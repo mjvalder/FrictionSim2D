@@ -116,7 +116,7 @@ def sub_build(var):
         filename = am_filename
     
     else:
-        slab_generator('sub',var['2D']['x'],'sub',var['2D']['y'],10)
+        slab_generator('sub',var,var['2D']['x']*1.2,var['2D']['y']*1.2,20)
         filename = os.path.join(os.path.dirname(__file__), "materials", f"{var['sub']['mat']}.lmp")
     
     lmp = lammps(cmdargs=["-log", "none", "-screen", "none",  "-nocite"])
@@ -124,20 +124,20 @@ def sub_build(var):
         "boundary p p p\n",
         "units metal\n",
         "atom_style      atomic\n",
-        f"region box block {var['dim']['xlo']} {var['dim']['xhi']} {var['dim']['ylo']} {var['dim']['yhi']} 0 10\n",
+        f"region box block {var['dim']['xlo']} {var['dim']['xhi']} {var['dim']['ylo']} {var['dim']['yhi']} 0 12\n",
         f"create_box       {var['data']['sub']['natype']} box\n\n",
         f"read_data {filename} add append\n",
         f"include {settings}\n",
         "group sub region box\n",
         "group box subtract all sub\n",
         "delete_atoms group box\n",
-        f"change_box all x final 0 {var['dim']['xhi']} y final 0 {var['dim']['yhi']} z final 0 10\n\n",
+        f"change_box all x final 0 {var['dim']['xhi']} y final 0 {var['dim']['yhi']} z final 0 12\n\n",
 
         "#Identify bottom atoms of Amorphous Silicon substrate\n\n",
-        "region          sub_fix block INF INF INF INF INF 2 units box\n",
+        "region          sub_fix block INF INF INF INF INF 5 units box\n",
         "group           sub_fix region sub_fix\n\n",
         "#Identify thermostat region of Amorphous Silicon substrate\n\n",
-        "region          sub_thermo block INF INF INF INF 2 5 units box\n",
+        "region          sub_thermo block INF INF INF INF 5 8 units box\n",
         "group           sub_thermo region sub_thermo\n\n",
 
         "# Define sub groups and atom types\n\n"

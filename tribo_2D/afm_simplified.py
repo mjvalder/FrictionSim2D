@@ -73,13 +73,13 @@ class afm:
 
     def system(self):
         for layer in self.var['2D']['layers']:
-
-            [tip_x,tip_y,tip_z] = [self.var['dim']['xhi']/2, self.var['dim']['yhi']/2, 55+self.var['2D']['lat_c']*(layer-1)/2]# Tip placement
+            h = settings_afm(self.var,layer)
+            [tip_x,tip_y,tip_z] = [self.var['dim']['xhi']/2, self.var['dim']['yhi']/2, 55+self.var['2D']['lat_c']*(layer-1)+2*h]# Tip placement
             
 
             filename = f"{self.directory[layer]}/lammps/system.lmp"
-            h = settings_afm(self.var,layer)
-            h_2D        = 10.5 + h
+            
+            h_2D        = 12.5 + h
             with open(filename, 'w') as f:
                 init(f)
                 f.writelines([
@@ -122,7 +122,7 @@ class afm:
                 "#--------------------Tip Indentation---------------------#\n",
                 "##########################################################\n",
                 "#----------------- Displace tip closer -------------------\n\n",
-                "displace_atoms  tip_all move 0.0 0.0 -20.0 units box\n\n",
+                "displace_atoms  tip_all move 0.0 0.0 -40.0 units box\n\n",
                 "#----------------- Apply constraints ---------------------\n\n",
 
                 "fix             tip_f tip_all rigid/nve single force * off off on torque * off off off\n\n",
@@ -258,14 +258,7 @@ class afm:
                 "variable spring_y equal sin(v_a*PI/180)\n\n",
                 "#------------------Add lateral harmonic spring------------\n\n",
                 f"fix             spr tip_fix smd cvel {springeV} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
-                "run 100000\n\n",
-
-                # "unfix spr\n\n",
-                # f"fix             spr tip_fix smd cvel {springeV} 0 tether 0.0 0.0 NULL 0.0\n\n",
-                # "run 5000\n\n",
-                # "unfix spr\n\n",
-                # f"fix             spr tip_fix smd cvel  {springeV} {tipps} tether -$(v_spring_x) -$(v_spring_y) NULL 0.0\n\n",
-                # "run 80000\n",
+                "run 200000\n\n",
 
                 f"if '$(v_a) == {self.var['general']['scan_angle'][3]}' then &\n",
                 "'next a' & \n",
