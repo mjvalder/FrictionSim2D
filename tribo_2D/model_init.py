@@ -8,6 +8,7 @@ from lammps import lammps
 
 from tribo_2D import utilities
 
+
 class model_init:
     def __init__(self, input_file, model='afm'):
         """
@@ -35,6 +36,7 @@ class model_init:
         self.dump_slide = None      # Used for dump slide
         self.dim = None             # Used for dimensions
         self.lat_c = None 
+        self.tipx = None
 
         # --- Read and parse configuration ---
         self.params = utilities.read_config(self.input_file)
@@ -50,9 +52,9 @@ class model_init:
 
         try:
             setup_methods[model]()
-        except KeyError:
-            raise ValueError(f"Unknown model type: {model}")
-        
+        except KeyError as exc:
+            raise ValueError(f"Unknown model type: {model}") from exc
+
     def setup_afm_model(self):
         # --- Set up working directory structure ---
         self.dir = (
@@ -82,7 +84,7 @@ class model_init:
             self.params['general']['force'][i]
             for i in range(4, len(self.params['general']['force']), 5)
             ]
-        
+
         self.dump_slide = [
             self.scan_angle[i]
             for i in range(4, len(self.scan_angle), 5)
@@ -114,7 +116,7 @@ class model_init:
 
         # --- Call init_sheet with sheetvsheet flag ---
         self.init_sheet(sheetvsheet=True)
-        
+
     def setup_sheet_part(self):
         self.dir = (
             f"sheet/{self.params['2D']['mat']}/"
@@ -131,7 +133,7 @@ class model_init:
         )
         for subdir in ["build", "potentials"]:
             Path(self.dir, subdir).mkdir(parents=True, exist_ok=True)
-        
+
         self.init_tip()
 
     def setup_substrate_part(self):
@@ -142,7 +144,7 @@ class model_init:
 
         for subdir in ["build", "potentials"]:
             Path(self.dir, subdir).mkdir(parents=True, exist_ok=True)
-        
+
         self.dim = {
             'xlo': 0,
             'ylo': 0,
@@ -150,7 +152,7 @@ class model_init:
             'xhi': self.params['2D']['y'],
             'yhi': self.params['2D']['x'],
             'zhi': 10
-        }        
+        }
         self.init_substrate()
 
     def init_sheet(self, sheetvsheet=False):
@@ -168,13 +170,13 @@ class model_init:
         for layer in self.params['2D']['layers']:
             self.sheet_dir[layer] = Path(self.dir) / f"l_{layer}"
             if layer > 1:
-                self.stacking(layer,sheetvsheet)
-                
+                self.stacking(layer, sheetvsheet)
+
     def init_substrate(self):
         self.potentials['sub'] = {}
         self.data['sub'] = utilities.cifread(self.params['sub']['cif_path'])
         self.potentials['sub']['count'] = utilities.count_atomtypes(self.params['sub']['pot_path'])
-        
+
         self.data['sub']['natype'] = sum(self.potentials['sub']['count'].values())
         self.potentials['sub']['path'] = utilities.copy_file(self.params['sub']['pot_path'], Path(self.dir) / f"potentials")
         self.sub_build()
@@ -252,16 +254,19 @@ class model_init:
 
         # Prepare file paths
         filename = f"{self.params['sub']['mat']}.lmp"
-        slab_path = os.path.join(os.path.dirname(__file__),
-                        "materials", f"{filename}")
+        slab_path = os.path.join(
+            os.path.dirname(__file__),
+            "materials", f"{filename}"
+        )
         self.__single_body_potential(
             f"{self.dir}/build/sub.in.settings", 'sub')
+
         # Generate a slab for the substrate of either amorphous or crystalline material
         if self.params['sub']['amorph'] == 'a':
             slab_path = self.make_amorphous('sub', 2500)
 
         else:
-            self.slab_generator(slab_path,self.params['sub']['cif_path'], self.params['2D']['x'], self.params['2D']['y'], 10)
+            self.slab_generator(slab_path, self.params['sub']['cif_path'], self.params['2D']['x'], self.params['2D']['y'], 10)
 
         # Initialize and run LAMMPS generation and equilibration of the AFM tip
         lmp = lammps(cmdargs=["-log", "none", "-screen", "none",  "-nocite"])
@@ -270,19 +275,19 @@ class model_init:
             "units metal\n",
             "atom_style      atomic\n",
 
-            f"region box block {self.dim['xlo']} {self.dim['xhi']} {self.dim['ylo']} {self.dim['yhi']} {self.dim['zlo']} {self.dim['zhi']}\n",
+            f"region box block {self.dim['xlo']} {self.dim['xhi']} {self.dim['ylo']} {self.dim['yhi']} {self.dim['zlo']} 12\n",
             f"create_box       {self.data['sub']['natype']} box\n\n",
             f"read_data {slab_path} add append\n",
             "group sub region box\n",
             "group box subtract all sub\n",
             "delete_atoms group box\n",
-            f"change_box all x final 0 {self.dim['xhi']} y final 0 {self.dim['yhi']} z final 0 {self.dim['zhi']}\n\n",
+            f"change_box all x final {self.dim['xlo']} {self.dim['xhi']} y final {self.dim['ylo']} {self.dim['yhi']} z final {self.dim['zlo']} {self.dim['zhi']}\n\n",
             "reset_atoms     id\n",
             f"write_data      {self.dir}/build/sub.lmp"
         ])
 
         lmp.close
-    
+
     def sheet_build(self):
         """
         Generate a 2D material sheet based on the specified material and properties.
@@ -298,7 +303,7 @@ class model_init:
         filename = f"{self.dir}/build/{self.params['2D']['mat']}_1.lmp"
 
         multiplier = utilities.check_potential_cif_compatibility(self.params['2D']['cif_path'], self.params['2D']['pot_path'])
-
+        print('this is the multiplier', multiplier)
         typecount = sum(self.potentials['2D']['count'].values())
         Path(filename).unlink(missing_ok=True)
 
@@ -306,23 +311,24 @@ class model_init:
         atomsk_command = f"echo n | atomsk {self.params['2D']['cif_path']} -ow {filename} -v 0"
         subprocess.run(atomsk_command, shell=True, check=True)
         if any(v != 1 for v in self.potentials['2D']['count'].values()) or multiplier != 1:
-            utilities.renumber_atom_types(self.potentials['2D']['count'],filename)
+            utilities.renumber_atom_types(self.potentials['2D']['count'], filename)
+            print('renumbered atom types')
         atomsk_command = f"atomsk {filename} -orthogonal-cell -ow lmp -v 0"
         subprocess.run(atomsk_command, shell=True, check=True)
 
         # Duplicate atoms to match the number of types in the potential file if necessary
         if multiplier != 1:
-                atoms = io.read(filename, format="lammps-data")
-                natoms = len(atoms)
-                if typecount % natoms == 0:
-                    for i in range(int(np.sqrt(typecount/natoms))+1, 0, -1):
-                        if typecount/natoms % i == 0:
-                            a = int(i)
-                            b = int(typecount / natoms / i)
-                            break
-                atomsk_command = f"echo n | atomsk {filename} -duplicate {a} {b} 1 -ow lmp -v 0"
-                subprocess.run(atomsk_command, shell=True, check=True)
-                utilities.renumber_atom_types(self.potentials['2D']['count'], filename)
+            atoms = io.read(filename, format="lammps-data")
+            natoms = len(atoms)
+            if typecount % natoms == 0:
+                for i in range(int(np.sqrt(typecount/natoms))+1, 0, -1):
+                    if typecount/natoms % i == 0:
+                        a = int(i)
+                        b = int(typecount / natoms / i)
+                        break
+            atomsk_command = f"echo n | atomsk {filename} -duplicate {a} {b} 1 -ow lmp -v 0"
+            subprocess.run(atomsk_command, shell=True, check=True)
+            utilities.renumber_atom_types(self.potentials['2D']['count'], filename)
 
         # Duplicate the sheet to match the specified dimensions
         dim = utilities.get_model_dimensions(filename)
@@ -339,7 +345,7 @@ class model_init:
         self.dim = utilities.get_model_dimensions(filename)
         self.center('2D', filename)
         self.lat_c = self.stacking(2)
-    
+
     def make_amorphous(self, system, tempmelt):
         """
         Generate an amorphous structure from a crystalline material using LAMMPS.
@@ -366,7 +372,6 @@ class model_init:
             quench = (tempmelt-self.params['general']['temproom'])*100
             pot_file = f"{self.dir}/build/{system}.in.settings"
             self.__single_body_potential(pot_file, system)
-            # lmp = lammps(cmdargs=["-log", "none", "-screen", "none",  "-nocite"])
             lmp = lammps()
             lmp.commands_list([
                 "boundary p p p\n",
@@ -514,7 +519,7 @@ class model_init:
         com_l1 = lmp.extract_variable('comz_1', None, 0)
         com_l2 = lmp.extract_variable('comz_2', None, 0)
         # Compute lattice constant from the z-coordinates
-        lat_c = com_l2 - com_l1 
+        lat_c = com_l2 - com_l1
 
         return lat_c
 

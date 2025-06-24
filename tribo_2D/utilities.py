@@ -90,7 +90,7 @@ def count_atomtypes(file):
 
     matches = re.compile(r'([A-Za-z]+)(\d*)')
 
-    with open(file, 'r') as f:
+    with open(file, 'r', encoding="utf-8") as f:
         lines = f.readlines()
 
     for line in lines:

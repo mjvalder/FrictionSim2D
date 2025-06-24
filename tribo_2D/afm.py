@@ -65,7 +65,7 @@ class AFM_simulation(model_init.model_init):
 
             # --- Find minimum gap between the 2D material and the substrate ---
             gap = self.afm_potentials_setup(layer)
-            height_2d = 10.5 + gap
+            height_2d = 12.5 + gap
 
             # --- Create the system input file ---
             lammps_lines = [
@@ -74,14 +74,14 @@ class AFM_simulation(model_init.model_init):
 
                 "#----------------- Read data files -----------------------\n\n",
                 f"read_data       {self.dir}/build/sub.lmp add append group sub\n",
-                f"read_data       {self.dir}/build/tip.lmp add append shift {tip_x} {tip_y} {tip_z}  group tip offset {self.data['sub']['natype']} 0 0 0 0\n",
-                f"read_data       {self.dir}/build/{self.params['2D']['mat']}_{layer}.lmp add append shift 0.0 0.0 {height_2d} group 2D offset {self.data['tip']['natype']+self.data['sub']['natype']} 0 0 0 0\n\n"
+                f"read_data       {self.dir}/build/tip.lmp add append shift {tip_x} {tip_y} {tip_z}  group tip offset {self.data['sub']['natype']*3} 0 0 0 0\n",
+                f"read_data       {self.dir}/build/{self.params['2D']['mat']}_{layer}.lmp add append shift 0.0 0.0 {height_2d} group 2D offset {self.data['tip']['natype']+self.data['sub']['natype']*3} 0 0 0 0\n\n"
 
                 "# Apply potentials\n\n",
                 f"include        {self.sheet_dir[layer]}/lammps/system.in.settings\n\n",
 
                 "#----------------- Create visualisation files ------------\n\n",
-                f"dump            sys all atom 10000 ./{self.dir}/visuals/system_{layer}.lammpstrj\n\n",
+                f"dump            sys all atom 1000 ./{self.dir}/visuals/system_{layer}.lammpstrj\n\n",
 
                 "#----------------- Minimize the system -------------------\n\n",
                 "min_style       cg\n",
