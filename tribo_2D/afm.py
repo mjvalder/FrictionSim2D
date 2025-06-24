@@ -56,6 +56,8 @@ class AFM_simulation(model_init.model_init):
 
         """
         for layer in self.params['2D']['layers']:
+            self.elemgroup = {}
+            self.group_def = {}
             tip_x = self.dim['xhi'] / 2
             tip_y = self.dim['yhi'] / 2
             tip_z = 55 + self.lat_c * (layer - 1) / 2
@@ -111,22 +113,22 @@ class AFM_simulation(model_init.model_init):
                 "#----------------- Apply constraints ---------------------\n\n",
 
                 "fix             tip_f tip_all rigid/nve single force * off off on torque * off off off\n\n",
-                "self.iable        f equal 0.0\n",
+                "variable        f equal 0.0\n",
 
-                f"self.iable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
+                f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
                 "label force_loop\n",
 
                 "#----------------- Set up initial parameters -------------\n\n",
-                "self.iable        num_floads equal 100\n",
-                "self.iable        r equal 0.0\n",
-                "self.iable        fincr equal (${find}-${f})/${num_floads}\n",
+                "variable        num_floads equal 100\n",
+                "variable        r equal 0.0\n",
+                "variable        fincr equal (${find}-${f})/${num_floads}\n",
                 "thermo_modify   lost ignore flush yes\n\n",
                 "#----------------- Apply pressure to the tip -------------\n\n",
-                "self.iable i loop ${num_floads}\n",
+                "variable i loop ${num_floads}\n",
                 "label loop_load\n\n",
-                "self.iable f equal ${f}+${fincr} \n\n",
-                "# Set force self.iable\n\n",
-                "self.iable Fatom equal -v_f/(count(tip_fix)*1.602176565)\n",
+                "variable f equal ${f}+${fincr} \n\n",
+                "# Set force variable\n\n",
+                "variable Fatom equal -v_f/(count(tip_fix)*1.602176565)\n",
                 "fix forcetip tip_fix aveforce 0.0 0.0 ${Fatom}\n",
                 "run 100 \n\n",
                 "unfix forcetip\n\n",
@@ -136,20 +138,20 @@ class AFM_simulation(model_init.model_init):
                 "#---------------------Equilibration----------------------#\n",
                 "##########################################################\n\n",
                 "fix forcetip tip_fix aveforce 0.0 0.0 ${Fatom}\n",
-                "self.iable        dispz equal xcm(tip_fix,z)\n\n",
+                "variable        dispz equal xcm(tip_fix,z)\n\n",
                 "run 100 pre yes post no\n\n",
                 "# Prepare to loop for displacement checks\n\n",
                 "label check_r\n\n",
-                "self.iable disp_l equal ${dispz}\n",
-                "self.iable disp_h equal ${dispz}\n\n",
-                "self.iable disploop loop 50\n",
+                "variable disp_l equal ${dispz}\n",
+                "variable disp_h equal ${dispz}\n\n",
+                "variable disploop loop 50\n",
                 "label disp\n\n",
                 "run 100 pre no post no\n\n",
-                "if '${dispz}>${disp_h}' then 'self.iable disp_h equal ${dispz}'\n",
-                "if '${dispz}<${disp_l}' then 'self.iable disp_l equal ${dispz}'\n\n",
+                "if '${dispz}>${disp_h}' then 'variable disp_h equal ${dispz}'\n",
+                "if '${dispz}<${disp_l}' then 'variable disp_l equal ${dispz}'\n\n",
                 "next disploop\n",
                 "jump SELF disp\n\n",
-                "self.iable r equal ${disp_h}-${disp_l}\n\n",
+                "variable r equal ${disp_h}-${disp_l}\n\n",
                 "# Check if r is less than 0.1\n\n",
                 "if '${r} < 0.2' then 'jump SELF loop_end' else 'jump SELF check_r'\n\n",
                 "# End of the loop\n\n",
@@ -189,10 +191,10 @@ class AFM_simulation(model_init.model_init):
             filename = f"{self.sheet_dir[layer]}/lammps/slide_{self.params['tip']['s']}ms.lmp"
             with open(filename, 'w', encoding="utf-8") as f:
                 f.writelines([
-                    f"self.iable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
+                    f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
                     "label force_loop\n",
 
-                    f"self.iable a index 0 {' '.join(str(x) for x in self.scan_angle)} 0\n",
+                    f"variable a index 0 {' '.join(str(x) for x in self.scan_angle)} 0\n",
                     "label angle_loop\n",
                 ])
                 settings.file.init(f)
@@ -225,8 +227,8 @@ class AFM_simulation(model_init.model_init):
                     "thermo          100\n\n",
 
                     "#----------------- Apply pressure to the tip -------------\n\n",
-                    "self.iable        Ftotal          equal -v_find/1.602176565\n",
-                    "self.iable        Fatom           equal v_Ftotal/count(tip_fix)\n",
+                    "variable        Ftotal          equal -v_find/1.602176565\n",
+                    "variable        Fatom           equal v_Ftotal/count(tip_fix)\n",
                     "fix             forcetip tip_fix aveforce 0.0 0.0 ${Fatom}\n\n",
 
                     "##########################################################\n",
@@ -234,18 +236,18 @@ class AFM_simulation(model_init.model_init):
                     "##########################################################\n\n",
 
                     f"compute COM_top layer_{layer} com\n",
-                    "self.iable comx equal c_COM_top[1] \n",
-                    "self.iable comy equal c_COM_top[2] \n",
-                    "self.iable comz equal c_COM_top[3] \n\n",
+                    "variable comx equal c_COM_top[1] \n",
+                    "variable comy equal c_COM_top[2] \n",
+                    "variable comz equal c_COM_top[3] \n\n",
 
                     "compute COM_tip tip_fix com\n",
-                    "self.iable comx_tip equal c_COM_tip[1] \n",
-                    "self.iable comy_tip equal c_COM_tip[2] \n",
-                    "self.iable comz_tip equal c_COM_tip[3] \n\n",
+                    "variable comx_tip equal c_COM_tip[1] \n",
+                    "variable comy_tip equal c_COM_tip[2] \n",
+                    "variable comz_tip equal c_COM_tip[3] \n\n",
                     "#----------------- Calculate total friction --------------\n\n",
-                    "self.iable        fz_tip   equal  f_forcetip[3]*1.602176565\n\n",
-                    "self.iable        fx_spr   equal  f_spr[1]*1.602176565\n\n",
-                    "self.iable        fy_spr   equal f_spr[2]*1.602176565\n\n",
+                    "variable        fz_tip   equal  f_forcetip[3]*1.602176565\n\n",
+                    "variable        fx_spr   equal  f_spr[1]*1.602176565\n\n",
+                    "variable        fy_spr   equal f_spr[2]*1.602176565\n\n",
                     f"fix             fc_ave all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file ./{self.dir}/results/fc_ave_slide_$(v_find)nN_$(v_a)angle_{self.params['tip']['s']}ms_l{layer}\n\n",
 
                     "##########################################################\n",
@@ -254,8 +256,8 @@ class AFM_simulation(model_init.model_init):
                     "#----------------- Add damping force ---------------------\n\n",
                     f"fix             damp tip_fix viscous {damp_ev}\n\n",
 
-                    "self.iable spring_x equal cos(v_a*PI/180)\n",
-                    "self.iable spring_y equal sin(v_a*PI/180)\n\n",
+                    "variable spring_x equal cos(v_a*PI/180)\n",
+                    "variable spring_y equal sin(v_a*PI/180)\n\n",
                     "#------------------Add lateral harmonic spring------------\n\n",
                     f"fix             spr tip_fix smd cvel {spring_ev} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
                     "run 100000\n\n",
@@ -345,8 +347,7 @@ class AFM_simulation(model_init.model_init):
             for system in self.systems:
                 arr = super().number_sequential_atoms(system)
                 if system == '2D':
-                    for l in range(layer):
-                        atype = super().define_elemgroup(system, arr, l=l, atype=atype)
+                    atype = super().define_elemgroup(system, arr, layer=layer, atype=atype)
                 else:
                     atype = self.__define_elemgroup_3regions(system, arr, atype=atype)
 
