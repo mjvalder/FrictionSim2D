@@ -1,0 +1,20 @@
+#!/bin/bash
+#PBS -l select=1:ncpus=32:mem=62gb:mpiprocs=32
+#PBS -l walltime=23:00:00
+#PBS -J 1-156
+#PBS -o /rds/general/user/mv923/home/logs_system_2/
+#PBS -e /rds/general/user/mv923/home/logs_system_2/
+
+
+module purge
+module load tools/prod
+module load OpenMPI/4.1.4-GCC-12.2.0
+module load LAMMPS/29Aug2024-foss-2023b-kokkos
+
+#Go to the temp directory (ephemeral) and create a new folder for this run
+cd $EPHEMERAL
+
+# $PBS_O_WORKDIR is the directory where the pbs script was sent from.
+
+mpiexec lmp -l none -in $(sed -n "${PBS_ARRAY_INDEX}p" $PBS_O_WORKDIR/list_slide_2.txt)
+

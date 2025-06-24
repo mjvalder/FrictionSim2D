@@ -3,7 +3,8 @@ from lammps import lammps
 
 from tribo_2D import settings, model_init, utilities
 
-class Sheetvsheet_simulation(model_init.model_init):
+
+class SheetvsheetSimulation(model_init.ModelInit):
     def __init__(self, input_file):
         
         super().__init__(input_file, model='sheetvsheet')

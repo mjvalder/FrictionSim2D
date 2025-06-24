@@ -1,0 +1,23 @@
+#!/bin/bash
+#PBS -l select=1:ncpus=32:mem=62gb:mpiprocs=32
+#PBS -l walltime=20:00:00
+#PBS -o /rds/general/user/mv923/home/logs_system_1/
+#PBS -e /rds/general/user/mv923/home/logs_system_1/
+#PBS -N slide_1_32c_tmpdir
+
+module purge
+module load tools/prod
+module load LAMMPS/29Aug2024-foss-2023b-kokkos
+
+cp -r $HOME/afm $TMPDIR/
+#Go to the temp directory (ephemeral) and create a new folder for this run
+cd $TMPDIR
+# $PBS_O_WORKDIR is the directory where the pbs script was sent from.
+
+mpiexec lmp -l none -in afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/l_1/lammps/slide_2ms_32c_tmpdir_new.lmp
+
+cp -r $TMPDIR/afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/results/32c_tmpdir $PBS_O_WORKDIR/afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/results/
+
+
+
+

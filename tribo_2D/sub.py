@@ -1,6 +1,7 @@
 from tribo_2D import model_init
 
-class Sub_simulation(model_init.model_init):
+
+class SubSimulation(model_init.ModelInit):
     """
     A class to generate a simulation cell for the Prandtl-Tomlinson
     model in LAMMPS simulations.

@@ -12,7 +12,7 @@ from lammps import lammps
 from tribo_2D import settings, model_init, utilities
 
 
-class AFM_simulation(model_init.model_init):
+class AFMSimulation(model_init.ModelInit):
     """
     A class to generate a simulation cell for the Prandtl-Tomlinson
     model in LAMMPS simulations.
@@ -33,12 +33,11 @@ class AFM_simulation(model_init.model_init):
         """
 
         super().__init__(input_file, model='afm')
-        
+
         for system in self.systems:
             if system not in self.params:
-                raise ValueError(f"Missing required parameter: {key} in input file.")
+                raise ValueError(f"Missing required parameter: {system} in input file.")
 
-            
         for key in ('tip', 'sub'):
             self.set_three_regions(key)
 
@@ -75,13 +74,13 @@ class AFM_simulation(model_init.model_init):
                 "#----------------- Read data files -----------------------\n\n",
                 f"read_data       {self.dir}/build/sub.lmp add append group sub\n",
                 f"read_data       {self.dir}/build/tip.lmp add append shift {tip_x} {tip_y} {tip_z}  group tip offset {self.data['sub']['natype']*3} 0 0 0 0\n",
-                f"read_data       {self.dir}/build/{self.params['2D']['mat']}_{layer}.lmp add append shift 0.0 0.0 {height_2d} group 2D offset {self.data['tip']['natype']+self.data['sub']['natype']*3} 0 0 0 0\n\n"
+                f"read_data       {self.dir}/build/{self.params['2D']['mat']}_{layer}.lmp add append shift 0.0 0.0 {height_2d} group 2D offset {self.data['tip']['natype']*3+self.data['sub']['natype']*3} 0 0 0 0\n\n"
 
                 "# Apply potentials\n\n",
                 f"include        {self.sheet_dir[layer]}/lammps/system.in.settings\n\n",
 
                 "#----------------- Create visualisation files ------------\n\n",
-                f"dump            sys all atom 1000 ./{self.dir}/visuals/system_{layer}.lammpstrj\n\n",
+                f"dump            sys all atom 10000 ./{self.dir}/visuals/system_{layer}.lammpstrj\n\n",
 
                 "#----------------- Minimize the system -------------------\n\n",
                 "min_style       cg\n",
@@ -260,7 +259,7 @@ class AFM_simulation(model_init.model_init):
                     "variable spring_y equal sin(v_a*PI/180)\n\n",
                     "#------------------Add lateral harmonic spring------------\n\n",
                     f"fix             spr tip_fix smd cvel {spring_ev} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
-                    "run 100000\n\n",
+                    "run 200000\n\n",
 
                     f"if '$(v_a) == {self.params['general']['scan_angle'][3]}' then &\n",
                     "'next a' & \n",

@@ -11,7 +11,6 @@ import numpy as np
 from tribo_2D.Potentials import lj_params
 
 
-
 def cifread(cif):
     """
     Reads a CIF file and extracts important information on the crystal structure.
@@ -283,7 +282,8 @@ def copy_file(path1, dest):
 
     return path2
 
-def renumber_atom_types(pot, filename):
+
+def renumber_atom_types(filename, pot=None):
     """
     Renumber atom types in a LAMMPS data file to match the order and types specified in the given potential.
 
@@ -331,13 +331,14 @@ def renumber_atom_types(pot, filename):
     # Prepare to update atom types in the "Atoms" section
     modified_lines = set()
     mod_lines = {}
-    pre_elem = {}
+    elem_pot = {}
     elem = {}
-    t = 1
+
+    t_add = len(atom_types) if pot is not None else 1
     # For each atom type, update its ID and collect info
     for i in range(1, len(atom_types)+1):
         atoms_section = False
-
+        t = i
         for l, line in enumerate(lines):
             stripped_line = line.strip()
 
@@ -353,22 +354,26 @@ def renumber_atom_types(pot, filename):
                     lines[l] = ''
                     mod_lines[t] = '  '.join(parts) + '\n'
                     modified_lines.add(l)
-                    pre_elem[t] = atom_types[i]
-                    t += 1
+                    elem[t] = atom_types[i]
+                    t += t_add
 
     a = 1
     atom_lines = {}
     # Assign new atom type numbers according to the order in 'pot'
-    for i in pot:
-        atoms_section = False
-        for l in range(1, len(mod_lines)+1):
-            stripped_line = mod_lines[l].strip()
-            parts = stripped_line.split()
-            if pre_elem[int(parts[1])][0] == i:
-                elem[a] = pre_elem[int(parts[1])]
-                parts[1] = str(a)
-                atom_lines[a] = '  '.join(parts) + '\n'
-                a += 1
+    if pot is not None:
+        for i in pot:
+            atoms_section = False
+            for l in range(1, len(mod_lines)+1):
+                stripped_line = mod_lines[l].strip()
+                parts = stripped_line.split()
+                if elem[int(parts[1])][0] == i:
+                    elem_pot[a] = elem[int(parts[1])]
+                    parts[1] = str(a)
+                    atom_lines[a] = '  '.join(parts) + '\n'
+                    a += 1
+        elem = elem_pot
+        mod_lines = atom_lines
+
     # Update the number of atom types in the header and rewrite the "Masses" section
     masses_section = False
     for i, line in enumerate(lines):
@@ -389,8 +394,9 @@ def renumber_atom_types(pot, filename):
         f.writelines(lines)
     # Append the updated atom lines at the end of the file
     with open(filename, 'a') as f:
-        for line in atom_lines.values():
+        for line in mod_lines.values():
             f.write(line)
+
 
 def check_potential_cif_compatibility(cif, pot):
     """
