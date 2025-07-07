@@ -69,6 +69,7 @@ class AFMSimulation(model_init.ModelInit):
 
             # --- Create the system input file ---
             lammps_lines = [
+                "comm_style tiled\n",
                 f"region box block {self.dim['xlo']} {self.dim['xhi']} {self.dim['ylo']} {self.dim['yhi']} -5 100\n",
                 f"create_box      {self.ngroups[layer]} box\n\n",
 
@@ -79,7 +80,7 @@ class AFMSimulation(model_init.ModelInit):
 
                 "# Apply potentials\n\n",
                 f"include        {self.sheet_dir[layer]}/lammps/system.in.settings\n\n",
-
+                "balance 1.0 rcb\n",
                 "#----------------- Create visualisation files ------------\n\n",
                 f"dump            sys all atom 10000 ./{self.dir}/visuals/system_{layer}.lammpstrj\n\n",
 
@@ -117,7 +118,7 @@ class AFMSimulation(model_init.ModelInit):
 
                 f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
                 "label force_loop\n",
-
+                "balance 1.0 rcb\n",
                 "#----------------- Set up initial parameters -------------\n\n",
                 "variable        num_floads equal 100\n",
                 "variable        r equal 0.0\n",
@@ -200,12 +201,15 @@ class AFMSimulation(model_init.ModelInit):
                 settings.file.init(f)
 
                 f.writelines([
+                    "comm_style       tiled\n",
                     f"read_data       {self.sheet_dir[layer]}/data/load_$(v_find)N.data # Read system data\n\n",
                     f"include         {self.sheet_dir[layer]}/lammps/system.in.settings\n\n",
+                    "balance 1.0 rcb\n",
 
                     "#----------------- Create visualisation files ------------\n\n",
                     f"dump            sys all atom 10000 ./{self.dir}/visuals/slide_{self.params['tip']['s']}ms_l{layer}.lammpstrj\n\n"
                     "dump_modify sys append yes\n",
+
                     "##########################################################\n",
                     "#--------------------Tip Indentation---------------------#\n",
                     "##########################################################\n",
@@ -458,7 +462,7 @@ class AFMSimulation(model_init.ModelInit):
         for element, count in self.potentials[system]['count'].items():
             for _ in range(1, count+1):
                 self.group_def.update({
-                    atype:   [f"{system}_t{i}",        str(atype), str(element), arr[system][i-1]],
+                    atype:   [f"{system}_t{i}",        str(atype),   str(element), arr[system][i-1]],
                     atype+1: [f"{system}_fix_t{i}",    str(atype+1), str(element), arr[system][i-1]],
                     atype+2: [f"{system}_thermo_t{i}", str(atype+2), str(element), arr[system][i-1]]
                 })

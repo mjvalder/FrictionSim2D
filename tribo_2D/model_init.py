@@ -621,7 +621,7 @@ class ModelInit:
         self.center('2D', filename)
 
         # Compute and store the interlayer lattice constant by stacking two layers
-        self.lat_c = self.stacking(2)
+        self.lat_c = self.stacking( )
 
     def make_amorphous(self, system, tempmelt):
         """
@@ -645,10 +645,12 @@ class ModelInit:
         filename = f"{self.params[system]['mat']}.lmp"
         slab_path = os.path.join(os.path.dirname(
             __file__), "materials", filename)
-        am_filename = os.path.join(self.dir, "build", f"{system}_amorph.lmp")
-
+        am_filename = os.path.join(os.path.dirname(
+            __file__), "materials", f"amor_{filename}")
+        print(am_filename)
         # Only generate if the amorphous file does not already exist
         if not os.path.exists(am_filename):
+            print("file not found")
             # Generate a large enough crystalline slab as the starting structure
             self.slab_generator(
                 slab_path, self.params[system]['cif_path'], 200, 200, 50)
@@ -790,6 +792,7 @@ class ModelInit:
 
         # Energy minimization and equilibration
         lmp.commands_list([
+            f"include         {self.dir}/build/sheet_{layer}.in.settings\n\n",
             "min_style       cg\n",
             "minimize        1.0e-4 1.0e-8 1000000 1000000\n\n",
             "timestep        0.001\n",

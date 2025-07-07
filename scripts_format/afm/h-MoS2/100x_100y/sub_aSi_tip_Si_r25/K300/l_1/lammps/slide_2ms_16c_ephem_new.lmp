@@ -98,5 +98,4 @@ if '$(v_find) == 30' then &
 label find_incr
 
 next find
-clear
 jump SELF force_loop
