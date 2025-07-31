@@ -26,4 +26,4 @@ S   Mo  Mo  14.428502599999979  0.1428569579923222  5.54660
 # sigma, gamma, cutoff, and cutoff_jk in [Angstrom]
 # others are unitless
 #
-# Kurniawana
+# Kurniawan

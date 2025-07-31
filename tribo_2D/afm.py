@@ -88,7 +88,7 @@ class AFMSimulation(model_init.ModelInit):
                 "min_style       cg\n",
                 "minimize        1.0e-4 1.0e-8 100 1000\n\n",
                 "timestep        0.001\n",
-                "thermo          100\n\n",
+                "thermo          1000000\n\n",
 
                 "# ----------------- Apply Nose-Hoover thermostat ----------\n\n",
                 "group           fixset union sub_fix tip_all\n",
@@ -228,7 +228,7 @@ class AFMSimulation(model_init.ModelInit):
                     "fix             nve_all all nve\n",
 
                     "timestep        0.001\n",
-                    "thermo          100\n\n",
+                    "thermo          1000000\n\n",
 
                     "#----------------- Apply pressure to the tip -------------\n\n",
                     "variable        Ftotal          equal -v_find/1.602176565\n",
@@ -344,6 +344,7 @@ class AFMSimulation(model_init.ModelInit):
         layer (int): The number of layers in the 2D system. 
         self. (dict): A dictionary containing the potential and data information for the simulation.
         """
+        lj_sheet = self.is_sheet_lj()
         filename = f"{self.dir}/l_{layer}/lammps/system.in.settings"
         with open(filename, 'w') as f:
             atype = 1
@@ -375,24 +376,32 @@ class AFMSimulation(model_init.ModelInit):
                             1, self.ngroups[layer]+1) if system+n in self.group_def[i][0]]
                         f.write(
                             f"group {system}{n} type {' '.join(sub_group)}\n")
-
-            f.writelines(["group mobile union tip_thermo sub_thermo\n",
+            if lj_sheet:
+                f.writelines(["group mobile union tip_thermo sub_thermo\n",
                           f"pair_style hybrid {self.params['sub']['pot_type']} {self.params['tip']['pot_type']} {(self.params['2D']['pot_type'] + ' ') * layer} lj/cut 8.0\n"])
+            else:
+                f.writelines(["group mobile union tip_thermo sub_thermo\n",
+                          f"pair_style hybrid {self.params['sub']['pot_type']} {self.params['tip']['pot_type']} {self.params['2D']['pot_type']} lj/cut 8.0\n"])
 
             potentials = {}
             t = 0
             for system in self.systems:
                 t += 1
                 if system == '2D':
-                    for l in range(layer):
-                        potentials[l] = [
-                            self.group_def[i][3] if "2D_l" +
-                            str(l+1) in self.group_def[i][0] else "NULL"
-                            for i in range(1, self.ngroups[layer]+1)
-                        ]
-
+                    if lj_sheet:
+                        for l in range(layer):
+                            potentials[l] = [
+                                self.group_def[i][3] if "2D_l" +
+                                str(l+1) in self.group_def[i][0] else "NULL"
+                                for i in range(1, self.ngroups[layer]+1)
+                            ]
+                            f.write(
+                                f"pair_coeff * * {self.params['2D']['pot_type']} {t+l} {self.potentials['2D']['path']} {'  '.join(potentials[l])} # interlayer '2D' Layer {l+1}\n")
+                    else:
+                        potentials = [self.group_def[i][3] if "2D" in self.group_def[i][0] else "NULL"
+                                      for i in range(1, self.ngroups[layer]+1)]
                         f.write(
-                            f"pair_coeff * * {self.params['2D']['pot_type']} {t+l} {self.potentials['2D']['path']} {'  '.join(potentials[l])} # interlayer '2D' Layer {l+1}\n")
+                            f"pair_coeff * * {self.params['2D']['pot_type']} {t} {self.potentials['2D']['path']} {'  '.join(potentials)} # interlayer '2D'\n")
                 else:
                     potentials[system] = [self.group_def[i][2] if system in self.group_def[i][0] else "NULL"
                                           for i in range(1, self.ngroups[layer]+1)]
@@ -400,18 +409,19 @@ class AFMSimulation(model_init.ModelInit):
                         f"pair_coeff * * {self.params[system]['pot_type']} {t} {self.potentials[system]['path']} {'  '.join(potentials[system])} # interlayer {system.capitalize()}\n")
 
             max_sigma = 0
-            for t in self.data['2D']['elem_comp']:
-                for key in ('sub', 'tip'):
-                    for s in self.data[key]['elem_comp']:
-                        e, sigma = utilities.LJparams(t, s)
-                        if key == 'sub' and sigma > max_sigma:
-                            max_sigma = sigma
-                        if len(self.elemgroup['2D'][layer-1][t]) == 1 and layer == 1:
-                            f.write(
-                                f"pair_coeff {self.elemgroup[key][s][0]}*{self.elemgroup[key][s][-1]} {self.elemgroup['2D'][0][t][0]} lj/cut {e} {sigma}\n")
-                        else:
-                            f.write(
-                                f"pair_coeff {self.elemgroup[key][s][0]}*{self.elemgroup[key][s][-1]} {self.elemgroup['2D'][0][t][0]}*{self.elemgroup['2D'][layer-1][t][-1]} lj/cut {e} {sigma}\n")
+            if lj_sheet:
+                for t in self.data['2D']['elem_comp']:
+                    for key in ('sub', 'tip'):
+                        for s in self.data[key]['elem_comp']:
+                            e, sigma = utilities.LJparams(t, s)
+                            if key == 'sub' and sigma > max_sigma:
+                                max_sigma = sigma
+                            if len(self.elemgroup['2D'][layer-1][t]) == 1 and layer == 1:
+                                f.write(
+                                    f"pair_coeff {self.elemgroup[key][s][0]}*{self.elemgroup[key][s][-1]} {self.elemgroup['2D'][0][t][0]} lj/cut {e} {sigma}\n")
+                            else:
+                                f.write(
+                                    f"pair_coeff {self.elemgroup[key][s][0]}*{self.elemgroup[key][s][-1]} {self.elemgroup['2D'][0][t][0]}*{self.elemgroup['2D'][layer-1][t][-1]} lj/cut {e} {sigma}\n")
             if layer > 1:
                 index_pairs = [(i, j) for i in range(layer)
                                for j in range(i+1, layer)]

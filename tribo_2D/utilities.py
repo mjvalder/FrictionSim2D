@@ -77,7 +77,7 @@ def cifread(cif):
     return cif
 
 
-def count_atomtypes(file):
+def count_atomtypes(file,elements):
     """
     Counts the number of different element types in a LAMMPS potential file.
     Args:
@@ -85,42 +85,62 @@ def count_atomtypes(file):
     Returns:
         elem_type (dict): A dictionary where keys are element names and values are their maximum numbers.
     """
-    elem_type = {}
+    # elem_type = {}
 
-    matches = re.compile(r'([A-Za-z]+)(\d*)')
+    # matches = re.compile(r'([A-Za-z]+)(\d*)')
+
+    # with open(file, 'r', encoding="utf-8") as f:
+    #     lines = f.readlines()
+
+    # for line in lines:
+    #     stripped_line = line.strip()
+
+    #     if stripped_line.startswith('#') or not stripped_line:
+    #         continue
+
+    #     parts = stripped_line.split()
+
+    #     if len(parts) >= 3:
+    #         for element in parts[:3]:
+    #             match = matches.match(element)
+    #             if match:
+    #                 element_name = match.group(1)
+    #                 element_number = match.group(2)
+
+    #                 if element_number:
+    #                     element_number = int(element_number)
+
+    #                 else:
+    #                     element_number = 1
+
+    #                 if element_name not in elem_type:
+    #                     elem_type[element_name] = 0
+
+    #                 elem_type[element_name] = max(
+    #                     elem_type[element_name], element_number)
+
+    # return elem_type
+
+    elem_type = {el: 0 for el in elements}
+    pattern = re.compile(r'([A-Za-z]+)(\d*)')
 
     with open(file, 'r', encoding="utf-8") as f:
         lines = f.readlines()
 
     for line in lines:
         stripped_line = line.strip()
-
         if stripped_line.startswith('#') or not stripped_line:
             continue
 
         parts = stripped_line.split()
-
-        if len(parts) >= 3:
-            for element in parts[:3]:
-                match = matches.match(element)
-                if match:
-                    element_name = match.group(1)
-                    element_number = match.group(2)
-
-                    if element_number:
-                        element_number = int(element_number)
-
-                    else:
-                        element_number = 1
-
-                    if element_name not in elem_type:
-                        elem_type[element_name] = 0
-
-                    elem_type[element_name] = max(
-                        elem_type[element_name], element_number)
-
+        for element in parts[:3]:
+            match = pattern.match(element)
+            if match:
+                element_name = match.group(1)
+                element_number = int(match.group(2)) if match.group(2) else 1
+                if element_name in elem_type:
+                    elem_type[element_name] = max(elem_type[element_name], element_number)
     return elem_type
-
 
 def get_model_dimensions(lmp):
     """
@@ -410,14 +430,13 @@ def check_potential_cif_compatibility(cif, pot):
         bool: True if compatible, False otherwise.
     """
     data = cifread(cif)
-    potentials_count = count_atomtypes(pot)
+    potentials_count = count_atomtypes(pot,data['elements'])
     # --- Check if atom types in the cif file match the atom types in the potential file by checking the number of atom types per element in each file---
     multiples = {
         element: (potentials_count.get(element, 0) / cif_count
                   if cif_count > 0 and potentials_count.get(element, 0) != 1 else 1)
         for element, cif_count in data['elem_comp'].items()
     }
-
     # Check that the ratio of atom types is consistent across all elements
     unique_multiples = set(m for m in multiples.values())
 

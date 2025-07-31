@@ -2,8 +2,8 @@
 #PBS -l select=1:ncpus=32:mem=62gb:mpiprocs=32
 #PBS -l walltime=20:00:00
 #PBS -J 1-156
-#PBS -o /rds/general/user/mv923/home/logs_system_1/100x100^array_index^_out.txt
-#PBS -e /rds/general/user/mv923/home/logs_system_1/100x100^array_index^_err.txt
+#PBS -o /rds/general/user/mv923/home/logs_system_1/100x100_^array_index^_out.txt
+#PBS -e /rds/general/user/mv923/home/logs_system_1/100x100_^array_index^_err.txt
 
 
 module purge
@@ -11,6 +11,7 @@ module load tools/prod
 module load LAMMPS/29Aug2024-foss-2023b-kokkos
 MAT=$(sed -n "${PBS_ARRAY_INDEX}p" $PBS_O_WORKDIR/materials_list.txt)
 
+mkdir -p $TMPDIR/afm/${MAT}/100x_100y/
 rsync -av --exclude='*.lammpstrj' $HOME/afm/${MAT}/100x_100y/ $TMPDIR/afm/${MAT}/100x_100y/
 
 #Go to the temp directory (ephemeral) and create a new folder for this run

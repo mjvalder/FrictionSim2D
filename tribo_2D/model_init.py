@@ -95,7 +95,8 @@ class ModelInit:
         self.dim = None             # Used for dimensions
         self.lat_c = None
         self.tipx = None
-
+        self.shift_x = None  # Used for x-shift in stacking
+        self.shift_y = None  # Used for y-shift in stacking
         # --- Read and parse configuration ---
         self.params = utilities.read_config(self.input_file)
 
@@ -333,7 +334,7 @@ class ModelInit:
         # --- Read material and potential data ---
         self.data['2D'] = utilities.cifread(self.params['2D']['cif_path'])
         self.potentials['2D']['count'] = utilities.count_atomtypes(
-            self.params['2D']['pot_path'])
+            self.params['2D']['pot_path'],self.data['2D']['elements'])
 
         # --- Count atom types from the potential file ---
         self.data['2D']['natype'] = sum(
@@ -375,7 +376,7 @@ class ModelInit:
         self.potentials['sub'] = {}
         self.data['sub'] = utilities.cifread(self.params['sub']['cif_path'])
         self.potentials['sub']['count'] = utilities.count_atomtypes(
-            self.params['sub']['pot_path'])
+            self.params['sub']['pot_path'],self.data['sub']['elements'])
 
         self.data['sub']['natype'] = sum(
             self.potentials['sub']['count'].values())
@@ -407,7 +408,7 @@ class ModelInit:
         self.potentials['tip'] = {}
         self.data['tip'] = utilities.cifread(self.params['tip']['cif_path'])
         self.potentials['tip']['count'] = utilities.count_atomtypes(
-            self.params['tip']['pot_path'])
+            self.params['tip']['pot_path'],self.data['tip']['elements'])
 
         self.data['tip']['natype'] = sum(
             self.potentials['tip']['count'].values())
@@ -574,7 +575,6 @@ class ModelInit:
             self.params['2D']['cif_path'], self.params['2D']['pot_path'])
         typecount = sum(self.potentials['2D']['count'].values())
         Path(filename).unlink(missing_ok=True)
-
         # Generate the 2D sheet using Atomsk (initial conversion from CIF)
         atomsk_command = f"echo n | atomsk {self.params['2D']['cif_path']} -ow {filename} -v 0"
         subprocess.run(atomsk_command, shell=True, check=True)
@@ -587,6 +587,11 @@ class ModelInit:
         # Orthogonalize the cell and ensure LAMMPS format
         atomsk_command = f"atomsk {filename} -orthogonal-cell -ow lmp -v 0"
         subprocess.run(atomsk_command, shell=True, check=True)
+
+        # Duplicate the sheet to match the specified simulation dimensions
+        dim = utilities.get_model_dimensions(filename)
+        # self.shift_x = dim['xhi'] / 3
+        self.shift_y = dim['yhi'] / 3
 
         # Duplicate atoms to match the number of types in the potential file if necessary
         if multiplier != 1:
@@ -607,6 +612,9 @@ class ModelInit:
 
         # Duplicate the sheet to match the specified simulation dimensions
         dim = utilities.get_model_dimensions(filename)
+        # self.shift_x = dim['xhi'] / 3
+        self.shift_y = dim['yhi'] / 3
+
         duplicate_a = round(x / dim['xhi'])
         duplicate_b = round(y / dim['yhi'])
 
@@ -622,7 +630,10 @@ class ModelInit:
         self.center('2D', filename)
 
         # Compute and store the interlayer lattice constant by stacking two layers
-        self.lat_c = self.stacking( )
+        if self.params['2D']['lat_c'] not in [None, '', ' ']:
+            self.lat_c = self.params['2D']['lat_c']
+        else:
+            self.lat_c = self.stacking()
 
     def make_amorphous(self, system, tempmelt):
         """
@@ -748,9 +759,12 @@ class ModelInit:
             warnings.warn(
                 "lat_c is not set; using default value of 6. This may not be appropriate for all materials. Consider setting lat_c explicitly.")
 
+        if self.params['2D']['stack_type'] == 'AA':
+            self.shift_y = 0
+            # y_shift = 0
+            # x_shift = (self.dim['xhi'] - self.dim['xlo']) / 2
         # Compute x_shift for layer displacement (used for stacking)
-        x_shift = (self.dim['xhi'] - self.dim['xlo']) / 10
-
+        # x_shift = (self.dim['xhi'] - self.dim['xlo']) / 4
         # Stack additional layers and apply displacements
         if sheetvsheet:
             for l in range(1, layer):
@@ -758,14 +772,14 @@ class ModelInit:
                     f"read_data {filename}_1.lmp add append shift 0 0 {l*lat_c} group layer_{l+1}\n")
             # For sheetvsheet, displace layers 3 and 4 only
             lmp.commands_list([
-                f"displace_atoms layer_3 move {x_shift} 0 0 units box\n",
-                f"displace_atoms layer_4 move {x_shift} 0 0 units box\n",
+                f"displace_atoms layer_3 move 0 {self.shift_y} 0 units box\n",
+                f"displace_atoms layer_4 move 0 {self.shift_y} 0 units box\n",
             ])
         else:
             for l in range(1, layer):
                 lmp.commands_list([
                     f"read_data {filename}_1.lmp add append shift 0 0 {l*lat_c} group layer_{l+1}\n",
-                    f"displace_atoms layer_{l+1} move {x_shift*l} 0 0 units box\n",
+                    f"displace_atoms layer_{l+1} move 0 -{self.shift_y*l} 0 units box\n",
                 ])
 
         # Define atom type groups for each layer
@@ -792,6 +806,7 @@ class ModelInit:
         # Energy minimization and equilibration
         lmp.commands_list([
             f"include         {self.dir}/build/sheet_{layer}.in.settings\n\n",
+            "dump            sys all atom 1 equil.lammpstrj\n",
             "min_style       cg\n",
             "minimize        1.0e-4 1.0e-8 1000000 1000000\n\n",
             "timestep        0.001\n",
@@ -838,6 +853,7 @@ class ModelInit:
             - Requires Atomsk and the utilities.cifread function to be available.
             - Raises subprocess.CalledProcessError if Atomsk commands fail.
         """
+
         # Remove existing output and temporary files if they exist
         Path(filename).unlink(missing_ok=True)
         Path('a.cif').unlink(missing_ok=True)
@@ -845,7 +861,6 @@ class ModelInit:
         # Convert CIF to orthogonal cell using Atomsk and write to 'a.cif'
         atomsk_command = f"atomsk {cif_path} -duplicate 2 2 1 -orthogonal-cell a.cif -ow -v 0"
         subprocess.run(atomsk_command, shell=True, check=True)
-
         # Read lattice constants from the orthogonalized CIF
         cif = utilities.cifread("a.cif")
         # Calculate duplication factors to reach the desired slab size (+15 Å buffer for x and y)
@@ -964,7 +979,6 @@ class ModelInit:
 
             # Get sequential atom type mapping for 2D system
             arr = self.number_sequential_atoms('2D')
-
             # Define element groups for all layers
             atype = self.define_elemgroup('2D', arr, layer=layer, atype=atype)
             # Write atomic masses for all elements and layers
@@ -978,36 +992,48 @@ class ModelInit:
                     if "2D_l" + str(l + 1) in self.group_def[i][0]
                 ]
                 f.write(f"group layer_{l+1} type {' '.join(layer_g)}\n")
+            is_lj = self.is_sheet_lj()
+            if is_lj== True:
+                # Set up hybrid pair_style: one for each layer plus an extra LJ/cut for interlayer
+                f.write(
+                    f"pair_style hybrid {(self.params['2D']['pot_type'] + ' ') * layer} lj/cut 11.0\n")
 
-            # Set up hybrid pair_style: one for each layer plus an extra LJ/cut for interlayer
-            f.write(
-                f"pair_style hybrid {(self.params['2D']['pot_type'] + ' ') * layer} lj/cut 11.0\n")
+                # Write pair_coeff for each layer: assign correct atom types and potential file
+                for l in range(layer):
+                    potentials[l] = [
+                        self.group_def[i][3] if "2D_l" +
+                        str(l + 1) in self.group_def[i][0] else "NULL"
+                        for i in range(1, self.data['2D']['natype'] * layer + 1)
+                    ]
+                    f.write(
+                        f"pair_coeff * * {self.params['2D']['pot_type']} {l+1} {self.potentials['2D']['path']} {'  '.join(potentials[l])} # interlayer '2D' Layer {l+1}\n"
+                    )
 
-            # Write pair_coeff for each layer: assign correct atom types and potential file
-            for l in range(layer):
-                potentials[l] = [
-                    self.group_def[i][3] if "2D_l" +
-                    str(l + 1) in self.group_def[i][0] else "NULL"
+                # Generate all unique layer index pairs for interlayer LJ
+                index_pairs = [(i, j) for i in range(layer)
+                               for j in range(i + 1, layer)]
+
+                if sheetvsheet:
+                    # For sheet-vs-sheet, set very low LJ energy for specific pairs (decoupling)
+                    index_pairs_low_e = [(1, 3), (0, 3), (0, 2)]
+                    index_pairs_sheetvsheet = [
+                        pair for pair in index_pairs if pair not in index_pairs_low_e]
+                    self.set_sheet_LJ_params(f, index_pairs_sheetvsheet)
+                    self.set_sheet_LJ_params(f, index_pairs_low_e, low=True)
+                else:
+                    # For normal stacking, set LJ for all pairs
+                    self.set_sheet_LJ_params(f, index_pairs)
+            else:
+                f.write(
+                    f"pair_style {self.params['2D']['pot_type'] + ' '}\n")
+                potentials = [
+                    self.group_def[i][3] 
                     for i in range(1, self.data['2D']['natype'] * layer + 1)
                 ]
                 f.write(
-                    f"pair_coeff * * {self.params['2D']['pot_type']} {l+1} {self.potentials['2D']['path']} {'  '.join(potentials[l])} # interlayer '2D' Layer {l+1}\n"
+                    f"pair_coeff * * {self.params['2D']['pot_type']} {l+1} {self.potentials['2D']['path']} {'  '.join(potentials)} # interlayer '2D'\n"
                 )
 
-            # Generate all unique layer index pairs for interlayer LJ
-            index_pairs = [(i, j) for i in range(layer)
-                           for j in range(i + 1, layer)]
-
-            if sheetvsheet:
-                # For sheet-vs-sheet, set very low LJ energy for specific pairs (decoupling)
-                index_pairs_low_e = [(1, 3), (0, 3), (0, 2)]
-                index_pairs_sheetvsheet = [
-                    pair for pair in index_pairs if pair not in index_pairs_low_e]
-                self.set_sheet_LJ_params(f, index_pairs_sheetvsheet)
-                self.set_sheet_LJ_params(f, index_pairs_low_e, low=True)
-            else:
-                # For normal stacking, set LJ for all pairs
-                self.set_sheet_LJ_params(f, index_pairs)
 
     def set_sheet_LJ_params(self, f, index_pairs, low=False):
         """
@@ -1262,3 +1288,13 @@ class ModelInit:
                     # For multiple atom types, write mass for the range of atom types
                     f.write(
                         f"mass {self.elemgroup[system][m][0]}*{self.elemgroup[system][m][-1]} {mass} #{m} {system}\n")
+
+    def is_sheet_lj(self):
+        no_lj = ['airebo','comb','comb3']
+        yes_lj = ['sw','tersoff','rebo','edip','meam','eam','bop','morse','rebomos','sw/mod']
+        if self.params['2D']['pot_type'] in yes_lj:
+            return True
+        elif self.params['2D']['pot_type'] in no_lj:
+            return False
+        else:
+            return None
