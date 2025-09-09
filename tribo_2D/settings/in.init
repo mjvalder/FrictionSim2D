@@ -1,9 +1,0 @@
-# LAMMPS input script for system build with input of substrate, graphene sheet and AFM tip
-clear
-
-units           metal
-atom_style      atomic
-neighbor        0.3 bin
-neigh_modify    every 1 delay 0 check yes #every 5
-
-boundary   	    p p f

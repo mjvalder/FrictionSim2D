@@ -1,34 +1,57 @@
-"""
-This set of tools deals with the reading, writing, modification and processing of files
+"""A collection of utility functions for file processing and calculations.
+
+This module provides tools for reading, writing, and modifying simulation
+files (e.g., CIF, LAMMPS data), parsing configuration files, and calculating
+physical parameters like Lennard-Jones coefficients.
 """
 
-import os
+import configparser
+from fileinput import filename
 import json
+import os
 import re
 import shutil
-import configparser
+
 import numpy as np
-from tribo_2D.Potentials import lj_params
+import yaml
+
+from tribo_2D.Potentials import lj_params as lj
 
 
-def cifread(cif):
-    """
-    Reads a CIF file and extracts important information on the crystal structure.
+def read_yaml(filepath):
+    """Reads a YAML file and returns its contents as a dictionary.
+
     Args:
-        cif (str): Path to the CIF file.
-    Returns:
-        cif(dict): A dictionary containing the extracted information such as
-        lattice constants, cell angles, chemical formula, and elements.
-    """
-    filename = os.path.basename(cif).split('.')[0]
+        filepath (str): Path to the YAML file.
 
-    with open(cif, 'r', encoding="utf-8") as f:
+    Returns:
+        dict: Parsed YAML contents.
+    """
+    with open(filepath, 'r') as f:
+        return yaml.safe_load(f)
+
+
+def cifread(cif_path):
+    """Reads a CIF file and extracts crystal structure information.
+
+    Args:
+        cif_path (str): Path to the CIF file.
+
+    Returns:
+        dict: A dictionary containing extracted information such as lattice
+        constants ('lat_a', 'lat_b', 'lat_c'), cell angles, chemical formula,
+        and a list of elements.
+    """
+    filename = os.path.basename(cif_path).split('.')[0]
+
+    with open(cif_path, 'r', encoding="utf-8") as f:
         lines = f.readlines()
 
     elements = []
-    cif = {}
+    cif_data = {}
     reading_elements = False
     header_skipped = False
+    # Map CIF keys to dictionary keys for easier parsing
     keys = {
         '_cell_length_a': 'lat_a',
         '_cell_length_b': 'lat_b',
@@ -40,91 +63,64 @@ def cifread(cif):
     }
 
     for line in lines:
+        # Parse lattice parameters and formula
         for key, var in keys.items():
             if line.startswith(key):
                 value = line.split(maxsplit=1)[1].strip()
-                cif[var] = float(value) if 'formula' not in var else value
+                cif_data[var] = float(
+                    value) if 'formula' not in var else value
 
+        # Start reading element symbols after this line
         if line.strip().startswith('_atom_site_type_symbol'):
             reading_elements = True
             continue
 
+        # Skip any other header lines within the atom site loop
         if reading_elements and not header_skipped:
             if line.strip().startswith('_'):
                 continue
             header_skipped = True
 
+        # Once headers are skipped, read the element symbols
         if reading_elements and header_skipped:
             parts = line.strip().split()
             if parts:
                 element = parts[0]
                 elements.append(element)
 
+    # Parse the chemical formula to get element counts
     elem_count = {}
-    if cif.get('formula'):
-        matches = re.findall(r'([A-Z][a-z]*)(\d*)', cif['formula'])
+    if cif_data.get('formula'):
+        matches = re.findall(r'([A-Z][a-z]*)(\d*)', cif_data['formula'])
         for element, count in matches:
             elem_count[element] = int(count) if count else 1
         nelements = len(elements)
 
-        cif.update({
+        cif_data.update({
             "elements": elements,
             "elem_comp": elem_count,
             "nelements": nelements,
             "filename": filename
         })
 
-    return cif
+    return cif_data
 
 
-def count_atomtypes(file,elements):
-    """
-    Counts the number of different element types in a LAMMPS potential file.
+def count_atomtypes(potential_filepath, elements):
+    """Counts the number of different atom types per element in a potential file.
+
     Args:
-        file (str): Path to the LAMMPS potential file.
+        potential_filepath (str): Path to the LAMMPS potential file.
+        elements (list): A list of element symbols to look for.
+
     Returns:
-        elem_type (dict): A dictionary where keys are element names and values are their maximum numbers.
+        dict: A dictionary where keys are element names and values are the
+        count of unique atom types for that element (e.g., {'C': 2} for C1, C2).
     """
-    # elem_type = {}
-
-    # matches = re.compile(r'([A-Za-z]+)(\d*)')
-
-    # with open(file, 'r', encoding="utf-8") as f:
-    #     lines = f.readlines()
-
-    # for line in lines:
-    #     stripped_line = line.strip()
-
-    #     if stripped_line.startswith('#') or not stripped_line:
-    #         continue
-
-    #     parts = stripped_line.split()
-
-    #     if len(parts) >= 3:
-    #         for element in parts[:3]:
-    #             match = matches.match(element)
-    #             if match:
-    #                 element_name = match.group(1)
-    #                 element_number = match.group(2)
-
-    #                 if element_number:
-    #                     element_number = int(element_number)
-
-    #                 else:
-    #                     element_number = 1
-
-    #                 if element_name not in elem_type:
-    #                     elem_type[element_name] = 0
-
-    #                 elem_type[element_name] = max(
-    #                     elem_type[element_name], element_number)
-
-    # return elem_type
-
     elem_type = {el: 0 for el in elements}
     pattern = re.compile(r'([A-Za-z]+)(\d*)')
 
-    with open(file, 'r', encoding="utf-8") as f:
+    with open(potential_filepath, 'r', encoding="utf-8") as f:
         lines = f.readlines()
 
     for line in lines:
@@ -133,25 +129,30 @@ def count_atomtypes(file,elements):
             continue
 
         parts = stripped_line.split()
+        # Check the first few words, which typically contain element types
         for element in parts[:3]:
             match = pattern.match(element)
             if match:
                 element_name = match.group(1)
                 element_number = int(match.group(2)) if match.group(2) else 1
                 if element_name in elem_type:
-                    elem_type[element_name] = max(elem_type[element_name], element_number)
+                    elem_type[element_name] = max(
+                        elem_type[element_name], element_number)
     return elem_type
 
-def get_model_dimensions(lmp):
-    """
-    Reads a LAMMPS data file and extracts the dimensions of the simulation box.
+
+def get_model_dimensions(lmp_path):
+    """Reads a LAMMPS data file and extracts the simulation box dimensions.
+
     Args:
-        lmp (str): Path to the LAMMPS data file.
+        lmp_path (str): Path to the LAMMPS data file.
+
     Returns:
-        dim (dict): A dictionary containing the dimensions of the simulation box
-        with keys 'xlo', 'xhi', 'ylo', 'yhi', 'zlo', 'zhi'."""
+        dict: A dictionary containing the box dimensions with keys 'xlo',
+        'xhi', 'ylo', 'yhi', 'zlo', 'zhi'.
+    """
     xlo, xhi, ylo, yhi, zlo, zhi = [None] * 6
-    with open(lmp, "r") as f:
+    with open(lmp_path, "r") as f:
         lines = f.readlines()
         for line in lines:
             if "xlo xhi" in line:
@@ -171,34 +172,37 @@ def get_model_dimensions(lmp):
     return dim
 
 
-def LJparams(X, Y):
-    """
-    Returns the Lennard-Jones parameters for two atoms using the Universal Force Field parameters.
-    These are obtained using the Lorentz-Bertholt mixing rules.
-    The Universal Force Field parameters are stored in the settings.lj_params dictionary.
+def lj_params(atom_type_1, atom_type_2):
+    """Calculates LJ parameters using Lorentz-Bertholt mixing rules.
+
+    Pulls UFF parameters from the `lj` dictionary and applies
+    mixing rules to determine the interaction parameters between two atom types.
+
     Args:
-        X (str): The first atom type.
-        Y (str): The second atom type.
+        atom_type_1 (str): The symbol of the first atom type (e.g., 'C').
+        atom_type_2 (str): The symbol of the second atom type (e.g., 'H').
+
     Returns:
-        epsilon (float): The depth of the potential well.
-        sigma (float): The finite distance at which the potential is zero.
+        tuple[float, float]: A tuple containing epsilon (potential well depth)
+        and sigma (zero-potential distance).
     """
-    e1 = lj_params.lj_params[X][1]
-    e2 = lj_params.lj_params[Y][1]
-    s1 = lj_params.lj_params[X][0]
-    s2 = lj_params.lj_params[Y][0]
-    epsilon = np.sqrt(e1*e2)
-    sigma = (s1 + s2)/2
+    e1 = lj.lj_params[atom_type_1][1]
+    e2 = lj.lj_params[atom_type_2][1]
+    s1 = lj.lj_params[atom_type_1][0]
+    s2 = lj.lj_params[atom_type_2][0]
+    epsilon = np.sqrt(e1 * e2)
+    sigma = (s1 + s2) / 2
     return epsilon, sigma
 
 
-def removeInlineComments(config):
-    """
-    Removes inline comments from a ConfigParser object.
+def _remove_inline_comments(config):
+    """Removes inline comments from a ConfigParser object.
+
     Args:
         config (configparser.ConfigParser): The ConfigParser object to process.
+
     Returns:
-        config (configparser.ConfigParser): The ConfigParser object with inline comments removed.
+        configparser.ConfigParser: The object with inline comments removed.
     """
     for section in config.sections():
         for item in config.items(section):
@@ -206,18 +210,19 @@ def removeInlineComments(config):
     return config
 
 
-def read_config(input):
-    """
-    Reads a configuration file and returns a dictionary with the parsed values.
+def read_config(filepath):
+    """Reads a configuration file and returns a dictionary with parsed values.
+
     Args:
-        input (str): Path to the configuration file.
+        filepath (str): Path to the configuration file.
+
     Returns:
-        params (dict): A dictionary containing the parsed configuration parameters.
+        dict: A dictionary containing the parsed configuration parameters.
     """
     config = configparser.ConfigParser()
-    config.read(input)
+    config.read(filepath)
 
-    config = removeInlineComments(config)
+    config = _remove_inline_comments(config)
 
     params = {}
     for section in config.sections():
@@ -225,10 +230,12 @@ def read_config(input):
         for key in config[section]:
             value = config.get(section, key)
 
+            # Attempt to cast values to appropriate types
             if value.endswith(']'):
-                params[section][key] = json.loads(value)
+                params[section][key] = json.loads(value)  # Parse lists
             elif value.isdigit():
-                params[section][key] = int(value)
+                params[section][key] = int(value)  # Parse integers
+            # Parse floats (standard or scientific notation)
             elif '.' in value and value.replace('.', '', 1).isdigit():
                 params[section][key] = float(value)
             elif value.replace('.', '', 1).replace('e', '', 1).replace('-', '', 1).isdigit():
@@ -238,38 +245,46 @@ def read_config(input):
     return params
 
 
-def atomic2molecular(file):
-    """
-    Converts a LAMMPS data file from atomic to molecular format.
+def atomic2molecular(filepath):
+    """Converts a LAMMPS data file from atomic to molecular format in-place.
+
+    This function modifies the "Atoms" section of a LAMMPS data file,
+    changing the style from 'atomic' to 'molecular' and adding the required
+    molecule ID and charge/dipole fields.
+
     Args:
-        file (str): Path to the LAMMPS data file.
+        filepath (str): Path to the LAMMPS data file to be modified.
     """
-    with open(file, 'r') as f:
+    with open(filepath, 'r') as f:
         lines = f.readlines()
 
-    atoms_section = False  # Track when we are inside the "Atoms" section
+    atoms_section = False
     modified_lines = []
 
     for line in lines:
         line = line.strip()
-        # If we hit the Velocities section, stop processing further lines.
+        # Stop processing if another section (e.g., Velocities) is reached
+        if atoms_section and not line.split():
+            atoms_section = False
+
         if line.startswith("Velocities"):
             break
+
         # Replace "Atoms # atomic" with "Atoms # molecular"
         if line == "Atoms # atomic":
             modified_lines.append("Atoms # molecular")
-            atoms_section = True  # Start processing atom lines
+            atoms_section = True
             continue
 
-        # Modify atom data lines
+        # Modify atom data lines to add molecule ID and charge/dipole fields
         if atoms_section and line:
             parts = line.split()
-            if len(parts) >= 4:  # Ensure we have at least ID, type, and coordinates
+            if len(parts) >= 4:  # Ensure it's a valid atom line
                 atom_id = parts[0]
                 atom_type = parts[1]
                 x, y, z = parts[2:5]
 
-                # Insert a zero between atom ID and atom type, and add three zeros at the end
+                # New format: atom-ID molecule-ID atom-type x y z [charge] [dipole]
                 new_line = f"{atom_id} 0 {atom_type} {x} {y} {z} 0 0 0"
                 modified_lines.append(new_line)
                 continue
@@ -278,44 +293,38 @@ def atomic2molecular(file):
         modified_lines.append(line)
 
     # Overwrite the original file with the modified content
-    with open(file, 'w') as f:
+    with open(filepath, 'w') as f:
         f.write("\n".join(modified_lines) + "\n")
 
 
 def copy_file(path1, dest):
-    """
-    Copies a file from path1 to the destination directory dest.
+    """Copies a file from a source path to a destination directory.
+
     Args:
         path1 (str): Path to the source file.
         dest (str): Path to the destination directory.
+
     Returns:
-        path2 (str): Path to the copied file in the destination directory.
+        str: Path to the copied file in the destination directory.
     """
-
     os.makedirs(dest, exist_ok=True)
-
     filename = os.path.basename(path1)
-
     path2 = os.path.join(dest, filename)
-
     shutil.copy2(path1, path2)
-
     return path2
 
 
 def renumber_atom_types(filename, pot=None):
-    """
-    Renumber atom types in a LAMMPS data file to match the order and types specified in the given potential.
+    """Renumbers atom types in a LAMMPS data file to a sequential order.
+
+    This function modifies a LAMMPS data file in-place to ensure atom types
+    are numbered sequentially from 1. If a potential `pot` is provided, it
+    renumbers the types to match the order of elements in that list.
 
     Args:
-        pot (list of str): List of atom type names in the desired order, typically as specified in the potential file.
         filename (str): Path to the LAMMPS data file to be modified.
-
-    Notes:
-        - The function assumes that the LAMMPS data file contains "Masses" and "Atoms" sections.
-        - The function modifies the file in-place, overwriting the original file.
-        - Atom type names are matched using comments (e.g., `# C`) in the "Masses" section.
-        - The function may require adaptation for files with different formatting.
+        pot (list[str], optional): A list of element symbols in the desired
+            order for renumbering. Defaults to None.
     """
     # Open the LAMMPS data file and read all lines
     with open(filename, 'r') as f:
@@ -420,28 +429,41 @@ def renumber_atom_types(filename, pot=None):
             f.write(line)
 
 
-def check_potential_cif_compatibility(cif, pot):
-    """
-    Checks if the CIF file and potential file are compatible.
+def check_potential_cif_compatibility(cif_path, pot_path):
+    """Checks if the number of atom types per element is compatible.
+
+    Compares the number of atom types for each element defined in a CIF file
+    versus a potential file. It returns a multiplier if the potential defines
+    a consistent multiple of atom types compared to the CIF.
+
     Args:
-        cif (dict): The CIF data dictionary.
-        pot (dict): The potential data dictionary.
+        cif_path (str): Path to the CIF file.
+        pot_path (str): Path to the potential file.
+
     Returns:
-        bool: True if compatible, False otherwise.
+        float: The consistent ratio of atom types in the potential vs. the CIF.
+
+    Raises:
+        ValueError: If the ratio of atom types is not consistent across all
+            elements.
     """
-    data = cifread(cif)
-    potentials_count = count_atomtypes(pot,data['elements'])
-    # --- Check if atom types in the cif file match the atom types in the potential file by checking the number of atom types per element in each file---
+    cif_data = cifread(cif_path)
+    potentials_count = count_atomtypes(pot_path, cif_data['elements'])
+
+    # Calculate the ratio of atom types for each element
     multiples = {
         element: (potentials_count.get(element, 0) / cif_count
                   if cif_count > 0 and potentials_count.get(element, 0) != 1 else 1)
-        for element, cif_count in data['elem_comp'].items()
+        for element, cif_count in cif_data['elem_comp'].items()
     }
-    # Check that the ratio of atom types is consistent across all elements
-    unique_multiples = set(m for m in multiples.values())
 
+    # Check that the ratio is consistent across all elements
+    unique_multiples = set(m for m in multiples.values())
     if len(unique_multiples) > 1:
-        raise ValueError('multiples must be the same')
+        raise ValueError(
+            'Inconsistent atom type multiplier between potential and CIF file. '
+            f'Ratios found: {unique_multiples}'
+        )
     multiplier = unique_multiples.pop()
 
     return multiplier

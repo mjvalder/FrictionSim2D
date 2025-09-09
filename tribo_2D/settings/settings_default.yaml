@@ -1,0 +1,53 @@
+# Output settings
+output:
+  dump: 
+    system_init: true            # Whether to dump data during system initialization (true or false)
+    slide: true                  # Whether to dump simulation data (true or false)
+  dump_frequency:
+    system_init: 10000           # Dump frequency during system initialization 
+    slide: 10000                 # Dump frequency during sliding run
+  results_frequency: 1000        # Frequency to save results
+
+# Thermostat and integration settings
+thermostat:
+  type: 'langevin'    # Type of thermostat used (e.g., 'langevin')
+  time_int_type: 'nvt'       # Type of time integration (e.g., 'nvt')
+  langevin_boundaries:
+    tip:
+      fix: [3, 0]
+      thermo: [5, 3]
+    sub:
+      fix: [0, 0.3]
+      thermo: [0.3, 0.6]
+
+# Tip and substrate configuration
+geometry:
+  rigid_tip: false           # Whether the tip is rigid (true/false)
+  tip_base_z: 55             # Z-position of the tip base
+  substrate_height: 12       # Height of the substrate
+  tip_reduction_factor: 2.25 # Factor to reduce tip size
+  lat_c_default: 6          # Default interlayer lattice constant if not specified
+
+# Simulation run parameters
+simulation:
+  thermo: 100000             # Thermostat reporting interval
+  timestep: 0.001            # Simulation timestep (in ps)
+  neighbor_list: 0.3         # Neighbor list skin distance
+  slide_run_steps: 200000    # Number of steps for sliding run
+  neigh_modify_command: 'neigh_modify    every 1 delay 0 check yes' # Neighbor list modification command
+  min_style: 'cg'            # Minimization style (e.g., 'cg')
+  minimization_command: 'minimize 1e-4 1e-8 1000000 1000000' # Minimization command
+
+# Potential settings
+potential:
+  LJ_type: 'LJ_base'         # Type of Lennard-Jones potential used
+  LJ_cutoff: 8.0             # Lennard-Jones potential cutoff distance
+
+# Quenching parameters
+quench:
+  quench_slab_dims: [200, 200, 50] # Dimensions of the slab for quenching
+  quench_rate: 1e12               # Quench rate in K/s
+  quench_target_temp: 300          # Target temperature for quenching
+  quench_melt_temp: 2500           # Melting temperature for quenching
+  run_local: true               # Whether to run quenching locally (true/false)
+  n_proc: 16                     # Number of processors to use if not running locally
