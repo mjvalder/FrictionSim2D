@@ -339,7 +339,13 @@ class AFMSimulation(model_init.ModelInit):
                     f"timestep       {self.settings['simulation']['timestep']}\n",
                     f"thermo         {self.settings['simulation']['thermo']}\n",
                     "comm_style       tiled\n",
-                    f"read_data       {self.sheet_dir[layer]}/data/load_$(v_find)N.data\n\n",
+                ])
+
+                drive_method = self.settings['simulation'].get('drive_method')
+                extra_atom_types = 1 if drive_method == 'virtual_atom' else 0
+
+                f_out.writelines([
+                    f"read_data       {self.sheet_dir[layer]}/data/load_$(v_find)N.data extra/atom/types {extra_atom_types}\n\n",
                     f"include         {self.sheet_dir[layer]}/lammps/system.in.settings\n\n",
                     "balance 1.0 rcb\n",
                 ])
@@ -362,12 +368,6 @@ class AFMSimulation(model_init.ModelInit):
                     self._write_langevin_thermostat_commands(f_out)
 
                 f_out.writelines([
-
-                    "# Apply constant normal force to the tip.\n",
-                    "variable        Ftotal          equal -v_find/1.602176565\n",
-                    f"variable        n           equal v_Ftotal/count({tip_fix_group})\n",
-                    f"fix             forcetip {tip_fix_group} aveforce 0.0 0.0 $n\n\n",
-
                     "# Define computes for output.\n",
                     f"compute COM_top layer_{layer} com\n",
                     "variable comx equal c_COM_top[1] \n",
@@ -378,6 +378,13 @@ class AFMSimulation(model_init.ModelInit):
                     "variable comx_tip equal c_COM_tip[1] \n",
                     "variable comy_tip equal c_COM_tip[2] \n",
                     "variable comz_tip equal c_COM_tip[3] \n\n",
+                    "run 0 # Update computes\n\n",
+
+                    "# Apply constant normal force to the tip.\n",
+                    "variable        Ftotal          equal -v_find/1.602176565\n",
+                    f"variable        n           equal v_Ftotal/count({tip_fix_group})\n",
+                    f"fix             forcetip {tip_fix_group} aveforce 0.0 0.0 $n\n\n",
+
                     "# Calculate friction forces.\n",
                     "variable        fz_tip   equal  f_forcetip[3]*1.602176565\n\n",
                     "variable        fx_spr   equal  f_spr[1]*1.602176565\n\n",
@@ -389,8 +396,34 @@ class AFMSimulation(model_init.ModelInit):
 
                     "variable spring_x equal cos(v_a*PI/180)\n",
                     "variable spring_y equal sin(v_a*PI/180)\n\n",
-                    "# Add lateral harmonic spring to pull the tip.\n",
-                    f"fix             spr tip_fix smd cvel {spring_ev} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
+                ])
+
+                if drive_method == 'smd':
+                    f_out.writelines([
+                        "# Add lateral harmonic spring to pull the tip.\n",
+                        f"fix             spr tip_fix smd cvel {spring_ev} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
+                    ])
+                elif drive_method == 'fix_move':
+                    f_out.writelines([
+                        "# Apply velocity to the tip to induce sliding.\n",
+                        f"velocity        {tip_fix_group} set $(v_spring_x*{tipps}) $(v_spring_y*{tipps}) 0.0\n\n",
+                    ])
+                elif drive_method == 'virtual_atom':
+                    virtual_atom_type = self.ngroups[layer] + 1
+                    virtual_offset = self.params['tip']['r'] * 3 / 2
+                    f_out.writelines([
+                        "# Create a virtual atom to drag the tip.\n",
+                        f"variable virtual_x equal $(v_comx_tip)+{virtual_offset}*$(v_spring_x)\n",
+                        f"variable virtual_y equal $(v_comy_tip)+{virtual_offset}*$(v_spring_y)\n",
+                        f"variable virtual_z equal $(v_comz_tip)\n",
+                        f"create_atoms    {virtual_atom_type} single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) group virtual\n",
+                        "set             group virtual mass 1.0\n",
+                        f"pair_coeff      {virtual_atom_type} * lj/cut 0.0 0.0\n",
+                        f"fix             move_virtual virtual move linear $(v_spring_x*{tipps}) $(v_spring_y*{tipps}) 0.0\n",
+                        f"fix             spr {tip_fix_group} spring couple virtual {spring_ev} {spring_ev} 0.0 0.0\n\n",
+                    ])
+
+                f_out.writelines([
                     "run 200000\n\n",
 
                     f"if '$(v_a) == {self.params['general']['scan_angle'][1]}' then &\n",

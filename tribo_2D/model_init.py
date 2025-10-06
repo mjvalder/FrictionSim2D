@@ -683,6 +683,7 @@ class ModelInit:
         except (FileNotFoundError, KeyError) as e:
             logging.exception(f"File or configuration error during slab generation: {e}")
             raise
+    
     def center(self, system, filename):
         """Centers a structure within the simulation box using LAMMPS.
 

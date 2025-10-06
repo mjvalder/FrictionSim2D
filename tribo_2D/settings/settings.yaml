@@ -37,6 +37,7 @@ simulation:
   neigh_modify_command: 'neigh_modify    every 1 delay 0 check yes' # Neighbor list modification command
   min_style: 'cg'            # Minimization style (e.g., 'cg')
   minimization_command: 'minimize 1e-4 1e-8 1000000 1000000' # Minimization command
+  drive_method: 'virtual_atom' # Method to drive the tip ('virtual_atom' or 'fix_move' or 'smd')
 
 # Potential settings
 potential:
