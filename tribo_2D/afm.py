@@ -9,6 +9,7 @@ import os
 import re
 import logging
 import tempfile
+import numpy as np
 
 from lammps import lammps
 
@@ -57,10 +58,10 @@ class AFMSimulation(model_init.ModelInit):
             with open(self.input_file, "r", encoding="utf-8") as config_file:
                 base_config_str = config_file.read()
         except FileNotFoundError:
-            logging.error(f"Input file not found: {self.input_file}")
+            logging.error("Input file not found: %s", self.input_file)
             return
-        except Exception as e:
-            logging.error(f"Failed to read or parse configuration: {e}")
+        except (OSError, KeyError, ValueError) as e:
+            logging.error("Failed to read or parse configuration: %s", e)
             return
 
         if materials:
@@ -69,8 +70,8 @@ class AFMSimulation(model_init.ModelInit):
                     print(f"Setting up simulation for material {mat}...")
                     mat_config_str = base_config_str.replace("{mat}", mat)
                     self._run_simulations_for_sizes(config, mat_config_str)
-                except Exception as e:
-                    logging.error(f"Simulation setup failed for material {mat}: {e}")
+                except (ValueError, KeyError, OSError, RuntimeError) as e:
+                    logging.error("Simulation setup failed for material %s: %s", mat, e)
                     continue 
         else:
             self._run_simulations_for_sizes(config, base_config_str)
@@ -93,7 +94,7 @@ class AFMSimulation(model_init.ModelInit):
             with open(materials_list, "r", encoding="utf-8") as materials_file:
                 return [line.strip() for line in materials_file]
         except FileNotFoundError:
-            logging.warning(f"Materials list file not found: {materials_list}")
+            logging.warning("Materials list file not found: %s", materials_list)
             return []
 
     def _run_simulations_for_sizes(self, config, config_str):
@@ -119,7 +120,7 @@ class AFMSimulation(model_init.ModelInit):
                     temp_config_name = temp_config_file.name
                 self.system_setup(temp_config_name)
             except Exception:
-                logging.exception(f"Single simulation run failed")
+                logging.exception("Single simulation run failed")
                 raise
             finally:
                 if os.path.exists(temp_config_name):
@@ -141,7 +142,7 @@ class AFMSimulation(model_init.ModelInit):
                     temp_config_name = temp_config_file.name
                 self.system_setup(temp_config_name)
             except Exception:
-                logging.exception(f"Simulation for size {x_val}x{y_val} failed")
+                logging.exception("Simulation for size %sx%s failed", x_val, y_val)
                 raise  # Re-raise to stop the process
             finally:
                 if temp_config_name and os.path.exists(temp_config_name):
@@ -173,7 +174,7 @@ class AFMSimulation(model_init.ModelInit):
             self.generate_system_init_script()
             self.generate_slide_script()
         except Exception as e:
-            logging.error(f"System setup failed: {e}")
+            logging.error("System setup failed: %s", e)
             raise
         
 
@@ -267,9 +268,17 @@ class AFMSimulation(model_init.ModelInit):
                     "# Apply constraints.\n",
                     f"fix             tip_f {tip_fix_group} rigid/nve single force * off off on torque * off off off\n\n",
                     "variable        f equal 0.0\n",
-
-                    f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
-                    "label force_loop\n",
+                ])
+                if isinstance(self.params['general']['force'], (list, tuple)):
+                    f_out.writelines([
+                        f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
+                        "label force_loop\n",
+                    ])
+                else:
+                    f_out.writelines([
+                        f"variable force equal {self.params['general']['force']}\n",
+                    ])
+                f_out.writelines([
                     "balance 1.0 rcb\n",
                     "# Set up initial parameters.\n",
                     "variable        num_floads equal 100\n",
@@ -327,12 +336,32 @@ class AFMSimulation(model_init.ModelInit):
             self._generate_potentials_file(layer, is_slide_script=True)
             filename = f"{self.sheet_dir[layer]}/lammps/slide_{self.params['tip']['s']}ms.lmp"
             with open(filename, 'w', encoding="utf-8") as f_out:
-                f_out.writelines([
-                    f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
-                    "label force_loop\n",
-                    f"variable a index 0 {' '.join(str(x) for x in self.scan_angle)} 0\n",
-                    "label angle_loop\n",
-                ])
+                if isinstance(self.params['general']['force'], (list, tuple)):
+                    f_out.writelines([
+                        f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
+                        "label force_loop\n",
+                    ])
+                else:
+                    f_out.writelines([
+                        f"variable force equal {self.params['general']['force']}\n",
+                    ])
+                if self.scan_angle is not None:
+                    if isinstance(self.scan_angle, (list, tuple, np.ndarray)):
+                        # Multiple values
+                        f_out.writelines([
+                            f"variable a index 0 {' '.join(str(x) for x in self.scan_angle)}\n",
+                            "label angle_loop\n",
+                        ])
+                    else:
+                        # Single value
+                        f_out.writelines([
+                            f"variable a equal {self.scan_angle}\n",
+                        ])
+                else:
+                    # self.scan_angle does not exist, default to 0
+                    f_out.writelines([
+                        "variable a equal 0\n",
+                    ])
                 
                 f_out.writelines(self.init(neigh=True))
 
@@ -410,7 +439,7 @@ class AFMSimulation(model_init.ModelInit):
                         "# Add lateral harmonic spring to pull the tip.\n",
                         f"fix             spr tip_fix smd cvel {spring_ev} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
                     ])
-                    
+
                 elif drive_method == 'fix_move':
                     f_out.writelines([
                         "# Apply velocity to the tip to induce sliding.\n",
@@ -423,10 +452,10 @@ class AFMSimulation(model_init.ModelInit):
                         "# Create a virtual atom to drag the tip.\n",
                         f"variable virtual_x equal $(v_comx_tip)+{virtual_offset}*$(v_spring_x)\n",
                         f"variable virtual_y equal $(v_comy_tip)+{virtual_offset}*$(v_spring_y)\n",
-                        f"variable virtual_z equal $(v_comz_tip)\n",
+                        "variable virtual_z equal $(v_comz_tip)\n",
                         f"create_atoms    {self.ngroups[layer]+1} single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box\n",
                         f"group           virtual type {self.ngroups[layer]+1}\n",
-                        f"velocity        virtual set 0.0 0.0 0.0\n",
+                        "velocity        virtual set 0.0 0.0 0.0\n",
                         f"fix             spr {tip_fix_group} spring couple virtual {spring_ev} 0.0 0.0 NULL {virtual_offset} \n\n",
                         f"fix             move_virtual virtual move linear $(v_spring_x*{tipps}) $(v_spring_y*{tipps}) 0.0\n",
                     ])
@@ -517,7 +546,6 @@ class AFMSimulation(model_init.ModelInit):
             i += 3
 
         lmp.command(f"write_data {self.dir}/build/{system}.lmp")
-        lmp.close
 
     def _generate_potentials_file(self, layer, is_slide_script):
         """Writes the potential settings file for the AFM simulation.
@@ -608,7 +636,6 @@ class AFMSimulation(model_init.ModelInit):
 
             for system in self.systems:
                 pot_type = self.params[system]['pot_type']
-                
                 index_str = ""
                 if potential_counts[pot_type] > 1:
                     potential_indices[pot_type] += 1
@@ -620,7 +647,7 @@ class AFMSimulation(model_init.ModelInit):
                             layer_index_str = ""
                             if potential_counts[pot_type] > 1:
                                 layer_index_str = f" {potential_indices[pot_type] + l}"
-                            
+
                             potentials = [
                                 self.group_def.get(i, [None]*4)[3] if f"2D_l{l+1}" in self.group_def.get(i, [""])[0] else "NULL"
                                 for i in range(1, num_atom_types + 1)
@@ -653,24 +680,24 @@ class AFMSimulation(model_init.ModelInit):
                             e, sigma = utilities.lj_params(t, s)
                             if key == 'sub' and sigma > max_sigma:
                                 max_sigma = sigma
-    
+
                             key_s_types = f"{self.elemgroup[key][s][0]}*{self.elemgroup[key][s][-1]}" if self.settings['thermostat']['type'] == 'langevin' else f"{self.elemgroup[key][s][0]}"
                             sheet_t_types = f"{self.elemgroup['2D'][0][t][0]}*{self.elemgroup['2D'][layer-1][t][-1]}" if len(self.elemgroup['2D'][layer-1][t]) > 1 or layer > 1 else f"{self.elemgroup['2D'][0][t][0]}"
     
                             f_out.write(
                                 f"pair_coeff {key_s_types} {sheet_t_types} lj/cut {e} {sigma}\n")
-    
+
             if layer > 1:
                 index_pairs = [(i, j) for i in range(layer) for j in range(i+1, layer)]
                 super().set_sheet_LJ_params(f_out, index_pairs)
-    
+
             for s in self.data['sub']['elem_comp']:
                 for t in self.data['tip']['elem_comp']:
                     e, sigma = utilities.lj_params(s, t)
-    
+
                     sub_types = f"{self.elemgroup['sub'][s][0]}*{self.elemgroup['sub'][s][-1]}" if self.settings['thermostat']['type'] == 'langevin' else f"{self.elemgroup['sub'][s][0]}"
                     tip_types = f"{self.elemgroup['tip'][t][0]}*{self.elemgroup['tip'][t][-1]}" if self.settings['thermostat']['type'] == 'langevin' else f"{self.elemgroup['tip'][t][0]}"
-    
+
                     f_out.write(
                         f"pair_coeff {sub_types} {tip_types} lj/cut {e} {sigma} \n")
             if is_slide_script and drive_method == 'virtual_atom':

@@ -1,5 +1,4 @@
-"""Initializes simulation models for atomic force microscopy (AFM) and
-sheet-on-sheet simulations.
+"""Initializes simulation models for molecular dynamics simulations.
 
 This module provides the `ModelInit` class, which serves as a base for setting
 up various atomistic simulations. It handles the reading of configuration
@@ -72,12 +71,12 @@ class ModelInit:
             settings_path = os.path.join(os.path.dirname(__file__), 'settings', 'settings.yaml')
             self.settings = utilities.read_yaml(settings_path)
         except FileNotFoundError as e:
-            logging.exception(f"Configuration file not found: {e}")
+            logging.exception("Configuration file not found: %s", e)
             raise
         except Exception as e:
-            logging.exception(f"Error reading configuration files: {e}")
+            logging.exception("Error reading configuration files: %s", e)
             raise
-        
+
         self.sheet_dir = {}
         self.data = {}
         self.potentials = {}
@@ -106,7 +105,7 @@ class ModelInit:
         except KeyError as exc:
             raise ValueError(f"Unknown model type: {model}") from exc
         except Exception as e:
-            logging.exception(f"An unexpected error occurred during model setup: {e}")
+            logging.exception("An unexpected error occurred during model setup: %s", e)
             raise
 
     def _create_directories(self, subdirs):
@@ -119,7 +118,7 @@ class ModelInit:
             try:
                 Path(self.dir, subdir).mkdir(parents=True, exist_ok=True)
             except OSError as e:
-                logging.exception(f"Failed to create directory {Path(self.dir, subdir)}: {e}")
+                logging.exception("Failed to create directory %s: %s", Path(self.dir, subdir), e)
                 raise
 
     def _initialize_component(self, system):
@@ -146,13 +145,13 @@ class ModelInit:
             build_method()
 
         except FileNotFoundError as e:
-            logging.exception(f"A required file was not found during component initialization for '{system}': {e}")
+            logging.exception("A required file was not found during component initialization for '%s': %s", system, e)
             raise
         except (KeyError, AttributeError) as e:
-            logging.exception(f"Configuration error for component '{system}': {e}")
+            logging.exception("Configuration error for component '%s': %s", system, e)
             raise
         except Exception as e:
-            logging.exception(f"An unexpected error occurred while initializing component '{system}': {e}")
+            logging.exception("An unexpected error occurred while initializing component '%s': %s", system, e)
             raise
 
     def setup_afm_model(self):
