@@ -1,0 +1,38 @@
+mass 1*3 28.085 #Si sub
+mass 4*6 28.085 #Si tip
+mass 7*9 118.71 #Sn 2D
+mass 10*12 72.63 #Ge 2D
+group sub_all type 1 2 3
+group sub_fix type 2
+group sub_thermo type 3
+group tip_all type 4 5 6
+group tip_fix type 5
+group tip_thermo type 6
+group 2D_all type 7 8 9 10 11 12
+group layer_1 type 7 10
+group layer_2 type 8 11
+group layer_3 type 9 12
+group mobile union tip_thermo sub_thermo
+pair_style hybrid sw sw sw sw sw lj/cut 8.0
+pair_coeff * * sw 1 afm/b-SnGe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw Si Si Si NULL NULL NULL NULL NULL NULL NULL NULL NULL # Sub
+pair_coeff * * sw 2 afm/b-SnGe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw NULL NULL NULL Si Si Si NULL NULL NULL NULL NULL NULL # Tip
+pair_coeff * * sw 3 afm/b-SnGe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-SnGe.sw NULL NULL NULL NULL NULL NULL Sn NULL NULL Ge NULL NULL # 2D Layer 1
+pair_coeff * * sw 4 afm/b-SnGe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-SnGe.sw NULL NULL NULL NULL NULL NULL NULL Sn NULL NULL Ge NULL # 2D Layer 2
+pair_coeff * * sw 5 afm/b-SnGe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-SnGe.sw NULL NULL NULL NULL NULL NULL NULL NULL Sn NULL NULL Ge # 2D Layer 3
+pair_coeff 1*3 7*9 lj/cut 0.020702742605880727 4.343500000000001
+pair_coeff 4*6 7*9 lj/cut 0.020702742605880727 4.343500000000001
+pair_coeff 1*3 10*12 lj/cut 0.016926063201159403 4.2875
+pair_coeff 4*6 10*12 lj/cut 0.016926063201159403 4.2875
+pair_coeff 7 8 lj/cut 0.0245870478 4.392
+pair_coeff 7 9 lj/cut 0.0245870478 4.392
+pair_coeff 8 9 lj/cut 0.0245870478 4.392
+pair_coeff 7 11 lj/cut 0.020101777475343495 4.336
+pair_coeff 7 12 lj/cut 0.020101777475343495 4.336
+pair_coeff 8 12 lj/cut 0.020101777475343495 4.336
+pair_coeff 8 10 lj/cut 0.020101777475343495 4.336
+pair_coeff 9 10 lj/cut 0.020101777475343495 4.336
+pair_coeff 9 11 lj/cut 0.020101777475343495 4.336
+pair_coeff 10 11 lj/cut 0.0164347286 4.28
+pair_coeff 10 12 lj/cut 0.0164347286 4.28
+pair_coeff 11 12 lj/cut 0.0164347286 4.28
+pair_coeff 1*3 4*6 lj/cut 0.0174320868 4.295 

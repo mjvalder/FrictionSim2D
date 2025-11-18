@@ -1,0 +1,21 @@
+mass 1*3 72.63 #Ge 2D
+mass 4*6 32.06 #S 2D
+group layer_1 type 1 4
+group layer_2 type 2 5
+group layer_3 type 3 6
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/b-GeS/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-GeS.sw Ge  NULL  NULL  S  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/b-GeS/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-GeS.sw NULL  Ge  NULL  NULL  S  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/b-GeS/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-GeS.sw NULL  NULL  Ge  NULL  NULL  S # 2D Layer 3
+pair_coeff 1 2 lj/cut 0.0164347286 4.28
+pair_coeff 1 3 lj/cut 0.0164347286 4.28
+pair_coeff 2 3 lj/cut 0.0164347286 4.28
+pair_coeff 1 5 lj/cut 0.013973918726952285 4.157500000000001
+pair_coeff 1 6 lj/cut 0.013973918726952285 4.157500000000001
+pair_coeff 2 6 lj/cut 0.013973918726952285 4.157500000000001
+pair_coeff 2 4 lj/cut 0.013973918726952285 4.157500000000001
+pair_coeff 3 4 lj/cut 0.013973918726952285 4.157500000000001
+pair_coeff 3 5 lj/cut 0.013973918726952285 4.157500000000001
+pair_coeff 4 5 lj/cut 0.0118815716 4.035
+pair_coeff 4 6 lj/cut 0.0118815716 4.035
+pair_coeff 5 6 lj/cut 0.0118815716 4.035

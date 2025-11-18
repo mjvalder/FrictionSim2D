@@ -1,0 +1,11 @@
+mass 1*8 12.011 #C 2D
+mass 9*16 127.6 #Te 2D
+group layer_1 type 1 2 3 4 9 10 11 12
+group layer_2 type 5 6 7 8 13 14 15 16
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/p-CTe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/p-CTe.sw C1  C2  C3  C4  NULL  NULL  NULL  NULL  Te1  Te2  Te3  Te4  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/p-CTe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/p-CTe.sw NULL  NULL  NULL  NULL  C1  C2  C3  C4  NULL  NULL  NULL  NULL  Te1  Te2  Te3  Te4 # 2D Layer 2
+pair_coeff 1*4 5*8 lj/cut 0.004553157 3.851
+pair_coeff 1*4 13*16 lj/cut 0.008864607524589705 4.1605
+pair_coeff 5*8 9*12 lj/cut 0.008864607524589705 4.1605
+pair_coeff 9*12 13*16 lj/cut 0.0172586332 4.47

@@ -1,0 +1,11 @@
+mass 1*4 118.71 #Sn 2D
+mass 5*8 15.999 #O 2D
+group layer_1 type 1 2 5 6
+group layer_2 type 3 4 7 8
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/p-SnO/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/p-SnO.sw Sn1  Sn2  NULL  NULL  O1  O2  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/p-SnO/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/p-SnO.sw NULL  NULL  Sn1  Sn2  NULL  NULL  O1  O2 # 2D Layer 2
+pair_coeff 1*2 3*4 lj/cut 0.0245870478 4.392
+pair_coeff 1*2 7*8 lj/cut 0.007998167247203024 3.946
+pair_coeff 3*4 5*6 lj/cut 0.007998167247203024 3.946
+pair_coeff 5*6 7*8 lj/cut 0.002601804 3.5

@@ -1,0 +1,21 @@
+mass 1*6 69.723 #Ga 2D
+mass 7*12 127.6 #Te 2D
+group layer_1 type 1 2 7 8
+group layer_2 type 3 4 9 10
+group layer_3 type 5 6 11 12
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/GaTe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/GaTe.sw Ga1  Ga2  NULL  NULL  NULL  NULL  Te1  Te2  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/GaTe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/GaTe.sw NULL  NULL  Ga1  Ga2  NULL  NULL  NULL  NULL  Te1  Te2  NULL  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/GaTe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/GaTe.sw NULL  NULL  NULL  NULL  Ga1  Ga2  NULL  NULL  NULL  NULL  Te1  Te2 # 2D Layer 3
+pair_coeff 1*2 3*4 lj/cut 0.017995811 4.383
+pair_coeff 1*2 5*6 lj/cut 0.017995811 4.383
+pair_coeff 3*4 5*6 lj/cut 0.017995811 4.383
+pair_coeff 1*2 9*10 lj/cut 0.017623368043184175 4.4265
+pair_coeff 1*2 11*12 lj/cut 0.017623368043184175 4.4265
+pair_coeff 3*4 11*12 lj/cut 0.017623368043184175 4.4265
+pair_coeff 3*4 7*8 lj/cut 0.017623368043184175 4.4265
+pair_coeff 5*6 7*8 lj/cut 0.017623368043184175 4.4265
+pair_coeff 5*6 9*10 lj/cut 0.017623368043184175 4.4265
+pair_coeff 7*8 9*10 lj/cut 0.0172586332 4.47
+pair_coeff 7*8 11*12 lj/cut 0.0172586332 4.47
+pair_coeff 9*10 11*12 lj/cut 0.0172586332 4.47

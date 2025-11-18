@@ -1,0 +1,11 @@
+mass 1*4 69.723 #Ga 2D
+mass 5*8 15.999 #O 2D
+group layer_1 type 1 2 5 6
+group layer_2 type 3 4 7 8
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/GaO/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/GaO.sw Ga1  Ga2  NULL  NULL  O1  O2  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/GaO/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/GaO.sw NULL  NULL  Ga1  Ga2  NULL  NULL  O1  O2 # 2D Layer 2
+pair_coeff 1*2 3*4 lj/cut 0.017995811 4.383
+pair_coeff 1*2 7*8 lj/cut 0.0068426291031330935 3.9415
+pair_coeff 3*4 5*6 lj/cut 0.0068426291031330935 3.9415
+pair_coeff 5*6 7*8 lj/cut 0.002601804 3.5

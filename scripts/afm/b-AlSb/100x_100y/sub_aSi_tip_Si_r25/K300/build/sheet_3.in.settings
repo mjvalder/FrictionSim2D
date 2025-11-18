@@ -1,0 +1,21 @@
+mass 1*3 26.9815385 #Al 2D
+mass 4*6 121.76 #Sb 2D
+group layer_1 type 1 4
+group layer_2 type 2 5
+group layer_3 type 3 6
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/b-AlSb/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-AlSb.sw Al  NULL  NULL  Sb  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/b-AlSb/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-AlSb.sw NULL  Al  NULL  NULL  Sb  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/b-AlSb/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-AlSb.sw NULL  NULL  Al  NULL  NULL  Sb # 2D Layer 3
+pair_coeff 1 2 lj/cut 0.021898517 4.499
+pair_coeff 1 3 lj/cut 0.021898517 4.499
+pair_coeff 2 3 lj/cut 0.021898517 4.499
+pair_coeff 1 5 lj/cut 0.02064867487958809 4.4595
+pair_coeff 1 6 lj/cut 0.02064867487958809 4.4595
+pair_coeff 2 6 lj/cut 0.02064867487958809 4.4595
+pair_coeff 2 4 lj/cut 0.02064867487958809 4.4595
+pair_coeff 3 4 lj/cut 0.02064867487958809 4.4595
+pair_coeff 3 5 lj/cut 0.02064867487958809 4.4595
+pair_coeff 4 5 lj/cut 0.0194701666 4.42
+pair_coeff 4 6 lj/cut 0.0194701666 4.42
+pair_coeff 5 6 lj/cut 0.0194701666 4.42

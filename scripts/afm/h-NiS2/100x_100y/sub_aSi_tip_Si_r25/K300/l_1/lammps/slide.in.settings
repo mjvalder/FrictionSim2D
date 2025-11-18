@@ -1,0 +1,24 @@
+mass 1*3 28.085 #Si sub
+mass 4*6 28.085 #Si tip
+mass 7*10 58.6934 #Ni 2D
+mass 11*18 32.06 #S 2D
+group sub_all type 1 2 3
+group sub_fix type 2
+group sub_thermo type 3
+group tip_all type 4 5 6
+group tip_fix type 5
+group tip_thermo type 6
+group 2D_all type 7 8 9 10 11 12 13 14 15 16 17 18
+group layer_1 type 7 8 9 10 11 12 13 14 15 16 17 18
+group mobile union tip_thermo sub_thermo
+pair_style hybrid sw sw sw lj/cut 8.0
+pair_coeff * * sw 1 afm/h-NiS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw Si Si Si NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # Sub
+pair_coeff * * sw 2 afm/h-NiS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw NULL NULL NULL Si Si Si NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # Tip
+pair_coeff * * sw 3 afm/h-NiS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/h-NiS2.sw NULL NULL NULL NULL NULL NULL Ni1 Ni2 Ni3 Ni4 S1 S2 S3 S4 S5 S6 S7 S8 NULL # 2D Layer 1
+pair_coeff 1*3 7*10 lj/cut 0.0033673013365522844 3.5645
+pair_coeff 4*6 7*10 lj/cut 0.0033673013365522844 3.5645
+pair_coeff 1*3 11*18 lj/cut 0.014391684663430299 4.165
+pair_coeff 4*6 11*18 lj/cut 0.014391684663430299 4.165
+pair_coeff 1*3 4*6 lj/cut 0.0174320868 4.295 
+mass 19 1.0
+pair_coeff * 19 lj/cut 1e-100 1e-100

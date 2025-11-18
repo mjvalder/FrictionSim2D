@@ -1,0 +1,7 @@
+mass 1*16 208.9804 #Bi 2D
+group layer_1 type 1 2 3 4 5 6 7 8
+group layer_2 type 9 10 11 12 13 14 15 16
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/p-bismuthene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/p-bismuthene.sw Bi1  Bi2  Bi3  Bi4  Bi5  Bi6  Bi7  Bi8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/p-bismuthene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/p-bismuthene.sw NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  Bi1  Bi2  Bi3  Bi4  Bi5  Bi6  Bi7  Bi8 # 2D Layer 2
+pair_coeff 1*8 9*16 lj/cut 0.0224622412 4.37

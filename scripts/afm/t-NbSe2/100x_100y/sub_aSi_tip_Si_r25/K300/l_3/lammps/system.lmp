@@ -1,0 +1,119 @@
+# LAMMPS input script
+
+clear
+
+units           metal
+atom_style      atomic
+boundary   	p p p
+neighbor        0.3 bin
+neigh_modify    every 1 delay 0 check yes
+comm_style tiled
+region box block 0.0 100.959384326873 0.0 102.508114263304 -5 87.41940673750288
+create_box      15 box
+
+# Read data files.
+read_data       afm/t-NbSe2/100x_100y/sub_aSi_tip_Si_r25/K300/build/sub.lmp add append group sub
+read_data       afm/t-NbSe2/100x_100y/sub_aSi_tip_Si_r25/K300/build/tip.lmp add append shift 50.4796921634365 51.254057131652 62.41940673750288  group tip offset 3 0 0 0 0
+read_data       afm/t-NbSe2/100x_100y/sub_aSi_tip_Si_r25/K300/build/t-NbSe2_3.lmp add append shift 0.0 0.0 16.75 group 2D offset 6 0 0 0 0
+
+# Apply potentials.
+include        afm/t-NbSe2/100x_100y/sub_aSi_tip_Si_r25/K300/l_3/lammps/system.in.settings
+
+balance 1.0 rcb
+# Create visualization files.
+dump            sys all atom 10000 ./afm/t-NbSe2/100x_100y/sub_aSi_tip_Si_r25/K300/visuals/system_3.lammpstrj
+
+# Minimize the system.
+min_style      cg
+minimize 1e-4 1e-8 1000000 1000000
+timestep       0.001
+thermo         100000
+# Apply thermostat 
+group           fixset union sub_fix tip_fix
+group           system subtract all fixset
+
+velocity        system create 300 492847948
+
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin 300 300 $(100.0*dt) 699483 zero yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin 300 300 $(100.0*dt) 2847563 zero yes
+fix_modify      lang_sub temp temp_sub
+
+group nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0 
+velocity        sub_fix set 0.0 0.0 0.0
+
+fix             tip_f tip_fix rigid/nve single force * off off off torque * off off off
+
+run             10000
+
+unfix           tip_f 
+
+# Tip Indentation.
+displace_atoms  tip_all move 0.0 0.0 -20.0 units box
+
+# Apply constraints.
+fix             tip_f tip_fix rigid/nve single force * off off on torque * off off off
+
+variable        f equal 0.0
+variable find index 2 5 10 20 30 50 70 85 100
+label force_loop
+balance 1.0 rcb
+# Set up initial parameters.
+variable        num_floads equal 100
+variable        r equal 0.0
+variable        fincr equal (${find}-${f})/${num_floads}
+# Apply pressure to the tip.
+variable i loop ${num_floads}
+label loop_load
+
+variable f equal ${f}+${fincr} 
+
+# Set force variable.
+variable n equal -v_f/(count(tip_fix)*1.602176565)
+fix forcetip tip_fix aveforce 0.0 0.0 $n
+run 100 
+
+unfix forcetip
+
+next i
+jump SELF loop_load
+
+# Equilibration.
+fix forcetip tip_fix aveforce 0.0 0.0 $n
+variable        dispz equal xcm(tip_all,z)
+
+run 100 pre yes post no
+
+# Loop to check for displacement stabilization.
+label check_r
+
+variable disp_l equal ${dispz}
+variable disp_h equal ${dispz}
+
+variable disploop loop 50
+label disp
+
+run 100 pre no post no
+
+if '${dispz}>${disp_h}' then 'variable disp_h equal ${dispz}'
+if '${dispz}<${disp_l}' then 'variable disp_l equal ${disp_l}'
+
+next disploop
+jump SELF disp
+
+variable r equal ${disp_h}-${disp_l}
+
+# Check if displacement has stabilized.
+if '${r} < 0.1' then 'jump SELF loop_end' else 'jump SELF check_r'
+
+label loop_end
+
+write_data afm/t-NbSe2/100x_100y/sub_aSi_tip_Si_r25/K300/l_3/data/load_$(v_find)N.data
+next find
+jump SELF force_loop

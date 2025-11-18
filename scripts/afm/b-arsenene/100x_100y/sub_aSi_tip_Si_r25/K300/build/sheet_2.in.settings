@@ -1,0 +1,7 @@
+mass 1*2 74.921595 #As 2D
+group layer_1 type 1
+group layer_2 type 2
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/b-arsenene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-arsenene.sw As  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/b-arsenene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-arsenene.sw NULL  As # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.0133992906 4.23

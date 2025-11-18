@@ -1,0 +1,7 @@
+mass 1*2 118.71 #Sn 2D
+group layer_1 type 1
+group layer_2 type 2
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/stanene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/stanene.sw Sn  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/stanene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/stanene.sw NULL  Sn # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.0245870478 4.392

@@ -1,0 +1,99 @@
+variable find index 2 5 10 20 30 50 70 85 100
+label force_loop
+variable a index 0 2 6 10 14 18 22 26 30 34 38 42 46 50 54 58 62 66 70 74 78 82 86 90
+label angle_loop
+# LAMMPS input script
+
+clear
+
+units           metal
+atom_style      atomic
+boundary   	p p p
+neighbor        0.3 bin
+neigh_modify    every 1 delay 0 check yes
+timestep       0.001
+thermo         100000
+comm_style       tiled
+read_data       afm/b-InSb/100x_100y/sub_aSi_tip_Si_r25/K300/l_2/data/load_$(v_find)N.data extra/atom/types 1
+
+include         afm/b-InSb/100x_100y/sub_aSi_tip_Si_r25/K300/l_2/lammps/slide.in.settings
+
+# Create visualization files.
+dump            sys all atom 10000 ./afm/b-InSb/100x_100y/sub_aSi_tip_Si_r25/K300/visuals/slide_2ms_$(v_find)nN_$(v_a)angle_l2.lammpstrj
+
+balance 1.0 rcb
+# Apply constraints.
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0 
+fix             tip_f tip_fix rigid/nve single force * on on on torque * off off off
+
+# Apply thermostat.
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin 300 300 $(100.0*dt) 699483 zero yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin 300 300 $(100.0*dt) 2847563 zero yes
+fix_modify      lang_sub temp temp_sub
+
+group nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+
+# Define computes for output.
+compute COM_top layer_2 com
+variable comx equal c_COM_top[1] 
+variable comy equal c_COM_top[2] 
+variable comz equal c_COM_top[3] 
+
+compute COM_tip tip_fix com
+variable comx_tip equal c_COM_tip[1] 
+variable comy_tip equal c_COM_tip[2] 
+variable comz_tip equal c_COM_tip[3] 
+
+run 0 # Update computes
+
+# Apply constant normal force to the tip.
+variable        Ftotal          equal -v_find/1.602176565
+variable        n           equal v_Ftotal/count(tip_fix)
+fix             forcetip tip_fix aveforce 0.0 0.0 $n
+
+# Calculate friction forces.
+variable        fz_tip   equal  f_forcetip[3]*1.602176565
+
+variable        fx_spr   equal  f_spr[1]*1.602176565
+
+variable        fy_spr   equal f_spr[2]*1.602176565
+
+fix             fc_ave all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file ./afm/b-InSb/100x_100y/sub_aSi_tip_Si_r25/K300/results/fc_ave_slide_$(v_find)nN_$(v_a)angle_2ms_l2
+
+# Apply spring loading for sliding.
+fix             damp tip_fix viscous 9.986414949216288e-05
+
+variable spring_x equal cos(v_a*PI/180)
+variable spring_y equal sin(v_a*PI/180)
+
+# Create a virtual atom to drag the tip.
+variable virtual_x equal $(v_comx_tip)+37.5*$(v_spring_x)
+variable virtual_y equal $(v_comy_tip)+37.5*$(v_spring_y)
+variable virtual_z equal $(v_comz_tip)
+create_atoms    11 single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
+group           virtual type 11
+velocity        virtual set 0.0 0.0 0.0
+fix             spr tip_fix spring couple virtual 3.12075467163009 0.0 0.0 NULL 37.5 
+
+fix             move_virtual virtual move linear $(v_spring_x*0.02) $(v_spring_y*0.02) 0.0
+run 500000
+
+if '$(v_a) == 90' then &
+'jump SELF find_incr'
+
+if '$(v_find) == 30' then &
+'next a' & 
+'clear' & 
+'jump SELF angle_loop'
+
+label find_incr
+
+next find
+clear
+variable a delete
+jump SELF force_loop

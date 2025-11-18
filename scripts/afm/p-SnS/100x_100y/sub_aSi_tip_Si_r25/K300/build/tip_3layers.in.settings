@@ -1,0 +1,3 @@
+mass 1*3 28.085 #Si tip
+pair_style sw
+pair_coeff * * afm/p-SnS/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw Si Si Si

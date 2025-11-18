@@ -1,0 +1,21 @@
+mass 1*12 183.84 #W 2D
+mass 13*36 15.999 #O 2D
+group layer_1 type 1 2 3 4 13 14 15 16 17 18 19 20
+group layer_2 type 5 6 7 8 21 22 23 24 25 26 27 28
+group layer_3 type 9 10 11 12 29 30 31 32 33 34 35 36
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/h-WO2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/h-WO2.sw W1  W2  W3  W4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  O1  O2  O3  O4  O5  O6  O7  O8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/h-WO2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/h-WO2.sw NULL  NULL  NULL  NULL  W1  W2  W3  W4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  O1  O2  O3  O4  O5  O6  O7  O8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/h-WO2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/h-WO2.sw NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  W1  W2  W3  W4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  O1  O2  O3  O4  O5  O6  O7  O8 # 2D Layer 3
+pair_coeff 1*4 5*8 lj/cut 0.0029053478 3.069
+pair_coeff 1*4 9*12 lj/cut 0.0029053478 3.069
+pair_coeff 5*8 9*12 lj/cut 0.0029053478 3.069
+pair_coeff 1*4 21*28 lj/cut 0.002749390028248302 3.2845
+pair_coeff 1*4 29*36 lj/cut 0.002749390028248302 3.2845
+pair_coeff 5*8 29*36 lj/cut 0.002749390028248302 3.2845
+pair_coeff 5*8 13*20 lj/cut 0.002749390028248302 3.2845
+pair_coeff 9*12 13*20 lj/cut 0.002749390028248302 3.2845
+pair_coeff 9*12 21*28 lj/cut 0.002749390028248302 3.2845
+pair_coeff 13*20 21*28 lj/cut 0.002601804 3.5
+pair_coeff 13*20 29*36 lj/cut 0.002601804 3.5
+pair_coeff 21*28 29*36 lj/cut 0.002601804 3.5

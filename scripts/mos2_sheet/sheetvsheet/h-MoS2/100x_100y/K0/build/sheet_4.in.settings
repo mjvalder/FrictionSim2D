@@ -1,0 +1,35 @@
+mass 1*16 95.95 #Mo 2D
+mass 17*48 32.06 #S 2D
+group layer_1 type 1 2 3 4 17 18 19 20 21 22 23 24
+group layer_2 type 5 6 7 8 25 26 27 28 29 30 31 32
+group layer_3 type 9 10 11 12 33 34 35 36 37 38 39 40
+group layer_4 type 13 14 15 16 41 42 43 44 45 46 47 48
+pair_style hybrid sw sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 sheetvsheet/h-MoS2/100x_100y/K0/potentials/h-MoS2.sw Mo1  Mo2  Mo3  Mo4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  S1  S2  S3  S4  S5  S6  S7  S8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 sheetvsheet/h-MoS2/100x_100y/K0/potentials/h-MoS2.sw NULL  NULL  NULL  NULL  Mo1  Mo2  Mo3  Mo4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  S1  S2  S3  S4  S5  S6  S7  S8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 2
+pair_coeff * * sw 3 sheetvsheet/h-MoS2/100x_100y/K0/potentials/h-MoS2.sw NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  Mo1  Mo2  Mo3  Mo4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  S1  S2  S3  S4  S5  S6  S7  S8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 3
+pair_coeff * * sw 4 sheetvsheet/h-MoS2/100x_100y/K0/potentials/h-MoS2.sw NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  Mo1  Mo2  Mo3  Mo4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  S1  S2  S3  S4  S5  S6  S7  S8 # 2D Layer 4
+pair_coeff 1*4 5*8 lj/cut 0.0024283504 3.052
+pair_coeff 5*8 9*12 lj/cut 0.0024283504 3.052
+pair_coeff 9*12 13*16 lj/cut 0.0024283504 3.052
+pair_coeff 1*4 25*32 lj/cut 0.005371463408372865 3.5435
+pair_coeff 5*8 33*40 lj/cut 0.005371463408372865 3.5435
+pair_coeff 9*12 41*48 lj/cut 0.005371463408372865 3.5435
+pair_coeff 5*8 17*24 lj/cut 0.005371463408372865 3.5435
+pair_coeff 9*12 25*32 lj/cut 0.005371463408372865 3.5435
+pair_coeff 13*16 33*40 lj/cut 0.005371463408372865 3.5435
+pair_coeff 17*24 25*32 lj/cut 0.0118815716 4.035
+pair_coeff 25*32 33*40 lj/cut 0.0118815716 4.035
+pair_coeff 33*40 41*48 lj/cut 0.0118815716 4.035
+pair_coeff 5*8 13*16 lj/cut 1e-100 3.052
+pair_coeff 1*4 13*16 lj/cut 1e-100 3.052
+pair_coeff 1*4 9*12 lj/cut 1e-100 3.052
+pair_coeff 5*8 41*48 lj/cut 1e-100 3.5435
+pair_coeff 1*4 41*48 lj/cut 1e-100 3.5435
+pair_coeff 1*4 33*40 lj/cut 1e-100 3.5435
+pair_coeff 13*16 25*32 lj/cut 1e-100 3.5435
+pair_coeff 13*16 17*24 lj/cut 1e-100 3.5435
+pair_coeff 9*12 17*24 lj/cut 1e-100 3.5435
+pair_coeff 25*32 41*48 lj/cut 1e-100 4.035
+pair_coeff 17*24 41*48 lj/cut 1e-100 4.035
+pair_coeff 17*24 33*40 lj/cut 1e-100 4.035

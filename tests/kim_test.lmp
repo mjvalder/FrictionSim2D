@@ -1,0 +1,28 @@
+# kim init SW_MX2_WenShirodkarPlechac_2017_MoS__MO_201919462778_001 metal
+units metal
+atom_style atomic
+boundary p p p
+read_data h-MoS2_1.lmp
+# pair_style sw
+pair_style hybrid kim SW_MX2_WenShirodkarPlechac_2017_MoS__MO_201919462778_001 lj/cut 8.0
+pair_coeff * * kim Mo Mo Mo Mo S S S S S S S S
+# pair_coeff * * sw_test.sw Mo Mo Mo Mo S S S S S S S S
+# Add dump for visualization
+dump            myDump all atom 100 hmos2_min.lammpstrj
+dump_modify     myDump sort id
+
+# kim interactions Mo Mo Mo Mo S S S S S S S S
+# kim_param get A 1:3 A_MoSS A_SMoMo A_MoMoS A_MoSMo A_SSMo A_SMoS A_MoMoMo A_SSS
+# kim_param get A 1:3 A_MoMoS A_MoSMo A_SMoMo A_SMoS A_SSMo A_MoMoMo A_SSS
+# kim_param get B 1:3 B_MoMoS B_MoSMo B_SMoMo B_SMoS B_SSMo B_MoMoMo B_SSS
+# kim_param get p 1:3 p_MoMoS p_MoSMo p_SMoMo p_SMoS p_SSMo p_MoMoMo p_SSS
+# kim_param get q 1:3 q_MoMoS q_MoSMo q_SMoMo q_SMoS q_SSMo q_MoMoMo q_SSS
+# kim_param get sigma 1:3 sigma_MoMoS sigma_MoSMo sigma_SMoMo sigma_SMoS sigma_SSMo sigma_MoMoMo sigma_SSS
+# kim_param get gamma 1:3 gamma_MoMoS gamma_MoSMo gamma_SMoMo gamma_SMoS gamma_SSMo gamma_MoMoMo gamma_SSS
+# kim_param get cutoff 1:3 cutoff_MoMoS cutoff_MoSMo cutoff_SMoMo cutoff_SMoS cutoff_SSMo cutoff_MoMoMo cutoff_SSS
+# kim_param get lambda 1:3 lambda_MoMoS lambda_MoSMo lambda_SMoMo lambda_SMoS lambda_SSMo lambda_MoMoMo lambda_SSS
+# kim_param get cosbeta0 1:3 cosbeta0_MoMoS cosbeta0_MoSMo cosbeta0_SMoMo cosbeta0_SMoS cosbeta0_SSMo cosbeta0_MoMoMo cosbeta0_SSS
+# kim_param get cutoff_jk 1:3 cutoffjk_MoMoS cutoffjk_MoSMo cutoffjk_SMoMo cutoffjk_SMoS cutoffjk_SSMo cutoffjk_MoMoMo cutoffjk_SSS
+
+min_style cg
+minimize 1.0e-4 1.0e-8 1000000 1000000

@@ -1,0 +1,11 @@
+mass 1*2 114.818 #In 2D
+mass 3*4 74.921595 #As 2D
+group layer_1 type 1 3
+group layer_2 type 2 4
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-InAs.sw In  NULL  As  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-InAs.sw NULL  In  NULL  As # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.0259746766 4.463
+pair_coeff 1 4 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 2 3 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 3 4 lj/cut 0.0133992906 4.23

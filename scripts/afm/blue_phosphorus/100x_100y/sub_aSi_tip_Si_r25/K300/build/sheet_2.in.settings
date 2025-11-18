@@ -1,0 +1,7 @@
+mass 1*2 30.973761998 #P 2D
+group layer_1 type 1
+group layer_2 type 2
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/blue_phosphorus/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/blue_phosphorus.sw P  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/blue_phosphorus/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/blue_phosphorus.sw NULL  P # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.013225837 4.147

@@ -1,0 +1,40 @@
+mass 1*3 28.085 #Si sub
+mass 4*6 28.085 #Si tip
+mass 7*9 114.818 #In 2D
+mass 10*12 74.921595 #As 2D
+group sub_all type 1 2 3
+group sub_fix type 2
+group sub_thermo type 3
+group tip_all type 4 5 6
+group tip_fix type 5
+group tip_thermo type 6
+group 2D_all type 7 8 9 10 11 12
+group layer_1 type 7 10
+group layer_2 type 8 11
+group layer_3 type 9 12
+group mobile union tip_thermo sub_thermo
+pair_style hybrid sw sw sw sw sw lj/cut 8.0
+pair_coeff * * sw 1 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw Si Si Si NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # Sub
+pair_coeff * * sw 2 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw NULL NULL NULL Si Si Si NULL NULL NULL NULL NULL NULL NULL # Tip
+pair_coeff * * sw 3 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-InAs.sw NULL NULL NULL NULL NULL NULL In NULL NULL As NULL NULL NULL # 2D Layer 1
+pair_coeff * * sw 4 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-InAs.sw NULL NULL NULL NULL NULL NULL NULL In NULL NULL As NULL NULL # 2D Layer 2
+pair_coeff * * sw 5 afm/b-InAs/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/b-InAs.sw NULL NULL NULL NULL NULL NULL NULL NULL In NULL NULL As NULL # 2D Layer 3
+pair_coeff 1*3 7*9 lj/cut 0.021278928946098976 4.379
+pair_coeff 4*6 7*9 lj/cut 0.021278928946098976 4.379
+pair_coeff 1*3 10*12 lj/cut 0.01528324562380727 4.2625
+pair_coeff 4*6 10*12 lj/cut 0.01528324562380727 4.2625
+pair_coeff 7 8 lj/cut 0.0259746766 4.463
+pair_coeff 7 9 lj/cut 0.0259746766 4.463
+pair_coeff 8 9 lj/cut 0.0259746766 4.463
+pair_coeff 7 11 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 7 12 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 8 12 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 8 10 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 9 10 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 9 11 lj/cut 0.018655890222780042 4.346500000000001
+pair_coeff 10 11 lj/cut 0.0133992906 4.23
+pair_coeff 10 12 lj/cut 0.0133992906 4.23
+pair_coeff 11 12 lj/cut 0.0133992906 4.23
+pair_coeff 1*3 4*6 lj/cut 0.0174320868 4.295 
+mass 13 1.0
+pair_coeff * 13 lj/cut 1e-100 1e-100

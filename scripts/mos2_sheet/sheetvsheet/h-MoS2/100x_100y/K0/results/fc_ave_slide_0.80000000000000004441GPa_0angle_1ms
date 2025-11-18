@@ -1,0 +1,3 @@
+# Time-averaged data for fix fc_ave
+# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot
+3000 0.0501108 -0.000107893 0.00324463 -3.40753e-06 -82.1966 1.57055 5.38214e-06 80.4028 50.1475 49.3579 15.247 50.149 48.6241 8.43442

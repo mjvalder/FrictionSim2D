@@ -1,0 +1,11 @@
+mass 1*3 72.63 #Ge 2D
+group layer_1 type 1
+group layer_2 type 2
+group layer_3 type 3
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/germanene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/germanene.sw Ge  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/germanene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/germanene.sw NULL  Ge  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/germanene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/germanene.sw NULL  NULL  Ge # 2D Layer 3
+pair_coeff 1 2 lj/cut 0.0164347286 4.28
+pair_coeff 1 3 lj/cut 0.0164347286 4.28
+pair_coeff 2 3 lj/cut 0.0164347286 4.28

@@ -1,0 +1,11 @@
+mass 1*8 180.94788 #Ta 2D
+mass 9*24 32.06 #S 2D
+group layer_1 type 1 2 3 4 9 10 11 12 13 14 15 16
+group layer_2 type 5 6 7 8 17 18 19 20 21 22 23 24
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/h-TaS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/h-TaS2.sw Ta1  Ta2  Ta3  Ta4  NULL  NULL  NULL  NULL  S1  S2  S3  S4  S5  S6  S7  S8  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/h-TaS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/h-TaS2.sw NULL  NULL  NULL  NULL  Ta1  Ta2  Ta3  Ta4  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  S1  S2  S3  S4  S5  S6  S7  S8 # 2D Layer 2
+pair_coeff 1*4 5*8 lj/cut 0.0035124354 3.17
+pair_coeff 1*4 17*24 lj/cut 0.006460127916339942 3.6025
+pair_coeff 5*8 9*16 lj/cut 0.006460127916339942 3.6025
+pair_coeff 9*16 17*24 lj/cut 0.0118815716 4.035

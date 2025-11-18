@@ -1,0 +1,21 @@
+mass 1*6 26.9815385 #Al 2D
+mass 7*12 78.971 #Se 2D
+group layer_1 type 1 2 7 8
+group layer_2 type 3 4 9 10
+group layer_3 type 5 6 11 12
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/AlSe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/AlSe.sw Al1  Al2  NULL  NULL  NULL  NULL  Se1  Se2  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/AlSe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/AlSe.sw NULL  NULL  Al1  Al2  NULL  NULL  NULL  NULL  Se1  Se2  NULL  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/AlSe/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/AlSe.sw NULL  NULL  NULL  NULL  Al1  Al2  NULL  NULL  NULL  NULL  Se1  Se2 # 2D Layer 3
+pair_coeff 1*2 3*4 lj/cut 0.021898517 4.499
+pair_coeff 1*2 5*6 lj/cut 0.021898517 4.499
+pair_coeff 3*4 5*6 lj/cut 0.021898517 4.499
+pair_coeff 1*2 9*10 lj/cut 0.01662323368826414 4.352
+pair_coeff 1*2 11*12 lj/cut 0.01662323368826414 4.352
+pair_coeff 3*4 11*12 lj/cut 0.01662323368826414 4.352
+pair_coeff 3*4 7*8 lj/cut 0.01662323368826414 4.352
+pair_coeff 5*6 7*8 lj/cut 0.01662323368826414 4.352
+pair_coeff 5*6 9*10 lj/cut 0.01662323368826414 4.352
+pair_coeff 7*8 9*10 lj/cut 0.0126187494 4.205
+pair_coeff 7*8 11*12 lj/cut 0.0126187494 4.205
+pair_coeff 9*10 11*12 lj/cut 0.0126187494 4.205

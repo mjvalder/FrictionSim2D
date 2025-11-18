@@ -1,0 +1,11 @@
+mass 1*2 47.867 #Ti 2D
+mass 3*6 78.971 #Se 2D
+group layer_1 type 1 3 4
+group layer_2 type 2 5 6
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/t-TiSe2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/t-TiSe2.sw Ti  NULL  Se1  Se2  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/t-TiSe2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/t-TiSe2.sw NULL  Ti  NULL  NULL  Se1  Se2 # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.0007371778 3.175
+pair_coeff 1 5*6 lj/cut 0.0030499609704786913 3.69
+pair_coeff 2 3*4 lj/cut 0.0030499609704786913 3.69
+pair_coeff 3*4 5*6 lj/cut 0.0126187494 4.205

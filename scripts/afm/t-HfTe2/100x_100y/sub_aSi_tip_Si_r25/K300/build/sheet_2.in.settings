@@ -1,0 +1,11 @@
+mass 1*2 178.49 #Hf 2D
+mass 3*6 127.6 #Te 2D
+group layer_1 type 1 3 4
+group layer_2 type 2 5 6
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/t-HfTe2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/t-HfTe2.sw Hf  NULL  Te1  Te2  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/t-HfTe2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/t-HfTe2.sw NULL  Hf  NULL  NULL  Te1  Te2 # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.0031221648 3.141
+pair_coeff 1 5*6 lj/cut 0.007340592419767724 3.8055
+pair_coeff 2 3*4 lj/cut 0.007340592419767724 3.8055
+pair_coeff 3*4 5*6 lj/cut 0.0172586332 4.47

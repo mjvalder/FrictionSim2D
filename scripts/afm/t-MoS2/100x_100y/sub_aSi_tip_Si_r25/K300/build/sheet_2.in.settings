@@ -1,0 +1,11 @@
+mass 1*2 95.95 #Mo 2D
+mass 3*6 32.06 #S 2D
+group layer_1 type 1 3 4
+group layer_2 type 2 5 6
+pair_style hybrid sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/t-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/t-MoS2.sw Mo  NULL  S1  S2  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/t-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/t-MoS2.sw NULL  Mo  NULL  NULL  S1  S2 # 2D Layer 2
+pair_coeff 1 2 lj/cut 0.0024283504 3.052
+pair_coeff 1 5*6 lj/cut 0.005371463408372865 3.5435
+pair_coeff 2 3*4 lj/cut 0.005371463408372865 3.5435
+pair_coeff 3*4 5*6 lj/cut 0.0118815716 4.035

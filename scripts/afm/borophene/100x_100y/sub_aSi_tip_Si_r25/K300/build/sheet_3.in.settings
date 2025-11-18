@@ -1,0 +1,11 @@
+mass 1*36 10.81 #B 2D
+group layer_1 type 1 2 3 4 5 6 7 8 9 10 11 12
+group layer_2 type 13 14 15 16 17 18 19 20 21 22 23 24
+group layer_3 type 25 26 27 28 29 30 31 32 33 34 35 36
+pair_style hybrid sw sw sw  lj/cut 11.0
+pair_coeff * * sw 1 afm/borophene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/borophene.sw B1  B2  B3  B4  B5  B6  B7  B8  B9  B10  B11  B12  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 1
+pair_coeff * * sw 2 afm/borophene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/borophene.sw NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  B1  B2  B3  B4  B5  B6  B7  B8  B9  B10  B11  B12  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL # 2D Layer 2
+pair_coeff * * sw 3 afm/borophene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/borophene.sw NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  NULL  B1  B2  B3  B4  B5  B6  B7  B8  B9  B10  B11  B12 # 2D Layer 3
+pair_coeff 1*12 13*24 lj/cut 0.007805412 4.083
+pair_coeff 1*12 25*36 lj/cut 0.007805412 4.083
+pair_coeff 13*24 25*36 lj/cut 0.007805412 4.083

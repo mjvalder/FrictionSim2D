@@ -1,0 +1,19 @@
+mass 1*3 28.085 #Si sub
+mass 4*6 28.085 #Si tip
+mass 7 28.085 #Si 2D
+group sub_all type 1 2 3
+group sub_fix type 2
+group sub_thermo type 3
+group tip_all type 4 5 6
+group tip_fix type 5
+group tip_thermo type 6
+group 2D_all type 7
+group layer_1 type 7
+group mobile union tip_thermo sub_thermo
+pair_style hybrid sw sw sw lj/cut 8.0
+pair_coeff * * sw 1 afm/silicene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw Si Si Si NULL NULL NULL NULL # Sub
+pair_coeff * * sw 2 afm/silicene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/Si.sw NULL NULL NULL Si Si Si NULL # Tip
+pair_coeff * * sw 3 afm/silicene/100x_100y/sub_aSi_tip_Si_r25/K300/potentials/silicene.sw NULL NULL NULL NULL NULL NULL Si # 2D Layer 1
+pair_coeff 1*3 7 lj/cut 0.0174320868 4.295
+pair_coeff 4*6 7 lj/cut 0.0174320868 4.295
+pair_coeff 1*3 4*6 lj/cut 0.0174320868 4.295 
