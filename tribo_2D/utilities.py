@@ -6,7 +6,6 @@ physical parameters like Lennard-Jones coefficients.
 """
 
 import configparser
-from fileinput import filename
 import json
 import os
 import re
@@ -235,7 +234,23 @@ def read_config(filepath):
 
             # Attempt to cast values to appropriate types
             if value.endswith(']'):
-                params[section][key] = json.loads(value)  # Parse lists
+                try:
+                    params[section][key] = json.loads(value)  # Parse lists
+                except json.JSONDecodeError:
+                    # Handle non-JSON lists like [0,90,90,all]
+                    # Remove brackets and split by comma
+                    cleaned = value.strip('[]')
+                    items = [item.strip() for item in cleaned.split(',')]
+                    # Convert numeric strings to numbers
+                    parsed_items = []
+                    for item in items:
+                        if item.isdigit():
+                            parsed_items.append(int(item))
+                        elif item.replace('.', '', 1).replace('e', '', 1).replace('-', '', 1).isdigit():
+                            parsed_items.append(float(item))
+                        else:
+                            parsed_items.append(item)  # Keep as string
+                    params[section][key] = parsed_items
             elif value.isdigit():
                 params[section][key] = int(value)  # Parse integers
             # Parse floats (standard or scientific notation)

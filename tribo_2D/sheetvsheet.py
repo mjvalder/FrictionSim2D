@@ -179,8 +179,11 @@ class SheetvsheetSimulation(model_init.ModelInit):
             if self.scan_angle is not None:
                 if isinstance(self.scan_angle, (list, tuple, np.ndarray)):
                     # Multiple values
+                    angle_values = [str(x) for x in self.scan_angle]
+                    if self.scan_angle[0] != 0:
+                        angle_values.insert(0, '0')
                     f_out.writelines([
-                        f"variable a index 0 {' '.join(str(x) for x in self.scan_angle)}\n",
+                        f"variable a index {' '.join(angle_values)}\n",
                         "label angle_loop\n",
                     ])
                 else:
@@ -203,7 +206,6 @@ class SheetvsheetSimulation(model_init.ModelInit):
                 f"region          box block {self.dim['xlo']} {self.dim['xhi']} {self.dim['ylo']} {self.dim['yhi']} -40.0 40.0 units box\n",
                 f"create_box      {self.ngroups[4]+1} box bond/types 1 extra/bond/per/atom 100\n\n",
                 f"read_data       {self.dir}/build/{self.params['2D']['mat']}_4.lmp extra/bond/per/atom 100 add append group bot\n\n",
-                
 
                 "#----------------- Create visualisation files ------------\n\n"
                 f"include {settings_filename}\n",
@@ -325,10 +327,11 @@ class SheetvsheetSimulation(model_init.ModelInit):
                         "jump SELF angle_loop\n\n",
                     ])
                 f_out.write("label pressure_incr\n\n")
-                
+
             if isinstance(self.params['general']['pressure'], (list, tuple)):
                 f_out.writelines([
                     "next pressure\n",
                     "clear\n",
+                    "variable a delete\n",
                     "jump SELF force_loop"
                 ])

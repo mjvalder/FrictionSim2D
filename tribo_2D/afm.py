@@ -345,11 +345,15 @@ class AFMSimulation(model_init.ModelInit):
                     f_out.writelines([
                         f"variable force equal {self.params['general']['force']}\n",
                     ])
+
                 if self.scan_angle is not None:
                     if isinstance(self.scan_angle, (list, tuple, np.ndarray)):
                         # Multiple values
+                        angle_values = [str(x) for x in self.scan_angle]
+                        if self.scan_angle[0] != 0:
+                            angle_values.insert(0, '0')
                         f_out.writelines([
-                            f"variable a index 0 {' '.join(str(x) for x in self.scan_angle)}\n",
+                            f"variable a index {' '.join(angle_values)}\n",
                             "label angle_loop\n",
                         ])
                     else:
@@ -378,18 +382,11 @@ class AFMSimulation(model_init.ModelInit):
                     f"read_data       {self.sheet_dir[layer]}/data/load_$(v_find)N.data extra/atom/types {extra_atom_types}\n\n",
                     f"include         {self.sheet_dir[layer]}/lammps/slide.in.settings\n\n",
                 ])
-                # if drive_method == 'virtual_atom':
-                #     f_out.writelines([
-                #         "# Create a virtual atom and assign it to a group.\n",
-                #         f"create_atoms    {self.ngroups[layer]+1} single 0 0 0 units box\n",
-                #         f"group           virtual type {self.ngroups[layer]+1}\n",
-                #     ])
-                    
+
                 if self.settings['output']['dump']['slide']:
                     f_out.writelines([
                         "# Create visualization files.\n",
-                        f"dump            sys all atom {self.settings['output']['dump_frequency']['slide']} ./{self.dir}/visuals/slide_{self.params['tip']['s']}ms_l{layer}.lammpstrj\n\n",
-                        "dump_modify sys append yes\n",
+                        f"dump            sys all atom {self.settings['output']['dump_frequency']['slide']} ./{self.dir}/visuals/slide_{self.params['tip']['s']}ms_$(v_find)nN_$(v_a)angle_l{layer}.lammpstrj\n\n",
                     ])
 
                 f_out.writelines([
@@ -459,24 +456,35 @@ class AFMSimulation(model_init.ModelInit):
                         f"fix             spr {tip_fix_group} spring couple virtual {spring_ev} 0.0 0.0 NULL {virtual_offset} \n\n",
                         f"fix             move_virtual virtual move linear $(v_spring_x*{tipps}) $(v_spring_y*{tipps}) 0.0\n",
                     ])
+                f_out.write(f"run {self.settings['simulation']['slide_run_steps']}\n\n")
 
-                f_out.writelines([
-                    f"run {self.settings['simulation']['slide_run_steps']}\n\n",
-
+                if isinstance(self.scan_angle, (list, tuple, np.ndarray)):
+                    f_out.writelines([
                     f"if '$(v_a) == {self.params['general']['scan_angle'][1]}' then &\n",
-                    "'next a' & \n",
                     "'jump SELF find_incr'\n\n",
+                    ])
+                    if isinstance(self.params['general']['scan_angle'][3], (int, float)):
+                        f_out.writelines([
+                            f"if '$(v_find) == {self.params['general']['scan_angle'][3]}' then &\n",
+                            "'next a' & \n",
+                            "'clear' & \n",
+                            "'jump SELF angle_loop'\n\n",
+                        ])
+                    else:
+                        f_out.writelines([
+                            "next a\n",
+                            "clear\n",
+                            "jump SELF angle_loop\n\n",
+                        ])
+                    f_out.write("label find_incr\n\n")
 
-                    f"if '$(v_find) == {self.params['general']['scan_angle'][3]}' then &\n",
-                    "'next a' & \n",
-                    "'clear' & \n",
-                    "'jump SELF angle_loop'\n\n",
-
-                    "label find_incr\n\n",
-                    "next find\n",
-                    "clear\n",
-                    "jump SELF force_loop"
-                ])
+                if isinstance(self.params['general']['force'], (list, tuple)):
+                    f_out.writelines([
+                        "next find\n",
+                        "clear\n",
+                        "variable a delete\n",
+                        "jump SELF force_loop"
+                    ])
 
     def set_three_regions(self, system):
         """Divides a system into fixed, thermostat, and mobile regions.
