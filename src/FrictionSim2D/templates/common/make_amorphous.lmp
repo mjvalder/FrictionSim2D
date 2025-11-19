@@ -1,0 +1,41 @@
+# LAMMPS input script for generating amorphous structure
+# Melt-Quench-Relax Protocol
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+# 1. Initialization
+read_data       {{ slab_path }}
+include         {{ pot_file }}
+
+# 2. Minimization
+min_style       {{ min_style }}
+{{ minimization_command }}
+
+timestep        {{ timestep }}
+thermo          100
+thermo_style    custom step temp pe ke etotal press vol
+
+# 3. Melt
+velocity        all create {{ melt_temp }} 1234579 rot yes dist gaussian
+run             0
+
+# Melt and equilibrate at constant pressure (NPT)
+fix             melt all npt temp {{ melt_temp }} {{ melt_temp }} $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             20000
+unfix           melt
+
+# 4. Quench
+# Quench to target temperature over calculated steps
+fix             quench all npt temp {{ melt_temp }} {{ target_temp }} $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             {{ quench_steps }}
+unfix           quench
+
+# 5. Final Relaxation
+fix             relax all npt temp {{ target_temp }} {{ target_temp }} $(100.0*dt) iso 0.0 0.0 $(1000.0*dt)
+run             10000
+unfix           relax
+
+write_data      {{ output_file }}

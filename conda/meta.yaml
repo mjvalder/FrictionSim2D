@@ -1,0 +1,47 @@
+{% set name = "FrictionSim2D" %}
+{% set version = "0.1.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  entry_points:
+    - FrictionSim2D = FrictionSim2D.cli:main
+
+requirements:
+  host:
+    - python >=3.9
+    - pip
+    - hatchling
+  run:
+    - python >=3.9
+    # --- Scientific Binaries (Conda installs these!) ---
+    - atomsk
+    - lammps
+    # --- Python Dependencies (Conda installs these!) ---
+    - numpy >=1.21
+    - ase >=3.22
+    - pyyaml >=6.0
+    - jinja2 >=3.1
+    - pydantic >=2.0
+
+test:
+  imports:
+    - FrictionSim2D
+  commands:
+    - FrictionSim2D --help
+    # Verify external tools are reachable
+    - atomsk --version
+    - lmp -h
+
+about:
+  home: https://github.com/Mclat16/FrictionSim2D
+  summary: 'Automated generation of LAMMPS scripts for 2D material friction studies.'
+  license: MIT
+  license_file: LICENSE

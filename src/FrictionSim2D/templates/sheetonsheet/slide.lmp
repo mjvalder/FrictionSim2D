@@ -1,0 +1,147 @@
+# LAMMPS Input Script for Sheet-vs-Sheet Sliding
+
+# Variable Definitions
+{% if pressures is iterable and pressures is not string %}
+variable        pressure index {{ pressures | join(' ') }}
+label           force_loop
+{% else %}
+variable        pressure equal {{ pressures }}
+{% endif %}
+
+{% if angles is iterable and angles is not string %}
+variable        a index {{ angles | join(' ') }}
+label           angle_loop
+{% else %}
+variable        a equal {{ angles }}
+{% endif %}
+
+clear
+units           metal
+atom_style      molecular
+boundary        p p p
+
+neighbor        {{ neighbor_list }} bin
+{{ neigh_modify_command }}
+
+comm_style      tiled
+
+# Create Geometry
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -40.0 40.0 units box
+create_box      {{ num_atom_types }} box bond/types 1 extra/bond/per/atom 100
+
+read_data       {{ data_file }} extra/bond/per/atom 100 add append group bot
+
+# Potentials
+include         {{ potential_file }}
+
+# Bonds (Inter-layer springs)
+bond_style      harmonic
+bond_coeff      1 {{ cspring }} {{ lat_c }}
+create_bonds    many layer_3 layer_4 1 {{ bond_min }} {{ bond_max }}
+
+{% if dump_enabled %}
+dump            sys all atom {{ dump_freq }} {{ dump_file_pattern }}
+{% endif %}
+
+balance         1.0 rcb
+
+# Minimization
+min_style       {{ min_style }}
+{{ minimization_command }}
+
+# Constraints & Thermostat
+group           center union layer_2 layer_3
+velocity        center create {{ temp }} 492847948
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) 2847563 zero yes
+fix             nve_center center nve
+
+timestep        {{ timestep }}
+thermo          {{ thermo }}
+
+fix             fstage_top layer_4 rigid/nve single force * on on on torque * off off off
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# Computes
+compute         COM_top layer_4 com
+variable        comx_top equal c_COM_top[1]
+variable        comy_top equal c_COM_top[2]
+variable        comz_top equal c_COM_top[3]
+
+compute         COM_ctop layer_3 com
+variable        comx_ctop equal c_COM_ctop[1]
+variable        comy_ctop equal c_COM_ctop[2]
+variable        comz_ctop equal c_COM_ctop[3]
+
+compute         COM_cbot layer_2 com
+variable        comx_cbot equal c_COM_cbot[1]
+variable        comy_cbot equal c_COM_cbot[2]
+variable        comz_cbot equal c_COM_cbot[3]
+
+compute         COM_bot layer_1 com
+variable        comx_bot equal c_COM_bot[1]
+variable        comy_bot equal c_COM_bot[2]
+variable        comz_bot equal c_COM_bot[3]
+
+# Apply Uniform Pressure
+# 1 eV/Å^3 = 160.2176621 GPa
+variable        A equal ({{ xhi }}-{{ xlo }})*({{ yhi }}-{{ ylo }})
+variable        p equal v_pressure/160.2176565 
+variable        f equal -v_p*v_A/(count(layer_4))
+
+fix             force layer_4 aveforce 0.0 0.0 $f
+
+variable        fx equal f_force[1]*1.602176565
+variable        fy equal f_force[2]*1.602176565
+variable        fz equal f_force[3]*1.602176565
+variable        sx equal f_fsbot[1]*1.602176565
+variable        sy equal f_fsbot[2]*1.602176565
+variable        sz equal f_fsbot[3]*1.602176565
+
+compute         frict layer_3 group/group layer_2
+variable        xfrict equal c_frict[1]
+variable        yfrict equal c_frict[2]
+
+run             10000
+
+# Prepare Sliding with Virtual Atom
+variable        r0_new equal ${comz_top}-${comz_ctop}
+bond_coeff      1 5 ${r0_new}
+
+variable        virtual_x equal $(v_comx_top)
+variable        virtual_y equal $(v_comy_top)
+variable        virtual_z equal $(v_comz_top)+10
+
+create_atoms    {{ virtual_atom_type }} single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
+group           virtual type {{ virtual_atom_type }}
+
+velocity        layer_4 set 0.0 0.0 0.0 units box
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr layer_4 spring couple virtual 50 0.0 0.0 NULL 0
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+fix             move_virtual virtual move linear $({{ scan_speed_norm }}*v_speed_x) $({{ scan_speed_norm }}*v_speed_y) 0.0
+
+# Output
+fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file {{ results_file_pattern }}
+
+run             {{ run_steps }}
+
+# Loop Logic
+{% if angles is iterable and angles is not string %}
+next            a
+clear
+jump            SELF angle_loop
+{% endif %}
+
+{% if pressures is iterable and pressures is not string %}
+next            pressure
+clear
+{% if angles is iterable and angles is not string %}
+variable        a delete
+{% endif %}
+jump            SELF force_loop
+{% endif %}

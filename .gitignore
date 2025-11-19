@@ -1,0 +1,10 @@
+visuals
+*.lammpstrj
+ptest
+scripts
+__pycache__
+results
+run
+.zip
+copy
+present

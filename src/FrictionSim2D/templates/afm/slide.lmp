@@ -1,0 +1,139 @@
+# LAMMPS input script for AFM Sliding Simulation
+
+# Variable Definitions
+{% if forces is iterable and forces is not string %}
+variable        find index {{ forces | join(' ') }}
+label           force_loop
+{% else %}
+variable        force equal {{ forces }}
+variable        find equal v_force
+{% endif %}
+
+{% if angles is iterable and angles is not string %}
+variable        a index {{ angles | join(' ') }}
+label           angle_loop
+{% else %}
+variable        a equal {{ angles }}
+{% endif %}
+
+# Initialization
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        {{ neighbor_list }} bin
+{{ neigh_modify_command }}
+
+timestep        {{ timestep }}
+thermo          {{ thermo }}
+comm_style      tiled
+
+# Read Data
+read_data       {{ data_file }} extra/atom/types {{ extra_atom_types }}
+include         {{ potential_file }}
+
+{% if dump_enabled %}
+dump            sys all atom {{ dump_freq }} {{ dump_file_pattern }}
+{% endif %}
+
+balance         1.0 rcb
+
+# Constraints
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0
+fix             tip_f {{ tip_fix_group }} rigid/nve single force * on on on torque * off off off
+
+# Thermostat
+{% if thermostat_type == 'langevin' %}
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) 699483 zero yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) 2847563 zero yes
+fix_modify      lang_sub temp temp_sub
+
+group           nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+{% else %}
+# Fallback thermostat logic
+{% endif %}
+
+# Computes & Output
+compute         COM_top {{ layer_group }} com
+variable        comx equal c_COM_top[1]
+variable        comy equal c_COM_top[2]
+variable        comz equal c_COM_top[3]
+
+compute         COM_tip {{ tip_fix_group }} com
+variable        comx_tip equal c_COM_tip[1]
+variable        comy_tip equal c_COM_tip[2]
+variable        comz_tip equal c_COM_tip[3]
+
+run             0
+
+# Apply Normal Force
+variable        Ftotal equal -v_find/1.602176565
+variable        n equal v_Ftotal/count({{ tip_fix_group }})
+fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
+
+# Friction Variables
+variable        fz_tip equal f_forcetip[3]*1.602176565
+{% if drive_method == 'virtual_atom' %}
+# For virtual atom, we track the spring force from the 'spr' fix
+variable        fx_spr equal f_spr[1]*1.602176565
+variable        fy_spr equal f_spr[2]*1.602176565
+{% else %}
+# For SMD, 'f_spr' refers to the SMD fix ID
+variable        fx_spr equal f_spr[1]*1.602176565
+variable        fy_spr equal f_spr[2]*1.602176565
+{% endif %}
+
+fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file {{ results_file_pattern }}
+
+# Apply Spring/Driving Mechanism
+fix             damp {{ tip_fix_group }} viscous {{ damp_ev }}
+
+variable        spring_x equal cos(v_a*PI/180)
+variable        spring_y equal sin(v_a*PI/180)
+
+{% if drive_method == 'smd' %}
+# SMD Method
+fix             spr {{ tip_fix_group }} smd cvel {{ spring_ev }} {{ tipps }} tether $(v_spring_x) $(v_spring_y) NULL 0.0
+
+{% elif drive_method == 'fix_move' %}
+# Fix Move Method
+velocity        {{ tip_fix_group }} set $(v_spring_x*{{ tipps }}) $(v_spring_y*{{ tipps }}) 0.0
+
+{% elif drive_method == 'virtual_atom' %}
+# Virtual Atom Method
+variable        virtual_x equal $(v_comx_tip)+{{ virtual_offset }}*$(v_spring_x)
+variable        virtual_y equal $(v_comy_tip)+{{ virtual_offset }}*$(v_spring_y)
+variable        virtual_z equal $(v_comz_tip)
+
+create_atoms    {{ virtual_atom_type }} single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
+group           virtual type {{ virtual_atom_type }}
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr {{ tip_fix_group }} spring couple virtual {{ spring_ev }} 0.0 0.0 NULL {{ virtual_offset }}
+fix             move_virtual virtual move linear $(v_spring_x*{{ tipps }}) $(v_spring_y*{{ tipps }}) 0.0
+{% endif %}
+
+run             {{ run_steps }}
+
+# Loop Logic
+{% if angles is iterable and angles is not string %}
+next            a
+clear
+jump            SELF angle_loop
+{% endif %}
+
+{% if forces is iterable and forces is not string %}
+next            find
+clear
+# If we had an angle loop, we need to reset or handle the variable 'a'
+{% if angles is iterable and angles is not string %}
+variable        a delete
+{% endif %}
+jump            SELF force_loop
+{% endif %}
