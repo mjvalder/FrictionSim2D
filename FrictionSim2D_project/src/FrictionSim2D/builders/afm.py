@@ -1,760 +1,468 @@
-"""AFM simulation module for the Prandtl-Tomlinson model.
+"""Builder for AFM Simulations.
 
-This module generates LAMMPS simulation cells and input files for AFM
-simulations. It handles configuration parsing, atomic structure building
-(2D material, substrate, and tip), potential assignment, and directory setup.
+This module orchestrates the setup of an AFM friction simulation.
+It builds the necessary components (tip, substrate, sheet), manages
+potential files, and generates the LAMMPS input scripts.
 """
 
-import os
-import re
 import logging
-import tempfile
+import shutil
 import numpy as np
+from pathlib import Path
+from typing import List, Dict, Any, Tuple, Optional
 
-from lammps import lammps
+from ase import data as ase_data
 
-from tribo_2D import model_init, utilities
+from FrictionSim2D.core.base_builder import BaseBuilder
+from FrictionSim2D.builders import components
+from FrictionSim2D.core.utils import count_atomtypes, lj_params, cifread, copy_file
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
+class AFMSimulation(BaseBuilder):
+    """Builder for Atomic Force Microscopy (AFM) simulations."""
 
-class AFMSimulation(model_init.ModelInit):
-    """Generates simulation cells and input files for AFM simulations.
+    def __init__(self, config, output_dir=None):
+        super().__init__(config, output_dir)
+        # Metadata storage to replace the old self.data/self.potentials dictionaries
+        self.meta_data = {} 
+        self.pot_data = {}
+        self.atom_groups = {} # Tracks atom type IDs
+        self.group_definitions = {} # Tracks LAMMPS group names
 
-    This class builds atomic structures (2D material, substrate, tip) and
-    prepares the necessary directory structure and LAMMPS scripts for simulation
-    setup, execution, and post-processing.
-
-    Attributes:
-        input_file (str): Path to the input configuration file.
-        langevin_multiplier (int): A multiplier for atom types when using a
-            Langevin thermostat (1 for regular, 3 for Langevin).
-    """
-
-    def __init__(self, input_file):
-        """Initializes and runs the AFM simulation workflow.
-
-        Args:
-            input_file (str): Path to the input configuration file.
-        """
-        self.input_file = input_file
-        try:
-            self._run_simulations()
-        except Exception:
-            logging.exception("A critical error occurred during the AFM simulation setup.")
-            raise
-
-    def _run_simulations(self):
-        """Iterates through materials and sizes, running a simulation for each.
-
-        Reads the main configuration to get a list of materials and generates
-        a simulation run for each one. If no materials are specified, it runs
-        a single simulation with the base configuration.
-        """
-        try:
-            config = utilities.read_config(self.input_file)
-            materials = self._get_materials(config)
-
-            with open(self.input_file, "r", encoding="utf-8") as config_file:
-                base_config_str = config_file.read()
-        except FileNotFoundError:
-            logging.error("Input file not found: %s", self.input_file)
-            return
-        except (OSError, KeyError, ValueError) as e:
-            logging.error("Failed to read or parse configuration: %s", e)
-            return
-
-        if materials:
-            for mat in materials:
-                try:
-                    print(f"Setting up simulation for material {mat}...")
-                    mat_config_str = base_config_str.replace("{mat}", mat)
-                    self._run_simulations_for_sizes(config, mat_config_str)
-                except (ValueError, KeyError, OSError, RuntimeError) as e:
-                    logging.error("Simulation setup failed for material %s: %s", mat, e)
-                    continue 
-        else:
-            self._run_simulations_for_sizes(config, base_config_str)
-
-    def _get_materials(self, config):
-        """Reads the list of materials from the configuration.
-
-        Args:
-            config (dict): The parsed configuration dictionary.
-
-        Returns:
-            list: A list of material names, or an empty list if none are found.
-        """
-        materials_list = config['2D'].get('materials_list')
-        if not materials_list:
-            return []
-        if isinstance(materials_list, list):
-            return materials_list
-        try:
-            with open(materials_list, "r", encoding="utf-8") as materials_file:
-                return [line.strip() for line in materials_file]
-        except FileNotFoundError:
-            logging.warning("Materials list file not found: %s", materials_list)
-            return []
-
-    def _run_simulations_for_sizes(self, config, config_str):
-        """Reads simulation sizes from config and runs a simulation for each.
-
-        If specific 'x' and 'y' sizes are defined in the config, this method
-        iterates through each pair, creating a temporary config file and
-        running the system setup for each. If no sizes are specified, it
-        runs a single simulation using the provided config string.
-
-        Args:
-            config (dict): The parsed configuration dictionary.
-            config_str (str): The string content of the configuration file.
-        """
-        x_sizes = config['2D'].get('x')
-        y_sizes = config['2D'].get('y')
-
-        if not isinstance(x_sizes, list):
-            # If no sizes are specified, run a single simulation.
-            try:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".ini", encoding="utf-8") as temp_config_file:
-                    temp_config_file.write(config_str)
-                    temp_config_name = temp_config_file.name
-                self.system_setup(temp_config_name)
-            except Exception:
-                logging.exception("Single simulation run failed")
-                raise
-            finally:
-                if os.path.exists(temp_config_name):
-                    os.remove(temp_config_name)
-            return
-
-        if len(x_sizes) != len(y_sizes):
-            raise ValueError("The number of x and y sizes must be the same.")
+    def build(self) -> None:
+        """Main execution method to build the simulation environment."""
         
-        sizes = list(zip(x_sizes, y_sizes))
+        # 1. Setup Directory Structure
+        self.setup_directories(["visuals", "results", "build", "potentials"])
 
-        for x_val, y_val in sizes:
-            temp_config_name = None
-            try:
-                size_config_str = re.sub(r'^(x\s*=\s*.*)$', f'x = {x_val}', config_str, flags=re.MULTILINE)
-                size_config_str = re.sub(r'^(y\s*=\s*.*)$', f'y = {y_val}', size_config_str, flags=re.MULTILINE)
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".ini", encoding="utf-8") as temp_config_file:
-                    temp_config_file.write(size_config_str)
-                    temp_config_name = temp_config_file.name
-                self.system_setup(temp_config_name)
-            except Exception:
-                logging.exception("Simulation for size %sx%s failed", x_val, y_val)
-                raise  # Re-raise to stop the process
-            finally:
-                if temp_config_name and os.path.exists(temp_config_name):
-                    os.remove(temp_config_name)
+        # 2. Gather Metadata & Copy Potentials
+        # We need to know elements and atom counts before building to handle IDs correctly
+        self._initialize_component_metadata('sheet', self.config.sheet)
+        self._initialize_component_metadata('sub', self.config.sub)
+        self._initialize_component_metadata('tip', self.config.tip)
 
-    def system_setup(self, config):
-        """Initializes the system and generates LAMMPS scripts.
+        # 3. Build Components
+        logger.info("Building Sheet...")
+        sheet_path, sheet_dims, lat_c = components.build_sheet(
+            self.config.sheet, self.atomsk, self.work_dir / "build"
+        )
+        
+        logger.info("Building Substrate...")
+        # Substrate needs to match sheet dimensions
+        sub_path = components.build_substrate(
+            self.config.sub, self.atomsk, self.work_dir / "build", sheet_dims
+        )
+        
+        logger.info("Building Tip...")
+        tip_path, tip_radius = components.build_tip(
+            self.config.tip, self.atomsk, self.work_dir / "build", self.settings
+        )
 
-        This method calls the parent initializer, sets up thermostat regions
-        if a Langevin thermostat is used, and then generates the LAMMPS
-        scripts for system initialization and sliding.
+        # 4. Generate Potential Settings Files
+        # These files define pair_coeffs and groups for LAMMPS
+        self._write_potential_file("system.in.settings", sheet_layers=self.config.sheet.layers, is_slide=False)
+        self._write_potential_file("slide.in.settings", sheet_layers=self.config.sheet.layers, is_slide=True)
 
-        Args:
-            config (str): Path to the temporary configuration file.
-        """
-        try:
-            super().__init__(config, model='afm')
-            for system in self.systems:
-                if system not in self.params:
-                    raise ValueError(f"System '{system}' is defined in 'systems' but not in the parameters.")
+        # 5. Write Main LAMMPS Scripts
+        self.write_inputs(sheet_dims, tip_radius, lat_c)
+
+    def _initialize_component_metadata(self, name: str, component_config: Any) -> None:
+        """Reads CIF/Potential data and prepares metadata for a component."""
+        
+        # Resolve CIF path
+        cif_path = Path(component_config.cif_path)
+        if not cif_path.exists():
+            cif_path = components._get_material_path(component_config.cif_path, 'cif')
             
-            if self.settings['thermostat']['type'] == 'langevin':
-                self.langevin_multiplier = 3
-                for key in ('tip', 'sub'):
-                    self.set_three_regions(key)
-            else:
-                self.langevin_multiplier = 1
-
-            self.generate_system_init_script()
-            self.generate_slide_script()
-        except Exception as e:
-            logging.error("System setup failed: %s", e)
-            raise
+        # Read Material Data
+        data = cifread(cif_path)
         
-
-    def _write_langevin_thermostat_commands(self, f_out):
-        """Writes the LAMMPS commands for a Langevin thermostat to a file.
-
-        Args:
-            f_out (file): The file object to write the commands to.
-        """
-        if not self.settings['geometry']['rigid_tip']:
-            f_out.writelines([
-                "compute         temp_tip tip_thermo temp/partial 0 1 0\n",
-                f"fix             lang_tip tip_thermo langevin {self.params['general']['temp']} {self.params['general']['temp']} $(100.0*dt) 699483 zero yes\n",
-                "fix_modify      lang_tip temp temp_tip\n\n"
-            ])
-        f_out.writelines([
-            "compute         temp_sub sub_thermo temp/partial 0 1 0\n",
-            f"fix             lang_sub sub_thermo langevin {self.params['general']['temp']} {self.params['general']['temp']} $(100.0*dt) 2847563 zero yes\n",
-            "fix_modify      lang_sub temp temp_sub\n\n",
-            "group nve_apply subtract all sub_fix tip_fix\n",
-            "fix             nve_all nve_apply nve\n\n",
-        ])
-
-    def generate_system_init_script(self):
-        """Generates a LAMMPS script for system initialization and indentation.
-
-        The script handles simulation box creation, reading data files,
-        setting up potentials, and running an initial equilibration. It then
-        indents the AFM tip into the 2D material to a specified load.
-        """
-        for layer in self.params['2D']['layers']:
+        # Resolve Potential Path using helper
+        pot_path = Path(component_config.pot_path)
+        if not pot_path.exists():
+             # Explicitly resolve using the helper
+             pot_path = components._get_potential_path(str(component_config.pot_path))
         
-            self.elemgroup = {}
-            self.group_def = {}
-            tip_x = self.dim['xhi'] / 2
-            tip_y = self.dim['yhi'] / 2
-            tip_z = self.settings['geometry']['tip_base_z'] + self.lat_c * (layer - 1) / 2
-            filename = f"{self.sheet_dir[layer]}/lammps/system.lmp"
-
-            # Find gap between the 2D material and the substrate.
-            gap = self._generate_potentials_file(layer, is_slide_script=False)
-            height_2d = self.params['sub']['thickness'] + 0.5 + gap
-            
-            with open(filename, 'w', encoding="utf-8") as f_out:
-                f_out.writelines(self.init(neigh=True))
-                f_out.writelines([
-                    "comm_style tiled\n",
-                    f"region box block {self.dim['xlo']} {self.dim['xhi']} {self.dim['ylo']} {self.dim['yhi']} -5 {tip_z + self.params['tip']['r']}\n",
-                    f"create_box      {self.ngroups[layer]} box\n\n",
-
-                    "# Read data files.\n",
-                    f"read_data       {self.dir}/build/sub.lmp add append group sub\n",
-                    f"read_data       {self.dir}/build/tip.lmp add append shift {tip_x} {tip_y} {tip_z}  group tip offset {self.data['sub']['natype']*self.langevin_multiplier} 0 0 0 0\n",
-                    f"read_data       {self.dir}/build/{self.params['2D']['mat']}_{layer}.lmp add append shift 0.0 0.0 {height_2d} group 2D offset {self.data['tip']['natype']*self.langevin_multiplier+self.data['sub']['natype']*self.langevin_multiplier} 0 0 0 0\n\n"
-
-                    "# Apply potentials.\n",
-                    f"include        {self.sheet_dir[layer]}/lammps/system.in.settings\n\n",
-                    "balance 1.0 rcb\n"
-                ])
-
-                if self.settings['output']['dump']['system_init']:
-                    f_out.writelines([
-                        "# Create visualization files.\n",
-                        f"dump            sys all atom {self.settings['output']['dump_frequency']['system_init']} ./{self.dir}/visuals/system_{layer}.lammpstrj\n\n",
-                    ])
-                
-                tip_fix_group = "tip_all" if self.settings['geometry']['rigid_tip'] else "tip_fix"
-                
-                f_out.writelines([
-                    "# Minimize the system.\n",
-                    f"min_style      {self.settings['simulation']['min_style']}\n",
-                    f"{self.settings['simulation']['minimization_command']}\n",
-                    f"timestep       {self.settings['simulation']['timestep']}\n",
-                    f"thermo         {self.settings['simulation']['thermo']}\n",
-                    "# Apply thermostat \n",
-                    f"group           fixset union sub_fix {tip_fix_group}\n",
-                    "group           system subtract all fixset\n\n",
-                    f"velocity        system create {self.params['general']['temp']} 492847948\n\n",
-                ])
-                if self.settings['thermostat']['type'] == 'langevin':
-                    self._write_langevin_thermostat_commands(f_out)
-
-                f_out.writelines([
-                    "fix             sub_fix sub_fix setforce 0.0 0.0 0.0 \n",
-                    "velocity        sub_fix set 0.0 0.0 0.0\n\n",
-                    f"fix             tip_f {tip_fix_group} rigid/nve single force * off off off torque * off off off\n\n",
-                    "run             10000\n\n",
-                    "unfix           tip_f \n\n",
-                    "# Tip Indentation.\n",
-                    "displace_atoms  tip_all move 0.0 0.0 -20.0 units box\n\n",
-                    "# Apply constraints.\n",
-                    f"fix             tip_f {tip_fix_group} rigid/nve single force * off off on torque * off off off\n\n",
-                    "variable        f equal 0.0\n",
-                ])
-                if isinstance(self.params['general']['force'], (list, tuple)):
-                    f_out.writelines([
-                        f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
-                        "label force_loop\n",
-                    ])
-                else:
-                    f_out.writelines([
-                        f"variable force equal {self.params['general']['force']}\n",
-                    ])
-                f_out.writelines([
-                    "balance 1.0 rcb\n",
-                    "# Set up initial parameters.\n",
-                    "variable        num_floads equal 100\n",
-                    "variable        r equal 0.0\n",
-                    "variable        fincr equal (${find}-${f})/${num_floads}\n",
-                    "# Apply pressure to the tip.\n",
-                    "variable i loop ${num_floads}\n",
-                    "label loop_load\n\n",
-                    "variable f equal ${f}+${fincr} \n\n",
-                    "# Set force variable.\n",
-                    f"variable n equal -v_f/(count({tip_fix_group})*1.602176565)\n",
-                    f"fix forcetip {tip_fix_group} aveforce 0.0 0.0 $n\n",
-                    "run 100 \n\n",
-                    "unfix forcetip\n\n",
-                    "next i\n",
-                    "jump SELF loop_load\n\n",
-                    "# Equilibration.\n",
-                    f"fix forcetip {tip_fix_group} aveforce 0.0 0.0 $n\n",
-                    "variable        dispz equal xcm(tip_all,z)\n\n",
-                    "run 100 pre yes post no\n\n",
-                    "# Loop to check for displacement stabilization.\n",
-                    "label check_r\n\n",
-                    "variable disp_l equal ${dispz}\n",
-                    "variable disp_h equal ${dispz}\n\n",
-                    "variable disploop loop 50\n",
-                    "label disp\n\n",
-                    "run 100 pre no post no\n\n",
-                    "if '${dispz}>${disp_h}' then 'variable disp_h equal ${dispz}'\n",
-                    "if '${dispz}<${disp_l}' then 'variable disp_l equal ${disp_l}'\n\n",
-                    "next disploop\n",
-                    "jump SELF disp\n\n",
-                    "variable r equal ${disp_h}-${disp_l}\n\n",
-                    "# Check if displacement has stabilized.\n",
-                    "if '${r} < 0.1' then 'jump SELF loop_end' else 'jump SELF check_r'\n\n",
-                    "label loop_end\n\n",
-                    f"write_data {self.sheet_dir[layer]}/data/load_$(v_find)N.data\n",
-                    "next find\n",
-                    "jump SELF force_loop"
-                ])
-
-    def generate_slide_script(self):
-        """Generates a LAMMPS script for the AFM sliding simulation.
-
-        This script reads the previously indented system, applies a constant
-        normal load, and then pulls the tip laterally at a constant velocity
-        to simulate sliding and measure friction.
-        """
-        spring_ev = self.params['tip']['cspring'] / 16.02176565  # eV/A^2
-        damp_ev = self.params['tip']['dspring'] / 0.01602176565  # eV/(A^2/ps)
-        tipps = self.params['tip']['s'] / 100  # Angstrom/ps
-
-        tip_fix_group = "tip_all" if self.settings['geometry']['rigid_tip'] else "tip_fix"
-
-        for layer in self.params['2D']['layers']:
-            self._generate_potentials_file(layer, is_slide_script=True)
-            filename = f"{self.sheet_dir[layer]}/lammps/slide_{self.params['tip']['s']}ms.lmp"
-            with open(filename, 'w', encoding="utf-8") as f_out:
-                if isinstance(self.params['general']['force'], (list, tuple)):
-                    f_out.writelines([
-                        f"variable find index {' '.join(str(x) for x in self.params['general']['force'])}\n",
-                        "label force_loop\n",
-                    ])
-                else:
-                    f_out.writelines([
-                        f"variable force equal {self.params['general']['force']}\n",
-                    ])
-
-                if self.scan_angle is not None:
-                    if isinstance(self.scan_angle, (list, tuple, np.ndarray)):
-                        # Multiple values
-                        angle_values = [str(x) for x in self.scan_angle]
-                        if self.scan_angle[0] != 0:
-                            angle_values.insert(0, '0')
-                        f_out.writelines([
-                            f"variable a index {' '.join(angle_values)}\n",
-                            "label angle_loop\n",
-                        ])
-                    else:
-                        # Single value
-                        f_out.writelines([
-                            f"variable a equal {self.scan_angle}\n",
-                        ])
-                else:
-                    # self.scan_angle does not exist, default to 0
-                    f_out.writelines([
-                        "variable a equal 0\n",
-                    ])
-                
-                f_out.writelines(self.init(neigh=True))
-
-                f_out.writelines([
-                    f"timestep       {self.settings['simulation']['timestep']}\n",
-                    f"thermo         {self.settings['simulation']['thermo']}\n",
-                    "comm_style       tiled\n",
-                ])
-
-                drive_method = self.settings['simulation'].get('drive_method')
-                extra_atom_types = 1 if drive_method == 'virtual_atom' else 0
-
-                f_out.writelines([
-                    f"read_data       {self.sheet_dir[layer]}/data/load_$(v_find)N.data extra/atom/types {extra_atom_types}\n\n",
-                    f"include         {self.sheet_dir[layer]}/lammps/slide.in.settings\n\n",
-                ])
-
-                if self.settings['output']['dump']['slide']:
-                    f_out.writelines([
-                        "# Create visualization files.\n",
-                        f"dump            sys all atom {self.settings['output']['dump_frequency']['slide']} ./{self.dir}/visuals/slide_{self.params['tip']['s']}ms_$(v_find)nN_$(v_a)angle_l{layer}.lammpstrj\n\n",
-                    ])
-
-                f_out.writelines([
-                    "balance 1.0 rcb\n",
-                    "# Apply constraints.\n",
-                    "fix             sub_fix sub_fix setforce 0.0 0.0 0.0 \n",
-                    f"fix             tip_f {tip_fix_group} rigid/nve single force * on on on torque * off off off\n\n",
-                    "# Apply thermostat.\n",
-                ])
-
-                if self.settings['thermostat']['type'] == 'langevin':
-                    self._write_langevin_thermostat_commands(f_out)
-
-                f_out.writelines([
-                    "# Define computes for output.\n",
-                    f"compute COM_top layer_{layer} com\n",
-                    "variable comx equal c_COM_top[1] \n",
-                    "variable comy equal c_COM_top[2] \n",
-                    "variable comz equal c_COM_top[3] \n\n",
-
-                    "compute COM_tip tip_fix com\n",
-                    "variable comx_tip equal c_COM_tip[1] \n",
-                    "variable comy_tip equal c_COM_tip[2] \n",
-                    "variable comz_tip equal c_COM_tip[3] \n\n",
-                    "run 0 # Update computes\n\n",
-
-                    "# Apply constant normal force to the tip.\n",
-                    "variable        Ftotal          equal -v_find/1.602176565\n",
-                    f"variable        n           equal v_Ftotal/count({tip_fix_group})\n",
-                    f"fix             forcetip {tip_fix_group} aveforce 0.0 0.0 $n\n\n",
-
-                    "# Calculate friction forces.\n",
-                    "variable        fz_tip   equal  f_forcetip[3]*1.602176565\n\n",
-                    "variable        fx_spr   equal  f_spr[1]*1.602176565\n\n",
-                    "variable        fy_spr   equal f_spr[2]*1.602176565\n\n",
-                    f"fix             fc_ave all ave/time 1 1000 {self.settings['output']['results_frequency']} v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file ./{self.dir}/results/fc_ave_slide_$(v_find)nN_$(v_a)angle_{self.params['tip']['s']}ms_l{layer}\n\n",
-
-                    "# Apply spring loading for sliding.\n",
-                    f"fix             damp tip_fix viscous {damp_ev}\n\n",
-
-                    "variable spring_x equal cos(v_a*PI/180)\n",
-                    "variable spring_y equal sin(v_a*PI/180)\n\n",
-                ])
-
-                if drive_method == 'smd':
-                    f_out.writelines([
-                        "# Add lateral harmonic spring to pull the tip.\n",
-                        f"fix             spr tip_fix smd cvel {spring_ev} {tipps} tether $(v_spring_x) $(v_spring_y) NULL 0.0\n\n",
-                    ])
-
-                elif drive_method == 'fix_move':
-                    f_out.writelines([
-                        "# Apply velocity to the tip to induce sliding.\n",
-                        f"velocity        {tip_fix_group} set $(v_spring_x*{tipps}) $(v_spring_y*{tipps}) 0.0\n\n",
-                    ])
-
-                elif drive_method == 'virtual_atom':
-                    virtual_offset = self.params['tip']['r'] * 3 / 2
-                    f_out.writelines([
-                        "# Create a virtual atom to drag the tip.\n",
-                        f"variable virtual_x equal $(v_comx_tip)+{virtual_offset}*$(v_spring_x)\n",
-                        f"variable virtual_y equal $(v_comy_tip)+{virtual_offset}*$(v_spring_y)\n",
-                        "variable virtual_z equal $(v_comz_tip)\n",
-                        f"create_atoms    {self.ngroups[layer]+1} single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box\n",
-                        f"group           virtual type {self.ngroups[layer]+1}\n",
-                        "velocity        virtual set 0.0 0.0 0.0\n",
-                        f"fix             spr {tip_fix_group} spring couple virtual {spring_ev} 0.0 0.0 NULL {virtual_offset} \n\n",
-                        f"fix             move_virtual virtual move linear $(v_spring_x*{tipps}) $(v_spring_y*{tipps}) 0.0\n",
-                    ])
-                f_out.write(f"run {self.settings['simulation']['slide_run_steps']}\n\n")
-
-                if isinstance(self.scan_angle, (list, tuple, np.ndarray)):
-                    f_out.writelines([
-                    f"if '$(v_a) == {self.params['general']['scan_angle'][1]}' then &\n",
-                    "'jump SELF find_incr'\n\n",
-                    ])
-                    if isinstance(self.params['general']['scan_angle'][3], (int, float)):
-                        f_out.writelines([
-                            f"if '$(v_find) == {self.params['general']['scan_angle'][3]}' then &\n",
-                            "'next a' & \n",
-                            "'clear' & \n",
-                            "'jump SELF angle_loop'\n\n",
-                        ])
-                    else:
-                        f_out.writelines([
-                            "next a\n",
-                            "clear\n",
-                            "jump SELF angle_loop\n\n",
-                        ])
-                    f_out.write("label find_incr\n\n")
-
-                if isinstance(self.params['general']['force'], (list, tuple)):
-                    f_out.writelines([
-                        "next find\n",
-                        "clear\n",
-                        "variable a delete\n",
-                        "jump SELF force_loop"
-                    ])
-
-    def set_three_regions(self, system):
-        """Divides a system into fixed, thermostat, and mobile regions.
-
-        This method is used for applying a Langevin thermostat, where only a
-        portion of the tip and substrate are thermalized. It rewrites the
-        LAMMPS data file for the specified system, assigning new atom types
-        to distinguish between the fixed, thermostat-controlled, and fully
-        mobile parts of the body.
-
-        Args:
-            system (str): The system to partition ('tip' or 'sub').
-        """
-        if system == 'tip':
-            h = self.tipx / self.settings['geometry']['tip_reduction_factor']
-            boundaries = self.settings['thermostat']['langevin_boundaries']['tip']
-            f_zlo, f_zhi = [h - val for val in boundaries['fix']]
-            t_zlo, t_zhi = [h - val for val in boundaries['thermo']]
-        elif system == 'sub':
-            thickness = self.params['sub']['thickness']
-            boundaries = self.settings['thermostat']['langevin_boundaries']['sub']
-            f_zlo = boundaries['fix'][0] * thickness
-            f_zhi = boundaries['fix'][1] * thickness
-            t_zlo = boundaries['thermo'][0] * thickness
-            t_zhi = boundaries['thermo'][1] * thickness
-            h = thickness
-            
-        dim = utilities.get_model_dimensions(f'{self.dir}/build/{system}.lmp')
-        potential_file = f'{self.dir}/build/{system}_3layers.in.settings'
-        self.__single_body_3layer(potential_file, system)
+        # Check again if found
+        if not pot_path.exists():
+             raise FileNotFoundError(f"Potential file '{component_config.pot_path}' not found in package data.")
+             
+        # Count atom types based on potential file
+        # This determines if 'C' becomes 'C1' and 'C2' in LAMMPS
+        counts = count_atomtypes(pot_path, data['elements'])
         
-        lmp = lammps(cmdargs=["-log", "none", "-screen", "none",  "-nocite"])
-        lmp.commands_list([
-            "boundary p p p",
-            "units metal",
-            "atom_style      atomic",
-            f"region box block {dim['xlo']} {dim['xhi']} {dim['ylo']} {dim['yhi']} -5 {h}",
-            f"create_box      {self.data[system]['natype']*3} box",
-            f"read_data       {self.dir}/build/{system}.lmp add append",
-            f"include         {potential_file}",
-            f"# Identify the fixed atoms of {system}.",
-            f"region          {system}_fix block INF INF INF INF {f_zlo} {f_zhi} units box",
-            f"group           {system}_fix region {system}_fix",
-            f"# Identify thermostat region of {system}.",
-            f"region          {system}_thermo block INF INF INF INF {t_zlo} {t_zhi} units box",
-            f"group           {system}_thermo region {system}_thermo",
-        ])
+        # Copy potential file to simulation folder
+        dest_pot = self.work_dir / "potentials" / pot_path.name
+        if pot_path.exists():
+            shutil.copy(pot_path, dest_pot)
+        
+        # Store
+        self.meta_data[name] = data
+        self.pot_data[name] = {
+            'path': dest_pot.name, # Relative path for LAMMPS
+            'full_path': dest_pot,
+            'counts': counts,
+            'natype': sum(counts.values()),
+            'config': component_config
+        }
 
-        # Assign new atom types for fixed and thermostat regions.
-        for t in range(self.data[system]['natype']):
-            t += 1
-            lmp.command(f"group {system}_{t} type {t}")
-
-        i = 1
-        for t in range(self.data[system]['natype']):
-            t += 1
-            lmp.commands_list([
-                f"set group {system}_{t} type {i}",
-                f"group {system}_fix_{t} intersect {system}_fix {system}_{t}",
-                f"set group {system}_fix_{t} type {i+1}",
-                f"group {system}_fix_{t} delete",
-                f"group {system}_thermo_{t} intersect {system}_thermo {system}_{t}",
-                f"set group {system}_thermo_{t} type {i+2}",
-                f"group {system}_thermo_{t} delete",
-                f"group {system}_{t} delete"
-            ])
-            i += 3
-
-        lmp.command(f"write_data {self.dir}/build/{system}.lmp")
-
-    def _generate_potentials_file(self, layer, is_slide_script):
-        """Writes the potential settings file for the AFM simulation.
-
-        This method configures hybrid potentials and defines pair coefficients
-        for all interactions, including intra-system potentials (e.g., EAM for
-        a metal tip), inter-system Lennard-Jones interactions (e.g., tip-sheet),
-        and inter-layer interactions for multi-layer 2D materials.
-
-        Args:
-            layer (int): The number of layers in the 2D material.
-            is_slide_script (bool): Flag to indicate if the settings are for the slide script.
-
-
-        Returns:
-            float: The maximum sigma value from Lennard-Jones interactions
-                   between the 2D material and the substrate, used for
-                   calculating the initial gap.
-        """
-        lj_sheet = self.is_sheet_lj()
-        if is_slide_script:
-            filename = f"{self.dir}/l_{layer}/lammps/slide.in.settings"
-        else:
-            filename = f"{self.dir}/l_{layer}/lammps/system.in.settings"
-
-        with open(filename, 'w', encoding="utf-8") as f_out:
-            self.elemgroup = {}
-            self.group_def = {}
+    def _write_potential_file(self, filename: str, sheet_layers: List[int], is_slide: bool = False) -> None:
+        """Generates the LAMMPS potential settings file."""
+        
+        # Determine active layer count
+        # For system_init, we usually build all layers requested.
+        # If layers list is [1, 2], max is 2.
+        num_layers = max(sheet_layers) if sheet_layers else 1
+        
+        filepath = self.work_dir / "potentials" / filename
+        
+        with open(filepath, 'w') as f:
+            self.atom_groups = {} # Reset for this file
+            self.group_definitions = {}
             atype = 1
 
-            # Define element groups for all systems.
-            for system in self.systems:
-                arr = super().number_sequential_atoms(system)
-                if system == '2D':
-                    atype = super().define_elemgroup(system, arr, layer=layer, atype=atype)
-                else:
-                    atype = self.__define_elemgroup_3regions(
-                        system, arr, atype=atype)
+            # 1. Define Elements & Groups
+            # Order: Sheet -> Substrate -> Tip (Standard convention in this code)
+            # Sheet
+            atype = self._define_elemgroup('sheet', atype, layers=num_layers)
+            # Substrate
+            atype = self._define_elemgroup_3regions('sub', atype)
+            # Tip
+            atype = self._define_elemgroup_3regions('tip', atype)
 
-            # Set masses for all atoms.
-            for system in self.systems:
-                super().set_masses(system, f_out, layer=layer)
+            # 2. Set Masses
+            self._set_masses('sheet', f, layers=num_layers)
+            self._set_masses('sub', f)
+            self._set_masses('tip', f)
 
-            # Define groups for different parts of the model.
-            for system in self.systems:
-                all_types = [self.group_def[i][1] for i in range(
-                    1, self.ngroups[layer]+1) if system in self.group_def[i][0]]
-                f_out.write(f"group {system}_all type {' '.join(all_types)}\n")
-                if system == '2D':
-                    for l in range(layer):
-                        layer_g = [self.group_def[i][1] for i in range(
-                            1, self.ngroups[layer]+1) if f"2D_l{l+1}" in self.group_def[i][0]]
-                        f_out.write(
-                            f"group layer_{l+1} type {' '.join(layer_g)}\n")
-                else:
-                    for n in ["_fix", "_thermo"]:
-                        sub_group = [self.group_def[i][1] for i in range(
-                            1, self.ngroups[layer]+1) if system+n in self.group_def[i][0]]
-                        f_out.write(
-                            f"group {system}{n} type {' '.join(sub_group)}\n")
+            # 3. Define LAMMPS Groups
+            self._write_lammps_groups(f, num_layers)
 
-            # Determine potential types for pair_style hybrid.
-            potential_counts = {}
-            for system in ['sub', 'tip']:
-                pot_type = self.params[system]['pot_type']
-                potential_counts[pot_type] = potential_counts.get(pot_type, 0) + 1
+            # 4. Configure Pair Styles
+            self._write_pair_interactions(f, num_layers, is_slide, atype)
 
-            pot_2d = self.params['2D']['pot_type']
-            if lj_sheet:
-                potential_counts[pot_2d] = potential_counts.get(pot_2d, 0) + layer
+    def _define_elemgroup(self, system: str, start_type: int, layers: int = 1) -> int:
+        """Assigns LAMMPS atom type IDs for standard components."""
+        counts = self.pot_data[system]['counts']
+        elements = self.meta_data[system]['elements'] # Ordered list from CIF
+        
+        current_type = start_type
+        
+        # Create a map: system -> layer -> element -> [type_ids]
+        if system not in self.atom_groups: self.atom_groups[system] = {}
+
+        # Iterate elements as they appear in CIF (Atomsk order)
+        for el in elements:
+            count = counts.get(el, 1)
+            if system == 'sheet':
+                for l in range(layers):
+                    if l not in self.atom_groups[system]: self.atom_groups[system][l] = {}
+                    if el not in self.atom_groups[system][l]: self.atom_groups[system][l][el] = []
+                    
+                    for _ in range(count):
+                        # Store metadata for this atom type
+                        # format: [Group Name, AtomTypeID, ElementName, AtomLabel]
+                        self.group_definitions[current_type] = [f"{system}_l{l+1}", str(current_type), el]
+                        self.atom_groups[system][l][el].append(current_type)
+                        current_type += 1
             else:
-                potential_counts[pot_2d] = potential_counts.get(pot_2d, 0) + 1
+                if el not in self.atom_groups[system]: self.atom_groups[system][el] = []
+                for _ in range(count):
+                    self.group_definitions[current_type] = [f"{system}", str(current_type), el]
+                    self.atom_groups[system][el].append(current_type)
+                    current_type += 1
+                    
+        return current_type
 
-            # Write pair_style hybrid command.
-            f_out.write("group mobile union tip_thermo sub_thermo\n")
-            hybrid_style_parts = [pot for pot, count in potential_counts.items() for _ in range(count)]
-            hybrid_style_parts.append("lj/cut 8.0")
-            f_out.write(f"pair_style hybrid {' '.join(hybrid_style_parts)}\n")
+    def _define_elemgroup_3regions(self, system: str, start_type: int) -> int:
+        """Assigns atom types for components with Fixed/Thermo/Mobile regions."""
+        # Used for Tip and Substrate when Langevin is active
+        # Each original atom type splits into 3: Mobile, Fixed, Thermo
+        
+        counts = self.pot_data[system]['counts']
+        elements = self.meta_data[system]['elements']
+        current_type = start_type
+        
+        if system not in self.atom_groups: self.atom_groups[system] = {}
 
-            # Write pair_coeff commands for intra-system potentials.
-            potential_indices = {pot: 0 for pot in potential_counts}
+        for el in elements:
+            count = counts.get(el, 1)
+            self.atom_groups[system][el] = []
+            
+            for i in range(count):
+                # 1. Standard/Mobile
+                self.group_definitions[current_type] = [f"{system}", str(current_type), el]
+                
+                # 2. Fixed
+                self.group_definitions[current_type+1] = [f"{system}_fix", str(current_type+1), el]
+                
+                # 3. Thermo
+                self.group_definitions[current_type+2] = [f"{system}_thermo", str(current_type+2), el]
+                
+                self.atom_groups[system][el].extend([current_type, current_type+1, current_type+2])
+                current_type += 3
+                
+        return current_type
 
-            drive_method = self.settings['simulation'].get('drive_method', 'smd')
-            num_atom_types = self.ngroups[layer]
-            if is_slide_script and drive_method == 'virtual_atom':
-                num_atom_types += 1
-                self.group_def[num_atom_types] = ['virtual', str(num_atom_types), 'NULL', 'NULL']
+    def _set_masses(self, system: str, f, layers: int = 1):
+        """Writes mass commands to file."""
+        elements = self.meta_data[system]['elements']
+        
+        for el in set(elements): # Unique elements
+            mass = ase_data.atomic_masses[ase_data.atomic_numbers[el]]
+            
+            if system == 'sheet':
+                # Get first type of first layer and last type of last layer for this element
+                # Assumes sequential ordering
+                first_type = self.atom_groups[system][0][el][0]
+                last_type = self.atom_groups[system][layers-1][el][-1]
+                f.write(f"mass {first_type}*{last_type} {mass} # {el} ({system})\n")
+            else:
+                types = self.atom_groups[system][el]
+                f.write(f"mass {types[0]}*{types[-1]} {mass} # {el} ({system})\n")
 
-            for system in self.systems:
-                pot_type = self.params[system]['pot_type']
-                index_str = ""
-                if potential_counts[pot_type] > 1:
-                    potential_indices[pot_type] += 1
-                    index_str = f" {potential_indices[pot_type]}"
+    def _write_lammps_groups(self, f, layers):
+        """Defines LAMMPS groups based on type ranges."""
+        # Sheet Layers
+        for l in range(layers):
+            # Collect all types belonging to this layer
+            types = []
+            for el in self.atom_groups['sheet'][l]:
+                types.extend([str(t) for t in self.atom_groups['sheet'][l][el]])
+            f.write(f"group layer_{l+1} type {' '.join(types)}\n")
 
-                if system == '2D':
-                    if lj_sheet:
-                        for l in range(layer):
-                            layer_index_str = ""
-                            if potential_counts[pot_type] > 1:
-                                layer_index_str = f" {potential_indices[pot_type] + l}"
+        # Tip/Sub Regions
+        for system in ['sub', 'tip']:
+            # Gather types for _fix, _thermo, and _all
+            fix_types = []
+            thermo_types = []
+            all_types = []
+            
+            for t_id, defs in self.group_definitions.items():
+                if f"{system}_fix" in defs[0]:
+                    fix_types.append(str(t_id))
+                if f"{system}_thermo" in defs[0]:
+                    thermo_types.append(str(t_id))
+                if defs[0].startswith(system): # Matches system, system_fix, system_thermo
+                    all_types.append(str(t_id))
+            
+            f.write(f"group {system}_all type {' '.join(all_types)}\n")
+            if fix_types:
+                f.write(f"group {system}_fix type {' '.join(fix_types)}\n")
+            if thermo_types:
+                f.write(f"group {system}_thermo type {' '.join(thermo_types)}\n")
 
-                            potentials = [
-                                self.group_def.get(i, [None]*4)[3] if f"2D_l{l+1}" in self.group_def.get(i, [""])[0] else "NULL"
-                                for i in range(1, num_atom_types + 1)
-                            ]
-                            f_out.write(
-                                f"pair_coeff * * {pot_type}{layer_index_str} {self.potentials['2D']['path']} {' '.join(potentials)} # 2D Layer {l+1}\n")
-                        if potential_counts[pot_type] > 1:
-                            potential_indices[pot_type] += layer -1
+        f.write("group mobile union tip_thermo sub_thermo\n")
+
+    def _write_pair_interactions(self, f, layers, is_slide, max_type):
+        """Writes pair_style and pair_coeff commands."""
+        
+        # 1. Determine Styles
+        styles = []
+        
+        # Helper to check if potential needs explicit LJ
+        def needs_lj(pot_type):
+            return pot_type in ['sw', 'tersoff', 'rebo', 'edip', 'meam', 'eam', 'bop', 'morse', 'rebomos', 'sw/mod']
+
+        sheet_lj = needs_lj(self.config.sheet.pot_type)
+        
+        # Add component potentials
+        if sheet_lj:
+            # If sheet needs LJ, we usually add the potential ONCE per layer or once total depending on type
+            # Legacy code added it 'layer' times.
+            for _ in range(layers):
+                styles.append(self.config.sheet.pot_type)
+        else:
+            styles.append(self.config.sheet.pot_type)
+            
+        styles.append(self.config.sub.pot_type)
+        styles.append(self.config.tip.pot_type)
+        styles.append("lj/cut 11.0") # For interactions
+        
+        f.write(f"pair_style hybrid {' '.join(styles)}\n")
+        
+        # 2. Write Component Coefficients
+        # Sheet
+        sheet_pot_path = self.pot_data['sheet']['path']
+        if sheet_lj:
+            # Hybrid overlay approach for layered materials
+            for l in range(layers):
+                # Map types for this layer to the potential file
+                # This requires constructing the mapping string "C NULL NULL..."
+                # Legacy code: built a list of NULLs and filled in types for specific layer
+                line_args = []
+                for t in range(1, max_type + 1): # LAMMPS types are 1-indexed
+                    if t in self.group_definitions and f"sheet_l{l+1}" in self.group_definitions[t][0]:
+                        # Map global type 't' to potential type element
+                        el = self.group_definitions[t][2]
+                        line_args.append(el) 
                     else:
-                        potentials = [
-                            self.group_def.get(i, [None]*4)[3] if "2D" in self.group_def.get(i, [""])[0] else "NULL"
-                            for i in range(1, num_atom_types + 1)
-                        ]
-                        f_out.write(
-                            f"pair_coeff * * {pot_type}{index_str} {self.potentials['2D']['path']} {' '.join(potentials)} # 2D\n")
+                        line_args.append("NULL")
+                
+                f.write(f"pair_coeff * * {self.config.sheet.pot_type} {sheet_pot_path} {' '.join(line_args)}\n")
+        else:
+             # Non-LJ (AIREBO etc) applies to all sheet atoms at once
+             line_args = []
+             for t in range(1, max_type + 1):
+                if t in self.group_definitions and "sheet" in self.group_definitions[t][0]:
+                    el = self.group_definitions[t][2]
+                    line_args.append(el)
                 else:
-                    potentials = [
-                        self.group_def.get(i, [None]*3)[2] if system in self.group_def.get(i, [""])[0] else "NULL"
-                        for i in range(1, num_atom_types + 1)
-                    ]
-                    f_out.write(
-                        f"pair_coeff * * {pot_type}{index_str} {self.potentials[system]['path']} {' '.join(potentials)} # {system.capitalize()}\n")
+                    line_args.append("NULL")
+             f.write(f"pair_coeff * * {self.config.sheet.pot_type} {sheet_pot_path} {' '.join(line_args)}\n")
 
-            # Write pair_coeff commands for inter-system LJ interactions.
-            max_sigma = 0
-            if lj_sheet:
-                for t in self.data['2D']['elem_comp']:
-                    for key in ('sub', 'tip'):
-                        for s in self.data[key]['elem_comp']:
-                            e, sigma = utilities.lj_params(t, s)
-                            if key == 'sub' and sigma > max_sigma:
-                                max_sigma = sigma
+        # Substrate & Tip
+        for sys_name in ['sub', 'tip']:
+            pot = self.pot_data[sys_name]['config'].pot_type
+            path = self.pot_data[sys_name]['path']
+            line_args = []
+            for t in range(1, max_type + 1):
+                if t in self.group_definitions and sys_name in self.group_definitions[t][0]:
+                    el = self.group_definitions[t][2]
+                    line_args.append(el)
+                else:
+                    line_args.append("NULL")
+            f.write(f"pair_coeff * * {pot} {path} {' '.join(line_args)}\n")
 
-                            key_s_types = f"{self.elemgroup[key][s][0]}*{self.elemgroup[key][s][-1]}" if self.settings['thermostat']['type'] == 'langevin' else f"{self.elemgroup[key][s][0]}"
-                            sheet_t_types = f"{self.elemgroup['2D'][0][t][0]}*{self.elemgroup['2D'][layer-1][t][-1]}" if len(self.elemgroup['2D'][layer-1][t]) > 1 or layer > 1 else f"{self.elemgroup['2D'][0][t][0]}"
-    
-                            f_out.write(
-                                f"pair_coeff {key_s_types} {sheet_t_types} lj/cut {e} {sigma}\n")
+        # 3. Interactions (Lennard-Jones)
+        # Inter-layer (if sheet > 1 layer)
+        if layers > 1:
+            # Simple LJ between layers
+            for l1 in range(layers):
+                for l2 in range(l1 + 1, layers):
+                    # Iterate elements
+                    for el1 in self.atom_groups['sheet'][l1]:
+                        for el2 in self.atom_groups['sheet'][l2]:
+                            eps, sig = lj_params(el1, el2)
+                            # Expand type ranges
+                            t1_start = self.atom_groups['sheet'][l1][el1][0]
+                            t1_end = self.atom_groups['sheet'][l1][el1][-1]
+                            t2_start = self.atom_groups['sheet'][l2][el2][0]
+                            t2_end = self.atom_groups['sheet'][l2][el2][-1]
+                            
+                            f.write(f"pair_coeff {t1_start}*{t1_end} {t2_start}*{t2_end} lj/cut {eps} {sig}\n")
 
-            if layer > 1:
-                index_pairs = [(i, j) for i in range(layer) for j in range(i+1, layer)]
-                super().set_sheet_LJ_params(f_out, index_pairs)
+        # Tip-Sheet, Sub-Sheet, Tip-Sub
+        def write_lj_interaction(sys_a, sys_b, group_a_getter, group_b_getter):
+             elements_a = self.meta_data[sys_a]['elements']
+             elements_b = self.meta_data[sys_b]['elements']
+             
+             for el_a in set(elements_a):
+                 for el_b in set(elements_b):
+                     eps, sig = lj_params(el_a, el_b)
+                     
+                     # Get type ranges
+                     types_a = group_a_getter(sys_a, el_a)
+                     types_b = group_b_getter(sys_b, el_b)
+                     
+                     if not types_a or not types_b: continue
+                     
+                     f.write(f"pair_coeff {types_a[0]}*{types_a[-1]} {types_b[0]}*{types_b[-1]} lj/cut {eps} {sig}\n")
 
-            for s in self.data['sub']['elem_comp']:
-                for t in self.data['tip']['elem_comp']:
-                    e, sigma = utilities.lj_params(s, t)
+        # Helpers to get type lists
+        def get_sheet_types(sys, el):
+            # Flatten all layers
+            ts = []
+            for l in range(layers):
+                if el in self.atom_groups['sheet'][l]:
+                    ts.extend(self.atom_groups['sheet'][l][el])
+            return sorted(ts)
+            
+        def get_solid_types(sys, el):
+            return sorted(self.atom_groups[sys][el])
 
-                    sub_types = f"{self.elemgroup['sub'][s][0]}*{self.elemgroup['sub'][s][-1]}" if self.settings['thermostat']['type'] == 'langevin' else f"{self.elemgroup['sub'][s][0]}"
-                    tip_types = f"{self.elemgroup['tip'][t][0]}*{self.elemgroup['tip'][t][-1]}" if self.settings['thermostat']['type'] == 'langevin' else f"{self.elemgroup['tip'][t][0]}"
+        # Write them
+        write_lj_interaction('sheet', 'tip', get_sheet_types, get_solid_types)
+        write_lj_interaction('sheet', 'sub', get_sheet_types, get_solid_types)
+        write_lj_interaction('sub', 'tip', get_solid_types, get_solid_types)
 
-                    f_out.write(
-                        f"pair_coeff {sub_types} {tip_types} lj/cut {e} {sigma} \n")
-            if is_slide_script and drive_method == 'virtual_atom':
-                f_out.writelines([f"mass {num_atom_types} 1.0\n",
-                                 f"pair_coeff * {num_atom_types} lj/cut 1e-100 1e-100\n"])
-        return max_sigma
+        # Virtual Atom (if driving)
+        if is_slide and self.settings.simulation.drive_method == 'virtual_atom':
+            virt_type = max_type + 1
+            f.write(f"mass {virt_type} 1.0\n")
+            f.write(f"pair_coeff * {virt_type} lj/cut 0.0 0.0\n")
 
-    def __single_body_3layer(self, filename, system):
-        """Writes a potential file for a single body with 3 regions.
+    def write_inputs(self, sheet_dims: Dict[str, float], tip_radius: float, lat_c: float) -> None:
+        """Writes the LAMMPS input scripts using Jinja2 templates."""
+        
+        tip_z = self.settings.geometry.tip_base_z
+        gap = 3.0
+        
+        # Calculate total atom types including virtual
+        total_types = len(self.group_definitions)
+        
+        # Context for System Init
+        init_context = {
+            'xlo': sheet_dims['xlo'], 'xhi': sheet_dims['xhi'],
+            'ylo': sheet_dims['ylo'], 'yhi': sheet_dims['yhi'],
+            'zhi_box': tip_z + tip_radius + 20,
+            'ngroups': total_types,
+            
+            'sub_file': f"build/sub.lmp",
+            'tip_file': f"build/tip.lmp",
+            'sheet_file': f"build/{self.config.sheet.mat}_1.lmp", # Layer 1 base
+            'potential_file': "potentials/system.in.settings",
+            
+            'tip_x': (sheet_dims['xhi'] - sheet_dims['xlo']) / 2,
+            'tip_y': (sheet_dims['yhi'] - sheet_dims['ylo']) / 2,
+            'tip_z': tip_z,
+            'sheet_z': self.config.sub.thickness + 0.5 + gap,
+            
+            'sub_natypes': self.pot_data['sub']['natype'] * 3, # 3 regions
+            'tip_natypes': self.pot_data['tip']['natype'] * 3, 
+            'offset_2d': (self.pot_data['sub']['natype']*3) + (self.pot_data['tip']['natype']*3),
+            
+            # Settings
+            'neighbor_list': self.settings.simulation.neighbor_list,
+            'neigh_modify_command': self.settings.simulation.neigh_modify_command,
+            'min_style': self.settings.simulation.min_style,
+            'minimization_command': self.settings.simulation.minimization_command,
+            'timestep': self.settings.simulation.timestep,
+            'thermo': self.settings.simulation.thermo,
+            'temp': self.config.general.temp,
+            'forces': self.config.general.force,
+            'thermostat_type': self.settings.thermostat.type,
+            'tip_fix_group': f"tip_all" if self.settings.geometry.rigid_tip else "tip_fix",
+            'dump_enabled': self.settings.output.dump['system_init'],
+            'dump_freq': self.settings.output.dump_frequency['system_init'],
+            'dump_file': f"visuals/system_init.lammpstrj",
+            'output_dir': "results"
+        }
+        
+        content = self.render_template("afm/system_init.lmp", init_context)
+        with open(self.work_dir / "system.in", "w") as f:
+            f.write(content)
+            
+        # Context for Slide
+        slide_context = {
+            'neighbor_list': self.settings.simulation.neighbor_list,
+            'neigh_modify_command': self.settings.simulation.neigh_modify_command,
+            'timestep': self.settings.simulation.timestep,
+            'thermo': self.settings.simulation.thermo,
+            'temp': self.config.general.temp,
+            'forces': self.config.general.force,
+            'angles': self.config.general.scan_angle,
+            'data_file': "results/load_${find}N.data",
+            'potential_file': "potentials/slide.in.settings",
+            'extra_atom_types': 1 if self.settings.simulation.drive_method == 'virtual_atom' else 0,
+            'dump_enabled': self.settings.output.dump['slide'],
+            'dump_freq': self.settings.output.dump_frequency['slide'],
+            'dump_file_pattern': "visuals/slide_${find}nN_${a}angle.lammpstrj",
+            'thermostat_type': self.settings.thermostat.type,
+            'tip_fix_group': f"tip_all" if self.settings.geometry.rigid_tip else "tip_fix",
+            'results_freq': self.settings.output.results_frequency,
+            'results_file_pattern': "results/friction_${find}nN_${a}angle.txt",
+            'layer_group': f"layer_{max(self.config.sheet.layers)}", # Top layer
+            'damp_ev': self.config.tip.dspring / 0.016,
+            'spring_ev': self.config.tip.cspring / 16.02,
+            'tipps': self.config.tip.s / 100,
+            'drive_method': self.settings.simulation.drive_method,
+            'virtual_offset': 10.0, 
+            'virtual_atom_type': total_types + 1,
+            'run_steps': self.settings.simulation.slide_run_steps
+        }
 
-        Args:
-            filename (str): The name of the file to write to.
-            system (str): The system for which the settings are being written.
-        """
-        with open(filename, 'w', encoding="utf-8") as f_out:
-            arr = super().number_sequential_atoms(system)
-            _ = self.__define_elemgroup_3regions(system, arr)
-
-            super().set_masses(system, f_out)
-
-            potentials = [self.group_def[i][2]
-                          for i in range(1, self.data[system]['natype']*3+1)]
-
-            f_out.writelines([
-                f"pair_style {self.params[system]['pot_type']}\n",
-                f"pair_coeff * * {self.potentials[system]['path']} {' '.join((potentials))}\n"])
-
-    def __define_elemgroup_3regions(self, system, arr, atype=1):
-        """Defines element groups for a system with fixed, thermo, and mobile regions.
-
-        Args:
-            system (str): The system being defined (e.g., 'tip', 'sub').
-            arr (dict): A dictionary of atom counts for each element.
-            atype (int): The starting atom type index.
-
-        Returns:
-            int: The next available atom type index.
-        """
-        i = 1
-        for element, count in self.potentials[system]['count'].items():
-            for _ in range(1, count+1):
-                self.group_def.update({
-                    atype:   [f"{system}_t{i}",        str(atype),   str(element), arr[system][i-1]],
-                    atype+1: [f"{system}_fix_t{i}",    str(atype+1), str(element), arr[system][i-1]],
-                    atype+2: [f"{system}_thermo_t{i}", str(atype+2), str(element), arr[system][i-1]]
-                })
-                self.elemgroup.setdefault(system, {}).setdefault(
-                    element, []).extend([atype, atype+1, atype+2])
-                i += 1
-                atype += 3
-
-        return atype
+        content = self.render_template("afm/slide.lmp", slide_context)
+        with open(self.work_dir / "slide.in", "w") as f:
+            f.write(content)

@@ -1,0 +1,134 @@
+# LAMMPS input script for AFM System Initialization and Indentation
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+# 1. Geometry & Groups
+neighbor        {{ neighbor_list }} bin
+{{ neigh_modify_command }}
+
+comm_style tiled
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -5 {{ zhi_box }}
+create_box      {{ ngroups }} box
+
+# Read data files
+read_data       {{ sub_file }} add append group sub
+read_data       {{ tip_file }} add append shift {{ tip_x }} {{ tip_y }} {{ tip_z }} group tip offset {{ sub_natypes }} 0 0 0 0
+read_data       {{ sheet_file }} add append shift 0.0 0.0 {{ sheet_z }} group 2D offset {{ offset_2d }} 0 0 0 0
+
+# Apply potentials
+include         {{ potential_file }}
+balance         1.0 rcb
+
+{% if dump_enabled %}
+# Visualization
+dump            sys all atom {{ dump_freq }} {{ dump_file }}
+{% endif %}
+
+# 2. Minimization & Equilibration
+min_style       {{ min_style }}
+{{ minimization_command }}
+
+timestep        {{ timestep }}
+thermo          {{ thermo }}
+
+# Apply thermostat
+group           fixset union sub_fix {{ tip_fix_group }}
+group           system subtract all fixset
+
+velocity        system create {{ temp }} 492847948
+
+{% if thermostat_type == 'langevin' %}
+# Langevin Thermostat Logic
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) 699483 zero yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) 2847563 zero yes
+fix_modify      lang_sub temp temp_sub
+
+group           nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+{% else %}
+# Default Thermostat (e.g. Nose-Hoover would go here if implemented, or generic NVT)
+# Assuming standard NVT for 'system' if not Langevin, or just NVE if pre-equilibrated
+fix             nvt_sys system nvt temp {{ temp }} {{ temp }} $(100.0*dt)
+{% endif %}
+
+# Constraints
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0
+velocity        sub_fix set 0.0 0.0 0.0
+
+fix             tip_f {{ tip_fix_group }} rigid/nve single force * off off off torque * off off off
+run             10000
+unfix           tip_f
+
+# 3. Indentation
+displace_atoms  tip_all move 0.0 0.0 -20.0 units box
+
+# Apply constraints for load loop
+fix             tip_f {{ tip_fix_group }} rigid/nve single force * off off on torque * off off off
+variable        f equal 0.0
+
+{% if forces is iterable and forces is not string %}
+# Loop over multiple force values
+variable        find index {{ forces | join(' ') }}
+label           force_loop
+{% else %}
+variable        force equal {{ forces }}
+# If single force, we effectively skip the outer loop logic but keep variable names consistent
+variable        find equal v_force
+{% endif %}
+
+balance         1.0 rcb
+
+# Initial parameters
+variable        num_floads equal 100
+variable        r equal 0.0
+variable        fincr equal (${find}-${f})/${num_floads}
+
+# Apply pressure to the tip
+variable        i loop ${num_floads}
+label           loop_load
+
+variable        f equal ${f}+${fincr}
+# Set force variable (eV/A conversion handled in python or here? Keeping original logic)
+variable        n equal -v_f/(count({{ tip_fix_group }})*1.602176565)
+fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
+run             100
+unfix           forcetip
+
+next            i
+jump            SELF loop_load
+
+# Equilibration at target load
+fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
+variable        dispz equal xcm(tip_all,z)
+run             100 pre yes post no
+
+# Check for displacement stabilization
+label           check_r
+variable        disp_l equal ${dispz}
+variable        disp_h equal ${dispz}
+variable        disploop loop 50
+
+label           disp
+run             100 pre no post no
+if              '${dispz}>${disp_h}' then 'variable disp_h equal ${dispz}'
+if              '${dispz}<${disp_l}' then 'variable disp_l equal ${disp_l}'
+next            disploop
+jump            SELF disp
+
+variable        r equal ${disp_h}-${disp_l}
+if              '${r} < 0.1' then 'jump SELF loop_end' else 'jump SELF check_r'
+
+label           loop_end
+write_data      {{ output_dir }}/load_$(v_find)N.data
+
+{% if forces is iterable and forces is not string %}
+next            find
+jump            SELF force_loop
+{% endif %}

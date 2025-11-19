@@ -1,4 +1,4 @@
-{% set name = "2DFrictionSim" %}
+{% set name = "FrictionSim2D" %}
 {% set version = "0.1.0" %}
 
 package:
@@ -12,7 +12,7 @@ build:
   number: 0
   script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
   entry_points:
-    - 2DFrictionSim = 2DFrictionSim.cli:main
+    - FrictionSim2D = FrictionSim2D.cli:main
 
 requirements:
   host:
@@ -33,15 +33,15 @@ requirements:
 
 test:
   imports:
-    - 2DFrictionSim
+    - FrictionSim2D
   commands:
-    - 2DFrictionSim --help
+    - FrictionSim2D --help
     # Verify external tools are reachable
     - atomsk --version
     - lmp -h
 
 about:
-  home: https://github.com/Mclat16/2DFrictionSim
+  home: https://github.com/Mclat16/FrictionSim2D
   summary: 'Automated generation of LAMMPS scripts for 2D material friction studies.'
   license: MIT
   license_file: LICENSE
