@@ -1,138 +1,153 @@
-"""Builder for Sheet-vs-Sheet Simulations."""
+"""Sheet-on-Sheet Simulation Builder.
+
+This module orchestrates the setup of a friction simulation between two
+2D material sheets. It coordinates the construction of the top and bottom
+sheets, manages their "ghost" interactions, and generates LAMMPS scripts.
+"""
 
 import logging
-import shutil
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from FrictionSim2D.core.base_builder import BaseBuilder
+from FrictionSim2D.core.config import AFMSimulationConfig
+from FrictionSim2D.core.potential_manager import PotentialManager
 from FrictionSim2D.builders import components
-from FrictionSim2D.core.utils import count_atomtypes, cifread, get_material_path, get_potential_path
 
 logger = logging.getLogger(__name__)
 
 class SheetVsSheetSimulation(BaseBuilder):
-    """Builder for Sheet-vs-Sheet friction simulations."""
+    """Builder for Sheet-on-Sheet friction simulations."""
 
-    def __init__(self, config, output_dir=None):
+    def __init__(self, config: AFMSimulationConfig, output_dir: str):
         super().__init__(config, output_dir)
-        self.meta_data = {}
-        self.pot_data = {}
-        self.atom_groups = {}
-        self.group_definitions = {}
+        self.config: AFMSimulationConfig = config
+        
+        # State
+        self.structure_paths: Dict[str, Path] = {}
+        self.z_positions: Dict[str, float] = {}
+        self.groups: Dict[str, str] = {}
 
     def build(self) -> None:
-        self.setup_directories(["visuals", "results", "build", "potentials", "lammps"])
-        self._initialize_component_metadata('sheet', self.config.sheet)
+        """Constructs the dual-sheet system."""
+        logger.info("Starting Sheet-vs-Sheet Build...")
+        self._create_directories()
+        build_dir = self.output_dir / "build"
+
+        # 1. Build Components
+        # Bottom Sheet (Acts as substrate)
+        # Note: Config currently has one 'sheet' entry. 
+        # Ideally, we'd have 'sheet_top' and 'sheet_bottom' configs.
+        # Assuming for now we use the SAME material for both, just stacked differently.
         
-        original_layers = self.config.sheet.layers
-        if not original_layers or max(original_layers) < 4:
-            self.config.sheet.layers = [1, 2, 3, 4]
-            
-        # Build base layer
-        sheet_path, sheet_dims, lat_c = components.build_sheet(
-            self.config.sheet, self.atomsk, self.work_dir / "build"
+        logger.info("Building Bottom Sheet...")
+        bot_path, dims, lat_c = components.build_sheet(
+            self.config.sheet, self.atomsk, build_dir, stack_if_multi=True
         )
+        self.structure_paths['bottom'] = bot_path
         
-        # Stack for friction simulation (4 layers)
-        final_stack_path = self._create_friction_stack(sheet_path, sheet_dims, lat_c, layers=4)
+        logger.info("Building Top Sheet...")
+        top_path, _, _ = components.build_sheet(
+            self.config.sheet, self.atomsk, build_dir, stack_if_multi=True
+        )
+        self.structure_paths['top'] = top_path
 
-        self._write_potential_file("system.in.settings", layers=4)
-        self.write_inputs(sheet_dims, lat_c, final_stack_path)
+        # 2. Calculate Layout
+        # Bottom sheet starts at 0
+        self.z_positions['bottom'] = 0.0
         
-        self.config.sheet.layers = original_layers
+        # Top sheet starts above bottom sheet
+        # Gap calculation
+        # Since they are likely same material, use self-interaction sigma or standard calculation
+        gap = self._calculate_gap(self.config.sheet, self.config.sheet, buffer=0.5)
+        
+        n_layers = max(self.config.sheet.layers) if self.config.sheet.layers else 1
+        bot_height = (n_layers - 1) * lat_c
+        
+        self.z_positions['top'] = bot_height + gap
+        
+        # 3. Generate Potentials
+        self._generate_potentials()
+        
+        logger.info("Build complete.")
 
-    def _create_friction_stack(self, base_layer_path: Path, dims: Dict, lat_c: float, layers: int) -> Path:
-        """Creates the specific 4-layer stack with unique types per layer."""
-        output_path = self.work_dir / "build" / f"{self.config.sheet.mat}_4.lmp"
+    def _calculate_gap(self, comp1, comp2, buffer=0.5):
+        """Calculates gap based on max sigma."""
+        # Helper to calculate gap (could also reuse from PM or base if moved there)
+        # For identical sheets, this is just the material's VdW gap proxy
+        pm = PotentialManager() # Temp instance just for calc
+        # We can just use utils directly if configs are available
+        # But since we have the logic in afm.py, we could move this to BaseBuilder to avoid duplication.
+        # For now, replicating the logic from afm.py for independence.
+        from FrictionSim2D.core.utils import cifread, lj_params
         
-        # Use modular shift calculation
-        sx, sy = components.calculate_layer_shifts(self.config.sheet.mat, dims)
-        
-        natypes = self.pot_data['sheet']['natype']
-        total_types = natypes * layers # We want unique IDs for every layer's atoms
-        
-        cmds = [
-            "clear",
-            "units metal",
-            "atom_style atomic",
-            "boundary p p p",
-            f"region box block {dims['xlo']} {dims['xhi']} {dims['ylo']} {dims['yhi']} -5 {dims['yhi']+6*layers}",
-            f"create_box {total_types} box",
-        ]
-        
-        # Build stack commands with specific friction-simulation shifts
-        # Layers 1,2 (Bottom) vs 3,4 (Top)
-        # Top layers usually shifted to align/misalign
-        
-        # Layer 1
-        cmds.append(f"read_data {base_layer_path} add append group layer_1")
-        
-        # Layer 2
-        cmds.append(f"read_data {base_layer_path} add append shift 0 0 {lat_c} group layer_2")
-        cmds.append(f"displace_atoms layer_2 move {sx} {sy} 0 units box")
-        
-        # Layer 3 (Start of Top Block)
-        cmds.append(f"read_data {base_layer_path} add append shift 0 0 {lat_c*2} group layer_3")
-        cmds.append(f"displace_atoms layer_3 move {sx} {sy} 0 units box")
-        
-        # Layer 4
-        cmds.append(f"read_data {base_layer_path} add append shift 0 0 {lat_c*3} group layer_4")
-        cmds.append(f"displace_atoms layer_4 move {sx} {sy} 0 units box")
+        elems1 = cifread(comp1.cif_path)['elements']
+        elems2 = cifread(comp2.cif_path)['elements']
+        max_sigma = 0.0
+        for e1 in set(elems1):
+            for e2 in set(elems2):
+                _, sigma = lj_params(e1, e2)
+                max_sigma = max(max_sigma, sigma)
+        return max_sigma + buffer
 
-        # Renumber types: Map original types to Layer-Specific types
-        # E.g. Layer 2 Carbon (Type 1 in file) -> Global Type (natypes + 1)
-        current_new_type = 1
-        for l in range(1, layers + 1):
-            for t in range(1, natypes + 1):
-                cmds.append(f"group t_{t} type {t}")
-                # Intersect atoms that are in this Layer AND are this original Element
-                cmds.append(f"group target intersect layer_{l} t_{t}")
-                cmds.append(f"set group target type {current_new_type}")
-                cmds.append(f"group t_{t} delete")
-                cmds.append(f"group target delete")
-                current_new_type += 1
-
-        cmds.append(f"write_data {output_path}")
+    def _generate_potentials(self) -> None:
+        """Configures potential file with Ghost interactions."""
+        pm = PotentialManager()
         
-        components.run_lammps_commands(cmds)
-        return output_path
+        # Register
+        pm.register_component('bottom', self.config.sheet)
+        pm.register_component('top', self.config.sheet)
+        
+        # Interactions
+        pm.add_self_interaction('bottom')
+        pm.add_self_interaction('top')
+        
+        # Cross Interaction: Ghost / Weak LJ
+        # We want them to interact, but perhaps with specific settings defined in config
+        # or standard LJ. Original code used 'hybrid' and specific coeffs.
+        # Defaulting to standard LJ mixing for physical friction.
+        # If "ghost" behavior (no interaction) is desired, epsilon can be set to ~0.
+        pm.add_cross_interaction('bottom', 'top', interaction_type='lj/cut')
+        
+        pm.write_file(self.output_dir / "lammps" / "system.in.settings")
+        
+        self.groups['bottom_types'] = pm.get_group_string('bottom')
+        self.groups['top_types'] = pm.get_group_string('top')
 
-    def _initialize_component_metadata(self, name: str, component_config: Any) -> None:
-        """Reads CIF/Potential data."""
-        cif_path = Path(component_config.cif_path)
-        if not cif_path.exists():
-            cif_path = get_material_path(component_config.cif_path, 'cif')
+    def write_inputs(self) -> None:
+        """Generates LAMMPS scripts."""
+        logger.info("Writing LAMMPS inputs...")
+        
+        all_types = set()
+        for s in self.groups.values():
+            all_types.update(s.split())
+        total_types = len(all_types)
+
+        context = {
+            'temp': self.config.general.temp,
+            'pressure': self.config.general.pressure,
+            'angle': self.config.general.scan_angle,
+            'speed': self.config.general.scan_speed, # Sheet-on-sheet often uses scan_speed
+            'settings': self.config.settings.simulation,
             
-        data = cifread(cif_path)
-        
-        # Resolve Potential Path using helper
-        pot_path = Path(component_config.pot_path)
-        if not pot_path.exists():
-            pot_path = get_potential_path(str(component_config.pot_path))
-        
-        # Check again if found
-        if not pot_path.exists():
-            raise FileNotFoundError(f"Potential file '{component_config.pot_path}' not found in package data.")
-
-        counts = count_atomtypes(pot_path, data['elements'])
-        
-        dest_pot = self.work_dir / "potentials" / pot_path.name
-        if pot_path.exists():
-            shutil.copy(pot_path, dest_pot)
+            'path_bot': f"../build/{self.structure_paths['bottom'].name}",
+            'path_top': f"../build/{self.structure_paths['top'].name}",
             
-        self.meta_data[name] = data
-        self.pot_data[name] = {
-            'path': dest_pot.name,
-            'counts': counts,
-            'natype': sum(counts.values())
+            'z_bot': self.z_positions['bottom'],
+            'z_top': self.z_positions['top'],
+            
+            'bot_types': self.groups['bottom_types'],
+            'top_types': self.groups['top_types'],
+            'ngroups': total_types,
+            
+            'results_freq': self.config.settings.output.results_frequency,
+            'dump_freq': self.config.settings.output.dump_frequency['slide']
         }
-
-    def _write_potential_file(self, filename: str, layers: int = 4) -> None:
-        # ... (Same logic as previous step, omitted for brevity unless requested) ...
-        # This function generates the pair_coeffs based on the unique types we just created
-        pass
-
-    def write_inputs(self, dims: Dict, lat_c: float, data_file: Path) -> None:
-        # ... (Same logic as previous step) ...
-        pass
+        
+        # Render Template
+        # Note: Sheet-on-sheet typically skips 'system_init' and goes straight to slide/equilibration
+        # or combines them. Assuming 'slide.lmp' covers the physics.
+        script = self.render_template("sheet_vs_sheet/slide.lmp", context)
+        self.write_file("lammps/slide.in", script)
+        
+        logger.info(f"Inputs written to {self.output_dir}/lammps/")

@@ -53,8 +53,8 @@ class AtomskWrapper:
         cmd = [self.executable] + [str(a) for a in args]
         
         # Default to quiet execution unless verbose requested
-        stdout_setting = None if verbose else subprocess.DEVNULL
-        stderr_setting = None if verbose else subprocess.DEVNULL
+        stdout_setting = None if verbose else subprocess.PIPE
+        stderr_setting = None if verbose else subprocess.PIPE
 
         try:
             subprocess.run(
@@ -67,7 +67,9 @@ class AtomskWrapper:
         except subprocess.CalledProcessError as e:
             # Try to capture stderr if we silenced it, to show the user why it failed
             error_msg = f"Atomsk command failed with exit code {e.returncode}"
-            if not verbose:
+            if e.stderr:
+                error_msg += f"\nError Output: {e.stderr}"
+            elif not verbose:
                 error_msg += ". Run with verbose=True to see details."
             raise AtomskError(error_msg) from e
 
@@ -92,11 +94,11 @@ class AtomskWrapper:
         self.run([str(input_file), "-orthogonal-cell", str(output_file)])
 
     def duplicate(
-        self, 
-        input_file: Union[str, Path], 
-        output_file: Union[str, Path], 
-        nx: int, 
-        ny: int, 
+        self,
+        input_file: Union[str, Path],
+        output_file: Union[str, Path],
+        nx: int,
+        ny: int,
         nz: int,
         center: bool = False
     ) -> None:
@@ -126,9 +128,9 @@ class AtomskWrapper:
         self.run(args)
 
     def create_slab(
-        self, 
-        cif_path: Union[str, Path], 
-        output_path: Union[str, Path], 
+        self,
+        cif_path: Union[str, Path],
+        output_path: Union[str, Path],
         pre_duplicate: List[int] = [2, 2, 1]
     ) -> None:
         """Helper to create an orthogonalized slab from a CIF.
@@ -146,3 +148,26 @@ class AtomskWrapper:
             str(output_path)
         ]
         self.run(args)
+
+    def center(self, input_file: Union[str, Path], output_file: Union[str, Path], axis: str = "z") -> None:
+        """Centers the system (usually to Center of Mass).
+        
+        Args:
+            input_file: Path to input.
+            output_file: Path to output.
+            axis: (Unused by Atomsk's basic -center com, but kept for API consistency)
+        """
+        self.run([str(input_file), "-center", "com", str(output_file)])
+
+    def remove_properties(self, input_file: Union[str, Path], output_file: Union[str, Path], properties: List[str]) -> None:
+        """Removes specific auxiliary properties (columns) from the file.
+        
+        Useful for stripping charges ('q') for potentials that don't support them.
+        
+        Args:
+            input_file: Path to input.
+            output_file: Path to output.
+            properties: List of properties to remove (e.g. ['q', 'vx']).
+        """
+        props_str = ",".join(properties)
+        self.run([str(input_file), "-properties", "remove", props_str, str(output_file)])

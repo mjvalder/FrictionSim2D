@@ -13,8 +13,9 @@ import re
 import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple, Union, Any
-import numpy as np
+import math
 import yaml
+from ase.io import read as ase_read
 
 from FrictionSim2D.data.potentials import UFF_params as lj
 
@@ -22,7 +23,7 @@ def get_material_path(mat_name: str, file_type: str = 'cif') -> Path:
     """Helper to find material files in the package data."""
     # Access the base materials directory
     mat_dir = resources.files('FrictionSim2D.data.materials')
-    
+
     # Potential locations to check
     candidates = [
         mat_dir.joinpath(mat_name),                                # direct match
@@ -35,7 +36,7 @@ def get_material_path(mat_name: str, file_type: str = 'cif') -> Path:
         if candidate.exists():
             return Path(str(candidate))
 
-    # If not found, return the original path string. 
+    # If not found, return the original path string.
     # The user might have provided an absolute path.
     return Path(mat_name)
 
@@ -63,8 +64,8 @@ def get_potential_path(pot_name: str) -> Path:
         matches = list(base_path.rglob(target_name))
         if matches:
             return matches[0] # Return the first match
-    except Exception as e:
-        logging.warning(f"Failed recursive search for potential: {e}")
+    except OSError as e:
+        logging.warning("Failed recursive search for potential: %s", e)
 
     # If not found in package, assume absolute path
     return Path(pot_name)
@@ -82,7 +83,7 @@ def read_yaml(filepath: Union[str, Path]) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 def cifread(cif_path: Union[str, Path]) -> Dict[str, Any]:
-    """Reads a CIF file and extracts crystal structure information.
+    """Reads a CIF file and extracts crystal structure information using ASE.
 
     Args:
         cif_path (str | Path): Path to the CIF file.
@@ -92,68 +93,35 @@ def cifread(cif_path: Union[str, Path]) -> Dict[str, Any]:
         constants ('lat_a', 'lat_b', 'lat_c'), cell angles, chemical formula,
         and a list of elements.
     """
-    filename = os.path.basename(str(cif_path)).split('.')[0]
+    cif_path = Path(cif_path)
+    filename = cif_path.stem
 
-    with open(cif_path, 'r', encoding="utf-8") as f:
-        lines = f.readlines()
+    # Read structure with ASE
+    atoms = ase_read(str(cif_path))
 
-    elements = []
-    cif_data = {}
-    reading_elements = False
-    header_skipped = False
+    # Extract cell parameters [a, b, c, alpha, beta, gamma]
+    cell = atoms.cell.cellpar()
 
-    # Map CIF keys to dictionary keys for easier parsing
-    keys = {
-        '_cell_length_a': 'lat_a',
-        '_cell_length_b': 'lat_b',
-        '_cell_length_c': 'lat_c',
-        '_chemical_formula_structural': 'formula',
-        '_cell_angle_alpha': 'ang_a',
-        '_cell_angle_beta': 'ang_b',
-        '_cell_angle_gamma': 'ang_g'
+    # Extract elements (unique, preserving order)
+    symbols = atoms.get_chemical_symbols()
+    elements = list(dict.fromkeys(symbols))
+
+    # Calculate composition
+    elem_comp = {el: symbols.count(el) for el in elements}
+
+    return {
+        'lat_a': float(cell[0]),
+        'lat_b': float(cell[1]),
+        'lat_c': float(cell[2]),
+        'ang_a': float(cell[3]),
+        'ang_b': float(cell[4]),
+        'ang_g': float(cell[5]),
+        'formula': atoms.get_chemical_formula(mode='hill'),
+        'elements': elements,
+        'elem_comp': elem_comp,
+        'nelements': len(elements),
+        'filename': filename
     }
-
-    for line in lines:
-        # Parse lattice parameters and formula
-        for key, var in keys.items():
-            if line.startswith(key):
-                value = line.split(maxsplit=1)[1].strip()
-                cif_data[var] = float(value) if 'formula' not in var else value
-
-        # Start reading element symbols after this line
-        if line.strip().startswith('_atom_site_type_symbol'):
-            reading_elements = True
-            continue
-
-        # Skip any other header lines within the atom site loop
-        if reading_elements and not header_skipped:
-            if line.strip().startswith('_'):
-                continue
-            header_skipped = True
-
-        # Once headers are skipped, read the element symbols
-        if reading_elements and header_skipped:
-            parts = line.strip().split()
-            if parts:
-                element = parts[0]
-                elements.append(element)
-
-    # Parse the chemical formula to get element counts
-    elem_count = {}
-    if cif_data.get('formula'):
-        matches = re.findall(r'([A-Z][a-z]*)(\d*)', cif_data['formula'])
-        for element, count in matches:
-            elem_count[element] = int(count) if count else 1
-        nelements = len(elements)
-
-        cif_data.update({
-            "elements": elements,
-            "elem_comp": elem_count,
-            "nelements": nelements,
-            "filename": filename
-        })
-
-    return cif_data
 
 def count_atomtypes(potential_filepath: Union[str, Path], elements: List[str]) -> Dict[str, int]:
     """Counts the number of different atom types per element in a potential file.
@@ -236,7 +204,7 @@ def lj_params(atom_type_1: str, atom_type_2: str) -> Tuple[float, float]:
     e2 = lj.lj_params[atom_type_2][1]
     s1 = lj.lj_params[atom_type_1][0]
     s2 = lj.lj_params[atom_type_2][0]
-    epsilon = np.sqrt(e1 * e2)
+    epsilon = math.sqrt(e1 * e2)
     sigma = (s1 + s2) / 2
     return epsilon, sigma
 

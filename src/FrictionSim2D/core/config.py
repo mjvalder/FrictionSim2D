@@ -119,11 +119,20 @@ class AFMSimulationConfig(BaseModel):
 class SheetOnSheetSimulationConfig(BaseModel):
     """Master configuration object for a Sheet-on-Sheet simulation run."""
     general: GeneralConfig
-    sheet1: SheetConfig
-    sheet2: SheetConfig
+    sheet: SheetConfig = Field(..., alias='2D')
     settings: GlobalSettings
 
 # --- Helper Functions ---
+
+def get_settings_path(filename: str = 'settings.yaml') -> Path:
+    """Returns the path to the installed settings file (if mutable) or package resource."""
+    # Check local directory first
+    local_settings = Path("settings.yaml")
+    if local_settings.exists():
+        return local_settings.resolve()
+
+    # Otherwise return the package resource context (read-only usually)
+    return resources.files('FrictionSim2D.data.settings').joinpath(filename)
 
 def load_default_settings() -> GlobalSettings:
     """Loads settings from 'settings.yaml', falling back to 'settings_default.yaml'.

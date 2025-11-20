@@ -1,23 +1,23 @@
-"""Base builder class for FrictionSim2D simulations.
+"""Base class for all simulation builders.
 
-This module defines the abstract base class for all simulation builders.
-It handles common tasks such as directory creation, configuration loading,
-Atomsk wrapper initialization, and Jinja2 template rendering.
+This module provides the abstract base class `BaseBuilder`, which defines
+the common interface and utility methods (template rendering, directory setup)
+required by all specific simulation types (AFM, Sheet-on-Sheet, etc.).
 """
-from importlib import resources
+
+import os
 import logging
-from pathlib import Path
-from typing import Optional, Any, Dict, List
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any, Dict, List, Union
 
-import jinja2
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from importlib import resources
 
-from FrictionSim2D.core.config import GlobalSettings, AFMSimulationConfig, SheetOnSheetSimulationConfig
+# Import the configuration model base for type hinting
+from FrictionSim2D.core.config import AFMSimulationConfig, GlobalSettings
 from FrictionSim2D.interfaces.atomsk import AtomskWrapper
-from FrictionSim2D.core.utils import get_potential_path
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class BaseBuilder(ABC):
@@ -25,140 +25,87 @@ class BaseBuilder(ABC):
 
     Attributes:
         config (AFMSimulationConfig): The validated configuration object.
-        settings (GlobalSettings): The global software settings.
-        atomsk (AtomskWrapper): The wrapper for the Atomsk binary.
-        work_dir (Path): The root directory for the current simulation output.
+        output_dir (Path): The root directory for the simulation output.
+        atomsk (AtomskWrapper): Interface for geometry manipulation.
+        jinja_env (jinja2.Environment): Template engine environment.
     """
 
-    def __init__(self, config: AFMSimulationConfig, output_dir: Optional[Path] = None):
-        """Initialize the BaseBuilder.
+    def __init__(self, config: Any, output_dir: Union[str, Path]):
+        """Initialize the builder.
 
         Args:
-            config (AFMSimulationConfig): Validated configuration object.
-            output_dir (Optional[Path]): Root directory for output. If None,
-                defaults to the current working directory.
+            config: A Pydantic configuration object (specific to the simulation type).
+            output_dir: The directory where files will be generated.
         """
         self.config = config
-        self.settings = config.settings
-        
-        # Initialize Atomsk Wrapper
+        self.output_dir = Path(output_dir).resolve()
         self.atomsk = AtomskWrapper()
-
-        # Setup Output Directory
-        self.work_dir = output_dir if output_dir else Path.cwd()
         
-        # Setup Jinja2 Template Environment
-        # We point the loader to the 'templates' directory inside the package
-        template_dir = resources.files('FrictionSim2D.templates')
-        self.jinja_env = jinja2.Environment(
-            loader=jinja2.FileSystemLoader(str(template_dir)),
+        # Initialize Jinja2 Environment
+        # We point it to the installed 'templates' directory package
+        template_path = resources.files('FrictionSim2D.templates')
+        self.jinja_env = Environment(
+            loader=FileSystemLoader(str(template_path)),
+            autoescape=select_autoescape(),
             trim_blocks=True,
             lstrip_blocks=True
         )
 
-    def setup_directories(self, subdirs: list[str]) -> None:
-        """Creates the simulation directory structure.
+    def _create_directories(self, subdirs: List[str] = None) -> None:
+        """Creates standard simulation subdirectories.
 
         Args:
-            subdirs (list[str]): List of subdirectory names to create 
-                                (e.g., ['visuals', 'results']).
+            subdirs: Optional list of additional subdirectories to create.
+                     Defaults to ['visuals', 'results', 'lammps', 'data', 'build'].
         """
-        for subdir in subdirs:
-            path = self.work_dir / subdir
-            try:
-                path.mkdir(parents=True, exist_ok=True)
-            except OSError as e:
-                logger.error(f"Failed to create directory {path}: {e}")
-                raise
+        default_dirs = ['visuals', 'results', 'lammps', 'data', 'build']
+        dirs_to_create = default_dirs + (subdirs or [])
+        
+        for d in dirs_to_create:
+            path = self.output_dir / d
+            path.mkdir(parents=True, exist_ok=True)
 
     def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
         """Renders a Jinja2 template with the provided context.
 
         Args:
-            template_name (str): Relative path to the template (e.g., 'afm/slide.lmp').
-            context (Dict[str, Any]): Dictionary of variables to pass to the template.
+            template_name: Relative path to the template (e.g., 'afm/slide.lmp').
+            context: Dictionary of variables to pass to the template.
 
         Returns:
-            str: The rendered content.
+            str: The rendered template string.
         """
         try:
             template = self.jinja_env.get_template(template_name)
             return template.render(context)
-        except jinja2.TemplateError as e:
+        except Exception as e:
             logger.error(f"Failed to render template '{template_name}': {e}")
             raise
 
-    def _generate_potential_commands(self) -> List[str]:
-        """Generates the LAMMPS commands for setting up potentials."""
-        commands = []
-        unique_potentials = {}
+    def write_file(self, filename: Union[str, Path], content: str) -> Path:
+        """Writes string content to a file in the output directory.
         
-        # Consolidate components from the specific config
-        components_to_process = {}
-        if isinstance(self.config, AFMSimulationConfig):
-            components_to_process = {
-                'tip': self.config.tip,
-                'sub': self.config.sub,
-                'sheet': self.config.sheet
-            }
-        elif isinstance(self.config, SheetOnSheetSimulationConfig):
-            components_to_process = {
-                'sheet1': self.config.sheet1,
-                'sheet2': self.config.sheet2
-            }
-
-        for component_name, component_config in components_to_process.items():
-            # Resolve the potential path using the helper
-            pot_path = get_potential_path(str(component_config.pot_path))
+        Args:
+            filename: Relative path or filename (e.g. 'lammps/system.in').
+            content: The string content to write.
             
-            if str(pot_path) not in unique_potentials:
-                unique_potentials[str(pot_path)] = {
-                    "type": component_config.pot_type,
-                    "components": []
-                }
-            unique_potentials[str(pot_path)]["components"].append(component_name)
-
-        # Create pair_style and pair_coeff commands
-        pair_style_parts = []
-        pair_coeff_commands = []
+        Returns:
+            Path: The full path to the written file.
+        """
+        full_path = self.output_dir / filename
+        full_path.parent.mkdir(parents=True, exist_ok=True)
         
-        for path, info in unique_potentials.items():
-            pair_style_parts.append(info['type'])
-        
-        if pair_style_parts:
-            commands.append(f"pair_style hybrid {' '.join(pair_style_parts)}")
+        with open(full_path, 'w') as f:
+            f.write(content)
             
-            for path, info in unique_potentials.items():
-                # This part might need adjustment based on how atom types are mapped
-                # Assuming a simple mapping for now
-                pair_coeff_commands.append(f"pair_coeff * * {info['type']} {path} ...") # Placeholder
-
-        # This is a simplified placeholder. The actual implementation will need to
-        # correctly map atom types to pair_coeff commands, which is complex.
-        # For now, we'll just show the resolved paths.
-        logging.info("--- Resolved Potentials ---")
-        for path, info in unique_potentials.items():
-            logging.info("  Path: %s", path)
-            logging.info("  Type: %s", info['type'])
-            logging.info("  Used by: %s", info['components'])
-        logging.info("--------------------------")
-        # This is a placeholder for the actual commands
-        # commands.extend(pair_coeff_commands)
-
-        return commands
+        return full_path
 
     @abstractmethod
     def build(self) -> None:
-        """Main execution method to build the simulation.
-        
-        Must be implemented by child classes (e.g., AFMSimulation).
-        """
+        """Orchestrates the construction of atomic structures (Tips, Sheets)."""
         pass
 
     @abstractmethod
     def write_inputs(self) -> None:
-        """Writes the LAMMPS input scripts.
-        
-        Must be implemented by child classes.
-        """
+        """Generates the LAMMPS input scripts and potential files."""
         pass
