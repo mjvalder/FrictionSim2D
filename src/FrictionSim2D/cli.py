@@ -72,17 +72,18 @@ def expand_config_sweeps(base_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         if materials:
             sweep_params[('2D', '_material_expand')] = materials
          
-    # Check General params (temp, force, layers, etc) - lists are sweepable
+    # Check General params - only SPECIFIC params should trigger multiple simulations
+    # force, pressure, and scan_angle are LAMMPS loop parameters, NOT sweep parameters
+    # layers is handled internally by AFMSimulation, NOT as separate runs
+    LAMMPS_LOOP_PARAMS = {'force', 'scan_angle', 'pressure'}  # These go to LAMMPS as loops, not separate runs
+    INTERNAL_SWEEP_PARAMS = {'layers'}  # Handled internally by simulation builders
+    
     if 'general' in base_config:
         for key, val in base_config['general'].items():
-            if isinstance(val, list):
+            if isinstance(val, list) and key not in LAMMPS_LOOP_PARAMS:
                 sweep_params[('general', key)] = val
     
-    # Also check layers in 2D section (commonly swept)
-    if '2D' in base_config:
-        layers = base_config['2D'].get('layers')
-        if isinstance(layers, list) and len(layers) > 1:
-            sweep_params[('2D', 'layers')] = [[l] for l in layers]  # Each layer as single-element list
+    # Note: layers is NOT expanded here - AFMSimulation handles layer iteration internally
 
     # 2. Generate Permutations
     if not sweep_params:
@@ -130,11 +131,6 @@ def handle_settings(args):
             shutil.copy(p, "settings.yaml")
         logger.info("Created mutable 'settings.yaml' in current directory.")
 
-def handle_build(args):
-    """Handler for 'build' subcommand (individual components)."""
-    # ... Logic to instantiate Config -> components.build_X ...
-    pass
-
 def handle_run(args):
     """Handler for 'run' subcommand."""
     config_path = Path(args.config_file)
@@ -158,13 +154,12 @@ def handle_run(args):
         run_dict['settings'] = defaults.dict()
         
         # Generate dynamic output dir based on run params
+        # Note: layers are handled internally by the simulation builder,
+        # which creates subdirectories (L1/, L2/, etc.) as needed
         mat = run_dict['2D'].get('mat', 'unknown')
-        layers = run_dict['2D'].get('layers', [1])
-        n_layers = layers[0] if isinstance(layers, list) else layers
         temp = run_dict['general'].get('temp', 0)
-        force = run_dict['general'].get('force', 0)
         
-        run_name = f"{mat}_L{n_layers}_{temp}K_{force}nN"
+        run_name = f"{mat}_{temp}K"
         run_output_dir = Path(args.output_dir) / run_name
         
         # Dispatch
@@ -177,7 +172,6 @@ def handle_run(args):
                 builder = SheetOnSheetSimulation(config_obj, run_output_dir)
             
             builder.build()
-            builder.write_inputs()
             
         except Exception as e:
             logger.error(f"Run {i+1} failed: {e}")
@@ -198,12 +192,6 @@ def main():
     settings_parser = subparsers.add_parser('settings', help='Manage settings')
     settings_parser.add_argument("action", choices=['show', 'init', 'reset'])
     settings_parser.set_defaults(func=handle_settings)
-    
-    # --- BUILD Command ---
-    build_parser = subparsers.add_parser('build', help='Build individual component')
-    build_parser.add_argument("component", choices=['tip', 'sheet', 'sub'])
-    # ... add args for config ...
-    build_parser.set_defaults(func=handle_build)
 
     args = parser.parse_args()
     args.func(args)

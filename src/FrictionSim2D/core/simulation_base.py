@@ -1,21 +1,18 @@
-"""Base class for all simulation builders.
+"""Base class for simulation setup.
 
-This module provides the abstract base class `BaseBuilder`, which defines
+This module provides the abstract base class `SimulationBase`, which defines
 the common interface and utility methods (template rendering, directory setup)
 required by all specific simulation types (AFM, Sheet-on-Sheet, etc.).
 """
 
-import os
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Union
-
-from jinja2 import Environment, FileSystemLoader, select_autoescape, BaseLoader, TemplateNotFound
 from importlib import resources
 
-# Import the configuration model base for type hinting
-from FrictionSim2D.core.config import AFMSimulationConfig, GlobalSettings
+from jinja2 import Environment, BaseLoader, TemplateNotFound
+
 from FrictionSim2D.interfaces.atomsk import AtomskWrapper
 
 logger = logging.getLogger(__name__)
@@ -25,12 +22,10 @@ class PackageLoader(BaseLoader):
     """Jinja2 loader that works with importlib.resources Traversable objects."""
     
     def __init__(self, package_name: str):
-        self.package_name = package_name
         self._package = resources.files(package_name)
     
     def get_source(self, environment, template):
         try:
-            # Navigate the path
             parts = template.split('/')
             current = self._package
             for part in parts:
@@ -40,23 +35,26 @@ class PackageLoader(BaseLoader):
                 raise TemplateNotFound(template)
             
             source = current.read_text(encoding='utf-8')
-            # Use a dummy path for the filename
             return source, template, lambda: True
         except (FileNotFoundError, TypeError):
             raise TemplateNotFound(template)
 
-class BaseBuilder(ABC):
-    """Abstract base class for simulation builders.
+class SimulationBase(ABC):
+    """Abstract base class for simulation setup.
+
+    Provides common infrastructure for directory creation, template rendering,
+    and file writing. Concrete simulation classes (AFM, SheetOnSheet) inherit
+    from this and implement the build() and write_inputs() methods.
 
     Attributes:
-        config (AFMSimulationConfig): The validated configuration object.
-        output_dir (Path): The root directory for the simulation output.
-        atomsk (AtomskWrapper): Interface for geometry manipulation.
-        jinja_env (jinja2.Environment): Template engine environment.
+        config: The validated configuration object for the simulation.
+        output_dir: The root directory for simulation output.
+        atomsk: Interface for geometry manipulation.
+        jinja_env: Template engine environment.
     """
 
     def __init__(self, config: Any, output_dir: Union[str, Path]):
-        """Initialize the builder.
+        """Initialize the simulation base.
 
         Args:
             config: A Pydantic configuration object (specific to the simulation type).
@@ -66,10 +64,8 @@ class BaseBuilder(ABC):
         self.output_dir = Path(output_dir).resolve()
         self.atomsk = AtomskWrapper()
         
-        # Initialize Jinja2 Environment with custom package loader
         self.jinja_env = Environment(
             loader=PackageLoader('FrictionSim2D.templates'),
-            autoescape=select_autoescape(),
             trim_blocks=True,
             lstrip_blocks=True
         )
@@ -82,11 +78,8 @@ class BaseBuilder(ABC):
                      Defaults to ['visuals', 'results', 'lammps', 'data', 'build'].
         """
         default_dirs = ['visuals', 'results', 'lammps', 'data', 'build']
-        dirs_to_create = default_dirs + (subdirs or [])
-        
-        for d in dirs_to_create:
-            path = self.output_dir / d
-            path.mkdir(parents=True, exist_ok=True)
+        for d in default_dirs + (subdirs or []):
+            (self.output_dir / d).mkdir(parents=True, exist_ok=True)
 
     def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
         """Renders a Jinja2 template with the provided context.
@@ -96,7 +89,7 @@ class BaseBuilder(ABC):
             context: Dictionary of variables to pass to the template.
 
         Returns:
-            str: The rendered template string.
+            The rendered template string.
         """
         try:
             template = self.jinja_env.get_template(template_name)
@@ -113,14 +106,11 @@ class BaseBuilder(ABC):
             content: The string content to write.
             
         Returns:
-            Path: The full path to the written file.
+            The full path to the written file.
         """
         full_path = self.output_dir / filename
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(full_path, 'w') as f:
-            f.write(content)
-            
+        full_path.write_text(content)
         return full_path
 
     @abstractmethod

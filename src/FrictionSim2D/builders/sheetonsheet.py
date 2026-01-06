@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
-from FrictionSim2D.core.base_builder import BaseBuilder
+from FrictionSim2D.core.simulation_base import SimulationBase
 from FrictionSim2D.core.config import SheetOnSheetSimulationConfig
 from FrictionSim2D.core.potential_manager import PotentialManager
 from FrictionSim2D.builders import components
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 N_LAYERS = 4
 
 
-class SheetOnSheetSimulation(BaseBuilder):
+class SheetOnSheetSimulation(SimulationBase):
     """Builder for Sheet-on-Sheet friction simulations.
     
     Creates a 4-layer stack of the same 2D material:
@@ -74,6 +74,9 @@ class SheetOnSheetSimulation(BaseBuilder):
         self.lat_c = lat_c
         self.sheet_dims = dims
         
+        # Write LAMMPS inputs
+        self.write_inputs()
+        
         logger.info("Build complete.")
 
     def _generate_potentials(self) -> PotentialManager:
@@ -115,17 +118,16 @@ class SheetOnSheetSimulation(BaseBuilder):
         
         total_types = self.pm.get_total_types() if self.pm else 0
         virtual_atom_type = total_types + 1
+        
+        sim = self.config.settings.simulation
+        out = self.config.settings.output
 
         context = {
             # General settings
             'temp': self.config.general.temp,
-            'pressure': self.config.general.pressure,
-            'angle': self.config.general.scan_angle,
-            'speed': self.config.general.scan_speed,
-            'settings': self.config.settings.simulation,
-            
-            # Structure path
-            'path_sheet': f"../build/{self.structure_paths['sheet'].name}",
+            'pressures': self.config.general.pressure,  # For LAMMPS index variable
+            'angles': self.config.general.scan_angle,   # For LAMMPS index variable
+            'scan_speed_norm': self.config.general.scan_speed / 100,  # Normalized for LAMMPS
             
             # Box dimensions (actual from build)
             'xlo': self.sheet_dims.get('xlo', 0.0),
@@ -133,30 +135,55 @@ class SheetOnSheetSimulation(BaseBuilder):
             'ylo': self.sheet_dims.get('ylo', 0.0),
             'yhi': self.sheet_dims.get('yhi', 100.0),
             
+            # File paths
+            'data_file': f"../build/{self.structure_paths['sheet'].name}",
+            'potential_file': 'system.in.settings',
+            
+            # Atom types
+            'num_atom_types': total_types,
+            'ngroups': total_types,
+            
             # Layer groups
             'layer_1_types': self.groups['layer_1'],
             'layer_2_types': self.groups['layer_2'],
             'layer_3_types': self.groups['layer_3'],
             'layer_4_types': self.groups['layer_4'],
             'center_types': self.groups['center'],
-            'ngroups': total_types,
             
             # Geometry
             'n_layers': N_LAYERS,
             'lat_c': self.lat_c,
             'sheet_dims': self.sheet_dims,
             
-            # Spring constants (convert N/m to eV/Å²: divide by 16.02)
+            # Bond settings for interlayer springs
             'bond_spring_ev': (self.config.general.bond_spring or 5.0) / 16.02,
+            'bond_min': self.lat_c * 0.8,  # 80% of interlayer spacing
+            'bond_max': self.lat_c * 1.2,  # 120% of interlayer spacing
+            
+            # Driving spring (convert N/m to eV/Å²: divide by 16.02)
             'driving_spring_ev': (self.config.general.driving_spring or 50.0) / 16.02,
             
+            # Simulation settings
+            'timestep': sim.timestep,
+            'thermo': sim.thermo,
+            'neighbor_list': sim.neighbor_list,
+            'neigh_modify_command': sim.neigh_modify_command,
+            'run_steps': sim.slide_run_steps,
+            
+            # Minimization settings
+            'min_style': sim.min_style,
+            'minimization_command': sim.minimization_command,
+            
             # Output settings
-            'results_freq': self.config.settings.output.results_frequency,
-            'dump_freq': self.config.settings.output.dump_frequency.get('slide', 1000),
+            'results_freq': out.results_frequency,
+            'dump_freq': out.dump_frequency.get('slide', 1000),
+            'dump_enabled': out.dump.get('slide', False),
+            'results_file_pattern': '../results/friction_p${pressure}_a${a}.dat',
+            'dump_file_pattern': '../visuals/slide_p${pressure}_a${a}.*.dump',
             
             # Virtual atom for driving
             'virtual_atom_type': virtual_atom_type,
-            'drive_method': self.config.settings.simulation.drive_method,
+            'drive_method': sim.drive_method,
             
             # Thermostat
             'thermostat_type': self.config.settings.thermostat.type,

@@ -17,7 +17,7 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from lammps import lammps
 
@@ -675,27 +675,32 @@ def build_substrate(
     
     return final_lmp
 
-def build_sheet(
+def build_monolayer(
     config: SheetConfig,
     atomsk: AtomskWrapper,
     build_dir: Path,
-    stack_if_multi: bool = False,
-    settings: Optional[GlobalSettings] = None,
-    n_layers_override: Optional[int] = None
-) -> Tuple[Path, dict, float]:
-    """Builds the 2D material sheet.
+    settings: Optional[GlobalSettings] = None
+) -> Tuple[Path, dict, float, dict, int]:
+    """Builds a single-layer 2D material sheet (monolayer).
+    
+    This is the base layer that can be stacked for multi-layer systems.
+    Building the monolayer once and reusing it for different layer counts
+    avoids redundant lattice spacing calculations.
     
     Args:
         config: Sheet configuration.
         atomsk: AtomskWrapper instance.
         build_dir: Directory for output files.
-        stack_if_multi: If True, stack multiple layers into one file.
-        settings: Global simulation settings (required for multi-layer lat_c calculation).
-        n_layers_override: Override the number of layers (ignores config.layers).
+        settings: Global simulation settings.
         
     Returns:
-        Tuple of (output_path, box_dimensions, lat_c).
-    """    
+        Tuple of (output_path, box_dimensions, lat_c, pot_counts, total_pot_types).
+        - output_path: Path to the monolayer .lmp file
+        - box_dimensions: Dict with xlo, xhi, ylo, yhi, zlo, zhi
+        - lat_c: Interlayer lattice constant
+        - pot_counts: Dict of atom counts per potential type (for stacking)
+        - total_pot_types: Total number of atom types in the potential
+    """
     cif_path = get_material_path(config.cif_path, 'cif')
     pot_path = get_material_path(config.pot_path, config.pot_type)
 
@@ -708,19 +713,16 @@ def build_sheet(
     total_pot_types = sum(pot_counts.values())
     
     # Determine atom type multiplier based on potential compatibility
-    # For rebo/airebo/meam/reaxff, use 1 (no renumbering needed)
-    # Otherwise check if potential has more types per element than CIF
     if config.pot_type in ['rebo', 'rebomos', 'airebo', 'meam', 'reaxff']:
         multiplier = 1
     else:
         multiplier = check_potential_cif_compatibility(cif_path, pot_path)
     
-    # Step 1: Convert CIF to LMP (small unit cell, NOT duplicated yet)
+    # Step 1: Convert CIF to LMP (small unit cell)
     temp_unit_cell = Path(tempfile.gettempdir()) / f"{config.mat}_{uuid.uuid4().hex[:8]}_unit.lmp"
     atomsk.convert(cif_path, temp_unit_cell)
     
-    # Step 2: Renumber atom types if potential has multiple types per element
-    # This must happen on the SMALL unit cell before duplication
+    # Step 2: Renumber atom types if needed
     if any(v != 1 for v in pot_counts.values()) or multiplier != 1:
         renumber_atom_types(temp_unit_cell)
     
@@ -738,7 +740,6 @@ def build_sheet(
         atoms = ase_io.read(str(ortho_cell), format="lammps-data")
         natoms = len(atoms)
         if total_pot_types % natoms == 0:
-            # Find optimal duplication factors a x b
             for i in range(int(np.sqrt(total_pot_types / natoms)) + 1, 0, -1):
                 if (total_pot_types / natoms) % i == 0:
                     a = int(i)
@@ -771,8 +772,38 @@ def build_sheet(
     if config.pot_type in ['tersoff', 'sw', 'rebo', 'airebo']:
         atomsk.charge2atom(base_path, base_path, ["q"])
     
-    final_path = base_path
     lat_c = config.lat_c
+    
+    return base_path, dims, lat_c, pot_counts, total_pot_types
+
+
+def build_sheet(
+    config: SheetConfig,
+    atomsk: AtomskWrapper,
+    build_dir: Path,
+    stack_if_multi: bool = False,
+    settings: Optional[GlobalSettings] = None,
+    n_layers_override: Optional[int] = None
+) -> Tuple[Path, dict, float]:
+    """Builds the 2D material sheet.
+    
+    Args:
+        config: Sheet configuration.
+        atomsk: AtomskWrapper instance.
+        build_dir: Directory for output files.
+        stack_if_multi: If True, stack multiple layers into one file.
+        settings: Global simulation settings (required for multi-layer lat_c calculation).
+        n_layers_override: Override the number of layers (ignores config.layers).
+        
+    Returns:
+        Tuple of (output_path, box_dimensions, lat_c).
+    """
+    # Build the monolayer first
+    base_path, dims, lat_c, pot_counts, total_pot_types = build_monolayer(
+        config, atomsk, build_dir, settings
+    )
+    
+    final_path = base_path
     
     # Determine number of layers: override takes priority, then config
     n_layers = n_layers_override or (max(config.layers) if config.layers else 1)
@@ -793,6 +824,9 @@ def build_sheet(
             lat_c=lat_c,
             settings=settings
         )
+        
+        # Remove the single-layer file since we only need the stacked version
+        base_path.unlink()
         
         final_path = stacked_path
 

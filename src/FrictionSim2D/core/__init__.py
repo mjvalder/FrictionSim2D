@@ -20,7 +20,7 @@ from FrictionSim2D.core.config import (
     parse_config,
 )
 from FrictionSim2D.core.potential_manager import PotentialManager
-from FrictionSim2D.core.base_builder import BaseBuilder
+from FrictionSim2D.core.simulation_base import SimulationBase
 from FrictionSim2D.core.utils import (
     cifread,
     count_atomtypes,
@@ -28,7 +28,6 @@ from FrictionSim2D.core.utils import (
     get_material_path,
     get_potential_path,
     read_config,
-    read_yaml,
 )
 
 __all__ = [
@@ -46,7 +45,7 @@ __all__ = [
     # Potential
     "PotentialManager",
     # Base
-    "BaseBuilder",
+    "SimulationBase",
     # Utils
     "cifread",
     "count_atomtypes",
@@ -54,5 +53,4 @@ __all__ = [
     "get_material_path",
     "get_potential_path",
     "read_config",
-    "read_yaml",
 ]

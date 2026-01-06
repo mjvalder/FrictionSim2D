@@ -6,10 +6,11 @@ generates the necessary potentials, and writes the LAMMPS input scripts.
 """
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Dict, Optional
 
-from FrictionSim2D.core.base_builder import BaseBuilder
+from FrictionSim2D.core.simulation_base import SimulationBase
 from FrictionSim2D.core.config import AFMSimulationConfig
 from FrictionSim2D.core.potential_manager import PotentialManager
 from FrictionSim2D.builders import components
@@ -17,79 +18,178 @@ from FrictionSim2D.builders import components
 logger = logging.getLogger(__name__)
 
 
-class AFMSimulation(BaseBuilder):
-    """Builder for AFM simulations (Tip + Sheet + Substrate)."""
+class AFMSimulation(SimulationBase):
+    """Builder for AFM simulations (Tip + Sheet + Substrate).
+    
+    Handles layer sweeps internally - when config.sheet.layers is a list,
+    builds common components once and iterates over layer counts.
+    """
 
     def __init__(self, config: AFMSimulationConfig, output_dir: str):
         super().__init__(config, output_dir)
         self.config: AFMSimulationConfig = config  # Type hinting alias
+        
+        # Base output directory (layer subdirs created within)
+        self.base_output_dir = self.output_dir
 
-        # State to track build artifacts
+        # State to track build artifacts (reset per layer)
         self.structure_paths: Dict[str, Path] = {}
         self.z_positions: Dict[str, float] = {}
-        self.groups: Dict[str, str] = {}  # Component name -> Atom type IDs string
-        self.pm: Optional[PotentialManager] = None  # Store PM for later use
+        self.groups: Dict[str, str] = {}
+        self.pm: Optional[PotentialManager] = None
+        
+        # Shared components (built once, reused across layers)
+        self._tip_path: Optional[Path] = None
+        self._tip_radius: Optional[float] = None
+        self._sub_path: Optional[Path] = None
+        self._monolayer_path: Optional[Path] = None
+        self._monolayer_dims: Optional[dict] = None
+        self._base_lat_c: Optional[float] = None
+        self._pot_counts: Optional[dict] = None
+        self._total_pot_types: Optional[int] = None
 
     def build(self) -> None:
-        """Constructs the atomic systems and layout."""
+        """Constructs the atomic systems and layout.
+        
+        If config.sheet.layers is a list, iterates over layer counts,
+        building common components (tip, substrate, monolayer) once.
+        """
         logger.info("Starting AFM Simulation Build...")
-        self._create_directories()
-        build_dir = self.output_dir / "build"
+        
+        # Normalize layers to list
+        layers = self.config.sheet.layers
+        if isinstance(layers, int):
+            layers = [layers]
+        elif not layers:
+            layers = [1]
+        
+        # Create shared build directory
+        shared_build_dir = self.base_output_dir / "build"
+        shared_build_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 1. Build common components ONCE
+        self._build_common_components(shared_build_dir)
+        
+        # 2. Iterate over layer counts
+        for n_layers in layers:
+            logger.info(f"--- Building for {n_layers} layer(s) ---")
+            
+            # Set output directory for this layer count
+            if len(layers) > 1:
+                self.output_dir = self.base_output_dir / f"L{n_layers}"
+            else:
+                self.output_dir = self.base_output_dir
+            
+            self._create_directories()
+            
+            # Symlink or copy shared build directory
+            layer_build_dir = self.output_dir / "build"
+            if layer_build_dir != shared_build_dir:
+                if layer_build_dir.exists():
+                    shutil.rmtree(layer_build_dir)
+                layer_build_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Build sheet for this layer count
+            self._build_sheet_for_layers(n_layers, layer_build_dir)
+            
+            # Copy tip and substrate to layer build dir (skip if same directory)
+            if layer_build_dir != shared_build_dir:
+                tip_dest = layer_build_dir / self._tip_path.name
+                sub_dest = layer_build_dir / self._sub_path.name
+                if not tip_dest.exists():
+                    shutil.copy(self._tip_path, tip_dest)
+                if not sub_dest.exists():
+                    shutil.copy(self._sub_path, sub_dest)
+                self.structure_paths['tip'] = tip_dest
+                self.structure_paths['sub'] = sub_dest
+            else:
+                self.structure_paths['tip'] = self._tip_path
+                self.structure_paths['sub'] = self._sub_path
+            
+            # Generate potentials for this layer count
+            self.pm = self._generate_potentials(n_sheet_layers=n_layers)
+            
+            # Calculate vertical layout
+            self._calculate_z_positions(n_layers)
+            
+            # Write inputs for this layer
+            self.write_inputs()
+        
+        logger.info("Build complete for all layer configurations.")
 
-        # Determine number of sheet layers
-        n_sheet_layers = max(self.config.sheet.layers) if self.config.sheet.layers else 1
-
-        # 1. Build Physical Components
-        # Tip
-        tip_path, tip_radius = components.build_tip(
+    def _build_common_components(self, build_dir: Path) -> None:
+        """Builds tip, substrate, and monolayer (components shared across layers)."""
+        
+        # Build Tip (once)
+        self._tip_path, self._tip_radius = components.build_tip(
             self.config.tip, self.atomsk, build_dir, self.config.settings
         )
-        self.structure_paths['tip'] = tip_path
-
-        # Sheet
-        sheet_path, sheet_dims, lat_c = components.build_sheet(
-            self.config.sheet, self.atomsk, build_dir, 
-            stack_if_multi=True, settings=self.config.settings
+        logger.info(f"Built tip: {self._tip_path.name}")
+        
+        # Build Monolayer (once) - don't stack yet
+        (self._monolayer_path, self._monolayer_dims, 
+         self._base_lat_c, self._pot_counts, self._total_pot_types) = components.build_monolayer(
+            self.config.sheet, self.atomsk, build_dir, self.config.settings
         )
-        self.structure_paths['sheet'] = sheet_path
-
-        # Substrate
-        sub_path = components.build_substrate(
-            self.config.sub, self.atomsk, build_dir, sheet_dims,
+        logger.info(f"Built monolayer: {self._monolayer_path.name}")
+        
+        # Build Substrate (once) - uses monolayer dims
+        self._sub_path = components.build_substrate(
+            self.config.sub, self.atomsk, build_dir, self._monolayer_dims,
             settings=self.config.settings
         )
-        self.structure_paths['sub'] = sub_path
+        logger.info(f"Built substrate: {self._sub_path.name}")
 
-        # 2. Generate Potentials & Calculate Gaps
-        self.pm = self._generate_potentials(n_sheet_layers=n_sheet_layers)
+    def _build_sheet_for_layers(self, n_layers: int, build_dir: Path) -> None:
+        """Stacks the monolayer to create n-layer sheet."""
+        
+        if n_layers == 1:
+            # Just copy the monolayer
+            sheet_path = build_dir / f"{self.config.sheet.mat}_1.lmp"
+            if sheet_path != self._monolayer_path:
+                shutil.copy(self._monolayer_path, sheet_path)
+            self.structure_paths['sheet'] = sheet_path
+            self.lat_c = self._base_lat_c
+            self.sheet_dims = self._monolayer_dims
+        else:
+            # Stack multiple layers
+            stacked_path = build_dir / f"{self.config.sheet.mat}_{n_layers}.lmp"
+            stacked_path, lat_c = components.stack_multilayer_sheet(
+                base_layer_path=self._monolayer_path,
+                config=self.config.sheet,
+                output_path=stacked_path,
+                box_dims=self._monolayer_dims,
+                n_layers=n_layers,
+                types_per_layer=self._total_pot_types,
+                pot_counts=self._pot_counts,
+                lat_c=self._base_lat_c,
+                settings=self.config.settings
+            )
+            self.structure_paths['sheet'] = stacked_path
+            self.lat_c = lat_c
+            self.sheet_dims = self._monolayer_dims
 
-        # Calculate Vertical Layout (Z-Offsets)
+    def _calculate_z_positions(self, n_layers: int) -> None:
+        """Calculates vertical positions for all components."""
+        
         gap_sub_sheet = self.pm.calculate_gap('sub', 'sheet', buffer=0.5)
         gap_sheet_tip = self.pm.calculate_gap('sheet', 'tip', buffer=0.5)
-
+        
         logger.info(f"Calculated gaps: Sub-Sheet={gap_sub_sheet:.2f}A, Sheet-Tip={gap_sheet_tip:.2f}A")
-
+        
         sub_thickness = self.config.sub.thickness
         
         # Position 1: Substrate (Base)
         self.z_positions['sub'] = 0.0
-
+        
         # Position 2: Sheet (Above Substrate)
         sheet_base_z = sub_thickness + gap_sub_sheet
         self.z_positions['sheet'] = sheet_base_z
-
+        
         # Position 3: Tip (Above Sheet)
-        sheet_stack_height = (n_sheet_layers - 1) * lat_c
-
-        # Tip Z is usually center of sphere, so add radius
-        tip_z = sheet_base_z + sheet_stack_height + gap_sheet_tip + tip_radius
+        sheet_stack_height = (n_layers - 1) * self.lat_c
+        tip_z = sheet_base_z + sheet_stack_height + gap_sheet_tip + self._tip_radius
         self.z_positions['tip'] = tip_z
-
-        # Store additional info for templates (calculated values only)
-        self.lat_c = lat_c
-        self.sheet_dims = sheet_dims
-
-        logger.info("Build complete.")
 
     def _generate_potentials(
         self, 
@@ -157,49 +257,122 @@ class AFMSimulation(BaseBuilder):
         total_types = self.pm.get_total_types() if self.pm else len(set(
             t for s in self.groups.values() for t in s.split()
         ))
+        
+        sim = self.config.settings.simulation
+        out = self.config.settings.output
+
+        # Calculate box dimensions from sheet dims
+        xlo, xhi = self.sheet_dims['xlo'], self.sheet_dims['xhi']
+        ylo, yhi = self.sheet_dims['ylo'], self.sheet_dims['yhi']
+        zhi_box = self.z_positions['tip'] + 50.0  # Extra space above tip
+        
+        # Tip centered on sheet
+        tip_x = (xlo + xhi) / 2.0
+        tip_y = (ylo + yhi) / 2.0
+        tip_z = self.z_positions['tip']
+        
+        # Type offsets for read_data append
+        sub_natypes = len(self.groups['sub_types'].split())
+        tip_natypes = len(self.groups['tip_types'].split())
+        offset_2d = sub_natypes + tip_natypes
 
         context = {
+            # Temperature and forces/angles for LAMMPS loops
             'temp': self.config.general.temp,
-            'force': self.config.general.force,
-            'angle': self.config.general.scan_angle,
+            'forces': self.config.general.force,  # List for LAMMPS index variable
+            'angles': self.config.general.scan_angle,  # List for LAMMPS index variable
             'speed': self.config.tip.s,
-            'settings': self.config.settings.simulation,
 
+            # Box dimensions
+            'xlo': xlo,
+            'xhi': xhi,
+            'ylo': ylo,
+            'yhi': yhi,
+            'zhi_box': zhi_box,
+            
+            # File paths for LAMMPS read_data
+            'data_file': f"../build/{self.structure_paths['sheet'].name}",
+            'potential_file': 'system.in.settings',
+            'sub_file': f"../build/{self.structure_paths['sub'].name}",
+            'tip_file': f"../build/{self.structure_paths['tip'].name}",
+            'sheet_file': f"../build/{self.structure_paths['sheet'].name}",
+            
+            # Legacy paths (keep for compatibility)
             'path_sub': f"../build/{self.structure_paths['sub'].name}",
             'path_tip': f"../build/{self.structure_paths['tip'].name}",
             'path_sheet': f"../build/{self.structure_paths['sheet'].name}",
+            
+            # Tip position for read_data shift
+            'tip_x': tip_x,
+            'tip_y': tip_y,
+            'tip_z': tip_z,
+            
+            # Sheet z position
+            'sheet_z': self.z_positions['sheet'],
+            
+            # Type offsets
+            'offset_2d': offset_2d,
+            
+            # Results output patterns
+            'results_file_pattern': '../results/friction_f${find}_a${a}.dat',
+            'dump_file_pattern': '../visuals/slide_f${find}_a${a}.*.dump',
+            'dump_enabled': out.dump.get('slide', False),
 
+            # Z positions
             'z_sub': self.z_positions['sub'],
             'z_sheet': self.z_positions['sheet'],
             'z_tip': self.z_positions['tip'],
 
+            # Group type IDs
             'sub_types': self.groups['sub_types'],
             'tip_types': self.groups['tip_types'],
             'sheet_types': self.groups['sheet_types'],
             'ngroups': total_types,
+            'extra_atom_types': 1,  # For virtual atom if using that drive method
 
             'sub_natypes': len(self.groups['sub_types'].split()),
             'tip_natypes': len(self.groups['tip_types'].split()),
 
+            # Simulation settings
+            'timestep': sim.timestep,
+            'thermo': sim.thermo,
+            'neighbor_list': sim.neighbor_list,
+            'neigh_modify_command': sim.neigh_modify_command,
+            'run_steps': sim.slide_run_steps,
+            'drive_method': sim.drive_method,
+            
+            # Drive mechanism parameters
             'damp_ev': self.config.tip.dspring / 0.016,
             'spring_ev': (self.config.general.driving_spring or 8.0) / 16.02,  # N/m to eV/Å²
             'tipps': self.config.tip.s / 100,
-            'drive_method': self.config.settings.simulation.drive_method,
             'virtual_offset': 10.0, 
             'virtual_atom_type': total_types + 1,
-            'run_steps': self.config.settings.simulation.slide_run_steps,
-            'results_freq': self.config.settings.output.results_frequency,
-            'dump_freq': self.config.settings.output.dump_frequency['slide'],
+            
+            # Output frequencies
+            'results_freq': out.results_frequency,
+            'dump_freq': out.dump_frequency.get('slide', 1000),
+            
+            # Group names for LAMMPS fixes
+            'tip_fix_group': 'tip',
+            'layer_group': 'sheet',
             
             # Multi-layer sheet context
             'n_sheet_layers': max(self.config.sheet.layers) if self.config.sheet.layers else 1,
-            'lat_c': self.lat_c,  # Calculated during build
-            'tip_radius': self.config.tip.r,  # From config
-            'sheet_dims': self.sheet_dims,  # Actual dimensions from build
+            'lat_c': self.lat_c,
+            'tip_radius': self.config.tip.r,
+            'sheet_dims': self.sheet_dims,
             
             # Thermostat settings
             'thermostat_type': self.config.settings.thermostat.type,
             'use_langevin': self.config.settings.thermostat.type == 'langevin',
+            
+            # Minimization settings
+            'min_style': sim.min_style,
+            'minimization_command': sim.minimization_command,
+            
+            # Output paths
+            'output_dir': '../results',
+            'dump_file': '../visuals/system.*.dump',
         }
 
         init_script = self.render_template("afm/system_init.lmp", context)

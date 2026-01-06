@@ -127,7 +127,6 @@ def _run_all(config_file: str, model: str = "afm"):
                 builder = SheetOnSheetSimulation(config_obj, output_dir)
 
             builder.build()
-            builder.write_inputs()
             print(f"  -> Completed: {output_dir}")
 
         except Exception as e:

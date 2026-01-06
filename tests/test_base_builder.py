@@ -1,16 +1,16 @@
 import pytest
 from pathlib import Path
-from FrictionSim2D.core.base_builder import BaseBuilder
+from FrictionSim2D.core.simulation_base import SimulationBase
 from FrictionSim2D.core.config import AFMSimulationConfig
 
-# Mock class to allow instantiation of abstract BaseBuilder
-class ConcreteBuilder(BaseBuilder):
+# Mock class to allow instantiation of abstract SimulationBase
+class ConcreteSimulation(SimulationBase):
     def build(self): pass
     def write_inputs(self): pass
 
 def test_directory_creation(tmp_path, afm_config):
     # afm_config comes from your conftest.py fixture
-    builder = ConcreteBuilder(afm_config, output_dir=tmp_path)
+    builder = ConcreteSimulation(afm_config, output_dir=tmp_path)
     
     builder.setup_directories(['visuals', 'results'])
     
@@ -18,7 +18,7 @@ def test_directory_creation(tmp_path, afm_config):
     assert (tmp_path / 'results').exists()
 
 def test_template_rendering(tmp_path, afm_config):
-    builder = ConcreteBuilder(afm_config, output_dir=tmp_path)
+    builder = ConcreteSimulation(afm_config, output_dir=tmp_path)
     
     # Render a real template or a mock one if you inject a mock env
     # Testing a real template:

@@ -55,7 +55,8 @@ class AtomskWrapper:
             args: List of command line arguments (e.g. ['file.cif', '-duplicate', ...])
             verbose: If True, prints Atomsk's stdout/stderr.
         """
-        cmd = [self.executable] + [str(a) for a in args]
+        # Build command with -ow (overwrite) and -v 0 (silent) flags
+        cmd = [self.executable, '-ow', '-v', '0'] + [str(a) for a in args]
         
         # Atomsk hangs waiting for user input if output file already exists.
         # Find and delete output file before running to prevent this.
@@ -70,8 +71,10 @@ class AtomskWrapper:
         # Atomsk has internal state issues when called concurrently
         with self._lock:
             try:
+                # Pipe "n" to stdin to auto-answer prompts (e.g., triclinic skew warnings)
                 subprocess.run(
                     cmd, 
+                    input="n\n",
                     check=True, 
                     stdout=stdout_setting, 
                     stderr=stderr_setting,
@@ -166,19 +169,6 @@ class AtomskWrapper:
         args = [str(input_file), "-duplicate", str(nx), str(ny), str(nz)]
         if center:
             args.extend(["-center", "com"])
-        args.append(str(output_file))
-        self.run(args)
-
-    def merge(self, input_files: List[Union[str, Path]], output_file: Union[str, Path]) -> None:
-        """Merges multiple structures into one.
-        
-        Corresponds to: atomsk --merge file1 file2 ... output
-        """
-        if len(input_files) < 2:
-            raise ValueError("Merge requires at least two input files.")
-            
-        args = ["--merge", str(len(input_files))]
-        args.extend([str(f) for f in input_files])
         args.append(str(output_file))
         self.run(args)
 

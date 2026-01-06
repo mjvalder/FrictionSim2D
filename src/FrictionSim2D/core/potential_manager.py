@@ -8,9 +8,11 @@ potential handling for multi-layer 2D materials.
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional, Literal
+from typing import List, Dict, Any, Tuple, Optional
 from collections import defaultdict
 import logging
+
+from ase.data import atomic_masses, atomic_numbers
 
 from FrictionSim2D.core.config import ComponentConfig, GlobalSettings
 from FrictionSim2D.core.utils import count_atomtypes, lj_params, cifread
@@ -62,7 +64,7 @@ class PotentialManager:
         self.global_atom_count: int = 0
         self.atom_type_map: Dict[str, Dict[str, List[int]]] = {}
         
-        # Detailed type tracking (mirrors tribo_2D's group_def)
+        # Detailed type tracking
         # group_def[type_id] = [group_name, type_id_str, element, pot_label]
         self.group_def: Dict[int, List[str]] = {}
         
@@ -85,7 +87,7 @@ class PotentialManager:
         config: ComponentConfig,
         elements: List[str]
     ) -> List[str]:
-        """Generates LAMMPS commands for a single-component potential setup.
+        """Generates LAMMPS interatomic potential settings for a single-component setup.
         
         This is useful for standalone simulations like amorphisation where
         only one component is used and no cross-interactions are needed.
@@ -99,8 +101,6 @@ class PotentialManager:
         Returns:
             List of LAMMPS commands (pair_style, pair_coeff, mass).
         """
-        from ase.data import atomic_masses, atomic_numbers
-        
         commands = []
         pot_type = config.pot_type.lower()
         pot_path = config.pot_path
@@ -282,7 +282,7 @@ class PotentialManager:
                 pot_label = el if count == 1 else f"{el}{t+1}"
                 
                 # Three regions: mobile, fixed, thermostat
-                for region, suffix in [('', ''), ('_fix', '_fix'), ('_thermo', '_thermo')]:
+                for suffix in ['', '_fix', '_thermo']:
                     atype = self.global_atom_count + 1
                     self.global_atom_count += 1
                     component_map[el].append(atype)
@@ -410,10 +410,6 @@ class PotentialManager:
         
         if not comp1 or not comp2:
             raise ValueError(f"Components '{comp1_name}' and/or '{comp2_name}' not found.")
-        
-        # Get element groups for efficient type range generation
-        eg1 = self.elemgroup[comp1_name]
-        eg2 = self.elemgroup[comp2_name]
         
         # Generate interactions for all element pairs
         for el1 in comp1.keys():
@@ -606,8 +602,6 @@ class PotentialManager:
         Returns:
             String with mass commands, one per line.
         """
-        from ase.data import atomic_masses, atomic_numbers
-        
         # Group types by element
         element_types: Dict[str, List[int]] = defaultdict(list)
         for atype in sorted(self.group_def.keys()):

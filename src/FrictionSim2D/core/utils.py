@@ -95,18 +95,6 @@ def get_potential_path(pot_name: str) -> Path:
     # If not found in package, assume absolute path
     return Path(pot_name)
 
-def read_yaml(filepath: Union[str, Path]) -> Dict[str, Any]:
-    """Reads a YAML file and returns its contents as a dictionary.
-
-    Args:
-        filepath (str | Path): Path to the YAML file.
-
-    Returns:
-        dict: Parsed YAML contents.
-    """
-    with open(filepath, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
-
 def cifread(cif_path: Union[str, Path]) -> Dict[str, Any]:
     """Reads a CIF file and extracts crystal structure information using ASE.
 
@@ -345,21 +333,6 @@ def atomic2molecular(filepath: Union[str, Path]) -> None:
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write("\n".join(modified_lines) + "\n")
 
-def copy_file(path1: Union[str, Path], dest: Union[str, Path]) -> Path:
-    """Copies a file from a source path to a destination directory.
-
-    Args:
-        path1 (str | Path): Path to the source file.
-        dest (str | Path): Path to the destination directory.
-
-    Returns:
-        Path: Path to the copied file in the destination directory.
-    """
-    os.makedirs(dest, exist_ok=True)
-    filename = os.path.basename(str(path1))
-    path2 = os.path.join(dest, filename)
-    shutil.copy2(path1, path2)
-    return Path(path2)
 
 def renumber_atom_types(filename: Union[str, Path], pot: List[str] = None) -> None:
     """Renumbers atom types in a LAMMPS data file to a sequential order.
