@@ -30,8 +30,8 @@ dependencies = [
 ]
 
 [project.scripts]
-FrictionSim2D = "FrictionSim2D.cli:main"
-friction2d = "FrictionSim2D.aiida.cli.commands:main"
+FrictionSim2D = "src.cli:main"
+friction2d = "src.aiida.cli.commands:main"
 
 [project.optional-dependencies]
 aiida = [
@@ -49,4 +49,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/FrictionSim2D"]
+packages = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/**"]

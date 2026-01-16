@@ -1,7 +1,7 @@
 import pytest
 import subprocess
 from unittest.mock import MagicMock, patch
-from FrictionSim2D.interfaces.atomsk import AtomskWrapper, AtomskError
+from src.interfaces.atomsk import AtomskWrapper, AtomskError
 
 def test_atomsk_binary_not_found():
     """Ensure error is raised if atomsk is missing."""

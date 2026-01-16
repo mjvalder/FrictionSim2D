@@ -86,7 +86,7 @@ class PreparationWorkflow:
     
     def _read_config(self) -> Dict[str, Any]:
         """Read and parse the configuration file."""
-        from FrictionSim2D.core.utils import read_config
+        from src.core.utils import read_config
         
         if self._config_dict is None:
             self._config_dict = read_config(self.config_path)
@@ -141,7 +141,7 @@ class PreparationWorkflow:
             
             # Call the appropriate builder
             # Import here to avoid circular imports
-            from FrictionSim2D import afm, sheetonsheet
+            from src import afm, sheetonsheet
             
             if self.simulation_type == 'afm':
                 afm(str(self.config_path))
@@ -170,7 +170,7 @@ class PreparationWorkflow:
         Returns:
             Path to the saved manifest
         """
-        from FrictionSim2D.aiida.hpc import JobManifest, JobEntry
+        from src.aiida.hpc import JobManifest, JobEntry
         
         manifest = JobManifest(
             name=self.output_dir.name,
@@ -214,7 +214,7 @@ class PreparationWorkflow:
             Provenance node UUID, or None if failed
         """
         try:
-            from FrictionSim2D.aiida.data import FrictionProvenanceData
+            from src.aiida.data import FrictionProvenanceData
             
             # Look for provenance folder in output
             provenance_dir = self.output_dir / 'provenance'
@@ -291,7 +291,7 @@ class PreparationWorkflow:
             
             # Update manifest with UUID if created
             if manifest_path and prov_uuid:
-                from FrictionSim2D.aiida.hpc import JobManifest
+                from src.aiida.hpc import JobManifest
                 manifest = JobManifest.load(manifest_path)
                 manifest.provenance_node_uuid = prov_uuid
                 manifest.save(manifest_path)

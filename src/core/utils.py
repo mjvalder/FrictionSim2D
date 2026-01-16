@@ -16,24 +16,32 @@ import math
 import yaml
 from ase.io import read as ase_read
 
-from FrictionSim2D.data.potentials import UFF_params as lj
+from src.data.potentials import UFF_params as lj
 
 def get_material_path(mat_name: str, file_type: str = 'cif') -> Path:
-    """Helper to find material files in the package data."""
+    """Find material files in the package data.
+
+    Args:
+        mat_name: Material identifier or file path.
+        file_type: File type extension (default 'cif').
+
+    Returns:
+        Path to the material file.
+    """
     # First check if user provided a path (absolute or relative) that exists
     user_path = Path(mat_name)
     if user_path.exists():
         return user_path
     
     # Access the base materials directory
-    mat_dir = resources.files('FrictionSim2D.data.materials')
+    mat_dir = resources.files('src.data.materials')
 
     # Potential locations to check in package data
     candidates = [
         mat_dir.joinpath(mat_name),                                # direct match
         mat_dir.joinpath(f"{mat_name}.{file_type}"),               # match with extension
-        mat_dir.joinpath('cif', mat_name),                         # inside cif/ subdir
-        mat_dir.joinpath('cif', f"{mat_name}.{file_type}"),        # inside cif/ subdir with extension
+        mat_dir.joinpath('cif').joinpath(mat_name),                # inside cif/ subdir
+        mat_dir.joinpath('cif').joinpath(f"{mat_name}.{file_type}"),  # inside cif/ subdir with extension
     ]
 
     for candidate in candidates:
@@ -45,12 +53,18 @@ def get_material_path(mat_name: str, file_type: str = 'cif') -> Path:
     return user_path
 
 def get_potential_path(pot_name: str) -> Path:
-    """Helper to find potential files in the package data recursively.
-    
+    """Find potential files in the package data recursively.
+
     This handles cases where potentials are in subfolders like 'sw/', 'tersoff/'.
+
+    Args:
+        pot_name: Potential name or file path.
+
+    Returns:
+        Path to the potential file.
     """
     # Access the base potentials directory using importlib.resources
-    pot_dir = resources.files('FrictionSim2D.data.potentials')
+    pot_dir = resources.files('src.data.potentials')
 
     # 1. Check direct path (if user provided 'sw/MoS2.sw')
     direct_path = pot_dir.joinpath(pot_name)
@@ -79,14 +93,14 @@ def get_potential_path(pot_name: str) -> Path:
     # Try subdirectory based on extension
     if ext in subdir_map:
         subdir = subdir_map[ext]
-        subdir_path = pot_dir.joinpath(subdir, target_name)
+        subdir_path = pot_dir.joinpath(subdir).joinpath(target_name)
         if subdir_path.is_file():
             return Path(str(subdir_path))
     
     # 3. Try all known subdirectories
     for subdir in subdir_map.values():
         try:
-            subdir_traversable = pot_dir.joinpath(subdir, target_name)
+            subdir_traversable = pot_dir.joinpath(subdir).joinpath(target_name)
             if subdir_traversable.is_file():
                 return Path(str(subdir_traversable))
         except (TypeError, FileNotFoundError):
@@ -200,18 +214,18 @@ def get_model_dimensions(lmp_path: Union[str, Path]) -> Dict[str, float]:
     return dims
 
 def lj_params(atom_type_1: str, atom_type_2: str) -> Tuple[float, float]:
-    """Calculates LJ parameters using Lorentz-Bertholt mixing rules.
+    """Calculate LJ parameters using Lorentz-Bertholt mixing rules.
 
-    Pulls UFF parameters from the `lj` dictionary and applies
-    mixing rules to determine the interaction parameters between two atom types.
+    Pulls UFF parameters and applies mixing rules to determine interaction
+    parameters between two atom types.
 
     Args:
-        atom_type_1 (str): The symbol of the first atom type (e.g., 'C').
-        atom_type_2 (str): The symbol of the second atom type (e.g., 'H').
+        atom_type_1: Symbol of the first atom type (e.g., 'C').
+        atom_type_2: Symbol of the second atom type (e.g., 'H').
 
     Returns:
-        tuple[float, float]: A tuple containing epsilon (potential well depth)
-        and sigma (zero-potential distance).
+        Tuple of (epsilon, sigma) - potential well depth and zero-potential
+        distance.
     """
     e1 = lj.lj_params[atom_type_1][1]
     e2 = lj.lj_params[atom_type_2][1]
@@ -253,6 +267,11 @@ def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
         params[section] = {}
         for key in config[section]:
             value = config.get(section, key)
+
+            # Handle empty strings - convert to None so Pydantic can apply defaults
+            if value == '':
+                params[section][key] = None
+                continue
 
             # Attempt to cast values to appropriate types
             if value.endswith(']'):

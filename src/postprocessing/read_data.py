@@ -52,17 +52,32 @@ class DataReader:
         to dynamically determine the correct number of timesteps for a complete file.
         """
         results_dir = self.settings['resultsdir']
-        file_pattern = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
-        path_pattern = re.compile(r'(\d+x_\d+y)/sub_(\w+)_tip_(\w+)_(r\d+)')
+        
+        # --- MODIFICATION: Add new patterns for sheetvsheet ---
+        # Original pattern for tip-on-substrate simulations
+        file_pattern_tip = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
+        path_pattern_tip = re.compile(r'(\d+x_\d+y)/sub_(\w+)_tip_(\w+)_(r\d+)')
+        
+        # New pattern for sheet-on-sheet simulations, now with optional substrate folder
+        file_pattern_sheet = re.compile(r'fc_ave_slide_(\d+\.?\d*)(?:GPa|nN)_(\d+)angle_(\d+)ms') # No layer info
+        path_pattern_sheet = re.compile(r'(?:sheetvsheet/)?([\w\d\-_]+)/(\d+x_\d+y)/([\w\d\-_]+)?/?results')
+        # --- END MODIFICATION ---
 
         # First pass: Find the maximum number of timesteps to define a "complete" file
         ntimestep = 0
         print("Starting first pass to determine ntimestep...")
         for root, _, files in os.walk(results_dir):
-            if not path_pattern.search(root):
+            # --- MODIFICATION: Check against either pattern ---
+            is_tip_sim = path_pattern_tip.search(root)
+            is_sheet_sim = path_pattern_sheet.search(root)
+            if not (is_tip_sim or is_sheet_sim):
                 continue
+            
+            current_file_pattern = file_pattern_tip if is_tip_sim else file_pattern_sheet
+            # --- END MODIFICATION ---
+
             for filename in files:
-                if file_pattern.match(filename):
+                if current_file_pattern.match(filename):
                     filepath = os.path.join(root, filename)
                     try:
                         # Read only the row count for efficiency
@@ -89,73 +104,140 @@ class DataReader:
         }
 
         for root, _, files in os.walk(results_dir):
-            path_match = path_pattern.search(root)
-            if not path_match:
-                continue
-
-            size, substrate_material, tip_material, tip_radius = path_match.groups()
+            # --- MODIFICATION: Detect which simulation type the path matches ---
+            path_match_tip = path_pattern_tip.search(root)
+            path_match_sheet = path_pattern_sheet.search(root)
             
-            try:
-                search_path = os.path.join(results_dir, 'afm')
-                start_dir = search_path if os.path.commonpath([root, search_path]) == search_path else results_dir
-                material_path_end_index = root.find(size)
-                material_path_full = root[:material_path_end_index]
-                material = os.path.relpath(material_path_full, start_dir).strip(os.sep)
-                if not material or material == '.':
+            material = None # Reset material for each new directory
+            if path_match_tip:
+                size, substrate_material, tip_material, tip_radius = path_match_tip.groups()
+                current_file_pattern = file_pattern_tip
+                sim_type = 'tip'
+                try:
+                    # Logic for finding the material name for AFM sims
+                    search_path = os.path.join(results_dir, 'afm')
+                    start_dir = search_path if os.path.commonpath([root, search_path]) == search_path else results_dir
+                    material_path_end_index = root.find(size)
+                    material_path_full = root[:material_path_end_index]
+                    material = os.path.relpath(material_path_full, start_dir).strip(os.sep)
+                    if not material or material == '.':
+                        continue
+                except (IndexError, ValueError):
                     continue
-            except (IndexError, ValueError):
+
+            elif path_match_sheet:
+                groups = path_match_sheet.groups()
+                material, size, substrate_material = groups
+                if substrate_material is None:
+                    substrate_material = 'N/A'
+                else:
+                    substrate_material = substrate_material.strip('/')
+                
+                # For sheet simulations, these concepts might not apply in the same way
+                tip_material = 'sheet' 
+                tip_radius = 'N/A'
+                current_file_pattern = file_pattern_sheet
+                sim_type = 'sheet'
+            else:
+                continue
+            # --- END MODIFICATION ---
+            
+            if not material:
                 continue
 
             safe_material = material.replace('-', '_').replace(os.sep, '__')
             size_key = size.replace('x_', 'x')
 
             for filename in files:
-                file_match = file_pattern.match(filename)
+                file_match = current_file_pattern.match(filename)
                 if not file_match:
                     continue
                 
                 filepath = os.path.join(root, filename)
                 try:
-                    df = pd.read_csv(filepath, sep=r'\s+', header=None, names=self.settings['fields'], skiprows=2)
-                    
-                    if len(df) != ntimestep:
+                    # --- MODIFICATION: Handle different column names/structures ---
+                    if sim_type == 'sheet':
+                        # New format with 15 columns: TimeStep v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz ...
+                        sheet_col_names = [
+                            'time', 'v_xfrict', 'v_yfrict', 'v_sx', 'v_sy', 'v_sz', 
+                            'v_fx', 'v_fy', 'v_fz', 'v_comx_ctop', 'v_comy_ctop', 
+                            'v_comz_ctop', 'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot'
+                        ]
+                        df = pd.read_csv(filepath, sep=r'\s+', header=None, names=sheet_col_names, skiprows=2)
+                        # Rename to match the internal names expected by the rest of the script, as per user request
+                        df.rename(columns={'v_xfrict': 'lfx', 'v_yfrict': 'lfy', 'v_fz': 'nf'}, inplace=True)
+                    else: # Original tip format
+                        df = pd.read_csv(filepath, sep=r'\s+', header=None, names=self.settings['fields'], skiprows=2)
+                    # --- END MODIFICATION ---
+
+                    # --- MODIFICATION: Check for completeness with a tolerance of 3 timesteps ---
+                    if ntimestep - len(df) > 3:
                         incomplete_files.setdefault(size_key, []).append(filepath)
                         incomplete_materials.setdefault(size_key, set()).add(material)
                         continue
+                    # --- END MODIFICATION ---
 
                     if time_series is None:
                         time_series = df['time'].to_list()
 
-                    force_str, angle_str, speed_str, layer_str = file_match.groups()
-                    force = float(force_str)
-                    angle, speed, layer = map(int, [angle_str, speed_str, layer_str])
+                    # --- MODIFICATION: Adapt group extraction based on pattern ---
+                    if sim_type == 'sheet':
+                        load_str, angle_str, speed_str = file_match.groups()
+                        layer = 2 # Assume bilayer for sheetvsheet, or assign as needed
+                        is_pressure = 'GPa' in load_str
+                        load_val = float(load_str.replace('GPa', '').replace('nN', ''))
+                    else: # Original tip sim
+                        load_str, angle_str, speed_str, layer_str = file_match.groups()
+                        layer = int(layer_str)
+                        is_pressure = False
+                        load_val = float(load_str)
+                    
+                    angle, speed = map(int, [angle_str, speed_str])
+                    # --- END MODIFICATION ---
 
                     metadata['materials'].add(safe_material)
                     metadata['substrates'].add(substrate_material)
                     metadata['tip_materials'].add(tip_material)
                     metadata['tip_radii'].add(tip_radius)
                     
-                    if force not in metadata['forces_and_angles']:
-                        metadata['forces_and_angles'][force] = set()
-                    metadata['forces_and_angles'][force].add(angle)
+                    # --- MODIFICATION: Store forces and pressures separately ---
+                    if is_pressure:
+                        if load_val not in metadata['pressures_and_angles']:
+                            metadata['pressures_and_angles'][load_val] = set()
+                        metadata['pressures_and_angles'][load_val].add(angle)
+                    else:
+                        if load_val not in metadata['forces_and_angles']:
+                            metadata['forces_and_angles'][load_val] = set()
+                        metadata['forces_and_angles'][load_val].add(angle)
+                    # --- END MODIFICATION ---
+
                     metadata['speeds'].add(speed)
                     metadata['layers'].add(layer)
 
                     df_processed = df.drop(columns=['time'])
 
-                    full_path = self.full_data_nested.setdefault(safe_material, {}).setdefault(size_key, {}).setdefault(substrate_material, {})\
+                    # --- MODIFICATION: Use p{pressure} or f{force} in the data structure ---
+                    base_path = self.full_data_nested.setdefault(safe_material, {}).setdefault(size_key, {}).setdefault(substrate_material, {})\
                         .setdefault(tip_material, {}).setdefault(tip_radius, {}).setdefault(f'l{layer}', {})\
-                        .setdefault(f's{speed}', {}).setdefault(f'f{force}', {})
+                        .setdefault(f's{speed}', {})
+                    
+                    if is_pressure:
+                        full_path = base_path.setdefault(f'p{load_val}', {})
+                    else:
+                        full_path = base_path.setdefault(f'f{load_val}', {})
+                    
                     full_path[f'a{angle}'] = df_processed
+                    # --- END MODIFICATION ---
                         
-                except (pd.errors.EmptyDataError, IndexError, ValueError):
+                except (pd.errors.EmptyDataError, IndexError, ValueError) as e:
+                    print(f"Warning: Could not process file {filepath}. Error: {e}")
                     incomplete_files.setdefault(size_key, []).append(filepath)
                     incomplete_materials.setdefault(size_key, set()).add(material)
         
         final_metadata = {}
         for k, v in metadata.items():
-            if k == 'forces_and_angles':
-                final_metadata[k] = {force: sorted(list(angles)) for force, angles in v.items()}
+            if k in ['forces_and_angles', 'pressures_and_angles']:
+                final_metadata[k] = {load: sorted(list(angles)) for load, angles in v.items()}
             else:
                 final_metadata[k] = sorted(list(v))
 

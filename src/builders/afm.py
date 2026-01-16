@@ -10,10 +10,10 @@ import shutil
 from pathlib import Path
 from typing import Dict, Optional
 
-from FrictionSim2D.core.simulation_base import SimulationBase
-from FrictionSim2D.core.config import AFMSimulationConfig
-from FrictionSim2D.core.potential_manager import PotentialManager
-from FrictionSim2D.builders import components
+from src.core.simulation_base import SimulationBase
+from src.core.config import AFMSimulationConfig
+from src.core.potential_manager import PotentialManager
+from src.builders import components
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,7 @@ class AFMSimulation(SimulationBase):
     def build(self) -> None:
         """Constructs the atomic systems and layout.
         
-        If config.sheet.layers is a list, iterates over layer counts,
-        building common components (tip, substrate, monolayer) once.
+        If config.sheet.layers is a list, iterates over layer counts.
         """
         logger.info("Starting AFM Simulation Build...")
         
@@ -63,17 +62,10 @@ class AFMSimulation(SimulationBase):
         elif not layers:
             layers = [1]
         
-        # Create shared build directory
-        shared_build_dir = self.base_output_dir / "build"
-        shared_build_dir.mkdir(parents=True, exist_ok=True)
-        
         # Initialize provenance folder
         self._init_provenance()
         
-        # 1. Build common components ONCE
-        self._build_common_components(shared_build_dir)
-        
-        # 2. Iterate over layer counts
+        # 1. Iterate over layer counts (build per layer)
         for n_layers in layers:
             logger.info(f"--- Building for {n_layers} layer(s) ---")
             
@@ -85,29 +77,21 @@ class AFMSimulation(SimulationBase):
             
             self._create_directories()
             
-            # Symlink or copy shared build directory
+            # Build directory scoped to this layer
             layer_build_dir = self.output_dir / "build"
-            if layer_build_dir != shared_build_dir:
-                if layer_build_dir.exists():
-                    shutil.rmtree(layer_build_dir)
-                layer_build_dir.mkdir(parents=True, exist_ok=True)
+            if layer_build_dir.exists():
+                shutil.rmtree(layer_build_dir)
+            layer_build_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Build common components inside the layer build dir
+            self._build_common_components(layer_build_dir)
             
             # Build sheet for this layer count
             self._build_sheet_for_layers(n_layers, layer_build_dir)
             
-            # Copy tip and substrate to layer build dir (skip if same directory)
-            if layer_build_dir != shared_build_dir:
-                tip_dest = layer_build_dir / self._tip_path.name
-                sub_dest = layer_build_dir / self._sub_path.name
-                if not tip_dest.exists():
-                    shutil.copy(self._tip_path, tip_dest)
-                if not sub_dest.exists():
-                    shutil.copy(self._sub_path, sub_dest)
-                self.structure_paths['tip'] = tip_dest
-                self.structure_paths['sub'] = sub_dest
-            else:
-                self.structure_paths['tip'] = self._tip_path
-                self.structure_paths['sub'] = self._sub_path
+            # Use paths from the layer build directory
+            self.structure_paths['tip'] = layer_build_dir / self._tip_path.name
+            self.structure_paths['sub'] = layer_build_dir / self._sub_path.name
             
             # Generate potentials for this layer count
             self.pm = self._generate_potentials(n_sheet_layers=n_layers)
@@ -122,7 +106,7 @@ class AFMSimulation(SimulationBase):
 
     def _init_provenance(self) -> None:
         """Initialize provenance folder and collect input files."""
-        from FrictionSim2D.core.utils import get_material_path, get_potential_path
+        from src.core.utils import get_material_path, get_potential_path
         
         # Initialize the provenance folder
         prov_dir = self.base_output_dir / 'provenance'
@@ -337,16 +321,17 @@ class AFMSimulation(SimulationBase):
             'zhi_box': zhi_box,
             
             # File paths for LAMMPS read_data
-            'data_file': f"../build/{self.structure_paths['sheet'].name}",
-            'potential_file': 'system.in.settings',
-            'sub_file': f"../build/{self.structure_paths['sub'].name}",
-            'tip_file': f"../build/{self.structure_paths['tip'].name}",
-            'sheet_file': f"../build/{self.structure_paths['sheet'].name}",
+            # Relative paths from the run directory (where python script is executed)
+            'data_file': str(self.output_dir / "build" / self.structure_paths['sheet'].name),
+            'potential_file': str(self.output_dir / "lammps" / "system.in.settings"),
+            'sub_file': str(self.output_dir / "build" / self.structure_paths['sub'].name),
+            'tip_file': str(self.output_dir / "build" / self.structure_paths['tip'].name),
+            'sheet_file': str(self.output_dir / "build" / self.structure_paths['sheet'].name),
             
             # Legacy paths (keep for compatibility)
-            'path_sub': f"../build/{self.structure_paths['sub'].name}",
-            'path_tip': f"../build/{self.structure_paths['tip'].name}",
-            'path_sheet': f"../build/{self.structure_paths['sheet'].name}",
+            'path_sub': str(self.output_dir / "build" / self.structure_paths['sub'].name),
+            'path_tip': str(self.output_dir / "build" / self.structure_paths['tip'].name),
+            'path_sheet': str(self.output_dir / "build" / self.structure_paths['sheet'].name),
             
             # Tip position for read_data shift
             'tip_x': tip_x,
@@ -359,9 +344,9 @@ class AFMSimulation(SimulationBase):
             # Type offsets
             'offset_2d': offset_2d,
             
-            # Results output patterns
-            'results_file_pattern': '../results/friction_f${find}_a${a}.dat',
-            'dump_file_pattern': '../visuals/slide_f${find}_a${a}.*.dump',
+            # Results output patterns (relative to run directory)
+            'results_file_pattern': str(self.output_dir / 'results' / 'friction_f${find}_a${a}.dat'),
+            'dump_file_pattern': str(self.output_dir / 'visuals' / 'slide_f${find}_a${a}.*.dump'),
             'dump_enabled': out.dump.get('slide', False),
 
             # Z positions

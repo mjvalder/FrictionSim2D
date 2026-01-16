@@ -332,7 +332,7 @@ class FrictionSimulationData(Data):
                 self.substrate_material = sub['mat']
             if 'amorph' in sub:
                 self.substrate_amorphous = sub['amorph'] == 'a'
-        
+
         # Tip parameters (AFM only)
         if 'tip' in config:
             tip = config['tip']
@@ -342,9 +342,8 @@ class FrictionSimulationData(Data):
                 self.tip_radius = tip['r']
             if 's' in tip:
                 self.scan_speed = tip['s']
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        """Export all attributes as a dictionary."""
         return {
             'uuid': str(self.uuid),
             'pk': self.pk,

@@ -15,10 +15,10 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
-from FrictionSim2D.core.simulation_base import SimulationBase
-from FrictionSim2D.core.config import SheetOnSheetSimulationConfig
-from FrictionSim2D.core.potential_manager import PotentialManager
-from FrictionSim2D.builders import components
+from src.core.simulation_base import SimulationBase
+from src.core.config import SheetOnSheetSimulationConfig
+from src.core.potential_manager import PotentialManager
+from src.builders import components
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class SheetOnSheetSimulation(SimulationBase):
 
     def _init_provenance(self) -> None:
         """Initialize provenance folder and collect input files."""
-        from FrictionSim2D.core.utils import get_material_path, get_potential_path
+        from src.core.utils import get_material_path, get_potential_path
         
         # Initialize the provenance folder
         prov_dir = self.output_dir / 'provenance'
@@ -170,9 +170,9 @@ class SheetOnSheetSimulation(SimulationBase):
             'ylo': self.sheet_dims.get('ylo', 0.0),
             'yhi': self.sheet_dims.get('yhi', 100.0),
             
-            # File paths
-            'data_file': f"../build/{self.structure_paths['sheet'].name}",
-            'potential_file': 'system.in.settings',
+            # File paths (relative to run directory)
+            'data_file': str(self.output_dir / "build" / self.structure_paths['sheet'].name),
+            'potential_file': str(self.output_dir / "lammps" / "system.in.settings"),
             
             # Atom types
             'num_atom_types': total_types,
@@ -213,8 +213,8 @@ class SheetOnSheetSimulation(SimulationBase):
             'results_freq': out.results_frequency,
             'dump_freq': out.dump_frequency.get('slide', 1000),
             'dump_enabled': out.dump.get('slide', False),
-            'results_file_pattern': '../results/friction_p${pressure}_a${a}.dat',
-            'dump_file_pattern': '../visuals/slide_p${pressure}_a${a}.*.dump',
+            'results_file_pattern': str(self.output_dir / 'results' / 'friction_p${pressure}_a${a}.dat'),
+            'dump_file_pattern': str(self.output_dir / 'visuals' / 'slide_p${pressure}_a${a}.*.dump'),
             
             # Virtual atom for driving
             'virtual_atom_type': virtual_atom_type,

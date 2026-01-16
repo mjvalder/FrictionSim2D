@@ -5,7 +5,7 @@ from pathlib import Path
 from importlib import resources
 from unittest.mock import MagicMock
 
-from FrictionSim2D.core.config import (
+from src.core.config import (
     GlobalSettings, 
     GeometrySettings,
     ThermostatSettings,

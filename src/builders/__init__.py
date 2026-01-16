@@ -7,9 +7,9 @@ the construction of complete simulation setups:
 - Component builders (tip, sheet, substrate)
 """
 
-from FrictionSim2D.builders.afm import AFMSimulation
-from FrictionSim2D.builders.sheetonsheet import SheetOnSheetSimulation
-from FrictionSim2D.builders import components
+from src.builders.afm import AFMSimulation
+from src.builders.sheetonsheet import SheetOnSheetSimulation
+from src.builders import components
 
 __all__ = [
     "AFMSimulation",

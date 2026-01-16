@@ -1,13 +1,13 @@
 """Core modules for FrictionSim2D.
 
 This package contains the foundational classes and utilities:
-- Configuration models (Pydantic)
-- Potential management
-- Utility functions for file I/O and calculations
-- Base builder class
+    - Configuration models (Pydantic)
+    - Potential management
+    - Utility functions for file I/O and calculations
+    - Base builder class
 """
 
-from FrictionSim2D.core.config import (
+from src.core.config import (
     ComponentConfig,
     TipConfig,
     SubstrateConfig,
@@ -16,12 +16,12 @@ from FrictionSim2D.core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
     GlobalSettings,
-    load_default_settings,
+    load_settings,
     parse_config,
 )
-from FrictionSim2D.core.potential_manager import PotentialManager
-from FrictionSim2D.core.simulation_base import SimulationBase
-from FrictionSim2D.core.utils import (
+from src.core.potential_manager import PotentialManager
+from src.core.simulation_base import SimulationBase
+from src.core.utils import (
     cifread,
     count_atomtypes,
     lj_params,
@@ -40,7 +40,7 @@ __all__ = [
     "AFMSimulationConfig",
     "SheetOnSheetSimulationConfig",
     "GlobalSettings",
-    "load_default_settings",
+    "load_settings",
     "parse_config",
     # Potential
     "PotentialManager",

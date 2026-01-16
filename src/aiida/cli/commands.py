@@ -42,10 +42,10 @@ def prepare(config_file: str,
     Example:
         friction2d prepare afm_config.ini -o ./output
     """
-    from FrictionSim2D.core.config import AFMSimulationConfig
-    from FrictionSim2D.core.utils import read_config
-    from FrictionSim2D.builders.afm import AFMSimulation
-    from FrictionSim2D.aiida.hpc import JobManifest
+    from src.core.config import AFMSimulationConfig
+    from src.core.utils import read_config
+    from src.builders.afm import AFMSimulation
+    from src.aiida.hpc import JobManifest
     
     config_path = Path(config_file)
     
@@ -81,7 +81,7 @@ def prepare(config_file: str,
         n_generated = 0
         
         if simulation_type == 'afm':
-            from FrictionSim2D import afm
+            from src import afm
             
             with click.progressbar(length=1, label='Generating simulations') as bar:
                 afm(str(config_path), output_dir=str(output_dir))
@@ -100,7 +100,7 @@ def prepare(config_file: str,
         # Register in AiiDA if requested
         if register:
             try:
-                from FrictionSim2D.aiida.data import (
+                from src.aiida.data import (
                     FrictionSimulationData,
                     FrictionConfigData,
                     FrictionProvenanceData,
@@ -168,8 +168,8 @@ def export_package(simulation_dir: str,
     Example:
         friction2d export ./afm_output -o ./hpc_package -s pbs
     """
-    from FrictionSim2D.aiida.hpc import HPCScriptGenerator, HPCConfig, JobManifest
-    from FrictionSim2D.aiida.hpc.scripts import create_hpc_package
+    from src.aiida.hpc import HPCScriptGenerator, HPCConfig, JobManifest
+    from src.aiida.hpc.scripts import create_hpc_package
     
     sim_dir = Path(simulation_dir)
     out_dir = Path(output_dir)
@@ -206,7 +206,7 @@ def export_package(simulation_dir: str,
         
         # Mark all jobs as exported
         for job in manifest.jobs:
-            from FrictionSim2D.aiida.hpc import JobStatus
+            from src.aiida.hpc import JobStatus
             job.update_status(JobStatus.EXPORTED)
         
         # Save manifest in package
@@ -248,7 +248,7 @@ def import_results(results_dir: str,
     Example:
         friction2d import ./returned_results -m manifest.json
     """
-    from FrictionSim2D.aiida.hpc import JobManifest, JobStatus
+    from src.aiida.hpc import JobManifest, JobStatus
     
     results_path = Path(results_dir)
     
@@ -277,7 +277,7 @@ def import_results(results_dir: str,
     if process:
         click.echo("\n🔄 Running postprocessing...")
         try:
-            from FrictionSim2D.postprocessing.read_data import DataReader
+            from src.postprocessing.read_data import DataReader
             
             reader = DataReader(results_dir=str(results_path))
             reader.export_full_data_to_json()
@@ -291,7 +291,7 @@ def import_results(results_dir: str,
     if store:
         click.echo("\n📦 Storing results in AiiDA...")
         try:
-            from FrictionSim2D.aiida.data import (
+            from src.aiida.data import (
                 FrictionSimulationData,
                 FrictionResultsData,
             )
@@ -360,7 +360,7 @@ def status(manifest_file: str, verbose: bool):
     Example:
         friction2d status manifest.json
     """
-    from FrictionSim2D.aiida.hpc import JobManifest
+    from src.aiida.hpc import JobManifest
     
     manifest = JobManifest.load(Path(manifest_file))
     summary = manifest.get_summary()
@@ -405,7 +405,7 @@ def mark(manifest_file: str, submitted: bool, job_prefix: Optional[str]):
     Example:
         friction2d mark manifest.json --submitted --job-prefix 12345
     """
-    from FrictionSim2D.aiida.hpc import JobManifest
+    from src.aiida.hpc import JobManifest
     
     manifest_path = Path(manifest_file)
     manifest = JobManifest.load(manifest_path)
@@ -445,7 +445,7 @@ def query(material: Optional[str],
         friction2d query -m h-MoS2 -l 2 --export results.csv
     """
     try:
-        from FrictionSim2D.aiida.db import Friction2DDB
+        from src.aiida.db import Friction2DDB
     except ImportError:
         click.echo("❌ AiiDA not available", err=True)
         raise click.Abort()
@@ -490,7 +490,7 @@ def stats():
         friction2d stats
     """
     try:
-        from FrictionSim2D.aiida.db import Friction2DDB
+        from src.aiida.db import Friction2DDB
     except ImportError:
         click.echo("❌ AiiDA not available", err=True)
         raise click.Abort()
@@ -526,7 +526,7 @@ def list_materials():
         friction2d materials
     """
     try:
-        from FrictionSim2D.aiida.db import Friction2DDB
+        from src.aiida.db import Friction2DDB
     except ImportError:
         click.echo("❌ AiiDA not available", err=True)
         raise click.Abort()
@@ -561,7 +561,7 @@ def list_conditions():
         friction2d conditions
     """
     try:
-        from FrictionSim2D.aiida.db import Friction2DDB
+        from src.aiida.db import Friction2DDB
     except ImportError:
         click.echo("❌ AiiDA not available", err=True)
         raise click.Abort()

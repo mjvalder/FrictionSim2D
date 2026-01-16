@@ -2,9 +2,9 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from FrictionSim2D.builders.afm import AFMSimulation
-from FrictionSim2D.builders import components
-from FrictionSim2D.core.config import AFMSimulationConfig, load_default_settings
+from src.builders.afm import AFMSimulation
+from src.builders import components
+from src.core.config import AFMSimulationConfig, load_settings
 
 # Reusing valid config data
 VALID_DATA = {

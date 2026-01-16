@@ -13,12 +13,11 @@ from pathlib import Path
 from copy import deepcopy
 from typing import List, Dict, Any
 
-from FrictionSim2D.core.config import (
+from src.core.config import (
     parse_config, AFMSimulationConfig, SheetOnSheetSimulationConfig, 
-    load_default_settings, GlobalSettings
-)
-from FrictionSim2D.builders.afm import AFMSimulation
-from FrictionSim2D.builders.sheetonsheet import SheetOnSheetSimulation
+    load_settings)
+from src.builders.afm import AFMSimulation
+from src.builders.sheetonsheet import SheetOnSheetSimulation
 
 # Configure logging
 logging.basicConfig(
@@ -113,7 +112,7 @@ def expand_config_sweeps(base_config: Dict[str, Any]) -> List[Dict[str, Any]]:
 def handle_settings(args):
     """Handler for 'settings' subcommand."""
     if args.action == 'show':
-        defaults = load_default_settings()
+        defaults = load_settings()
         print(yaml.dump(defaults.dict(), default_flow_style=False))
         
     elif args.action == 'reset':
@@ -127,7 +126,7 @@ def handle_settings(args):
     elif args.action == 'init':
         # Copy defaults to local dir for editing
         from importlib import resources
-        with resources.as_file(resources.files('FrictionSim2D.data.settings') / 'settings_default.yaml') as p:
+        with resources.as_file(resources.files('src.data.settings') / 'settings_default.yaml') as p:
             shutil.copy(p, "settings.yaml")
         logger.info("Created mutable 'settings.yaml' in current directory.")
 
@@ -148,7 +147,7 @@ def handle_run(args):
     logger.info(f"Found {len(configs_to_run)} simulation configurations to run.")
     
     for i, run_dict in enumerate(configs_to_run):
-        logger.info(f"--- Starting Run {i+1}/{len(configs_to_run)} ---")
+        logger.info("--- Starting Run %d/%d ---", i+1, len(configs_to_run))
         
         # Inject settings
         run_dict['settings'] = defaults.dict()

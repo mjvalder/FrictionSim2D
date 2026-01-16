@@ -2,7 +2,7 @@ import pytest
 import yaml
 from pathlib import Path
 from pydantic import ValidationError
-from FrictionSim2D.core.config import (
+from src.core.config import (
     AFMSimulationConfig, 
     TipConfig, 
     SheetConfig, 
@@ -10,7 +10,7 @@ from FrictionSim2D.core.config import (
     GeneralConfig,
     GlobalSettings,
     parse_config,
-    load_default_settings
+    load_settings
 )
 
 # Sample data
@@ -30,14 +30,14 @@ VALID_GENERAL = {'temp': 300.0}
 
 def test_load_default_settings():
     """Ensure default settings load correctly from package resources."""
-    settings = load_default_settings()
+    settings = load_settings()
     assert isinstance(settings, GlobalSettings)
     assert settings.geometry.rigid_tip is not None
     assert settings.thermostat.type in ['langevin', 'nose-hoover']
 
 def test_valid_config_creation():
     """Test creating a full configuration object."""
-    settings = load_default_settings()
+    settings = load_settings()
     
     config = AFMSimulationConfig(
         general=VALID_GENERAL,
@@ -51,7 +51,7 @@ def test_valid_config_creation():
 
 def test_validation_error():
     """Ensure invalid types raise errors."""
-    settings = load_default_settings()
+    settings = load_settings()
     invalid_tip = VALID_TIP.copy()
     invalid_tip['r'] = "not_a_number" # Should fail
     

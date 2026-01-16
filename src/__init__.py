@@ -13,13 +13,13 @@ __version__ = "0.2.0"
 from pathlib import Path
 import logging
 
-from FrictionSim2D.builders.afm import AFMSimulation
-from FrictionSim2D.builders.sheetonsheet import SheetOnSheetSimulation
-from FrictionSim2D.core.potential_manager import PotentialManager
-from FrictionSim2D.core.config import (
+from src.builders.afm import AFMSimulation
+from src.builders.sheetonsheet import SheetOnSheetSimulation
+from src.core.potential_manager import PotentialManager
+from src.core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
-    load_default_settings,
+    load_settings,
     parse_config,
 )
 
@@ -30,7 +30,7 @@ def afm(config_file: str = "afm_config.ini"):
     """Run AFM simulations from a config file.
     
     Simple interface that mimics the old tribo_2D behavior:
-        from FrictionSim2D import afm
+        from src import afm
         afm("afm_config.ini")
     
     This function:
@@ -63,7 +63,7 @@ def _run_all(config_file: str, model: str = "afm"):
     - Parameter sweeps (force, layers, temp)
     - Folder structure creation matching old tribo_2D format
     """
-    from FrictionSim2D.cli import expand_config_sweeps
+    from src.cli import expand_config_sweeps
     
     config_path = Path(config_file)
     if not config_path.exists():
@@ -71,7 +71,7 @@ def _run_all(config_file: str, model: str = "afm"):
 
     # Load base config and settings
     base_dict = parse_config(config_path)
-    defaults = load_default_settings()
+    defaults = load_settings()
 
     # Expand sweeps
     configs_to_run = expand_config_sweeps(base_dict)

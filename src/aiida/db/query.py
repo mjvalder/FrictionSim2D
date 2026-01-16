@@ -118,7 +118,7 @@ class Friction2DDB:
             )
         
         # Import data types
-        from FrictionSim2D.aiida.data import (
+        from src.aiida.data import (
             FrictionSimulationData,
             FrictionConfigData,
             FrictionResultsData,

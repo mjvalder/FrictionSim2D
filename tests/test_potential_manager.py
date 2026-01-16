@@ -18,12 +18,12 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from FrictionSim2D.core.potential_manager import (
+from src.core.potential_manager import (
     PotentialManager,
     POTENTIALS_WITH_INTERNAL_LJ,
     POTENTIALS_REQUIRING_LJ,
 )
-from FrictionSim2D.core.config import ComponentConfig
+from src.core.config import ComponentConfig
 
 
 class TestPotentialManagerInit:
@@ -269,7 +269,7 @@ class TestAFMSystem:
     ):
         """AFM system should register all three components."""
         # Need to mock both Si and MoS2 cifread
-        import FrictionSim2D.core.potential_manager as pm_module
+        import src.core.potential_manager as pm_module
         
         def mock_cifread(path):
             if 'MoS2' in str(path) or 'h-Mo' in str(path):
@@ -306,7 +306,7 @@ class TestAFMSystem:
         self, mock_settings, si_tip_config, si_sub_config, mos2_sheet_config
     ):
         """AFM system should have cross-interactions between all pairs."""
-        import FrictionSim2D.core.potential_manager as pm_module
+        import src.core.potential_manager as pm_module
         
         def mock_cifread(path):
             if 'MoS2' in str(path) or 'h-Mo' in str(path):
@@ -562,7 +562,7 @@ class TestGapCalculation:
 
     def test_calculate_gap_different_elements(self, mock_settings):
         """Gap between different elements should use mixing rules."""
-        import FrictionSim2D.core.potential_manager as pm_module
+        import src.core.potential_manager as pm_module
         
         def mock_cifread(path):
             if 'MoS2' in str(path):
@@ -578,7 +578,7 @@ class TestGapCalculation:
         pm_module.count_atomtypes = mock_count
         
         try:
-            from FrictionSim2D.core.config import SheetConfig, TipConfig
+            from src.core.config import SheetConfig, TipConfig
             
             tip_config = TipConfig(
                 mat='Si', pot_type='sw', pot_path='/fake/Si.sw',

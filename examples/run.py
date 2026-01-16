@@ -6,7 +6,7 @@ Usage:
     afm("afm_config.ini")
 """
 
-from FrictionSim2D import afm
+from FrictionSim2D.src import afm
 
 if __name__ == "__main__":
     afm("afm_config.ini")

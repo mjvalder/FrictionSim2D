@@ -4,11 +4,8 @@ import os
 import re
 import pandas as pd
 import numpy as np
-import matplotlib
 import seaborn as sns
 import glob
-
-matplotlib.use('Agg') # Use a non-interactive backend to prevent Qt errors
 import matplotlib.pyplot as plt
 
 class Plotter:
@@ -156,25 +153,31 @@ class Plotter:
     def _add_derived_columns(self, df):
         """
         Adds derived quantities (lf, cof, tip_sep) to a raw data DataFrame.
+        This is now more flexible to handle different simulation types.
         """
-        # Ensure required columns exist
-        required_cols = ['lfx', 'lfy', 'nf', 'tipz', 'comz']
-        if not all(col in df.columns for col in required_cols):
-            print("Warning: Missing one or more required columns for derived calculations. Skipping.")
-            return df
+        # --- MODIFICATION: Calculate lf if possible, then other columns if possible ---
+        # Lateral force (lf) is fundamental for ranking and most plots.
+        if 'lfx' in df.columns and 'lfy' in df.columns:
+            df['lf'] = np.sqrt(df['lfx']**2 + df['lfy']**2)
+        else:
+            print(f"Warning: Missing 'lfx' or 'lfy'. Cannot calculate lateral force. Available columns: {df.columns.tolist()}")
 
-        df['lf'] = np.sqrt(df['lfx']**2 + df['lfy']**2)
-        # Avoid division by zero for COF
-        df['cof'] = (df['lf'] / df['nf']).replace([np.inf, -np.inf], np.nan)
-        df['tip_sep'] = df['tipz'] - df['comz']
+        # Coefficient of Friction (cof) requires lateral force and normal force.
+        if 'lf' in df.columns and 'nf' in df.columns:
+            # Avoid division by zero for COF
+            df['cof'] = (df['lf'] / df['nf']).replace([np.inf, -np.inf], np.nan)
+
+        # Tip separation (tip_sep) is specific to AFM sims.
+        if 'tipz' in df.columns and 'comz' in df.columns:
+            df['tip_sep'] = df['tipz'] - df['comz']
         
-        # Add tipspeed calculation, assuming time step is in fs
-        if 'tipx' in df.columns and 'tipy' in df.columns:
-            time_interval_ps = self.time_step_fs / 1000.0  # Convert fs to ps
-            if time_interval_ps > 0:
-                df['tipspeed'] = np.sqrt(df['tipx'].diff().pow(2) + df['tipy'].diff().pow(2)).fillna(0) / time_interval_ps
-            else:
-                df['tipspeed'] = 0 # Avoid division by zero if time step is 0
+        # Tip speed is also specific to AFM sims.
+        if 'tipx' in df.columns and 'tipy' in df.columns and 'time' in df.columns:
+            time_diff_s = (df['time'].diff() * self.time_step_fs * 1e-15).fillna(0)
+            dist_diff_A = np.sqrt(df['tipx'].diff().fillna(0)**2 + df['tipy'].diff().fillna(0)**2)
+            # Calculate speed in m/s, avoiding division by zero
+            df['tipspeed'] = (dist_diff_A * 1e-10 / time_diff_s).replace([np.inf, -np.inf], 0)
+        # --- END MODIFICATION ---
 
         return df
 
@@ -313,6 +316,7 @@ class Plotter:
                 print(f"After id filter ({len(filter_values)} ids using contains): {original_shape} -> {filtered_df.shape}")
             
             elif plot_by == 'material_type':
+                # When plotting by type, we still need to filter down to the relevant IDs
                 ids_to_plot = [mid for mid, mtype in self.material_type_map.items() if mtype in filter_values]
                 original_shape = filtered_df.shape
                 filtered_df = filtered_df[filtered_df['id'].isin(ids_to_plot)]
@@ -744,47 +748,89 @@ class Plotter:
             print(f"Saved force correlation plot for size '{size}' to {output_path}")
             plt.close()
 
-    def rank_friction(self):
-        """Ranks materials by mean friction for each size and force, and exports to JSON."""
+    def rank_friction(self, plot_config={}):
+        """
+        Ranks materials by mean friction (lf or cof) for each size and force,
+        and exports the rankings to JSON files.
+        """
         print("\n--- Generating Friction Rankings ---")
         summary_df = self._get_summary_data_df()
         if summary_df.empty:
-            print("No summary data available to generate friction rankings.")
+            print("Warning: Summary data is empty, cannot generate rankings.")
             return
 
-        # Filter for baseline runs: angle == 0 and meaningful friction
-        rank_df = summary_df[(summary_df['angle'] == 0) & (summary_df['lf'] > 0)].copy()
+        # Determine which metrics to rank by. Default to 'lf' if not specified.
+        rank_by_metrics = plot_config.get('rank_by', ['lf'])
+        if not isinstance(rank_by_metrics, list):
+            rank_by_metrics = [rank_by_metrics]
 
-        if rank_df.empty:
-            print("No valid friction data (angle=0, lf>0) found to generate rankings.")
+        # --- New: Add layer filtering ---
+        layer_to_filter = plot_config.get('filter_layer')
+        if layer_to_filter:
+            summary_df = summary_df[summary_df['layer'] == layer_to_filter]
+
+        # Filter for baseline runs: angle == 0
+        base_df = summary_df[summary_df['angle'] == 0].copy()
+
+        if base_df.empty:
+            print("Warning: No data available for ranking (angle=0).")
             return
 
-        # Ensure required columns exist
-        required_cols = ['size', 'force', 'id', 'lf']
-        if not all(col in rank_df.columns for col in required_cols):
-            print(f"Error: Missing one or more required columns for ranking. Needed: {required_cols}")
-            return
+        for metric in rank_by_metrics:
+            print(f"\n--- Ranking by: {metric} ---")
 
-        # Group by size first to create separate files
-        for size, group in rank_df.groupby('size'):
-            friction_ranking = {}
-            # Then group by force to create rankings for each load
-            for force, force_group in group.groupby('force'):
-                # Sort by mean friction ('lf') and select relevant columns
-                sorted_materials = force_group.sort_values('lf')[['id', 'lf']]
+            # Ensure the metric column exists and has positive values for ranking
+            if metric not in base_df.columns:
+                print(f"Warning: Metric '{metric}' not found in summary data. Skipping this ranking.")
+                continue
+            
+            rank_df = base_df[base_df[metric] > 0].copy()
+            if rank_df.empty:
+                print(f"Warning: No data with positive '{metric}' values available for ranking.")
+                continue
+
+            # Ensure other required columns exist
+            required_cols = ['size', 'force', 'id', metric]
+            if not all(col in rank_df.columns for col in required_cols):
+                print(f"Error: Missing one or more required columns for ranking by '{metric}': {required_cols}")
+                continue
+
+            # Aggregate runs by taking the mean of the ranking metric
+            agg_df = rank_df.groupby(['size', 'force', 'id'])[metric].mean().reset_index()
+
+            # Group by size to create separate files
+            for size, group in agg_df.groupby('size'):
+                ranks_by_force = {}
+                # Group by force to rank materials
+                for force, force_group in group.groupby('force'):
+                    # Rank by the specified metric, ascending=False (higher value is worse)
+                    ranked_materials = force_group.sort_values(metric, ascending=False).reset_index()
+                    ranked_materials['rank'] = ranked_materials.index + 1
+                    
+                    materials_for_force = []
+                    for _, row in ranked_materials.iterrows():
+                        record = {
+                            'material': row['id'],
+                            'rank': row['rank'],
+                            'metric': metric,
+                            'mean_value': row[metric]
+                        }
+                        materials_for_force.append(record)
+                    
+                    force_key = f"f{force}"
+                    ranks_by_force[force_key] = materials_for_force
                 
-                # Rename columns for the final JSON output
-                sorted_materials = sorted_materials.rename(columns={'id': 'material', 'lf': 'mean_friction'})
-                
-                # Convert to the desired list of records format
-                friction_ranking[f'f{force}'] = sorted_materials.to_dict('records')
+                if not ranks_by_force:
+                    print(f"No ranks generated for size '{size}' and metric '{metric}'.")
+                    continue
 
-            if friction_ranking:
-                filename = f'friction_ranking_{size}.json'
-                filepath = os.path.join(self.output_dir, filename)
-                with open(filepath, 'w') as f:
-                    json.dump(friction_ranking, f, indent=4)
-                print(f"Friction ranking for size '{size}' saved to {filepath}")
+                # Export to a uniquely named JSON file
+                layer_str = f"_layer{layer_to_filter}" if layer_to_filter else ""
+                output_filename = f'friction_ranking_{metric}_{size}{layer_str}.json'
+                output_path = os.path.join(self.output_dir, output_filename)
+                with open(output_path, 'w') as f:
+                    json.dump(ranks_by_force, f, indent=4)
+                print(f"Exported '{metric}' ranking for size '{size}' to {output_path}")
 
     def generate_plot(self, plot_config):
         """
@@ -797,7 +843,7 @@ class Plotter:
         elif plot_type == 'timeseries':
             self._generate_timeseries_plot(plot_config)
         elif plot_type == 'rank_friction':
-            self.rank_friction()
+            self.rank_friction(plot_config)
         elif plot_type == 'correlation':
             self._generate_correlation_plots(plot_config)
         else:

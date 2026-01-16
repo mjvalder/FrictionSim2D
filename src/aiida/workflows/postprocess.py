@@ -80,7 +80,7 @@ class PostProcessWorkflow:
     def _load_manifest(self):
         """Load the job manifest if available."""
         if self.manifest_path and self.manifest_path.exists():
-            from FrictionSim2D.aiida.hpc import JobManifest
+            from src.aiida.hpc import JobManifest
             self._manifest = JobManifest.load(self.manifest_path)
             logger.info(f"Loaded manifest with {self._manifest.n_jobs} jobs")
     
@@ -90,7 +90,7 @@ class PostProcessWorkflow:
         Returns:
             List of generated JSON file paths
         """
-        from FrictionSim2D.postprocessing.read_data import DataReader
+        from src.postprocessing.read_data import DataReader
         
         logger.info(f"Processing results in {self.results_dir}")
         
@@ -117,8 +117,8 @@ class PostProcessWorkflow:
             return []
         
         try:
-            from FrictionSim2D.aiida.data import FrictionSimulationData, FrictionResultsData
-            from FrictionSim2D.aiida.hpc import JobStatus
+            from src.aiida.data import FrictionSimulationData, FrictionResultsData
+            from src.aiida.hpc import JobStatus
         except ImportError:
             logger.warning("AiiDA not available, skipping storage")
             return []
@@ -157,8 +157,8 @@ class PostProcessWorkflow:
             metadata: Global metadata from JSON
             stored_uuids: List to append stored UUIDs to
         """
-        from FrictionSim2D.aiida.data import FrictionSimulationData, FrictionResultsData
-        from FrictionSim2D.aiida.hpc import JobStatus
+        from src.aiida.data import FrictionSimulationData, FrictionResultsData
+        from src.aiida.hpc import JobStatus
         import pandas as pd
         
         time_series = metadata.get('time_series', [])
@@ -248,7 +248,7 @@ class PostProcessWorkflow:
         if not self._manifest:
             return
         
-        from FrictionSim2D.aiida.hpc import JobStatus
+        from src.aiida.hpc import JobStatus
         
         # Mark completed jobs as imported
         updated = self._manifest.mark_completed_from_results(self.results_dir)

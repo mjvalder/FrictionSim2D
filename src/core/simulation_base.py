@@ -13,13 +13,17 @@ from importlib import resources
 
 from jinja2 import Environment, BaseLoader, TemplateNotFound
 import shutil
-from FrictionSim2D.interfaces.atomsk import AtomskWrapper
+from src.interfaces.atomsk import AtomskWrapper
 
 logger = logging.getLogger(__name__)
 
 
 class PackageLoader(BaseLoader):
-    """Jinja2 loader that works with importlib.resources Traversable objects."""
+    """Jinja2 loader that works with importlib.resources Traversable objects.
+
+    Allows Jinja2 to load templates from package resources instead of the
+    filesystem, supporting both installed packages and development mode.
+    """
     
     def __init__(self, package_name: str):
         self._package = resources.files(package_name)
@@ -65,7 +69,7 @@ class SimulationBase(ABC):
         self.atomsk = AtomskWrapper()
         
         self.jinja_env = Environment(
-            loader=PackageLoader('FrictionSim2D.templates'),
+            loader=PackageLoader('src.templates'),
             trim_blocks=True,
             lstrip_blocks=True
         )
@@ -81,11 +85,13 @@ class SimulationBase(ABC):
         for d in default_dirs + (subdirs or []):
             (self.output_dir / d).mkdir(parents=True, exist_ok=True)
 
-    def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
-        """Renders a Jinja2 template with the provided context.
+    def render_template(self, template_name: str,
+                       context: Dict[str, Any]) -> str:
+        """Render a Jinja2 template with the provided context.
 
         Args:
-            template_name: Relative path to the template (e.g., 'afm/slide.lmp').
+            template_name: Relative path to the template (e.g.,
+                'afm/slide.lmp').
             context: Dictionary of variables to pass to the template.
 
         Returns:
@@ -98,13 +104,14 @@ class SimulationBase(ABC):
             logger.error(f"Failed to render template '{template_name}': {e}")
             raise
 
-    def write_file(self, filename: Union[str, Path], content: str) -> Path:
-        """Writes string content to a file in the output directory.
-        
+    def write_file(self, filename: Union[str, Path],
+                   content: str) -> Path:
+        """Write string content to a file in the output directory.
+
         Args:
-            filename: Relative path or filename (e.g. 'lammps/system.in').
+            filename: Relative path or filename (e.g., 'lammps/system.in').
             content: The string content to write.
-            
+
         Returns:
             The full path to the written file.
         """
@@ -194,10 +201,18 @@ class SimulationBase(ABC):
 
     @abstractmethod
     def build(self) -> None:
-        """Orchestrates the construction of atomic structures (Tips, Sheets)."""
+        """Orchestrate the construction of atomic structures.
+
+        Subclasses must implement this to create all necessary structures
+        and prepare the simulation.
+        """
         pass
 
     @abstractmethod
     def write_inputs(self) -> None:
-        """Generates the LAMMPS input scripts and potential files."""
+        """Generate the LAMMPS input scripts and potential files.
+
+        Subclasses must implement this to create all necessary LAMMPS
+        configuration files and scripts.
+        """
         pass

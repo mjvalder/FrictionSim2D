@@ -15,7 +15,7 @@ Typical Usage (Offline HPC Workflow):
 
 1. **Prepare simulations**::
 
-    from FrictionSim2D.aiida.workflows import FrictionSimWorkflow
+    from src.aiida.workflows import FrictionSimWorkflow
     
     workflow = FrictionSimWorkflow(
         config_path='afm_config.ini',
@@ -40,7 +40,7 @@ Typical Usage (Offline HPC Workflow):
 
 5. **Query results**::
 
-    from FrictionSim2D.aiida.db import Friction2DDB
+    from src.aiida.db import Friction2DDB
     
     db = Friction2DDB()
     results = db.query_by_material('h-MoS2')

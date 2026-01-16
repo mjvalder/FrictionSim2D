@@ -21,13 +21,13 @@ from typing import Dict, List, Optional, Tuple
 
 from lammps import lammps
 
-from FrictionSim2D.core.config import GlobalSettings, SheetConfig, SubstrateConfig, TipConfig
-from FrictionSim2D.core.potential_manager import PotentialManager
-from FrictionSim2D.core.utils import (
+from src.core.config import GlobalSettings, SheetConfig, SubstrateConfig, TipConfig
+from src.core.potential_manager import PotentialManager
+from src.core.utils import (
     cifread, count_atomtypes, get_material_path, get_model_dimensions,
     renumber_atom_types, check_potential_cif_compatibility
 )
-from FrictionSim2D.interfaces.atomsk import AtomskWrapper
+from src.interfaces.atomsk import AtomskWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def get_amorphous_path(mat_name: str) -> Optional[Path]:
     """
     from importlib import resources
     
-    mat_dir = resources.files('FrictionSim2D.data.materials')
+    mat_dir = resources.files('src.data.materials')
     amor_file = mat_dir.joinpath(f"amor_{mat_name}.lmp")
     
     if amor_file.is_file():
@@ -235,7 +235,7 @@ def make_amorphous(
     
     # Output file for amorphous structure (save in materials folder for reuse)
     from importlib import resources
-    mat_dir = resources.files('FrictionSim2D.data.materials')
+    mat_dir = resources.files('src.data.materials')
     # Convert to actual filesystem path
     if hasattr(mat_dir, '__fspath__'):
         materials_path = Path(mat_dir)
@@ -252,7 +252,7 @@ def make_amorphous(
     elements = cif_data['elements']
     
     # Create a temporary ComponentConfig for PotentialManager
-    from FrictionSim2D.core.config import ComponentConfig
+    from src.core.config import ComponentConfig
     temp_config = ComponentConfig(
         mat=mat_name,
         pot_type=pot_type,
@@ -772,7 +772,12 @@ def build_monolayer(
     if config.pot_type in ['tersoff', 'sw', 'rebo', 'airebo']:
         atomsk.charge2atom(base_path, base_path, ["q"])
     
+    # Use config lat_c if provided, otherwise use default from settings
     lat_c = config.lat_c
+    if lat_c is None and settings is not None:
+        lat_c = settings.geometry.lat_c_default
+    elif lat_c is None:
+        lat_c = 6.0  # Fallback default
     
     return base_path, dims, lat_c, pot_counts, total_pot_types
 

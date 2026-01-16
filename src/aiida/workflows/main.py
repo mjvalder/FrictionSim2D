@@ -242,8 +242,8 @@ class FrictionSimWorkflow:
         Returns:
             Path to package directory if successful
         """
-        from FrictionSim2D.aiida.hpc import HPCScriptGenerator, HPCConfig
-        from FrictionSim2D.aiida.hpc.scripts import create_hpc_package
+        from src.aiida.hpc import HPCScriptGenerator, HPCConfig
+        from src.aiida.hpc.scripts import create_hpc_package
         
         if self.state.phase.value not in ('preparation', 'export'):
             logger.warning("Export should follow preparation")
@@ -289,7 +289,7 @@ class FrictionSimWorkflow:
         Returns:
             True if successful
         """
-        from FrictionSim2D.aiida.hpc import JobManifest, JobStatus
+        from src.aiida.hpc import JobManifest, JobStatus
         
         results_dir = Path(results_dir).resolve()
         self.state.results_dir = results_dir

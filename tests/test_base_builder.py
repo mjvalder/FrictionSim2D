@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
-from FrictionSim2D.core.simulation_base import SimulationBase
-from FrictionSim2D.core.config import AFMSimulationConfig
+from src.core.simulation_base import SimulationBase
+from src.core.config import AFMSimulationConfig
 
 # Mock class to allow instantiation of abstract SimulationBase
 class ConcreteSimulation(SimulationBase):
