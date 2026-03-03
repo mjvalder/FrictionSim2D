@@ -191,6 +191,7 @@ class HPCScriptGenerator:
             context.update({
                 'array_size': len(chunk),
                 'manifest_file': f"{base_dir}/{output_dir.name}/{manifest_name}",
+                'manifest_filename': manifest_name,
                 'base_dir': base_dir,
                 'log_dir': f"{base_dir}/logs",
             })
@@ -330,6 +331,7 @@ class HPCScriptGenerator:
             context.update({
                 'array_size': len(system_jobs),
                 'manifest_file': f"{base_dir}/hpc/manifest_system.txt",
+                'manifest_filename': 'manifest_system.txt',
                 'base_dir': base_dir,
                 'log_dir': f"{base_dir}/logs",
                 'job_name': f"{self.config.job_name}_system",
@@ -344,6 +346,7 @@ class HPCScriptGenerator:
             context.update({
                 'array_size': len(slide_jobs),
                 'manifest_file': f"{base_dir}/hpc/manifest_slide.txt",
+                'manifest_filename': 'manifest_slide.txt',
                 'base_dir': base_dir,
                 'log_dir': f"{base_dir}/logs",
                 'job_name': f"{self.config.job_name}_slide",

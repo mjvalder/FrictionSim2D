@@ -28,7 +28,7 @@ TASK_ID=${PBS_ARRAY_INDEX}
 TASK_ID=1
 {% endif %}
 
-SCRIPT_PATH=$(sed -n "${TASK_ID}p" {{ manifest_file }})
+SCRIPT_PATH=$(sed -n "${TASK_ID}p" $PBS_O_WORKDIR/hpc/{{ manifest_filename }})
 SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 SIM_PATH=$(dirname "$SCRIPT_DIR")
 
@@ -38,13 +38,14 @@ if [ -z "$SCRIPT_PATH" ]; then
 fi
 
 {% if use_tmpdir %}
-SIM_ROOT=$(basename "{{ base_dir }}")
+SIM_ROOT=$(basename "$PBS_O_WORKDIR")
 SCRATCH={{ scratch_dir }}/${SIM_ROOT}
 mkdir -p $SCRATCH/${SIM_PATH}
-rsync -av --exclude='*.lammpstrj' {{ base_dir }}/${SIM_PATH}/ $SCRATCH/${SIM_PATH}/
+rsync -av --exclude='*.lammpstrj' --exclude='results/' --exclude='visuals/' --exclude='data/' $PBS_O_WORKDIR/${SIM_PATH}/ $SCRATCH/${SIM_PATH}/
+mkdir -p $SCRATCH/${SIM_PATH}/results $SCRATCH/${SIM_PATH}/visuals $SCRATCH/${SIM_PATH}/data
 cd $SCRATCH
 {% else %}
-cd {{ base_dir }}
+cd $PBS_O_WORKDIR
 {% endif %}
 
 {{ mpi_command }} lmp {{ lmp_flags }} -in ${SCRIPT_PATH}
@@ -54,7 +55,7 @@ if [ $? -ne 0 ]; then
 fi
 
 {% if use_tmpdir %}
-cp -r ${SIM_PATH}/results ${SIM_PATH}/visuals ${SIM_PATH}/data {{ base_dir }}/${SIM_PATH}/
+cp -r ${SIM_PATH}/results ${SIM_PATH}/visuals ${SIM_PATH}/data $PBS_O_WORKDIR/${SIM_PATH}/
 {% endif %}
 
 echo "Simulation completed successfully: ${SIM_PATH}"

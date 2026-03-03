@@ -61,7 +61,7 @@ hpc:
   queue: null                      # PBS queue name (optional)
   partition: null                 # SLURM partition (optional)
   account: ''                     # Account/project to charge (optional)
-  hpc_host: mv923@dtn-b.hpc.ic.ac.uk
+  hpc_host: mv923@dtn-c.cx3.hpc.ic.ac.uk
   hpc_home: /rds/general/user/mv923/home/
   scratch_dir: '$EPHEMERAL'           # Scratch directory on compute nodes ($EPHEMERAL or $TMPDIR)
   num_nodes: 1                    # Number of nodes per job

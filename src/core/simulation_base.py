@@ -370,6 +370,7 @@ class SimulationBase(ABC):
             context.update({
                 'array_size': manifest.n_jobs,
                 'manifest_file': slide_manifest_rel,
+                'manifest_filename': 'manifest_slide.txt',
                 'base_dir': base_dir,
                 'log_dir': f"{base_dir}/logs",
                 'job_name': job_name,
