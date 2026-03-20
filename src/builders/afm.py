@@ -39,6 +39,11 @@ class AFMSimulation(SimulationBase):
         self.output_dir_layer: Dict[int, Path] = {}
         self.relative_run_dir_layer: Dict[int, Path] = {}
 
+    @staticmethod
+    def _normalized_pot_type(value: str) -> str:
+        """Normalize potential type for builder-level checks."""
+        return value.strip().lower()
+
     def build(self) -> None:
         """Constructs the atomic systems and layout.
         
@@ -264,9 +269,9 @@ class AFMSimulation(SimulationBase):
 
         reaxff_types = {'reaxff', 'reax/c'}
         uses_reaxff = (
-            self.config.sheet.pot_type.lower() in reaxff_types or
-            self.config.tip.pot_type.lower() in reaxff_types or
-            self.config.sub.pot_type.lower() in reaxff_types
+            self._normalized_pot_type(self.config.sheet.pot_type) in reaxff_types or
+            self._normalized_pot_type(self.config.tip.pot_type) in reaxff_types or
+            self._normalized_pot_type(self.config.sub.pot_type) in reaxff_types
         )
         atom_style = 'charge' if uses_reaxff else 'atomic'
 

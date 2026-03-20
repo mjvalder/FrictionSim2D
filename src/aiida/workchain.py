@@ -48,7 +48,8 @@ class FrictionWorkChain(WorkChain):
     @classmethod
     def define(cls, spec):
         """Define the WorkChain specification."""
-        super().define(spec)
+        super_cls = cast(Any, super())
+        super_cls.define(spec)
 
         # Inputs
         spec.input(

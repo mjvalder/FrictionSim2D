@@ -87,7 +87,7 @@ def mock_settings_no_langevin(mock_settings) -> GlobalSettings:
 @pytest.fixture
 def data_path() -> Path:
     """Returns the path to package data directory."""
-    return Path(str(resources.files('FrictionSim2D.data')))
+    return Path(str(resources.files('src.data')))
 
 
 @pytest.fixture

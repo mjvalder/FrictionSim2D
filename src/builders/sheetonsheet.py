@@ -52,8 +52,23 @@ class SheetOnSheetSimulation(SimulationBase):
 
     @property
     def n_layers(self) -> int:
-        """Number of layers derived from sheet configuration."""
-        return max(self.config.sheet.layers)
+        """Number of layers derived from sheet configuration.
+
+        Sheet-on-sheet currently supports a single explicit layer count
+        (not a layer sweep list).
+        """
+        layers = self.config.sheet.layers
+        if len(layers) != 1:
+            raise ValueError(
+                "Sheet-on-sheet currently requires exactly one value in 2D.layers "
+                "(e.g., layers=[3])."
+            )
+        return int(layers[0])
+
+    @staticmethod
+    def _normalized_pot_type(value: str) -> str:
+        """Normalize potential type for builder-level checks."""
+        return value.strip().lower()
 
     @staticmethod
     def _to_list(value: Optional[Union[float, List[float]]]) -> List[float]:
@@ -89,7 +104,7 @@ class SheetOnSheetSimulation(SimulationBase):
         self._init_provenance()
 
         constraint_mode = self.config.settings.simulation.constraint_mode
-        pot_type_lower = self.config.sheet.pot_type.lower()
+        pot_type_lower = self._normalized_pot_type(self.config.sheet.pot_type)
 
         if pot_type_lower in POTENTIALS_WITH_INTERNAL_LJ and constraint_mode != 'none':
             raise ValueError(
@@ -215,7 +230,7 @@ class SheetOnSheetSimulation(SimulationBase):
         n_layers = self.n_layers
         total_types = len(self.pm.types) if self.pm else 0
         constraint_mode = self.config.settings.simulation.constraint_mode
-        pot_type = self.config.sheet.pot_type.lower()
+        pot_type = self._normalized_pot_type(self.config.sheet.pot_type)
 
         sim = self.config.settings.simulation
         out = self.config.settings.output
