@@ -1,0 +1,55 @@
+# FrictionSim2D – AiiDA-enabled conda environment
+#
+# Usage:
+#   conda env create -f conda/environment-aiida.yml
+#   conda activate frictionsim2d-aiida
+#   export PYTHONPATH=$PWD
+#   bash src/aiida/start_aiida.sh   # start RabbitMQ & create profile
+#
+# Requirements:
+#   - Python 3.11  (AiiDA 2.x is not yet compatible with Python 3.12+)
+#   - RabbitMQ     (bundled via aiida-core.services)
+#   - PostgreSQL   (bundled via aiida-core.services)
+#
+# After activation run the one-time setup:
+#   bash src/aiida/start_aiida.sh
+
+name: frictionsim2d-aiida
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # ----- Python (must be <3.12 for AiiDA 2.x) -----
+  - python=3.11
+
+  # ----- Scientific binaries -----
+  - lammps
+  - atomsk
+
+  # ----- AiiDA core + services (bundles RabbitMQ & PostgreSQL) -----
+  - aiida-core>=2.0
+  - aiida-core.services>=2.0
+  - psycopg2>=2.9
+  - typing_extensions>=4.0
+
+  # ----- Python packages -----
+  - numpy>=1.21
+  - ase>=3.22
+  - pyyaml>=6.0
+  - jinja2>=3.1
+  - pydantic>=2.0
+  - click>=8.0
+  - pandas>=1.5
+  - matplotlib>=3.5
+  - seaborn>=0.12
+  - scipy>=1.8
+
+  # ----- Dev / test -----
+  - pip
+  - pytest>=7.0
+  - pytest-cov>=4.0
+
+  - pip:
+      - hatchling

@@ -9,23 +9,40 @@ This project is intended to run from a Conda environment so that LAMMPS, Atomsk,
 
 > pip installation is not the supported path in this repository documentation.
 
-### 1) Create environment
+Two environment files are provided depending on whether you need AiiDA:
+
+| File | Use case |
+|------|----------|
+| `conda/environment.yml` | Standard use – LAMMPS + all Python deps, **no AiiDA** |
+| `conda/environment-aiida.yml` | AiiDA provenance + HPC daemon, requires Python 3.11 |
+
+### Option A – Without AiiDA (recommended for most users)
 
 ```bash
-conda create -n frictionsim2d -c conda-forge \
-	python=3.11 \
-	numpy ase pyyaml jinja2 pydantic click pandas \
-	lammps atomsk \
-	aiida-core aiida-core.services typing_extensions psycopg2
-```
-
-```bash
+conda env create -f conda/environment.yml
 conda activate frictionsim2d
 ```
 
-### 2) Run from source
+### Option B – With AiiDA (provenance tracking, HPC submission)
 
-From repository root:
+> **Requirements:** Python 3.11, RabbitMQ, PostgreSQL  
+> (all bundled via `aiida-core.services` – no separate install needed)
+
+```bash
+conda env create -f conda/environment-aiida.yml
+conda activate frictionsim2d-aiida
+```
+
+Then run the one-time setup script to start RabbitMQ and create the AiiDA profile:
+
+```bash
+export PYTHONPATH=$PWD
+bash src/aiida/start_aiida.sh
+```
+
+### Run from source
+
+From the repository root (either environment):
 
 ```bash
 export PYTHONPATH=$PWD
@@ -38,13 +55,17 @@ Optional alias:
 alias FrictionSim2D='python -m src.cli'
 ```
 
-### 3) Verify binaries
+### Verify installation
 
 ```bash
-python -m src.cli --help
+# Both environments
+FrictionSim2D --help
 lmp -h
 atomsk --version
+
+# AiiDA environment only
 verdi --version
+verdi daemon status
 ```
 
 ## Quick start
@@ -80,6 +101,51 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - `FrictionSim2D hpc generate ...`
 - `FrictionSim2D settings show|init|reset`
 - `FrictionSim2D aiida status|setup|submit|import|query|export|import-archive|package`
+- `FrictionSim2D db upload|query|stats|delete`
+
+## Shared database
+
+FrictionSim2D can upload results to and query from a shared PostgreSQL database, allowing users to share and compare simulation results.
+
+### Configure connection
+
+Set the connection via environment variables (or pass `--host`, `--user`, `--password` flags):
+
+```bash
+export FRICTION_DB_HOST=db.example.com
+export FRICTION_DB_PORT=5432
+export FRICTION_DB_NAME=frictionsim2d
+export FRICTION_DB_USER=myuser
+export FRICTION_DB_PASSWORD=secret
+```
+
+### Upload results
+
+```bash
+FrictionSim2D db upload ./simulation_output/afm_run/results --uploader alice
+```
+
+### Query results
+
+```bash
+# Print table to terminal
+FrictionSim2D db query --material h-MoS2 --layers 1
+
+# Save to CSV
+FrictionSim2D db query --material h-WS2 --csv output.csv
+```
+
+### Database statistics
+
+```bash
+FrictionSim2D db stats
+```
+
+### Delete your own rows
+
+```bash
+FrictionSim2D db delete --uploader alice
+```
 
 ## AiiDA notes
 

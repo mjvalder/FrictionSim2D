@@ -755,6 +755,239 @@ def postprocess_plot(plot_config: str, output_dir: str,
 
 
 # =============================================================================
+# DATABASE COMMANDS
+# =============================================================================
+
+@cli.group('db')
+def db_group():
+    """Interact with the shared online FrictionSim2D PostgreSQL database.
+
+    Upload your simulation results to the community database and query
+    results contributed by other users.
+
+    Connection settings can be provided via environment variables
+    (FRICTION_DB_HOST, FRICTION_DB_PORT, FRICTION_DB_NAME,
+    FRICTION_DB_USER, FRICTION_DB_PASSWORD) or via the --host / --user /
+    --password options.
+    """
+
+
+def _make_db(
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Instantiate a :class:`~src.data.database.FrictionDB`."""
+    from src.data.database import FrictionDB  # noqa: PLC0415
+    return FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
+
+
+_DB_OPTIONS = [
+    click.option('--host', default=None, envvar='FRICTION_DB_HOST',
+                 help='Database hostname (default: $FRICTION_DB_HOST or localhost)'),
+    click.option('--port', default=None, type=int, envvar='FRICTION_DB_PORT',
+                 help='Database port (default: $FRICTION_DB_PORT or 5432)'),
+    click.option('--dbname', default=None, envvar='FRICTION_DB_NAME',
+                 help='Database name (default: $FRICTION_DB_NAME or frictionsim2d)'),
+    click.option('--user', '-u', default=None, envvar='FRICTION_DB_USER',
+                 help='Database username (default: $FRICTION_DB_USER)'),
+    click.option('--password', default=None, envvar='FRICTION_DB_PASSWORD',
+                 help='Database password (default: $FRICTION_DB_PASSWORD)'),
+]
+
+
+def _add_db_options(func):
+    for opt in reversed(_DB_OPTIONS):
+        func = opt(func)
+    return func
+
+
+@db_group.command('upload')
+@click.argument('results_dir', type=click.Path(exists=True))
+@click.option('--uploader', '-n', default=None,
+              help='Your name or identifier (stored with each row).')
+@_add_db_options
+def db_upload(
+    results_dir: str,
+    uploader: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Upload simulation results from RESULTS_DIR to the shared database.
+
+    Scans RESULTS_DIR for completed simulation outputs and uploads each
+    result (mean COF, forces, conditions) to the community PostgreSQL
+    database.
+
+    Example:
+        FrictionSim2D db upload ./simulation_output/afm_run_1/results \\
+            --uploader alice
+    """
+    from src.postprocessing.read_data import DataReader  # noqa: PLC0415
+    from src.data.database import FrictionDB  # noqa: PLC0415
+
+    click.echo(f"📂 Reading results from {results_dir} ...")
+    reader = DataReader(results_dir=str(results_dir))
+
+    db = _make_db(host, port, dbname, user, password)
+
+    n_uploaded = 0
+    for material, size_data in reader.full_data_nested.items():
+        for _size_key, substrate_data in size_data.items():
+            for _sub, tip_data in substrate_data.items():
+                for _tip_mat, radius_data in tip_data.items():
+                    for _radius, layer_data in radius_data.items():
+                        for layer_key, speed_data in layer_data.items():
+                            layers = int(layer_key.replace('l', ''))
+                            for speed_key, force_data in speed_data.items():
+                                speed = int(speed_key.replace('s', ''))
+                                for load_key, angle_data in force_data.items():
+                                    is_pressure = load_key.startswith('p')
+                                    load_val = float(load_key[1:])
+                                    for angle_key, df in angle_data.items():
+                                        angle = int(angle_key.replace('a', ''))
+                                        try:
+                                            import numpy as np  # noqa: PLC0415
+                                            cof_col = 'cof' if 'cof' in df.columns else None
+                                            mean_cof = float(df[cof_col].mean()) if cof_col else None
+                                            std_cof = float(df[cof_col].std()) if cof_col else None
+                                            lf_col = 'lfx' if 'lfx' in df.columns else None
+                                            mean_lf = float(df[lf_col].mean()) if lf_col else None
+                                            nf_col = 'nf' if 'nf' in df.columns else None
+                                            mean_nf = float(df[nf_col].mean()) if nf_col else None
+
+                                            db.upload_result(
+                                                material=material.replace('_', '-'),
+                                                simulation_type='afm',
+                                                layers=layers,
+                                                force_nN=None if is_pressure else load_val,
+                                                pressure_gpa=load_val if is_pressure else None,
+                                                scan_angle=float(angle),
+                                                scan_speed=float(speed),
+                                                mean_cof=mean_cof,
+                                                std_cof=std_cof,
+                                                mean_lf=mean_lf,
+                                                mean_nf=mean_nf,
+                                                uploader=uploader,
+                                            )
+                                            n_uploaded += 1
+                                        except Exception as exc:  # pylint: disable=broad-except
+                                            logger.warning(
+                                                "Skipped row (%s, l%d, a%d): %s",
+                                                material, layers, angle, exc,
+                                            )
+
+    click.echo(f"✅ Uploaded {n_uploaded} result(s) to the database.")
+
+
+@db_group.command('query')
+@click.option('--material', '-m', default=None, help='Filter by material name.')
+@click.option('--type', 'sim_type', default=None,
+              help='Filter by simulation type (afm or sheetonsheet).')
+@click.option('--layers', '-l', type=int, default=None,
+              help='Filter by number of layers.')
+@click.option('--uploader', '-n', default=None, help='Filter by uploader name.')
+@click.option('--limit', type=int, default=50, show_default=True,
+              help='Maximum number of rows to return.')
+@click.option('--csv', 'output_csv', default=None,
+              help='Save results to a CSV file.')
+@_add_db_options
+def db_query(
+    material: Optional[str],
+    sim_type: Optional[str],
+    layers: Optional[int],
+    uploader: Optional[str],
+    limit: int,
+    output_csv: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Query the shared database and print matching results.
+
+    Example:
+        FrictionSim2D db query --material h-MoS2 --layers 1 --limit 20
+
+        FrictionSim2D db query --material h-WS2 --csv results.csv
+    """
+    db = _make_db(host, port, dbname, user, password)
+    df = db.query(
+        material=material,
+        simulation_type=sim_type,
+        layers=layers,
+        uploader=uploader,
+        limit=limit,
+    )
+
+    if df.empty:
+        click.echo("No results found.")
+        return
+
+    click.echo(df.to_string(index=False))
+    click.echo(f"\n{len(df)} row(s) returned.")
+
+    if output_csv:
+        df.to_csv(output_csv, index=False)
+        click.echo(f"💾 Saved to {output_csv}")
+
+
+@db_group.command('stats')
+@_add_db_options
+def db_stats(
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Show aggregate statistics for the shared database."""
+    db = _make_db(host, port, dbname, user, password)
+    stats = db.get_statistics()
+
+    click.echo(f"Total simulations : {stats['total_rows']}")
+    click.echo(f"Global mean COF   : {stats['cof_global_mean']:.4f}"
+               if stats['cof_global_mean'] is not None else "Global mean COF   : n/a")
+    click.echo("\nBy material:")
+    for mat, count in stats['by_material'].items():
+        click.echo(f"  {mat:<20} {count}")
+    click.echo("\nBy simulation type:")
+    for stype, count in stats['by_type'].items():
+        click.echo(f"  {stype:<20} {count}")
+
+
+@db_group.command('delete')
+@click.option('--uploader', '-n', required=True,
+              help='Delete all rows belonging to this uploader.')
+@click.confirmation_option(prompt='Are you sure you want to delete these rows?')
+@_add_db_options
+def db_delete(
+    uploader: str,
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Delete your uploaded results from the shared database.
+
+    Only rows with a matching uploader name are deleted.
+
+    Example:
+        FrictionSim2D db delete --uploader alice
+    """
+    db = _make_db(host, port, dbname, user, password)
+    count = db.delete_own_results(uploader)
+    click.echo(f"🗑  Deleted {count} row(s) for uploader '{uploader}'.")
+
+
+# =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
 
