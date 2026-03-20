@@ -17,7 +17,8 @@ outputs:
   # -----------------------------------------------------------------------
   - name: {{ name|lower }}
     build:
-      script: python -m pip install . -vv --no-deps --no-build-isolation
+      noarch: python
+      script: $PYTHON -m pip install . -vv --no-deps --no-build-isolation
       entry_points:
         - FrictionSim2D = src.cli:main
     requirements:
@@ -53,6 +54,7 @@ outputs:
   # -----------------------------------------------------------------------
   - name: {{ name|lower }}-aiida
     build:
+      noarch: generic
       script: bash -c "mkdir -p $PREFIX/libexec/frictionsim2d/hooks $PREFIX/bin && cp src/aiida/start_aiida.sh $PREFIX/libexec/frictionsim2d/ && chmod +x $PREFIX/libexec/frictionsim2d/start_aiida.sh && ln -sf $PREFIX/libexec/frictionsim2d/start_aiida.sh $PREFIX/bin/frictionsim2d-start-aiida && cp src/aiida/hooks/*.sh $PREFIX/libexec/frictionsim2d/hooks/ && cp src/aiida/install_conda_hooks.sh $PREFIX/libexec/frictionsim2d/hooks/ && chmod +x $PREFIX/libexec/frictionsim2d/hooks/*.sh && ln -sf $PREFIX/libexec/frictionsim2d/hooks/install_conda_hooks.sh $PREFIX/bin/frictionsim2d-install-hooks"
     requirements:
       run:
