@@ -10,7 +10,6 @@ source:
 
 build:
   number: 0
-  noarch: python
 
 outputs:
   # -----------------------------------------------------------------------
@@ -18,7 +17,7 @@ outputs:
   # -----------------------------------------------------------------------
   - name: {{ name|lower }}
     build:
-      script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+      script: python -m pip install . -vv --no-deps --no-build-isolation
       entry_points:
         - FrictionSim2D = src.cli:main
     requirements:
@@ -50,8 +49,11 @@ outputs:
   # -----------------------------------------------------------------------
   # AiiDA variant: conda install frictionsim2d-aiida
   # Installs the base package + aiida-core + rabbitmq + postgresql
+  # Includes startup script and optional conda hooks for service automation
   # -----------------------------------------------------------------------
   - name: {{ name|lower }}-aiida
+    build:
+      script: bash -c "mkdir -p $PREFIX/libexec/frictionsim2d/hooks $PREFIX/bin && cp src/aiida/start_aiida.sh $PREFIX/libexec/frictionsim2d/ && chmod +x $PREFIX/libexec/frictionsim2d/start_aiida.sh && ln -sf $PREFIX/libexec/frictionsim2d/start_aiida.sh $PREFIX/bin/frictionsim2d-start-aiida && cp src/aiida/hooks/*.sh $PREFIX/libexec/frictionsim2d/hooks/ && cp src/aiida/install_conda_hooks.sh $PREFIX/libexec/frictionsim2d/hooks/ && chmod +x $PREFIX/libexec/frictionsim2d/hooks/*.sh && ln -sf $PREFIX/libexec/frictionsim2d/hooks/install_conda_hooks.sh $PREFIX/bin/frictionsim2d-install-hooks"
     requirements:
       run:
         - {{ pin_subpackage(name|lower, exact=True) }}
@@ -66,7 +68,9 @@ outputs:
       commands:
         - FrictionSim2D --help
         - verdi --version
-        - rabbitmqctl help  # confirm rabbitmq binary is available
+        - rabbitmqctl help
+        - frictionsim2d-start-aiida --help  # confirm startup script is in PATH
+        - frictionsim2d-install-hooks --help  # confirm hook installer is in PATH
 
 about:
   home: https://github.com/Mclat16/FrictionSim2D

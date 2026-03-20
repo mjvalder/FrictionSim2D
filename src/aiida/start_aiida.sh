@@ -21,6 +21,7 @@ set -euo pipefail
 # --- Defaults ----------------------------------------------------------------
 PROFILE_NAME="friction2d"
 START_DAEMON=true
+RABBITMQ_CONSUMER_TIMEOUT_MS="${RABBITMQ_CONSUMER_TIMEOUT_MS:-36000000}"
 
 # --- Argument parsing --------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -49,6 +50,34 @@ echo "  FrictionSim2D – AiiDA environment setup"
 echo "  Profile: ${PROFILE_NAME}"
 echo "============================================================"
 
+_patch_rabbitmq_timeout() {
+    local conf_dir conf_file
+
+    if [[ -n "${CONDA_PREFIX:-}" ]]; then
+        conf_dir="${CONDA_PREFIX}/etc/rabbitmq"
+    else
+        conf_dir="${HOME}/.config/rabbitmq"
+    fi
+
+    conf_file="${conf_dir}/rabbitmq.conf"
+    mkdir -p "${conf_dir}"
+
+    if [[ -f "${conf_file}" ]]; then
+        if grep -Eq '^\s*consumer_timeout\s*=' "${conf_file}"; then
+            sed -i -E "s|^\s*consumer_timeout\s*=.*$|consumer_timeout = ${RABBITMQ_CONSUMER_TIMEOUT_MS}|" "${conf_file}"
+        else
+            printf "\nconsumer_timeout = %s\n" "${RABBITMQ_CONSUMER_TIMEOUT_MS}" >> "${conf_file}"
+        fi
+    else
+        cat > "${conf_file}" <<EOF
+# FrictionSim2D AiiDA RabbitMQ settings
+consumer_timeout = ${RABBITMQ_CONSUMER_TIMEOUT_MS}
+EOF
+    fi
+
+    echo "  ✓ RabbitMQ consumer_timeout set to ${RABBITMQ_CONSUMER_TIMEOUT_MS} ms"
+}
+
 # --- 1. Verify conda environment ---------------------------------------------
 if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
     echo "⚠  WARNING: No active conda environment detected."
@@ -58,6 +87,8 @@ fi
 # --- 2. Start RabbitMQ -------------------------------------------------------
 echo ""
 echo "▶ Starting RabbitMQ broker..."
+_patch_rabbitmq_timeout
+
 if rabbitmqctl status &>/dev/null 2>&1; then
     echo "  ✓ RabbitMQ is already running"
 else
@@ -71,7 +102,7 @@ fi
 echo ""
 echo "▶ Configuring AiiDA profile '${PROFILE_NAME}'..."
 
-if verdi profile list | grep -q "^${PROFILE_NAME}$" 2>/dev/null; then
+if verdi profile show "${PROFILE_NAME}" >/dev/null 2>&1; then
     echo "  ✓ Profile '${PROFILE_NAME}' already exists"
     verdi profile setdefault "${PROFILE_NAME}"
 else

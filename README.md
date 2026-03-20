@@ -3,70 +3,69 @@
 FrictionSim2D generates and manages LAMMPS friction simulation workflows for 2D materials.
 It supports AFM and sheet-on-sheet setups, HPC script generation, and optional AiiDA provenance/submission workflows.
 
-## Installation (Conda-only)
+## Installation
 
-This project is intended to run from a Conda environment so that LAMMPS, Atomsk, and AiiDA service dependencies are consistent.
+FrictionSim2D is distributed as a Conda package for maximum reproducibility and minimal dependency conflicts.
 
-> pip installation is not the supported path in this repository documentation.
+### Option A – Base package (recommended for most users)
 
-Two environment files are provided depending on whether you need AiiDA:
-
-| File | Use case |
-|------|----------|
-| `conda/environment.yml` | Standard use – LAMMPS + all Python deps, **no AiiDA** |
-| `conda/environment-aiida.yml` | AiiDA provenance + HPC daemon, requires Python 3.11 |
-
-### Option A – Without AiiDA (recommended for most users)
+Install LAMMPS, Atomsk, and core dependencies:
 
 ```bash
-conda env create -f conda/environment.yml
+conda install -c conda-forge frictionsim2d
 conda activate frictionsim2d
+```
+
+Verify:
+```bash
+FrictionSim2D --help
+lmp -h
+atomsk --version
 ```
 
 ### Option B – With AiiDA (provenance tracking, HPC submission)
 
-> **Requirements:** Python 3.11, RabbitMQ, PostgreSQL  
-> (all bundled via `aiida-core.services` – no separate install needed)
+Install base package + AiiDA with bundled PostgreSQL and RabbitMQ:
 
 ```bash
-conda env create -f conda/environment-aiida.yml
+conda install -c conda-forge frictionsim2d-aiida
 conda activate frictionsim2d-aiida
 ```
 
-Then run the one-time setup script to start RabbitMQ and create the AiiDA profile:
+Then bootstrap AiiDA and start services (one-time setup):
 
 ```bash
-export PYTHONPATH=$PWD
-bash src/aiida/start_aiida.sh
+frictionsim2d-start-aiida
+```
+
+This:
+- Starts RabbitMQ with automatic `consumer_timeout` patching (36000000 ms default)
+- Starts PostgreSQL
+- Creates your first AiiDA profile
+
+Override RabbitMQ timeout if needed:
+```bash
+export RABBITMQ_CONSUMER_TIMEOUT_MS=72000000
+frictionsim2d-start-aiida
+```
+
+Optional: install conda activate/deactivate hooks for automatic service lifecycle:
+```bash
+frictionsim2d-install-hooks
+```
+
+After this, PostgreSQL and RabbitMQ start/stop automatically with `conda activate/deactivate`.
+
+Verify AiiDA setup:
+```bash
+verdi --version
+verdi profile show
+verdi daemon status
 ```
 
 ### Run from source
 
-From the repository root (either environment):
-
-```bash
-export PYTHONPATH=$PWD
-python -m src.cli --help
-```
-
-Optional alias:
-
-```bash
-alias FrictionSim2D='python -m src.cli'
-```
-
-### Verify installation
-
-```bash
-# Both environments
-FrictionSim2D --help
-lmp -h
-atomsk --version
-
-# AiiDA environment only
-verdi --version
-verdi daemon status
-```
+After installation, the `FrictionSim2D` command is available in your environment.
 
 ## Quick start
 
