@@ -7,14 +7,14 @@ for cross-interactions, and layer-specific potential handling for multi-layer
 2D materials.
 
 Supported potentials include:
-    - With internal LJ: AIREBO, COMB, COMB3, ReaxFF
+    - With internal LJ: AIREBO, COMB, COMB3, ReaxFF, REBOMOS
     - Requiring explicit LJ: Stillinger-Weber (SW), Tersoff, REBO, EDIP, MEAM,
-    EAM, BOP, Morse, REBOMOS, SW/MOD, EXTEP, Vashishta
+    EAM, BOP, Morse, SW/MOD, EXTEP, Vashishta
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional, Union
+from typing import List, Dict, Any, Tuple, Optional, Union, Iterator
 from collections import defaultdict
 import logging
 import re
@@ -87,7 +87,7 @@ class TypeRegistry:
     def __len__(self) -> int:
         return len(self._types)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[AtomType]:
         """Iterate over all types in type_id order."""
         for tid in sorted(self._types.keys()):
             yield self._types[tid]
@@ -265,12 +265,18 @@ class PotentialManager:
             return token
         return token[0].upper() + token[1:].lower()
 
+    @staticmethod
+    def _normalize_potential_type(value: str) -> str:
+        """Normalize potential style names to lowercase keys."""
+        return value.strip().lower()
+
     @classmethod
     def _pair_key(cls, el1: str, el2: str) -> Tuple[str, str]:
         """Build an order-independent key for an element pair."""
         a = cls._normalize_element_symbol(el1)
         b = cls._normalize_element_symbol(el2)
-        return tuple(sorted((a, b)))
+        sorted_pair = sorted((a, b))
+        return (sorted_pair[0], sorted_pair[1])
 
     @classmethod
     def _parse_override_pair(cls, pair_key: str) -> Tuple[str, str]:
@@ -309,9 +315,9 @@ class PotentialManager:
 
         Example:
             {
-              "Mo-Mo": [1.0624, 3.878597],
-              "Mo-S": [0.4124, 3.75114],
-              "S-S": [0.198443, 3.62368]
+            "Mo-Mo": [1.0624, 3.878597],
+            "Mo-S": [0.4124, 3.75114],
+            "S-S": [0.198443, 3.62368]
             }
         """
         self.lj_overrides = {}
@@ -325,10 +331,12 @@ class PotentialManager:
 
     def _get_lj_params(self, el1: str, el2: str) -> Tuple[float, float]:
         """Return LJ parameters, preferring user overrides when present."""
-        override = self.lj_overrides.get(self._pair_key(el1, el2))
+        norm_el1 = self._normalize_element_symbol(el1)
+        norm_el2 = self._normalize_element_symbol(el2)
+        override = self.lj_overrides.get(self._pair_key(norm_el1, norm_el2))
         if override is not None:
             return override
-        return lj_params(el1, el2)
+        return lj_params(norm_el1, norm_el2)
 
     @staticmethod
     def _format_lj_value(value: float) -> str:
@@ -394,9 +402,10 @@ class PotentialManager:
         cif_data = cifread(config.cif_path)
         elements = cif_data['elements']
 
-        pot_counts = count_atomtypes(config.pot_path, elements, pot_type=config.pot_type)
+        pot_type = self._normalize_potential_type(config.pot_type)
+        pot_counts = count_atomtypes(config.pot_path, elements, pot_type=pot_type)
 
-        self.potential_usage[config.pot_type] += n_layers if self.is_sheet_lj(config.pot_type) else 1
+        self.potential_usage[pot_type] += n_layers if self.is_sheet_lj(pot_type) else 1
 
         apply_langevin = self.use_langevin and name in ('tip', 'sub')
 
@@ -544,20 +553,21 @@ class PotentialManager:
         c_conf = comp['config']
         n_layers = comp['n_layers']
 
-        self.potential_indices[c_conf.pot_type] += 1
-        pot_index = self.potential_indices[c_conf.pot_type]
+        pot_type = self._normalize_potential_type(c_conf.pot_type)
+        self.potential_indices[pot_type] += 1
+        pot_index = self.potential_indices[pot_type]
 
-        needs_index = self.potential_usage[c_conf.pot_type] > 1
+        needs_index = self.potential_usage[pot_type] > 1
         index_str = f" {pot_index}" if needs_index else ""
 
-        if n_layers > 1 and self.is_sheet_lj(c_conf.pot_type):
+        if n_layers > 1 and self.is_sheet_lj(pot_type):
             layers_to_process = [layer] if layer is not None else range(n_layers)
             for l in layers_to_process:
                 self._add_layer_self_interaction(comp, l, pot_index)
         else:
             atom_list = self.types.build_null_map(component_name)
             pot_path = self._get_potential_path(c_conf.pot_path)
-            cmd = f"pair_coeff * * {c_conf.pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
+            cmd = f"pair_coeff * * {pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
             self.self_interaction_commands.append(f"{cmd} # {component_name}")
 
     def _add_layer_self_interaction(self, comp: Dict, layer: int,
@@ -571,17 +581,18 @@ class PotentialManager:
         """
         c_conf = comp['config']
         name = comp['name']
+        pot_type = self._normalize_potential_type(c_conf.pot_type)
 
         pot_index = base_pot_index + layer
-        self.potential_indices[c_conf.pot_type] = pot_index
+        self.potential_indices[pot_type] = pot_index
 
-        needs_index = self.potential_usage[c_conf.pot_type] > 1
+        needs_index = self.potential_usage[pot_type] > 1
         index_str = f" {pot_index}" if needs_index else ""
 
         atom_list = self.types.build_null_map(name, layer=layer)
 
         pot_path = self._get_potential_path(c_conf.pot_path)
-        cmd = f"pair_coeff * * {c_conf.pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
+        cmd = f"pair_coeff * * {pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
         self.self_interaction_commands.append(f"{cmd} # {name} Layer {layer+1}")
 
     def add_cross_interaction(
@@ -638,7 +649,8 @@ class PotentialManager:
             layer_pairs: List of (layer_i, layer_j) tuples, or None for all
                 pairs.
             low_interaction: If True, use near-zero epsilon (ghost/weak
-                interaction).n        """
+                interaction).
+        """
         comp = self.components.get(component_name)
         if not comp:
             raise ValueError(f"Component '{component_name}' not registered.")
@@ -927,8 +939,7 @@ class PotentialManager:
         """
         lj_cutoff = self.settings.potential.lj_cutoff
         has_lj = bool(self.cross_interaction_commands) or self.virtual_atom_type is not None
-        total_pots = sum(self.potential_usage.values())
-        use_hybrid = total_pots > 1 or has_lj
+        use_hybrid = (not self._is_single_potential()) or self.virtual_atom_type is not None
 
         # Build pair_style parts; ReaxFF needs NULL + keywords when in hybrid
         style_parts = []

@@ -26,7 +26,7 @@ geometry:
   tip_base_z: 55             # Z-position of the tip base
   substrate_height: 12       # Height of the substrate
   tip_reduction_factor: 2.25 # Factor to reduce tip size
-  lat_c_default: 6          # Default interlayer lattice constant if not specified
+  lat_c_default: 6           # Default interlayer lattice constant if not specified
 
 # Simulation run parameters
 simulation:
@@ -96,5 +96,3 @@ aiida:
   username: null                  # SSH username for remote access
   ssh_port: 22                    # SSH port
   key_filename: null              # Path to SSH private key (optional)
-
-

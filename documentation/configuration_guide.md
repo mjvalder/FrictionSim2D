@@ -5,7 +5,7 @@
 ## Overview
 
 FrictionSim2D uses INI-format configuration files to define simulation parameters. These files support:
-- **Parameter sweeps**: Multiple values for force, pressure, scan angle, layers, etc.
+- **Parameter sweeps**: Multiple values for force, pressure, scan angle, and other general parameters
 - **Material placeholders**: Use `{mat}` to loop over multiple materials
 - **Path interpolation**: Automatically resolve potentials and CIF files
 - **Model-specific sections**: AFM uses `[tip]`, `[sub]`, and `[2D]`; Sheet-on-sheet uses only `[2D]`
@@ -15,6 +15,8 @@ FrictionSim2D uses INI-format configuration files to define simulation parameter
 ### AFM Configuration
 
 AFM simulations require four sections: `[2D]`, `[tip]`, `[sub]`, and `[general]`.
+
+AFM supports layer sweeps: multiple values in `[2D].layers` will generate a separate simulation for each layer count (e.g., layers=[1,2,3] creates L1, L2, and L3 subdirectories).
 
 ```ini
 # 2D Material (sheet between tip and substrate)
@@ -61,6 +63,11 @@ driving_spring = 50        # Spring constant for tip drive in N/m
 
 Sheet-on-sheet simulations use only `[2D]` and `[general]` sections.
 
+Important constraints for this model:
+- `layers` must contain exactly one value.
+- The layer count must be at least 3 (bilayer is not supported in this model).
+- Layer sweeps are not applied in this model builder.
+
 ```ini
 # 2D Material
 [2D]
@@ -68,7 +75,7 @@ mat = h-MoS2
 cif_path = structures/MoS2.cif
 x = 100                    # Sheet dimensions in nm
 y = 100
-layers = [2]               # Usually [2] for bilayer systems
+layers = [3]               # Single value only, must be >= 3
 pot_path = MoS2.sw
 pot_type = sw
 stack_type = AB
@@ -316,7 +323,7 @@ mat = {mat}
 cif_path = structures/{mat}.cif
 x = 100
 y = 100
-layers = [2]
+layers = [3]
 pot_path = potentials/{mat}.sw
 pot_type = sw
 stack_type = AB

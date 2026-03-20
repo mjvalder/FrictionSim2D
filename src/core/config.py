@@ -8,7 +8,7 @@ for correctness before a simulation is executed.
 from importlib import resources
 import json
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, Literal
+from typing import List, Optional, Union, Dict, Any, Literal, cast
 import yaml
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
 
@@ -27,7 +27,7 @@ class ThermostatSettings(BaseModel):
     """Thermostat and time integration settings."""
     type: Literal['langevin', 'nose-hoover'] = 'langevin'
     time_integration: Literal['verlet', 'respa', 'nvt', 'nve'] = Field(
-        default='nvt', alias='time_int_type')
+        default='nve', alias='time_int_type')
     langevin_boundaries: Dict[str, Dict[str, List[float]]] = Field(
         default_factory=lambda: {
             'tip': {'fix': [3.0, 0.0], 'thermo': [6.0, 3.0]},
@@ -37,14 +37,14 @@ class ThermostatSettings(BaseModel):
 
 class SimulationSettings(BaseModel):
     """Simulation run parameters."""
-    timestep: float = 0.001
+    timestep: float = Field(default=0.001, description="Timestep in picoseconds")
     thermo: int = 100000
     min_style: str = 'cg'
     minimization_command: str = 'minimize 1e-4 1e-8 1000000 1000000'
     neighbor_list: float = 0.3
     neigh_modify_command: str = 'neigh_modify every 1 delay 0 check yes'
-    slide_run_steps: int =500000
-    drive_method: Literal['smd', 'fix_move', 'virtual_atom'] = 'fix_move'
+    slide_run_steps: int = 500000
+    drive_method: Literal['smd', 'fix_move', 'virtual_atom'] = 'virtual_atom'
     constraint_mode: Literal['atom_bonds', 'com_spring', 'none'] = 'none'
 
 class QuenchSettings(BaseModel):
@@ -135,7 +135,7 @@ class GlobalSettings(BaseModel):
     output: OutputSettings = Field(default_factory=OutputSettings)
     potential: PotentialSettings = Field(default_factory=PotentialSettings)
     hpc: HPCSettings = Field(default_factory=HPCSettings)
-    aiida: AiidaSettings = Field(default_factory=lambda: AiidaSettings())  # pylint: disable=unnecessary-lambda
+    aiida: AiidaSettings = Field(default_factory=AiidaSettings)
 
 # --- User Input Settings (From .ini files) ---
 
@@ -220,7 +220,7 @@ class GeneralConfig(BaseModel):
         )
     )
     bond_spring: Optional[float] = Field(80.0, description="Spring constant for harmonically bonded sheets")
-    driving_spring: Optional[float] = Field(50, description="Driving spring constant")
+    driving_spring: Optional[float] = Field(50, description="Driving spring constant for virtual atom method")
 
 
 class AFMSimulationConfig(BaseModel):
@@ -274,10 +274,10 @@ def load_settings() -> GlobalSettings:
             with settings_resource.open('r') as f:
                 user_settings = yaml.safe_load(f) or {}
                 if user_settings:
-                    return GlobalSettings(**user_settings)
+                    return cast(GlobalSettings, GlobalSettings.model_validate(user_settings))
     except (FileNotFoundError, AttributeError):
         pass
-    return GlobalSettings()
+    return cast(GlobalSettings, GlobalSettings())
 
 
 def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:

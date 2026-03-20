@@ -77,6 +77,105 @@ class TestIsSheetLJ:
         assert pm.is_sheet_lj('unknown_potential') is True
 
 
+class TestNormalizationGuards:
+    """Tests for defensive normalization inside PotentialManager."""
+
+    def test_register_component_normalizes_potential_usage_key(
+        self,
+        mock_settings,
+        monkeypatch,
+    ):
+        """Mixed-case pot_type should map to a single lowercase usage key."""
+        # Monkeypatch path validation functions in the modules that use them
+        monkeypatch.setattr(
+            'src.core.config.get_potential_path',
+            lambda _path: Path(_path)
+        )
+        monkeypatch.setattr(
+            'src.core.config.get_material_path',
+            lambda _path: Path(_path)
+        )
+        monkeypatch.setattr(
+            'src.core.potential_manager.cifread',
+            lambda _path: {'elements': ['Si']}
+        )
+        monkeypatch.setattr(
+            'src.core.potential_manager.count_atomtypes',
+            lambda _path, _elements, pot_type=None: {'Si': 1}
+        )
+
+        from src.core.config import TipConfig
+        config_upper = TipConfig(
+            mat='Si', pot_type='SW', pot_path='/tmp/Si.sw', cif_path='/tmp/Si.cif',
+            r=20.0, amorph='c', dspring=0.1, s=1.0
+        )
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('tip', config_upper)
+
+        assert 'sw' in pm.potential_usage
+        assert 'SW' not in pm.potential_usage
+
+    def test_add_self_interaction_uses_normalized_key_for_indexing(
+        self,
+        mock_settings,
+        monkeypatch,
+    ):
+        """Potential indexing should stay consistent when pot_type casing differs."""
+        # Monkeypatch path validation functions in the modules that use them
+        monkeypatch.setattr(
+            'src.core.config.get_potential_path',
+            lambda _path: Path(_path)
+        )
+        monkeypatch.setattr(
+            'src.core.config.get_material_path',
+            lambda _path: Path(_path)
+        )
+        monkeypatch.setattr(
+            'src.core.potential_manager.cifread',
+            lambda _path: {'elements': ['Si']}
+        )
+        monkeypatch.setattr(
+            'src.core.potential_manager.count_atomtypes',
+            lambda _path, _elements, pot_type=None: {'Si': 1}
+        )
+
+        # Create minimal configs without needing real files
+        from src.core.config import TipConfig, SubstrateConfig
+        config_upper = TipConfig(
+            mat='Si', pot_type='SW', pot_path='/tmp/Si.sw', cif_path='/tmp/Si.cif',
+            r=20.0, amorph='c', dspring=0.1, s=1.0
+        )
+        config_lower = SubstrateConfig(
+            mat='Si', pot_type='sw', pot_path='/tmp/Si.sw', cif_path='/tmp/Si.cif',
+            thickness=10.0, amorph='c'
+        )
+
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('tip', config_upper)
+        pm.register_component('sub', config_lower)
+
+        pm.add_self_interaction('tip')
+        pm.add_self_interaction('sub')
+
+        assert len(pm.self_interaction_commands) == 2
+        assert ' sw ' in pm.self_interaction_commands[0].lower()
+        assert ' sw ' in pm.self_interaction_commands[1].lower()
+        assert 'sw 1' in pm.self_interaction_commands[0].lower()
+        assert 'sw 2' in pm.self_interaction_commands[1].lower()
+
+    def test_mixed_case_elements_use_override_in_cross_interaction(self, mock_settings):
+        """Mixed-case element symbols should still resolve override parameters."""
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.set_lj_overrides({'mo-s': [0.5, 3.5]})
+
+        pm.types.register(component='a', element='MO', pot_label='MO')
+        pm.types.register(component='b', element='s', pot_label='s')
+        pm.add_cross_interaction('a', 'b')
+
+        command = pm.cross_interaction_commands[0]
+        assert 'lj/cut 0.5 3.5' in command
+
+
 class TestLJOverrides:
     """Tests for user-provided LJ override behavior."""
 

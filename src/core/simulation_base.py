@@ -24,6 +24,22 @@ from src.hpc.manifest import JobManifest
 
 logger = logging.getLogger(__name__)
 
+POTENTIAL_EXTENSIONS = {
+    '.sw', '.tersoff', '.rebo', '.airebo', '.reaxff', '.meam',
+    '.extep', '.vashishta', '.adp', '.bop', '.eam', '.edip',
+    '.comb', '.comb3', '.morse', '.rebomos', '.mod'
+}
+
+
+def _infer_provenance_category(file_path: Path) -> str:
+    """Infer provenance category from file extension."""
+    ext = file_path.suffix.lower()
+    if ext == '.cif':
+        return 'cif'
+    if ext in POTENTIAL_EXTENSIONS:
+        return 'potential'
+    return 'other'
+
 
 class SimulationBase(ABC):
     """Abstract base class for simulation setup.
@@ -91,7 +107,7 @@ class SimulationBase(ABC):
             template = self.jinja_env.get_template(template_name)
             return template.render(context)
         except Exception as e:
-            logger.error("Failed to render template '%s': %s", template_name, e)
+            logger.exception("Failed to render template '%s': %s", template_name, e)
             raise
 
     def set_base_output_dir(self, base_output_dir: Union[str, Path]) -> None:
@@ -122,7 +138,7 @@ class SimulationBase(ABC):
         target_dir = Path(output_dir) if output_dir is not None else self.output_dir
         full_path = target_dir / filename
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content)
+        full_path.write_text(content, encoding='utf-8')
         return full_path
 
     def add_to_provenance(self, file_path: Union[str, Path], category: str = 'auto',
@@ -152,15 +168,7 @@ class SimulationBase(ABC):
         prov_dir = self.output_dir / 'provenance'
 
         if category == 'auto':
-            ext = file_path.suffix.lower()
-            if ext == '.cif':
-                category = 'cif'
-            elif ext in ('.sw', '.tersoff', '.rebo', '.airebo', '.reaxff', '.meam', 
-                        '.extep', '.vashishta', '.adp', '.bop', '.eam', '.edip', 
-                        '.comb', '.comb3', '.morse', '.rebomos', '.mod'):
-                category = 'potential'
-            else:
-                category = 'other'
+            category = _infer_provenance_category(file_path)
 
         if category == 'cif':
             dest_dir = prov_dir / 'cif'
@@ -209,7 +217,7 @@ class SimulationBase(ABC):
         manifest_path = self.output_dir / 'provenance' / 'manifest.json'
 
         if manifest_path.exists():
-            manifest_data = json.loads(manifest_path.read_text())
+            manifest_data = json.loads(manifest_path.read_text(encoding='utf-8'))
         else:
             manifest_data = {
                 'version': '1.0',
@@ -217,20 +225,24 @@ class SimulationBase(ABC):
                 'files': []
             }
 
+        original_path_resolved = str(original_path.resolve())
         checksum = hashlib.sha256(original_path.read_bytes()).hexdigest()
 
         search_criteria = (
             f for f in manifest_data['files']
-            if f['filename'] == original_path.name
-            and f['category'] == category
+            if f['category'] == category
+            and (
+                f.get('original_path') == original_path_resolved
+                or f.get('checksum') == checksum
+            )
         )
         existing = next(search_criteria, None)
 
-        def ensure_list(val):
+        def ensure_list(val: Optional[Union[str, List[str]]]) -> List[str]:
             if val is None:
                 return []
             if isinstance(val, list):
-                return val
+                return [entry for entry in val if isinstance(entry, str)]
             return [val]
 
         new_components = ensure_list(component)
@@ -241,14 +253,14 @@ class SimulationBase(ABC):
                 if c and c not in existing_components:
                     existing_components.append(c)
             existing['components'] = existing_components
-            existing['original_path'] = str(original_path.resolve())
+            existing['original_path'] = original_path_resolved
             existing['stored_path'] = str(stored_path.relative_to(self.output_dir))
             existing['checksum'] = checksum
             existing['added_at'] = datetime.now().isoformat()
         else:
             manifest_data['files'].append({
                 'filename': original_path.name,
-                'original_path': str(original_path.resolve()),
+                'original_path': original_path_resolved,
                 'stored_path': str(stored_path.relative_to(self.output_dir)),
                 'category': category,
                 'components': new_components,
@@ -258,14 +270,15 @@ class SimulationBase(ABC):
 
         manifest_data['last_updated'] = datetime.now().isoformat()
 
-        manifest_path.write_text(json.dumps(manifest_data, indent=2))
+        manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding='utf-8')
         logger.debug("Updated provenance manifest: %s", manifest_path)
 
     def _add_component_files_to_provenance(self, component_name: str, config: Any) -> None:
         """Find and add CIF and potential files for a component config to provenance.
-        
-        Handles both explicit file paths (cif_path/pot_path) and material lookups (mat/pot).
-        
+
+        Uses canonical component paths from the validated schema: `cif_path` and
+        `pot_path`.
+
         Args:
             component_name: Name of the component ('tip', 'sub', 'sheet', etc.)
             config: Component config object (TipConfig, SubstrateConfig, SheetConfig, etc.)
@@ -279,9 +292,8 @@ class SimulationBase(ABC):
             except (FileNotFoundError, ValueError, KeyError):
                 pass
 
-        pot = getattr(config, 'pot_path', None) or (
-            get_potential_path(config.pot) if hasattr(config, 'pot') and config.pot else None
-        )
+        pot_path = getattr(config, 'pot_path', None)
+        pot = get_potential_path(pot_path) if pot_path else None
         if pot:
             try:
                 self.add_to_provenance(pot, 'potential', component=component_name)
@@ -382,7 +394,7 @@ class SimulationBase(ABC):
 
             script_name = 'run.pbs' if hpc_config.scheduler_type == 'pbs' else 'run.sh'
             script_path = hpc_dir / script_name
-            script_path.write_text(script_content)
+            script_path.write_text(script_content, encoding='utf-8')
 
             logger.info("Generated HPC script in %s", hpc_dir)
 

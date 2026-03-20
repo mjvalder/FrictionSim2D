@@ -18,7 +18,7 @@ from aiida.common.exceptions import NotExistent
 from aiida.orm import QueryBuilder
 from aiida.engine import submit as aiida_submit
 
-from src.core.config import GlobalSettings, load_settings, parse_config
+from src.core.config import GlobalSettings, load_settings
 from src.core.run import run_simulations
 from src.aiida.calcjob import (
     LammpsFrictionCalcJob,
@@ -78,15 +78,13 @@ def run_with_aiida(
     if auto_setup:
         _ensure_profile_loaded(profile_name)
 
-    settings = load_settings()
+    settings: GlobalSettings = load_settings()
 
     logger.info("Generating simulation files from %s", config_file)
-    config_dict = parse_config(config_file)
-    simulation_dirs, root_dir = run_simulations(
-        config=config_dict,
+    simulation_dirs, root_dir, _, _ = run_simulations(
+        config_file=str(config_file),
         model=model,
         output_root=output_root,
-        settings=settings,
         use_aiida=True,
     )
     logger.info("Generated %d simulation(s) in %s", len(simulation_dirs), root_dir)
@@ -151,7 +149,7 @@ def smart_submit(
     """
     import click  # pylint: disable=import-outside-toplevel
 
-    settings = load_settings()
+    settings: GlobalSettings = load_settings()
 
     code = _get_code(code_label, interactive=True)
     click.echo(f"Using code: {code.full_label}")
