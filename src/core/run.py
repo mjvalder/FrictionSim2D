@@ -228,16 +228,14 @@ def run_simulations(
         defaults.aiida.enabled = True
         defaults.aiida.create_provenance = True
 
-    # pylint: disable=no-member
     if model == 'sheetonsheet':
         if defaults.hpc.lammps_scripts == ['system.in', 'slide.in']:
             defaults.hpc.lammps_scripts = ['slide.in']
     elif model == 'afm':
         if defaults.hpc.lammps_scripts == ['slide.in']:
             defaults.hpc.lammps_scripts = ['system.in', 'slide.in']
-    # pylint: enable=no-member
 
-    if ensure_hpc_settings is not None:
+    if ensure_hpc_settings is not None and generate_hpc:
         ensure_hpc_settings(defaults.hpc)
 
     configs_to_run = expand_config_sweeps(base_dict)

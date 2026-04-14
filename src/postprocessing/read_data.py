@@ -44,10 +44,27 @@ class DataReader:
     stores it in a structured format.
     """
 
-    _FIELDS = [
+    # Column names matching fix fc_ave output order in afm/slide.lmp.
+    # 9 LAMMPS variables + timestep = 10 file columns.
+    _AFM_FILE_COLUMNS = [
         'time', 'nf', 'lfx', 'lfy', 'comx', 'comy', 'comz',
-        'tipx', 'tipy', 'tipz', 'lateral_force', 'cof',
+        'tipx', 'tipy', 'tipz',
     ]
+
+    # Column names matching fix fc_ave output order in sheetonsheet/slide.lmp.
+    # 16 LAMMPS variables + timestep = 17 file columns.
+    _SHEET_FILE_COLUMNS = [
+        'time', 'v_xfrict', 'v_yfrict', 'v_sx', 'v_sy', 'v_sz',
+        'v_fx', 'v_fy', 'v_fz', 'v_comx_top', 'v_comy_top',
+        'v_comx_ctop', 'v_comy_ctop', 'v_comz_ctop',
+        'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot',
+    ]
+
+    _SHEET_COLUMN_RENAME = {
+        'v_xfrict': 'lfx',
+        'v_yfrict': 'lfy',
+        'v_fz': 'nf',
+    }
 
     def __init__(self, results_dir: str = 'results_110725_test') -> None:
         """Initialise the DataReader.
@@ -73,9 +90,8 @@ class DataReader:
     def _calculate_derived_quantities(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate lateral force and coefficient of friction.
 
-        Adds two new columns:
-        - lateral_force: sqrt(lfx² + lfy²)
-        - cof: lateral_force / nf (coefficient of friction)
+        Delegates to :func:`~src.data.models.compute_derived_columns` to
+        ensure consistent calculation across the codebase.
 
         Args:
             df: DataFrame with at least lfx, lfy, and nf columns.
@@ -84,19 +100,12 @@ class DataReader:
             DataFrame with added lateral_force and cof columns.
         """
         if 'lfx' in df.columns and 'lfy' in df.columns and 'nf' in df.columns:
-            lfx = df['lfx'].values
-            lfy = df['lfy'].values
-            nf = df['nf'].values
+            from src.data.models import compute_derived_columns  # noqa: PLC0415
 
-            lateral_force = np.sqrt(lfx**2 + lfy**2)
-            df['lateral_force'] = lateral_force
-
-            cof = np.divide(
-                lateral_force,
-                nf,
-                out=np.zeros_like(lateral_force),
-                where=nf != 0,
+            lateral_force, cof = compute_derived_columns(
+                df['lfx'].values, df['lfy'].values, df['nf'].values,
             )
+            df['lateral_force'] = lateral_force
             df['cof'] = cof
 
         return df
@@ -216,15 +225,32 @@ class DataReader:
                 filepath = Path(root) / filename
                 try:
                     if sim_type == 'sheet':
-                        sheet_col_names = [
-                            'time', 'v_xfrict', 'v_yfrict', 'v_sx', 'v_sy', 'v_sz',
-                            'v_fx', 'v_fy', 'v_fz', 'v_comx_ctop', 'v_comy_ctop',
-                            'v_comz_ctop', 'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot',
-                        ]
-                        df = pd.read_csv(filepath, sep=r'\s+', header=None, names=sheet_col_names, skiprows=2)
-                        df.rename(columns={'v_xfrict': 'lfx', 'v_yfrict': 'lfy', 'v_fz': 'nf'}, inplace=True)
+                        df = pd.read_csv(
+                            filepath, sep=r'\s+', header=None,
+                            names=self._SHEET_FILE_COLUMNS, skiprows=2,
+                        )
+                        ncols = df.shape[1]
+                        expected = len(self._SHEET_FILE_COLUMNS)
+                        if ncols != expected:
+                            logger.warning(
+                                "Column count mismatch in %s: got %d, expected %d. "
+                                "Template fix fc_ave order may have changed.",
+                                filepath, ncols, expected,
+                            )
+                        df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
                     else:
-                        df = pd.read_csv(filepath, sep=r'\s+', header=None, names=self._FIELDS, skiprows=2)
+                        df = pd.read_csv(
+                            filepath, sep=r'\s+', header=None,
+                            names=self._AFM_FILE_COLUMNS, skiprows=2,
+                        )
+                        ncols = df.shape[1]
+                        expected = len(self._AFM_FILE_COLUMNS)
+                        if ncols != expected:
+                            logger.warning(
+                                "Column count mismatch in %s: got %d, expected %d. "
+                                "Template fix fc_ave order may have changed.",
+                                filepath, ncols, expected,
+                            )
 
                     if ntimestep - len(df) > 3:
                         incomplete_files.setdefault(size_key, []).append(str(filepath))

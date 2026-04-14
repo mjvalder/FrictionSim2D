@@ -79,7 +79,7 @@ variable        i loop ${num_floads}
 label           loop_load
 
 variable        f equal ${f}+${fincr}
-variable        n equal -v_f/(count({{ tip_fix_group }})*1.602176565)
+variable        n equal -v_f/(count({{ tip_fix_group }})*{{ ev_a_to_nn }})
 fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
 run             100
 unfix           forcetip

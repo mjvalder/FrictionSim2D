@@ -183,21 +183,39 @@ class FrictionResultsData(Data):
         return self.mean_cof
 
     def _calculate_summary_statistics(self):
-        """Compute and store summary statistics from the current time-series."""
+        """Compute and store summary statistics from the current time-series.
+
+        Uses :func:`~src.data.models.compute_friction_stats` as the canonical
+        source for COF and force statistics (ratio-of-means, 20 % transient
+        skip). Min/max values are still computed on the full series.
+        """
         ts = self.time_series
         if not ts:
             return
 
+        # ------------------------------------------------------------------
+        # Canonical friction stats (with transient skip)
+        # ------------------------------------------------------------------
+        if all(k in ts for k in ('nf', 'lfx', 'lfy')):
+            from src.data.models import compute_friction_stats  # noqa: PLC0415
+
+            stats = compute_friction_stats(
+                np.asarray(ts['nf']),
+                np.asarray(ts['lfx']),
+                np.asarray(ts['lfy']),
+            )
+            for key, val in stats.items():
+                self.base.attributes.set(key, val)
+            self.base.attributes.set('friction_coefficient', stats['mean_cof'])
+
+        # ------------------------------------------------------------------
+        # Per-field min/max on the full series (no skip)
+        # ------------------------------------------------------------------
         for field in self._SUMMARY_FIELDS:
             if field in ts:
                 arr = np.asarray(ts[field])
-                self.base.attributes.set(f'mean_{field}', float(np.mean(arr)))
-                self.base.attributes.set(f'std_{field}', float(np.std(arr)))
                 self.base.attributes.set(f'min_{field}', float(np.min(arr)))
                 self.base.attributes.set(f'max_{field}', float(np.max(arr)))
-
-        if 'cof' in ts:
-            self.base.attributes.set('friction_coefficient', self.mean_cof)
 
     def get_summary_statistics(self, skip_fraction: float = 0.2) -> Dict[str, Any]:
         """Get summary statistics for all fields.
@@ -293,7 +311,10 @@ class FrictionResultsData(Data):
         return float(np.std(data[skip_n:]))
 
     def get_friction_coefficient(self, skip_fraction: float = 0.2) -> float:
-        """Calculate friction coefficient μ = F_l / F_n.
+        """Calculate friction coefficient μ using the canonical formula.
+
+        Delegates to :func:`~src.data.models.compute_friction_stats`
+        (ratio-of-means: ``mean(F_L) / mean(F_N)``).
 
         Args:
             skip_fraction: Fraction of initial data to skip.
@@ -301,17 +322,15 @@ class FrictionResultsData(Data):
         Returns:
             Mean friction coefficient.
         """
-        nf = self.get_array('nf')
-        lf = self.get_lateral_force_magnitude()
-        skip_n = int(len(nf) * skip_fraction)
+        from src.data.models import compute_friction_stats  # noqa: PLC0415
 
-        nf_slice = nf[skip_n:]
-        lf_slice = lf[skip_n:]
-
-        with np.errstate(divide='ignore', invalid='ignore'):
-            mu = np.where(nf_slice > 0, lf_slice / nf_slice, 0.0)
-
-        return float(np.mean(mu))
+        stats = compute_friction_stats(
+            self.get_array('nf'),
+            self.get_array('lfx'),
+            self.get_array('lfy'),
+            skip_fraction=skip_fraction,
+        )
+        return stats['mean_cof']
 
     # -- Factory methods ------------------------------------------------------
 
@@ -337,6 +356,40 @@ class FrictionResultsData(Data):
                     setattr(node, attr, metadata[attr])
 
         return node
+
+    def to_result_record(self) -> 'ResultRecord':
+        """Convert this node to a canonical :class:`ResultRecord`.
+
+        Returns:
+            A :class:`~src.data.models.ResultRecord` populated from this
+            node's attributes and time-series statistics.
+        """
+        from src.data.models import (  # noqa: PLC0415
+            ResultRecord,
+            compute_friction_stats,
+            compute_time_series_hash,
+        )
+
+        ts = self.time_series
+        kwargs: Dict[str, Any] = {
+            'material': self.material,
+            'layers': self.layers,
+            'force_nN': self.force if self.force else None,
+            'scan_angle': self.angle if self.angle else None,
+            'scan_speed': self.speed if self.speed else None,
+            'ntimesteps': self.ntimesteps,
+            'is_complete': self.is_complete,
+            'metadata': {'aiida_uuid': str(self.uuid)},
+        }
+
+        if all(k in ts for k in ('nf', 'lfx', 'lfy')):
+            nf = np.asarray(ts['nf'])
+            lfx = np.asarray(ts['lfx'])
+            lfy = np.asarray(ts['lfy'])
+            kwargs.update(compute_friction_stats(nf, lfx, lfy))
+            kwargs['time_series_hash'] = compute_time_series_hash(nf, lfx, lfy)
+
+        return ResultRecord(**kwargs)
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict]) -> 'FrictionResultsData':

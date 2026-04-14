@@ -12,6 +12,7 @@ from typing import Dict, Optional, List, Tuple
 from src.core.simulation_base import SimulationBase
 from src.core.config import AFMSimulationConfig
 from src.core.potential_manager import PotentialManager
+from src.data.models import EV_A_TO_NN, NM_TO_EV_A2
 from src.builders import components
 
 logger = logging.getLogger(__name__)
@@ -350,6 +351,7 @@ class AFMSimulation(SimulationBase):
             'output_dir': f"{self.relative_run_dir_layer[n_layers]}/data",
             'dump_file': f"{self.relative_run_dir_layer[n_layers]}/visuals/system.lammpstrj",
             'atom_style': atom_style,
+            'ev_a_to_nn': EV_A_TO_NN,
         }
 
         init_script = self.render_template("afm/system_init.lmp", context)

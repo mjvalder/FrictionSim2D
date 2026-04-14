@@ -123,22 +123,25 @@ variable        comy_bot equal c_COM_bot[2]
 variable        comz_bot equal c_COM_bot[3]
 
 # Apply Uniform Pressure
-# 1 eV/Å^3 = 160.2176621 GPa
+# 1 eV/Å³ = {{ ev_a3_to_gpa }} GPa
 variable        A equal ({{ xhi }}-{{ xlo }})*({{ yhi }}-{{ ylo }})
-variable        p equal v_pressure/160.2176565
+variable        p equal v_pressure/{{ ev_a3_to_gpa }}
 variable        f equal -v_p*v_A/(count(layer_{{ n_layers }}))
 
 fix             force layer_{{ n_layers }} aveforce 0.0 0.0 $f
 
-variable        fx equal f_force[1]*1.602176565
-variable        fy equal f_force[2]*1.602176565
-variable        fz equal f_force[3]*1.602176565
-variable        sx equal f_fsbot[1]*1.602176565
-variable        sy equal f_fsbot[2]*1.602176565
-variable        sz equal f_fsbot[3]*1.602176565
+variable        fx equal f_force[1]*{{ ev_a_to_nn }}
+variable        fy equal f_force[2]*{{ ev_a_to_nn }}
+variable        fz equal f_force[3]*{{ ev_a_to_nn }}
+variable        sx equal f_fsbot[1]*{{ ev_a_to_nn }}
+variable        sy equal f_fsbot[2]*{{ ev_a_to_nn }}
+variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 
 {% if has_internal_lj %}
-# Many-body potential; compute group/group not supported; use bottom layer reaction forces instead
+# Many-body potential ({{ pot_type }}): compute group/group not supported.
+# Using bottom-layer reaction forces as lateral friction proxy.
+# If friction values look wrong, verify pot_type classification in
+# PotentialManager.is_sheet_lj() (src/core/potential_manager.py).
 variable        xfrict equal v_sx
 variable        yfrict equal v_sy
 {% else %}

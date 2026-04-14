@@ -25,28 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_hpc_settings(hpc_settings) -> None:
-    """Ensure required HPC settings are set, prompting when missing."""
-    if not getattr(hpc_settings, 'log_dir', None):
-        hpc_settings.log_dir = click.prompt(
-            "Absolute path for HPC log files",
-            type=str
-        )
-
-    if not getattr(hpc_settings, 'modules', None):
-        modules_raw = click.prompt(
-            "Modules to load (comma-separated)",
-            type=str
-        )
-        hpc_settings.modules = [
-            m.strip() for m in modules_raw.split(',') if m.strip()
-        ]
+    """Ensure minimal HPC settings are set without interactive prompts."""
+    # Scheduler type and scratch directory are the only required values.
+    if not getattr(hpc_settings, 'scheduler_type', None):
+        hpc_settings.scheduler_type = 'pbs'
 
     if getattr(hpc_settings, 'use_tmpdir', False) and not getattr(hpc_settings, 'scratch_dir', None):
-        hpc_settings.scratch_dir = click.prompt(
-            "Scratch directory (e.g. $EPHEMERAL or $TMPDIR)",
-            type=str,
-            default="$TMPDIR"
-        )
+        hpc_settings.scratch_dir = "$TMPDIR"
 
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
@@ -760,15 +745,19 @@ def postprocess_plot(plot_config: str, output_dir: str,
 
 @cli.group('db')
 def db_group():
-    """Interact with the shared online FrictionSim2D PostgreSQL database.
+    """Interact with the FrictionSim2D PostgreSQL database.
 
     Upload your simulation results to the community database and query
     results contributed by other users.
 
-    Connection settings can be provided via environment variables
-    (FRICTION_DB_HOST, FRICTION_DB_PORT, FRICTION_DB_NAME,
-    FRICTION_DB_USER, FRICTION_DB_PASSWORD) or via the --host / --user /
-    --password options.
+    Connection settings are resolved in order of precedence:
+
+    \b
+      1. Explicit CLI flags (--host, --port, etc.)
+      2. Environment variables (FRICTION_DB_HOST, FRICTION_DB_PORT, ...)
+      3. The active database profile in settings.yaml
+
+    Use ``--profile local`` or ``--profile central`` to switch profiles.
     """
 
 
@@ -778,13 +767,27 @@ def _make_db(
     dbname: Optional[str],
     user: Optional[str],
     password: Optional[str],
+    profile: Optional[str] = None,
 ):
-    """Instantiate a :class:`~src.data.database.FrictionDB`."""
+    """Instantiate a :class:`~src.data.database.FrictionDB`.
+
+    If none of the explicit connection parameters are provided, falls back
+    to the settings.yaml database profile.
+    """
+    has_explicit = any(v is not None for v in (host, port, dbname, user, password))
+    if not has_explicit:
+        try:
+            from src.data.database import db_from_profile  # noqa: PLC0415
+            return db_from_profile(profile)
+        except Exception:  # settings not available, fall through
+            pass
     from src.data.database import FrictionDB  # noqa: PLC0415
     return FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
 
 
 _DB_OPTIONS = [
+    click.option('--profile', '-p', default=None,
+                 help="Database profile from settings.yaml ('local' or 'central')."),
     click.option('--host', default=None, envvar='FRICTION_DB_HOST',
                  help='Database hostname (default: $FRICTION_DB_HOST or localhost)'),
     click.option('--port', default=None, type=int, envvar='FRICTION_DB_PORT',
@@ -852,14 +855,14 @@ def db_upload(
                                     for angle_key, df in angle_data.items():
                                         angle = int(angle_key.replace('a', ''))
                                         try:
+                                            from src.data.models import compute_friction_stats  # noqa: PLC0415
                                             import numpy as np  # noqa: PLC0415
-                                            cof_col = 'cof' if 'cof' in df.columns else None
-                                            mean_cof = float(df[cof_col].mean()) if cof_col else None
-                                            std_cof = float(df[cof_col].std()) if cof_col else None
-                                            lf_col = 'lfx' if 'lfx' in df.columns else None
-                                            mean_lf = float(df[lf_col].mean()) if lf_col else None
-                                            nf_col = 'nf' if 'nf' in df.columns else None
-                                            mean_nf = float(df[nf_col].mean()) if nf_col else None
+
+                                            nf_arr = df['nf'].values if 'nf' in df.columns else np.array([])
+                                            lfx_arr = df['lfx'].values if 'lfx' in df.columns else np.array([])
+                                            lfy_arr = df['lfy'].values if 'lfy' in df.columns else np.array([])
+
+                                            stats = compute_friction_stats(nf_arr, lfx_arr, lfy_arr) if nf_arr.size > 0 else {}
 
                                             db.upload_result(
                                                 material=material.replace('_', '-'),
@@ -869,11 +872,9 @@ def db_upload(
                                                 pressure_gpa=load_val if is_pressure else None,
                                                 scan_angle=float(angle),
                                                 scan_speed=float(speed),
-                                                mean_cof=mean_cof,
-                                                std_cof=std_cof,
-                                                mean_lf=mean_lf,
-                                                mean_nf=mean_nf,
                                                 uploader=uploader,
+                                                ntimesteps=len(df),
+                                                **stats,
                                             )
                                             n_uploaded += 1
                                         except Exception as exc:  # pylint: disable=broad-except
@@ -904,6 +905,7 @@ def db_query(
     uploader: Optional[str],
     limit: int,
     output_csv: Optional[str],
+    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -917,7 +919,7 @@ def db_query(
 
         FrictionSim2D db query --material h-WS2 --csv results.csv
     """
-    db = _make_db(host, port, dbname, user, password)
+    db = _make_db(host, port, dbname, user, password, profile=profile)
     df = db.query(
         material=material,
         simulation_type=sim_type,
@@ -941,6 +943,7 @@ def db_query(
 @db_group.command('stats')
 @_add_db_options
 def db_stats(
+    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -948,7 +951,7 @@ def db_stats(
     password: Optional[str],
 ):
     """Show aggregate statistics for the shared database."""
-    db = _make_db(host, port, dbname, user, password)
+    db = _make_db(host, port, dbname, user, password, profile=profile)
     stats = db.get_statistics()
 
     click.echo(f"Total simulations : {stats['total_rows']}")
@@ -969,6 +972,7 @@ def db_stats(
 @_add_db_options
 def db_delete(
     uploader: str,
+    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -982,9 +986,245 @@ def db_delete(
     Example:
         FrictionSim2D db delete --uploader alice
     """
-    db = _make_db(host, port, dbname, user, password)
+    db = _make_db(host, port, dbname, user, password, profile=profile)
     count = db.delete_own_results(uploader)
     click.echo(f"🗑  Deleted {count} row(s) for uploader '{uploader}'.")
+
+
+@db_group.command('init')
+@_add_db_options
+def db_init(
+    profile: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Initialise the database schema (create tables + apply migrations).
+
+    Safe to run repeatedly — existing tables and columns are not overwritten.
+
+    Example:\n
+        FrictionSim2D db init --profile local
+    """
+    db = _make_db(host, port, dbname, user, password, profile=profile)
+    from src.data.database import SCHEMA_VERSION  # noqa: PLC0415
+    click.echo(f"✅ Database initialised at schema version {SCHEMA_VERSION}.")
+
+
+@db_group.command('migrate')
+@_add_db_options
+def db_migrate(
+    profile: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Apply pending database migrations.
+
+    Detects the current schema version and applies any outstanding
+    migrations up to the latest version.
+
+    Example:\n
+        FrictionSim2D db migrate --profile central
+    """
+    from src.data.database import (  # noqa: PLC0415
+        FrictionDB, apply_migrations, get_current_schema_version, SCHEMA_VERSION,
+    )
+
+    has_explicit = any(v is not None for v in (host, port, dbname, user, password))
+    if not has_explicit:
+        try:
+            from src.data.database import db_from_profile  # noqa: PLC0415
+            db = db_from_profile(profile)
+        except Exception:
+            db = FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
+    else:
+        db = FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password, auto_create=False)
+
+    with db._cursor(commit=True) as cur:
+        before = get_current_schema_version(cur)
+        applied = apply_migrations(cur)
+
+    if applied:
+        click.echo(f"✅ Migrated v{before} → v{applied[-1]} (applied: {applied})")
+    else:
+        click.echo(f"Database already at latest schema version {SCHEMA_VERSION}.")
+
+
+@db_group.command('create-key')
+@click.option('--name', '-n', required=True,
+              help='User name to associate with the API key.')
+@_add_db_options
+def db_create_key(
+    name: str,
+    profile: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Generate a new API key for write access to the database.
+
+    The raw API key is printed ONCE.  Store it securely — it cannot be
+    retrieved again (only revoked).
+
+    Example:\n
+        FrictionSim2D db create-key --name alice
+    """
+    db = _make_db(host, port, dbname, user, password, profile=profile)
+    raw_key = db.create_api_key(name)
+    click.echo(f"🔑 API key for '{name}':")
+    click.echo(f"   {raw_key}")
+    click.echo("\nStore this key securely. It cannot be shown again.")
+
+
+@db_group.command('stage')
+@click.argument('results_dir', type=click.Path(exists=True))
+@click.option('--uploader', '-n', required=True,
+              help='Your name or identifier.')
+@click.option('--api-key', default=None, envvar='FRICTION_DB_API_KEY',
+              help='API key for write access.')
+@_add_db_options
+def db_stage(
+    results_dir: str,
+    uploader: str,
+    api_key: Optional[str],
+    profile: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Stage simulation results for review before publishing.
+
+    Results are uploaded with status='staged'.  They must pass validation
+    and curator approval before becoming publicly visible.
+
+    Example:\n
+        FrictionSim2D db stage ./results --uploader alice --api-key <key>
+    """
+    db = _make_db(host, port, dbname, user, password, profile=profile)
+
+    if api_key:
+        verified_user = db.verify_api_key(api_key)
+        if not verified_user:
+            raise click.ClickException("Invalid or revoked API key.")
+        click.echo(f"Authenticated as: {verified_user}")
+
+    from src.postprocessing.read_data import DataReader  # noqa: PLC0415
+    from src.data.models import compute_friction_stats  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    click.echo(f"📂 Reading results from {results_dir} ...")
+    reader = DataReader(results_dir=str(results_dir))
+
+    n_staged = 0
+    for material, size_data in reader.full_data_nested.items():
+        for _size_key, substrate_data in size_data.items():
+            for _sub, tip_data in substrate_data.items():
+                for _tip_mat, radius_data in tip_data.items():
+                    for _radius, layer_data in radius_data.items():
+                        for layer_key, speed_data in layer_data.items():
+                            layers = int(layer_key.replace('l', ''))
+                            for speed_key, force_data in speed_data.items():
+                                speed = int(speed_key.replace('s', ''))
+                                for load_key, angle_data in force_data.items():
+                                    is_pressure = load_key.startswith('p')
+                                    load_val = float(load_key[1:])
+                                    for angle_key, df in angle_data.items():
+                                        angle = int(angle_key.replace('a', ''))
+                                        try:
+                                            nf_arr = df['nf'].values if 'nf' in df.columns else np.array([])
+                                            lfx_arr = df['lfx'].values if 'lfx' in df.columns else np.array([])
+                                            lfy_arr = df['lfy'].values if 'lfy' in df.columns else np.array([])
+                                            stats = compute_friction_stats(nf_arr, lfx_arr, lfy_arr) if nf_arr.size > 0 else {}
+
+                                            db.upload_result(
+                                                material=material.replace('_', '-'),
+                                                simulation_type='afm',
+                                                layers=layers,
+                                                force_nN=None if is_pressure else load_val,
+                                                pressure_gpa=load_val if is_pressure else None,
+                                                scan_angle=float(angle),
+                                                scan_speed=float(speed),
+                                                uploader=uploader,
+                                                ntimesteps=len(df),
+                                                **stats,
+                                            )
+                                            n_staged += 1
+                                        except Exception as exc:
+                                            logger.warning(
+                                                "Skipped row (%s, l%d, a%d): %s",
+                                                material, layers, angle, exc,
+                                            )
+
+    click.echo(f"✅ Staged {n_staged} result(s) for review.")
+
+
+@db_group.command('publish')
+@click.argument('row_id', type=int)
+@_add_db_options
+def db_publish(
+    row_id: int,
+    profile: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Publish a validated result (curator action).
+
+    Promotes a result from 'validated' to 'published', making it visible
+    to all users.
+
+    Example:\n
+        FrictionSim2D db publish 42
+    """
+    db = _make_db(host, port, dbname, user, password, profile=profile)
+    ok = db.publish(row_id)
+    if ok:
+        click.echo(f"✅ Result {row_id} published.")
+    else:
+        raise click.ClickException(
+            f"Could not publish result {row_id}. "
+            "It may not exist or may not be in 'validated' status."
+        )
+
+
+@db_group.command('reject')
+@click.argument('row_id', type=int)
+@click.option('--reason', '-r', default=None, help='Reason for rejection.')
+@_add_db_options
+def db_reject(
+    row_id: int,
+    reason: Optional[str],
+    profile: Optional[str],
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """Reject a staged or validated result (curator action).
+
+    Example:\n
+        FrictionSim2D db reject 42 --reason "Duplicate of row 37"
+    """
+    db = _make_db(host, port, dbname, user, password, profile=profile)
+    ok = db.reject(row_id, reason=reason)
+    if ok:
+        click.echo(f"❌ Result {row_id} rejected.")
+    else:
+        raise click.ClickException(
+            f"Could not reject result {row_id}. It may not exist."
+        )
 
 
 # =============================================================================

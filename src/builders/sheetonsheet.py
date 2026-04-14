@@ -22,6 +22,7 @@ from typing import Dict, Optional, List, Union
 from src.core.simulation_base import SimulationBase
 from src.core.config import SheetOnSheetSimulationConfig
 from src.core.potential_manager import PotentialManager, POTENTIALS_WITH_INTERNAL_LJ
+from src.data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from src.core.utils import atomic2molecular
 from src.builders import components
 
@@ -279,12 +280,12 @@ class SheetOnSheetSimulation(SimulationBase):
             'lat_c': self.lat_c,
             'sheet_dims': self.sheet_dims,
             'bond_spring_ev': (
-                (self.config.general.bond_spring or 80.0) / 16.02176565
+                (self.config.general.bond_spring or 80.0) / NM_TO_EV_A2
             ),
             'bond_min': self.lat_c - 0.15,
             'bond_max': self.lat_c + 0.15,
             'driving_spring_ev': (
-                (self.config.general.driving_spring or 50.0) / 16.02176565
+                (self.config.general.driving_spring or 50.0) / NM_TO_EV_A2
             ),
             'timestep': sim.timestep,
             'thermo': sim.thermo,
@@ -309,6 +310,8 @@ class SheetOnSheetSimulation(SimulationBase):
             'atom_style': atom_style,
             'pot_type': pot_type,
             'has_internal_lj': not self.pm.is_sheet_lj(pot_type),
+            'ev_a_to_nn': EV_A_TO_NN,
+            'ev_a3_to_gpa': EV_A3_TO_GPA,
         }
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)

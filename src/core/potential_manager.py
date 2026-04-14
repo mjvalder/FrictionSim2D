@@ -925,7 +925,6 @@ class PotentialManager:
         # Find the path token (starts with / or contains .)
         for i in range(3, len(tokens)):
             if '/' in tokens[i] or '.' in tokens[i]:
-                # Everything from path onward is kept
                 cleaned = ' '.join(tokens[:3] + tokens[i:])
                 return f"{cleaned}{comment}"
 

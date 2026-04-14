@@ -91,6 +91,7 @@ class HPCSettings(BaseModel):
     account: str = ''
     hpc_host: Optional[str] = None
     hpc_home: Optional[str] = None
+    log_dir: Optional[str] = None
     scratch_dir: Optional[str] = "$TMPDIR"
     num_nodes: int = 1
     num_cpus: int = 32
@@ -126,6 +127,25 @@ class AiidaSettings(BaseModel):
     key_filename: Optional[str] = None
 
 
+class DatabaseProfileSettings(BaseModel):
+    """Connection parameters for a single database profile."""
+    host: str = 'localhost'
+    port: int = 5432
+    dbname: str = 'frictionsim2d'
+    user: str = ''
+    password: str = ''
+    api_key: str = ''
+
+
+class DatabaseSettings(BaseModel):
+    """Database connection and staging pipeline configuration."""
+    active_profile: str = 'local'
+    local: DatabaseProfileSettings = Field(default_factory=DatabaseProfileSettings)
+    central: DatabaseProfileSettings = Field(default_factory=lambda: DatabaseProfileSettings(host=''))
+    auto_validate: bool = True
+    skip_fraction: float = 0.2
+
+
 class GlobalSettings(BaseModel):
     """Represents the full structure of settings.yaml with hardcoded defaults."""
     geometry: GeometrySettings = Field(default_factory=GeometrySettings)
@@ -136,6 +156,7 @@ class GlobalSettings(BaseModel):
     potential: PotentialSettings = Field(default_factory=PotentialSettings)
     hpc: HPCSettings = Field(default_factory=HPCSettings)
     aiida: AiidaSettings = Field(default_factory=AiidaSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
 
 # --- User Input Settings (From .ini files) ---
 

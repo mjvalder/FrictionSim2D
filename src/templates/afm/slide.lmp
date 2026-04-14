@@ -77,14 +77,14 @@ variable        comz_tip equal c_COM_tip[3]
 
 run             0
 
-variable        Ftotal equal -v_find/1.602176565
+variable        Ftotal equal -v_find/{{ ev_a_to_nn }}
 variable        n equal v_Ftotal/count({{ tip_fix_group }})
 fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
 
-variable        fz_tip equal f_forcetip[3]*1.602176565
+variable        fz_tip equal f_forcetip[3]*{{ ev_a_to_nn }}
 
-variable        fx_spr equal f_spr[1]*1.602176565
-variable        fy_spr equal f_spr[2]*1.602176565
+variable        fx_spr equal f_spr[1]*{{ ev_a_to_nn }}
+variable        fy_spr equal f_spr[2]*{{ ev_a_to_nn }}
 
 fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file {{ results_file_pattern }}
 

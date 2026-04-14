@@ -35,22 +35,36 @@ def test_load_default_settings():
     assert settings.geometry.rigid_tip is not None
     assert settings.thermostat.type in ['langevin', 'nose-hoover']
 
-def test_valid_config_creation():
+def test_valid_config_creation(tmp_path, monkeypatch):
     """Test creating a full configuration object."""
+    dummy_pot = tmp_path / "dummy.sw"
+    dummy_cif = tmp_path / "dummy.cif"
+    dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
+    dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
+    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
+    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+
     settings = load_settings()
     
     config = AFMSimulationConfig(
         general=VALID_GENERAL,
         tip=VALID_TIP,
         sub=VALID_SUB,
-        sheet=VALID_SHEET, # Maps to '2D' alias
+        **{'2D': VALID_SHEET},
         settings=settings
     )
     assert config.tip.r == 10.0
     assert config.sheet.mat == 'MoS2'
 
-def test_validation_error():
+def test_validation_error(tmp_path, monkeypatch):
     """Ensure invalid types raise errors."""
+    dummy_pot = tmp_path / "dummy.sw"
+    dummy_cif = tmp_path / "dummy.cif"
+    dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
+    dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
+    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
+    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+
     settings = load_settings()
     invalid_tip = VALID_TIP.copy()
     invalid_tip['r'] = "not_a_number" # Should fail
@@ -60,7 +74,7 @@ def test_validation_error():
             general=VALID_GENERAL,
             tip=invalid_tip,
             sub=VALID_SUB,
-            sheet=VALID_SHEET,
+            **{'2D': VALID_SHEET},
             settings=settings
         )
 

@@ -384,7 +384,7 @@ class SimulationBase(ABC):
                 'manifest_file': slide_manifest_rel,
                 'manifest_filename': 'manifest_slide.txt',
                 'base_dir': base_dir,
-                'log_dir': f"{base_dir}/logs",
+                'log_dir': hpc_config.log_dir or f"{base_dir}/logs",
                 'job_name': job_name,
             })
 

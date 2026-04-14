@@ -10,8 +10,14 @@ import json
 from jinja2 import Environment, FileSystemLoader
 
 from src.hpc.manifest import JobManifest
+from src.core.config import GlobalSettings
 
 TEMPLATES_DIR = Path(__file__).parent.parent / 'templates' / 'hpc'
+
+
+def _default_hpc_settings():
+    """Return default validated HPC settings from GlobalSettings."""
+    return GlobalSettings().hpc
 
 
 @dataclass
@@ -40,27 +46,9 @@ class HPCConfig:
         lammps_scripts: Script names to execute.
         max_array_size: Maximum array job size.
     """
-    scheduler_type: Literal['pbs', 'slurm'] = 'pbs'
-    nodes: int = 1
-    cpus_per_node: int = 32
-    memory_gb: int = 62
-    walltime_hours: int = 20
+    hpc_settings: Any = field(default_factory=_default_hpc_settings)
     job_name: str = "friction2d"
-    queue: Optional[str] = None
-    partition: Optional[str] = None
-    account: Optional[str] = None
-    hpc_host: Optional[str] = None
-    hpc_home: Optional[str] = None
-    scratch_dir: Optional[str] = "$TMPDIR"
-    modules: List[str] = field(default_factory=lambda: [
-        'tools/prod',
-        'LAMMPS/29Aug2024-foss-2023b-kokkos'
-    ])
-    mpi_command: str = "mpirun"
     lmp_flags: str = "-l none"
-    use_tmpdir: bool = True
-    lammps_scripts: List[str] = field(default_factory=lambda: ['system.in', 'slide.in'])
-    max_array_size: int = 300
 
     @classmethod
     def from_settings(cls, hpc_settings, job_name: str = "friction2d") -> 'HPCConfig':
@@ -73,25 +61,79 @@ class HPCConfig:
         Returns:
             New HPCConfig instance.
         """
-        return cls(
-            scheduler_type=hpc_settings.scheduler_type,
-            nodes=hpc_settings.num_nodes,
-            cpus_per_node=hpc_settings.num_cpus,
-            memory_gb=hpc_settings.memory_gb,
-            walltime_hours=hpc_settings.walltime_hours,
-            job_name=job_name,
-            queue=hpc_settings.queue or None,
-            partition=hpc_settings.partition,
-            account=hpc_settings.account or None,
-            hpc_host=getattr(hpc_settings, 'hpc_host', None),
-            hpc_home=getattr(hpc_settings, 'hpc_home', None),
-            scratch_dir=getattr(hpc_settings, 'scratch_dir', None),
-            modules=hpc_settings.modules,
-            mpi_command=hpc_settings.mpi_command,
-            use_tmpdir=hpc_settings.use_tmpdir,
-            max_array_size=hpc_settings.max_array_size,
-            lammps_scripts=getattr(hpc_settings, 'lammps_scripts', None) or ['system.in', 'slide.in'],
-        )
+        return cls(hpc_settings=hpc_settings, job_name=job_name)
+
+    @property
+    def scheduler_type(self) -> Literal['pbs', 'slurm']:
+        return self.hpc_settings.scheduler_type
+
+    @property
+    def nodes(self) -> int:
+        return self.hpc_settings.num_nodes
+
+    @property
+    def cpus_per_node(self) -> int:
+        return self.hpc_settings.num_cpus
+
+    @property
+    def memory_gb(self) -> int:
+        return self.hpc_settings.memory_gb
+
+    @property
+    def walltime_hours(self) -> int:
+        return self.hpc_settings.walltime_hours
+
+    @property
+    def queue(self) -> Optional[str]:
+        return self.hpc_settings.queue or None
+
+    @property
+    def partition(self) -> Optional[str]:
+        return self.hpc_settings.partition
+
+    @property
+    def account(self) -> Optional[str]:
+        return self.hpc_settings.account or None
+
+    @property
+    def hpc_host(self) -> Optional[str]:
+        return getattr(self.hpc_settings, 'hpc_host', None)
+
+    @property
+    def hpc_home(self) -> Optional[str]:
+        return getattr(self.hpc_settings, 'hpc_home', None)
+
+    @property
+    def log_dir(self) -> Optional[str]:
+        return getattr(self.hpc_settings, 'log_dir', None)
+
+    @property
+    def scratch_dir(self) -> Optional[str]:
+        return getattr(self.hpc_settings, 'scratch_dir', None)
+
+    @property
+    def modules(self) -> List[str]:
+        return list(self.hpc_settings.modules or [])
+
+    @property
+    def mpi_command(self) -> str:
+        return self.hpc_settings.mpi_command
+
+    @property
+    def use_tmpdir(self) -> bool:
+        return self.hpc_settings.use_tmpdir
+
+    @property
+    def lammps_scripts(self) -> List[str]:
+        return list(getattr(self.hpc_settings, 'lammps_scripts', None) or ['system.in', 'slide.in'])
+
+    @lammps_scripts.setter
+    def lammps_scripts(self, scripts: List[str]) -> None:
+        self.hpc_settings.lammps_scripts = list(scripts)
+
+    @property
+    def max_array_size(self) -> int:
+        return self.hpc_settings.max_array_size
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for template rendering.
@@ -110,6 +152,7 @@ class HPCConfig:
             'account': self.account,
             'hpc_host': self.hpc_host,
             'hpc_home': self.hpc_home,
+            'log_dir': self.log_dir,
             'scratch_dir': self.scratch_dir,
             'modules': self.modules,
             'mpi_command': self.mpi_command,
@@ -137,7 +180,7 @@ class HPCScriptGenerator:
         Args:
             config: HPC configuration (uses defaults if None).
         """
-        self.config = config or HPCConfig()
+        self.config = config or HPCConfig.from_settings(_default_hpc_settings())
         self.jinja_env = Environment(
             loader=FileSystemLoader(TEMPLATES_DIR),
             trim_blocks=True,
@@ -154,6 +197,14 @@ class HPCScriptGenerator:
             raise ValueError("HPC modules list is empty.")
         if self.config.use_tmpdir and not self.config.scratch_dir:
             raise ValueError("HPC scratch_dir required when use_tmpdir is true.")
+
+    def _resolve_log_dir(self, base_dir: str) -> str:
+        """Resolve log directory for job scripts.
+
+        Uses explicit config value when provided, otherwise falls back to
+        base_dir/logs to preserve current behavior.
+        """
+        return self.config.log_dir or f"{base_dir}/logs"
 
     def _generate_array_scripts(self, simulation_paths: List[str], output_dir: Path,
                                 base_dir: str, scheduler: Literal['pbs', 'slurm']) -> List[Path]:
@@ -193,7 +244,7 @@ class HPCScriptGenerator:
                 'manifest_file': f"{base_dir}/{output_dir.name}/{manifest_name}",
                 'manifest_filename': manifest_name,
                 'base_dir': base_dir,
-                'log_dir': f"{base_dir}/logs",
+                'log_dir': self._resolve_log_dir(base_dir),
             })
             if n_scripts > 1:
                 context['job_name'] = f"{self.config.job_name}_{i+1}"
@@ -333,7 +384,7 @@ class HPCScriptGenerator:
                 'manifest_file': f"{base_dir}/hpc/manifest_system.txt",
                 'manifest_filename': 'manifest_system.txt',
                 'base_dir': base_dir,
-                'log_dir': f"{base_dir}/logs",
+                'log_dir': self._resolve_log_dir(base_dir),
                 'job_name': f"{self.config.job_name}_system",
             })
             script_path = output_dir / f"run_system{script_ext}"
@@ -348,7 +399,7 @@ class HPCScriptGenerator:
                 'manifest_file': f"{base_dir}/hpc/manifest_slide.txt",
                 'manifest_filename': 'manifest_slide.txt',
                 'base_dir': base_dir,
-                'log_dir': f"{base_dir}/logs",
+                'log_dir': self._resolve_log_dir(base_dir),
                 'job_name': f"{self.config.job_name}_slide",
             })
             script_path = output_dir / f"run_slide{script_ext}"

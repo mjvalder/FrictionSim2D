@@ -91,6 +91,12 @@ def data_path() -> Path:
 
 
 @pytest.fixture
+def temp_dir(tmp_path: Path) -> Path:
+    """Legacy fixture alias used by older tests."""
+    return tmp_path
+
+
+@pytest.fixture
 def materials_path(data_path) -> Path:
     """Returns the path to materials directory."""
     return data_path / 'materials'

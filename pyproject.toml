@@ -47,13 +47,19 @@ plotting = [
   "seaborn>=0.12",
   "scipy>=1.8",
 ]
+api = [
+  "fastapi>=0.100",
+  "uvicorn[standard]>=0.20",
+  "httpx>=0.24",
+]
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.0",
   "pylint>=2.15",
+  "httpx>=0.24",
 ]
 all = [
-  "FrictionSim2D[aiida,plotting]",
+  "FrictionSim2D[aiida,plotting,api]",
 ]
 
 # ---------------------------------------------------------------------------
@@ -87,3 +93,8 @@ packages = ["src"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/**"]
+
+[tool.pylint.messages_control]
+disable = [
+  "missing-function-docstring",
+]
