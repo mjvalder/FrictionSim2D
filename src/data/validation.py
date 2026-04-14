@@ -22,10 +22,10 @@ _VALID_RANGES: Dict[str, tuple] = {
     'mean_cof': (0.0, 5.0),
     'std_cof': (0.0, 5.0),
     'temperature': (0.0, 10_000.0),
-    'force_nN': (0.0, 1_000.0),
-    'pressure_gpa': (0.0, 100.0),
+    'force_nN': (0.0, 100_000.0),
+    'pressure_gpa': (0.0, 10_000.0),
     'scan_angle': (0.0, 360.0),
-    'layers': (1, 100),
+    'layers': (1, 20),
     'tip_radius': (0.0, 10_000.0),
 }
 

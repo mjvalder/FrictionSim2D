@@ -108,17 +108,22 @@ database:
     host: 'localhost'
     port: 5432
     dbname: 'frictionsim2d'
-    user: ''
-    password: ''
+    user: ''          # set via FRICTION_DB_USER on the server machine
+    password: ''      # set via FRICTION_DB_PASSWORD on the server machine
 
   central:
-    host: ''                       # Central DB host (Oracle Cloud VM, etc.)
+    host: 'localhost'   # change to your server's IP/hostname when deployed
     port: 5432
     dbname: 'frictionsim2d'
-    user: ''
-    password: ''
-    api_key: ''                    # Per-user API key for write access
+    user: ''            # set via FRICTION_DB_USER on the server machine
+    password: ''        # set via FRICTION_DB_PASSWORD on the server machine
+    api_key: ''         # not used in API mode; kept for direct-connection fallback
 
   # Staging pipeline defaults
   auto_validate: true              # Run validation automatically on upload
   skip_fraction: 0.2               # Transient skip for COF computation
+
+  # REST API server (run on the machine that hosts the DB)
+  api_url: 'http://localhost:8000'  # URL collaborators use to reach the server
+  api_host: '0.0.0.0'              # Interface the server binds to
+  api_port: 8000                    # Port the server listens on

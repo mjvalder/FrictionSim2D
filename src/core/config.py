@@ -144,6 +144,9 @@ class DatabaseSettings(BaseModel):
     central: DatabaseProfileSettings = Field(default_factory=lambda: DatabaseProfileSettings(host=''))
     auto_validate: bool = True
     skip_fraction: float = 0.2
+    api_url: str = 'http://localhost:8000'
+    api_host: str = '0.0.0.0'
+    api_port: int = 8000
 
 
 class GlobalSettings(BaseModel):

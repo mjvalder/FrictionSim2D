@@ -1228,11 +1228,65 @@ def db_reject(
 
 
 # =============================================================================
-# MAIN ENTRY POINT
+# API SERVER COMMAND
 # =============================================================================
 
+@cli.group('api')
+def api_group():
+    """Run the FrictionSim2D REST API server."""
+
+
+@api_group.command('serve')
+@click.option('--host', default=None,
+              help='Bind host (default: settings.database.api_host or 0.0.0.0)')
+@click.option('--port', '-p', default=None, type=int,
+              help='Port (default: settings.database.api_port or 8000)')
+@click.option('--profile', default=None,
+              help="Database profile to back the server ('local' or 'central').")
+@click.option('--reload', is_flag=True,
+              help='Auto-reload on code changes (development only).')
+def api_serve(host: Optional[str], port: Optional[int],
+              profile: Optional[str], reload: bool):
+    """Start the REST API server.
+
+    Runs the FastAPI application so collaborators can upload and query
+    results without needing direct database credentials.  They only need
+    the server URL and a personal API key.
+
+    \b
+    Server setup (run once on your machine):
+        FrictionSim2D db init --profile local
+        FrictionSim2D db create-key --name alice --profile local
+        FrictionSim2D api serve --host 0.0.0.0 --port 8000
+
+    \b
+    Collaborator usage:
+        Query via browser or scripts at http://your-server:8000/docs
+        (write operations are available through authenticated API endpoints)
+    """
+    try:
+        import uvicorn  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        _raise_abort(
+            "❌ uvicorn is required to run the API server.\n"
+            "   Install with: pip install uvicorn[standard]",
+            exc,
+        )
+
+    settings = load_settings()
+    db_cfg = settings.database
+    _host = host or getattr(db_cfg, 'api_host', None) or '0.0.0.0'
+    _port = port or getattr(db_cfg, 'api_port', None) or 8000
+
+    from src.api.server import create_app  # noqa: PLC0415
+    create_app(profile=profile or db_cfg.active_profile)
+
+    click.echo(f"🌐 FrictionSim2D API server → http://{_host}:{_port}")
+    click.echo("   Press Ctrl-C to stop.\n")
+    uvicorn.run("src.api.server:app", host=_host, port=_port, reload=reload)
+
+
 def main():
-    """Main CLI entry point."""
     try:
         cli()
     except Exception:  # pylint: disable=broad-except
