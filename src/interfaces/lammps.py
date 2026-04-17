@@ -6,8 +6,6 @@ This module provides utilities for interacting with LAMMPS via its Python interf
 import logging
 from typing import List
 
-from lammps import lammps
-
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +18,8 @@ def run_lammps_commands(commands: List[str]) -> None:
     Raises:
         Exception: If any LAMMPS command fails during execution.
     """
+    from lammps import lammps  # pylint: disable=import-outside-toplevel
+
     lmp = lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
     try:
         for cmd in commands:

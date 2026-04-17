@@ -24,7 +24,6 @@ import numpy as np
 
 from ase import io as ase_io
 from jinja2 import Environment
-from lammps import lammps
 
 from src.core.config import GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig
 from src.core.potential_manager import PotentialManager
@@ -38,6 +37,12 @@ from src.interfaces.jinja import PackageLoader
 from src.interfaces.lammps import run_lammps_commands
 
 logger = logging.getLogger(__name__)
+
+
+def _create_lammps_instance():
+    from lammps import lammps  # pylint: disable=import-outside-toplevel
+
+    return lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
 
 def calculate_layer_shifts(
     mat_name: str,
@@ -455,7 +460,7 @@ def stack_multilayer_sheet(
     commands = template.render(context).strip().split('\n')
     commands = [cmd.strip() for cmd in commands if cmd.strip() and not cmd.strip().startswith('#')]
 
-    lmp = lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
+    lmp = _create_lammps_instance()
     try:
         for cmd in commands:
             lmp.command(cmd)
