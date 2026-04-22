@@ -5,33 +5,32 @@ Provides FastAPI dependencies for verifying API keys passed as
 while write endpoints require a valid API key.
 """
 
+# pyright: reportMissingImports=false
+
 from __future__ import annotations
 
-import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, Header, HTTPException, status
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Module-level database reference (set by server startup)
 # ---------------------------------------------------------------------------
 
-_db_instance = None
+_DB_CONTEXT: dict[str, Any] = {"instance": None}
 
 
 def set_db(db) -> None:
     """Set the shared :class:`~src.data.database.FrictionDB` instance."""
-    global _db_instance  # noqa: PLW0603
-    _db_instance = db
+    _DB_CONTEXT["instance"] = db
 
 
 def get_db():
     """Return the shared database instance."""
-    if _db_instance is None:
+    db = _DB_CONTEXT["instance"]
+    if db is None:
         raise RuntimeError("Database not initialised — call set_db() first")
-    return _db_instance
+    return db
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +40,7 @@ def get_db():
 
 def _get_api_key_header(x_api_key: Optional[str] = Header(None)) -> Optional[str]:
     """Extract the API key from the request header."""
-    return x_api_key
+    return x_api_key.strip() if x_api_key else x_api_key
 
 
 def require_api_key(

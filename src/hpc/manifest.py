@@ -384,7 +384,7 @@ class JobManifest:
         """
         sim_dir = Path(sim_dir)
         manifest = cls(name=name or sim_dir.name, source_directory=str(sim_dir))
-        layer_pattern = re.compile(r'l[_]?(\d+)')
+        layer_pattern = re.compile(r'l[_]?(\d+)', re.IGNORECASE)
 
         sim_directories = []
         for lammps_dir in sim_dir.rglob('lammps'):
@@ -392,8 +392,8 @@ class JobManifest:
                 continue
             sim_path = lammps_dir.parent
             rel_path = sim_path.relative_to(sim_dir)
-            path_str = str(rel_path)
-            parts = path_str.split('/')
+            path_str = rel_path.as_posix()
+            parts = rel_path.parts
             material = parts[1] if len(parts) >= 2 and parts[0] in ('afm', 'sheetonsheet') else (parts[0] if parts else "")
             layer_match = layer_pattern.search(path_str)
             layers = int(layer_match.group(1)) if layer_match else 1

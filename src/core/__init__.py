@@ -7,7 +7,7 @@ This package contains the foundational classes and utilities:
     - Base builder class
 """
 
-from src.core.config import (
+from .config import (
     ComponentConfig,
     TipConfig,
     SubstrateConfig,
@@ -19,9 +19,9 @@ from src.core.config import (
     load_settings,
     parse_config,
 )
-from src.core.potential_manager import PotentialManager
-from src.core.simulation_base import SimulationBase
-from src.core.utils import (
+from .potential_manager import PotentialManager
+from .simulation_base import SimulationBase
+from .utils import (
     cifread,
     count_atomtypes,
     lj_params,
@@ -34,7 +34,7 @@ from src.core.utils import (
     renumber_atom_types,
     check_potential_cif_compatibility,
 )
-from src.core.run import (
+from .run import (
     expand_config_sweeps,
     collect_hpc_simulation_paths,
     generate_hpc_scripts_for_root,

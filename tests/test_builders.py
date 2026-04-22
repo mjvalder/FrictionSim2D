@@ -3,8 +3,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.builders import AFMSimulation as ExportedAFMSimulation
 from src.builders.afm import AFMSimulation
+from src.builders import SheetOnSheetSimulation as ExportedSheetOnSheetSimulation
 from src.builders import components
+from src.builders import components as exported_components
 from src.core.config import AFMSimulationConfig, load_settings
 
 
@@ -61,6 +64,42 @@ def test_component_build_tip(mock_lmp, afm_config, mock_atomsk, temp_dir):
     assert radius == 10.0
     assert path == temp_dir / "tip.lmp"
     mock_lmp.assert_called()
+
+
+def test_build_sheet_copies_base_when_multilayer_stacking_disabled(tmp_path: Path) -> None:
+    """build_sheet should return an existing file when stacking is disabled."""
+    base_path = tmp_path / "base.lmp"
+    base_path.write_text("atoms\n", encoding="utf-8")
+    build_dir = tmp_path / "build"
+    build_dir.mkdir(parents=True)
+
+    fake_dims = {'xlo': 0.0, 'xhi': 10.0, 'ylo': 0.0, 'yhi': 10.0, 'zlo': 0.0, 'zhi': 5.0}
+    fake_config = MagicMock()
+    fake_config.mat = "MoS2"
+    fake_config.layers = [1, 2]
+    fake_config.lat_c = 3.0
+
+    with patch("src.builders.components.build_monolayer", return_value=(base_path, fake_dims, {}, 1, fake_dims)), \
+         patch("src.builders.components.stack_multilayer_sheet") as mock_stack:
+        out_path, out_dims, out_lat_c = components.build_sheet(
+            fake_config,
+            atomsk=MagicMock(),
+            build_dir=build_dir,
+            stack_if_multi=False,
+        )
+
+    assert not mock_stack.called
+    assert out_path.exists()
+    assert out_path.read_text(encoding="utf-8") == "atoms\n"
+    assert out_dims == fake_dims
+    assert out_lat_c == 3.0
+
+
+def test_builders_package_exports():
+    """Package-level builder exports should preserve the public API."""
+    assert ExportedAFMSimulation is AFMSimulation
+    assert ExportedSheetOnSheetSimulation.__name__ == "SheetOnSheetSimulation"
+    assert exported_components is components
 
 
 def test_afm_builder_structure(afm_config, mock_atomsk, temp_dir):

@@ -5,16 +5,13 @@ Unified CLI for simulation execution, HPC script generation, and AiiDA integrati
 
 import logging
 import sys
-import shutil
-import tarfile
 from pathlib import Path
-from typing import List, Dict, Any, Optional, cast, NoReturn
+from typing import List, Optional, NoReturn
 from importlib import resources as pkg_resources
-import yaml
 import click
 
 from src.core.config import load_settings
-from src.core.run import run_simulations, _build_hpc_manifest_entries
+from src.core.run import run_simulations, _build_hpc_manifest_entries, layer_aware_path_sort_key
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,10 +32,7 @@ def _ensure_hpc_settings(hpc_settings) -> None:
 
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
-                    use_aiida: bool, generate_hpc: bool,
-                    hpc_name: Optional[str], run_local: bool):
-    _ = (hpc_name, run_local)
-
+                    use_aiida: bool, generate_hpc: bool):
     if use_aiida:
         from src.aiida import AIIDA_AVAILABLE
         if not AIIDA_AVAILABLE:
@@ -46,7 +40,7 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
             click.echo("   conda install -c conda-forge aiida-core", err=True)
             raise click.Abort()
 
-    created_simulations, simulation_root, configs_to_run, defaults = run_simulations(
+    created_simulations, simulation_root, configs_to_run, _ = run_simulations(
         config_file=config_file,
         model=model,
         output_root=Path(output_dir),
@@ -91,12 +85,7 @@ def run_group():
               help='Enable AiiDA provenance tracking')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
                             help='Generate HPC scripts for the simulation root')
-@click.option('--hpc', 'hpc_name', type=str, default=None,
-              help='HPC configuration name (overrides settings)')
-@click.option('--local', 'run_local', is_flag=True,
-              help='Mark as local run (no HPC submission)')
-def run_afm(config_file: str, output_dir: str, use_aiida: bool, 
-                        generate_hpc: bool, hpc_name: Optional[str], run_local: bool):
+def run_afm(config_file: str, output_dir: str, use_aiida: bool, generate_hpc: bool):
     """Generate AFM simulation files.
     
     Creates all necessary LAMMPS input files, structures, and potentials
@@ -106,7 +95,7 @@ def run_afm(config_file: str, output_dir: str, use_aiida: bool,
         FrictionSim2D run.afm afm_config.ini -o ./afm_output --aiida
     """
     _run_simulation(
-        'afm', config_file, output_dir, use_aiida, generate_hpc, hpc_name, run_local
+        'afm', config_file, output_dir, use_aiida, generate_hpc
     )
 
 @run_group.command('sheetonsheet')
@@ -117,12 +106,7 @@ def run_afm(config_file: str, output_dir: str, use_aiida: bool,
               help='Enable AiiDA provenance tracking')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
         help='Generate HPC scripts for the simulation root')
-@click.option('--hpc', 'hpc_name', type=str, default=None,
-              help='HPC configuration name (overrides settings)')
-@click.option('--local', 'run_local', is_flag=True,
-              help='Mark as local run (no HPC submission)')
-def run_sheetonsheet(config_file: str, output_dir: str, use_aiida: bool,
-            generate_hpc: bool, hpc_name: Optional[str], run_local: bool):
+def run_sheetonsheet(config_file: str, output_dir: str, use_aiida: bool, generate_hpc: bool):
     """Generate sheet-on-sheet simulation files.
     
     Creates all necessary LAMMPS input files for 4-layer sheet-on-sheet
@@ -132,7 +116,7 @@ def run_sheetonsheet(config_file: str, output_dir: str, use_aiida: bool,
         FrictionSim2D run.sheetonsheet sheet_config.ini -o ./sheet_output
     """
     _run_simulation(
-        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc, hpc_name, run_local
+        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc
     )
 
 def _register_simulations_aiida(simulation_dirs: List[Path], config_path: Path):
@@ -165,71 +149,6 @@ def _raise_abort(message: str, exc: Exception) -> NoReturn:
     raise click.Abort() from exc
 
 
-def _build_aiida_submit_options(
-    machines: Optional[int],
-    mpiprocs: Optional[int],
-    walltime: Optional[str],
-    queue: Optional[str],
-    project: Optional[str],
-    mem: Optional[str],
-    scheduler: str,
-    prepend_text: tuple,
-) -> Dict[str, Any]:
-    options: Dict[str, Any] = {}
-    resource_options: Dict[str, Any] = {}
-    settings = cast(Any, load_settings())
-    hpc_defaults = settings.hpc
-
-    if machines is None:
-        machines = getattr(hpc_defaults, 'num_nodes', None)
-    if mpiprocs is None:
-        mpiprocs = getattr(hpc_defaults, 'num_cpus', None)
-    if machines:
-        resource_options['num_machines'] = machines
-    if mpiprocs:
-        resource_options['num_mpiprocs_per_machine'] = mpiprocs
-    if resource_options:
-        options['resources'] = resource_options
-
-    if walltime is None:
-        default_hours = getattr(hpc_defaults, 'walltime_hours', None)
-        if default_hours:
-            walltime = f"{default_hours}:00:00"
-    walltime_seconds = _parse_walltime(walltime)
-    if walltime_seconds is not None:
-        options['max_wallclock_seconds'] = walltime_seconds
-
-    if queue is None:
-        queue = getattr(hpc_defaults, 'queue', None)
-    if queue:
-        options['queue_name'] = queue
-    if project is None:
-        project = getattr(hpc_defaults, 'account', None)
-    if project:
-        options['account'] = project
-
-    scheduler_cmds = []
-    if mem is None:
-        default_mem = getattr(hpc_defaults, 'memory_gb', None)
-        if default_mem:
-            mem = f"{default_mem}gb"
-    if mem:
-        if scheduler == 'slurm':
-            scheduler_cmds.append(f"#SBATCH --mem={mem}")
-        else:
-            scheduler_cmds.append(f"#PBS -l mem={mem}")
-    if scheduler_cmds:
-        options['custom_scheduler_commands'] = "\n".join(scheduler_cmds)
-
-    if not prepend_text:
-        modules_list = cast(List[str], getattr(hpc_defaults, 'modules', []))
-        if modules_list:
-            prepend_text = tuple(f"module load {m}" for m in modules_list)
-    if prepend_text:
-        options['prepend_text'] = "\n".join(prepend_text)
-
-    return options
-
 # =============================================================================
 # SETTINGS COMMANDS
 # =============================================================================
@@ -242,12 +161,14 @@ def settings_group():
 @settings_group.command('show')
 def settings_show():
     """Display current settings."""
+    import yaml  # noqa: PLC0415
     defaults = load_settings()
-    click.echo(yaml.dump(defaults.dict(), default_flow_style=False))
+    click.echo(yaml.dump(defaults.model_dump(), default_flow_style=False))
 
 @settings_group.command('init')
 def settings_init():
     """Create a local settings.yaml file for customization."""
+    import shutil  # noqa: PLC0415
     with pkg_resources.as_file(pkg_resources.files('src.data.settings') / 'settings.yaml') as p:
         shutil.copy(p, "settings.yaml")
     click.echo("✅ Created 'settings.yaml' in current directory")
@@ -319,6 +240,8 @@ def hpc_generate(simulation_dir: str, scheduler: str, output_dir: Optional[str])
         rel_path = lammps_dir.parent.relative_to(sim_dir)
         simulation_paths.append(str(rel_path))
 
+    simulation_paths = sorted(set(simulation_paths), key=layer_aware_path_sort_key)
+
     if not simulation_paths:
         click.echo("❌ No simulation directories found", err=True)
         raise click.Abort()
@@ -372,7 +295,7 @@ def aiida_status():
     click.echo("✅ AiiDA is installed")
     
     try:
-        from aiida.manage.configuration import load_profile
+        from aiida.manage.configuration import load_profile  # type: ignore[import-untyped]
         profile = load_profile()
         click.echo(f"✅ Active profile: {profile.name}")
         click.echo(f"   Storage: {profile.storage_backend}")
@@ -492,7 +415,6 @@ def aiida_setup(profile: Optional[str], lammps_path: Optional[str],
         FrictionSim2D aiida setup --use-remote  # Uses settings.yaml AiiDA config
     """
     from src.aiida.setup import full_setup
-    from src.core.config import load_settings
 
     click.echo("🔧 Running AiiDA first-time setup ...")
 
@@ -577,6 +499,7 @@ def aiida_import_archive(archive_path: str):
               help='Output archive path (.tar.gz)')
 def aiida_package(simulation_dir: str, output: Optional[str]):
     """Create a tar.gz archive of simulation inputs for transfer."""
+    import tarfile  # noqa: PLC0415
     sim_path = Path(simulation_dir)
     out_path = Path(output) if output else sim_path.with_suffix('.tar.gz')
 
@@ -711,12 +634,12 @@ def postprocess_plot(plot_config: str, output_dir: str,
     import json  # noqa: PLC0415
     from src.postprocessing import Plotter  # noqa: PLC0415
 
-    with open(plot_config, 'r') as f:
+    with open(plot_config, 'r', encoding='utf-8') as f:
         config = json.load(f)
 
     plot_settings = None
     if settings:
-        with open(settings, 'r') as f:
+        with open(settings, 'r', encoding='utf-8') as f:
             plot_settings = json.load(f)
 
     data_dirs = config.get('data_dirs', [])
@@ -779,7 +702,7 @@ def _make_db(
         try:
             from src.data.database import db_from_profile  # noqa: PLC0415
             return db_from_profile(profile)
-        except Exception:  # settings not available, fall through
+        except Exception:  # pylint: disable=broad-except  # settings not available
             pass
     from src.data.database import FrictionDB  # noqa: PLC0415
     return FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
@@ -807,6 +730,31 @@ def _add_db_options(func):
     return func
 
 
+def _iter_reader_rows(reader):
+    """Yield one result row per simulation from a DataReader, with statistics."""
+    import numpy as np  # noqa: PLC0415
+    from src.data.models import compute_friction_stats  # noqa: PLC0415
+    for material, size_data in reader.full_data_nested.items():
+        for _size_key, substrate_data in size_data.items():
+            for _sub, tip_data in substrate_data.items():
+                for _tip_mat, radius_data in tip_data.items():
+                    for _radius, layer_data in radius_data.items():
+                        for layer_key, speed_data in layer_data.items():
+                            layers = int(layer_key.replace('l', ''))
+                            for speed_key, force_data in speed_data.items():
+                                speed = int(speed_key.replace('s', ''))
+                                for load_key, angle_data in force_data.items():
+                                    is_pressure = load_key.startswith('p')
+                                    load_val = float(load_key[1:])
+                                    for angle_key, df in angle_data.items():
+                                        angle = int(angle_key.replace('a', ''))
+                                        nf_arr = df['nf'].values if 'nf' in df.columns else np.array([])
+                                        lfx_arr = df['lfx'].values if 'lfx' in df.columns else np.array([])
+                                        lfy_arr = df['lfy'].values if 'lfy' in df.columns else np.array([])
+                                        stats = compute_friction_stats(nf_arr, lfx_arr, lfy_arr) if nf_arr.size > 0 else {}
+                                        yield material, layers, speed, is_pressure, load_val, angle, len(df), stats
+
+
 @db_group.command('upload')
 @click.argument('results_dir', type=click.Path(exists=True))
 @click.option('--uploader', '-n', default=None,
@@ -815,6 +763,7 @@ def _add_db_options(func):
 def db_upload(
     results_dir: str,
     uploader: Optional[str],
+    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -832,56 +781,28 @@ def db_upload(
             --uploader alice
     """
     from src.postprocessing.read_data import DataReader  # noqa: PLC0415
-    from src.data.database import FrictionDB  # noqa: PLC0415
 
     click.echo(f"📂 Reading results from {results_dir} ...")
     reader = DataReader(results_dir=str(results_dir))
-
-    db = _make_db(host, port, dbname, user, password)
-
+    db = _make_db(host, port, dbname, user, password, profile=profile)
     n_uploaded = 0
-    for material, size_data in reader.full_data_nested.items():
-        for _size_key, substrate_data in size_data.items():
-            for _sub, tip_data in substrate_data.items():
-                for _tip_mat, radius_data in tip_data.items():
-                    for _radius, layer_data in radius_data.items():
-                        for layer_key, speed_data in layer_data.items():
-                            layers = int(layer_key.replace('l', ''))
-                            for speed_key, force_data in speed_data.items():
-                                speed = int(speed_key.replace('s', ''))
-                                for load_key, angle_data in force_data.items():
-                                    is_pressure = load_key.startswith('p')
-                                    load_val = float(load_key[1:])
-                                    for angle_key, df in angle_data.items():
-                                        angle = int(angle_key.replace('a', ''))
-                                        try:
-                                            from src.data.models import compute_friction_stats  # noqa: PLC0415
-                                            import numpy as np  # noqa: PLC0415
-
-                                            nf_arr = df['nf'].values if 'nf' in df.columns else np.array([])
-                                            lfx_arr = df['lfx'].values if 'lfx' in df.columns else np.array([])
-                                            lfy_arr = df['lfy'].values if 'lfy' in df.columns else np.array([])
-
-                                            stats = compute_friction_stats(nf_arr, lfx_arr, lfy_arr) if nf_arr.size > 0 else {}
-
-                                            db.upload_result(
-                                                material=material.replace('_', '-'),
-                                                simulation_type='afm',
-                                                layers=layers,
-                                                force_nN=None if is_pressure else load_val,
-                                                pressure_gpa=load_val if is_pressure else None,
-                                                scan_angle=float(angle),
-                                                scan_speed=float(speed),
-                                                uploader=uploader,
-                                                ntimesteps=len(df),
-                                                **stats,
-                                            )
-                                            n_uploaded += 1
-                                        except Exception as exc:  # pylint: disable=broad-except
-                                            logger.warning(
-                                                "Skipped row (%s, l%d, a%d): %s",
-                                                material, layers, angle, exc,
-                                            )
+    for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
+        try:
+            db.upload_result(
+                material=material.replace('_', '-'),
+                simulation_type='afm',
+                layers=layers,
+                force_nN=None if is_pressure else load_val,
+                pressure_gpa=load_val if is_pressure else None,
+                scan_angle=float(angle),
+                scan_speed=float(speed),
+                uploader=uploader,
+                ntimesteps=ntimesteps,
+                **stats,  # type: ignore[arg-type]
+            )
+            n_uploaded += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Skipped row (%s, l%d, a%d): %s", material, layers, angle, exc)
 
     click.echo(f"✅ Uploaded {n_uploaded} result(s) to the database.")
 
@@ -1001,58 +922,16 @@ def db_init(
     user: Optional[str],
     password: Optional[str],
 ):
-    """Initialise the database schema (create tables + apply migrations).
+    """Initialise the database schema (create/verify current tables).
 
     Safe to run repeatedly — existing tables and columns are not overwritten.
 
     Example:\n
         FrictionSim2D db init --profile local
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    _make_db(host, port, dbname, user, password, profile=profile)
     from src.data.database import SCHEMA_VERSION  # noqa: PLC0415
     click.echo(f"✅ Database initialised at schema version {SCHEMA_VERSION}.")
-
-
-@db_group.command('migrate')
-@_add_db_options
-def db_migrate(
-    profile: Optional[str],
-    host: Optional[str],
-    port: Optional[int],
-    dbname: Optional[str],
-    user: Optional[str],
-    password: Optional[str],
-):
-    """Apply pending database migrations.
-
-    Detects the current schema version and applies any outstanding
-    migrations up to the latest version.
-
-    Example:\n
-        FrictionSim2D db migrate --profile central
-    """
-    from src.data.database import (  # noqa: PLC0415
-        FrictionDB, apply_migrations, get_current_schema_version, SCHEMA_VERSION,
-    )
-
-    has_explicit = any(v is not None for v in (host, port, dbname, user, password))
-    if not has_explicit:
-        try:
-            from src.data.database import db_from_profile  # noqa: PLC0415
-            db = db_from_profile(profile)
-        except Exception:
-            db = FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
-    else:
-        db = FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password, auto_create=False)
-
-    with db._cursor(commit=True) as cur:
-        before = get_current_schema_version(cur)
-        applied = apply_migrations(cur)
-
-    if applied:
-        click.echo(f"✅ Migrated v{before} → v{applied[-1]} (applied: {applied})")
-    else:
-        click.echo(f"Database already at latest schema version {SCHEMA_VERSION}.")
 
 
 @db_group.command('create-key')
@@ -1118,51 +997,27 @@ def db_stage(
         click.echo(f"Authenticated as: {verified_user}")
 
     from src.postprocessing.read_data import DataReader  # noqa: PLC0415
-    from src.data.models import compute_friction_stats  # noqa: PLC0415
-    import numpy as np  # noqa: PLC0415
 
     click.echo(f"📂 Reading results from {results_dir} ...")
     reader = DataReader(results_dir=str(results_dir))
-
     n_staged = 0
-    for material, size_data in reader.full_data_nested.items():
-        for _size_key, substrate_data in size_data.items():
-            for _sub, tip_data in substrate_data.items():
-                for _tip_mat, radius_data in tip_data.items():
-                    for _radius, layer_data in radius_data.items():
-                        for layer_key, speed_data in layer_data.items():
-                            layers = int(layer_key.replace('l', ''))
-                            for speed_key, force_data in speed_data.items():
-                                speed = int(speed_key.replace('s', ''))
-                                for load_key, angle_data in force_data.items():
-                                    is_pressure = load_key.startswith('p')
-                                    load_val = float(load_key[1:])
-                                    for angle_key, df in angle_data.items():
-                                        angle = int(angle_key.replace('a', ''))
-                                        try:
-                                            nf_arr = df['nf'].values if 'nf' in df.columns else np.array([])
-                                            lfx_arr = df['lfx'].values if 'lfx' in df.columns else np.array([])
-                                            lfy_arr = df['lfy'].values if 'lfy' in df.columns else np.array([])
-                                            stats = compute_friction_stats(nf_arr, lfx_arr, lfy_arr) if nf_arr.size > 0 else {}
-
-                                            db.upload_result(
-                                                material=material.replace('_', '-'),
-                                                simulation_type='afm',
-                                                layers=layers,
-                                                force_nN=None if is_pressure else load_val,
-                                                pressure_gpa=load_val if is_pressure else None,
-                                                scan_angle=float(angle),
-                                                scan_speed=float(speed),
-                                                uploader=uploader,
-                                                ntimesteps=len(df),
-                                                **stats,
-                                            )
-                                            n_staged += 1
-                                        except Exception as exc:
-                                            logger.warning(
-                                                "Skipped row (%s, l%d, a%d): %s",
-                                                material, layers, angle, exc,
-                                            )
+    for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
+        try:
+            db.upload_result(
+                material=material.replace('_', '-'),
+                simulation_type='afm',
+                layers=layers,
+                force_nN=None if is_pressure else load_val,
+                pressure_gpa=load_val if is_pressure else None,
+                scan_angle=float(angle),
+                scan_speed=float(speed),
+                uploader=uploader,
+                ntimesteps=ntimesteps,
+                **stats,  # type: ignore[arg-type]
+            )
+            n_staged += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Skipped row (%s, l%d, a%d): %s", material, layers, angle, exc)
 
     click.echo(f"✅ Staged {n_staged} result(s) for review.")
 

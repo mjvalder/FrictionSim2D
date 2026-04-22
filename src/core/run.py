@@ -10,18 +10,32 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from copy import deepcopy
 import itertools
+import re
 
-from src.core.config import (
+from .config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
     parse_config,
 )
-from src.builders.afm import AFMSimulation
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.hpc import HPCScriptGenerator, HPCConfig
+from ..builders.afm import AFMSimulation
+from ..builders.sheetonsheet import SheetOnSheetSimulation
+from ..hpc import HPCScriptGenerator, HPCConfig
 
 logger = logging.getLogger(__name__)
+
+
+def layer_aware_path_sort_key(path_str: str) -> Tuple[Tuple[int, Union[int, str]], ...]:
+    """Sort paths naturally for layer segments like L1, L2, L10."""
+    parts = Path(path_str).parts
+    key_parts: List[Tuple[int, Union[int, str]]] = []
+    for part in parts:
+        match = re.fullmatch(r"L(\d+)", part)
+        if match:
+            key_parts.append((0, int(match.group(1))))
+        else:
+            key_parts.append((1, part))
+    return tuple(key_parts)
 
 
 def _as_float_list(value: Any) -> List[float]:
@@ -140,7 +154,7 @@ def collect_hpc_simulation_paths(
     lammps_scripts: Optional[List[str]] = None,
 ) -> List[str]:
     """Collect simulation paths relative to a shared simulation root."""
-    scripts = lammps_scripts or ['system.in', 'slide.in']
+    scripts = ['system.in', 'slide.in'] if lammps_scripts is None else lammps_scripts
 
     def script_exists(lammps_dir: Path, script_name: str) -> bool:
         if '*' in script_name or '?' in script_name:
@@ -162,15 +176,15 @@ def collect_hpc_simulation_paths(
         if not lammps_dir.is_dir():
             continue
 
-        if not any(script_exists(lammps_dir, script) for script in scripts):
-            continue
-
-        if not scripts and not list(lammps_dir.glob('*.in')):
+        if scripts:
+            if not any(script_exists(lammps_dir, script) for script in scripts):
+                continue
+        elif not list(lammps_dir.glob('*.in')):
             continue
 
         rel_path = lammps_dir.parent.relative_to(simulation_root)
         simulation_paths.append(str(rel_path))
-    return sorted(set(simulation_paths))
+    return sorted(set(simulation_paths), key=layer_aware_path_sort_key)
 
 
 def _build_hpc_manifest_entries(
@@ -289,7 +303,7 @@ def run_simulations(
 
     configs_to_run = expand_config_sweeps(base_dict)
 
-    for idx, run_dict in enumerate(configs_to_run, start=1):
+    for run_dict in configs_to_run:
         _validate_runtime_sweep_ordering(run_dict.get('general', {}))
 
     root_name = simulation_root_name or datetime.now().strftime("simulation_%Y%m%d_%H%M%S")
@@ -301,7 +315,7 @@ def run_simulations(
     created_simulations: List[Path] = []
 
     for run_dict in configs_to_run:
-        run_dict['settings'] = defaults.dict()
+        run_dict['settings'] = defaults.model_dump()
 
         mat = run_dict['2D'].get('mat', 'unknown')
         x = run_dict['2D'].get('x', 100)

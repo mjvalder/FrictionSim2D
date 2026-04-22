@@ -129,7 +129,7 @@ class Friction2DDB:
         self._query_builder_cls = _QueryBuilder
         self._load_node = _load_node
         # Lazy import to avoid circular dependencies
-        from src.aiida.data import (  # pylint: disable=import-outside-toplevel
+        from .data import (  # pylint: disable=import-outside-toplevel
             FrictionSimulationData,
             FrictionResultsData,
             FrictionProvenanceData,

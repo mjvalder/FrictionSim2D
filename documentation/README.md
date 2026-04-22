@@ -12,14 +12,14 @@ Complete documentation for FrictionSim2D - A framework for 2D material friction 
 
 ### Core Guides
 
-4. **[Configuration Guide](configuration_guide.md)** ⭐ NEW
+4. **[Configuration Guide](configuration_guide.md)** 
    - Complete `.ini` file format reference
    - Parameter sweeps and material lists
    - AFM and sheet-on-sheet configurations
    - Advanced options and validation
    - Real-world examples with explanations
 
-5. **[Python API Guide](python_api_guide.md)** ⭐ NEW
+5. **[Python API Guide](python_api_guide.md)**
    - Programmatic simulation generation
    - High-level workflow functions
    - **Simplified AiiDA interface** (5 lines instead of 68!)
@@ -27,7 +27,7 @@ Complete documentation for FrictionSim2D - A framework for 2D material friction 
    - Batch processing and analysis
    - Error handling and best practices
 
-6. **[AiiDA Workflows Guide](aiida_workflows.md)** ⭐ NEW
+6. **[AiiDA Workflows Guide](aiida_workflows.md)**
    - **New simplified interface** (v0.2.0)
    - Three execution modes (offline, local, remote)
    - Interactive prompting and auto-detection
@@ -35,7 +35,7 @@ Complete documentation for FrictionSim2D - A framework for 2D material friction 
    - Migration guide from old interface
    - Troubleshooting guide
 
-7. **[Settings Reference](settings_reference.md)** ⭐ NEW
+7. **[Settings Reference](settings_reference.md)** 
    - Complete `settings.yaml` documentation
    - All configuration sections explained
    - HPC cluster settings

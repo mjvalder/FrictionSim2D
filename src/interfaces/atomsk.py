@@ -125,7 +125,7 @@ class AtomskWrapper:
         """Convert structure to orthogonal cell."""
         self.run([str(input_file), "-orthogonal-cell", str(output_file)])
 
-    def duplicate(
+    def duplicate(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         input_file: Union[str, Path],
         output_file: Union[str, Path],
@@ -199,8 +199,7 @@ class AtomskWrapper:
         """
         input_path = Path(input_file).resolve()
         subprocess.run(
-            f"lmp_charge2atom.sh {input_path}",
-            shell=True,
+            ["lmp_charge2atom.sh", str(input_path)],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL

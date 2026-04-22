@@ -46,5 +46,5 @@ class PackageLoader(BaseLoader):
 
             source = current.read_text(encoding='utf-8')
             return source, template, lambda: True
-        except (FileNotFoundError, TypeError) as exc:
+        except FileNotFoundError as exc:
             raise TemplateNotFound(template) from exc

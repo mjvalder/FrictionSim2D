@@ -9,8 +9,8 @@ import json
 
 from jinja2 import Environment, FileSystemLoader
 
-from src.hpc.manifest import JobManifest
-from src.core.config import GlobalSettings
+from .manifest import JobManifest
+from ..core.config import GlobalSettings
 
 TEMPLATES_DIR = Path(__file__).parent.parent / 'templates' / 'hpc'
 
@@ -522,7 +522,7 @@ def create_hpc_package(simulation_dir: Path, output_dir: Path,
                     ignore=shutil.ignore_patterns('*.lammpstrj'))
 
     generator = HPCScriptGenerator(config)
-    generator.generate_scripts(simulation_paths, package_dir / 'scripts',
+    generator.generate_scripts(simulation_paths, package_dir / 'hpc',
                                 scheduler=scheduler, base_dir='../simulations')
 
     info = {'n_simulations': len(simulation_paths), 'scheduler': scheduler,
@@ -536,7 +536,7 @@ def create_hpc_package(simulation_dir: Path, output_dir: Path,
 
 ## Usage
 1. Transfer to HPC: `rsync -avz friction2d_package/ <hpc>:~/`
-2. Submit jobs: `cd scripts && bash submit_all.txt`
+2. Submit jobs: `cd hpc && bash submit_all.txt`
 3. Monitor: `{monitor} -u $USER`
 4. Download results: `rsync -avz <hpc>:~/friction2d_package/simulations/*/results ./`
 """

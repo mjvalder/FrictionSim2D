@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from src.data.models import ResultRecord
+from .models import ResultRecord
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def validate_ranges(record: ResultRecord) -> ValidationResult:
         val = getattr(record, field_name, None)
         if val is None:
             continue
-        if not (lo <= val <= hi):
+        if val < lo or val > hi:
             result.add_error(
                 f"Field '{field_name}' = {val} is outside valid range [{lo}, {hi}]"
             )

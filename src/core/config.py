@@ -12,7 +12,7 @@ from typing import List, Optional, Union, Dict, Any, Literal, cast
 import yaml
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
 
-from src.core.utils import read_config, get_potential_path, get_material_path
+from .utils import read_config, get_potential_path, get_material_path
 
 # --- Internal Settings ---
 

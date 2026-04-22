@@ -8,6 +8,6 @@ Usage::
     # Development server
     FrictionSim2D api serve --port 8000
 
-    # Or directly
-    uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+    # Or directly with the app factory (ensures DB is initialized)
+    uvicorn src.api.server:create_app --factory --host 0.0.0.0 --port 8000
 """

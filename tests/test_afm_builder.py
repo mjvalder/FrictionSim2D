@@ -181,19 +181,6 @@ def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> 
     assert sorted(builder.output_dir_layer.keys()) == [2, 4]
 
 
-def test_afm_collect_simulation_paths_lists_layer_dirs(tmp_path: Path) -> None:
-    """Collect only layer directories that contain a lammps folder."""
-    config = _make_afm_config(tmp_path, layers=[1])
-    out_dir = tmp_path / "out"
-    builder = AFMSimulation(config, output_dir=str(out_dir))
-
-    (out_dir / "L1" / "lammps").mkdir(parents=True, exist_ok=True)
-    (out_dir / "L3" / "lammps").mkdir(parents=True, exist_ok=True)
-    (out_dir / "misc").mkdir(parents=True, exist_ok=True)
-
-    assert builder._collect_simulation_paths() == ["L1", "L3"]
-
-
 def _prepare_builder_for_slide_write(builder: AFMSimulation, tmp_path: Path) -> Path:
     """Seed builder state so write_inputs can render slide.in in isolation."""
     output_dir = tmp_path / "out"

@@ -19,20 +19,17 @@ Health:
     GET  /health           — Liveness check
 """
 
+# pyright: reportMissingImports=false
+
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-
-from src.data.models import ResultRecord, ResultStatus
+from pydantic import BaseModel
 
 from .auth import get_db, optional_api_key, require_api_key, set_db
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # App factory
@@ -182,6 +179,10 @@ class ConditionsResponse(BaseModel):
     layers: Optional[Dict[str, int]] = None
 
 
+FloatRange = Dict[str, float]
+IntRange = Dict[str, int]
+
+
 class RejectRequest(BaseModel):
     """Body for rejecting a result."""
     reason: Optional[str] = None
@@ -251,6 +252,50 @@ def _row_to_response(row: dict) -> ResultResponse:
     )
 
 
+def _filter_visible_rows(df, viewer_name: Optional[str],
+                        requested_status: Optional[str] = None):
+    """Return only rows visible to the current viewer.
+
+    Public requests can only see published results. Authenticated requests
+    may see all rows by default or apply an explicit status filter.
+    """
+    if df.empty:
+        return df
+
+    status_filter = requested_status
+    if viewer_name is None:
+        if requested_status is None:
+            status_filter = 'published'
+        elif requested_status != 'published':
+            return df.iloc[0:0]
+
+    if status_filter is None or 'status' not in df.columns:
+        return df
+    return df[df['status'] == status_filter]
+
+
+def _statistics_from_rows(df) -> StatisticsResponse:
+    """Build aggregate statistics from a filtered result DataFrame."""
+    if df.empty:
+        return StatisticsResponse(
+            total_rows=0,
+            by_material={},
+            by_type={},
+            cof_global_mean=None,
+        )
+
+    materials = df['material'].dropna().value_counts().to_dict()
+    simulation_types = df['simulation_type'].dropna().value_counts().to_dict()
+    cof_values = df['mean_cof'].dropna()
+    cof_global_mean = float(cof_values.mean()) if not cof_values.empty else None
+    return StatisticsResponse(
+        total_rows=len(df),
+        by_material=materials,
+        by_type=simulation_types,
+        cof_global_mean=cof_global_mean,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -279,9 +324,14 @@ def query_results(
     angle_min: Optional[float] = Query(None),
     angle_max: Optional[float] = Query(None),
     uploader: Optional[str] = Query(None),
-    status: Optional[str] = Query(None, description="Filter by status (published, validated, etc.)"),
+    result_status: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by status (published, validated, etc.)",
+    ),
     limit: int = Query(100, ge=1, le=10000),
     order_by: str = Query("uploaded_at DESC"),
+    viewer_name: Optional[str] = Depends(optional_api_key),
     db=Depends(get_db),
 ):
     """Query the shared database with optional filters.
@@ -311,19 +361,18 @@ def query_results(
         order_by=order_by,
     )
 
-    # If a status filter was requested, apply it in-memory
-    # (FrictionDB.query() doesn't have a status param yet)
-    if status is not None and not df.empty:
-        df = df[df['status'] == status]
+    df = _filter_visible_rows(df, viewer_name, result_status)
 
     results = [_row_to_response(row) for _, row in df.iterrows()]
     return QueryResponse(count=len(results), results=results)
 
 
 @app.get("/results/{result_id}", response_model=ResultResponse)
-def get_result(result_id: int, db=Depends(get_db)):
+def get_result(result_id: int,
+                viewer_name: Optional[str] = Depends(optional_api_key),
+                db=Depends(get_db)):
     """Retrieve a single result by ID."""
-    df = db.query(limit=None)
+    df = _filter_visible_rows(db.query(limit=None), viewer_name)
     match = df[df['id'] == result_id]
     if match.empty:
         raise HTTPException(
@@ -335,16 +384,18 @@ def get_result(result_id: int, db=Depends(get_db)):
 
 
 @app.get("/statistics", response_model=StatisticsResponse)
-def get_statistics(db=Depends(get_db)):
+def get_statistics(viewer_name: Optional[str] = Depends(optional_api_key),
+                   db=Depends(get_db)):
     """Return aggregate statistics about the dataset."""
-    stats = db.get_statistics()
-    return StatisticsResponse(**stats)
+    df = _filter_visible_rows(db.query(limit=None), viewer_name)
+    return _statistics_from_rows(df)
 
 
 @app.get("/materials", response_model=MaterialsResponse)
-def list_materials(db=Depends(get_db)):
+def list_materials(viewer_name: Optional[str] = Depends(optional_api_key),
+                   db=Depends(get_db)):
     """List distinct material names in the database."""
-    df = db.query(limit=None)
+    df = _filter_visible_rows(db.query(limit=None), viewer_name)
     if df.empty:
         return MaterialsResponse(materials=[])
     materials = sorted(df['material'].dropna().unique().tolist())
@@ -352,27 +403,33 @@ def list_materials(db=Depends(get_db)):
 
 
 @app.get("/conditions", response_model=ConditionsResponse)
-def get_conditions(db=Depends(get_db)):
+def get_conditions(viewer_name: Optional[str] = Depends(optional_api_key),
+                   db=Depends(get_db)):
     """Return parameter ranges available in the dataset."""
-    df = db.query(limit=None)
+    df = _filter_visible_rows(db.query(limit=None), viewer_name)
     if df.empty:
         return ConditionsResponse()
 
-    def _range(col, as_int=False):
+    def _float_range(col: str) -> Optional[FloatRange]:
         s = df[col].dropna()
         if s.empty:
             return None
         lo, hi = s.min(), s.max()
-        if as_int:
-            return {"min": int(lo), "max": int(hi)}
         return {"min": float(lo), "max": float(hi)}
 
+    def _int_range(col: str) -> Optional[IntRange]:
+        s = df[col].dropna()
+        if s.empty:
+            return None
+        lo, hi = s.min(), s.max()
+        return {"min": int(lo), "max": int(hi)}
+
     return ConditionsResponse(
-        force_nN=_range('force_nN'),
-        temperature=_range('temperature'),
-        scan_angle=_range('scan_angle'),
-        pressure_gpa=_range('pressure_gpa'),
-        layers=_range('layers', as_int=True),
+        force_nN=_float_range('force_nN'),
+        temperature=_float_range('temperature'),
+        scan_angle=_float_range('scan_angle'),
+        pressure_gpa=_float_range('pressure_gpa'),
+        layers=_int_range('layers'),
     )
 
 
@@ -404,7 +461,7 @@ def stage_result(
 @app.post("/results/{result_id}/validate", response_model=ValidationResponse)
 def validate_result(
     result_id: int,
-    user_name: str = Depends(require_api_key),
+    _user_name: str = Depends(require_api_key),
     db=Depends(get_db),
 ):
     """Run automated validation on a staged result."""
@@ -419,7 +476,7 @@ def validate_result(
 @app.post("/results/{result_id}/publish")
 def publish_result(
     result_id: int,
-    user_name: str = Depends(require_api_key),
+    _user_name: str = Depends(require_api_key),
     db=Depends(get_db),
 ):
     """Promote a validated result to published (curator action)."""
@@ -436,7 +493,7 @@ def publish_result(
 def reject_result(
     result_id: int,
     body: RejectRequest,
-    user_name: str = Depends(require_api_key),
+    _user_name: str = Depends(require_api_key),
     db=Depends(get_db),
 ):
     """Reject a staged or validated result (curator action)."""

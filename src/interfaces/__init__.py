@@ -7,9 +7,9 @@ in simulation preparation and execution:
     - run_lammps_commands: Interface to LAMMPS via Python bindings
 """
 
-from src.interfaces.atomsk import AtomskWrapper, AtomskError
-from src.interfaces.jinja import PackageLoader
-from src.interfaces.lammps import run_lammps_commands
+from .atomsk import AtomskWrapper, AtomskError
+from .jinja import PackageLoader
+from .lammps import run_lammps_commands
 
 __all__ = [
     'AtomskWrapper',

@@ -22,10 +22,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from src.aiida import AIIDA_AVAILABLE
+from . import AIIDA_AVAILABLE
 
 if TYPE_CHECKING:
-    from src.aiida.data import (
+    from .data import (
         FrictionProvenanceData,
         FrictionSimulationData,
         FrictionResultsData,
@@ -133,7 +133,7 @@ def register_single_simulation(
     config_data = json.loads(config_file.read_text(encoding='utf-8'))
 
     # --- Simulation node ---
-    from src.aiida.data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
+    from .data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
     sim_node = FrictionSimulationData()
     sim_type = 'afm' if 'tip' in config_data else 'sheetonsheet'
     sim_node.set_from_config(config_data, simulation_type=sim_type)
@@ -172,7 +172,7 @@ def _create_provenance_node(
         Stored provenance node, or ``None`` on failure.
     """
     try:
-        from src.aiida.data import FrictionProvenanceData  # pylint: disable=import-outside-toplevel
+        from .data import FrictionProvenanceData  # pylint: disable=import-outside-toplevel
         prov_node = FrictionProvenanceData.from_provenance_folder(prov_dir)
         prov_node.base.attributes.set('config_filename', config_path.name)
         prov_node.store()
@@ -218,7 +218,7 @@ def import_results_to_aiida(results_dir: Path) -> List[str]:
         List of created result node UUIDs.
     """
     _require_aiida()
-    from src.postprocessing.read_data import DataReader  # pylint: disable=import-outside-toplevel
+    from ..postprocessing.read_data import DataReader  # pylint: disable=import-outside-toplevel
 
     reader = DataReader(results_dir=str(results_dir))
     created_uuids: List[str] = []
@@ -290,7 +290,7 @@ def _create_result_node(
     load_val: float, is_pressure: bool, angle: int, df,
 ) -> 'FrictionResultsData':
     """Construct a single FrictionResultsData node from a DataFrame."""
-    from src.aiida.data import FrictionResultsData  # pylint: disable=import-outside-toplevel
+    from .data import FrictionResultsData  # pylint: disable=import-outside-toplevel
     node = FrictionResultsData()
 
     node.material = material.replace('_', '-')
@@ -324,7 +324,7 @@ def _load_manifest(manifest_path: Path):
     Returns:
         A :class:`~src.hpc.manifest.JobManifest` instance.
     """
-    from src.hpc.manifest import JobManifest  # pylint: disable=import-outside-toplevel
+    from ..hpc.manifest import JobManifest  # pylint: disable=import-outside-toplevel
     return JobManifest.load(manifest_path)
 
 
@@ -360,12 +360,12 @@ def export_archive(output_path: Path, materials: Optional[List[str]] = None) -> 
         Path to the created archive file.
     """
     _require_aiida()
-    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
-    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
+    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel  # pyright: ignore[reportMissingImports]
+    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel  # pyright: ignore[reportMissingImports]
 
     output_path = Path(output_path)
 
-    from src.aiida.data import (  # pylint: disable=import-outside-toplevel
+    from .data import (  # pylint: disable=import-outside-toplevel
         FrictionSimulationData,
         FrictionResultsData,
         FrictionProvenanceData,
@@ -376,7 +376,7 @@ def export_archive(output_path: Path, materials: Optional[List[str]] = None) -> 
     for node_cls in (FrictionSimulationData, FrictionResultsData, FrictionProvenanceData):
         qb = QueryBuilder()
         qb.append(node_cls, project=['id'])
-        if materials and node_cls == FrictionSimulationData:
+        if materials and node_cls is FrictionSimulationData:
             qb.add_filter(node_cls, {'attributes.material': {'in': materials}})
         for (pk,) in qb.all():
             node_pks.add(pk)
@@ -403,7 +403,7 @@ def import_archive(archive_path: Path) -> int:
         Number of new nodes imported.
     """
     _require_aiida()
-    from aiida.tools.archive import import_archive as aiida_import  # pylint: disable=import-outside-toplevel
+    from aiida.tools.archive import import_archive as aiida_import  # pylint: disable=import-outside-toplevel  # pyright: ignore[reportMissingImports]
 
     archive_path = Path(archive_path)
     result = aiida_import(archive_path)

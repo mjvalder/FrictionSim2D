@@ -146,7 +146,7 @@ class TestFrictionDBConnectionParams:
         params = _get_connection_params()
         assert params["host"] == "localhost"
         assert params["port"] == 5432
-        assert params["dbname"] == "frictionsim2d"
+        assert params["dbname"] == "frictionsim2ddb"
 
 
 class TestFrictionDBUpload:
@@ -385,6 +385,19 @@ class TestComputeFrictionStats:
                 np.array([1.0, 2.0]),
             )
 
+    def test_invalid_skip_fraction_raises(self):
+        from src.data.models import compute_friction_stats
+
+        nf = np.array([1.0, 2.0, 3.0])
+        lfx = np.array([0.1, 0.1, 0.1])
+        lfy = np.array([0.0, 0.0, 0.0])
+
+        with pytest.raises(ValueError, match="skip_fraction"):
+            compute_friction_stats(nf, lfx, lfy, skip_fraction=1.0)
+
+        with pytest.raises(ValueError, match="skip_fraction"):
+            compute_friction_stats(nf, lfx, lfy, skip_fraction=-0.1)
+
 
 class TestComputeDerivedColumns:
     """Test element-wise derived column computation."""
@@ -617,7 +630,7 @@ class TestDatabaseSettings:
         ds = DatabaseSettings()
         assert ds.local.host == 'localhost'
         assert ds.local.port == 5432
-        assert ds.local.dbname == 'frictionsim2d'
+        assert ds.local.dbname == 'frictionsim2ddb'
 
     def test_central_profile_empty_host(self):
         from src.core.config import DatabaseSettings
@@ -641,66 +654,12 @@ class TestDatabaseSettings:
         assert ds.auto_validate is True
 
 
-class TestMigrationRunner:
-    """Test the migration infrastructure (no real DB)."""
+class TestSchemaVersion:
+    """Basic checks for fixed pre-release schema versioning."""
 
-    def test_migration_registry_has_v1_to_v2(self):
-        from src.data.database import _MIGRATIONS
-        assert (1, 2) in _MIGRATIONS
-
-    def test_get_current_schema_version_returns_int(self):
-        from src.data.database import get_current_schema_version
-
-        class FakeCur:
-            def execute(self, sql):
-                pass
-            def fetchone(self):
-                return (2,)
-
-        assert get_current_schema_version(FakeCur()) == 2
-
-    def test_get_current_schema_version_defaults_to_1(self):
-        from src.data.database import get_current_schema_version
-
-        class FakeCur:
-            def execute(self, sql):
-                if 'schema_version' in sql and 'ROLLBACK' not in sql:
-                    raise Exception("relation does not exist")
-            def fetchone(self):
-                return None
-
-        assert get_current_schema_version(FakeCur()) == 1
-
-    def test_apply_migrations_noop_when_current(self):
-        from src.data.database import apply_migrations
-
-        class FakeCur:
-            def execute(self, sql, params=None):
-                pass
-            def fetchone(self):
-                return (2,)  # already at target
-
-        result = apply_migrations(FakeCur(), target=2)
-        assert result == []
-
-    def test_apply_migrations_v1_to_v2(self):
-        from src.data.database import apply_migrations
-
-        executed = []
-
-        class FakeCur:
-            _version = 1
-            def execute(self, sql, params=None):
-                executed.append(sql[:60])
-                if 'ROLLBACK' in sql:
-                    return
-            def fetchone(self):
-                return (FakeCur._version,)
-
-        result = apply_migrations(FakeCur(), target=2)
-        assert result == [2]
-        # Should have executed the migration statements
-        assert len(executed) > 5  # at least the ALTER TABLEs
+    def test_schema_version_constant(self):
+        from src.data.database import SCHEMA_VERSION
+        assert SCHEMA_VERSION == 2
 
 
 class TestDbFromProfile:

@@ -339,7 +339,9 @@ def _make_code_info(code_uuid: str, flag_list: list, script: str) -> CodeInfo:
 def _collect_lammps_scripts(sim_folder, scripts_override):
     """Return ordered LAMMPS scripts, or override list if provided."""
     if scripts_override:
-        return list(scripts_override)
+        if isinstance(scripts_override, str):
+            return [scripts_override]
+        return [str(script) for script in scripts_override]
 
     repo = sim_folder.base.repository
     discovered = [
@@ -352,7 +354,6 @@ def _collect_lammps_scripts(sim_folder, scripts_override):
     others = sorted(s for s in discovered
                     if s.lower() != 'system.in' and 'slide' not in s.lower())
     return system + slides + others
-
 
 def _detect_sim_prefix(repo, lammps_scripts):
     """Infer the simulation path prefix from LAMMPS scripts, if any."""

@@ -19,20 +19,20 @@ else:
     LOAD_PROFILE = None
 
 _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
-    'FrictionSimulationData': ('src.aiida.data', 'FrictionSimulationData'),
-    'FrictionResultsData': ('src.aiida.data', 'FrictionResultsData'),
-    'FrictionProvenanceData': ('src.aiida.data', 'FrictionProvenanceData'),
-    'Friction2DDB': ('src.aiida.query', 'Friction2DDB'),
-    'register_simulation_batch': ('src.aiida.integration', 'register_simulation_batch'),
-    'register_single_simulation': ('src.aiida.integration', 'register_single_simulation'),
-    'import_results_to_aiida': ('src.aiida.integration', 'import_results_to_aiida'),
-    'export_archive': ('src.aiida.integration', 'export_archive'),
-    'import_archive': ('src.aiida.integration', 'import_archive'),
-    'LammpsFrictionCalcJob': ('src.aiida.calcjob', 'LammpsFrictionCalcJob'),
-    'FrictionWorkChain': ('src.aiida.workchain', 'FrictionWorkChain'),
-    'run_with_aiida': ('src.aiida.submit', 'run_with_aiida'),
-    'smart_submit': ('src.aiida.submit', 'smart_submit'),
-    'full_setup': ('src.aiida.setup', 'full_setup'),
+    'FrictionSimulationData': (f'{__name__}.data', 'FrictionSimulationData'),
+    'FrictionResultsData': (f'{__name__}.data', 'FrictionResultsData'),
+    'FrictionProvenanceData': (f'{__name__}.data', 'FrictionProvenanceData'),
+    'Friction2DDB': (f'{__name__}.query', 'Friction2DDB'),
+    'register_simulation_batch': (f'{__name__}.integration', 'register_simulation_batch'),
+    'register_single_simulation': (f'{__name__}.integration', 'register_single_simulation'),
+    'import_results_to_aiida': (f'{__name__}.integration', 'import_results_to_aiida'),
+    'export_archive': (f'{__name__}.integration', 'export_archive'),
+    'import_archive': (f'{__name__}.integration', 'import_archive'),
+    'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),
+    'FrictionWorkChain': (f'{__name__}.workchain', 'FrictionWorkChain'),
+    'run_with_aiida': (f'{__name__}.submit', 'run_with_aiida'),
+    'smart_submit': (f'{__name__}.submit', 'smart_submit'),
+    'full_setup': (f'{__name__}.setup', 'full_setup'),
 }
 
 __all__ = ['AIIDA_AVAILABLE', 'load_aiida_profile']
@@ -67,7 +67,7 @@ def load_aiida_profile(profile_name=None):
 def __getattr__(name: str) -> Any:
     """Lazy-load optional AiiDA symbols exported at package root."""
     if name not in _LAZY_EXPORTS:
-        raise AttributeError(f"module 'src.aiida' has no attribute '{name}'")
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
     if not AIIDA_AVAILABLE:
         raise AttributeError(
             f"AiiDA is unavailable; cannot access '{name}'. "

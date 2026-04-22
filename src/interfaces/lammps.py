@@ -7,10 +7,11 @@ import importlib
 import logging
 import re
 import sys
+import threading
 import time
-from typing import List
 
 logger = logging.getLogger(__name__)
+_IMPORT_LOCK = threading.Lock()
 
 
 def _compat_strptime(value: str, fmt: str):
@@ -30,22 +31,23 @@ def _compat_strptime(value: str, fmt: str):
 
 def _import_lammps_module():
     """Import the lammps module with a narrow compatibility fallback."""
-    module = sys.modules.get("lammps")
-    if module is not None:
-        return module
+    with _IMPORT_LOCK:
+        module = sys.modules.get("lammps")
+        if module is not None:
+            return module
 
-    try:
-        return importlib.import_module("lammps")
-    except ValueError as exc:
-        if "unconverted data remains" not in str(exc):
-            raise
-
-        sys.modules.pop("lammps", None)
-        time.strptime = _compat_strptime
         try:
             return importlib.import_module("lammps")
-        finally:
-            time.strptime = _ORIGINAL_STRPTIME
+        except ValueError as exc:
+            if "unconverted data remains" not in str(exc):
+                raise
+
+            sys.modules.pop("lammps", None)
+            time.strptime = _compat_strptime
+            try:
+                return importlib.import_module("lammps")
+            finally:
+                time.strptime = _ORIGINAL_STRPTIME
 
 
 _ORIGINAL_STRPTIME = time.strptime
@@ -58,7 +60,7 @@ except (ImportError, OSError, ValueError):
     logger.debug("LAMMPS preload skipped", exc_info=True)
 
 
-def run_lammps_commands(commands: List[str]) -> None:
+def run_lammps_commands(commands: list[str]) -> None:
     """Runs a list of LAMMPS commands using the Python interface.
     
     Args:

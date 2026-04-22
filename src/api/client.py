@@ -20,11 +20,7 @@ Usage::
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import Any, Dict, List, Optional
-
-logger = logging.getLogger(__name__)
 
 
 class FrictionHTTPClient:
@@ -57,7 +53,7 @@ class FrictionHTTPClient:
             ) from exc
 
         self._base = api_url.rstrip("/")
-        self._api_key = api_key
+        self._api_key = api_key.strip() or None if api_key is not None else None
         self._client = httpx.Client(timeout=timeout)
 
     # -- Internal helpers -----------------------------------------------------
@@ -77,7 +73,7 @@ class FrictionHTTPClient:
         if resp.status_code >= 400:
             try:
                 detail = resp.json().get("detail", resp.text)
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 detail = resp.text
             raise RuntimeError(
                 f"API error {resp.status_code}: {detail}"
@@ -110,6 +106,7 @@ class FrictionHTTPClient:
 
     def upload_record(self, record: Any, uploader: Optional[str] = None) -> int:
         """Upload a :class:`~src.data.models.ResultRecord` via the API."""
+        _ = uploader
         d = record.to_upload_dict()
         d.pop("uploader", None)
         d.pop("status", None)
@@ -117,7 +114,7 @@ class FrictionHTTPClient:
 
     # -- Query ----------------------------------------------------------------
 
-    def query(
+    def query(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         material: Optional[str] = None,
         simulation_type: Optional[str] = None,

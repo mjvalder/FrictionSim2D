@@ -38,7 +38,8 @@ else
 fi
 
 if [ -f "$SRCDIR/src/aiida/install_conda_hooks.sh" ]; then
-    cp "$SRCDIR/src/aiida/install_conda_hooks.sh" "$PREFIX/libexec/frictionsim2d/hooks/" || mkdir -p "$PREFIX/libexec/frictionsim2d/hooks" && cp "$SRCDIR/src/aiida/install_conda_hooks.sh" "$PREFIX/libexec/frictionsim2d/hooks/"
+    mkdir -p "$PREFIX/libexec/frictionsim2d/hooks"
+    cp "$SRCDIR/src/aiida/install_conda_hooks.sh" "$PREFIX/libexec/frictionsim2d/hooks/"
     chmod +x "$PREFIX/libexec/frictionsim2d/hooks/install_conda_hooks.sh"
 else
     echo "WARNING: install_conda_hooks.sh not found at $SRCDIR/src/aiida/install_conda_hooks.sh" >&2

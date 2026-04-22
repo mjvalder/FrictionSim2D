@@ -22,8 +22,8 @@ import shutil
 
 from ase.data import atomic_masses, atomic_numbers
 
-from src.core.config import ComponentConfig, GlobalSettings
-from src.core.utils import count_atomtypes, lj_params, cifread
+from .config import ComponentConfig, GlobalSettings
+from .utils import count_atomtypes, lj_params, cifread
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +256,11 @@ class PotentialManager:
         self.lj_overrides: Dict[Tuple[str, str], Tuple[float, float]] = {}
 
         self.virtual_atom_type: Optional[int] = None
+
+    @property
+    def lj_cutoff(self) -> float:
+        """Expose the configured LJ cutoff."""
+        return self.settings.potential.lj_cutoff
 
     @staticmethod
     def _normalize_element_symbol(value: str) -> str:

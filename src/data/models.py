@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import enum
 import hashlib
-import json
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -77,16 +76,21 @@ def compute_friction_stats(
 
     if nf.size == 0 or lfx.size == 0 or lfy.size == 0:
         raise ValueError("Input arrays must not be empty")
-    if not (nf.shape == lfx.shape == lfy.shape):
+    if nf.shape != lfx.shape or nf.shape != lfy.shape:
         raise ValueError(
             f"Array shape mismatch: nf={nf.shape}, lfx={lfx.shape}, lfy={lfy.shape}"
         )
+    if skip_fraction < 0.0 or skip_fraction >= 1.0:
+        raise ValueError("skip_fraction must be in [0.0, 1.0)")
 
     # Skip transient
     skip_n = int(len(nf) * skip_fraction)
     nf_s = nf[skip_n:]
     lfx_s = lfx[skip_n:]
     lfy_s = lfy[skip_n:]
+
+    if nf_s.size == 0:
+        raise ValueError("skip_fraction leaves no samples for statistics")
 
     lateral_force = np.sqrt(lfx_s ** 2 + lfy_s ** 2)
 

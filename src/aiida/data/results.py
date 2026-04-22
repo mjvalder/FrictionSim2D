@@ -9,7 +9,8 @@ import json
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
-from aiida.orm import Data
+from aiida.orm import Data  # pyright: ignore[reportMissingImports]
+from ...data.models import ResultRecord, compute_friction_stats, compute_time_series_hash
 
 
 class FrictionResultsData(Data):
@@ -197,8 +198,6 @@ class FrictionResultsData(Data):
         # Canonical friction stats (with transient skip)
         # ------------------------------------------------------------------
         if all(k in ts for k in ('nf', 'lfx', 'lfy')):
-            from src.data.models import compute_friction_stats  # noqa: PLC0415
-
             stats = compute_friction_stats(
                 np.asarray(ts['nf']),
                 np.asarray(ts['lfx']),
@@ -322,8 +321,6 @@ class FrictionResultsData(Data):
         Returns:
             Mean friction coefficient.
         """
-        from src.data.models import compute_friction_stats  # noqa: PLC0415
-
         stats = compute_friction_stats(
             self.get_array('nf'),
             self.get_array('lfx'),
@@ -364,12 +361,6 @@ class FrictionResultsData(Data):
             A :class:`~src.data.models.ResultRecord` populated from this
             node's attributes and time-series statistics.
         """
-        from src.data.models import (  # noqa: PLC0415
-            ResultRecord,
-            compute_friction_stats,
-            compute_time_series_hash,
-        )
-
         ts = self.time_series
         kwargs: Dict[str, Any] = {
             'material': self.material,

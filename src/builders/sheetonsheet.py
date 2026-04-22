@@ -19,12 +19,12 @@ import re
 from pathlib import Path
 from typing import Dict, Optional, List, Union
 
-from src.core.simulation_base import SimulationBase
-from src.core.config import SheetOnSheetSimulationConfig
-from src.core.potential_manager import PotentialManager, POTENTIALS_WITH_INTERNAL_LJ
-from src.data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
-from src.core.utils import atomic2molecular
-from src.builders import components
+from ..core.simulation_base import SimulationBase
+from ..core.config import SheetOnSheetSimulationConfig
+from ..core.potential_manager import PotentialManager, POTENTIALS_WITH_INTERNAL_LJ
+from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
+from ..core.utils import atomic2molecular
+from . import components
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ class SheetOnSheetSimulation(SimulationBase):
         assert self.lat_c is not None
 
         n_layers = self.n_layers
-        total_types = len(self.pm.types) if self.pm else 0
+        total_types = len(self.pm.types)
         constraint_mode = self.config.settings.simulation.constraint_mode
         pot_type = self._normalized_pot_type(self.config.sheet.pot_type)
 
@@ -251,9 +251,8 @@ class SheetOnSheetSimulation(SimulationBase):
         else:
             atom_style = 'atomic'
 
-        sheet_data_path = f"{self.output_dir}/build/{self.structure_paths['sheet'].name}"
         if atom_style == 'molecular':
-            atomic2molecular(sheet_data_path)
+            atomic2molecular(self.structure_paths['sheet'])
 
         base_context = {
             'temp': self.config.general.temp,
@@ -323,7 +322,7 @@ class SheetOnSheetSimulation(SimulationBase):
             context['scan_speed_config'] = self.config.general.scan_speed
             script = self.render_template("sheetonsheet/slide.lmp", context)
             self.write_file("lammps/slide.in", script)
-            logger.info("Using legacy single-script mode (slide.in).")
+            logger.info("Using single-script mode (slide.in).")
             logger.info("Inputs written to %s/lammps/", self.output_dir)
             return
 

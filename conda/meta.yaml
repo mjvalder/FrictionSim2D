@@ -55,14 +55,14 @@ outputs:
   - name: {{ name|lower }}-aiida
     build:
       noarch: generic
-      script: bash -c "mkdir -p $PREFIX/libexec/frictionsim2d/hooks $PREFIX/bin && cp src/aiida/start_aiida.sh $PREFIX/libexec/frictionsim2d/ && chmod +x $PREFIX/libexec/frictionsim2d/start_aiida.sh && ln -sf $PREFIX/libexec/frictionsim2d/start_aiida.sh $PREFIX/bin/frictionsim2d-start-aiida && cp src/aiida/hooks/*.sh $PREFIX/libexec/frictionsim2d/hooks/ && cp src/aiida/install_conda_hooks.sh $PREFIX/libexec/frictionsim2d/hooks/ && chmod +x $PREFIX/libexec/frictionsim2d/hooks/*.sh && ln -sf $PREFIX/libexec/frictionsim2d/hooks/install_conda_hooks.sh $PREFIX/bin/frictionsim2d-install-hooks"
+      script: bash conda/post-install-aiida.sh
     requirements:
       run:
         - {{ pin_subpackage(name|lower, exact=True) }}
+        - {{ pin_subpackage(name|lower + '-db', exact=True) }}
         - aiida-core >=2.0
         - aiida-core.services >=2.0   # bundles rabbitmq-server + postgresql
         - typing_extensions >=4.0
-        - psycopg2 >=2.9
     test:
       imports:
         - src
@@ -73,6 +73,79 @@ outputs:
         - rabbitmqctl help
         - frictionsim2d-start-aiida --help  # confirm startup script is in PATH
         - frictionsim2d-install-hooks --help  # confirm hook installer is in PATH
+
+  # -----------------------------------------------------------------------
+  # Database variant: conda install frictionsim2d-db
+  # Adds the PostgreSQL driver for FrictionSim2D db commands
+  # -----------------------------------------------------------------------
+  - name: {{ name|lower }}-db
+    build:
+      noarch: generic
+    requirements:
+      run:
+        - {{ pin_subpackage(name|lower, exact=True) }}
+        - psycopg2 >=2.9
+    test:
+      imports:
+        - src
+        - psycopg2
+
+  # -----------------------------------------------------------------------
+  # Plotting variant: conda install frictionsim2d-plotting
+  # Adds matplotlib, seaborn and scipy for postprocess plot
+  # -----------------------------------------------------------------------
+  - name: {{ name|lower }}-plotting
+    build:
+      noarch: generic
+    requirements:
+      run:
+        - {{ pin_subpackage(name|lower, exact=True) }}
+        - matplotlib >=3.5
+        - seaborn >=0.12
+        - scipy >=1.8
+    test:
+      imports:
+        - src
+        - matplotlib
+        - seaborn
+        - scipy
+
+  # -----------------------------------------------------------------------
+  # API variant: conda install frictionsim2d-api
+  # Adds FastAPI + uvicorn + httpx for the REST API server and client
+  # -----------------------------------------------------------------------
+  - name: {{ name|lower }}-api
+    build:
+      noarch: generic
+    requirements:
+      run:
+        - {{ pin_subpackage(name|lower, exact=True) }}
+        - fastapi >=0.100
+        - uvicorn >=0.20
+        - httpx >=0.24
+    test:
+      imports:
+        - src
+        - fastapi
+        - uvicorn
+        - httpx
+
+  # -----------------------------------------------------------------------
+  # All-in-one: conda install frictionsim2d-all
+  # -----------------------------------------------------------------------
+  - name: {{ name|lower }}-all
+    build:
+      noarch: generic
+    requirements:
+      run:
+        - {{ pin_subpackage(name|lower, exact=True) }}
+        - {{ pin_subpackage(name|lower + '-aiida', exact=True) }}
+        - {{ pin_subpackage(name|lower + '-db', exact=True) }}
+        - {{ pin_subpackage(name|lower + '-plotting', exact=True) }}
+        - {{ pin_subpackage(name|lower + '-api', exact=True) }}
+    test:
+      imports:
+        - src
 
 about:
   home: https://github.com/Mclat16/FrictionSim2D

@@ -247,7 +247,7 @@ class TestSingleComponentTip:
         assert 'Si' in result
         assert len(result['Si']) == 1
         assert result['Si'] == [1]
-        assert pm.get_total_types() == 1
+        assert len(pm.types) == 1
 
     def test_tip_self_interaction_only(
         self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
@@ -268,7 +268,7 @@ class TestSingleComponentTip:
         pm = PotentialManager(mock_settings, use_langevin=False)
         pm.register_component('tip', si_tip_config)
         
-        group_str = pm.get_group_string('tip')
+        group_str = pm.types.get_group_string('tip')
         assert group_str == '1'
 
 
@@ -290,7 +290,7 @@ class TestSingleComponentSubstrate:
         
         assert 'Si' in result
         assert len(result['Si']) == 1
-        assert pm.get_total_types() == 1
+        assert len(pm.types) == 1
 
     def test_sub_no_cross_interactions(
         self, mock_settings, si_sub_config, mock_cifread_si, mock_count_atomtypes_si
@@ -321,7 +321,7 @@ class TestSingleComponentSheet:
         
         assert 'Mo' in result
         assert 'S' in result
-        assert pm.get_total_types() == 2
+        assert len(pm.types) == 2
 
     def test_sheet_multi_layer_types(
         self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
@@ -332,7 +332,7 @@ class TestSingleComponentSheet:
         result = pm.register_component('sheet', mos2_sheet_config, n_layers=2)
         
         # 2 elements × 2 layers = 4 types
-        assert pm.get_total_types() == 4
+        assert len(pm.types) == 4
 
     def test_sheet_multi_layer_interlayer_lj(
         self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
@@ -365,7 +365,7 @@ class TestLangevinComponents:
         # Si has 1 pot type × 3 regions = 3 types
         assert 'Si' in result
         assert len(result['Si']) == 3
-        assert pm.get_total_types() == 3
+        assert len(pm.types) == 3
 
     def test_sub_langevin_3x_types(
         self, mock_settings, si_sub_config, mock_cifread_si, mock_count_atomtypes_si
@@ -376,7 +376,7 @@ class TestLangevinComponents:
         result = pm.register_component('sub', si_sub_config)
         
         assert len(result['Si']) == 3
-        assert pm.get_total_types() == 3
+        assert len(pm.types) == 3
 
     def test_sheet_no_langevin_expansion(
         self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
@@ -387,7 +387,7 @@ class TestLangevinComponents:
         result = pm.register_component('sheet', mos2_sheet_config)
         
         # Should only have 2 types (Mo, S), not 6 (Mo×3, S×3)
-        assert pm.get_total_types() == 2
+        assert len(pm.types) == 2
 
     def test_langevin_group_definitions(
         self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
@@ -396,8 +396,8 @@ class TestLangevinComponents:
         pm = PotentialManager(mock_settings, use_langevin=True)
         pm.register_component('tip', si_tip_config)
         
-        # Check group_def entries
-        group_names = [pm.group_def[i][0] for i in pm.group_def]
+        # Check generated group names from registered atom types
+        group_names = [atype.group_name for atype in pm.types]
         
         # Should have tip_t1, tip_fix_t1, tip_thermo_t1
         assert any('tip_t' in g and '_fix' not in g and '_thermo' not in g for g in group_names)
@@ -425,7 +425,7 @@ class TestAFMSystem:
                 return {'elements': ['Mo', 'S']}
             return {'elements': ['Si']}
         
-        def mock_count(path, elements):
+        def mock_count(path, elements, pot_type=None):
             return {el: 1 for el in elements}
         
         original_cifread = pm_module.cifread
@@ -446,7 +446,7 @@ class TestAFMSystem:
             pm.add_self_interaction('sheet')
             
             # Si(sub) + Si(tip) + Mo + S = 4 types
-            assert pm.get_total_types() == 4
+            assert len(pm.types) == 4
         finally:
             pm_module.cifread = original_cifread
             pm_module.count_atomtypes = original_count
@@ -462,7 +462,7 @@ class TestAFMSystem:
                 return {'elements': ['Mo', 'S']}
             return {'elements': ['Si']}
         
-        def mock_count(path, elements):
+        def mock_count(path, elements, pot_type=None):
             return {el: 1 for el in elements}
         
         original_cifread = pm_module.cifread
@@ -515,7 +515,7 @@ class TestSheetOnSheetSystem:
         pm.add_self_interaction('sheet')
         
         # 2 elements × 4 layers = 8 types
-        assert pm.get_total_types() == 8
+        assert len(pm.types) == 8
 
     def test_sheet_on_sheet_layer_groups(
         self, mock_settings, mos2_multilayer_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
@@ -526,7 +526,7 @@ class TestSheetOnSheetSystem:
         pm.add_self_interaction('sheet')
         
         for layer in range(4):
-            layer_types = pm.get_layer_group_string('sheet', layer)
+            layer_types = pm.types.get_layer_group_string('sheet', layer)
             assert layer_types != ''
             # Each layer should have 2 types (Mo, S)
             assert len(layer_types.split()) == 2
@@ -538,7 +538,7 @@ class TestSheetOnSheetSystem:
         pm = PotentialManager(mock_settings, use_langevin=False)
         pm.register_component('sheet', mos2_multilayer_config, n_layers=4)
         pm.add_self_interaction('sheet')
-        pm.add_interlayer_lj_by_distance('sheet', max_real_distance=1)
+        pm.add_ghost_lj('sheet', max_real_distance=1)
         
         # Check we have cross-interaction commands
         assert len(pm.cross_interaction_commands) > 0
@@ -601,14 +601,14 @@ class TestSingleComponentCommands:
         assert len(mass_commands) == 2
 
     def test_get_commands_hybrid_for_lj_requiring(self, mock_settings, si_tip_config):
-        """SW potential should use hybrid with lj/cut."""
+        """get_single_component_commands uses bare pair_style for single-component setup."""
         pm = PotentialManager(mock_settings, use_langevin=False)
         commands = pm.get_single_component_commands(si_tip_config, ['Si'])
         
         pair_style = [c for c in commands if 'pair_style' in c][0]
-        # SW requires LJ, so should be hybrid
-        assert 'hybrid' in pair_style
-        assert 'lj/cut' in pair_style
+        # Single-component amorphisation commands use a bare pair_style (no LJ needed)
+        assert 'sw' in pair_style
+        assert pair_style.strip() == 'pair_style sw'
 
 
 # =========================================================================
@@ -709,17 +709,34 @@ class TestGapCalculation:
         assert gap > 0.5  # At least the buffer
         assert gap < 10.0  # Reasonable upper bound
 
-    def test_calculate_gap_different_elements(self, mock_settings):
+    def test_calculate_gap_different_elements(self, mock_settings, tmp_path):
         """Gap between different elements should use mixing rules."""
         import src.core.potential_manager as pm_module
+        from src.core.config import SheetConfig, TipConfig
         
         def mock_cifread(path):
             if 'MoS2' in str(path):
                 return {'elements': ['Mo', 'S']}
             return {'elements': ['Si']}
         
-        def mock_count(path, elements):
+        def mock_count(path, elements, pot_type=None):
             return {el: 1 for el in elements}
+        
+        si_sw = tmp_path / 'Si.sw'
+        mos2_sw = tmp_path / 'MoS2.sw'
+        si_cif = tmp_path / 'Si.cif'
+        mos2_cif = tmp_path / 'MoS2.cif'
+        for p in [si_sw, mos2_sw, si_cif, mos2_cif]:
+            p.write_text('# dummy', encoding='utf-8')
+        
+        tip_config = TipConfig(
+            mat='Si', pot_type='sw', pot_path=str(si_sw),
+            cif_path=str(si_cif), r=20.0, amorph='c', dspring=0.1,
+        )
+        sheet_config = SheetConfig(
+            mat='MoS2', pot_type='sw', pot_path=str(mos2_sw),
+            cif_path=str(mos2_cif), x=50.0, y=50.0, layers=[1]
+        )
         
         original_cifread = pm_module.cifread
         original_count = pm_module.count_atomtypes
@@ -727,17 +744,6 @@ class TestGapCalculation:
         pm_module.count_atomtypes = mock_count
         
         try:
-            from src.core.config import SheetConfig, TipConfig
-            
-            tip_config = TipConfig(
-                mat='Si', pot_type='sw', pot_path='/fake/Si.sw',
-                cif_path='/fake/Si.cif', r=20.0, amorph='c', dspring=0.1, s=1.0
-            )
-            sheet_config = SheetConfig(
-                mat='MoS2', pot_type='sw', pot_path='/fake/MoS2.sw',
-                cif_path='/fake/MoS2.cif', x=50.0, y=50.0, layers=[1]
-            )
-            
             pm = PotentialManager(mock_settings, use_langevin=False)
             pm.register_component('tip', tip_config)
             pm.register_component('sheet', sheet_config)
@@ -760,11 +766,11 @@ class TestEdgeCases:
     """Tests for edge cases and error handling."""
 
     def test_unregistered_component_raises_error(self, mock_settings):
-        """Accessing unregistered component should raise ValueError."""
+        """Interlayer setup on unregistered component should raise ValueError."""
         pm = PotentialManager(mock_settings)
         
         with pytest.raises(ValueError, match="not registered"):
-            pm._get_component('nonexistent')
+            pm.add_ghost_lj('nonexistent')
 
     def test_add_cross_interaction_missing_component(self, mock_settings):
         """Cross-interaction with missing component should raise error."""
@@ -786,12 +792,12 @@ class TestEdgeCases:
         # Tip gets type 1, sub gets type 2
         assert tip_map['Si'] == [1]
         assert sub_map['Si'] == [2]
-        assert pm.get_total_types() == 2
+        assert len(pm.types) == 2
 
     def test_group_string_unregistered_returns_empty(self, mock_settings):
         """Group string for unregistered component should be empty."""
         pm = PotentialManager(mock_settings)
-        assert pm.get_group_string('nonexistent') == ''
+        assert pm.types.get_group_string('nonexistent') == ''
 
     def test_add_self_interaction_before_registration(self, mock_settings):
         """Adding self-interaction before registration should raise error."""

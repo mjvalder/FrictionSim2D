@@ -104,6 +104,30 @@ def test_collect_hpc_simulation_paths_detects_valid_inputs(tmp_path: Path) -> No
     assert paths == ["simA", "simB"]
 
 
+def test_collect_hpc_simulation_paths_orders_layers_numerically(tmp_path: Path) -> None:
+    """Layer-like paths should use numeric order (L2 before L10)."""
+    for layer in ("L1", "L2", "L10"):
+        (tmp_path / layer / "lammps").mkdir(parents=True)
+        (tmp_path / layer / "lammps" / "slide.in").write_text("", encoding="utf-8")
+
+    paths = collect_hpc_simulation_paths(tmp_path)
+
+    assert paths == ["L1", "L2", "L10"]
+
+
+def test_collect_hpc_simulation_paths_accepts_any_in_when_scripts_empty(tmp_path: Path) -> None:
+    """An empty script filter should include dirs containing any .in file."""
+    (tmp_path / "simA" / "lammps").mkdir(parents=True)
+    (tmp_path / "simA" / "lammps" / "custom_input.in").write_text("", encoding="utf-8")
+
+    (tmp_path / "simB" / "lammps").mkdir(parents=True)
+    (tmp_path / "simB" / "lammps" / "notes.txt").write_text("", encoding="utf-8")
+
+    paths = collect_hpc_simulation_paths(tmp_path, lammps_scripts=[])
+
+    assert paths == ["simA"]
+
+
 def test_build_hpc_manifest_entries_prefers_slide_when_available(tmp_path: Path) -> None:
     """Manifest should include slide scripts when present, else system scripts."""
     (tmp_path / "simA" / "lammps").mkdir(parents=True)

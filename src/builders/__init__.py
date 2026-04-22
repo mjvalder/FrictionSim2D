@@ -7,9 +7,9 @@ the construction of complete simulation setups:
 - Component builders (tip, sheet, substrate)
 """
 
-from src.builders.afm import AFMSimulation
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.builders import components
+from . import components
+from .afm import AFMSimulation
+from .sheetonsheet import SheetOnSheetSimulation
 
 __all__ = [
     "AFMSimulation",

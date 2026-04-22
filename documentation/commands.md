@@ -17,7 +17,7 @@ FrictionSim2D --version     # Show version
 
 ### run afm
 
-Generate AFM (tip-substrate-sheet) simulations.
+Generate AFM (tip-on-substrate) simulation files.
 
 ```bash
 FrictionSim2D run afm CONFIG_FILE [OPTIONS]
@@ -27,11 +27,11 @@ FrictionSim2D run afm CONFIG_FILE [OPTIONS]
 - `CONFIG_FILE`: Path to `.ini` configuration file
 
 **Options**:
-- `--output-dir DIR`: Output directory (default: auto-generated timestamp)
+- `-o, --output-dir DIR`: Output directory (default: `simulation_output`)
 - `--aiida`: Enable AiiDA provenance tracking
-- `--hpc-scripts`: Generate HPC submission scripts (PBS/SLURM)
-- `--hpc NAME`: Specify HPC template name
-- `--local`: Run locally (default behavior)
+- `--hpc-scripts`: Also generate HPC submission scripts
+- `--hpc NAME`: HPC configuration name (overrides settings)
+- `--local`: Mark as local run (no HPC submission)
 
 **Examples**:
 
@@ -39,22 +39,22 @@ FrictionSim2D run afm CONFIG_FILE [OPTIONS]
 # Basic generation
 FrictionSim2D run afm afm_config.ini
 
-# With custom output directory
-FrictionSim2D run afm config.ini --output-dir ./my_simulations
+# Custom output directory
+FrictionSim2D run afm config.ini -o ./my_simulations
 
 # With AiiDA provenance
 FrictionSim2D run afm config.ini --aiida
 
-# With HPC scripts
+# Generate HPC scripts inline
 FrictionSim2D run afm config.ini --hpc-scripts
 
-# Combined: AiiDA + HPC scripts
-FrictionSim2D run afm config.ini --aiida --hpc-scripts
+# Combined
+FrictionSim2D run afm config.ini -o ./output --aiida --hpc-scripts
 ```
 
 ### run sheetonsheet
 
-Generate sheet-on-sheet sliding simulations.
+Generate sheet-on-sheet sliding simulation files.
 
 ```bash
 FrictionSim2D run sheetonsheet CONFIG_FILE [OPTIONS]
@@ -68,11 +68,38 @@ FrictionSim2D run sheetonsheet CONFIG_FILE [OPTIONS]
 **Examples**:
 
 ```bash
-# Basic generation
 FrictionSim2D run sheetonsheet sheet_config.ini
+FrictionSim2D run sheetonsheet config.ini -o ./sheet_output --hpc-scripts
+```
 
-# With AiiDA and HPC scripts
-FrictionSim2D run sheetonsheet config.ini --aiida --hpc-scripts
+---
+
+## settings - Settings Management
+
+### settings show
+
+Display the current merged settings (package defaults overridden by local `settings.yaml`).
+
+```bash
+FrictionSim2D settings show
+```
+
+### settings init
+
+Copy the package default `settings.yaml` into the current directory for local customisation.
+
+```bash
+FrictionSim2D settings init
+```
+
+Creates `./settings.yaml`. Edit this file to override simulation, HPC, or database defaults.
+
+### settings reset
+
+Remove the local `settings.yaml` so the package defaults take effect again.
+
+```bash
+FrictionSim2D settings reset
 ```
 
 ---
@@ -81,115 +108,73 @@ FrictionSim2D run sheetonsheet config.ini --aiida --hpc-scripts
 
 ### hpc generate
 
-Generate PBS/SLURM submission scripts for existing simulations.
+Generate PBS or SLURM array-job scripts for an existing simulation tree.
 
 ```bash
 FrictionSim2D hpc generate SIMULATION_DIR [OPTIONS]
 ```
 
 **Arguments**:
-- `SIMULATION_DIR`: Path to simulation root directory
+- `SIMULATION_DIR`: Root directory produced by `run afm` / `run sheetonsheet`
 
 **Options**:
-- `--scheduler {pbs,slurm}`: Scheduler type (default: from settings.yaml)
-- `--output-dir DIR`: Override output location for HPC scripts
+- `-s, --scheduler {pbs,slurm}`: Scheduler type (default: `pbs`)
+- `-o, --output-dir DIR`: Output directory for scripts (default: `SIMULATION_DIR/hpc`)
 
 **Examples**:
 
 ```bash
-# Generate PBS scripts
-FrictionSim2D hpc generate ./output/simulation_20250201_120000
+# PBS scripts (default)
+FrictionSim2D hpc generate ./simulation_output
 
-# Generate SLURM scripts
-FrictionSim2D hpc generate ./output/simulation_20250201_120000 --scheduler slurm
+# SLURM scripts
+FrictionSim2D hpc generate ./simulation_output --scheduler slurm
 
-# Custom output location
-FrictionSim2D hpc generate ./simulations --output-dir ./hpc_scripts
+# Custom script output location
+FrictionSim2D hpc generate ./simulation_output --output-dir ./hpc_scripts
 ```
 
-**Generated files**:
-- AFM simulations: `run_system.pbs`, `run_slide.pbs`, `submit_jobs.sh`, manifests
-- Sheet-on-sheet: `run.pbs` or `run.sh`, manifest
-
----
-
-## settings - Settings Management
-
-### settings show
-
-Display current global settings.
-
-```bash
-FrictionSim2D settings show
-```
-
-Shows all settings from `src/data/settings/settings.yaml` including:
-- Simulation parameters
-- HPC configuration
-- AiiDA settings
-
-### settings init
-
-Create default settings file if missing.
-
-```bash
-FrictionSim2D settings init
-```
-
-Creates `src/data/settings/settings.yaml` with default values.
-
-### settings reset
-
-Reset settings to package defaults.
-
-```bash
-FrictionSim2D settings reset
-```
-
-**Warning**: This overwrites your settings file. Backup first if you have customizations.
+**Generated files** (inside the output directory):
+- `manifest.txt` — ordered list of simulation paths
+- `run_array.pbs` / `run_array.sh` — array job script
+- `submit_all.txt` — next-steps instructions
 
 ---
 
 ## aiida - AiiDA Workflow Commands
 
+All `aiida` subcommands require `aiida-core` to be installed. The group will abort with an install hint if AiiDA is unavailable.
+
 ### aiida setup
 
-Initialize AiiDA environment (one-time setup).
+First-time AiiDA configuration: create a profile, register a computer, and configure the LAMMPS code.
 
 ```bash
 FrictionSim2D aiida setup [OPTIONS]
 ```
 
 **Options**:
-- `--profile NAME`: AiiDA profile name (default: 'friction2d')
-- `--lammps-path PATH`: Path to LAMMPS executable (default: auto-detect)
-- `--use-remote`: Configure remote HPC computer from settings.yaml
-
-**What it does**:
-1. Starts RabbitMQ broker
-2. Creates AiiDA profile with PostgreSQL
-3. Configures localhost computer
-4. Sets up LAMMPS code
+- `-p, --profile NAME`: AiiDA profile name (default: `friction2d`)
+- `--lammps-path PATH`: Explicit path to LAMMPS executable
+- `--use-remote`: Configure a remote HPC computer from the `aiida` section of `settings.yaml`
+- `--hpc-config PATH`: *(Deprecated)* Use `--use-remote` instead
 
 **Examples**:
 
 ```bash
-# Basic setup
+# Localhost setup (most common)
 FrictionSim2D aiida setup
 
-# Custom profile name
-FrictionSim2D aiida setup --profile my_profile
+# Custom LAMMPS binary
+FrictionSim2D aiida setup --lammps-path /opt/lammps/bin/lmp_mpi
 
-# Custom LAMMPS path
-FrictionSim2D aiida setup --lammps-path /opt/lammps/bin/lmp
-
-# Setup remote HPC computer
+# Remote HPC computer (configure settings.yaml first)
 FrictionSim2D aiida setup --use-remote
 ```
 
 ### aiida status
 
-Check AiiDA daemon and recent job status.
+Check AiiDA installation and active profile.
 
 ```bash
 FrictionSim2D aiida status
@@ -197,206 +182,141 @@ FrictionSim2D aiida status
 
 **Output**:
 ```
-Daemon: Running
-Profile: friction2d
-Recent calculations:
-  PK=1234  afm_MoS2_1L_5nN      State: running
-  PK=1235  afm_MoS2_2L_10nN     State: finished
-  PK=1236  afm_MoS2_3L_20nN     State: failed
+✅ AiiDA is installed
+✅ Active profile: friction2d
+   Storage: psql_dos
 ```
 
 ### aiida submit
 
-Submit simulations to AiiDA with smart defaults and prompting.
+Submit simulations to AiiDA with smart defaults.
 
 ```bash
 FrictionSim2D aiida submit SIMULATION_DIR [OPTIONS]
 ```
 
-**New Simplified Interface** (v0.2.0):
-
 **Arguments**:
-- `SIMULATION_DIR`: Path to simulation root or individual simulation
+- `SIMULATION_DIR`: Simulation root directory
 
 **Options**:
-- `-c, --code LABEL`: AiiDA code label (default: auto-detect)
-- `--scripts CSV`: Comma-separated LAMMPS scripts to run
-- `--array`: Submit as single array job
-
-**Resource overrides** (optional):
-- `--machines N`: Number of nodes
-- `--mpiprocs N`: MPI processes per node
-- `--walltime TIME`: Walltime (HH:MM:SS or hours)
-- `--queue NAME`: Queue/partition name
-- `--project NAME`: Account/project to charge
-
-**Other options**:
+- `-c, --code LABEL`: AiiDA code label (auto-detects if omitted)
+- `--scripts CSV`: Comma-separated list of LAMMPS scripts to run in order
+- `--array`: Submit a single array job for all simulations
+- `--machines N`: Override number of nodes per job
+- `--mpiprocs N`: Override MPI processes per node
+- `--walltime TIME`: Override walltime (`HH:MM:SS` or integer seconds)
+- `--queue NAME`: Override scheduler queue/partition
+- `--project NAME`: Override scheduler account/project
 - `--dry-run`: Preview configuration without submitting
 
 **Examples**:
 
 ```bash
-# Minimal (auto-detect code, use defaults)
-FrictionSim2D aiida submit ./output
+# Minimal — auto-detect code, use settings.yaml defaults
+FrictionSim2D aiida submit ./simulation_output
 
-# With manual overrides
-FrictionSim2D aiida submit ./output --machines 4 --walltime 24:00:00
+# Resource overrides
+FrictionSim2D aiida submit ./simulation_output --machines 4 --walltime 24:00:00
 
-# Preview before submitting
-FrictionSim2D aiida submit ./output --dry-run
+# Preview first
+FrictionSim2D aiida submit ./simulation_output --dry-run
 
-# Array job
-FrictionSim2D aiida submit ./output --array
-
-# Specify code
-FrictionSim2D aiida submit ./output --code lammps@hpc
-
-# Custom scripts
-FrictionSim2D aiida submit ./output --scripts system.in,slide_1.in,slide_2.in
-
-# Full control
-FrictionSim2D aiida submit ./output \\
-  --code lammps@hpc \\
-  --machines 8 \\
-  --walltime 72:00:00 \\
-  --queue express \\
-  --project my_allocation
-```
-
-**Interactive prompting**: If code not specified and multiple codes exist:
-
-```
-Available LAMMPS codes:
-  1. lammps@localhost
-  2. lammps@hpc
-Select code [1]: 2
-
-Using defaults from settings.yaml (1 node, 32 CPUs/node, 20h walltime)
-
-Preview:
-  Code: lammps@hpc
-  Simulations: 15
-  Resources: 1 nodes, 32 CPUs/node, 20h
-
-Proceed with submission? [Y/n]:
+# Array job with explicit code
+FrictionSim2D aiida submit ./simulation_output --array --code lammps@hpc
 ```
 
 ### aiida import
 
-Import completed simulation results into AiiDA.
+Import completed simulation results into the AiiDA database.
 
 ```bash
 FrictionSim2D aiida import RESULTS_DIR [OPTIONS]
 ```
 
 **Arguments**:
-- `RESULTS_DIR`: Path to directory with completed results
+- `RESULTS_DIR`: Directory containing returned simulation outputs
 
 **Options**:
-- `--process` / `--no-process`: Run post-processing (default: yes)
+- `--process` / `--no-process`: Run post-processing before import (default: `--process`)
 
 **Examples**:
 
 ```bash
-# Import results with post-processing
 FrictionSim2D aiida import ./returned_results
-
-# Import without post-processing
 FrictionSim2D aiida import ./results --no-process
 ```
 
 ### aiida query
 
-Query AiiDA database for simulation results.
+Query the AiiDA simulation database.
 
 ```bash
 FrictionSim2D aiida query [OPTIONS]
 ```
 
 **Filter options**:
-- `--material MAT`: Filter by material
-- `--layers N`: Filter by layer count
-- `--force F`: Filter by force value
-- `--pressure P`: Filter by pressure value
-- `--temperature T`: Filter by temperature
+- `-m, --material MAT`: Filter by material name
+- `-l, --layers N`: Filter by layer count
+- `-f, --force F`: Filter by applied force (nN)
 
 **Output options**:
-- `--format {table,csv,json}`: Output format (default: table)
-- `--output FILE`: Save to file
+- `--format {table,csv,json}`: Output format (default: `table`)
+- `-o, --output FILE`: Save to file
 
 **Examples**:
 
 ```bash
-# Query all simulations
+# All results (table)
 FrictionSim2D aiida query
 
-# Filter by material
-FrictionSim2D aiida query --material MoS2
+# Filtered
+FrictionSim2D aiida query --material h-MoS2 --layers 2
 
-# Multiple filters
-FrictionSim2D aiida query --material MoS2 --layers 2 --force 10
-
-# CSV output
-FrictionSim2D aiida query --material MoS2 --format csv
-
-# Save to file
-FrictionSim2D aiida query --output results.csv
-
-# JSON for scripting
-FrictionSim2D aiida query --format json --output results.json
+# CSV export
+FrictionSim2D aiida query --material h-MoS2 --format csv -o results.csv
 ```
 
 ### aiida export
 
-Export AiiDA archive for transfer/backup.
+Export the AiiDA database to a portable archive.
 
 ```bash
 FrictionSim2D aiida export [OPTIONS]
 ```
 
 **Options**:
-- `--output FILE`: Archive filename (default: friction_archive.aiida)
-- `--material MAT`: Filter by material (export only matching)
-- `--layers N`: Filter by layers
-- `--force F`: Filter by force
+- `-o, --output FILE`: Archive path (default: `friction2d.aiida`)
+- `-m, --material MAT`: Export only simulations for this material
 
 **Examples**:
 
 ```bash
-# Export everything
-FrictionSim2D aiida export --output all_data.aiida
-
-# Export filtered data
-FrictionSim2D aiida export --material MoS2 --output mos2_only.aiida
-
-# Export specific layers
-FrictionSim2D aiida export --material WSe2 --layers 2 --output wse2_bilayer.aiida
+FrictionSim2D aiida export
+FrictionSim2D aiida export -o all_data.aiida
+FrictionSim2D aiida export -m h-MoS2 -o mos2.aiida
 ```
 
 ### aiida import-archive
 
-Import AiiDA archive from another system.
+Import an AiiDA archive into the current profile.
 
 ```bash
-FrictionSim2D aiida import-archive ARCHIVE_FILE
+FrictionSim2D aiida import-archive ARCHIVE_PATH
 ```
 
 **Arguments**:
-- `ARCHIVE_FILE`: Path to `.aiida` archive file
+- `ARCHIVE_PATH`: Path to `.aiida` archive file
 
 **Examples**:
 
 ```bash
-# Import archive
-FrictionSim2D aiida import-archive friction_archive.aiida
-
-# Import from colleague
+FrictionSim2D aiida import-archive friction2d.aiida
 FrictionSim2D aiida import-archive /path/to/shared_results.aiida
 ```
 
 ### aiida package
 
-Package simulations with provenance into tarball.
+Create a `.tar.gz` archive of simulation input files (`.lammpstrj` trajectory files are excluded).
 
 ```bash
 FrictionSim2D aiida package SIMULATION_DIR [OPTIONS]
@@ -406,97 +326,277 @@ FrictionSim2D aiida package SIMULATION_DIR [OPTIONS]
 - `SIMULATION_DIR`: Simulation root directory
 
 **Options**:
-- `--output FILE`: Tarball filename (default: simulations.tar.gz)
+- `-o, --output FILE`: Output archive path (default: `SIMULATION_DIR.tar.gz`)
 
 **Examples**:
 
 ```bash
-# Create tarball
-FrictionSim2D aiida package ./output --output simulations.tar.gz
-
-# Package with timestamp
-FrictionSim2D aiida package ./output --output archive_$(date +%Y%m%d).tar.gz
+FrictionSim2D aiida package ./simulation_output
+FrictionSim2D aiida package ./simulation_output -o transfer.tar.gz
 ```
 
 ---
 
-## Command Combinations
+## postprocess - Result Analysis
 
-### Full Local Workflow
+### postprocess read
+
+Read simulation result files, generate issue reports, and optionally export full time-series data.
 
 ```bash
-# 1. Generate simulations with AiiDA provenance
+FrictionSim2D postprocess read RESULTS_DIR [OPTIONS]
+```
+
+**Arguments**:
+- `RESULTS_DIR`: Directory containing simulation results
+
+**Options**:
+- `--export`: Export full time-series data to JSON (default: off)
+
+**Examples**:
+
+```bash
+FrictionSim2D postprocess read ./simulation_output
+FrictionSim2D postprocess read ./simulation_output --export
+```
+
+### postprocess plot
+
+Generate plots from processed simulation data using a JSON config file.
+
+```bash
+FrictionSim2D postprocess plot PLOT_CONFIG [OPTIONS]
+```
+
+**Arguments**:
+- `PLOT_CONFIG`: JSON file describing what to plot (must contain `data_dirs`, `labels`, and `plots` keys)
+
+**Options**:
+- `-o, --output-dir DIR`: Output directory for plots (default: `plots`)
+- `--settings FILE`: Plot settings JSON file (colours, font sizes, etc.)
+
+**Examples**:
+
+```bash
+FrictionSim2D postprocess plot plot_config.json
+FrictionSim2D postprocess plot plot_config.json -o ./figures --settings plot_style.json
+```
+
+---
+
+## db - Community Database
+
+Interact with the shared PostgreSQL database. Connection settings are resolved in order:
+
+1. Explicit CLI flags (`--host`, `--port`, …)
+2. Environment variables (`FRICTION_DB_HOST`, `FRICTION_DB_PORT`, `FRICTION_DB_NAME`, `FRICTION_DB_USER`, `FRICTION_DB_PASSWORD`)
+3. The active profile in `settings.yaml`
+
+All `db` commands accept these common connection options:
+
+| Option | Env var | Default |
+|--------|---------|---------|
+| `-p, --profile {local,central}` | — | settings.yaml active profile |
+| `--host` | `FRICTION_DB_HOST` | `localhost` |
+| `--port` | `FRICTION_DB_PORT` | `5432` |
+| `--dbname` | `FRICTION_DB_NAME` | `frictionsim2ddb` |
+| `-u, --user` | `FRICTION_DB_USER` | — |
+| `--password` | `FRICTION_DB_PASSWORD` | — |
+
+### db init
+
+Create or verify the database schema. Safe to run repeatedly.
+
+```bash
+FrictionSim2D db init [CONNECTION OPTIONS]
+```
+
+```bash
+FrictionSim2D db init --profile local
+```
+
+### db create-key
+
+Generate an API key for authenticated write access. The raw key is printed once — store it securely.
+
+```bash
+FrictionSim2D db create-key --name NAME [CONNECTION OPTIONS]
+```
+
+```bash
+FrictionSim2D db create-key --name alice --profile local
+```
+
+### db upload
+
+Upload simulation results directly to the database (requires database credentials).
+
+```bash
+FrictionSim2D db upload RESULTS_DIR [OPTIONS]
+```
+
+**Arguments**:
+- `RESULTS_DIR`: Directory with completed simulation outputs
+
+**Options**:
+- `-n, --uploader NAME`: Your name or identifier (stored with each row)
+- Connection options (see above)
+
+```bash
+FrictionSim2D db upload ./simulation_output --uploader alice
+```
+
+### db stage
+
+Upload results with status `staged` for curator review before they become publicly visible. Requires an API key.
+
+```bash
+FrictionSim2D db stage RESULTS_DIR --uploader NAME [OPTIONS]
+```
+
+**Options**:
+- `-n, --uploader NAME` *(required)*: Your name or identifier
+- `--api-key KEY` / env `FRICTION_DB_API_KEY`: API key for write access
+- Connection options (see above)
+
+```bash
+export FRICTION_DB_API_KEY=<your-key>
+FrictionSim2D db stage ./simulation_output --uploader alice
+```
+
+### db query
+
+Query the database and print matching rows.
+
+```bash
+FrictionSim2D db query [OPTIONS]
+```
+
+**Filter options**:
+- `-m, --material NAME`: Filter by material
+- `--type {afm,sheetonsheet}`: Filter by simulation type
+- `-l, --layers N`: Filter by layer count
+- `-n, --uploader NAME`: Filter by uploader
+- `--limit N`: Maximum rows to return (default: 50)
+
+**Output options**:
+- `--csv FILE`: Save results to a CSV file
+
+```bash
+FrictionSim2D db query --material h-MoS2 --layers 1
+FrictionSim2D db query --type afm --limit 100 --csv results.csv
+```
+
+### db stats
+
+Show aggregate statistics for the database.
+
+```bash
+FrictionSim2D db stats [CONNECTION OPTIONS]
+```
+
+```bash
+FrictionSim2D db stats --profile central
+```
+
+### db delete
+
+Delete all rows you uploaded (matched by uploader name). Prompts for confirmation.
+
+```bash
+FrictionSim2D db delete --uploader NAME [CONNECTION OPTIONS]
+```
+
+```bash
+FrictionSim2D db delete --uploader alice
+```
+
+### db publish
+
+*(Curator action)* Promote a result from `validated` to `published`.
+
+```bash
+FrictionSim2D db publish ROW_ID [CONNECTION OPTIONS]
+```
+
+```bash
+FrictionSim2D db publish 42
+```
+
+### db reject
+
+*(Curator action)* Reject a staged or validated result.
+
+```bash
+FrictionSim2D db reject ROW_ID [OPTIONS]
+```
+
+**Options**:
+- `-r, --reason TEXT`: Reason for rejection
+
+```bash
+FrictionSim2D db reject 42 --reason "Duplicate of row 37"
+```
+
+---
+
+## api - REST API Server
+
+### api serve
+
+Start the FastAPI REST server so collaborators can upload and query results without direct database credentials.
+
+```bash
+FrictionSim2D api serve [OPTIONS]
+```
+
+**Options**:
+- `--host HOST`: Bind address (default: `settings.database.api_host` or `0.0.0.0`)
+- `-p, --port PORT`: Port number (default: `settings.database.api_port` or `8000`)
+- `--profile {local,central}`: Database profile to back the server
+- `--reload`: Auto-reload on code changes (development only; requires `uvicorn`)
+
+**Setup** (run once):
+```bash
+FrictionSim2D db init --profile local
+FrictionSim2D db create-key --name alice --profile local
+FrictionSim2D api serve --host 0.0.0.0 --port 8000
+```
+
+Collaborators can then browse the interactive API docs at `http://your-server:8000/docs`.
+
+---
+
+## Common Workflows
+
+### Generate and submit via AiiDA
+
+```bash
 FrictionSim2D run afm config.ini --aiida
-
-# 2. Submit to cluster
-FrictionSim2D aiida submit ./output/simulation_20250201_120000
-
-# 3. Monitor status
+FrictionSim2D aiida submit ./simulation_output --dry-run
+FrictionSim2D aiida submit ./simulation_output
 FrictionSim2D aiida status
-
-# 4. Query results
-FrictionSim2D aiida query --material MoS2
-
-# 5. Export archive
-FrictionSim2D aiida export --output project_results.aiida
 ```
 
-### Offline HPC Workflow
+### Offline HPC workflow
 
 ```bash
-# 1. Generate with HPC scripts
-FrictionSim2D run afm config.ini --aiida --hpc-scripts
+# Generate inputs + HPC scripts
+FrictionSim2D run afm config.ini --hpc-scripts
 
-# 2. Transfer to HPC manually
-# scp -r ./output user@hpc:~/simulations/
-
-# 3. Run on HPC
-# ssh user@hpc
-# cd ~/simulations/output/simulation_20250201_120000/hpc
-# ./submit_jobs.sh
-
-# 4. Transfer results back
-# scp -r user@hpc:~/simulations/output ./returned_results
-
-# 5. Import results
-FrictionSim2D aiida import ./returned_results
+# Transfer to cluster, run, transfer results back, then:
+FrictionSim2D postprocess read ./returned_results
+FrictionSim2D db upload ./returned_results --uploader alice
 ```
 
-### Batch Processing
+### Share results with the community
 
 ```bash
-# Generate multiple configs
-for config in configs/*.ini; do
-    FrictionSim2D run afm $config --aiida
-done
+# Stage for review (needs API key)
+FrictionSim2D db stage ./returned_results --uploader alice --api-key $KEY
 
-# Submit all
-for sim in ./output/*/; do
-    FrictionSim2D aiida submit $sim
-done
-
-# Query combined results
-FrictionSim2D aiida query --format csv --output all_results.csv
-```
-
-### Testing Workflow
-
-```bash
-# 1. Test with small config
-FrictionSim2D run afm test_config.ini --aiida
-
-# 2. Preview submission
-FrictionSim2D aiida submit ./output --dry-run
-
-# 3. Submit test
-FrictionSim2D aiida submit ./output
-
-# 4. Check if successful
-FrictionSim2D aiida status
-
-# 5. If good, run full sweep
-FrictionSim2D run afm full_config.ini --aiida
-FrictionSim2D aiida submit ./output
+# Query public database
+FrictionSim2D db query --material h-MoS2 --format csv -o community.csv
 ```
 
 ---

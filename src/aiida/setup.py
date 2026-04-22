@@ -7,9 +7,12 @@ commands.
 """
 
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
+
+from ..core.config import HPCSettings, AiidaSettings
 
 if TYPE_CHECKING:
     from aiida import orm
@@ -213,7 +216,6 @@ def setup_computer_from_hpc_settings(
         Configured AiiDA Computer instance
     """
     from aiida import orm  # pylint: disable=import-outside-toplevel
-    from src.core.config import HPCSettings, AiidaSettings
 
     label = aiida_settings.computer_label or 'hpc'
     scheduler = hpc_settings.scheduler_type
@@ -263,8 +265,6 @@ def _find_lammps_executable() -> str:
     Raises:
         FileNotFoundError: If no LAMMPS executable is found.
     """
-    import shutil  # pylint: disable=import-outside-toplevel
-
     for name in ('lmp', 'lmp_mpi', 'lmp_serial', 'lammps'):
         path = shutil.which(name)
         if path:
@@ -352,8 +352,6 @@ def full_setup(
         Dict with setup results (``rabbitmq``, ``profile``, ``computer``,
         ``code``, ``daemon``).
     """
-    from src.core.config import HPCSettings, AiidaSettings
-
     results = {}
 
     results['rabbitmq'] = start_rabbitmq()

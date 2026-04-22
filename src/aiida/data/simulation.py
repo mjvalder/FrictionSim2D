@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .results import FrictionResultsData
 
 
-class FrictionSimulationData(Data):
+class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
     """AiiDA Data node representing a friction simulation.
 
     Stores all simulation metadata in queryable attributes and links to
@@ -265,8 +265,9 @@ class FrictionSimulationData(Data):
                 return None
         return None
 
-    def set_from_config(self, config: Dict[str, Any],
-                        simulation_type: str = 'afm') -> None:
+    def set_from_config(  # pylint: disable=too-many-branches
+            self, config: Dict[str, Any],
+            simulation_type: str = 'afm') -> None:
         """Populate attributes from a parsed configuration dictionary.
 
         Args:

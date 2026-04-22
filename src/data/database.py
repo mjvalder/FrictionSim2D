@@ -55,9 +55,27 @@ import logging
 import os
 import secrets
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, TypedDict, cast
+
+if TYPE_CHECKING:
+    import pandas
 
 logger = logging.getLogger(__name__)
+
+
+class _StatsKwargs(TypedDict, total=False):
+    """Subset of upload_result kwargs produced by compute_friction_stats."""
+
+    mean_cof: float
+    std_cof: float
+    mean_lf: float
+    std_lf: float
+    mean_nf: float
+    std_nf: float
+    mean_lfx: float
+    std_lfx: float
+    mean_lfy: float
+    std_lfy: float
 
 # ---------------------------------------------------------------------------
 # Schema DDL
@@ -153,12 +171,15 @@ _COLUMN_NAMES = [
     'status', 'notes', 'metadata', 'data_url',
 ]
 
+# Allowed tokens for query ORDER BY sanitisation
+_ALLOWED_ORDER_COLS = set(_COLUMN_NAMES) | {'ASC', 'DESC', 'asc', 'desc'}
+
 # ---------------------------------------------------------------------------
 # Connection helpers
 # ---------------------------------------------------------------------------
 
 
-def _get_connection_params(
+def _get_connection_params(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     host: Optional[str] = None,
     port: Optional[int] = None,
     dbname: Optional[str] = None,
@@ -202,7 +223,7 @@ def db_from_profile(profile: Optional[str] = None) -> 'FrictionDB':
     Returns:
         Configured :class:`FrictionDB` instance.
     """
-    from src.core.config import load_settings  # noqa: PLC0415
+    from src.core.config import load_settings  # pylint: disable=import-outside-toplevel
 
     settings = load_settings()
     db_cfg = settings.database
@@ -222,72 +243,6 @@ def db_from_profile(profile: Optional[str] = None) -> 'FrictionDB':
         user=p.user or None,
         password=p.password or None,
     )
-
-
-# ---------------------------------------------------------------------------
-# Migration runner
-# ---------------------------------------------------------------------------
-
-# Registry of migration modules, keyed by (from_version, to_version).
-_MIGRATIONS = {
-    (1, 2): 'src.data.migrations.v001_to_v002',
-}
-
-
-def get_current_schema_version(cursor) -> int:
-    """Read the current schema version from the database.
-
-    Args:
-        cursor: An open database cursor.
-
-    Returns:
-        Current schema version number.  Returns 1 if the ``schema_version``
-        table does not exist (legacy databases created before versioning).
-    """
-    try:
-        cursor.execute(
-            "SELECT MAX(version) FROM schema_version;"
-        )
-        row = cursor.fetchone()
-        return row[0] if row and row[0] is not None else 1
-    except Exception:  # table doesn't exist yet → legacy v1
-        # Must reset the transaction after the failed query
-        cursor.execute("ROLLBACK;")
-        return 1
-
-
-def apply_migrations(cursor, *, target: int = SCHEMA_VERSION) -> List[int]:
-    """Apply pending migrations up to *target* version.
-
-    Args:
-        cursor: An open database cursor (caller must commit afterwards).
-        target: Version to migrate to (default: ``SCHEMA_VERSION``).
-
-    Returns:
-        List of version numbers that were applied.
-    """
-    import importlib  # noqa: PLC0415
-
-    current = get_current_schema_version(cursor)
-    applied: List[int] = []
-
-    while current < target:
-        key = (current, current + 1)
-        module_path = _MIGRATIONS.get(key)
-        if module_path is None:
-            raise RuntimeError(
-                f"No migration registered for {current} → {current + 1}"
-            )
-
-        mod = importlib.import_module(module_path)
-        for stmt in mod.UP:
-            cursor.execute(stmt)
-
-        applied.append(current + 1)
-        logger.info("Applied migration v%d → v%d", current, current + 1)
-        current += 1
-
-    return applied
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +281,7 @@ class FrictionDB:
         df = db.query(material="h-MoS2")
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
@@ -336,7 +291,7 @@ class FrictionDB:
         auto_create: bool = True,
     ):
         try:
-            import psycopg2  # pylint: disable=import-outside-toplevel
+            import psycopg2  # pyright: ignore[reportMissingModuleSource]  # pylint: disable=import-outside-toplevel
         except ImportError as exc:
             raise ImportError(
                 "psycopg2 is required for database access. "
@@ -376,23 +331,14 @@ class FrictionDB:
     # -- Schema ----------------------------------------------------------------
 
     def _ensure_schema(self) -> None:
-        """Create tables and apply pending migrations if needed.
+        """Create/verify the current schema in place.
 
-        For a fresh database this creates the full v2 schema.  For an
-        existing v1 database it applies migrations incrementally.
+        Initialisation always enforces the current schema version.
         """
         with self._cursor(commit=True) as cur:
             cur.execute(_CREATE_SCHEMA_VERSION_SQL)
             cur.execute(_CREATE_TABLE_SQL)
             cur.execute(_CREATE_API_KEYS_SQL)
-
-            # Apply any pending migrations
-            applied = apply_migrations(cur)
-            if applied:
-                logger.info(
-                    "Migrated database to v%d (applied: %s)",
-                    applied[-1], applied,
-                )
 
             # Record current version
             cur.execute(
@@ -404,7 +350,7 @@ class FrictionDB:
 
     # -- Upload ----------------------------------------------------------------
 
-    def upload_result(  # pylint: disable=too-many-arguments,too-many-locals
+    def upload_result(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments,invalid-name
         self,
         material: str,
         simulation_type: str = 'afm',
@@ -525,16 +471,17 @@ class FrictionDB:
         Returns:
             Database row ``id`` of the inserted record.
         """
-        from src.data.models import compute_friction_stats  # noqa: PLC0415
-
-        import numpy as np  # noqa: PLC0415
+        from .models import compute_friction_stats  # pylint: disable=import-outside-toplevel
+        import numpy as np  # pylint: disable=import-outside-toplevel
 
         ts = result_node.time_series
         nf = np.asarray(ts.get('nf', []))
         lfx = np.asarray(ts.get('lfx', []))
         lfy = np.asarray(ts.get('lfy', []))
 
-        stats = compute_friction_stats(nf, lfx, lfy) if nf.size > 0 else {}
+        stats: _StatsKwargs = {}
+        if nf.size > 0:
+            stats = cast(_StatsKwargs, compute_friction_stats(nf, lfx, lfy))
 
         return self.upload_result(
             material=result_node.material,
@@ -551,7 +498,7 @@ class FrictionDB:
 
     # -- Query -----------------------------------------------------------------
 
-    def query(  # pylint: disable=too-many-arguments,too-many-branches,too-many-locals
+    def query(  # pylint: disable=too-many-arguments,too-many-branches,too-many-locals,too-many-positional-arguments
         self,
         material: Optional[str] = None,
         simulation_type: Optional[str] = None,
@@ -610,7 +557,6 @@ class FrictionDB:
         limit_clause = f"LIMIT {int(limit)}" if limit else ""
 
         # Sanitise order_by: allow only column names + ASC/DESC
-        _ALLOWED_ORDER_COLS = set(_COLUMN_NAMES) | {'ASC', 'DESC', 'asc', 'desc'}
         order_tokens = order_by.replace(',', ' ').split()
         for token in order_tokens:
             if token not in _ALLOWED_ORDER_COLS:
@@ -637,7 +583,8 @@ class FrictionDB:
             total: int = cur.fetchone()[0]
 
             cur.execute(
-                "SELECT material, COUNT(*) FROM simulations GROUP BY material ORDER BY COUNT(*) DESC;"
+                "SELECT material, COUNT(*) FROM simulations "
+                "GROUP BY material ORDER BY COUNT(*) DESC;"
             )
             by_material = dict(cur.fetchall())
 
@@ -710,16 +657,15 @@ class FrictionDB:
         Returns:
             :class:`~src.data.validation.ValidationResult`.
         """
-        import pandas as pd  # pylint: disable=import-outside-toplevel
-        from src.data.models import ResultRecord  # noqa: PLC0415
-        from src.data.validation import validate_record  # noqa: PLC0415
+        from .models import ResultRecord  # pylint: disable=import-outside-toplevel
+        from .validation import validate_record  # pylint: disable=import-outside-toplevel
 
         with self._cursor() as cur:
             cur.execute("SELECT * FROM simulations WHERE id = %s;", (row_id,))
             row = cur.fetchone()
 
         if row is None:
-            from src.data.validation import ValidationResult  # noqa: PLC0415
+            from .validation import ValidationResult  # pylint: disable=import-outside-toplevel
             vr = ValidationResult()
             vr.add_error(f"Row {row_id} not found")
             return vr

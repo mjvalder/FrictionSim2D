@@ -1,7 +1,6 @@
 """Data models, validation, and database access for FrictionSim2D."""
 
-from src.data.models import ResultRecord, compute_friction_stats
-from src.data.database import db_from_profile
+from .models import ResultRecord, compute_friction_stats
 
 __all__ = ['ResultRecord', 'compute_friction_stats']
 
@@ -27,9 +26,9 @@ def get_client(mode: str = 'direct', **kwargs):
         ImportError: If the required backend library is not installed.
     """
     if mode == 'api':
-        from src.api.client import FrictionHTTPClient  # noqa: PLC0415
+        from ..api.client import FrictionHTTPClient  # pylint: disable=import-outside-toplevel
         return FrictionHTTPClient(**kwargs)
     if mode == 'direct':
-        from src.data.database import FrictionDB  # noqa: PLC0415
+        from .database import FrictionDB  # pylint: disable=import-outside-toplevel
         return FrictionDB(**kwargs)
     raise ValueError(f"Unknown mode {mode!r}. Use 'direct' or 'api'.")

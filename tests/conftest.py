@@ -97,15 +97,15 @@ def temp_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def materials_path(data_path) -> Path:
-    """Returns the path to materials directory."""
-    return data_path / 'materials'
+def materials_path() -> Path:
+    """Returns the path to examples materials directory."""
+    return Path(__file__).resolve().parents[1] / 'examples' / 'materials'
 
 
 @pytest.fixture
-def potentials_path(data_path) -> Path:
-    """Returns the path to potentials directory."""
-    return data_path / 'potentials'
+def potentials_path() -> Path:
+    """Returns the path to examples potentials directory."""
+    return Path(__file__).resolve().parents[1] / 'examples' / 'potentials'
 
 
 # =========================================================================
@@ -191,7 +191,7 @@ def mock_cifread_si(monkeypatch):
     """Mocks cifread to return Silicon data."""
     def mock_cif(*args, **kwargs):
         return {'elements': ['Si']}
-    monkeypatch.setattr('FrictionSim2D.core.potential_manager.cifread', mock_cif)
+    monkeypatch.setattr('src.core.potential_manager.cifread', mock_cif)
 
 
 @pytest.fixture
@@ -199,7 +199,7 @@ def mock_cifread_mos2(monkeypatch):
     """Mocks cifread to return MoS2 data."""
     def mock_cif(*args, **kwargs):
         return {'elements': ['Mo', 'S']}
-    monkeypatch.setattr('FrictionSim2D.core.potential_manager.cifread', mock_cif)
+    monkeypatch.setattr('src.core.potential_manager.cifread', mock_cif)
 
 
 @pytest.fixture
@@ -207,7 +207,7 @@ def mock_count_atomtypes_si(monkeypatch):
     """Mocks count_atomtypes for Silicon (1 type per element)."""
     def mock_count(*args, **kwargs):
         return {'Si': 1}
-    monkeypatch.setattr('FrictionSim2D.core.potential_manager.count_atomtypes', mock_count)
+    monkeypatch.setattr('src.core.potential_manager.count_atomtypes', mock_count)
 
 
 @pytest.fixture
@@ -215,7 +215,7 @@ def mock_count_atomtypes_mos2(monkeypatch):
     """Mocks count_atomtypes for MoS2 (SW has 6 types: Mo1-6, S1-6)."""
     def mock_count(*args, **kwargs):
         return {'Mo': 6, 'S': 6}
-    monkeypatch.setattr('FrictionSim2D.core.potential_manager.count_atomtypes', mock_count)
+    monkeypatch.setattr('src.core.potential_manager.count_atomtypes', mock_count)
 
 
 @pytest.fixture
@@ -223,4 +223,4 @@ def mock_count_atomtypes_mos2_simple(monkeypatch):
     """Mocks count_atomtypes for MoS2 with simple 1 type per element."""
     def mock_count(*args, **kwargs):
         return {'Mo': 1, 'S': 1}
-    monkeypatch.setattr('FrictionSim2D.core.potential_manager.count_atomtypes', mock_count)
+    monkeypatch.setattr('src.core.potential_manager.count_atomtypes', mock_count)

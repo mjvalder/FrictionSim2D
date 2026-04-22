@@ -21,7 +21,7 @@ from aiida import orm
 from aiida.engine import ToContext
 from aiida.engine.processes.workchains.workchain import WorkChain
 
-from src.aiida.calcjob import LammpsFrictionCalcJob, prepare_simulation_folder
+from .calcjob import LammpsFrictionCalcJob, prepare_simulation_folder
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class FrictionWorkChain(WorkChain):
         if 'config_path' in inputs:
             config_path = Path(inputs.config_path.value)
 
-        from src.aiida.integration import register_single_simulation  # pylint: disable=import-outside-toplevel
+        from .integration import register_single_simulation  # pylint: disable=import-outside-toplevel
 
         uuids = []
         ctx.sim_nodes = {}
@@ -238,7 +238,7 @@ class FrictionWorkChain(WorkChain):
         corresponding ``FrictionSimulationData`` nodes.
         """
         ctx = self.ctx  # type: ignore[attr-defined]
-        from src.aiida.integration import import_results_to_aiida  # pylint: disable=import-outside-toplevel
+        from .integration import import_results_to_aiida  # pylint: disable=import-outside-toplevel
 
         result_uuids = []
         for label in ctx.completed_dirs:

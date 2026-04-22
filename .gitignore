@@ -1,5 +1,4 @@
 src/data/settings/settings.yaml
-src/data/settings/hpc.yaml
 visuals
 *.lammpstrj
 ptest
@@ -7,4 +6,7 @@ scripts
 __pycache__
 results
 run
-*.yaml
+settings.yaml
+.vscode
+.pytest_cache
+frictionsim2d-file-audit.md

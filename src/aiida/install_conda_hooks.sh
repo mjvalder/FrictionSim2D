@@ -9,8 +9,7 @@ if [[ -z "${CONDA_PREFIX:-}" ]]; then
     exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK_SRC_DIR="${SCRIPT_DIR}/hooks"
+HOOK_SRC_DIR="${CONDA_PREFIX}/libexec/frictionsim2d/hooks"
 ACTIVATE_DIR="${CONDA_PREFIX}/etc/conda/activate.d"
 DEACTIVATE_DIR="${CONDA_PREFIX}/etc/conda/deactivate.d"
 

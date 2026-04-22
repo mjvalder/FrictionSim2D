@@ -12,7 +12,7 @@ FrictionSim2D is distributed as a Conda package for maximum reproducibility and 
 Install LAMMPS, Atomsk, and core dependencies:
 
 ```bash
-conda install -c conda-forge frictionsim2d
+conda create -n frictionsim2d -c conda-forge frictionsim2d
 conda activate frictionsim2d
 ```
 
@@ -28,7 +28,7 @@ atomsk --version
 Install base package + AiiDA with bundled PostgreSQL and RabbitMQ:
 
 ```bash
-conda install -c conda-forge frictionsim2d-aiida
+conda create -n frictionsim2d-aiida -c conda-forge frictionsim2d-aiida
 conda activate frictionsim2d-aiida
 ```
 
@@ -41,7 +41,9 @@ frictionsim2d-start-aiida
 This:
 - Starts RabbitMQ with automatic `consumer_timeout` patching (36000000 ms default)
 - Starts PostgreSQL
-- Creates your first AiiDA profile
+- Creates your first AiiDA profile (`friction2d`)
+
+Options: `--profile NAME` to use a custom profile name, `--no-daemon` to skip daemon startup.
 
 Override RabbitMQ timeout if needed:
 ```bash
@@ -63,9 +65,34 @@ verdi profile show
 verdi daemon status
 ```
 
-### Run from source
+### Option C – Community database only
 
-After installation, the `FrictionSim2D` command is available in your environment.
+```bash
+conda create -n frictionsim2d-db -c conda-forge frictionsim2d-db
+conda activate frictionsim2d-db
+```
+
+### Option D – Postprocessing / plotting
+
+```bash
+conda create -n frictionsim2d-plotting -c conda-forge frictionsim2d-plotting
+conda activate frictionsim2d-plotting
+```
+
+### Option E – REST API server
+
+```bash
+conda create -n frictionsim2d-api -c conda-forge frictionsim2d-api
+conda activate frictionsim2d-api
+```
+
+### Option F – All-in-one
+
+```bash
+conda create -n frictionsim2d-all -c conda-forge frictionsim2d-all
+conda activate frictionsim2d-all
+frictionsim2d-start-aiida
+```
 
 ## Quick start
 
@@ -100,7 +127,9 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - `FrictionSim2D hpc generate ...`
 - `FrictionSim2D settings show|init|reset`
 - `FrictionSim2D aiida status|setup|submit|import|query|export|import-archive|package`
-- `FrictionSim2D db upload|query|stats|delete`
+- `FrictionSim2D postprocess read|plot`
+- `FrictionSim2D db init|create-key|upload|stage|query|stats|delete|publish|reject`
+- `FrictionSim2D api serve`
 
 ## Shared database
 

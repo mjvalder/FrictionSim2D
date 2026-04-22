@@ -8,11 +8,11 @@ __version__ = "0.2.0"
 
 import logging
 
-from src.core.run import run_simulations
-from src.builders.afm import AFMSimulation
-from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.core.potential_manager import PotentialManager
-from src.core.config import (
+from .core.run import run_simulations
+from .builders.afm import AFMSimulation
+from .builders.sheetonsheet import SheetOnSheetSimulation
+from .core.potential_manager import PotentialManager
+from .core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
@@ -21,7 +21,7 @@ from src.core.config import (
 
 # Optional AiiDA imports (only available if AiiDA is installed)
 try:
-    from src.aiida.submit import run_with_aiida
+    from .aiida.submit import run_with_aiida
     _AIIDA_AVAILABLE = True
 except ImportError:
     _AIIDA_AVAILABLE = False

@@ -10,17 +10,18 @@ and dispatching them to the AiiDA daemon.
 """
 
 import logging
+import io
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 from aiida import orm
 from aiida.common.exceptions import NotExistent
 from aiida.orm import QueryBuilder
 from aiida.engine import submit as aiida_submit
 
-from src.core.config import GlobalSettings, load_settings
-from src.core.run import run_simulations
-from src.aiida.calcjob import (
+from ..core.config import GlobalSettings, load_settings
+from ..core.run import run_simulations, layer_aware_path_sort_key
+from .calcjob import (
     LammpsFrictionCalcJob,
     prepare_simulation_folder,
     prepare_simulation_root,
@@ -284,7 +285,7 @@ def submit_batch(
     Returns:
         List of submitted ``ProcessNode`` instances.
     """
-    from src.aiida.integration import register_single_simulation  # pylint: disable=import-outside-toplevel
+    from .integration import register_single_simulation  # pylint: disable=import-outside-toplevel
 
     processes = []
     for sim_dir in simulation_dirs:
@@ -336,13 +337,13 @@ def submit_array(
     Returns:
         The submitted ``ProcessNode``.
     """
-    import io
-    from typing import cast  # pylint: disable=import-outside-toplevel
-
     code = orm.load_code(code_label) if isinstance(code_label, str) else code_label
     sim_root = Path(simulation_root)
 
-    ordered_dirs = sorted([Path(p) for p in simulation_dirs], key=str)
+    ordered_dirs = sorted(
+        [Path(p) for p in simulation_dirs],
+        key=lambda p: layer_aware_path_sort_key(str(p.relative_to(sim_root))),
+    )
     rel_paths = [str(p.relative_to(sim_root)) for p in ordered_dirs]
 
     folder = prepare_simulation_root(sim_root, ordered_dirs)
@@ -567,7 +568,7 @@ def _find_lammps_dirs(simulation_dir: Path) -> List[Path]:
         if subdir.is_dir() and (subdir / 'lammps').exists():
             sim_dirs.append(subdir)
 
-    return sorted(sim_dirs)
+    return sorted(sim_dirs, key=lambda p: layer_aware_path_sort_key(p.name))
 
 
 def _parse_walltime(walltime_str: str) -> int:

@@ -7,13 +7,13 @@ generates the necessary potentials, and writes the LAMMPS input scripts.
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, Tuple
 
-from src.core.simulation_base import SimulationBase
-from src.core.config import AFMSimulationConfig
-from src.core.potential_manager import PotentialManager
-from src.data.models import EV_A_TO_NN, NM_TO_EV_A2
-from src.builders import components
+from ..core.simulation_base import SimulationBase
+from ..core.config import AFMSimulationConfig
+from ..core.potential_manager import PotentialManager
+from ..data.models import EV_A_TO_NN
+from . import components
 
 logger = logging.getLogger(__name__)
 
@@ -88,16 +88,6 @@ class AFMSimulation(SimulationBase):
     def _get_hpc_job_name(self) -> str:
         """Get AFM-specific job name."""
         return f"afm_{self.config.sheet.mat}"
-
-    def _collect_simulation_paths(self) -> List[str]:
-        """Collect AFM simulation paths from layer directories (L1, L2, etc.)."""
-        paths = []
-        for item in self.output_dir.iterdir():
-            if item.is_dir() and item.name.startswith('L'):
-                lammps_dir = item / 'lammps'
-                if lammps_dir.exists():
-                    paths.append(item.name)
-        return sorted(paths)
 
     def _init_provenance(self) -> None:
         """Initialize provenance folder and collect input files."""

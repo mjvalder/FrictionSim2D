@@ -16,11 +16,11 @@ import hashlib
 
 from jinja2 import Environment, FileSystemLoader
 
-from src.interfaces.atomsk import AtomskWrapper
-from src.interfaces.jinja import PackageLoader
-from src.core.config import get_material_path, get_potential_path
-from src.hpc import HPCScriptGenerator, HPCConfig
-from src.hpc.manifest import JobManifest
+from ..interfaces.atomsk import AtomskWrapper
+from ..interfaces.jinja import PackageLoader
+from .utils import get_material_path, get_potential_path
+from ..hpc import HPCScriptGenerator, HPCConfig
+from ..hpc.manifest import JobManifest
 
 logger = logging.getLogger(__name__)
 
@@ -283,17 +283,27 @@ class SimulationBase(ABC):
             component_name: Name of the component ('tip', 'sub', 'sheet', etc.)
             config: Component config object (TipConfig, SubstrateConfig, SheetConfig, etc.)
         """
-        cif = getattr(config, 'cif_path', None) or (
-            get_material_path(config.mat) if hasattr(config, 'mat') and config.mat else None
-        )
+        cif = None
+        try:
+            cif = getattr(config, 'cif_path', None) or (
+                get_material_path(config.mat) if hasattr(config, 'mat') and config.mat else None
+            )
+        except (FileNotFoundError, ValueError, KeyError):
+            pass
+
         if cif:
             try:
                 self.add_to_provenance(cif, 'cif', component=component_name)
             except (FileNotFoundError, ValueError, KeyError):
                 pass
 
-        pot_path = getattr(config, 'pot_path', None)
-        pot = get_potential_path(pot_path) if pot_path else None
+        pot = None
+        try:
+            pot_path = getattr(config, 'pot_path', None)
+            pot = get_potential_path(pot_path) if pot_path else None
+        except (FileNotFoundError, ValueError, KeyError):
+            pass
+
         if pot:
             try:
                 self.add_to_provenance(pot, 'potential', component=component_name)
