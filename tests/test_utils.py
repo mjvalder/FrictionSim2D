@@ -76,6 +76,13 @@ class TestLjParams:
         eps_upper, sig_upper = lj_params('C', 'H')
         assert eps_mixed == eps_upper
         assert sig_mixed == sig_upper
+
+    def test_lj_params_two_letter_symbols_case_normalization(self):
+        """Test that two-letter element symbols normalize correctly."""
+        eps_upper, sig_upper = lj_params('NB', 'NI')
+        eps_canonical, sig_canonical = lj_params('Nb', 'Ni')
+        assert eps_upper == eps_canonical
+        assert sig_upper == sig_canonical
     
     def test_lj_params_symmetric(self):
         """Test that LJ parameters are symmetric for swapped atoms."""

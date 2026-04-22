@@ -186,7 +186,7 @@ def _get_connection_params(
     return {
         'host': host or os.environ.get('FRICTION_DB_HOST', 'localhost'),
         'port': port or int(os.environ.get('FRICTION_DB_PORT', '5432')),
-        'dbname': dbname or os.environ.get('FRICTION_DB_NAME', 'frictionsim2d'),
+        'dbname': dbname or os.environ.get('FRICTION_DB_NAME', 'frictionsim2ddb'),
         'user': user or os.environ.get('FRICTION_DB_USER', ''),
         'password': password or os.environ.get('FRICTION_DB_PASSWORD', ''),
     }

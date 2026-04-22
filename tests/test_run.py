@@ -6,6 +6,7 @@ import pytest
 
 from src.core.config import load_settings as real_load_settings
 from src.core.run import (
+    _validate_runtime_sweep_ordering,
     _build_hpc_manifest_entries,
     collect_hpc_simulation_paths,
     expand_config_sweeps,
@@ -35,6 +36,28 @@ def test_expand_config_sweeps_does_not_expand_2d_layers() -> None:
 
     assert len(expanded) == 1
     assert expanded[0]["2D"]["layers"] == [3, 4]
+
+
+def test_runtime_validation_rejects_unsorted_pressure() -> None:
+    """Runtime validation should reject non-ascending pressure lists."""
+    with pytest.raises(ValueError, match="pressure must be in ascending order"):
+        _validate_runtime_sweep_ordering({"pressure": [1.0, 0.1]})
+
+
+def test_runtime_validation_rejects_unsorted_scan_angle_force() -> None:
+    """Runtime validation should reject non-ascending selector lists."""
+    with pytest.raises(ValueError, match="scan_angle_force must be in ascending order"):
+        _validate_runtime_sweep_ordering(
+            {"pressure": [0.1, 1.0, 10.0], "scan_angle_force": [10.0, 0.1]}
+        )
+
+
+def test_runtime_validation_rejects_selector_not_in_target_order() -> None:
+    """Selector values must follow pressure/force order as a subsequence."""
+    with pytest.raises(ValueError, match="scan_angle_force must follow the same order as pressure values"):
+        _validate_runtime_sweep_ordering(
+            {"pressure": [0.1, 1.0, 10.0], "scan_angle_force": [0.1, 5.0]}
+        )
 
 
 def test_expand_config_sweeps_expands_general_non_lammps_lists() -> None:

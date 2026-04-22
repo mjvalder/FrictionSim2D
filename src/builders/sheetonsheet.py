@@ -7,7 +7,7 @@ This module orchestrates the setup of a friction simulation between two
     - Layer N: Rigid, driven by virtual atom (top)
 
 Constraint modes control interlayer bonding and ghost interactions:
-    - atom_bonds: Harmonic bonds between top 2 and (if N>3) bottom 2 layers,
+    - atom_bonds: Harmonic bonds between top 2 layers only,
         ghost LJ for non-adjacent layers.
     - com_spring: COM spring between top 2 layers, ghost LJ for non-adjacent
         layers, no constraints on bottom layers.
@@ -239,7 +239,7 @@ class SheetOnSheetSimulation(SimulationBase):
         rel_run_dir_str = str(self.relative_run_dir)
 
         if constraint_mode == 'atom_bonds':
-            n_bond_types = 2 if n_layers > MIN_LAYERS else 1
+            n_bond_types = 1
         else:
             n_bond_types = 0
 
@@ -258,6 +258,7 @@ class SheetOnSheetSimulation(SimulationBase):
         base_context = {
             'temp': self.config.general.temp,
             'scan_angle_config': self.config.general.scan_angle,
+            'scan_angle_force': self.config.general.scan_angle_force,
             'xlo': self.sheet_dims.get('xlo', 0.0),
             'xhi': self.sheet_dims.get('xhi', 100.0),
             'ylo': self.sheet_dims.get('ylo', 0.0),

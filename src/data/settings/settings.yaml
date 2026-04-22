@@ -38,7 +38,8 @@ simulation:
   min_style: 'cg'            # Minimization style (e.g., 'cg')
   minimization_command: 'minimize 1e-4 1e-8 1000000 1000000' # Minimization command
   drive_method: 'virtual_atom' # Method to drive the tip ('virtual_atom' or 'fix_move' or 'smd')
-
+  constraint_mode: 'atom_bonds'          # Constraint mode for the tip ('none', 'atom_bonds', or 'com_spring')
+  
 # Potential settings
 potential:
   LJ_type: 'LJ_base'         # Type of Lennard-Jones potential used

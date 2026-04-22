@@ -1,6 +1,7 @@
 """Tests for AFMSimulation builder layer sweep behavior."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -191,3 +192,89 @@ def test_afm_collect_simulation_paths_lists_layer_dirs(tmp_path: Path) -> None:
     (out_dir / "misc").mkdir(parents=True, exist_ok=True)
 
     assert builder._collect_simulation_paths() == ["L1", "L3"]
+
+
+def _prepare_builder_for_slide_write(builder: AFMSimulation, tmp_path: Path) -> Path:
+    """Seed builder state so write_inputs can render slide.in in isolation."""
+    output_dir = tmp_path / "out"
+    layer_dir = output_dir / "L1"
+
+    builder.output_dir = output_dir
+    builder.relative_run_dir = Path("out")
+    builder.output_dir_layer[1] = layer_dir
+    builder.relative_run_dir_layer[1] = Path("out") / "L1"
+
+    builder.sheet_paths[1] = tmp_path / "sheet.lmp"
+    builder.tip_path = tmp_path / "tip.lmp"
+    builder.sub_path = tmp_path / "sub.lmp"
+
+    builder.z_positions[1] = {"sub": 0.0, "sheet": 16.0, "tip": 40.0}
+    builder.groups[1] = {
+        "sub_types": "1",
+        "tip_types": "2",
+        "sheet_types": "3",
+    }
+    builder.pm[1] = SimpleNamespace(types=[1, 2, 3])
+    builder.lat_c = 6.0
+    builder.sheet_dims = {
+        "xlo": 0.0,
+        "xhi": 100.0,
+        "ylo": 0.0,
+        "yhi": 100.0,
+        "zlo": 0.0,
+        "zhi": 12.0,
+    }
+
+    for path in (builder.sheet_paths[1], builder.tip_path, builder.sub_path):
+        path.write_text("# dummy\n", encoding="utf-8")
+
+    builder.write_inputs(1)
+    return layer_dir / "lammps" / "slide.in"
+
+
+def test_afm_scan_angle_list_with_force_gate(tmp_path: Path) -> None:
+    """Explicit angle lists should be used directly (no interval expansion)."""
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.force = [2.0, 5.0, 10.0, 20.0, 30.0]
+    config.general.scan_angle = [2.0, 10.0, 4.0]
+    config.general.scan_angle_force = 30.0
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    slide_script = slide_path.read_text(encoding="utf-8")
+
+    assert "variable        a index 2.0 10.0 4.0" in slide_script
+    assert "variable        scan_angle_force equal 30.0" in slide_script
+    assert "abs(v_find-v_scan_angle_force) < 1.0e-12" in slide_script
+
+
+def test_afm_scan_angle_explicit_list_with_force_gate(tmp_path: Path) -> None:
+    """Explicit AFM angle lists should be supported with a separate force gate."""
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.force = [2.0, 5.0, 10.0, 20.0, 30.0]
+    config.general.scan_angle = [0.0, 2.0, 6.0, 10.0]
+    config.general.scan_angle_force = 30.0
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    slide_script = slide_path.read_text(encoding="utf-8")
+
+    assert "variable        a index 0.0 2.0 6.0 10.0" in slide_script
+    assert "variable        scan_angle_force equal 30.0" in slide_script
+    assert "abs(v_find-v_scan_angle_force) < 1.0e-12" in slide_script
+
+
+def test_afm_scan_angle_force_accepts_multiple_targets(tmp_path: Path) -> None:
+    """scan_angle_force should support lists of target force values."""
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.force = [2.0, 5.0, 10.0, 20.0, 30.0]
+    config.general.scan_angle = [0.0, 45.0, 90.0]
+    config.general.scan_angle_force = [10.0, 30.0]
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    slide_script = slide_path.read_text(encoding="utf-8")
+
+    assert "variable        scan_angle_force index 10.0 30.0" in slide_script
+    assert "abs(v_find-v_scan_angle_force) < 1.0e-12" in slide_script
+    assert "then \"next scan_angle_force\"" in slide_script

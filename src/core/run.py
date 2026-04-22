@@ -24,6 +24,55 @@ from src.hpc import HPCScriptGenerator, HPCConfig
 logger = logging.getLogger(__name__)
 
 
+def _as_float_list(value: Any) -> List[float]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [float(v) for v in value]
+    return [float(value)]
+
+
+def _is_ascending(values: List[float]) -> bool:
+    return all(values[i] <= values[i + 1] for i in range(len(values) - 1))
+
+
+def _is_subsequence(subseq: List[float], seq: List[float], tol: float = 1.0e-12) -> bool:
+    if not subseq:
+        return True
+    idx = 0
+    for value in seq:
+        if abs(value - subseq[idx]) <= tol:
+            idx += 1
+            if idx == len(subseq):
+                return True
+    return False
+
+
+def _validate_runtime_sweep_ordering(general_cfg: Dict[str, Any]) -> None:
+    """Validate sweep ordering in runtime path (CLI/script flow)."""
+    for field_name in ('force', 'pressure', 'scan_angle', 'scan_angle_force'):
+        values = _as_float_list(general_cfg.get(field_name))
+        if len(values) > 1 and not _is_ascending(values):
+            raise ValueError(f"{field_name} must be in ascending order")
+
+    selector = _as_float_list(general_cfg.get('scan_angle_force'))
+    if len(selector) <= 1:
+        return
+
+    force_values = _as_float_list(general_cfg.get('force'))
+    pressure_values = _as_float_list(general_cfg.get('pressure'))
+    target_field = 'force' if force_values else 'pressure'
+    target_values = force_values if force_values else pressure_values
+
+    if not target_values:
+        raise ValueError("scan_angle_force list requires force or pressure values")
+
+    if not _is_subsequence(selector, target_values):
+        raise ValueError(
+            f"scan_angle_force must follow the same order as {target_field} values"
+        )
+
+
 def expand_config_sweeps(base_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Expand config with material lists and parameter sweeps."""
     sweep_params = {}
@@ -239,6 +288,9 @@ def run_simulations(
         ensure_hpc_settings(defaults.hpc)
 
     configs_to_run = expand_config_sweeps(base_dict)
+
+    for idx, run_dict in enumerate(configs_to_run, start=1):
+        _validate_runtime_sweep_ordering(run_dict.get('general', {}))
 
     root_name = simulation_root_name or datetime.now().strftime("simulation_%Y%m%d_%H%M%S")
     base_root = Path(output_root) if output_root is not None else Path.cwd()

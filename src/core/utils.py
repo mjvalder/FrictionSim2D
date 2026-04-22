@@ -239,12 +239,20 @@ def get_num_atom_types(lmp_path: Union[str, Path]) -> int:
                 return int(line.split()[0])
     return 1
 
+def _normalize_element_symbol(value: str) -> str:
+    """Normalize element-like tokens to canonical symbol case."""
+    token = value.strip()
+    if not token:
+        return token
+    return token[0].upper() + token[1:].lower()
+
+
 def lj_params(atom_type_1: str, atom_type_2: str) -> Tuple[float, float]:
     """Calculate LJ parameters using Lorentz-Berthelot mixing rules.
 
     Pulls UFF parameters and applies mixing rules to determine interaction
-    parameters between two atom types. Atom types are normalized to uppercase,
-    so lowercase or mixed-case symbols (e.g., 'c', 'C', 'cArBoN') are accepted.
+    parameters between two atom types. Atom types are normalized to canonical
+    element symbol case (e.g., 'nb'/'NB'/'nB' -> 'Nb').
 
     Args:
         atom_type_1: Symbol of the first atom type (e.g., 'C', 'c', 'H').
@@ -256,9 +264,9 @@ def lj_params(atom_type_1: str, atom_type_2: str) -> Tuple[float, float]:
     Raises:
         KeyError: If atom type is not found in LJ parameters database.
     """
-    # Normalize to uppercase to handle case variations
-    key1 = atom_type_1.upper()
-    key2 = atom_type_2.upper()
+    # Normalize to canonical symbol case so two-letter elements map correctly
+    key1 = _normalize_element_symbol(atom_type_1)
+    key2 = _normalize_element_symbol(atom_type_2)
 
     try:
         e1 = lj.lj_params[key1][1]

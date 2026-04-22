@@ -14,16 +14,20 @@ label           force_loop
 variable        find equal {{ forces }}
 {% endif %}
 
-{% if scan_angle_config is iterable and scan_angle_config is not string %}
-{% if scan_angle_config|length >= 3 %}
-{% set angle_values = range(scan_angle_config[0]|int, (scan_angle_config[1] + 1)|int, scan_angle_config[2]|int) | list %}
-variable        a index {{ angle_values | join(' ') }}
-{% else %}
+{% set scan_angle_is_sequence = scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
+
+{% if scan_angle_is_sequence %}
 variable        a index {{ scan_angle_config | join(' ') }}
-{% endif %}
 label           angle_loop
 {% else %}
-variable        a equal {{ scan_angle_config }}
+variable        a equal {{ scan_angle_config if scan_angle_config is not none else 0 }}
+{% endif %}
+
+{% set scan_angle_force_is_sequence = scan_angle_force is iterable and scan_angle_force is not string and scan_angle_force|length > 0 %}
+{% if scan_angle_force_is_sequence %}
+variable        scan_angle_force index {{ scan_angle_force | join(' ') }}
+{% elif scan_angle_force is number %}
+variable        scan_angle_force equal {{ scan_angle_force }}
 {% endif %}
 
 clear
@@ -114,12 +118,9 @@ fix             move_virtual virtual move linear $(v_spring_x*${speed}/100) $(v_
 
 run             {{ run_steps }}
 
-{% if scan_angle_config is iterable and scan_angle_config is not string %}
-{% if scan_angle_config|length >= 4 %}
-if              '$(v_a) == {{ scan_angle_config[1] }}' then jump SELF find_incr
-
-{% if scan_angle_config[3] is number %}
-if              '$(v_find) == {{ scan_angle_config[3] }}' then &
+{% if scan_angle_is_sequence %}
+{% if scan_angle_force is number or scan_angle_force_is_sequence %}
+if              'abs(v_find-v_scan_angle_force) < 1.0e-12' then &
                 "next a" &
                 "clear" &
                 "jump SELF angle_loop"
@@ -128,19 +129,16 @@ next            a
 clear
 jump            SELF angle_loop
 {% endif %}
-
-label           find_incr
-{% else %}
-next            a
-clear
-jump            SELF angle_loop
 {% endif %}
+
+{% if scan_angle_is_sequence and scan_angle_force_is_sequence %}
+if              'abs(v_find-v_scan_angle_force) < 1.0e-12' then "next scan_angle_force"
 {% endif %}
 
 {% if forces is iterable and forces is not string %}
 next            find
 clear
-{% if scan_angle_config is iterable and scan_angle_config is not string %}
+{% if scan_angle_is_sequence %}
 variable        a delete
 {% endif %}
 jump            SELF force_loop
@@ -152,7 +150,7 @@ clear
 {% if forces is iterable and forces is not string %}
 variable        find delete
 {% endif %}
-{% if scan_angle_config is iterable and scan_angle_config is not string %}
+{% if scan_angle_is_sequence %}
 variable        a delete
 {% endif %}
 jump            SELF speed_loop

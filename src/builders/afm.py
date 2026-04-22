@@ -295,6 +295,7 @@ class AFMSimulation(SimulationBase):
             'temp': self.config.general.temp,
             'forces': self.config.general.force,
             'scan_angle_config': self.config.general.scan_angle,
+            'scan_angle_force': self.config.general.scan_angle_force,
             'scan_speed_config': self.config.general.scan_speed,
             'xlo': xlo,
             'xhi': xhi,

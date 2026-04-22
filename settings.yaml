@@ -38,6 +38,7 @@ simulation:
   min_style: 'cg'            # Minimization style (e.g., 'cg')
   minimization_command: 'minimize 1e-4 1e-8 1000000 1000000' # Minimization command
   drive_method: 'virtual_atom' # Method to drive the tip ('virtual_atom' or 'fix_move' or 'smd')
+  constraint_mode: 'atom_bonds'          # Constraint mode for the tip ('none', 'atom_bonds', or 'com_spring')
 
 # Potential settings
 potential:
@@ -107,14 +108,14 @@ database:
   local:
     host: 'localhost'
     port: 5432
-    dbname: 'frictionsim2d'
+    dbname: 'frictionsim2ddb'
     user: ''          # set via FRICTION_DB_USER on the server machine
     password: ''      # set via FRICTION_DB_PASSWORD on the server machine
 
   central:
     host: 'localhost'   # change to your server's IP/hostname when deployed
     port: 5432
-    dbname: 'frictionsim2d'
+    dbname: 'frictionsim2ddb'
     user: ''            # set via FRICTION_DB_USER on the server machine
     password: ''        # set via FRICTION_DB_PASSWORD on the server machine
     api_key: ''         # not used in API mode; kept for direct-connection fallback

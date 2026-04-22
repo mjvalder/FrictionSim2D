@@ -84,7 +84,8 @@ stack_type = AB
 [general]
 temp = 300
 pressure = [-0.5, 0.1, 1, 10]    # Applied pressure in GPa (sweepable)
-scan_angle = [0, 90, 15, 1]      # [start, end, step, force/pressure]
+scan_angle = [0, 45, 90]         # Explicit scan-angle list (degrees)
+scan_angle_force = [1]           # Optional: apply angle list only at selected pressure/force values
 scan_speed = 1                    # Scan velocity in m/s
 bond_spring = 5                   # Spring between sheets in eV/A^2
 driving_spring = 50               # Drive spring in N/m
@@ -118,16 +119,19 @@ force = [5, 10, 20]              # 3 values
 
 ### Scan Angle Sweeps
 
-Special 4-element format for scan angle ranges:
+Use explicit angle lists. Optionally restrict angle sweeps to specific
+force/pressure values using `scan_angle_force`.
 
 ```ini
 [general]
-# Format: [start, end, step, force_or_pressure]
-scan_angle = [0, 90, 15, 10]     # 0° to 90° every 15°, at force=10 nN
-# Generates: 0°, 15°, 30°, 45°, 60°, 75°, 90° (7 simulations)
-```
+scan_angle = [0, 15, 30, 45, 60, 75, 90]   # Explicit angle list
+scan_angle_force = 10                        # Optional force/pressure selector
 
-The 4th element selects which force/pressure value to use when combined with force/pressure sweeps.
+# Or apply the angle list at multiple selectors:
+scan_angle_force = [5, 10, 20]
+
+# If scan_angle_force is omitted, all scan angles apply to all force/pressure values.
+```
 
 ### Material List Sweeps
 
@@ -366,7 +370,8 @@ cif_path = Si.cif
 [general]
 temp = 300
 force = [5, 10, 20, 50]    # 4 force values
-scan_angle = [0, 90, 15, 10]  # 7 angles at F=10nN
+scan_angle = [0, 15, 30, 45, 60, 75, 90]  # 7 explicit angles
+scan_angle_force = 10                      # apply angle sweep only at F=10 nN
 scan_speed = 2
 # Total: 3 layers × (4 forces + 7 angles) = 33 simulations
 ```

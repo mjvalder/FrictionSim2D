@@ -793,7 +793,7 @@ _DB_OPTIONS = [
     click.option('--port', default=None, type=int, envvar='FRICTION_DB_PORT',
                  help='Database port (default: $FRICTION_DB_PORT or 5432)'),
     click.option('--dbname', default=None, envvar='FRICTION_DB_NAME',
-                 help='Database name (default: $FRICTION_DB_NAME or frictionsim2d)'),
+                 help='Database name (default: $FRICTION_DB_NAME or frictionsim2ddb)'),
     click.option('--user', '-u', default=None, envvar='FRICTION_DB_USER',
                  help='Database username (default: $FRICTION_DB_USER)'),
     click.option('--password', default=None, envvar='FRICTION_DB_PASSWORD',

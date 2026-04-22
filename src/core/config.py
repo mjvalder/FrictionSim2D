@@ -131,7 +131,7 @@ class DatabaseProfileSettings(BaseModel):
     """Connection parameters for a single database profile."""
     host: str = 'localhost'
     port: int = 5432
-    dbname: str = 'frictionsim2d'
+    dbname: str = 'frictionsim2ddb'
     user: str = ''
     password: str = ''
     api_key: str = ''
@@ -235,12 +235,20 @@ class GeneralConfig(BaseModel):
     force: Optional[Union[float, List[float]]] = None
     pressure: Optional[Union[float, List[float]]] = None
     scan_angle: Optional[Union[float, List[float]]] = 0.0
+    scan_angle_force: Optional[Union[float, List[float]]] = Field(
+        None,
+        description=(
+            "Optional force/pressure selector for applying the scan_angle list. "
+            "Accepts a single value or a list of values. If omitted, all scan "
+            "angles are applied to all force/pressure values."
+        )
+    )
     scan_speed: Optional[Union[float, List[float]]] = 2.0
     outer_loop: Optional[Literal['pressure', 'scan_speed']] = Field(
         None,
         description=(
             "Parameter expanded as separate LAMMPS input files (slide_*.in). "
-            "If omitted, legacy single-script behavior is used."
+            "If omitted, single-script behavior is used."
         )
     )
     bond_spring: Optional[float] = Field(80.0, description="Spring constant for harmonically bonded sheets")
