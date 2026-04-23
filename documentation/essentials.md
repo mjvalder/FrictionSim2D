@@ -73,3 +73,9 @@ Recommended minimum to archive per study:
 - `provenance/manifest.json`
 - Settings used at generation time
 - Environment description (for example, package list)
+
+## Related Docs
+
+- [configuration_guide.md](configuration_guide.md)
+- [settings_reference.md](settings_reference.md)
+- [HPC_TWO_PHASE_JOBS.md](HPC_TWO_PHASE_JOBS.md)

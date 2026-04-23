@@ -66,3 +66,5 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - [configuration_guide.md](configuration_guide.md)
 - [commands.md](commands.md)
 - [examples.md](examples.md)
+
+For day-to-day runs, start with [configuration_guide.md](configuration_guide.md), then use [commands.md](commands.md) and [examples.md](examples.md).

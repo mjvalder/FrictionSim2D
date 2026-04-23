@@ -90,3 +90,9 @@ FrictionSim2D api serve --host 0.0.0.0 --port 8000
 AiiDA commands abort immediately
 
 - Install AiiDA dependencies (`pip install -e .[aiida]`), then rerun `FrictionSim2D aiida setup`.
+
+## Related Docs
+
+- [mainpage.md](mainpage.md)
+- [commands.md](commands.md)
+- [aiida_workflows.md](aiida_workflows.md)

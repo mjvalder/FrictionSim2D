@@ -16,7 +16,7 @@ from src import AFMSimulation, SheetOnSheetSimulation
 
 If AiiDA extras are installed, `run_with_aiida` is also exported.
 
-## 1) Run AFM from Python
+## 1. Run AFM from Python
 
 ```python
 from src import afm
@@ -24,7 +24,7 @@ from src import afm
 afm(config_file="afm_config.ini", output_root="./simulation_output", generate_hpc=True)
 ```
 
-## 2) Run Sheet-on-Sheet from Python
+## 2. Run Sheet-on-Sheet from Python
 
 ```python
 from src import sheetonsheet
@@ -32,7 +32,7 @@ from src import sheetonsheet
 sheetonsheet(config_file="sheet_config.ini", output_root="./simulation_output")
 ```
 
-## 3) Use `run_simulations` Directly
+## 3. Use `run_simulations` Directly
 
 ```python
 from src.core.run import run_simulations
@@ -54,7 +54,7 @@ Return values:
 - `expanded`: expanded config dictionaries after sweep processing
 - `settings`: loaded global settings object
 
-## 4) Parse and Validate Configs
+## 4. Parse and Validate Configs
 
 ```python
 from src.core.config import parse_config, AFMSimulationConfig, load_settings
@@ -64,7 +64,7 @@ raw["settings"] = load_settings().model_dump()
 validated = AFMSimulationConfig(**raw)
 ```
 
-## 5) Builder-Level Usage
+## 5. Builder-Level Usage
 
 ```python
 from src.builders.afm import AFMSimulation
@@ -79,7 +79,7 @@ sim.set_base_output_dir("./")
 sim.build()
 ```
 
-## 6) AiiDA Helper
+## 6. AiiDA Helper
 
 ```python
 from src.aiida.submit import run_with_aiida
@@ -94,3 +94,9 @@ Use this for generate+submit flow with one call.
 - `src.__init__` defines convenience wrappers `afm()` and `sheetonsheet()`.
 - Internal helper `_run_all()` exists in source but is intentionally internal by naming convention.
 - For long sweeps, call patterns that return created paths and log metadata immediately to your run notebook or database.
+
+## Related Docs
+
+- [configuration_guide.md](configuration_guide.md)
+- [settings_reference.md](settings_reference.md)
+- [aiida_workflows.md](aiida_workflows.md)

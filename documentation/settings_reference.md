@@ -217,3 +217,9 @@ database:
 ```
 
 These values back `db` and `api` command groups when explicit CLI options are not provided.
+
+## Related Docs
+
+- [configuration_guide.md](configuration_guide.md)
+- [commands.md](commands.md)
+- [aiida_workflows.md](aiida_workflows.md)

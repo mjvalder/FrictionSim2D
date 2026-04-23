@@ -196,3 +196,9 @@ Common failures:
 2. Confirm folder output before launching large sweeps.
 3. Keep absolute or clearly relative paths to avoid file resolution surprises.
 4. Version your config files with each simulation campaign.
+
+## Related Docs
+
+- [settings_reference.md](settings_reference.md)
+- [commands.md](commands.md)
+- [examples.md](examples.md)

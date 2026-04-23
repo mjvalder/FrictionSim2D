@@ -32,3 +32,19 @@ If your goal is to generate and run simulations quickly, prioritize:
 4. [examples.md](examples.md)
 
 The architecture document is useful for reproducibility and development work, but not required for day-to-day simulation setup.
+
+## Suggested Reading Paths
+
+CLI-first users:
+
+1. [mainpage.md](mainpage.md)
+2. [configuration_guide.md](configuration_guide.md)
+3. [commands.md](commands.md)
+4. [examples.md](examples.md)
+
+Python/API-first users:
+
+1. [python_api_guide.md](python_api_guide.md)
+2. [configuration_guide.md](configuration_guide.md)
+3. [settings_reference.md](settings_reference.md)
+4. [aiida_workflows.md](aiida_workflows.md)

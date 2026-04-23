@@ -69,3 +69,9 @@ Unexpected script ordering:
 Dependency errors at submit time:
 
 - Check scheduler syntax and whether wrapper script captured the first job ID correctly.
+
+## Related Docs
+
+- [commands.md](commands.md)
+- [settings_reference.md](settings_reference.md)
+- [essentials.md](essentials.md)

@@ -258,3 +258,9 @@ Options:
 - For the latest generated command usage, run `FrictionSim2D <group> <command> --help`.
 - `run` commands currently expose `--hpc-scripts` and do not expose `--hpc` or `--local` flags.
 - `postprocess plot` expects a JSON plot configuration file, not a results directory path.
+
+## Related Docs
+
+- [configuration_guide.md](configuration_guide.md)
+- [examples.md](examples.md)
+- [aiida_workflows.md](aiida_workflows.md)

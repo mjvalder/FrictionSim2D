@@ -60,3 +60,9 @@ AiiDA integration and postprocessing tools can read provenance contents to map s
 - Current implementation copies files rather than creating symlinks, prioritizing portability.
 - If very large potential files are used repeatedly, storage usage can increase.
 - Manifest schema is simple JSON; there is no strict external schema file yet.
+
+## Related Docs
+
+- [essentials.md](essentials.md)
+- [aiida_workflows.md](aiida_workflows.md)
+- [python_api_guide.md](python_api_guide.md)
