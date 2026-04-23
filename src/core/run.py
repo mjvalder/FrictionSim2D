@@ -270,6 +270,7 @@ def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> None:
 def run_simulations(
     config_file: str,
     model: str,
+    settings_file: Optional[Union[str, Path]] = None,
     output_root: Optional[Union[str, Path]] = None,
     ensure_hpc_settings=None,
     use_aiida: bool = False,
@@ -285,7 +286,7 @@ def run_simulations(
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
     base_dict = parse_config(config_path)
-    defaults = load_settings()
+    defaults = load_settings(settings_file=settings_file)
 
     if use_aiida:
         defaults.aiida.enabled = True

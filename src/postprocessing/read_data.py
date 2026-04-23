@@ -100,7 +100,7 @@ class DataReader:
             DataFrame with added lateral_force and cof columns.
         """
         if 'lfx' in df.columns and 'lfy' in df.columns and 'nf' in df.columns:
-            from src.data.models import compute_derived_columns  # noqa: PLC0415
+            from ..data.models import compute_derived_columns  # noqa: PLC0415
 
             lateral_force, cof = compute_derived_columns(
                 df['lfx'].values, df['lfy'].values, df['nf'].values,

@@ -5,8 +5,8 @@ parameters. By leveraging Pydantic, it ensures that all configurations—from
 low-level engine settings to high-level experimental parameters—are validated
 for correctness before a simulation is executed.
 """
-from importlib import resources
 import json
+import os
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any, Literal, cast
 import yaml
@@ -141,10 +141,19 @@ class DatabaseSettings(BaseModel):
     """Database connection and staging pipeline configuration."""
     active_profile: str = 'local'
     local: DatabaseProfileSettings = Field(default_factory=DatabaseProfileSettings)
-    central: DatabaseProfileSettings = Field(default_factory=lambda: DatabaseProfileSettings(host=''))
+    central: DatabaseProfileSettings = Field(
+        default_factory=lambda: DatabaseProfileSettings(
+            host=os.environ.get('FRICTION_CENTRAL_DB_HOST', 'localhost'),
+            port=int(os.environ.get('FRICTION_CENTRAL_DB_PORT', '5432')),
+            dbname=os.environ.get('FRICTION_CENTRAL_DB_NAME', 'frictionsim2ddb'),
+            user=os.environ.get('FRICTION_CENTRAL_DB_USER', ''),
+            password=os.environ.get('FRICTION_CENTRAL_DB_PASSWORD', ''),
+            api_key=os.environ.get('FRICTION_DB_API_KEY', ''),
+        )
+    )
     auto_validate: bool = True
     skip_fraction: float = 0.2
-    api_url: str = 'http://localhost:8000'
+    api_url: str = os.environ.get('FRICTION_CENTRAL_API_URL', 'http://localhost:8000')
     api_host: str = '0.0.0.0'
     api_port: int = 8000
 
@@ -273,43 +282,75 @@ class SheetOnSheetSimulationConfig(BaseModel):
 
 # --- Helper Functions ---
 
-def _ensure_default_settings_files() -> None:
-    """Create settings.yaml in src/data/settings if it is missing.
+def _global_settings_path() -> Path:
+    """Return the semi-permanent per-user settings path.
 
-    Note: hpc.yaml is no longer auto-created. It's only needed for AiiDA
-    remote computer setup and should be created manually when needed.
+    Respects ``$XDG_CONFIG_HOME`` on Linux; falls back to ``~/.config``.
     """
-    settings_dir = Path(__file__).resolve().parents[1] / 'data' / 'settings'
-    settings_dir.mkdir(parents=True, exist_ok=True)
+    xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
+    base = Path(xdg_config_home) if xdg_config_home else (Path.home() / '.config')
+    return base / 'FrictionSim2D' / 'settings.yaml'
 
-    settings_path = settings_dir / 'settings.yaml'
-    if not settings_path.exists():
-        defaults = GlobalSettings()
-        settings_path.write_text(
-            yaml.safe_dump(defaults.model_dump(), sort_keys=False),
-            encoding='utf-8'
-        )
 
-def load_settings() -> GlobalSettings:
-    """Load settings from package settings.yaml, or use hardcoded defaults.
+def _settings_paths_in_precedence_order(settings_file: Optional[Union[str, Path]] = None) -> List[Path]:
+    """Return candidate settings files in descending precedence order.
 
-    Checks for settings.yaml in the package data/settings folder. If it exists
-    and is populated, loads those settings. Otherwise returns hardcoded defaults.
+    Order:
+      1. Explicit ``settings_file`` argument (user-provided for this run)
+      2. ``~/.config/FrictionSim2D/settings.yaml`` (semi-permanent global)
+
+    If neither is present, hardcoded :class:`GlobalSettings` defaults are used.
+    """
+    paths: List[Path] = []
+
+    if settings_file:
+        paths.append(Path(settings_file).expanduser())
+
+    paths.append(_global_settings_path())
+    return paths
+
+
+def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
+    """Load settings onto hardcoded defaults.
+
+    Search order (first file found wins):
+      1. Explicit ``settings_file`` argument
+      2. ``~/.config/FrictionSim2D/settings.yaml`` (semi-permanent global)
+
+    If no file is found, the hardcoded Pydantic defaults in
+    :class:`GlobalSettings` are returned unchanged.
+
+    Args:
+        settings_file: Optional path to a settings YAML file for explicit,
+            per-run configuration.
 
     Returns:
-        GlobalSettings with values from settings.yaml if present, else defaults.
+        :class:`GlobalSettings` populated from the first matching file, or
+        pure defaults if no file exists.
     """
-    try:
-        _ensure_default_settings_files()
-        settings_resource = resources.files('src.data.settings').joinpath('settings.yaml')
-        if settings_resource.is_file():
-            with settings_resource.open('r') as f:
-                user_settings = yaml.safe_load(f) or {}
-                if user_settings:
-                    return cast(GlobalSettings, GlobalSettings.model_validate(user_settings))
-    except (FileNotFoundError, AttributeError):
-        pass
+    for path in _settings_paths_in_precedence_order(settings_file=settings_file):
+        try:
+            if not path.is_file():
+                continue
+            with path.open('r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            if data:
+                return cast(GlobalSettings, GlobalSettings.model_validate(data))
+        except (FileNotFoundError, OSError, yaml.YAMLError):
+            continue
+
     return cast(GlobalSettings, GlobalSettings())
+
+
+def settings_origin(settings_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
+    """Return the path of the settings file currently in effect, or ``None``.
+
+    Useful for ``settings show --origin`` to tell the user which file is being used.
+    """
+    for path in _settings_paths_in_precedence_order(settings_file=settings_file):
+        if path.is_file():
+            return path
+    return None
 
 
 def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:

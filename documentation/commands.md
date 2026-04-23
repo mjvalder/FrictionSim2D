@@ -187,17 +187,29 @@ FrictionSim2D db init [DB OPTIONS]
 FrictionSim2D db create-key --name NAME [DB OPTIONS]
 ```
 
+### db setup
+
+```bash
+FrictionSim2D db setup [--name NAME] [--profile PROFILE] [DB OPTIONS]
+```
+
+Initializes schema, creates an API key, and stores it in `~/.config/FrictionSim2D/settings.yaml`.
+
 ### db upload
 
 ```bash
 FrictionSim2D db upload RESULTS_DIR [--uploader NAME] [DB OPTIONS]
 ```
 
+Current behavior: each uploaded row is validated automatically. Valid rows are published; invalid rows are rejected.
+
 ### db stage
 
 ```bash
 FrictionSim2D db stage RESULTS_DIR --uploader NAME [--api-key KEY] [DB OPTIONS]
 ```
+
+Current behavior: staged rows are validated automatically and then published when valid (or rejected when invalid).
 
 ### db query
 
@@ -258,6 +270,7 @@ Options:
 - For the latest generated command usage, run `FrictionSim2D <group> <command> --help`.
 - `run` commands currently expose `--hpc-scripts` and do not expose `--hpc` or `--local` flags.
 - `postprocess plot` expects a JSON plot configuration file, not a results directory path.
+- API `POST /results` submissions run automatic validation and will end in `published` or `rejected`.
 
 ## Related Docs
 

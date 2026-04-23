@@ -19,8 +19,9 @@ Typical workflow on HPC
 
 import json
 import logging
+import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import AIIDA_AVAILABLE
 
@@ -43,12 +44,51 @@ _REGISTRATION_EXCEPTIONS = (
 )
 
 
+def _sanitize_for_aiida(obj: Any) -> Any:
+    """Recursively replace float nan/inf with None so AiiDA can store the value."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_aiida(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_aiida(v) for v in obj]
+    return obj
+
+
 def _require_aiida():
     """Raise if AiiDA is not available."""
     if not AIIDA_AVAILABLE:
         raise ImportError(
             "AiiDA is not installed. Install with: pip install 'FrictionSim2D[aiida]'"
         )
+
+
+def _ensure_aiida_profile(profile_name: Optional[str] = None) -> None:
+    """Load an AiiDA profile if one is not already active.
+
+    Args:
+        profile_name: Profile to load. ``None`` loads the default profile.
+    """
+    try:
+        from aiida.manage import get_manager  # pylint: disable=import-outside-toplevel
+        manager = get_manager()
+        # If a profile storage is already loaded, nothing to do.
+        if manager.get_profile() is not None:
+            return
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+    try:
+        from aiida.manage.configuration import load_profile  # pylint: disable=import-outside-toplevel
+        load_profile(profile_name)
+        logger.debug("Loaded AiiDA profile: %s", profile_name or "(default)")
+    except Exception as exc:  # pylint: disable=broad-except
+        raise RuntimeError(
+            f"Could not load AiiDA profile {profile_name!r}. "
+            "Run 'verdi presto' or 'verdi profile list' to check available profiles."
+        ) from exc
 
 
 # =============================================================================
@@ -59,6 +99,7 @@ def register_simulation_batch(
     simulation_dirs: List[Path],
     config_path: Path,
     manifest_path: Optional[Path] = None,
+    aiida_profile: Optional[str] = None,
 ) -> List[str]:
     """Register a batch of simulations with AiiDA.
 
@@ -71,11 +112,14 @@ def register_simulation_batch(
         config_path: Path to the original config file.
         manifest_path: Optional path to the HPC manifest JSON. If provided,
             job entries are updated with AiiDA node UUIDs.
+        aiida_profile: AiiDA profile name to load. Defaults to the configured
+            default profile.
 
     Returns:
         List of created simulation node UUIDs.
     """
     _require_aiida()
+    _ensure_aiida_profile(aiida_profile)
 
     manifest = _load_manifest(manifest_path) if manifest_path else None
     created_uuids: List[str] = []
@@ -204,7 +248,10 @@ def _update_provenance_manifest(
 # Result import
 # =============================================================================
 
-def import_results_to_aiida(results_dir: Path) -> List[str]:
+def import_results_to_aiida(
+    results_dir: Path,
+    aiida_profile: Optional[str] = None,
+) -> List[str]:
     """Import completed simulation results into AiiDA.
 
     Reads results using :class:`~src.postprocessing.read_data.DataReader`
@@ -213,11 +260,14 @@ def import_results_to_aiida(results_dir: Path) -> List[str]:
 
     Args:
         results_dir: Directory containing simulation results.
+        aiida_profile: AiiDA profile name to load. Defaults to the configured
+            default profile.
 
     Returns:
         List of created result node UUIDs.
     """
     _require_aiida()
+    _ensure_aiida_profile(aiida_profile)
     from ..postprocessing.read_data import DataReader  # pylint: disable=import-outside-toplevel
 
     reader = DataReader(results_dir=str(results_dir))
@@ -278,9 +328,9 @@ def _import_force_angle_data(
                     'P' if is_pressure else 'F', load_val, angle,
                     node.mean_cof,
                 )
-            except _REGISTRATION_EXCEPTIONS:
+            except Exception:  # pylint: disable=broad-except
                 logger.warning(
-                    "Failed to import %s/l%d/%s", material, layers, load_key,
+                    "Failed to import %s/l%d/%s/a%d", material, layers, load_key, angle,
                     exc_info=True,
                 )
 
@@ -308,7 +358,7 @@ def _create_result_node(
     if reader.time_series:
         time_series['time'] = reader.time_series
 
-    node.time_series = time_series  # auto-calculates summary stats
+    node.time_series = _sanitize_for_aiida(time_series)  # auto-calculates summary stats
     node.is_complete = True
 
     return node

@@ -255,7 +255,7 @@ class TestStageResult:
         assert resp.status_code == 201
         body = resp.json()
         assert body["id"] == 42
-        assert body["status"] == "staged"
+        assert body["status"] == "published"
 
     def test_stage_no_auth(self, client, mock_db):
         resp = client.post(
@@ -466,11 +466,19 @@ class TestGetClientFactory:
         assert client._base == 'http://example.com'
         client.close()
 
-    def test_direct_mode_import_error(self):
-        """Direct mode raises ImportError when psycopg2 unavailable."""
+    def test_direct_mode_returns_db_client(self, monkeypatch):
+        """Direct mode should construct and return a FrictionDB client."""
         from src.data import get_client
-        with pytest.raises(ImportError):
-            get_client(mode='direct')
+
+        class DummyDB:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        monkeypatch.setattr('src.data.database.FrictionDB', DummyDB)
+        client = get_client(mode='direct', host='localhost', auto_create=False)
+        assert isinstance(client, DummyDB)
+        assert client.kwargs['host'] == 'localhost'
+        assert client.kwargs['auto_create'] is False
 
 
 # ---------------------------------------------------------------------------

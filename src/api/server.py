@@ -49,7 +49,7 @@ def create_app(db=None, *, profile: Optional[str] = None) -> FastAPI:
         Configured :class:`FastAPI` application.
     """
     if db is None:
-        from src.data.database import db_from_profile  # noqa: PLC0415
+        from ..data.database import db_from_profile  # noqa: PLC0415
         db = db_from_profile(profile)
 
     set_db(db)
@@ -444,18 +444,22 @@ def stage_result(
     user_name: str = Depends(require_api_key),
     db=Depends(get_db),
 ):
-    """Stage a new simulation result.
+    """Submit a new simulation result.
 
-    Requires a valid API key (``X-API-Key`` header). The result is
-    created with ``status='staged'`` and the uploader set to the
-    key owner.
+    Requires a valid API key (``X-API-Key`` header). The result is uploaded
+    as ``staged``, automatically validated, and published when it passes
+    validation.
     """
     row_id = db.upload_result(
         uploader=user_name,
         status='staged',
         **body.model_dump(exclude_none=True),
     )
-    return UploadResponse(id=row_id, status='staged')
+    validation = db.validate_staged(row_id)
+    if validation.is_valid:
+        db.publish(row_id)
+        return UploadResponse(id=row_id, status='published')
+    return UploadResponse(id=row_id, status='rejected')
 
 
 @app.post("/results/{result_id}/validate", response_model=ValidationResponse)
@@ -479,7 +483,7 @@ def publish_result(
     _user_name: str = Depends(require_api_key),
     db=Depends(get_db),
 ):
-    """Promote a validated result to published (curator action)."""
+    """Promote a validated result to published."""
     ok = db.publish(result_id)
     if not ok:
         raise HTTPException(
@@ -496,7 +500,7 @@ def reject_result(
     _user_name: str = Depends(require_api_key),
     db=Depends(get_db),
 ):
-    """Reject a staged or validated result (curator action)."""
+    """Reject a staged or validated result."""
     ok = db.reject(result_id, reason=body.reason)
     if not ok:
         raise HTTPException(

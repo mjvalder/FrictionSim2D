@@ -55,7 +55,8 @@ import logging
 import os
 import secrets
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, TypedDict, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, TypedDict, Union, cast
 
 if TYPE_CHECKING:
     import pandas
@@ -213,19 +214,23 @@ def _get_connection_params(  # pylint: disable=too-many-arguments,too-many-posit
     }
 
 
-def db_from_profile(profile: Optional[str] = None) -> 'FrictionDB':
+def db_from_profile(
+    profile: Optional[str] = None,
+    settings_file: Optional[Union[str, Path]] = None,
+) -> 'FrictionDB':
     """Create a :class:`FrictionDB` from a ``settings.yaml`` database profile.
 
     Args:
         profile: Profile name (``'local'`` or ``'central'``).  If ``None``,
             uses the ``database.active_profile`` value from settings.
+        settings_file: Optional explicit settings YAML path for this call.
 
     Returns:
         Configured :class:`FrictionDB` instance.
     """
-    from src.core.config import load_settings  # pylint: disable=import-outside-toplevel
+    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
 
-    settings = load_settings()
+    settings = load_settings(settings_file=settings_file)
     db_cfg = settings.database
     name = profile or db_cfg.active_profile
 

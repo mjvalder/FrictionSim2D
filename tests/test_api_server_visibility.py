@@ -56,3 +56,18 @@ def test_authenticated_results_can_see_non_published_rows(client_with_mixed_visi
     assert response.status_code == 200
     body = response.json()
     assert body["count"] == 2
+
+
+def test_curator_can_request_non_published_status(
+    client_with_mixed_visibility,
+) -> None:
+    response = client_with_mixed_visibility.get(
+        "/results",
+        params={"status": "staged"},
+        headers={"X-API-Key": "valid-key"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["id"] for row in body["results"]] == [2]

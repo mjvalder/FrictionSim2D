@@ -5,13 +5,13 @@ Unified CLI for simulation execution, HPC script generation, and AiiDA integrati
 
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, NoReturn
-from importlib import resources as pkg_resources
 import click
 
-from src.core.config import load_settings
-from src.core.run import run_simulations, _build_hpc_manifest_entries, layer_aware_path_sort_key
+from .core.config import load_settings, settings_origin, _global_settings_path
+from .core.run import run_simulations, _build_hpc_manifest_entries, layer_aware_path_sort_key
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +19,26 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
+
+
+def _bootstrap_local_db_once() -> None:
+    """Best-effort one-time local schema bootstrap for new environments.
+
+    This is intentionally non-fatal: if PostgreSQL credentials or server are
+    not available yet, FrictionSim2D commands should still run.
+    """
+    marker = Path.home() / '.config' / 'FrictionSim2D' / '.local_db_bootstrapped'
+    if marker.exists():
+        return
+
+    try:
+        from .data.database import db_from_profile  # noqa: PLC0415
+        db_from_profile('local')
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{datetime.utcnow().isoformat()}Z\n", encoding='utf-8')
+        logger.info("Bootstrapped local FrictionSim2D DB schema.")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.info("Skipping local DB bootstrap: %s", exc)
 
 
 def _ensure_hpc_settings(hpc_settings) -> None:
@@ -32,9 +52,10 @@ def _ensure_hpc_settings(hpc_settings) -> None:
 
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
-                    use_aiida: bool, generate_hpc: bool):
+                    use_aiida: bool, generate_hpc: bool,
+                    settings_file: Optional[Path] = None):
     if use_aiida:
-        from src.aiida import AIIDA_AVAILABLE
+        from .aiida import AIIDA_AVAILABLE
         if not AIIDA_AVAILABLE:
             click.echo("⚠️  AiiDA not available. Install with:", err=True)
             click.echo("   conda install -c conda-forge aiida-core", err=True)
@@ -43,6 +64,7 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
     created_simulations, simulation_root, configs_to_run, _ = run_simulations(
         config_file=config_file,
         model=model,
+        settings_file=settings_file,
         output_root=Path(output_dir),
         ensure_hpc_settings=_ensure_hpc_settings,
         use_aiida=use_aiida,
@@ -79,13 +101,17 @@ def run_group():
 
 @run_group.command('afm')
 @click.argument('config_file', type=click.Path(exists=True))
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
                             help='Generate HPC scripts for the simulation root')
-def run_afm(config_file: str, output_dir: str, use_aiida: bool, generate_hpc: bool):
+def run_afm(config_file: str, settings_file: Optional[Path], output_dir: str,
+            use_aiida: bool, generate_hpc: bool):
     """Generate AFM simulation files.
     
     Creates all necessary LAMMPS input files, structures, and potentials
@@ -95,18 +121,22 @@ def run_afm(config_file: str, output_dir: str, use_aiida: bool, generate_hpc: bo
         FrictionSim2D run.afm afm_config.ini -o ./afm_output --aiida
     """
     _run_simulation(
-        'afm', config_file, output_dir, use_aiida, generate_hpc
+        'afm', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
     )
 
 @run_group.command('sheetonsheet')
 @click.argument('config_file', type=click.Path(exists=True))
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+          default=None,
+          help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
         help='Generate HPC scripts for the simulation root')
-def run_sheetonsheet(config_file: str, output_dir: str, use_aiida: bool, generate_hpc: bool):
+def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir: str,
+             use_aiida: bool, generate_hpc: bool):
     """Generate sheet-on-sheet simulation files.
     
     Creates all necessary LAMMPS input files for 4-layer sheet-on-sheet
@@ -116,13 +146,13 @@ def run_sheetonsheet(config_file: str, output_dir: str, use_aiida: bool, generat
         FrictionSim2D run.sheetonsheet sheet_config.ini -o ./sheet_output
     """
     _run_simulation(
-        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc
+        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
     )
 
 def _register_simulations_aiida(simulation_dirs: List[Path], config_path: Path):
     """Register generated simulations with AiiDA."""
     try:
-        from src.aiida.integration import register_simulation_batch
+        from .aiida.integration import register_simulation_batch
         registered = register_simulation_batch(simulation_dirs, config_path)
         click.echo(f"   ✅ Registered {len(registered)} simulations")
     except ImportError:
@@ -159,29 +189,93 @@ def settings_group():
 
 
 @settings_group.command('show')
-def settings_show():
-    """Display current settings."""
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='Explicit settings.yaml path to inspect (run-specific).')
+@click.option('--origin', is_flag=True,
+              help='Show which settings file is currently in effect.')
+def settings_show(settings_file: Optional[Path], origin: bool):
+    """Display current effective settings.
+
+    With --origin, also prints the path of the settings file that was loaded
+    (or 'hardcoded defaults' if no file is found).
+
+    Example:
+        FrictionSim2D settings show
+        FrictionSim2D settings show --origin
+    """
     import yaml  # noqa: PLC0415
-    defaults = load_settings()
-    click.echo(yaml.dump(defaults.model_dump(), default_flow_style=False))
+    if origin:
+        src = settings_origin(settings_file=settings_file)
+        if src:
+            click.echo(f"# Settings loaded from: {src}")
+        else:
+            click.echo("# Settings loaded from: hardcoded defaults (no settings.yaml found)")
+    effective = load_settings(settings_file=settings_file)
+    click.echo(yaml.dump(effective.model_dump(), default_flow_style=False))
+
 
 @settings_group.command('init')
-def settings_init():
-    """Create a local settings.yaml file for customization."""
-    import shutil  # noqa: PLC0415
-    with pkg_resources.as_file(pkg_resources.files('src.data.settings') / 'settings.yaml') as p:
-        shutil.copy(p, "settings.yaml")
-    click.echo("✅ Created 'settings.yaml' in current directory")
+@click.option('--global', 'global_', is_flag=True,
+              help='Write to ~/.config/FrictionSim2D/settings.yaml (semi-permanent).')
+@click.option('--force', is_flag=True,
+              help='Overwrite an existing file without prompting.')
+def settings_init(global_: bool, force: bool):
+    """Create a settings.yaml file pre-populated with current effective settings.
+
+    Without --global, writes settings.yaml to the current directory for
+    per-simulation customisation. This file is only used when explicitly
+    supplied to commands (e.g. run --settings-file). With --global, writes to
+    ~/.config/FrictionSim2D/settings.yaml for machine-level configuration
+    such as HPC host, queue names, and database credentials.
+
+    Example:
+        FrictionSim2D settings init                # create per-run file
+        FrictionSim2D settings init --global       # first-time machine setup
+    """
+    import yaml  # noqa: PLC0415
+
+    target = _global_settings_path() if global_ else Path('settings.yaml')
+
+    if target.exists() and not force:
+        click.confirm(
+            f"'{target}' already exists. Overwrite?",
+            abort=True,
+        )
+
+    effective = load_settings()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        yaml.safe_dump(effective.model_dump(), sort_keys=False),
+        encoding='utf-8',
+    )
+    click.echo(f"✅ Created '{target}'")
+    if global_:
+        click.echo("   Edit this file to set HPC, database, and other machine-level defaults.")
+    else:
+        click.echo("   Edit this file and pass it via --settings-file for per-simulation settings.")
+
 
 @settings_group.command('reset')
-def settings_reset():
-    """Remove local settings.yaml and use package defaults."""
-    local_settings = Path("settings.yaml")
-    if local_settings.exists():
-        local_settings.unlink()
-        click.echo("✅ Removed local settings.yaml")
+@click.option('--global', 'global_', is_flag=True,
+              help='Remove ~/.config/FrictionSim2D/settings.yaml instead.')
+@click.confirmation_option(prompt='This will delete the settings file. Continue?')
+def settings_reset(global_: bool):
+    """Delete a settings.yaml file and revert to defaults.
+
+    Without --global, removes settings.yaml from the current directory.
+    With --global, removes ~/.config/FrictionSim2D/settings.yaml.
+
+    Example:
+        FrictionSim2D settings reset
+        FrictionSim2D settings reset --global
+    """
+    target = _global_settings_path() if global_ else Path('settings.yaml')
+    if target.exists():
+        target.unlink()
+        click.echo(f"✅ Removed '{target}'")
     else:
-        click.echo("ℹ️  No local settings found")
+        click.echo(f"ℹ️  No settings file found at '{target}'")
 
 # =============================================================================
 # HPC COMMANDS
@@ -194,11 +288,15 @@ def hpc_group():
 
 @hpc_group.command('generate')
 @click.argument('simulation_dir', type=click.Path(exists=True))
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='Path to a settings.yaml file for this command.')
 @click.option('--scheduler', '-s', type=click.Choice(['pbs', 'slurm']), default='pbs',
               help='HPC scheduler type')
 @click.option('--output-dir', '-o', default=None,
               help='Output directory for scripts (default: simulation_dir/hpc)')
-def hpc_generate(simulation_dir: str, scheduler: str, output_dir: Optional[str]):
+def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
+                 scheduler: str, output_dir: Optional[str]):
     """Generate HPC submission scripts for existing simulations.
     
     Scans simulation directory and creates PBS or SLURM job scripts.
@@ -206,7 +304,7 @@ def hpc_generate(simulation_dir: str, scheduler: str, output_dir: Optional[str])
     Example:
         FrictionSim2D hpc generate ./afm_output --scheduler pbs
     """
-    from src.hpc import HPCScriptGenerator, HPCConfig
+    from .hpc import HPCScriptGenerator, HPCConfig
 
     sim_dir = Path(simulation_dir)
     out_dir = Path(output_dir) if output_dir else sim_dir / 'hpc'
@@ -214,7 +312,7 @@ def hpc_generate(simulation_dir: str, scheduler: str, output_dir: Optional[str])
 
     click.echo(f"🖥️  Generating {scheduler.upper()} scripts for: {sim_dir}")
 
-    settings = load_settings()
+    settings = load_settings(settings_file=settings_file)
     _ensure_hpc_settings(settings.hpc)
     hpc_config = HPCConfig.from_settings(settings.hpc)
     hpc_config.scheduler_type = scheduler  # type: ignore[assignment]
@@ -277,7 +375,7 @@ def hpc_generate(simulation_dir: str, scheduler: str, output_dir: Optional[str])
 @cli.group('aiida')
 def aiida_group():
     """AiiDA workflow management (requires aiida-core)."""
-    from src.aiida import AIIDA_AVAILABLE
+    from .aiida import AIIDA_AVAILABLE
     if not AIIDA_AVAILABLE:
         click.echo("⚠️  AiiDA not available. Install with:", err=True)
         click.echo("   conda install -c conda-forge aiida-core", err=True)
@@ -286,7 +384,7 @@ def aiida_group():
 @aiida_group.command('status')
 def aiida_status():
     """Check AiiDA installation and profile status."""
-    from src.aiida import AIIDA_AVAILABLE
+    from .aiida import AIIDA_AVAILABLE
     
     if not AIIDA_AVAILABLE:
         click.echo("❌ AiiDA not installed")
@@ -307,13 +405,15 @@ def aiida_status():
 @click.argument('results_dir', type=click.Path(exists=True))
 @click.option('--process/--no-process', default=True,
               help='Run postprocessing on results')
-def aiida_import(results_dir: str, process: bool):
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_import(results_dir: str, process: bool, profile: Optional[str]):
     """Import completed simulation results into AiiDA database.
     
     Example:
         FrictionSim2D aiida import ./returned_results
     """
-    from src.aiida.integration import import_results_to_aiida
+    from .aiida.integration import import_results_to_aiida
     
     results_path = Path(results_dir)
     click.echo(f"📥 Importing results from: {results_path}")
@@ -321,11 +421,11 @@ def aiida_import(results_dir: str, process: bool):
     try:
         if process:
             click.echo("🔄 Running postprocessing...")
-            from src.postprocessing.read_data import DataReader
+            from .postprocessing.read_data import DataReader
             _ = DataReader(results_dir=str(results_path))
             click.echo("   ✅ Postprocessing complete")
         
-        imported = import_results_to_aiida(results_path)
+        imported = import_results_to_aiida(results_path, aiida_profile=profile)
         click.echo(f"✅ Imported {len(imported)} simulations to AiiDA")
         
     except Exception as exc:  # pylint: disable=broad-except
@@ -346,7 +446,7 @@ def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[
     Example:
         FrictionSim2D aiida query --material h-MoS2 --layers 2 --format csv
     """
-    from src.aiida.query import Friction2DDB
+    from .aiida.query import Friction2DDB
     
     db = Friction2DDB()
     
@@ -396,8 +496,12 @@ def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[
               help='(Deprecated) Path to hpc.yaml for PBS/SLURM computer setup')
 @click.option('--use-remote', is_flag=True,
               help='Configure remote HPC computer using settings from settings.yaml')
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                            default=None,
+                            help='Path to a settings.yaml file used with --use-remote.')
 def aiida_setup(profile: Optional[str], lammps_path: Optional[str],
-                hpc_config: Optional[str], use_remote: bool):
+                                hpc_config: Optional[str], use_remote: bool,
+                                settings_file: Optional[Path]):
     """Set up AiiDA profile, computer, and LAMMPS code.
 
     Performs first-time AiiDA configuration:
@@ -414,7 +518,7 @@ def aiida_setup(profile: Optional[str], lammps_path: Optional[str],
         FrictionSim2D aiida setup --lammps-path /usr/local/bin/lmp_mpi
         FrictionSim2D aiida setup --use-remote  # Uses settings.yaml AiiDA config
     """
-    from src.aiida.setup import full_setup
+    from .aiida.setup import full_setup
 
     click.echo("🔧 Running AiiDA first-time setup ...")
 
@@ -422,7 +526,7 @@ def aiida_setup(profile: Optional[str], lammps_path: Optional[str],
     hpc_settings = None
     aiida_settings = None
     if use_remote:
-        settings = load_settings()
+        settings = load_settings(settings_file=settings_file)
         hpc_settings = settings.hpc
         aiida_settings = settings.aiida
         click.echo(f"📡 Configuring remote HPC: {aiida_settings.hostname or 'localhost'}")
@@ -459,7 +563,7 @@ def aiida_export(output: str, material: Optional[str]):
         FrictionSim2D aiida export -o results.aiida
         FrictionSim2D aiida export -m h-MoS2
     """
-    from src.aiida.integration import export_archive
+    from .aiida.integration import export_archive
 
     click.echo(f"📦 Exporting archive to {output} ...")
     try:
@@ -482,7 +586,7 @@ def aiida_import_archive(archive_path: str):
 
         FrictionSim2D aiida import-archive results.aiida
     """
-    from src.aiida.integration import import_archive
+    from .aiida.integration import import_archive
 
     click.echo(f"📥 Importing archive: {archive_path} ...")
     try:
@@ -516,6 +620,9 @@ def aiida_package(simulation_dir: str, output: Optional[str]):
 
 @aiida_group.command('submit')
 @click.argument('simulation_dir', type=click.Path(exists=True))
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='Path to a settings.yaml file for this submission.')
 @click.option('--code', '-c', default=None,
               help='AiiDA code label (auto-detects if not specified)')
 @click.option('--scripts', default=None,
@@ -536,6 +643,7 @@ def aiida_package(simulation_dir: str, output: Optional[str]):
               help='Preview configuration without submitting')
 def aiida_submit(
     simulation_dir: str,
+    settings_file: Optional[Path],
     code: Optional[str],
     scripts: Optional[str],
     use_array: bool,
@@ -562,7 +670,7 @@ def aiida_submit(
       # Preview before submitting
       FrictionSim2D aiida submit ./output --dry-run
     """
-    from src.aiida.submit import smart_submit
+    from .aiida.submit import smart_submit
 
     sim_path = Path(simulation_dir)
     click.echo(f"🚀 Preparing submission from {sim_path}\n")
@@ -584,6 +692,7 @@ def aiida_submit(
         # Call smart submit helper
         processes = smart_submit(
             simulation_dir=sim_path,
+            settings_file=settings_file,
             code_label=code,
             use_array=use_array,
             scripts=scripts,
@@ -613,7 +722,7 @@ def postprocess_group():
               help='Export full time-series data to JSON.')
 def postprocess_read(results_dir: str, do_export: bool):
     """Read and process simulation result data."""
-    from src.postprocessing import DataReader  # noqa: PLC0415
+    from .postprocessing import DataReader  # noqa: PLC0415
 
     reader = DataReader(results_dir=results_dir)
     reader.export_issue_reports()
@@ -632,7 +741,7 @@ def postprocess_plot(plot_config: str, output_dir: str,
                      settings: Optional[str]):
     """Generate plots from processed simulation data."""
     import json  # noqa: PLC0415
-    from src.postprocessing import Plotter  # noqa: PLC0415
+    from .postprocessing import Plotter  # noqa: PLC0415
 
     with open(plot_config, 'r', encoding='utf-8') as f:
         config = json.load(f)
@@ -700,11 +809,11 @@ def _make_db(
     has_explicit = any(v is not None for v in (host, port, dbname, user, password))
     if not has_explicit:
         try:
-            from src.data.database import db_from_profile  # noqa: PLC0415
+            from .data.database import db_from_profile  # noqa: PLC0415
             return db_from_profile(profile)
         except Exception:  # pylint: disable=broad-except  # settings not available
             pass
-    from src.data.database import FrictionDB  # noqa: PLC0415
+    from .data.database import FrictionDB  # noqa: PLC0415
     return FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
 
 
@@ -733,7 +842,7 @@ def _add_db_options(func):
 def _iter_reader_rows(reader):
     """Yield one result row per simulation from a DataReader, with statistics."""
     import numpy as np  # noqa: PLC0415
-    from src.data.models import compute_friction_stats  # noqa: PLC0415
+    from .data.models import compute_friction_stats  # noqa: PLC0415
     for material, size_data in reader.full_data_nested.items():
         for _size_key, substrate_data in size_data.items():
             for _sub, tip_data in substrate_data.items():
@@ -780,15 +889,16 @@ def db_upload(
         FrictionSim2D db upload ./simulation_output/afm_run_1/results \\
             --uploader alice
     """
-    from src.postprocessing.read_data import DataReader  # noqa: PLC0415
+    from .postprocessing.read_data import DataReader  # noqa: PLC0415
 
     click.echo(f"📂 Reading results from {results_dir} ...")
     reader = DataReader(results_dir=str(results_dir))
     db = _make_db(host, port, dbname, user, password, profile=profile)
-    n_uploaded = 0
+    n_published = 0
+    n_rejected = 0
     for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
         try:
-            db.upload_result(
+            row_id = db.upload_result(
                 material=material.replace('_', '-'),
                 simulation_type='afm',
                 layers=layers,
@@ -800,11 +910,17 @@ def db_upload(
                 ntimesteps=ntimesteps,
                 **stats,  # type: ignore[arg-type]
             )
-            n_uploaded += 1
+            vr = db.validate_staged(row_id)
+            if vr.is_valid and db.publish(row_id):
+                n_published += 1
+            else:
+                n_rejected += 1
         except Exception as exc:  # pylint: disable=broad-except
             logger.warning("Skipped row (%s, l%d, a%d): %s", material, layers, angle, exc)
 
-    click.echo(f"✅ Uploaded {n_uploaded} result(s) to the database.")
+    click.echo(
+        f"✅ Processed results: published={n_published}, rejected={n_rejected}."
+    )
 
 
 @db_group.command('query')
@@ -930,7 +1046,7 @@ def db_init(
         FrictionSim2D db init --profile local
     """
     _make_db(host, port, dbname, user, password, profile=profile)
-    from src.data.database import SCHEMA_VERSION  # noqa: PLC0415
+    from .data.database import SCHEMA_VERSION  # noqa: PLC0415
     click.echo(f"✅ Database initialised at schema version {SCHEMA_VERSION}.")
 
 
@@ -980,10 +1096,10 @@ def db_stage(
     user: Optional[str],
     password: Optional[str],
 ):
-    """Stage simulation results for review before publishing.
+    """Stage simulation results and apply automatic validation.
 
-    Results are uploaded with status='staged'.  They must pass validation
-    and curator approval before becoming publicly visible.
+    Results are uploaded with status='staged', validated, and automatically
+    published when they pass validation.
 
     Example:\n
         FrictionSim2D db stage ./results --uploader alice --api-key <key>
@@ -996,14 +1112,15 @@ def db_stage(
             raise click.ClickException("Invalid or revoked API key.")
         click.echo(f"Authenticated as: {verified_user}")
 
-    from src.postprocessing.read_data import DataReader  # noqa: PLC0415
+    from .postprocessing.read_data import DataReader  # noqa: PLC0415
 
     click.echo(f"📂 Reading results from {results_dir} ...")
     reader = DataReader(results_dir=str(results_dir))
-    n_staged = 0
+    n_published = 0
+    n_rejected = 0
     for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
         try:
-            db.upload_result(
+            row_id = db.upload_result(
                 material=material.replace('_', '-'),
                 simulation_type='afm',
                 layers=layers,
@@ -1015,11 +1132,17 @@ def db_stage(
                 ntimesteps=ntimesteps,
                 **stats,  # type: ignore[arg-type]
             )
-            n_staged += 1
+            vr = db.validate_staged(row_id)
+            if vr.is_valid and db.publish(row_id):
+                n_published += 1
+            else:
+                n_rejected += 1
         except Exception as exc:  # pylint: disable=broad-except
             logger.warning("Skipped row (%s, l%d, a%d): %s", material, layers, angle, exc)
 
-    click.echo(f"✅ Staged {n_staged} result(s) for review.")
+    click.echo(
+        f"✅ Processed staged results: published={n_published}, rejected={n_rejected}."
+    )
 
 
 @db_group.command('publish')
@@ -1082,6 +1205,81 @@ def db_reject(
         )
 
 
+@db_group.command('setup')
+@click.option('--name', '-n', default=None,
+              help='User/uploader name for API key (default: $USER or "user")')
+@click.option('--profile', '-p', default='local',
+              help='Database profile to set up (default: local)')
+@_add_db_options
+def db_setup(
+    name: Optional[str],
+    profile: str,
+    host: Optional[str],
+    port: Optional[int],
+    dbname: Optional[str],
+    user: Optional[str],
+    password: Optional[str],
+):
+    """First-time setup: initialize database and generate API key.
+
+    This command:
+    1. Initializes the database schema (safe to run repeatedly)
+    2. Creates an API key for your user
+    3. Stores the API key in ~/.config/FrictionSim2D/settings.yaml
+
+    Example:
+        FrictionSim2D db setup                      # local setup
+        FrictionSim2D db setup --name alice --profile central
+    """
+    import os as os_module  # noqa: PLC0415
+    import yaml  # noqa: PLC0415
+    from pathlib import Path as PathlibPath  # noqa: PLC0415
+
+    if not name:
+        name = os_module.environ.get('USER', os_module.environ.get('USERNAME', 'user'))
+
+    click.echo("📊 Initializing database schema...")
+    db = _make_db(host, port, dbname, user, password, profile=profile)
+    from .data.database import SCHEMA_VERSION  # noqa: PLC0415
+    click.echo(f"✅ Database initialised at schema version {SCHEMA_VERSION}.")
+
+    click.echo(f"🔑 Creating API key for user '{name}'...")
+    raw_key = db.create_api_key(name)
+    click.echo(f"✅ API key generated: {raw_key}")
+
+    click.echo("💾 Storing API key in settings...")
+    settings_dir = PathlibPath.home() / ".config" / "FrictionSim2D"
+    settings_file = settings_dir / "settings.yaml"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+
+    if settings_file.exists():
+        settings_data = yaml.safe_load(settings_file.read_text(encoding='utf-8'))
+        if settings_data is None:
+            settings_data = {}
+    else:
+        effective = load_settings()
+        settings_data = effective.model_dump()
+
+    if 'database' not in settings_data:
+        settings_data['database'] = {}
+    if profile not in settings_data['database']:
+        settings_data['database'][profile] = {}
+
+    settings_data['database'][profile]['api_key'] = raw_key
+
+    settings_file.write_text(
+        yaml.safe_dump(settings_data, sort_keys=False),
+        encoding='utf-8',
+    )
+    click.echo(f"✅ API key saved to {settings_file}")
+    click.echo()
+    click.echo("📋 Next steps:")
+    click.echo(f"   1. You can now upload results: FrictionSim2D db upload <dir> --uploader {name} --profile {profile}")
+    click.echo(f"   2. Or stage for review: FrictionSim2D db stage <dir> --uploader {name} --profile {profile}")
+    click.echo()
+    click.echo("⚠️  Your API key is stored in settings.yaml. Keep it secure!")
+
+
 # =============================================================================
 # API SERVER COMMAND
 # =============================================================================
@@ -1100,8 +1298,12 @@ def api_group():
               help="Database profile to back the server ('local' or 'central').")
 @click.option('--reload', is_flag=True,
               help='Auto-reload on code changes (development only).')
+@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='Path to a settings.yaml file for this command.')
 def api_serve(host: Optional[str], port: Optional[int],
-              profile: Optional[str], reload: bool):
+              profile: Optional[str], reload: bool,
+              settings_file: Optional[Path]):
     """Start the REST API server.
 
     Runs the FastAPI application so collaborators can upload and query
@@ -1128,12 +1330,12 @@ def api_serve(host: Optional[str], port: Optional[int],
             exc,
         )
 
-    settings = load_settings()
+    settings = load_settings(settings_file=settings_file)
     db_cfg = settings.database
     _host = host or getattr(db_cfg, 'api_host', None) or '0.0.0.0'
     _port = port or getattr(db_cfg, 'api_port', None) or 8000
 
-    from src.api.server import create_app  # noqa: PLC0415
+    from .api.server import create_app  # noqa: PLC0415
     create_app(profile=profile or db_cfg.active_profile)
 
     click.echo(f"🌐 FrictionSim2D API server → http://{_host}:{_port}")
@@ -1143,6 +1345,8 @@ def api_serve(host: Optional[str], port: Optional[int],
 
 def main():
     try:
+        if not any(arg in ('--help', '-h') for arg in sys.argv[1:]):
+            _bootstrap_local_db_once()
         cli()
     except Exception:  # pylint: disable=broad-except
         logger.exception("Command failed")

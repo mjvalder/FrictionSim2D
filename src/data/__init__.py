@@ -1,5 +1,7 @@
 """Data models, validation, and database access for FrictionSim2D."""
 
+import os
+
 from .models import ResultRecord, compute_friction_stats
 
 __all__ = ['ResultRecord', 'compute_friction_stats']
@@ -26,7 +28,20 @@ def get_client(mode: str = 'direct', **kwargs):
         ImportError: If the required backend library is not installed.
     """
     if mode == 'api':
+        from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
         from ..api.client import FrictionHTTPClient  # pylint: disable=import-outside-toplevel
+
+        settings_file = kwargs.pop('settings_file', None)
+        settings = load_settings(settings_file=settings_file)
+        if not kwargs.get('api_url'):
+            kwargs['api_url'] = settings.database.api_url
+        if kwargs.get('api_key') is None:
+            kwargs['api_key'] = (
+                os.environ.get('FRICTION_DB_API_KEY')
+                or settings.database.central.api_key
+                or None
+            )
+
         return FrictionHTTPClient(**kwargs)
     if mode == 'direct':
         from .database import FrictionDB  # pylint: disable=import-outside-toplevel

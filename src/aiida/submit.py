@@ -47,6 +47,7 @@ _SUBMISSION_EXCEPTIONS = (OSError, ValueError, KeyError, TypeError, RuntimeError
 def run_with_aiida(
     config_file: Union[str, Path],
     model: str = 'afm',
+    settings_file: Optional[Union[str, Path]] = None,
     output_root: Optional[Union[str, Path]] = None,
     auto_submit: bool = True,
     code_label: Optional[str] = None,
@@ -79,12 +80,13 @@ def run_with_aiida(
     if auto_setup:
         _ensure_profile_loaded(profile_name)
 
-    settings: GlobalSettings = load_settings()
+    settings: GlobalSettings = load_settings(settings_file=settings_file)
 
     logger.info("Generating simulation files from %s", config_file)
     simulation_dirs, root_dir, _, _ = run_simulations(
         config_file=str(config_file),
         model=model,
+        settings_file=settings_file,
         output_root=output_root,
         use_aiida=True,
     )
@@ -129,6 +131,7 @@ def run_with_aiida(
 
 def smart_submit(
     simulation_dir: Path,
+    settings_file: Optional[Union[str, Path]] = None,
     code_label: Optional[str] = None,
     use_array: bool = False,
     scripts: Optional[str] = None,
@@ -150,7 +153,7 @@ def smart_submit(
     """
     import click  # pylint: disable=import-outside-toplevel
 
-    settings: GlobalSettings = load_settings()
+    settings: GlobalSettings = load_settings(settings_file=settings_file)
 
     code = _get_code(code_label, interactive=True)
     click.echo(f"Using code: {code.full_label}")

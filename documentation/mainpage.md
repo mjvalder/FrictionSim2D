@@ -57,7 +57,7 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - `hpc`: build scheduler scripts from generated simulations
 - `aiida`: setup, submit, import, query, export archives
 - `postprocess`: read and plot simulation results
-- `db`: upload/query/stage/publish shared database records
+- `db`: setup keys, upload/query shared database records, and run staged validation workflow
 - `api`: serve REST API on top of the database
 
 ## Related Docs
