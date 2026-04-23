@@ -1,141 +1,62 @@
 # Provenance Architecture
 
-## Overview
+This document explains how FrictionSim2D records input provenance for reproducibility.
 
-The provenance system tracks reproducibility of simulations by recording all input files (CIFs, potentials, configs) with component-level metadata. This enables:
+## Design Goals
 
-1. **No duplication of large potential files** (symlinks)
-2. **Component traceability** (which potential for tip? which CIF for substrate?)
-3. **AiiDA integration** (manifest readable during workflow)
+- Keep enough metadata to reconstruct how a simulation was built.
+- Track which source files were used by each component.
+- Keep manifest data easy to consume from downstream tools (including AiiDA flows).
 
-## How It Works
+## Current Behavior
 
-### 1. Simulation Setup (`SimulationBase.add_to_provenance()`)
+Provenance is handled by `SimulationBase` methods in `src/core/simulation_base.py`.
 
-When building a simulation, call:
-```python
-sim = AFMSimulation(config, output_dir)
-sim.add_to_provenance('/path/to/potentials/Au.sw', category='potential', component='tip')
-sim.add_to_provenance('/path/to/cif/MoS2.cif', category='cif', component='substrate')
+When source files are added:
+
+- CIF files are copied into `provenance/cif/`
+- Potential files are copied into `provenance/potentials/`
+- Metadata entries are written into `provenance/manifest.json`
+
+Each manifest record stores fields like:
+
+- `filename`
+- `original_path`
+- `stored_path`
+- `category`
+- `components`
+- `checksum`
+- `added_at`
+
+## Typical Provenance Tree
+
+```text
+<simulation>/
+  provenance/
+    manifest.json
+    config.json
+    cif/
+      <files>.cif
+    potentials/
+      <potential files>
 ```
 
-**File Handling:**
-- **Potentials**: Creates a symlink (no duplication)
-- **CIFs**: Copies the file (small, component-specific)
-- **Config files**: Copied during `init_provenance()`
+AFM simulations may also include layer-resolved directories (`L1`, `L2`, ...), but provenance tracking remains centered around each simulation path.
 
-**Result:**
-```
-output_dir/
-├── provenance/
-│   ├── manifest.json          # Component-to-file mapping
-│   ├── config.ini             # Copy of config
-│   ├── materials_list.txt     # Copy of materials
-│   ├── cif/
-│   │   └── MoS2.cif           # Copy
-│   └── potentials/
-│       └── Au.sw              # Symlink → /repo/potentials/Au.sw
-```
+## Why Checksums Matter
 
-### 2. Provenance Manifest
+Checksums let you:
 
-The `manifest.json` file tracks component usage:
+- confirm file integrity after transfer
+- detect accidental replacement of source files
+- compare whether two runs used identical assets even if path names changed
 
-```json
-{
-  "version": "1.0",
-  "created": "2025-01-19T14:30:00",
-  "last_updated": "2025-01-19T14:35:00",
-  "files": [
-    {
-      "filename": "Au.sw",
-      "original_path": "/home/user/repo/potentials/Au.sw",
-      "stored_path": "provenance/potentials/Au.sw",
-      "category": "potential",
-      "component": "tip",
-      "checksum": "abc123...",
-      "added_at": "2025-01-19T14:30:30"
-    },
-    {
-      "filename": "MoS2.cif",
-      "original_path": "/home/user/repo/structures/MoS2.cif",
-      "stored_path": "provenance/cif/MoS2.cif",
-      "category": "cif",
-      "components": ["substrate"],
-      "checksum": "def456...",
-      "added_at": "2025-01-19T14:30:45"
-    }
-  ]
-}
-```
+## Consumption by Workflows
 
-**Key features:**
-- Maps each file to its component usage
-- Records original path (for validation/debugging)
-- Includes checksums for integrity verification
-- Timestamp for audit trail
+AiiDA integration and postprocessing tools can read provenance contents to map simulation outputs back to source inputs.
 
-### 3. AiiDA Integration (`FrictionProvenanceData.from_provenance_folder()`)
+## Limitations and Trade-Offs
 
-When creating AiiDA provenance nodes:
-
-```python
-from src.aiida.data.provenance import FrictionProvenanceData
-
-prov_node = FrictionProvenanceData.from_provenance_folder(
-    provenance_dir / 'provenance',
-    simulation_type='afm'
-)
-```
-
-**What happens:**
-1. Reads `manifest.json` and stores component mappings
-2. Stores all files in AiiDA repository (potentials as symlinks)
-3. Makes the mapping available via:
-   ```python
-   prov_node.file_manifest  # dict mapping components to files
-   ```
-
-**Example usage in workflows:**
-```python
-manifest = prov_node.file_manifest
-tip_potential = manifest.get('tip', {}).get('potential')
-substrate_cif = manifest.get('substrate', {}).get('cif')
-
-# Create component-specific input nodes
-tip_pot_node = load_potential(tip_potential)
-substrate_node = load_cif(substrate_cif)
-```
-
-## Directory Structure in Provenance
-
-```
-provenance/
-├── manifest.json                    # Maps components to files
-├── config.ini                       # Simulation config (copy)
-├── settings.yaml                    # Optional settings (copy)
-├── materials_list.txt               # Optional materials list (copy)
-├── cif/
-│   ├── substrate.cif               # CIF files (copies)
-│   └── coating.cif
-└── potentials/
-    ├── Au.sw                       # Potential files (SYMLINKS)
-    ├── W.sw
-    └── MoS2.sw
-```
-
-## Benefits
-
-| Issue | Solution |
-|-------|----------|
-| Large potentials duplicated | Use symlinks - stored as references |
-| Can't trace tip potential to tip | Manifest tracks component→file mapping |
-| AiiDA can't find component origins | Read manifest during node creation |
-| Manual tracing of provenance | Checksums + timestamps for audit |
-
-## Backward Compatibility
-
-The manifest is optional:
-- If missing, the system still works (just no component metadata)
-- Old provenance folders without manifest can still be loaded
-- New code auto-generates manifest on `add_to_provenance()` calls
+- Current implementation copies files rather than creating symlinks, prioritizing portability.
+- If very large potential files are used repeatedly, storage usage can increase.
+- Manifest schema is simple JSON; there is no strict external schema file yet.

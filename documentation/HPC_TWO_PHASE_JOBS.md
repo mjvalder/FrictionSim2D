@@ -1,75 +1,71 @@
-# Two-Phase HPC Job Submission
+# HPC Two-Phase Jobs
 
-## Overview
+This document explains scheduler script generation and submission ordering.
 
-AFM simulations now use a two-phase job submission system to ensure all `system.in` initialization scripts complete before any `slide*.in` simulation scripts run.
+## Why Two Phases Exist
 
-## How It Works
+AFM workflows usually need initialization before sliding:
 
-### 1. Manifest Creation
-The system creates a manifest listing all simulation jobs:
-- **Phase 1**: All `system*.in` files are listed first
-- **Phase 2**: All `slide*.in` files are listed second
+1. `system.in` phase
+2. `slide*.in` phase
 
-### 2. Separate Job Scripts
-Two separate HPC job scripts are generated:
-- `run_system.pbs` or `run_system.sh` - Runs all system initialization jobs
-- `run_slide.pbs` or `run_slide.sh` - Runs all slide simulation jobs
+Generated scripts separate these phases so slide jobs start only after successful initialization.
 
-### 3. Job Dependencies
-The slide job script has a dependency on the system job:
-- **SLURM**: `--dependency=afterok:$SYSTEM_JOB_ID`
-- **PBS**: `-W depend=afterok:$SYSTEM_JOB_ID`
+## Generated Files
 
-This ensures slide jobs wait for all system jobs to complete successfully.
+In `hpc/` you can expect files such as:
 
-### 4. Submission Script
-A submission wrapper script `submit_jobs.sh` is generated that:
-1. Submits the system job
-2. Captures the job ID
-3. Submits the slide job with dependency on the system job
+- `manifest.json`
+- `manifest_system.txt` (AFM)
+- `manifest_slide.txt`
+- `run_system.pbs` or `run_system.sh` (AFM)
+- `run_slide.pbs` or `run_slide.sh`
+- `submit_jobs.sh`
 
-## Usage
+Exact names can vary with scheduler and script selection.
 
-### For AFM Simulations
+## Submission Model
 
-```bash
-cd your_simulation_directory
+AFM:
 
-# Submit both phases (system jobs will run first)
-./hpc/submit_jobs.sh
+- Submit system phase first.
+- Submit slide phase with scheduler dependency on system completion.
 
-# Monitor jobs
-squeue -u $USER  # SLURM
-qstat -u $USER   # PBS
-```
+Sheet-on-sheet:
 
-### For Sheet-on-Sheet Simulations
+- Usually slide-only phase.
 
-Sheet-on-sheet simulations don't have system initialization scripts, so they use simple single-phase submission:
+## Generate Scripts
+
+From a generated simulation root:
 
 ```bash
-cd your_simulation_directory
-
-# Submit slide jobs directly
-sbatch hpc/run.sh   # SLURM
-qsub hpc/run.pbs    # PBS
+FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --scheduler pbs
 ```
 
-## Files Generated
+Or produce scripts during generation:
 
-In the `hpc/` directory:
-- `manifest.json` - Full manifest with all job metadata
-- `manifest_system.txt` - List of system script paths (AFM only)
-- `manifest_slide.txt` - List of slide script paths
-- `run_system.pbs/sh` - System job script (AFM only)
-- `run_slide.pbs/sh` - Slide job script
-- `submit_jobs.sh` - Automated submission script
+```bash
+FrictionSim2D run afm afm_config.ini --hpc-scripts
+```
 
-## Benefits
+## Practical Checks Before Submission
 
-1. **Correctness**: Guarantees proper execution order
-2. **Efficiency**: No polling or waiting in job scripts
-3. **Native dependencies**: Uses scheduler features (afterok)
-4. **Parallelism**: System jobs run in parallel, then slide jobs run in parallel
-5. **Clean separation**: Easy to monitor each phase independently
+1. Confirm scheduler type (`pbs` or `slurm`).
+2. Confirm module list and MPI launcher in settings.
+3. Confirm walltime/resources match queue policies.
+4. Confirm script discovery includes expected `system.in`/`slide*.in` files.
+
+## Troubleshooting
+
+No simulation directories found:
+
+- Ensure generated folders contain `lammps/` and at least one `.in` script.
+
+Unexpected script ordering:
+
+- Review `hpc.lammps_scripts` in settings and generated manifests.
+
+Dependency errors at submit time:
+
+- Check scheduler syntax and whether wrapper script captured the first job ID correctly.

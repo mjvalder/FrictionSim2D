@@ -1,55 +1,75 @@
 # Essentials
 
-\anchor essentials
+## Standard Lifecycle
 
-\section essentials_flow Standard FrictionSim2D flow
+1. Prepare a config file (`afm_config.ini` or `sheet_config.ini`).
+2. Generate simulation folders with `FrictionSim2D run ...`.
+3. Optionally generate HPC scripts (`--hpc-scripts` or `hpc generate`).
+4. Run LAMMPS scripts on local or cluster resources.
+5. Optionally postprocess and/or import results with AiiDA.
 
-1. Prepare config (`afm_config.ini` or `sheet_config.ini`).
-2. Generate simulations with `run` commands.
-3. Optionally generate HPC scripts.
-4. Optionally register/submit via AiiDA.
-5. Import and query results.
+## Model Differences
 
-\section essentials_inputs Inputs
+AFM model:
 
-Primary inputs are `.ini` config files plus material/potential assets referenced by those configs.
+- Uses `[2D]`, `[tip]`, `[sub]`, and `[general]` sections.
+- Supports layer sweeps through `2D.layers`.
+- Produces per-layer subfolders like `L1`, `L2`, `L3`.
 
-Typical run commands:
+Sheet-on-sheet model:
 
-```bash
-FrictionSim2D run afm afm_config.ini --output-dir ./simulation_output
-FrictionSim2D run sheetonsheet sheet_config.ini --output-dir ./simulation_output
+- Uses `[2D]` and `[general]` sections.
+- Requires exactly one `layers` value and that value must be at least 3.
+- Uses one simulation directory per expanded parameter set.
+
+## Output Structure
+
+Typical AFM root:
+
+```text
+simulation_YYYYMMDD_HHMMSS/
+  afm/
+    <material>/
+      <size>/
+        <sub_tip>/
+          K<temp>/
+            L1/
+              lammps/
+              data/
+              results/
+              visuals/
+            L2/
+            ...
+            provenance/
+  hpc/                # optional
+  logs/
 ```
 
-\section essentials_outputs Outputs
+Typical sheet-on-sheet root:
 
-Generated run directories usually contain:
+```text
+simulation_YYYYMMDD_HHMMSS/
+  sheetonsheet/
+    <material>/
+      <size>/
+        K<temp>/
+          lammps/
+          data/
+          results/
+          visuals/
+          provenance/
+  hpc/                # optional
+  logs/
+```
 
-- `lammps/` (input scripts)
-- `data/` (structures/data files)
-- `results/` (numeric outputs)
-- `visuals/` (trajectory/visual artifacts)
-- `provenance/` (manifest + reproducibility metadata)
+## Reproducibility Basics
 
-\section essentials_hpc HPC execution model
+Each simulation directory includes a provenance area with copied source files and a manifest.
 
-Use generated scripts (`hpc generate` or `--hpc-scripts`) for batch/array execution.
-Templates support PBS and SLURM with module loading and optional scratch staging.
+Recommended minimum to archive per study:
 
-\section essentials_aiida AiiDA execution model
-
-AiiDA can be used for:
-
-- provenance registration
-- scheduler submission (`aiida submit`)
-- archive export/import
-- query workflows
-
-For secured clusters, HPC-native AiiDA deployment is typically more robust than local SSH transport.
-
-\section essentials_repro Reproducibility checklist
-
-- Keep original config file.
-- Keep generated `provenance/manifest.json` and config snapshots.
-- Record Conda environment (`conda env export > env.yml`).
-- Version-control template and settings changes.
+- Original config file
+- Generated simulation root
+- `provenance/manifest.json`
+- Settings used at generation time
+- Environment description (for example, package list)
