@@ -4,30 +4,70 @@ Provides LAMMPS-based molecular dynamics setup for AFM and sheet-on-sheet
 friction simulations with automatic potential generation.
 """
 
+from __future__ import annotations
+
 __version__ = "0.2.0"
 
 import logging
+from importlib.util import find_spec
+from typing import TYPE_CHECKING
 
-from .core.run import run_simulations
-from .builders.afm import AFMSimulation
-from .builders.sheetonsheet import SheetOnSheetSimulation
-from .core.potential_manager import PotentialManager
-from .core.config import (
-    AFMSimulationConfig,
-    SheetOnSheetSimulationConfig,
-    load_settings,
-    parse_config,
-)
-
-# Optional AiiDA imports (only available if AiiDA is installed)
-try:
+if TYPE_CHECKING:
     from .aiida.submit import run_with_aiida
-    _AIIDA_AVAILABLE = True
-except ImportError:
-    _AIIDA_AVAILABLE = False
-    run_with_aiida = None  # type: ignore
+    from .builders.afm import AFMSimulation
+    from .builders.sheetonsheet import SheetOnSheetSimulation
+    from .core.config import (
+        AFMSimulationConfig,
+        SheetOnSheetSimulationConfig,
+        load_settings,
+        parse_config,
+    )
+    from .core.potential_manager import PotentialManager
+    from .core.run import run_simulations
+
+_AIIDA_AVAILABLE = find_spec('aiida') is not None
 
 logger = logging.getLogger(__name__)
+
+
+def __getattr__(name: str):
+    """Lazily expose top-level API symbols to minimize import-time cost."""
+    if name == 'run_simulations':
+        from .core.run import run_simulations as _run_simulations
+        return _run_simulations
+    if name == 'AFMSimulation':
+        from .builders.afm import AFMSimulation as _AFMSimulation
+        return _AFMSimulation
+    if name == 'SheetOnSheetSimulation':
+        from .builders.sheetonsheet import (
+            SheetOnSheetSimulation as _SheetOnSheetSimulation,
+        )
+        return _SheetOnSheetSimulation
+    if name == 'PotentialManager':
+        from .core.potential_manager import PotentialManager as _PotentialManager
+        return _PotentialManager
+    if name == 'AFMSimulationConfig':
+        from .core.config import AFMSimulationConfig as _AFMSimulationConfig
+        return _AFMSimulationConfig
+    if name == 'SheetOnSheetSimulationConfig':
+        from .core.config import (
+            SheetOnSheetSimulationConfig as _SheetOnSheetSimulationConfig,
+        )
+        return _SheetOnSheetSimulationConfig
+    if name == 'load_settings':
+        from .core.config import load_settings as _load_settings
+        return _load_settings
+    if name == 'parse_config':
+        from .core.config import parse_config as _parse_config
+        return _parse_config
+    if name == 'run_with_aiida':
+        if not _AIIDA_AVAILABLE:
+            raise AttributeError(
+                "run_with_aiida is unavailable because AiiDA is not installed",
+            )
+        from .aiida.submit import run_with_aiida as _run_with_aiida
+        return _run_with_aiida
+    raise AttributeError(f"module {__name__!s} has no attribute {name!r}")
 
 
 def afm(config_file: str = "afm_config.ini", output_root: str = ".",
@@ -63,6 +103,8 @@ def _run_all(config_file: str, model: str = "afm", output_root: str = ".",
         model: Simulation type ('afm' or 'sheetonsheet').
         output_root: Base directory for the simulation root folder.
     """
+    from .core.run import run_simulations
+
     created_simulations, simulation_root, configs_to_run, _ = run_simulations(
         config_file=config_file,
         model=model,

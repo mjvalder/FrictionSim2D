@@ -754,6 +754,8 @@ def postprocess_plot(plot_config: str, output_dir: str,
     data_dirs = config.get('data_dirs', [])
     labels = config.get('labels', [])
     plots = config.get('plots', [])
+    dataset_display_labels = config.get('dataset_display_labels', {})
+    series_color_map = config.get('series_color_map', {})
 
     if not data_dirs or not labels or not plots:
         raise click.Abort(
@@ -765,7 +767,14 @@ def postprocess_plot(plot_config: str, output_dir: str,
             "Number of 'data_dirs' must match number of 'labels'."
         )
 
-    plotter = Plotter(data_dirs, labels, output_dir, plot_settings)
+    plotter = Plotter(
+        data_dirs,
+        labels,
+        output_dir,
+        plot_settings,
+        dataset_display_labels=dataset_display_labels,
+        series_color_map=series_color_map,
+    )
     for plot_cfg in plots:
         plotter.generate_plot(plot_cfg)
     click.echo("All plots generated.")
@@ -898,9 +907,10 @@ def db_upload(
     n_rejected = 0
     for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
         try:
+            sim_type = 'sheetonsheet' if is_pressure else 'afm'
             row_id = db.upload_result(
                 material=material.replace('_', '-'),
-                simulation_type='afm',
+                simulation_type=sim_type,
                 layers=layers,
                 force_nN=None if is_pressure else load_val,
                 pressure_gpa=load_val if is_pressure else None,
@@ -1120,9 +1130,10 @@ def db_stage(
     n_rejected = 0
     for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
         try:
+            sim_type = 'sheetonsheet' if is_pressure else 'afm'
             row_id = db.upload_result(
                 material=material.replace('_', '-'),
-                simulation_type='afm',
+                simulation_type=sim_type,
                 layers=layers,
                 force_nN=None if is_pressure else load_val,
                 pressure_gpa=load_val if is_pressure else None,

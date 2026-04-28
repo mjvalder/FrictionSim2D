@@ -6,8 +6,24 @@ output from friction simulations:
     - Plotter: Generates plots and figures from processed data
 """
 
-from .read_data import DataReader
-from .plot_data import Plotter
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .plot_data import Plotter
+    from .read_data import DataReader
+
+
+def __getattr__(name: str):
+    """Lazily expose heavy symbols to reduce import-time overhead."""
+    if name == 'DataReader':
+        from .read_data import DataReader as _DataReader
+        return _DataReader
+    if name == 'Plotter':
+        from .plot_data import Plotter as _Plotter
+        return _Plotter
+    raise AttributeError(f"module {__name__!s} has no attribute {name!r}")
 
 __all__ = [
     'DataReader',

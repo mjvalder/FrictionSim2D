@@ -23,19 +23,19 @@ logger = logging.getLogger(__name__)
 class _NpEncoder(json.JSONEncoder):
     """JSON encoder that handles NumPy and pandas types."""
 
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, pd.DataFrame):
-            return {'columns': obj.columns.tolist(), 'data': obj.values.tolist()}
-        return super().default(obj)
+    def default(self, o):  # pylint: disable=arguments-renamed
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, pd.DataFrame):
+            return {'columns': o.columns.tolist(), 'data': o.values.tolist()}
+        return super().default(o)
 
 
-class DataReader:
+class DataReader:  # pylint: disable=too-many-instance-attributes
     """Reads and processes friction simulation data.
 
     Walks through a directory of simulation results, parses filenames and
@@ -65,6 +65,19 @@ class DataReader:
         'v_yfrict': 'lfy',
         'v_fz': 'nf',
     }
+
+    # Filename patterns (compiled once at class level)
+    _FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
+    _FILE_PATTERN_SHEET = re.compile(
+        r'fc_ave_slide_(\d+\.?\d*)(GPa|nN)_(\d+\.?\d*)angle_(\d+\.?\d*)ms'
+    )
+    _FILE_PATTERN_SHEET_ALT = re.compile(r'friction_p(\d+\.?\d*)_a(\d+\.?\d*)_s(\d+\.?\d*)')
+
+    # Path patterns (compiled once at class level)
+    _PATH_PATTERN_TIP = re.compile(r'(\d+x_\d+y)/sub_(\w+)_tip_(\w+)_(r\d+)')
+    _PATH_PATTERN_SHEET = re.compile(
+        r'(?:sheetvsheet/)?([\w\d\-_]+)/(\d+x_\d+y)/([\w\d\-_]+)?/?results'
+    )
 
     def __init__(self, results_dir: str = 'results_110725_test') -> None:
         """Initialise the DataReader.
@@ -100,10 +113,12 @@ class DataReader:
             DataFrame with added lateral_force and cof columns.
         """
         if 'lfx' in df.columns and 'lfy' in df.columns and 'nf' in df.columns:
-            from ..data.models import compute_derived_columns  # noqa: PLC0415
+            from ..data.models import compute_derived_columns  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
             lateral_force, cof = compute_derived_columns(
-                df['lfx'].values, df['lfy'].values, df['nf'].values,
+                np.asarray(df['lfx'].values),
+                np.asarray(df['lfy'].values),
+                np.asarray(df['nf'].values),
             )
             df['lateral_force'] = lateral_force
             df['cof'] = cof
@@ -114,58 +129,159 @@ class DataReader:
         """Construct the full path for an output file."""
         return self.output_dir / filename
 
-    def read_data(self) -> tuple:
+    def _first_pass_ntimestep(self) -> int:
+        """First directory walk to determine the expected timestep count."""
+        ntimestep = 0
+        logger.info("Starting first pass to determine ntimestep...")
+        for root, _, files in os.walk(self.results_dir):
+            is_tip = self._PATH_PATTERN_TIP.search(root)
+            is_sheet = self._PATH_PATTERN_SHEET.search(root)
+            if not (is_tip or is_sheet):
+                continue
+            file_patterns = (
+                (self._FILE_PATTERN_TIP,)
+                if is_tip
+                else (self._FILE_PATTERN_SHEET, self._FILE_PATTERN_SHEET_ALT)
+            )
+            for filename in files:
+                if any(p.match(filename) for p in file_patterns):
+                    filepath = Path(root) / filename
+                    try:
+                        df = pd.read_csv(
+                            filepath, sep=r'\s+', header=None, usecols=[0], skiprows=2,
+                        )
+                        ntimestep = max(ntimestep, len(df))
+                    except (pd.errors.EmptyDataError, IndexError):
+                        continue
+        return ntimestep
+
+    def _resolve_path_info(
+        self, root: str,
+    ) -> tuple[str, str, str, str, str, str] | None:
+        """Parse a directory path to extract simulation context.
+
+        Returns:
+            ``(sim_type, material, size, substrate, tip_material, tip_radius)``
+            or ``None`` if the path does not match any known pattern.
+        """
+        path_match_tip = self._PATH_PATTERN_TIP.search(root)
+        if path_match_tip:
+            size, substrate_material, tip_material, tip_radius = path_match_tip.groups()
+            try:
+                search_path = str(self.results_dir / 'afm')
+                start_dir = (
+                    search_path
+                    if os.path.commonpath([root, search_path]) == search_path
+                    else str(self.results_dir)
+                )
+                material_path_full = root[:root.find(size)]
+                material = str(Path(material_path_full).relative_to(start_dir)).strip('/')
+            except (IndexError, ValueError):
+                return None
+            if not material or material == '.':
+                return None
+            return ('tip', material, size, substrate_material, tip_material, tip_radius)
+
+        path_match_sheet = self._PATH_PATTERN_SHEET.search(root)
+        if path_match_sheet:
+            material, size, substrate_material = path_match_sheet.groups()
+            substrate_material = (substrate_material or 'N/A').strip('/')
+            return ('sheet', material, size, substrate_material, 'sheet', 'N/A')
+
+        return None
+
+    def _read_dataframe(self, filepath: Path, sim_type: str) -> pd.DataFrame:
+        """Read a LAMMPS output file and return a labelled DataFrame."""
+        if sim_type == 'sheet':
+            sheet_col_names: list[str] | None = None
+            try:
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
+                    header_lines = [next(fh, ''), next(fh, '')]
+                if len(header_lines) > 1 and header_lines[1].startswith('#'):
+                    tokens = header_lines[1].lstrip('#').strip().split()
+                    if tokens:
+                        sheet_col_names = [
+                            'time' if t == 'TimeStep' else t for t in tokens
+                        ]
+            except OSError:
+                pass
+            col_names = sheet_col_names or self._SHEET_FILE_COLUMNS
+            df = pd.read_csv(
+                filepath, sep=r'\s+', header=None, names=col_names, skiprows=2,
+            )
+            df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
+        else:
+            df = pd.read_csv(
+                filepath, sep=r'\s+', header=None,
+                names=self._AFM_FILE_COLUMNS, skiprows=2,
+            )
+            if df.shape[1] != len(self._AFM_FILE_COLUMNS):
+                logger.warning(
+                    "Column count mismatch in %s: got %d, expected %d. "
+                    "Template fix fc_ave order may have changed.",
+                    filepath, df.shape[1], len(self._AFM_FILE_COLUMNS),
+                )
+        return df
+
+    def _parse_filename_params(
+        self,
+        sim_type: str,
+        filename: str,
+        file_match: re.Match,
+    ) -> tuple[float, int, int, int, bool]:
+        """Extract load, angle, speed, layer and pressure flag from a regex match.
+
+        Returns:
+            ``(load_val, angle, speed, layer, is_pressure)``
+        """
+        if sim_type == 'sheet':
+            if self._FILE_PATTERN_SHEET.match(filename):
+                load_str, unit_str, angle_str, speed_str = file_match.groups()
+                is_pressure = unit_str == 'GPa'
+                load_val = float(load_str)
+            else:
+                load_str, angle_str, speed_str = file_match.groups()
+                is_pressure = True
+                load_val = float(load_str)
+            layer = 2
+        else:
+            load_str, angle_str, speed_str, layer_str = file_match.groups()
+            layer = int(layer_str)
+            is_pressure = False
+            load_val = float(load_str)
+        return load_val, int(float(angle_str)), int(float(speed_str)), layer, is_pressure
+
+    @staticmethod
+    def _finalize_metadata(metadata: dict) -> dict:
+        """Convert mutable sets in the metadata dict to sorted lists."""
+        final: dict = {}
+        for k, v in metadata.items():
+            if k in ('forces_and_angles', 'pressures_and_angles'):
+                final[k] = {load: sorted(list(angles)) for load, angles in v.items()}
+            else:
+                final[k] = sorted(list(v))
+        material_types: dict = {
+            'b_type': [], 'h_type': [], 't_type': [], 'p_type': [], 'other': [],
+        }
+        for mat in final.get('materials', []):
+            prefix = mat.split('_', 1)[0]
+            type_key = f"{prefix}_type"
+            material_types[type_key if type_key in material_types else 'other'].append(mat)
+        final['material_types'] = material_types
+        return final
+
+    def read_data(self) -> tuple:  # pylint: disable=too-many-locals
         """Walk through the results directory and read all simulation data.
 
         Uses a two-pass approach to dynamically determine the correct
         number of timesteps for a complete file.
         """
-        results_dir = self.results_dir
-
-        # Patterns for tip-on-substrate simulations
-        file_pattern_tip = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
-        path_pattern_tip = re.compile(r'(\d+x_\d+y)/sub_(\w+)_tip_(\w+)_(r\d+)')
-
-        # Patterns for sheet-on-sheet simulations
-        file_pattern_sheet = re.compile(
-            r'fc_ave_slide_(\d+\.?\d*)(GPa|nN)_(\d+)angle_(\d+)ms'
-        )
-        file_pattern_sheet_alt = re.compile(r'friction_p(\d+\.?\d*)_a(\d+)_s(\d+)')
-        path_pattern_sheet = re.compile(
-            r'(?:sheetvsheet/)?([\w\d\-_]+)/(\d+x_\d+y)/([\w\d\-_]+)?/?results'
-        )
-
-        # --- First pass: find max timesteps ---
-        ntimestep = 0
-        logger.info("Starting first pass to determine ntimestep...")
-        for root, _, files in os.walk(results_dir):
-            is_tip_sim = path_pattern_tip.search(root)
-            is_sheet_sim = path_pattern_sheet.search(root)
-            if not (is_tip_sim or is_sheet_sim):
-                continue
-
-            if is_tip_sim:
-                current_file_patterns = (file_pattern_tip,)
-            else:
-                current_file_patterns = (file_pattern_sheet, file_pattern_sheet_alt)
-
-            for filename in files:
-                if any(pattern.match(filename) for pattern in current_file_patterns):
-                    filepath = Path(root) / filename
-                    try:
-                        df = pd.read_csv(filepath, sep=r'\s+', header=None, usecols=[0], skiprows=2)
-                        if len(df) > ntimestep:
-                            ntimestep = len(df)
-                    except (pd.errors.EmptyDataError, IndexError):
-                        continue
-
+        ntimestep = self._first_pass_ntimestep()
         if ntimestep == 0:
             logger.warning("No valid data files found. Could not determine ntimestep.")
             return None, {}, {}, {}, 0
-
         logger.info("Determined ntimestep for a complete file to be: %d", ntimestep)
 
-        # --- Second pass: process complete files ---
         time_series = None
         incomplete_files: dict = {}
         incomplete_materials: dict = {}
@@ -175,82 +291,28 @@ class DataReader:
             'forces_and_angles': {}, 'pressures_and_angles': {},
         }
 
-        for root, _, files in os.walk(results_dir):
-            path_match_tip = path_pattern_tip.search(root)
-            path_match_sheet = path_pattern_sheet.search(root)
-
-            material = None
-            if path_match_tip:
-                size, substrate_material, tip_material, tip_radius = path_match_tip.groups()
-                sim_type = 'tip'
-                try:
-                    search_path = str(results_dir / 'afm')
-                    start_dir = search_path if os.path.commonpath([root, search_path]) == search_path else str(results_dir)
-                    material_path_end_index = root.find(size)
-                    material_path_full = root[:material_path_end_index]
-                    material = str(Path(material_path_full).relative_to(start_dir)).strip('/')
-                    if not material or material == '.':
-                        continue
-                except (IndexError, ValueError):
-                    continue
-
-            elif path_match_sheet:
-                groups = path_match_sheet.groups()
-                material, size, substrate_material = groups
-                if substrate_material is None:
-                    substrate_material = 'N/A'
-                else:
-                    substrate_material = substrate_material.strip('/')
-
-                tip_material = 'sheet'
-                tip_radius = 'N/A'
-                sim_type = 'sheet'
-            else:
+        for root, _, files in os.walk(self.results_dir):
+            path_info = self._resolve_path_info(root)
+            if path_info is None:
                 continue
-
-            if not material:
-                continue
-
+            sim_type, material, size, substrate_material, tip_material, tip_radius = path_info
             safe_material = material.replace('-', '_').replace('/', '__')
             size_key = size.replace('x_', 'x')
 
             for filename in files:
                 if sim_type == 'sheet':
-                    file_match = file_pattern_sheet.match(filename) or file_pattern_sheet_alt.match(filename)
+                    file_match = (
+                        self._FILE_PATTERN_SHEET.match(filename)
+                        or self._FILE_PATTERN_SHEET_ALT.match(filename)
+                    )
                 else:
-                    file_match = file_pattern_tip.match(filename)
+                    file_match = self._FILE_PATTERN_TIP.match(filename)
                 if not file_match:
                     continue
 
                 filepath = Path(root) / filename
                 try:
-                    if sim_type == 'sheet':
-                        df = pd.read_csv(
-                            filepath, sep=r'\s+', header=None,
-                            names=self._SHEET_FILE_COLUMNS, skiprows=2,
-                        )
-                        ncols = df.shape[1]
-                        expected = len(self._SHEET_FILE_COLUMNS)
-                        if ncols != expected:
-                            logger.warning(
-                                "Column count mismatch in %s: got %d, expected %d. "
-                                "Template fix fc_ave order may have changed.",
-                                filepath, ncols, expected,
-                            )
-                        df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
-                    else:
-                        df = pd.read_csv(
-                            filepath, sep=r'\s+', header=None,
-                            names=self._AFM_FILE_COLUMNS, skiprows=2,
-                        )
-                        ncols = df.shape[1]
-                        expected = len(self._AFM_FILE_COLUMNS)
-                        if ncols != expected:
-                            logger.warning(
-                                "Column count mismatch in %s: got %d, expected %d. "
-                                "Template fix fc_ave order may have changed.",
-                                filepath, ncols, expected,
-                            )
+                    df = self._read_dataframe(filepath, sim_type)
 
                     if ntimestep - len(df) > 3:
                         incomplete_files.setdefault(size_key, []).append(str(filepath))
@@ -260,36 +322,19 @@ class DataReader:
                     if time_series is None:
                         time_series = df['time'].to_list()
 
-                    if sim_type == 'sheet':
-                        if file_pattern_sheet.match(filename):
-                            load_str, unit_str, angle_str, speed_str = file_match.groups()
-                            is_pressure = unit_str == 'GPa'
-                            load_val = float(load_str)
-                        else:
-                            load_str, angle_str, speed_str = file_match.groups()
-                            is_pressure = True
-                            load_val = float(load_str)
-                        layer = 2
-                    else:
-                        load_str, angle_str, speed_str, layer_str = file_match.groups()
-                        layer = int(layer_str)
-                        is_pressure = False
-                        load_val = float(load_str)
-
-                    angle, speed = map(int, [angle_str, speed_str])
-
+                    load_val, angle, speed, layer, is_pressure = self._parse_filename_params(
+                        sim_type, filename, file_match,
+                    )
                     metadata['materials'].add(safe_material)
                     metadata['substrates'].add(substrate_material)
                     metadata['tip_materials'].add(tip_material)
                     metadata['tip_radii'].add(tip_radius)
-
+                    metadata['speeds'].add(speed)
+                    metadata['layers'].add(layer)
                     if is_pressure:
                         metadata['pressures_and_angles'].setdefault(load_val, set()).add(angle)
                     else:
                         metadata['forces_and_angles'].setdefault(load_val, set()).add(angle)
-
-                    metadata['speeds'].add(speed)
-                    metadata['layers'].add(layer)
 
                     df_processed = df.drop(columns=['time'])
                     df_processed = self._calculate_derived_quantities(df_processed)
@@ -304,37 +349,21 @@ class DataReader:
                         .setdefault(f'l{layer}', {})
                         .setdefault(f's{speed}', {})
                     )
-
                     load_key = f'p{load_val}' if is_pressure else f'f{load_val}'
-                    full_path = base_path.setdefault(load_key, {})
-                    full_path[f'a{angle}'] = df_processed
+                    base_path.setdefault(load_key, {})[f'a{angle}'] = df_processed
 
                 except (pd.errors.EmptyDataError, IndexError, ValueError) as e:
                     logger.warning("Could not process file %s: %s", filepath, e)
                     incomplete_files.setdefault(size_key, []).append(str(filepath))
                     incomplete_materials.setdefault(size_key, set()).add(material)
 
-        final_metadata: dict = {}
-        for k, v in metadata.items():
-            if k in ('forces_and_angles', 'pressures_and_angles'):
-                final_metadata[k] = {load: sorted(list(angles)) for load, angles in v.items()}
-            else:
-                final_metadata[k] = sorted(list(v))
-
-        material_types: dict = {'b_type': [], 'h_type': [], 't_type': [], 'p_type': [], 'other': []}
-        for material_name in final_metadata.get('materials', []):
-            try:
-                prefix = material_name.split('_', 1)[0]
-                type_key = f"{prefix}_type"
-                if type_key in material_types:
-                    material_types[type_key].append(material_name)
-                else:
-                    material_types['other'].append(material_name)
-            except IndexError:
-                material_types['other'].append(material_name)
-        final_metadata['material_types'] = material_types
-
-        return time_series, incomplete_files, incomplete_materials, final_metadata, ntimestep
+        return (
+            time_series,
+            incomplete_files,
+            incomplete_materials,
+            self._finalize_metadata(metadata),
+            ntimestep,
+        )
 
     def export_full_data_to_json(self) -> None:
         """Export the full time-series data to JSON files, one per size."""
@@ -363,7 +392,7 @@ class DataReader:
                 'results': size_data,
             }
 
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(output_with_metadata, f, cls=_NpEncoder)
             logger.info("Full time-series data for size %s exported to %s", size_key, output_path)
 
@@ -372,13 +401,13 @@ class DataReader:
         if self.incomplete_files:
             for size, files in self.incomplete_files.items():
                 filepath = self._get_output_path(f'incomplete_files_{size}.txt')
-                with open(filepath, 'w') as f:
+                with open(filepath, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(sorted(files)))
                 logger.info("Incomplete files for size %s saved to %s", size, filepath)
 
         if self.incomplete_materials:
             for size, materials in self.incomplete_materials.items():
                 filepath = self._get_output_path(f'incomplete_materials_{size}.txt')
-                with open(filepath, 'w') as f:
+                with open(filepath, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(sorted(list(materials))))
                 logger.info("Incomplete materials for size %s saved to %s", size, filepath)
