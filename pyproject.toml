@@ -68,9 +68,10 @@ all = [
 # AiiDA entry points — required for plugin discovery by aiida-core
 # ---------------------------------------------------------------------------
 [project.entry-points."aiida.data"]
-"friction2d.simulation"  = "src.aiida.data.simulation:FrictionSimulationData"
-"friction2d.results"     = "src.aiida.data.results:FrictionResultsData"
-"friction2d.provenance"  = "src.aiida.data.provenance:FrictionProvenanceData"
+"friction2d.simulation"     = "src.aiida.data.simulation:FrictionSimulationData"
+"friction2d.simulation_set" = "src.aiida.data.simulation_set:FrictionSimulationSetData"
+"friction2d.results"        = "src.aiida.data.results:FrictionResultsData"
+"friction2d.provenance"     = "src.aiida.data.provenance:FrictionProvenanceData"
 
 [project.entry-points."aiida.calculations"]
 "friction2d.lammps" = "src.aiida.calcjob:LammpsFrictionCalcJob"

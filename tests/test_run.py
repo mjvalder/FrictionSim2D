@@ -183,7 +183,7 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     settings.hpc.lammps_scripts = ["slide.in"]
 
     monkeypatch.setattr("src.core.run.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.core.run.load_settings", lambda: settings)
+    monkeypatch.setattr("src.core.run.load_settings", lambda **_kwargs: settings)
     monkeypatch.setattr("src.core.run.expand_config_sweeps", lambda _c: [dict(base_dict)])
 
     class FakeConfig:
@@ -194,9 +194,11 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
             return "{}"
 
     calls = {"build": 0, "base": 0, "hpc": 0}
+    seen_output_dirs: list[Path] = []
 
     class FakeAFMBuilder:
         def __init__(self, _config, _output_dir, config_path=None):
+            seen_output_dirs.append(Path(_output_dir))
             self.config_path = config_path
 
         def set_base_output_dir(self, _root):
@@ -223,6 +225,7 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     assert len(created) == 1
     assert root == tmp_path / "sim_run"
     assert calls == {"build": 1, "base": 1, "hpc": 1}
+    assert seen_output_dirs[0].as_posix().endswith("afm/MoS2/20x_20y/sub_aSi_tip_Si_r25/K300")
     assert returned_settings.hpc.lammps_scripts == ["system.in", "slide.in"]
 
 
@@ -243,7 +246,7 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
     settings.hpc.lammps_scripts = ["system.in", "slide.in"]
 
     monkeypatch.setattr("src.core.run.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.core.run.load_settings", lambda: settings)
+    monkeypatch.setattr("src.core.run.load_settings", lambda **_kwargs: settings)
     monkeypatch.setattr("src.core.run.expand_config_sweeps", lambda _c: [dict(base_dict)])
 
     class FakeConfig:
@@ -293,7 +296,7 @@ def test_run_simulations_continues_after_build_failure(
 
     settings = real_load_settings()
     monkeypatch.setattr("src.core.run.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.core.run.load_settings", lambda: settings)
+    monkeypatch.setattr("src.core.run.load_settings", lambda **_kwargs: settings)
     monkeypatch.setattr(
         "src.core.run.expand_config_sweeps",
         lambda _c: [dict(base_dict), dict(base_dict)],

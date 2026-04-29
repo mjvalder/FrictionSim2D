@@ -243,15 +243,6 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
     def provenance_uuid(self, value: str):
         self.base.attributes.set('provenance_uuid', value)
 
-    @property
-    def set_uuid(self) -> Optional[str]:
-        """UUID of the parent ``FrictionSimulationSetData`` node."""
-        return self.base.attributes.get('set_uuid')
-
-    @set_uuid.setter
-    def set_uuid(self, value: str):
-        self.base.attributes.set('set_uuid', str(value))
-
     # -- Convenience methods --------------------------------------------------
 
     def get_results(self) -> Optional['FrictionResultsData']:
@@ -285,30 +276,24 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
         """
         self.simulation_type = simulation_type
 
-        # General parameters — skip list-valued fields (those belong on the
-        # simulation set node) and None values.
+        # General parameters
         if 'general' in config:
             gen = config['general']
-            for key, attr in [('temp', 'temperature'), ('scan_speed', 'scan_speed')]:
-                val = gen.get(key)
-                if val is not None and not isinstance(val, list):
-                    setattr(self, attr, val)
+            for key, attr in [('temp', 'temperature'), ('force', 'force'),
+                              ('pressure', 'pressure'), ('scan_angle', 'scan_angle'),
+                              ('scan_speed', 'scan_speed')]:
+                if key in gen:
+                    setattr(self, attr, gen[key])
 
         # 2D sheet parameters
         sheet_key = '2D' if '2D' in config else 'sheet'
         if sheet_key in config:
             sheet = config[sheet_key]
             for key, attr in [('mat', 'material'), ('x', 'size_x'), ('y', 'size_y'),
-                              ('stack_type', 'stack_type'),
+                              ('layers', 'layers'), ('stack_type', 'stack_type'),
                               ('pot_type', 'potential_type')]:
-                if key in sheet and sheet[key] is not None:
+                if key in sheet:
                     setattr(self, attr, sheet[key])
-            # layers may be stored as a list (one value per material in a batch)
-            if 'layers' in sheet and sheet['layers'] is not None:
-                layers_val = sheet['layers']
-                if isinstance(layers_val, list):
-                    layers_val = layers_val[0] if layers_val else 1
-                self.layers = layers_val
 
         # Substrate
         if 'sub' in config:

@@ -402,37 +402,87 @@ def aiida_status():
         click.echo("\n📝 Setup AiiDA with: verdi presto --use-postgres")
 
 @aiida_group.command('import')
-@click.argument('results_dir', type=click.Path(exists=True))
-@click.option('--process/--no-process', default=True,
-              help='Run postprocessing on results')
+@click.argument('simulation_folder', type=click.Path(exists=True))
+@click.option('--label', '-l', default=None,
+              help='Required label for the simulation set (prompted if omitted)')
+@click.option('--description', '-d', default='',
+              help='Optional description for this simulation set')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_import(results_dir: str, process: bool, profile: Optional[str]):
-    """Import completed simulation results into AiiDA database.
-    
+def aiida_import(simulation_folder: str, label: Optional[str], description: str,
+                 profile: Optional[str]):
+    """Import a simulation set into AiiDA with full provenance.
+
+    SIMULATION_FOLDER must be the ``simulation_XXXXXXXX`` directory produced
+    by a single ``FrictionSim2D run`` invocation.  A label is required to
+    identify this set in the database; you will be prompted if one is not
+    supplied.
+
+    Creates one ``FrictionSimulationSetData`` node (shared config), one
+    ``FrictionProvenanceData`` + one ``FrictionSimulationData`` per material,
+    and one ``FrictionResultsData`` per load/angle combination.
+
     Example:
-        FrictionSim2D aiida import ./returned_results
+        FrictionSim2D aiida import ./simulation_20260421_173546 --label "251125-sheetonsheet"
     """
-    from .aiida.integration import import_results_to_aiida
-    
-    results_path = Path(results_dir)
-    click.echo(f"📥 Importing results from: {results_path}")
-    
+    from .aiida.integration import import_simulation_set
+
+    sim_path = Path(simulation_folder)
+
+    if not label:
+        label = click.prompt(
+            'Label for this simulation set',
+            default=sim_path.name,
+        )
+    label = label.strip()
+    if not label:
+        _raise_abort("❌ Label cannot be empty.", ValueError("empty label"))
+
+    click.echo(f"📥 Importing simulation set: {sim_path.name}")
+    click.echo(f"   Label: {label}")
+    if description:
+        click.echo(f"   Description: {description}")
+
     try:
-        if process:
-            click.echo("🔄 Running postprocessing...")
-            from .postprocessing.read_data import DataReader
-            _ = DataReader(results_dir=str(results_path))
-            click.echo("   ✅ Postprocessing complete")
-        
-        imported = import_results_to_aiida(results_path, aiida_profile=profile)
-        click.echo(f"✅ Imported {len(imported)} simulations to AiiDA")
-        
+        set_uuid = import_simulation_set(
+            simulation_folder=sim_path,
+            label=label,
+            description=description,
+            aiida_profile=profile,
+        )
+        click.echo(f"✅ Import complete — set UUID: {set_uuid}")
+
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Import failed")
         _raise_abort(f"❌ Import failed: {exc}", exc)
 
-@aiida_group.command('query')
+
+@aiida_group.command('clear')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@click.confirmation_option(
+    prompt='This will permanently delete all FrictionSim2D nodes. Continue?'
+)
+def aiida_clear(profile: Optional[str]):
+    """Delete all FrictionSim2D nodes from the AiiDA database.
+
+    This removes every SimulationSet, Simulation, Provenance, and Results
+    node.  The action is irreversible.
+
+    Example:
+        FrictionSim2D aiida clear
+    """
+    from .aiida.integration import clear_all_nodes
+
+    click.echo("🗑️  Deleting all FrictionSim2D nodes…")
+    try:
+        n = clear_all_nodes(aiida_profile=profile)
+        click.echo(f"✅ Deleted {n} nodes.")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Clear failed")
+        _raise_abort(f"❌ Clear failed: {exc}", exc)
+
+
 @click.option('--material', '-m', help='Filter by material')
 @click.option('--layers', '-l', type=int, help='Filter by layer count')
 @click.option('--force', '-f', type=float, help='Filter by applied force')

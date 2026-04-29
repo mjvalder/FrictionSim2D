@@ -20,16 +20,12 @@ else:
 
 _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'FrictionSimulationData': (f'{__name__}.data', 'FrictionSimulationData'),
-    'FrictionSimulationSetData': (f'{__name__}.data', 'FrictionSimulationSetData'),
     'FrictionResultsData': (f'{__name__}.data', 'FrictionResultsData'),
     'FrictionProvenanceData': (f'{__name__}.data', 'FrictionProvenanceData'),
     'Friction2DDB': (f'{__name__}.query', 'Friction2DDB'),
     'register_simulation_batch': (f'{__name__}.integration', 'register_simulation_batch'),
     'register_single_simulation': (f'{__name__}.integration', 'register_single_simulation'),
     'import_results_to_aiida': (f'{__name__}.integration', 'import_results_to_aiida'),
-    'import_simulation_set': (f'{__name__}.integration', 'import_simulation_set'),
-    'rebuild_simulation_set': (f'{__name__}.integration', 'rebuild_simulation_set'),
-    'clear_all_nodes': (f'{__name__}.integration', 'clear_all_nodes'),
     'export_archive': (f'{__name__}.integration', 'export_archive'),
     'import_archive': (f'{__name__}.integration', 'import_archive'),
     'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),

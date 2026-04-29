@@ -18,6 +18,7 @@ from .config import (
     load_settings,
     parse_config,
 )
+from .path_utils import format_dimension_token
 from ..builders.afm import AFMSimulation
 from ..builders.sheetonsheet import SheetOnSheetSimulation
 from ..hpc import HPCScriptGenerator, HPCConfig
@@ -322,6 +323,7 @@ def run_simulations(
         x = run_dict['2D'].get('x', 100)
         y = run_dict['2D'].get('y', 100)
         temp = run_dict['general'].get('temp', 300)
+        size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
 
         if model == "afm":
             tip_mat = run_dict.get('tip', {}).get('mat', 'Si')
@@ -334,13 +336,13 @@ def run_simulations(
             tip_str = f"{tip_amorph}{tip_mat}" if tip_amorph == 'a' else tip_mat
 
             output_dir = (
-                simulation_root / "afm" / mat / f"{x}x_{y}y" /
+                simulation_root / "afm" / mat / size_token /
                 f"sub_{sub_str}_tip_{tip_str}_r{int(tip_r)}" /
                 f"K{int(temp)}"
             )
         else:
             output_dir = (
-                simulation_root / "sheetonsheet" / mat / f"{x}x_{y}y" /
+                simulation_root / "sheetonsheet" / mat / size_token /
                 f"K{int(temp)}"
             )
 

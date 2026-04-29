@@ -84,33 +84,6 @@ class FrictionResultsData(Data):
     # -- Simulation identification --------------------------------------------
 
     @property
-    def simulation_type(self) -> str:
-        """Simulation type: ``'afm'`` or ``'sheetonsheet'``."""
-        return self.base.attributes.get('simulation_type', '')
-
-    @simulation_type.setter
-    def simulation_type(self, value: str):
-        self.base.attributes.set('simulation_type', str(value))
-
-    @property
-    def simulation_uuid(self) -> str:
-        """UUID of the parent ``FrictionSimulationData`` node."""
-        return self.base.attributes.get('simulation_uuid', '')
-
-    @simulation_uuid.setter
-    def simulation_uuid(self, value: str):
-        self.base.attributes.set('simulation_uuid', str(value))
-
-    @property
-    def set_uuid(self) -> str:
-        """UUID of the parent ``FrictionSimulationSetData`` node."""
-        return self.base.attributes.get('set_uuid', '')
-
-    @set_uuid.setter
-    def set_uuid(self, value: str):
-        self.base.attributes.set('set_uuid', str(value))
-
-    @property
     def material(self) -> str:
         """Material this result is for."""
         return self.base.attributes.get('material', '')

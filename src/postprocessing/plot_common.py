@@ -1084,9 +1084,18 @@ class PlotCommonMixin(PlotterMixinBase):
             mat_df = df[df['id'] == mat_id].copy()
 
             if force_range and len(force_range) == 2:
+                force_col = 'force' if 'force' in mat_df.columns else 'nf' if 'nf' in mat_df.columns else None
+                if force_col is None:
+                    logger.warning(
+                        "Skipping source %s for material %s: no force/nf column available",
+                        source_config,
+                        mat_id,
+                    )
+                    continue
+
                 mat_df = mat_df[
-                    (mat_df['force'] >= force_range[0])
-                    & (mat_df['force'] <= force_range[1])
+                    (mat_df[force_col] >= force_range[0])
+                    & (mat_df[force_col] <= force_range[1])
                 ]
 
                 if len(mat_df) < 2:
@@ -1094,7 +1103,7 @@ class PlotCommonMixin(PlotterMixinBase):
 
                 avg_value = mat_df[metric].mean()
                 fit = self._calculate_linear_fit(
-                    mat_df['force'].values, mat_df[metric].values,
+                    mat_df[force_col].values, mat_df[metric].values,
                 )
 
                 if fit:

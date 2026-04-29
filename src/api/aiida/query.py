@@ -137,52 +137,6 @@ class Friction2DDB:
         self._simulation_data_cls = FrictionSimulationData
         self._results_data_cls = FrictionResultsData
         self._provenance_data_cls = FrictionProvenanceData
-        from .data import FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
-        self._simulation_set_cls = FrictionSimulationSetData
-
-    # -- Simulation set queries -----------------------------------------------
-
-    def list_sets(self) -> List[Any]:
-        """Return all ``FrictionSimulationSetData`` nodes, newest first.
-
-        Returns:
-            List of set nodes ordered by creation time (descending).
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_set_cls, project=['*'])
-        qb.order_by({self._simulation_set_cls: [{'ctime': 'desc'}]})
-        return [row[0] for row in qb.all()]
-
-    def query_by_set(self, set_uuid: str) -> QueryResult:
-        """Return all ``FrictionSimulationData`` nodes belonging to a set.
-
-        Args:
-            set_uuid: UUID of the ``FrictionSimulationSetData`` node.
-
-        Returns:
-            Matching simulation nodes.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, filters={'attributes.set_uuid': set_uuid})
-        simulations = [row[0] for row in qb.all()]
-        return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
-            query_params={'set_uuid': set_uuid},
-        )
-
-    def get_set_results(self, set_uuid: str) -> List[Any]:
-        """Return all ``FrictionResultsData`` nodes belonging to a set.
-
-        Args:
-            set_uuid: UUID of the ``FrictionSimulationSetData`` node.
-
-        Returns:
-            List of results nodes.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._results_data_cls, filters={'attributes.set_uuid': set_uuid})
-        return [row[0] for row in qb.all()]
 
     # -- Simple queries -------------------------------------------------------
 
