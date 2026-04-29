@@ -1077,61 +1077,76 @@ class PlotCommonMixin(PlotterMixinBase):
         error_metric = source_config.get('error_metric', 'slope_stderr')
 
         materials_out: list[str] = []
-        values_out: list = []
-        errors_out: list = []
+        values_out: list[float] = []
+        errors_out: list[float] = []
 
         for mat_id in df['id'].unique():
             mat_df = df[df['id'] == mat_id].copy()
 
             if force_range and len(force_range) == 2:
-                force_col = 'force' if 'force' in mat_df.columns else 'nf' if 'nf' in mat_df.columns else None
-                if force_col is None:
+                candidate_cols = [
+                    col for col in ('force', 'pressure', 'nf')
+                    if col in mat_df.columns and mat_df[col].notna().any()
+                ]
+                if not candidate_cols:
                     logger.warning(
-                        "Skipping source %s for material %s: no force/nf column available",
+                        "Skipping source %s for material %s: no force/pressure/nf column available",
                         source_config,
                         mat_id,
                     )
                     continue
 
-                mat_df = mat_df[
+                # Prefer force when available, but fall back to pressure if force
+                # does not provide enough points in the requested range.
+                force_col = candidate_cols[0]
+                filtered = mat_df[
                     (mat_df[force_col] >= force_range[0])
                     & (mat_df[force_col] <= force_range[1])
                 ]
+                if (
+                    len(filtered) < 2
+                    and force_col == 'force'
+                    and 'pressure' in candidate_cols
+                ):
+                    force_col = 'pressure'
+                    filtered = mat_df[
+                        (mat_df[force_col] >= force_range[0])
+                        & (mat_df[force_col] <= force_range[1])
+                    ]
 
-                if len(mat_df) < 2:
+                if len(filtered) < 2:
                     continue
 
-                avg_value = mat_df[metric].mean()
+                avg_value = float(filtered[metric].mean())
                 fit = self._calculate_linear_fit(
-                    mat_df[force_col].values, mat_df[metric].values,
+                    filtered[force_col].values,
+                    filtered[metric].values,
                 )
-
                 if fit:
                     error_map = {
                         'slope_stderr': fit['slope_stderr'],
                         'rmse': fit['rmse'],
                         'r_squared': 1 - fit['r_squared'],
                     }
-                    error = error_map.get(error_metric, fit['slope_stderr'])
+                    error = float(error_map.get(error_metric, fit['slope_stderr']))
                 else:
-                    error = mat_df[metric].std()
+                    error = float(filtered[metric].std())
 
                 materials_out.append(mat_id)
                 values_out.append(avg_value)
                 errors_out.append(error)
-            else:
-                force = source_config.get('force')
-                if force is not None:
-                    mat_df = mat_df[mat_df['force'] == force]
+                continue
 
-                if mat_df.empty:
-                    continue
+            force = source_config.get('force')
+            if force is not None and 'force' in mat_df.columns:
+                mat_df = mat_df[mat_df['force'] == force]
 
-                materials_out.append(mat_id)
-                values_out.append(mat_df[metric].mean())
-                errors_out.append(
-                    mat_df[metric].std() if len(mat_df) > 1 else 0,
-                )
+            if mat_df.empty:
+                continue
+
+            materials_out.append(mat_id)
+            values_out.append(float(mat_df[metric].mean()))
+            errors_out.append(float(mat_df[metric].std()) if len(mat_df) > 1 else 0.0)
 
         return materials_out, np.array(values_out), np.array(errors_out)
 

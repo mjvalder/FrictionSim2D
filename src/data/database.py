@@ -1,29 +1,49 @@
-"""Online PostgreSQL database interface for FrictionSim2D.
+"""Central PostgreSQL database interface for FrictionSim2D.
 
-Provides :class:`FrictionDB`, a lightweight wrapper around ``psycopg2`` for
-uploading simulation results to a shared PostgreSQL instance and querying
-results contributed by all users.
+This module implements the **central (remote) database** — one half of the
+two-database architecture used by FrictionSim2D.
 
-The database uses a **federated catalog** model:
+Two-database architecture
+-------------------------
+FrictionSim2D uses two distinct databases with different roles:
 
-- **Central DB** stores queryable summary statistics (~1 KB per simulation).
-- **Full time-series data** stays with the contributor (local AiiDA / files).
-- Published results may link to an archive URL (Zenodo, Figshare, etc.)
-  for on-demand download of full data.
+**Local database (AiiDA)**
+    Managed by AiiDA on your own machine.  Stores full provenance and complete
+    time-series data for every simulation you generate.  Used via the
+    ``FrictionSim2D aiida`` command group.  Set up once with
+    ``FrictionSim2D aiida setup``.
 
-Results go through a **staging pipeline**::
+**Central database (this module)**
+    A shared PostgreSQL instance hosted on a remote server.  Stores only
+    **summary statistics** (~1 KB per simulation: mean COF, forces, conditions).
+    Used to share results across users and machines.  Accessed via the
+    ``FrictionSim2D db`` command group.  Full time-series data is *not*
+    uploaded here — it stays in your local AiiDA database.
 
-    local → staged → validated → published
-                   ↘ rejected
+Typical workflow::
+
+    # 1. Run simulations; AiiDA stores full provenance locally.
+    FrictionSim2D run afm afm_config.ini --aiida
+
+    # 2. Import completed results into local AiiDA DB (full timeseries).
+    FrictionSim2D aiida import ./simulation_YYYYMMDD
+
+    # 3. Upload summary statistics to the central shared DB.
+    FrictionSim2D db upload ./simulation_YYYYMMDD --uploader alice --profile central
+
+Central DB staging pipeline::
+
+    staged → validated → published
+           ↘ rejected
 
 Usage
 -----
-Configure the connection via environment variables, keyword arguments, or
-``settings.yaml`` profiles::
+Configure the central DB connection via environment variables, keyword
+arguments, or ``settings.yaml`` profiles::
 
     export FRICTION_DB_HOST=db.example.com
     export FRICTION_DB_PORT=5432
-    export FRICTION_DB_NAME=frictionsim2d
+    export FRICTION_DB_NAME=frictionsim2ddb
     export FRICTION_DB_USER=myuser
     export FRICTION_DB_PASSWORD=secret
 
@@ -44,7 +64,10 @@ Configure the connection via environment variables, keyword arguments, or
 Connection profiles
 -------------------
 :func:`db_from_profile` creates a :class:`FrictionDB` from the active profile
-in ``settings.yaml`` (``database.local`` or ``database.central``).
+in ``settings.yaml``.  Use profile ``'central'`` for the remote shared DB.
+The ``'local'`` profile name in settings refers to a *separate* local copy of
+the central-DB schema (useful for offline testing) and is **not** the AiiDA
+database.
 """
 
 from __future__ import annotations

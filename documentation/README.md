@@ -22,6 +22,13 @@ This folder contains user documentation for FrictionSim2D, a package that genera
 
 - [PROVENANCE_ARCHITECTURE.md](PROVENANCE_ARCHITECTURE.md): provenance manifest model and file tracking internals
 
+## Publication Dataset
+
+The [`publication/`](publication/) folder contains the data and configuration files accompanying the published dataset (DOI: 10.82186/gs4dc-90a11):
+
+- [publication/README.md](publication/README.md): dataset overview, import instructions, and how to reproduce all publication figures
+- [publication/plots_publication.json](publication/plots_publication.json): master plot configuration used in the publication
+
 ## Which Docs Are Most Useful For Typical Users?
 
 If your goal is to generate and run simulations quickly, prioritize:

@@ -143,7 +143,7 @@ class DatabaseSettings(BaseModel):
     local: DatabaseProfileSettings = Field(default_factory=DatabaseProfileSettings)
     central: DatabaseProfileSettings = Field(
         default_factory=lambda: DatabaseProfileSettings(
-            host=os.environ.get('FRICTION_CENTRAL_DB_HOST', 'localhost'),
+            host=os.environ.get('FRICTION_CENTRAL_DB_HOST', ''),
             port=int(os.environ.get('FRICTION_CENTRAL_DB_PORT', '5432')),
             dbname=os.environ.get('FRICTION_CENTRAL_DB_NAME', 'frictionsim2ddb'),
             user=os.environ.get('FRICTION_CENTRAL_DB_USER', ''),

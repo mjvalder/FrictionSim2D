@@ -49,15 +49,29 @@ FrictionSim2D aiida submit ./simulation_output/simulation_YYYYMMDD_HHMMSS --dry-
 
 ## 6. Import and Query AiiDA Results
 
+Import a completed simulation directory into the local AiiDA database:
+
 ```bash
-FrictionSim2D aiida import ./returned_results
-FrictionSim2D aiida query --material h-MoS2 --format table
+FrictionSim2D aiida import ./simulation_20260421_143404 --label "251113-afm"
 ```
 
-Export archive:
+Dump stored time-series to JSON files for plotting:
 
 ```bash
-FrictionSim2D aiida export --output friction2d_results.aiida
+FrictionSim2D aiida dump 251113-afm --output-dir ~/results/aiida_dump/251113-afm
+```
+
+Query the database:
+
+```bash
+FrictionSim2D aiida query --material h-MoS2 --format table
+FrictionSim2D aiida query --set 251113-afm --format csv --output afm_results.csv
+```
+
+Export the full database to a portable archive:
+
+```bash
+verdi -p friction2d archive create --all friction2d_results.aiida
 ```
 
 ## 7. Postprocess Results

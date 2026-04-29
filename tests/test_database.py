@@ -298,8 +298,8 @@ class TestFrictionDBImportError:
         import importlib
         import src.data.database as db_module
 
-        # Remove stub so the real import fails
-        monkeypatch.delitem(sys.modules, "psycopg2", raising=False)
+        # Block the real psycopg2 import by setting the entry to None
+        monkeypatch.setitem(sys.modules, "psycopg2", None)
         importlib.reload(db_module)
 
         with pytest.raises(ImportError, match="psycopg2"):

@@ -19,9 +19,10 @@ FrictionSim2D run afm CONFIG_FILE [OPTIONS]
 
 Options:
 
+- `--settings-file PATH` — per-run settings.yaml override
 - `-o, --output-dir TEXT` (default: `simulation_output`)
-- `--aiida`
-- `--hpc-scripts`
+- `--aiida` — register generated simulations in AiiDA
+- `--hpc-scripts` — generate PBS/SLURM scripts in the same step
 
 ### run sheetonsheet
 
@@ -29,27 +30,41 @@ Options:
 FrictionSim2D run sheetonsheet CONFIG_FILE [OPTIONS]
 ```
 
-Options are the same as `run afm`.
+Same options as `run afm`.
 
 ## settings
 
 ### settings show
 
 ```bash
-FrictionSim2D settings show
+FrictionSim2D settings show [--settings-file PATH] [--origin]
 ```
+
+Options:
+
+- `--settings-file PATH` — inspect a specific file rather than the resolved default
+- `--origin` — also print which settings file was loaded
 
 ### settings init
 
 ```bash
-FrictionSim2D settings init
+FrictionSim2D settings init [--global] [--force]
 ```
+
+Options:
+
+- `--global` — write to `~/.config/FrictionSim2D/settings.yaml`
+- `--force` — overwrite without prompting
 
 ### settings reset
 
 ```bash
-FrictionSim2D settings reset
+FrictionSim2D settings reset [--global]
 ```
+
+Options:
+
+- `--global` — remove the global settings file instead of the local one
 
 ## hpc
 
@@ -61,12 +76,13 @@ FrictionSim2D hpc generate SIMULATION_DIR [OPTIONS]
 
 Options:
 
+- `--settings-file PATH`
 - `-s, --scheduler {pbs|slurm}` (default: `pbs`)
 - `-o, --output-dir TEXT` (default: `SIMULATION_DIR/hpc`)
 
 ## aiida
 
-Note: AiiDA commands require AiiDA dependencies.
+> AiiDA commands require `aiida-core`. Install with `pip install -e .[aiida]`.
 
 ### aiida status
 
@@ -84,32 +100,63 @@ Options:
 
 - `-p, --profile TEXT`
 - `--lammps-path PATH`
-- `--hpc-config PATH` (deprecated)
-- `--use-remote`
+- `--use-remote` — configure a remote HPC computer using `settings.yaml`
+- `--hpc-config PATH` *(deprecated — use `--use-remote` instead)*
+- `--settings-file PATH`
 
-### aiida submit
+### aiida import
+
+Import a `simulation_XXXXXXXX` directory as a new simulation set:
 
 ```bash
-FrictionSim2D aiida submit SIMULATION_DIR [OPTIONS]
+FrictionSim2D aiida import SIMULATION_FOLDER [OPTIONS]
 ```
 
 Options:
 
-- `-c, --code TEXT`
-- `--scripts TEXT` (comma-separated script list)
-- `--array`
-- `--machines INTEGER`
-- `--mpiprocs INTEGER`
-- `--walltime TEXT`
-- `--queue TEXT`
-- `--project TEXT`
-- `--dry-run`
+- `-l, --label TEXT` — required label (prompted if omitted)
+- `-d, --description TEXT`
+- `--profile TEXT`
 
-### aiida import
+### aiida list-sets
 
 ```bash
-FrictionSim2D aiida import RESULTS_DIR [--process/--no-process]
+FrictionSim2D aiida list-sets [OPTIONS]
 ```
+
+Options:
+
+- `--profile TEXT`
+- `--format {table|json|csv}` (default: `table`)
+
+### aiida dump
+
+Export time-series data from an AiiDA set to `output_full_*.json` files, ready for `postprocess plot`:
+
+```bash
+FrictionSim2D aiida dump SET_LABEL --output-dir OUTPUT_DIR [OPTIONS]
+```
+
+Options:
+
+- `-o, --output-dir PATH` *(required)*
+- `--profile TEXT`
+
+Output layout: `OUTPUT_DIR/outputs/output_full_<size>.json`
+
+### aiida rebuild
+
+Reconstruct a full simulation directory tree from AiiDA provenance data alone:
+
+```bash
+FrictionSim2D aiida rebuild SET_LABEL [OPTIONS]
+```
+
+Options:
+
+- `-o, --output-dir PATH` (default: current directory)
+- `--hpc-scripts` — also generate PBS/SLURM scripts
+- `--profile TEXT`
 
 ### aiida query
 
@@ -122,10 +169,30 @@ Options:
 - `-m, --material TEXT`
 - `-l, --layers INTEGER`
 - `-f, --force FLOAT`
-- `--format {table|csv|json}`
+- `-s, --set TEXT` — filter by simulation set label
+- `--format {table|csv|json}` (default: `table`)
 - `-o, --output PATH`
+- `--profile TEXT`
+
+### aiida delete
+
+Delete a single simulation set and all linked nodes (irreversible):
+
+```bash
+FrictionSim2D aiida delete SET_LABEL [--profile TEXT]
+```
+
+### aiida clear
+
+Delete **all** FrictionSim2D nodes from the database (irreversible):
+
+```bash
+FrictionSim2D aiida clear [--profile TEXT]
+```
 
 ### aiida export
+
+Export nodes to a portable AiiDA archive file:
 
 ```bash
 FrictionSim2D aiida export [OPTIONS]
@@ -138,29 +205,56 @@ Options:
 
 ### aiida import-archive
 
+Import a previously exported AiiDA archive into the current profile:
+
 ```bash
 FrictionSim2D aiida import-archive ARCHIVE_PATH
 ```
 
 ### aiida package
 
+Create a `tar.gz` of simulation inputs for cluster transfer (excludes `.lammpstrj`):
+
 ```bash
-FrictionSim2D aiida package SIMULATION_DIR [OPTIONS]
+FrictionSim2D aiida package SIMULATION_DIR [-o OUTPUT]
+```
+
+### aiida submit
+
+```bash
+FrictionSim2D aiida submit SIMULATION_DIR [OPTIONS]
 ```
 
 Options:
 
-- `-o, --output PATH`
+- `--settings-file PATH`
+- `-c, --code TEXT`
+- `--scripts TEXT` (comma-separated list)
+- `--array`
+- `--machines INTEGER`
+- `--mpiprocs INTEGER`
+- `--walltime TEXT` (`HH:MM:SS` or integer seconds)
+- `--queue TEXT`
+- `--project TEXT`
+- `--dry-run`
 
 ## postprocess
 
 ### postprocess read
 
+Walk a simulation directory and export time-series data to JSON:
+
 ```bash
 FrictionSim2D postprocess read RESULTS_DIR [--export]
 ```
 
+Options:
+
+- `--export` — write `output_full_*.json` files alongside results
+
 ### postprocess plot
+
+Generate plots from a JSON plot configuration file:
 
 ```bash
 FrictionSim2D postprocess plot PLOT_CONFIG [OPTIONS]
@@ -169,13 +263,43 @@ FrictionSim2D postprocess plot PLOT_CONFIG [OPTIONS]
 Options:
 
 - `-o, --output-dir TEXT` (default: `plots`)
-- `--settings PATH` (JSON plot settings)
+- `--settings PATH` — additional JSON plot-style settings
+
+`PLOT_CONFIG` must define `data_dirs`, `labels`, and `plots`. See [examples.md](examples.md) and the reference config in `documentation/publication/plots_publication.json`.
 
 ## db
 
-Database commands accept connection/profile options. See `FrictionSim2D db --help` for full argument list.
+The `db` command group manages the **central (remote) PostgreSQL database** — the shared summary-statistics store.
+It is **not** the local AiiDA database; for full provenance and time-series access, use the `aiida` command group.
+
+> **Two-database architecture**
+> - `FrictionSim2D aiida ...` → local AiiDA database (full time-series, complete provenance)
+> - `FrictionSim2D db ...` → central remote PostgreSQL (summary statistics: mean COF, forces, conditions)
+
+All `db` commands accept a common set of connection options. Pass `--profile central` to target the shared remote DB; `--profile local` targets a local instance.
+
+**Common DB options** (available on every `db` subcommand):
+
+```
+--profile TEXT        Profile from settings.yaml ('local' or 'central')
+--host TEXT           $FRICTION_DB_HOST
+--port INTEGER        $FRICTION_DB_PORT
+--dbname TEXT         $FRICTION_DB_NAME
+-u, --user TEXT       $FRICTION_DB_USER
+--password TEXT       $FRICTION_DB_PASSWORD
+```
+
+### db setup
+
+First-time setup: initializes schema, creates an API key, and saves it to settings:
+
+```bash
+FrictionSim2D db setup [--name NAME] [DB OPTIONS]
+```
 
 ### db init
+
+Initialize or verify the database schema (safe to re-run):
 
 ```bash
 FrictionSim2D db init [DB OPTIONS]
@@ -183,33 +307,29 @@ FrictionSim2D db init [DB OPTIONS]
 
 ### db create-key
 
+Generate a new API key for write access:
+
 ```bash
 FrictionSim2D db create-key --name NAME [DB OPTIONS]
 ```
 
-### db setup
-
-```bash
-FrictionSim2D db setup [--name NAME] [--profile PROFILE] [DB OPTIONS]
-```
-
-Initializes schema, creates an API key, and stores it in `~/.config/FrictionSim2D/settings.yaml`.
-
 ### db upload
+
+Upload simulation results to the shared database:
 
 ```bash
 FrictionSim2D db upload RESULTS_DIR [--uploader NAME] [DB OPTIONS]
 ```
 
-Current behavior: each uploaded row is validated automatically. Valid rows are published; invalid rows are rejected.
+Each row is validated automatically; valid rows are published.
 
 ### db stage
+
+Upload with an API key; rows are validated and published or rejected automatically:
 
 ```bash
 FrictionSim2D db stage RESULTS_DIR --uploader NAME [--api-key KEY] [DB OPTIONS]
 ```
-
-Current behavior: staged rows are validated automatically and then published when valid (or rejected when invalid).
 
 ### db query
 
@@ -217,13 +337,13 @@ Current behavior: staged rows are validated automatically and then published whe
 FrictionSim2D db query [OPTIONS] [DB OPTIONS]
 ```
 
-Important options:
+Options:
 
-- `--material TEXT`
-- `--type TEXT`
-- `--layers INTEGER`
-- `--uploader TEXT`
-- `--limit INTEGER`
+- `-m, --material TEXT`
+- `--type TEXT` (`afm` or `sheetonsheet`)
+- `-l, --layers INTEGER`
+- `-n, --uploader TEXT`
+- `--limit INTEGER` (default: 50)
 - `--csv PATH`
 
 ### db stats
@@ -232,13 +352,9 @@ Important options:
 FrictionSim2D db stats [DB OPTIONS]
 ```
 
-### db delete
-
-```bash
-FrictionSim2D db delete --uploader NAME [DB OPTIONS]
-```
-
 ### db publish
+
+Promote a staged/validated result to published (curator action):
 
 ```bash
 FrictionSim2D db publish ROW_ID [DB OPTIONS]
@@ -246,8 +362,18 @@ FrictionSim2D db publish ROW_ID [DB OPTIONS]
 
 ### db reject
 
+Reject a staged or validated result:
+
 ```bash
 FrictionSim2D db reject ROW_ID [--reason TEXT] [DB OPTIONS]
+```
+
+### db delete
+
+Delete all rows belonging to a given uploader:
+
+```bash
+FrictionSim2D db delete --uploader NAME [DB OPTIONS]
 ```
 
 ## api
@@ -263,14 +389,15 @@ Options:
 - `--host TEXT`
 - `-p, --port INTEGER`
 - `--profile TEXT`
-- `--reload`
+- `--reload` — auto-reload on code changes (development only)
+- `--settings-file PATH`
 
 ## Practical Notes
 
-- For the latest generated command usage, run `FrictionSim2D <group> <command> --help`.
-- `run` commands currently expose `--hpc-scripts` and do not expose `--hpc` or `--local` flags.
-- `postprocess plot` expects a JSON plot configuration file, not a results directory path.
-- API `POST /results` submissions run automatic validation and will end in `published` or `rejected`.
+- For the most up-to-date usage, run `FrictionSim2D <group> <command> --help`.
+- `run` commands expose `--hpc-scripts` to generate scheduler scripts in one step.
+- `postprocess plot` requires a JSON config file, not a results directory.
+- `aiida dump` and `postprocess read --export` both produce `output_full_*.json` files, but `aiida dump` reads from the AiiDA database while `postprocess read` walks the raw LAMMPS output files on disk.
 
 ## Related Docs
 

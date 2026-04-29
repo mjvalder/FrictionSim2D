@@ -10,7 +10,7 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from ..core.config import HPCSettings, AiidaSettings
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _LOOKUP_EXCEPTIONS = (LookupError, ValueError, RuntimeError)
+
 
 _SCHEDULER_MAP = {
     'pbs': 'core.pbspro',
@@ -33,15 +34,98 @@ _TRANSPORT_MAP = {
 }
 
 
+def _ensure_rabbitmq_installed() -> bool:
+    """Install rabbitmq-server via conda if not already available.
+
+    Returns:
+        ``True`` if rabbitmqctl is available after the call.
+    """
+    if shutil.which('rabbitmqctl'):
+        return True
+
+    conda_exe = shutil.which('conda')
+    if not conda_exe:
+        logger.error(
+            "rabbitmqctl not found and conda is not available to install it. "
+            "Install manually: conda install -c conda-forge rabbitmq-server"
+        )
+        return False
+
+    logger.info("rabbitmqctl not found — installing rabbitmq-server via conda ...")
+    result = subprocess.run(
+        [conda_exe, 'install', '-c', 'conda-forge', 'rabbitmq-server', '-y'],
+        capture_output=False,  # show progress to user
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.error("conda install rabbitmq-server failed")
+        return False
+
+    if not shutil.which('rabbitmqctl'):
+        logger.error(
+            "rabbitmqctl still not found after install. "
+            "Try: conda install -c conda-forge rabbitmq-server"
+        )
+        return False
+
+    logger.info("rabbitmq-server installed successfully")
+    return True
+
+
+def _patch_rabbitmq_consumer_timeout(timeout_ms: int = 36_000_000) -> None:
+    """Write consumer_timeout to the RabbitMQ config for this conda env.
+
+    Newer RabbitMQ versions (>=3.8.15 / v4.x) ship with a default consumer
+    timeout of 30 minutes, which causes long-running AiiDA workflows to crash.
+    Patches ``$CONDA_PREFIX/etc/rabbitmq/rabbitmq.conf`` to a safe value
+    (default 10 hours). Must be called before starting rabbitmq-server.
+
+    Args:
+        timeout_ms: Consumer timeout in milliseconds.
+    """
+    import os  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        conf_dir = Path(conda_prefix) / 'etc' / 'rabbitmq'
+    else:
+        conf_dir = Path.home() / '.config' / 'rabbitmq'
+
+    conf_file = conf_dir / 'rabbitmq.conf'
+    conf_dir.mkdir(parents=True, exist_ok=True)
+
+    entry = f'consumer_timeout = {timeout_ms}'
+
+    if conf_file.exists():
+        text = conf_file.read_text()
+        if re.search(r'^\s*consumer_timeout\s*=', text, re.MULTILINE):
+            text = re.sub(r'^\s*consumer_timeout\s*=.*$', entry, text, flags=re.MULTILINE)
+        else:
+            text += f'\n{entry}\n'
+        conf_file.write_text(text)
+    else:
+        conf_file.write_text(f'# FrictionSim2D AiiDA RabbitMQ settings\n{entry}\n')
+
+    logger.info("RabbitMQ consumer_timeout set to %d ms in %s", timeout_ms, conf_file)
+
+
 def start_rabbitmq() -> bool:
     """Start the RabbitMQ broker in detached mode.
 
-    AiiDA requires RabbitMQ for daemon communication. The broker is
-    provided by the ``aiida-core.services`` conda package.
+    AiiDA requires RabbitMQ for daemon communication. rabbitmq-server is
+    installed automatically via conda if not already present.
 
     Returns:
         ``True`` if RabbitMQ is already running or was started successfully.
     """
+    if not _ensure_rabbitmq_installed():
+        return False
+
+    # Patch consumer_timeout before starting — prevents workflow crashes with
+    # newer RabbitMQ versions (>=3.8.15) which default to a 30-min timeout.
+    _patch_rabbitmq_consumer_timeout()
+
     # Check if already running
     probe = subprocess.run(
         ['rabbitmqctl', 'status'],
@@ -60,11 +144,7 @@ def start_rabbitmq() -> bool:
         logger.info("RabbitMQ started in detached mode")
         return True
 
-    logger.error(
-        "Failed to start RabbitMQ: %s\n"
-        "Install via: conda install -c conda-forge aiida-core.services",
-        result.stderr,
-    )
+    logger.error("Failed to start RabbitMQ: %s", result.stderr)
     return False
 
 
@@ -87,7 +167,9 @@ def setup_profile(
     from aiida.manage.configuration import (  # pylint: disable=import-outside-toplevel
         get_config,
         load_profile,
+        reset_config,
     )
+    from aiida.manage import get_manager  # pylint: disable=import-outside-toplevel
 
     config = get_config()
 
@@ -105,9 +187,27 @@ def setup_profile(
     logger.info("Creating AiiDA profile '%s'...", profile_name)
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
-    if result.returncode != 0:
+    if result.returncode != 0 and use_postgres:
+        logger.warning(
+            "PostgreSQL profile creation failed (%s), retrying with SQLite ...",
+            result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown error',
+        )
+        cmd_sqlite = ['verdi', 'presto', '--profile-name', profile_name]
+        result = subprocess.run(cmd_sqlite, capture_output=True, text=True, check=False)
+
+    # Treat "profile already exists" as a success (created in a previous run)
+    already_exists = result.returncode != 0 and 'already exists' in (result.stderr + result.stdout)
+
+    if result.returncode != 0 and not already_exists:
         logger.error("Profile creation failed: %s", result.stderr)
         return False
+
+    # verdi presto ran in a subprocess so the in-process config cache is stale.
+    # Reset the loaded config/profile through the public AiiDA APIs so the
+    # next load_profile() re-reads from disk.
+    manager = get_manager()
+    reset_config()
+    manager.reset_profile()
 
     load_profile(profile_name)
     logger.info("Profile '%s' created and loaded", profile_name)
@@ -173,6 +273,7 @@ def setup_lammps_code(
         The configured ``InstalledCode`` node.
     """
     from aiida import orm  # pylint: disable=import-outside-toplevel
+    from aiida.common.exceptions import NotExistent  # pylint: disable=import-outside-toplevel
 
     full_label = f'{label}@{computer_label}'
 
@@ -180,7 +281,7 @@ def setup_lammps_code(
         code = orm.load_code(full_label)
         logger.info("Code '%s' already exists (PK=%d)", full_label, code.pk)
         return code
-    except _LOOKUP_EXCEPTIONS:
+    except (*_LOOKUP_EXCEPTIONS, NotExistent):
         pass
 
     # Auto-detect LAMMPS
@@ -356,6 +457,9 @@ def full_setup(
 
     results['rabbitmq'] = start_rabbitmq()
     results['profile'] = setup_profile(profile_name)
+
+    if not results['profile']:
+        raise RuntimeError("AiiDA profile setup failed — cannot continue")
 
     if hpc_settings or aiida_settings:
         resolved_hpc = hpc_settings or HPCSettings()

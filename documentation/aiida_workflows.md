@@ -51,22 +51,48 @@ Preview without submitting:
 FrictionSim2D aiida submit ./simulation_output/simulation_YYYYMMDD_HHMMSS --dry-run
 ```
 
-## 4. Import Completed Results
+## 4. Import a Simulation Set
+
+Import a completed `simulation_XXXXXXXX` directory into the local AiiDA database. Stores full time-series data with provenance.
 
 ```bash
-FrictionSim2D aiida import ./returned_results
+FrictionSim2D aiida import ./simulation_20260421_143404 --label "251113-afm"
 ```
 
-Skip processing pass:
+The label is required and will be prompted if omitted.
+
+## 5. Export (Dump) Time-Series Data
+
+Export AiiDA-stored time-series to `output_full_*.json` files ready for `postprocess plot`:
 
 ```bash
-FrictionSim2D aiida import ./returned_results --no-process
+FrictionSim2D aiida dump 251113-afm --output-dir ~/results/aiida_dump/251113-afm
 ```
 
-## 5. Query Database
+Output: `OUTPUT_DIR/outputs/output_full_<size>.json`
+
+This validates the full import round-trip and is the recommended way to regenerate plots from the AiiDA database.
+
+## 6. Rebuild Simulation Inputs from Provenance
+
+Reconstruct a complete simulation directory tree from AiiDA provenance data alone — without needing the original INI config or simulation directory:
+
+```bash
+FrictionSim2D aiida rebuild 251113-afm --output-dir ~/rebuild_test/ --hpc-scripts
+```
+
+The reconstructed tree mirrors the output of `FrictionSim2D run` and can be submitted directly to an HPC cluster.
+
+## 7. Query Database
 
 ```bash
 FrictionSim2D aiida query --material h-MoS2 --layers 3 --format table
+```
+
+Filter by simulation set:
+
+```bash
+FrictionSim2D aiida query --set 251113-afm --format table
 ```
 
 Export query to CSV:
@@ -75,21 +101,41 @@ Export query to CSV:
 FrictionSim2D aiida query --format csv --output results.csv
 ```
 
-## 6. Export/Import Archives
+## 8. Export/Import Archives
 
-Export:
-
-```bash
-FrictionSim2D aiida export --output friction2d.aiida
-```
-
-Import on another machine/profile:
+Create a portable AiiDA archive of the entire database:
 
 ```bash
-FrictionSim2D aiida import-archive friction2d.aiida
+verdi -p friction2d archive create --all friction2d_archive.aiida
 ```
 
-## 7. Package Simulation Inputs for Transfer
+Or export a material-specific subset:
+
+```bash
+FrictionSim2D aiida export -m h-MoS2 --output mos2_results.aiida
+```
+
+Import on another machine or profile:
+
+```bash
+FrictionSim2D aiida import-archive friction2d_archive.aiida
+```
+
+## 9. Delete Simulation Sets
+
+Delete a single set and all its linked nodes (irreversible):
+
+```bash
+FrictionSim2D aiida delete 260312-force_rebomos
+```
+
+Delete all FrictionSim2D nodes (irreversible):
+
+```bash
+FrictionSim2D aiida clear
+```
+
+## 10. Package Simulation Inputs for Transfer
 
 ```bash
 FrictionSim2D aiida package ./simulation_output/simulation_YYYYMMDD_HHMMSS --output bundle.tar.gz

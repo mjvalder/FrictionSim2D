@@ -1,0 +1,405 @@
+{
+  "data_dirs": [
+    "251113-afm/",
+    "251125-sheetonsheet/",
+    "260227-tmd/",
+    "260227-mos2_jing2/",
+    "260227-mos2_jing3/",
+    "260227-rebomos/",
+    "260227-sevik_mos2/",
+    "260227-sw_lammps/",
+    "260312-force_rebomos/",
+    "260312-force_sevik/"
+  ],
+  "labels": [
+    "251113_afm",
+    "sheetonsheet",
+    "tmd",
+    "mos2_jiang2",
+    "mos2_jiang3",
+    "rebomos",
+    "sevik_mos2",
+    "mos2_jiang1",
+    "force_rebomos",
+    "force_sevik"
+  ],
+  "dataset_display_labels": {
+    "tmd": "SW-Jiang_4",
+    "mos2_jiang1": "SW-Jiang_1",
+    "mos2_jiang2": "SW-Jiang_2",
+    "mos2_jiang3": "SW-Jiang_3",
+    "rebomos": "REBOMoS",
+    "sevik_mos2": "SW-Sevik",
+    "force_rebomos": "REBOMoS",
+    "force_sevik": "SW-Sevik"
+  },
+  "series_color_map": {
+    "SW-Jiang_1": "#7E2F8E",
+    "SW-Jiang_2": "#77AC30",
+    "SW-Jiang_3": "#EDB120",
+    "SW-Jiang_4": "#0072BD",
+    "SW-Sevik": "#D95319",
+    "REBOMoS": "#4DBEEE",
+    "SW - Hu": "#A2142F",
+    "ReaxFF - Serpini": "#FFD60A",
+    "Exp. - Serpini": "#6582FD"
+  },
+  "plots": [
+    {
+      "plot_type": "summary",
+      "filename": "lf_vs_load_100x100_sheetonsheet.png",
+      "use_dataset_colors": false,
+      "datasets": [
+        "sheetonsheet"
+      ],
+      "filter_size": "100x100y",
+      "x_axis": "nf",
+      "y_axis": "lf",
+      "angle": 0,
+      "x_label": "Normal Load (nN)",
+      "y_label": "Lateral Force (nN)",
+      "add_linear_fit": true,
+      "fit_x_range": [
+        0,
+        2100
+      ],
+      "filter_materials": [
+        "AlSe",
+        "t_VS2",
+        "t_SnS2",
+        "h_VS2",
+        "p_CS",
+        "p_GeSe",
+        "b_SiSe",
+        "h_ScTe2",
+        "b_CO"
+      ],
+      "x_limits": [
+        -50,
+        2100
+      ],
+      "y_limits": [
+        -5,
+        170
+      ]
+    },
+    {
+      "plot_type": "summary",
+      "filename": "lf_vs_load_100x100_afm.png",
+      "use_dataset_colors": false,
+      "datasets": [
+        "251113_afm"
+      ],
+      "filter_size": "100x100y",
+      "x_axis": "force",
+      "y_axis": "lf",
+      "x_label": "Normal load (nN)",
+      "y_label": "Lateral Force (nN)",
+      "plot_by": "id",
+      "add_linear_fit": false,
+      "fit_x_range": [
+        0,
+        100
+      ],
+      "filter_materials": [
+        "h_MoS2",
+        "h_MoSe2",
+        "t_CoTe2",
+        "t_HfS2",
+        "p_arsenene",
+        "b_SnS",
+        "b_SnSe"
+      ]
+    },
+    {
+      "plot_type": "timeseries",
+      "filename": "lf_vs_time_h_MoS2_l2_afm.png",
+      "use_dataset_colors": false,
+      "datasets": [
+        "251113_afm"
+      ],
+      "filter_size": "100x100y",
+      "angle": 0,
+      "y_axis": "lf",
+      "x_label": "Time (ps)",
+      "y_label": "Lateral Force (nN)",
+      "filter_materials": [
+        "h_MoS2"
+      ],
+      "filter_layer": 2,
+      "filter_forces": [
+        2,
+        30,
+        85
+      ],
+      "time_scale": 0.001
+    },
+    {
+      "plot_type": "scatter_comparison",
+      "filename": "tribindex_vs_cof_sheetonsheet.png",
+      "x_source": {
+        "file": "trib_index.json",
+        "material_column": "materials",
+        "value_column": "tribIndex",
+        "error_column": "dev"
+      },
+      "y_source": {
+        "dataset": "sheetonsheet",
+        "metric": "cof",
+        "filter_size": "100x100y",
+        "angle": 0,
+        "force_range": [
+          5,
+          30
+        ],
+        "error_metric": "slope_stderr"
+      },
+      "show_error_bars": true,
+      "color_by_material_class": true,
+      "show_point_labels": false,
+      "point_label_fontsize": 10,
+      "add_linear_fit": false,
+      "show_r_squared": false,
+      "show_identity_line": false,
+      "iterative_outlier_removal": 0,
+      "legend_location": "lower right",
+      "x_label": "Lubricating Figure of Merit",
+      "y_label": "Coefficient of Friction (COF)",
+      "y_limits": [
+        0.018,
+        null
+      ]
+    },
+    {
+      "plot_type": "summary",
+      "filename": "lf_vs_nf_100x100_mos2_sx_sy.png",
+      "use_dataset_colors": true,
+      "datasets": [
+        "tmd",
+        "mos2_jiang2",
+        "mos2_jiang3",
+        "rebomos",
+        "sevik_mos2",
+        "mos2_jiang1"
+      ],
+      "filter_size": "100x100y",
+      "x_axis": "nf",
+      "y_axis": "lf",
+      "lf_source": "sx_sy",
+      "plot_by": "dataset_label",
+      "angle": 90,
+      "label_prefix": "",
+      "x_limits": [
+        0.0,
+        370
+      ],
+      "fit_x_range": [
+        0.0,
+        370
+      ],
+      "fit_only": true,
+      "shift_series_to_origin": false,
+      "shift_external_series_to_origin": false,
+      "fit_constraint": "none",
+      "extend_fit_to_origin": true,
+      "append_slope_to_legend": false,
+      "slope_label": "COF",
+      "slope_decimals": 5,
+      "slope_fit_constraint": "none",
+      "marker_by_potential_type": true,
+      "potential_markers": {
+        "reaxff": "s",
+        "rebomos": "o",
+        "sw": "^"
+      },
+      "legend_outside": false,
+      "legend_location": "upper left",
+      "legend_separate_png": false,
+      "x_label": "Normal Force (nN)",
+      "y_label": "Lateral Force (nN)",
+      "external_series": [
+        {
+          "file": "mos2_comparison_data.json",
+          "path": [
+            "cofvsload"
+          ],
+          "x_key": "pressure",
+          "y_key": "cof",
+          "label": "SW - Hu",
+          "plot_style": "line",
+          "line_style": "--",
+          "x_transform": "lambda x: x * 98",
+          "y_transform": "lambda x, y: x * 98 * y"
+        },
+        {
+          "file": "mos2_reaxff_comparison.json",
+          "path": [
+            "reaxff_comparison_ac"
+          ],
+          "x_key": "x",
+          "y_key": "y",
+          "label": "ReaxFF - Serpini",
+          "plot_style": "line",
+          "line_style": "--"
+        },
+        {
+          "file": "mos2_reaxff_comparison.json",
+          "path": [
+            "serpini_et_al"
+          ],
+          "x_key": "x",
+          "y_key": "y",
+          "label": "Exp. - Serpini",
+          "plot_style": "line",
+          "line_style": "--",
+          "marker_style": "D"
+        }
+      ]
+    },
+    {
+      "plot_type": "timeseries",
+      "filename": "lf_vs_time_h_MoS2_l2_v_com_top.png",
+      "use_dataset_colors": true,
+      "datasets": [
+        "force_rebomos",
+        "force_sevik"
+      ],
+      "filter_size": "100x100y",
+      "angle": 90,
+      "y_axis": "lf",
+      "x_label": "Time (ps)",
+      "y_label": "Lateral Force (nN)",
+      "pressures": [
+        0.1
+      ],
+      "time_scale": 0.001,
+      "shift_time_to_zero": true,
+      "secondary_y_axis": "v_comy_top",
+      "secondary_y_label": "Displacement in x (nm)",
+      "secondary_y_scale": 0.1,
+      "legend_location": "upper right"
+    },
+    {
+      "plot_type": "stick_slip_analysis",
+      "filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_rebomos.png",
+      "spectrum_filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_rebomos_spectrum.png",
+      "results_filename": "stick_slip_h_MoS2_v_com_top_0.1GPa.json",
+      "datasets": [
+        "force_rebomos"
+      ],
+      "filter_size": "100x100y",
+      "angle": 90,
+      "pressures": [
+        0.1
+      ],
+      "time_scale": 0.001,
+      "displacement_axis": "v_comy_top",
+      "displacement_scale": 0.1,
+      "time_unit": "ps",
+      "displacement_unit": "nm",
+      "freq_min": 0.001,
+      "freq_plot_max": 0.15,
+      "display_time_window": [
+        22,
+        260
+      ],
+      "fft_peaks_to_report": 2,
+      "fft_peak_rank": 2
+    },
+    {
+      "plot_type": "stick_slip_analysis",
+      "filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_sevik.png",
+      "spectrum_filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_sevik_spectrum.png",
+      "results_filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_sevik.json",
+      "datasets": [
+        "force_sevik"
+      ],
+      "filter_size": "100x100y",
+      "angle": 90,
+      "pressures": [
+        0.1
+      ],
+      "time_scale": 0.001,
+      "displacement_axis": "v_comy_top",
+      "displacement_scale": 0.1,
+      "time_unit": "ps",
+      "displacement_unit": "nm",
+      "freq_min": 0.001,
+      "freq_plot_max": 0.15,
+      "display_time_window": [
+        22,
+        260
+      ],
+      "fft_peaks_to_report": 2,
+      "extrema_use_prominence": true,
+      "extrema_min_prominence": 0.015,
+      "extrema_min_distance_points": 6
+    },
+    {
+      "plot_type": "cof_histogram",
+      "filename": "cof_histogram_mos2.png",
+      "datasets": [
+        "mos2_jiang1",
+        "mos2_jiang2",
+        "mos2_jiang3",
+        "tmd",
+        "sevik_mos2",
+        "rebomos"
+      ],
+      "filter_size": "100x100y",
+      "x_axis": "nf",
+      "y_axis": "lf",
+      "lf_source": "sx_sy",
+      "angle": 90,
+      "x_limits": [
+        0.0,
+        370
+      ],
+      "fit_x_range": [
+        0.0,
+        370
+      ],
+      "slope_fit_constraint": "none",
+      "slope_decimals": 5,
+      "y_label": "COF",
+      "annotate_bars": false,
+      "x_label_rotation": 30,
+      "figure_size": [
+        13,
+        7
+      ],
+      "bar_width": 0.5,
+      "external_series": [
+        {
+          "file": "mos2_comparison_data.json",
+          "path": [
+            "cofvsload"
+          ],
+          "x_key": "pressure",
+          "y_key": "cof",
+          "label": "SW - Hu",
+          "x_transform": "lambda x: x * 98",
+          "y_transform": "lambda x, y: x * 98 * y"
+        },
+        {
+          "file": "mos2_reaxff_comparison.json",
+          "path": [
+            "reaxff_comparison_ac"
+          ],
+          "x_key": "x",
+          "y_key": "y",
+          "label": "ReaxFF - Serpini"
+        },
+        {
+          "file": "mos2_reaxff_comparison.json",
+          "path": [
+            "serpini_et_al"
+          ],
+          "x_key": "x",
+          "y_key": "y",
+          "label": "Exp. - Serpini"
+        }
+      ]
+    }
+  ]
+}

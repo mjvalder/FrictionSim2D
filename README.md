@@ -5,6 +5,80 @@ It supports AFM and sheet-on-sheet setups, HPC script generation, and optional A
 
 ## Installation
 
+FrictionSim2D is not yet published on conda-forge. The supported installation path today is to create an environment yourself, then install the package from source.
+
+### Requirements
+
+- Python 3.9+
+- LAMMPS available in your environment
+- Atomsk available in your environment
+
+### Create an environment
+
+Using conda:
+
+```bash
+conda create -n frictionsim2d python=3.11
+conda activate frictionsim2d
+```
+
+Or using venv:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### Install from source
+
+From the repository root:
+
+```bash
+pip install -e .
+```
+
+Install optional extras as needed:
+
+```bash
+pip install -e .[aiida]
+pip install -e .[db]
+pip install -e .[plotting]
+pip install -e .[api]
+pip install -e .[all]
+```
+
+### Verify
+
+```bash
+FrictionSim2D --help
+FrictionSim2D --version
+lmp -h
+atomsk --version
+```
+
+### Optional AiiDA setup
+
+After installing the AiiDA extras, run:
+
+```bash
+FrictionSim2D aiida status
+FrictionSim2D aiida setup
+```
+
+If your workflows target a remote machine, configure the `aiida` section in `settings.yaml` and use:
+
+```bash
+FrictionSim2D aiida setup --use-remote
+```
+
+### Notes
+
+- RabbitMQ and PostgreSQL are still required for full AiiDA workflows.
+- The conda-forge installation scheme below is planned for a future release and is intentionally hidden for now.
+
+<!--
+Future conda-forge installation draft
+
 FrictionSim2D is distributed as a Conda package for maximum reproducibility and minimal dependency conflicts.
 
 ### Option A – Base package (recommended for most users)
@@ -93,6 +167,7 @@ conda create -n frictionsim2d-all -c conda-forge frictionsim2d-all
 conda activate frictionsim2d-all
 frictionsim2d-start-aiida
 ```
+-->
 
 ## Quick start
 

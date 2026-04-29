@@ -43,10 +43,41 @@ class QueryResult:
         """
         import pandas as pd  # pylint: disable=import-outside-toplevel
 
+        def _fallback_record(sim) -> Dict[str, Any]:
+            attrs = sim.base.attributes
+            return {
+                'uuid': str(getattr(sim, 'uuid', '')),
+                'pk': getattr(sim, 'pk', None),
+                'simulation_type': attrs.get('simulation_type', ''),
+                'material': attrs.get('material', ''),
+                'substrate_material': attrs.get('substrate_material', ''),
+                'substrate_amorphous': attrs.get('substrate_amorphous', False),
+                'tip_material': attrs.get('tip_material', ''),
+                'tip_radius': attrs.get('tip_radius', 0.0),
+                'layers': attrs.get('layers', 1),
+                'force': attrs.get('force', 0.0),
+                'pressure': attrs.get('pressure', None),
+                'scan_angle': attrs.get('scan_angle', 0.0),
+                'scan_speed': attrs.get('scan_speed', 0.0),
+                'temperature': attrs.get('temperature', 300.0),
+                'size_x': attrs.get('size_x', None),
+                'size_y': attrs.get('size_y', None),
+                'stack_type': attrs.get('stack_type', ''),
+                'potential_type': attrs.get('potential_type', ''),
+                'status': attrs.get('status', ''),
+                'simulation_path': attrs.get('simulation_path', ''),
+            }
+
         records = []
         for sim in self.simulations:
-            record = sim.to_dict()
-            results = sim.get_results()
+            try:
+                record = sim.to_dict()
+            except (AttributeError, KeyError, TypeError):
+                record = _fallback_record(sim)
+            try:
+                results = sim.get_results()
+            except (AttributeError, KeyError, TypeError):
+                results = None
             if results:
                 try:
                     stats = results.get_summary_statistics()

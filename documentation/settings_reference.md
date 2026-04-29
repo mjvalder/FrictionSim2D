@@ -190,11 +190,21 @@ aiida:
 
 ## database
 
+FrictionSim2D uses a **two-database architecture**:
+
+| Database | Backend | Contents | CLI group |
+|---|---|---|---|
+| **Local (AiiDA)** | AiiDA-managed SQLite/PostgreSQL | Full time-series data, complete provenance | `FrictionSim2D aiida` |
+| **Central (remote)** | Shared PostgreSQL on remote server | Summary statistics only (mean COF, forces, conditions) | `FrictionSim2D db` |
+
+The `database` section in `settings.yaml` configures connections for the **central DB** and an optional local mirror.
+The AiiDA database is configured separately via `verdi` / `FrictionSim2D aiida setup`.
+
 Defaults:
 
 ```yaml
 database:
-  active_profile: local
+  active_profile: local   # 'local' = local mirror for testing; 'central' = shared remote DB
   local:
     host: localhost
     port: 5432
@@ -203,7 +213,7 @@ database:
     password: ""
     api_key: ""
   central:
-    host: ""
+    host: ""              # hostname of your remote PostgreSQL server
     port: 5432
     dbname: frictionsim2ddb
     user: ""
@@ -216,7 +226,11 @@ database:
   api_port: 8000
 ```
 
-These values back `db` and `api` command groups when explicit CLI options are not provided.
+These values back the `db` and `api` command groups when explicit CLI options are not provided.
+
+> **Note**: `active_profile: local` points to a local PostgreSQL mirror of the central DB schema —
+> useful for offline testing. It is **not** the AiiDA database. To target the shared remote DB,
+> set `active_profile: central` or pass `--profile central` to `db` commands.
 
 ## Related Docs
 

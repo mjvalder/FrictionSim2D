@@ -28,6 +28,8 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'register_single_simulation': (f'{__name__}.integration', 'register_single_simulation'),
     'import_results_to_aiida': (f'{__name__}.integration', 'import_results_to_aiida'),
     'import_simulation_set': (f'{__name__}.integration', 'import_simulation_set'),
+    'list_simulation_sets': (f'{__name__}.integration', 'list_simulation_sets'),
+    'dump_results_to_json': (f'{__name__}.integration', 'dump_results_to_json'),
     'rebuild_simulation_set': (f'{__name__}.integration', 'rebuild_simulation_set'),
     'clear_all_nodes': (f'{__name__}.integration', 'clear_all_nodes'),
     'export_archive': (f'{__name__}.integration', 'export_archive'),

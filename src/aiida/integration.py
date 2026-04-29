@@ -21,7 +21,7 @@ import json
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
 
 from . import AIIDA_AVAILABLE
 from ..core.path_utils import format_dimension_token
@@ -29,8 +29,9 @@ from ..core.path_utils import format_dimension_token
 if TYPE_CHECKING:
     from .data import (
         FrictionProvenanceData,
-        FrictionSimulationData,
         FrictionResultsData,
+        FrictionSimulationData,
+        FrictionSimulationSetData,
     )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,19 @@ def _sanitize_for_aiida(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_sanitize_for_aiida(v) for v in obj]
     return obj
+
+
+def _canonicalize_rebuild_material_name(material: str) -> str:
+    """Return the on-disk material name used for rebuilt simulation trees.
+
+    Historic AiiDA imports stored polymorph-prefixed materials with a hyphen
+    (for example ``h-MoS2``), while the generated simulation tree convention in
+    this project uses an underscore (``h_MoS2``). Rebuild should restore the
+    filesystem convention without changing the stored AiiDA metadata.
+    """
+    if len(material) > 2 and material[0] in {'b', 'h', 't', 'p'} and material[1] == '-':
+        return f'{material[0]}_{material[2:]}'
+    return material
 
 
 def _require_aiida():
@@ -444,11 +458,6 @@ def import_simulation_set(
     reader = DataReader(results_dir=str(simulation_folder))
     results_nested = reader.full_data_nested
 
-    # DataReader uses safe material names (dashes → underscores).
-    safe_to_original: Dict[str, str] = {
-        m.replace('-', '_').replace('/', '__'): m for m in materials_list
-    }
-
     # Process every material found in the directory structure. For materials
     # that have result files (in results_nested) we also create ResultsData
     # nodes; for those that don't we still create Provenance + Simulation nodes
@@ -741,9 +750,387 @@ def _import_set_results_tree(
     return count
 
 
+def list_simulation_sets(aiida_profile: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return metadata for all stored ``FrictionSimulationSetData`` nodes.
+
+    Args:
+        aiida_profile: AiiDA profile to load.
+
+    Returns:
+        List of dictionaries sorted by creation time (newest first).
+    """
+    _require_aiida()
+    _ensure_aiida_profile(aiida_profile)
+
+    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
+    from .data import (  # pylint: disable=import-outside-toplevel
+        FrictionSimulationSetData,
+        FrictionSimulationData,
+        FrictionResultsData,
+    )
+
+    qb = QueryBuilder()
+    qb.append(FrictionSimulationSetData)
+    set_nodes = cast(List['FrictionSimulationSetData'], qb.all(flat=True))
+
+    rows: List[Dict[str, Any]] = []
+    for node in set_nodes:
+        set_uuid = str(node.uuid)
+
+        q_sim = QueryBuilder()
+        q_sim.append(
+            FrictionSimulationData,
+            filters={'attributes.set_uuid': set_uuid},
+            project=['id'],
+        )
+        q_res = QueryBuilder()
+        q_res.append(
+            FrictionResultsData,
+            filters={'attributes.set_uuid': set_uuid},
+            project=['id'],
+        )
+
+        rows.append(
+            {
+                'label': node.label,
+                'uuid': set_uuid,
+                'pk': node.pk,
+                'simulation_type': node.simulation_type,
+                'n_materials': node.n_materials,
+                'run_folder': node.run_folder,
+                'ctime': node.ctime.isoformat() if getattr(node, 'ctime', None) else '',
+                'n_simulations': q_sim.count(),
+                'n_results': q_res.count(),
+            }
+        )
+
+    rows.sort(key=lambda item: item.get('ctime') or '', reverse=True)
+    return rows
+
+
+# =============================================================================
+# Export time-series data from AiiDA to output_full_*.json
+# =============================================================================
+
+def dump_results_to_json(
+    set_label: str,
+    output_dir: Path,
+    aiida_profile: Optional[str] = None,
+) -> int:
+    """Export time-series data from an AiiDA simulation set to ``output_full_*.json`` files.
+
+    Creates ``<output_dir>/outputs/output_full_<size>.json`` in the same
+    format produced by ``FrictionSim2D postprocess read --export``, so
+    downstream plotting with ``FrictionSim2D postprocess plot`` works
+    against the AiiDA-extracted data.
+
+    Args:
+        set_label: Label of the ``FrictionSimulationSetData`` to export.
+        output_dir: Directory to write output files (``outputs/`` subdirectory
+            is created automatically).
+        aiida_profile: AiiDA profile name.
+
+    Returns:
+        Number of ``FrictionResultsData`` nodes successfully exported.
+
+    Raises:
+        ValueError: If no set or no result data is found.
+    """
+    _require_aiida()
+    _ensure_aiida_profile(aiida_profile)
+
+    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
+    from .data import (  # pylint: disable=import-outside-toplevel
+        FrictionSimulationSetData,
+        FrictionSimulationData,
+        FrictionResultsData,
+    )
+
+    def _safe_attr_get(attrs_obj, key: str, default: Any = None) -> Any:
+        """Safely get an AiiDA attribute key for mixed/legacy node schemas."""
+        try:
+            return attrs_obj.get(key)
+        except Exception:  # pylint: disable=broad-except
+            return default
+
+    # 1. Resolve set by label
+    qb = QueryBuilder()
+    qb.append(FrictionSimulationSetData, filters={'attributes.label': set_label})
+    sets = cast(List['FrictionSimulationSetData'], qb.all(flat=True))
+    if not sets:
+        raise ValueError(f"No simulation set found with label '{set_label}'")
+    set_uuid = str(sets[0].uuid)
+
+    # 2. Get all FrictionSimulationData nodes for this set
+    qb2 = QueryBuilder()
+    qb2.append(FrictionSimulationData, filters={'attributes.set_uuid': set_uuid})
+    sim_nodes = cast(List['FrictionSimulationData'], qb2.all(flat=True))
+    if not sim_nodes:
+        raise ValueError(f"No simulation nodes found for set '{set_label}'")
+
+    # 2b. Build a lookup of result nodes by simulation UUID for robust linking.
+    qb_res = QueryBuilder()
+    qb_res.append(FrictionResultsData, filters={'attributes.set_uuid': set_uuid})
+    result_nodes = cast(List['FrictionResultsData'], qb_res.all(flat=True))
+    results_by_sim_uuid: Dict[str, List[Any]] = {}
+    for res in result_nodes:
+        sim_uuid = _safe_attr_get(res.base.attributes, 'simulation_uuid')
+        if sim_uuid:
+            results_by_sim_uuid.setdefault(str(sim_uuid), []).append(res)
+
+    # 3. Build nested dict {size_key: {material: {substrate: {tip: {radius: {layer: {speed: {force: {angle: df_dict}}}}}}}}}
+    nested_by_size: Dict[str, Any] = {}
+    metadata_acc: Dict[str, Any] = {
+        'materials': set(),
+        'substrates': set(),
+        'tip_materials': set(),
+        'tip_radii': set(),
+        'layers': set(),
+        'speeds': set(),
+        'forces_and_angles': {},
+        'time_series': None,
+    }
+    n_exported = 0
+
+    for sim in sim_nodes:
+        attrs = sim.base.attributes
+
+        # --- keys stable at simulation level ---
+        material = _safe_attr_get(attrs, 'material', 'unknown')
+        safe_material = material.replace('-', '_').replace('/', '__')
+
+        substrate_mat = _safe_attr_get(attrs, 'substrate_material', '') or ''
+        substrate_amorphous = _safe_attr_get(attrs, 'substrate_amorphous', False)
+        substrate_key = ('a' + substrate_mat) if (substrate_amorphous and substrate_mat) else (substrate_mat or 'sub')
+
+        tip_material = _safe_attr_get(attrs, 'tip_material', '') or 'tip'
+
+        try:
+            radius_key = f'r{int(float(_safe_attr_get(attrs, "tip_radius", 0)))}'
+        except (TypeError, ValueError):
+            radius_key = 'r0'
+
+        sx = _safe_attr_get(attrs, 'size_x')
+        sy = _safe_attr_get(attrs, 'size_y')
+        try:
+            sim_size_key = f'{int(float(sx))}x{int(float(sy))}y' if (sx is not None and sy is not None) else 'unknownx'
+        except (TypeError, ValueError):
+            sim_size_key = 'unknownx'
+
+        # --- gather all result candidates for this simulation ---
+        candidates: List[Any] = []
+        try:
+            direct_results = sim.get_results()
+        except Exception:  # pylint: disable=broad-except
+            direct_results = None
+        if direct_results is not None:
+            candidates.append(direct_results)
+
+        candidates.extend(results_by_sim_uuid.get(str(sim.uuid), []))
+
+        # De-duplicate by UUID while preserving order.
+        unique_candidates: List[Any] = []
+        seen_result_uuids = set()
+        for candidate in candidates:
+            candidate_uuid = str(getattr(candidate, 'uuid', ''))
+            if candidate_uuid in seen_result_uuids:
+                continue
+            seen_result_uuids.add(candidate_uuid)
+            unique_candidates.append(candidate)
+
+        # Legacy fallback: some imports may only have a time_series on the sim node.
+        if not unique_candidates and _safe_attr_get(attrs, 'time_series', {}):
+            unique_candidates = [None]
+
+        if not unique_candidates:
+            logger.warning("No results node for simulation pk=%s (%s) — skipping", sim.pk, material)
+            continue
+
+        for result_node in unique_candidates:
+            result_attrs = result_node.base.attributes if result_node is not None else attrs
+            ts = result_node.time_series if (result_node is not None and hasattr(result_node, 'time_series')) else {}
+            if not ts:
+                ts = _safe_attr_get(result_attrs, 'time_series', {})
+
+            if not ts:
+                logger.warning("Empty time_series for pk=%s (%s) — skipping", sim.pk, material)
+                continue
+
+            # Derive varying keys primarily from the result node.
+            layers = _safe_attr_get(result_attrs, 'layers', _safe_attr_get(attrs, 'layers', 1))
+            try:
+                layer_key = f'l{int(layers)}'
+            except (TypeError, ValueError):
+                layer_key = 'l1'
+
+            speed_val = _safe_attr_get(result_attrs, 'speed', _safe_attr_get(result_attrs, 'scan_speed', _safe_attr_get(attrs, 'scan_speed', 2)))
+            try:
+                speed_key = f's{int(float(speed_val))}'
+            except (TypeError, ValueError):
+                speed_key = 's2'
+
+            pressure = _safe_attr_get(result_attrs, 'pressure', None)
+            force = _safe_attr_get(result_attrs, 'force', _safe_attr_get(attrs, 'force', 0.0))
+            if pressure is not None:
+                try:
+                    load_key = f'p{float(pressure)}'
+                    load_val = float(pressure)
+                except (TypeError, ValueError):
+                    load_key = 'p0.0'
+                    load_val = 0.0
+            else:
+                try:
+                    load_key = f'f{float(force)}'
+                    load_val = float(force)
+                except (TypeError, ValueError):
+                    load_key = 'f0.0'
+                    load_val = 0.0
+
+            scan_angle = _safe_attr_get(result_attrs, 'angle', _safe_attr_get(result_attrs, 'scan_angle', _safe_attr_get(attrs, 'scan_angle', 0.0)))
+            try:
+                angle_key = f'a{int(float(scan_angle))}'
+                angle_val = float(scan_angle)
+            except (TypeError, ValueError):
+                angle_key = 'a0'
+                angle_val = 0.0
+
+            size_key = sim_size_key
+            if size_key == 'unknownx':
+                res_size = _safe_attr_get(result_attrs, 'size', '')
+                if isinstance(res_size, str) and res_size:
+                    size_key = res_size
+
+            # Accumulate the 'time' array for metadata (from first non-empty node)
+            if metadata_acc['time_series'] is None and 'time' in ts:
+                metadata_acc['time_series'] = ts['time']
+
+            # Convert {field: [values]} → {'columns': [...], 'data': [[row0], ...]}
+            fields = [k for k in ts if k != 'time']
+            if not fields:
+                continue
+            n_steps = len(ts[fields[0]])
+            df_dict = {
+                'columns': fields,
+                'data': [[ts[f][i] for f in fields] for i in range(n_steps)],
+            }
+
+            # Accumulate metadata
+            metadata_acc['materials'].add(safe_material)
+            metadata_acc['substrates'].add(substrate_key)
+            metadata_acc['tip_materials'].add(tip_material)
+            metadata_acc['tip_radii'].add(radius_key)
+            try:
+                metadata_acc['layers'].add(int(layers))
+            except (TypeError, ValueError):
+                metadata_acc['layers'].add(1)
+            try:
+                metadata_acc['speeds'].add(int(float(speed_val)))
+            except (TypeError, ValueError):
+                metadata_acc['speeds'].add(2)
+            metadata_acc['forces_and_angles'].setdefault(load_val, set()).add(angle_val)
+
+            # Place data at the correct nested path
+            (
+                nested_by_size
+                .setdefault(size_key, {})
+                .setdefault(safe_material, {})
+                .setdefault(substrate_key, {})
+                .setdefault(tip_material, {})
+                .setdefault(radius_key, {})
+                .setdefault(layer_key, {})
+                .setdefault(speed_key, {})
+                .setdefault(load_key, {})[angle_key]
+            ) = df_dict
+
+            n_exported += 1
+
+    if not nested_by_size:
+        raise ValueError(f"No exportable data found for set '{set_label}'.")
+
+    # 4. Write output files
+    output_dir = Path(output_dir)
+    outputs_dir = output_dir / 'outputs'
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    for size_key, size_data in nested_by_size.items():
+        metadata = {
+            'materials': sorted(metadata_acc['materials']),
+            'substrates': sorted(metadata_acc['substrates']),
+            'tip_materials': sorted(metadata_acc['tip_materials']),
+            'tip_radii': sorted(metadata_acc['tip_radii']),
+            'layers': sorted(metadata_acc['layers']),
+            'speeds': sorted(metadata_acc['speeds']),
+            'forces_and_angles': {
+                str(k): sorted(list(v))
+                for k, v in metadata_acc['forces_and_angles'].items()
+            },
+            'material_types': {},
+            'time_series': metadata_acc['time_series'] or [],
+            'size': size_key,
+        }
+        output_file = outputs_dir / f'output_full_{size_key}.json'
+        with open(output_file, 'w', encoding='utf-8') as fh:
+            json.dump({'metadata': metadata, 'results': size_data}, fh)
+        logger.info("Wrote %s (%d simulations)", output_file, n_exported)
+
+    return n_exported
+
+
 # =============================================================================
 # Database maintenance
 # =============================================================================
+
+def delete_simulation_set(
+    label_or_uuid: str,
+    aiida_profile: Optional[str] = None,
+) -> int:
+    """Delete a single simulation set and all its linked nodes.
+
+    Removes the ``FrictionSimulationSetData`` node identified by *label_or_uuid*
+    together with every ``FrictionSimulationData``, ``FrictionResultsData``, and
+    ``FrictionProvenanceData`` node that belongs to the same set (matched via
+    the ``set_uuid`` attribute).
+
+    Args:
+        label_or_uuid: Set label or UUID string.
+        aiida_profile: AiiDA profile to load.
+
+    Returns:
+        Number of nodes deleted.
+
+    Raises:
+        LookupError: If no set with the given label/UUID is found.
+    """
+    _require_aiida()
+    _ensure_aiida_profile(aiida_profile)
+
+    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
+    from aiida.tools import delete_nodes  # pylint: disable=import-outside-toplevel
+    from .data import (  # pylint: disable=import-outside-toplevel
+        FrictionSimulationSetData,
+        FrictionSimulationData,
+        FrictionResultsData,
+        FrictionProvenanceData,
+    )
+
+    set_node = _resolve_set_node(label_or_uuid, QueryBuilder, FrictionSimulationSetData)
+    set_uuid = str(set_node.uuid)
+    set_pk = set_node.pk
+    if set_pk is None:
+        raise RuntimeError(f"Resolved set node has no PK: {label_or_uuid!r}")
+
+    pks: List[int] = [set_pk]
+
+    for node_class in (FrictionSimulationData, FrictionResultsData, FrictionProvenanceData):
+        qb = QueryBuilder()
+        qb.append(node_class, filters={'attributes.set_uuid': set_uuid}, project=['id'])
+        pks.extend(pk for (pk,) in qb.all())
+
+    _, deletion_ok = delete_nodes(pks, dry_run=False)
+    deleted = len(pks) if deletion_ok else 0
+    logger.info("Deleted %d nodes for set %r (uuid=%s)", deleted, label_or_uuid, set_uuid)
+    return deleted
+
 
 def clear_all_nodes(aiida_profile: Optional[str] = None) -> int:
     """Delete all FrictionSim2D nodes from the active AiiDA profile.
@@ -782,8 +1169,8 @@ def clear_all_nodes(aiida_profile: Optional[str] = None) -> int:
         logger.info("Deleted %d FrictionSim2D nodes.", deleted_count)
 
     # Also delete friction2d/* groups
-    from aiida.orm import Group, QueryBuilder as _QB  # pylint: disable=import-outside-toplevel
-    gqb = _QB()
+    from aiida.orm import Group  # pylint: disable=import-outside-toplevel
+    gqb = QueryBuilder()
     gqb.append(Group, filters={'label': {'like': 'friction2d/%'}}, project=['id', 'uuid'])
     group_pks = [r[0] for r in gqb.all()]
     for pk in group_pks:
@@ -796,7 +1183,7 @@ def clear_all_nodes(aiida_profile: Optional[str] = None) -> int:
     # the identity map so SQLAlchemy doesn't try to reload deleted rows.
     try:
         from aiida.manage import get_manager  # pylint: disable=import-outside-toplevel
-        get_manager().get_profile_storage().get_session().expunge_all()
+        get_manager().reset_profile_storage()
     except Exception:  # pylint: disable=broad-except
         pass
     return len(pks_to_delete)
@@ -917,19 +1304,15 @@ def rebuild_simulation_set(
     from ..builders.afm import AFMSimulation  # pylint: disable=import-outside-toplevel
     from ..builders.sheetonsheet import SheetOnSheetSimulation  # pylint: disable=import-outside-toplevel
 
-    defaults = load_settings()
-    if sim_type == 'sheetonsheet':
-        if defaults.hpc.lammps_scripts == ['system.in', 'slide.in']:
-            defaults.hpc.lammps_scripts = ['slide.in']
-
     # ------------------------------------------------------------------
     # 4. Query all provenance nodes for this set
     # ------------------------------------------------------------------
     qb = QueryBuilder()
-    qb.append(FrictionProvenanceData,
-              filters={'attributes.set_uuid': set_uuid},
-              project=['*'])
-    prov_nodes = qb.all(flat=True)
+    qb.append(
+        FrictionProvenanceData,
+        filters={'attributes.set_uuid': set_uuid},
+    )
+    prov_nodes = cast(List['FrictionProvenanceData'], qb.all(flat=True))
 
     if not prov_nodes:
         raise LookupError(
@@ -938,6 +1321,33 @@ def rebuild_simulation_set(
         )
 
     logger.info("Found %d provenance nodes for set %r", len(prov_nodes), set_node.label)
+
+    # ------------------------------------------------------------------
+    # 4b. Extract settings.yaml from provenance (stored at import time).
+    # Fall back to load_settings() from disk if not present.
+    # ------------------------------------------------------------------
+    _settings_tmp = tempfile.mkdtemp(prefix='friction2d_settings_')
+    _settings_yaml_path: Optional[Path] = None
+    for _pn in prov_nodes:
+        try:
+            _settings_bytes = _pn.get_file_content('settings.yaml', 'config')
+            _candidate = Path(_settings_tmp) / 'settings.yaml'
+            _candidate.write_bytes(_settings_bytes)
+            _settings_yaml_path = _candidate
+            logger.info("Using settings.yaml from provenance node pk=%s", _pn.pk)
+            break
+        except (KeyError, FileNotFoundError):
+            continue
+
+    defaults = load_settings(_settings_yaml_path)
+    if _settings_yaml_path is None:
+        logger.warning(
+            "settings.yaml not found in any provenance node for set %r — "
+            "falling back to disk/default settings", label_or_uuid
+        )
+    if sim_type == 'sheetonsheet':
+        if defaults.hpc.lammps_scripts == ['system.in', 'slide.in']:
+            defaults.hpc.lammps_scripts = ['slide.in']
 
     # ------------------------------------------------------------------
     # 5. Rebuild each material
@@ -977,17 +1387,21 @@ def rebuild_simulation_set(
 
     if generate_hpc and created_dirs:
         try:
-            from ..hpc.scripts import generate_hpc_scripts_for_root  # pylint: disable=import-outside-toplevel
+            from ..core.run import generate_hpc_scripts_for_root  # pylint: disable=import-outside-toplevel
             generate_hpc_scripts_for_root(simulation_root, defaults)
         except ImportError:
             logger.warning(
-                "generate_hpc_scripts_for_root not available in hpc.scripts — skipping HPC script generation"
+                "generate_hpc_scripts_for_root not available in core.run — skipping HPC script generation"
             )
 
     return created_dirs, simulation_root
 
 
-def _resolve_set_node(label_or_uuid: str, QueryBuilder, FrictionSimulationSetData):
+def _resolve_set_node(
+    label_or_uuid: str,
+    QueryBuilder,
+    FrictionSimulationSetData,
+) -> 'FrictionSimulationSetData':
     """Return the ``FrictionSimulationSetData`` matching *label_or_uuid*.
 
     Tries an exact label match first, then falls back to a UUID prefix match.
@@ -997,14 +1411,14 @@ def _resolve_set_node(label_or_uuid: str, QueryBuilder, FrictionSimulationSetDat
     qb.append(FrictionSimulationSetData,
               filters={'attributes.label': label_or_uuid},
               project=['*'])
-    results = qb.all(flat=True)
+    results = cast(List['FrictionSimulationSetData'], qb.all(flat=True))
     if results:
         return results[0]
 
     # Try UUID (or UUID prefix)
     qb2 = QueryBuilder()
     qb2.append(FrictionSimulationSetData, project=['*'])
-    for node in qb2.all(flat=True):
+    for node in cast(List['FrictionSimulationSetData'], qb2.all(flat=True)):
         if str(node.uuid).startswith(label_or_uuid):
             return node
 
@@ -1052,7 +1466,7 @@ def _rebuild_single_material(
 
     # ---- Determine output directory from config --------------------------
     sheet_cfg = config_dict.get('2D') or config_dict.get('sheet', {})
-    mat = sheet_cfg.get('mat', material)
+    mat = _canonicalize_rebuild_material_name(sheet_cfg.get('mat', material))
     x = sheet_cfg.get('x', 100)
     y = sheet_cfg.get('y', 100)
     temp = config_dict.get('general', {}).get('temp', 300)

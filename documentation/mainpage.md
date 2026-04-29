@@ -48,7 +48,20 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 2. Run `FrictionSim2D run ...` to generate simulation trees.
 3. Optionally generate or use bundled HPC scripts.
 4. Run LAMMPS jobs locally or on cluster.
-5. Optionally import/query results with AiiDA commands.
+5. Import completed results into the local AiiDA database (full timeseries + provenance): `FrictionSim2D aiida import`.
+6. Optionally upload summary statistics to the central shared DB: `FrictionSim2D db upload --profile central`.
+
+## Two-Database Architecture
+
+FrictionSim2D uses two separate databases with different roles:
+
+| | Local (AiiDA) | Central (remote) |
+|---|---|---|
+| **Backend** | AiiDA-managed | PostgreSQL on remote server |
+| **Contents** | Full time-series data, complete provenance | Summary statistics only (mean COF, forces, conditions) |
+| **CLI** | `FrictionSim2D aiida ...` | `FrictionSim2D db ...` |
+| **Setup** | `FrictionSim2D aiida setup` | `FrictionSim2D db setup --profile central` |
+| **Use for** | Analysis, plotting, rebuilding simulations | Cross-study comparison, sharing results |
 
 ## Command Families
 

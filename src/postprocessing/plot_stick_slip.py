@@ -347,6 +347,20 @@ class PlotStickSlipMixin(PlotterMixinBase):
         peak_labels = psd_result.peak_labels
         fft_peak_rank = psd_result.fft_peak_rank
 
+        # Map primary PSD peaks to displacement spacing via d = v / f,
+        # where v is the detrended slope in native displacement/time units.
+        psd_arrow_metrics = {'peak_spacings': []}
+        for peak in peak_labels[:2]:
+            freq = float(peak['freq'])
+            if freq <= 0.0:
+                continue
+            psd_arrow_metrics['peak_spacings'].append({
+                'label': peak['name'],
+                'frequency': freq,
+                'period': float(1.0 / freq),
+                'spacing_raw': float(slope / freq),
+            })
+
         logger.info("--- Stick-Slip Analysis ---")
         logger.info(
             "Run: id=%s force=%s angle=%s layer=%s",
@@ -358,6 +372,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
         logger.info("v (slope) = %.8g (%s/%s)", slope, disp_unit, time_unit)
         logger.info("f_slip = %.8g 1/%s", f_slip, time_unit)
         logger.info("T = %.8g %s", T, time_unit)
+        spectrum_spacing = float(slope * T)
 
         displacement_filename = plot_config.get('filename', 'stick_slip_analysis.png')
         displacement_root = Path(displacement_filename).stem
@@ -569,6 +584,54 @@ class PlotStickSlipMixin(PlotterMixinBase):
                 va='bottom',
             )
 
+        # Frequency-axis spacing arrows: 0→f1 and 0→f2.
+        # Distances are shown in displacement units from d = v / f.
+        if len(psd_arrow_metrics['peak_spacings']) == 2:
+            spacings = psd_arrow_metrics['peak_spacings']
+            y_max_plot = float(np.max(psd[freq_plot_mask]))
+            y_max_plot = max(y_max_plot, 1e-12)
+
+            freq_left = 0.0
+            y_bottom = 1.28 * y_max_plot
+            y_top = 1.55 * y_max_plot
+            y_text_offset = 0.05 * y_max_plot
+
+            # Place the longer distance on top for readability.
+            entries = sorted(
+                [
+                    {'freq': float(item['frequency']), 'dist': float(item['spacing_raw'])}
+                    for item in spacings
+                ],
+                key=lambda row: row['dist'],
+                reverse=True,
+            )
+
+            for entry, y_arrow in zip(entries, [y_top, y_bottom]):
+                ax_psd.annotate(
+                    '',
+                    xy=(freq_left, y_arrow),
+                    xytext=(entry['freq'], y_arrow),
+                    arrowprops={
+                        'arrowstyle': '<->',
+                        'color': 'tab:red',
+                        'lw': 1.2,
+                        'alpha': 0.75,
+                    },
+                )
+                ax_psd.text(
+                    0.5 * (freq_left + entry['freq']),
+                    y_arrow + y_text_offset,
+                    f"{entry['dist']:.4g} {disp_unit}",
+                    ha='center',
+                    va='bottom',
+                    fontsize=self.settings["fonts"]["legend"],
+                )
+
+            y_min_current, y_max_current = ax_psd.get_ylim()
+            y_top_needed = y_top + y_text_offset + 0.22 * y_max_plot
+            if y_top_needed > y_max_current:
+                ax_psd.set_ylim(y_min_current, y_top_needed)
+
         ax_psd.set_xlabel(
             plot_config.get('freq_xlabel', f"Frequency (1/{time_unit})"),
             fontsize=self.settings["fonts"]["axis_label"],
@@ -605,9 +668,34 @@ class PlotStickSlipMixin(PlotterMixinBase):
                     'displacement_column': displacement_col,
                     'time_scale': time_scale,
                     'displacement_scale': displacement_scale,
+                    'metrics': {
+                        'slope_native': slope,
+                        'slope_units': f"{disp_unit}/{time_unit}",
+                        'spacing_trend_avg': spectrum_spacing,
+                        'spacing_units': disp_unit,
+                    },
                     'frequency_analysis': {
                         'selected_primary_frequency': f_slip,
                         'selected_peak_rank': fft_peak_rank,
+                        'reported_peaks': [
+                            {
+                                'label': peak['name'],
+                                'frequency': peak['freq'],
+                                'psd': peak['psd'],
+                                'period': peak['period'],
+                            }
+                            for peak in peak_labels
+                        ],
+                        'display_frequency_min': float(np.min(freqs[freq_plot_mask])),
+                        'display_frequency_max': float(np.max(freqs[freq_plot_mask])),
+                        'psd_arrow_metrics': psd_arrow_metrics,
+                    },
+                    'display_windows': {
+                        'time_window': [float(plot_t[0]), float(plot_t[-1])],
+                        'frequency_window': [
+                            float(np.min(freqs[freq_plot_mask])),
+                            float(np.max(freqs[freq_plot_mask])),
+                        ],
                     },
                 }, f, indent=2)
             logger.info("Saved stick-slip analysis results: %s", results_path)

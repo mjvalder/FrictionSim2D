@@ -384,12 +384,6 @@ def aiida_group():
 @aiida_group.command('status')
 def aiida_status():
     """Check AiiDA installation and profile status."""
-    from .aiida import AIIDA_AVAILABLE
-    
-    if not AIIDA_AVAILABLE:
-        click.echo("❌ AiiDA not installed")
-        return
-    
     click.echo("✅ AiiDA is installed")
     
     try:
@@ -434,7 +428,7 @@ def aiida_import(simulation_folder: str, label: Optional[str], description: str,
             'Label for this simulation set',
             default=sim_path.name,
         )
-    label = label.strip()
+    label = (label or '').strip()
     if not label:
         _raise_abort("❌ Label cannot be empty.", ValueError("empty label"))
 
@@ -455,6 +449,184 @@ def aiida_import(simulation_folder: str, label: Optional[str], description: str,
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Import failed")
         _raise_abort(f"❌ Import failed: {exc}", exc)
+
+
+@aiida_group.command('list-sets')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@click.option('--format', 'output_format', type=click.Choice(['table', 'json', 'csv']),
+              default='table', help='Output format')
+def aiida_list_sets(profile: Optional[str], output_format: str):
+    """List imported simulation sets stored in AiiDA.
+
+    Example:
+        FrictionSim2D aiida list-sets
+        FrictionSim2D aiida list-sets --format json
+    """
+    from .aiida.integration import list_simulation_sets
+
+    try:
+        rows = list_simulation_sets(aiida_profile=profile)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to list simulation sets")
+        _raise_abort(f"❌ List failed: {exc}", exc)
+
+    if not rows:
+        click.echo("No simulation sets found in the current AiiDA profile.")
+        return
+
+    if output_format == 'json':
+        import json
+        click.echo(json.dumps(rows, indent=2))
+        return
+
+    if output_format == 'csv':
+        import csv
+        import io
+        keys = [
+            'label', 'simulation_type', 'n_materials', 'n_simulations',
+            'n_results', 'run_folder', 'ctime', 'uuid', 'pk',
+        ]
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(rows)
+        click.echo(buffer.getvalue().rstrip())
+        return
+
+    headers = [
+        ('Label', 'label'),
+        ('Type', 'simulation_type'),
+        ('Materials', 'n_materials'),
+        ('Sims', 'n_simulations'),
+        ('Results', 'n_results'),
+        ('Run folder', 'run_folder'),
+        ('UUID', 'uuid'),
+    ]
+    widths = []
+    for title, key in headers:
+        max_value_width = max(len(str(row.get(key, ''))) for row in rows)
+        widths.append(max(len(title), max_value_width))
+
+    header_line = '  '.join(title.ljust(widths[idx]) for idx, (title, _) in enumerate(headers))
+    sep_line = '  '.join('-' * widths[idx] for idx in range(len(headers)))
+    click.echo(header_line)
+    click.echo(sep_line)
+    for row in rows:
+        click.echo(
+            '  '.join(
+                str(row.get(key, '')).ljust(widths[idx])
+                for idx, (_, key) in enumerate(headers)
+            )
+        )
+    click.echo(sep_line)
+    click.echo(f"\nTotal sets: {len(rows)}")
+
+
+@aiida_group.command('dump')
+@click.argument('set_label')
+@click.option('--output-dir', '-o', required=True, type=click.Path(),
+              help='Directory to write output_full_*.json files into')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_dump(set_label: str, output_dir: str, profile: Optional[str]):
+    """Export time-series data from an AiiDA set to output_full_*.json files.
+
+    Creates <output_dir>/outputs/output_full_<size>.json in the same format
+    as ``postprocess read --export``, so you can regenerate plots with
+    ``postprocess plot`` against the AiiDA-exported data.
+
+    Example:
+        FrictionSim2D aiida dump 251113-afm --output-dir ~/Syncthing/aiida_dump/251113_afm
+        FrictionSim2D aiida dump 260227-sevik_mos2 -o ~/Syncthing/aiida_dump/sevik_mos2
+    """
+    from .aiida import load_aiida_profile
+    from .aiida.integration import dump_results_to_json
+
+    load_aiida_profile(profile)
+
+    click.echo(f"📤 Dumping set '{set_label}' → {output_dir}/outputs/")
+    try:
+        n = dump_results_to_json(
+            set_label=set_label,
+            output_dir=Path(output_dir),
+            aiida_profile=profile,
+        )
+        click.echo(f"✅ Exported {n} simulation(s) to {output_dir}/outputs/")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Dump failed")
+        _raise_abort(f"❌ Dump failed: {exc}", exc)
+
+
+@aiida_group.command('rebuild')
+@click.argument('set_label')
+@click.option('--output-dir', '-o', default=None, type=click.Path(),
+              help='Root directory to write the simulation tree into (default: cwd)')
+@click.option('--hpc-scripts', is_flag=True, default=False,
+              help='Generate HPC job-submission scripts after rebuilding')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_rebuild(set_label: str, output_dir: Optional[str], hpc_scripts: bool, profile: Optional[str]):
+    """Rebuild LAMMPS input files for a set from its AiiDA provenance.
+
+    Reads every FrictionProvenanceData node for the set, exports the stored
+    CIF and potential files, and reruns the builder to produce a complete
+    simulation directory tree.  This validates that the stored provenance is
+    sufficient to reproduce the original simulation inputs.
+
+    The reconstructed tree mirrors the layout produced by ``FrictionSim2D run``
+    and can be submitted directly to an HPC cluster.
+
+    Example:
+        FrictionSim2D aiida rebuild 251125-sheetonsheet --output-dir ~/rebuild_test/
+        FrictionSim2D aiida rebuild 251113-afm -o ~/rebuild_test/ --hpc-scripts
+    """
+    from .aiida import load_aiida_profile
+    from .aiida.integration import rebuild_simulation_set
+
+    load_aiida_profile(profile)
+
+    click.echo(f"🔨 Rebuilding set '{set_label}' from AiiDA provenance…")
+    try:
+        created_dirs, simulation_root = rebuild_simulation_set(
+            label_or_uuid=set_label,
+            output_root=Path(output_dir) if output_dir else None,
+            generate_hpc=hpc_scripts,
+            aiida_profile=profile,
+        )
+        click.echo(
+            f"✅ Rebuilt {len(created_dirs)} simulation(s) → {simulation_root}"
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Rebuild failed")
+        _raise_abort(f"❌ Rebuild failed: {exc}", exc)
+
+
+@aiida_group.command('delete')
+@click.argument('set_label')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@click.confirmation_option(
+    prompt='This will permanently delete the simulation set and all linked nodes. Continue?'
+)
+def aiida_delete(set_label: str, profile: Optional[str]):
+    """Delete a single simulation set and all its linked nodes.
+
+    SET_LABEL is the label (or UUID) of the set to delete. All linked
+    SimulationData, ResultsData, and ProvenanceData nodes are also removed.
+
+    Example:
+        FrictionSim2D aiida delete 260312-force_rebomos
+    """
+    from .aiida.integration import delete_simulation_set
+
+    click.echo(f"🗑️  Deleting simulation set '{set_label}'…")
+    try:
+        n = delete_simulation_set(label_or_uuid=set_label, aiida_profile=profile)
+        click.echo(f"✅ Deleted {n} nodes for set '{set_label}'.")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Delete failed")
+        _raise_abort(f"❌ Delete failed: {exc}", exc)
 
 
 @aiida_group.command('clear')
@@ -483,37 +655,62 @@ def aiida_clear(profile: Optional[str]):
         _raise_abort(f"❌ Clear failed: {exc}", exc)
 
 
+@aiida_group.command('query')
 @click.option('--material', '-m', help='Filter by material')
 @click.option('--layers', '-l', type=int, help='Filter by layer count')
 @click.option('--force', '-f', type=float, help='Filter by applied force')
+@click.option('--set', '-s', 'set_label', default=None, help='Filter by simulation set label (e.g. "251113-afm")')
 @click.option('--format', 'output_format', type=click.Choice(['table', 'csv', 'json']),
               default='table', help='Output format')
 @click.option('--output', '-o', type=click.Path(), help='Save to file')
+@click.option('--profile', default=None,
+                            help='AiiDA profile name (default: configured default profile)')
 def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[float],
-                output_format: str, output: Optional[str]):
+                                set_label: Optional[str], output_format: str,
+                                output: Optional[str], profile: Optional[str]):
     """Query simulation database.
     
     Example:
         FrictionSim2D aiida query --material h-MoS2 --layers 2 --format csv
+        FrictionSim2D aiida query --set 251113-afm --format table
     """
+    from .aiida import load_aiida_profile
     from .aiida.query import Friction2DDB
+
+    load_aiida_profile(profile)
     
     db = Friction2DDB()
-    
-    filters = {}
-    if material:
-        filters['material'] = material
-    if layers:
-        filters['layers'] = layers
-    if force:
-        filters['force'] = force
-    
-    click.echo(f"🔍 Querying database with filters: {filters}")
-    
-    try:
-        results = db.query(**filters)
+
+    if set_label:
+        from .aiida.integration import list_simulation_sets
+        sets = list_simulation_sets(aiida_profile=profile)
+        matched = [s for s in sets if s['label'] == set_label]
+        if not matched:
+            available = [s['label'] for s in sets]
+            raise click.ClickException(
+                f"No set found with label '{set_label}'. Available: {available}"
+            )
+        set_uuid = matched[0]['uuid']
+        click.echo(f"🔍 Querying set '{set_label}' (UUID: {set_uuid[:8]}…)")
+        results = db.query_by_set(set_uuid)
         click.echo(f"📊 Found {results.total_count} results")
-        
+    else:
+        query_kwargs = {
+            'materials': [material] if material else None,
+            'layers': layers,
+            'force_range': (force, force) if force is not None else None,
+        }
+        # Remove None values before forwarding to Friction2DDB.query
+        query_kwargs = {k: v for k, v in query_kwargs.items() if v is not None}
+        click.echo(f"🔍 Querying database with filters: {query_kwargs}")
+        try:
+            results = db.query(**query_kwargs)
+            click.echo(f"📊 Found {results.total_count} results")
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("AiiDA query failed")
+            _raise_abort(f"❌ Query failed: {exc}", exc)
+
+    try:
         if output_format == 'table':
             df = results.to_dataframe()
             click.echo("\n" + df.to_string(index=False))
@@ -636,7 +833,10 @@ def aiida_import_archive(archive_path: str):
 
         FrictionSim2D aiida import-archive results.aiida
     """
+    from .aiida import load_aiida_profile
     from .aiida.integration import import_archive
+
+    load_aiida_profile()
 
     click.echo(f"📥 Importing archive: {archive_path} ...")
     try:
@@ -1269,8 +1469,6 @@ def db_reject(
 @db_group.command('setup')
 @click.option('--name', '-n', default=None,
               help='User/uploader name for API key (default: $USER or "user")')
-@click.option('--profile', '-p', default='local',
-              help='Database profile to set up (default: local)')
 @_add_db_options
 def db_setup(
     name: Optional[str],
@@ -1289,7 +1487,7 @@ def db_setup(
     3. Stores the API key in ~/.config/FrictionSim2D/settings.yaml
 
     Example:
-        FrictionSim2D db setup                      # local setup
+        FrictionSim2D db setup                              # local setup (default profile)
         FrictionSim2D db setup --name alice --profile central
     """
     import os as os_module  # noqa: PLC0415
