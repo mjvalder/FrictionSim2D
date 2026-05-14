@@ -414,11 +414,15 @@ def atomic2molecular(filepath: Union[str, Path]) -> None:
 
         if atoms_section and line:
             parts = line.split()
-            if len(parts) >= 4 and all(c in '0123456789.-+eE' for c in parts[0]):
+            if len(parts) >= 5 and all(c in '0123456789.-+eE' for c in parts[0]):
                 atom_id = parts[0]
                 atom_type = parts[1]
                 x, y, z = parts[2:5]
-                new_line = f"{atom_id} 0 {atom_type} {x} {y} {z} 0 0 0"
+                # Preserve nx, ny, nz if present to avoid unwrapped-topology warnings.
+                image_flags = ""
+                if len(parts) >= 8:
+                    image_flags = f" {parts[5]} {parts[6]} {parts[7]}"
+                new_line = f"{atom_id} 0 {atom_type} {x} {y} {z}{image_flags}"
                 modified_lines.append(new_line)
                 continue
 
@@ -448,110 +452,172 @@ def renumber_atom_types(filename: Union[str, Path], pot: Optional[List[str]] = N
     with open(filename, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    masses_idx = next((i for i, line in enumerate(lines) if line.strip() == LAMMPS_SECTION_MASSES), None)
-    atoms_idx = next((i for i, line in enumerate(lines) if LAMPS_SECTION_ATOMS in line), None)
-    if masses_idx is None or atoms_idx is None or masses_idx >= atoms_idx:
-        return
+    # PASS 1: Parse Masses section to extract type ID -> (element_name, mass) mapping
+    masses_section = False
+    atom_types = {}  # maps old type_id -> (element_name, mass)
 
-    # Parse Masses section entries: old_type_id -> (element_name, mass)
-    atom_types: Dict[int, Tuple[str, float]] = {}
-    mass_line_indices: List[int] = []
-    for i in range(masses_idx + 1, atoms_idx):
-        stripped = lines[i].strip()
-        if not stripped:
+    for i, line in enumerate(lines):
+        if line.strip() == LAMMPS_SECTION_MASSES:
+            masses_section = True
             continue
-        parts = stripped.split()
-        if len(parts) < 2 or not parts[0].isdigit():
-            continue
-        type_id = int(parts[0])
-        mass = float(parts[1])
-        element_name = lines[i].split('#', maxsplit=1)[1].strip() if '#' in lines[i] else f'Unknown_{type_id}'
-        atom_types[type_id] = (element_name, mass)
-        mass_line_indices.append(i)
 
-    if not atom_types:
-        return
+        if masses_section:
+            if LAMPS_SECTION_ATOMS in line:
+                break
 
-    # Build old_type -> new_type mapping, optionally following potential element order.
-    old_type_ids = sorted(atom_types.keys())
-    old_to_new: Dict[int, int] = {}
-    next_type = 1
+            parts = line.split()
+            if len(parts) < 2:
+                continue
 
-    if pot:
-        remaining = list(old_type_ids)
+            atom_type_id = int(parts[0])
+            mass = float(parts[1])
+            # Extract element name from comment if present (e.g., "1 12.011  # C")
+            if '#' in line:
+                atom_type_name = line.split('#')[-1].strip()
+                lines[i] = ''
+            else:
+                atom_type_name = f'Unknown_{atom_type_id}'
+            atom_types[atom_type_id] = (atom_type_name, mass)
+
+    # PASS 2: Scan Atoms section and build mapping of new type IDs -> atom lines
+    # If pot is provided, this also reorders by element.
+    modified_lines = set()  # Track which line indices have been processed
+    mod_lines = {}  # Maps new type_id -> reformatted atom line string
+    elem = {}  # Maps new type_id -> (element_name, mass)
+    type_offset = len(atom_types) if pot is not None else 1  # Stride for type numbering
+    current_type = 1
+
+    # For each old type ID, find atoms with that type and assign new type IDs
+    for old_type_id in range(1, len(atom_types) + 1):
+        atoms_section = False
+        if pot is not None:
+            # When reordering by element list, use pot index as new type
+            current_type = old_type_id
+
+        # Scan atoms section to find all atoms with old_type_id
+        for line_idx, line in enumerate(lines):
+            stripped_line = line.strip()
+
+            if LAMPS_SECTION_ATOMS in line:
+                atoms_section = True
+                continue
+
+            # Process atoms in the Atoms section if not yet processed
+            if atoms_section and stripped_line and line_idx not in modified_lines:
+                parts = stripped_line.split()
+
+                # Check if this atom has the current old_type_id
+                if len(parts) > 1 and parts[1] == str(old_type_id):
+                    # Renumber: set both atom_id and atom_type to new type
+                    parts[1] = parts[0] = str(current_type)
+                    lines[line_idx] = ''  # Clear old line
+                    mod_lines[current_type] = '  '.join(parts) + '\n'
+                    modified_lines.add(line_idx)
+                    elem[current_type] = atom_types[old_type_id]
+                    current_type += type_offset
+
+    # PASS 3: If pot list is provided, reorder atoms to match pot element order
+    if pot is not None:
+        atom_idx = 1
+        atom_lines = {}  # Final mapping of new type_id -> atom line
+        elem_pot = {}  # Element re-ordering map
+
+        # For each element in the pot list, find corresponding atoms and renumber sequentially
         for element in pot:
-            matches = [
-                old_id for old_id in remaining
-                if atom_types[old_id][0].upper() == element.upper()
-            ]
-            for old_id in matches:
-                old_to_new[old_id] = next_type
-                next_type += 1
-                remaining.remove(old_id)
+            # Search mod_lines for atoms matching current element
+            for line_num in range(1, len(mod_lines) + 1):
+                if line_num not in mod_lines:
+                    continue
+                stripped_line = mod_lines[line_num].strip()
+                parts = stripped_line.split()
+                # Match element name (case-insensitive)
+                if elem[int(parts[1])][0].upper() == element.upper():
+                    elem_pot[atom_idx] = elem[int(parts[1])]
+                    parts[1] = str(atom_idx)
+                    atom_lines[atom_idx] = '  '.join(parts) + '\n'
+                    atom_idx += 1
+        elem = elem_pot
+        mod_lines = atom_lines
 
-        for old_id in remaining:
-            old_to_new[old_id] = next_type
-            next_type += 1
-    else:
-        for old_id in old_type_ids:
-            old_to_new[old_id] = next_type
-            next_type += 1
-
-    # Renumber atom types in Atoms section without touching atom IDs.
-    section_headers = {
-        LAMMPS_SECTION_MASSES,
-        LAMPS_SECTION_ATOMS,
-        LAMMPS_SECTION_VELOCITIES,
-        'Bonds',
-        'Angles',
-        'Dihedrals',
-        'Impropers',
-        'Pair Coeffs',
-        'Bond Coeffs',
-        'Angle Coeffs',
-        'Dihedral Coeffs',
-        'Improper Coeffs',
-    }
-
-    for i in range(atoms_idx + 1, len(lines)):
-        stripped = lines[i].strip()
-        if not stripped:
-            continue
-        if stripped in section_headers or any(stripped.startswith(h) for h in section_headers):
-            break
-
-        parts = stripped.split()
-        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
-            continue
-
-        old_type = int(parts[1])
-        if old_type in old_to_new:
-            parts[1] = str(old_to_new[old_type])
-            lines[i] = '  '.join(parts) + '\n'
-
-    # Update atom types header count.
-    n_types = len(old_to_new)
+    # PASS 4: Update header "atom types" count and rebuild Masses section with new IDs
+    masses_section = False
     for i, line in enumerate(lines):
         if re.match(r'^\s*\d+\s+atom types\s*$', line.strip()):
-            lines[i] = f"  {n_types}  atom types\n"
+            # Update the atom type count header
+            lines[i] = f"  {len(elem)}  atom types\n"
+            continue
+
+        if line.strip() == LAMMPS_SECTION_MASSES:
+            masses_section = True
+            continue
+
+        if masses_section:
+            # Rewrite Masses section with sequential type IDs
+            for atom_type_id in range(1, len(elem) + 1):
+                lines[i] += f"{atom_type_id} {elem[atom_type_id][1]}  #{elem[atom_type_id][0]}\n"
             break
-
-    # Rewrite Masses section to match new type ordering.
-    new_type_to_elem_mass = {new_id: atom_types[old_id] for old_id, new_id in old_to_new.items()}
-    mass_lines = [f"{new_id} {new_type_to_elem_mass[new_id][1]}  #{new_type_to_elem_mass[new_id][0]}\n"
-                  for new_id in sorted(new_type_to_elem_mass.keys())]
-
-    if mass_line_indices:
-        insert_at = mass_line_indices[0]
-        for idx in reversed(mass_line_indices):
-            del lines[idx]
-        for offset, mass_line in enumerate(mass_lines):
-            lines.insert(insert_at + offset, mass_line)
-    else:
-        lines[masses_idx + 1:masses_idx + 1] = mass_lines
 
     with open(filename, 'w', encoding='utf-8') as f:
         f.writelines(lines)
+    with open(filename, 'a', encoding='utf-8') as f:
+        for line in mod_lines.values():
+            f.write(line)
+
+def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
+    """Shift all atom z-coordinates so the minimum z is 0, and update the box bounds.
+
+    Modifies the LAMMPS data file in-place. After this operation, the lowest
+    atom z-coordinate will be 0.0, and zlo/zhi are updated accordingly.
+
+    Args:
+        filename: Path to the LAMMPS data file.
+    """
+    with open(filename, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    # Find minimum z across all atom lines
+    atoms_section = False
+    z_values: List[float] = []
+    for line in lines:
+        if LAMPS_SECTION_ATOMS in line:
+            atoms_section = True
+            continue
+        if atoms_section and line.strip():
+            parts = line.strip().split()
+            if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
+                try:
+                    z_values.append(float(parts[4]))
+                except ValueError:
+                    pass
+
+    if not z_values:
+        return
+
+    z_min = min(z_values)
+    if abs(z_min) < 1e-10:
+        return  # Already at zero, nothing to do
+
+    # Shift atom z-coordinates and update zlo/zhi box bounds
+    atoms_section = False
+    for i, line in enumerate(lines):
+        if LAMPS_SECTION_ATOMS in line:
+            atoms_section = True
+            continue
+        if atoms_section and line.strip():
+            parts = line.strip().split()
+            if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
+                try:
+                    parts[4] = f"{float(parts[4]) - z_min:.15f}"
+                    lines[i] = '  '.join(parts) + '\n'
+                except ValueError:
+                    pass
+        elif 'zlo zhi' in line:
+            zlo, zhi = map(float, line.split()[:2])
+            lines[i] = f"      {zlo - z_min:.15f}      {zhi - z_min:.15f}  zlo zhi\n"
+
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
 
 def check_potential_cif_compatibility(cif_path: Union[str, Path],
                                         pot_path: Union[str, Path]) -> float:
@@ -588,3 +654,48 @@ def check_potential_cif_compatibility(cif_path: Union[str, Path],
         )
 
     return unique_multiples.pop()
+
+
+def normalize_potential_type(potential_type: str) -> str:
+    """Normalize a potential type string for comparison and validation.
+    
+    Converts to lowercase and strips whitespace for case-insensitive comparison.
+    
+    Args:
+        potential_type: Potential type string (e.g., 'SW', 'reaxff', 'ReaxFF')
+    
+    Returns:
+        Normalized lowercase potential type string.
+    
+    Example:
+        >>> normalize_potential_type('ReaxFF')
+        'reaxff'
+        >>> normalize_potential_type('  SW  ')
+        'sw'
+    """
+    return potential_type.strip().lower()
+
+
+def format_numeric_token(value: float) -> str:
+    """Format a numeric value into a filename-safe token string.
+    
+    Converts numbers to strings suitable for use in filenames and directory names.
+    Replaces problematic characters: minus signs become 'm', decimals become 'p'.
+    
+    Args:
+        value: Numeric value to format (int, float, or scientific notation)
+    
+    Returns:
+        Alphanumeric token string (e.g., '1p5' for 1.5, 'm2p3' for -2.3)
+    
+    Example:
+        >>> format_numeric_token(1.5)
+        '1p5'
+        >>> format_numeric_token(-2.3)
+        'm2p3'
+        >>> format_numeric_token(1e-5)
+        '1e-05'
+    """
+    token = f"{value:g}"
+    token = token.replace('-', 'm').replace('.', 'p')
+    return re.sub(r'[^A-Za-z0-9_]+', '_', token)

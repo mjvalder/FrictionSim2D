@@ -12,6 +12,7 @@ from typing import Dict, Optional, Tuple
 from ..core.simulation_base import SimulationBase
 from ..core.config import AFMSimulationConfig
 from ..core.potential_manager import PotentialManager
+from ..core.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from . import components
 
@@ -40,11 +41,6 @@ class AFMSimulation(SimulationBase):
         self.output_dir_layer: Dict[int, Path] = {}
         self.relative_run_dir_layer: Dict[int, Path] = {}
 
-    @staticmethod
-    def _normalized_pot_type(value: str) -> str:
-        """Normalize potential type for builder-level checks."""
-        return value.strip().lower()
-
     def build(self) -> None:
         """Constructs the atomic systems and layout.
         
@@ -68,7 +64,8 @@ class AFMSimulation(SimulationBase):
             sheet_path, sheet_dims, lat_c = components.build_sheet(
                 self.config.sheet, self.atomsk, build_dir,
                 stack_if_multi=True, settings=self.config.settings,
-                n_layers_override=n_layers, stacking_type=stacking_type
+                    n_layers_override=n_layers,
+                    stacking_type=stacking_type
             )
             self.sheet_paths[n_layers] = sheet_path
             if self.lat_c is None:
@@ -260,9 +257,9 @@ class AFMSimulation(SimulationBase):
 
         reaxff_types = {'reaxff', 'reax/c'}
         uses_reaxff = (
-            self._normalized_pot_type(self.config.sheet.pot_type) in reaxff_types or
-            self._normalized_pot_type(self.config.tip.pot_type) in reaxff_types or
-            self._normalized_pot_type(self.config.sub.pot_type) in reaxff_types
+            normalize_potential_type(self.config.sheet.pot_type) in reaxff_types or
+            normalize_potential_type(self.config.tip.pot_type) in reaxff_types or
+            normalize_potential_type(self.config.sub.pot_type) in reaxff_types
         )
         atom_style = 'charge' if uses_reaxff else 'atomic'
 
@@ -305,9 +302,9 @@ class AFMSimulation(SimulationBase):
             'sheet_z': z_positions['sheet'],
             'offset_2d': offset_2d,
             'results_file_pattern': (f"{self.relative_run_dir_layer[n_layers]}/results/"
-                                    f"friction_f${{find}}_a${{a}}_s${{speed}}_layer{n_layers}.txt"),
+                                    f"friction_f$(v_find)_a${{a}}_s${{speed}}_layer{n_layers}.txt"),
             'dump_file_pattern': (f"{self.relative_run_dir_layer[n_layers]}/visuals/"
-                                    f"slide_f${{find}}_a${{a}}_s${{scan_speed}}.lammpstrj"),
+                                    f"slide_f$(v_find)_a${{a}}_s${{speed}}.lammpstrj"),
             'dump_enabled': out.dump.get('slide', False),
             'z_sub': z_positions['sub'],
             'z_sheet': z_positions['sheet'],
@@ -330,7 +327,7 @@ class AFMSimulation(SimulationBase):
             'results_freq': out.results_frequency,
             'dump_freq': out.dump_frequency.get('slide', 1000),
             'tip_fix_group': 'tip_all' if self.config.settings.geometry.rigid_tip else 'tip_fix',
-            'layer_group': 'sheet',
+            'layer_group': '2D_all',
             'n_sheet_layers': n_layers,
             'lat_c': lat_c,
             'tip_radius': self.config.tip.r,

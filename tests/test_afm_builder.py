@@ -7,6 +7,7 @@ import pytest
 
 from src.builders.afm import AFMSimulation
 from src.core.config import AFMSimulationConfig, load_settings
+from src.core.utils import normalize_potential_type
 
 
 def _make_afm_config(tmp_path: Path, layers: list[int]) -> AFMSimulationConfig:
@@ -104,8 +105,8 @@ def test_afm_builder_layer_specific_paths(tmp_path: Path, monkeypatch) -> None:
     assert builder.config.sheet.layers == [2, 3]
 
 
-def test_afm_normalized_pot_type_consistency() -> None:
-    """AFM should normalize pot_type consistently for checks."""
+def test_normalize_potential_type_consistency() -> None:
+    """Potential type normalization should be consistent across builders."""
     test_cases = [
         ("SW", "sw"),
         ("Tersoff", "tersoff"),
@@ -115,7 +116,7 @@ def test_afm_normalized_pot_type_consistency() -> None:
     ]
 
     for input_val, expected in test_cases:
-        assert AFMSimulation._normalized_pot_type(input_val) == expected
+        assert normalize_potential_type(input_val) == expected
 
 
 def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> None:

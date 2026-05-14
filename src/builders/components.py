@@ -30,7 +30,7 @@ from ..core.potential_manager import PotentialManager
 from ..core.utils import (
     cifread, count_atomtypes, get_material_path, get_model_dimensions,
     renumber_atom_types, check_potential_cif_compatibility, get_num_atom_types,
-    atomic2charge
+    atomic2charge, shift_atoms_to_z_zero
 )
 from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader
@@ -499,6 +499,12 @@ def stack_multilayer_sheet(
         if pot_file.exists():
             pot_file.unlink()
 
+    # Re-anchor the stacked sheet so its lowest atom is at z=0.
+    # Without this, some stacking/minimization outcomes can leave atoms below
+    # zero, which reduces the intended sheet-substrate separation in AFM setup.
+    if output_path.exists():
+        shift_atoms_to_z_zero(output_path)
+
     return lat_c
 
 def build_tip(
@@ -734,7 +740,7 @@ def build_monolayer(
     atomsk.orthogonalize(temp_unit_cell, ortho_cell)
     temp_unit_cell.unlink()
 
-    # dims = get_model_dimensions(ortho_cell)
+    dims = get_model_dimensions(ortho_cell)
 
     if multiplier != 1:
         atoms = ase_io.read(str(ortho_cell), format="lammps-data")
@@ -752,7 +758,7 @@ def build_monolayer(
             ortho_cell.unlink()
             ortho_cell = dup_ortho
             renumber_atom_types(ortho_cell, pot=list(pot_counts.keys()))
-            # dims = get_model_dimensions(ortho_cell)
+            dims = get_model_dimensions(ortho_cell)
 
     dims_calc = get_model_dimensions(ortho_cell)
     dims_calc_typed: Dict[str, float] = {k: cast(float, v) for k, v in dims_calc.items()}
@@ -773,6 +779,9 @@ def build_monolayer(
         atomsk.duplicate(ortho_cell, base_path, dup_x, dup_y, 1)
     ortho_cell.unlink()
 
+    dims = get_model_dimensions(base_path)
+
+    shift_atoms_to_z_zero(base_path)
     dims = get_model_dimensions(base_path)
 
     if config.pot_type in ['tersoff', 'sw', 'rebo', 'airebo']:
@@ -831,6 +840,6 @@ def build_sheet(
         )
         return stacked_path, dims, lat_c
 
-    # When stacking is disabled, return a concrete single-layer file path.
-    shutil.copy(base_path, stacked_path)
+    if n_layers == 1:
+        shutil.copy(base_path, stacked_path)
     return stacked_path, dims, lat_c

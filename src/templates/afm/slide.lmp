@@ -42,7 +42,7 @@ timestep        {{ timestep }}
 thermo          {{ thermo }}
 comm_style      tiled
 
-read_data       {{ output_dir }}/load_${find}N.data
+read_data       {{ output_dir }}/load_$(v_find)N.data
 include         {{ potential_file }}
 
 
@@ -96,24 +96,27 @@ fix             damp {{ tip_fix_group }} viscous {{ damp_ev }}
 
 variable        spring_x equal cos(v_a*PI/180)
 variable        spring_y equal sin(v_a*PI/180)
+variable        drive_vx equal v_spring_x*v_speed/100
+variable        drive_vy equal v_spring_y*v_speed/100
 
 {% if drive_method == 'smd' %}
-fix             spr {{ tip_fix_group }} smd cvel {{ spring_ev }} ${speed/100} tether $(v_spring_x) $(v_spring_y) NULL 0.0
+fix             spr {{ tip_fix_group }} smd cvel {{ spring_ev }} $(v_speed/100) tether $(v_spring_x) $(v_spring_y) NULL 0.0
 
 {% elif drive_method == 'fix_move' %}
-velocity        {{ tip_fix_group }} set $(v_spring_x*${speed}/100) $(v_spring_y*${speed}/100) 0.0
+velocity        {{ tip_fix_group }} set $(v_drive_vx) $(v_drive_vy) 0.0
 
 {% elif drive_method == 'virtual_atom' %}
-variable        virtual_x equal $(v_comx_tip)+{{ virtual_offset }}*$(v_spring_x)
-variable        virtual_y equal $(v_comy_tip)+{{ virtual_offset }}*$(v_spring_y)
-variable        virtual_z equal $(v_comz_tip)
+run             0
+variable        virtual_x equal xcm({{ tip_fix_group }},x)+{{ virtual_offset }}*v_spring_x
+variable        virtual_y equal xcm({{ tip_fix_group }},y)+{{ virtual_offset }}*v_spring_y
+variable        virtual_z equal xcm({{ tip_fix_group }},z)
 
 create_atoms    {{ ngroups }} single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
 group           virtual type {{ ngroups }}
 velocity        virtual set 0.0 0.0 0.0
 
 fix             spr {{ tip_fix_group }} spring couple virtual {{ spring_ev }} 0.0 0.0 NULL {{ virtual_offset }}
-fix             move_virtual virtual move linear $(v_spring_x*${speed}/100) $(v_spring_y*${speed}/100) 0.0
+fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 {% endif %}
 
 run             {{ run_steps }}

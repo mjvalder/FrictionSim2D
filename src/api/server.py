@@ -35,7 +35,6 @@ from .auth import get_db, optional_api_key, require_api_key, set_db
 # App factory
 # ---------------------------------------------------------------------------
 
-
 def create_app(db=None, *, profile: Optional[str] = None) -> FastAPI:
     """Create and configure the FastAPI application.
 

@@ -162,8 +162,6 @@ bond_coeff      1 {{ bond_spring_ev }} ${r0_top}
 fix             com_spring layer_{{ n_layers }} spring couple layer_{{ n_layers - 1 }} {{ bond_spring_ev }} 0.0 0.0 NULL 0.0
 {% endif %}
 
-velocity        layer_{{ n_layers }} set 0.0 0.0 0.0 units box
-
 variable        speed_x equal cos(v_a*PI/180)
 variable        speed_y equal sin(v_a*PI/180)
 

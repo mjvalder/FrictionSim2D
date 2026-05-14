@@ -290,6 +290,30 @@ Velocities
         assert "0 1" in content  # Molecule ID 0
         lammps_atomic_file.unlink()
 
+    def test_atomic_to_molecular_preserves_image_flags(self):
+        """Image flags should be preserved when converting style."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 1 atoms
+
+Atoms # atomic
+
+1 1 0.0 0.0 0.0 1 -1 2
+
+Velocities
+
+1 0.0 0.0 0.0
+""")
+            path = Path(f.name)
+
+        atomic2molecular(path)
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        assert "Atoms # molecular" in content
+        assert "1 0 1 0.0 0.0 0.0 1 -1 2" in content
+        path.unlink()
+
 
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""

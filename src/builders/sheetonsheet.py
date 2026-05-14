@@ -15,15 +15,14 @@ Constraint modes control interlayer bonding and ghost interactions:
 """ 
 
 import logging
-import re
 from pathlib import Path
 from typing import Dict, Optional, List, Union
 
 from ..core.simulation_base import SimulationBase
 from ..core.config import SheetOnSheetSimulationConfig
 from ..core.potential_manager import PotentialManager, POTENTIALS_WITH_INTERNAL_LJ
+from ..core.utils import atomic2molecular, format_numeric_token, normalize_potential_type
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
-from ..core.utils import atomic2molecular
 from . import components
 
 logger = logging.getLogger(__name__)
@@ -67,11 +66,6 @@ class SheetOnSheetSimulation(SimulationBase):
         return int(layers[0])
 
     @staticmethod
-    def _normalized_pot_type(value: str) -> str:
-        """Normalize potential type for builder-level checks."""
-        return value.strip().lower()
-
-    @staticmethod
     def _to_list(value: Optional[Union[float, List[float]]]) -> List[float]:
         """Normalize scalar/list sweep values to a list of floats."""
         if value is None:
@@ -80,12 +74,6 @@ class SheetOnSheetSimulation(SimulationBase):
             return [float(v) for v in value]
         return [float(value)]
 
-    @staticmethod
-    def _format_loop_value(value: float) -> str:
-        """Format a numeric sweep value into a filename-safe token."""
-        token = f"{value:g}"
-        token = token.replace('-', 'm').replace('.', 'p')
-        return re.sub(r'[^A-Za-z0-9_]+', '_', token)
 
     def build(self) -> None:
         """Constructs the N-layer sheet stack."""
@@ -105,7 +93,7 @@ class SheetOnSheetSimulation(SimulationBase):
         self._init_provenance()
 
         constraint_mode = self.config.settings.simulation.constraint_mode
-        pot_type_lower = self._normalized_pot_type(self.config.sheet.pot_type)
+        pot_type_lower = normalize_potential_type(self.config.sheet.pot_type)
 
         if pot_type_lower in POTENTIALS_WITH_INTERNAL_LJ and constraint_mode != 'none':
             raise ValueError(
@@ -231,7 +219,7 @@ class SheetOnSheetSimulation(SimulationBase):
         n_layers = self.n_layers
         total_types = len(self.pm.types)
         constraint_mode = self.config.settings.simulation.constraint_mode
-        pot_type = self._normalized_pot_type(self.config.sheet.pot_type)
+        pot_type = normalize_potential_type(self.config.sheet.pot_type)
 
         sim = self.config.settings.simulation
         out = self.config.settings.output
@@ -340,7 +328,7 @@ class SheetOnSheetSimulation(SimulationBase):
                 context['pressures'] = pressure
                 context['scan_speed_config'] = inner_speeds
                 script_name = (
-                    f"slide_p{self._format_loop_value(float(pressure))}gpa.in"
+                    f"slide_p{format_numeric_token(float(pressure))}gpa.in"
                 )
                 script = self.render_template(
                     "sheetonsheet/slide.lmp", context
@@ -357,7 +345,7 @@ class SheetOnSheetSimulation(SimulationBase):
                 context['pressures'] = inner_pressures
                 context['scan_speed_config'] = speed
                 script_name = (
-                    f"slide_{self._format_loop_value(float(speed))}ms.in"
+                    f"slide_{format_numeric_token(float(speed))}ms.in"
                 )
                 script = self.render_template(
                     "sheetonsheet/slide.lmp", context

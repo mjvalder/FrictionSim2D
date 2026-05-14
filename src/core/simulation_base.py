@@ -30,7 +30,6 @@ POTENTIAL_EXTENSIONS = {
     '.comb', '.comb3', '.morse', '.rebomos', '.mod'
 }
 
-
 def _infer_provenance_category(file_path: Path) -> str:
     """Infer provenance category from file extension."""
     ext = file_path.suffix.lower()
@@ -39,7 +38,6 @@ def _infer_provenance_category(file_path: Path) -> str:
     if ext in POTENTIAL_EXTENSIONS:
         return 'potential'
     return 'other'
-
 
 class SimulationBase(ABC):
     """Abstract base class for simulation setup.
