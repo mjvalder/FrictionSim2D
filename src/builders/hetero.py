@@ -22,17 +22,32 @@ are no longer commensurate. To guarantee ``matrix @ (tiled cell)`` is the true
 coincidence supercell, the match is always found from the very cells that are
 tiled.
 
-Why the strain is applied in the co-oriented frame
---------------------------------------------------
+Symmetric mean-cell strain (design §8.3)
+----------------------------------------
+Both materials are strained symmetrically onto the shared
+``mean_cell = (sc_a + sc_b) / 2`` — there is no unstrained "reference" material.
+The per-material strains ``strain_a`` / ``strain_b`` are recorded separately and
+each must be ``<= strain_tol`` (``find_coincidence_lattice`` already guarantees
+this for any accepted match) or the build fails loud. This halves the worst-case
+per-material distortion versus a one-sided policy and avoids pre-stressing a
+single monolayer off its equilibrium bond length.
+
+Why the strain must be applied in the co-oriented frame
+-------------------------------------------------------
 ``find_coincidence_lattice`` measures strain between the two supercells in their
 *shared* (co-oriented) frame — the frame make_supercell produces. Writing each
-supercell to a LAMMPS data file independently re-canonicalizes it to a1-along-x
-with a *different* rotation per material, which decoheres a sheared match: a
-``change_box`` remap (which cannot rotate) would then read the rotation
-mismatch as a huge spurious strain. So the smaller supercell is strained onto
-the larger in the co-oriented frame via ASE ``set_cell(scale_atoms=True)``, and
-only then are *both* written out (canonicalized by the same rotation because
-they now share an identical cell), so their on-disk boxes coincide exactly.
+supercell independently re-canonicalizes it to a1-along-x with a *different*
+rotation per material (polar decomposition discards a per-material rotation that
+canonicalization then re-imposes), so a per-file ``change_box`` remap (which
+cannot rotate) would read the rotation mismatch as a huge spurious shear strain.
+So both supercells are strained onto ``mean_cell`` **in the co-oriented frame**
+via an affine ``set_cell(scale_atoms=True)`` remap (which, like ``change_box
+remap``, preserves fractional coordinates), and only then are *both* written
+out. Because both now carry the identical in-plane cell, ASE canonicalizes them
+by the same rotation, so their on-disk boxes coincide exactly and the relative
+A/B registry survives. Per-atom metadata (charges for ``atom_style charge``)
+round-trips through :func:`_write_supercell` (``specorder`` + ``atom_style``),
+so no ReaxFF charge information is lost.
 """
 from __future__ import annotations
 
@@ -61,35 +76,31 @@ from .components import build_monolayer, calculate_layer_shifts
 
 PathLike = Union[str, Path]
 
-# The one-sided strain of straining the smaller supercell fully onto the larger
-# is ~= strain_a + strain_b (each measured against the symmetric mean cell), so
-# it is bounded by 2 x strain_tol for any match find_coincidence_lattice would
-# accept. The default fail-loud bound uses exactly that principled factor.
-_ONE_SIDED_STRAIN_FACTOR = 2.0
-
-
 @dataclass
 class MatchedStack:
-    """Two per-material coincidence supercells sharing one in-plane box.
+    """Two per-material coincidence supercells sharing one in-plane mean cell.
+
+    Both materials are strained symmetrically onto the shared
+    ``mean_cell = (sc_a + sc_b) / 2`` (design §8.3); there is no unstrained
+    reference material.
 
     Attributes:
         supercell_a: Path to material A's output supercell data file.
         supercell_b: Path to material B's output supercell data file.
-        reference: Which input material ('a' or 'b') supplied the
-            unstrained reference box -- the one with the larger in-plane
-            coincidence-supercell area.
-        strain_reference: Always 0.0; the reference material is never
-            strained, only rotated/canonicalized into LAMMPS form.
-        strain_applied: Max absolute principal strain applied to the
-            non-reference material to reach the shared (reference) box.
+        strain_a: Max absolute principal strain applied to material A to reach
+            the shared mean cell (``<= strain_tol``).
+        strain_b: Max absolute principal strain applied to material B to reach
+            the shared mean cell (``<= strain_tol``).
+        mean_cell: The shared 2x2 in-plane box (Å) both supercells were strained
+            onto, in LAMMPS-canonical form (first vector along +x).
         match: The coincidence-lattice match found (internally) between the two
             monolayers' actual in-plane cells.
     """
     supercell_a: Path
     supercell_b: Path
-    reference: str
-    strain_reference: float
-    strain_applied: float
+    strain_a: float
+    strain_b: float
+    mean_cell: np.ndarray
     match: MatchResult = field(default=None)  # type: ignore[assignment]
 
 
@@ -265,11 +276,6 @@ def _embed_3x3(matrix_2x2: np.ndarray) -> np.ndarray:
     p = np.eye(3, dtype=int)
     p[:2, :2] = np.asarray(matrix_2x2, dtype=int)
     return p
-
-
-def _in_plane_area(cell_2x2: np.ndarray) -> float:
-    """Absolute area (Å²) of a 2x2 row-vector in-plane cell."""
-    return abs(float(np.linalg.det(np.asarray(cell_2x2, dtype=float))))
 
 
 def _detect_atom_style(path: Path) -> str:
@@ -458,15 +464,18 @@ def build_matched_supercells(
     area_tol: float = 0.10,
     max_strain: Optional[float] = None,
 ) -> MatchedStack:
-    """Build A's and B's coincidence supercells sharing one in-plane box.
+    """Build A's and B's coincidence supercells sharing one in-plane mean cell.
 
     Reads each monolayer's *actual* in-plane cell from disk, finds their
     Zur-McGill coincidence lattice on those exact cells (so the integer match
     matrices are consistent with the cells that get tiled), tiles each material
-    with its match matrix via :func:`ase.build.make_supercell`, picks whichever
-    supercell has the larger in-plane area as an unstrained reference, and
-    strains the other supercell onto the reference's box **in the co-oriented
-    frame** so both output files share exactly one LAMMPS-canonical in-plane box.
+    with its match matrix via :func:`ase.build.make_supercell`, and strains
+    **both** supercells symmetrically onto the shared
+    ``mean_cell = (sc_a + sc_b) / 2`` (design §8.3) **in the co-oriented frame**
+    (an affine ``set_cell(scale_atoms=True)`` remap that preserves fractional
+    coordinates and per-atom metadata), so both output files share exactly one
+    LAMMPS-canonical in-plane box with each material carrying at most
+    ``strain_tol`` of distortion.
 
     Args:
         mono_a_path: LAMMPS data file for material A's monolayer.
@@ -474,35 +483,34 @@ def build_matched_supercells(
         workdir: Directory to write the two output supercell data files into
             (created if missing).
         strain_tol: Max per-material strain (vs the symmetric mean cell) allowed
-            when searching for a coincidence match. Forwarded to
-            :func:`~src.core.lattice_matching.find_coincidence_lattice`.
+            both when searching for a coincidence match (forwarded to
+            :func:`~src.core.lattice_matching.find_coincidence_lattice`) and as
+            the fail-loud bound on each material's applied mean-cell strain.
         max_supercell: Max supercell repeat along each axis for the match search.
         area_tol: Relative supercell-area agreement tolerance for the search.
-        max_strain: Fail-loud bound on the *one-sided* strain actually applied
-            to the smaller supercell (measured geometrically, not estimated). A
-            match accepted by ``find_coincidence_lattice`` implies a one-sided
-            strain <= ``2 * strain_tol``; ``max_strain`` defaults to exactly that
-            bound. Straining beyond it raises ``ValueError``.
+        max_strain: Optional override for the per-material fail-loud strain
+            bound. Defaults to ``strain_tol`` (each material must land within
+            ``strain_tol`` of the shared mean cell). Straining beyond it raises
+            ``ValueError``.
 
     Returns:
         :class:`MatchedStack` with both output supercell paths (ordered A then
-        B, regardless of which was the reference), which material was left
-        unstrained, the strain applied to the other, and the match found.
+        B), the per-material mean-cell strains ``strain_a`` / ``strain_b``, the
+        shared ``mean_cell`` box, and the match found.
 
     Raises:
         ValueError: If no coincidence lattice is found within the given
-            tolerances, or if the geometric strain needed to make the two
-            supercells share one box exceeds ``max_strain`` (i.e. the pair is
-            not actually commensurate at this match -- fail loud rather than
-            silently emit an incommensurate "matched" stack).
+            tolerances, or if either material's geometric strain onto the shared
+            mean cell exceeds the bound (i.e. the pair is not actually
+            commensurate at this match -- fail loud rather than silently emit an
+            incommensurate "matched" stack).
     """
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     mono_a_path = Path(mono_a_path)
     mono_b_path = Path(mono_b_path)
 
-    if max_strain is None:
-        max_strain = _ONE_SIDED_STRAIN_FACTOR * strain_tol
+    strain_bound = strain_tol if max_strain is None else max_strain
 
     # 1. Read each monolayer (metadata-preserving) and its ACTUAL in-plane cell.
     mono = {"a": _read_monolayer(mono_a_path), "b": _read_monolayer(mono_b_path)}
@@ -530,58 +538,61 @@ def build_matched_supercells(
         for label in ("a", "b")
     }
     sc_cell = {label: np.array(sc_atoms[label].cell)[:2, :2] for label in ("a", "b")}
-    areas = {label: _in_plane_area(sc_cell[label]) for label in ("a", "b")}
 
-    # 4. Larger-area supercell is the unstrained reference.
-    ref_label = "a" if areas["a"] >= areas["b"] else "b"
-    other_label = "b" if ref_label == "a" else "a"
-    ref_cell = sc_cell[ref_label]
+    # 4. Shared symmetric mean cell in the co-oriented (make_supercell) frame.
+    #    Both materials strain onto this ONE box -- no unstrained reference.
+    mean_co = (sc_cell["a"] + sc_cell["b"]) / 2.0
 
-    # 5. Measure the real one-sided strain of straining the smaller onto the
-    #    larger (both in the shared, co-oriented make_supercell frame), and fail
-    #    loud if it exceeds the principled asymmetric bound.
-    strain = _max_strain(ref_cell, sc_cell[other_label])
-    if strain > max_strain:
+    # 5. Measure each material's strain onto the mean cell IN THE CO-ORIENTED
+    #    FRAME (rotation-free), and fail loud if either exceeds the bound (no
+    #    silent incommensurate fallback).
+    strains = {label: _max_strain(mean_co, sc_cell[label]) for label in ("a", "b")}
+    if strains["a"] > strain_bound or strains["b"] > strain_bound:
         raise ValueError(
-            f"Cannot build a commensurate heterostructure stack: straining "
-            f"material '{other_label}' ({mono[other_label]['atom_style']}, "
-            f"{(mono_a_path if other_label == 'a' else mono_b_path).name}) onto "
-            f"material '{ref_label}'s reference box requires {strain:.4%} strain, "
-            f"exceeding max_strain={max_strain:.4%} "
-            f"(= {_ONE_SIDED_STRAIN_FACTOR:g} x strain_tol={strain_tol:.4%})."
+            f"Cannot build a commensurate heterostructure stack between "
+            f"'{mono_a_path.name}' and '{mono_b_path.name}': symmetric mean-cell "
+            f"strain exceeds tol -- strain_a={strains['a']:.4%}, "
+            f"strain_b={strains['b']:.4%} > {strain_bound:.4%}."
         )
 
-    # 6. Strain the smaller supercell onto the reference box IN THE CO-ORIENTED
-    #    FRAME (set_cell with scale_atoms is a pure affine remap that includes
-    #    the small aligning rotation), then write BOTH. Since both now carry an
-    #    identical in-plane cell, ASE canonicalizes them by the same rotation, so
-    #    their on-disk boxes coincide exactly.
-    other_atoms = sc_atoms[other_label]
-    lz = np.array(other_atoms.cell)[2, 2]
-    aligned_cell = np.array([
-        [ref_cell[0, 0], ref_cell[0, 1], 0.0],
-        [ref_cell[1, 0], ref_cell[1, 1], 0.0],
-        [0.0, 0.0, lz],
-    ])
-    other_atoms.set_cell(aligned_cell, scale_atoms=True)
-
+    # 6. Strain BOTH supercells onto the mean cell IN THE CO-ORIENTED FRAME
+    #    (set_cell with scale_atoms is a pure affine remap that preserves
+    #    fractional coordinates -- like change_box remap -- but keeps A and B in
+    #    one shared frame so no per-material canonicalization rotation is baked
+    #    in as spurious shear). Since both now carry the identical in-plane cell,
+    #    ASE canonicalizes them by the same rotation on write, so their on-disk
+    #    boxes coincide exactly; _write_supercell preserves per-atom metadata.
     outputs: Dict[str, Path] = {}
-    for label, at in ((ref_label, sc_atoms[ref_label]), (other_label, other_atoms)):
+    mean_cell: Optional[np.ndarray] = None
+    for label in ("a", "b"):
+        at = sc_atoms[label]
+        lz = np.array(at.cell)[2, 2]
+        at.set_cell(
+            np.array([
+                [mean_co[0, 0], mean_co[0, 1], 0.0],
+                [mean_co[1, 0], mean_co[1, 1], 0.0],
+                [0.0, 0.0, lz],
+            ]),
+            scale_atoms=True,
+        )
         out_path = workdir / f"{label}_supercell.lmp"
-        _write_supercell(
+        written_cell = _write_supercell(
             at, out_path,
             atom_style=str(mono[label]["atom_style"]),
             n_types=int(mono[label]["n_types"]),
             masses=mono[label]["masses"],  # type: ignore[arg-type]
         )
+        # Both materials write the identical in-plane cell -> identical canonical
+        # on-disk box; capture it once as the shared mean cell.
+        mean_cell = written_cell if mean_cell is None else mean_cell
         outputs[label] = out_path
 
     return MatchedStack(
         supercell_a=outputs["a"],
         supercell_b=outputs["b"],
-        reference=ref_label,
-        strain_reference=0.0,
-        strain_applied=strain,
+        strain_a=strains["a"],
+        strain_b=strains["b"],
+        mean_cell=mean_cell,  # type: ignore[arg-type]
         match=match,
     )
 
@@ -630,11 +641,12 @@ class HeteroStack:
         layers: Per-layer bookkeeping (material/layer index, z, xy offset,
             group, type offset, source) for a later sim builder.
         ri_offset: The cross-material Registry-Index offset (Å) actually applied
-            to the non-reference material's layers (one-sided; NOT
+            to the displaced material's layers (one-sided; NOT
             centroid-cancelled). Non-zero for AB / off-registry stackings.
-        reference_index: Material index left unshifted in-plane (the larger,
-            unstrained reference lattice from Task 3).
-        nonreference_index: Material index carrying ``ri_offset``.
+        reference_index: In-plane anchor material index, left unshifted (always
+            material 0). Both materials are symmetrically strained onto the
+            shared mean cell, so this is the RI anchor, not a strain reference.
+        nonreference_index: Material index carrying ``ri_offset`` (material 1).
         interface_spacing: Cross-material interlayer COM z-gap (Å) found by real
             minimization with the registered potential.
         stacking: The requested layer ordering ('grouped' or 'alternating').
@@ -857,8 +869,13 @@ def assemble_hetero_stack(
             raise ValueError(f"SheetConfig for {sheet.mat!r} has an empty layers list.")
         n_layers.append(int(sheet.layers[0]))
 
-    ref_index = 0 if matched.reference == "a" else 1
-    nonref_index = 1 - ref_index
+    # Symmetric strain leaves no unstrained "reference" material. The cross-
+    # material RI offset is a RELATIVE in-plane displacement between the two
+    # interface layers, so anchor material 0 (supercell_a) unshifted at (0, 0)
+    # and displace material 1 (supercell_b) by the offset -- the anchor choice
+    # does not change the relative registry.
+    ref_index = 0
+    nonref_index = 1
 
     styles = {_detect_atom_style(p) for p in mat_paths}
     if len(styles) > 1:

@@ -258,21 +258,51 @@ def _write_synthetic_monolayer(path, cell_2x2, charges=None):
     return path
 
 
-def test_matched_supercells_share_one_box_and_reference_is_unstrained(tmp_path):
+def test_matched_supercells_are_symmetrically_strained_onto_mean_cell(tmp_path):
+    """Both materials are strained symmetrically onto the shared mean cell
+    ``mean_cell = (sc_a + sc_b) / 2`` -- neither is left as an unstrained
+    reference (design §8.3). Each per-material strain is logged separately and
+    is bounded by ``strain_tol``; the two on-disk boxes coincide and equal the
+    mean cell.
+    """
     mono_a = _build_small_monolayer("h-MoS2", MOS2_CIF, MOS2_POT)
     mono_b = _build_small_monolayer("h-WS2", WS2_CIF, WS2_POT)
 
-    stack = build_matched_supercells(
+    ms = build_matched_supercells(
         mono_a, mono_b, workdir=tmp_path, strain_tol=0.05, max_supercell=6,
     )
 
-    ca = np.array(read(str(stack.supercell_a), format="lammps-data").cell)[:2, :2]
-    cb = np.array(read(str(stack.supercell_b), format="lammps-data").cell)[:2, :2]
+    # Both materials strained (neither is an unstrained reference).
+    assert ms.strain_a > 0.0 and ms.strain_b > 0.0
+    assert ms.strain_a <= 0.05 + 1e-9 and ms.strain_b <= 0.05 + 1e-9
 
-    assert np.allclose(ca, cb, atol=1e-4)          # shared periodic box
-    assert stack.strain_reference == 0.0            # larger material unstrained
-    assert stack.strain_applied <= 0.10 + 1e-9       # within one-sided bound (2*strain_tol)
-    assert stack.reference in ("a", "b")
+    # Both supercells share ONE box == mean_cell.
+    ca = np.array(read(str(ms.supercell_a), format="lammps-data").cell)[:2, :2]
+    cb = np.array(read(str(ms.supercell_b), format="lammps-data").cell)[:2, :2]
+    assert np.allclose(ca, cb, atol=1e-3)                    # shared periodic box
+    assert np.allclose(ca, ms.mean_cell, atol=1e-3)          # box IS the mean cell
+
+    # Symmetric: neither strain is 0 (the old one-sided policy pinned one to 0);
+    # the two strains are comparable, not a 0-vs-full split.
+    assert abs(ms.strain_a - ms.strain_b) < max(ms.strain_a, ms.strain_b)
+
+
+def test_matched_supercells_fail_loud_when_either_strain_exceeds_tol(tmp_path):
+    """No silent incommensurate fallback: a pair with no low-strain symmetric
+    coincidence must raise ``ValueError`` mentioning the strain, not emit a
+    quietly-mismatched stack.
+    """
+    # Nearly-golden-ratio length ratio: no small commensurate supercell exists
+    # under a tight symmetric strain budget.
+    cell_a = np.array([[3.0, 0.0], [0.0, 3.0]])
+    cell_b = np.array([[3.0 * 1.6180339887, 0.0], [0.0, 3.0]])
+    mono_a = _write_synthetic_monolayer(tmp_path / "s_inc_a.lmp", cell_a)
+    mono_b = _write_synthetic_monolayer(tmp_path / "s_inc_b.lmp", cell_b)
+
+    with pytest.raises(ValueError, match=r"strain"):
+        build_matched_supercells(
+            mono_a, mono_b, workdir=tmp_path, strain_tol=0.001,
+        )
 
 
 # A genuinely sheared, non-identity coincidence between two canonical (a1 along
