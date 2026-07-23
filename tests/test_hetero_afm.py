@@ -126,3 +126,43 @@ def test_hetero_afm_rejects_triclinic_cell(tmp_path, monkeypatch):
     monkeypatch.setattr(ha, "read", lambda *a, **k: _FakeAtoms())
     with pytest.raises(ValueError, match="triclinic"):
         sim._build_hetero_sheet(build_dir=tmp_path / "build")
+
+
+# --- Task 4: potential split (sheet_1/sheet_2 + 2D union groups) ---
+
+def _prep_layer_dirs(sim, n):
+    """Mirror the per-layer dir setup AFMSimulation.build() does before
+    _generate_potentials, so the potential method can be exercised in isolation."""
+    sim.output_dir_layer[n] = sim.output_dir / f"L{n}"
+    sim.relative_run_dir_layer[n] = sim.relative_run_dir / f"L{n}"
+    sim._create_directories(sim.output_dir_layer[n])
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_potentials_layout_and_2D_group(tmp_path):
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    build_dir = Path(tmp_path) / "build"
+    sim._init_provenance()
+    sim._build_hetero_sheet(build_dir=build_dir)
+    sim.tip_path, _tip_r, sim.sub_path = sim._build_components(build_dir)
+    _prep_layer_dirs(sim, 1)
+    pm = sim._generate_potentials(1)
+    # contiguous, disjoint blocks: sub+tip then sheet_1+sheet_2 spans all types
+    n_sub = len(pm.types.ids_by_component('sub'))
+    n_tip = len(pm.types.ids_by_component('tip'))
+    n_s1 = len(pm.types.ids_by_component('sheet_1'))
+    n_s2 = len(pm.types.ids_by_component('sheet_2'))
+    assert n_s1 > 0 and n_s2 > 0
+    # contiguous blocks: sub+tip, then sheet_1+sheet_2, then any drive virtual type
+    n_virtual = 1 if pm.virtual_atom_type is not None else 0
+    assert (n_sub + n_tip) + (n_s1 + n_s2) + n_virtual == len(pm.types)
+    # the sheet block sits immediately after sub+tip
+    assert min(pm.types.ids_by_component('sheet_1')) == n_sub + n_tip + 1
+    # 2D_all union emitted INTO the written settings file (both scripts include it)
+    settings_text = (sim.output_dir_layer[1] / "lammps" / "system.in.settings").read_text()
+    assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text
+    # sheet_types context var = sheet_1 ∪ sheet_2 union (slide.lmp `group 2D type {{sheet_types}}`)
+    assert sim.groups[1]["sheet_types"].split() == [str(i) for i in
+        pm.types.ids_by_component('sheet_1') + pm.types.ids_by_component('sheet_2')]

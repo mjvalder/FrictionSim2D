@@ -145,6 +145,39 @@ class HeteroPotentials:
     type_offsets: List[int]
 
 
+def register_sheet_block(
+    pm: PotentialManager,
+    sheets: List[SheetConfig],
+    regions: Optional[List[Optional[str]]] = None,
+) -> List[str]:
+    """Register the per-material sheet stack onto ``pm`` as ``sheet_1``/``sheet_2``/...
+
+    Appends one component ``sheet_{i+1}`` per material (in order) onto whatever
+    ``pm`` it is given, returning the component names. This is the single source
+    of truth for hetero sheet numbering: it is called by
+    :func:`register_hetero_potentials` (which numbers the assembled data file)
+    AND by the D2 unified AFM PotentialManager, so the sim-PM sheet block and the
+    data-file sheet block cannot diverge (with or without ``regions``). The
+    ``regions`` argument (default None; D5 finite path passes ``[None, 'edge']``)
+    is applied identically on both sides through this one call.
+
+    Args:
+        pm: The PotentialManager to append onto (at its current type offset).
+        sheets: Per-material sheet configs.
+        regions: Optional per-type region split forwarded to
+            :meth:`PotentialManager.register_component`.
+
+    Returns:
+        The registered component names (``['sheet_1', 'sheet_2', ...]``).
+    """
+    component_names: List[str] = []
+    for i, sheet in enumerate(sheets):
+        name = f"sheet_{i + 1}"
+        pm.register_component(name, sheet, n_layers=1, regions=regions)
+        component_names.append(name)
+    return component_names
+
+
 def register_hetero_potentials(
     sheets: List[SheetConfig],
     settings: GlobalSettings,
@@ -224,11 +257,9 @@ def register_hetero_potentials(
 
     # 1. One component per material -> disjoint, contiguous global type blocks
     #    (the PM's TypeRegistry assigns the IDs; we never hand-roll them).
-    component_names: List[str] = []
-    for i, sheet in enumerate(sheets):
-        name = f"sheet_{i + 1}"
-        pm.register_component(name, sheet, n_layers=1)
-        component_names.append(name)
+    #    Single-sourced through register_sheet_block so the unified AFM PM (D2)
+    #    numbers sheet_1/sheet_2 identically to this data-file spine.
+    component_names = register_sheet_block(pm, sheets)
 
     # 1b. Optionally reserve the dedicated non-interacting virtual type for the
     #     virtual_atom drive -- BEFORE the self-interactions, mirroring the
