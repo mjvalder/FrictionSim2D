@@ -184,3 +184,19 @@ def test_hetero_afm_system_init_references_replicated_stack(tmp_path):
     # the 2D_all union lives in the included settings file (both scripts include it)
     settings_text = (sim.output_dir_layer[1] / "lammps" / "system.in.settings").read_text()
     assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text
+
+
+# --- Task 6: routing ---
+
+def test_routing_selects_hetero_afm_for_two_materials():
+    from src.core.run import _select_afm_builder_cls
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    assert _select_afm_builder_cls("afm", cfg) is HeteroAFMSimulation
+
+
+def test_routing_keeps_homogeneous_afm_for_single_material():
+    from src.core.run import _select_afm_builder_cls
+    from src.builders.afm import AFMSimulation
+    cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
+    assert _select_afm_builder_cls("afm", cfg) is AFMSimulation
