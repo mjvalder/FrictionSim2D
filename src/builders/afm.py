@@ -70,23 +70,7 @@ class AFMSimulation(SimulationBase):
             self.relative_run_dir_layer[n_layers] = self.relative_run_dir / f"L{n_layers}"
             self._create_directories(self.output_dir_layer[n_layers])
 
-            stacking_type = getattr(self.config.sheet, 'stack_type', 'AB')
-            sheet_path, sheet_dims, lat_c = components.build_sheet(
-                self.config.sheet, build_dir,
-                stack_if_multi=True, settings=self.config.settings,
-                    n_layers_override=n_layers,
-                    stacking_type=stacking_type,
-                    edge_mode=(
-                        self.config.settings.geometry.finite_sheet_afm_edge_mode
-                        if self.config.general.finite_sheet else 'none'
-                    ),
-                    edge_width=self.config.settings.geometry.finite_sheet_edge_width,
-                    unit_cell_out=self.sheet_unit_cell,
-            )
-            self.sheet_paths[n_layers] = sheet_path
-            if self.lat_c is None:
-                self.lat_c = lat_c
-                self.sheet_dims = dict(sheet_dims)
+            self._build_sheet_for_layers(build_dir, n_layers)
 
         if not self.sheet_dims:
             raise ValueError("No sheet dimensions were generated during AFM build.")
@@ -103,6 +87,31 @@ class AFMSimulation(SimulationBase):
 
         self._generate_hpc_scripts()
         logger.info("Build complete for all layer configurations.")
+
+    def _build_sheet_for_layers(self, build_dir: Path, n_layers: int) -> None:
+        """Build the sheet for one layer count and record its path/dims/lat_c.
+
+        Extracted (behavior-preserving) from the :meth:`build` loop so subclasses
+        can substitute a different sheet source (e.g. the D2 hetero stack) without
+        overriding the whole ``build`` orchestration.
+        """
+        stacking_type = getattr(self.config.sheet, 'stack_type', 'AB')
+        sheet_path, sheet_dims, lat_c = components.build_sheet(
+            self.config.sheet, build_dir,
+            stack_if_multi=True, settings=self.config.settings,
+                n_layers_override=n_layers,
+                stacking_type=stacking_type,
+                edge_mode=(
+                    self.config.settings.geometry.finite_sheet_afm_edge_mode
+                    if self.config.general.finite_sheet else 'none'
+                ),
+                edge_width=self.config.settings.geometry.finite_sheet_edge_width,
+                unit_cell_out=self.sheet_unit_cell,
+        )
+        self.sheet_paths[n_layers] = sheet_path
+        if self.lat_c is None:
+            self.lat_c = lat_c
+            self.sheet_dims = dict(sheet_dims)
 
     def _get_hpc_job_name(self) -> str:
         """Get AFM-specific job name."""

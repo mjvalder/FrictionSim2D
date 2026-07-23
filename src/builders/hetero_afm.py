@@ -195,6 +195,50 @@ class HeteroAFMSimulation(AFMSimulation):
         )
         return rep
 
+    def _build_sheet_for_layers(self, build_dir, n_layers):
+        """Override the AFM sheet source: the replicated hetero stack is the sheet.
+
+        One assembled ``read_data`` drives a single build() iteration
+        (``config.sheet.layers == [1]``); ``_build_hetero_sheet`` sets
+        ``sheet_dims``/``lat_c`` from the replicated box.
+        """
+        self._build_hetero_sheet(Path(build_dir))
+        self.sheet_paths[n_layers] = self._hetero_rep_path
+
+    def _calculate_z_positions(self, n_layers, tip_radius):
+        """Z-placement for the hetero stack (no single 'sheet' component exists).
+
+        The inherited base method calls ``calculate_gap('sub','sheet')`` /
+        ``('sheet','tip')``, but the hetero PM has ``sheet_1``/``sheet_2`` instead,
+        and the assembled stack is thick (its z-extent is baked into
+        ``hetero_rep.data``). Use the conservative max gap across BOTH materials
+        and place the tip above the TOP of the stack; the indent script then
+        live-measures ``2D_all`` and lowers the tip to ``contact_gap``, so a
+        slightly-high start is safe.
+        """
+        pm = self.pm[n_layers]
+        sheet_names = [n for n in ('sheet_1', 'sheet_2') if n in pm.components]
+
+        self.z_positions[n_layers] = {}
+        gap_sub_sheet = max(pm.calculate_gap('sub', s, buffer=0.5) for s in sheet_names)
+        sub_thickness = self.config.sub.thickness
+        self.z_positions[n_layers]['sub'] = 0.0
+        sheet_base_z = sub_thickness + gap_sub_sheet
+        self.z_positions[n_layers]['sheet'] = sheet_base_z
+
+        z_extent = self._hetero_rep_box[2]        # full assembled-stack thickness
+        gap_sheet_tip = max(pm.calculate_gap(s, 'tip', buffer=0.5) for s in sheet_names)
+        start_clearance = self.config.settings.geometry.tip_start_clearance
+        tip_z = sheet_base_z + z_extent + gap_sheet_tip + tip_radius + start_clearance
+
+        self.z_positions[n_layers]['tip'] = tip_z
+        self.z_positions[n_layers]['tip_contact_gap'] = gap_sheet_tip
+        logger.info(
+            "Hetero z-placement: sub-sheet gap %.2fA, stack z-extent %.2fA, "
+            "sheet-tip gap %.2fA -> tip start z %.2fA.",
+            gap_sub_sheet, z_extent, gap_sheet_tip, tip_z,
+        )
+
     def _generate_potentials(self, n_sheet_layers):
         """Register sub/tip/sheet_1/sheet_2 in ONE PM and emit the 2D union groups.
 

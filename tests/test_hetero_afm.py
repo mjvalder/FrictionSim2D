@@ -166,3 +166,21 @@ def test_hetero_afm_potentials_layout_and_2D_group(tmp_path):
     # sheet_types context var = sheet_1 ∪ sheet_2 union (slide.lmp `group 2D type {{sheet_types}}`)
     assert sim.groups[1]["sheet_types"].split() == [str(i) for i in
         pm.types.ids_by_component('sheet_1') + pm.types.ids_by_component('sheet_2')]
+
+
+# --- Task 5: build_render_context / build() wiring (templates unchanged) ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_system_init_references_replicated_stack(tmp_path):
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]           # HPC script gen needs a non-empty module list
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+    init = sim.output_dir_layer[1] / "lammps" / "system.in"
+    text = init.read_text()
+    assert "hetero_rep.data" in text                 # sheet_file points at the replicated stack
+    assert "reduce max z" in text                     # inherited tip-approach body intact
+    # the 2D_all union lives in the included settings file (both scripts include it)
+    settings_text = (sim.output_dir_layer[1] / "lammps" / "system.in.settings").read_text()
+    assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text
