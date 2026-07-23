@@ -338,9 +338,12 @@ def test_sheared_nonidentity_match_builds_coinciding_boxes(tmp_path):
 
     # The two BUILT boxes must coincide to high precision (the whole point).
     assert np.allclose(ca, cb, atol=1e-4)
-    # And at the true, low strain -- not the ~54 %/24 % a wrong-frame build gives.
-    assert stack.strain_applied < 0.02
-    assert stack.strain_reference == 0.0
+    # Both materials strained onto the shared mean cell at the true, low strain
+    # -- not the ~12 %/10 % spurious shear an independent-canonicalization build
+    # produces on a sheared match (each ~half the one-sided ~1.4 %).
+    assert stack.strain_a < 0.02 and stack.strain_b < 0.02
+    assert stack.strain_a > 0.0 and stack.strain_b > 0.0
+    assert np.allclose(ca, stack.mean_cell, atol=1e-4)
     # The match was built via genuinely non-scalar/sheared matrices.
     assert stack.match.matrix_a[0, 1] != 0 or stack.match.matrix_b[0, 1] != 0
 
