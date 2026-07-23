@@ -565,11 +565,52 @@ class AFMSimulationConfig(BaseModel):
     tip: TipConfig
     sub: Optional[SubstrateConfig] = Field(default=None, alias='sub')
     sheet: SheetConfig = Field(..., alias='2D')
+    sheets: List[SheetConfig] = Field(
+        default_factory=list,
+        description=(
+            "Per-material sheet stack, folded from [2D-1], [2D-2], ... sections "
+            "(or a single-element list wrapping [2D] when only one material is "
+            "given). Populated by _fold_sheet_sections before validation. Two or "
+            "more entries route `run afm` to the periodic hetero AFM builder (D2)."
+        ),
+    )
     flake: Optional[FlakeConfig] = Field(default=None, alias='flake')
     pes: Optional[PESConfig] = Field(default=None, alias='pes')
     indent: Optional[IndentConfig] = Field(default=None, alias='indent')
     lj_override: Dict[str, Any] = Field(default_factory=dict, alias='lj_override')
     settings: GlobalSettings
+
+    @model_validator(mode='before')
+    @classmethod
+    def _fold_sheet_sections(cls, data: Any) -> Any:
+        """Fold [2D-1], [2D-2], ... sections into ``sheets`` (mirrors SheetOnSheet).
+
+        Numbered ``2D-N`` sections are collected in numeric order into the
+        ``sheets`` list. When only a single ``[2D]`` (alias) section is present,
+        it is wrapped as a one-element ``sheets`` list, preserving the
+        homogeneous single-material path. The ``2D``/``sheet`` field stays
+        required: when only numbered sections are given, the first is also
+        mirrored onto ``2D`` so existing single-sheet code paths keep working.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        folded = dict(data)
+        two_d_keys = sorted(
+            (k for k in folded if isinstance(k, str) and k.startswith('2D-')),
+            key=lambda key: (
+                int(key.split('-', maxsplit=1)[1])
+                if key.split('-', maxsplit=1)[1].isdigit() else 10**9
+            ),
+        )
+
+        if two_d_keys:
+            folded['sheets'] = [folded[k] for k in two_d_keys]
+            folded.setdefault('2D', folded[two_d_keys[0]])
+        elif '2D' in folded:
+            folded['sheets'] = [folded['2D']]
+
+        return folded
 
     @model_validator(mode='after')
     def validate_non_finite_sheet_substrate(self) -> 'AFMSimulationConfig':
