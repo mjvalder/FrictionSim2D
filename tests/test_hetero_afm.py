@@ -86,3 +86,43 @@ def test_replicated_data_has_no_pair_coeffs(tmp_path):
     text = out.read_text()
     assert "Pair Coeffs" not in text          # written nocoeff
     assert "Atoms" in text
+
+
+# --- Task 3: structure build + orthogonality guard ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_build_replicates_and_orthogonal(tmp_path):
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim._build_hetero_sheet(build_dir=Path(tmp_path) / "build")   # structure-only entry
+    assert sim._hetero_rep_path.exists()
+    lx, ly = sim._hetero_rep_box[:2]
+    # footprint >= 4*tip.r each way (tip r=10 -> >= 40 A)
+    assert lx >= 40.0 - 1e-6 and ly >= 40.0 - 1e-6
+
+
+def test_hetero_afm_rejects_triclinic_cell(tmp_path, monkeypatch):
+    from src.builders import hetero_afm as ha
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = ha.HeteroAFMSimulation(cfg, str(tmp_path))
+
+    import numpy as np
+
+    class _FakeAtoms:
+        def get_cell(self):
+            c = np.eye(3) * 20.0
+            c[1, 0] = 5.0     # nonzero xy tilt -> triclinic
+            return c
+
+        def get_positions(self):
+            return np.zeros((1, 3))
+
+    class _FakeStack:  # only .data_path is read before the guard
+        data_path = tmp_path / "hetero.data"
+
+    (tmp_path / "hetero.data").write_text("")
+    monkeypatch.setattr(ha, "build_hetero_structure", lambda *a, **k: _FakeStack())
+    monkeypatch.setattr(ha, "read", lambda *a, **k: _FakeAtoms())
+    with pytest.raises(ValueError, match="triclinic"):
+        sim._build_hetero_sheet(build_dir=tmp_path / "build")

@@ -577,6 +577,7 @@ class AFMSimulationConfig(BaseModel):
     flake: Optional[FlakeConfig] = Field(default=None, alias='flake')
     pes: Optional[PESConfig] = Field(default=None, alias='pes')
     indent: Optional[IndentConfig] = Field(default=None, alias='indent')
+    lattice_match: Optional[LatticeMatchConfig] = Field(default=None, alias='lattice_match')
     lj_override: Dict[str, Any] = Field(default_factory=dict, alias='lj_override')
     settings: GlobalSettings
 
