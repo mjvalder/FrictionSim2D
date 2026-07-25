@@ -7,6 +7,7 @@ routing, and a short real-LAMMPS end-to-end smoke.
 """
 import math
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -200,3 +201,108 @@ def test_routing_keeps_homogeneous_afm_for_single_material():
     from src.builders.afm import AFMSimulation
     cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is AFMSimulation
+
+
+# --- Task 7: end-to-end short-LAMMPS smoke (approach + indent + short slide) ---
+
+def _run_lammps_afm(run_dir, script_path, timeout=1800):
+    """Run ``lmp_serial`` on an AFM script; return ``(proc, combined_output)``.
+
+    ``cwd`` is ``run_dir``. Every path baked into ``system.in``/``slide.in`` is
+    run-dir absolute (the builder stores ``relative_run_dir`` = the output dir),
+    so ``build/hetero_rep.data``, ``L1/lammps/system.in.settings`` (with its
+    staged ``provenance/potentials`` prefix), ``L1/data/load_*.data`` and
+    ``L1/results/`` all resolve. ``combined_output`` is stdout + stderr + the
+    LAMMPS ``log.lammps`` so callers can grep for errors / "Lost atoms".
+    """
+    run_dir = Path(run_dir)
+    proc = subprocess.run(
+        ["lmp_serial", "-in", str(script_path)],
+        cwd=str(run_dir), capture_output=True, text=True, timeout=timeout,
+    )
+    combined = f"{proc.stdout}\n{proc.stderr}"
+    log = run_dir / "log.lammps"
+    if log.exists():
+        combined += "\n" + log.read_text()
+    return proc, combined
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_runs_approach_indent_slide(tmp_path):
+    """Capstone D2 smoke: assemble a REAL MoS2/WS2 replicated hetero + amorphous-Si
+    substrate + Si tip and actually RUN it in ``lmp_serial`` -- ``system.in``
+    (tip approach + a tiny indent load ramp -> ``load_10N.data``) then a short
+    ``slide.in`` -- gating on physical output. Proves the whole D2 pipeline works
+    end to end through the UNCHANGED AFM templates: run-dir path resolution, the
+    ``sheet_1``/``sheet_2`` hybrid pair_coeff, the emitted ``2D_all``/``2D`` groups,
+    the replicated box, langevin region groups, and the approach/indent/slide loop.
+
+    Smallest viable config (empirically tuned -- see docs/superpowers/summaries/
+    D2-hetero-afm.md). Each knob is a hard constraint, not an arbitrary shrink:
+      * ``tip.r = 5`` -> 2x2 in-plane replication, the floor: a 2x2 MoS2/WS2 cell
+        is ~22-25 A, just above ``pair_style ... lj/cut 11.0`` + skin; a smaller
+        box aborts ``comm_style tiled``. ~705 atoms total.
+      * ``tip_reduction_factor = 0.7`` so the small (r=5) tip is tall enough that
+        the langevin thermo band ``[h-6, h-3]`` (h = r/factor) holds atoms; else
+        ``fix langevin ... zero yes`` aborts "Cannot zero Langevin force of 0 atoms".
+      * ``temp = 1`` K so the AFM indent template's displacement-convergence loop
+        (loops until the tip z-COM excursion < 0.1 A over 5000 steps) actually
+        settles; at 300 K a light rigid tip's thermal COM jitter never falls below
+        0.1 A and the loop runs unbounded.
+    Runtime ~110 s: ``system.in``'s hardcoded 10k-step equilibration + 100x100-step
+    load ramp + mechanical settling dominate. Those step counts live in the AFM
+    templates (reused unchanged); ``slide_run_steps`` only shortens the already
+    trivial (~0.3 s) slide phase.
+    """
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    raw = _afm_hetero_raw()
+    raw["general"]["force"] = 10.0          # single deployable load -> one ramp
+    raw["general"]["temp"] = 1.0            # so the indent convergence loop settles
+    raw["tip"]["r"] = 5.0                   # 2x2 replication (LJ-cutoff floor)
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]           # HPC gen needs a non-empty module list
+    cfg.settings.geometry.tip_reduction_factor = 0.7  # populate the langevin thermo band
+    cfg.settings.simulation.slide_run_steps = 200     # short slide
+
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    run_dir = Path(tmp_path)
+
+    # 1) Approach + indent: system.in finishes cleanly, keeps every atom, and
+    #    writes the per-load restart the slide phase reads.
+    init = run_dir / "L1" / "lammps" / "system.in"
+    assert init.exists()
+    proc, out = _run_lammps_afm(run_dir, init)
+    assert proc.returncode == 0, f"system.in exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out, f"atoms lost during approach/indent:\n{out[-3000:]}"
+    # run-0 / pair_coeff sanity: the hetero hybrid SW+LJ pair_coeff for
+    # sub/tip/sheet_1/sheet_2 was fully set (a mis-numbered sheet split would
+    # leave a pair unset and abort here), and the named computes evaluated.
+    assert "pair coeffs are not set" not in out.lower(), \
+        f"incomplete hetero pair_coeff (sheet split mis-numbered?):\n{out[-3000:]}"
+    loads = list((run_dir / "L1" / "data").glob("load_*N.data"))
+    assert loads and all(p.stat().st_size > 0 for p in loads), \
+        f"no non-empty load_*N.data written by the indent phase: {loads}"
+
+    # 1b) Substrate sanity (risk: collapsed / over-thick amorphous box): assert the
+    #     built amorphous Si slab's PERIODIC BOX z-height is ~thickness (config 12 A)
+    #     + the build's -5..thickness padding (~17 A). NB the data file stores atoms
+    #     UNWRAPPED (raw amorphous-block coords span ~90-120 A in both this and the
+    #     homogeneous AFM path); LAMMPS wraps them into the box on read_data, so the
+    #     BOX height -- not the raw atom span -- is the meaningful thickness check.
+    from src.builders.components import get_model_dimensions as _gmd
+    sub_dims = _gmd(run_dir / "build" / "sub.lmp")
+    box_z = float(sub_dims["zhi"]) - float(sub_dims["zlo"])
+    assert 10.0 <= box_z <= 22.0, \
+        f"substrate box z-height {box_z:.1f} A off ~17 A (thickness 12 + pad)"
+
+    # 2) Slide: the load restart drives a short friction slide that writes results.
+    slide = run_dir / "L1" / "lammps" / "slide.in"
+    assert slide.exists()
+    proc2, out2 = _run_lammps_afm(run_dir, slide)
+    assert proc2.returncode == 0, f"slide.in exited {proc2.returncode}:\n{out2[-3000:]}"
+    assert "Lost atoms" not in out2, f"atoms lost during slide:\n{out2[-3000:]}"
+    friction = list((run_dir / "L1" / "results").glob("friction_*"))
+    assert friction and all(p.stat().st_size > 0 for p in friction), \
+        f"no non-empty friction output written by the slide: {friction}"
