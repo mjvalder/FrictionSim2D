@@ -584,6 +584,109 @@ def build_flake_component(
     return flake_path, flake_dims
 
 
+def build_hetero_flake_component(
+    flake_sheets: List[SheetConfig],
+    settings: GlobalSettings,
+    flake_cfg: FlakeConfig,
+    workdir: Path,
+    hetero_stacking: str = "grouped",
+) -> Tuple[Path, dict]:
+    """Build a shaped flake carved from a matched hetero *bilayer*.
+
+    The single-material :func:`build_flake_component` sources its flake from one
+    monolayer; this hetero variant instead assembles the two ``flake_sheets``
+    materials into a stacked bilayer (the SAME proven Phase-B pipeline
+    :func:`~src.builders.hetero.build_hetero_structure` uses —
+    :func:`~src.builders.hetero.build_matched_supercells` +
+    :func:`~src.builders.hetero.assemble_hetero_stack`), then reuses the existing
+    :func:`build_flake` to carve the outline and :func:`apply_flake_corner_types`
+    to split every bilayer type into interleaved core ``2t-1`` / corner ``2t``
+    types. The carved flake therefore carries **both** materials' types
+    (in-shape atoms only; out-of-shape atoms removed by the mask), both layers
+    sharing the same xy corners.
+
+    Args:
+        flake_sheets: Exactly two :class:`SheetConfig`s (the flake's bilayer
+            materials, from the ``[Flake-1]`` / ``[Flake-2]`` sections).
+        settings: Global simulation settings (threaded to the match / assemble
+            steps, which run real LAMMPS interface minimization).
+        flake_cfg: Shape spec (``shape``, ``edge_length``, ``rotation_deg``,
+            ``corner_radius``, optional ``center_x`` / ``center_y``).
+        workdir: Directory for the per-material supercells, ``hetero.data``,
+            ``system.in.settings``, staged potentials, and the carved flake.
+        hetero_stacking: Layer ordering for the bilayer (``'grouped'`` default —
+            a one-layer-each bilayer is order-insensitive).
+
+    Returns:
+        Tuple of (flake_path, flake_box_dims).
+
+    Raises:
+        ValueError: If ``flake_sheets`` does not hold exactly two materials.
+    """
+    # Local import: hetero.py imports components.py, so importing hetero at
+    # module scope would create a circular import.
+    from .hetero import (  # pylint: disable=import-outside-toplevel
+        assemble_hetero_stack,
+        build_matched_supercells,
+        register_hetero_potentials,
+    )
+
+    if len(flake_sheets) != 2:
+        raise ValueError(
+            f"build_hetero_flake_component builds a flake from exactly two "
+            f"materials (a bilayer); got {len(flake_sheets)}."
+        )
+
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Monolayer per flake material (build_monolayer returns the path first).
+    mono_paths = [Path(build_monolayer(sheet)[0]) for sheet in flake_sheets]
+
+    # 2. Match -> two supercells sharing one in-plane box.
+    matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir)
+
+    # 3. Register the flake materials' potential/type spine (geometry-independent).
+    hetero_potentials = register_hetero_potentials(flake_sheets, settings, workdir)
+
+    # 4. Assemble the two matched supercells into one stacked bilayer hetero.data
+    #    (interface z-spacing by real minimization; types aligned to the spine).
+    stack = assemble_hetero_stack(
+        matched, flake_sheets, hetero_potentials, hetero_stacking, settings, workdir,
+    )
+
+    # 5. Carve the requested shape from the assembled bilayer. build_flake keeps
+    #    every type and both layers (they share xy), removing only out-of-shape
+    #    atoms via the boundary mask.
+    center_xy: Optional[Tuple[float, float]] = None
+    if flake_cfg.center_x is not None and flake_cfg.center_y is not None:
+        center_xy = (float(flake_cfg.center_x), float(flake_cfg.center_y))
+
+    flake_path = workdir / f"hetero_flake_{flake_cfg.shape}.data"
+    build_flake(
+        stack.data_path,
+        flake_path,
+        shape=flake_cfg.shape,
+        edge_length=float(flake_cfg.edge_length),
+        rotation_deg=float(flake_cfg.rotation_deg),
+        center_xy=center_xy,
+    )
+
+    # 6. Corner-type ALL bilayer types (core 2t-1 / corner 2t, across both
+    #    materials) -> matches register_component(..., regions=[None, 'corner']).
+    apply_flake_corner_types(
+        flake_path,
+        shape=flake_cfg.shape,
+        corner_radius=float(flake_cfg.corner_radius),
+    )
+
+    flake_dims = _require_box_dims(
+        get_model_dimensions(flake_path), context=str(flake_path)
+    )
+    logger.info("Built hetero flake component: %s", flake_path.name)
+    return flake_path, flake_dims
+
+
 def _write_cif_as_lammps_atomic(
     cif_path: Path,
     output_path: Path,
