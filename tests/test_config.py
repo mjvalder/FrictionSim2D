@@ -473,3 +473,23 @@ def test_single_2d_section_still_builds_one_element_sheets_list(tmp_path, monkey
     assert len(cfg.sheets) == 1
     assert cfg.sheets[0].mat == "MoS2"
     assert cfg.sheet.mat == "MoS2"
+
+# --- D2b: [sub] match flag + relaxed amorphous-required validator ---
+
+def test_crystalline_substrate_with_match_is_allowed():
+    from src.core.config import AFMSimulationConfig, load_settings
+    from tests.test_hetero_afm import _afm_hetero_raw
+    raw = _afm_hetero_raw()                       # non-finite-sheet hetero AFM
+    raw["sub"]["amorph"] = "c"
+    raw["sub"]["match"] = True
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())   # must not raise
+    assert cfg.sub.amorph == "c" and cfg.sub.match is True
+
+
+def test_crystalline_substrate_without_match_still_rejected():
+    from src.core.config import AFMSimulationConfig, load_settings
+    from tests.test_hetero_afm import _afm_hetero_raw
+    raw = _afm_hetero_raw()
+    raw["sub"]["amorph"] = "c"                    # crystalline, no match flag
+    with pytest.raises(ValueError, match="amorphous"):
+        AFMSimulationConfig(**raw, settings=load_settings())

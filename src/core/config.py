@@ -284,6 +284,21 @@ class SubstrateConfig(ComponentConfig):
         description="Finite-sheet substrate size in y (same units as sheet y).",
     )
     amorph: Literal['c', 'a'] = Field('c', description="'c' for crystalline, 'a' for amorphous")
+    match: bool = Field(
+        False,
+        description=(
+            "Lattice-match a crystalline substrate onto the fixed hetero box (D2b). "
+            "When true with amorph='c', the substrate surface cell is strained onto "
+            "the periodic hetero box so it tiles the same cell with no seam."
+        ),
+    )
+    match_strain_tol: float = Field(
+        default=0.02, ge=0.0, le=1.0,
+        description=(
+            "Base strain tolerance for the fixed-reference substrate match; the "
+            "accept bound is 2*match_strain_tol (residual strain beyond it fails loud)."
+        ),
+    )
     @field_validator('amorph', mode='before')
     @classmethod
     def handle_empty_amorph(cls, v):
@@ -618,12 +633,18 @@ class AFMSimulationConfig(BaseModel):
         """Require amorphous substrate for a substrate-backed non-finite-sheet AFM.
 
         A freestanding run (no [sub] section, self.sub is None) has no substrate to
-        constrain, so the amorphous requirement does not apply.
+        constrain, so the amorphous requirement does not apply. A lattice-matched
+        crystalline substrate (``amorph == 'c'`` with ``match``) is also permitted:
+        it is strained onto the fixed hetero box so it tiles the periodic cell with
+        no seam (D2b).
         """
-        if self.sub is not None and not self.general.finite_sheet and self.sub.amorph != 'a':
+        if (self.sub is not None and not self.general.finite_sheet
+                and self.sub.amorph != 'a'
+                and not (self.sub.amorph == 'c' and self.sub.match)):
             raise ValueError(
                 "Non-finite-sheet AFM requires an amorphous substrate "
-                "(set [sub] amorph = a)."
+                "([sub] amorph = a), or a lattice-matched crystalline substrate "
+                "([sub] amorph = c, match = true)."
             )
         return self
 
