@@ -284,13 +284,112 @@ def match_to_fixed_box(
     )
 
 
+def _relative_rotation_strain(sc_a: np.ndarray, sc_b: np.ndarray) -> Tuple[float, float]:
+    """Relative rotation (deg) and residual stretch strain between two 2×2 cells.
+
+    Uses the **left** transform ``G = inv(sc_b) @ sc_a`` (``sc_a = sc_b @ G``),
+    whose singular values (and polar-rotation) are invariant under rotating
+    *either* cell (a right/left orthogonal factor). This is the correct frame to
+    separate a rigid relative rotation (the twist) from a pure shape mismatch
+    (the residual strain): for ``sc_a = sc_b @ Rᵀ`` (rigid rotation, no strain)
+    ``G = Rᵀ`` exactly, so the strain is 0 and the angle is the twist -- unlike
+    the right transform ``sc_a @ inv(sc_b)``, which reports spurious strain for
+    rotated non-orthogonal cells.
+
+    Returns:
+        ``(angle_deg, max_strain)`` where ``angle_deg`` is the polar-rotation of
+        ``G`` (CCW positive) and ``max_strain`` is ``max|σ_i - 1|`` over ``G``'s
+        singular values. ``(0.0, inf)`` if ``G`` is singular.
+    """
+    try:
+        G = np.linalg.inv(np.asarray(sc_b, float)) @ np.asarray(sc_a, float)
+        U2 = G.T @ G
+        eigvals, eigvecs = np.linalg.eigh(U2)
+        eigvals = np.maximum(eigvals, 0.0)
+        stretches = np.sqrt(eigvals)
+        U = eigvecs @ np.diag(stretches) @ eigvecs.T
+        R = G @ np.linalg.inv(U)
+        angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
+        strain = float(np.max(np.abs(stretches - 1.0)))
+        return angle, strain
+    except np.linalg.LinAlgError:
+        return 0.0, math.inf
+
+
+def rotation_angle_between(sc_a: np.ndarray, sc_b: np.ndarray) -> float:
+    """Rotation angle (degrees) carrying raw 2×2 cell ``sc_b`` onto ``sc_a``.
+
+    The relative rotation is the polar-rotation component of the left transform
+    ``G = inv(sc_b) @ sc_a`` (see :func:`_relative_rotation_strain`), which is
+    rotation-invariant and so gives the twist directly. Operates on **raw** 2×2
+    lattice matrices (row-vector convention), so it can be called on candidate
+    supercell pairs during a twist search -- unlike
+    :func:`rotation_angle_from_match`, which unpacks a :class:`MatchResult`.
+
+    Args:
+        sc_a: 2×2 reference cell (rows = lattice vectors, Å).
+        sc_b: 2×2 cell to measure the rotation of, onto ``sc_a``.
+
+    Returns:
+        Rotation angle in degrees (counter-clockwise positive). Returns 0.0 when
+        the two cells are already aligned or the decomposition is singular.
+    """
+    return _relative_rotation_strain(sc_a, sc_b)[0]
+
+
+def _gauss_reduce_2d(cell: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Lagrange–Gauss reduce a 2×2 lattice basis to its two shortest vectors.
+
+    Returns ``(reduced, U)`` where ``reduced`` is a right-handed
+    (positive-determinant) reduced basis (rows = the two shortest lattice
+    vectors) and ``U`` is the integer unimodular transform with
+    ``reduced == U @ cell`` (so the reduction can be composed with a supercell
+    matrix to recover the exact integer tiling of the original monolayer).
+
+    Two bases of lattices that are rigid rotations of each other reduce to bases
+    related by the lattice point group (rotations by multiples of the
+    reduced-cell angle + reflections), so their relative rotation is well-defined
+    modulo that symmetry -- the twist search folds the result onto the hexagonal
+    wedge. Basis reduction is essential: two *raw* supercell matrices for the
+    same sublattice differ by an integer unimodular factor, which would otherwise
+    masquerade as large strain.
+    """
+    v1, v2 = np.asarray(cell, float)[0].copy(), np.asarray(cell, float)[1].copy()
+    U = np.eye(2)
+    swap = np.array([[0.0, 1.0], [1.0, 0.0]])
+    if v1 @ v1 > v2 @ v2:
+        v1, v2 = v2.copy(), v1.copy()
+        U = swap @ U
+    for _ in range(1000):
+        m = round((v1 @ v2) / (v1 @ v1))
+        v2 = v2 - m * v1
+        U = np.array([[1.0, 0.0], [-m, 1.0]]) @ U
+        if v2 @ v2 >= v1 @ v1:
+            break
+        v1, v2 = v2.copy(), v1.copy()
+        U = swap @ U
+    # Canonicalise into a single deterministic representative so that two bases
+    # of lattices related by a rotation reduce to bases that are the SAME
+    # rotation of each other (otherwise a hexagonal lattice's 60° vs 120°
+    # shortest-vector rhombi -- both valid reductions -- read as a spurious
+    # shear). Every decision below is rotation-invariant (dot signs, det sign,
+    # lengths), so canonicalize(R·L) = R·canonicalize(L).
+    if v1 @ v2 < 0.0:            # acute angle between v1 and v2 (pick 60° image)
+        v2 = -v2
+        U = np.array([[1.0, 0.0], [0.0, -1.0]]) @ U
+    reduced = np.array([v1, v2])
+    if np.linalg.det(reduced) < 0.0:   # keep right-handed (swap, preserves the
+        reduced = reduced[::-1]        # acute angle: dot is symmetric)
+        U = swap @ U
+    return reduced, np.rint(U).astype(int)
+
+
 def rotation_angle_from_match(match: MatchResult) -> float:
     """Extract the rotation angle (degrees) that aligns material B to material A.
 
-    The deformation gradient ``F = supercell_a @ inv(supercell_b)`` is
-    decomposed into ``F = R @ U`` via polar decomposition.  The rotation
-    component ``R`` gives the angle material B must be rotated to produce a
-    commensurate interface.
+    Thin wrapper over :func:`rotation_angle_between` that unpacks the two
+    supercells of a :class:`MatchResult` (the rotation component of
+    ``F = supercell_a @ inv(supercell_b)``).
 
     Args:
         match: A :class:`MatchResult` from :func:`find_coincidence_lattice`.
@@ -301,19 +400,272 @@ def rotation_angle_from_match(match: MatchResult) -> float:
     """
     if match is None:
         return 0.0
-    try:
-        F = match.supercell_a @ np.linalg.inv(match.supercell_b)
-        # Polar decomposition F = R @ U  (right polar)
-        U2 = F.T @ F
-        # Symmetric square-root of U²
-        eigvals, eigvecs = np.linalg.eigh(U2)
-        eigvals = np.maximum(eigvals, 0.0)
-        U = eigvecs @ np.diag(np.sqrt(eigvals)) @ eigvecs.T
-        R = F @ np.linalg.inv(U)
-        angle_rad = math.atan2(R[1, 0], R[0, 0])
-        return math.degrees(angle_rad)
-    except np.linalg.LinAlgError:
-        return 0.0
+    return rotation_angle_between(match.supercell_a, match.supercell_b)
+
+
+@dataclass
+class TwistMatch:
+    """A commensurate twisted-moiré approximant emitted on an orthorhombic box.
+
+    Produced by :func:`find_commensurate_twist`. The two integer supercell
+    matrices tile each layer's monolayer into the shared moiré cell; the layer B
+    monolayer is then physically rotated by ``achieved_angle_deg`` (via
+    :func:`~src.core.lattice_apply.rotate_layer_to_angle`) so the two tilings
+    coincide up to ``residual_strain``.
+
+    Commensurate moiré cells are generically rhombic (60°/120°), but downstream
+    postprocessing/AiiDA/HPC/plotting all assume an **orthogonal** simulation
+    box. ``moire_cell`` is therefore the minimal orthorhombic super-supercell
+    (the rhombus→rectangle wrapper, ``ortho_tiling`` rhombi per box) actually
+    emitted, in LAMMPS-canonical form (first vector along +x, xy tilt ≈ 0).
+
+    Attributes:
+        supercell_a: Integer 2×2 supercell matrix tiling layer A's monolayer
+            directly into the emitted **orthorhombic** box:
+            ``supercell_a @ cell_a`` equals ``moire_cell`` up to a rigid frame
+            rotation and the residual strain (it already folds in the
+            rhombus→rectangle ``ortho_tiling`` and the basis reduction). Feed it
+            to ``ase.build.make_supercell`` then ``set_cell(moire_cell)``.
+        supercell_b: Integer 2×2 supercell matrix tiling layer B's monolayer
+            into the same orthorhombic box; because it selects the θ-rotated
+            sublattice, tiling B with it (vs A with ``supercell_a``) and mapping
+            both onto ``moire_cell`` realises the relative twist.
+        achieved_angle_deg: The realised relative twist (nearest commensurate
+            angle to the target -- reported, never silently replaced by target).
+        residual_strain: Max per-material strain to close the approximant onto
+            the shared cell (≤ ``strain_tol``); ≈ 0 for same-material moiré.
+        moire_period: Moiré periodicity length (Å) = shorter emitted box edge.
+        moire_cell: The emitted 2×2 orthorhombic box (LAMMPS-canonical).
+        ortho_tiling: Integer 2×2 tiling matrix mapping the rhombic moiré cell
+            to the orthorhombic box (``|det|`` = rhombi per box, ≥ 1).
+    """
+    supercell_a: np.ndarray
+    supercell_b: np.ndarray
+    achieved_angle_deg: float
+    residual_strain: float
+    moire_period: float
+    moire_cell: np.ndarray
+    ortho_tiling: np.ndarray
+
+
+def orthorhombic_wrapper(
+    rhombic_cell: np.ndarray,
+    max_tiling: int = 6,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Minimal orthorhombic super-supercell tiling an integer number of rhombi.
+
+    Commensurate moiré cells are generically rhombic (60°/120°). Downstream
+    tooling requires an orthogonal box, so rather than *filter* to zero-tilt
+    supercells (which would reject essentially every hexagonal input -- a 60°
+    cell has no zero-tilt HNF supercell), this *wraps* the rhombus in the
+    smallest rectangular cell whose edges are still superlattice vectors of the
+    rhombic lattice (so the box stays exactly periodic). For the standard 60°
+    hexagonal rhombus this is the well-known c-rectangular doubling (2 rhombi
+    per box).
+
+    Searches integer 2×2 tiling matrices ``T`` with entries in
+    ``[-max_tiling, max_tiling]`` and returns the ``T`` of least positive
+    determinant whose ``T @ rhombic_cell`` has orthogonal rows.
+
+    Args:
+        rhombic_cell: 2×2 rhombic (or already-orthogonal) cell (row vectors, Å).
+        max_tiling: Bound on integer tiling-matrix entries searched.
+
+    Returns:
+        ``(ortho_cell, tiling)`` where ``ortho_cell`` is the orthorhombic box in
+        LAMMPS-canonical form (``[[lx, 0], [0, ly]]``, xy tilt 0) and ``tiling``
+        is the integer 2×2 ``T`` (``|det T|`` = rhombi per box, ≥ 1).
+
+    Raises:
+        ValueError: If no orthogonalising tiling is found within ``max_tiling``.
+    """
+    a = np.asarray(rhombic_cell, dtype=float)
+    best: Optional[Tuple[float, np.ndarray, np.ndarray]] = None
+    rng = range(-max_tiling, max_tiling + 1)
+    for p in rng:
+        for q in rng:
+            for r in rng:
+                for s in rng:
+                    det = p * s - q * r
+                    if det <= 0:
+                        continue
+                    T = np.array([[p, q], [r, s]], dtype=float)
+                    b = T @ a
+                    n0 = float(np.linalg.norm(b[0]))
+                    n1 = float(np.linalg.norm(b[1]))
+                    if n0 < 1e-9 or n1 < 1e-9:
+                        continue
+                    if abs(float(b[0] @ b[1])) > 1e-6 * n0 * n1:
+                        continue  # rows not orthogonal
+                    if best is None or det < best[0] - 1e-9:
+                        best = (float(det), T.copy(), b.copy())
+    if best is None:
+        raise ValueError(
+            f"orthorhombic_wrapper: no orthogonalising integer tiling (|entries| "
+            f"<= {max_tiling}) found for the rhombic moiré cell {a.tolist()}. "
+            f"Widen max_tiling."
+        )
+    _det, tiling, ortho_rows = best
+    # Emit in LAMMPS-canonical orthogonal form: rows are orthogonal, so the
+    # canonical box is diag(|b0|, |b1|) with xy tilt exactly 0.
+    lx = float(np.linalg.norm(ortho_rows[0]))
+    ly = float(np.linalg.norm(ortho_rows[1]))
+    ortho_cell = np.array([[lx, 0.0], [0.0, ly]])
+    return ortho_cell, tiling.astype(int)
+
+
+def find_commensurate_twist(
+    cell_a: np.ndarray,
+    cell_b: np.ndarray,
+    target_angle: float,
+    angle_tol: float = 2.0,
+    strain_tol: float = 0.02,
+    max_supercell: int = 12,
+    area_tol: float = 0.10,
+    max_tiling: int = 6,
+) -> TwistMatch:
+    """Find the commensurate twisted-moiré approximant nearest ``target_angle``.
+
+    Enumerates integer supercell pairs ``(M_a, M_b)`` (via
+    :func:`_enumerate_matrices`), forms each candidate's supercells
+    ``sc_a = M_a @ cell_a`` / ``sc_b = M_b @ cell_b``, and for area-compatible
+    pairs measures the **achieved** relative rotation
+    (:func:`rotation_angle_between`, rotation-only) and the residual strain to
+    close ``sc_b`` onto ``sc_a`` (:func:`_max_strain`, rotation-invariant, so it
+    is the pure stretch mismatch). The best candidate minimises
+    ``|achieved - target_angle|`` among those within ``angle_tol`` and
+    ``strain_tol``. Its rhombic moiré cell is then wrapped in its minimal
+    orthorhombic super-supercell (:func:`orthorhombic_wrapper`) so the emitted
+    box is orthogonal.
+
+    The achieved angle is always reported (commensurate angles are discrete, so
+    it generally differs from ``target_angle``).
+
+    Args:
+        cell_a: 2×2 lattice matrix for layer A (row vectors, Å).
+        cell_b: 2×2 lattice matrix for layer B (equals ``cell_a`` for a
+            same-material twist).
+        target_angle: Desired relative twist (deg).
+        angle_tol: Max ``|achieved - target|`` accepted (deg).
+        strain_tol: Max residual strain accepted to close the approximant.
+        max_supercell: Max supercell repeat along each axis for the search.
+        area_tol: Relative supercell-area agreement pre-filter.
+        max_tiling: Forwarded to :func:`orthorhombic_wrapper`.
+
+    Returns:
+        :class:`TwistMatch` (achieved angle, residual strain, moiré period, the
+        emitted orthorhombic ``moire_cell`` + its ``ortho_tiling``).
+
+    Raises:
+        ValueError: If no candidate lands within ``angle_tol`` / ``strain_tol``
+            inside ``max_supercell`` -- naming the nearest achievable angle and
+            its atom-count cost (rhombi-per-cell) so the caller can widen the
+            budget or pick a reachable angle.
+    """
+    cell_a = np.asarray(cell_a, dtype=float)
+    cell_b = np.asarray(cell_b, dtype=float)
+
+    # Pre-compute candidate supercells + areas once per layer.
+    cand_a = []
+    for ma in _enumerate_matrices(max_supercell):
+        sc = ma @ cell_a
+        cand_a.append((ma, sc, abs(float(np.linalg.det(sc)))))
+    cand_b = []
+    for mb in _enumerate_matrices(max_supercell):
+        sc = mb @ cell_b
+        cand_b.append((mb, sc, abs(float(np.linalg.det(sc)))))
+
+    # In-tolerance candidates: (sort_key, matrix_a, reduced_a, matrix_b,
+    # achieved_folded, residual, ncells). The orthogonal-box wrapper is a HARD
+    # feasibility constraint (downstream needs an orthogonal box), so we keep ALL
+    # in-tolerance candidates and, after sorting best-angle-first, return the
+    # first whose reduced moiré cell actually wraps into an orthorhombic box
+    # within the tiling budget -- skipping oblique approximants that would need
+    # an exploded (or non-existent) orthogonal super-supercell.
+    candidates: List[Tuple[Tuple[float, int], np.ndarray, np.ndarray, np.ndarray, float, float, int]] = []
+    # Nearest *achievable* commensurate angle seen at all (for a helpful raise),
+    # tracked independently of angle_tol so we can name it when nothing qualifies.
+    nearest = None       # (angle_err, achieved, residual, ncells)
+
+    for ma, sc_a, area_a in cand_a:
+        if area_a < 1.0:
+            continue
+        for mb, sc_b, area_b in cand_b:
+            if area_b < 1.0:
+                continue
+            if abs(area_a - area_b) / max(area_a, area_b) > area_tol:
+                continue
+            # Reduce both supercells to their shortest-vector bases first, so the
+            # measured rotation/strain reflect the sublattices' actual geometry
+            # (not an integer-unimodular basis skew).
+            ra, _ua = _gauss_reduce_2d(sc_a)
+            rb, _ub = _gauss_reduce_2d(sc_b)
+            achieved, residual = _relative_rotation_strain(ra, rb)
+            # Fold onto the hexagonal irreducible wedge [0, 60): twist is
+            # defined modulo the 60° lattice symmetry, so compare in [0, 60).
+            achieved_folded = abs(achieved) % 60.0
+            if achieved_folded > 30.0:
+                achieved_folded = 60.0 - achieved_folded   # nearest wedge image
+            angle_err = abs(achieved_folded - target_angle)
+            ncells = int(round(area_a / abs(float(np.linalg.det(cell_a)))))
+            if nearest is None or angle_err < nearest[0] - 1e-9 or (
+                abs(angle_err - nearest[0]) < 1e-9 and residual < nearest[2]
+            ):
+                nearest = (angle_err, achieved_folded, residual, ncells)
+            if angle_err > angle_tol or residual > strain_tol:
+                continue
+            # Prefer the closest angle; break ties by the smaller moiré cell.
+            key = (round(angle_err, 6), ncells)
+            candidates.append((key, ma, mb, achieved_folded, residual, ncells))
+
+    # Best angle first, then smaller cell. Return the first candidate whose
+    # reduced moiré cell wraps into an orthorhombic box within the tiling budget.
+    candidates.sort(key=lambda c: c[0])
+    for _key, matrix_a, matrix_b, achieved, residual, ncells in candidates:
+        # Reduce each layer's rhombic moiré supercell, capturing the integer
+        # reduction transform U so the FULL orthorhombic tiling matrix of the
+        # *original* monolayer is S = T @ U @ M (exact integers, no rounding).
+        reduced_a, u_a = _gauss_reduce_2d(matrix_a @ cell_a)
+        reduced_b, u_b = _gauss_reduce_2d(matrix_b @ cell_b)
+        try:
+            ortho_cell, tiling = orthorhombic_wrapper(reduced_a[:2, :2], max_tiling=max_tiling)
+        except ValueError:
+            continue  # oblique approximant with no small orthogonal wrapper -> skip
+        s_a = (tiling @ u_a @ matrix_a).astype(int)
+        s_b = (tiling @ u_b @ matrix_b).astype(int)
+        # Moiré periodicity = the reduced rhombus edge length (the genuine moiré
+        # wavelength), not the wrapped-box edge.
+        moire_period = float(np.linalg.norm(reduced_a[0]))
+        return TwistMatch(
+            supercell_a=s_a,
+            supercell_b=s_b,
+            achieved_angle_deg=float(achieved),
+            residual_strain=float(residual),
+            moire_period=moire_period,
+            moire_cell=ortho_cell,
+            ortho_tiling=tiling,
+        )
+
+    # Nothing qualified (or nothing wrapped within budget): fail loud, naming the
+    # nearest achievable angle + its atom-count cost.
+    near_msg = (
+        f"nearest achievable angle {nearest[1]:.3f} deg "
+        f"(|Δ|={nearest[0]:.3f} deg, residual strain {nearest[2]:.4%}, "
+        f"{nearest[3]} unit cells/layer)"
+        if nearest is not None else "no area-compatible supercell pair"
+    )
+    extra = "" if not candidates else (
+        " (in-tolerance candidates existed but none wrapped into an orthorhombic "
+        "box within the tiling budget -- moiré-cell explosion; widen max_supercell "
+        "or pick a cleaner angle)"
+    )
+    raise ValueError(
+        f"find_commensurate_twist: no commensurate moiré within angle_tol="
+        f"{angle_tol:.3f} deg and strain_tol={strain_tol:.4%} of "
+        f"target_angle={target_angle:.3f} deg inside max_supercell="
+        f"{max_supercell}. The {near_msg}.{extra} Widen angle_tol/strain_tol/"
+        f"max_supercell or pick a reachable angle."
+    )
 
 
 def find_coincidence_lattice_from_cif(

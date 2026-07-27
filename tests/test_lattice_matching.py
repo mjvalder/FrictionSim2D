@@ -445,3 +445,58 @@ def test_match_to_fixed_box_fails_loud_when_incommensurate():
     other = np.array([[7.31, 0.0], [0.0, 3.17]])   # no low-order supercell within tol
     with pytest.raises(ValueError, match=r"strain"):
         match_to_fixed_box(box, other, strain_tol=0.001, max_supercell=3)
+
+
+# =============================================================================
+# D3: commensurate twist search + orthorhombic wrapper
+# =============================================================================
+
+def _hex_cell(a=3.16):
+    return np.array([[a, 0.0], [a * 0.5, a * np.sqrt(3) / 2]])
+
+
+def test_find_commensurate_twist_emits_orthorhombic_box_near_target():
+    from src.core.lattice_matching import find_commensurate_twist, TwistMatch
+    A = _hex_cell(); B = _hex_cell()
+    m = find_commensurate_twist(A, B, target_angle=7.0, angle_tol=3.0,
+                                strain_tol=0.03, max_supercell=12)
+    assert isinstance(m, TwistMatch)
+    assert abs(m.achieved_angle_deg - 7.0) <= 3.0        # within tol
+    assert m.residual_strain <= 0.03
+    assert m.moire_period > 0
+    # the EMITTED box is orthorhombic (downstream needs orthogonal): xy tilt ~ 0
+    assert abs(m.moire_cell[1, 0]) < 1e-6 * abs(m.moire_cell[0, 0])
+    assert m.ortho_tiling is not None                     # a real rhombus->rectangle wrapper was applied
+
+
+def test_find_commensurate_twist_fails_loud_names_nearest():
+    from src.core.lattice_matching import find_commensurate_twist
+    A = _hex_cell(); B = _hex_cell()
+    with pytest.raises(ValueError, match=r"nearest|achievable"):
+        find_commensurate_twist(A, B, target_angle=7.0, angle_tol=0.01,
+                                strain_tol=0.001, max_supercell=4)
+
+
+def test_orthorhombic_wrapper_tiles_rhombic_moire():
+    from src.core.lattice_matching import orthorhombic_wrapper
+    rhombus = _hex_cell(a=30.0)                            # a moire-scale rhombus (60 deg)
+    ortho, tiling = orthorhombic_wrapper(rhombus)
+    assert abs(ortho[1, 0]) < 1e-6                         # rectangular
+    # the wrapper area is an integer multiple of the rhombus area (genuine periodic tiling)
+    ratio = abs(np.linalg.det(ortho)) / abs(np.linalg.det(rhombus))
+    assert abs(ratio - round(ratio)) < 1e-6 and round(ratio) >= 1
+
+
+def test_rotation_angle_between_matches_from_match():
+    """The factored-out raw-cell helper agrees with rotation_angle_from_match."""
+    from src.core.lattice_matching import rotation_angle_between, rotation_angle_from_match
+    A = _hex_cell()
+    theta = 15.0
+    r = math.radians(theta)
+    R = np.array([[math.cos(r), -math.sin(r)], [math.sin(r), math.cos(r)]])
+    B = A @ R.T                                            # A rotated by +15 deg
+    assert abs(rotation_angle_between(A, B) - (-theta)) < 1e-6 \
+        or abs(rotation_angle_between(A, B) - theta) < 1e-6
+    match = MatchResult(matrix_a=np.eye(2, dtype=int), matrix_b=np.eye(2, dtype=int),
+                        supercell_a=A, supercell_b=B, strain_a=0.0, strain_b=0.0, area=1.0)
+    assert abs(rotation_angle_between(A, B) - rotation_angle_from_match(match)) < 1e-9
