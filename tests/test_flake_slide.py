@@ -216,6 +216,35 @@ def test_driven_group_is_flake_and_virtual_type_reserved(tmp_path):
     assert re.search(rf"group\s+virtual\s+type\s+{total_real + 1}\b", slide_text)
 
 
+def _single_material_cfg():
+    """A homogeneous single-[2D] sheet-on-sheet config with NO [Flake] section."""
+    raw = {
+        "general": {"temp": 300, "scan_speed": 1},
+        "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+               "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+               "x": 8, "y": 8, "layers": [4]},
+    }
+    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+
+
+def test_routing_flake_section_selects_flake_slide():
+    from src.core.run import _select_sheet_builder_cls
+    from src.builders.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    assert cfg.flake is not None
+    assert _select_sheet_builder_cls("sheetonsheet", cfg) is FlakeSlideSimulation
+
+
+def test_routing_no_flake_unchanged():
+    from src.core.run import _select_sheet_builder_cls
+    from src.builders.sheetonsheet import SheetOnSheetSimulation
+
+    cfg = _single_material_cfg()
+    assert cfg.flake is None
+    assert _select_sheet_builder_cls("sheetonsheet", cfg) is SheetOnSheetSimulation
+
+
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_builder_requires_multilayer_substrate(tmp_path):
     from src.builders.flake_slide import FlakeSlideSimulation

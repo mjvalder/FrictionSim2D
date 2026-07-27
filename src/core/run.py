@@ -381,6 +381,11 @@ def _select_sheet_builder_cls(model, config_obj):
     """
     if model == 'pes_sheet':
         return PESSheetSimulation
+    # A [Flake] section switches sheet-on-sheet to the D4 flake-driven slide,
+    # regardless of the substrate being homogeneous or hetero (precedence).
+    if model == 'sheetonsheet' and getattr(config_obj, 'flake', None) is not None:
+        from src.builders.flake_slide import FlakeSlideSimulation
+        return FlakeSlideSimulation
     sheets = getattr(config_obj, 'sheets', None) or []
     twist = getattr(getattr(config_obj, 'general', None), 'twist_angle', None)
     if len(sheets) >= 2 or twist is not None:
