@@ -624,3 +624,130 @@ def test_same_material_twist_synthesises_two_sheets(tmp_path):
     assert stack.twist_angle_achieved is not None        # twist recorded
     assert stack.moire_period is not None and stack.moire_period > 0
     assert stack.total_types >= 2                        # two material blocks even for same material
+
+
+def _read_hetero_masses_and_counts(data_path):
+    """Parse a written ``hetero.data``: return (type->mass, type->n_atoms).
+
+    Reads the resolved per-type mass from the Masses section and counts atoms
+    per type from the Atoms section -- the physics the type/registry checks
+    alone cannot see.
+    """
+    from collections import Counter
+    type_mass: dict[int, float] = {}
+    type_count: Counter = Counter()
+    section = None
+    for raw_line in Path(data_path).read_text().splitlines():
+        s = raw_line.strip()
+        if s == "Masses":
+            section = "M"; continue
+        if s.startswith("Atoms"):
+            section = "A"; continue
+        if s in ("Velocities", "Bonds", "Angles", "Dihedrals", "Impropers"):
+            section = None; continue
+        if not s:
+            continue
+        parts = s.split()
+        if not parts[0].lstrip("-").isdigit():
+            continue
+        if section == "M":
+            type_mass[int(parts[0])] = float(parts[1])
+        elif section == "A":
+            type_count[int(parts[1])] += 1
+    return type_mass, type_count
+
+
+def test_same_material_twist_masses_preserve_metal(tmp_path):
+    """The same-material twist path must keep MoS2's stoichiometry AND masses.
+
+    Regression for the overlapping-mass-range bug: the second synthesised sheet's
+    METAL sublattice was emitted with sulfur's mass (net MoS5), because
+    ``get_masses_string`` collapsed the non-contiguous Mo type list [1, 3] into
+    the LAMMPS range ``1*3`` and the later S range ``2*4`` overwrote type 3 (Mo).
+    The type registry looked correct; only the resolved per-atom masses in
+    ``hetero.data`` were wrong -- the physics the registry checks cannot see.
+
+    Asserts on the built ``hetero.data``: (a) exactly two distinct mass species,
+    which must be {32.06 (S), 95.95 (Mo)}; (b) the S:metal mass-count ratio is
+    2:1 over the WHOLE cell (both layers), i.e. every Mo atom carries 95.95 and
+    the honeycomb 1:2 metal:chalcogen ratio holds in mass space.
+    """
+    raw = {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped",
+                    "twist_angle": 21.8},
+        "2D": {"mat": "h-MoS2", "cif_path": MOS2_CIF, "pot_path": MOS2_POT,
+               "pot_type": "sw", "x": 4.0, "y": 4.0, "layers": [1]},
+    }
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+
+    type_mass, type_count = _read_hetero_masses_and_counts(stack.data_path)
+    assert set(type_mass) == set(type_count), "every atom type needs a mass"
+
+    # (a) exactly two mass species, and they are S and Mo (not a stray sulfur mass).
+    species = sorted(set(round(m, 2) for m in type_mass.values()))
+    assert species == [32.06, 95.95], (
+        f"expected only S(32.06) and Mo(95.95) masses, got {species} -- a metal "
+        f"sublattice is carrying the wrong mass (MoS5 instead of MoS2)."
+    )
+
+    # (b) aggregate atom counts by mass species over the whole (two-layer) cell.
+    metal_atoms = sum(n for t, n in type_count.items() if round(type_mass[t], 2) == 95.95)
+    chalc_atoms = sum(n for t, n in type_count.items() if round(type_mass[t], 2) == 32.06)
+    assert metal_atoms > 0 and chalc_atoms > 0
+    assert chalc_atoms == 2 * metal_atoms, (
+        f"S:Mo mass-count ratio must be 2:1 (MoS2), got {chalc_atoms}:{metal_atoms}."
+    )
+
+    # BOTH synthesised layers must contribute Mo atoms in the 1:2 metal:chalc
+    # ratio -- proves the fix is not a single-layer accident.
+    per_layer_metal = metal_atoms // 2
+    assert metal_atoms == 2 * per_layer_metal            # equal Mo per layer
+    assert chalc_atoms == 4 * per_layer_metal            # 2 layers x 2 S per Mo
+
+
+def test_get_masses_string_no_overlapping_ranges_across_components(tmp_path):
+    """``get_masses_string`` must never let one element's range overwrite another
+    element's type when the same element spans multiple components.
+
+    Locks the invariant for BOTH the same-material duplicate (Mo/S + Mo/S, where
+    the bug bit: Mo=[1,3], S=[2,4]) and the genuine hetero pair (Mo/S + W/S, the
+    path that only *accidentally* survived because a later W line re-corrected the
+    engulfed type). Applies LAMMPS last-wins semantics to the emitted string and
+    requires every type's FINAL mass to equal its registered element's mass.
+    """
+    from ase.data import atomic_masses, atomic_numbers
+
+    def _final_masses(masses_str, n_types):
+        final: dict[int, float] = {}
+        for line in masses_str.splitlines():
+            parts = line.split()
+            if len(parts) < 3 or parts[0] != "mass":
+                continue
+            spec, val = parts[1], float(parts[2])
+            if "*" in spec:
+                lo_s, hi_s = spec.split("*")
+                lo = int(lo_s) if lo_s else 1
+                hi = int(hi_s) if hi_s else n_types
+            else:
+                lo = hi = int(spec)
+            for t in range(lo, hi + 1):
+                final[t] = val
+        return final
+
+    for sheets in (
+        [_sheet_config("h-MoS2", MOS2_CIF, MOS2_POT),
+         _sheet_config("h-MoS2", MOS2_CIF, MOS2_POT)],          # same-material
+        [_sheet_config("h-MoS2", MOS2_CIF, MOS2_POT),
+         _sheet_config("h-WS2", WS2_CIF, WS2_POT)],             # hetero pair
+    ):
+        hp = register_hetero_potentials(sheets, load_settings(), workdir=tmp_path)
+        n_types = len(hp.pm.types)
+        final = _final_masses(hp.pm.get_masses_string(), n_types)
+        assert set(final) == set(range(1, n_types + 1))
+        for atype in hp.pm.types:
+            expected = atomic_masses[atomic_numbers[atype.element]]
+            assert abs(final[atype.type_id] - expected) < 0.5, (
+                f"type {atype.type_id} ({atype.element}) resolved to "
+                f"{final[atype.type_id]}, expected ~{expected:.2f}"
+            )

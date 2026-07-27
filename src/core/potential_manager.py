@@ -169,6 +169,27 @@ class TypeRegistry:
             return str(types[0])
         return f"{types[0]}*{types[-1]}"
 
+    @staticmethod
+    def contiguous_runs(types: List[int]) -> List[List[int]]:
+        """Split a list of type IDs into maximal consecutive runs.
+
+        ``[1, 3]`` -> ``[[1], [3]]``; ``[1, 2, 3, 5]`` -> ``[[1, 2, 3], [5]]``.
+        Used to emit LAMMPS ``mass`` lines whose ``lo*hi`` spans never engulf a
+        type absent from the list (which the plain :meth:`format_type_range` span
+        would), so one element's mass cannot overwrite another's when the same
+        element occupies non-contiguous types across hetero components.
+        """
+        if not types:
+            return []
+        ordered = sorted(types)
+        runs: List[List[int]] = [[ordered[0]]]
+        for t in ordered[1:]:
+            if t == runs[-1][-1] + 1:
+                runs[-1].append(t)
+            else:
+                runs.append([t])
+        return runs
+
     def get_element_type_range(self, component: str, element: str) -> str:
         """Get the LAMMPS type range string for an element in a component.
 
@@ -803,18 +824,27 @@ class PotentialManager:
 
         lines = []
         for element, types in element_types.items():
-            types = sorted(types)
-            if element == 'Virtual':
-                type_range = self.types.format_type_range(types)
-                lines.append(f"mass {type_range} 1.0 #Virtual atom")
-            else:
+            # Emit one `mass <range> <m>` per MAXIMAL CONTIGUOUS RUN of this
+            # element's type IDs. The LAMMPS `mass` command takes only a single
+            # ID or a `lo*hi` span (never an ID list), so collapsing a
+            # NON-contiguous list (e.g. Mo=[1,3] when the same element appears in
+            # two hetero components) into one `1*3` span would silently engulf the
+            # intervening type (2) -- and a later element's span (S=[2,4] -> `2*4`)
+            # would then overwrite the engulfed type under LAMMPS last-wins,
+            # corrupting its mass. Per-run emission keeps every span disjoint, so
+            # no element can clobber another's type. A normally-contiguous
+            # single-material block stays a single `lo*hi` line (output
+            # unchanged); only cross-component non-contiguous cases split.
+            for run in self.types.contiguous_runs(types):
+                type_range = self.types.format_type_range(run)
+                if element == 'Virtual':
+                    lines.append(f"mass {type_range} 1.0 #Virtual atom")
+                    continue
                 try:
                     mass = atomic_masses[atomic_numbers[element]]
-                    type_range = self.types.format_type_range(types)
                     lines.append(f"mass {type_range} {mass:.6f} #{element}")
                 except (KeyError, IndexError):
                     logger.warning("Could not find mass for element '%s', using 1.0", element)
-                    type_range = self.types.format_type_range(types)
                     lines.append(f"mass {type_range} 1.0 #{element} (unknown)")
 
         return "\n".join(lines)
