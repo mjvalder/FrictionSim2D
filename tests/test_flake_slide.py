@@ -7,13 +7,12 @@ from the bottom-sheet reaction force (the many-body ``sw`` observable).
 """
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
-import numpy as np
 import pytest
-from ase.io import read
 from src.core.config import SheetOnSheetSimulationConfig, load_settings
+# Reuse the D1 slide runner + friction-record parser for the e2e smoke.
+from tests.test_hetero_slide import _read_friction_records, _run_lammps_slide
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
@@ -255,3 +254,72 @@ def test_flake_slide_builder_requires_multilayer_substrate(tmp_path):
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
     with pytest.raises(ValueError, match=r"[Aa]t least 2"):
         sim.build()
+
+
+# --------------------------------------------------------------------------- #
+# End-to-end smoke: build a real MoS2 flake on a MoS2 sheet and RUN the drive.
+# Reuses the D1 slide runner + friction-record parser (imported at module top).
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_flake_slide_runs_and_translates_flake_com(tmp_path):
+    """Capstone D4 smoke: assemble a real MoS2 flake on a 2-layer MoS2 substrate
+    sheet and actually RUN the virtual-atom drive in LAMMPS. Proves: run-dir-
+    relative path resolution (data, settings, staged potentials, results), the
+    baked reserved virtual type, a live flake drive (the flake COM translates),
+    no lost atoms and complete pair coeffs.
+    """
+    from src.builders.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.settings.simulation.drive_method = "virtual_atom"
+    # The template equilibrates a fixed 10000 steps, then defines the friction
+    # fix (ave/time 1 1000 results_freq) and drives run_steps more. Nfreq=1000
+    # -> first record at 11000; 4000 driven steps give records at
+    # 11000/12000/13000/14000 (>=2, needed for the displacement check).
+    cfg.settings.simulation.slide_run_steps = 4000
+    # Fast drive so the translation dominates thermal COM jitter (~4 A over 4 ps).
+    cfg.general.scan_speed = 100
+
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    run_dir = sim.run_dir()
+    assert (run_dir / "flake_slide.data").exists()
+    assert (run_dir / "lammps" / "system.in.settings").exists()
+
+    slide = next(Path(run_dir).rglob("*slide*.in"))
+    proc, out = _run_lammps_slide(run_dir, slide.name)
+
+    # 1) Clean finish, no lost atoms, all pair coeffs set.
+    assert proc.returncode == 0, f"lmp_serial exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out, f"atoms lost during flake slide:\n{out[-3000:]}"
+    assert "All pair coeffs are not set" not in out, f"incomplete pair coeffs:\n{out[-3000:]}"
+
+    # 1b) The virtual driver attaches to EXACTLY ONE reserved atom.
+    m = re.search(r"(\d+) atoms in group virtual", out)
+    assert m is not None, f"no 'atoms in group virtual' line:\n{out[-3000:]}"
+    assert m.group(1) == "1", (
+        f"group virtual has {m.group(1)} atoms, expected exactly 1 (the reserved "
+        f"non-interacting virtual atom)"
+    )
+
+    # 2) A non-empty friction results file was written.
+    friction = next(run_dir.rglob("friction_*"))
+    assert friction.stat().st_size > 0, f"empty friction file: {friction}"
+
+    # 3) The drive is LIVE: the flake's in-plane COM translated a nonzero net
+    #    amount between the first and last record (the template logs
+    #    v_comx_flake / v_comy_flake = xcm(flake,x/y)).
+    cols, rows = _read_friction_records(friction)
+    assert cols is not None, f"no column header parsed from {friction}"
+    assert len(rows) >= 2, f"need >=2 records to measure displacement, got {len(rows)}"
+    ix, iy = cols.index("v_comx_flake"), cols.index("v_comy_flake")
+    dx = rows[-1][ix] - rows[0][ix]
+    dy = rows[-1][iy] - rows[0][iy]
+    disp = abs(dx) + abs(dy)
+    assert disp > 0.5, (
+        f"flake COM barely moved (dx={dx:.3f}, dy={dy:.3f}, |dx|+|dy|={disp:.3f} A); "
+        f"virtual_atom drive appears dead"
+    )
