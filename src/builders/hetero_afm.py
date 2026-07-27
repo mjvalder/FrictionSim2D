@@ -87,16 +87,66 @@ def _read_data_masses(data_path) -> list[float]:
     return [masses[tid] for tid in sorted(masses)]
 
 
-def _assert_sheet_block_matches_data(pm: PotentialManager, data_path, offset: int) -> None:
+def _read_settings_masses(settings_path) -> list[float]:
+    """Real per-type masses from a settings file's ``mass <i|i*j> <value>`` commands.
+
+    ``apply_sheet_edge_types`` (B3) retypes the assembled patch by DOUBLING the
+    atom-type count; LAMMPS gives every fresh type the default mass ``1.0``, so the
+    edge-typed ``hetero.data`` (and its replicated ``hetero_rep.data``) carries a
+    uniform placeholder ``Masses`` block. The real per-type masses are the
+    ``mass`` commands the potential spine writes into ``system.in.settings`` (e.g.
+    ``mass 1*2 95.95 #Mo``). This parses those (expanding ``i*j`` ranges) so the
+    layout guard can compare element identity even for the edge-typed file.
+    """
+    masses: dict[int, float] = {}
+    for line in Path(settings_path).read_text().splitlines():
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped.startswith("mass"):
+            continue
+        parts = stripped.split()
+        if len(parts) < 3:
+            continue
+        try:
+            value = float(parts[2])
+        except ValueError:
+            continue
+        rng = parts[1]
+        if "*" in rng:
+            lo_s, hi_s = rng.split("*", 1)
+            try:
+                lo, hi = int(lo_s), int(hi_s)
+            except ValueError:
+                continue
+        else:
+            try:
+                lo = hi = int(rng)
+            except ValueError:
+                continue
+        for tid in range(lo, hi + 1):
+            masses[tid] = value
+    return [masses[tid] for tid in sorted(masses)]
+
+
+def assert_sheet_block_matches_data(pm: PotentialManager, data_path, offset: int = 0) -> None:
     """Fail loud if the unified PM's sheet block diverges from the data file.
 
     ``hetero_rep.data`` contains ONLY the sheet stack, so its ``Masses`` (in type
     order) are exactly the ``sheet_1`` then ``sheet_2`` block. The unified AFM PM
     places that same block at ``[offset+1 …]``. Because both sides are numbered
     through :func:`register_sheet_block`, the sequences must match element-for-
-    element; comparing the per-type mass sequence (mass encodes element identity)
-    trips any equal-count reordering — the future-works §2 corruption mode — not
-    merely a count mismatch.
+    element.
+
+    The check is per-type, not count-only: it walks the ordered
+    ``(pot_label, element, mass, region)`` block the PM registered and compares the
+    mass sequence (mass encodes element identity) against the data file's
+    ``Masses`` section position-by-position. That trips any equal-count reordering
+    — the future-works §2 corruption mode where the ``regions=[None, 'edge']``
+    split doubles the type count and a count-only assert would pass a permuted
+    layout — not merely a size mismatch. With ``regions`` the block interleaves
+    core/edge types per element, so a swap of two same-mass same-element types
+    (core<->edge) leaves the mass sequence intact; the ``offset+1`` start check and
+    the single-sourced numbering through :func:`register_sheet_block` are what pin
+    that ordering.
     """
     id_to_type = {t.type_id: t for t in pm.types}
     sheet_ids = (pm.types.ids_by_component('sheet_1')
@@ -105,25 +155,43 @@ def _assert_sheet_block_matches_data(pm: PotentialManager, data_path, offset: in
                  for tid in sheet_ids]
     data_masses = _read_data_masses(data_path)
 
+    # The edge-typed (finite) data file carries uniform placeholder masses (1.0):
+    # apply_sheet_edge_types doubles the type count and LAMMPS defaults each fresh
+    # type's mass to 1.0, with the real masses set by the companion settings file's
+    # `mass` commands. Recover the real per-type masses from that settings file so
+    # the element-wise comparison stays meaningful for the region-split path.
+    if data_masses and all(abs(m - 1.0) < 1e-6 for m in data_masses):
+        companion = Path(data_path).parent / "lammps" / "system.in.settings"
+        if companion.is_file():
+            real = _read_settings_masses(companion)
+            if real:
+                data_masses = real
+
     if len(pm_masses) != len(data_masses):
         raise ValueError(
-            f"Hetero sheet block size mismatch: unified PM has {len(pm_masses)} "
+            f"Hetero sheet block layout mismatch: unified PM has {len(pm_masses)} "
             f"sheet types but {Path(data_path).name} has {len(data_masses)}."
         )
     first_sheet_id = sheet_ids[0] if sheet_ids else None
     if first_sheet_id is not None and first_sheet_id != offset + 1:
         raise ValueError(
-            f"Hetero sheet block starts at type {first_sheet_id}, expected "
-            f"{offset + 1} (sub+tip offset)."
+            f"Hetero sheet block layout mismatch: block starts at type "
+            f"{first_sheet_id}, expected {offset + 1} (sub+tip offset)."
         )
     for i, (pm_m, data_m) in enumerate(zip(pm_masses, data_masses)):
         if abs(pm_m - data_m) > 1e-3:
             raise ValueError(
-                f"Hetero sheet block diverges from {Path(data_path).name} at "
-                f"sheet position {i} (data type {i + 1}, PM type {sheet_ids[i]}): "
-                f"PM mass {pm_m:.4f} != data mass {data_m:.4f}. The unified-PM "
-                "numbering and the assembled data file disagree."
+                f"Hetero sheet block layout mismatch / wrong order vs "
+                f"{Path(data_path).name} at sheet position {i} (data type {i + 1}, "
+                f"PM type {sheet_ids[i]}): PM mass {pm_m:.4f} != data mass "
+                f"{data_m:.4f}. The unified-PM numbering and the assembled data "
+                "file disagree."
             )
+
+
+#: D2 call sites reference the private spelling; keep it pointing at the public
+#: guard so both names are one implementation (no divergence).
+_assert_sheet_block_matches_data = assert_sheet_block_matches_data
 
 
 class HeteroAFMSimulation(AFMSimulation):
@@ -383,4 +451,50 @@ class HeteroAFMSimulation(AFMSimulation):
         offset = len(pm.types.ids_by_component('sub')) + len(pm.types.ids_by_component('tip'))
         _assert_sheet_block_matches_data(pm, self._hetero_rep_path, offset)
 
+        return pm
+
+
+class FiniteHeteroAFMSimulation(HeteroAFMSimulation):
+    """Finite (edge-typed) hetero AFM tip-slide on an amorphous substrate (D5).
+
+    The finite counterpart of :class:`HeteroAFMSimulation`: the hetero stack is
+    built as an isolated **patch** whose perimeter is edge-typed (B3's finite
+    ``build_hetero_structure`` path, auto-selected because ``general.finite_sheet``
+    is ``True``), replicated so the patch is >= 2x the tip diameter (reusing the
+    D2 replication helpers, inherited via :meth:`_build_hetero_sheet`), and centred
+    on an amorphous substrate sized to ``[sub] x/y`` (the inherited finite handling
+    from :class:`~src.builders.afm.AFMSimulation` — ``_build_components`` sizes the
+    slab to the ``[sub]`` footprint, ``_compute_sheet_offset`` centres the patch,
+    ``_validate_final_substrate_dims`` guards the margin).
+
+    Because both the assembled ``hetero_rep.data`` and the unified AFM PM route
+    their sheet block through the SAME :func:`register_sheet_block`, setting
+    ``self._sheet_regions = [None, 'edge']`` splits every material's types into an
+    interleaved core/edge pair on BOTH sides consistently (the future-works §2
+    guard, :func:`assert_sheet_block_matches_data`, verifies this element-wise).
+    The ``2D_edge`` union group and the finite-edge context flags (Task 2) make the
+    UNCHANGED ``afm/system_init.lmp`` / ``afm/slide.lmp`` edge-tether block fire on
+    the hetero ``2D_edge`` group.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Split each material's sheet types into core (None) + edge -> the same
+        # region split B3's finite build_hetero_structure applies to the data file,
+        # kept single-sourced through register_sheet_block so they cannot diverge.
+        self._sheet_regions = [None, 'edge']
+        self._finite = True
+
+    def _generate_potentials(self, n_sheet_layers):
+        """D2 sub/tip/sheet_1/sheet_2 registration, exposing the single PM.
+
+        Delegates to :meth:`HeteroAFMSimulation._generate_potentials` (which,
+        because ``self._sheet_regions == [None, 'edge']``, splits the sheet block
+        into core/edge types matching the edge-typed ``hetero_rep.data`` and runs
+        the element-wise layout guard), and records ``self._pm`` so the finite
+        layout-guard test can assert the unified PM's sheet block against the data
+        file directly.
+        """
+        pm = super()._generate_potentials(n_sheet_layers)
+        self._pm = pm
         return pm

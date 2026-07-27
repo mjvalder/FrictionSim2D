@@ -376,3 +376,114 @@ def test_hetero_afm_crystalline_runs_no_seam(tmp_path):
     loads = list((run_dir / "L1" / "data").glob("load_*N.data"))
     assert loads and all(p.stat().st_size > 0 for p in loads), \
         f"no non-empty load_*N.data written by the crystalline-substrate indent: {loads}"
+
+
+# ============================================================================
+# D5 — Finite hetero stack + AFM tip (edge effects)
+# ============================================================================
+
+def _finite_hetero_afm_raw():
+    """Finite (edge-typed) MoS2/WS2 patch + amorphous-Si substrate + Si tip.
+
+    The substrate is sized to ``[sub] x/y`` (80x80) -- larger than the replicated
+    patch, so the patch is centred with margin. ``general.finite_sheet`` routes
+    ``build_hetero_structure`` to its edge-typed finite path.
+    """
+    return {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped",
+                    "finite_sheet": True},
+        "tip": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
+                "pot_type": "sw", "r": 10.0},
+        "sub": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
+                "pot_type": "sw", "amorph": "a", "thickness": 12.0, "x": 80.0, "y": 80.0},
+        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
+                 "pot_type": "sw", "x": 20.0, "y": 20.0, "layers": [1]},
+        "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
+                 "pot_type": "sw", "x": 20.0, "y": 20.0, "layers": [1]},
+    }
+
+
+def _fake_pm_with_sheet_block(block):
+    """Stub PM exposing an ordered ``(pot_label, element, mass, region)`` sheet block.
+
+    Registers each entry as ``sheet_1`` / ``sheet_2`` (grouped by material label,
+    in block order) on a real :class:`TypeRegistry`, so the layout guard's
+    ``pm.types`` iteration + ``ids_by_component('sheet_1'/'sheet_2')`` queries
+    resolve exactly as on a real build -- without a full LAMMPS assembly.
+    """
+    from types import SimpleNamespace
+    from src.core.potential_manager import TypeRegistry
+    reg = TypeRegistry()
+    labels = []
+    for pot_label, element, _mass, region in block:
+        if pot_label not in labels:
+            labels.append(pot_label)
+        comp = f"sheet_{labels.index(pot_label) + 1}"
+        reg.register(comp, element, pot_label, region=region)
+    return SimpleNamespace(types=reg)
+
+
+def _write_data_with_masses(path, masses):
+    """Write a minimal LAMMPS data file whose ``Masses`` section = ``masses`` order."""
+    lines = [
+        "Permuted layout test data", "",
+        f"{len(masses)} atoms", f"{len(masses)} atom types", "",
+        "0.0 10.0 xlo xhi", "0.0 10.0 ylo yhi", "0.0 10.0 zlo zhi", "",
+        "Masses", "",
+    ]
+    for i, (_pot, _el, mass, _region) in enumerate(masses, start=1):
+        lines.append(f"{i} {mass}")
+    lines.append("")
+    Path(path).write_text("\n".join(lines))
+    return Path(path)
+
+
+# --- D5 Task 1: finite hetero sheet build + centering + layout guard ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_afm_builds_edge_typed_centered_patch(tmp_path):
+    from ase.io import read
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
+    cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
+    cfg.settings.hpc.modules = ["lammps"]
+    sim = FiniteHeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+    settings_file = next(Path(tmp_path).rglob("system.in.settings"))
+    text = settings_file.read_text()
+    assert "2D_edge" in text                          # B3 edge group present
+    # substrate larger than patch (patch centred with margin), sized to [sub] x=80
+    sub = read(str(next(Path(tmp_path).rglob("sub*.lmp"))), format="lammps-data").get_cell()
+    assert sub[0, 0] >= 40.0
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_layout_guard_covers_the_region_split(tmp_path):
+    # future-works §2: with regions=[None,'edge'] the type count doubles but a
+    # COUNT-only assert cannot catch an ordering divergence. Prove the
+    # single-sourced numbering + the element-wise guard cover the region-split path.
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation, assert_sheet_block_matches_data
+    cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
+    cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
+    cfg.settings.hpc.modules = ["lammps"]
+    sim = FiniteHeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()                                        # build passes the guard -> no divergence
+    offset = (len(sim._pm.types.ids_by_component('sub'))
+              + len(sim._pm.types.ids_by_component('tip')))
+    # POSITIVE: unified PM's sheet block == hetero_rep.data's block, element-wise.
+    assert_sheet_block_matches_data(sim._pm, sim._hetero_rep_path, offset=offset)
+
+
+def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
+    # NEGATIVE: a data file whose sheet block is a PERMUTATION of the PM's block at
+    # equal count (the silent-corruption mode). The guard MUST raise; a count check
+    # would not.
+    from src.builders.hetero_afm import assert_sheet_block_matches_data
+    pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
+                                    ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
+    data = _write_data_with_masses(
+        tmp_path / "perm.data",
+        masses=[("MoS2", "S", 32.1, "edge"), ("MoS2", "Mo", 95.9, None),   # SWAPPED
+                ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
+    with pytest.raises((AssertionError, ValueError), match=r"[Ll]ayout|order|mismatch"):
+        assert_sheet_block_matches_data(pm, data, offset=0)
