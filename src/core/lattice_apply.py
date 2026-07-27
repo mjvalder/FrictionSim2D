@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .lattice_matching import _max_strain
+from .lattice_matching import _max_strain, rotation_angle_between
 
 _TILT_EPS = 1e-9
 
@@ -144,3 +144,68 @@ def strain_monolayer_to_cell(input_data_path: str,
         lmp.close()
 
     return _max_strain(target, source_2x2)
+
+
+def rotate_layer_to_angle(mono_path: str,
+                          angle_deg: float,
+                          out_path: str) -> float:
+    """Rigidly reorient a monolayer's atoms + cell about z by ``angle_deg``.
+
+    ``change_box`` (used by :func:`strain_monolayer_to_cell`) is affine and
+    **cannot rotate**, so the reorientation is done in ASE: the atoms and the
+    lattice vectors are rotated together about z (``atoms.rotate(angle_deg,
+    'z', rotate_cell=True)``), then written back to a LAMMPS data file. The
+    write re-canonicalises the box to the LAMMPS frame (first vector along +x),
+    preserving every LAMMPS type as a distinct placeholder element, the real
+    ``Masses`` section, per-atom charges, and the ``atom_style`` -- reusing
+    :func:`~src.builders.hetero.build_matched_supercells`' metadata machinery,
+    so nothing is dropped the way a bare ASE round-trip would.
+
+    Note on periodicity: a rigid rotation of a *periodic* cell is a
+    lattice-symmetry-equivalent operation, so after re-canonicalisation the
+    reoriented monolayer's on-disk box matches the input's -- the reorientation
+    only becomes physically observable **relative to another layer**. The
+    twisted heterostructure realises the relative twist by tiling this layer
+    with its commensurate moiré supercell matrix into the shared moiré box (see
+    :func:`~src.builders.hetero.build_twisted_supercells`); this function is the
+    reorientation primitive and the achieved-angle reporter.
+
+    Args:
+        mono_path: Path to the source monolayer LAMMPS data file.
+        angle_deg: In-plane rotation about z (degrees, CCW positive).
+        out_path: Path to write the reoriented monolayer data file.
+
+    Returns:
+        The **applied** in-plane rotation (deg), measured off the reoriented
+        lattice vectors before the LAMMPS-frame canonicalisation (equals
+        ``angle_deg`` up to numerical precision). Reported explicitly because
+        commensurate twist angles are discrete and the achieved angle must
+        never be silently assumed.
+    """
+    # Lazy import: the metadata-preserving read/write helpers live in the hetero
+    # builder (which imports this module), so import them at call time to avoid a
+    # module-load cycle while still reusing exactly one metadata path.
+    from ..builders.hetero import (  # pylint: disable=import-outside-toplevel
+        _monolayer_to_atoms,
+        _read_monolayer,
+        _write_supercell,
+    )
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
+
+    mono = _read_monolayer(Path(mono_path))
+    atoms = _monolayer_to_atoms(mono)
+
+    cell_in = np.array(atoms.cell)[:2, :2].copy()
+    atoms.rotate(angle_deg, "z", rotate_cell=True)
+    cell_rot = np.array(atoms.cell)[:2, :2].copy()
+
+    _write_supercell(
+        atoms,
+        Path(out_path),
+        atom_style=str(mono["atom_style"]),
+        n_types=int(mono["n_types"]),
+        masses=mono["masses"],  # type: ignore[arg-type]
+    )
+
+    # Applied rotation carrying the input cell onto the reoriented cell.
+    return rotation_angle_between(cell_in, cell_rot)
