@@ -33,3 +33,21 @@ def test_extract_surface_cell_is_2x2_and_one_layer(tmp_path):
     from ase.io import read
     z = read(str(mono_path), format="lammps-data").get_positions()[:, 2]
     assert z.ptp() < 3.0                          # a single surface layer, not a bulk slab
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_matched_crystalline_substrate_equals_hetero_box(tmp_path):
+    from ase.io import read
+    from src.builders.components import build_matched_crystalline_substrate
+    # NB: the plan draft used a 38x44 box, but that is incommensurate with Si's
+    # 10.887 A (2x2) surface cell (38/10.887 = 3.49 -> no integer supercell within
+    # 2*strain_tol) and would fail loud by design. 33x43 is reachable by a 3x4
+    # supercell within tolerance (residual ~0.013), so it exercises the strain path.
+    hetero_box = np.array([[33.0, 0.0], [0.0, 43.0]])
+    sub = _si_sub()
+    p = build_matched_crystalline_substrate(hetero_box, sub, thickness=12.0, build_dir=tmp_path)
+    atoms = read(str(p), format="lammps-data")
+    cell = atoms.get_cell()
+    assert abs(cell[0, 0] - 33.0) < 1e-4 and abs(cell[1, 1] - 43.0) < 1e-4   # box == hetero box
+    zspan = atoms.get_positions()[:, 2].ptp()
+    assert 8.0 <= zspan <= 16.0                                             # ~12 A thickness

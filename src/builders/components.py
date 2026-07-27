@@ -1250,6 +1250,103 @@ def extract_substrate_surface_cell(
     return surface_cell, mono_path
 
 
+def build_matched_crystalline_substrate(
+    hetero_box: np.ndarray,
+    sub_config: SubstrateConfig,
+    thickness: float,
+    build_dir: Path,
+) -> Path:
+    """Build a crystalline substrate strained exactly onto the fixed hetero box.
+
+    Fixed-reference coincidence build: the hetero box is pinned and the crystalline
+    substrate is strained onto it so the substrate tiles the same periodic cell with
+    no seam. Pipeline: extract the substrate surface cell ->
+    :func:`~src.core.lattice_matching.match_to_fixed_box` (fail-loud if the residual
+    strain exceeds ``2 * match_strain_tol``) -> apply the supercell matrix in-plane
+    -> strain onto the hetero box -> a proper full-thickness crystalline block.
+
+    **Thickness note:** the plan's "replicate the single surface layer in z" is not
+    physically viable — a lone atomic layer stacked at the intra-cell spacing puts
+    atoms ~1.4 Å apart (Si bond ~2.35 Å) and blows up under Stillinger-Weber. The
+    z-thickness is therefore built from the true z-periodic crystalline repeat via
+    :func:`create_orthogonal_slab` (``target_z = thickness``), which is the physical
+    realisation of "replicate in z to thickness". The in-plane result is identical:
+    the substrate lands on the hetero box exactly.
+
+    Args:
+        hetero_box: 2×2 fixed in-plane hetero box (row vectors, Å, LAMMPS-canonical
+            — first vector along x). Pinned; never strained.
+        sub_config: Crystalline substrate configuration (``cif_path``, ``mat``,
+            optional ``match_strain_tol``).
+        thickness: Target substrate thickness (Å).
+        build_dir: Output directory for ``sub.lmp`` and intermediates.
+
+    Returns:
+        Path to ``sub.lmp`` — the crystalline substrate on the hetero box exactly.
+
+    Raises:
+        ValueError: If no substrate supercell matches the box within
+            ``2 * match_strain_tol`` (propagated from ``match_to_fixed_box``), or if
+            the least-strain supercell is sheared (non-diagonal) — an orthogonal box
+            cannot be tiled by a sheared substrate cell.
+    """
+    from ..core.lattice_matching import match_to_fixed_box
+    from ..core.lattice_apply import strain_monolayer_to_cell
+
+    hetero_box = np.asarray(hetero_box, dtype=float)
+    build_dir = Path(build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) Surface cell for the coincidence search (the mono file is the surface
+    #    representation; only the in-plane cell metric drives the match).
+    surface_cell, _ = extract_substrate_surface_cell(sub_config, build_dir)
+
+    # 2) Fixed-reference match: pin the hetero box, strain the substrate onto it.
+    strain_tol = getattr(sub_config, 'match_strain_tol', 0.02)
+    match = match_to_fixed_box(hetero_box, surface_cell, strain_tol=strain_tol)
+    matrix = match.supercell_matrix
+    if int(matrix[0, 1]) != 0 or int(matrix[1, 0]) != 0:
+        raise ValueError(
+            f"Crystalline substrate match yielded a sheared supercell {matrix.tolist()}; "
+            "an orthogonal hetero box cannot be tiled by a sheared substrate cell. "
+            "Use an amorphous substrate ([sub] amorph = a) or a commensurate "
+            "orthogonal substrate/hetero pair."
+        )
+    nx, ny = int(matrix[0, 0]), int(matrix[1, 1])
+
+    # 3) Full-thickness crystalline block (the true z-periodic repeat), built to
+    #    `thickness` in z — the physical form of "replicate in z to thickness".
+    cif_path = get_material_path(sub_config.cif_path)
+    surf_lx = float(surface_cell[0, 0])
+    surf_ly = float(surface_cell[1, 1])
+    block = build_dir / f"{sub_config.mat}_crystal_block.lmp"
+    create_orthogonal_slab(
+        cif_path, block, target_x=surf_lx, target_y=surf_ly, target_z=thickness
+    )
+
+    # 4) Apply the supercell matrix in-plane (tile to ~the hetero footprint).
+    rep = build_dir / f"{sub_config.mat}_crystal_rep.lmp"
+    if nx == 1 and ny == 1:
+        shutil.copy(block, rep)
+    else:
+        _duplicate_lammps_data(block, rep, nx, ny, 1)
+
+    # 5) Strain the tiled block exactly onto the fixed hetero box (no seam). The
+    #    out-of-plane vector and z coordinates are left untouched.
+    sub_lmp = build_dir / "sub.lmp"
+    strain_monolayer_to_cell(str(rep), str(sub_lmp), hetero_box)
+
+    block.unlink(missing_ok=True)
+    rep.unlink(missing_ok=True)
+    logger.info(
+        "Built matched crystalline substrate %s: %dx%d surface supercell strained "
+        "onto %.2f x %.2f A hetero box (residual strain %.4f), thickness ~%.1f A.",
+        sub_config.mat, nx, ny, float(hetero_box[0, 0]), float(hetero_box[1, 1]),
+        match.residual_strain, thickness,
+    )
+    return sub_lmp
+
+
 def get_amorphous_path(mat_name: str) -> Optional[Path]:
     """Get path to pre-generated amorphous material file if it exists.
     
