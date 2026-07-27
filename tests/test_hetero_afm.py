@@ -306,3 +306,27 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
     friction = list((run_dir / "L1" / "results").glob("friction_*"))
     assert friction and all(p.stat().st_size > 0 for p in friction), \
         f"no non-empty friction output written by the slide: {friction}"
+
+
+# --- D2b: crystalline lattice-matched substrate branch ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_uses_crystalline_matched_substrate(tmp_path):
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    raw = _afm_hetero_raw()
+    raw["sub"]["amorph"] = "c"
+    raw["sub"]["match"] = True
+    # Si vs the MoS2/WS2 replicated box (~51x44 A) needs a wider tol: the best Si
+    # supercell (5x4 of the 10.887 A surface cell) strains ~6.4% onto the box, above
+    # the 0.02 production default. Widen in the TEST config only (production default
+    # in SubstrateConfig stays 0.02); documents the D2b E2E commensurability risk.
+    raw["sub"]["match_strain_tol"] = 0.05
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+    from ase.io import read
+    sub = read(str(next(Path(tmp_path).rglob("sub*.lmp"))), format="lammps-data")
+    lx, ly, _ = sim._hetero_rep_box
+    cell = sub.get_cell()
+    assert abs(cell[0, 0] - lx) < 1e-3 and abs(cell[1, 1] - ly) < 1e-3   # substrate box == hetero box (no seam)

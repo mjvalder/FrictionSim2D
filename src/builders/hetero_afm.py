@@ -12,9 +12,11 @@ import logging
 import math
 from pathlib import Path
 
+import numpy as np
 from ase.data import atomic_masses, atomic_numbers
 from ase.io import read
 
+from src.builders import components
 from src.builders.afm import AFMSimulation
 from src.builders.hetero import build_hetero_structure, register_sheet_block
 from src.core.potential_manager import PotentialManager
@@ -194,6 +196,77 @@ class HeteroAFMSimulation(AFMSimulation):
             "%dx%d -> %.2f x %.2f A footprint.", lx_cell, ly_cell, nx, ny, lx, ly,
         )
         return rep
+
+    def _build_components(self, build_dir):
+        """D2 tip + substrate build, with an opt-in crystalline-matched substrate (D2b).
+
+        Mirrors :meth:`AFMSimulation._build_components` (tip, optional flake, and
+        langevin region handling are unchanged), overriding only the substrate: when
+        ``sub.amorph == 'c' and sub.match`` the substrate is built by straining its
+        surface cell onto the fixed hetero box (``self._hetero_rep_box``) via
+        :func:`~src.builders.components.build_matched_crystalline_substrate`, so it
+        tiles the periodic cell with no seam. Otherwise the amorphous/unmatched D2
+        path (:func:`~src.builders.components.build_substrate`) is used unchanged.
+
+        ``_build_components`` is fully overridden (not extended) because the base
+        builds the substrate inline; Task 5's scope is this file only, so the tip /
+        flake / langevin blocks are re-expressed here rather than by adding a hook to
+        ``afm.py``. Returns the base's ``(tip_path, tip_radius, sub_path)`` tuple.
+        """
+        tip_path, tip_radius = components.build_tip(
+            self.config.tip, build_dir, self.config.settings
+        )
+        logger.info("Built tip: %s", tip_path.name)
+
+        if self.config.flake is not None:
+            self.flake_path, self.flake_dims = components.build_flake_component(
+                self.config.flake, build_dir
+            )
+            logger.info("Built flake: %s", self.flake_path.name)
+
+        sub_path = None
+        if self.config.sub is not None:
+            if self.config.sub.amorph == 'c' and self.config.sub.match:
+                lx, ly, _ = self._hetero_rep_box
+                hetero_box = np.array([[lx, 0.0], [0.0, ly]])
+                sub_path = components.build_matched_crystalline_substrate(
+                    hetero_box, self.config.sub, self.config.sub.thickness, build_dir,
+                )
+                logger.info("Built crystalline-matched substrate: %s", sub_path.name)
+            else:
+                sub_path = components.build_substrate(
+                    self.config.sub,
+                    build_dir,
+                    self.sheet_dims,
+                    settings=self.config.settings,
+                    target_x=self.config.sub.x if self.config.general.finite_sheet else None,
+                    target_y=self.config.sub.y if self.config.general.finite_sheet else None,
+                )
+                logger.info("Built substrate: %s", sub_path.name)
+
+        if self.config.settings.thermostat.type == 'langevin':
+            tip_height = tip_radius / self.config.settings.geometry.tip_reduction_factor
+            components.apply_langevin_regions(
+                component_name='tip',
+                component_path=tip_path,
+                config=self.config.tip,
+                settings=self.config.settings,
+                component_height=tip_height,
+            )
+            logger.info("Applied Langevin regions to tip")
+
+            if self.config.sub is not None:
+                components.apply_langevin_regions(
+                    component_name='sub',
+                    component_path=sub_path,
+                    config=self.config.sub,
+                    settings=self.config.settings,
+                    component_height=self.config.sub.thickness,
+                    substrate_thickness=self.config.sub.thickness,
+                )
+                logger.info("Applied Langevin regions to substrate")
+
+        return tip_path, tip_radius, sub_path
 
     def _build_sheet_for_layers(self, build_dir, n_layers):
         """Override the AFM sheet source: the replicated hetero stack is the sheet.
