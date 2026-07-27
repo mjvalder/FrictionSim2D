@@ -414,3 +414,34 @@ class TestRotationAngleFromMatch:
         angle = rotation_angle_from_match(match)
         assert abs(angle - 45.0) < 0.1
 
+
+
+# --- D2b: fixed-reference substrate match (match_to_fixed_box) ---
+
+def test_match_to_fixed_box_pins_box_and_strains_other():
+    from src.core.lattice_matching import match_to_fixed_box, FixedBoxMatch
+    # box = a 20x22 orthogonal hetero cell; other = a ~4.1x4.5 crystalline surface cell.
+    # (A perfect 4x4 cell is genuinely incommensurate with 22 -> 22/4 = 5.5, min
+    # residual 0.083 > 0.05; these near-commensurate lengths let a 5x5 supercell
+    # strain onto the box within tol while still exercising a nonzero strain.)
+    box = np.array([[20.0, 0.0], [0.0, 22.0]])
+    other = np.array([[4.1, 0.0], [0.0, 4.5]])
+    m = match_to_fixed_box(box, other, strain_tol=0.05, max_supercell=8)
+    assert isinstance(m, FixedBoxMatch)
+    # box_cell returned unchanged
+    assert np.allclose(m.box_cell, box)
+    # ASSERT THE ALGEBRA: the integer supercell of `other`, once strain-closed, lands on `box`.
+    # Use the module's confirmed row-vector convention sc = M @ cell (lattice_matching.py:163).
+    sup = m.supercell_matrix @ other                       # 2x2 supercell BEFORE strain
+    from src.core.lattice_matching import _max_strain as _ms
+    assert abs(_ms(box, sup) - m.residual_strain) < 1e-9   # residual is the box<-sup strain
+    # and the residual is within tol -> the strained supercell equals the box within that strain
+    assert m.residual_strain <= 0.05 + 1e-9
+
+
+def test_match_to_fixed_box_fails_loud_when_incommensurate():
+    from src.core.lattice_matching import match_to_fixed_box
+    box = np.array([[20.0, 0.0], [0.0, 22.0]])
+    other = np.array([[7.31, 0.0], [0.0, 3.17]])   # no low-order supercell within tol
+    with pytest.raises(ValueError, match=r"strain"):
+        match_to_fixed_box(box, other, strain_tol=0.001, max_supercell=3)

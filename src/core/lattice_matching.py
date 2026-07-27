@@ -198,6 +198,92 @@ def find_coincidence_lattice(
     return best
 
 
+@dataclass
+class FixedBoxMatch:
+    """A fixed-reference coincidence match: box pinned, other cell strained.
+
+    Unlike :class:`MatchResult` (which strains both cells onto a mean cell),
+    this pins ``box_cell`` and strains only the supercell of the other cell
+    onto it. See the D2b crystalline-substrate design (§4.1).
+
+    Attributes:
+        supercell_matrix: Integer 2×2 matrix applied to ``other_cell``
+            (row-vector convention ``supercell = M @ other_cell``).
+        residual_strain: ``_max_strain(box_cell, other_supercell)`` — the
+            strain the supercell absorbs to land on the pinned box.
+        box_cell: The pinned reference cell (returned unchanged).
+    """
+    supercell_matrix: np.ndarray
+    residual_strain: float
+    box_cell: np.ndarray
+
+
+def match_to_fixed_box(
+    box_cell: np.ndarray,
+    other_cell: np.ndarray,
+    strain_tol: float = 0.02,
+    max_supercell: int = 10,
+    area_tol: float = 0.10,
+) -> FixedBoxMatch:
+    """Pin ``box_cell``; strain a supercell of ``other_cell`` onto it.
+
+    Enumerates integer supercells of ``other_cell`` (via :func:`_enumerate_matrices`,
+    with the same area pre-filter as :func:`find_coincidence_lattice`) and returns
+    the one whose supercell, strained onto the fixed ``box_cell``, needs the
+    smallest ``_max_strain(box_cell, other_supercell)``. Accepts only if that
+    residual strain is ``<= 2 * strain_tol``.
+
+    Deliberately diverges from :func:`find_coincidence_lattice` (which strains
+    both cells onto a mean cell): here the box is load-bearing and never strained.
+    See the D2b spec §4.1. Reuses ``_enumerate_matrices``/``_max_strain`` so the
+    matrix convention matches sheet–sheet matching exactly.
+
+    Args:
+        box_cell: 2×2 pinned reference cell (row vectors, Å) — never strained.
+        other_cell: 2×2 lattice matrix to supercell + strain onto the box.
+        strain_tol: Base strain tolerance; the accept bound is ``2 * strain_tol``.
+        max_supercell: Maximum supercell repeat along each axis.
+        area_tol: Relative tolerance on supercell/box area agreement (pre-filter).
+
+    Returns:
+        :class:`FixedBoxMatch` with the least-strain supercell.
+
+    Raises:
+        ValueError: If no supercell matches within ``2 * strain_tol`` — names
+            the best achievable strain so the user can fall back to amorphous.
+    """
+    box_cell = np.asarray(box_cell, dtype=float)
+    other_cell = np.asarray(other_cell, dtype=float)
+    box_area = abs(float(np.linalg.det(box_cell)))
+
+    best: Optional[Tuple[np.ndarray, float]] = None
+    for matrix in _enumerate_matrices(max_supercell):
+        sup = matrix @ other_cell  # type: ignore[operator]
+        sup_area = abs(float(np.linalg.det(sup)))
+        if sup_area < 1.0:
+            continue
+        # Area pre-filter: box must be reachable by strain (mirror find_coincidence_lattice).
+        if abs(sup_area - box_area) / max(sup_area, box_area) > area_tol:
+            continue
+        eps = _max_strain(box_cell, sup)
+        if best is None or eps < best[1]:
+            best = (matrix.copy(), eps)
+
+    if best is None or best[1] > 2.0 * strain_tol:
+        got = ("no supercell within max_supercell/area_tol"
+               if best is None else f"best residual strain {best[1]:.4f}")
+        raise ValueError(
+            f"Substrate cannot be matched onto the fixed hetero box within "
+            f"{2 * strain_tol:.4f} strain ({got}). Use an amorphous substrate "
+            f"([sub] amorph = a) or widen match_strain_tol."
+        )
+    return FixedBoxMatch(
+        supercell_matrix=best[0],
+        residual_strain=best[1],
+        box_cell=box_cell,
+    )
+
+
 def rotation_angle_from_match(match: MatchResult) -> float:
     """Extract the rotation angle (degrees) that aligns material B to material A.
 
