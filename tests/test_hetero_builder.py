@@ -901,3 +901,29 @@ def test_edge_atoms_on_true_perimeter_not_interior(tmp_path):
         f"only {near_perimeter.mean():.0%} of edge atoms are within {ew} A of the "
         f"patch perimeter -- edge band buried in the interior (ordering regression)"
     )
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_run0_smoke(tmp_path):
+    """The finite edge-typed hetero.data + system.in.settings assemble in LAMMPS:
+    every (doubled) pair coeff is set and a finite ``run 0`` energy results with
+    no lost atoms (structure-only; the run-phase edge fix is D5's job)."""
+    cfg = _finite_hetero_cfg(tmp_path)
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    energy = _lammps_run0_energy(stack.data_path, stack.settings_path)
+    assert np.isfinite(energy) and abs(energy) < 1e6  # physical, not exploded
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_edge_and_multilayer_coexist(tmp_path):
+    """Hetero materials share types across their layers (no per-layer type
+    expansion), so multilayer + edge regions coexist cleanly -- there is no
+    mutual-exclusivity guard to satisfy (unlike the homogeneous afm.py path).
+    A 2-layer-per-material finite stack still doubles into one core/edge block
+    per material."""
+    cfg = _finite_hetero_cfg(tmp_path, layers=[2])
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    assert stack.total_types >= 4  # doubled core/edge, still one block per material
+    # No lost atoms with the extra layers + edge types either.
+    energy = _lammps_run0_energy(stack.data_path, stack.settings_path)
+    assert np.isfinite(energy) and abs(energy) < 1e6
