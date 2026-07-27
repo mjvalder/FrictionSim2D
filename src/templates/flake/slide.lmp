@@ -1,0 +1,197 @@
+# LAMMPS Input Script for Flake-on-Sheet Sliding (D4)
+# A finite flake driven across a {{ n_layers }}-layer substrate sheet by a
+# {{ drive_method }} drive (no tip, no substrate slab). constraint_mode: {{ constraint_mode }}
+#
+# Derived from templates/hetero/slide.lmp (the proven D1 slide body). Differences:
+#   * the DRIVEN group is the flake (by type), NOT a sheet layer_N;
+#   * the sheet bottom band (layer_1) is fixed; the sheet interior
+#     (layer_2..layer_{{ n_layers }}) + the flake are thermostatted;
+#   * the tip-approach, top-sheet-layer rigidify and normal-load blocks are
+#     DROPPED -- a flake slide has no tip and no load on the sheet top; the
+#     flake sits at the minimized gap;
+#   * optional corner-hold keeps the flake rigid in-plane while driven;
+#   * friction proxy = bottom-sheet reaction force (many-body sw observable).
+
+{% if scan_speed_config is iterable and scan_speed_config is not string %}
+variable        speed index {{ scan_speed_config | join(' ') }}
+label           speed_loop
+{% else %}
+variable        speed equal {{ scan_speed_config }}
+{% endif %}
+
+{% if pressures is iterable and pressures is not string %}
+variable        pressure index {{ pressures | join(' ') }}
+label           pressure_loop
+{% else %}
+variable        pressure equal {{ pressures }}
+{% endif %}
+
+{% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
+variable        a index {{ scan_angle_config | join(' ') }}
+label           angle_loop
+{% else %}
+variable        a equal {{ scan_angle_config if scan_angle_config is not none else 0 }}
+{% endif %}
+
+{% set scan_angle_force_is_sequence = scan_angle_force is iterable and scan_angle_force is not string and scan_angle_force|length > 0 %}
+{% if scan_angle_force_is_sequence %}
+variable        scan_angle_force index {{ scan_angle_force | join(' ') }}
+{% elif scan_angle_force is number %}
+variable        scan_angle_force equal {{ scan_angle_force }}
+{% endif %}
+
+clear
+units           metal
+atom_style      {{ atom_style }}
+boundary        p p p
+
+neighbor        {{ neighbor_list }} bin
+{{ neigh_modify_command }}
+
+comm_style      tiled
+
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -15.0 {{ zhi + 15 }} units box
+read_data       {{ data_file }}{% if reserve_virtual_type %} extra/atom/types 1{% endif %} group all_atoms
+change_box      all z final -15.0 {{ zhi + 15 }} units box
+
+include         {{ potential_file }}
+
+# ---- Substrate-sheet layer groups by initial z-slab (shared types, so region not type) ----
+{% for layer in sheet_layers %}
+region          reg_layer_{{ layer.idx }} block INF INF INF INF {{ '%.4f'|format(layer.zlo) }} {{ '%.4f'|format(layer.zhi) }} units box
+group           layer_{{ layer.idx }} region reg_layer_{{ layer.idx }}
+{% endfor %}
+
+# ---- Flake group (by type: the driven body) ----
+group           flake type {{ flake_group_types }}
+
+{% if pot_type == 'reaxff' %}
+fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
+{% elif pot_type == 'reax/c' %}
+fix             qeq all qeq/reax 1 0.0 10.0 1.0e-6 reax/c
+{% endif %}
+
+{% if dump_enabled %}
+dump            sys all atom {{ dump_freq }} {{ dump_file_pattern }}
+{% endif %}
+
+balance         1.0 rcb
+
+min_style       {{ min_style }}
+{{ minimization_command }}
+
+# Thermostat: the substrate-sheet interior (layer 2 .. {{ n_layers }}) + the flake.
+group           center union {% for i in range(2, n_layers + 1) %}layer_{{ i }} {% endfor %}flake
+
+velocity        center create {{ temp }} {{ range(1, 999999) | random }}
+{% if thermostat_type == 'nose-hoover' %}
+fix             nvt_center center nvt temp {{ temp }} {{ temp }} $(100.0*dt)
+{% else %}
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ range(1, 999999) | random }} zero yes
+fix             nve_center center nve
+{% endif %}
+
+timestep        {{ timestep }}
+thermo          {{ thermo }}
+
+# Substrate-sheet bottom band (layer 1): fixed.
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# Flake COM (the drive observable, logged to the results file).
+compute         COM_flake flake com
+variable        comx_flake equal c_COM_flake[1]
+variable        comy_flake equal c_COM_flake[2]
+variable        comz_flake equal c_COM_flake[3]
+
+{% if corner_hold %}
+# Corner-hold: tether the flake corner atoms in xy so the flake stays rigid
+# while driven (matching the AFM indentation convention). corner_hold=false
+# leaves the flake deformable.
+group           flake_corner type {{ flake_corner_types }}
+fix             corner_hold flake_corner spring/self {{ flake_corner_k }} xy
+{% endif %}
+
+# Friction proxy: bottom-sheet reaction force.
+variable        sx equal f_fsbot[1]*{{ ev_a_to_nn }}
+variable        sy equal f_fsbot[2]*{{ ev_a_to_nn }}
+variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
+
+{% if has_internal_lj %}
+# Many-body potential ({{ pot_type }}): compute group/group not supported.
+# Using bottom-sheet reaction forces as lateral friction proxy.
+variable        xfrict equal v_sx
+variable        yfrict equal v_sy
+{% else %}
+compute         frict flake group/group layer_{{ n_layers }}
+variable        xfrict equal c_frict[1]
+variable        yfrict equal c_frict[2]
+{% endif %}
+
+run             10000
+
+{% if constraint_mode == 'com_spring' %}
+# COM spring tethering the flake to the sheet top band.
+fix             com_spring flake spring couple layer_{{ n_layers }} {{ bond_spring_ev }} 0.0 0.0 NULL 0.0
+{% endif %}
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+{% if drive_method == 'smd' %}
+fix             spr flake smd cvel {{ driving_spring_ev }} ${speed/100} tether $(v_speed_x) $(v_speed_y) NULL 0.0
+
+{% elif drive_method == 'fix_move' %}
+velocity        flake set 0.0 0.0 0.0 units box
+velocity        flake set $(v_speed_x*v_speed/100) $(v_speed_y*v_speed/100) 0.0
+
+{% elif drive_method == 'virtual_atom' %}
+create_atoms    {{ num_atom_types }} single $(xcm(flake,x)) $(xcm(flake,y)) $(xcm(flake,z)+{{ virtual_offset }}) units box
+group           virtual type {{ num_atom_types }}
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr flake spring couple virtual {{ driving_spring_ev }} 0.0 0.0 NULL 0
+fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
+{% endif %}
+
+fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_comx_flake v_comy_flake v_comz_flake file {{ results_file_pattern }}
+
+run             {{ run_steps }}
+
+{% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
+{% if scan_angle_force is number or scan_angle_force_is_sequence %}
+if              'abs(v_pressure-v_scan_angle_force) < 1.0e-12' then &
+                "next a" &
+                "clear" &
+                "jump SELF angle_loop"
+{% else %}
+next            a
+clear
+jump            SELF angle_loop
+{% endif %}
+{% endif %}
+
+{% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 and scan_angle_force_is_sequence %}
+if              'abs(v_pressure-v_scan_angle_force) < 1.0e-12' then "next scan_angle_force"
+{% endif %}
+
+{% if pressures is iterable and pressures is not string %}
+next            pressure
+clear
+{% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
+variable        a delete
+{% endif %}
+jump            SELF pressure_loop
+{% endif %}
+
+{% if scan_speed_config is iterable and scan_speed_config is not string %}
+next            speed
+clear
+{% if pressures is iterable and pressures is not string %}
+variable        pressure delete
+{% endif %}
+{% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
+variable        a delete
+{% endif %}
+jump            SELF speed_loop
+{% endif %}
