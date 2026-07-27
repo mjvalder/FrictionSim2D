@@ -222,6 +222,7 @@ def register_hetero_potentials(
     settings: GlobalSettings,
     workdir: PathLike,
     reserve_virtual_type: bool = False,
+    regions: Optional[List[Optional[str]]] = None,
 ) -> HeteroPotentials:
     """Register the stacked materials as PotentialManager components.
 
@@ -263,6 +264,15 @@ def register_hetero_potentials(
             describe the REAL material types only (the virtual type is NOT a
             material); only ``len(hp.pm.types)`` includes it (== real count + 1).
             Default False leaves ALL behavior byte-identical.
+        regions: Optional per-type region split forwarded (through the shared
+            :func:`register_sheet_block`) to each material's
+            :meth:`PotentialManager.register_component`. The finite/edge path
+            passes ``[None, 'edge']`` so every material's types double into an
+            interleaved core (odd) / edge (even) pair, matching the layout
+            :func:`~src.builders.components.apply_sheet_edge_types` writes into
+            the assembled data file. Edge ids are then exposed via
+            ``pm.types.ids_by_component_region('sheet_i', 'edge')``. Default
+            ``None`` leaves the periodic registration byte-identical.
 
     Returns:
         :class:`HeteroPotentials` exposing the configured manager, the written
@@ -297,8 +307,10 @@ def register_hetero_potentials(
     # 1. One component per material -> disjoint, contiguous global type blocks
     #    (the PM's TypeRegistry assigns the IDs; we never hand-roll them).
     #    Single-sourced through register_sheet_block so the unified AFM PM (D2)
-    #    numbers sheet_1/sheet_2 identically to this data-file spine.
-    component_names = register_sheet_block(pm, sheets)
+    #    numbers sheet_1/sheet_2 identically to this data-file spine. When
+    #    ``regions`` is given (finite/edge path, [None, 'edge']), every material's
+    #    types double into an interleaved core/edge pair through that one call.
+    component_names = register_sheet_block(pm, sheets, regions=regions)
 
     # 1b. Optionally reserve the dedicated non-interacting virtual type for the
     #     virtual_atom drive -- BEFORE the self-interactions, mirroring the

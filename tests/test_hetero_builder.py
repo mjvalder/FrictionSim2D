@@ -751,3 +751,42 @@ def test_get_masses_string_no_overlapping_ranges_across_components(tmp_path):
                 f"type {atype.type_id} ({atype.element}) resolved to "
                 f"{final[atype.type_id]}, expected ~{expected:.2f}"
             )
+
+
+# =============================================================================
+# B3: edge-atom typing for finite hetero sheets
+# =============================================================================
+
+
+def test_register_hetero_potentials_edge_regions_disjoint(tmp_path):
+    """With ``regions=[None, 'edge']`` each material's types double into an
+    interleaved core/edge pair (mirroring ``apply_sheet_edge_types``), and the
+    per-material blocks stay disjoint.
+    """
+    sheets = [
+        _sheet_config("h-MoS2", MOS2_CIF, MOS2_POT),
+        _sheet_config("h-WS2", WS2_CIF, WS2_POT),
+    ]
+    hp = register_hetero_potentials(
+        sheets, load_settings(), workdir=tmp_path, regions=[None, "edge"]
+    )
+    c1 = hp.pm.types.ids_by_component_region("sheet_1", "edge")
+    c2 = hp.pm.types.ids_by_component_region("sheet_2", "edge")
+    core1 = hp.pm.types.ids_by_component_region("sheet_1", None)
+    assert c1 and c2  # each material has edge types
+    assert set(c1).isdisjoint(core1)  # edge disjoint from core
+    assert set(hp.pm.types.ids_by_component("sheet_1")).isdisjoint(
+        hp.pm.types.ids_by_component("sheet_2")
+    )
+
+
+def test_register_hetero_potentials_no_regions_unchanged(tmp_path):
+    """Default ``regions=None`` registers no edge types (byte-identical to the
+    periodic path)."""
+    sheets = [
+        _sheet_config("h-MoS2", MOS2_CIF, MOS2_POT),
+        _sheet_config("h-WS2", WS2_CIF, WS2_POT),
+    ]
+    hp = register_hetero_potentials(sheets, load_settings(), workdir=tmp_path)
+    assert hp.pm.types.ids_by_component_region("sheet_1", "edge") == []
+    assert hp.pm.types.ids_by_component_region("sheet_2", "edge") == []
