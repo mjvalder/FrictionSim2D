@@ -1609,3 +1609,25 @@ def _apply_finite_hetero_edges(
     )
     stack.settings_path = Path(hp_edge.settings_path)
     stack.total_types = len(hp_edge.pm.types)
+
+    # Emit the edge groups explicitly. get_component_groups_string special-cases
+    # only the literal name 'sheet', so sheet_1/sheet_2 fall to the generic
+    # {name}_all branch with NO 2D_edge split -- so the per-material edge groups,
+    # the combined 2D_edge union, and the 2D union (sheet_1_all + sheet_2_all,
+    # both already written by write_file) are appended here so the finite run
+    # templates' `group sheet_edge intersect 2D 2D_edge` fires unchanged.
+    component_names = hp_edge.component_names
+    group_lines = ["", "# Finite-sheet edge groups (per-material + combined 2D)"]
+    for name in component_names:
+        edge_ids = hp_edge.pm.types.ids_by_component_region(name, "edge")
+        group_lines.append(
+            f"group {name}_edge type {' '.join(str(tid) for tid in edge_ids)}"
+        )
+    group_lines.append(
+        f"group 2D_edge union {' '.join(f'{name}_edge' for name in component_names)}"
+    )
+    group_lines.append(
+        f"group 2D union {' '.join(f'{name}_all' for name in component_names)}"
+    )
+    with open(stack.settings_path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(group_lines) + "\n")

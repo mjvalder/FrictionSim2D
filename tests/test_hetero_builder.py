@@ -864,3 +864,40 @@ def test_finite_hetero_builds_with_doubled_types(tmp_path):
     text = Path(stack.data_path).read_text()
     m = re.search(r"(\d+)\s+atom types", text)
     assert m and int(m.group(1)) == 2 * single  # every real type split core/edge
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_emits_2D_edge_union(tmp_path):
+    """The finite build emits per-material edge groups plus the combined
+    ``2D_edge`` union and a ``2D`` union (so the finite run templates'
+    ``group sheet_edge intersect 2D 2D_edge`` fires unchanged)."""
+    cfg = _finite_hetero_cfg(tmp_path)
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    settings_text = Path(stack.settings_path).read_text()
+    assert "group sheet_1_edge" in settings_text
+    assert "group sheet_2_edge" in settings_text
+    assert "group 2D_edge union sheet_1_edge sheet_2_edge" in settings_text
+    assert "group 2D union" in settings_text
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_edge_atoms_on_true_perimeter_not_interior(tmp_path):
+    """Regression guard for the ordering invariant: because edge typing runs
+    AFTER matching + stacking (on the assembled patch), the edge-typed atoms sit
+    on the patch's TRUE perimeter -- NOT buried in the supercell interior (the
+    failure the pre-tiling order would produce)."""
+    cfg = _finite_hetero_cfg(tmp_path)
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    type_id, xy = _parse_lammps_atoms(stack.data_path)
+    ew = cfg.settings.geometry.finite_sheet_edge_width
+    lo, hi = xy.min(axis=0), xy.max(axis=0)
+    # apply_sheet_edge_types numbering: core -> 2(t-1)+1 (odd), edge -> 2(t-1)+2 (even).
+    edge_mask = (type_id % 2 == 0)
+    assert edge_mask.any(), "no edge-typed atoms found"
+    e = xy[edge_mask]
+    near_perimeter = ((e[:, 0] - lo[0] < ew) | (hi[0] - e[:, 0] < ew) |
+                      (e[:, 1] - lo[1] < ew) | (hi[1] - e[:, 1] < ew))
+    assert near_perimeter.mean() > 0.8, (
+        f"only {near_perimeter.mean():.0%} of edge atoms are within {ew} A of the "
+        f"patch perimeter -- edge band buried in the interior (ordering regression)"
+    )
