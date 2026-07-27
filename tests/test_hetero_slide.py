@@ -448,6 +448,81 @@ def _read_friction_records(friction_path):
     return cols, rows
 
 
+def _twisted_moire_config():
+    """A small twisted MoS2/WS2 2+2 moiré slide config.
+
+    The twist is 21.8 deg -- the (1,2) commensurate moiré (achieved ~21.787 deg,
+    the clean N=7 case), a CHEAP commensurate cell (the plan's 7 deg has no small
+    commensurate cell within max_supercell=12 -> a ~120-cell strained
+    approximant). x=y=8 keeps the emitted orthorhombic moiré box edges above the
+    hetero cross-LJ cutoff (11 A) so ``comm_style tiled`` does not abort (the
+    same box-vs-cutoff constraint the D1 e2e handles with a 14 A cell).
+    """
+    raw = {
+        "general": {"temp": 300, "scan_speed": 100, "hetero_stacking": "grouped",
+                    "twist_angle": 21.8},
+        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
+                 "pot_type": "sw", "x": 8.0, "y": 8.0, "layers": [2]},
+        "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
+                 "pot_type": "sw", "x": 8.0, "y": 8.0, "layers": [2]},
+    }
+    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_twisted_moire_slide_runs_and_logs_angle(tmp_path):
+    """Capstone D3 smoke: assemble a real twisted MoS2/WS2 commensurate moiré
+    (21.8 deg target -> ~21.787 deg achieved) and actually RUN the slide in
+    LAMMPS. Proves the whole twist pipeline end to end: the commensurate-moiré
+    search, the rotate-in-cell + orthorhombic-box tiling (emitted box is
+    orthogonal), routing to the hetero slide builder, the achieved-angle
+    manifest log, and a live drive on the twisted stack.
+    """
+    cfg = _twisted_moire_config()
+    cfg.settings.simulation.slide_run_steps = 4000
+    # fix_move drives the top-layer group directly (robust for the offset-placed
+    # twisted stack); the virtual_atom drive's create_atoms point can land on the
+    # unwrapped COM outside the box for such stacks -- a pre-existing D1 drive
+    # placement concern, tracked as a follow-up.
+    cfg.settings.simulation.drive_method = "fix_move"
+
+    sim = HeteroSheetOnSheetSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    slide = next(Path(tmp_path).rglob("slide*.in"))
+    run_dir = slide.parent.parent
+    assert (run_dir / "hetero.data").exists()
+    assert (run_dir / "lammps" / "system.in.settings").exists()
+
+    # Emitted box is ORTHOGONAL (downstream invariant): no xy tilt in hetero.data.
+    at = read(str(run_dir / "hetero.data"), format="lammps-data")
+    cell = np.array(at.cell)
+    assert abs(cell[1, 0]) < 1e-6 * abs(cell[0, 0])
+
+    proc, out = _run_lammps_slide(run_dir, slide.name)
+    assert proc.returncode == 0, f"lmp_serial exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out, f"atoms lost during twisted slide:\n{out[-3000:]}"
+
+    # The achieved twist angle + moiré period were logged into the run manifest.
+    manifest = next(Path(run_dir).rglob("*manifest*"))
+    mtext = manifest.read_text().lower()
+    assert "twist" in mtext and "achieved" in mtext, f"manifest missing twist log:\n{mtext}"
+
+    # A non-empty friction results file was written.
+    friction = next(run_dir.rglob("friction_*"))
+    assert friction.stat().st_size > 0
+
+    # The drive is LIVE: the twisted top layer's in-plane COM moved a nonzero
+    # net amount between the first and last record.
+    cols, rows = _read_friction_records(friction)
+    assert cols is not None and len(rows) >= 2, f"need >=2 records, got {len(rows)}"
+    ix, iy = cols.index("v_comx_top"), cols.index("v_comy_top")
+    dx, dy = rows[-1][ix] - rows[0][ix], rows[-1][iy] - rows[0][iy]
+    assert (dx * dx + dy * dy) ** 0.5 > 0.5, (
+        f"twisted top layer barely moved (|d|={(dx*dx+dy*dy)**0.5:.3f} A); drive dead"
+    )
+
+
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_slide_runs_and_drives_top_layer(tmp_path):
     """Capstone D1 smoke: assemble a real MoS2/WS2 2+2 hetero stack and actually
