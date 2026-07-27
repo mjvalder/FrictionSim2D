@@ -1196,6 +1196,60 @@ def create_orthogonal_slab(
     final_dims_typed: Dict[str, float] = {k: cast(float, v) for k, v in final_dims.items()}
     return output_path, final_dims_typed, duplication
 
+def extract_substrate_surface_cell(
+    sub_config: SubstrateConfig,
+    build_dir: Path,
+) -> Tuple[np.ndarray, Path]:
+    """Return the in-plane surface cell (2x2) + a one-layer atom file.
+
+    Produces the coincidence-search input for a crystalline substrate match: the
+    orthogonalized in-plane surface cell (a 2x2 row-vector lattice matrix) and a
+    path to a data file holding just the topmost atomic layer of that cell. This
+    is deliberately distinct from the bulk-thickness :func:`create_orthogonal_slab`
+    output — it is the thin surface repeat the Zur-McGill search operates on.
+
+    Reuses :func:`create_orthogonal_slab` for the CIF -> orthogonalized-cell
+    idiom (``target_z=None`` -> one unit cell in z) and slices its topmost
+    atomic layer.
+
+    Args:
+        sub_config: Substrate configuration (sources the crystalline cell from
+            ``sub_config.cif_path``).
+        build_dir: Directory for the intermediate + one-layer data files.
+
+    Returns:
+        ``(surface_cell_2x2, mono_path)`` — the in-plane surface cell (Å, row
+        vectors, LAMMPS-canonical orthogonal) and the one-layer data-file path.
+    """
+    build_dir = Path(build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+    cif_path = get_material_path(sub_config.cif_path)
+
+    ortho_cell = build_dir / f"{sub_config.mat}_surface_ortho.lmp"
+    # target_x/y = 1.0 -> no in-plane duplication (dup 1x1); target_z=None -> a
+    # single unit cell in z. The orthogonalized in-plane cell is the surface cell.
+    _, dims, _ = create_orthogonal_slab(
+        cif_path, ortho_cell, target_x=1.0, target_y=1.0, target_z=None
+    )
+    lx = float(dims['xhi']) - float(dims['xlo'])
+    ly = float(dims['yhi']) - float(dims['ylo'])
+    surface_cell = np.array([[lx, 0.0], [0.0, ly]])
+
+    # Slice the topmost atomic layer -> a one-layer surface data file. The
+    # coincidence search only needs the surface termination (single layer), not
+    # the full z-repeat, as its representative atom set.
+    atoms = ase_io.read(str(ortho_cell), format="lammps-data")
+    z = atoms.get_positions()[:, 2]
+    top_mask = z >= (z.max() - 0.5)          # topmost atomic plane (~0 A ptp)
+    mono = atoms[top_mask]
+
+    mono_path = build_dir / f"{sub_config.mat}_surface_mono.lmp"
+    ase_io.write(str(mono_path), mono, format="lammps-data")
+    ortho_cell.unlink(missing_ok=True)
+
+    return surface_cell, mono_path
+
+
 def get_amorphous_path(mat_name: str) -> Optional[Path]:
     """Get path to pre-generated amorphous material file if it exists.
     
