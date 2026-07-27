@@ -204,8 +204,17 @@ def assemble(assembly: Assembly, identity: Optional[Identity] = None) -> Assembl
     )
 
 
-def to_ovito(system: AssembledSystem):
+def to_ovito(system: AssembledSystem,
+             colours: Optional[Dict[int, Tuple[float, float, float]]] = None,
+             radii: Optional[Dict[int, float]] = None):
     """Convert an assembled system into an ovito pipeline for display.
+
+    Args:
+        system: The assembled system.
+        colours: Optional ``type id -> (r, g, b)``. Applied when the types are
+            created; setting them on a *computed* data collection instead has
+            no effect, because that is a copy the pipeline discards.
+        radii: Optional ``type id -> display radius``.
 
     Returns:
         An ``ovito.pipeline.Pipeline`` whose source holds the assembled data,
@@ -233,9 +242,18 @@ def to_ovito(system: AssembledSystem):
 
     # A property built from raw ids carries no type definitions, so the element
     # names have to be registered explicitly -- this is what gives the viewport
-    # a legend instead of bare numbers.
+    # a legend instead of bare numbers, and where colours have to be set.
     types_property = particles['Particle Type']
-    for type_id, element in sorted(system.legend.items()):
-        types_property.types.append(ElementType(id=int(type_id), name=element))
+    present = {int(t) for t in np.unique(system.type_ids)}
+    for type_id in sorted(present):
+        element_type = ElementType(
+            id=int(type_id),
+            name=system.legend.get(type_id, str(type_id)),
+        )
+        if colours and type_id in colours:
+            element_type.color = colours[type_id]
+        if radii and type_id in radii:
+            element_type.radius = radii[type_id]
+        types_property.types.append(element_type)
 
     return Pipeline(source=StaticSource(data=data))
