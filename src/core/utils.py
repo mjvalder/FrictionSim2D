@@ -46,14 +46,25 @@ def _is_float(value: str) -> bool:
         return False
 
 
+#: How far above ``base_dir`` to look for a config-relative file. Configs in
+#: ``examples/`` name ``examples/materials/...``, i.e. paths relative to the
+#: project root rather than to themselves, so the search has to climb.
+PATH_SEARCH_MAX_PARENTS = 4
+
+
 def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List[Path]:
     """Candidate locations for a config-supplied file, in resolution order.
 
-    Config files reference potentials and structures by relative path
-    (``examples/potentials/sw/MoS2_wen.sw``), which historically resolved only
-    when the process ran from the repository root. ``base_dir`` -- the directory
-    of the config file itself -- makes those references work regardless of the
-    current working directory, which a desktop launcher does not control.
+    Config files reference potentials and structures by relative path, and those
+    paths are relative to wherever the user ran from -- in practice the project
+    root, not the config's own directory. ``examples/indent_config.ini`` names
+    ``examples/materials/h-MoS2.cif``, which resolves one level *above* itself.
+
+    So the search tries the name as given (absolute, or relative to the current
+    directory), then ``base_dir``, then each of its parents up to
+    :data:`PATH_SEARCH_MAX_PARENTS`. That accommodates both conventions without
+    asking anyone to rewrite existing configs, and it is what lets the GUI open
+    one from an arbitrary working directory.
 
     Args:
         name: Path or filename from a config.
@@ -64,8 +75,14 @@ def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List
         Candidate paths, most specific first. Never empty.
     """
     candidates = [Path(name)]
-    if base_dir is not None and not Path(name).is_absolute():
-        candidates.append(Path(base_dir) / name)
+    if base_dir is None or Path(name).is_absolute():
+        return candidates
+
+    root = Path(base_dir)
+    for depth, directory in enumerate([root, *root.parents]):
+        if depth > PATH_SEARCH_MAX_PARENTS:
+            break
+        candidates.append(directory / name)
     return candidates
 
 
