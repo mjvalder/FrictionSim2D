@@ -54,14 +54,23 @@ api = [
   "uvicorn[standard]>=0.20",
   "httpx>=0.24",
 ]
+gui = [
+  # ovito supplies the embedded interactive viewport (Viewport.create_qt_widget).
+  # It pins its own PySide6 (>=6.8.3 for ovito 3.15); do not install PySide6 from
+  # conda alongside it -- the two Qt builds conflict.  create_qt_widget is only
+  # verified from 3.15 onwards.
+  "ovito>=3.15",
+  "PySide6>=6.8.3",
+]
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.0",
   "pylint>=2.15",
   "httpx>=0.24",
+  "pytest-qt>=4.2",
 ]
 all = [
-  "FrictionSim2D[aiida,db,plotting,api]",
+  "FrictionSim2D[aiida,db,plotting,api,gui]",
 ]
 
 # ---------------------------------------------------------------------------

@@ -373,6 +373,36 @@ def settings_reset(global_: bool):
 # HPC COMMANDS
 # =============================================================================
 
+@cli.group('gui', invoke_without_command=True)
+@click.option('--check', 'run_check', is_flag=True,
+              help='Diagnose the GUI environment and exit without launching.')
+@click.pass_context
+def gui_group(ctx, run_check: bool):
+    """Launch the desktop simulation builder.
+
+    With no subcommand this starts the GUI. Use --check to verify that Qt,
+    ovito and the external build tools are usable here first.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    from .gui import GUI_AVAILABLE, INSTALL_HINT  # noqa: PLC0415
+
+    if not GUI_AVAILABLE:
+        click.echo("GUI dependencies are not available.", err=True)
+        click.echo(INSTALL_HINT, err=True)
+        raise click.Abort()
+
+    if run_check:
+        from .gui.diagnostics import run_checks  # noqa: PLC0415
+        report = run_checks()
+        click.echo(report.render())
+        ctx.exit(0 if report.ok else 1)
+
+    from .gui import main as gui_main  # noqa: PLC0415
+    ctx.exit(gui_main(tuple()))
+
+
 @cli.group('hpc')
 def hpc_group():
     """Generate HPC submission scripts."""
