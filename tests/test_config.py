@@ -495,6 +495,39 @@ def test_crystalline_substrate_without_match_still_rejected():
         AFMSimulationConfig(**raw, settings=load_settings())
 
 
+# --- B2: [Flake-1]/[Flake-2] fold into flake_sheets ---
+
+def test_flake_sections_fold_into_flake_sheets():
+    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+    raw = {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
+        "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
+               "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+               "x": 30.0, "y": 30.0, "layers": [1]},
+        "Flake": {"shape": "hexagon", "edge_length": 12.0, "corner_radius": 3.0},
+        "Flake-1": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
+                    "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+                    "x": 12.0, "y": 12.0, "layers": [1]},
+        "Flake-2": {"mat": "h-WS2", "cif_path": "examples/materials/h-WS2.cif",
+                    "pot_path": "examples/potentials/sw/sw_lammps/t-WS2.sw", "pot_type": "sw",
+                    "x": 12.0, "y": 12.0, "layers": [1]},
+    }
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    assert len(cfg.flake_sheets) == 2
+    assert cfg.flake_sheets[0].mat == "h-MoS2" and cfg.flake_sheets[1].mat == "h-WS2"
+    assert cfg.flake is not None and cfg.flake.shape == "hexagon"
+
+
+def test_no_flake_sections_leaves_flake_sheets_empty():
+    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+    raw = {"general": {"temp": 300, "scan_speed": 1},
+           "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
+                  "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+                  "x": 12.0, "y": 12.0, "layers": [1]}}
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    assert cfg.flake_sheets == []
+
+
 # --- D3: general.twist_angle + twist tolerances ---
 
 def test_twist_angle_config_defaults_and_range():

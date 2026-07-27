@@ -218,6 +218,8 @@ class ComponentConfig(BaseModel):
         Returns:
             Resolved absolute path as string.
         """
+        if v is None:
+            return v
         path = Path(v)
         if path.exists():
             return str(path)
@@ -335,6 +337,13 @@ class FlakeConfig(ComponentConfig):
         center_x, center_y: Optional flake center override (box coords). When
             omitted the flake is centered under the tip.
     """
+    # Material fields are optional on a flake: a hetero flake sources its two
+    # materials from [Flake-1]/[Flake-2] (``flake_sheets``), leaving [Flake] a
+    # pure shape spec. A single-material flake still supplies them directly.
+    mat: Optional[str] = None
+    pot_type: Optional[str] = None
+    pot_path: Optional[str] = None
+    cif_path: Optional[str] = None
     shape: Literal['triangle', 'square', 'hexagon'] = 'hexagon'
     edge_length: float = Field(..., description="Characteristic flake size in Angstroms")
     rotation_deg: float = 0.0
@@ -620,6 +629,28 @@ class LatticeMatchConfig(BaseModel):
     area_tol: float = Field(default=0.10, ge=0.0, le=1.0)
 
 
+def _fold_flake_sheet_sections(folded: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold [Flake-1], [Flake-2], ... sections into ``flake_sheets``.
+
+    Numbered ``Flake-N`` sections carry the two dedicated hetero-flake
+    materials (mirrors the ``2D-N`` sheet folding). They are collected in
+    numeric order into ``flake_sheets``. When no ``[Flake-N]`` section is
+    present the key is left untouched (defaults to an empty list) so the
+    single-material flake path — a lone ``[Flake]`` shape spec — is unchanged.
+    ``[Flake]`` itself carries the shape spec and is captured separately.
+    """
+    flake_keys = sorted(
+        (k for k in folded if isinstance(k, str) and k.startswith('Flake-')),
+        key=lambda key: (
+            int(key.split('-', maxsplit=1)[1])
+            if key.split('-', maxsplit=1)[1].isdigit() else 10**9
+        ),
+    )
+    if flake_keys:
+        folded['flake_sheets'] = [folded[k] for k in flake_keys]
+    return folded
+
+
 class AFMSimulationConfig(BaseModel):
     """Master configuration object for an AFM simulation run."""
     general: GeneralConfig
@@ -636,6 +667,15 @@ class AFMSimulationConfig(BaseModel):
         ),
     )
     flake: Optional[FlakeConfig] = Field(default=None, alias='flake')
+    flake_sheets: List[SheetConfig] = Field(
+        default_factory=list,
+        description=(
+            "Dedicated hetero-flake materials, folded from [Flake-1], [Flake-2] "
+            "sections (numeric order). Two entries build a flake carved from a "
+            "matched hetero bilayer (B2); empty leaves the single-material flake "
+            "path unchanged. The [flake]/[Flake] section carries the shape spec."
+        ),
+    )
     pes: Optional[PESConfig] = Field(default=None, alias='pes')
     indent: Optional[IndentConfig] = Field(default=None, alias='indent')
     lattice_match: Optional[LatticeMatchConfig] = Field(default=None, alias='lattice_match')
@@ -672,7 +712,7 @@ class AFMSimulationConfig(BaseModel):
         elif '2D' in folded:
             folded['sheets'] = [folded['2D']]
 
-        return folded
+        return _fold_flake_sheet_sections(folded)
 
     @model_validator(mode='after')
     def validate_non_finite_sheet_substrate(self) -> 'AFMSimulationConfig':
@@ -754,6 +794,16 @@ class SheetOnSheetSimulationConfig(BaseModel):
             "given). Populated by _fold_sheet_sections before validation."
         ),
     )
+    flake: Optional[FlakeConfig] = Field(default=None, alias='Flake')
+    flake_sheets: List[SheetConfig] = Field(
+        default_factory=list,
+        description=(
+            "Dedicated hetero-flake materials, folded from [Flake-1], [Flake-2] "
+            "sections (numeric order). Two entries build a flake carved from a "
+            "matched hetero bilayer (B2); empty leaves the single-material flake "
+            "path unchanged. The [Flake] section carries the shape spec."
+        ),
+    )
     pes: Optional[PESConfig] = Field(default=None, alias='pes')
     lattice_match: Optional[LatticeMatchConfig] = Field(default=None, alias='lattice_match')
     lj_override: Dict[str, Any] = Field(default_factory=dict, alias='lj_override')
@@ -790,7 +840,7 @@ class SheetOnSheetSimulationConfig(BaseModel):
         elif '2D' in folded:
             folded['sheets'] = [folded['2D']]
 
-        return folded
+        return _fold_flake_sheet_sections(folded)
 
 # --- Helper Functions ---
 
