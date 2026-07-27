@@ -306,7 +306,11 @@ def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
     Returns:
         Dictionary containing the parsed configuration parameters.
     """
-    config = configparser.ConfigParser()
+    # interpolation=None: configparser's default BasicInterpolation raises on a
+    # bare '%' in any value. No config in this project uses '%(name)s'
+    # substitution, so the feature only ever cost us a crash on values a user
+    # could reasonably type.
+    config = configparser.ConfigParser(interpolation=None)
     config.read(filepath)
     config = _remove_inline_comments(config)
 
