@@ -405,6 +405,52 @@ class GeneralConfig(BaseModel):
             "interleaves layers across materials."
         ),
     )
+    twist_angle: Optional[float] = Field(
+        default=None,
+        description=(
+            "Relative twist angle (deg) between the two stacked layers for a D3 "
+            "commensurate-moiré build. When None (default) all twist paths are "
+            "inert and the build is unchanged. The range is restricted to "
+            "0 <= twist_angle < 60, the irreducible wedge for a hexagonal "
+            "lattice (angles outside fold back into it by the 60-deg symmetry). "
+            "A single [2D] material with a twist re-enables matching (a "
+            "same-material moiré); two materials give a twisted heterostructure. "
+            "The ACHIEVED angle is generally the nearest commensurate angle, not "
+            "this target (commensurate angles are discrete)."
+        ),
+    )
+    twist_angle_tol: float = Field(
+        default=2.0,
+        description=(
+            "Max |achieved - target| twist angle (deg) accepted by the "
+            "commensurate-moiré search before failing loud."
+        ),
+    )
+    twist_strain_tol: float = Field(
+        default=0.02,
+        description=(
+            "Max residual per-material strain accepted when closing the twisted "
+            "moiré approximant onto its shared box."
+        ),
+    )
+    twist_max_supercell: int = Field(
+        default=12,
+        description=(
+            "Cap on the moiré supercell repeat along each axis (bounds moiré-cell "
+            "explosion); the search fails loud with the nearest achievable angle "
+            "and its atom-count cost when exceeded."
+        ),
+    )
+
+    @model_validator(mode='after')
+    def _validate_twist_angle(self) -> 'GeneralConfig':
+        """Restrict twist_angle to the hexagonal irreducible wedge [0, 60)."""
+        if self.twist_angle is not None and not (0.0 <= self.twist_angle < 60.0):
+            raise ValueError(
+                f"general.twist_angle must be in [0, 60) deg (the hexagonal "
+                f"irreducible wedge); got {self.twist_angle}."
+            )
+        return self
 
 
 class PESConfig(BaseModel):

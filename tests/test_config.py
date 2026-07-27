@@ -493,3 +493,21 @@ def test_crystalline_substrate_without_match_still_rejected():
     raw["sub"]["amorph"] = "c"                    # crystalline, no match flag
     with pytest.raises(ValueError, match="amorphous"):
         AFMSimulationConfig(**raw, settings=load_settings())
+
+
+# --- D3: general.twist_angle + twist tolerances ---
+
+def test_twist_angle_config_defaults_and_range():
+    from src.core.config import GeneralConfig
+    g = GeneralConfig(temp=300)
+    assert g.twist_angle is None                    # inert by default
+    # the twist tolerance knobs have documented defaults
+    assert g.twist_angle_tol == 2.0
+    assert g.twist_strain_tol == 0.02
+    assert g.twist_max_supercell == 12
+    g2 = GeneralConfig(temp=300, twist_angle=7.34)
+    assert abs(g2.twist_angle - 7.34) < 1e-9
+    with pytest.raises(ValueError):
+        GeneralConfig(temp=300, twist_angle=95.0)   # out of [0,60)
+    with pytest.raises(ValueError):
+        GeneralConfig(temp=300, twist_angle=-1.0)   # below range
