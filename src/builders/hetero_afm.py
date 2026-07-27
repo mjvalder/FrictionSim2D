@@ -497,4 +497,34 @@ class FiniteHeteroAFMSimulation(HeteroAFMSimulation):
         """
         pm = super()._generate_potentials(n_sheet_layers)
         self._pm = pm
+        self._emit_edge_groups(pm, n_sheet_layers)
         return pm
+
+    def _emit_edge_groups(self, pm, n_sheet_layers):
+        """Append the per-material + combined ``2D_edge`` groups to the run settings.
+
+        :meth:`PotentialManager.get_component_groups_string` special-cases only the
+        literal component name ``sheet`` for the ``2D_edge`` split, so the hetero
+        ``sheet_1`` / ``sheet_2`` components fall to the generic ``{name}_all``
+        branch with NO edge groups; D2 additionally appends only ``2D_all``. The
+        finite path therefore appends the per-material ``sheet_i_edge`` type groups
+        and their ``2D_edge`` union HERE (mirroring B3's structure-side emission),
+        so the UNCHANGED ``afm/system_init.lmp`` / ``afm/slide.lmp`` finite-edge
+        block ``group sheet_edge intersect 2D 2D_edge`` resolves at runtime. The
+        finite context flags (``finite_sheet_enabled`` / ``finite_sheet_edge_mode``
+        / width / spring-k) that gate that block are already emitted by
+        :meth:`AFMSimulation.build_render_context` straight from
+        ``config.general.finite_sheet`` + ``geometry`` — inherited unchanged.
+        """
+        sheet_names = [n for n in ('sheet_1', 'sheet_2') if n in pm.components]
+        settings_path = (self.output_dir_layer[n_sheet_layers]
+                         / "lammps" / "system.in.settings")
+        lines = ["", "# Finite-sheet edge groups (per-material + combined 2D_edge)"]
+        for name in sheet_names:
+            edge_ids = pm.types.ids_by_component_region(name, 'edge')
+            lines.append(f"group {name}_edge type {' '.join(str(t) for t in edge_ids)}")
+        lines.append(
+            f"group 2D_edge union {' '.join(f'{name}_edge' for name in sheet_names)}"
+        )
+        with open(settings_path, 'a', encoding='utf-8') as fh:
+            fh.write("\n".join(lines) + "\n")

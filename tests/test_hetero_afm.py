@@ -487,3 +487,27 @@ def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
                 ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
     with pytest.raises((AssertionError, ValueError), match=r"[Ll]ayout|order|mismatch"):
         assert_sheet_block_matches_data(pm, data, offset=0)
+
+
+# --- D5 Task 2: finite-edge context flags + 2D_edge group wiring ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_afm_renders_edge_fix(tmp_path):
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
+    cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
+    cfg.settings.hpc.modules = ["lammps"]
+    sim = FiniteHeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+    init = sim.output_dir_layer[1] / "lammps" / "system.in"
+    text = init.read_text()
+    assert "group           sheet_edge intersect 2D 2D_edge" in text  # finite-edge block fired
+    assert "spring/self" in text                                      # edge tether present
+    assert "reduce max z" in text                                     # inherited tip approach intact
+    # The 2D_edge union the tether intersects with is defined in the RUN settings
+    # (the AFM path assembles its own settings; D2 only emits 2D_all there).
+    settings_text = (sim.output_dir_layer[1] / "lammps" / "system.in.settings").read_text()
+    assert "group 2D_edge union sheet_1_edge sheet_2_edge" in settings_text
+    assert "group sheet_1_edge type" in settings_text
+    assert "group sheet_2_edge type" in settings_text
+    assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text  # D2 union intact
