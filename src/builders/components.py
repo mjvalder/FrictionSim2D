@@ -1196,21 +1196,51 @@ def create_orthogonal_slab(
     final_dims_typed: Dict[str, float] = {k: cast(float, v) for k, v in final_dims.items()}
     return output_path, final_dims_typed, duplication
 
+def _orthogonal_primitive_cell(cif_path: Path, out_path: Path) -> Dict[str, float]:
+    """Write the orthogonalized **primitive** unit cell of a CIF (no supercelling).
+
+    Unlike :func:`create_orthogonal_slab` (which duplicates 2×2 in-plane before
+    orthogonalizing, so its smallest output is a 2× supercell), this orthogonalizes
+    the raw unit cell directly, yielding the primitive in-plane repeat. For an
+    already-orthogonal cell (e.g. cubic Si, 5.44 Å) it is a no-op; for a
+    non-orthogonal cell the coincidence match downstream yields a sheared supercell
+    and the caller falls back to amorphous.
+
+    Using the *primitive* cell (vs the 2× supercell) is what lets the substrate
+    commensurate onto a wider set of hetero boxes at low residual strain — the 2×
+    cell needlessly doubles the tiling granularity and forces large-strain matches.
+
+    Args:
+        cif_path: Source CIF.
+        out_path: Output LAMMPS data path for the orthogonal primitive cell.
+
+    Returns:
+        The cell's box dimensions (``get_model_dimensions`` keys, floats).
+    """
+    cif_path = Path(cif_path).absolute()
+    unit = Path(tempfile.gettempdir()) / f"{cif_path.stem}_{uuid.uuid4().hex[:8]}_unit.lmp"
+    cif_data = cifread(cif_path)
+    _write_cif_as_lammps_atomic(cif_path, unit, specorder=cif_data['elements'])
+    _orthogonalize_lammps_data(unit, out_path)
+    unit.unlink(missing_ok=True)
+    dims = get_model_dimensions(out_path)
+    return {k: cast(float, v) for k, v in dims.items()}
+
+
 def extract_substrate_surface_cell(
     sub_config: SubstrateConfig,
     build_dir: Path,
 ) -> Tuple[np.ndarray, Path]:
-    """Return the in-plane surface cell (2x2) + a one-layer atom file.
+    """Return the in-plane **primitive** surface cell (2x2) + a one-layer atom file.
 
     Produces the coincidence-search input for a crystalline substrate match: the
-    orthogonalized in-plane surface cell (a 2x2 row-vector lattice matrix) and a
-    path to a data file holding just the topmost atomic layer of that cell. This
+    orthogonalized in-plane *primitive* surface cell (a 2x2 row-vector lattice
+    matrix) and a path to a data file holding just the topmost atomic layer. This
     is deliberately distinct from the bulk-thickness :func:`create_orthogonal_slab`
-    output — it is the thin surface repeat the Zur-McGill search operates on.
-
-    Reuses :func:`create_orthogonal_slab` for the CIF -> orthogonalized-cell
-    idiom (``target_z=None`` -> one unit cell in z) and slices its topmost
-    atomic layer.
+    output — it is the thin, finest-granularity surface repeat the Zur-McGill
+    search operates on. Using the primitive cell (not the 2× supercell
+    ``create_orthogonal_slab`` emits) minimises the residual match strain, which is
+    what keeps a strained crystalline substrate mechanically stable end to end.
 
     Args:
         sub_config: Substrate configuration (sources the crystalline cell from
@@ -1218,34 +1248,30 @@ def extract_substrate_surface_cell(
         build_dir: Directory for the intermediate + one-layer data files.
 
     Returns:
-        ``(surface_cell_2x2, mono_path)`` — the in-plane surface cell (Å, row
-        vectors, LAMMPS-canonical orthogonal) and the one-layer data-file path.
+        ``(surface_cell_2x2, mono_path)`` — the in-plane primitive surface cell (Å,
+        row vectors, LAMMPS-canonical orthogonal) and the one-layer data-file path.
     """
     build_dir = Path(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
     cif_path = get_material_path(sub_config.cif_path)
 
-    ortho_cell = build_dir / f"{sub_config.mat}_surface_ortho.lmp"
-    # target_x/y = 1.0 -> no in-plane duplication (dup 1x1); target_z=None -> a
-    # single unit cell in z. The orthogonalized in-plane cell is the surface cell.
-    _, dims, _ = create_orthogonal_slab(
-        cif_path, ortho_cell, target_x=1.0, target_y=1.0, target_z=None
-    )
-    lx = float(dims['xhi']) - float(dims['xlo'])
-    ly = float(dims['yhi']) - float(dims['ylo'])
+    prim_cell = build_dir / f"{sub_config.mat}_surface_prim.lmp"
+    dims = _orthogonal_primitive_cell(cif_path, prim_cell)
+    lx = dims['xhi'] - dims['xlo']
+    ly = dims['yhi'] - dims['ylo']
     surface_cell = np.array([[lx, 0.0], [0.0, ly]])
 
     # Slice the topmost atomic layer -> a one-layer surface data file. The
     # coincidence search only needs the surface termination (single layer), not
     # the full z-repeat, as its representative atom set.
-    atoms = ase_io.read(str(ortho_cell), format="lammps-data")
+    atoms = ase_io.read(str(prim_cell), format="lammps-data")
     z = atoms.get_positions()[:, 2]
     top_mask = z >= (z.max() - 0.5)          # topmost atomic plane (~0 A ptp)
     mono = atoms[top_mask]
 
     mono_path = build_dir / f"{sub_config.mat}_surface_mono.lmp"
     ase_io.write(str(mono_path), mono, format="lammps-data")
-    ortho_cell.unlink(missing_ok=True)
+    prim_cell.unlink(missing_ok=True)
 
     return surface_cell, mono_path
 
@@ -1314,29 +1340,31 @@ def build_matched_crystalline_substrate(
         )
     nx, ny = int(matrix[0, 0]), int(matrix[1, 1])
 
-    # 3) Full-thickness crystalline block (the true z-periodic repeat), built to
-    #    `thickness` in z — the physical form of "replicate in z to thickness".
+    # 3) Build the crystalline block from the SAME primitive cell the match used
+    #    (so `matrix` tiles it consistently): replicate the primitive orthogonal
+    #    unit cell nx*ny in-plane and dup_z in z to reach `thickness`. z-replicating
+    #    the true z-periodic primitive is the physical form of "replicate in z to
+    #    thickness" — a lone surface layer stacked at the intra-cell spacing would
+    #    put atoms ~1.4 A apart and blow up under Stillinger-Weber.
     cif_path = get_material_path(sub_config.cif_path)
-    surf_lx = float(surface_cell[0, 0])
-    surf_ly = float(surface_cell[1, 1])
-    block = build_dir / f"{sub_config.mat}_crystal_block.lmp"
-    create_orthogonal_slab(
-        cif_path, block, target_x=surf_lx, target_y=surf_ly, target_z=thickness
-    )
+    prim = build_dir / f"{sub_config.mat}_prim.lmp"
+    pdims = _orthogonal_primitive_cell(cif_path, prim)
+    unit_z = pdims['zhi'] - pdims['zlo']
+    dup_z = max(1, round(thickness / unit_z))
 
-    # 4) Apply the supercell matrix in-plane (tile to ~the hetero footprint).
+    # 4) Apply the supercell matrix in-plane + thicken in z (single replicate).
     rep = build_dir / f"{sub_config.mat}_crystal_rep.lmp"
-    if nx == 1 and ny == 1:
-        shutil.copy(block, rep)
+    if nx == 1 and ny == 1 and dup_z == 1:
+        shutil.copy(prim, rep)
     else:
-        _duplicate_lammps_data(block, rep, nx, ny, 1)
+        _duplicate_lammps_data(prim, rep, nx, ny, dup_z)
 
     # 5) Strain the tiled block exactly onto the fixed hetero box (no seam). The
     #    out-of-plane vector and z coordinates are left untouched.
     sub_lmp = build_dir / "sub.lmp"
     strain_monolayer_to_cell(str(rep), str(sub_lmp), hetero_box)
 
-    block.unlink(missing_ok=True)
+    prim.unlink(missing_ok=True)
     rep.unlink(missing_ok=True)
     logger.info(
         "Built matched crystalline substrate %s: %dx%d surface supercell strained "
