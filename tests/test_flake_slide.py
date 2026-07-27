@@ -129,3 +129,100 @@ def test_flake_slide_corner_hold_can_be_disabled():
     ctx["corner_hold"] = False
     script = render_flake_slide(ctx)
     assert "corner_hold" not in script
+
+
+# --------------------------------------------------------------------------- #
+# Builder: substrate sheet + flake placement + single combined PM/data file
+# --------------------------------------------------------------------------- #
+
+def _flake_on_sheet_cfg(hetero_flake: bool = False):
+    """A flake-on-sheet config: single ``[2D]`` MoS2 substrate (2 layers) + a
+    ``[Flake]`` hexagon. ``hetero_flake=True`` adds ``[Flake-1]``/``[Flake-2]``
+    (a MoS2/WS2 bilayer flake); otherwise the single-material flake reuses the
+    substrate ``[2D]`` material (the builder fills its material fields).
+    """
+    raw = {
+        "general": {"temp": 300, "scan_speed": 100},
+        "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+               "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+               "x": 16.0, "y": 16.0, "layers": [2]},
+        "Flake": {"shape": "hexagon", "edge_length": 5.0, "corner_radius": 3.5,
+                  "corner_spring_k": 10.0},
+    }
+    if hetero_flake:
+        raw["Flake-1"] = {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+                          "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+                          "x": 12.0, "y": 12.0, "layers": [1]}
+        raw["Flake-2"] = {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif",
+                          "pot_path": f"{POT}/sw_lammps/t-WS2.sw", "pot_type": "sw",
+                          "x": 12.0, "y": 12.0, "layers": [1]}
+    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
+    from src.builders.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.settings.simulation.drive_method = "virtual_atom"
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    slide = next(Path(tmp_path).rglob("*slide*.in"))
+    text = slide.read_text()
+    assert "spring couple virtual" in text
+    assert re.search(r"fix\s+spr flake spring couple virtual", text)   # driven group is the flake
+    assert "fsbot" in text and "setforce 0.0 0.0 0.0" in text          # sheet bottom fixed
+    assert "corner_hold" in text                                       # default ON
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_driven_group_is_flake_and_virtual_type_reserved(tmp_path):
+    from src.builders.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.settings.simulation.drive_method = "virtual_atom"
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    data = next(Path(tmp_path).rglob("*flake_slide*.data"))
+    text = data.read_text()
+    m = re.search(r"(\d+)\s+atom types", text)
+    assert m, "no 'atom types' header in the assembled data file"
+    header_types = int(m.group(1))
+
+    # Real types actually present in the Atoms section.
+    real = set()
+    in_atoms = False
+    for raw in text.splitlines():
+        s = raw.split("#", 1)[0].strip()
+        if not s:
+            continue
+        if s.startswith("Atoms"):
+            in_atoms = True
+            continue
+        if in_atoms:
+            tok = s.split()
+            if not tok[0].lstrip("-").isdigit():
+                break
+            if len(tok) >= 2:
+                real.add(int(tok[1]))
+    total_real = max(real)
+    # The reserved virtual type is a DEDICATED extra type: header = real + 1,
+    # and no real atom carries the virtual type id.
+    assert header_types == total_real + 1
+    slide_text = next(Path(tmp_path).rglob("*slide*.in")).read_text()
+    assert re.search(rf"create_atoms\s+{total_real + 1}\s+single", slide_text)
+    assert re.search(rf"group\s+virtual\s+type\s+{total_real + 1}\b", slide_text)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_flake_slide_builder_requires_multilayer_substrate(tmp_path):
+    from src.builders.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.sheet.layers = [1]          # single-layer substrate -> no fixed bottom + interior
+    cfg.sheets[0].layers = [1]
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    with pytest.raises(ValueError, match=r"[Aa]t least 2"):
+        sim.build()
