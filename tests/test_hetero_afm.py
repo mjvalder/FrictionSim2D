@@ -330,3 +330,49 @@ def test_hetero_afm_uses_crystalline_matched_substrate(tmp_path):
     lx, ly, _ = sim._hetero_rep_box
     cell = sub.get_cell()
     assert abs(cell[0, 0] - lx) < 1e-3 and abs(cell[1, 1] - ly) < 1e-3   # substrate box == hetero box (no seam)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_crystalline_runs_no_seam(tmp_path):
+    """D2b capstone: a crystalline lattice-matched Si substrate under a MoS2/WS2
+    hetero AFM actually RUNS in ``lmp_serial`` with NO periodic-seam blowup -- the
+    substrate tiles the fixed hetero box exactly (no Lost atoms), and the indent
+    load ramp writes ``load_*N.data``.
+
+    Config mirrors the D2 capstone's runtime-bounding knobs (temp=1, force=10,
+    tip_reduction_factor=0.7) but with ``[sub] amorph=c, match=true``.
+
+    ``tip.r = 7`` (not the default 10) is deliberate: it sets the hetero box to a
+    3x3 replication (~38x33 A), onto which Si's *primitive* 5.44 A surface cell
+    commensurates as a 7x6 supercell at only ~1.3% residual strain -- WITHIN the
+    0.02 production ``match_strain_tol`` default (no widening needed). The default
+    r=10 box (~51x44 A) needs a 9x8 Si supercell at ~4% strain; the coarse 2x2
+    cell would need ~6.4%, whose post-release ringing stalls the AFM template's
+    hardcoded tip-COM convergence loop for tens of thousands of extra steps (a
+    30-min+ timeout was observed). Keeping the match strain low is what makes this
+    end-to-end smoke both stable and reasonably fast.
+    """
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    raw = _afm_hetero_raw()
+    raw["sub"]["amorph"] = "c"
+    raw["sub"]["match"] = True
+    raw["tip"]["r"] = 7.0                # 3x3 box; Si primitive cell matches at ~1.3% strain
+    raw["general"]["force"] = 10.0
+    raw["general"]["temp"] = 1.0
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]
+    cfg.settings.geometry.tip_reduction_factor = 0.7
+    cfg.settings.simulation.slide_run_steps = 200
+
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    run_dir = Path(tmp_path)
+    init = run_dir / "L1" / "lammps" / "system.in"
+    assert init.exists()
+    proc, out = _run_lammps_afm(run_dir, init)
+    assert proc.returncode == 0, f"system.in exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out, f"atoms lost (crystalline periodic seam?):\n{out[-3000:]}"
+    loads = list((run_dir / "L1" / "data").glob("load_*N.data"))
+    assert loads and all(p.stat().st_size > 0 for p in loads), \
+        f"no non-empty load_*N.data written by the crystalline-substrate indent: {loads}"
