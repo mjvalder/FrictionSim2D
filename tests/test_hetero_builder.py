@@ -580,3 +580,47 @@ def test_lattice_match_config_is_threaded_into_build(tmp_path):
 
     with pytest.raises(ValueError, match=r"strain_tol=0\.0001%"):
         build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+
+
+# =============================================================================
+# D3: twisted commensurate-moiré supercells + same-material re-enable
+# =============================================================================
+# NOTE ON ANGLE CHOICE: the plan's example used twist_angle=7.0, but for a
+# hexagonal lattice no CLEAN commensurate cell exists near 7 deg within
+# max_supercell=12 (the reachable exact angles are ~16.4 / 21.8 deg; 7 deg only
+# yields a large, ~120-cell strained approximant -- the "moiré-cell explosion"
+# risk the design flags). These tests use 21.8 deg (the (1,2) moiré, achieved
+# ~21.787 deg, N=7 rhombus -> x2 orthorhombic wrapper = 14 cells/layer), a
+# cheap CLEAN commensurate cell that exercises the identical code paths.
+
+def test_build_twisted_supercells_shares_one_orthorhombic_box(tmp_path):
+    from src.builders.hetero import build_twisted_supercells
+    mono_a = _build_small_monolayer("h-MoS2", MOS2_CIF, MOS2_POT)
+    mono_b = _build_small_monolayer("h-WS2", WS2_CIF, WS2_POT)
+    ms = build_twisted_supercells(mono_a, mono_b, workdir=tmp_path, twist_angle=21.8,
+                                  angle_tol=3.0, strain_tol=0.03, max_supercell=12)
+    assert ms.twist_angle_achieved is not None
+    assert abs(ms.twist_angle_achieved - 21.8) <= 3.0
+    assert ms.moire_period is not None and ms.moire_period > 0
+    ca = read(str(ms.supercell_a), format="lammps-data").get_cell()
+    cb = read(str(ms.supercell_b), format="lammps-data").get_cell()
+    assert np.allclose(np.array(ca)[:2, :2], np.array(cb)[:2, :2], atol=1e-3)  # shared box
+    assert abs(ca[1, 0]) < 1e-3 * abs(ca[0, 0])                                # orthorhombic
+
+
+def test_same_material_twist_synthesises_two_sheets(tmp_path):
+    raw = {  # a SINGLE [2D] material + twist -> same-material moiré
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped",
+                    "twist_angle": 21.8},
+        # x=y=4 keeps build_monolayer at its PRIMITIVE orthogonalized cell so the
+        # moiré is built from the primitive lattice (a larger footprint would
+        # pre-tile the monolayer and inflate the moiré to hundreds of atoms).
+        "2D": {"mat": "h-MoS2", "cif_path": MOS2_CIF, "pot_path": MOS2_POT,
+               "pot_type": "sw", "x": 4.0, "y": 4.0, "layers": [1]},
+    }
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    assert len(cfg.sheets) == 1                          # a single [2D] material
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    assert stack.twist_angle_achieved is not None        # twist recorded
+    assert stack.moire_period is not None and stack.moire_period > 0
+    assert stack.total_types >= 2                        # two material blocks even for same material

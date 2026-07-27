@@ -64,10 +64,13 @@ from ase.io import read, write
 from jinja2 import Environment
 
 from ..core.config import GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig
+from ..core.lattice_apply import rotate_layer_to_angle
 from ..core.lattice_matching import (
     MatchResult,
     _max_strain,
+    _relative_rotation_strain,
     find_coincidence_lattice,
+    find_commensurate_twist,
     scan_registry_index,
 )
 from ..core.potential_manager import PotentialManager
@@ -102,6 +105,11 @@ class MatchedStack:
     strain_b: float
     mean_cell: np.ndarray
     match: MatchResult = field(default=None)  # type: ignore[assignment]
+    # D3 twist path only (None for the plain non-twist coincidence path, so that
+    # path stays byte-identical): the achieved relative twist (deg) and the moiré
+    # periodicity (Å). Set by :func:`build_twisted_supercells`.
+    twist_angle_achieved: Optional[float] = None
+    moire_period: Optional[float] = None
 
 
 @dataclass
@@ -628,6 +636,150 @@ def build_matched_supercells(
     )
 
 
+def build_twisted_supercells(
+    mono_a_path: PathLike,
+    mono_b_path: PathLike,
+    workdir: PathLike,
+    twist_angle: float,
+    angle_tol: float = 2.0,
+    strain_tol: float = 0.02,
+    max_supercell: int = 12,
+) -> MatchedStack:
+    """Build two layers' commensurate twisted-moiré supercells on one ortho box.
+
+    The D3 twist analogue of :func:`build_matched_supercells`. Where the plain
+    path finds the *aligned* coincidence lattice, this finds the commensurate
+    moiré **approximant nearest a user-selected twist angle**
+    (:func:`~src.core.lattice_matching.find_commensurate_twist`) and emits both
+    layers tiled into the shared **orthorhombic** moiré box (xy tilt ≈ 0 --
+    downstream requires an orthogonal box; the search wraps the rhombic moiré in
+    its minimal rectangular super-supercell).
+
+    Mechanism (why the twist survives an orthogonal LAMMPS-canonical box). The
+    search returns an integer supercell matrix for each layer that tiles that
+    layer's monolayer directly into the moiré box; layer B's matrix selects the
+    θ-rotated sublattice. Tiling A with ``supercell_a`` and B with
+    ``supercell_b`` (via ``make_supercell``) gives two boxes of the same shape
+    but rotated by the achieved angle relative to each other; mapping BOTH onto
+    the single canonical orthorhombic ``moire_cell`` with an affine
+    ``set_cell(scale_atoms=True)`` (which also closes the residual strain)
+    realises the relative twist in the atomic positions while emitting one
+    shared orthogonal box. Layer B is first passed through
+    :func:`~src.core.lattice_apply.rotate_layer_to_angle` (the reorientation
+    primitive); a rigid rotation of a periodic monolayer canonicalises to the
+    same on-disk cell, so the twist is carried by the commensurate tiling, not
+    by that write.
+
+    Args:
+        mono_a_path: LAMMPS data file for layer A's monolayer.
+        mono_b_path: LAMMPS data file for layer B's monolayer (equals A's for a
+            same-material moiré).
+        workdir: Directory to write the two output supercell data files into.
+        twist_angle: Target relative twist (deg).
+        angle_tol: Max ``|achieved - target|`` accepted by the search (deg).
+        strain_tol: Max residual per-material strain to close the approximant.
+        max_supercell: Max moiré supercell repeat along each axis.
+
+    Returns:
+        :class:`MatchedStack` (the same dataclass D1 consumes) with both output
+        supercell paths sharing one orthorhombic box, the per-material residual
+        strains, ``mean_cell`` = the emitted orthorhombic box, and the twist
+        fields ``twist_angle_achieved`` / ``moire_period`` set.
+
+    Raises:
+        ValueError: If no commensurate moiré lands within the tolerances /
+            budget (:func:`find_commensurate_twist` fails loud, naming the
+            nearest achievable angle), or if a per-material strain onto the
+            emitted box exceeds ``strain_tol``.
+    """
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    mono_a_path = Path(mono_a_path)
+    mono_b_path = Path(mono_b_path)
+
+    mono_a = _read_monolayer(mono_a_path)
+    mono_b = _read_monolayer(mono_b_path)
+    cell_a = np.asarray(mono_a["cell"])[:2, :2]
+    cell_b = np.asarray(mono_b["cell"])[:2, :2]
+
+    # 1. Nearest commensurate twisted moiré -> achieved angle + integer supercell
+    #    matrices tiling each monolayer into the shared orthorhombic box.
+    twist = find_commensurate_twist(
+        cell_a, cell_b, target_angle=twist_angle, angle_tol=angle_tol,
+        strain_tol=strain_tol, max_supercell=max_supercell,
+    )
+    achieved = twist.achieved_angle_deg
+    ortho = np.asarray(twist.moire_cell, dtype=float)   # canonical, xy tilt 0
+
+    # 2. Reorient layer B by the achieved angle (the reorientation primitive; a
+    #    rigid rotation of a periodic cell is a canonical no-op on disk, so the
+    #    twist is carried by supercell_b below, but this keeps the achieved angle
+    #    verified end to end and B's file is the tiling input).
+    mono_b_rot_path = workdir / "b_twist_rotated.lmp"
+    rotate_layer_to_angle(str(mono_b_path), achieved, str(mono_b_rot_path))
+    mono_b_rot = _read_monolayer(mono_b_rot_path)
+
+    # 3. Tile each monolayer into its moiré supercell with the integer matrices.
+    atoms = {
+        "a": _monolayer_to_atoms(mono_a),
+        "b": _monolayer_to_atoms(mono_b_rot),
+    }
+    matrices = {"a": twist.supercell_a, "b": twist.supercell_b}
+    sc_atoms = {
+        lbl: make_supercell(atoms[lbl], _embed_3x3(matrices[lbl])) for lbl in ("a", "b")
+    }
+
+    # 4. Map BOTH supercells onto the single canonical orthorhombic moiré box
+    #    (affine remap: closes residual strain AND, because the two tiled boxes
+    #    are rotated by the achieved angle relative to each other, realises the
+    #    relative twist in the atoms). Both end with the identical in-plane cell,
+    #    so ASE canonicalizes them identically -> on-disk boxes coincide exactly.
+    strains: Dict[str, float] = {}
+    outputs: Dict[str, Path] = {}
+    for lbl, mono in (("a", mono_a), ("b", mono_b_rot)):
+        at = sc_atoms[lbl]
+        sc_cell = np.array(at.cell)[:2, :2]
+        # Residual strain to close this layer onto the ortho box (rotation-
+        # invariant: the tiled box and the ortho box differ by a rigid rotation
+        # plus this strain).
+        strains[lbl] = _relative_rotation_strain(ortho, sc_cell)[1]
+        if strains[lbl] > strain_tol + 1e-9:
+            raise ValueError(
+                f"build_twisted_supercells: layer '{lbl}' residual strain "
+                f"{strains[lbl]:.4%} onto the moiré box exceeds strain_tol="
+                f"{strain_tol:.4%} (achieved twist {achieved:.3f} deg). Widen "
+                f"twist_strain_tol or pick a cleaner angle."
+            )
+        lz = np.array(at.cell)[2, 2]
+        at.set_cell(
+            np.array([
+                [ortho[0, 0], ortho[0, 1], 0.0],
+                [ortho[1, 0], ortho[1, 1], 0.0],
+                [0.0, 0.0, lz],
+            ]),
+            scale_atoms=True,
+        )
+        out_path = workdir / f"{lbl}_twist_supercell.lmp"
+        _write_supercell(
+            at, out_path,
+            atom_style=str(mono["atom_style"]),
+            n_types=int(mono["n_types"]),
+            masses=mono["masses"],  # type: ignore[arg-type]
+        )
+        outputs[lbl] = out_path
+
+    return MatchedStack(
+        supercell_a=outputs["a"],
+        supercell_b=outputs["b"],
+        strain_a=strains["a"],
+        strain_b=strains["b"],
+        mean_cell=ortho,
+        match=None,  # type: ignore[arg-type]
+        twist_angle_achieved=float(achieved),
+        moire_period=float(twist.moire_period),
+    )
+
+
 # =============================================================================
 # Stack assembly: two matched supercells -> one periodic hetero cell
 # =============================================================================
@@ -696,6 +848,10 @@ class HeteroStack:
     stacking: str
     total_types: int
     material_offsets: Dict[int, np.ndarray]
+    # D3 twist path only (None otherwise): achieved relative twist (deg) + moiré
+    # periodicity (Å), logged into the run manifest by the slide builder.
+    twist_angle_achieved: Optional[float] = None
+    moire_period: Optional[float] = None
 
 
 def _run_lammps(workdir: Path, script_path: Path) -> str:
@@ -1161,28 +1317,48 @@ def build_hetero_structure(
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
+    twist_angle = getattr(config.general, "twist_angle", None)
+
     sheets: List[SheetConfig] = list(config.sheets)
+    if twist_angle is not None and len(sheets) == 1:
+        # D3 same-material twist: a single [2D] material twisted against itself is
+        # a genuine moiré -> synthesise two identical sheet entries so the
+        # (two-material) matcher/registrar/assembler run. (Same-material stacks
+        # otherwise skip matching entirely; a twist re-enables it.)
+        sheets = [sheets[0], sheets[0]]
     if len(sheets) < 2:
         raise ValueError(
             f"build_hetero_structure needs >= 2 materials (a heterostructure "
-            f"interface); config.sheets has {len(sheets)}."
+            f"interface), or a single material with general.twist_angle set (a "
+            f"same-material moiré); config.sheets has {len(config.sheets)} and "
+            f"twist_angle={twist_angle}."
         )
 
     # 1. Monolayer per material (build_monolayer returns the path as element 0).
     mono_paths = [Path(build_monolayer(sheet)[0]) for sheet in sheets]
 
-    # 2. Match + strain smaller onto larger -> two supercells, one shared box.
-    #    Thread the optional [lattice_match] config through to the coincidence
-    #    search; when unset, build_matched_supercells' own defaults apply. This
-    #    is the knob a user needs to build genuinely different-lattice pairs
-    #    (a wider strain_tol / larger max_supercell than the 2% / 10 defaults).
-    lm = config.lattice_match
-    match_kwargs = (
-        dict(strain_tol=lm.strain_tol, max_supercell=lm.max_supercell, area_tol=lm.area_tol)
-        if lm is not None
-        else {}
-    )
-    matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir, **match_kwargs)
+    # 2. Match -> two supercells sharing one shared box.
+    if twist_angle is not None:
+        # D3 twist path: the nearest commensurate moiré approximant to the
+        # user-selected angle, emitted on an orthorhombic box.
+        general = config.general
+        matched = build_twisted_supercells(
+            mono_paths[0], mono_paths[1], workdir,
+            twist_angle=twist_angle,
+            angle_tol=general.twist_angle_tol,
+            strain_tol=general.twist_strain_tol,
+            max_supercell=general.twist_max_supercell,
+        )
+    else:
+        # Plain (aligned) coincidence path. Thread the optional [lattice_match]
+        # config through; when unset, build_matched_supercells' defaults apply.
+        lm = config.lattice_match
+        match_kwargs = (
+            dict(strain_tol=lm.strain_tol, max_supercell=lm.max_supercell, area_tol=lm.area_tol)
+            if lm is not None
+            else {}
+        )
+        matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir, **match_kwargs)
 
     # 3. Register the materials' potential/type spine (geometry-independent).
     hetero_potentials = register_hetero_potentials(sheets, settings, workdir)
@@ -1196,4 +1372,7 @@ def build_hetero_structure(
         settings,
         workdir,
     )
+    # Carry the achieved twist + moiré period onto the stack (None for non-twist).
+    stack.twist_angle_achieved = matched.twist_angle_achieved
+    stack.moire_period = matched.moire_period
     return stack
