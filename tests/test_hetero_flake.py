@@ -97,3 +97,31 @@ def test_register_hetero_flake_potentials_corner_groups(tmp_path):
     settings_text = hp.settings_path.read_text()
     assert "flake_1_corner" in settings_text and "flake_2_corner" in settings_text
     assert "flake_corner" in settings_text
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_flake_run0_smoke(tmp_path):
+    from src.core.config import load_settings, FlakeConfig
+    from src.builders.components import build_hetero_flake_component
+    from src.builders.hetero import register_hetero_flake_potentials
+    settings = load_settings()
+    path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
+                                           FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0), tmp_path)
+    hp = register_hetero_flake_potentials(_flake_sheets(settings), settings, tmp_path)
+    # Absolute read_data/include with cwd = run dir, mirroring
+    # test_hetero_builder._lammps_run0_energy: the settings' pair_coeff lines
+    # reference the staged potentials by the run-dir-relative prefix
+    # 'provenance/potentials/...', which only resolves when cwd is the run dir.
+    data_path = Path(path).resolve()
+    settings_path = Path(hp.settings_path).resolve()
+    script = tmp_path / "run0.lmp"
+    script.write_text(
+        "units metal\natom_style atomic\nboundary p p p\n"
+        f"read_data {data_path}\n"
+        f"include {settings_path}\n"
+        "run 0\n")
+    out = subprocess.run([LMP, "-in", str(script)], cwd=str(tmp_path),
+                         capture_output=True, text=True)
+    combined = out.stdout + out.stderr
+    assert out.returncode == 0, combined         # all pair coeffs set (no "All pair coeffs are not set")
+    assert "Lost atoms" not in combined
