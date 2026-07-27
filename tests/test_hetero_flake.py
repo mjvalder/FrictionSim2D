@@ -76,3 +76,24 @@ def test_corner_types_double_every_bilayer_type_and_find_vertices(tmp_path):
     assert len(distinct) >= 4
     # corner types are the even ids (2t); at least one corner atom exists (vertices found)
     assert any(t % 2 == 0 for t in distinct)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_register_hetero_flake_potentials_corner_groups(tmp_path):
+    from src.core.config import load_settings
+    from src.builders.hetero import register_hetero_flake_potentials
+    settings = load_settings()
+    hp = register_hetero_flake_potentials(_flake_sheets(settings), settings, tmp_path)
+    # disjoint contiguous blocks
+    ids1 = hp.pm.types.ids_by_component('flake_1')
+    ids2 = hp.pm.types.ids_by_component('flake_2')
+    assert set(ids1).isdisjoint(ids2)
+    # per-material corner ids
+    c1 = hp.pm.types.ids_by_component_region('flake_1', 'corner')
+    c2 = hp.pm.types.ids_by_component_region('flake_2', 'corner')
+    assert c1 and c2
+    # combined flake_corner group = union
+    assert set(hp.flake_corner_group.split()) >= {str(i) for i in c1 + c2}
+    settings_text = hp.settings_path.read_text()
+    assert "flake_1_corner" in settings_text and "flake_2_corner" in settings_text
+    assert "flake_corner" in settings_text

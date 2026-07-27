@@ -153,6 +153,37 @@ class HeteroPotentials:
     type_offsets: List[int]
 
 
+@dataclass
+class HeteroFlakePotentials:
+    """Registered potential spine for a flake carved from a hetero bilayer.
+
+    Mirrors :class:`HeteroPotentials` (``pm`` / ``settings_path`` /
+    ``component_names`` / ``type_ids`` / ``type_offsets``) but the two materials
+    are registered as ``flake_1`` / ``flake_2`` with ``regions=[None, 'corner']``
+    so every type is split into an interleaved core / corner pair — matching the
+    data file :func:`~src.builders.components.apply_flake_corner_types` writes.
+    It additionally exposes the corner atom-type ids the shape-hold restraint
+    (D4 / a hetero-flake AFM) needs, emitted as explicit LAMMPS groups because
+    :meth:`PotentialManager.get_component_groups_string` special-cases only the
+    literal component name ``'sheet'`` (so ``flake_1`` / ``flake_2`` fall to the
+    generic ``{name}_all`` branch with no corner split).
+
+    Attributes:
+        corner_ids_by_material: Per-material corner (even) type ids, in
+            ``flake_1`` / ``flake_2`` order (``ids_by_component_region(name,
+            'corner')``).
+        flake_corner_group: Space-separated union of ALL corner type ids (both
+            materials), i.e. the ``flake_corner`` group's members.
+    """
+    pm: PotentialManager
+    settings_path: Path
+    component_names: List[str]
+    type_ids: List[List[int]]
+    type_offsets: List[int]
+    corner_ids_by_material: List[List[int]]
+    flake_corner_group: str
+
+
 def register_sheet_block(
     pm: PotentialManager,
     sheets: List[SheetConfig],
@@ -302,6 +333,129 @@ def register_hetero_potentials(
         component_names=component_names,
         type_ids=type_ids,
         type_offsets=type_offsets,
+    )
+
+
+def register_hetero_flake_potentials(
+    flake_sheets: List[SheetConfig],
+    settings: GlobalSettings,
+    workdir: PathLike,
+    reserve_virtual_type: bool = False,
+) -> HeteroFlakePotentials:
+    """Register a hetero flake's two materials as corner-typed PM components.
+
+    The finite-flake analogue of :func:`register_hetero_potentials`: it mirrors
+    that function's potential spine (one component per material -> disjoint,
+    contiguous global type blocks; a many-body ``add_self_interaction`` per
+    component inside one ``pair_style hybrid``; a UFF-mixed ``lj/cut``
+    ``add_cross_interaction`` between the two materials), but registers each
+    material as ``flake_{i+1}`` with ``regions=[None, 'corner']`` so every type
+    is split into an interleaved core ``2t-1`` / corner ``2t`` pair -- exactly
+    the layout :func:`~src.builders.components.apply_flake_corner_types` writes
+    into the carved bilayer data file, so ``read_data`` types line up with this
+    PM.
+
+    Because :meth:`PotentialManager.get_component_groups_string` special-cases
+    only the literal component name ``'sheet'`` (emitting ``2D_core`` /
+    ``2D_edge`` / ``layer_N``), the ``flake_1`` / ``flake_2`` components fall to
+    the generic ``group {name}_all`` branch with NO corner split. So the corner
+    groups the shape-hold restraint (D4 / a hetero-flake AFM) needs are emitted
+    HERE, builder-side, by appending to the written ``system.in.settings``:
+    ``group flake_1_corner type ...``, ``group flake_2_corner type ...`` and a
+    combined ``group flake_corner union flake_1_corner flake_2_corner``.
+
+    Args:
+        flake_sheets: Exactly two :class:`SheetConfig`s (the flake's bilayer
+            materials, from the ``[Flake-1]`` / ``[Flake-2]`` sections).
+        settings: Global simulation settings.
+        workdir: Directory to write ``lammps/system.in.settings`` and stage the
+            ``provenance/potentials`` into (created if missing).
+        reserve_virtual_type: Reserve one non-interacting ``virtual`` type for a
+            future ``virtual_atom`` flake drive (D4), registered after the
+            components but before the self-interactions -- the same ordering
+            :func:`register_hetero_potentials` uses. Default False.
+
+    Returns:
+        :class:`HeteroFlakePotentials` exposing the configured manager, the
+        written settings path, the per-material type blocks / offsets, the
+        per-material corner type ids, and the combined ``flake_corner`` group.
+
+    Raises:
+        ValueError: If ``flake_sheets`` does not hold exactly two materials (a
+            hetero flake is a two-material bilayer; N>2 is out of scope).
+    """
+    if len(flake_sheets) != 2:
+        raise ValueError(
+            f"register_hetero_flake_potentials builds a flake from exactly two "
+            f"materials (a bilayer); got {len(flake_sheets)}."
+        )
+
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    # Same run-dir-relative potential staging as the periodic hetero spine.
+    pm = PotentialManager(
+        settings,
+        potentials_dir=workdir / "provenance" / "potentials",
+        potentials_prefix=str(Path("provenance") / "potentials"),
+    )
+
+    # 1. One corner-split component per material -> disjoint, contiguous global
+    #    type blocks (core 2t-1 / corner 2t), aligned with apply_flake_corner_types.
+    component_names: List[str] = []
+    for i, sheet in enumerate(flake_sheets):
+        name = f"flake_{i + 1}"
+        pm.register_component(name, sheet, n_layers=1, regions=[None, "corner"])
+        component_names.append(name)
+
+    # 1b. Optionally reserve the drive's virtual type before the self-interactions.
+    if reserve_virtual_type:
+        pm.register_virtual_atom()
+
+    # 2. Each material's own many-body potential (hybrid entry per component).
+    for name in component_names:
+        pm.add_self_interaction(name)
+
+    # 3. UFF-mixed lj/cut cross-terms between the two flake materials.
+    for i in range(len(component_names)):
+        for j in range(i + 1, len(component_names)):
+            pm.add_cross_interaction(component_names[i], component_names[j])
+
+    settings_path = workdir / "lammps" / "system.in.settings"
+    pm.write_file(settings_path)
+
+    # 4. Per-material corner (even) type ids + the combined union.
+    corner_ids_by_material = [
+        pm.types.ids_by_component_region(name, "corner") for name in component_names
+    ]
+    flake_corner_ids = sorted({tid for ids in corner_ids_by_material for tid in ids})
+    flake_corner_group = " ".join(str(tid) for tid in flake_corner_ids)
+
+    # 5. Emit the corner groups explicitly (the PM only special-cases 'sheet').
+    #    Per-material groups first, then a union referencing them by name.
+    corner_group_lines = ["", "# Flake corner groups (per-material + combined)"]
+    for name, ids in zip(component_names, corner_ids_by_material):
+        corner_group_lines.append(
+            f"group {name}_corner type {' '.join(str(tid) for tid in ids)}"
+        )
+    corner_group_lines.append(
+        f"group flake_corner union {' '.join(f'{name}_corner' for name in component_names)}"
+    )
+    with open(settings_path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(corner_group_lines) + "\n")
+
+    # 6. Per-material type blocks / offsets read back from the registry.
+    type_ids = [pm.types.ids_by_component(name) for name in component_names]
+    type_offsets = [ids[0] - 1 for ids in type_ids]
+
+    return HeteroFlakePotentials(
+        pm=pm,
+        settings_path=settings_path,
+        component_names=component_names,
+        type_ids=type_ids,
+        type_offsets=type_offsets,
+        corner_ids_by_material=corner_ids_by_material,
+        flake_corner_group=flake_corner_group,
     )
 
 
