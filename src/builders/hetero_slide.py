@@ -1,4 +1,5 @@
 """D1 hetero sheet-on-sheet slide assembly (consumes hetero.py's structure builder)."""
+import json
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -323,6 +324,13 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         self.write_file("lammps/slide.in", script)
         logger.info("Wrote hetero slide script to %s/lammps/slide.in", self.output_dir)
 
+        # D3: record the achieved twist angle + moiré period into the run
+        # manifest (achieved != target for discrete commensurate angles; always
+        # log the achieved value). Inert for the non-twist hetero slide
+        # (twist_angle_achieved is None), so the aligned path is unaffected.
+        if stack.twist_angle_achieved is not None:
+            self._record_twist_manifest(stack, general.twist_angle)
+
         # Reuse the homogeneous HPC scaffolding, but do NOT let it block the
         # slide.in write. It also assumes the sim-root-relative path convention;
         # the hetero slide is run-dir-relative, so any script it emits needs a
@@ -335,3 +343,32 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                 "homogeneous HPC path assumes sim-root-relative paths while the "
                 "hetero slide is run-dir-relative; deferring to Task 5.", exc,
             )
+
+    def _record_twist_manifest(self, stack, twist_angle_target) -> None:
+        """Write the achieved twist angle + moiré period into the run manifest.
+
+        Augments the provenance manifest (``provenance/manifest.json``, created
+        by :meth:`SimulationBase.write_file` during provenance init) with a
+        ``twist`` block recording the user-selected target, the ACHIEVED
+        commensurate angle (the two differ -- commensurate angles are discrete),
+        and the moiré period. Downstream (postprocessing/AiiDA) can read the
+        realised twist straight from provenance.
+        """
+        manifest_path = self.output_dir / "provenance" / "manifest.json"
+        if manifest_path.exists():
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        else:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"version": "1.0", "files": []}
+        data["twist"] = {
+            "twist_angle_target_deg": twist_angle_target,
+            "twist_angle_achieved_deg": stack.twist_angle_achieved,
+            "moire_period_ang": stack.moire_period,
+        }
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        logger.info(
+            "Twisted moiré: target %.3f deg -> ACHIEVED %.3f deg, moiré period "
+            "%.3f A (recorded in %s)",
+            twist_angle_target, stack.twist_angle_achieved, stack.moire_period,
+            manifest_path,
+        )

@@ -372,11 +372,18 @@ def _select_afm_builder_cls(model, config_obj):
 
 
 def _select_sheet_builder_cls(model, config_obj):
-    """Route sheet-on-sheet to the hetero builder when >=2 materials are configured."""
+    """Route sheet-on-sheet to the hetero builder for >=2 materials or a twist.
+
+    A single ``[2D]`` material with ``general.twist_angle`` set is a genuine
+    same-material moiré, so it must also reach the hetero builder (which
+    synthesises the two sheets). A single material with no twist stays on the
+    homogeneous builder (unchanged).
+    """
     if model == 'pes_sheet':
         return PESSheetSimulation
     sheets = getattr(config_obj, 'sheets', None) or []
-    if len(sheets) >= 2:
+    twist = getattr(getattr(config_obj, 'general', None), 'twist_angle', None)
+    if len(sheets) >= 2 or twist is not None:
         return HeteroSheetOnSheetSimulation
     return SheetOnSheetSimulation
 

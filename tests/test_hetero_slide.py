@@ -370,6 +370,29 @@ def test_routing_selects_homogeneous_for_single_material():
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is SheetOnSheetSimulation
 
 
+def _single_material_twist_config():
+    """A single [2D] material with a twist angle -> same-material moiré."""
+    raw = {
+        "general": {"temp": 300, "scan_speed": 1, "twist_angle": 21.8},
+        "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
+               "pot_type": "sw", "x": 4.0, "y": 4.0, "layers": [4]},
+    }
+    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+
+
+def test_routing_single_material_twist_selects_hetero():
+    cfg = _single_material_twist_config()          # single [2D] + general.twist_angle
+    assert len(cfg.sheets) == 1
+    assert cfg.general.twist_angle is not None
+    assert _select_sheet_builder_cls("sheetonsheet", cfg) is HeteroSheetOnSheetSimulation
+
+
+def test_routing_single_material_no_twist_stays_homogeneous():
+    cfg = _single_material_config()                # single [2D], no twist
+    assert cfg.general.twist_angle is None
+    assert _select_sheet_builder_cls("sheetonsheet", cfg) is SheetOnSheetSimulation
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end smoke: build a real 2+2 MoS2/WS2 hetero slide and RUN it in LAMMPS
 # --------------------------------------------------------------------------- #
