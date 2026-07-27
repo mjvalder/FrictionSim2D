@@ -1388,6 +1388,64 @@ def get_amorphous_path(mat_name: str) -> Optional[Path]:
     amor_file = mat_dir.joinpath(f"amor_{mat_name}.lmp")
     return Path(str(amor_file)) if amor_file.is_file() else None
 
+class AmorphousNotCachedError(RuntimeError):
+    """A cached amorphous structure was required but is unusable.
+
+    Raised only when ``allow_generate=False``, i.e. by callers that must never
+    trigger a melt-quench (the GUI preview). Raised before anything is written.
+    """
+
+
+def _cached_amorphous(mat_name: str,
+                      target_x: float,
+                      target_y: float,
+                      target_z: float) -> Tuple[Optional[Path], Optional[str]]:
+    """The cached amorphous file for ``mat_name`` if it is big enough.
+
+    Returns:
+        ``(path, None)`` when the cache is usable, otherwise ``(None, reason)``.
+    """
+    amor_path = get_amorphous_path(mat_name)
+    if not amor_path:
+        return None, f"no cached amorphous structure for '{mat_name}'"
+
+    amor_dims = get_model_dimensions(amor_path)
+    if any(amor_dims.get(k) is None for k in ('xhi', 'xlo', 'yhi', 'ylo', 'zhi', 'zlo')):
+        return None, f"cached amorphous file '{amor_path.name}' has no readable box"
+
+    amor_x = cast(float, amor_dims['xhi']) - cast(float, amor_dims['xlo'])
+    amor_y = cast(float, amor_dims['yhi']) - cast(float, amor_dims['ylo'])
+    amor_z = cast(float, amor_dims['zhi']) - cast(float, amor_dims['zlo'])
+
+    if amor_x >= target_x and amor_y >= target_y and amor_z >= target_z:
+        return amor_path, None
+
+    return None, (
+        f"cached amorphous {mat_name} is too small "
+        f"({amor_x:.1f}x{amor_y:.1f}x{amor_z:.1f} A) for the requested "
+        f"{target_x:.1f}x{target_y:.1f}x{target_z:.1f} A"
+    )
+
+
+def amorphous_available(mat_name: str,
+                        target_x: float,
+                        target_y: float,
+                        target_z: float) -> Tuple[bool, str]:
+    """Whether :func:`make_amorphous` would return the cache without generating.
+
+    A bare ``get_amorphous_path`` hit is *not* sufficient: the cached box is
+    also compared against the requested dimensions, and a structure that is too
+    small triggers a fresh melt-quench. Callers that must not pay that cost --
+    or must not write to the package data directory -- should check this first
+    and pass ``allow_generate=False`` as the actual guarantee.
+
+    Returns:
+        ``(True, '')`` when a usable cache exists, else ``(False, reason)``.
+    """
+    path, reason = _cached_amorphous(mat_name, target_x, target_y, target_z)
+    return (path is not None), (reason or '')
+
+
 def make_amorphous(
     mat_name: str,
     cif_path: Path,
@@ -1397,10 +1455,11 @@ def make_amorphous(
     pot_path: Path,
     pot_type: str,
     output_dir: Path,
-    settings: GlobalSettings
+    settings: GlobalSettings,
+    allow_generate: bool = True,
 ) -> Path:
     """Get or generate amorphous structure via melt-quench procedure.
-    
+
     Args:
         mat_name: Material name.
         cif_path: Crystalline CIF file path.
@@ -1411,27 +1470,33 @@ def make_amorphous(
         pot_type: Potential type (sw, tersoff, etc.).
         output_dir: Directory for temporary files.
         settings: Global settings with quench parameters.
-        
+        allow_generate: When False, refuse to run a melt-quench and raise
+            :class:`AmorphousNotCachedError` instead -- before writing anything.
+            Generation is expensive, shells out to ``mpiexec ... lmp``, and
+            writes into the installed package data directory, so interactive
+            callers such as the GUI preview must not be able to trigger it.
+
     Returns:
         Path to amorphous structure file with sufficient dimensions.
+
+    Raises:
+        AmorphousNotCachedError: If no usable cached structure exists and
+            ``allow_generate`` is False.
     """
-    amor_path = get_amorphous_path(mat_name)
-    if amor_path:
-        amor_dims = get_model_dimensions(amor_path)
-        assert all(amor_dims[k] is not None for k in ['xhi', 'xlo', 'yhi', 'ylo', 'zhi', 'zlo'])
+    cached, reason = _cached_amorphous(mat_name, target_x, target_y, target_z)
+    if cached is not None:
+        logger.info("Using existing amorphous file: %s", cached)
+        return cached
 
-        amor_x = cast(float, amor_dims['xhi']) - cast(float, amor_dims['xlo'])
-        amor_y = cast(float, amor_dims['yhi']) - cast(float, amor_dims['ylo'])
-        amor_z = cast(float, amor_dims['zhi']) - cast(float, amor_dims['zlo'])
-
-        if amor_x >= target_x and amor_y >= target_y and amor_z >= target_z:
-            logger.info("Using existing amorphous file: %s", amor_path)
-            return amor_path
-        logger.info(
-            "Existing amorphous file too small (%.1fx%.1fx%.1f vs %.1fx%.1fx%.1f), regenerating...",
-            amor_x, amor_y, amor_z, target_x, target_y, target_z
+    if not allow_generate:
+        # Refuse before create_orthogonal_slab writes the base block: the
+        # guarantee is "nothing on disk changed", not "we stopped eventually".
+        raise AmorphousNotCachedError(
+            f"{reason}. Generating it would run a melt-quench; "
+            f"refusing because allow_generate=False."
         )
 
+    logger.info("%s; regenerating via melt-quench...", reason)
     logger.info("Generating amorphous %s via melt-quench...", mat_name)
 
     quench = settings.quench
@@ -1546,10 +1611,11 @@ def _create_base_slab(
     target_z: float,
     output_path: Path,
     build_dir: Path,
-    settings: GlobalSettings
+    settings: GlobalSettings,
+    allow_generate: bool = True,
 ) -> None:
     """Create base slab (amorphous or crystalline).
-    
+
     Args:
         config: TipConfig or SubstrateConfig.
         cif_path: CIF file path.
@@ -1559,6 +1625,8 @@ def _create_base_slab(
         output_path: Output slab file path.
         build_dir: Directory for temporary files.
         settings: Global simulation settings.
+        allow_generate: Passed to :func:`make_amorphous`; False forbids a
+            melt-quench.
     """
     if config.amorph == 'a':
         pot_path = get_material_path(config.pot_path)
@@ -1566,7 +1634,8 @@ def _create_base_slab(
             config.mat, cif_path,
             target_x=target_x, target_y=target_y, target_z=target_z,
             pot_path=pot_path, pot_type=config.pot_type,
-            output_dir=build_dir, settings=settings
+            output_dir=build_dir, settings=settings,
+            allow_generate=allow_generate,
         )
         shutil.copy(amor_path, output_path)
     else:
@@ -1734,15 +1803,19 @@ def stack_multilayer_sheet(
 def build_tip(
     config: TipConfig,
     build_dir: Path,
-    settings: GlobalSettings
+    settings: GlobalSettings,
+    allow_generate: bool = True,
 ) -> Tuple[Path, float]:
     """Build AFM tip structure (spherical geometry).
-    
+
     Args:
         config: Tip configuration.
         build_dir: Output directory.
         settings: Global simulation settings.
-        
+        allow_generate: When False, an amorphous tip whose structure is not
+            already cached raises :class:`AmorphousNotCachedError` rather than
+            running a melt-quench.
+
     Returns:
         Tuple of (tip_path, actual_radius).
     """
@@ -1757,7 +1830,7 @@ def build_tip(
         config, cif_path,
         target_x=box_size, target_y=box_size, target_z=box_size,
         output_path=base_lmp, build_dir=build_dir,
-        settings=settings
+        settings=settings, allow_generate=allow_generate,
     )
 
     if config.amorph != 'a':
@@ -1796,9 +1869,10 @@ def build_substrate(
     settings: Optional[GlobalSettings] = None,
     target_x: Optional[float] = None,
     target_y: Optional[float] = None,
+    allow_generate: bool = True,
     ) -> Path:
     """Build substrate slab.
-    
+
     Args:
         config: Substrate configuration.
         build_dir: Output directory.
@@ -1806,7 +1880,10 @@ def build_substrate(
         settings: Global settings (required for amorphous).
         target_x: Optional explicit substrate size in x.
         target_y: Optional explicit substrate size in y.
-        
+        allow_generate: When False, an amorphous substrate whose structure is
+            not already cached raises :class:`AmorphousNotCachedError` rather
+            than running a melt-quench.
+
     Returns:
         Path to substrate file.
     """
@@ -1822,7 +1899,8 @@ def build_substrate(
         config, cif_path,
         target_x=target_x, target_y=target_y, target_z=target_z,
         output_path=base_lmp, build_dir=build_dir,
-        settings=settings or GlobalSettings()
+        settings=settings or GlobalSettings(),
+        allow_generate=allow_generate,
     )
 
     # Preserve periodic tiling for crystalline substrates by using the
