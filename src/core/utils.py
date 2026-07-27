@@ -46,11 +46,46 @@ def _is_float(value: str) -> bool:
         return False
 
 
-def get_material_path(mat_name: str) -> Path:
+def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List[Path]:
+    """Candidate locations for a config-supplied file, in resolution order.
+
+    Config files reference potentials and structures by relative path
+    (``examples/potentials/sw/MoS2_wen.sw``), which historically resolved only
+    when the process ran from the repository root. ``base_dir`` -- the directory
+    of the config file itself -- makes those references work regardless of the
+    current working directory, which a desktop launcher does not control.
+
+    Args:
+        name: Path or filename from a config.
+        base_dir: Directory to resolve relative names against, normally the
+            directory containing the config file.
+
+    Returns:
+        Candidate paths, most specific first. Never empty.
+    """
+    candidates = [Path(name)]
+    if base_dir is not None and not Path(name).is_absolute():
+        candidates.append(Path(base_dir) / name)
+    return candidates
+
+
+def _find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
+    """First existing candidate for ``name``, or None."""
+    for candidate in search_paths(name, base_dir):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def get_material_path(mat_name: str,
+                      base_dir: Optional[Union[str, Path]] = None) -> Path:
     """Find material files.
 
     Args:
         mat_name: Material identifier or file path.
+        base_dir: Directory to resolve relative paths against (normally the
+            directory holding the config file). Optional; when omitted the
+            behaviour is the historical current-working-directory lookup.
 
     Returns:
         Path to the material file.
@@ -58,9 +93,9 @@ def get_material_path(mat_name: str) -> Path:
     Raises:
         FileNotFoundError: If the material file is not found.
     """
-    user_path = Path(mat_name)
-    if user_path.exists():
-        return user_path
+    found = _find_existing(mat_name, base_dir)
+    if found is not None:
+        return found
 
     raise FileNotFoundError(
         f"Material file '{mat_name}' not found. "
@@ -69,11 +104,15 @@ def get_material_path(mat_name: str) -> Path:
         f"folder in the GitHub repository: https://github.com/Mclat16/FrictionSim2D"
     )
 
-def get_potential_path(pot_name: str) -> Path:
+def get_potential_path(pot_name: str,
+                       base_dir: Optional[Union[str, Path]] = None) -> Path:
     """Find potential files.
 
     Args:
         pot_name: Potential name or file path.
+        base_dir: Directory to resolve relative paths against (normally the
+            directory holding the config file). Optional; when omitted the
+            behaviour is the historical current-working-directory lookup.
 
     Returns:
         Path to the potential file.
@@ -81,9 +120,9 @@ def get_potential_path(pot_name: str) -> Path:
     Raises:
         FileNotFoundError: If the potential file is not found.
     """
-    pot_path = Path(pot_name)
-    if pot_path.exists():
-        return pot_path
+    found = _find_existing(pot_name, base_dir)
+    if found is not None:
+        return found
 
     raise FileNotFoundError(
         f"Potential file '{pot_name}' not found. "

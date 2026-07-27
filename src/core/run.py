@@ -4,6 +4,7 @@ Provides config expansion, shared simulation-root layout, and HPC script
 generation used by both the CLI and Python scripts.
 """
 
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -19,6 +20,7 @@ from .config import (
     parse_config,
 )
 from .path_utils import format_dimension_token
+from .utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..builders.afm import AFMSimulation
 from ..builders.afm_freestanding import FreestandingPESTipSimulation
 from ..builders.sheetonsheet import SheetOnSheetSimulation
@@ -99,8 +101,109 @@ def _validate_runtime_sweep_ordering(general_cfg: Dict[str, Any]) -> None:
         )
 
 
-def expand_config_sweeps(base_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Expand config with material lists and parameter sweeps."""
+def read_material_list(path: Union[str, Path],
+                       base_dir: Optional[Union[str, Path]] = None) -> List[str]:
+    """Read a material list file, tolerating the ways people actually write them.
+
+    Blank lines, surrounding whitespace, ``#`` comments (whole-line or trailing)
+    and duplicate entries are all handled. Entries may be one per line or
+    comma-separated, or a mixture.
+
+    Args:
+        path: Path to the list file.
+        base_dir: Directory to resolve a relative ``path`` against.
+
+    Returns:
+        Material names, in file order, without duplicates.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        OSError: If the file cannot be read.
+    """
+    found = _find_existing(str(path), base_dir)
+    if found is None:
+        raise FileNotFoundError(f"Material list file '{path}' not found.")
+
+    materials: List[str] = []
+    seen = set()
+    for raw_line in found.read_text(encoding='utf-8').splitlines():
+        line = raw_line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        for entry in line.split(','):
+            name = entry.strip()
+            if name and name not in seen:
+                seen.add(name)
+                materials.append(name)
+    return materials
+
+
+@dataclass
+class MaterialPreflight:
+    """Which materials in a sweep can actually be built."""
+
+    usable: List[str] = dataclass_field(default_factory=list)
+    skipped: List[Tuple[str, str]] = dataclass_field(default_factory=list)
+
+    def summary(self) -> str:
+        if not self.skipped:
+            return f"{len(self.usable)} material(s) resolved"
+        detail = "; ".join(f"{mat} ({reason})" for mat, reason in self.skipped)
+        return (
+            f"{len(self.usable)} material(s) resolved, "
+            f"{len(self.skipped)} skipped: {detail}"
+        )
+
+
+def preflight_materials(materials: List[str],
+                        section_config: Dict[str, Any],
+                        base_dir: Optional[Union[str, Path]] = None) -> MaterialPreflight:
+    """Check which materials have the files their config template refers to.
+
+    A missing CIF used to surface only part-way through a build, after other
+    materials had already been generated. Resolving up front means one clear
+    warning instead of a late crash, and the rest of the sweep still runs.
+
+    Args:
+        materials: Candidate material names.
+        section_config: The config section holding the ``{mat}`` templates
+            (``cif_path``, ``pot_path``).
+        base_dir: Directory to resolve relative paths against.
+
+    Returns:
+        The usable materials and the reason each skipped one was dropped.
+    """
+    result = MaterialPreflight()
+    for mat in materials:
+        missing = []
+        for key in ('cif_path', 'pot_path'):
+            template = section_config.get(key)
+            if not isinstance(template, str) or not template:
+                continue
+            candidate = template.replace('{mat}', mat)
+            if _find_existing(candidate, base_dir) is None:
+                missing.append(f"{key}={candidate}")
+        if missing:
+            result.skipped.append((mat, "missing " + ", ".join(missing)))
+        else:
+            result.usable.append(mat)
+    return result
+
+
+def expand_config_sweeps(base_config: Dict[str, Any],
+                         base_dir: Optional[Union[str, Path]] = None) -> List[Dict[str, Any]]:
+    """Expand config with material lists and parameter sweeps.
+
+    Args:
+        base_config: Raw config mapping.
+        base_dir: Directory to resolve relative material-list and component
+            paths against. Optional; without it, resolution is relative to the
+            current working directory as before.
+
+    Raises:
+        ValueError: If a material list was given but none of its materials can
+            be resolved -- silently generating nothing is worse than failing.
+    """
     sweep_params = {}
 
     def resolve_materials_list(section_config: Dict[str, Any]) -> List[str]:
@@ -108,13 +211,26 @@ def expand_config_sweeps(base_config: Dict[str, Any]) -> List[Dict[str, Any]]:
             return []
 
         mat_list_path = section_config.get('materials_list', '')
-        if isinstance(mat_list_path, str) and mat_list_path.endswith(".txt"):
-            path = Path(mat_list_path)
-            if path.exists():
-                with open(path, 'r', encoding='utf-8') as f:
-                    return [line.strip() for line in f if line.strip()]
-            logger.warning("Material list file %s not found.", path)
-        return []
+        if not isinstance(mat_list_path, str) or not mat_list_path.endswith(".txt"):
+            return []
+
+        try:
+            materials = read_material_list(mat_list_path, base_dir)
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("%s", exc)
+            return []
+
+        preflight = preflight_materials(materials, section_config, base_dir)
+        if preflight.skipped:
+            logger.warning(
+                "Material list %s: %s", mat_list_path, preflight.summary()
+            )
+        if materials and not preflight.usable:
+            raise ValueError(
+                f"None of the {len(materials)} materials in '{mat_list_path}' could "
+                f"be resolved. {preflight.summary()}"
+            )
+        return preflight.usable
 
     def expand_mat_template(section_config: Dict[str, Any], mat_value: str) -> Dict[str, Any]:
         expanded = {}
@@ -159,6 +275,132 @@ def expand_config_sweeps(base_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         expanded_configs.append(new_conf)
 
     return expanded_configs
+
+
+#: How a list value in each config key is interpreted. A parameter may only be
+#: *swept* into separate runs if it changes the output directory name (see
+#: ``run_simulations``); otherwise every member would write into the same
+#: directory and overwrite its predecessor.
+#:
+#:   'sweep'    expanded into separate configs, each with its own directory
+#:   'layer'    looped inside build() into L{n} subdirectories
+#:   'in_file'  looped inside one LAMMPS script, or split into one run script
+#:              per value when named by ``outer_loop``
+#:   'scalar'   a list here is not supported
+LOOPABILITY: Dict[Tuple[str, str], str] = {
+    ('2D', 'materials_list'): 'sweep',
+    ('general', 'temp'): 'sweep',
+    ('2D', 'layers'): 'layer',
+    ('general', 'force'): 'in_file',
+    ('general', 'scan_angle'): 'in_file',
+    ('general', 'scan_angle_force'): 'in_file',
+    ('general', 'pressure'): 'in_file',
+    ('general', 'scan_speed'): 'in_file',
+}
+
+#: Keys the LAMMPS scripts loop over internally; excluded from sweep expansion.
+LAMMPS_LOOP_PARAMS = frozenset({'force', 'scan_angle', 'pressure', 'scan_speed'})
+
+
+def loopability(section: str, key: str) -> str:
+    """How a list value in ``[section] key`` would be interpreted."""
+    return LOOPABILITY.get((section, key), 'scalar')
+
+
+@dataclass
+class ExpansionSummary:
+    """How much work a config will produce.
+
+    Three different numbers, all of which have been mistaken for each other:
+
+        configs  separate configs, each with its own output directory
+        builds   configs x layer counts -- the L{n} trees actually written
+        jobs     run scripts, i.e. HPC array entries
+    """
+
+    configs: int
+    builds: int
+    jobs: int
+    notes: List[str] = dataclass_field(default_factory=list)
+
+    def render(self) -> str:
+        return f"{self.configs} config(s) -> {self.builds} build(s) -> {self.jobs} job(s)"
+
+
+def _as_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, List[str]]:
+    """How many run scripts one built directory will contain.
+
+    Mirrors the builders: ``outer_loop`` promotes one in-file loop to separate
+    ``slide_*.in`` files, and a PES sheet scan adds a refinement script. Pinned
+    against real generated trees by ``test_expansion_count``.
+    """
+    general = config.get('general', {}) or {}
+    outer_loop = general.get('outer_loop')
+    notes: List[str] = []
+
+    scripts = 1
+    if outer_loop:
+        values = _as_list(general.get(outer_loop))
+        if len(values) > 1:
+            scripts = len(values)
+            notes.append(f"outer_loop={outer_loop} splits the run phase into {scripts} scripts")
+
+    if model == 'pes_sheet':
+        pes = config.get('pes', {}) or {}
+        if pes.get('grid_n_refine'):
+            scripts += 1
+            notes.append("pes.grid_n_refine adds a refinement script")
+
+    return scripts, notes
+
+
+def count_expansion(base_config: Dict[str, Any],
+                    model: str,
+                    base_dir: Optional[Union[str, Path]] = None) -> ExpansionSummary:
+    """Predict how many configs, builds and jobs a config will generate.
+
+    Args:
+        base_config: Raw config mapping.
+        model: Simulation model name (``afm``, ``indent``, ``pes_tip``,
+            ``sheetonsheet``, ``pes_sheet``).
+        base_dir: Directory to resolve relative paths against.
+
+    Returns:
+        An :class:`ExpansionSummary`.
+    """
+    expanded = expand_config_sweeps(base_config, base_dir)
+    configs = len(expanded)
+
+    notes: List[str] = []
+    builds = 0
+    jobs = 0
+    for config in expanded:
+        layers = _as_list(config.get('2D', {}).get('layers')) or [1]
+        scripts, script_notes = _run_scripts_per_build(config, model)
+        builds += len(layers)
+        jobs += len(layers) * scripts
+        for note in script_notes:
+            if note not in notes:
+                notes.append(note)
+
+    return ExpansionSummary(configs=configs, builds=builds, jobs=jobs, notes=notes)
+
+
+def count_generated_jobs(simulation_root: Path) -> int:
+    """Exact job count for an already-generated tree.
+
+    Uses the same discovery as the HPC manifest: every ``*slide*.in`` in a
+    simulation directory, falling back to ``*system*.in`` when there are none.
+    """
+    paths = collect_hpc_simulation_paths(simulation_root)
+    entries, _ = _build_hpc_manifest_entries(simulation_root, paths, [])
+    return len(entries)
 
 
 def collect_hpc_simulation_paths(

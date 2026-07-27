@@ -211,20 +211,31 @@ class ComponentConfig(BaseModel):
     def resolve_path(cls, v: str, info: ValidationInfo) -> str:
         """Resolve filesystem paths from config values.
 
+        A ``base_dir`` supplied through the validation context (see
+        ``model_validate(..., context={'base_dir': ...})``) is used to resolve
+        relative paths, so a config that references ``examples/potentials/...``
+        works regardless of the current working directory.
+
         Args:
             v: Path value from config.
-            info: Pydantic validation info including field name.
+            info: Pydantic validation info including field name and context.
 
         Returns:
             Resolved absolute path as string.
         """
+        base_dir = None
+        if isinstance(info.context, dict):
+            base_dir = info.context.get('base_dir')
+
         path = Path(v)
         if path.exists():
             return str(path)
-        if info.field_name == 'pot_path':
-            resolved = get_potential_path(v)
-        else:
-            resolved = get_material_path(v)
+
+        resolver = get_potential_path if info.field_name == 'pot_path' else get_material_path
+        # Call with one argument unless a base_dir was actually supplied: these
+        # helpers are widely monkeypatched with single-argument stubs, and the
+        # extra argument should only appear when the feature is in use.
+        resolved = resolver(v) if base_dir is None else resolver(v, base_dir)
 
         return str(resolved) if resolved.exists() else v
 
