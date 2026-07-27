@@ -8,7 +8,7 @@ from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from copy import deepcopy
 import itertools
 import re
@@ -639,8 +639,19 @@ def run_simulations(
     use_aiida: bool = False,
     generate_hpc: bool = False,
     simulation_root_name: Optional[str] = None,
+    on_failure: Optional[Callable[[Path, Dict[str, Any], Exception], None]] = None,
+    allow_generate_amorphous: bool = True,
 ) -> Tuple[List[Path], Path, List[Dict[str, Any]], Any]:
     """Run all simulations defined in a config file.
+
+    Args:
+        on_failure: Called as ``(output_dir, run_dict, exception)`` for each
+            config whose build fails. Failures are otherwise only logged, and
+            the caller sees just a success count with no way to say which
+            member failed.
+        allow_generate_amorphous: When False, a missing amorphous structure
+            raises instead of triggering a melt-quench. See
+            :func:`src.builders.components.make_amorphous`.
 
     Returns a tuple of (created_simulations, simulation_root, configs_to_run, settings).
     """
@@ -654,6 +665,11 @@ def run_simulations(
     if use_aiida:
         defaults.aiida.enabled = True
         defaults.aiida.create_provenance = True
+
+    # Carried on the settings rather than threaded through every builder: the
+    # builders already pass `settings` down to make_amorphous.
+    if not allow_generate_amorphous:
+        defaults.quench.allow_generate = False
 
     if model in SHEET_LIKE_MODELS:
         if defaults.hpc.lammps_scripts == ['system.in', 'slide.in']:
@@ -742,6 +758,10 @@ def run_simulations(
             raise
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Build failed for %s: %s", output_dir, exc)
+            # Logging alone leaves callers with only "N/M successful" and no way
+            # to say which member failed or why. The callback lets them report it.
+            if on_failure is not None:
+                on_failure(output_dir, run_dict, exc)
             continue
 
     if generate_hpc and created_simulations:

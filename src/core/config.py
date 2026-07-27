@@ -79,6 +79,15 @@ class QuenchSettings(BaseModel):
     melt_steps: int = 50000
     quench_steps: int = 100000
     equilibrate_steps: int = 20000
+    allow_generate: bool = Field(
+        default=True,
+        description=(
+            "Whether a missing or too-small amorphous structure may be generated "
+            "by melt-quench. Set False for interactive callers (the GUI preview) "
+            "that must not spend minutes in mpiexec or write into the packaged "
+            "materials directory; make_amorphous then raises instead."
+        ),
+    )
     model_config = {'validate_by_name': True}
 
 class OutputSettings(BaseModel):
