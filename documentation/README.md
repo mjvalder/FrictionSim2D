@@ -1,59 +1,32 @@
-# FrictionSim2D Documentation
+# FrictionSim2D documentation
 
-This folder contains user documentation for FrictionSim2D, a package that generates LAMMPS-ready friction simulation inputs for 2D materials.
+User documentation for FrictionSim2D, a package that generates LAMMPS-ready friction simulation inputs for 2D materials.
 
-## Start Here
+Read in this order if you are new; each document also stands alone.
 
-1. [installation.md](installation.md): environment setup and dependency checks
-2. [mainpage.md](mainpage.md): what FrictionSim2D does and quick start
-3. [configuration_guide.md](configuration_guide.md): how to write valid config files
-4. [commands.md](commands.md): complete CLI reference
-5. [examples.md](examples.md): practical workflows
+| # | Document | Covers |
+|---|---|---|
+| 1 | [installation.md](installation.md) | Environment setup, optional extras, verification, troubleshooting |
+| 2 | [overview.md](overview.md) | What the package does, the five simulation models, output layout, quick start |
+| 3 | [configuration.md](configuration.md) | Writing `.ini` config files, sweep behaviour, worked examples |
+| 4 | [commands.md](commands.md) | Complete CLI reference for every command group |
+| 5 | [gui.md](gui.md) | Desktop application: configure, preview in 3D, generate |
+| 6 | [examples.md](examples.md) | End-to-end workflows from generation to plots |
+| 7 | [settings.md](settings.md) | Every `settings.yaml` section and its defaults |
+| 8 | [pes_scan.md](pes_scan.md) | Static potential-energy-surface (corrugation-barrier) scans |
+| 9 | [indent.md](indent.md) | Indentation runs: penetration on hold, adhesion on retract |
+| 10 | [aiida.md](aiida.md) | AiiDA setup, submission, import, query, archive exchange |
+| 11 | [hpc_jobs.md](hpc_jobs.md) | Scheduler script generation and two-phase submission |
+| 12 | [provenance.md](provenance.md) | Provenance manifest model and file tracking internals |
+| 13 | [python_api.md](python_api.md) | Driving the package from Python instead of the CLI |
 
-## Core User Guides
+If your goal is simply to generate and run simulations, documents 1 through 6 are
+sufficient. Documents 12 and 13 matter for development and reproducibility work.
 
-- [essentials.md](essentials.md): simulation lifecycle, run layout, and common patterns
-- [pes_scan.md](pes_scan.md): static potential-energy-surface (corrugation-barrier) scans
-- [indent.md](indent.md): AFM indentation ("indent") sims — penetration/compliance (hold) + adhesion/pull-off (retract) in one run
-- [settings_reference.md](settings_reference.md): global settings used during generation
-- [aiida_workflows.md](aiida_workflows.md): AiiDA setup, submission, and result import
-- [python_api_guide.md](python_api_guide.md): programmatic usage from Python
-- [HPC_TWO_PHASE_JOBS.md](HPC_TWO_PHASE_JOBS.md): scheduler script behavior and submission order
+## Publication dataset
 
-## Internal Architecture
+[`publication/`](publication/) holds the data and configuration files accompanying the
+published dataset, DOI [10.82186/gs4dc-90a11](https://doi.org/10.82186/gs4dc-90a11):
 
-- [PROVENANCE_ARCHITECTURE.md](PROVENANCE_ARCHITECTURE.md): provenance manifest model and file tracking internals
-
-## Publication Dataset
-
-The [`publication/`](publication/) folder contains the data and configuration files accompanying the published dataset (DOI: 10.82186/gs4dc-90a11):
-
-- [publication/README.md](publication/README.md): dataset overview, import instructions, and how to reproduce all publication figures
-- [publication/plots_publication.json](publication/plots_publication.json): master plot configuration used in the publication
-
-## Which Docs Are Most Useful For Typical Users?
-
-If your goal is to generate and run simulations quickly, prioritize:
-
-1. [installation.md](installation.md)
-2. [configuration_guide.md](configuration_guide.md)
-3. [commands.md](commands.md)
-4. [examples.md](examples.md)
-
-The architecture document is useful for reproducibility and development work, but not required for day-to-day simulation setup.
-
-## Suggested Reading Paths
-
-CLI-first users:
-
-1. [mainpage.md](mainpage.md)
-2. [configuration_guide.md](configuration_guide.md)
-3. [commands.md](commands.md)
-4. [examples.md](examples.md)
-
-Python/API-first users:
-
-1. [python_api_guide.md](python_api_guide.md)
-2. [configuration_guide.md](configuration_guide.md)
-3. [settings_reference.md](settings_reference.md)
-4. [aiida_workflows.md](aiida_workflows.md)
+- [publication/README.md](publication/README.md) — dataset overview, import instructions, and how to reproduce every publication figure
+- [publication/plots_publication.json](publication/plots_publication.json) — the master plot configuration
