@@ -790,3 +790,77 @@ def test_register_hetero_potentials_no_regions_unchanged(tmp_path):
     hp = register_hetero_potentials(sheets, load_settings(), workdir=tmp_path)
     assert hp.pm.types.ids_by_component_region("sheet_1", "edge") == []
     assert hp.pm.types.ids_by_component_region("sheet_2", "edge") == []
+
+
+import shutil  # noqa: E402  (B3 real-LAMMPS tests below)
+
+LMP = shutil.which("lmp_serial")
+
+
+def _finite_hetero_cfg(tmp_path, layers=None):
+    """A finite (edge-typed) two-material hetero config.
+
+    Reuses the smallest MoS2/WS2 coincidence pair (``x=y=4`` -> dup (1,1) ->
+    the ~19x22 A coincidence supercell), with ``general.finite_sheet=True`` so
+    :func:`build_hetero_structure` takes the edge-typing branch.
+    """
+    lyr = layers if layers is not None else [1]
+    raw = {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped",
+                    "finite_sheet": True},
+        "2D-1": {"mat": "h-MoS2", "cif_path": MOS2_CIF, "pot_path": MOS2_POT,
+                 "pot_type": "sw", "x": 20.0, "y": 20.0, "layers": lyr},
+        "2D-2": {"mat": "h-WS2", "cif_path": WS2_CIF, "pot_path": WS2_POT,
+                 "pot_type": "sw", "x": 20.0, "y": 20.0, "layers": lyr},
+    }
+    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+
+
+def _parse_lammps_atoms(path):
+    """Return ``(type_ids, xy)`` read straight from the data file's Atoms section.
+
+    Column 2 is the LAMMPS type id for ``atom_style atomic`` (id type x y z);
+    columns 3-4 are x, y. ASE's lammps-data reader maps types to chemical Z
+    (all even for Mo/S/W), so the even/odd edge rule needs the RAW type column,
+    which only a direct parse gives.
+    """
+    lines = Path(path).read_text().splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip().split("#")[0].strip() == "Atoms":
+            start = i
+            break
+    assert start is not None, f"no Atoms section in {path}"
+    type_ids = []
+    xy = []
+    for line in lines[start + 1:]:
+        s = line.strip()
+        if not s:
+            if type_ids:  # blank line after the block ends it
+                break
+            continue  # blank line(s) between the header and the first row
+        if s.split("#")[0].strip() == "":
+            continue
+        parts = s.split()
+        type_ids.append(int(parts[1]))
+        xy.append((float(parts[2]), float(parts[3])))
+    return np.array(type_ids, dtype=int), np.array(xy, dtype=float)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_builds_with_doubled_types(tmp_path):
+    """The finite branch edge-types the assembled patch, so its data file
+    carries the doubled (core/edge) atom types -- exactly twice the single
+    (periodic) spine's type count. (The plan's ``>= 4`` cannot fail on the
+    un-implemented periodic path, whose spine here is already 5 types, so we
+    assert the exact doubling against a reference single registration.)"""
+    cfg = _finite_hetero_cfg(tmp_path)
+    single = len(
+        register_hetero_potentials(
+            list(cfg.sheets), cfg.settings, workdir=tmp_path / "ref_spine"
+        ).pm.types
+    )
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    text = Path(stack.data_path).read_text()
+    m = re.search(r"(\d+)\s+atom types", text)
+    assert m and int(m.group(1)) == 2 * single  # every real type split core/edge

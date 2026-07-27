@@ -75,7 +75,7 @@ from ..core.lattice_matching import (
 )
 from ..core.potential_manager import PotentialManager
 from ..interfaces.jinja import PackageLoader
-from .components import build_monolayer, calculate_layer_shifts
+from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
 
 PathLike = Union[str, Path]
 
@@ -1527,6 +1527,9 @@ def build_hetero_structure(
         matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir, **match_kwargs)
 
     # 3. Register the materials' potential/type spine (geometry-independent).
+    #    The finite/edge path needs the SINGLE-type spine here (assembly aligns
+    #    the data file to it); the doubled core/edge spine is registered AFTER
+    #    the patch is edge-typed (below), so the two stay consistent.
     hetero_potentials = register_hetero_potentials(sheets, settings, workdir)
 
     # 4. Assemble into one periodic hetero.data aligned to that spine.
@@ -1541,4 +1544,68 @@ def build_hetero_structure(
     # Carry the achieved twist + moiré period onto the stack (None for non-twist).
     stack.twist_angle_achieved = matched.twist_angle_achieved
     stack.moire_period = matched.moire_period
+
+    # 5. Finite/edge path (opt-in). Edge typing runs AFTER matching + stacking,
+    #    on the ASSEMBLED patch, so the edge band is the patch's TRUE perimeter
+    #    (apply_sheet_edge_types keys off bound(all,*), the atom bounding box).
+    #    Doing it per-monolayer before tiling would bury the band in the
+    #    coincidence supercell's interior (the cell is generally not 1x1).
+    if bool(config.general.finite_sheet) and len(sheets) >= 2:
+        _apply_finite_hetero_edges(stack, sheets, settings, workdir)
+
     return stack
+
+
+def _apply_finite_hetero_edges(
+    stack: HeteroStack,
+    sheets: List[SheetConfig],
+    settings: GlobalSettings,
+    workdir: Path,
+) -> None:
+    """Edge-type an assembled hetero patch in place and re-register its spine.
+
+    Mirrors the homogeneous finite path's replicate-then-edge-type ordering
+    (:func:`~src.builders.components.build_monolayer`): the assembled
+    ``hetero.data`` is retyped so every original type ``t`` splits into an
+    interleaved core (``2t-1``) / edge (``2t``) pair via
+    :func:`~src.builders.components.apply_sheet_edge_types` (which keys off the
+    atom bounding box, so the edge band is the patch's true perimeter), then the
+    potential spine is re-registered with ``regions=[None, 'edge']`` so
+    ``system.in.settings`` describes the doubled types. ``stack`` is updated in
+    place (``settings_path`` / ``total_types``).
+
+    Raises:
+        ValueError: If ``finite_sheet_edge_width`` is not smaller than half the
+            assembled patch's smaller in-plane span (the edge band would swallow
+            the whole patch, leaving no core).
+    """
+    edge_width = float(settings.geometry.finite_sheet_edge_width)
+    if edge_width <= 0:
+        return
+
+    # Guard: the edge band must not swallow the patch. Span from the assembled
+    # patch's atom bounding box (the same extent apply_sheet_edge_types uses).
+    at = read(str(stack.data_path), format="lammps-data")
+    xy = at.get_positions()[:, :2]
+    span_x = float(xy[:, 0].max() - xy[:, 0].min())
+    span_y = float(xy[:, 1].max() - xy[:, 1].min())
+    smaller = min(span_x, span_y)
+    if edge_width >= 0.5 * smaller:
+        raise ValueError(
+            f"finite_sheet_edge_width={edge_width} A is not smaller than half the "
+            f"assembled patch's smaller in-plane span ({smaller:.2f} A) -- the "
+            f"edge band would swallow the whole patch, leaving no core. Reduce "
+            f"finite_sheet_edge_width or enlarge the sheet."
+        )
+
+    # Retype the assembled patch: per original type t -> core 2t-1 / edge 2t.
+    apply_sheet_edge_types(Path(stack.data_path), edge_width=edge_width)
+
+    # Re-register the spine with the doubled core/edge types so
+    # system.in.settings matches the retyped data file (same shared
+    # register_sheet_block routine, now with regions).
+    hp_edge = register_hetero_potentials(
+        sheets, settings, workdir, regions=[None, "edge"]
+    )
+    stack.settings_path = Path(hp_edge.settings_path)
+    stack.total_types = len(hp_edge.pm.types)
