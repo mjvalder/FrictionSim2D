@@ -362,11 +362,16 @@ def _select_afm_builder_cls(model, config_obj):
             f"'pes-tip' (the freestanding tip PES). Model '{model}' requires a [sub] "
             f"section; freestanding dynamic slide/indent is a future (Phase 2) feature."
         )
-    # D2: periodic hetero AFM when >=2 materials are configured (amorphous sub).
-    # pes_tip/indent are NOT rerouted here — their hetero variants are later
-    # phases. TODO(D5/future): hetero pes_tip/indent.
-    if model == 'afm' and len(getattr(config_obj, 'sheets', []) or []) >= 2:
-        from src.builders.hetero_afm import HeteroAFMSimulation
+    # Hetero AFM when >=2 materials are configured (amorphous sub). ONE hetero
+    # decision point: a finite ([general] finite_sheet) stack routes to the D5
+    # edge-typed FiniteHeteroAFMSimulation, else the D2 periodic HeteroAFMSimulation.
+    # pes_tip/indent are NOT rerouted here — their hetero variants are later phases.
+    # TODO(future): hetero pes_tip/indent.
+    sheets = getattr(config_obj, 'sheets', []) or []
+    if model == 'afm' and len(sheets) >= 2:
+        from src.builders.hetero_afm import HeteroAFMSimulation, FiniteHeteroAFMSimulation
+        if getattr(config_obj.general, 'finite_sheet', False):
+            return FiniteHeteroAFMSimulation
         return HeteroAFMSimulation
     return default_cls
 

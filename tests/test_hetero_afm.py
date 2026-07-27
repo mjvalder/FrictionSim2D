@@ -511,3 +511,23 @@ def test_finite_hetero_afm_renders_edge_fix(tmp_path):
     assert "group sheet_1_edge type" in settings_text
     assert "group sheet_2_edge type" in settings_text
     assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text  # D2 union intact
+
+
+# --- D5 Task 3: routing (finite hetero before periodic hetero) ---
+
+def test_routing_finite_hetero_selects_finite_builder():
+    from src.core.run import _select_afm_builder_cls
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
+    assert _select_afm_builder_cls("afm", cfg) is FiniteHeteroAFMSimulation
+
+
+def test_routing_periodic_hetero_still_selects_d2():
+    from src.core.run import _select_afm_builder_cls
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    raw = _finite_hetero_afm_raw()
+    raw["general"]["finite_sheet"] = False
+    del raw["sub"]["x"]
+    del raw["sub"]["y"]
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    assert _select_afm_builder_cls("afm", cfg) is HeteroAFMSimulation
