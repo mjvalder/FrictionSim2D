@@ -145,6 +145,23 @@ class AFMSimulation(SimulationBase):
 
         logger.info("Initialized provenance folder: %s", prov_dir)
 
+    def _maybe_twist_flake(self) -> None:
+        """D3b: twist the built AFM flake in place when ``twist_angle`` is set.
+
+        Rotates the finite flake's atoms about z in the fixed box frame (a
+        genuine lattice twist vs the sheet below -- the flake is finite, so any
+        angle is legal and no commensurate snapping applies). Shared by
+        :class:`AFMSimulation` and :class:`~src.builders.hetero_afm.HeteroAFMSimulation`.
+        Inert when ``twist_angle is None`` -> the AFM flake path stays
+        byte-identical.
+        """
+        twist = getattr(self.config.general, "twist_angle", None)
+        if twist is None:
+            return
+        from ..core.lattice_apply import rotate_flake_in_plane  # lazy: avoid cycle
+        rotate_flake_in_plane(self.flake_path, float(twist))
+        logger.info("Twisted AFM flake by %.3f deg (D3b)", float(twist))
+
     def _build_components(self, build_dir: Path) -> Tuple[Path, float, Path]:
         """Builds tip and substrate (shared across layer configurations).
         
@@ -163,6 +180,7 @@ class AFMSimulation(SimulationBase):
                 self.config.flake, build_dir
             )
             logger.info("Built flake: %s", self.flake_path.name)
+            self._maybe_twist_flake()
 
         sub_path = None
         if self.config.sub is not None:

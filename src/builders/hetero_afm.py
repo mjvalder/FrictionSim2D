@@ -291,6 +291,7 @@ class HeteroAFMSimulation(AFMSimulation):
                 self.config.flake, build_dir
             )
             logger.info("Built flake: %s", self.flake_path.name)
+            self._maybe_twist_flake()
 
         sub_path = None
         if self.config.sub is not None:
