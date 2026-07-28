@@ -531,3 +531,95 @@ def test_routing_periodic_hetero_still_selects_d2():
     del raw["sub"]["y"]
     cfg = AFMSimulationConfig(**raw, settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is HeteroAFMSimulation
+
+
+# --- D5 Task 4: end-to-end short-LAMMPS finite-hetero-AFM smoke ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_finite_hetero_afm_runs_with_edge_tether(tmp_path):
+    """Capstone D5 smoke: build a REAL finite MoS2/WS2 edge-typed patch + amorphous-Si
+    substrate + Si tip and RUN it in ``lmp_serial`` end to end -- ``system.in``
+    (tip approach + indent load ramp -> ``load_*N.data``) then a short ``slide.in`` --
+    with ``finite_sheet_afm_edge_mode='spring'`` so the UNCHANGED template edge-tether
+    block (``group sheet_edge intersect 2D 2D_edge`` + ``spring/self xy``) fires on the
+    hetero ``2D_edge`` group. Gates on: no shed atoms (edges tethered), the load
+    restart + friction output are written, and the patch's in-plane COM drift is
+    bounded (the tether holds the footprint through the slide).
+
+    Config knobs (empirically tuned for a cheap, reliably-CONVERGING run -- a finite
+    free patch introduces an undamped vertical drum/piston mode absent from the D2
+    periodic sheet, and the indent template loops until the tip z-COM settles):
+      * ``force = 30`` nN presses the patch FIRMLY onto the amorphous substrate,
+        pinning that free z-mode against the substrate's langevin bath so the tip
+        settles (a light load lets the patch float on the vdW gap and the tip never
+        converges). The edge tether is xy-only, so it holds the footprint but does
+        not damp the z-mode -- the load does.
+      * ``tip.r = 5`` -> 2x2 in-plane replication of the ~12.7x11 A coincidence cell
+        (~25x22 A patch, the >=2x-tip-diameter floor), on a 40x40 A substrate
+        (patch + margin > LJ cutoff). ~1300 atoms.
+      * ``tip_reduction_factor = 0.7`` so the r=5 tip is tall enough to populate the
+        langevin thermo band (else ``fix langevin ... zero yes`` aborts on 0 atoms).
+      * ``temp = 1`` K: low enough that the settling loop's tip z-COM range clears the
+        0.1 A convergence gate once the patch is pinned.
+    Runtime ~140 s (dominated by ``system.in``'s hardcoded equilibration + load ramp +
+    settling); ``slide_run_steps`` only shortens the trivial slide phase.
+    """
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    raw = _finite_hetero_afm_raw()
+    raw["general"]["force"] = 30.0        # firm press -> pins the free z drum-mode
+    raw["general"]["temp"] = 1.0
+    raw["tip"]["r"] = 5.0                  # 2x2 replication (LJ-cutoff floor)
+    raw["sub"]["x"] = raw["sub"]["y"] = 40.0
+    raw["2D-1"]["x"] = raw["2D-1"]["y"] = 12.0
+    raw["2D-2"]["x"] = raw["2D-2"]["y"] = 12.0
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
+    cfg.settings.hpc.modules = ["lammps"]
+    cfg.settings.geometry.tip_reduction_factor = 0.7   # populate langevin thermo band
+    cfg.settings.simulation.slide_run_steps = 200      # short slide
+    cfg.settings.output.dump_frequency["slide"] = 100  # >=2 frames for the drift check
+
+    sim = FiniteHeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+    run_dir = Path(tmp_path)
+
+    # 1) Approach + indent: system.in finishes cleanly, keeps every atom (edges
+    #    tethered -> no shedding), and writes the per-load restart the slide reads.
+    init = run_dir / "L1" / "lammps" / "system.in"
+    assert init.exists()
+    proc, out = _run_lammps_afm(run_dir, init)
+    assert proc.returncode == 0, f"system.in exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out, f"atoms lost during approach/indent:\n{out[-3000:]}"
+    loads = list((run_dir / "L1" / "data").glob("load_*N.data"))
+    assert loads and all(p.stat().st_size > 0 for p in loads), \
+        f"no non-empty load_*N.data written by the indent phase: {loads}"
+
+    # 2) Slide: the load restart drives a short friction slide -> results written,
+    #    still no shed atoms with the edge tether re-applied in slide.lmp.
+    slide = run_dir / "L1" / "lammps" / "slide.in"
+    assert slide.exists()
+    proc2, out2 = _run_lammps_afm(run_dir, slide)
+    assert proc2.returncode == 0, f"slide.in exited {proc2.returncode}:\n{out2[-3000:]}"
+    assert "Lost atoms" not in out2, f"atoms lost during slide:\n{out2[-3000:]}"
+    friction = list((run_dir / "L1" / "results").glob("friction_*"))
+    assert friction and all(p.stat().st_size > 0 for p in friction), \
+        f"no non-empty friction output written by the slide: {friction}"
+
+    # 3) Edge tether holds the footprint: the patch's in-plane COM barely drifts over
+    #    the slide (an untethered finite patch would translate/spin many A as the tip
+    #    drags it). Compare the sheet-atom xy-COM between the first and last dump frame.
+    import numpy as np
+    from ase.io import read as _read
+    dump = next((run_dir / "L1" / "visuals").glob("slide_*.lammpstrj"))
+    frames = _read(str(dump), format="lammps-dump-text", index=":")
+    assert len(frames) >= 2, f"need >=2 slide frames for the drift check, got {len(frames)}"
+    sheet_ids = (sim._pm.types.ids_by_component("sheet_1")
+                 + sim._pm.types.ids_by_component("sheet_2"))
+
+    def _sheet_xy_com(atoms):
+        mask = np.isin(atoms.numbers, sheet_ids)   # ase maps lammps type -> numbers
+        assert mask.sum() > 0, "no sheet atoms found in the slide dump by type"
+        return atoms.get_positions()[mask][:, :2].mean(axis=0)
+
+    drift = float(np.linalg.norm(_sheet_xy_com(frames[-1]) - _sheet_xy_com(frames[0])))
+    assert drift < 1.5, f"patch in-plane COM drift {drift:.3f} A too large (tether failed?)"
