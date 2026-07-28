@@ -21,8 +21,7 @@ The sliding phase (``afm/slide.lmp``) is never invoked. Like the former poke and
 adhesion builders it subsumes, it reuses the identical AFM build + ``system.in``
 indentation and injects a recorded **fresh** velocity seed per ``(material,
 layer)``, so all existing two-phase / combined HPC job generation applies
-unchanged. See :mod:`src.postprocessing.indent`, ``documentation/indent.md`` and
-``POKE_SIM_RECIPE.md``.
+unchanged. See :mod:`src.postprocessing.indent` and ``documentation/indent.md``.
 """
 
 import hashlib

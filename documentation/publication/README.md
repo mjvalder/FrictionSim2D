@@ -31,7 +31,7 @@ Each set contains full time-series lateral force, normal force, and displacement
 
 ## Requirements
 
-A full installation of FrictionSim2D (including all optional dependencies) is required to properly manipulate this dataset. Alternatively, a raw SQLite database file can be found in the .aiida zip folder.  See installation.md for help with installation. 
+A full installation of FrictionSim2D, including all optional dependencies, is required to manipulate this dataset. Alternatively, a raw SQLite database file can be found inside the `.aiida` zip folder. See [../installation.md](../installation.md) for help with installation.
 
 ---
 

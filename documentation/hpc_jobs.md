@@ -1,8 +1,8 @@
-# HPC Two-Phase Jobs
+# HPC jobs
 
-This document explains scheduler script generation and submission ordering.
+Scheduler script generation and the two-phase submission model.
 
-## Why Two Phases Exist
+## Why two phases exist
 
 AFM workflows usually need initialization before sliding:
 
@@ -11,7 +11,7 @@ AFM workflows usually need initialization before sliding:
 
 Generated scripts separate these phases so slide jobs start only after successful initialization.
 
-## Generated Files
+## Generated files
 
 In `hpc/` you can expect files such as:
 
@@ -24,7 +24,7 @@ In `hpc/` you can expect files such as:
 
 Exact names can vary with scheduler and script selection.
 
-## Submission Model
+## Submission model
 
 AFM:
 
@@ -35,7 +35,7 @@ Sheet-on-sheet:
 
 - Usually slide-only phase.
 
-## Generate Scripts
+## Generate scripts
 
 From a generated simulation root:
 
@@ -49,7 +49,7 @@ Or produce scripts during generation:
 FrictionSim2D run afm afm_config.ini --hpc-scripts
 ```
 
-## Practical Checks Before Submission
+## Checks before submission
 
 1. Confirm scheduler type (`pbs` or `slurm`).
 2. Confirm module list and MPI launcher in settings.
@@ -70,8 +70,8 @@ Dependency errors at submit time:
 
 - Check scheduler syntax and whether wrapper script captured the first job ID correctly.
 
-## Related Docs
+## Related docs
 
 - [commands.md](commands.md)
-- [settings_reference.md](settings_reference.md)
-- [essentials.md](essentials.md)
+- [settings.md](settings.md)
+- [overview.md](overview.md)

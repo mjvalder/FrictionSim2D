@@ -1,8 +1,8 @@
-# AiiDA Workflows
+# AiiDA workflows
 
 FrictionSim2D integrates with AiiDA for provenance-aware submission, import, query, and archive exchange.
 
-## 1. One-Time Setup
+## 1. One-time setup
 
 Check install:
 
@@ -24,13 +24,13 @@ FrictionSim2D aiida setup --use-remote
 
 `--hpc-config` is still accepted but marked deprecated by the CLI.
 
-## 2. Generate Simulations
+## 2. Generate simulations
 
 ```bash
 FrictionSim2D run afm afm_config.ini --output-dir ./simulation_output --aiida
 ```
 
-## 3. Submit Generated Runs
+## 3. Submit generated runs
 
 Minimal submit (auto-detect code/defaults):
 
@@ -51,7 +51,7 @@ Preview without submitting:
 FrictionSim2D aiida submit ./simulation_output/simulation_YYYYMMDD_HHMMSS --dry-run
 ```
 
-## 4. Import a Simulation Set
+## 4. Import a simulation set
 
 Import a completed `simulation_XXXXXXXX` directory into the local AiiDA database. Stores full time-series data with provenance.
 
@@ -61,7 +61,7 @@ FrictionSim2D aiida import ./simulation_20260421_143404 --label "251113-afm"
 
 The label is required and will be prompted if omitted.
 
-## 5. Export (Dump) Time-Series Data
+## 5. Export time-series data
 
 Export AiiDA-stored time-series to `output_full_*.json` files ready for `postprocess plot`:
 
@@ -73,7 +73,7 @@ Output: `OUTPUT_DIR/outputs/output_full_<size>.json`
 
 This validates the full import round-trip and is the recommended way to regenerate plots from the AiiDA database.
 
-## 6. Rebuild Simulation Inputs from Provenance
+## 6. Rebuild simulation inputs from provenance
 
 Reconstruct a complete simulation directory tree from AiiDA provenance data alone — without needing the original INI config or simulation directory:
 
@@ -83,7 +83,7 @@ FrictionSim2D aiida rebuild 251113-afm --output-dir ~/rebuild_test/ --hpc-script
 
 The reconstructed tree mirrors the output of `FrictionSim2D run` and can be submitted directly to an HPC cluster.
 
-## 7. Query Database
+## 7. Query the database
 
 ```bash
 FrictionSim2D aiida query --material h-MoS2 --layers 3 --format table
@@ -101,7 +101,7 @@ Export query to CSV:
 FrictionSim2D aiida query --format csv --output results.csv
 ```
 
-## 8. Export/Import Archives
+## 8. Export and import archives
 
 Create a portable AiiDA archive of the entire database:
 
@@ -121,7 +121,7 @@ Import on another machine or profile:
 FrictionSim2D aiida import-archive friction2d_archive.aiida
 ```
 
-## 9. Delete Simulation Sets
+## 9. Delete simulation sets
 
 Delete a single set and all its linked nodes (irreversible):
 
@@ -135,7 +135,7 @@ Delete all FrictionSim2D nodes (irreversible):
 FrictionSim2D aiida clear
 ```
 
-## 10. Package Simulation Inputs for Transfer
+## 10. Package simulation inputs for transfer
 
 ```bash
 FrictionSim2D aiida package ./simulation_output/simulation_YYYYMMDD_HHMMSS --output bundle.tar.gz
@@ -143,7 +143,7 @@ FrictionSim2D aiida package ./simulation_output/simulation_YYYYMMDD_HHMMSS --out
 
 This excludes `.lammpstrj` files by design.
 
-## Recommended Modes
+## Recommended modes
 
 - Offline: generate and run manually, import later.
 - Local: AiiDA daemon and compute endpoint on same environment.
@@ -151,8 +151,8 @@ This excludes `.lammpstrj` files by design.
 
 Choose based on cluster policy and authentication constraints.
 
-## Related Docs
+## Related docs
 
 - [commands.md](commands.md)
-- [settings_reference.md](settings_reference.md)
-- [HPC_TWO_PHASE_JOBS.md](HPC_TWO_PHASE_JOBS.md)
+- [settings.md](settings.md)
+- [hpc_jobs.md](hpc_jobs.md)

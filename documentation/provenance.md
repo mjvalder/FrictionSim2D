@@ -1,14 +1,14 @@
-# Provenance Architecture
+# Provenance
 
-This document explains how FrictionSim2D records input provenance for reproducibility.
+How FrictionSim2D records input provenance for reproducibility.
 
-## Design Goals
+## Design goals
 
 - Keep enough metadata to reconstruct how a simulation was built.
 - Track which source files were used by each component.
 - Keep manifest data easy to consume from downstream tools (including AiiDA flows).
 
-## Current Behavior
+## Current behaviour
 
 Provenance is handled by `SimulationBase` methods in `src/core/simulation_base.py`.
 
@@ -28,7 +28,7 @@ Each manifest record stores fields like:
 - `checksum`
 - `added_at`
 
-## Typical Provenance Tree
+## Typical provenance tree
 
 ```text
 <simulation>/
@@ -43,7 +43,7 @@ Each manifest record stores fields like:
 
 AFM simulations may also include layer-resolved directories (`L1`, `L2`, ...), but provenance tracking remains centered around each simulation path.
 
-## Why Checksums Matter
+## Why checksums matter
 
 Checksums let you:
 
@@ -51,18 +51,18 @@ Checksums let you:
 - detect accidental replacement of source files
 - compare whether two runs used identical assets even if path names changed
 
-## Consumption by Workflows
+## Consumption by workflows
 
 AiiDA integration and postprocessing tools can read provenance contents to map simulation outputs back to source inputs.
 
-## Limitations and Trade-Offs
+## Limitations and trade-offs
 
 - Current implementation copies files rather than creating symlinks, prioritizing portability.
 - If very large potential files are used repeatedly, storage usage can increase.
 - Manifest schema is simple JSON; there is no strict external schema file yet.
 
-## Related Docs
+## Related docs
 
-- [essentials.md](essentials.md)
-- [aiida_workflows.md](aiida_workflows.md)
-- [python_api_guide.md](python_api_guide.md)
+- [overview.md](overview.md)
+- [aiida.md](aiida.md)
+- [python_api.md](python_api.md)

@@ -1591,6 +1591,11 @@ def make_amorphous(
         logger.info("Using existing amorphous file: %s", cached)
         return cached
 
+    # Either the explicit argument or the settings flag can forbid generation.
+    # The settings route exists so a caller can forbid it for a whole run
+    # without threading a parameter through every builder.
+    allow_generate = allow_generate and getattr(settings.quench, 'allow_generate', True)
+
     if not allow_generate:
         # Refuse before create_orthogonal_slab writes the base block: the
         # guarantee is "nothing on disk changed", not "we stopped eventually".

@@ -1,22 +1,23 @@
-# Configuration Guide
+# Configuration
 
-FrictionSim2D accepts `.ini` configuration files for simulation generation.
+Writing the per-run `.ini` files that drive simulation generation.
 
-## Section Layout
+Global parameters live in `settings.yaml` and are documented separately in
+[settings.md](settings.md).
 
-AFM config requires:
+## Section layout
 
-- `[2D]`
-- `[tip]`
-- `[sub]`
-- `[general]`
+| Model | Required sections | Additional |
+|---|---|---|
+| AFM sliding | `[2D]`, `[tip]`, `[sub]`, `[general]` | — |
+| Sheet-on-sheet | `[2D]`, `[general]` | — |
+| Interlayer PES scan | `[2D]`, `[general]` | `[pes]` |
+| Tip PES scan | `[2D]`, `[tip]`, `[general]` | `[pes]`; omit `[sub]` for the freestanding builder |
+| Indentation | `[2D]`, `[tip]`, `[sub]`, `[general]` | `[indent]` |
 
-Sheet-on-sheet config requires:
+Optional in any model: `[lj_override]`.
 
-- `[2D]`
-- `[general]`
-
-## Core Fields
+## Core fields
 
 ### [2D]
 
@@ -32,7 +33,7 @@ Common fields:
 - `lat_c` (optional)
 - `materials_list` (optional)
 
-### [tip] (AFM)
+### [tip]
 
 - `mat`
 - `r`
@@ -42,7 +43,7 @@ Common fields:
 - `pot_type`
 - `cif_path`
 
-### [sub] (AFM)
+### [sub]
 
 - `mat`
 - `thickness`
@@ -65,18 +66,21 @@ Common knobs include:
 - `driving_spring`
 - `outer_loop`
 
-## Working Examples
+## Working examples
+
+The shipped configs under [../examples/](../examples/) are the authoritative runnable
+versions; the two below are trimmed to the minimum.
 
 ### Minimal AFM
 
 ```ini
 [2D]
 mat = h-MoS2
-cif_path = run/cif/h-MoS2.cif
+cif_path = examples/materials/h-MoS2.cif
 x = 100
 y = 100
 layers = [1,2,3]
-pot_path = h-MoS2.sw
+pot_path = examples/potentials/sw/MoS2_wen.sw
 pot_type = sw
 stack_type = AB
 
@@ -85,17 +89,17 @@ mat = Si
 r = 25
 amorph = c
 dspring = 1.6e-6
-pot_path = Si.sw
+pot_path = examples/potentials/sw/Si.sw
 pot_type = sw
-cif_path = run/cif/Si.cif
+cif_path = examples/materials/Si.cif
 
 [sub]
 mat = Si
 thickness = 12
 amorph = a
-pot_path = Si.sw
+pot_path = examples/potentials/sw/Si.sw
 pot_type = sw
-cif_path = run/cif/Si.cif
+cif_path = examples/materials/Si.cif
 
 [general]
 temp = 300
@@ -105,16 +109,16 @@ scan_speed = 2
 driving_spring = 50
 ```
 
-### Minimal Sheet-on-Sheet
+### Minimal sheet-on-sheet
 
 ```ini
 [2D]
 mat = h-MoS2
-cif_path = run/cif/h-MoS2.cif
+cif_path = examples/materials/h-MoS2.cif
 x = 100
 y = 100
 layers = [3]
-pot_path = h-MoS2.sw
+pot_path = examples/potentials/sw/MoS2_wen.sw
 pot_type = sw
 stack_type = AB
 
@@ -127,7 +131,7 @@ bond_spring = 5
 driving_spring = 50
 ```
 
-## Sweep Behavior
+## Sweep behaviour
 
 Important implementation detail:
 
@@ -160,21 +164,23 @@ force = [2, 5, 10, 20, 30, 50, 70, 85, 100]
 outer_loop = force
 ```
 
-### Material List Expansion
+### Material list expansion
 
 Use placeholder replacement from a text list:
 
 ```ini
 [2D]
-materials_list = run/material_list.txt
+materials_list = examples/material_list.txt
 mat = {mat}
-cif_path = run/cif/{mat}.cif
-pot_path = {mat}.sw
+cif_path = examples/materials/{mat}.cif
+pot_path = examples/potentials/sw/sw_lammps/{mat}.sw
 ```
 
-`materials_list` format: one material token per line, no header.
+`materials_list` format: one material token per line, no header. Potential and CIF
+paths resolve literally — there is no search path — so every `{mat}` must have a
+matching file.
 
-## Scan Angle Formats
+## Scan angle formats
 
 Supported by current runtime logic:
 
@@ -185,12 +191,13 @@ Legacy interval-style lists may still appear in older configs; explicit lists ar
 
 `scan_angle_force` can restrict angle lists to selected force/pressure values and must follow the same ordering as the target list.
 
-## Layer Constraints
+## Layer constraints
 
 - AFM: `layers` can contain multiple values.
 - Sheet-on-sheet: `layers` must contain exactly one value and that value must be at least 3.
+- Interlayer PES scan: `layers` must be exactly `[2]`.
 
-## Optional Sections
+## Optional sections
 
 ### [lj_override]
 
@@ -202,11 +209,36 @@ Mo-S = [0.4124, 3.75114]
 S-S = [0.1984, 3.62368]
 ```
 
+### [pes]
+
+Required by `run pes-sheet` and `run pes-tip`. Full reference in
+[pes_scan.md](pes_scan.md).
+
+```ini
+[pes]
+grid_n = 12          # N for the N x N lateral grid over one surface unit cell
+grid_n_refine = 20   # optional finer grid for a convergence check
+z_relax = true       # sheet scan: relax the top layer's z at each grid point
+```
+
+### [indent]
+
+Required by `run indent`. Full reference in [indent.md](indent.md).
+
+```ini
+[indent]
+hold_steps = 10000   # damped hold at the target load
+z_step = 0.2         # retract increment per step, Å
+n_steps = 100        # retract steps
+seed = 20260710      # campaign base seed
+```
+
 ### [settings_override]
 
-Documented in legacy workflows but not currently merged in the active runtime path. Prefer editing global settings directly when reproducibility is required.
+Documented in legacy workflows but not currently merged in the active runtime path.
+Prefer editing global settings directly when reproducibility is required.
 
-## Validation Notes
+## Validation notes
 
 Common failures:
 
@@ -222,8 +254,8 @@ Common failures:
 3. Keep absolute or clearly relative paths to avoid file resolution surprises.
 4. Version your config files with each simulation campaign.
 
-## Related Docs
+## Related docs
 
-- [settings_reference.md](settings_reference.md)
+- [settings.md](settings.md)
 - [commands.md](commands.md)
 - [examples.md](examples.md)
