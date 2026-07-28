@@ -409,6 +409,101 @@ class TestRequiredMarking:
         assert '*' not in optional_label.text()
 
 
+class TestCollapsibleSections:
+    """Both tabs run to nine sections; folding is what makes them navigable."""
+
+    @pytest.fixture(name='form')
+    def _form(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank('afm'))
+        yield form
+        form.deleteLater()
+
+    def test_required_sections_start_open(self, form):
+        for key in ('2D', 'tip', 'sub', 'general'):
+            assert not form.sections[key].is_collapsed(), key
+
+    def test_switched_off_optional_sections_start_folded(self, form):
+        """They have nothing to show, and they are most of the clutter."""
+        for key in ('flake', 'lattice_match'):
+            assert form.sections[key].is_collapsed(), key
+
+    def test_toggling_folds_and_unfolds(self, form):
+        section = form.sections['tip']
+        section.toggle_collapsed()
+        assert section.is_collapsed()
+        section.toggle_collapsed()
+        assert not section.is_collapsed()
+
+    def test_collapse_all_and_expand_all(self, form):
+        form.set_all_collapsed(True)
+        assert len(form.collapsed_sections()) == len(form.sections)
+        form.set_all_collapsed(False)
+        assert form.collapsed_sections() == []
+
+    def test_fold_state_survives_a_rebuild(self, form):
+        """Switching mode should not reopen everything just tidied away."""
+        form.sections['general'].set_collapsed(True)
+        form.rebuild()
+        assert form.sections['general'].is_collapsed()
+
+    def test_switching_a_section_on_opens_it(self, form):
+        """Ticking it is a request to work on it."""
+        section = form.sections['flake']
+        assert section.is_collapsed()
+        section.setChecked(True)
+        assert not section.is_collapsed()
+
+    def test_state_is_tracked_not_read_from_visibility(self, form):
+        """isVisible() is False for everything until the window is shown, so
+        deriving fold state from it reports every section as folded."""
+        assert not form.sections['tip'].is_collapsed()
+        assert not form.sections['tip'].body.isVisible()
+
+
+class TestFoldedSummary:
+    """A folded section still has to say enough to decide whether to open it."""
+
+    @pytest.fixture(name='form')
+    def _form(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent'))
+        yield form
+        form.deleteLater()
+
+    def test_a_filled_section_reports_how_much_is_set(self, form):
+        section = form.sections['tip']
+        section.set_collapsed(True)
+        assert 'set' in section.summary.text()
+
+    def test_missing_required_fields_are_called_out(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        blank = ConfigForm(ConfigDocument.blank('afm'))
+        section = blank.sections['2D']
+        section.set_collapsed(True)
+        assert 'required still empty' in section.summary.text()
+
+    def test_a_section_that_is_off_says_so(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        blank = ConfigForm(ConfigDocument.blank('afm'))
+        assert blank.sections['flake'].summary.text() == 'not included'
+
+    def test_the_summary_only_shows_while_folded(self, form):
+        section = form.sections['tip']
+        section.set_collapsed(True)
+        section.set_collapsed(False)
+        assert not section.summary.isVisibleTo(section)
+
+
 class TestPairOverrides:
     """[lj_override] has user-chosen keys, so introspection renders nothing --
     it used to appear as an empty box."""

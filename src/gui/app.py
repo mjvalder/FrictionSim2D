@@ -50,6 +50,29 @@ logger = logging.getLogger(__name__)
 APP_NAME = 'FrictionSim2D'
 
 
+def _fold_controls(parent: QWidget, form: ConfigForm) -> QHBoxLayout:
+    """Collapse/expand-all buttons for a form.
+
+    Both tabs run to nine sections, which is more than fits on screen; folding
+    them one at a time to find the one you want is its own chore.
+    """
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+
+    collapse = QPushButton('Collapse all', parent)
+    collapse.setToolTip('Fold every section')
+    collapse.clicked.connect(lambda: form.set_all_collapsed(True))
+    row.addWidget(collapse)
+
+    expand = QPushButton('Expand all', parent)
+    expand.setToolTip('Unfold every section')
+    expand.clicked.connect(lambda: form.set_all_collapsed(False))
+    row.addWidget(expand)
+
+    row.addStretch(1)
+    return row
+
+
 class MainWindow(QMainWindow):
     """Configuration on the left, rendered system on the right."""
 
@@ -133,12 +156,19 @@ class MainWindow(QMainWindow):
     def _build_left(self) -> QWidget:
         self.tabs = QTabWidget(self)
 
-        self.form = ConfigForm(self.document, self)
-        scroll = QScrollArea(self)
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.form = ConfigForm(self.document, page)
+        layout.addLayout(_fold_controls(page, self.form))
+
+        scroll = QScrollArea(page)
         scroll.setWidget(self.form)
         scroll.setWidgetResizable(True)
-        self.tabs.addTab(scroll, 'Config')
+        layout.addWidget(scroll, 1)
 
+        self.tabs.addTab(page, 'Config')
         self.tabs.addTab(self._build_settings_tab(), 'Settings')
         return self.tabs
 
@@ -151,8 +181,11 @@ class MainWindow(QMainWindow):
         self.settings_origin.setStyleSheet(CAPTION)
         layout.addWidget(self.settings_origin)
 
-        self.settings_form = ConfigForm(self.settings_document, page)
+        self.settings_form = ConfigForm(self.settings_document, page,
+                                        start_collapsed=True)
         self.settings_form.changed.connect(self._on_settings_changed)
+        layout.addLayout(_fold_controls(page, self.settings_form))
+
         scroll = QScrollArea(page)
         scroll.setWidget(self.settings_form)
         scroll.setWidgetResizable(True)
