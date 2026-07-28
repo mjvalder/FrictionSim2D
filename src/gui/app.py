@@ -38,6 +38,7 @@ from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
 from .controllers.settings_document import SettingsDocument
+from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
 from .preview.viewport import ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
@@ -493,6 +494,8 @@ def choose_workspace(parent=None) -> Optional[Path]:
 
 def main(argv: Sequence[str] = ()) -> int:
     """Run the Qt event loop. Returns the process exit code."""
+    install_message_filter()
+
     app = QApplication.instance() or QApplication(list(argv) or sys.argv[:1])
     app.setApplicationName(APP_NAME)
 
@@ -505,4 +508,9 @@ def main(argv: Sequence[str] = ()) -> int:
 
     window = MainWindow(workspace)
     window.show()
-    return app.exec()
+    status = app.exec()
+
+    summary = suppressed_summary()
+    if summary:
+        print(summary, file=sys.stderr)
+    return status
