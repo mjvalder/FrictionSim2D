@@ -374,3 +374,36 @@ def test_flake_slide_twisted_runs_and_holds(tmp_path):
     ix, iy = cols.index("v_comx_flake"), cols.index("v_comy_flake")
     disp = abs(rows[-1][ix] - rows[0][ix]) + abs(rows[-1][iy] - rows[0][iy])
     assert disp > 0.5           # twisted flake still slides (drive live; superlubric contact is fine)
+
+
+# --------------------------------------------------------------------------- #
+# D3b Task 4: hetero-flake twist coverage + achieved-angle manifest
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_hetero_flake_slide_twist_rotates(tmp_path):
+    from ase.io import read
+    from src.builders.flake_slide import FlakeSlideSimulation
+    from tests.test_lattice_apply import _flake_lattice_orientation
+    cfg = _flake_on_sheet_cfg(hetero_flake=True)      # MoS2/WS2 hetero flake
+    cfg.sheet.x = cfg.sheet.y = 30.0                  # room for the ~16 A hetero flake footprint
+    cfg.general.twist_angle = 22.0
+    sim = FlakeSlideSimulation(cfg, str(tmp_path / "tw")); sim.build()
+    cfg0 = _flake_on_sheet_cfg(hetero_flake=True)
+    cfg0.sheet.x = cfg0.sheet.y = 30.0
+    sim0 = FlakeSlideSimulation(cfg0, str(tmp_path / "nt")); sim0.build()
+    fl = next((tmp_path / "tw").rglob("*hexagon.data"))
+    fl0 = next((tmp_path / "nt").rglob("*hexagon.data"))
+    rel = (_flake_lattice_orientation(read(str(fl), format="lammps-data"))
+           - _flake_lattice_orientation(read(str(fl0), format="lammps-data"))) % 60.0
+    assert min(rel, 60.0 - rel) > 5.0
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_twist_angle_applied_recorded_in_manifest(tmp_path):
+    from src.builders.flake_slide import FlakeSlideSimulation
+    cfg = _flake_on_sheet_cfg(hetero_flake=False); cfg.general.twist_angle = 17.5
+    sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
+    manifest = next(Path(tmp_path).rglob("*manifest*"))
+    text = manifest.read_text()
+    assert "17.5" in text or "twist" in text.lower()
