@@ -528,24 +528,45 @@ def dispatch_hpc_generation(
     )
 
 
-def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> None:
-    """Generate shared HPC scripts for a simulation root directory."""
+def hpc_generation_blocker(settings) -> Optional[str]:
+    """Why HPC script generation would be skipped, or None if it would run.
+
+    Generation has a precondition that is easy to miss: ``settings.hpc.modules``
+    defaults to unset, and without it nothing is written. Exposing the reason
+    lets a caller say so up front instead of appearing to succeed while
+    producing no scripts.
+    """
+    if not getattr(settings.hpc, 'modules', None):
+        return (
+            "No HPC modules are configured, so no job scripts can be written. "
+            "Set settings.hpc.modules to the module names your cluster needs "
+            "(for example the LAMMPS and MPI modules)."
+        )
+    return None
+
+
+def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> Optional[str]:
+    """Generate shared HPC scripts for a simulation root directory.
+
+    Returns:
+        None when scripts were generated, otherwise the reason they were not.
+    """
+
+    blocker = hpc_generation_blocker(settings)
+    if blocker is not None:
+        logger.warning("Skipping HPC script generation: %s", blocker)
+        return blocker
 
     hpc_config = HPCConfig.from_settings(settings.hpc, job_name=simulation_root.name)
-    # Skip only when required HPC settings were not provided.
-    if not hpc_config.modules:
-        logger.warning(
-            "Skipping HPC script generation: no HPC modules configured in settings.hpc.modules."
-        )
-        return
 
     simulation_paths = collect_hpc_simulation_paths(
         simulation_root,
         lammps_scripts=hpc_config.lammps_scripts,
     )
     if not simulation_paths:
-        logger.warning("No simulations found for HPC script generation.")
-        return
+        reason = "No simulations were found to write job scripts for."
+        logger.warning("%s", reason)
+        return reason
 
     manifest_entries, resolved_scripts = _build_hpc_manifest_entries(
         simulation_root,
@@ -572,6 +593,7 @@ def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> None:
         base_dir,
         manifest_entries,
     )
+    return None
 
 
 class FreestandingConfigError(ValueError):

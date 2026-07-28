@@ -22,15 +22,17 @@ def _emit(kind: str, **payload: Any) -> None:
 
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
     from ..core.orchestration import generate_package
-    from ..core.run import count_generated_jobs
+    from ..core.run import count_generated_jobs, hpc_generation_blocker
 
     _emit('progress', message=f"generating {request['model']}")
+
+    wants_hpc = bool(request.get('generate_hpc'))
 
     result = generate_package(
         request['config_file'], request['model'],
         output_root=Path(request['output_root']),
         settings_file=request.get('settings_file'),
-        generate_hpc=bool(request.get('generate_hpc')),
+        generate_hpc=wants_hpc,
         simulation_root_name=request.get('root_name'),
     )
 
@@ -44,6 +46,19 @@ def run(request: Dict[str, Any]) -> Dict[str, Any]:
 
     if result.simulation_root and result.created:
         payload['jobs'] = count_generated_jobs(result.simulation_root)
+
+    if wants_hpc:
+        # Report what actually happened. HPC generation skips silently when
+        # settings.hpc.modules is unset, which otherwise looks like the tick
+        # box doing nothing.
+        payload['hpc_requested'] = True
+        payload['hpc_blocked'] = hpc_generation_blocker(result.settings) \
+            if result.settings else None
+        hpc_dir = (result.simulation_root / 'hpc') if result.simulation_root else None
+        payload['hpc_scripts'] = (
+            len([p for p in hpc_dir.iterdir() if p.is_file()])
+            if hpc_dir and hpc_dir.is_dir() else 0
+        )
 
     if not result.created:
         payload['error'] = (result.failures[0].render() if result.failures

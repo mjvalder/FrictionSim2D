@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
+from ..core.run import hpc_generation_blocker
 from .controllers.settings_document import SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
@@ -481,12 +482,23 @@ class MainWindow(QMainWindow):
             return
 
         summary = self.document.expansion()
-        confirm = QMessageBox.question(
-            self, 'Generate simulation package',
+        message = (
             f"This will generate {summary.configs} config(s), {summary.builds} "
-            f"build(s) and {summary.jobs} job(s) into:\n{self.workspace.runs_dir}\n\n"
-            f"Continue?",
+            f"build(s) and {summary.jobs} job(s) into:\n{self.workspace.runs_dir}"
         )
+
+        # Say up front that the tick box will not produce anything, rather than
+        # after the build has run.
+        if self.hpc_box.isChecked():
+            blocker = hpc_generation_blocker(self.settings)
+            if blocker:
+                message += (
+                    f"\n\nHPC job scripts will NOT be written.\n{blocker}\n"
+                    f"You can set this on the Settings tab, under HPC."
+                )
+
+        confirm = QMessageBox.question(
+            self, 'Generate simulation package', message + "\n\nContinue?")
         if confirm != QMessageBox.Yes:
             return
 
@@ -506,6 +518,16 @@ class MainWindow(QMainWindow):
         self._busy(message, False)
 
         detail = message + f"\n\n{result.get('simulation_root')}"
+
+        if result.get('hpc_requested'):
+            written = result.get('hpc_scripts', 0)
+            if written:
+                detail += f"\n\nHPC scripts: {written} written to the hpc/ folder."
+            else:
+                detail += "\n\nHPC scripts: none written."
+                if result.get('hpc_blocked'):
+                    detail += f"\n{result['hpc_blocked']}"
+
         if result.get('failures'):
             detail += "\n\nFailures:\n" + '\n'.join(result['failures'])
         QMessageBox.information(self, 'Generation complete', detail)
