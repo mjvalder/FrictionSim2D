@@ -209,3 +209,45 @@ def rotate_layer_to_angle(mono_path: str,
 
     # Applied rotation carrying the input cell onto the reoriented cell.
     return rotation_angle_between(cell_in, cell_rot)
+
+
+def rotate_flake_in_plane(flake_path, angle_deg, out_path=None):
+    """Twist a FINITE flake by rotating its atoms about z in the FIXED box frame.
+
+    Unlike :func:`rotate_layer_to_angle` (which rotates the cell too and
+    re-canonicalises -- a lattice-symmetry no-op for a layer in a shared box),
+    this rotates ONLY the atom xy positions, about the flake centroid, leaving
+    the cell unchanged. The flake is finite, so this is a genuine twist relative
+    to whatever it is later placed on (the periodic sheet / the tip contact).
+    Metadata (types/masses/charges/atom_style) is preserved by reusing the same
+    metadata-preserving I/O helpers as :func:`rotate_layer_to_angle`.
+
+    Args:
+        flake_path: Path to the source flake LAMMPS data file.
+        angle_deg: In-plane twist about z (degrees, CCW positive).
+        out_path: Where to write the twisted flake; defaults to overwriting
+            ``flake_path`` in place.
+
+    Returns:
+        The output path (a :class:`~pathlib.Path`).
+    """
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
+    from ..builders.hetero import (  # pylint: disable=import-outside-toplevel
+        _monolayer_to_atoms,
+        _read_monolayer,
+        _write_supercell,
+    )
+
+    out_path = Path(out_path) if out_path is not None else Path(flake_path)
+    mono = _read_monolayer(Path(flake_path))
+    atoms = _monolayer_to_atoms(mono)
+    cxy = atoms.get_positions()[:, :2].mean(axis=0)
+    atoms.rotate(angle_deg, "z", center=(cxy[0], cxy[1], 0.0), rotate_cell=False)
+    _write_supercell(
+        atoms,
+        out_path,
+        atom_style=str(mono["atom_style"]),
+        n_types=int(mono["n_types"]),
+        masses=mono["masses"],  # type: ignore[arg-type]
+    )
+    return out_path
