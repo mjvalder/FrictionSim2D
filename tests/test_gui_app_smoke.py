@@ -223,7 +223,225 @@ class TestMainWindow:
         assert window.viewport.system is None
 
     def test_settings_tab_names_its_source(self, window):
-        assert 'Settings from:' in window.settings_view.toPlainText()
+        assert 'Settings from:' in window.settings_origin.text()
+
+    def test_settings_are_editable(self, window):
+        assert window.settings_form.sections
+        assert 'thermostat' in window.settings_form.sections
+
+    def test_settings_survive_a_form_round_trip(self, window):
+        """Committing the settings form unchanged must not invalidate them --
+        empty strings and nested sub-models are both easy to destroy."""
+        window.settings_form.commit()
+        result = window.settings_document.validate()
+        assert result.ok, result.render()
+
+    def test_saving_settings_writes_a_complete_file(self, window):
+        """load_settings replaces rather than merges, so a partial file would
+        silently reset everything it omitted."""
+        import yaml
+
+        window.settings_form.commit()
+        window._save_settings()
+        path = window.workspace.settings_path
+        assert path.exists()
+        data = yaml.safe_load(path.read_text(encoding='utf-8'))
+        assert set(data) == set(window.settings_document.values)
+
+    def test_a_saved_settings_file_is_passed_to_builds(self, window):
+        """Nothing loads settings.yaml from a directory on its own; the GUI has
+        to pass it explicitly."""
+        assert window.settings_file is None
+        window.settings_form.commit()
+        window._save_settings()
+        assert window.settings_file == window.workspace.settings_path
+
+
+class TestSubstrateSection:
+    """Switching to a mode that requires a substrate must restore it -- and the
+    form must not silently discard what is typed into a section that is absent."""
+
+    def test_switching_from_pes_tip_restores_the_substrate(self):
+        """Only the PES tip scan may be freestanding, so switching away from it
+        has to bring the substrate back -- otherwise the build aborts with
+        'substrate is not optional' however carefully the form was filled in."""
+        document = ConfigDocument.blank('pes_tip')
+        document.enable_section('sub', False)
+        document.set_model('afm')
+        assert document.has_section('sub')
+
+    def test_a_filled_substrate_validates_after_the_switch(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('pes_tip')
+        document.enable_section('sub', False)
+        document.set_model('afm')
+
+        for section, values in (
+            ('2D', {'mat': 'h-MoS2', 'pot_type': 'sw',
+                    'pot_path': 'examples/potentials/sw/MoS2_wen.sw',
+                    'cif_path': 'examples/materials/h-MoS2.cif',
+                    'x': 60, 'y': 60, 'layers': [1]}),
+            ('tip', {'mat': 'Si', 'pot_type': 'sw',
+                     'pot_path': 'examples/potentials/sw/Si.sw',
+                     'cif_path': 'examples/materials/Si.cif', 'r': 25}),
+            ('sub', {'mat': 'Si', 'pot_type': 'sw',
+                     'pot_path': 'examples/potentials/sw/Si.sw',
+                     'cif_path': 'examples/materials/Si.cif',
+                     'thickness': 12, 'amorph': 'a'}),
+        ):
+            for key, value in values.items():
+                document.set(section, key, value)
+
+        result = document.validate()
+        assert result.ok, result.render()
+
+    def test_a_required_section_accepts_edits_even_if_it_was_absent(self, qt_app,
+                                                                   monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('afm')
+        del document.values['sub']          # as a mode switch used to leave it
+
+        form = ConfigForm(document)
+        form.sections['sub'].editors['mat'].set_value('Si')
+        form.commit()
+
+        assert document.has_section('sub')
+        assert document.get('sub', 'mat') == 'Si'
+
+
+class TestFamilyFieldFiltering:
+    """A field the family's templates never read should not be offered."""
+
+    @pytest.fixture(name='general_fields')
+    def _general_fields(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+
+        def fields_for(model):
+            return set(ConfigForm(ConfigDocument.blank(model)).sections['general'].editors)
+        return fields_for
+
+    def test_afm_offers_load_but_not_pressure(self, general_fields):
+        fields = general_fields('afm')
+        assert 'force' in fields
+        assert 'pressure' not in fields
+
+    def test_afm_hides_the_sheet_only_springs(self, general_fields):
+        fields = general_fields('afm')
+        assert 'bond_spring' not in fields
+        assert 'driving_spring' not in fields
+
+    def test_sheet_on_sheet_offers_pressure_but_not_load(self, general_fields):
+        fields = general_fields('sheetonsheet')
+        assert 'pressure' in fields
+        assert 'force' not in fields
+
+    def test_sheet_on_sheet_keeps_the_springs(self, general_fields):
+        assert 'bond_spring' in general_fields('sheetonsheet')
+
+    @pytest.mark.parametrize('model,expected', [
+        ('afm', {'force'}),
+        ('indent', {'force'}),
+        ('sheetonsheet', {'pressure', 'scan_speed'}),
+    ])
+    def test_outer_loop_offers_only_what_the_builder_acts_on(self, qt_app, model,
+                                                             expected, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank(model))
+        box = form.sections['general'].editors['outer_loop'].box
+        choices = {box.itemData(i) for i in range(box.count())} - {None}
+        assert choices == expected
+
+
+class TestDependentFields:
+    """A greyed control says 'this does nothing yet'; a live one that is ignored
+    says nothing at all."""
+
+    @pytest.fixture(name='form')
+    def _form(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        return ConfigForm(ConfigDocument.blank('afm'))
+
+    def test_match_tolerance_is_disabled_until_lattice_match_is_ticked(self, form):
+        section = form.sections['sub']
+        assert not section.editors['match_strain_tol'].isEnabled()
+
+        section.editors['match'].set_value(True)
+        section._apply_dependencies()
+        assert section.editors['match_strain_tol'].isEnabled()
+
+    def test_twist_tolerances_are_disabled_without_a_twist_angle(self, form):
+        section = form.sections['general']
+        for key in ('twist_angle_tol', 'twist_strain_tol', 'twist_max_supercell'):
+            assert not section.editors[key].isEnabled(), key
+
+        section.editors['twist_angle'].set_value(5.0)
+        section._apply_dependencies()
+        assert section.editors['twist_angle_tol'].isEnabled()
+
+    def test_scan_angle_selector_is_disabled_without_scan_angles(self, form):
+        section = form.sections['general']
+        section.editors['scan_angle'].set_value(None)
+        section._apply_dependencies()
+        assert not section.editors['scan_angle_force'].isEnabled()
+
+
+class TestRequiredMarking:
+
+    def test_required_fields_are_marked_and_optional_ones_are_not(self, qt_app,
+                                                                 monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank('afm'))
+        section = form.sections['2D']
+
+        required_label, _ = section._rows['mat']
+        optional_label, _ = section._rows['lat_c']
+        assert '*' in required_label.text()
+        assert '*' not in optional_label.text()
+
+
+class TestPairOverrides:
+    """[lj_override] has user-chosen keys, so introspection renders nothing --
+    it used to appear as an empty box."""
+
+    @pytest.fixture(name='section')
+    def _section(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('afm')
+        document.enable_section('lj_override', True)
+        # Held for the test's duration: letting the form be collected destroys
+        # its Qt children while the Python wrappers survive.
+        form = ConfigForm(document)
+        yield form.sections['lj_override']
+        form.deleteLater()
+
+    def test_the_section_has_a_working_editor(self, section):
+        assert section.pair_editor is not None
+
+    def test_pairs_round_trip(self, section):
+        section.pair_editor.set_value({'Mo-S': [0.41, 3.75]})
+        assert section.pair_editor.value() == {'Mo-S': [0.41, 3.75]}
+
+    def test_editing_writes_through_to_the_document(self, section):
+        section.pair_editor.set_value({'Mo-S': [0.41, 3.75]})
+        section.commit()
+        assert section.document.values['lj_override'] == {'Mo-S': [0.41, 3.75]}
+
+    def test_incomplete_rows_are_skipped(self, section):
+        section.pair_editor.set_value({'Mo-S': [0.41, 3.75]})
+        section.pair_editor._add_row('S-S', '', '')
+        assert section.pair_editor.value() == {'Mo-S': [0.41, 3.75]}
 
 
 class TestFormEditors:

@@ -50,9 +50,18 @@ class SimulationFamily:
     has_layer_levels: bool
     #: Whether a substrate-free config is accepted (only PES tip is).
     optional_sections: Tuple[str, ...] = ()
+    #: ``[general]`` keys this family's templates never read. Offering them
+    #: invites configuring something that silently has no effect.
+    unsupported_general: Tuple[str, ...] = ()
+    #: Values ``[general] outer_loop`` may take for this family.
+    outer_loop_choices: Tuple[str, ...] = ()
 
     def mode(self, key: str) -> Optional[SimulationMode]:
         return next((m for m in self.modes if m.key == key), None)
+
+    def supports(self, section: str, key: str) -> bool:
+        """Whether a config key does anything for this family."""
+        return not (section == 'general' and key in self.unsupported_general)
 
 
 AFM = SimulationFamily(
@@ -65,6 +74,10 @@ AFM = SimulationFamily(
     sections=('2D', 'tip', 'sub', 'general'),
     optional_sections=('flake', 'lattice_match', 'lj_override'),
     has_layer_levels=True,
+    # The AFM templates drive the tip with a normal load; pressure and the two
+    # spring constants appear only in the sheet-on-sheet templates.
+    unsupported_general=('pressure', 'bond_spring', 'driving_spring'),
+    outer_loop_choices=('force',),
     modes=(
         SimulationMode(
             key='dynamic_indent', model='afm',
@@ -97,6 +110,10 @@ SHEET_ON_SHEET = SimulationFamily(
     sections=('2D', 'general'),
     optional_sections=('lattice_match', 'lj_override'),
     has_layer_levels=False,
+    # There is no tip to load, so the normal-load field does nothing here;
+    # the sheets are driven by pressure.
+    unsupported_general=('force',),
+    outer_loop_choices=('pressure', 'scan_speed'),
     modes=(
         SimulationMode(
             key='dynamic', model='sheetonsheet',

@@ -14,11 +14,17 @@ corrected; do not take a unit from an example comment.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from .simulation_types import MODES
 
-__all__ = ['FieldOverride', 'SectionOverride', 'overrides_for', 'section_override']
+__all__ = [
+    'FieldOverride', 'SectionOverride', 'overrides_for', 'section_override',
+    'ENABLED', 'field_override',
+]
+
+#: Sentinel for ``enable_if``: the other field just has to hold a truthy value.
+ENABLED = object()
 
 
 @dataclass(frozen=True)
@@ -30,12 +36,17 @@ class FieldOverride:
     help: Optional[str] = None
     group: Optional[str] = None
     order: int = 100
-    #: Hide unless another field in the same section has a given value.
-    show_if: Optional[Tuple[str, object]] = None
+    #: Disable unless another field in the same section is set. Given as
+    #: ``(field key, required value)``; ``ENABLED`` means "any truthy value".
+    #: A greyed control says "this does nothing yet" far more clearly than a
+    #: value that is quietly ignored.
+    enable_if: Optional[Tuple[str, object]] = None
+    #: Reason shown when the control is disabled by ``enable_if``.
+    enable_hint: Optional[str] = None
     #: Render read-only.
     read_only: bool = False
-    #: Show but do not offer editing, with a reason.
-    disabled_reason: Optional[str] = None
+    #: Restrict an enum's choices below what the model allows.
+    choices: Optional[Tuple[object, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -107,10 +118,27 @@ _COMMON: Dict[str, SectionOverride] = {
         fields={
             **_COMPONENT_FIELDS,
             'thickness': FieldOverride(label='Thickness', unit=A, order=10),
-            'x': FieldOverride(label='Length (x)', unit=A, order=11),
-            'y': FieldOverride(label='Width (y)', unit=A, order=12),
+            'x': FieldOverride(
+                label='Length (x)', unit=A, order=11,
+                help='Only used in finite-sheet mode; otherwise the substrate '
+                     'takes the sheet footprint.',
+            ),
+            'y': FieldOverride(
+                label='Width (y)', unit=A, order=12,
+                help='Only used in finite-sheet mode.',
+            ),
             'amorph': FieldOverride(label='Structure', order=13),
-            'match': FieldOverride(label='Lattice match', order=14),
+            'match': FieldOverride(
+                label='Lattice match', order=14,
+                help='Strain the substrate to be commensurate with the sheet.',
+            ),
+            'match_strain_tol': FieldOverride(
+                label='Match strain tolerance', order=15,
+                enable_if=('match', ENABLED),
+                enable_hint='Tick "Lattice match" to set a strain tolerance.',
+                help='Largest strain accepted when matching the substrate '
+                     'lattice to the sheet.',
+            ),
         },
     ),
     'general': SectionOverride(
@@ -130,8 +158,12 @@ _COMMON: Dict[str, SectionOverride] = {
             'scan_speed': FieldOverride(label='Scan speed', unit='Å/ps', order=4),
             'scan_angle': FieldOverride(label='Scan angle', unit='deg', order=5),
             'scan_angle_force': FieldOverride(
-                label='Scan-angle load selector', unit='nN', order=6,
-                help='Which loads the scan-angle list applies to.',
+                label='Apply scan angles only at these loads', unit='nN', order=6,
+                enable_if=('scan_angle', ENABLED),
+                enable_hint='Set one or more scan angles first.',
+                help=('Leave empty to sweep every scan angle at every load. '
+                      'Give loads here to pair them with the scan angles '
+                      'instead, in the same order.'),
             ),
             'outer_loop': FieldOverride(
                 label='Split run phase by', order=7,
@@ -139,11 +171,46 @@ _COMMON: Dict[str, SectionOverride] = {
                       'instead of looping inside a single script. This is what '
                       'multiplies the HPC job count.'),
             ),
-            'finite_sheet': FieldOverride(label='Finite sheet', order=8),
-            'bond_spring': FieldOverride(label='Bond spring constant', order=9),
-            'driving_spring': FieldOverride(label='Driving spring constant', order=10),
-            'twist_angle': FieldOverride(label='Twist angle', unit='deg', order=11),
-            'hetero_stacking': FieldOverride(label='Heterostructure stacking', order=12),
+            'finite_sheet': FieldOverride(
+                label='Finite sheet', order=8,
+                help='Build a sheet with free edges rather than a periodic one.',
+            ),
+            'bond_spring': FieldOverride(
+                label='Bond spring constant', order=9,
+                help='Harmonic bonds holding a sheet together.',
+            ),
+            'driving_spring': FieldOverride(
+                label='Driving spring constant', order=10,
+                help='Stiffness of the spring dragging the moving sheet.',
+            ),
+            'twist_angle': FieldOverride(
+                label='Twist angle', unit='deg', order=11,
+                help=('Relative rotation between the two sheets. Setting this '
+                      'builds a twisted (moiré) cell and routes the run to the '
+                      'heterostructure builder.'),
+            ),
+            'twist_angle_tol': FieldOverride(
+                label='Twist angle tolerance', unit='deg', order=12,
+                enable_if=('twist_angle', ENABLED),
+                enable_hint='Set a twist angle first.',
+                help='How far the achieved angle may fall from the requested one.',
+            ),
+            'twist_strain_tol': FieldOverride(
+                label='Twist strain tolerance', order=13,
+                enable_if=('twist_angle', ENABLED),
+                enable_hint='Set a twist angle first.',
+            ),
+            'twist_max_supercell': FieldOverride(
+                label='Twist max supercell', order=14,
+                enable_if=('twist_angle', ENABLED),
+                enable_hint='Set a twist angle first.',
+                help='Largest supercell searched when looking for a coincidence cell.',
+            ),
+            'hetero_stacking': FieldOverride(
+                label='Heterostructure stacking', order=15,
+                help=('Layer ordering when more than one sheet material is '
+                      'configured. Has no effect on a single-material run.'),
+            ),
         },
     ),
     'flake': SectionOverride(
@@ -187,19 +254,30 @@ def section_override(section_key: str) -> SectionOverride:
     return _COMMON.get(section_key, SectionOverride())
 
 
-def overrides_for(model: str) -> Dict[str, SectionOverride]:
-    """Section overrides for a simulation model, with per-mode adjustments.
+def field_override(model: str, section: str, key: str) -> Optional[FieldOverride]:
+    """Display metadata for one field of one model."""
+    return overrides_for(model).get(section, SectionOverride()).fields.get(key)
 
-    The one real per-model difference: a substrate-free config is only accepted
-    by the PES tip scan. Every other model raises ``FreestandingConfigError``
-    when ``[sub]`` is absent, so offering a checkbox to remove it would offer a
-    guaranteed failure.
+
+def overrides_for(model: str) -> Dict[str, SectionOverride]:
+    """Section overrides for a simulation model, with per-family adjustments.
+
+    Two things vary by family, both because offering them anyway would let
+    someone configure something that has no effect:
+
+    * a substrate-free config is only accepted by the PES tip scan -- every
+      other model raises ``FreestandingConfigError`` without ``[sub]``;
+    * the AFM templates read a normal load and never a pressure, while the
+      sheet-on-sheet templates are the reverse and are the only ones that read
+      the two spring constants.
     """
     entry = MODES.get(model)
     result = dict(_COMMON)
 
     if entry is None:
         return result
+
+    family, _mode = entry
 
     if model != 'pes_tip':
         substrate = result.get('sub', SectionOverride())
@@ -212,4 +290,27 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
             ),
         )
 
+    general = result.get('general', SectionOverride())
+    fields = {
+        key: value for key, value in general.fields.items()
+        if family.supports('general', key)
+    }
+    if family.outer_loop_choices and 'outer_loop' in fields:
+        existing = fields['outer_loop']
+        fields['outer_loop'] = FieldOverride(
+            label=existing.label, unit=existing.unit, help=existing.help,
+            order=existing.order, choices=family.outer_loop_choices,
+        )
+    result['general'] = SectionOverride(
+        label=general.label, help=general.help, order=general.order, fields=fields,
+    )
+
     return result
+
+
+def hidden_fields(model: str, section: str) -> Tuple[str, ...]:
+    """Keys this model's templates never read, so the form should not offer them."""
+    entry = MODES.get(model)
+    if entry is None or section != 'general':
+        return ()
+    return entry[0].unsupported_general

@@ -34,10 +34,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.config import load_settings
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
+from .controllers.settings_document import SettingsDocument
+from .style import CAPTION
 from .preview.viewport import ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.form import ConfigForm
@@ -55,7 +56,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.workspace = workspace
         self.document = ConfigDocument.blank('afm')
-        self.settings = load_settings()
+        # A workspace settings.yaml is used when present, but only because it
+        # is passed explicitly; nothing picks it up from the directory itself.
+        workspace_settings = workspace.settings_path
+        self.settings_document = SettingsDocument.load(
+            workspace_settings if workspace_settings.exists() else None)
+        self.settings = self.settings_document.as_settings()
 
         self.preview = PreviewController(workspace, self)
         self.generator = GenerateController(workspace, self)
@@ -112,7 +118,7 @@ class MainWindow(QMainWindow):
         row.addStretch(1)
 
         self.workspace_label = QLabel('', header)
-        self.workspace_label.setStyleSheet('color: palette(mid);')
+        self.workspace_label.setStyleSheet(CAPTION)
         row.addWidget(self.workspace_label)
 
         change = QPushButton('Change workspace…', header)
@@ -132,12 +138,41 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         self.tabs.addTab(scroll, 'Config')
 
-        self.settings_view = QPlainTextEdit(self)
-        self.settings_view.setReadOnly(True)
-        self._refresh_settings_view()
-        self.tabs.addTab(self.settings_view, 'Settings')
-
+        self.tabs.addTab(self._build_settings_tab(), 'Settings')
         return self.tabs
+
+    def _build_settings_tab(self) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+
+        self.settings_origin = QLabel('', page)
+        self.settings_origin.setWordWrap(True)
+        self.settings_origin.setStyleSheet(CAPTION)
+        layout.addWidget(self.settings_origin)
+
+        self.settings_form = ConfigForm(self.settings_document, page)
+        self.settings_form.changed.connect(self._on_settings_changed)
+        scroll = QScrollArea(page)
+        scroll.setWidget(self.settings_form)
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll, 1)
+
+        row = QHBoxLayout()
+        save = QPushButton('Save to workspace', page)
+        save.setToolTip(
+            'Write settings.yaml into the workspace. It is passed explicitly to '
+            'every build from here; it is not picked up automatically by the CLI.')
+        save.clicked.connect(self._save_settings)
+        row.addWidget(save)
+
+        revert = QPushButton('Revert to defaults', page)
+        revert.clicked.connect(self._revert_settings)
+        row.addWidget(revert)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        self._refresh_settings_origin()
+        return page
 
     def _build_right(self) -> QWidget:
         right = QWidget(self)
@@ -222,25 +257,53 @@ class MainWindow(QMainWindow):
     def _update_workspace_label(self) -> None:
         self.workspace_label.setText(str(self.workspace.root))
 
-    def _refresh_settings_view(self) -> None:
-        """Show the effective settings and where they came from.
+    def _refresh_settings_origin(self) -> None:
+        origin = self.settings_document.source_path
+        changed = self.settings_document.differs_from_defaults()
+        text = f"Settings from: {origin or 'built-in defaults'}"
+        if changed:
+            groups = ', '.join(sorted(changed))
+            text += f"  —  changed from defaults in: {groups}"
+        self.settings_origin.setText(text)
 
-        Read-only for now, and honest about it: load_settings replaces rather
-        than merges, so editing must write a complete file or it would silently
-        reset everything it omitted.
-        """
-        from ..core.config import settings_origin  # noqa: PLC0415
+    def _on_settings_changed(self) -> None:
+        self._refresh_settings_origin()
+
+    def _save_settings(self) -> None:
+        """Write the complete settings file into the workspace."""
+        self.settings_form.commit()
+        result = self.settings_document.validate()
+        self.settings_form.show_errors(result.issues)
+        if not result.ok:
+            QMessageBox.warning(self, 'Settings are not valid', result.render())
+            return
 
         try:
-            origin = settings_origin()
-        except Exception:  # pylint: disable=broad-except
-            origin = None
+            written = self.settings_document.save(self.workspace.settings_path)
+        except Exception as exc:  # pylint: disable=broad-except
+            QMessageBox.critical(self, 'Could not save settings', str(exc))
+            return
 
-        import yaml  # noqa: PLC0415
+        self.settings = self.settings_document.as_settings()
+        self._refresh_settings_origin()
+        self.statusBar().showMessage(f"Saved {written}")
 
-        header = f"# Settings from: {origin or 'built-in defaults'}\n\n"
-        self.settings_view.setPlainText(
-            header + yaml.safe_dump(self.settings.model_dump(), sort_keys=False))
+    def _revert_settings(self) -> None:
+        self.settings_document = SettingsDocument.defaults()
+        self.settings_form.document = self.settings_document
+        self.settings_form.rebuild()
+        self._refresh_settings_origin()
+
+    @property
+    def settings_file(self) -> Optional[Path]:
+        """The settings file builds should use, if the workspace has one.
+
+        Passed explicitly because nothing loads a settings.yaml from the
+        working directory on its own -- only an explicit argument or the file
+        in ~/.config/FrictionSim2D.
+        """
+        path = self.workspace.settings_path
+        return path if path.exists() else None
 
     def _refresh_counts(self) -> None:
         try:
@@ -351,6 +414,7 @@ class MainWindow(QMainWindow):
             config=self.document.to_dict(),
             model=self.document.model,
             layer=None,
+            settings_file=self.settings_file,
             referenced_files=self._referenced_files(),
         )
         self.preview.start(request)
@@ -396,6 +460,7 @@ class MainWindow(QMainWindow):
             config=self.document.to_dict(),
             model=self.document.model,
             generate_hpc=self.hpc_box.isChecked(),
+            settings_file=self.settings_file,
         ))
 
     def _on_generated(self, result: dict) -> None:

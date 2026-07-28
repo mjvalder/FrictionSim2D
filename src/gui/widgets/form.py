@@ -8,7 +8,7 @@ absent section, not a flag.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -20,9 +20,16 @@ from PySide6.QtWidgets import (
 )
 
 from ..controllers.document import ConfigDocument
-from ..schema.introspect import FieldSpec, SectionSpec
-from ..schema.overrides import SectionOverride, overrides_for
+from ..schema.introspect import FieldKind, FieldSpec, SectionSpec
+from ..schema.overrides import (
+    ENABLED,
+    SectionOverride,
+    hidden_fields,
+    overrides_for,
+)
 from .fields import FieldEditor, build_editor
+from .pairs import PairOverrideEditor
+from ..style import CAPTION_SMALL, REQUIRED_MARK, SECTION_HELP
 
 __all__ = ['SectionForm', 'ConfigForm']
 
@@ -41,13 +48,21 @@ def _label_for(spec: FieldSpec, override: Optional[SectionOverride]) -> str:
 
 
 def _ordered_fields(section: SectionSpec,
-                    override: Optional[SectionOverride]) -> List[FieldSpec]:
-    """Fields in display order; unlisted ones keep schema order, at the end."""
+                    override: Optional[SectionOverride],
+                    hidden: Tuple[str, ...] = ()) -> List[FieldSpec]:
+    """Fields in display order, minus any this model's templates never read."""
     def key(spec: FieldSpec):
         field_override = override.fields.get(spec.key) if override else None
         return (field_override.order if field_override else 100, spec.key)
 
-    return sorted(section.fields, key=key)
+    # A nested sub-model has no flat control. Rendering it through the text
+    # fallback would stringify a dict and destroy it on the next commit, so it
+    # is left out and its value passes through untouched.
+    visible = [
+        f for f in section.fields
+        if f.key not in hidden and f.kind is not FieldKind.NESTED
+    ]
+    return sorted(visible, key=key)
 
 
 class SectionForm(QGroupBox):
@@ -67,6 +82,8 @@ class SectionForm(QGroupBox):
         self.section = section
         self.document = document
         self.editors: Dict[str, FieldEditor] = {}
+        self._captions: Dict[str, QLabel] = {}
+        self._rows: Dict[str, tuple] = {}
         self._loading = False
 
         locked = document.is_section_locked(section.key)
@@ -83,28 +100,69 @@ class SectionForm(QGroupBox):
         if help_text:
             caption = QLabel(help_text, self)
             caption.setWordWrap(True)
-            caption.setStyleSheet('color: palette(mid);')
+            caption.setStyleSheet(SECTION_HELP)
             layout.addWidget(caption)
 
         self.form = QFormLayout()
         self.form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         layout.addLayout(self.form)
 
-        for spec in _ordered_fields(section, self.override):
-            editor = build_editor(spec, self)
-            editor.changed.connect(self._on_field_changed)
-            self.editors[spec.key] = editor
+        # A free-form section has user-chosen keys rather than model fields, so
+        # introspection yields nothing to render and it would otherwise appear
+        # as an empty box.
+        self.pair_editor: Optional[PairOverrideEditor] = None
+        if section.key == 'lj_override':
+            self.pair_editor = PairOverrideEditor(self)
+            self.pair_editor.changed.connect(self._on_field_changed)
+            layout.addWidget(self.pair_editor)
 
-            label = QLabel(_label_for(spec, self.override), self)
-            field_override = self.override.fields.get(spec.key) if self.override else None
-            tooltip = (field_override.help if field_override and field_override.help
-                       else spec.doc)
-            if tooltip:
-                label.setToolTip(tooltip)
-                editor.setToolTip(tooltip)
-            self.form.addRow(label, editor)
+        hidden = hidden_fields(document.model, section.key)
+        for spec in _ordered_fields(section, self.override, hidden):
+            self._add_field(spec)
 
         self.load()
+        self._apply_dependencies()
+
+    def _add_field(self, spec: FieldSpec) -> None:
+        """One labelled row: control, required marker, and a short explanation."""
+        field_override = self.override.fields.get(spec.key) if self.override else None
+
+        editor = build_editor(spec, self, choices=(
+            field_override.choices if field_override else None))
+        editor.changed.connect(self._on_field_changed)
+        self.editors[spec.key] = editor
+
+        # Required fields are marked, so "which of these must I fill in?" is
+        # answerable by looking rather than by pressing Render.
+        text = _label_for(spec, self.override)
+        label = QLabel(f"{text}{REQUIRED_MARK}" if spec.required else text, self)
+        if spec.required:
+            label.setToolTip('Required')
+
+        help_text = (field_override.help if field_override and field_override.help
+                     else spec.doc)
+
+        cell = QWidget(self)
+        cell_layout = QVBoxLayout(cell)
+        cell_layout.setContentsMargins(0, 0, 0, 0)
+        cell_layout.setSpacing(1)
+        cell_layout.addWidget(editor)
+
+        if help_text:
+            caption = QLabel(help_text, cell)
+            caption.setWordWrap(True)
+            caption.setStyleSheet(CAPTION_SMALL)
+            cell_layout.addWidget(caption)
+            self._captions[spec.key] = caption
+            label.setToolTip(help_text)
+
+        self._rows[spec.key] = (label, cell)
+        self.form.addRow(label, cell)
+
+    def _is_required(self) -> bool:
+        """Whether this section must be present for the model to build."""
+        return (not self.section.optional
+                or self.document.is_section_locked(self.section.key))
 
     # ---------------------------------------------------------------- state
 
@@ -114,8 +172,12 @@ class SectionForm(QGroupBox):
         try:
             for key, editor in self.editors.items():
                 editor.set_value(self.document.get(self.section.key, key))
+            if self.pair_editor is not None:
+                self.pair_editor.set_value(
+                    self.document.values.get(self.section.key) or {})
         finally:
             self._loading = False
+        self._apply_dependencies()
 
     def commit(self) -> None:
         """Write the editors' values back to the document.
@@ -126,6 +188,17 @@ class SectionForm(QGroupBox):
         or False and so would turn "not specified" into an explicit False.
         """
         if not self.document.has_section(self.section.key):
+            # A section that cannot be switched off must exist before anything
+            # can be written to it; otherwise the user fills the substrate in
+            # and every value is silently dropped.
+            if not self._is_required():
+                return
+            self.document.enable_section(self.section.key, True)
+
+        if self.pair_editor is not None:
+            # A free-form section *is* its values; replace it wholesale.
+            self.document.values[self.section.key] = self.pair_editor.value()
+            self.document.dirty = True
             return
 
         existing = self.document.values.get(self.section.key, {})
@@ -149,10 +222,42 @@ class SectionForm(QGroupBox):
 
     # --------------------------------------------------------------- events
 
+    def _apply_dependencies(self) -> None:
+        """Grey out controls whose prerequisite is not set.
+
+        A disabled control says "this does nothing yet" plainly; a live one
+        whose value is quietly ignored says nothing at all.
+        """
+        if not self.override:
+            return
+
+        for key, editor in self.editors.items():
+            field_override = self.override.fields.get(key)
+            if not field_override or not field_override.enable_if:
+                continue
+
+            other_key, expected = field_override.enable_if
+            other = self.editors.get(other_key)
+            value = other.value() if other else self.document.get(
+                self.section.key, other_key)
+
+            enabled = bool(value) if expected is ENABLED else value == expected
+            editor.setEnabled(enabled)
+
+            label, _cell = self._rows.get(key, (None, None))
+            if label is not None:
+                label.setEnabled(enabled)
+            caption = self._captions.get(key)
+            if caption is not None and field_override.enable_hint:
+                caption.setText(
+                    field_override.enable_hint if not enabled
+                    else (field_override.help or ''))
+
     def _on_field_changed(self) -> None:
         if self._loading:
             return
         self.commit()
+        self._apply_dependencies()
         self.changed.emit()
 
     def _on_toggled(self, enabled: bool) -> None:

@@ -62,6 +62,7 @@ class _TextEditor(FieldEditor):
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
+        self._was_string = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
@@ -70,9 +71,15 @@ class _TextEditor(FieldEditor):
 
     def value(self) -> Any:
         text = self.edit.text().strip()
-        return text or None
+        if text:
+            return text
+        # An empty box means "no value" for an optional field, but an empty
+        # *string* for one that held a string: turning '' into None would fail
+        # validation on a plain `str` field that simply has no value yet.
+        return '' if self._was_string else None
 
     def set_value(self, value: Any) -> None:
+        self._was_string = isinstance(value, str)
         self.edit.setText('' if value is None else str(value))
 
 
@@ -169,14 +176,17 @@ class _BoolEditor(FieldEditor):
 
 class _EnumEditor(FieldEditor):
 
-    def __init__(self, spec: FieldSpec, parent=None) -> None:
+    def __init__(self, spec: FieldSpec, parent=None, choices=None) -> None:
         super().__init__(spec, parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.box = QComboBox(self)
         if not spec.required:
             self.box.addItem('(unset)', None)
-        for choice in spec.choices:
+        # Choices may be narrowed below what the model allows: outer_loop
+        # accepts pressure/scan_speed/force, but each family's builder only
+        # acts on some of them.
+        for choice in (choices if choices is not None else spec.choices):
             self.box.addItem(str(choice), choice)
         self.box.currentIndexChanged.connect(self.changed)
         layout.addWidget(self.box)
@@ -258,6 +268,7 @@ class _PathEditor(FieldEditor):
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
+        self._was_string = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
@@ -280,9 +291,12 @@ class _PathEditor(FieldEditor):
 
     def value(self) -> Any:
         text = self.edit.text().strip()
-        return text or None
+        if text:
+            return text
+        return '' if self._was_string else None
 
     def set_value(self, value: Any) -> None:
+        self._was_string = isinstance(value, str)
         self.edit.setText('' if value is None else str(value))
 
 
@@ -321,17 +335,26 @@ _EDITORS = {
 }
 
 
-def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None) -> FieldEditor:
+def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
+                 choices=None) -> FieldEditor:
     """The editor for a field.
 
     Anything without a dedicated editor falls back to text rather than being
     omitted, so a new config field is editable before anyone writes a widget
     for it.
+
+    Args:
+        spec: The field to build a control for.
+        parent: Qt parent.
+        choices: Narrowed enum choices, where the model permits more than this
+            simulation family can act on.
     """
     if spec.kind is FieldKind.INT:
         return _NumberEditor(spec, parent, integer=True)
     if spec.kind is FieldKind.FLOAT:
         return _NumberEditor(spec, parent, integer=False)
+    if spec.kind is FieldKind.ENUM:
+        return _EnumEditor(spec, parent, choices=choices)
 
     factory = _EDITORS.get(spec.kind)
     return factory(spec, parent) if factory else _TextEditor(spec, parent)

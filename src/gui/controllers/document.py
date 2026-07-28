@@ -187,7 +187,13 @@ class ConfigDocument:
             del self.values[key]
 
         for spec in self.sections():
-            if not spec.optional and spec.key not in self.values:
+            # Locked sections count as required: [sub] is Optional on the model
+            # but every model except the PES tip scan aborts without it. Leaving
+            # it out here is how switching pes_tip -> afm used to produce a
+            # config that could not build, with a form that silently discarded
+            # everything typed into the substrate.
+            required = not spec.optional or self.is_section_locked(spec.key)
+            if required and spec.key not in self.values:
                 self.values[spec.key] = self._defaults_for(spec)
 
         self.dirty = True

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from .assemble import AssembledSystem, to_ovito
+from ..style import CAPTION, WARNING
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class ViewportPanel(QWidget):
             'Press Render to build and display the configured system.', self)
         self.placeholder.setAlignment(
             self.placeholder.alignment().__class__.AlignCenter)
-        self.placeholder.setStyleSheet('color: palette(mid); padding: 40px;')
+        self.placeholder.setStyleSheet(CAPTION + ' padding: 40px;')
         self._view_container.addWidget(self.placeholder)
 
         layout.addLayout(self._build_controls())
@@ -92,7 +93,7 @@ class ViewportPanel(QWidget):
 
         self.warning = QLabel('', self)
         self.warning.setWordWrap(True)
-        self.warning.setStyleSheet('color: palette(highlight);')
+        self.warning.setStyleSheet(WARNING)
         self.warning.hide()
         layout.addWidget(self.warning)
 
