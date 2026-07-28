@@ -249,6 +249,90 @@ _COMMON: Dict[str, SectionOverride] = {
 }
 
 
+#: Model name used by the settings document, so its sections get their own
+#: labels rather than falling back to raw field names.
+SETTINGS_MODEL = '__settings__'
+
+#: Settings groups. Only the fields worth explaining are listed; the rest fall
+#: back to their model description.
+_SETTINGS: Dict[str, SectionOverride] = {
+    'hpc': SectionOverride(
+        label='HPC',
+        help=('Cluster and job-script settings. Job scripts are only written '
+              'when Modules is filled in.'),
+        fields={
+            'modules': FieldOverride(
+                label='Modules', order=1,
+                help=('Environment modules your cluster loads before running, '
+                      'comma separated, e.g. lammps, openmpi. Required: with '
+                      'this empty no job scripts are written at all, whatever '
+                      'the other settings here say.'),
+            ),
+            'scheduler_type': FieldOverride(
+                label='Scheduler', order=2,
+                help='Which submission system the scripts target.',
+            ),
+            'queue': FieldOverride(label='Queue', order=3),
+            'partition': FieldOverride(label='Partition', order=4),
+            'account': FieldOverride(
+                label='Account', order=5,
+                help='Project or budget code to charge the job to.',
+            ),
+            'num_nodes': FieldOverride(label='Nodes', order=6),
+            'num_cpus': FieldOverride(label='CPUs per node', order=7),
+            'memory_gb': FieldOverride(label='Memory', unit='GB', order=8),
+            'walltime_hours': FieldOverride(label='Walltime', unit='h', order=9),
+            'max_array_size': FieldOverride(
+                label='Max array size', order=10,
+                help='Largest job array the scheduler accepts; longer runs are '
+                     'split across several arrays.',
+            ),
+            'hpc_host': FieldOverride(label='Host', order=11),
+            'hpc_home': FieldOverride(
+                label='Remote working directory', order=12,
+                help='Where the simulation tree will live on the cluster.',
+            ),
+            'mpi_command': FieldOverride(label='MPI launcher', order=13),
+            'use_tmpdir': FieldOverride(
+                label='Run in scratch', order=14,
+                help='Copy the run into node-local scratch and back afterwards.',
+            ),
+            'scratch_dir': FieldOverride(
+                label='Scratch directory', order=15,
+                enable_if=('use_tmpdir', ENABLED),
+                enable_hint='Enable "Run in scratch" to set this.',
+            ),
+            'lammps_scripts': FieldOverride(
+                label='Scripts to submit', order=16,
+                help='Which generated run scripts get job entries.',
+            ),
+        },
+    ),
+    'quench': SectionOverride(
+        label='Quench',
+        help=('Melt-quench parameters used when an amorphous structure has to '
+              'be generated.'),
+        fields={
+            'allow_generate': FieldOverride(
+                label='Allow generating amorphous structures', order=1,
+                help=('When off, a missing amorphous structure is an error '
+                      'rather than a melt-quench. The preview always runs with '
+                      'this off.'),
+            ),
+            'run_local': FieldOverride(label='Run locally', order=2),
+            'n_procs': FieldOverride(label='Processes', order=3),
+        },
+    ),
+    'thermostat': SectionOverride(label='Thermostat'),
+    'geometry': SectionOverride(label='Geometry'),
+    'simulation': SectionOverride(label='Simulation'),
+    'output': SectionOverride(label='Output'),
+    'potential': SectionOverride(label='Potential'),
+    'aiida': SectionOverride(label='AiiDA'),
+    'database': SectionOverride(label='Database'),
+}
+
+
 def section_override(section_key: str) -> SectionOverride:
     """Display metadata for a section, empty if none is declared."""
     return _COMMON.get(section_key, SectionOverride())
@@ -271,6 +355,9 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
       sheet-on-sheet templates are the reverse and are the only ones that read
       the two spring constants.
     """
+    if model == SETTINGS_MODEL:
+        return dict(_SETTINGS)
+
     entry = MODES.get(model)
     result = dict(_COMMON)
 

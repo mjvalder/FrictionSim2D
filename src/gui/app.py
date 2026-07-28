@@ -329,6 +329,44 @@ class MainWindow(QMainWindow):
         self.settings_form.rebuild()
         self._refresh_settings_origin()
 
+    def _apply_settings(self) -> Optional[str]:
+        """Make what is on the Settings tab the settings the build will use.
+
+        The tab edits a document, but a build reads a file. Without this,
+        typing a value and pressing Generate uses the previous one -- the tab
+        looks live while quietly having no effect.
+
+        Returns:
+            None on success, otherwise why the settings could not be applied.
+        """
+        self.settings_form.commit()
+        if not self.settings_document.dirty:
+            return None
+
+        result = self.settings_document.validate()
+        if not result.ok:
+            self.settings_form.show_errors(result.issues)
+            return result.render()
+
+        self.settings_document.save(self.workspace.settings_path)
+        self.settings = self.settings_document.as_settings()
+        self._refresh_settings_origin()
+        self.statusBar().showMessage('Applied settings changes.')
+        return None
+
+    def _sync_settings(self) -> bool:
+        """Apply the settings, reporting a failure. False stops the build."""
+        error = self._apply_settings()
+        if error is None:
+            return True
+
+        self.tabs.setCurrentIndex(1)
+        QMessageBox.warning(
+            self, 'Settings are not valid',
+            f"The build was not started because the settings cannot be "
+            f"applied:\n\n{error}")
+        return False
+
     @property
     def settings_file(self) -> Optional[Path]:
         """The settings file builds should use, if the workspace has one.
@@ -441,6 +479,8 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------------- actions
 
     def _render(self) -> None:
+        if not self._sync_settings():
+            return
         if not self._validate():
             self.statusBar().showMessage('Fix the reported problems first.')
             return
@@ -477,6 +517,8 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, 'Preview failed', message)
 
     def _generate(self) -> None:
+        if not self._sync_settings():
+            return
         if not self._validate():
             self.statusBar().showMessage('Fix the reported problems first.')
             return

@@ -538,9 +538,11 @@ def hpc_generation_blocker(settings) -> Optional[str]:
     """
     if not getattr(settings.hpc, 'modules', None):
         return (
-            "No HPC modules are configured, so no job scripts can be written. "
-            "Set settings.hpc.modules to the module names your cluster needs "
-            "(for example the LAMMPS and MPI modules)."
+            "The HPC 'Modules' setting is empty. It is the only one that gates "
+            "job-script generation: scheduler, nodes, CPUs and walltime are all "
+            "written into the scripts but none of them substitute for it. "
+            "Set it to the environment modules your cluster loads before "
+            "running, e.g. 'lammps, openmpi'."
         )
     return None
 

@@ -30,6 +30,7 @@ from pydantic import ValidationError
 
 from ...core.config import GlobalSettings, load_settings, settings_origin
 from ..schema.introspect import SectionSpec, describe_section
+from ..schema.overrides import SETTINGS_MODEL
 
 __all__ = ['SettingsDocument', 'SETTINGS_FILENAME']
 
@@ -44,8 +45,9 @@ class SettingsDocument:
     source_path: Optional[Path] = None
     dirty: bool = False
 
-    #: Duck-types ConfigDocument for the shared form widgets.
-    model: str = '__settings__'
+    #: Duck-types ConfigDocument for the shared form widgets; also selects the
+    #: settings override table so the groups get labels and help.
+    model: str = SETTINGS_MODEL
 
     # ------------------------------------------------------------------ load
 

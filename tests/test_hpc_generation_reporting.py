@@ -33,7 +33,13 @@ class TestBlocker:
         assert 'modules' in reason
 
     def test_the_reason_names_the_setting_to_change(self):
-        assert 'settings.hpc.modules' in hpc_generation_blocker(GlobalSettings())
+        assert "'Modules'" in hpc_generation_blocker(GlobalSettings())
+
+    def test_the_reason_says_the_other_hpc_settings_do_not_substitute(self):
+        """Filling in scheduler, nodes and walltime looks like enough."""
+        reason = hpc_generation_blocker(GlobalSettings())
+        assert 'substitute' in reason
+        assert 'scheduler' in reason
 
     def test_configured_modules_are_not_blocked(self):
         assert hpc_generation_blocker(_settings_with_modules()) is None

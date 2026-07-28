@@ -257,6 +257,56 @@ class TestMainWindow:
         assert window.settings_file == window.workspace.settings_path
 
 
+class TestSettingsTakeEffect:
+    """The tab edits a document but a build reads a file, so an edit that is
+    only on screen used to be silently ignored."""
+
+    @pytest.fixture(name='window')
+    def _window(self, qt_app, workspace, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        from src.gui.app import MainWindow
+        window = MainWindow(workspace)
+        yield window
+        window.close()
+
+    def test_hpc_scripts_are_blocked_until_modules_are_set(self, window):
+        from src.core.run import hpc_generation_blocker
+
+        assert hpc_generation_blocker(window.settings) is not None
+
+    def test_typing_modules_applies_without_a_separate_save(self, window):
+        from src.core.run import hpc_generation_blocker
+
+        window.settings_form.sections['hpc'].editors['modules'].set_value(
+            ['lammps', 'openmpi'])
+        assert window._apply_settings() is None
+        assert hpc_generation_blocker(window.settings) is None
+
+    def test_applying_writes_the_workspace_file_builds_are_given(self, window):
+        assert window.settings_file is None
+        window.settings_form.sections['hpc'].editors['modules'].set_value(['lammps'])
+        window._apply_settings()
+        assert window.settings_file == window.workspace.settings_path
+
+    def test_invalid_settings_stop_the_build_and_are_not_saved(self, window):
+        window.settings_form.sections['hpc'].editors['num_cpus'].set_value('lots')
+        error = window._apply_settings()
+        assert error is not None
+        assert 'num_cpus' in error
+        assert not window.workspace.settings_path.exists()
+
+    def test_syncing_with_no_edits_is_a_no_op(self, window):
+        assert window._apply_settings() is None
+        assert not window.workspace.settings_path.exists()
+
+    def test_the_hpc_group_explains_the_modules_requirement(self, window):
+        section = window.settings_form.sections['hpc']
+        assert section.title() == 'HPC'
+        caption = section._captions.get('modules')
+        assert caption is not None
+        assert 'no job scripts' in caption.text()
+
+
 class TestSubstrateSection:
     """Switching to a mode that requires a substrate must restore it -- and the
     form must not silently discard what is typed into a section that is absent."""
