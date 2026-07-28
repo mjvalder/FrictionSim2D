@@ -323,3 +323,54 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
         f"flake COM barely moved (dx={dx:.3f}, dy={dy:.3f}, |dx|+|dy|={disp:.3f} A); "
         f"virtual_atom drive appears dead"
     )
+
+
+# --------------------------------------------------------------------------- #
+# D3b: incommensurate flake twist on the sheet-on-sheet (D4) drive
+# --------------------------------------------------------------------------- #
+
+def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
+    # [Flake] + twist must go to the FLAKE builder (D3b), not the D3 periodic hetero builder.
+    from src.core.run import _select_sheet_builder_cls
+    from src.builders.flake_slide import FlakeSlideSimulation
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.general.twist_angle = 12.0
+    assert _select_sheet_builder_cls("sheetonsheet", cfg) is FlakeSlideSimulation
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_flake_slide_twist_rotates_the_flake(tmp_path):
+    from ase.io import read
+    from src.builders.flake_slide import FlakeSlideSimulation
+    from tests.test_lattice_apply import _flake_lattice_orientation
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.general.twist_angle = 20.0
+    sim = FlakeSlideSimulation(cfg, str(tmp_path / "tw")); sim.build()
+    cfg0 = _flake_on_sheet_cfg(hetero_flake=False)
+    sim0 = FlakeSlideSimulation(cfg0, str(tmp_path / "nt")); sim0.build()
+    # Compare the FLAKE COMPONENT (build/flake_*_<shape>.data), not the combined
+    # sheet+flake file (flake_slide.data, sheet-dominated).
+    fl = next((tmp_path / "tw").rglob("*hexagon.data"))
+    fl0 = next((tmp_path / "nt").rglob("*hexagon.data"))
+    rel = (_flake_lattice_orientation(read(str(fl), format="lammps-data"))
+           - _flake_lattice_orientation(read(str(fl0), format="lammps-data"))) % 60.0
+    assert min(rel, 60.0 - rel) > 5.0     # visibly twisted vs the untwisted flake
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_flake_slide_twisted_runs_and_holds(tmp_path):
+    from src.builders.flake_slide import FlakeSlideSimulation
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.general.twist_angle = 20.0
+    cfg.settings.simulation.slide_run_steps = 4000
+    cfg.general.scan_speed = 100
+    sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
+    run_dir = sim.run_dir()
+    slide = next(Path(run_dir).rglob("*slide*.in"))
+    proc, out = _run_lammps_slide(run_dir, slide.name)
+    assert proc.returncode == 0 and "Lost atoms" not in out
+    friction = next(run_dir.rglob("friction_*")); assert friction.stat().st_size > 0
+    cols, rows = _read_friction_records(friction)
+    ix, iy = cols.index("v_comx_flake"), cols.index("v_comy_flake")
+    disp = abs(rows[-1][ix] - rows[0][ix]) + abs(rows[-1][iy] - rows[0][iy])
+    assert disp > 0.5           # twisted flake still slides (drive live; superlubric contact is fine)

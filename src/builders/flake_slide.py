@@ -198,6 +198,18 @@ class FlakeSlideSimulation(SimulationBase):
             flake_names = ["flake"]
             flake_components = [filled_flake]
 
+        # 2b. D3b: incommensurate twist of the FINITE flake. Rotate the flake's
+        #     atoms about z in the fixed box frame (a genuine lattice twist vs the
+        #     periodic bottom sheet -- the flake is finite, so any angle is legal
+        #     and no commensurate snapping applies). Inert when twist_angle is
+        #     None -> the D4 flake path stays byte-identical.
+        twist = getattr(self.config.general, "twist_angle", None)
+        if twist is not None:
+            from ..core.lattice_apply import rotate_flake_in_plane  # lazy: avoid cycle
+            rotate_flake_in_plane(flake_path, float(twist))   # in-place twist, box unchanged
+            self._record_twist_manifest(float(twist))
+            logger.info("Twisted flake by %.3f deg (D3b incommensurate)", float(twist))
+
         # 3. ONE PotentialManager: sheet -> flake(s) -> reserved virtual, so global
         #    atom types are sheet 1..S, flake S+1..S+F, virtual S+F+1. Run-dir-
         #    relative potential staging (LAMMPS runs with cwd = output_dir).
@@ -330,6 +342,32 @@ class FlakeSlideSimulation(SimulationBase):
 
     def _get_hpc_job_name(self) -> str:
         return f"flake_{self.config.sheet.mat}"
+
+    def _record_twist_manifest(self, twist_angle_applied: float) -> None:
+        """Record the applied flake twist into the run manifest (D3b).
+
+        Augments the provenance manifest (``provenance/manifest.json``, created
+        during provenance init) with a ``twist`` block. The flake is finite, so
+        the ACHIEVED angle equals the requested angle (no commensurate snapping):
+        both are logged as the same value so downstream (postprocessing/AiiDA)
+        can read the realised twist straight from provenance.
+        """
+        import json  # pylint: disable=import-outside-toplevel
+        manifest_path = self.output_dir / "provenance" / "manifest.json"
+        if manifest_path.exists():
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        else:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"version": "1.0", "files": []}
+        data["twist"] = {
+            "twist_angle_target_deg": twist_angle_applied,
+            "twist_angle_applied_deg": twist_angle_applied,
+        }
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        logger.info(
+            "Flake twist applied %.3f deg (finite flake: achieved == requested; "
+            "recorded in %s)", twist_angle_applied, manifest_path,
+        )
 
     def _assemble_flake_on_sheet(
         self,
