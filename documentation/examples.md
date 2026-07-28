@@ -1,8 +1,8 @@
 # Examples
 
-These examples are written against the current CLI behavior.
+End-to-end workflows, from generating a simulation tree through to plots and database records.
 
-## 1. Generate AFM Simulations
+## 1. Generate AFM simulations
 
 ```bash
 FrictionSim2D run afm examples/afm_config.ini --output-dir ./simulation_output
@@ -10,13 +10,46 @@ FrictionSim2D run afm examples/afm_config.ini --output-dir ./simulation_output
 
 Result: a timestamped simulation root under `./simulation_output/`.
 
-## 2. Generate Sheet-on-Sheet Simulations
+## 2. Generate sheet-on-sheet simulations
 
 ```bash
 FrictionSim2D run sheetonsheet examples/sheet_config.ini --output-dir ./simulation_output
 ```
 
-## 3. Generate HPC Scripts After Build
+## 3. Generate PES scans
+
+Interlayer scan on a frozen bilayer, then a tip-on-sheet scan:
+
+```bash
+FrictionSim2D run pes-sheet examples/pes_sheet_config.ini --output-dir ./pes_output
+FrictionSim2D run pes-tip   examples/pes_tip_config.ini   --output-dir ./pes_output
+```
+
+Reduce the finished grids to per-material descriptors:
+
+```bash
+FrictionSim2D postprocess pes-scan ./pes_output/simulation_YYYYMMDD_HHMMSS \
+    --data-dir data --grid-dir outputs/pes_scan
+```
+
+See [pes_scan.md](pes_scan.md).
+
+## 4. Generate an indentation run
+
+```bash
+FrictionSim2D run indent examples/indent_config.ini --output-dir ./indent_output
+```
+
+Reduce the finished runs to penetration and adhesion descriptors:
+
+```bash
+FrictionSim2D postprocess indent ./indent_output/simulation_YYYYMMDD_HHMMSS \
+    --out-dir outputs/poke_sims --data-dir data
+```
+
+See [indent.md](indent.md).
+
+## 5. Generate HPC scripts after the build
 
 ```bash
 FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --scheduler pbs
@@ -28,13 +61,13 @@ SLURM version:
 FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --scheduler slurm
 ```
 
-## 4. Generate and Include HPC Scripts In One Step
+## 6. Generate simulations and HPC scripts in one step
 
 ```bash
 FrictionSim2D run afm examples/afm_config.ini --hpc-scripts --output-dir ./simulation_output
 ```
 
-## 5. AiiDA Setup and Submission
+## 7. AiiDA setup and submission
 
 ```bash
 FrictionSim2D aiida setup
@@ -47,7 +80,7 @@ Dry-run first:
 FrictionSim2D aiida submit ./simulation_output/simulation_YYYYMMDD_HHMMSS --dry-run
 ```
 
-## 6. Import and Query AiiDA Results
+## 8. Import and query AiiDA results
 
 Import a completed simulation directory into the local AiiDA database:
 
@@ -74,7 +107,7 @@ Export the full database to a portable archive:
 verdi -p friction2d archive create --all friction2d_results.aiida
 ```
 
-## 7. Postprocess Results
+## 9. Postprocess results
 
 Read and export full time-series JSON:
 
@@ -88,7 +121,7 @@ Plot from JSON plot config:
 FrictionSim2D postprocess plot plot_config.json --output-dir plots
 ```
 
-## 8. Database Upload and Query
+## 10. Database upload and query
 
 ```bash
 FrictionSim2D db init
@@ -96,7 +129,7 @@ FrictionSim2D db upload ./simulation_output/simulation_YYYYMMDD_HHMMSS --uploade
 FrictionSim2D db query --material h-MoS2 --limit 20
 ```
 
-## 9. Serve REST API
+## 11. Serve the REST API
 
 ```bash
 FrictionSim2D api serve --host 0.0.0.0 --port 8000
@@ -104,8 +137,8 @@ FrictionSim2D api serve --host 0.0.0.0 --port 8000
 
 Then inspect API docs at `/docs` on that host.
 
-## Related Docs
+## Related docs
 
 - [commands.md](commands.md)
-- [configuration_guide.md](configuration_guide.md)
-- [aiida_workflows.md](aiida_workflows.md)
+- [configuration.md](configuration.md)
+- [aiida.md](aiida.md)

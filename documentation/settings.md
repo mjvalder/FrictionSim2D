@@ -1,8 +1,10 @@
-# Settings Reference
+# Settings
 
-FrictionSim2D loads global settings through `load_settings()` from `src/core/config.py`.
+Every `settings.yaml` section and its defaults.
 
-## Where Settings Come From
+Settings are global to a run and loaded through `load_settings()` in `src/core/config.py`. Per-run parameters live in `.ini` files instead — see [configuration.md](configuration.md).
+
+## Where settings come from
 
 Current runtime behavior:
 
@@ -12,7 +14,7 @@ Current runtime behavior:
 
 For reproducibility, keep a copy of the exact settings file used in your simulation root.
 
-## CLI Helpers
+## CLI helpers
 
 ```bash
 FrictionSim2D settings show
@@ -20,7 +22,7 @@ FrictionSim2D settings init
 FrictionSim2D settings reset
 ```
 
-## Top-Level Sections
+## Top-level sections
 
 - `simulation`
 - `thermostat`
@@ -232,8 +234,8 @@ These values back the `db` and `api` command groups when explicit CLI options ar
 > useful for offline testing. It is **not** the AiiDA database. To target the shared remote DB,
 > set `active_profile: central` or pass `--profile central` to `db` commands.
 
-## Related Docs
+## Related docs
 
-- [configuration_guide.md](configuration_guide.md)
+- [configuration.md](configuration.md)
 - [commands.md](commands.md)
-- [aiida_workflows.md](aiida_workflows.md)
+- [aiida.md](aiida.md)

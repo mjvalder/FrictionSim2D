@@ -1,53 +1,25 @@
 # FrictionSim2D
 
 FrictionSim2D generates and manages LAMMPS friction simulation workflows for 2D materials.
-It supports AFM and sheet-on-sheet setups, HPC script generation, and optional AiiDA provenance/submission workflows.
+It supports AFM sliding, sheet-on-sheet shear, static PES scans, and indentation setups,
+with HPC script generation and optional AiiDA provenance and submission workflows.
+
+Full documentation lives in [documentation/](documentation/) — start with
+[documentation/README.md](documentation/README.md).
 
 ## Installation
 
-FrictionSim2D is not yet published on conda-forge. The supported installation path today is to create an environment yourself, then install the package from source.
-
-### Requirements
-
-- Python 3.9+
-- LAMMPS available in your environment
-- Atomsk available in your environment (optional, only for Atomsk-specific workflows)
-
-### Create an environment
-
-Using conda:
+FrictionSim2D is not yet published on conda-forge. Create an environment, then install
+from source. Requires Python 3.9+ and LAMMPS on your path; Atomsk is optional.
 
 ```bash
 conda create -n frictionsim2d python=3.11
 conda activate frictionsim2d
+pip install -e .          # core
+pip install -e ".[all]"   # with aiida, db, plotting, and api extras
 ```
 
-Or using venv:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-### Install from source
-
-From the repository root:
-
-```bash
-pip install -e .
-```
-
-Install optional extras as needed:
-
-```bash
-pip install -e .[aiida]
-pip install -e .[db]
-pip install -e .[plotting]
-pip install -e .[api]
-pip install -e .[all]
-```
-
-### Verify
+Verify:
 
 ```bash
 FrictionSim2D --help
@@ -55,31 +27,12 @@ FrictionSim2D --version
 lmp -h
 ```
 
-If you plan to use Atomsk-based geometry operations, also verify:
+Individual extras, external-binary checks, AiiDA bootstrap, and troubleshooting are
+covered in [documentation/installation.md](documentation/installation.md). RabbitMQ and
+PostgreSQL are required for full AiiDA workflows.
 
-```bash
-atomsk --version
-```
-
-### Optional AiiDA setup
-
-After installing the AiiDA extras, run:
-
-```bash
-FrictionSim2D aiida status
-FrictionSim2D aiida setup
-```
-
-If your workflows target a remote machine, configure the `aiida` section in `settings.yaml` and use:
-
-```bash
-FrictionSim2D aiida setup --use-remote
-```
-
-### Notes
-
-- RabbitMQ and PostgreSQL are still required for full AiiDA workflows.
-- The conda-forge installation scheme below is planned for a future release and is intentionally hidden for now.
+The conda-forge installation scheme below is planned for a future release and is
+intentionally hidden for now.
 
 <!--
 Future conda-forge installation draft
@@ -197,6 +150,14 @@ FrictionSim2D run pes-tip   examples/pes_tip_config.ini   --output-dir ./simulat
 
 See [documentation/pes_scan.md](documentation/pes_scan.md).
 
+Generate an indentation run — penetration on hold, adhesion on retract:
+
+```bash
+FrictionSim2D run indent examples/indent_config.ini --output-dir ./simulation_output
+```
+
+See [documentation/indent.md](documentation/indent.md).
+
 Generate with AiiDA registration enabled:
 
 ```bash
@@ -211,15 +172,15 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 
 ## CLI overview
 
-- `FrictionSim2D run afm ...`
-- `FrictionSim2D run sheetonsheet ...`
-- `FrictionSim2D run pes-sheet ...` / `FrictionSim2D run pes-tip ...` (static PES scans)
+- `FrictionSim2D run afm|sheetonsheet|pes-sheet|pes-tip|indent ...`
 - `FrictionSim2D hpc generate ...`
 - `FrictionSim2D settings show|init|reset`
-- `FrictionSim2D aiida status|setup|submit|import|query|export|import-archive|package`
-- `FrictionSim2D postprocess read|plot|pes-scan`
-- `FrictionSim2D db init|create-key|upload|stage|query|stats|delete|publish|reject`
+- `FrictionSim2D aiida status|setup|submit|import|list-sets|dump|rebuild|query|delete|clear|export|import-archive|package`
+- `FrictionSim2D postprocess read|plot|pes-scan|indent`
+- `FrictionSim2D db setup|init|create-key|upload|stage|query|stats|publish|reject|delete`
 - `FrictionSim2D api serve`
+
+Full reference: [documentation/commands.md](documentation/commands.md).
 
 ## Shared database
 
@@ -311,18 +272,22 @@ FrictionSim2D db delete --uploader alice
 
 Generated simulation roots typically contain:
 
-- `afm/` or `sheetonsheet/` runs
+- `afm/`, `sheetonsheet/`, `pes_sheet/`, `pes_tip/`, or `indent/` runs
 - per-run `lammps/`, `data/`, `results/`, `visuals/`, `provenance/`
 - optional `hpc/` submission scripts
 
+Full layout in [documentation/overview.md](documentation/overview.md).
+
 ## Documentation
 
-- [documentation/mainpage.md](documentation/mainpage.md)
-- [documentation/installation.md](documentation/installation.md)
-- [documentation/essentials.md](documentation/essentials.md)
-- [documentation/commands.md](documentation/commands.md)
-- [documentation/examples.md](documentation/examples.md)
-- [documentation/PROVENANCE_ARCHITECTURE.md](documentation/PROVENANCE_ARCHITECTURE.md)
+The index at [documentation/README.md](documentation/README.md) lists everything in
+reading order. Most-used entries:
+
+- [documentation/installation.md](documentation/installation.md) — setup and troubleshooting
+- [documentation/overview.md](documentation/overview.md) — models, output layout, lifecycle
+- [documentation/configuration.md](documentation/configuration.md) — writing `.ini` configs
+- [documentation/commands.md](documentation/commands.md) — full CLI reference
+- [documentation/examples.md](documentation/examples.md) — end-to-end workflows
 
 ## Development
 

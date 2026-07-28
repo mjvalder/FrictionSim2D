@@ -1,6 +1,6 @@
 # Installation
 
-This guide is aligned with the current repository (`pyproject.toml`) and CLI behavior.
+Environment setup, optional extras, verification, and troubleshooting.
 
 ## Requirements
 
@@ -15,7 +15,7 @@ Optional features require extra dependencies:
 - Plotting: `matplotlib`, `seaborn`, `scipy`
 - API server: `fastapi`, `uvicorn`, `httpx`
 
-## Install From Source (Recommended for this repository)
+## Install from source
 
 From the project root:
 
@@ -23,17 +23,18 @@ From the project root:
 pip install -e .
 ```
 
-Install optional extras as needed:
+Install optional extras as needed. Quote the extras so the shell does not glob the
+brackets:
 
 ```bash
-pip install -e .[aiida]
-pip install -e .[db]
-pip install -e .[plotting]
-pip install -e .[api]
-pip install -e .[all]
+pip install -e ".[aiida]"
+pip install -e ".[db]"
+pip install -e ".[plotting]"
+pip install -e ".[api]"
+pip install -e ".[all]"
 ```
 
-## Verify Installation
+## Verify the installation
 
 ```bash
 FrictionSim2D --help
@@ -52,7 +53,7 @@ If you use Atomsk-based geometry operations, also verify:
 atomsk --version
 ```
 
-## AiiDA Setup (Optional)
+## AiiDA setup (optional)
 
 After installing AiiDA dependencies:
 
@@ -67,7 +68,7 @@ If your workflows target a remote machine, configure the `aiida` section in sett
 FrictionSim2D aiida setup --use-remote
 ```
 
-## Database/API Setup (Optional)
+## Database and API setup (optional)
 
 Initialize schema:
 
@@ -98,10 +99,10 @@ FrictionSim2D api serve --host 0.0.0.0 --port 8000
 
 AiiDA commands abort immediately
 
-- Install AiiDA dependencies (`pip install -e .[aiida]`), then rerun `FrictionSim2D aiida setup`.
+- Install AiiDA dependencies (`pip install -e ".[aiida]"`), then rerun `FrictionSim2D aiida setup`.
 
-## Related Docs
+## Related docs
 
-- [mainpage.md](mainpage.md)
+- [overview.md](overview.md)
 - [commands.md](commands.md)
-- [aiida_workflows.md](aiida_workflows.md)
+- [aiida.md](aiida.md)

@@ -1,8 +1,10 @@
-# Commands Reference
+# Commands
 
-This document reflects the current CLI in `src/cli.py`.
+Complete reference for every CLI command group, mirroring `src/cli.py`.
 
-## Top Level
+For the most current option list, `FrictionSim2D <GROUP> <COMMAND> --help` is always authoritative.
+
+## Top level
 
 ```bash
 FrictionSim2D --help
@@ -38,11 +40,12 @@ Same options as `run afm`.
 FrictionSim2D run pes-sheet CONFIG_FILE [OPTIONS]
 ```
 
-Generate a static **sheet-on-sheet interlayer PES scan**: a frozen bilayer whose
-top layer is grid-scanned laterally over one surface unit cell (energy map,
-per-cell normalized) instead of a sliding run. Requires `[2D] layers = [2]` and a
-`[pes]` section (`grid_n`, optional `grid_n_refine`, `z_relax`). Same options as
-`run afm`. See [pes_scan.md](pes_scan.md).
+Generate a static interlayer PES scan: a frozen bilayer whose top layer is
+grid-scanned laterally over one surface unit cell, producing a per-cell normalized
+energy map instead of a sliding run.
+
+Requires `[2D] layers = [2]` and a `[pes]` section. Same options as `run afm`. See
+[pes_scan.md](pes_scan.md).
 
 ### run pes-tip
 
@@ -50,10 +53,12 @@ per-cell normalized) instead of a sliding run. Requires `[2D] layers = [2]` and 
 FrictionSim2D run pes-tip CONFIG_FILE [OPTIONS]
 ```
 
-Generate a static **tip-on-sheet (AFM) surface PES scan**: builds and indents the
-tip + sheet + substrate stack to a low load exactly as the sliding sim, then
-grid-scans the rigid tip laterally, recording energy and the lateral force on the
-tip. Same options as `run afm`. See [pes_scan.md](pes_scan.md).
+Generate a static tip-on-sheet surface PES scan: assembles the tip, sheet, and
+substrate stack, places the rigid tip at a fixed contact gap, then grid-scans it
+laterally, recording energy and the lateral force on the tip.
+
+Requires a `[pes]` section. Omitting `[sub]` selects the freestanding builder. Same
+options as `run afm`. See [pes_scan.md](pes_scan.md).
 
 ### run indent
 
@@ -61,16 +66,16 @@ tip. Same options as `run afm`. See [pes_scan.md](pes_scan.md).
 FrictionSim2D run indent CONFIG_FILE [OPTIONS]
 ```
 
-Generate an **AFM indentation ("indent")** simulation — the standard AFM build +
-indentation ramp (`system.in`) to each load in `[general] force`, then per load a
-short **damped hold** (finite-T) followed by a displacement-controlled
-**quasi-static retract** of the rigid tip to full detachment; the sliding phase is
-never invoked. Records both the out-of-plane **penetration** channels (vertical
-compliance) and the force–distance **retract** curve (pull-off force, work of
-adhesion, contact stiffness), with a fresh, recorded velocity seed per
-`(material, layer)`. Adds an `[indent]` section (`hold_steps`, `z_step`,
-`n_steps`, `seed`); loads come from `[general] force`. Same options as `run afm`.
-Subsumes the former separate `run poke` (hold-only) and `run adhesion`
+Generate an indentation simulation: the standard AFM build and `system.in` ramp to
+each load in `[general] force`, then per load a short damped finite-temperature hold
+followed by a quasi-static retract of the rigid tip to full detachment. The sliding
+phase is never invoked.
+
+Records both the out-of-plane penetration channels and the force–distance retract
+curve, with a fresh recorded velocity seed per `(material, layer)`. Requires an
+`[indent]` section; loads come from `[general] force`. Same options as `run afm`.
+
+Replaces the former separate `run poke` (hold-only) and `run adhesion`
 (retract-only) commands. See [indent.md](indent.md).
 
 ## settings
@@ -306,7 +311,7 @@ Options:
 - `-o, --output-dir TEXT` (default: `plots`)
 - `--settings PATH` — additional JSON plot-style settings
 
-`PLOT_CONFIG` must define `data_dirs`, `labels`, and `plots`. See [examples.md](examples.md) and the reference config in `documentation/publication/plots_publication.json`.
+`PLOT_CONFIG` must define `data_dirs`, `labels`, and `plots`. See [examples.md](examples.md) and the reference config at [publication/plots_publication.json](publication/plots_publication.json).
 
 ### postprocess pes-scan
 
@@ -323,8 +328,7 @@ Options:
 - `--kind [sheet|tip|both]` (default: `both`)
 
 Scans `RUN_ROOT` for `pes_sheet/` and `pes_tip/` results and writes one row per
-material (merge key `material`), ready for the ML feature pipeline. See
-[pes_scan.md](pes_scan.md).
+material, merge key `material`. See [pes_scan.md](pes_scan.md).
 
 ### postprocess indent
 
@@ -342,13 +346,14 @@ Options:
 - `-d, --data-dir PATH` (default: same as `--out-dir`) — destination for
   `indent_features.csv`
 
-Delivers both descriptor sets from the one hold+retract run: the campaign reader
-writes one `output_indent_f<load>_s<seed>.json` per load (penetration, nested
-campaign schema); each retract curve is reduced to `pulloff_force`,
-`work_of_adhesion` and `contact_stiffness` (`indent_features.csv`, keyed
-`material, layer, load`) with the tidied per-condition curves copied alongside;
-and `indent_manifest.csv` (`material, layer, load, seed, hold_steps, z_step,
-n_steps, wall_time`) records the provenance. See [indent.md](indent.md).
+Produces both descriptor sets from the one hold-and-retract run:
+
+- `output_indent_f<load>_s<seed>.json` — penetration, one per load, nested campaign schema
+- `indent_features.csv` — `pulloff_force`, `work_of_adhesion`, `contact_stiffness`, keyed `material, layer, load`
+- `indent/<material>_l<layer>.csv` — the tidied per-condition retract curves
+- `indent_manifest.csv` — `material, layer, load, seed, hold_steps, z_step, n_steps, wall_time`
+
+See [indent.md](indent.md).
 
 ## db
 
@@ -363,7 +368,7 @@ All `db` commands accept a common set of connection options. Pass `--profile cen
 
 **Common DB options** (available on every `db` subcommand):
 
-```
+```text
 --profile TEXT        Profile from settings.yaml ('local' or 'central')
 --host TEXT           $FRICTION_DB_HOST
 --port INTEGER        $FRICTION_DB_PORT
@@ -475,15 +480,14 @@ Options:
 - `--reload` — auto-reload on code changes (development only)
 - `--settings-file PATH`
 
-## Practical Notes
+## Practical notes
 
-- For the most up-to-date usage, run `FrictionSim2D <group> <command> --help`.
-- `run` commands expose `--hpc-scripts` to generate scheduler scripts in one step.
+- Every `run` command exposes `--hpc-scripts` to generate scheduler scripts in one step.
 - `postprocess plot` requires a JSON config file, not a results directory.
 - `aiida dump` and `postprocess read --export` both produce `output_full_*.json` files, but `aiida dump` reads from the AiiDA database while `postprocess read` walks the raw LAMMPS output files on disk.
 
-## Related Docs
+## Related docs
 
-- [configuration_guide.md](configuration_guide.md)
+- [configuration.md](configuration.md)
 - [examples.md](examples.md)
-- [aiida_workflows.md](aiida_workflows.md)
+- [aiida.md](aiida.md)
