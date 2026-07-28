@@ -46,11 +46,63 @@ def _is_float(value: str) -> bool:
         return False
 
 
-def get_material_path(mat_name: str) -> Path:
+#: How far above ``base_dir`` to look for a config-relative file. Configs in
+#: ``examples/`` name ``examples/materials/...``, i.e. paths relative to the
+#: project root rather than to themselves, so the search has to climb.
+PATH_SEARCH_MAX_PARENTS = 4
+
+
+def search_paths(name: str, base_dir: Optional[Union[str, Path]] = None) -> List[Path]:
+    """Candidate locations for a config-supplied file, in resolution order.
+
+    Config files reference potentials and structures by relative path, and those
+    paths are relative to wherever the user ran from -- in practice the project
+    root, not the config's own directory. ``examples/indent_config.ini`` names
+    ``examples/materials/h-MoS2.cif``, which resolves one level *above* itself.
+
+    So the search tries the name as given (absolute, or relative to the current
+    directory), then ``base_dir``, then each of its parents up to
+    :data:`PATH_SEARCH_MAX_PARENTS`. That accommodates both conventions without
+    asking anyone to rewrite existing configs, and it is what lets the GUI open
+    one from an arbitrary working directory.
+
+    Args:
+        name: Path or filename from a config.
+        base_dir: Directory to resolve relative names against, normally the
+            directory containing the config file.
+
+    Returns:
+        Candidate paths, most specific first. Never empty.
+    """
+    candidates = [Path(name)]
+    if base_dir is None or Path(name).is_absolute():
+        return candidates
+
+    root = Path(base_dir)
+    for depth, directory in enumerate([root, *root.parents]):
+        if depth > PATH_SEARCH_MAX_PARENTS:
+            break
+        candidates.append(directory / name)
+    return candidates
+
+
+def _find_existing(name: str, base_dir: Optional[Union[str, Path]]) -> Optional[Path]:
+    """First existing candidate for ``name``, or None."""
+    for candidate in search_paths(name, base_dir):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def get_material_path(mat_name: str,
+                      base_dir: Optional[Union[str, Path]] = None) -> Path:
     """Find material files.
 
     Args:
         mat_name: Material identifier or file path.
+        base_dir: Directory to resolve relative paths against (normally the
+            directory holding the config file). Optional; when omitted the
+            behaviour is the historical current-working-directory lookup.
 
     Returns:
         Path to the material file.
@@ -58,9 +110,9 @@ def get_material_path(mat_name: str) -> Path:
     Raises:
         FileNotFoundError: If the material file is not found.
     """
-    user_path = Path(mat_name)
-    if user_path.exists():
-        return user_path
+    found = _find_existing(mat_name, base_dir)
+    if found is not None:
+        return found
 
     raise FileNotFoundError(
         f"Material file '{mat_name}' not found. "
@@ -69,11 +121,15 @@ def get_material_path(mat_name: str) -> Path:
         f"folder in the GitHub repository: https://github.com/Mclat16/FrictionSim2D"
     )
 
-def get_potential_path(pot_name: str) -> Path:
+def get_potential_path(pot_name: str,
+                       base_dir: Optional[Union[str, Path]] = None) -> Path:
     """Find potential files.
 
     Args:
         pot_name: Potential name or file path.
+        base_dir: Directory to resolve relative paths against (normally the
+            directory holding the config file). Optional; when omitted the
+            behaviour is the historical current-working-directory lookup.
 
     Returns:
         Path to the potential file.
@@ -81,9 +137,9 @@ def get_potential_path(pot_name: str) -> Path:
     Raises:
         FileNotFoundError: If the potential file is not found.
     """
-    pot_path = Path(pot_name)
-    if pot_path.exists():
-        return pot_path
+    found = _find_existing(pot_name, base_dir)
+    if found is not None:
+        return found
 
     raise FileNotFoundError(
         f"Potential file '{pot_name}' not found. "
@@ -306,7 +362,11 @@ def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
     Returns:
         Dictionary containing the parsed configuration parameters.
     """
-    config = configparser.ConfigParser()
+    # interpolation=None: configparser's default BasicInterpolation raises on a
+    # bare '%' in any value. No config in this project uses '%(name)s'
+    # substitution, so the feature only ever cost us a crash on values a user
+    # could reasonably type.
+    config = configparser.ConfigParser(interpolation=None)
     config.read(filepath)
     config = _remove_inline_comments(config)
 

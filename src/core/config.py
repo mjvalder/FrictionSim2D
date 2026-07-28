@@ -79,6 +79,15 @@ class QuenchSettings(BaseModel):
     melt_steps: int = 50000
     quench_steps: int = 100000
     equilibrate_steps: int = 20000
+    allow_generate: bool = Field(
+        default=True,
+        description=(
+            "Whether a missing or too-small amorphous structure may be generated "
+            "by melt-quench. Set False for interactive callers (the GUI preview) "
+            "that must not spend minutes in mpiexec or write into the packaged "
+            "materials directory; make_amorphous then raises instead."
+        ),
+    )
     model_config = {'validate_by_name': True}
 
 class OutputSettings(BaseModel):
@@ -211,22 +220,33 @@ class ComponentConfig(BaseModel):
     def resolve_path(cls, v: str, info: ValidationInfo) -> str:
         """Resolve filesystem paths from config values.
 
+        A ``base_dir`` supplied through the validation context (see
+        ``model_validate(..., context={'base_dir': ...})``) is used to resolve
+        relative paths, so a config that references ``examples/potentials/...``
+        works regardless of the current working directory.
+
         Args:
             v: Path value from config.
-            info: Pydantic validation info including field name.
+            info: Pydantic validation info including field name and context.
 
         Returns:
             Resolved absolute path as string.
         """
         if v is None:
             return v
+        base_dir = None
+        if isinstance(info.context, dict):
+            base_dir = info.context.get('base_dir')
+
         path = Path(v)
         if path.exists():
             return str(path)
-        if info.field_name == 'pot_path':
-            resolved = get_potential_path(v)
-        else:
-            resolved = get_material_path(v)
+
+        resolver = get_potential_path if info.field_name == 'pot_path' else get_material_path
+        # Call with one argument unless a base_dir was actually supplied: these
+        # helpers are widely monkeypatched with single-argument stubs, and the
+        # extra argument should only appear when the feature is in use.
+        resolved = resolver(v) if base_dir is None else resolver(v, base_dir)
 
         return str(resolved) if resolved.exists() else v
 
