@@ -132,6 +132,11 @@ class SectionForm(QGroupBox):
         self.document = document
         self.editors: Dict[str, FieldEditor] = {}
         self._captions: Dict[str, QLabel] = {}
+        #: The caption text as composed in `_add_field` -- override help (or
+        #: `spec.doc`) plus any loopability hint. `_apply_dependencies` needs
+        #: this to restore an enabled field's caption; recomputing it from the
+        #: override alone would drop the hint.
+        self._composed_captions: Dict[str, str] = {}
         self._rows: Dict[str, tuple] = {}
         self._loading = False
         self._collapsed = False
@@ -221,6 +226,7 @@ class SectionForm(QGroupBox):
             caption.setStyleSheet(CAPTION_SMALL)
             cell_layout.addWidget(caption)
             self._captions[spec.key] = caption
+            self._composed_captions[spec.key] = caption_text
         if tooltip_text:
             label.setToolTip(tooltip_text)
             editor.setToolTip(tooltip_text)
@@ -385,9 +391,11 @@ class SectionForm(QGroupBox):
                 label.setEnabled(enabled)
             caption = self._captions.get(key)
             if caption is not None and field_override.enable_hint:
+                # The composed caption carries the loopability hint, which the
+                # override alone does not -- recomputing from `help` drops it.
                 caption.setText(
                     field_override.enable_hint if not enabled
-                    else (field_override.help or ''))
+                    else self._composed_captions.get(key, ''))
 
     def _on_field_changed(self) -> None:
         if self._loading:

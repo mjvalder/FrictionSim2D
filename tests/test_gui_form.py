@@ -102,4 +102,25 @@ class TestLoopabilityHints:
         form = ConfigForm(SettingsDocument.defaults())
         caption = form.sections['hpc']._captions.get('num_cpus')
         assert caption is None or 'list' not in caption.text()
+
+
+class TestDependentFieldsKeepTheirHint:
+    """scan_angle_force is the one field with both a dependency and a
+    loopability. _apply_dependencies rewrites its caption, and rewriting it
+    from the override alone silently drops the generated hint."""
+
+    def test_the_hint_returns_when_the_dependency_is_satisfied(self, form):
+        section = form.sections['general']
+        section.editors['scan_angle'].set_value(5.0)
+        section._apply_dependencies()
+        caption = section._captions['scan_angle_force'].text()
+        assert 'Empty: every angle at every load.' in caption
+        assert 'looped inside' in caption
+
+    def test_the_enable_hint_still_leads_while_disabled(self, form):
+        section = form.sections['general']
+        section.editors['scan_angle'].set_value(None)
+        section._apply_dependencies()
+        assert section._captions['scan_angle_force'].text() == \
+            'Set one or more scan angles first.'
         form.deleteLater()
