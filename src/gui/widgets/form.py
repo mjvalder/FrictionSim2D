@@ -38,6 +38,29 @@ from ..style import CAPTION_SMALL, REQUIRED_MARK, SECTION_HELP
 #: Names that capitalise() would mangle.
 _ACRONYMS = {'hpc': 'HPC', 'aiida': 'AiiDA', 'lj': 'LJ', 'pes': 'PES'}
 
+#: What a list in a field means, keyed by ConfigDocument.loopability_of().
+#: Generated rather than restated per field, so this and the LOOPABILITY map
+#: in core.run cannot drift apart.
+LOOPABILITY_HINTS = {
+    'sweep': 'A list runs each value as a separate simulation.',
+    'layer': 'A list builds one L{n} tree per value.',
+    'in_file': 'A list is looped inside one LAMMPS script.',
+}
+
+
+def loopability_hint(document, section: str, key: str) -> str:
+    """What a list in this field would do, or '' when there is nothing to say.
+
+    'scalar' is deliberately silent: a list that is actually present is already
+    reported by `unsupported_lists`, and captioning every single-value field
+    with a negative is noise. The settings document has no loopability concept,
+    hence the getattr.
+    """
+    resolver = getattr(document, 'loopability_of', None)
+    if resolver is None:
+        return ''
+    return LOOPABILITY_HINTS.get(resolver(section, key), '')
+
 
 def _prettify(key: str) -> str:
     """A readable title for a section that has no declared label.
@@ -178,6 +201,9 @@ class SectionForm(QGroupBox):
             label.setToolTip('Required')
 
         caption_text = (field_override.help if field_override else None) or spec.doc
+        hint = loopability_hint(self.document, self.section.key, spec.key)
+        if hint:
+            caption_text = f"{caption_text} {hint}" if caption_text else hint
         tooltip_text = (
             (field_override.detail if field_override else None)
             or caption_text)
