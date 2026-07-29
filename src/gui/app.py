@@ -403,11 +403,18 @@ class MainWindow(QMainWindow):
         ]
 
         if self.document.pending_template_issues:
-            count = self.document.expansion().configs
+            try:
+                target = f"{self.document.expansion().configs} config(s)"
+            except Exception as exc:  # pylint: disable=broad-except
+                # The sweep cannot be counted yet -- typically a materials_list
+                # whose per-material files do not resolve. Still worth saying
+                # the placeholders are pending; the count is the part at risk.
+                logger.debug("expansion count failed: %s", exc)
+                target = "each material in the sweep"
             lines.append(
                 f"{len(self.document.pending_template_issues)} path(s) contain "
-                f"{{mat}}; they will be substituted across {count} config(s) "
-                f"when you generate.")
+                f"{{mat}}; they will be substituted across {target} when you "
+                f"generate.")
 
         self.issues.setPlainText('\n'.join(lines) if lines else 'Config is valid.')
         self._refresh_counts()

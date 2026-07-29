@@ -222,6 +222,13 @@ class ConfigDocument:
         error". Treating it as fatal made a correctly configured sweep
         impossible to render or generate. With no material list, though,
         nothing will ever substitute the placeholder, so it stays an error.
+
+        When a material sweep is configured, `unexpanded_template` issues are
+        moved to `pending_template_issues` and reported via that attribute
+        instead. This means `ok` can be True while `config` is None: the
+        preflight finds unresolved templates so the model was never
+        constructed. Callers must not assume `.config` is usable when `ok` is
+        True; check `pending_template_issues` first.
         """
         payload = copy.deepcopy(self.values)
         payload['settings'] = (settings or load_settings()).model_dump()
