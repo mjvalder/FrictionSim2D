@@ -119,6 +119,13 @@ class TestIntrospectionCoverage:
             for item in missing:
                 print(f"  {item}")
 
+    @pytest.mark.parametrize('model', ROOT_MODELS, ids=lambda m: m.__name__)
+    def test_the_material_list_is_an_introspected_field(self, model):
+        """It drives the material sweep, and the form is built from
+        model_fields -- a key the model does not declare cannot be edited."""
+        sheet = {s.key: s for s in describe_model(model)}['2D']
+        assert 'materials_list' in sheet.field_map()
+
 
 class TestSectionStructure:
 

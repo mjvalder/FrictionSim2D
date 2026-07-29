@@ -334,6 +334,15 @@ class SheetConfig(ComponentConfig):
     layers: List[int]
     stack_type: str = 'AA'
     lat_c: Optional[float] = None
+    materials_list: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to a .txt of material names, one per line. Each becomes a "
+            "separate simulation. Read by expand_config_sweeps before the model "
+            "is built and stripped from the expanded configs; declared here so "
+            "it is a known key rather than a silently tolerated one."
+        ),
+    )
 
 class FlakeConfig(ComponentConfig):
     """Shaped-flake configuration (a finite patch placed between tip and sheet).
