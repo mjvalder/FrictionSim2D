@@ -8,6 +8,7 @@ hand in the override table, where it drifts.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -59,10 +60,38 @@ class TestLoopabilityHints:
         assert caption is not None
         assert 'list' not in caption.text()
 
-    def test_the_hint_is_appended_not_substituted(self, form):
-        """twist_angle has its own caption and no loopability; force has a
-        loopability and no hand-written caption. Both must render."""
-        assert self._caption(form, 'general', 'twist_angle')
+    def test_the_hint_is_appended_not_substituted(self, qt_app, monkeypatch):
+        """No field currently rendered by the form carries both a hand-written
+        caption and a non-scalar loopability at once: Task 3 emptied `temp`,
+        `layers` and `force` precisely so the hint would be the only text, and
+        `[2D] materials_list` -- the one override entry that does have both --
+        is never introspected as a real field (it is set programmatically, see
+        `tests/test_gui_material_list.py`), so it never reaches `_captions` at
+        all. A field with only one of the two cannot distinguish append from
+        substitute, so this synthesises one: give `[general] temp` (loopability
+        'sweep') a temporary hand-written caption and drive it through the real
+        `_add_field` path. Substituting instead of appending would drop one of
+        the two strings; this fails either way that happens."""
+        from src.gui.schema import overrides as overrides_mod
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        temp_fields = overrides_mod._COMMON['general'].fields
+        synthetic = replace(temp_fields['temp'], help='Ambient control temperature.')
+        monkeypatch.setitem(temp_fields, 'temp', synthetic)
+
+        form = ConfigForm(ConfigDocument.blank('afm'))
+        caption = self._caption(form, 'general', 'temp')
+        assert 'Ambient control temperature.' in caption      # the declared help
+        assert 'separate simulation' in caption               # the generated hint
+        form.deleteLater()
+
+    def test_the_hint_stays_out_of_the_tooltip(self, form):
+        """The tooltip carries the long-form detail; repeating the hint there
+        adds nothing. Most loopable fields declare no detail, so the tooltip
+        falls back to the caption -- it must be the pre-hint caption."""
+        label, _cell = form.sections['general']._rows['force']
+        assert 'looped inside' not in label.toolTip()
 
     def test_settings_fields_get_no_hint(self, qt_app, monkeypatch):
         """SettingsDocument has no loopability concept at all."""

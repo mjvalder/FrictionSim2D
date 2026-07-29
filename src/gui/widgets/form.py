@@ -201,12 +201,13 @@ class SectionForm(QGroupBox):
             label.setToolTip('Required')
 
         caption_text = (field_override.help if field_override else None) or spec.doc
-        hint = loopability_hint(self.document, self.section.key, spec.key)
-        if hint:
-            caption_text = f"{caption_text} {hint}" if caption_text else hint
         tooltip_text = (
             (field_override.detail if field_override else None)
             or caption_text)
+
+        hint = loopability_hint(self.document, self.section.key, spec.key)
+        if hint:
+            caption_text = f"{caption_text} {hint}" if caption_text else hint
 
         cell = QWidget(self)
         cell_layout = QVBoxLayout(cell)
