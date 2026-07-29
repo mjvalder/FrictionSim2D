@@ -326,12 +326,35 @@ _SETTINGS: Dict[str, SectionOverride] = {
             ),
             'run_local': FieldOverride(label='Run locally', order=2),
             'n_procs': FieldOverride(label='Processes', order=3),
+            'quench_slab_dims': FieldOverride(
+                label='Quench slab', unit=A, order=4, editor='xyz_dims'),
         },
     ),
-    'thermostat': SectionOverride(label='Thermostat'),
+    'thermostat': SectionOverride(
+        label='Thermostat',
+        fields={
+            'langevin_boundaries': FieldOverride(
+                label='Langevin boundaries', order=3,
+                editor='langevin_bands',
+                help='Fixed and thermostatted bands per component.',
+                detail=('Tip bands are absolute Å below the tip top face; '
+                        'substrate bands are a fraction of its thickness from '
+                        'the bottom.'),
+            ),
+        },
+    ),
     'geometry': SectionOverride(label='Geometry'),
     'simulation': SectionOverride(label='Simulation'),
-    'output': SectionOverride(label='Output'),
+    'output': SectionOverride(
+        label='Output',
+        fields={
+            'dump': FieldOverride(label='Dump phases', order=1,
+                                  editor='key_value'),
+            'dump_frequency': FieldOverride(
+                label='Dump frequency', order=2, editor='key_value',
+                help='Steps between dumps, per phase.'),
+        },
+    ),
     'potential': SectionOverride(label='Potential'),
     'aiida': SectionOverride(label='AiiDA'),
     'database': SectionOverride(label='Database'),

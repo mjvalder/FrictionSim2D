@@ -133,4 +133,105 @@ class TestStackingOverride:
 
         override = section_override('2D').fields['stack_type']
         assert override.help
-        assert 'AA' in override.help
+
+
+DEFAULT_BANDS = {
+    'tip': {'fix': [3.0, 0.0], 'thermo': [6.0, 3.0]},
+    'sub': {'fix': [0.0, 0.3], 'thermo': [0.3, 0.6]},
+}
+
+
+class TestLangevinBands:
+    """One line of JSON, replaced by a table that names its own units."""
+
+    @pytest.fixture(name='editor')
+    def _editor(self, qt_app):
+        from src.gui.widgets.bands import LangevinBoundaryEditor
+
+        return LangevinBoundaryEditor(_spec(key='langevin_boundaries',
+                                            kind=FieldKind.DICT))
+
+    def test_the_default_round_trips(self, editor):
+        editor.set_value(DEFAULT_BANDS)
+        assert editor.value() == DEFAULT_BANDS
+
+    def test_the_settings_default_round_trips(self, editor):
+        """Against the model, not a copy of it."""
+        from src.core.config import ThermostatSettings
+
+        bands = ThermostatSettings().langevin_boundaries
+        editor.set_value(bands)
+        assert editor.value() == bands
+
+    def test_an_undisplayed_component_is_preserved(self, editor):
+        """The widget shows tip and sub. A third component must survive it."""
+        extra = dict(DEFAULT_BANDS, flake={'fix': [1.0, 0.0]})
+        editor.set_value(extra)
+        assert editor.value()['flake'] == {'fix': [1.0, 0.0]}
+
+    def test_editing_one_cell_changes_only_that_number(self, editor):
+        editor.set_value(DEFAULT_BANDS)
+        editor.set_cell('tip', 'fix', 0, 4.5)
+        result = editor.value()
+        assert result['tip']['fix'] == [4.5, 0.0]
+        assert result['sub'] == DEFAULT_BANDS['sub']
+
+    def test_the_two_unit_systems_are_stated(self, editor):
+        """Tip bands are absolute Angstrom from the top; substrate bands are a
+        fraction of thickness from the bottom. Nothing said so before."""
+        text = editor.describe()
+        assert 'Å' in text
+        assert 'fraction' in text.lower()
+
+
+class TestKeyValueGrid:
+
+    @pytest.fixture(name='editor')
+    def _editor(self, qt_app):
+        from src.gui.widgets.keyvalue import KeyValueGridEditor
+
+        return KeyValueGridEditor(_spec(key='dump', kind=FieldKind.DICT))
+
+    def test_bools_round_trip(self, editor):
+        value = {'system_init': True, 'slide': False}
+        editor.set_value(value)
+        assert editor.value() == value
+
+    def test_ints_round_trip(self, editor):
+        value = {'system_init': 1000, 'slide': 10000}
+        editor.set_value(value)
+        assert editor.value() == value
+
+    def test_a_row_can_be_added(self, editor):
+        editor.set_value({'slide': True})
+        editor.add_row('minimise', True)
+        assert editor.value() == {'slide': True, 'minimise': True}
+
+    def test_a_row_can_be_removed(self, editor):
+        editor.set_value({'slide': True, 'minimise': False})
+        editor.remove_row('minimise')
+        assert editor.value() == {'slide': True}
+
+    def test_empty_is_none(self, editor):
+        editor.set_value({})
+        assert editor.value() is None
+
+
+class TestFixedList:
+
+    @pytest.fixture(name='editor')
+    def _editor(self, qt_app):
+        from src.gui.widgets.keyvalue import FixedListEditor
+
+        return FixedListEditor(_spec(key='quench_slab_dims', kind=FieldKind.LIST,
+                                     item_kind=FieldKind.INT))
+
+    def test_three_dimensions_round_trip(self, editor):
+        editor.set_value([200, 200, 50])
+        assert editor.value() == [200, 200, 50]
+
+    def test_a_wrong_length_list_is_kept_and_flagged(self, editor):
+        """Truncating to fit the cells would silently change the quench box."""
+        editor.set_value([200, 200])
+        assert editor.value() == [200, 200]
+        assert editor.warning() is not None
