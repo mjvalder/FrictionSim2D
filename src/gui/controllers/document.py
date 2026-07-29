@@ -26,10 +26,13 @@ from ...core.config import (
 )
 from ...core.config_io import write_config
 from ...core.config_validation import ConfigValidation, validate_config
-from ...core.run import ExpansionSummary, count_expansion, loopability
+from ...core.run import (
+    ExpansionSummary, count_expansion, loopability, read_material_list,
+)
 from ..schema.introspect import SectionSpec, describe_model
 from ..schema.overrides import overrides_for
 from ..schema.simulation_types import MODES, sections_for
+from .materials import STRUCTURE_EXTENSION
 
 __all__ = ['ConfigDocument', 'DocumentError', 'HETERO_SECTION_HINT']
 
@@ -249,6 +252,89 @@ class ConfigDocument:
     def has_material_list(self) -> bool:
         """Whether a material sweep is configured."""
         return bool(self.get('2D', 'materials_list'))
+
+    #: [2D] keys that must carry {mat} for a sweep to substitute per material.
+    TEMPLATED_KEYS = ('mat', 'cif_path', 'pot_path')
+
+    def material_names(self) -> List[str]:
+        """Materials named by the configured list, or [] if there is none.
+
+        Unreadable is not an error: the field is mid-edit more often than not.
+        """
+        path = self.get('2D', 'materials_list')
+        if not isinstance(path, str) or not path:
+            return []
+        try:
+            return read_material_list(path, self.base_dir)
+        except (FileNotFoundError, OSError, ValueError):
+            return []
+
+    def write_material_names(self, names: List[str]) -> Optional[Path]:
+        """Write the material list and point the config at it.
+
+        Selected names have to reach disk as the .txt the CLI reads; there is no
+        GUI-only representation of a sweep. Written beside the config when it has
+        been saved, so the pair travels together.
+        """
+        names = [n.strip() for n in names if n and n.strip()]
+        if not names:
+            self.values.get('2D', {}).pop('materials_list', None)
+            self.dirty = True
+            return None
+
+        if self.source_path is not None:
+            target = self.source_path.parent / \
+                f"{self.source_path.stem}_materials.txt"
+        else:
+            target = Path.cwd() / 'materials.txt'
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('\n'.join(names) + '\n', encoding='utf-8')
+        self.set('2D', 'materials_list', str(
+            self._relative_to_config(target)))
+        return target
+
+    def _relative_to_config(self, path: Path) -> Path:
+        """A path relative to the config's directory where that is possible.
+
+        The existing configs use relative paths and travel with their run
+        directory; absolutising them on a round trip would break that.
+        """
+        if self.base_dir is None:
+            return path
+        try:
+            return Path(path).resolve().relative_to(Path(self.base_dir).resolve())
+        except ValueError:
+            return Path(path)
+
+    def apply_material_directories(self, structure_dir, potential_dir,
+                                   potential_extension: str) -> None:
+        """Point the per-material fields at two directories.
+
+        This is what makes a material list actually sweep: `expand_config_sweeps`
+        substitutes {mat} per material, and without the placeholders every config
+        in the sweep would build the same material.
+        """
+        structures = self._relative_to_config(Path(structure_dir))
+        potentials = self._relative_to_config(Path(potential_dir))
+
+        self.set('2D', 'mat', '{mat}')
+        self.set('2D', 'cif_path', f"{structures}/{{mat}}{STRUCTURE_EXTENSION}")
+        self.set('2D', 'pot_path', f"{potentials}/{{mat}}{potential_extension}")
+
+    def material_directories(self):
+        """The two directories the templates point at, read back.
+
+        Returns ``(structure_dir, potential_dir, potential_extension)``, each
+        None when the config is not templated. Opening a config has to
+        repopulate the pickers, or every open looks like nothing is configured.
+        """
+        cif = self.get('2D', 'cif_path')
+        pot = self.get('2D', 'pot_path')
+        if not (isinstance(cif, str) and isinstance(pot, str)
+                and '{mat}' in cif and '{mat}' in pot):
+            return (None, None, None)
+        return (Path(cif).parent, Path(pot).parent, Path(pot).suffix)
 
     def expansion(self) -> ExpansionSummary:
         """How many configs, builds and jobs this would generate."""

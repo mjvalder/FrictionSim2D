@@ -133,3 +133,107 @@ class TestWindowIntegration:
         assert '{mat}' in issues_text
         # When count fails, it falls back to a generic message
         assert 'substituted' in issues_text
+
+
+class TestScanningMaterialDirectories:
+    """The material list is the intersection of a structure directory and a
+    potential directory -- exactly what preflight_materials computes at build
+    time, surfaced up front instead."""
+
+    @pytest.fixture(name='dirs')
+    def _dirs(self, tmp_path):
+        structures = tmp_path / 'cif'
+        potentials = tmp_path / 'sw_lammps'
+        structures.mkdir()
+        potentials.mkdir()
+        for name in ('h-MoS2', 't-MoS2', 'b-AlSb'):
+            (structures / f"{name}.cif").write_text('', encoding='utf-8')
+            (potentials / f"{name}.sw").write_text('', encoding='utf-8')
+        # In cif/ only, exactly as Si is in the real run directory.
+        (structures / 'Si.cif').write_text('', encoding='utf-8')
+        # In sw_lammps/ only.
+        (potentials / 'h-WS2.sw').write_text('', encoding='utf-8')
+        return structures, potentials
+
+    def test_the_usable_materials_are_the_intersection(self, dirs):
+        from src.gui.controllers.materials import scan_material_directories
+
+        found = scan_material_directories(*dirs)
+        assert [c.name for c in found if c.usable] == ['b-AlSb', 'h-MoS2', 't-MoS2']
+
+    def test_a_structure_with_no_potential_is_reported_not_dropped(self, dirs):
+        """Silently omitting it is how 'why is Si missing?' becomes a mystery."""
+        from src.gui.controllers.materials import scan_material_directories
+
+        si = next(c for c in scan_material_directories(*dirs) if c.name == 'Si')
+        assert not si.usable
+        assert 'potential' in si.reason
+
+    def test_a_potential_with_no_structure_is_reported(self, dirs):
+        from src.gui.controllers.materials import scan_material_directories
+
+        ws2 = next(c for c in scan_material_directories(*dirs) if c.name == 'h-WS2')
+        assert not ws2.usable
+        assert 'structure' in ws2.reason
+
+    def test_the_potential_extension_is_inferred(self, dirs):
+        from src.gui.controllers.materials import infer_potential_extension
+
+        assert infer_potential_extension(dirs[1]) == '.sw'
+
+    def test_a_mixed_potential_directory_takes_the_commonest_extension(self, tmp_path):
+        from src.gui.controllers.materials import infer_potential_extension
+
+        directory = tmp_path / 'pots'
+        directory.mkdir()
+        for name in ('a.sw', 'b.sw', 'c.rebomos'):
+            (directory / name).write_text('', encoding='utf-8')
+        assert infer_potential_extension(directory) == '.sw'
+
+    def test_a_missing_directory_scans_empty_rather_than_raising(self, tmp_path):
+        """The pickers are half-filled while the user is still choosing."""
+        from src.gui.controllers.materials import scan_material_directories
+
+        assert scan_material_directories(tmp_path / 'nope', tmp_path / 'also') == []
+
+
+class TestApplyingMaterialDirectories:
+
+    @pytest.fixture(name='document')
+    def _document(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        return document
+
+    def test_the_templates_are_written(self, document, tmp_path):
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'sw_lammps', '.sw')
+        assert document.get('2D', 'mat') == '{mat}'
+        assert document.get('2D', 'cif_path') == 'cif/{mat}.cif'
+        assert document.get('2D', 'pot_path') == 'sw_lammps/{mat}.sw'
+
+    def test_directories_are_stored_relative_to_the_config(self, document, tmp_path):
+        """The existing configs use relative paths and travel with their run
+        directory; absolutising them would break that."""
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'sw_lammps', '.sw')
+        assert not document.get('2D', 'cif_path').startswith('/')
+
+    def test_a_directory_outside_the_config_tree_stays_absolute(self, document):
+        document.apply_material_directories(
+            Path('/opt/shared/cif'), Path('/opt/shared/pots'), '.sw')
+        assert document.get('2D', 'cif_path') == '/opt/shared/cif/{mat}.cif'
+
+    def test_the_directories_can_be_read_back(self, document, tmp_path):
+        """Opening a config has to repopulate the pickers, or every open looks
+        like nothing is configured."""
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'sw_lammps', '.sw')
+        structures, potentials, extension = document.material_directories()
+        assert structures.name == 'cif'
+        assert potentials.name == 'sw_lammps'
+        assert extension == '.sw'
+
+    def test_reading_back_an_untemplated_config_gives_nothing(self, document):
+        assert document.material_directories() == (None, None, None)
