@@ -222,6 +222,30 @@ class TestCaptionBudget:
             "to `detail`:\n  " + "\n  ".join(offenders))
 
 
+class TestRebuiltOverridesKeepTheirMetadata:
+    """`overrides_for` reconstructs three entries -- the substrate section, the
+    general section, and `outer_loop` when narrowing its per-family choices.
+    Each copies fields by name, so a field added to FieldOverride and not added
+    to those copies is dropped silently: the tooltip goes empty at runtime while
+    every test reading the un-rebuilt `section_override` path still passes."""
+
+    def test_the_rebuilt_substrate_keeps_its_detail(self):
+        substrate = overrides_for('afm')['sub']
+        assert substrate.required_reason          # it *was* rebuilt
+        assert substrate.fields['x'].detail == section_override('sub').fields['x'].detail
+
+    def test_the_rebuilt_general_section_keeps_field_detail(self):
+        general = overrides_for('afm')['general']
+        assert general.fields['twist_angle'].detail
+
+    def test_the_narrowed_outer_loop_keeps_its_detail(self):
+        """The nested rebuild: `choices` is replaced per family, and everything
+        else has to be carried across by hand."""
+        outer_loop = overrides_for('afm')['general'].fields['outer_loop']
+        assert outer_loop.choices == ('force',)   # it *was* rebuilt
+        assert 'job count' in outer_loop.detail
+
+
 class TestOverrides:
 
     def test_units_are_angstrom_not_nm(self):
