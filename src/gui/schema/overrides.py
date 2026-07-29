@@ -20,11 +20,14 @@ from .simulation_types import MODES
 
 __all__ = [
     'FieldOverride', 'SectionOverride', 'overrides_for', 'section_override',
-    'ENABLED', 'field_override',
+    'ENABLED', 'field_override', 'CAPTION_BUDGET',
 ]
 
 #: Sentinel for ``enable_if``: the other field just has to hold a truthy value.
 ENABLED = object()
+
+#: Caption length budget, in characters. Enforced by tests/test_gui_schema.py.
+CAPTION_BUDGET = 70
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,11 @@ class FieldOverride:
     read_only: bool = False
     #: Restrict an enum's choices below what the model allows.
     choices: Optional[Tuple[object, ...]] = None
+    #: Long-form explanation. Tooltip only -- never rendered as a caption,
+    #: because a caption under every control is what made the form unreadable.
+    detail: Optional[str] = None
+    #: Slug requesting a purpose-built editor; see widgets.fields.EDITOR_REGISTRY.
+    editor: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,8 @@ class SectionOverride:
     #: Section cannot be switched off, with a reason, even though the model
     #: marks it optional.
     required_reason: Optional[str] = None
+    #: Long-form explanation. Tooltip only, same rationale as FieldOverride.detail.
+    detail: Optional[str] = None
 
 
 A = 'Å'
@@ -82,17 +92,14 @@ _COMMON: Dict[str, SectionOverride] = {
             **_COMPONENT_FIELDS,
             'x': FieldOverride(label='Length (x)', unit=A, order=10),
             'y': FieldOverride(label='Width (y)', unit=A, order=11),
-            'layers': FieldOverride(
-                label='Layers', order=12,
-                help=('Number of sheet layers. A list builds one L{n} directory '
-                      'per entry -- it multiplies builds, not configs.'),
-            ),
+            'layers': FieldOverride(label='Layers', order=12),
             'stack_type': FieldOverride(label='Stacking', order=13),
             'lat_c': FieldOverride(label='Interlayer spacing', unit=A, order=14),
             'materials_list': FieldOverride(
                 label='Material list file', order=5,
-                help=('Text file of material names. Each becomes a separate '
-                      'simulation, so this multiplies the run count.'),
+                help='Text file of material names, one per line.',
+                detail=('Each material becomes a separate simulation, so this '
+                        'multiplies the run count.'),
             ),
         },
     ),
@@ -101,13 +108,15 @@ _COMMON: Dict[str, SectionOverride] = {
         help='The indenting tip.',
         fields={
             **_COMPONENT_FIELDS,
-            'r': FieldOverride(label='Radius', unit=A, order=10,
-                               help='Sheet footprint should be at least twice '
-                                    'the tip diameter to avoid the tip meeting '
-                                    'its own periodic image.'),
+            'r': FieldOverride(
+                label='Radius', unit=A, order=10,
+                help='Tip radius.',
+                detail=('Sheet footprint should be at least twice the tip diameter to '
+                        'avoid the tip meeting its own periodic image.'),
+            ),
             'amorph': FieldOverride(
                 label='Structure', order=11,
-                help="'a' uses a melt-quenched amorphous block; 'c' is crystalline.",
+                help="'a' melt-quenched amorphous, 'c' crystalline.",
             ),
             'dspring': FieldOverride(label='Damping override', order=12),
         },
@@ -120,60 +129,50 @@ _COMMON: Dict[str, SectionOverride] = {
             'thickness': FieldOverride(label='Thickness', unit=A, order=10),
             'x': FieldOverride(
                 label='Length (x)', unit=A, order=11,
-                help='Only used in finite-sheet mode; otherwise the substrate '
-                     'takes the sheet footprint.',
+                help='Finite-sheet mode only.',
+                detail='Otherwise the substrate takes the sheet footprint.',
             ),
-            'y': FieldOverride(
-                label='Width (y)', unit=A, order=12,
-                help='Only used in finite-sheet mode.',
-            ),
+            'y': FieldOverride(label='Width (y)', unit=A, order=12,
+                               help='Finite-sheet mode only.'),
             'amorph': FieldOverride(label='Structure', order=13),
             'match': FieldOverride(
                 label='Lattice match', order=14,
-                help='Strain the substrate to be commensurate with the sheet.',
+                help='Strain the substrate commensurate with the sheet.',
             ),
             'match_strain_tol': FieldOverride(
                 label='Match strain tolerance', order=15,
                 enable_if=('match', ENABLED),
                 enable_hint='Tick "Lattice match" to set a strain tolerance.',
-                help='Largest strain accepted when matching the substrate '
-                     'lattice to the sheet.',
+                help='Largest strain accepted when matching.',
             ),
         },
     ),
     'general': SectionOverride(
         label='Run parameters', order=4,
         fields={
-            'temp': FieldOverride(
-                label='Temperature', unit='K', order=1,
-                help=('A list runs each temperature as a separate simulation '
-                      '-- it appears in the output directory name.'),
-            ),
-            'force': FieldOverride(
-                label='Normal load', unit='nN', order=2,
-                help=('Looped inside one LAMMPS script. A list does not '
-                      'multiply the run count unless outer_loop names it.'),
-            ),
+            'temp': FieldOverride(label='Temperature', unit='K', order=1),
+            'force': FieldOverride(label='Normal load', unit='nN', order=2),
             'pressure': FieldOverride(label='Pressure', unit='GPa', order=3),
             'scan_speed': FieldOverride(label='Scan speed', unit='Å/ps', order=4),
             'scan_angle': FieldOverride(label='Scan angle', unit='deg', order=5),
             'scan_angle_force': FieldOverride(
-                label='Apply scan angles only at these loads', unit='nN', order=6,
+                label='Scan angles apply at these loads', unit='nN', order=6,
                 enable_if=('scan_angle', ENABLED),
                 enable_hint='Set one or more scan angles first.',
-                help=('Leave empty to sweep every scan angle at every load. '
-                      'Give loads here to pair them with the scan angles '
-                      'instead, in the same order.'),
+                help='Empty: every angle at every load.',
+                detail=('Give loads here to pair them with the scan angles instead, in '
+                        'the same order.'),
             ),
             'outer_loop': FieldOverride(
                 label='Split run phase by', order=7,
-                help=('Emits one run script per value of the named parameter '
-                      'instead of looping inside a single script. This is what '
-                      'multiplies the HPC job count.'),
+                help='One run script per value instead of one in-script loop.',
+                detail=('Emits one run script per value of the named parameter instead '
+                        'of looping inside a single script. This is what multiplies '
+                        'the HPC job count.'),
             ),
             'finite_sheet': FieldOverride(
                 label='Finite sheet', order=8,
-                help='Build a sheet with free edges rather than a periodic one.',
+                help='Build free edges rather than a periodic sheet.',
             ),
             'bond_spring': FieldOverride(
                 label='Bond spring constant', order=9,
@@ -185,9 +184,10 @@ _COMMON: Dict[str, SectionOverride] = {
             ),
             'twist_angle': FieldOverride(
                 label='Twist angle', unit='deg', order=11,
-                help=('Relative rotation between the two sheets. Setting this '
-                      'builds a twisted (moiré) cell and routes the run to the '
-                      'heterostructure builder.'),
+                help='Relative rotation between the two sheets.',
+                detail=('Setting this builds a twisted (moiré) cell and routes the run '
+                        'to the heterostructure builder. The achieved angle is the '
+                        'nearest commensurate one, not necessarily this target.'),
             ),
             'twist_angle_tol': FieldOverride(
                 label='Twist angle tolerance', unit='deg', order=12,
@@ -204,12 +204,12 @@ _COMMON: Dict[str, SectionOverride] = {
                 label='Twist max supercell', order=14,
                 enable_if=('twist_angle', ENABLED),
                 enable_hint='Set a twist angle first.',
-                help='Largest supercell searched when looking for a coincidence cell.',
+                help='Largest supercell searched for a coincidence cell.',
             ),
             'hetero_stacking': FieldOverride(
                 label='Heterostructure stacking', order=15,
-                help=('Layer ordering when more than one sheet material is '
-                      'configured. Has no effect on a single-material run.'),
+                help='Layer ordering across multiple sheet materials.',
+                detail='Has no effect on a single-material run.',
             ),
         },
     ),
@@ -258,15 +258,15 @@ SETTINGS_MODEL = '__settings__'
 _SETTINGS: Dict[str, SectionOverride] = {
     'hpc': SectionOverride(
         label='HPC',
-        help=('Cluster and job-script settings. Job scripts are only written '
-              'when Modules is filled in.'),
+        help='Cluster and job-script settings.',
+        detail='Job scripts are only written when Modules is filled in.',
         fields={
             'modules': FieldOverride(
                 label='Modules', order=1,
-                help=('Environment modules your cluster loads before running, '
-                      'comma separated, e.g. lammps, openmpi. Required: with '
-                      'this empty no job scripts are written at all, whatever '
-                      'the other settings here say.'),
+                help='Required — with this empty, no job scripts are written.',
+                detail=('Environment modules your cluster loads before running, comma '
+                        'separated, e.g. lammps, openmpi. With this empty no job '
+                        'scripts are written at all, whatever the other settings say.'),
             ),
             'scheduler_type': FieldOverride(
                 label='Scheduler', order=2,
@@ -284,8 +284,8 @@ _SETTINGS: Dict[str, SectionOverride] = {
             'walltime_hours': FieldOverride(label='Walltime', unit='h', order=9),
             'max_array_size': FieldOverride(
                 label='Max array size', order=10,
-                help='Largest job array the scheduler accepts; longer runs are '
-                     'split across several arrays.',
+                help='Longer runs are split across several arrays.',
+                detail='Largest job array the scheduler accepts.',
             ),
             'hpc_host': FieldOverride(label='Host', order=11),
             'hpc_home': FieldOverride(
@@ -310,14 +310,13 @@ _SETTINGS: Dict[str, SectionOverride] = {
     ),
     'quench': SectionOverride(
         label='Quench',
-        help=('Melt-quench parameters used when an amorphous structure has to '
-              'be generated.'),
+        help='Melt-quench parameters for amorphous structures.',
         fields={
             'allow_generate': FieldOverride(
                 label='Allow generating amorphous structures', order=1,
-                help=('When off, a missing amorphous structure is an error '
-                      'rather than a melt-quench. The preview always runs with '
-                      'this off.'),
+                help='When off, a missing structure is an error.',
+                detail=('Rather than a melt-quench. The preview always runs with this '
+                        'off, whatever this setting says.'),
             ),
             'run_local': FieldOverride(label='Run locally', order=2),
             'n_procs': FieldOverride(label='Processes', order=3),
@@ -370,7 +369,7 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
         substrate = result.get('sub', SectionOverride())
         result['sub'] = SectionOverride(
             label=substrate.label, help=substrate.help, order=substrate.order,
-            fields=substrate.fields,
+            fields=substrate.fields, detail=substrate.detail,
             required_reason=(
                 'Only the PES tip scan supports a substrate-free (freestanding) '
                 'configuration; other models abort without one.'
@@ -387,9 +386,11 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
         fields['outer_loop'] = FieldOverride(
             label=existing.label, unit=existing.unit, help=existing.help,
             order=existing.order, choices=family.outer_loop_choices,
+            detail=existing.detail, editor=existing.editor,
         )
     result['general'] = SectionOverride(
         label=general.label, help=general.help, order=general.order, fields=fields,
+        detail=general.detail,
     )
 
     return result

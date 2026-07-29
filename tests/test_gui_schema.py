@@ -195,6 +195,33 @@ class TestFieldClassification:
         assert 'radius' in afm['tip']['r'].doc.lower()
 
 
+class TestCaptionBudget:
+    """Captions render permanently under every control. Long ones are why the
+    form read as a wall of grey text; the long form belongs in the tooltip."""
+
+    def _all_overrides(self):
+        from src.gui.schema.overrides import SETTINGS_MODEL
+
+        for model in list(ALL_MODELS) + [SETTINGS_MODEL]:
+            for section_key, section in overrides_for(model).items():
+                yield model, section_key, None, section
+                for key, field in section.fields.items():
+                    yield model, section_key, key, field
+
+    def test_every_caption_is_one_short_line(self):
+        from src.gui.schema.overrides import CAPTION_BUDGET
+
+        offenders = [
+            f"{model} [{section}] {key or '(section)'}: {len(entry.help)} chars"
+            for model, section, key, entry in self._all_overrides()
+            if entry.help and (
+                len(entry.help) > CAPTION_BUDGET or '\n' in entry.help)
+        ]
+        assert not offenders, (
+            "these captions exceed CAPTION_BUDGET or wrap; move the long form "
+            "to `detail`:\n  " + "\n  ".join(offenders))
+
+
 class TestOverrides:
 
     def test_units_are_angstrom_not_nm(self):
@@ -212,13 +239,12 @@ class TestOverrides:
         assert overrides_for('pes_tip')['sub'].required_reason is None
 
     def test_sweep_semantics_are_explained_where_they_bite(self):
+        """Long by nature, so it lives in `detail`, not the caption."""
         general = section_override('general').fields
-        assert 'separate simulation' in general['temp'].help
-        assert 'does not multiply' in general['force'].help
-        assert 'job count' in general['outer_loop'].help
+        assert 'job count' in general['outer_loop'].detail
 
     def test_tip_radius_carries_the_pbc_rule(self):
-        assert 'periodic image' in section_override('tip').fields['r'].help
+        assert 'periodic image' in section_override('tip').fields['r'].detail
 
     def test_unknown_section_yields_an_empty_override(self):
         assert section_override('not_a_section').fields == {}

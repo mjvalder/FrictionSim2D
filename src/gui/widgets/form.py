@@ -137,6 +137,8 @@ class SectionForm(QGroupBox):
             caption = QLabel(help_text, self.body)
             caption.setWordWrap(True)
             caption.setStyleSheet(SECTION_HELP)
+            if self.override.detail:
+                caption.setToolTip(self.override.detail)
             body_layout.addWidget(caption)
 
         self.form = QFormLayout()
@@ -175,8 +177,10 @@ class SectionForm(QGroupBox):
         if spec.required:
             label.setToolTip('Required')
 
-        help_text = (field_override.help if field_override and field_override.help
-                     else spec.doc)
+        caption_text = (field_override.help if field_override else None) or spec.doc
+        tooltip_text = (
+            (field_override.detail if field_override else None)
+            or caption_text)
 
         cell = QWidget(self)
         cell_layout = QVBoxLayout(cell)
@@ -184,13 +188,15 @@ class SectionForm(QGroupBox):
         cell_layout.setSpacing(1)
         cell_layout.addWidget(editor)
 
-        if help_text:
-            caption = QLabel(help_text, cell)
+        if caption_text:
+            caption = QLabel(caption_text, cell)
             caption.setWordWrap(True)
             caption.setStyleSheet(CAPTION_SMALL)
             cell_layout.addWidget(caption)
             self._captions[spec.key] = caption
-            label.setToolTip(help_text)
+        if tooltip_text:
+            label.setToolTip(tooltip_text)
+            editor.setToolTip(tooltip_text)
 
         self._rows[spec.key] = (label, cell)
         self.form.addRow(label, cell)
