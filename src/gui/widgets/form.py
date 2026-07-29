@@ -103,13 +103,7 @@ def _ordered_fields(section: SectionSpec,
         field_override = override.fields.get(spec.key) if override else None
         return (field_override.order if field_override else 100, spec.key)
 
-    # A nested sub-model has no flat control. Rendering it through the text
-    # fallback would stringify a dict and destroy it on the next commit, so it
-    # is left out and its value passes through untouched.
-    visible = [
-        f for f in section.fields
-        if f.key not in hidden and f.kind is not FieldKind.NESTED
-    ]
+    visible = [f for f in section.fields if f.key not in hidden]
     return sorted(visible, key=key)
 
 
@@ -191,6 +185,10 @@ class SectionForm(QGroupBox):
 
     def _add_field(self, spec: FieldSpec) -> None:
         """One labelled row: control, required marker, and a short explanation."""
+        if spec.kind is FieldKind.NESTED:
+            self._add_nested_row(spec)
+            return
+
         field_override = self.override.fields.get(spec.key) if self.override else None
 
         editor = build_editor(spec, self, choices=(
@@ -233,6 +231,29 @@ class SectionForm(QGroupBox):
 
         self._rows[spec.key] = (label, cell)
         self.form.addRow(label, cell)
+
+    def _add_nested_row(self, spec: FieldSpec) -> None:
+        """A nested sub-model, shown but not editable.
+
+        Rendering it through the text fallback would stringify a dict and
+        destroy it on the next commit. It is deliberately kept out of
+        `editors`, which `commit` and `load` iterate, so the value passes
+        through untouched -- but omitting the row entirely made the field
+        indistinguishable from one that does not exist.
+        """
+        text = _label_for(spec, self.override)
+        label = QLabel(text, self)
+        label.setEnabled(False)
+
+        caption = QLabel('Nested settings — passed through unchanged; '
+                         'edit in the YAML.', self)
+        caption.setWordWrap(True)
+        caption.setStyleSheet(CAPTION_SMALL)
+        caption.setEnabled(False)
+
+        self._captions[spec.key] = caption
+        self._rows[spec.key] = (label, caption)
+        self.form.addRow(label, caption)
 
     def _build_header(self) -> QHBoxLayout:
         """The fold control and the summary shown when folded."""

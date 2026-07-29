@@ -102,6 +102,7 @@ class TestLoopabilityHints:
         form = ConfigForm(SettingsDocument.defaults())
         caption = form.sections['hpc']._captions.get('num_cpus')
         assert caption is None or 'list' not in caption.text()
+        form.deleteLater()
 
 
 class TestDependentFieldsKeepTheirHint:
@@ -123,4 +124,51 @@ class TestDependentFieldsKeepTheirHint:
         section._apply_dependencies()
         assert section._captions['scan_angle_force'].text() == \
             'Set one or more scan angles first.'
+
+
+class TestNestedFieldsAreNotHidden:
+    """A nested sub-model has no flat control, so it is not rendered. Silently
+    omitting it is indistinguishable from the field not existing."""
+
+    def test_a_nested_field_is_shown_as_read_only(self, qt_app, monkeypatch):
+        from src.gui.controllers.settings_document import SettingsDocument
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(SettingsDocument.defaults())
+        section = form.sections['database']
+
+        for key in ('local', 'central'):
+            assert key in section._rows, key
+            assert key not in section.editors, key
         form.deleteLater()
+
+    def test_a_nested_value_survives_a_commit(self, qt_app, monkeypatch):
+        """`SettingsDocument` has no `to_dict`; `.values` is the same plain
+        dict a real save would serialise, so a deep copy of it is the
+        equivalent check."""
+        import copy
+
+        from src.gui.controllers.settings_document import SettingsDocument
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = SettingsDocument.defaults()
+        before = copy.deepcopy(document.values)
+        form = ConfigForm(document)
+        form.commit()
+        assert document.values == before
+        form.deleteLater()
+
+
+class TestCountsRead:
+
+    @pytest.mark.parametrize('n,word,expected', [
+        (1, 'config', '1 config'),
+        (2, 'config', '2 configs'),
+        (1, 'build', '1 build'),
+    ])
+    def test_plural(self, n, word, expected):
+        from src.gui.app import plural
+
+        assert plural(n, word) == expected

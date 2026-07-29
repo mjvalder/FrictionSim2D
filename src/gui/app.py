@@ -51,6 +51,11 @@ logger = logging.getLogger(__name__)
 APP_NAME = 'FrictionSim2D'
 
 
+def plural(count: int, word: str) -> str:
+    """'1 config', '2 configs'. Every word here pluralises with a bare s."""
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
 def _fold_controls(parent: QWidget, form: ConfigForm) -> QHBoxLayout:
     """Collapse/expand-all buttons for a form.
 
@@ -382,8 +387,9 @@ class MainWindow(QMainWindow):
         try:
             summary = self.document.expansion()
             self.counts.setText(
-                f"{summary.configs} config → {summary.builds} builds → "
-                f"{summary.jobs} jobs")
+                f"{plural(summary.configs, 'config')} → "
+                f"{plural(summary.builds, 'build')} → "
+                f"{plural(summary.jobs, 'job')}")
         except Exception as exc:  # pylint: disable=broad-except
             self.counts.setText('—')
             logger.debug("count failed: %s", exc)
