@@ -402,6 +402,13 @@ class MainWindow(QMainWindow):
             for section, key in unsupported
         ]
 
+        if self.document.pending_template_issues:
+            count = self.document.expansion().configs
+            lines.append(
+                f"{len(self.document.pending_template_issues)} path(s) contain "
+                f"{{mat}}; they will be substituted across {count} config(s) "
+                f"when you generate.")
+
         self.issues.setPlainText('\n'.join(lines) if lines else 'Config is valid.')
         self._refresh_counts()
         return result.ok and not unsupported

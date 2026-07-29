@@ -63,6 +63,10 @@ class ConfigDocument:
     values: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     source_path: Optional[Path] = None
     dirty: bool = False
+    #: `unexpanded_template` issues held back by the most recent validate().
+    #: Not an error when a material sweep is configured -- expansion
+    #: substitutes them -- but worth reporting as pending work.
+    pending_template_issues: List[Any] = field(default_factory=list)
 
     # ------------------------------------------------------------------ load
 
@@ -211,12 +215,33 @@ class ConfigDocument:
         No rule is re-implemented here: cross-field physics constraints live in
         the models and their errors are mapped back to the field that caused
         them.
+
+        One issue kind is reclassified rather than reported. A config driving a
+        material sweep is *meant* to carry `{mat}` placeholders -- expansion
+        substitutes them, and `preflight_paths` documents the kind as "not user
+        error". Treating it as fatal made a correctly configured sweep
+        impossible to render or generate. With no material list, though,
+        nothing will ever substitute the placeholder, so it stays an error.
         """
         payload = copy.deepcopy(self.values)
         payload['settings'] = (settings or load_settings()).model_dump()
-        return validate_config(
+        result = validate_config(
             payload, root_model_for(self.model), base_dir=self.base_dir,
         )
+
+        self.pending_template_issues = []
+        if not self.has_material_list():
+            return result
+
+        pending, hard = [], []
+        for issue in result.issues:
+            (pending if issue.kind == 'unexpanded_template' else hard).append(issue)
+        self.pending_template_issues = pending
+        return ConfigValidation(issues=hard, config=result.config)
+
+    def has_material_list(self) -> bool:
+        """Whether a material sweep is configured."""
+        return bool(self.get('2D', 'materials_list'))
 
     def expansion(self) -> ExpansionSummary:
         """How many configs, builds and jobs this would generate."""
