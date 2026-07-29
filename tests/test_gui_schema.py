@@ -225,18 +225,30 @@ class TestCaptionBudget:
 class TestRebuiltOverridesKeepTheirMetadata:
     """`overrides_for` reconstructs three entries -- the substrate section, the
     general section, and `outer_loop` when narrowing its per-family choices.
-    Each copies fields by name, so a field added to FieldOverride and not added
-    to those copies is dropped silently: the tooltip goes empty at runtime while
-    every test reading the un-rebuilt `section_override` path still passes."""
+    Each copies attributes by name, so anything left out of the copy is
+    dropped silently. `sub` and `general` reconstruct only the SectionOverride
+    wrapper -- their `fields` dict passes through by reference, so it is each
+    section's own attributes (label, help, detail, order) that are at risk,
+    not anything inside `fields`. `outer_loop` is the opposite: it reconstructs
+    a FieldOverride itself, so its own attributes (detail, editor, ...) are
+    what a copy can drop."""
 
-    def test_the_rebuilt_substrate_keeps_its_detail(self):
-        substrate = overrides_for('afm')['sub']
-        assert substrate.required_reason          # it *was* rebuilt
-        assert substrate.fields['x'].detail == section_override('sub').fields['x'].detail
+    def test_the_rebuilt_substrate_keeps_its_section_metadata(self):
+        """The `sub` rebuild copies the section's own attributes by name and
+        adds `required_reason`. Its `fields` dict passes through by reference,
+        so the section attributes are the only thing this site can drop."""
+        source = section_override('sub')
+        rebuilt = overrides_for('afm')['sub']
+        assert rebuilt.required_reason          # it *was* rebuilt
+        assert (rebuilt.label, rebuilt.help, rebuilt.detail, rebuilt.order) == \
+               (source.label, source.help, source.detail, source.order)
 
-    def test_the_rebuilt_general_section_keeps_field_detail(self):
-        general = overrides_for('afm')['general']
-        assert general.fields['twist_angle'].detail
+    def test_the_rebuilt_general_section_keeps_its_section_metadata(self):
+        source = section_override('general')
+        rebuilt = overrides_for('afm')['general']
+        assert set(rebuilt.fields) < set(source.fields)   # it *was* rebuilt
+        assert (rebuilt.label, rebuilt.help, rebuilt.detail, rebuilt.order) == \
+               (source.label, source.help, source.detail, source.order)
 
     def test_the_narrowed_outer_loop_keeps_its_detail(self):
         """The nested rebuild: `choices` is replaced per family, and everything
