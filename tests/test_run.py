@@ -370,3 +370,33 @@ def test_afm_no_substrate_raises():
         sub = None
     with pytest.raises(ValueError, match="substrate-free"):
         _select_afm_builder_cls('afm', _Cfg())
+
+
+class TestMaterialListIsNotLostSilently:
+    """A materials_list that resolves to nothing used to expand to one config
+    with no message at all, so a 40-material sweep silently became one run."""
+
+    def _config(self, path):
+        return {
+            '2D': {'mat': '{mat}', 'materials_list': str(path), 'layers': [1]},
+            'general': {'temp': 300},
+        }
+
+    def test_a_non_txt_path_is_reported(self, tmp_path):
+        from src.core.run import count_expansion
+
+        listing = tmp_path / 'mats.csv'
+        listing.write_text('h-MoS2\n', encoding='utf-8')
+        summary = count_expansion(self._config(listing), 'afm')
+
+        assert summary.configs == 1
+        assert any('.txt' in note for note in summary.notes)
+
+    def test_a_txt_path_produces_no_note(self, tmp_path):
+        from src.core.run import count_expansion
+
+        listing = tmp_path / 'mats.txt'
+        listing.write_text('h-MoS2\n', encoding='utf-8')
+        summary = count_expansion(self._config(listing), 'afm')
+
+        assert not [n for n in summary.notes if '.txt' in n]

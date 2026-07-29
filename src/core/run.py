@@ -191,7 +191,8 @@ def preflight_materials(materials: List[str],
 
 
 def expand_config_sweeps(base_config: Dict[str, Any],
-                         base_dir: Optional[Union[str, Path]] = None) -> List[Dict[str, Any]]:
+                         base_dir: Optional[Union[str, Path]] = None,
+                         notes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Expand config with material lists and parameter sweeps.
 
     Args:
@@ -199,6 +200,8 @@ def expand_config_sweeps(base_config: Dict[str, Any],
         base_dir: Directory to resolve relative material-list and component
             paths against. Optional; without it, resolution is relative to the
             current working directory as before.
+        notes: Optional list to collect informational messages about expansion
+            decisions (e.g., when a materials_list file is ignored).
 
     Raises:
         ValueError: If a material list was given but none of its materials can
@@ -212,6 +215,10 @@ def expand_config_sweeps(base_config: Dict[str, Any],
 
         mat_list_path = section_config.get('materials_list', '')
         if not isinstance(mat_list_path, str) or not mat_list_path.endswith(".txt"):
+            if mat_list_path and notes is not None:
+                notes.append(
+                    f"[2D] materials_list: '{mat_list_path}' is not a .txt file, "
+                    f"so no material sweep was expanded.")
             return []
 
         try:
@@ -374,10 +381,10 @@ def count_expansion(base_config: Dict[str, Any],
     Returns:
         An :class:`ExpansionSummary`.
     """
-    expanded = expand_config_sweeps(base_config, base_dir)
+    notes: List[str] = []
+    expanded = expand_config_sweeps(base_config, base_dir, notes)
     configs = len(expanded)
 
-    notes: List[str] = []
     builds = 0
     jobs = 0
     for config in expanded:
