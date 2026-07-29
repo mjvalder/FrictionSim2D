@@ -191,8 +191,10 @@ class SectionForm(QGroupBox):
 
         field_override = self.override.fields.get(spec.key) if self.override else None
 
-        editor = build_editor(spec, self, choices=(
-            field_override.choices if field_override else None))
+        editor = build_editor(
+            spec, self,
+            choices=(field_override.choices if field_override else None),
+            editor=(field_override.editor if field_override else None))
         editor.changed.connect(self._on_field_changed)
         self.editors[spec.key] = editor
 
@@ -382,6 +384,10 @@ class SectionForm(QGroupBox):
         for issue in issues:
             if issue.section == self.section.key and issue.key in self.editors:
                 self.editors[issue.key].set_error(issue.message)
+
+        for editor in self.editors.values():
+            if editor.error() is None and editor.warning():
+                editor.set_error(editor.warning())
 
     # --------------------------------------------------------------- events
 

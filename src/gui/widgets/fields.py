@@ -11,7 +11,7 @@ reader reads back as ``None``) rather than an empty string.
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from ..schema.introspect import FieldKind, FieldSpec
 
-__all__ = ['FieldEditor', 'build_editor']
+__all__ = ['FieldEditor', 'build_editor', 'EDITOR_REGISTRY', 'register_editor']
 
 
 class FieldEditor(QWidget):
@@ -50,6 +50,18 @@ class FieldEditor(QWidget):
         self._error = message
         self.setToolTip(message or '')
         self._apply_error_style(bool(message))
+
+    def error(self) -> Optional[str]:
+        """The validation message currently shown against this field, if any."""
+        return self._error
+
+    def warning(self) -> Optional[str]:
+        """A non-fatal note about the current value, or None.
+
+        Distinct from `set_error`, which reports a validation failure the model
+        raised. This is the widget noticing something itself.
+        """
+        return None
 
     def _apply_error_style(self, invalid: bool) -> None:
         for child in self.findChildren(QLineEdit):
@@ -175,9 +187,20 @@ class _BoolEditor(FieldEditor):
 
 
 class _EnumEditor(FieldEditor):
+    """A fixed set of choices, preserving anything it was not expecting.
+
+    Snapping an unrecognised value to the first choice is destructive: for a
+    field the model types as a plain `str` -- `stack_type` -- opening a config
+    and saving it would silently rewrite the value. For a real Literal field the
+    value is a validation error, and reporting it beats substituting a legal one
+    before validation ever sees the original.
+    """
+
+    UNKNOWN_SUFFIX = ' (not recognised)'
 
     def __init__(self, spec: FieldSpec, parent=None, choices=None) -> None:
         super().__init__(spec, parent)
+        self._unknown: Optional[Any] = None
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.box = QComboBox(self)
@@ -188,16 +211,31 @@ class _EnumEditor(FieldEditor):
         # acts on some of them.
         for choice in (choices if choices is not None else spec.choices):
             self.box.addItem(str(choice), choice)
-        self.box.currentIndexChanged.connect(self.changed)
+        self.box.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self.box)
         layout.addStretch(1)
+
+    def _on_changed(self) -> None:
+        if self.box.currentData() != self._unknown:
+            self._unknown = None
+        self.changed.emit()
 
     def value(self) -> Any:
         return self.box.currentData()
 
     def set_value(self, value: Any) -> None:
         index = self.box.findData(value)
+        if index < 0 and value not in (None, ''):
+            self._unknown = value
+            self.box.addItem(f"{value}{self.UNKNOWN_SUFFIX}", value)
+            index = self.box.count() - 1
         self.box.setCurrentIndex(index if index >= 0 else 0)
+
+    def warning(self) -> Optional[str]:
+        if self._unknown is None or self.box.currentData() != self._unknown:
+            return None
+        return (f"'{self._unknown}' is not one of the recognised values; "
+                f"it is kept as written.")
 
 
 class _ListEditor(FieldEditor):
@@ -335,8 +373,19 @@ _EDITORS = {
 }
 
 
+#: Purpose-built editors, keyed by the slug a FieldOverride requests.
+#: Populated by the widget modules themselves so this module does not import
+#: them -- see widgets/bands.py and widgets/keyvalue.py.
+EDITOR_REGISTRY: Dict[str, type] = {}
+
+
+def register_editor(slug: str, factory: type) -> None:
+    """Make a purpose-built editor requestable by slug."""
+    EDITOR_REGISTRY[slug] = factory
+
+
 def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
-                 choices=None) -> FieldEditor:
+                 choices=None, editor: Optional[str] = None) -> FieldEditor:
     """The editor for a field.
 
     Anything without a dedicated editor falls back to text rather than being
@@ -347,13 +396,22 @@ def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
         spec: The field to build a control for.
         parent: Qt parent.
         choices: Narrowed enum choices, where the model permits more than this
-            simulation family can act on.
+            simulation family can act on. Declared choices on a plain `str`
+            field also select a combo -- `stack_type` is typed `str` but the
+            builders only act on AA versus not-AA.
+        editor: Registry slug requesting a purpose-built editor. An unknown
+            slug falls back to the field kind rather than failing, so an
+            override naming a widget that has not been written yet still
+            renders something editable.
     """
+    if editor and editor in EDITOR_REGISTRY:
+        return EDITOR_REGISTRY[editor](spec, parent)
+
     if spec.kind is FieldKind.INT:
         return _NumberEditor(spec, parent, integer=True)
     if spec.kind is FieldKind.FLOAT:
         return _NumberEditor(spec, parent, integer=False)
-    if spec.kind is FieldKind.ENUM:
+    if spec.kind is FieldKind.ENUM or (choices and spec.kind is FieldKind.STR):
         return _EnumEditor(spec, parent, choices=choices)
 
     factory = _EDITORS.get(spec.kind)

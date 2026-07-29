@@ -93,7 +93,13 @@ _COMMON: Dict[str, SectionOverride] = {
             'x': FieldOverride(label='Length (x)', unit=A, order=10),
             'y': FieldOverride(label='Width (y)', unit=A, order=11),
             'layers': FieldOverride(label='Layers', order=12),
-            'stack_type': FieldOverride(label='Stacking', order=13),
+            'stack_type': FieldOverride(
+                label='Stacking', order=13,
+                choices=('AA', 'AB'),
+                help='AA: layers aligned. AB: alternate layers shifted.',
+                detail=('Only affects runs with more than one layer. The builders test '
+                        'for AA and treat every other value as AB.'),
+            ),
             'lat_c': FieldOverride(label='Interlayer spacing', unit=A, order=14),
             'materials_list': FieldOverride(
                 label='Material list file', order=5,
