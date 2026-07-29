@@ -183,6 +183,24 @@ class TestLangevinBands:
         assert 'Å' in text
         assert 'fraction' in text.lower()
 
+    def test_an_emptied_table_is_flagged(self, editor):
+        editor.set_value(DEFAULT_BANDS)
+        for band in ('fix', 'thermo'):
+            for index in (0, 1):
+                editor.set_cell('tip', band, index, '')
+                editor.set_cell('sub', band, index, '')
+        assert editor.value() is None
+        assert editor.warning() is not None
+
+    def test_a_half_filled_table_names_what_is_missing(self, editor):
+        """The builders index both keys, so one is as fatal as none."""
+        editor.set_value({'tip': DEFAULT_BANDS['tip']})
+        assert 'sub' in editor.warning()
+
+    def test_a_complete_table_is_not_flagged(self, editor):
+        editor.set_value(DEFAULT_BANDS)
+        assert editor.warning() is None
+
 
 class TestKeyValueGrid:
 

@@ -119,17 +119,30 @@ class LangevinBoundaryEditor(FieldEditor):
                     bands[band] = numbers
             if bands:
                 result[component] = bands
-        # `langevin_boundaries` is not Optional on the model -- it is
-        # `Dict[str, Dict[str, List[float]]]` with a `default_factory`, not
-        # `Optional[...]`. SettingsDocument always loads a complete model
-        # dump, so the key is always already present in the document, and
-        # SectionForm.commit() writes whatever value() returns straight into
-        # it unconditionally (the "key not in existing" skip never applies).
-        # Returning None here for an emptied table -- as the free-form
-        # dict/list editors below do -- would therefore commit `None` into a
-        # non-Optional dict field and fail model validation on save. An empty
-        # dict is a type-valid value for this field, so return that instead.
-        return result
+        # None, not {}: an empty dict is a type-valid value for this
+        # non-Optional field, so it would save silently and reach
+        # apply_langevin_regions, which indexes ['tip'] and ['sub']
+        # unconditionally -- a KeyError two screens away from the mistake.
+        # None fails validation instead, which _save_settings/_apply_settings
+        # (src/gui/app.py) both check for before ever calling .save(),
+        # producing a blocked save that names the field. See warning() below
+        # for catching this earlier still, in the form itself.
+        return result or None
+
+    def warning(self) -> Optional[str]:
+        """Flag a table emptied of the two components the builders require.
+
+        apply_langevin_regions indexes langevin_boundaries['tip'] and ['sub']
+        unconditionally, so a run configured without them fails during the
+        build rather than here.
+        """
+        value = self.value() or {}
+        missing = [name for name, _title, _note, _unit in _BLOCKS
+                   if name not in value]
+        if not missing:
+            return None
+        return (f"no bands set for {', '.join(missing)}; the build reads both "
+                f"and will fail without them")
 
     def set_value(self, value: Any) -> None:
         value = value or {}
