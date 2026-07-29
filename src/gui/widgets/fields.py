@@ -216,8 +216,15 @@ class _EnumEditor(FieldEditor):
         layout.addStretch(1)
 
     def _on_changed(self) -> None:
-        if self.box.currentData() != self._unknown:
-            self._unknown = None
+        # Selecting a real value retires the synthetic entry. Clearing the flag
+        # without removing the item leaves findData() able to match it later,
+        # so the value stops being recognised as unrecognised.
+        if self._unknown is not None and self.box.currentData() != self._unknown:
+            self.box.blockSignals(True)
+            try:
+                self._drop_unknown_item()
+            finally:
+                self.box.blockSignals(False)
         self.changed.emit()
 
     def value(self) -> Any:

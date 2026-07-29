@@ -92,6 +92,25 @@ class TestStringChoices:
             editor.set_value(value)
         assert editor.box.count() == before
 
+    def test_picking_a_real_value_retires_the_synthetic_entry(self, qt_app):
+        """The user correcting a flagged field is the normal path. Clearing the
+        flag without removing the item leaves it for findData to match later,
+        which silently un-flags the value on the next load()."""
+        from src.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(), choices=('AA', 'AB'))
+        before = editor.box.count()
+        editor.set_value('ABC')
+
+        editor.box.setCurrentIndex(editor.box.findData('AB'))   # as the user would
+        assert editor.value() == 'AB'
+        assert editor.warning() is None
+        assert editor.box.count() == before
+
+        editor.set_value('ABC')          # another config, same odd value
+        assert editor.value() == 'ABC'
+        assert editor.warning() is not None
+
 
 class TestRegistry:
 
