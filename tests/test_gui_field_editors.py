@@ -70,6 +70,28 @@ class TestStringChoices:
         editor.set_value('AB')
         assert editor.warning() is None
 
+    def test_the_warning_survives_the_value_being_revisited(self, qt_app):
+        """load() reuses long-lived editors, so the same widget sees many
+        configs. A stale synthetic item made findData succeed on the second
+        visit, so the value was no longer recognised as unrecognised."""
+        from src.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(), choices=('AA', 'AB'))
+        editor.set_value('ABC')
+        editor.set_value('AB')
+        editor.set_value('ABC')
+        assert editor.value() == 'ABC'
+        assert editor.warning() is not None
+
+    def test_synthetic_entries_do_not_accumulate(self, qt_app):
+        from src.gui.widgets.fields import build_editor
+
+        editor = build_editor(_spec(), choices=('AA', 'AB'))
+        before = editor.box.count()
+        for value in ('ABC', 'ABD', 'ABC', 'AA'):
+            editor.set_value(value)
+        assert editor.box.count() == before
+
 
 class TestRegistry:
 

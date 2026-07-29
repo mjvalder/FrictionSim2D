@@ -223,13 +223,32 @@ class _EnumEditor(FieldEditor):
     def value(self) -> Any:
         return self.box.currentData()
 
+    def _drop_unknown_item(self) -> None:
+        """Remove the synthetic entry, if one is present.
+
+        set_value owns its lifetime: leaving it behind makes the next
+        findData() succeed against a stale item, so the value is no longer
+        recognised as unrecognised.
+        """
+        if self._unknown is None:
+            return
+        index = self.box.findData(self._unknown)
+        if index >= 0:
+            self.box.removeItem(index)
+        self._unknown = None
+
     def set_value(self, value: Any) -> None:
-        index = self.box.findData(value)
-        if index < 0 and value not in (None, ''):
-            self._unknown = value
-            self.box.addItem(f"{value}{self.UNKNOWN_SUFFIX}", value)
-            index = self.box.count() - 1
-        self.box.setCurrentIndex(index if index >= 0 else 0)
+        self.box.blockSignals(True)
+        try:
+            self._drop_unknown_item()
+            index = self.box.findData(value)
+            if index < 0 and value not in (None, ''):
+                self._unknown = value
+                self.box.addItem(f"{value}{self.UNKNOWN_SUFFIX}", value)
+                index = self.box.count() - 1
+            self.box.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self.box.blockSignals(False)
 
     def warning(self) -> Optional[str]:
         if self._unknown is None or self.box.currentData() != self._unknown:
