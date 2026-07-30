@@ -50,6 +50,26 @@ def _swept(materials_file, monkeypatch):
     return document
 
 
+@pytest.fixture(name='dirs')
+def _dirs(tmp_path):
+    """A structure directory and a potential directory: the intersection is
+    three materials, plus Si (structure only) and h-WS2 (potential only) --
+    exactly the shape of the real run_afm/ directory. Module-scoped so every
+    test class below can share it rather than each re-declaring its own."""
+    structures = tmp_path / 'cif'
+    potentials = tmp_path / 'sw_lammps'
+    structures.mkdir()
+    potentials.mkdir()
+    for name in ('h-MoS2', 't-MoS2', 'b-AlSb'):
+        (structures / f"{name}.cif").write_text('', encoding='utf-8')
+        (potentials / f"{name}.sw").write_text('', encoding='utf-8')
+    # In cif/ only, exactly as Si is in the real run directory.
+    (structures / 'Si.cif').write_text('', encoding='utf-8')
+    # In sw_lammps/ only.
+    (potentials / 'h-WS2.sw').write_text('', encoding='utf-8')
+    return structures, potentials
+
+
 class TestSweepIsReachable:
 
     def test_the_sweep_expands(self, swept):
@@ -140,21 +160,6 @@ class TestScanningMaterialDirectories:
     potential directory -- exactly what preflight_materials computes at build
     time, surfaced up front instead."""
 
-    @pytest.fixture(name='dirs')
-    def _dirs(self, tmp_path):
-        structures = tmp_path / 'cif'
-        potentials = tmp_path / 'sw_lammps'
-        structures.mkdir()
-        potentials.mkdir()
-        for name in ('h-MoS2', 't-MoS2', 'b-AlSb'):
-            (structures / f"{name}.cif").write_text('', encoding='utf-8')
-            (potentials / f"{name}.sw").write_text('', encoding='utf-8')
-        # In cif/ only, exactly as Si is in the real run directory.
-        (structures / 'Si.cif').write_text('', encoding='utf-8')
-        # In sw_lammps/ only.
-        (potentials / 'h-WS2.sw').write_text('', encoding='utf-8')
-        return structures, potentials
-
     def test_the_usable_materials_are_the_intersection(self, dirs):
         from src.gui.controllers.materials import scan_material_directories
 
@@ -237,3 +242,117 @@ class TestApplyingMaterialDirectories:
 
     def test_reading_back_an_untemplated_config_gives_nothing(self, document):
         assert document.material_directories() == (None, None, None)
+
+
+class TestMaterialListEditor:
+
+    @pytest.fixture(name='editor')
+    def _editor(self, qt_app, dirs):
+        from src.gui.schema.introspect import FieldKind, FieldSpec
+        from src.gui.widgets.materials import MaterialListEditor
+
+        spec = FieldSpec(name='materials_list', key='materials_list',
+                         kind=FieldKind.STR, required=False)
+        editor = MaterialListEditor(spec)
+        editor.set_directories(*dirs)
+        return editor
+
+    def test_it_starts_not_sweeping(self, qt_app):
+        from src.gui.schema.introspect import FieldKind, FieldSpec
+        from src.gui.widgets.materials import MaterialListEditor
+
+        spec = FieldSpec(name='materials_list', key='materials_list',
+                         kind=FieldKind.STR, required=False)
+        assert not MaterialListEditor(spec).is_sweeping()
+
+    def test_setting_directories_lists_the_usable_materials(self, editor):
+        assert editor.selected_names() == ['b-AlSb', 'h-MoS2', 't-MoS2']
+
+    def test_an_unusable_material_is_shown_but_not_selected(self, editor):
+        """Si is in cif/ with no potential -- the real case in run_afm/."""
+        assert 'Si' in editor.listed_names()
+        assert 'Si' not in editor.selected_names()
+
+    def test_an_unusable_material_cannot_be_selected(self, editor):
+        editor.select_all()
+        assert 'Si' not in editor.selected_names()
+
+    def test_deselecting_narrows_the_sweep(self, editor):
+        editor.set_selected(['h-MoS2'])
+        assert editor.selected_names() == ['h-MoS2']
+
+    def test_the_summary_counts_usable_against_listed(self, editor):
+        assert '3' in editor.summary_text()
+        assert '4' in editor.summary_text()
+
+    def test_a_path_value_switches_it_into_sweeping(self, editor):
+        editor.set_value('material_list.txt')
+        assert editor.is_sweeping()
+
+    def test_an_empty_value_leaves_it_single(self, editor):
+        editor.set_value(None)
+        assert not editor.is_sweeping()
+
+
+class TestSweepRoundTrip:
+    """Opening a configured sweep must show what it actually runs."""
+
+    def test_an_existing_list_becomes_the_selection(self, qt_app, dirs, tmp_path,
+                                                    monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        listing = tmp_path / 'run_materials.txt'
+        listing.write_text('h-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(structures, potentials, '.sw')
+        document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        assert editor.is_sweeping()
+        assert editor.selected_names() == ['h-MoS2']
+        form.deleteLater()
+
+    def test_committing_writes_the_list_and_the_templates(self, qt_app, dirs,
+                                                          tmp_path, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+        editor.set_directories(*dirs)
+        section.commit()
+
+        assert document.get('2D', 'mat') == '{mat}'
+        assert '{mat}' in document.get('2D', 'cif_path')
+        assert document.material_names() == ['b-AlSb', 'h-MoS2', 't-MoS2']
+        assert document.expansion().configs == 3
+        form.deleteLater()
+
+    def test_unticking_removes_the_sweep(self, qt_app, dirs, tmp_path, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+        editor.set_directories(*dirs)
+        section.commit()
+
+        editor.set_sweeping(False)
+        section.commit()
+        assert not document.has_material_list()
+        form.deleteLater()

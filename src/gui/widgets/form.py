@@ -340,6 +340,28 @@ class SectionForm(QGroupBox):
             if self.pair_editor is not None:
                 self.pair_editor.set_value(
                     self.document.values.get(self.section.key) or {})
+
+            material_editor = self.editors.get('materials_list')
+            if self.section.key == '2D' and hasattr(material_editor, 'is_sweeping'):
+                structures, potentials, extension = self.document.material_directories()
+                if structures and potentials:
+                    # material_directories() gives back paths as stored -- relative
+                    # to the config's own directory, per _relative_to_config -- so
+                    # they have to be rejoined against base_dir before scanning the
+                    # actual filesystem, or a relative 'cif' resolves against the
+                    # process cwd instead of the run directory and scans empty.
+                    base = self.document.base_dir
+                    if base is not None:
+                        structures = structures if structures.is_absolute() \
+                            else base / structures
+                        potentials = potentials if potentials.is_absolute() \
+                            else base / potentials
+                    material_editor.set_directories(structures, potentials, extension)
+                    names = self.document.material_names()
+                    if names:
+                        # An existing list is the selection; the directories
+                        # only decide what is available to tick.
+                        material_editor.set_selected(names)
         finally:
             self._loading = False
         self._apply_dependencies()
@@ -366,6 +388,27 @@ class SectionForm(QGroupBox):
             self.document.dirty = True
             return
 
+        material_editor = self.editors.get('materials_list')
+        if self.section.key == '2D' and hasattr(material_editor, 'is_sweeping'):
+            sweeping = material_editor.is_sweeping()
+            self._commit_material_sweep(material_editor)
+            if sweeping:
+                # apply_material_directories just wrote {mat} placeholders
+                # straight into the document, bypassing the mat/cif_path/
+                # pot_path editors -- which still hold whatever single
+                # material was on screen before. Without this, the general
+                # loop below re-reads that stale text and writes it right
+                # back over the placeholders it was just given. Gated on
+                # `sweeping`: when the box is unticked, _commit_material_sweep
+                # touches nothing but materials_list, and resyncing here would
+                # instead overwrite a same-commit edit to 'mat' with the
+                # document's old value.
+                for key in self.document.TEMPLATED_KEYS:
+                    templated_editor = self.editors.get(key)
+                    if templated_editor is not None:
+                        templated_editor.set_value(
+                            self.document.get(self.section.key, key))
+
         existing = self.document.values.get(self.section.key, {})
         specs = self.section.field_map()
 
@@ -376,6 +419,27 @@ class SectionForm(QGroupBox):
                 if value is None or (spec is not None and value == spec.default):
                     continue
             self.document.set(self.section.key, key, value)
+
+    def _commit_material_sweep(self, editor) -> None:
+        """Turn the chosen directories into the three things a sweep needs.
+
+        The `.txt`, and the `{mat}` placeholders in the per-material fields.
+        Setting one without the others silently produces a sweep in which every
+        config builds the same material.
+        """
+        if not editor.is_sweeping():
+            self.document.write_material_names([])
+            editor.note_written(None)
+            return
+
+        structures, potentials, extension = editor.directories()
+        if not (structures and potentials and extension):
+            return
+
+        self.document.apply_material_directories(
+            structures, potentials, extension)
+        editor.note_written(
+            self.document.write_material_names(editor.selected_names()))
 
     def show_errors(self, issues) -> None:
         """Decorate the fields named by validation issues."""

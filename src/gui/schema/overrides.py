@@ -102,10 +102,10 @@ _COMMON: Dict[str, SectionOverride] = {
             ),
             'lat_c': FieldOverride(label='Interlayer spacing', unit=A, order=14),
             'materials_list': FieldOverride(
-                label='Material list file', order=5,
-                help='Text file of material names, one per line.',
-                detail=('Each material becomes a separate simulation, so this '
-                        'multiplies the run count.'),
+                label='Materials', order=5, editor='material_list',
+                detail=('Each material becomes a separate simulation. The structure '
+                        'and potential directories decide which are available: a '
+                        'material needs a file in both.'),
             ),
         },
     ),
