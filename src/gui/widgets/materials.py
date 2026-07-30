@@ -194,15 +194,8 @@ class MaterialListEditor(FieldEditor):
         # "all" again.
         select_by_default = not self._selection_touched
 
-        # A potential file with no matching structure cannot become a material
-        # at all -- there is no geometry to place in the sheet -- so it is not
-        # a sweep candidate the way a structure without a potential is (that
-        # one is real and just needs a potential, which is worth surfacing;
-        # see MaterialCandidate.reason). Filtering it out here, rather than in
-        # the controller, keeps scan_material_directories reporting the full
-        # picture for anything that inspects it directly.
-        candidates = [c for c in scan_material_directories(
-            structures, potentials, self._extension) if c.has_structure]
+        candidates = scan_material_directories(
+            structures, potentials, self._extension)
 
         self.listing.blockSignals(True)
         try:

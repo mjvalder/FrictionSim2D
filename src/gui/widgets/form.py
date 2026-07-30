@@ -421,25 +421,39 @@ class SectionForm(QGroupBox):
             self.document.set(self.section.key, key, value)
 
     def _commit_material_sweep(self, editor) -> None:
-        """Turn the chosen directories into the three things a sweep needs.
+        """Write the three things a sweep needs, when they actually changed.
 
-        The `.txt`, and the `{mat}` placeholders in the per-material fields.
-        Setting one without the others silently produces a sweep in which every
-        config builds the same material.
+        Unconditional writes are dangerous here: this runs on every commit of
+        the section, including commits triggered by unrelated fields.
         """
         if not editor.is_sweeping():
-            self.document.write_material_names([])
-            editor.note_written(None)
+            if self.document.has_material_list():
+                self.document.write_material_names([])
+                editor.note_written(None)
             return
 
         structures, potentials, extension = editor.directories()
         if not (structures and potentials and extension):
             return
 
+        if not editor.listed_names():
+            # Nothing was found on disk. That means the directories do not
+            # resolve on this machine -- a moved run directory, an unmounted
+            # share -- not that the user emptied the sweep. Rewriting the
+            # config from an empty scan would delete a working sweep.
+            return
+
         self.document.apply_material_directories(
             structures, potentials, extension)
-        editor.note_written(
-            self.document.write_material_names(editor.selected_names()))
+
+        selected = editor.selected_names()
+        # Order-insensitive: selected_names() comes back in
+        # scan_material_directories' alphabetical order, but a hand-maintained
+        # .txt is under no obligation to be sorted. Comparing as lists would
+        # treat that as a change and retarget a file that nothing actually
+        # asked to change.
+        if set(selected) != set(self.document.material_names()):
+            editor.note_written(self.document.write_material_names(selected))
 
     def show_errors(self, issues) -> None:
         """Decorate the fields named by validation issues."""

@@ -282,8 +282,8 @@ class TestMaterialListEditor:
         assert editor.selected_names() == ['h-MoS2']
 
     def test_the_summary_counts_usable_against_listed(self, editor):
-        assert '3' in editor.summary_text()
-        assert '4' in editor.summary_text()
+        """3 of the 5 names across the two directories have both files."""
+        assert '3 of 5' in editor.summary_text()
 
     def test_a_path_value_switches_it_into_sweeping(self, editor):
         editor.set_value('material_list.txt')
@@ -292,6 +292,13 @@ class TestMaterialListEditor:
     def test_an_empty_value_leaves_it_single(self, editor):
         editor.set_value(None)
         assert not editor.is_sweeping()
+
+    def test_deselecting_everything_survives_a_rescan(self, editor):
+        """An empty selection is a choice, not an absence. Treating it as
+        'select all' on the next scan silently re-widens the sweep."""
+        editor.select_none()
+        editor._rescan()
+        assert editor.selected_names() == []
 
 
 class TestSweepRoundTrip:
@@ -355,4 +362,47 @@ class TestSweepRoundTrip:
         editor.set_sweeping(False)
         section.commit()
         assert not document.has_material_list()
+        form.deleteLater()
+
+    def test_an_unscannable_sweep_is_not_destroyed(self, qt_app, tmp_path,
+                                                   monkeypatch):
+        """A config whose directories do not exist on this machine still has a
+        real sweep. Committing must not delete it."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        listing = tmp_path / 'run_materials.txt'
+        listing.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(
+            tmp_path / 'gone', tmp_path / 'also_gone', '.sw')
+        document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        form.sections['2D'].commit()
+        assert document.has_material_list()
+        assert document.material_names() == ['h-MoS2', 't-MoS2']
+        form.deleteLater()
+
+    def test_committing_an_unchanged_sweep_rewrites_nothing(self, qt_app, dirs,
+                                                            tmp_path, monkeypatch):
+        """Opening a config and pressing Render must not retarget the list the
+        user maintains by hand."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        listing = tmp_path / 'material_list.txt'
+        listing.write_text('h-MoS2\nt-MoS2\nb-AlSb\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(*dirs, '.sw')
+        document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        before = document.get('2D', 'materials_list')
+        form.sections['2D'].commit()
+        assert document.get('2D', 'materials_list') == before
         form.deleteLater()
