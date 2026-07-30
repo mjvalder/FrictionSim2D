@@ -79,6 +79,44 @@ last.
 
 Putting a list in the last category is reported before anything is generated.
 
+### Sweeping over materials
+
+`[2D] materials_list` names a `.txt` of material names, one per line, and each
+becomes a separate simulation. Setting all of that by hand means keeping four
+things in sync — the `.txt`, and `{mat}` placeholders in `mat`, `cif_path` and
+`pot_path` — which is why the field was effectively undiscoverable before.
+
+Ticking **Sweep over many materials** in `[2D]` replaces the single `mat`
+field with two directory pickers, **Structures** and **Potentials**. This
+mirrors a real run directory — a `cif/` beside a `sw_lammps/` — so pointing
+at the pair is usually just pointing at the two directories that already
+exist.
+
+The material list is the **intersection** of the two directories: a material
+needs a structure file and a potential file to be usable. The potential file
+extension is inferred from the commonest suffix in the potentials directory.
+Names found in only one directory are still shown, greyed out, with the
+reason (`no potential file` / `no structure file`) rather than silently
+dropped — a material missing from a sweep is exactly the kind of thing worth
+noticing.
+
+The derived names appear as a checkable list, so the sweep can be narrowed
+below "everything usable". A summary line reads e.g. `12 of 14 usable → 9
+configs`. **Select all** / **None** act on the currently usable names.
+
+Committing a sweep writes the checked names to `<config>_materials.txt`
+beside the config, and fills `mat = {mat}`, `cif_path =
+<structures>/{mat}.cif`, `pot_path = <potentials>/{mat}<ext>` — paths are
+stored relative to the config's own directory where that is possible. If the
+selection matches what is already on disk, nothing is rewritten.
+
+Opening a config with an existing `materials_list` loads those names as the
+current selection; the two directories (recovered from the `{mat}` templates
+in `cif_path` / `pot_path`) only decide what is available to tick, not what
+is selected. Paths that still contain `{mat}` are reported as pending
+substitutions rather than as validation errors, so a templated config renders
+and generates normally.
+
 ## Render
 
 **Render** builds the configured components, assembles them as the generated
@@ -137,9 +175,34 @@ from elsewhere.
 ## Settings
 
 The Settings tab shows the effective `GlobalSettings` and which file they came
-from. It is read-only for now, deliberately: `load_settings` replaces rather
-than merges, so writing a partial file would silently reset every value it
-omitted to a built-in default. Use `FrictionSim2D settings` to change them.
+from. Editing a value and pressing Render or Generate applies it: the tab edits
+a document, a build reads a file, so the build writes `settings.yaml` into the
+workspace first and passes it explicitly.
+
+**Save to workspace** writes the file without building. **Revert to defaults**
+discards the file's values for the built-in ones. The file written is always
+complete — `load_settings` replaces rather than merges, so a partial file would
+silently reset every value it omitted.
+
+Two groups are worth knowing about:
+
+- **HPC** — with **Modules** empty, no job scripts are written at all, whatever
+  the rest of the group says. The Generate dialog says so before it builds.
+- **Thermostat** — the Langevin bands split each component into fixed,
+  thermostatted and free, shown as a table rather than raw JSON. The two
+  halves use different units: tip bands are absolute Å measured down from the
+  tip's top face, substrate bands are a fraction of the substrate thickness
+  measured up from the bottom. A table with a component missing entirely is
+  flagged, since the builders read both unconditionally and fail without them.
+
+A few other fields get purpose-built editors instead of a JSON blob: `output.dump`
+and `output.dump_frequency` are key/value grids (rows can be added and removed,
+since the keys are dump-phase names the user picks), and
+`quench.quench_slab_dims` is three labelled x/y/z cells. Elsewhere,
+`[2D] stack_type` (stacking) is a dropdown of `AA`/`AB` that preserves an
+unrecognised hand-written value rather than silently snapping it to a choice —
+the model types the field as a plain string, so a config with something else
+in it round-trips unchanged.
 
 ## Not included
 
