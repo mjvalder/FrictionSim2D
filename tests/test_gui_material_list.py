@@ -575,4 +575,33 @@ class TestSweepRoundTrip:
 
         form.sections['2D'].commit()
         assert not document.has_material_list()
+        # Not just "no sweep was invented" -- the placeholders committing put
+        # there must survive too. Asserting only has_material_list() walks
+        # straight past clear_material_directories() deleting them on every
+        # unticked commit rather than only on a genuine untick.
+        assert document.get('2D', 'mat') == '{mat}'
+        assert document.get('2D', 'cif_path') is not None
+        assert document.get('2D', 'pot_path') is not None
+        form.deleteLater()
+
+    def test_a_templated_config_without_a_list_keeps_its_placeholders(
+            self, qt_app, monkeypatch):
+        """sheet_config.ini ships with {mat} in all three fields and no
+        materials_list. Clearing placeholders on any unticked commit -- rather
+        than on an actual untick -- destroys it on the first keystroke."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'sheet_config.ini', 'sheetonsheet')
+        before = {key: document.get('2D', key)
+                  for key in ('mat', 'cif_path', 'pot_path')}
+        assert not document.has_material_list()
+
+        form = ConfigForm(document)
+        form.sections['2D'].commit()
+        form.sections['2D'].commit()      # the second one is where it died
+
+        assert {key: document.get('2D', key)
+                for key in ('mat', 'cif_path', 'pot_path')} == before
         form.deleteLater()

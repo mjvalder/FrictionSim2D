@@ -469,17 +469,19 @@ class SectionForm(QGroupBox):
             if self.document.has_material_list():
                 self.document.write_material_names([])
                 editor.note_written(None)
-                wrote = True
-            # Unticking must not leave the config invalid: apply_material_
-            # directories' placeholders are only meaningful with a sweep to
-            # substitute them, so they come out with it. Only reported as a
-            # change when something was actually templated -- an ordinary,
-            # never-swept config commits every field on every keystroke, and
-            # unconditionally resyncing mat/cif_path/pot_path here would
-            # revert whatever the user just typed into 'mat' before the
-            # generic loop below ever sees it.
-            if self.document.clear_material_directories():
-                wrote = True
+                # Unticking must not leave the config invalid:
+                # apply_material_directories' placeholders are only
+                # meaningful with a sweep to substitute them, so they come
+                # out with it. Nested inside has_material_list(), not called
+                # unconditionally: this branch runs on *every* commit while
+                # the box is unticked, including one triggered by an
+                # unrelated keystroke on a config that was never a sweep at
+                # all -- examples/sheet_config.ini ships with {mat} in all
+                # three fields and no materials_list, and clearing them on
+                # sight would destroy a documented, shipped configuration
+                # form on the first commit.
+                if self.document.clear_material_directories():
+                    wrote = True
             return wrote
 
         structures, potentials, extension = editor.directories()
