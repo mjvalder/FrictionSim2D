@@ -38,6 +38,13 @@ class FieldEditor(QWidget):
         super().__init__(parent)
         self.spec = spec
         self._error: Optional[str] = None
+        #: The explanatory tooltip set by the form builder (help/detail text),
+        #: as opposed to a transient error message. Remembered separately so
+        #: clearing an error can restore it instead of leaving the tooltip
+        #: blank -- set_error(None) is called on every editor on every
+        #: show_errors(), including the common case where there is nothing to
+        #: report.
+        self._base_tooltip: str = ''
 
     def value(self) -> Any:
         raise NotImplementedError
@@ -45,10 +52,16 @@ class FieldEditor(QWidget):
     def set_value(self, value: Any) -> None:
         raise NotImplementedError
 
+    def set_base_tooltip(self, text: Optional[str]) -> None:
+        """The tooltip to show when there is no validation error."""
+        self._base_tooltip = text or ''
+        if not self._error:
+            self.setToolTip(self._base_tooltip)
+
     def set_error(self, message: Optional[str]) -> None:
         """Mark the field as holding an invalid value."""
         self._error = message
-        self.setToolTip(message or '')
+        self.setToolTip(message or self._base_tooltip)
         self._apply_error_style(bool(message))
 
     def error(self) -> Optional[str]:

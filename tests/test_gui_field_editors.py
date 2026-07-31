@@ -206,19 +206,29 @@ class TestKeyValueGrid:
 
     @pytest.fixture(name='editor')
     def _editor(self, qt_app):
+        """output.dump: Dict[str, bool]."""
         from src.gui.widgets.keyvalue import KeyValueGridEditor
 
-        return KeyValueGridEditor(_spec(key='dump', kind=FieldKind.DICT))
+        return KeyValueGridEditor(
+            _spec(key='dump', kind=FieldKind.DICT, item_kind=FieldKind.BOOL))
+
+    @pytest.fixture(name='int_editor')
+    def _int_editor(self, qt_app):
+        """output.dump_frequency: Dict[str, int]."""
+        from src.gui.widgets.keyvalue import KeyValueGridEditor
+
+        return KeyValueGridEditor(
+            _spec(key='dump_frequency', kind=FieldKind.DICT, item_kind=FieldKind.INT))
 
     def test_bools_round_trip(self, editor):
         value = {'system_init': True, 'slide': False}
         editor.set_value(value)
         assert editor.value() == value
 
-    def test_ints_round_trip(self, editor):
+    def test_ints_round_trip(self, int_editor):
         value = {'system_init': 1000, 'slide': 10000}
-        editor.set_value(value)
-        assert editor.value() == value
+        int_editor.set_value(value)
+        assert int_editor.value() == value
 
     def test_a_row_can_be_added(self, editor):
         editor.set_value({'slide': True})
@@ -233,6 +243,21 @@ class TestKeyValueGrid:
     def test_empty_is_none(self, editor):
         editor.set_value({})
         assert editor.value() is None
+
+    def test_an_added_row_matches_the_declared_item_kind(self, qt_app):
+        """add_row used to choose a checkbox from the runtime type of the
+        value it was handed, and _on_add_clicked always passes '' -- so a row
+        added by hand to a Dict[str, bool] field like output.dump got a text
+        box instead of a checkbox."""
+        from PySide6.QtWidgets import QCheckBox
+
+        from src.gui.widgets.keyvalue import KeyValueGridEditor
+
+        editor = KeyValueGridEditor(
+            _spec(key='dump', kind=FieldKind.DICT, item_kind=FieldKind.BOOL))
+        editor.add_row('minimise', '')
+        _row, control = editor._rows['minimise']
+        assert isinstance(control, QCheckBox)
 
 
 class TestFixedList:

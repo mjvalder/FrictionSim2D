@@ -225,6 +225,10 @@ def expand_config_sweeps(base_config: Dict[str, Any],
             materials = read_material_list(mat_list_path, base_dir)
         except (FileNotFoundError, OSError) as exc:
             logger.warning("%s", exc)
+            if notes is not None:
+                notes.append(
+                    f"[2D] materials_list: '{mat_list_path}' could not be read "
+                    f"({exc}), so no material sweep was expanded.")
             return []
 
         preflight = preflight_materials(materials, section_config, base_dir)

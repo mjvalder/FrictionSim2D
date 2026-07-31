@@ -154,6 +154,25 @@ class TestWindowIntegration:
         # When count fails, it falls back to a generic message
         assert 'substituted' in issues_text
 
+    def test_a_missing_materials_list_is_reported(self, window, tmp_path, monkeypatch):
+        """FINDING 2: a materials_list pointing at a file that does not exist
+        must be surfaced to the user, not silently swallowed. ExpansionSummary
+        already collects this class of message as a note; _validate() must
+        show it."""
+        monkeypatch.chdir(REPO_ROOT)
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        missing = tmp_path / 'typo_materials.txt'
+        window.document.set('2D', 'materials_list', str(missing))
+        window.document.set('2D', 'mat', '{mat}')
+        window.document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        window._validate()
+        issues_text = window.issues.toPlainText()
+        assert 'typo_materials.txt' in issues_text
+
 
 class TestScanningMaterialDirectories:
     """The material list is the intersection of a structure directory and a
@@ -405,4 +424,155 @@ class TestSweepRoundTrip:
         before = document.get('2D', 'materials_list')
         form.sections['2D'].commit()
         assert document.get('2D', 'materials_list') == before
+        form.deleteLater()
+
+    def test_a_half_resolving_scan_does_not_destroy_an_existing_sweep(
+            self, qt_app, tmp_path, monkeypatch):
+        """FINDING 1: one directory fails to resolve (an unmounted share, a
+        moved run directory). scan_material_directories still returns names
+        for whichever directory *does* resolve, all marked unusable -- so
+        listed_names() is non-empty even though nothing here can actually be
+        swept. That must not be read as 'the user emptied the sweep'."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        listing = tmp_path / 'run_materials.txt'
+        listing.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+
+        structures = tmp_path / 'cif'
+        structures.mkdir()
+        (structures / 'h-MoS2.cif').write_text('', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(
+            structures, tmp_path / 'unmounted_potentials', '.sw')
+        document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        form.sections['2D'].commit()
+
+        assert document.has_material_list()
+        assert document.material_names() == ['h-MoS2', 't-MoS2']
+        form.deleteLater()
+
+    def test_an_unreadable_list_does_not_widen_into_everything(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINDING 2: materials_list pointing at a missing (or empty) .txt
+        must not be read as 'nothing decided yet, select everything usable'.
+        A typo in the path must not become a full sweep on the next commit."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(*dirs, '.sw')
+        document.set('2D', 'materials_list', str(tmp_path / 'typo_materials.txt'))
+
+        form = ConfigForm(document)
+        form.sections['2D'].commit()
+
+        assert document.material_names() == []
+        assert not (tmp_path / 'run_materials.txt').exists()
+        form.deleteLater()
+
+    def test_committing_a_sweep_stores_a_relative_materials_list(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINDING 3: write_material_names() stores a relative path but
+        returns the absolute target it wrote to disk. note_written must
+        remember what the document actually holds, not that return value, or
+        the generic editor loop's write of editor.value() puts the absolute
+        path back."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+        editor.set_directories(*dirs)
+        section.commit()
+
+        stored = document.get('2D', 'materials_list')
+        assert stored is not None
+        assert not Path(stored).is_absolute()
+        form.deleteLater()
+
+    def test_typing_into_mat_survives_commit_when_the_sweep_is_unconfigured(
+            self, qt_app, tmp_path, monkeypatch):
+        """FINDING 4: ticking the sweep box does not hide mat/cif_path/
+        pot_path -- they stay visible and editable until the sweep actually
+        has both directories resolved. Committing while the box is ticked but
+        the pickers are still empty must not silently revert a same-commit
+        edit to 'mat'."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        material_editor = section.editors['materials_list']
+        material_editor.set_sweeping(True)   # ticked, but no directories chosen
+
+        mat_editor = section.editors['mat']
+        mat_editor.set_value('h_MoS2')
+        section.commit()
+
+        assert document.get('2D', 'mat') == 'h_MoS2'
+        form.deleteLater()
+
+    def test_unticking_clears_the_mat_placeholders(self, qt_app, dirs, tmp_path,
+                                                    monkeypatch):
+        """FINDING 5a: unticking must do more than remove materials_list --
+        mat/cif_path/pot_path are left holding {mat}, which makes the config
+        invalid and forces the user to retype three fields by hand."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+        editor.set_directories(*dirs)
+        section.commit()
+        assert document.get('2D', 'mat') == '{mat}'   # sanity: sweep applied
+
+        editor.set_sweeping(False)
+        section.commit()
+
+        assert document.get('2D', 'mat') != '{mat}'
+        assert '{mat}' not in (document.get('2D', 'cif_path') or '')
+        assert '{mat}' not in (document.get('2D', 'pot_path') or '')
+        form.deleteLater()
+
+    def test_opening_a_templated_config_without_a_list_does_not_tick_the_box(
+            self, qt_app, tmp_path, monkeypatch):
+        """FINDING 5b: a {mat} config with no materials_list is unfinished,
+        not swept. set_directories used to force the checkbox on whenever the
+        paths happened to be templated, regardless of whether a sweep was
+        actually configured -- so opening such a config, then committing
+        (e.g. by pressing Render) invented a materials_list nobody asked for."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'sw_lammps', '.sw')
+        assert not document.has_material_list()
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        assert not editor.is_sweeping()
+
+        form.sections['2D'].commit()
+        assert not document.has_material_list()
         form.deleteLater()

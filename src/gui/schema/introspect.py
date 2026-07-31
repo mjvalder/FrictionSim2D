@@ -132,7 +132,14 @@ def _classify(annotation: Any, name: str) -> Tuple[FieldKind, Tuple[Any, ...], O
         return FieldKind.LIST, (), item
 
     if origin in (dict, Dict):
-        return FieldKind.DICT, (), None
+        # The value type, not the key type -- KeyValueGridEditor needs it to
+        # give a newly added row the right control (a checkbox for
+        # Dict[str, bool], a text cell otherwise) without having to guess
+        # from a runtime value that may just be the empty string add_row()
+        # is handed by default.
+        args = get_args(annotation)
+        item = _scalar_kind(args[1], name) if len(args) > 1 else FieldKind.UNKNOWN
+        return FieldKind.DICT, (), item
 
     if origin is Union:
         args = get_args(annotation)

@@ -142,15 +142,40 @@ class MaterialListEditor(FieldEditor):
 
     def set_directories(self, structure_dir, potential_dir,
                         extension: Optional[str] = None) -> None:
+        """Populate the pickers and rescan. Does not touch the checkbox.
+
+        Whether the sweep is *on* is a separate decision -- driven by whether
+        a materials_list is actually configured, not by whether directories
+        happen to be known -- so callers (SectionForm.load) that only want to
+        show what a config's {mat} templates point at, without turning
+        sweeping on, can call this safely. This used to force the checkbox on
+        unconditionally, which ticked it for a config that had {mat}
+        placeholders but no materials_list -- unfinished, not swept.
+        """
         self.structure_edit.setText(str(structure_dir or ''))
         self.potential_edit.setText(str(potential_dir or ''))
         self._extension = extension
-        self.set_sweeping(True)
         self._rescan()
 
     def listed_names(self) -> List[str]:
         return [self.listing.item(i).data(Qt.UserRole)
                 for i in range(self.listing.count())]
+
+    def has_usable_names(self) -> bool:
+        """Whether anything in the current listing could actually be swept.
+
+        scan_material_directories reports orphans too -- names present in
+        only one directory -- so listed_names() being non-empty does not mean
+        anything here is usable. That distinction matters when only one of
+        the two directories resolves (a moved run directory, an unmounted
+        share): the listing is full of unusable orphans from the directory
+        that *did* resolve, and treating that as a real (empty) selection
+        would delete a working sweep the scan simply cannot see right now.
+        """
+        return any(
+            self.listing.item(i).flags() & Qt.ItemIsUserCheckable
+            for i in range(self.listing.count())
+        )
 
     def selected_names(self) -> List[str]:
         return [

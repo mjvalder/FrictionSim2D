@@ -86,11 +86,13 @@ becomes a separate simulation. Setting all of that by hand means keeping four
 things in sync — the `.txt`, and `{mat}` placeholders in `mat`, `cif_path` and
 `pot_path` — which is why the field was effectively undiscoverable before.
 
-Ticking **Sweep over many materials** in `[2D]` replaces the single `mat`
-field with two directory pickers, **Structures** and **Potentials**. This
-mirrors a real run directory — a `cif/` beside a `sw_lammps/` — so pointing
-at the pair is usually just pointing at the two directories that already
-exist.
+Ticking **Sweep over many materials** in `[2D]` reveals two directory
+pickers, **Structures** and **Potentials**, alongside the existing `mat`,
+`cif_path` and `pot_path` fields — it does not replace or hide them.
+Committing a sweep rewrites those three to `{mat}` templates (see below).
+Pointing at the two directories mirrors a real run directory — a `cif/`
+beside a `sw_lammps/` — so it is usually just pointing at the pair that
+already exists.
 
 The material list is the **intersection** of the two directories: a material
 needs a structure file and a potential file to be usable. The potential file

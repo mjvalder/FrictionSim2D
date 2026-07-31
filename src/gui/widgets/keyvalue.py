@@ -63,7 +63,14 @@ class KeyValueGridEditor(FieldEditor):
     # ------------------------------------------------------------------ rows
 
     def add_row(self, key: str, value: Any) -> None:
-        """Add one key. A bool gets a checkbox, anything else a text cell."""
+        """Add one key. A bool gets a checkbox, anything else a text cell.
+
+        Which control to use is decided from ``spec.item_kind`` -- the
+        declared value type of the dict, e.g. ``bool`` for ``output.dump`` --
+        rather than from ``value``'s runtime type. ``_on_add_clicked`` always
+        hands this an empty string, so choosing by runtime type gave every
+        hand-added row a text box, even for a bool-valued dict.
+        """
         if not key or key in self._rows:
             return
 
@@ -72,7 +79,7 @@ class KeyValueGridEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(QLabel(key, row))
 
-        if isinstance(value, bool):
+        if self.spec.item_kind is FieldKind.BOOL:
             control = QCheckBox(row)
             control.setChecked(parse_bool(value))
             control.toggled.connect(self.changed)

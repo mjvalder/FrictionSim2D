@@ -185,6 +185,15 @@ class TestFieldClassification:
     def test_list_item_kind_is_captured(self, afm):
         assert afm['2D']['layers'].item_kind is FieldKind.INT
 
+    def test_dict_item_kind_is_captured(self):
+        """output.dump is Dict[str, bool]: KeyValueGridEditor.add_row needs
+        this to give a newly added row a checkbox instead of a text box."""
+        from src.core.config import GlobalSettings
+
+        settings = {s.key: s.field_map() for s in describe_model(GlobalSettings)}
+        assert settings['output']['dump'].item_kind is FieldKind.BOOL
+        assert settings['output']['dump_frequency'].item_kind is FieldKind.INT
+
     def test_enum_choices_are_captured(self, afm):
         assert set(afm['tip']['amorph'].choices) == {'a', 'c'}
         assert set(afm['general']['outer_loop'].choices) == \

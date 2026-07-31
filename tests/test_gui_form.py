@@ -161,6 +161,35 @@ class TestNestedFieldsAreNotHidden:
         form.deleteLater()
 
 
+class TestErrorClearingPreservesTheTooltip:
+    """show_errors() clears every editor's error with set_error(None) before
+    reapplying issues -- including on the happy path, where there is nothing
+    to reapply. set_error wrote straight to setToolTip, so that alone blanked
+    the field's explanatory tooltip every time a config was opened or Render
+    was pressed."""
+
+    def test_set_error_none_restores_the_explanatory_tooltip(self, form):
+        """stack_type has both a caption/tooltip (help) and a detail."""
+        editor = form.sections['2D'].editors['stack_type']
+        before = editor.toolTip()
+        assert before
+
+        editor.set_error('some validation problem')
+        assert editor.toolTip() == 'some validation problem'
+
+        editor.set_error(None)
+        assert editor.toolTip() == before
+
+    def test_show_errors_with_no_issues_keeps_the_tooltip(self, form):
+        section = form.sections['2D']
+        editor = section.editors['stack_type']
+        before = editor.toolTip()
+        assert before
+
+        section.show_errors([])
+        assert editor.toolTip() == before
+
+
 class TestCountsRead:
 
     @pytest.mark.parametrize('n,word,expected', [

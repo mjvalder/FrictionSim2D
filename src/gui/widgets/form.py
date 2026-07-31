@@ -229,7 +229,10 @@ class SectionForm(QGroupBox):
             self._composed_captions[spec.key] = caption_text
         if tooltip_text:
             label.setToolTip(tooltip_text)
-            editor.setToolTip(tooltip_text)
+            # Not editor.setToolTip() directly: set_error(None) -- called on
+            # every editor by show_errors(), including when there is nothing
+            # to report -- would otherwise blank it right back out.
+            editor.set_base_tooltip(tooltip_text)
 
         self._rows[spec.key] = (label, cell)
         self.form.addRow(label, cell)
@@ -357,11 +360,27 @@ class SectionForm(QGroupBox):
                         potentials = potentials if potentials.is_absolute() \
                             else base / potentials
                     material_editor.set_directories(structures, potentials, extension)
-                    names = self.document.material_names()
-                    if names:
-                        # An existing list is the selection; the directories
-                        # only decide what is available to tick.
-                        material_editor.set_selected(names)
+
+                # Whether the box is ticked is decided by whether a sweep is
+                # actually configured, not by whether the paths happen to be
+                # templated -- set_directories only populates the pickers. A
+                # {mat} config with no materials_list is unfinished, not
+                # swept, and must not have the box invented for it.
+                material_editor.set_sweeping(self.document.has_material_list())
+
+                names = self.document.material_names()
+                if names:
+                    # An existing list is the selection; the directories
+                    # only decide what is available to tick.
+                    material_editor.set_selected(names)
+                elif self.document.has_material_list():
+                    # Configured but unreadable -- missing file, empty file,
+                    # bad path. Leaving the default "everything usable"
+                    # selection in place is how a typo'd path becomes a full
+                    # sweep the moment anything is committed; an empty
+                    # selection matches what is actually on disk (nothing)
+                    # and commits as a no-op instead.
+                    material_editor.set_selected([])
         finally:
             self._loading = False
         self._apply_dependencies()
@@ -373,6 +392,19 @@ class SectionForm(QGroupBox):
         gave it a value. Writing every editor unconditionally would invent
         entries -- most visibly for booleans, whose editors always report True
         or False and so would turn "not specified" into an explicit False.
+
+        The `[2D]` material sweep is handled before the generic loop, not
+        after: `_commit_material_sweep` writes materials_list and, when a
+        sweep is actually configured, the mat/cif_path/pot_path placeholders,
+        straight into the document -- bypassing their editors, which still
+        hold whatever text was on screen before. Running the generic loop
+        afterwards used to let it re-read that stale editor text and write it
+        right back over what the sweep logic had just decided, which both
+        discarded same-commit edits to those fields and replaced a correctly
+        *relative* materials_list with the absolute path note_written() had
+        been (wrongly) given. materials_list itself is excluded from the
+        generic loop entirely below, for the same reason: it is always fully
+        owned by _commit_material_sweep.
         """
         if not self.document.has_section(self.section.key):
             # A section that cannot be switched off must exist before anything
@@ -389,20 +421,19 @@ class SectionForm(QGroupBox):
             return
 
         material_editor = self.editors.get('materials_list')
-        if self.section.key == '2D' and hasattr(material_editor, 'is_sweeping'):
-            sweeping = material_editor.is_sweeping()
-            self._commit_material_sweep(material_editor)
-            if sweeping:
-                # apply_material_directories just wrote {mat} placeholders
-                # straight into the document, bypassing the mat/cif_path/
-                # pot_path editors -- which still hold whatever single
-                # material was on screen before. Without this, the general
-                # loop below re-reads that stale text and writes it right
-                # back over the placeholders it was just given. Gated on
-                # `sweeping`: when the box is unticked, _commit_material_sweep
-                # touches nothing but materials_list, and resyncing here would
-                # instead overwrite a same-commit edit to 'mat' with the
-                # document's old value.
+        is_material_section = (self.section.key == '2D'
+                               and hasattr(material_editor, 'is_sweeping'))
+
+        if is_material_section:
+            wrote_to_document = self._commit_material_sweep(material_editor)
+            if wrote_to_document:
+                # Keep the owned editors in sync with what the document now
+                # holds. Gated on whether the document actually changed this
+                # call, not on the box being ticked: an unresolved sweep (box
+                # ticked, no directories chosen yet) must leave
+                # mat/cif_path/pot_path exactly as editable as any other
+                # field, or a same-commit edit to one of them is silently
+                # reverted before it ever reaches the document.
                 for key in self.document.TEMPLATED_KEYS:
                     templated_editor = self.editors.get(key)
                     if templated_editor is not None:
@@ -413,6 +444,8 @@ class SectionForm(QGroupBox):
         specs = self.section.field_map()
 
         for key, editor in self.editors.items():
+            if is_material_section and key == 'materials_list':
+                continue
             value = editor.value()
             if key not in existing:
                 spec = specs.get(key)
@@ -420,28 +453,49 @@ class SectionForm(QGroupBox):
                     continue
             self.document.set(self.section.key, key, value)
 
-    def _commit_material_sweep(self, editor) -> None:
+    def _commit_material_sweep(self, editor) -> bool:
         """Write the three things a sweep needs, when they actually changed.
 
         Unconditional writes are dangerous here: this runs on every commit of
         the section, including commits triggered by unrelated fields.
+
+        Returns:
+            Whether this call wrote (or cleared) something in the document --
+            i.e. whether mat/cif_path/pot_path may have just changed under
+            their editors' feet and need resyncing.
         """
         if not editor.is_sweeping():
+            wrote = False
             if self.document.has_material_list():
                 self.document.write_material_names([])
                 editor.note_written(None)
-            return
+                wrote = True
+            # Unticking must not leave the config invalid: apply_material_
+            # directories' placeholders are only meaningful with a sweep to
+            # substitute them, so they come out with it. Only reported as a
+            # change when something was actually templated -- an ordinary,
+            # never-swept config commits every field on every keystroke, and
+            # unconditionally resyncing mat/cif_path/pot_path here would
+            # revert whatever the user just typed into 'mat' before the
+            # generic loop below ever sees it.
+            if self.document.clear_material_directories():
+                wrote = True
+            return wrote
 
         structures, potentials, extension = editor.directories()
         if not (structures and potentials and extension):
-            return
+            return False
 
-        if not editor.listed_names():
-            # Nothing was found on disk. That means the directories do not
-            # resolve on this machine -- a moved run directory, an unmounted
-            # share -- not that the user emptied the sweep. Rewriting the
-            # config from an empty scan would delete a working sweep.
-            return
+        if not editor.has_usable_names():
+            # Nothing usable was found on disk. scan_material_directories
+            # reports orphans too -- names present in only one directory --
+            # so a non-empty listing does not mean anything here is usable:
+            # when only one of the two directories resolves (a moved run
+            # directory, an unmounted share), the listing is full of
+            # unusable orphans from the one that did. Treating that as a
+            # real, empty selection would delete a working sweep the scan
+            # simply cannot see right now.
+            return False
 
         self.document.apply_material_directories(
             structures, potentials, extension)
@@ -453,7 +507,16 @@ class SectionForm(QGroupBox):
         # treat that as a change and retarget a file that nothing actually
         # asked to change.
         if set(selected) != set(self.document.material_names()):
-            editor.note_written(self.document.write_material_names(selected))
+            self.document.write_material_names(selected)
+            # Read back what the document actually holds -- a relative path,
+            # per _relative_to_config -- rather than reusing
+            # write_material_names' return value, which is the absolute
+            # target it wrote to disk. The two are not the same, and the
+            # generic loop used to write whichever one note_written was
+            # given straight back into the document.
+            editor.note_written(self.document.get('2D', 'materials_list'))
+
+        return True
 
     def show_errors(self, issues) -> None:
         """Decorate the fields named by validation issues."""

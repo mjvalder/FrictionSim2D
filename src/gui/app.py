@@ -408,15 +408,30 @@ class MainWindow(QMainWindow):
             for section, key in unsupported
         ]
 
+        expansion = None
+        try:
+            expansion = self.document.expansion()
+        except Exception as exc:  # pylint: disable=broad-except
+            # The sweep cannot be counted yet -- typically a materials_list
+            # whose per-material files do not resolve.
+            logger.debug("expansion count failed: %s", exc)
+
+        if expansion is not None:
+            # Only the material-sweep notes: a materials_list that could not
+            # be read is reported here rather than silently falling back to
+            # "nothing configured", which is how a typo in the path used to
+            # become a full sweep. ExpansionSummary.notes also carries
+            # routine, non-error information (outer_loop splitting the run
+            # phase, a PES refinement script) that does not belong beside a
+            # "config is valid" message.
+            lines += [n for n in expansion.notes
+                     if n.startswith('[2D] materials_list')]
+
         if self.document.pending_template_issues:
-            try:
-                target = f"{self.document.expansion().configs} config(s)"
-            except Exception as exc:  # pylint: disable=broad-except
-                # The sweep cannot be counted yet -- typically a materials_list
-                # whose per-material files do not resolve. Still worth saying
-                # the placeholders are pending; the count is the part at risk.
-                logger.debug("expansion count failed: %s", exc)
-                target = "each material in the sweep"
+            # Still worth saying the placeholders are pending even when the
+            # count is not available; the count is the part at risk.
+            target = f"{expansion.configs} config(s)" if expansion is not None \
+                else "each material in the sweep"
             lines.append(
                 f"{len(self.document.pending_template_issues)} path(s) contain "
                 f"{{mat}}; they will be substituted across {target} when you "

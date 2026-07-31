@@ -322,6 +322,37 @@ class ConfigDocument:
         self.set('2D', 'cif_path', f"{structures}/{{mat}}{STRUCTURE_EXTENSION}")
         self.set('2D', 'pot_path', f"{potentials}/{{mat}}{potential_extension}")
 
+    def clear_material_directories(self) -> bool:
+        """Undo apply_material_directories: drop the {mat} placeholders.
+
+        Turning the sweep off has to leave a config that still builds. Only
+        keys that actually carry a placeholder are touched -- a hand-typed
+        `mat` that never went through apply_material_directories is left
+        alone -- and the key is dropped rather than left with a guessed,
+        non-sensical value (e.g. stripping just the filename would leave
+        `cif_path = cif/`, which looks like a path but is not one). An absent
+        key reads as "not set yet", which is what it is: the user must type a
+        real value in before the config can build again.
+
+        Returns:
+            Whether anything was actually removed. Callers use this to decide
+            whether the mat/cif_path/pot_path editors need resyncing from the
+            document -- doing that unconditionally would revert a same-commit
+            edit to a plain (non-templated) 'mat' on every commit of an
+            ordinary, never-swept config.
+        """
+        section = self.values.get('2D')
+        if not section:
+            return False
+        changed = False
+        for key in self.TEMPLATED_KEYS:
+            value = section.get(key)
+            if isinstance(value, str) and '{mat}' in value:
+                del section[key]
+                self.dirty = True
+                changed = True
+        return changed
+
     def material_directories(self):
         """The two directories the templates point at, read back.
 
