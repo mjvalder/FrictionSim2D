@@ -301,6 +301,17 @@ class TestOverrides:
     def test_unknown_section_yields_an_empty_override(self):
         assert section_override('not_a_section').fields == {}
 
+    def test_scan_speed_is_metres_per_second(self):
+        from src.gui.schema.overrides import field_override
+        fo = field_override('sheetonsheet', 'general', 'scan_speed')
+        assert fo.unit == 'm/s'
+        assert '100 m/s = 1 Å/ps' in (fo.help or '') + (fo.detail or '')
+
+    def test_spring_constants_have_units(self):
+        from src.gui.schema.overrides import field_override
+        assert field_override('sheetonsheet', 'general', 'driving_spring').unit == 'N/m'
+        assert field_override('sheetonsheet', 'general', 'bond_spring').unit == 'N/m'
+
 
 class TestDescribeSection:
 

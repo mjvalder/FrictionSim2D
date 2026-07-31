@@ -124,7 +124,10 @@ _COMMON: Dict[str, SectionOverride] = {
                 label='Structure', order=11,
                 help="'a' melt-quenched amorphous, 'c' crystalline.",
             ),
-            'dspring': FieldOverride(label='Damping override', order=12),
+            'dspring': FieldOverride(
+                label='Damping override', order=12,
+                help='Raw viscous damping; overrides Damping ratio when set.',
+            ),
         },
     ),
     'sub': SectionOverride(
@@ -159,7 +162,12 @@ _COMMON: Dict[str, SectionOverride] = {
             'temp': FieldOverride(label='Temperature', unit='K', order=1),
             'force': FieldOverride(label='Normal load', unit='nN', order=2),
             'pressure': FieldOverride(label='Pressure', unit='GPa', order=3),
-            'scan_speed': FieldOverride(label='Scan speed', unit='Å/ps', order=4),
+            'scan_speed': FieldOverride(
+                label='Scan speed', unit='m/s', order=4,
+                help='Converted in the LAMMPS script: 100 m/s = 1 Å/ps.',
+                detail=('The stored value is metres per second; the generated script '
+                        'divides by 100 to get the Å/ps LAMMPS drives with.'),
+            ),
             'scan_angle': FieldOverride(label='Scan angle', unit='deg', order=5),
             'scan_angle_force': FieldOverride(
                 label='Scan angles apply at these loads', unit='nN', order=6,
@@ -181,12 +189,14 @@ _COMMON: Dict[str, SectionOverride] = {
                 help='Build free edges rather than a periodic sheet.',
             ),
             'bond_spring': FieldOverride(
-                label='Bond spring constant', order=9,
+                label='Bond spring constant', order=9, unit='N/m',
                 help='Harmonic bonds holding a sheet together.',
+                detail='Converted to eV/Å² in the builder (divide by 16.02).',
             ),
             'driving_spring': FieldOverride(
-                label='Driving spring constant', order=10,
+                label='Driving spring constant', order=10, unit='N/m',
                 help='Stiffness of the spring dragging the moving sheet.',
+                detail='Converted to eV/Å² in the builder (divide by 16.02).',
             ),
             'twist_angle': FieldOverride(
                 label='Twist angle', unit='deg', order=11,
