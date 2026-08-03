@@ -544,3 +544,8 @@ def test_twist_angle_config_defaults_and_range():
         GeneralConfig(temp=300, twist_angle=95.0)   # out of [0,60)
     with pytest.raises(ValueError):
         GeneralConfig(temp=300, twist_angle=-1.0)   # below range
+
+
+def test_damping_ratio_defaults_to_zero():
+    from src.core.config import TipConfig
+    assert TipConfig.model_fields['damping_ratio'].default == 0.0

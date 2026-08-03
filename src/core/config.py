@@ -263,12 +263,12 @@ class TipConfig(ComponentConfig):
         ),
     )
     damping_ratio: Optional[float] = Field(
-        0.0072,
+        0.0,
         description=(
             "Target damping ratio (zeta) of critical for the spring-driven tip. The viscous coefficient "
             "is computed in the LAMMPS script from the driving spring constant and the actual tip "
             "mass/atom count, so it stays at this zeta for any tip size or spring. Used only when "
-            "dspring is None. zeta=1 is critical; ~0.05-0.1 is a light, low-contamination default."
+            "dspring is None. Defaults to 0.0 (off). Note dspring's default 0.0 already overrides this unless dspring is blanked."
         ),
     )
     tip_x: Optional[float] = Field(

@@ -61,7 +61,7 @@ def _indent_context(**overrides):
         "results_freq": 1000,
         "results_file_pattern": "indent/.../results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt",
         "damp_ev": None,
-        "damping_ratio": 0.0072,
+        "damping_ratio": 0.0,
         "spring_ev": 0.5,
         "hold_steps": 10000,
         # --- retract phase ---
