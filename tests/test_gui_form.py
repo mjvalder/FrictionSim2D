@@ -263,12 +263,17 @@ class TestRequiredStars:
         assert force.required is True
         assert force.required_blocks is True
 
-    def test_pressure_is_required_but_warns(self):
+    def test_pressure_is_required_and_blocks(self):
+        """The `[0.0]` fallback only exists in the two outer_loop branches
+        (sheetonsheet.py:341,359); the default single-script path passes
+        `general.pressure` straight through unguarded, so an absent pressure
+        renders `variable pressure equal None` in slide.lmp -- the same
+        unparseable-LAMMPS failure class as an empty force list."""
         from src.gui.schema.overrides import overrides_for
 
         pressure = overrides_for('sheetonsheet')['general'].fields['pressure']
         assert pressure.required is True
-        assert pressure.required_blocks is False
+        assert pressure.required_blocks is True
 
     def test_missing_required_reports_force_as_blocking(self, qt_app, monkeypatch):
         from src.gui.controllers.document import ConfigDocument
@@ -281,8 +286,8 @@ class TestRequiredStars:
         assert entries[('general', 'force')] is True
         form.deleteLater()
 
-    def test_missing_required_reports_pressure_as_non_blocking(self, qt_app,
-                                                               monkeypatch):
+    def test_missing_required_reports_pressure_as_blocking(self, qt_app,
+                                                            monkeypatch):
         from src.gui.controllers.document import ConfigDocument
         from src.gui.widgets.form import ConfigForm
 
@@ -292,7 +297,7 @@ class TestRequiredStars:
         form = ConfigForm(doc)
         entries = {(sec, key): blocks for sec, key, _label, blocks
                   in form.missing_required()}
-        assert entries[('general', 'pressure')] is False
+        assert entries[('general', 'pressure')] is True
         form.deleteLater()
 
 

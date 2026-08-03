@@ -182,17 +182,22 @@ _COMMON: Dict[str, SectionOverride] = {
                         'and slide.lmp both render `variable find index` with no '
                         'values (or `variable find equal None` when the field is '
                         'simply absent) -- LAMMPS aborts on that line, it does not '
-                        'produce a no-load run. Unlike sheet-on-sheet pressure, '
-                        'there is no builder default to fall back on, so this '
-                        'blocks Generate.'),
+                        'produce a no-load run. There is no builder default for '
+                        'force in any code path, so this blocks Generate.'),
             ),
             'pressure': FieldOverride(
                 label='Pressure', unit='GPa', order=3,
-                required=True, required_blocks=False,
-                detail=('Sheet-on-sheet treats an absent pressure as 0.0, so an '
-                        'empty field still builds a (zero-load) run -- warn, do '
-                        'not block, or legacy configs that relied on that default '
-                        'would stop working.'),
+                required=True, required_blocks=True,
+                detail=('The `pressures or [0.0]` fallback only exists in the two '
+                        'outer_loop branches (sheetonsheet.py outer_loop == '
+                        '"pressure"/"scan_speed"). The default single-script path '
+                        '(outer_loop unset) passes `self.config.general.pressure` '
+                        'straight into the template unguarded, and an absent '
+                        'pressure renders `variable pressure equal None` in '
+                        'sheetonsheet/slide.lmp -- the same unparseable-LAMMPS '
+                        'failure as an empty force list. Such configs were never '
+                        'actually valid on the default path, so this blocks '
+                        'Generate rather than only warning.'),
             ),
             'scan_speed': FieldOverride(
                 label='Scan speed', unit='m/s', order=4, required=True,
