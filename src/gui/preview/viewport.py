@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .assemble import AssembledSystem, to_ovito
+from .assemble import AssembledSystem, build_data_collection
 from ..style import CAPTION, WARNING
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,8 @@ class ViewportPanel(QWidget):
         self._viewport = None
         self._widget: Optional[QWidget] = None
         self._visibility: Dict[str, bool] = {}
+        self._framed = False
+        self._last_cell: Optional[tuple] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -150,16 +152,29 @@ class ViewportPanel(QWidget):
     # ----------------------------------------------------------------- state
 
     def show_system(self, system: AssembledSystem) -> None:
-        """Display an assembled system."""
+        """Display an assembled system.
+
+        Component names that are unchanged from the previous system keep
+        their visibility ticks and toggle widgets -- only a structurally
+        different system (components added, removed or renamed) rebuilds
+        the toggle row.
+        """
+        same_names = (self.system is not None and
+                      [c.name for c in self.system.components] ==
+                      [c.name for c in system.components])
         self.system = system
-        self._visibility = {c.name: True for c in system.components}
-        self._rebuild_component_toggles()
-        self._rebuild_pipeline()
+        self._visibility = {c.name: self._visibility.get(c.name, True)
+                            for c in system.components}
+        if not same_names:
+            self._rebuild_component_toggles()
+        self._update_pipeline()
         self._update_legend()
         self._update_warnings()
 
     def clear(self) -> None:
         self.system = None
+        self._framed = False
+        self._last_cell = None
         self._teardown_view()
         self.placeholder.show()
         self.legend.setText('')
@@ -175,8 +190,16 @@ class ViewportPanel(QWidget):
                 mask[component.first:component.last] = False
         return mask
 
-    def _rebuild_pipeline(self) -> None:
-        """Rebuild the displayed data from the current visibility selection.
+    def _update_pipeline(self) -> None:
+        """Update the displayed data from the current visibility selection.
+
+        Updates the existing pipeline's source data in place rather than
+        tearing down and rebuilding the scene, so the camera the user set up
+        survives a re-render. Only the first render, a :meth:`clear`, or a
+        cell whose size changed materially triggers a re-frame -- see
+        :meth:`_needs_framing`. If the in-place update fails for any reason
+        the except clause below falls back to a full teardown, which is
+        today's (pre-this-change) behaviour.
 
         Hidden components are dropped from the data rather than made
         transparent: it is simpler, and it keeps the atom count -- and so the
@@ -196,14 +219,24 @@ class ViewportPanel(QWidget):
         )
 
         try:
-            self._teardown_view()
-            self._pipeline = to_ovito(subset, colours=self._colour_map())
-            self._ensure_widget()
-            self._pipeline.add_to_scene()
-            # Framing has to happen once the scene has contents; zooming to an
-            # empty scene leaves the camera pointing at nothing.
-            self._fit()
-            self._refresh()
+            data = build_data_collection(subset, colours=self._colour_map())
+            if self._pipeline is None:
+                from ovito.pipeline import Pipeline, StaticSource  # noqa: PLC0415
+
+                self._teardown_view()
+                self._pipeline = Pipeline(source=StaticSource(data=data))
+                self._ensure_widget()
+                self._pipeline.add_to_scene()
+                # Framing has to happen once the scene has contents; zooming
+                # to an empty scene leaves the camera pointing at nothing.
+                self._frame_and_refresh()
+            else:
+                self._pipeline.source.data = data
+                if self._needs_framing():
+                    self._frame_and_refresh()
+                else:
+                    self._refresh()
+            self._last_cell = self.system.cell
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Failed to display the assembled system")
             self._teardown_view()
@@ -261,8 +294,9 @@ class ViewportPanel(QWidget):
         return colours
 
     def _apply_colours(self) -> None:
-        """Recolour by rebuilding, since colours live on the type definitions."""
-        self._rebuild_pipeline()
+        """Recolour by updating the pipeline, since colours live on the type
+        definitions -- the camera is untouched."""
+        self._update_pipeline()
 
     def _group_index_of(self, type_id: int) -> int:
         assert self.system is not None
@@ -272,11 +306,11 @@ class ViewportPanel(QWidget):
         return 0
 
     def _apply_cell_visibility(self) -> None:
-        self._rebuild_pipeline()
+        self._update_pipeline()
 
     def _set_visible(self, name: str, visible: bool) -> None:
         self._visibility[name] = visible
-        self._rebuild_pipeline()
+        self._update_pipeline()
 
     def _fit(self) -> None:
         """Frame the whole scene."""
@@ -286,6 +320,40 @@ class ViewportPanel(QWidget):
             self._viewport.zoom_all()
         except Exception:  # pylint: disable=broad-except
             logger.debug("zoom_all failed", exc_info=True)
+
+    def _frame_and_refresh(self) -> None:
+        """Frame the whole scene, remember that it has been framed, and
+        repaint -- the path taken on the first render and whenever the cell
+        changed enough that the old camera no longer makes sense."""
+        self._fit()
+        self._framed = True
+        self._refresh()
+
+    def _needs_framing(self) -> bool:
+        """Whether the camera should be (re-)framed on this update.
+
+        True on the first render and after :meth:`clear` (nothing has been
+        framed yet), or when the new cell's max extent differs from the one
+        last framed by more than 10% -- a materially different box would
+        otherwise be shown through a camera set up for a different scale.
+        Anything smaller than that (recolouring, toggling a component,
+        toggling the box outline) leaves the camera exactly where the user
+        put it.
+        """
+        if not self._framed:
+            return True
+        if self._last_cell is None or self.system is None or self.system.cell is None:
+            return False
+        previous = self._max_extent(self._last_cell)
+        current = self._max_extent(self.system.cell)
+        if previous == 0:
+            return current != 0
+        return abs(current - previous) / previous > 0.10
+
+    @staticmethod
+    def _max_extent(cell) -> float:
+        xlo, xhi, ylo, yhi, zlo, zhi = cell
+        return max(xhi - xlo, yhi - ylo, zhi - zlo)
 
     def set_camera(self, direction: str) -> None:
         """Point the camera along a standard axis and fit the scene."""
