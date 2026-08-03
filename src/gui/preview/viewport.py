@@ -12,10 +12,12 @@ when a component meets a periodic boundary.
 
 from __future__ import annotations
 
+import colorsys
 import logging
 from typing import Dict, List, Optional
 
 import numpy as np
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,11 +34,17 @@ from ..style import CAPTION, WARNING
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['ViewportPanel', 'COLOUR_MODES']
+__all__ = ['ViewportPanel', 'COLOUR_MODES', 'distinct_colour']
 
-COLOUR_BY_TYPE = 'Atom type'
+COLOUR_BY_ELEMENT = 'Element'      # was 'Atom type', which coloured by element
+COLOUR_BY_TYPE = 'LAMMPS type'
 COLOUR_BY_COMPONENT = 'Component'
-COLOUR_MODES = (COLOUR_BY_TYPE, COLOUR_BY_COMPONENT)
+COLOUR_MODES = (COLOUR_BY_ELEMENT, COLOUR_BY_TYPE, COLOUR_BY_COMPONENT)
+
+
+def distinct_colour(index: int):
+    """Golden-angle hue walk: any count of types stays distinguishable."""
+    return colorsys.hsv_to_rgb((index * 0.61803398875) % 1.0, 0.65, 0.95)
 
 #: Distinguishable colours for components, in assignment order.
 _COMPONENT_COLOURS = [
@@ -277,13 +285,15 @@ class ViewportPanel(QWidget):
         if self.system is None:
             return {}
 
-        by_component = self.colour_mode.currentText() == COLOUR_BY_COMPONENT
+        mode = self.colour_mode.currentText()
         colours: Dict[int, tuple] = {}
 
-        for type_id in sorted(self.system.legend):
-            if by_component:
-                index = self._group_index_of(type_id)
-                colours[type_id] = _COMPONENT_COLOURS[index % len(_COMPONENT_COLOURS)]
+        for index, type_id in enumerate(sorted(self.system.legend)):
+            if mode == COLOUR_BY_COMPONENT:
+                group_index = self._group_index_of(type_id)
+                colours[type_id] = _COMPONENT_COLOURS[group_index % len(_COMPONENT_COLOURS)]
+            elif mode == COLOUR_BY_TYPE:
+                colours[type_id] = distinct_colour(index)
             else:
                 element = self.system.legend.get(type_id, '')
                 colours[type_id] = _ELEMENT_COLOURS.get(
@@ -294,8 +304,10 @@ class ViewportPanel(QWidget):
 
     def _apply_colours(self) -> None:
         """Recolour by updating the pipeline, since colours live on the type
-        definitions -- the camera is untouched."""
+        definitions -- the camera is untouched. Also refreshes the legend so
+        its swatches follow the newly selected mode."""
         self._update_pipeline()
+        self._update_legend()
 
     def _group_index_of(self, type_id: int) -> int:
         assert self.system is not None
@@ -402,10 +414,15 @@ class ViewportPanel(QWidget):
         for type_id in self.system.type_ids:
             counts[int(type_id)] = counts.get(int(type_id), 0) + 1
 
-        parts = [
-            f"{type_id}:{element} ({counts.get(type_id, 0)})"
-            for type_id, element in sorted(self.system.legend.items())
-        ]
+        colours = self._colour_map()
+        self.legend.setTextFormat(Qt.RichText)
+        parts = []
+        for type_id, element in sorted(self.system.legend.items()):
+            r, g, b = colours.get(type_id, (0.0, 0.0, 0.0))
+            swatch = (f'<span style="color:#{int(r * 255):02x}'
+                      f'{int(g * 255):02x}{int(b * 255):02x}">■</span>')
+            parts.append(f'{swatch}&nbsp;{type_id}:{element}&nbsp;'
+                         f'({counts.get(type_id, 0)})')
         total = self.system.count
         self.legend.setText(f"{total:,} atoms  —  " + '  '.join(parts))
 

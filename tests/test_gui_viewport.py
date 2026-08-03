@@ -162,3 +162,20 @@ def test_cumulative_drift_from_the_last_framed_cell_triggers_a_reframe(
     # which does trigger a reframe -- _last_cell moves to the new cell.
     panel.show_system(_with_extent(11.2))
     assert panel._last_cell != framed_cell
+
+
+def test_lammps_type_mode_gives_distinct_colours(panel):
+    system = AssembledSystem(
+        positions=np.zeros((18, 3)), type_ids=np.arange(1, 19),
+        group_ids=np.zeros(18, dtype=int), cell=None,
+        components=[ComponentSlice('2D', 0, 0, 18, list(range(1, 19)))],
+        legend={i: f'T{i}' for i in range(1, 19)},
+    )
+    panel.system = system
+    panel.colour_mode.setCurrentText('LAMMPS type')
+    assert len(set(panel._colour_map().values())) == 18
+
+
+def test_legend_carries_swatches(panel, two_component_system):
+    panel.show_system(two_component_system)
+    assert '■' in panel.legend.text()
