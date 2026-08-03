@@ -102,6 +102,10 @@ class TestBlankDocument:
         document.set('general', 'temp', 500)
         assert document.dirty
 
+    def test_blank_config_does_not_prefill_gated_fields(self):
+        document = ConfigDocument.blank('afm')
+        assert 'tip_x_offset' not in document.values['tip']
+
 
 class TestSections:
 

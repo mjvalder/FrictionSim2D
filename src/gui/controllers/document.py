@@ -121,10 +121,20 @@ class ConfigDocument:
         return next((s for s in self.sections() if s.key == key), None)
 
     def _defaults_for(self, section: SectionSpec) -> Dict[str, Any]:
+        # Gated fields (e.g. the tip position quartet) are excluded even
+        # though tip_x_offset/tip_y_offset default to 0.0 and would otherwise
+        # pre-fill: every blank config would then arrive with those keys
+        # already set, ticking the "set tip position" gate on sight and
+        # defeating the whole feature.
+        override = overrides_for(self.model).get(section.key)
+        gated = {
+            key for key, fo in (override.fields if override else {}).items()
+            if fo.gate
+        }
         return {
             f.key: f.default
             for f in section.fields
-            if f.default is not None or f.required
+            if f.key not in gated and (f.default is not None or f.required)
         }
 
     # --------------------------------------------------------------- values

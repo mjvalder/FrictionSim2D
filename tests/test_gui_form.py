@@ -317,6 +317,34 @@ class TestStarredFieldPrefill:
         assert doc.get('general', 'temp') == 300.0
 
 
+class TestTipPositionGate:
+    """The four tip-position fields only matter when the tip is deliberately
+    placed; the gate keeps them out of sight and out of the document until
+    then."""
+
+    def test_gate_unticked_on_blank_ticked_on_explicit(self, qt_app):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('afm')
+        form = SectionForm(doc.section('tip'), doc)
+        assert not form._gate_boxes['tip_position'].isChecked()
+        doc.set('tip', 'tip_x', 12.0)
+        form.load()
+        assert form._gate_boxes['tip_position'].isChecked()
+
+    def test_unticking_gate_drops_keys(self, qt_app):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('afm')
+        doc.set('tip', 'tip_x', 12.0)
+        form = SectionForm(doc.section('tip'), doc)
+        form._gate_boxes['tip_position'].setChecked(False)
+        form.commit()
+        assert doc.get('tip', 'tip_x') is None
+
+
 class TestCountsRead:
 
     @pytest.mark.parametrize('n,word,expected', [

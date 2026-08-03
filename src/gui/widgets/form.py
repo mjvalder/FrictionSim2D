@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -167,6 +168,15 @@ class SectionForm(QGroupBox):
         #: the override alone would drop the hint.
         self._composed_tooltips: Dict[str, str] = {}
         self._rows: Dict[str, tuple] = {}
+        #: One checkbox per gate declared in the section override (e.g. "Set
+        #: tip position"), keyed by gate name. Ticking it shows the gated
+        #: fields and lets them commit; unticking hides them and drops their
+        #: keys from the document.
+        self._gate_boxes: Dict[str, QCheckBox] = {}
+        #: Form-layout row each gate's checkbox was inserted at, recorded
+        #: while adding fields below -- the checkbox belongs right before the
+        #: first field it gates, not tacked on at the end of the section.
+        self._gate_first_row: Dict[str, int] = {}
         self._loading = False
         self._collapsed = False
 
@@ -214,6 +224,7 @@ class SectionForm(QGroupBox):
         hidden = hidden_fields(document.model, section.key)
         for spec in _ordered_fields(section, self.override, hidden):
             self._add_field(spec)
+        self._build_gates()
 
         self.load()
         self._apply_dependencies()
@@ -274,6 +285,9 @@ class SectionForm(QGroupBox):
             # to report -- would otherwise blank it right back out.
             editor.set_base_tooltip(tooltip_text)
 
+        if field_override and field_override.gate:
+            self._gate_first_row.setdefault(field_override.gate, self.form.rowCount())
+
         self._rows[spec.key] = (label, cell)
         self.form.addRow(label, cell)
 
@@ -298,6 +312,28 @@ class SectionForm(QGroupBox):
 
         self._rows[spec.key] = (label, caption)
         self.form.addRow(label, caption)
+
+    def _build_gates(self) -> None:
+        """One checkbox per declared gate, inserted just above the first
+        field it controls rather than appended after every field is in."""
+        if not self.override or not self.override.gates:
+            return
+        # Highest row first: inserting low-to-high would shift a
+        # not-yet-inserted gate's recorded row out from under it.
+        ordered = sorted(
+            self.override.gates.items(),
+            key=lambda item: self._gate_first_row.get(item[0], -1),
+            reverse=True,
+        )
+        for gate_key, label in ordered:
+            row = self._gate_first_row.get(gate_key)
+            if row is None:
+                continue
+            checkbox = QCheckBox(label, self)
+            checkbox.toggled.connect(
+                lambda _checked=False, g=gate_key: self._on_gate_toggled(g))
+            self.form.insertRow(row, checkbox)
+            self._gate_boxes[gate_key] = checkbox
 
     def _build_header(self) -> QHBoxLayout:
         """The fold control and the summary shown when folded."""
@@ -470,6 +506,8 @@ class SectionForm(QGroupBox):
                     continue
                 if editor.value() in (None, '', []):
                     editor.set_value(spec.default)
+
+            self._load_gates()
         finally:
             self._loading = False
         self._apply_dependencies()
@@ -535,6 +573,21 @@ class SectionForm(QGroupBox):
         for key, editor in self.editors.items():
             if is_material_section and key == 'materials_list':
                 continue
+
+            field_override = self.override.fields.get(key) if self.override else None
+            if field_override and field_override.gate:
+                gate_box = self._gate_boxes.get(field_override.gate)
+                if gate_box is not None and not gate_box.isChecked():
+                    # The gate is off: this key must not survive in the
+                    # document, or a value typed before unticking (or one
+                    # loaded from a hand-written config) would silently
+                    # reappear on the next commit.
+                    removed = self.document.values.get(
+                        self.section.key, {}).pop(key, None)
+                    if removed is not None:
+                        self.document.dirty = True
+                    continue
+
             value = editor.value()
             if key not in existing:
                 spec = specs.get(key)
@@ -656,6 +709,66 @@ class SectionForm(QGroupBox):
                 bubble.setToolTip(
                     field_override.enable_hint if not enabled
                     else self._composed_tooltips.get(key, ''))
+
+    def _load_gates(self) -> None:
+        """Tick each gate iff a field it guards actually differs from its
+        spec default.
+
+        Presence alone cannot be the test: `_defaults_for` already keeps
+        gated keys out of a blank config, but an *existing* config loaded
+        from disk still carries whatever `_defaults_for` wrote when it was
+        first created, plus anything hand-edited since. Comparing against
+        the spec default is what tells "never touched" from "deliberately
+        set to the default value" apart.
+
+        One accepted consequence: a hand-written config with an explicit
+        `tip_x_offset = 0.0` (equal to its own spec default) reads as
+        untouched, ticks no gate, and loses that key on the next save. This
+        is a no-op semantically -- the builder already treats an absent
+        offset as 0.0 -- so the round trip changes nothing about how the
+        config builds, only how it looks on disk.
+        """
+        if not self.override or not self.override.gates:
+            return
+        specs = self.section.field_map()
+        for gate_key, checkbox in self._gate_boxes.items():
+            gated_keys = [key for key, fo in self.override.fields.items()
+                         if fo.gate == gate_key]
+            on = False
+            for key in gated_keys:
+                spec = specs.get(key)
+                value = self.document.get(self.section.key, key)
+                if value not in (None, '', []) and (
+                        spec is None or value != spec.default):
+                    on = True
+                    break
+            checkbox.setChecked(on)
+        self._apply_gates()
+
+    def _apply_gates(self) -> None:
+        """Show or hide each gate's fields to match its checkbox.
+
+        `setRowVisible` (not hiding label and widget separately) is what
+        keeps a hidden row from leaving its slice of form spacing behind.
+        """
+        if not self.override or not self.override.gates:
+            return
+        for gate_key, checkbox in self._gate_boxes.items():
+            on = checkbox.isChecked()
+            for key, field_override in self.override.fields.items():
+                if field_override.gate != gate_key:
+                    continue
+                label, _cell = self._rows.get(key, (None, None))
+                if label is None:
+                    continue
+                row, _role = self.form.getWidgetPosition(label)
+                if row < 0:
+                    continue
+                self.form.setRowVisible(row, on)
+
+    def _on_gate_toggled(self, _gate_key: str) -> None:
+        self._apply_gates()
+        self._on_field_changed()
 
     def _on_field_changed(self) -> None:
         if self._loading:

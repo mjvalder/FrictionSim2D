@@ -70,6 +70,13 @@ class FieldOverride:
     #: only warns (False). Only meaningful when the field is required (by
     #: either of the two mechanisms above).
     required_blocks: bool = True
+    #: Key into the owning SectionOverride's ``gates``: the field is only
+    #: shown, pre-filled, and committed while that gate's checkbox is ticked.
+    #: Unlike ``enable_if`` (greyed out but still visible and still written),
+    #: a gated field is hidden entirely and its key is kept out of the
+    #: document while the gate is off -- for fields that are actively
+    #: confusing to see unless deliberately in use, not merely inert.
+    gate: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +92,9 @@ class SectionOverride:
     required_reason: Optional[str] = None
     #: Long-form explanation. Tooltip only, same rationale as FieldOverride.detail.
     detail: Optional[str] = None
+    #: Checkbox gates for this section's fields: gate key -> checkbox label.
+    #: A field opts in via ``FieldOverride.gate``.
+    gates: Dict[str, str] = field(default_factory=dict)
 
 
 A = 'Å'
@@ -127,6 +137,7 @@ _COMMON: Dict[str, SectionOverride] = {
     'tip': SectionOverride(
         label='Tip', order=2,
         help='The indenting tip.',
+        gates={'tip_position': 'Set tip position'},
         fields={
             **_COMPONENT_FIELDS,
             'r': FieldOverride(
@@ -142,6 +153,22 @@ _COMMON: Dict[str, SectionOverride] = {
             'dspring': FieldOverride(
                 label='Damping override', order=12,
                 help='Raw viscous damping; overrides Damping ratio when set.',
+            ),
+            'tip_x': FieldOverride(
+                label='Tip x', unit=A, order=20, gate='tip_position',
+                help='Absolute tip x-position in box coordinates.',
+            ),
+            'tip_y': FieldOverride(
+                label='Tip y', unit=A, order=21, gate='tip_position',
+                help='Absolute tip y-position in box coordinates.',
+            ),
+            'tip_x_offset': FieldOverride(
+                label='Tip x offset', unit=A, order=22, gate='tip_position',
+                help='Used only when tip x is not set.',
+            ),
+            'tip_y_offset': FieldOverride(
+                label='Tip y offset', unit=A, order=23, gate='tip_position',
+                help='Used only when tip y is not set.',
             ),
         },
     ),
