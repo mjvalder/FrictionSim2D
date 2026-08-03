@@ -139,7 +139,8 @@ class SectionForm(QGroupBox):
     collapsed_changed = Signal(str, bool)
 
     def __init__(self, section: SectionSpec, document: ConfigDocument,
-                 parent: Optional[QWidget] = None) -> None:
+                 parent: Optional[QWidget] = None,
+                 settings: Optional[object] = None) -> None:
         overrides = overrides_for(document.model)
         self.override = overrides.get(section.key)
         title = (self.override.label if self.override and self.override.label
@@ -148,6 +149,13 @@ class SectionForm(QGroupBox):
         super().__init__(title, parent)
         self.section = section
         self.document = document
+        #: A `GlobalSettings`, needed only by fields whose requiredness
+        #: depends on a Settings choice rather than another field in this
+        #: same section (that is what `enable_if` is for) -- e.g. the driving
+        #: spring only matters when the virtual-atom drive method is
+        #: selected. None on the Settings tab's own form, which has no
+        #: settings to consult.
+        self.settings = settings
         self.editors: Dict[str, FieldEditor] = {}
         #: The ⓘ button at the end of a row, keyed by field. Only present when
         #: there is something to say: help, detail, the model's own doc, a
@@ -228,8 +236,9 @@ class SectionForm(QGroupBox):
         # Required fields are marked, so "which of these must I fill in?" is
         # answerable by looking rather than by pressing Render.
         text = _label_for(spec, self.override)
-        label = QLabel(f"{text}{REQUIRED_MARK}" if spec.required else text, self)
-        if spec.required:
+        required = self.effective_required(spec.key)
+        label = QLabel(f"{text}{REQUIRED_MARK}" if required else text, self)
+        if required:
             label.setToolTip('Required')
 
         help_text = field_override.help if field_override else None
@@ -348,8 +357,8 @@ class SectionForm(QGroupBox):
             if values.get(key) not in (None, '', [])
         )
         missing = [
-            key for key, spec in self.section.field_map().items()
-            if spec.required and key in self.editors
+            key for key in self.section.field_map()
+            if key in self.editors and self.effective_required(key)
             and values.get(key) in (None, '', [])
         ]
         text = f"{filled} of {len(self.editors)} set"
@@ -361,6 +370,40 @@ class SectionForm(QGroupBox):
         """Whether this section must be present for the model to build."""
         return (not self.section.optional
                 or self.document.is_section_locked(self.section.key))
+
+    def effective_required(self, key: str) -> bool:
+        """Whether `key` must be filled in, resolving the settings-dependent
+        case: a `required_if_settings` override wins over a plain `required`
+        override, which in turn wins over the model's own required flag."""
+        fo = self.override.fields.get(key) if self.override else None
+        spec = self.section.field_map().get(key)
+        if fo and fo.required_if_settings and self.settings is not None:
+            path, expected = fo.required_if_settings
+            value = self.settings
+            for part in path.split('.'):
+                value = getattr(value, part, None)
+            return value == expected
+        if fo and fo.required is not None:
+            return fo.required
+        return bool(spec and spec.required)
+
+    def set_settings(self, settings: Optional[object]) -> None:
+        """Re-derive every row's star in place, e.g. after Settings changes
+        the drive method. Rebuilding the whole form would work too, but would
+        also discard whatever the user has open/collapsed/typed elsewhere."""
+        self.settings = settings
+        for key in self.editors:
+            spec = self.section.field_map().get(key)
+            if spec is None:
+                continue
+            label, _cell = self._rows.get(key, (None, None))
+            if label is None:
+                continue
+            text = _label_for(spec, self.override)
+            if self.effective_required(key):
+                label.setText(f"{text}{REQUIRED_MARK}")
+            else:
+                label.setText(text)
 
     # ---------------------------------------------------------------- state
 
@@ -628,9 +671,14 @@ class ConfigForm(QWidget):
 
     def __init__(self, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
-                 start_collapsed: bool = False) -> None:
+                 start_collapsed: bool = False,
+                 settings: Optional[object] = None) -> None:
         super().__init__(parent)
         self.document = document
+        #: Forwarded to every `SectionForm`; None on the Settings tab's own
+        #: form, which keeps passing nothing -- it has no settings of its own
+        #: to consult.
+        self.settings = settings
         #: Open every section folded. Used for settings, where all nine groups
         #: are populated and none demands attention.
         self.start_collapsed = start_collapsed
@@ -652,7 +700,7 @@ class ConfigForm(QWidget):
         self.sections.clear()
 
         for section in self.document.sections():
-            form = SectionForm(section, self.document, self)
+            form = SectionForm(section, self.document, self, settings=self.settings)
             form.changed.connect(self.changed)
             form.collapsed_changed.connect(self._remember_collapsed)
             self.sections[section.key] = form
@@ -690,3 +738,35 @@ class ConfigForm(QWidget):
         """Route validation issues to the sections that own them."""
         for form in self.sections.values():
             form.show_errors(issues)
+
+    def set_settings(self, settings: Optional[object]) -> None:
+        """Fan a (possibly new) settings object out to every section, so a
+        star that depends on a Settings choice moves without a rebuild."""
+        self.settings = settings
+        for form in self.sections.values():
+            form.set_settings(settings)
+
+    def missing_required(self) -> List[Tuple[str, str, str, bool]]:
+        """Starred-but-empty fields, as ``(section, key, label, blocks)``.
+
+        Only sections actually in play are checked: an optional section that
+        is switched off has nothing to fill in, and its editors' values do
+        not reflect the document (there is nothing there to reflect).
+        """
+        missing: List[Tuple[str, str, str, bool]] = []
+        for section_key, form in self.sections.items():
+            section_required = (not form.section.optional
+                                or self.document.is_section_locked(section_key))
+            if not (self.document.has_section(section_key) or section_required):
+                continue
+            field_map = form.section.field_map()
+            for key, spec in field_map.items():
+                if key not in form.editors or not form.effective_required(key):
+                    continue
+                if self.document.get(section_key, key) not in (None, '', []):
+                    continue
+                label = _label_for(spec, form.override)
+                field_override = form.override.fields.get(key) if form.override else None
+                blocks = field_override.required_blocks if field_override else True
+                missing.append((section_key, key, label, blocks))
+        return missing

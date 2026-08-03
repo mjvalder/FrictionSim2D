@@ -204,6 +204,98 @@ class TestErrorClearingPreservesTheTooltip:
         assert editor.toolTip() == before
 
 
+def _settings_with_drive(method):
+    from src.core.config import GlobalSettings
+
+    s = GlobalSettings()
+    s.simulation.drive_method = method
+    return s
+
+
+class TestRequiredStars:
+    """A field can be obligatory only given a Settings choice: the driving
+    spring only matters when the virtual-atom drive method is selected."""
+
+    def test_driving_spring_star_follows_drive_method(self, qt_app):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        form = SectionForm(doc.section('general'), doc,
+                           settings=_settings_with_drive('virtual_atom'))
+        assert form.effective_required('driving_spring') is True
+        form2 = SectionForm(doc.section('general'), doc,
+                            settings=_settings_with_drive('smd'))
+        assert form2.effective_required('driving_spring') is False
+
+    def test_temp_is_starred(self, qt_app):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+        from src.gui.style import REQUIRED_MARK
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        form = SectionForm(doc.section('general'), doc,
+                           settings=_settings_with_drive('smd'))
+        label, _ = form._rows['temp']
+        assert label.text().endswith(REQUIRED_MARK)
+
+    def test_driving_spring_star_updates_with_set_settings(self, qt_app):
+        """set_settings re-derives the star in place, without rebuilding --
+        the Settings tab's Apply/Save must move the star on the config form
+        that is already on screen."""
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+        from src.gui.style import REQUIRED_MARK
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        form = SectionForm(doc.section('general'), doc,
+                           settings=_settings_with_drive('smd'))
+        label, _ = form._rows['driving_spring']
+        assert not label.text().endswith(REQUIRED_MARK)
+
+        form.set_settings(_settings_with_drive('virtual_atom'))
+        assert label.text().endswith(REQUIRED_MARK)
+
+    def test_force_is_required_and_blocks(self):
+        from src.gui.schema.overrides import overrides_for
+
+        force = overrides_for('afm')['general'].fields['force']
+        assert force.required is True
+        assert force.required_blocks is True
+
+    def test_pressure_is_required_but_warns(self):
+        from src.gui.schema.overrides import overrides_for
+
+        pressure = overrides_for('sheetonsheet')['general'].fields['pressure']
+        assert pressure.required is True
+        assert pressure.required_blocks is False
+
+    def test_missing_required_reports_force_as_blocking(self, qt_app, monkeypatch):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank('afm'))
+        entries = {(sec, key): blocks for sec, key, _label, blocks
+                  in form.missing_required()}
+        assert entries[('general', 'force')] is True
+        form.deleteLater()
+
+    def test_missing_required_reports_pressure_as_non_blocking(self, qt_app,
+                                                               monkeypatch):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.set('general', 'pressure', None)
+        form = ConfigForm(doc)
+        entries = {(sec, key): blocks for sec, key, _label, blocks
+                  in form.missing_required()}
+        assert entries[('general', 'pressure')] is False
+        form.deleteLater()
+
+
 class TestCountsRead:
 
     @pytest.mark.parametrize('n,word,expected', [

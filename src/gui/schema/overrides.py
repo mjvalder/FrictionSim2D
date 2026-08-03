@@ -55,6 +55,21 @@ class FieldOverride:
     detail: Optional[str] = None
     #: Slug requesting a purpose-built editor; see widgets.fields.EDITOR_REGISTRY.
     editor: Optional[str] = None
+    #: Overrides the introspected requiredness. ``None`` defers to the
+    #: model's own required flag; ``True``/``False`` force it either way --
+    #: some fields the builder treats as obligatory even though the Pydantic
+    #: model defaults them (e.g. ``temp``), so introspection alone would
+    #: never star them.
+    required: Optional[bool] = None
+    #: The field is only obligatory given another *settings* value (not
+    #: another field in the same section -- that is ``enable_if``). Given as
+    #: ``('dotted.settings.path', expected value)``; evaluated against the
+    #: `GlobalSettings` handed to the form, not the document being edited.
+    required_if_settings: Optional[Tuple[str, object]] = None
+    #: Whether leaving this starred field empty blocks Generate (True) or
+    #: only warns (False). Only meaningful when the field is required (by
+    #: either of the two mechanisms above).
+    required_blocks: bool = True
 
 
 @dataclass(frozen=True)
@@ -159,11 +174,28 @@ _COMMON: Dict[str, SectionOverride] = {
     'general': SectionOverride(
         label='Run parameters', order=4,
         fields={
-            'temp': FieldOverride(label='Temperature', unit='K', order=1),
-            'force': FieldOverride(label='Normal load', unit='nN', order=2),
-            'pressure': FieldOverride(label='Pressure', unit='GPa', order=3),
+            'temp': FieldOverride(label='Temperature', unit='K', order=1, required=True),
+            'force': FieldOverride(
+                label='Normal load', unit='nN', order=2,
+                required=True, required_blocks=True,
+                detail=('An empty load list is not a zero-load run: system_init.lmp '
+                        'and slide.lmp both render `variable find index` with no '
+                        'values (or `variable find equal None` when the field is '
+                        'simply absent) -- LAMMPS aborts on that line, it does not '
+                        'produce a no-load run. Unlike sheet-on-sheet pressure, '
+                        'there is no builder default to fall back on, so this '
+                        'blocks Generate.'),
+            ),
+            'pressure': FieldOverride(
+                label='Pressure', unit='GPa', order=3,
+                required=True, required_blocks=False,
+                detail=('Sheet-on-sheet treats an absent pressure as 0.0, so an '
+                        'empty field still builds a (zero-load) run -- warn, do '
+                        'not block, or legacy configs that relied on that default '
+                        'would stop working.'),
+            ),
             'scan_speed': FieldOverride(
-                label='Scan speed', unit='m/s', order=4,
+                label='Scan speed', unit='m/s', order=4, required=True,
                 help='Converted in the LAMMPS script: 100 m/s = 1 Å/ps.',
                 detail=('The stored value is metres per second; the generated script '
                         'divides by 100 to get the Å/ps LAMMPS drives with.'),
@@ -197,6 +229,7 @@ _COMMON: Dict[str, SectionOverride] = {
                 label='Driving spring constant', order=10, unit='N/m',
                 help='Stiffness of the spring dragging the moving sheet.',
                 detail='Converted to eV/Å² in the builder (divide by 16.02).',
+                required_if_settings=('simulation.drive_method', 'virtual_atom'),
             ),
             'twist_angle': FieldOverride(
                 label='Twist angle', unit='deg', order=11,

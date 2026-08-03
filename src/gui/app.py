@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.form = ConfigForm(self.document, page)
+        self.form = ConfigForm(self.document, page, settings=self.settings)
         layout.addLayout(_fold_controls(page, self.form))
 
         scroll = QScrollArea(page)
@@ -325,6 +325,7 @@ class MainWindow(QMainWindow):
             return
 
         self.settings = self.settings_document.as_settings()
+        self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage(f"Saved {written}")
 
@@ -355,6 +356,7 @@ class MainWindow(QMainWindow):
 
         self.settings_document.save(self.workspace.settings_path)
         self.settings = self.settings_document.as_settings()
+        self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage('Applied settings changes.')
         return None
@@ -410,6 +412,13 @@ class MainWindow(QMainWindow):
             for section, key in unsupported
         ]
 
+        missing = self.form.missing_required()
+        lines += [
+            f"[{sec}] {label}: required, currently empty"
+            for sec, _key, label, _blocks in missing
+        ]
+        blocking = [blocks for _sec, _key, _label, blocks in missing]
+
         expansion = None
         try:
             expansion = self.document.expansion()
@@ -443,7 +452,7 @@ class MainWindow(QMainWindow):
         if text != self.issues.toPlainText():
             self.issues.setPlainText(text)
         self._refresh_counts()
-        return result.ok and not unsupported
+        return result.ok and not unsupported and not any(blocking)
 
     # --------------------------------------------------------------- events
 
