@@ -386,13 +386,15 @@ class MainWindow(QMainWindow):
     def _refresh_counts(self) -> None:
         try:
             summary = self.document.expansion()
-            self.counts.setText(
+            text = (
                 f"{plural(summary.configs, 'config')} → "
                 f"{plural(summary.builds, 'build')} → "
                 f"{plural(summary.jobs, 'job')}")
         except Exception as exc:  # pylint: disable=broad-except
-            self.counts.setText('—')
+            text = '—'
             logger.debug("count failed: %s", exc)
+        if text != self.counts.text():
+            self.counts.setText(text)
 
     def _validate(self) -> bool:
         """Validate and surface the result. Returns True when valid."""
@@ -437,7 +439,9 @@ class MainWindow(QMainWindow):
                 f"{{mat}}; they will be substituted across {target} when you "
                 f"generate.")
 
-        self.issues.setPlainText('\n'.join(lines) if lines else 'Config is valid.')
+        text = '\n'.join(lines) if lines else 'Config is valid.'
+        if text != self.issues.toPlainText():
+            self.issues.setPlainText(text)
         self._refresh_counts()
         return result.ok and not unsupported
 

@@ -59,7 +59,10 @@ class FieldEditor(QWidget):
             self.setToolTip(self._base_tooltip)
 
     def set_error(self, message: Optional[str]) -> None:
-        """Mark the field as holding an invalid value."""
+        """Mark the field invalid. Idempotent: repeating the same state is a
+        no-op, so a full-form show_errors() pass does not repaint every row."""
+        if message == self._error:
+            return
         self._error = message
         self.setToolTip(message or self._base_tooltip)
         self._apply_error_style(bool(message))

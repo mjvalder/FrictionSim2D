@@ -278,3 +278,18 @@ class TestFixedList:
         editor.set_value([200, 200])
         assert editor.value() == [200, 200]
         assert editor.warning() is not None
+
+
+class TestSetErrorIdempotence:
+    """set_error should not restyle the field when repeating the same state."""
+
+    def test_set_error_is_idempotent(self, qt_app):
+        from src.gui.widgets.fields import build_editor
+
+        ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
+        calls = []
+        ed._apply_error_style = lambda invalid: calls.append(invalid)
+        ed.set_error(None); ed.set_error(None)
+        assert calls == []
+        ed.set_error('bad'); ed.set_error('bad')
+        assert calls == [True]
