@@ -293,3 +293,15 @@ class TestSetErrorIdempotence:
         assert calls == []
         ed.set_error('bad'); ed.set_error('bad')
         assert calls == [True]
+
+
+class TestDefaultGhosting:
+    """A default should be visible even when the field is empty, so a blank
+    box reads as "unset, will fall back to X" rather than "unset, no idea"."""
+
+    def test_optional_field_ghosts_its_default(self, qt_app):
+        from src.gui.schema.introspect import FieldSpec, FieldKind
+        from src.gui.widgets.fields import build_editor
+        ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT,
+                                    required=False, default=80.0))
+        assert ed.edit.placeholderText() == 'default: 80.0'

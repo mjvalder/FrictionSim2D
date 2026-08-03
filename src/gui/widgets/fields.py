@@ -95,6 +95,8 @@ class _TextEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit)
 
     def value(self) -> Any:
@@ -125,6 +127,8 @@ class _NumberEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit)
 
     def _parse(self, text: str) -> Any:
@@ -221,7 +225,9 @@ class _EnumEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         self.box = QComboBox(self)
         if not spec.required:
-            self.box.addItem('(unset)', None)
+            unset_text = ('(unset)' if spec.default in (None, '')
+                          else f'(default: {spec.default})')
+            self.box.addItem(unset_text, None)
         # Choices may be narrowed below what the model allows: outer_loop
         # accepts pressure/scan_speed/force, but each family's builder only
         # acts on some of them.
@@ -290,6 +296,8 @@ class _ListEditor(FieldEditor):
         self.edit = QLineEdit(self)
         self.edit.setPlaceholderText('e.g. 1, 2, 3')
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit)
 
     def _coerce(self, text: str) -> Any:
@@ -329,7 +337,8 @@ class _ScalarOrListEditor(_ListEditor):
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
-        self.edit.setPlaceholderText('one value, or a comma-separated list')
+        if spec.default in (None, ''):
+            self.edit.setPlaceholderText('one value, or a comma-separated list')
 
     def value(self) -> Any:
         text = self.edit.text().strip()
@@ -353,6 +362,8 @@ class _PathEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit, 1)
 
         browse = QPushButton('…', self)

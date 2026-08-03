@@ -454,6 +454,22 @@ class SectionForm(QGroupBox):
                     # selection matches what is actually on disk (nothing)
                     # and commits as a no-op instead.
                     material_editor.set_selected([])
+
+            # A starred field left empty has no way to show the user what
+            # will actually be built without pre-filling it: unlike the ghost
+            # placeholder on an optional field, a required field's blank box
+            # blocks Render entirely, so the default has to actually land in
+            # the control (and, on commit, the document) rather than just be
+            # suggested.
+            specs = self.section.field_map()
+            for key, editor in self.editors.items():
+                spec = specs.get(key)
+                if spec is None or spec.default is None:
+                    continue
+                if not self.effective_required(key):
+                    continue
+                if editor.value() in (None, '', []):
+                    editor.set_value(spec.default)
         finally:
             self._loading = False
         self._apply_dependencies()
@@ -522,7 +538,8 @@ class SectionForm(QGroupBox):
             value = editor.value()
             if key not in existing:
                 spec = specs.get(key)
-                if value is None or (spec is not None and value == spec.default):
+                if value is None or (spec is not None and value == spec.default
+                                     and not self.effective_required(key)):
                     continue
             self.document.set(self.section.key, key, value)
 

@@ -301,6 +301,22 @@ class TestRequiredStars:
         form.deleteLater()
 
 
+class TestStarredFieldPrefill:
+    """A starred field that is empty should load its default and commit it
+    explicitly, so the written config is not silently missing a required
+    value just because the user never touched the box."""
+
+    def test_starred_field_prefills_and_commits_default(self, qt_app):
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.values['general'].pop('temp', None)
+        form = SectionForm(doc.section('general'), doc, settings=None)
+        form.load(); form.commit()
+        assert doc.get('general', 'temp') == 300.0
+
+
 class TestCountsRead:
 
     @pytest.mark.parametrize('n,word,expected', [
