@@ -62,10 +62,11 @@ class MaterialListEditor(FieldEditor):
         #: choice and must survive a rescan rather than being read as "nothing
         #: has been picked yet" and silently reset to "everything".
         self._selection_touched = False
-        #: Reentrancy guard: rescan() ends by emitting `changed`, and nothing
-        #: upstream may ever route that back into another rescan (see
-        #: SectionForm's rescan wiring), but this is cheap insurance against a
-        #: future wiring mistake doing exactly that.
+        #: Reentrancy guard: rescan() emits `changed` while this is still
+        #: True (the emit sits inside the guarded region, not after it), so a
+        #: listener that calls back into rescan() synchronously -- which
+        #: nothing upstream should ever do, see SectionForm's rescan wiring --
+        #: is refused rather than recursing.
         self._rescanning = False
         #: The (structures, potentials, extension) triple last passed to
         #: rescan(), or None before the first one. This widget no longer
@@ -198,8 +199,11 @@ class MaterialListEditor(FieldEditor):
         no new information.
 
         `self._rescanning` guards against a reentrant call landing here while
-        one is already in progress -- see the class docstring's note on
-        `_rescanning`.
+        one is already in progress -- true from before the listing is
+        rebuilt until after `changed` has been emitted and every connected
+        slot has returned, so a slot that calls back into rescan() while
+        handling that signal is refused rather than recursing. See the class
+        docstring's note on `_rescanning`.
         """
         # Resolved, not the raw argument: a folder-mode field never carries an
         # extension of its own (there is no `{mat}` to read a suffix off of),
@@ -261,9 +265,15 @@ class MaterialListEditor(FieldEditor):
             self.summary.setText(
                 f"{usable} of {len(candidates)} usable → {len(self.selected_names())} "
                 f"configs" if candidates else 'Choose both directories.')
+
+            # Emitted inside the guarded region, not after: `_rescanning` is
+            # what a reentrant rescan() call checks, so it must still be True
+            # for the whole time `changed` is out and its listeners are
+            # running -- otherwise a listener that calls rescan() again would
+            # sail straight through the guard the moment it is released.
+            self.changed.emit()
         finally:
             self._rescanning = False
-        self.changed.emit()
 
     def _on_item_changed(self, _item) -> None:
         # Only reached from a real click: programmatic changes during rescan()

@@ -343,7 +343,13 @@ class TestMaterialListEditor:
         # unchanged-triple no-op: the guarantee under test is that an actual
         # rebuild of the listing still respects an explicitly emptied
         # selection, not merely that nothing happens when nothing changed
-        # (that is test_rescan_is_noop_for_unchanged_triple's job).
+        # (that is test_rescan_is_noop_for_unchanged_triple's job). Poking
+        # `_scanned` directly is what stands in for that rebuild: the
+        # same-triple rescan this test originally drove through
+        # `editor._rescan()` is no longer reachable through any real UI
+        # trigger now that rescan() has the no-op guard -- editingFinished,
+        # a browse selection, and ticking the box all only ever fire it with
+        # a genuinely different triple.
         editor._scanned = None
         editor.rescan(*dirs, '.sw')
         assert editor.selected_names() == []
@@ -358,6 +364,40 @@ class TestMaterialListEditor:
         editor.rescan(*dirs, '.sw')
         assert editor.listed_names() == listing_before
         assert calls == []
+
+    def test_reentrant_rescan_during_changed_is_refused(self, editor, dirs, tmp_path):
+        """`_rescanning` must still be True for the whole time `changed` is
+        out and its listeners are running, not just while the listing is
+        being rebuilt -- otherwise a listener that calls back into rescan()
+        would sail straight through the guard the moment it is released.
+
+        The reentrant call below targets a directory triple that differs
+        from whichever rescan is currently in flight, so the *separate*
+        unchanged-triple no-op cannot be what refuses it -- only the
+        `_rescanning` guard can.
+        """
+        structures, potentials = dirs
+        other = tmp_path / 'other_structures'
+        other.mkdir()
+        (other / 'h-MoS2.cif').write_text('', encoding='utf-8')
+
+        calls = []
+
+        def _reenter():
+            calls.append(1)
+            editor.rescan(structures, potentials, '.sw')
+
+        editor.changed.connect(_reenter)
+        editor.rescan(other, potentials, '.sw')
+
+        # The listener ran exactly once: the reentrant call it made was
+        # refused outright rather than itself rebuilding the listing and
+        # emitting `changed` again (which would have called _reenter a
+        # second time).
+        assert len(calls) == 1
+        # And it left no trace: the in-flight rescan(other, ...) is still
+        # what the widget reports, not the reentrant call's triple.
+        assert editor.directories() == (other, potentials, '.sw')
 
 
 class TestSweepRoundTrip:
