@@ -39,39 +39,60 @@ def _form(qt_app, monkeypatch):
     form.deleteLater()
 
 
+class TestInfoBubbles:
+    """Captions ate a caption-worth of vertical space on every row; an ⓘ
+    bubble at the end of the row carries the same text as a tooltip instead."""
+
+    def test_bubble_tooltip_carries_help_and_default(self, qt_app):
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        form = SectionForm(doc.section('general'), doc)
+        tip = form._bubbles['scan_speed'].toolTip()
+        assert '100 m/s' in tip
+        assert not hasattr(form, '_captions')
+
+    def test_hint_only_field_still_gets_a_bubble(self, qt_app):
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        form = SectionForm(doc.section('general'), doc)
+        assert 'twist_strain_tol' in form._bubbles   # enable_hint only, no help
+
+
 class TestLoopabilityHints:
 
-    def _caption(self, form, section, key):
-        return form.sections[section]._captions[key].text()
+    def _tip(self, form, section, key):
+        return form.sections[section]._bubbles[key].toolTip()
 
     def test_a_swept_field_says_a_list_makes_separate_runs(self, form):
-        assert 'separate simulation' in self._caption(form, 'general', 'temp')
+        assert 'separate simulation' in self._tip(form, 'general', 'temp')
 
     def test_a_layer_field_says_a_list_makes_separate_builds(self, form):
-        assert 'L{n}' in self._caption(form, '2D', 'layers')
+        assert 'L{n}' in self._tip(form, '2D', 'layers')
 
     def test_an_in_file_field_says_a_list_is_looped(self, form):
-        assert 'looped inside' in self._caption(form, 'general', 'force')
+        assert 'looped inside' in self._tip(form, 'general', 'force')
 
     def test_a_scalar_field_gets_no_hint(self, form):
-        """Captioning every single-value field with a negative is noise; a list
+        """Bubbling every single-value field with a negative is noise; a list
         that is actually present is already reported by validation."""
-        caption = form.sections['tip']._captions.get('r')
-        assert caption is not None
-        assert 'list' not in caption.text()
+        bubble = form.sections['tip']._bubbles.get('r')
+        assert bubble is not None
+        assert 'list' not in bubble.toolTip()
 
     def test_the_hint_is_appended_not_substituted(self, qt_app, monkeypatch):
         """No field currently rendered by the form carries both a hand-written
-        caption and a non-scalar loopability at once: Task 3 emptied `temp`,
+        help text and a non-scalar loopability at once: Task 3 emptied `temp`,
         `layers` and `force` precisely so the hint would be the only text, and
         `[2D] materials_list` -- the one override entry that does have both --
         is never introspected as a real field (it is set programmatically, see
-        `tests/test_gui_material_list.py`), so it never reaches `_captions` at
+        `tests/test_gui_material_list.py`), so it never reaches `_bubbles` at
         all. A field with only one of the two cannot distinguish append from
         substitute, so this synthesises one: give `[general] temp` (loopability
-        'sweep') a temporary hand-written caption and drive it through the real
-        `_add_field` path. Substituting instead of appending would drop one of
-        the two strings; this fails either way that happens."""
+        'sweep') a temporary hand-written help text and drive it through the
+        real `_add_field` path. Substituting instead of appending would drop
+        one of the two strings; this fails either way that happens."""
         from src.gui.schema import overrides as overrides_mod
         from src.gui.widgets.form import ConfigForm
 
@@ -81,17 +102,10 @@ class TestLoopabilityHints:
         monkeypatch.setitem(temp_fields, 'temp', synthetic)
 
         form = ConfigForm(ConfigDocument.blank('afm'))
-        caption = self._caption(form, 'general', 'temp')
-        assert 'Ambient control temperature.' in caption      # the declared help
-        assert 'separate simulation' in caption               # the generated hint
+        tip = self._tip(form, 'general', 'temp')
+        assert 'Ambient control temperature.' in tip      # the declared help
+        assert 'separate simulation' in tip               # the generated hint
         form.deleteLater()
-
-    def test_the_hint_stays_out_of_the_tooltip(self, form):
-        """The tooltip carries the long-form detail; repeating the hint there
-        adds nothing. Most loopable fields declare no detail, so the tooltip
-        falls back to the caption -- it must be the pre-hint caption."""
-        label, _cell = form.sections['general']._rows['force']
-        assert 'looped inside' not in label.toolTip()
 
     def test_settings_fields_get_no_hint(self, qt_app, monkeypatch):
         """SettingsDocument has no loopability concept at all."""
@@ -100,29 +114,29 @@ class TestLoopabilityHints:
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(SettingsDocument.defaults())
-        caption = form.sections['hpc']._captions.get('num_cpus')
-        assert caption is None or 'list' not in caption.text()
+        bubble = form.sections['hpc']._bubbles.get('num_cpus')
+        assert bubble is None or 'list' not in bubble.toolTip()
         form.deleteLater()
 
 
 class TestDependentFieldsKeepTheirHint:
     """scan_angle_force is the one field with both a dependency and a
-    loopability. _apply_dependencies rewrites its caption, and rewriting it
+    loopability. _apply_dependencies rewrites its tooltip, and rewriting it
     from the override alone silently drops the generated hint."""
 
     def test_the_hint_returns_when_the_dependency_is_satisfied(self, form):
         section = form.sections['general']
         section.editors['scan_angle'].set_value(5.0)
         section._apply_dependencies()
-        caption = section._captions['scan_angle_force'].text()
-        assert 'Empty: every angle at every load.' in caption
-        assert 'looped inside' in caption
+        tip = section._bubbles['scan_angle_force'].toolTip()
+        assert 'Empty: every angle at every load.' in tip
+        assert 'looped inside' in tip
 
     def test_the_enable_hint_still_leads_while_disabled(self, form):
         section = form.sections['general']
         section.editors['scan_angle'].set_value(None)
         section._apply_dependencies()
-        assert section._captions['scan_angle_force'].text() == \
+        assert section._bubbles['scan_angle_force'].toolTip() == \
             'Set one or more scan angles first.'
 
 

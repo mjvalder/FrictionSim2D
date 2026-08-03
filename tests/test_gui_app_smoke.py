@@ -302,9 +302,9 @@ class TestSettingsTakeEffect:
     def test_the_hpc_group_explains_the_modules_requirement(self, window):
         section = window.settings_form.sections['hpc']
         assert section.title() == 'HPC'
-        caption = section._captions.get('modules')
-        assert caption is not None
-        assert 'no job scripts' in caption.text()
+        bubble = section._bubbles.get('modules')
+        assert bubble is not None
+        assert 'no job scripts' in bubble.toolTip()
 
 
 class TestSubstrateSection:

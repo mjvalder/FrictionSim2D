@@ -8,15 +8,18 @@ absent section, not a flag.
 
 from __future__ import annotations
 
+import html
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -60,6 +63,27 @@ def loopability_hint(document, section: str, key: str) -> str:
     if resolver is None:
         return ''
     return LOOPABILITY_HINTS.get(resolver(section, key), '')
+
+
+def _compose_tooltip(help_text: Optional[str], detail: Optional[str], doc: str,
+                     hint: str, default: object) -> str:
+    """The bubble/tooltip body: only the parts that are actually present.
+
+    HTML so the primary explanation (override help, or the model's own
+    docstring when there is no override) stands out from the rest; everything
+    else is plain rows underneath it.
+    """
+    primary = help_text or doc
+    parts = []
+    if primary:
+        parts.append(f"<b>{html.escape(primary)}</b>")
+    if detail:
+        parts.append(html.escape(detail))
+    if hint:
+        parts.append(f"<i>{html.escape(hint)}</i>")
+    if default not in (None, '', [], {}, ()):
+        parts.append(f"default: {html.escape(str(default))}")
+    return '<br>'.join(parts)
 
 
 def _prettify(key: str) -> str:
@@ -125,12 +149,15 @@ class SectionForm(QGroupBox):
         self.section = section
         self.document = document
         self.editors: Dict[str, FieldEditor] = {}
-        self._captions: Dict[str, QLabel] = {}
-        #: The caption text as composed in `_add_field` -- override help (or
-        #: `spec.doc`) plus any loopability hint. `_apply_dependencies` needs
-        #: this to restore an enabled field's caption; recomputing it from the
-        #: override alone would drop the hint.
-        self._composed_captions: Dict[str, str] = {}
+        #: The ⓘ button at the end of a row, keyed by field. Only present when
+        #: there is something to say: help, detail, the model's own doc, a
+        #: loopability hint, a default, or an `enable_if` reason.
+        self._bubbles: Dict[str, QToolButton] = {}
+        #: The composed tooltip text as built in `_add_field` -- override help
+        #: (or `spec.doc`), detail, and any loopability hint. `_apply_dependencies`
+        #: needs this to restore an enabled field's tooltip; recomputing it from
+        #: the override alone would drop the hint.
+        self._composed_tooltips: Dict[str, str] = {}
         self._rows: Dict[str, tuple] = {}
         self._loading = False
         self._collapsed = False
@@ -184,7 +211,7 @@ class SectionForm(QGroupBox):
         self._apply_dependencies()
 
     def _add_field(self, spec: FieldSpec) -> None:
-        """One labelled row: control, required marker, and a short explanation."""
+        """One labelled row: control, required marker, and an info bubble."""
         if spec.kind is FieldKind.NESTED:
             self._add_nested_row(spec)
             return
@@ -205,28 +232,32 @@ class SectionForm(QGroupBox):
         if spec.required:
             label.setToolTip('Required')
 
-        caption_text = (field_override.help if field_override else None) or spec.doc
-        tooltip_text = (
-            (field_override.detail if field_override else None)
-            or caption_text)
-
+        help_text = field_override.help if field_override else None
+        detail_text = field_override.detail if field_override else None
         hint = loopability_hint(self.document, self.section.key, spec.key)
-        if hint:
-            caption_text = f"{caption_text} {hint}" if caption_text else hint
+        tooltip_text = _compose_tooltip(help_text, detail_text, spec.doc, hint, spec.default)
+        enable_hint = field_override.enable_hint if field_override else None
 
         cell = QWidget(self)
-        cell_layout = QVBoxLayout(cell)
+        cell_layout = QHBoxLayout(cell)
         cell_layout.setContentsMargins(0, 0, 0, 0)
-        cell_layout.setSpacing(1)
-        cell_layout.addWidget(editor)
+        cell_layout.setSpacing(4)
+        cell_layout.addWidget(editor, 1)
 
-        if caption_text:
-            caption = QLabel(caption_text, cell)
-            caption.setWordWrap(True)
-            caption.setStyleSheet(CAPTION_SMALL)
-            cell_layout.addWidget(caption)
-            self._captions[spec.key] = caption
-            self._composed_captions[spec.key] = caption_text
+        # A bubble exists whenever there is something to show -- either the
+        # composed tooltip, or (a hint-only field like twist_strain_tol) just
+        # an enable_if reason for when the field is disabled.
+        if tooltip_text or enable_hint:
+            bubble = QToolButton(cell)
+            bubble.setText('\N{CIRCLED LATIN SMALL LETTER I}')
+            bubble.setAutoRaise(True)
+            bubble.setToolTip(tooltip_text)
+            bubble.clicked.connect(
+                lambda _checked=False, b=bubble: QToolTip.showText(QCursor.pos(), b.toolTip(), b))
+            cell_layout.addWidget(bubble)
+            self._bubbles[spec.key] = bubble
+            self._composed_tooltips[spec.key] = tooltip_text
+
         if tooltip_text:
             label.setToolTip(tooltip_text)
             # Not editor.setToolTip() directly: set_error(None) -- called on
@@ -256,7 +287,6 @@ class SectionForm(QGroupBox):
         caption.setStyleSheet(CAPTION_SMALL)
         caption.setEnabled(False)
 
-        self._captions[spec.key] = caption
         self._rows[spec.key] = (label, caption)
         self.form.addRow(label, caption)
 
@@ -559,13 +589,13 @@ class SectionForm(QGroupBox):
             label, _cell = self._rows.get(key, (None, None))
             if label is not None:
                 label.setEnabled(enabled)
-            caption = self._captions.get(key)
-            if caption is not None and field_override.enable_hint:
-                # The composed caption carries the loopability hint, which the
+            bubble = self._bubbles.get(key)
+            if bubble is not None and field_override.enable_hint:
+                # The composed tooltip carries the loopability hint, which the
                 # override alone does not -- recomputing from `help` drops it.
-                caption.setText(
+                bubble.setToolTip(
                     field_override.enable_hint if not enabled
-                    else self._composed_captions.get(key, ''))
+                    else self._composed_tooltips.get(key, ''))
 
     def _on_field_changed(self) -> None:
         if self._loading:
