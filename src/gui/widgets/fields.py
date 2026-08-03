@@ -353,11 +353,18 @@ class _ScalarOrListEditor(_ListEditor):
 
 
 class _PathEditor(FieldEditor):
-    """A file path, with a browse button."""
+    """A file path, with a browse button.
+
+    Directory mode is a separate axis from the field itself: `cif_path`/
+    `pot_path` mean a single file normally, but a directory to scan while a
+    material sweep is on. `SectionForm` is what knows which is current --
+    this widget only needs to remember the flag and act on it.
+    """
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
         self._was_string = False
+        self._directory_mode = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
@@ -366,19 +373,36 @@ class _PathEditor(FieldEditor):
             self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit, 1)
 
-        browse = QPushButton('…', self)
-        browse.setFixedWidth(30)
-        browse.setToolTip('Browse for a file')
-        browse.clicked.connect(self._browse)
-        layout.addWidget(browse)
+        self._browse_button = QPushButton('…', self)
+        self._browse_button.setFixedWidth(30)
+        self._browse_button.setToolTip('Browse for a file')
+        self._browse_button.clicked.connect(self._browse)
+        layout.addWidget(self._browse_button)
+
+    def set_directory_mode(self, directory: bool) -> None:
+        """Switch the browse button (and its tooltip) between file and
+        directory pickers -- called by SectionForm as the sweep is ticked or
+        unticked, never decided by this widget on its own."""
+        self._directory_mode = directory
+        self._browse_button.setToolTip(
+            'Browse for a directory' if directory else 'Browse for a file')
 
     def _browse(self) -> None:
         from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
 
-        chosen, _ = QFileDialog.getOpenFileName(self, f'Select {self.spec.key}')
+        if self._directory_mode:
+            chosen = QFileDialog.getExistingDirectory(self, f'Select {self.spec.key}')
+        else:
+            chosen, _ = QFileDialog.getOpenFileName(self, f'Select {self.spec.key}')
         if chosen:
             self.edit.setText(chosen)
             self.changed.emit()
+            # A rescan trigger for the 2D section's sweep pickers (wired via
+            # editingFinished, not this widget's own `changed`): setText()
+            # alone does not fire editingFinished, so a browse selection has
+            # to raise it explicitly or the listing would only ever refresh
+            # on the next manual edit.
+            self.edit.editingFinished.emit()
 
     def value(self) -> Any:
         text = self.edit.text().strip()

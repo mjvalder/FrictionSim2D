@@ -8,7 +8,10 @@ invisible in the GUI entirely.
 
 Both halves come from one question instead: which structure directory, and
 which potential directory. The material list is the intersection, which is what
-``preflight_materials`` works out at build time anyway.
+``preflight_materials`` works out at build time anyway. The two directories
+themselves are no longer this widget's own text fields -- they are the [2D]
+section's `cif_path`/`pot_path` pickers, switched into folder mode while
+sweeping; `SectionForm` reads them and calls `rescan()` here.
 """
 
 from __future__ import annotations
@@ -19,10 +22,8 @@ from typing import List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -42,11 +43,13 @@ __all__ = ['MaterialListEditor']
 
 
 class MaterialListEditor(FieldEditor):
-    """A sweep toggle, two directory pickers, and the resulting material list.
+    """A sweep toggle and the resulting material list.
 
     ``value()`` is the ``materials_list`` path, because that is what the config
     holds. Writing the `.txt` and the `{mat}` templates spans other fields in
-    the section, so it happens in ``SectionForm.commit``.
+    the section, so it happens in ``SectionForm.commit``. The two directories
+    that decide what is available live in the [2D] section's own `cif_path`/
+    `pot_path` editors -- ``rescan()`` is how their current values reach here.
     """
 
     def __init__(self, spec: FieldSpec, parent: Optional[QWidget] = None) -> None:
@@ -59,6 +62,24 @@ class MaterialListEditor(FieldEditor):
         #: choice and must survive a rescan rather than being read as "nothing
         #: has been picked yet" and silently reset to "everything".
         self._selection_touched = False
+        #: Reentrancy guard: rescan() ends by emitting `changed`, and nothing
+        #: upstream may ever route that back into another rescan (see
+        #: SectionForm's rescan wiring), but this is cheap insurance against a
+        #: future wiring mistake doing exactly that.
+        self._rescanning = False
+        #: The (structures, potentials, extension) triple last passed to
+        #: rescan(), or None before the first one. This widget no longer
+        #: keeps its own directory text -- SectionForm's path editors do --
+        #: so this is what `directories()` reports back to
+        #: `_commit_material_sweep`.
+        self._scanned: Optional[Tuple[Optional[Path], Optional[Path],
+                                      Optional[str]]] = None
+        #: material_names() as of the last load(), passed in via
+        #: set_document_names. The floor a rescan's "keep the selection"
+        #: logic falls back to when the widget's own selection has gone empty
+        #: -- e.g. an intermediate scan of a directory that does not resolve
+        #: -- so a curated .txt cannot be silently read as "nothing selected".
+        self._document_names: List[str] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -73,13 +94,9 @@ class MaterialListEditor(FieldEditor):
         body.setContentsMargins(16, 0, 0, 0)
         body.setSpacing(3)
 
-        self.structure_edit, structure_row = self._directory_row('Structures')
-        self.potential_edit, potential_row = self._directory_row('Potentials')
         self.extension_label = QLabel('', self.body)
         self.extension_label.setStyleSheet(CAPTION_SMALL)
-        potential_row.addWidget(self.extension_label)
-        body.addLayout(structure_row)
-        body.addLayout(potential_row)
+        body.addWidget(self.extension_label)
 
         self.summary = QLabel('', self.body)
         self.summary.setWordWrap(True)
@@ -103,28 +120,6 @@ class MaterialListEditor(FieldEditor):
         layout.addWidget(self.body)
         self.body.setVisible(False)
 
-    def _directory_row(self, label: str) -> Tuple[QLineEdit, QHBoxLayout]:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(QLabel(label, self.body))
-
-        edit = QLineEdit(self.body)
-        edit.editingFinished.connect(self._rescan)
-        row.addWidget(edit, 1)
-
-        browse = QPushButton('…', self.body)
-        browse.setFixedWidth(30)
-        browse.clicked.connect(lambda _=False, e=edit: self._browse(e))
-        row.addWidget(browse)
-        return edit, row
-
-    def _browse(self, edit: QLineEdit) -> None:
-        chosen = QFileDialog.getExistingDirectory(
-            self, 'Select a directory', edit.text() or '')
-        if chosen:
-            edit.setText(chosen)
-            self._rescan()
-
     # ----------------------------------------------------------------- state
 
     def is_sweeping(self) -> bool:
@@ -133,29 +128,15 @@ class MaterialListEditor(FieldEditor):
     def set_sweeping(self, sweeping: bool) -> None:
         self.sweep_box.setChecked(sweeping)
 
+    def set_document_names(self, names: List[str]) -> None:
+        """Record the document's current material list, for rescan()'s
+        selection-keeping fallback. See ``_document_names``."""
+        self._document_names = list(names or [])
+
     def directories(self) -> Tuple[Optional[Path], Optional[Path], Optional[str]]:
-        structures = self.structure_edit.text().strip()
-        potentials = self.potential_edit.text().strip()
-        return (Path(structures) if structures else None,
-                Path(potentials) if potentials else None,
-                self._extension)
-
-    def set_directories(self, structure_dir, potential_dir,
-                        extension: Optional[str] = None) -> None:
-        """Populate the pickers and rescan. Does not touch the checkbox.
-
-        Whether the sweep is *on* is a separate decision -- driven by whether
-        a materials_list is actually configured, not by whether directories
-        happen to be known -- so callers (SectionForm.load) that only want to
-        show what a config's {mat} templates point at, without turning
-        sweeping on, can call this safely. This used to force the checkbox on
-        unconditionally, which ticked it for a config that had {mat}
-        placeholders but no materials_list -- unfinished, not swept.
-        """
-        self.structure_edit.setText(str(structure_dir or ''))
-        self.potential_edit.setText(str(potential_dir or ''))
-        self._extension = extension
-        self._rescan()
+        """The (structures, potentials, extension) triple last passed to
+        rescan(), or all-None before one ever happened."""
+        return self._scanned or (None, None, None)
 
     def listed_names(self) -> List[str]:
         return [self.listing.item(i).data(Qt.UserRole)
@@ -206,54 +187,86 @@ class MaterialListEditor(FieldEditor):
 
     # --------------------------------------------------------------- scanning
 
-    def _rescan(self) -> None:
-        """Re-read the directories and rebuild the list, keeping the selection."""
-        structures, potentials, _ = self.directories()
-        self._extension = (self._extension
-                           or infer_potential_extension(potentials))
-        keep = set(self.selected_names())
-        # Only "nobody has decided yet" defaults to everything. Using an empty
-        # `keep` for that would also fire the first time a user re-picks a
-        # directory after explicitly clicking None: their empty selection is a
-        # real choice, not an unset default, and must not silently become
-        # "all" again.
-        select_by_default = not self._selection_touched
+    def rescan(self, structures, potentials,
+              extension: Optional[str] = None) -> None:
+        """Re-read (structures, potentials, extension) and rebuild the listing.
 
-        candidates = scan_material_directories(
-            structures, potentials, self._extension)
+        A no-op when the triple is identical to the last call and the listing
+        is already populated: `editingFinished` fires even when the text did
+        not actually change (a plain focus-out), and rebuilding -- and
+        re-emitting `changed` -- on every one of those would be pure noise for
+        no new information.
 
-        self.listing.blockSignals(True)
+        `self._rescanning` guards against a reentrant call landing here while
+        one is already in progress -- see the class docstring's note on
+        `_rescanning`.
+        """
+        # Resolved, not the raw argument: a folder-mode field never carries an
+        # extension of its own (there is no `{mat}` to read a suffix off of),
+        # so the triple `directories()` reports back to `_commit_material_sweep`
+        # has to be the one actually used to scan, or a sweep built purely
+        # through folder-mode editing would look unconfigured at commit time
+        # (extension=None) even though the listing is fully populated.
+        resolved_extension = extension or infer_potential_extension(potentials)
+        triple = (structures, potentials, resolved_extension)
+        if self._rescanning:
+            return
+        if triple == self._scanned and self.listing.count():
+            return
+
+        self._rescanning = True
         try:
-            self.listing.clear()
-            for candidate in candidates:
-                text = (candidate.name if candidate.usable
-                        else f"{candidate.name}   {candidate.reason}")
-                item = QListWidgetItem(text, self.listing)
-                item.setData(Qt.UserRole, candidate.name)
-                if candidate.usable:
-                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                    # First scan selects everything usable; a later one keeps
-                    # whatever was ticked (even nothing), so re-picking a
-                    # directory does not silently undo the user's selection.
-                    item.setCheckState(
-                        Qt.Checked if (select_by_default or candidate.name in keep)
-                        else Qt.Unchecked)
-                else:
-                    item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable
-                                  & ~Qt.ItemIsEnabled)
-                    item.setCheckState(Qt.Unchecked)
-        finally:
-            self.listing.blockSignals(False)
+            self._scanned = triple
+            self._extension = resolved_extension
+            # Only "nobody has decided yet" defaults to everything usable.
+            # Using an empty `keep` for that would also fire the first time a
+            # user re-picks a directory after explicitly clicking None: their
+            # empty selection is a real choice, not an unset default. When the
+            # widget's own selection has gone empty for some other reason --
+            # an intermediate scan of a directory that does not resolve --
+            # fall back to the document's list rather than reading that as
+            # "the user emptied it".
+            keep = set(self.selected_names()) or set(self._document_names)
+            select_by_default = not self._selection_touched
 
-        usable = sum(1 for c in candidates if c.usable)
-        self.extension_label.setText(self._extension or '')
-        self.summary.setText(
-            f"{usable} of {len(candidates)} usable → {len(self.selected_names())} "
-            f"configs" if candidates else 'Choose both directories.')
+            candidates = scan_material_directories(
+                structures, potentials, self._extension)
+
+            self.listing.blockSignals(True)
+            try:
+                self.listing.clear()
+                for candidate in candidates:
+                    text = (candidate.name if candidate.usable
+                            else f"{candidate.name}   {candidate.reason}")
+                    item = QListWidgetItem(text, self.listing)
+                    item.setData(Qt.UserRole, candidate.name)
+                    if candidate.usable:
+                        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                        # First scan selects everything usable; a later one
+                        # keeps whatever was ticked (even nothing), so
+                        # re-picking a directory does not silently undo the
+                        # user's selection.
+                        item.setCheckState(
+                            Qt.Checked if (select_by_default or candidate.name in keep)
+                            else Qt.Unchecked)
+                    else:
+                        item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable
+                                      & ~Qt.ItemIsEnabled)
+                        item.setCheckState(Qt.Unchecked)
+            finally:
+                self.listing.blockSignals(False)
+
+            usable = sum(1 for c in candidates if c.usable)
+            self.extension_label.setText(self._extension or '')
+            self.summary.setText(
+                f"{usable} of {len(candidates)} usable → {len(self.selected_names())} "
+                f"configs" if candidates else 'Choose both directories.')
+        finally:
+            self._rescanning = False
         self.changed.emit()
 
     def _on_item_changed(self, _item) -> None:
-        # Only reached from a real click: programmatic changes during _rescan
+        # Only reached from a real click: programmatic changes during rescan()
         # happen under blockSignals(). This is what distinguishes "the user
         # has never touched the selection" from "the user touched it and
         # ended up at empty".

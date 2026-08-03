@@ -70,6 +70,29 @@ def _dirs(tmp_path):
     return structures, potentials
 
 
+def test_materials_row_is_first_in_2d_section():
+    """The sweep is the first decision a [2D] section should ask -- it
+    decides whether Structure/Potential below it are files or folders."""
+    from src.gui.schema.overrides import field_override
+
+    assert field_override('afm', '2D', 'materials_list').order == 0
+
+
+def test_path_editor_directory_mode(qt_app):
+    """set_directory_mode is what SectionForm flips as the sweep is ticked or
+    unticked -- the widget only remembers the flag and browses accordingly."""
+    from src.gui.schema.introspect import FieldKind, FieldSpec
+    from src.gui.widgets.fields import build_editor
+
+    ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
+                                kind=FieldKind.PATH, required=True))
+    assert not ed._directory_mode
+    ed.set_directory_mode(True)
+    assert ed._directory_mode
+    ed.set_directory_mode(False)
+    assert not ed._directory_mode
+
+
 class TestSweepIsReachable:
 
     def test_the_sweep_expands(self, swept):
@@ -273,7 +296,7 @@ class TestMaterialListEditor:
         spec = FieldSpec(name='materials_list', key='materials_list',
                          kind=FieldKind.STR, required=False)
         editor = MaterialListEditor(spec)
-        editor.set_directories(*dirs)
+        editor.rescan(*dirs, '.sw')
         return editor
 
     def test_it_starts_not_sweeping(self, qt_app):
@@ -312,12 +335,29 @@ class TestMaterialListEditor:
         editor.set_value(None)
         assert not editor.is_sweeping()
 
-    def test_deselecting_everything_survives_a_rescan(self, editor):
+    def test_deselecting_everything_survives_a_rescan(self, editor, dirs):
         """An empty selection is a choice, not an absence. Treating it as
         'select all' on the next scan silently re-widens the sweep."""
         editor.select_none()
-        editor._rescan()
+        # Force a real rescan of the same directories rather than hitting the
+        # unchanged-triple no-op: the guarantee under test is that an actual
+        # rebuild of the listing still respects an explicitly emptied
+        # selection, not merely that nothing happens when nothing changed
+        # (that is test_rescan_is_noop_for_unchanged_triple's job).
+        editor._scanned = None
+        editor.rescan(*dirs, '.sw')
         assert editor.selected_names() == []
+
+    def test_rescan_is_noop_for_unchanged_triple(self, editor, dirs):
+        """Re-scanning the same (structures, potentials, extension) triple --
+        as happens whenever editingFinished fires without the text actually
+        changing -- must not rebuild the listing or re-emit `changed`."""
+        listing_before = editor.listed_names()
+        calls = []
+        editor.changed.connect(lambda: calls.append(1))
+        editor.rescan(*dirs, '.sw')
+        assert editor.listed_names() == listing_before
+        assert calls == []
 
 
 class TestSweepRoundTrip:
@@ -355,7 +395,7 @@ class TestSweepRoundTrip:
         section = form.sections['2D']
         editor = section.editors['materials_list']
         editor.set_sweeping(True)
-        editor.set_directories(*dirs)
+        editor.rescan(*dirs, '.sw')
         section.commit()
 
         assert document.get('2D', 'mat') == '{mat}'
@@ -375,7 +415,7 @@ class TestSweepRoundTrip:
         section = form.sections['2D']
         editor = section.editors['materials_list']
         editor.set_sweeping(True)
-        editor.set_directories(*dirs)
+        editor.rescan(*dirs, '.sw')
         section.commit()
 
         editor.set_sweeping(False)
@@ -493,7 +533,7 @@ class TestSweepRoundTrip:
         section = form.sections['2D']
         editor = section.editors['materials_list']
         editor.set_sweeping(True)
-        editor.set_directories(*dirs)
+        editor.rescan(*dirs, '.sw')
         section.commit()
 
         stored = document.get('2D', 'materials_list')
@@ -541,7 +581,7 @@ class TestSweepRoundTrip:
         section = form.sections['2D']
         editor = section.editors['materials_list']
         editor.set_sweeping(True)
-        editor.set_directories(*dirs)
+        editor.rescan(*dirs, '.sw')
         section.commit()
         assert document.get('2D', 'mat') == '{mat}'   # sanity: sweep applied
 
@@ -556,10 +596,11 @@ class TestSweepRoundTrip:
     def test_opening_a_templated_config_without_a_list_does_not_tick_the_box(
             self, qt_app, tmp_path, monkeypatch):
         """FINDING 5b: a {mat} config with no materials_list is unfinished,
-        not swept. set_directories used to force the checkbox on whenever the
-        paths happened to be templated, regardless of whether a sweep was
-        actually configured -- so opening such a config, then committing
-        (e.g. by pressing Render) invented a materials_list nobody asked for."""
+        not swept. rescan() (formerly set_directories) used to force the
+        checkbox on whenever the paths happened to be templated, regardless
+        of whether a sweep was actually configured -- so opening such a
+        config, then committing (e.g. by pressing Render) invented a
+        materials_list nobody asked for."""
         from src.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
@@ -604,4 +645,60 @@ class TestSweepRoundTrip:
 
         assert {key: document.get('2D', key)
                 for key in ('mat', 'cif_path', 'pot_path')} == before
+        form.deleteLater()
+
+    def test_editingfinished_scan_then_commit_templates_the_paths(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The Structure/Potential cells are folder pickers while sweeping:
+        typing (or browsing to) a directory and finishing the edit rescans,
+        and committing turns what was picked into the {mat} templates -- with
+        no directory-row editors of the sweep's own left to drive this from."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        cif_dir, pot_dir = dirs
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        config_form = ConfigForm(document)
+        form = config_form.sections['2D']
+        form.editors['materials_list'].set_sweeping(True)
+        form.editors['cif_path'].edit.setText(str(cif_dir))
+        form.editors['cif_path'].edit.editingFinished.emit()
+        form.editors['pot_path'].edit.setText(str(pot_dir))
+        form.editors['pot_path'].edit.editingFinished.emit()
+        form.commit()
+
+        assert form.document.get('2D', 'cif_path').endswith('/{mat}.cif')
+        assert form.document.has_material_list()
+        config_form.deleteLater()
+
+    def test_intermediate_empty_scan_keeps_curated_selection(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINDING 1/2 combined at the rescan level: a bogus intermediate
+        scan (a directory that briefly does not resolve, e.g. mid-re-browse)
+        must not read as 'the user emptied the sweep' and overwrite a curated
+        .txt with 'everything' or 'nothing' once the real directory is
+        scanned. The document's own material list is the floor rescan()
+        falls back to."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        listing = tmp_path / 'run_materials.txt'
+        listing.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(structures, potentials, '.sw')
+        document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+
+        editor.rescan(tmp_path / 'nonexistent', potentials, '.sw')
+        editor.rescan(structures, potentials, '.sw')
+
+        assert set(editor.selected_names()) == set(document.material_names())
         form.deleteLater()

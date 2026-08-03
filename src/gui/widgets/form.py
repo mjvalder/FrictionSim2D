@@ -9,6 +9,7 @@ absent section, not a flag.
 from __future__ import annotations
 
 import html
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
@@ -225,6 +226,7 @@ class SectionForm(QGroupBox):
         for spec in _ordered_fields(section, self.override, hidden):
             self._add_field(spec)
         self._build_gates()
+        self._wire_material_sweep()
 
         self.load()
         self._apply_dependencies()
@@ -455,29 +457,21 @@ class SectionForm(QGroupBox):
 
             material_editor = self.editors.get('materials_list')
             if self.section.key == '2D' and hasattr(material_editor, 'is_sweeping'):
-                structures, potentials, extension = self.document.material_directories()
-                if structures and potentials:
-                    # material_directories() gives back paths as stored -- relative
-                    # to the config's own directory, per _relative_to_config -- so
-                    # they have to be rejoined against base_dir before scanning the
-                    # actual filesystem, or a relative 'cif' resolves against the
-                    # process cwd instead of the run directory and scans empty.
-                    base = self.document.base_dir
-                    if base is not None:
-                        structures = structures if structures.is_absolute() \
-                            else base / structures
-                        potentials = potentials if potentials.is_absolute() \
-                            else base / potentials
-                    material_editor.set_directories(structures, potentials, extension)
+                # The generic loop above has already put the document's raw
+                # cif_path/pot_path text into their editors, so
+                # _sweep_directories() (reading those editors) sees exactly
+                # what a freshly opened config carries -- templated or not.
+                names = self.document.material_names()
+                material_editor.set_document_names(names)
+                material_editor.rescan(*self._sweep_directories())
 
                 # Whether the box is ticked is decided by whether a sweep is
                 # actually configured, not by whether the paths happen to be
-                # templated -- set_directories only populates the pickers. A
-                # {mat} config with no materials_list is unfinished, not
-                # swept, and must not have the box invented for it.
+                # templated -- rescan() only populates the listing. A {mat}
+                # config with no materials_list is unfinished, not swept, and
+                # must not have the box invented for it.
                 material_editor.set_sweeping(self.document.has_material_list())
 
-                names = self.document.material_names()
                 if names:
                     # An existing list is the selection; the directories
                     # only decide what is available to tick.
@@ -490,6 +484,8 @@ class SectionForm(QGroupBox):
                     # selection matches what is actually on disk (nothing)
                     # and commits as a no-op instead.
                     material_editor.set_selected([])
+
+                self._apply_sweep_mode()
 
             # A starred field left empty has no way to show the user what
             # will actually be built without pre-filling it: unlike the ghost
@@ -662,6 +658,106 @@ class SectionForm(QGroupBox):
             editor.note_written(self.document.get('2D', 'materials_list'))
 
         return True
+
+    # ----------------------------------------------------------- sweep mode
+
+    def _sweep_directories(self) -> Tuple[Optional[Path], Optional[Path], Optional[str]]:
+        """The (structures, potentials, extension) triple the [2D] path
+        editors currently describe, resolved against the config's own
+        directory.
+
+        Reads the editors rather than the document: while sweeping, the
+        cif_path/pot_path fields hold a bare directory (folder mode), not yet
+        the `{mat}`-templated path only `apply_material_directories` writes on
+        commit -- so a templated value's directory is its parent, and anything
+        else is taken as a directory outright. The base_dir rejoin mirrors
+        what `load()` used to do reading `document.material_directories()`: a
+        relative 'cif' has to resolve against the config's own directory, not
+        the process cwd, or it scans empty.
+        """
+        cif_editor = self.editors.get('cif_path')
+        pot_editor = self.editors.get('pot_path')
+        cif_text = (cif_editor.value() if cif_editor else None) or ''
+        pot_text = (pot_editor.value() if pot_editor else None) or ''
+
+        structures = self._directory_from_field(cif_text)
+        potentials = self._directory_from_field(pot_text)
+        extension = Path(pot_text).suffix if '{mat}' in pot_text else None
+
+        base = self.document.base_dir
+        if base is not None:
+            if structures is not None and not structures.is_absolute():
+                structures = base / structures
+            if potentials is not None and not potentials.is_absolute():
+                potentials = base / potentials
+        return structures, potentials, (extension or None)
+
+    @staticmethod
+    def _directory_from_field(text: str) -> Optional[Path]:
+        text = (text or '').strip()
+        if not text:
+            return None
+        return Path(text).parent if '{mat}' in text else Path(text)
+
+    def _apply_sweep_mode(self) -> None:
+        """Folder pickers while sweeping, single-file pickers otherwise.
+
+        The sweep state decides what Structure/Potential mean -- a directory
+        to scan when ticked, a single file otherwise -- not whichever mode the
+        widgets happened to be left in. The mat field is only ever set to
+        '{mat}' by the post-apply resync in commit(), never here: ticking the
+        box alone must not manufacture a {mat}-with-no-materials_list config.
+        """
+        material_editor = self.editors.get('materials_list')
+        if self.section.key != '2D' or not hasattr(material_editor, 'is_sweeping'):
+            return
+        sweeping = material_editor.is_sweeping()
+        for key in ('cif_path', 'pot_path'):
+            path_editor = self.editors.get(key)
+            if path_editor is not None and hasattr(path_editor, 'set_directory_mode'):
+                path_editor.set_directory_mode(sweeping)
+        mat_editor = self.editors.get('mat')
+        if mat_editor is not None:
+            mat_editor.setEnabled(not sweeping)
+
+    def _wire_material_sweep(self) -> None:
+        """Connect the sweep checkbox and the two path editors'
+        editingFinished to rescans -- in the [2D] section only, and never
+        through `changed`/`_on_field_changed`.
+
+        MaterialListEditor.rescan() ends by emitting `changed`, and
+        `_on_field_changed` is wired to every editor's `changed` (including
+        this one) to commit the section. Triggering a rescan from
+        `_on_field_changed` would therefore recurse forever: rescan ->
+        changed -> _on_field_changed -> rescan -> ... These two connections
+        are the only rescan triggers besides `load()` and a browse-dialog
+        selection (which raises editingFinished itself, see _PathEditor).
+        """
+        material_editor = self.editors.get('materials_list')
+        if self.section.key != '2D' or not hasattr(material_editor, 'is_sweeping'):
+            return
+        material_editor.sweep_box.toggled.connect(self._on_sweep_box_toggled)
+        for key in ('cif_path', 'pot_path'):
+            path_editor = self.editors.get(key)
+            if path_editor is not None:
+                path_editor.edit.editingFinished.connect(self._on_sweep_paths_finished)
+
+    def _on_sweep_box_toggled(self, _checked: bool) -> None:
+        self._apply_sweep_mode()
+        if self._loading:
+            # load() issues its own rescan once the document has been fully
+            # read; a tick fired by set_sweeping() while loading must not
+            # duplicate it with one built from a still-partially-applied form.
+            return
+        material_editor = self.editors.get('materials_list')
+        if material_editor is not None and material_editor.is_sweeping():
+            material_editor.rescan(*self._sweep_directories())
+
+    def _on_sweep_paths_finished(self) -> None:
+        material_editor = self.editors.get('materials_list')
+        if material_editor is None or not material_editor.is_sweeping():
+            return
+        material_editor.rescan(*self._sweep_directories())
 
     def show_errors(self, issues) -> None:
         """Decorate the fields named by validation issues."""
