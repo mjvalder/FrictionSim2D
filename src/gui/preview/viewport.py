@@ -236,7 +236,6 @@ class ViewportPanel(QWidget):
                     self._frame_and_refresh()
                 else:
                     self._refresh()
-            self._last_cell = self.system.cell
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Failed to display the assembled system")
             self._teardown_view()
@@ -322,27 +321,40 @@ class ViewportPanel(QWidget):
             logger.debug("zoom_all failed", exc_info=True)
 
     def _frame_and_refresh(self) -> None:
-        """Frame the whole scene, remember that it has been framed, and
-        repaint -- the path taken on the first render and whenever the cell
-        changed enough that the old camera no longer makes sense."""
+        """Frame the whole scene, remember that it has been framed (and at
+        what cell size), and repaint -- the path taken on the first render
+        and whenever the cell changed enough that the old camera no longer
+        makes sense.
+
+        ``_last_cell`` is anchored here rather than in every
+        :meth:`_update_pipeline` call, so :meth:`_needs_framing`'s drift
+        check measures against the last *framed* cell, not merely the
+        immediately preceding one -- otherwise a cell drifting a few percent
+        per render would never accumulate past the threshold.
+        """
         self._fit()
         self._framed = True
+        self._last_cell = self.system.cell if self.system is not None else None
         self._refresh()
 
     def _needs_framing(self) -> bool:
         """Whether the camera should be (re-)framed on this update.
 
         True on the first render and after :meth:`clear` (nothing has been
-        framed yet), or when the new cell's max extent differs from the one
-        last framed by more than 10% -- a materially different box would
-        otherwise be shown through a camera set up for a different scale.
-        Anything smaller than that (recolouring, toggling a component,
-        toggling the box outline) leaves the camera exactly where the user
-        put it.
+        framed yet), when the last-framed cell is unknown despite the view
+        supposedly being framed (an inconsistent state that should not be
+        trusted to mean "skip framing"), or when the new cell's max extent
+        differs from the one last framed by more than 10% -- a materially
+        different box would otherwise be shown through a camera set up for a
+        different scale. Anything smaller than that (recolouring, toggling a
+        component, toggling the box outline) leaves the camera exactly where
+        the user put it.
         """
         if not self._framed:
             return True
-        if self._last_cell is None or self.system is None or self.system.cell is None:
+        if self._last_cell is None:
+            return True
+        if self.system is None or self.system.cell is None:
             return False
         previous = self._max_extent(self._last_cell)
         current = self._max_extent(self.system.cell)
