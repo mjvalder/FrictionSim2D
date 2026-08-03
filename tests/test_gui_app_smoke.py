@@ -256,6 +256,25 @@ class TestMainWindow:
         window._save_settings()
         assert window.settings_file == window.workspace.settings_path
 
+    def test_render_and_generate_shortcuts(self, window):
+        """Render and Generate buttons have keyboard shortcuts."""
+        assert window.render_button.shortcut().toString() == 'Ctrl+R'
+        assert window.generate_button.shortcut().toString() == 'Ctrl+G'
+
+    def test_scroll_position_retained_when_mode_changes(self, window):
+        """Switching simulation mode preserves the form's scroll position."""
+        # Scroll down the config form
+        initial_value = window.config_scroll.verticalScrollBar().value()
+        window.config_scroll.verticalScrollBar().setValue(100)
+        scrolled_before = window.config_scroll.verticalScrollBar().value()
+
+        # Change mode (which triggers form.rebuild())
+        window.mode_box.setCurrentIndex(1)  # Switch from 'afm' to 'indent'
+
+        # Scroll position should be approximately restored (allow small variance)
+        scrolled_after = window.config_scroll.verticalScrollBar().value()
+        assert abs(scrolled_after - scrolled_before) < 5
+
 
 class TestSettingsTakeEffect:
     """The tab edits a document but a build reads a file, so an edit that is

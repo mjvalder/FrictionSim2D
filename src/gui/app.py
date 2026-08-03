@@ -169,10 +169,10 @@ class MainWindow(QMainWindow):
         self.form = ConfigForm(self.document, page, settings=self.settings)
         layout.addLayout(_fold_controls(page, self.form))
 
-        scroll = QScrollArea(page)
-        scroll.setWidget(self.form)
-        scroll.setWidgetResizable(True)
-        layout.addWidget(scroll, 1)
+        self.config_scroll = QScrollArea(page)
+        self.config_scroll.setWidget(self.form)
+        self.config_scroll.setWidgetResizable(True)
+        layout.addWidget(self.config_scroll, 1)
 
         self.tabs.addTab(page, 'Config')
         self.tabs.addTab(self._build_settings_tab(), 'Settings')
@@ -245,15 +245,17 @@ class MainWindow(QMainWindow):
         row.addWidget(self.hpc_box)
 
         self.render_button = QPushButton('Render', self)
+        self.render_button.setShortcut('Ctrl+R')
         self.render_button.setToolTip(
             'Build the configured components and show the assembled system. '
-            'Never runs a melt-quench or a minimisation.')
+            'Never runs a melt-quench or a minimisation. (Ctrl+R)')
         self.render_button.clicked.connect(self._render)
         row.addWidget(self.render_button)
 
         self.generate_button = QPushButton('Generate', self)
+        self.generate_button.setShortcut('Ctrl+G')
         self.generate_button.setToolTip(
-            'Write the full simulation package into the workspace.')
+            'Write the full simulation package into the workspace. (Ctrl+G)')
         self.generate_button.clicked.connect(self._generate)
         row.addWidget(self.generate_button)
 
@@ -469,7 +471,15 @@ class MainWindow(QMainWindow):
         except DocumentError as exc:
             QMessageBox.warning(self, 'Cannot switch', str(exc))
             return
+
+        # Save scroll position before rebuild
+        scroll_value = self.config_scroll.verticalScrollBar().value()
+
         self.form.rebuild()
+
+        # Restore scroll position after rebuild
+        self.config_scroll.verticalScrollBar().setValue(scroll_value)
+
         self._refresh_counts()
 
     def _on_config_changed(self) -> None:

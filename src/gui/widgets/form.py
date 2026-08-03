@@ -919,25 +919,29 @@ class ConfigForm(QWidget):
 
     def rebuild(self) -> None:
         """Recreate every section form, e.g. after the model changed."""
-        while self._layout.count():
-            item = self._layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self.sections.clear()
+        self.setUpdatesEnabled(False)
+        try:
+            while self._layout.count():
+                item = self._layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.sections.clear()
 
-        for section in self.document.sections():
-            form = SectionForm(section, self.document, self, settings=self.settings)
-            form.changed.connect(self.changed)
-            form.collapsed_changed.connect(self._remember_collapsed)
-            self.sections[section.key] = form
-            self._layout.addWidget(form)
+            for section in self.document.sections():
+                form = SectionForm(section, self.document, self, settings=self.settings)
+                form.changed.connect(self.changed)
+                form.collapsed_changed.connect(self._remember_collapsed)
+                self.sections[section.key] = form
+                self._layout.addWidget(form)
 
-            collapsed = self._collapsed.get(
-                section.key,
-                self.start_collapsed or _starts_collapsed(section, self.document))
-            form.set_collapsed(collapsed)
+                collapsed = self._collapsed.get(
+                    section.key,
+                    self.start_collapsed or _starts_collapsed(section, self.document))
+                form.set_collapsed(collapsed)
 
-        self._layout.addStretch(1)
+            self._layout.addStretch(1)
+        finally:
+            self.setUpdatesEnabled(True)
 
     # ------------------------------------------------------------- collapsing
 
