@@ -48,6 +48,46 @@ def panel(qt_app, monkeypatch):
     return vp.ViewportPanel()
 
 
+class _StubSource:
+    """Stands in for ``ovito.pipeline.StaticSource``: only needs a settable
+    ``data`` attribute for ``_update_pipeline``'s in-place-update branch."""
+
+    def __init__(self):
+        self.data = None
+
+
+class _StubPipeline:
+    """Stands in for ``ovito.pipeline.Pipeline``: only ``.source.data`` is
+    ever touched once a pipeline already exists."""
+
+    def __init__(self):
+        self.source = _StubSource()
+
+
+@pytest.fixture
+def live_panel(qt_app, monkeypatch):
+    """A panel whose real ``_update_pipeline`` runs.
+
+    Unlike ``panel`` above, this does *not* stub ``_update_pipeline`` itself
+    -- the framing decision and ``_last_cell`` bookkeeping under test live
+    inside it, so a test using this fixture must exercise the real method.
+    Only what would touch real OVITO/GL objects is stubbed: ``_ensure_widget``
+    (never creates a viewport widget) and ``build_data_collection`` (returns a
+    sentinel instead of a real ``DataCollection``). A stub pipeline is
+    preloaded so ``_update_pipeline`` always takes the "pipeline already
+    exists" branch -- the one this test cares about -- rather than the
+    pipeline-construction branch, which imports real ``ovito.pipeline``
+    classes.
+    """
+    from src.gui.preview import viewport as vp
+    monkeypatch.setattr(vp.ViewportPanel, '_ensure_widget', lambda self: None)
+    monkeypatch.setattr(vp, 'build_data_collection',
+                        lambda subset, colours=None, radii=None: object())
+    instance = vp.ViewportPanel()
+    instance._pipeline = _StubPipeline()
+    return instance
+
+
 def test_visibility_survives_rerender(panel, two_component_system):
     panel.show_system(two_component_system)
     panel._visibility['tip'] = False
@@ -79,16 +119,21 @@ def test_unknown_last_cell_owes_a_reframe_even_if_marked_framed(panel, two_compo
 
 
 def test_cumulative_drift_from_the_last_framed_cell_triggers_a_reframe(
-        panel, two_component_system):
+        live_panel, two_component_system):
     """The 10% threshold must be measured from the last cell that was
     actually *framed* (`_last_cell`, anchored in `_frame_and_refresh`), not
     from whatever cell happened to be displayed on the previous render --
     otherwise a handful of individually-small drifts (~4% each) could
     accumulate past 10% of the framed baseline without ever triggering a
-    reframe."""
-    panel.show_system(two_component_system)
-    panel._framed = True
-    panel._last_cell = two_component_system.cell  # max extent 10.0, the framed baseline
+    reframe.
+
+    Drives the real ``_update_pipeline`` (via ``show_system``) across several
+    renders, rather than poking ``_needs_framing()`` directly: the bug this
+    guards against lived entirely inside ``_update_pipeline``'s old
+    unconditional ``_last_cell`` overwrite, which a direct
+    ``_needs_framing()`` check cannot see.
+    """
+    panel = live_panel
 
     def _with_extent(extent):
         return AssembledSystem(
@@ -100,15 +145,20 @@ def test_cumulative_drift_from_the_last_framed_cell_triggers_a_reframe(
             legend=two_component_system.legend,
         )
 
+    # First real render: nothing has been framed yet, so this frames and
+    # anchors _last_cell to the extent-10.0 baseline.
+    panel.show_system(two_component_system)
+    framed_cell = panel._last_cell
+    assert framed_cell == two_component_system.cell
+
     # Two ~4% steps relative to the framed baseline: individually under the
-    # 10% threshold, and _last_cell must stay put (only a real
-    # _frame_and_refresh moves it, which none of these renders trigger).
+    # 10% threshold, so no reframe should occur and _last_cell must stay at
+    # the original baseline -- not creep forward render by render.
     for extent in (10.4, 10.8):
-        panel.system = _with_extent(extent)
-        assert not panel._needs_framing()
-        assert panel._last_cell == two_component_system.cell
+        panel.show_system(_with_extent(extent))
+        assert panel._last_cell == framed_cell
 
     # A third step brings cumulative drift from the framed baseline to 12%,
-    # which does owe a reframe -- even though each individual step was small.
-    panel.system = _with_extent(11.2)
-    assert panel._needs_framing()
+    # which does trigger a reframe -- _last_cell moves to the new cell.
+    panel.show_system(_with_extent(11.2))
+    assert panel._last_cell != framed_cell
