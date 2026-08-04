@@ -13,7 +13,7 @@ corrected; do not take a unit from an example comment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Optional, Tuple
 
 from .simulation_types import MODES
@@ -123,6 +123,15 @@ _COMMON: Dict[str, SectionOverride] = {
         help='The sheet being slid or indented.',
         fields={
             **_COMPONENT_FIELDS,
+            # Shifted down from _COMPONENT_FIELDS' shared order (2/3/4) to
+            # leave a gap for the material-list block, which SectionForm
+            # inserts as its own row right after `mat` -- see
+            # SectionForm._insert_material_list_row. Only this section
+            # reorders them; tip/sub/flake keep _COMPONENT_FIELDS' order as
+            # they have no materials_list field to make room for.
+            'cif_path': replace(_COMPONENT_FIELDS['cif_path'], order=3),
+            'pot_type': replace(_COMPONENT_FIELDS['pot_type'], order=4),
+            'pot_path': replace(_COMPONENT_FIELDS['pot_path'], order=5),
             'x': FieldOverride(label='Length (x)', unit=A, order=10),
             'y': FieldOverride(label='Width (y)', unit=A, order=11),
             'layers': FieldOverride(label='Layers', order=12),

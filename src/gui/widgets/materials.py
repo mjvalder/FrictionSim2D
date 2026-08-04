@@ -12,6 +12,13 @@ which potential directory. The material list is the intersection, which is what
 themselves are no longer this widget's own text fields -- they are the [2D]
 section's `cif_path`/`pot_path` pickers, switched into folder mode while
 sweeping; `SectionForm` reads them and calls `rescan()` here.
+
+This widget renders as two rows, not one: the checkbox (``materials_list``'s
+own row, carrying no text of its own -- the form label already says "Sweep
+over materials") and, placed later by `SectionForm` (after `mat`, see
+`_insert_material_list_row`), the ``.txt`` path picker plus the tick list
+itself, exposed as `list_panel`. They stay one editor -- one `value()`, one
+set of sweep-state guards -- split only for where Qt draws it.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -82,44 +90,65 @@ class MaterialListEditor(FieldEditor):
         #: -- so a curated .txt cannot be silently read as "nothing selected".
         self._document_names: List[str] = []
 
-        layout = QVBoxLayout(self)
+        # This editor's own row holds only the checkbox -- no text of its
+        # own, matching every other checkbox editor (_BoolEditor): the row
+        # label ("Sweep over materials", from the override) already names
+        # it, and repeating that on the checkbox was the duplicated wording
+        # the user's screenshot flagged.
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
-
-        self.sweep_box = QCheckBox('Sweep over many materials', self)
+        self.sweep_box = QCheckBox(self)
         self.sweep_box.toggled.connect(self._on_sweep_toggled)
         layout.addWidget(self.sweep_box)
+        layout.addStretch(1)
 
-        self.body = QWidget(self)
-        body = QVBoxLayout(self.body)
-        body.setContentsMargins(16, 0, 0, 0)
-        body.setSpacing(3)
+        # The .txt picker, tick list and Select all/None -- deliberately
+        # NOT part of this widget's own layout. `SectionForm` places it as a
+        # second, later form row (after `mat`, see
+        # `SectionForm._insert_material_list_row`) so the checkbox --
+        # first, and in its own row -- visibly governs the file/folder cells
+        # in between, per the user's explicit layout choice.
+        self.list_panel = QWidget()
+        panel = QVBoxLayout(self.list_panel)
+        panel.setContentsMargins(0, 0, 0, 0)
+        panel.setSpacing(3)
 
-        self.extension_label = QLabel('', self.body)
+        path_row = QHBoxLayout()
+        self.path_edit = QLineEdit(self.list_panel)
+        self.path_edit.setPlaceholderText(
+            'Point at an existing materials .txt to load it, or leave blank')
+        path_row.addWidget(self.path_edit, 1)
+        self.browse_button = QPushButton('…', self.list_panel)
+        self.browse_button.setFixedWidth(30)
+        self.browse_button.setToolTip('Browse for a materials .txt')
+        self.browse_button.clicked.connect(self._browse_list)
+        path_row.addWidget(self.browse_button)
+        panel.addLayout(path_row)
+
+        self.extension_label = QLabel('', self.list_panel)
         self.extension_label.setStyleSheet(CAPTION_SMALL)
-        body.addWidget(self.extension_label)
+        panel.addWidget(self.extension_label)
 
-        self.summary = QLabel('', self.body)
+        self.summary = QLabel('', self.list_panel)
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet(CAPTION_SMALL)
-        body.addWidget(self.summary)
+        panel.addWidget(self.summary)
 
-        self.listing = QListWidget(self.body)
+        self.listing = QListWidget(self.list_panel)
         self.listing.setMaximumHeight(160)
         self.listing.itemChanged.connect(self._on_item_changed)
-        body.addWidget(self.listing)
+        panel.addWidget(self.listing)
 
         buttons = QHBoxLayout()
         for label, slot in (('Select all', self.select_all),
                             ('None', self.select_none)):
-            button = QPushButton(label, self.body)
+            button = QPushButton(label, self.list_panel)
             button.clicked.connect(slot)
             buttons.addWidget(button)
         buttons.addStretch(1)
-        body.addLayout(buttons)
+        panel.addLayout(buttons)
 
-        layout.addWidget(self.body)
-        self.body.setVisible(False)
+        self.list_panel.setVisible(False)
 
     # ----------------------------------------------------------------- state
 
@@ -291,7 +320,41 @@ class MaterialListEditor(FieldEditor):
             f"{usable} of {total} usable → {len(self.selected_names())} configs")
 
     def _on_sweep_toggled(self, sweeping: bool) -> None:
-        self.body.setVisible(sweeping)
+        self.list_panel.setVisible(sweeping)
+        self.changed.emit()
+
+    # ------------------------------------------------------------- .txt path
+
+    def _browse_list(self) -> None:
+        from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
+
+        chosen, _ = QFileDialog.getOpenFileName(
+            self.list_panel, 'Select a materials list',
+            filter='Text files (*.txt);;All files (*)')
+        if chosen:
+            self.path_edit.setText(chosen)
+            # A rescan-style trigger, not a per-keystroke one: setText()
+            # alone does not fire editingFinished, so a browse selection has
+            # to raise it explicitly -- mirrors _PathEditor._browse, and is
+            # what SectionForm's own editingFinished wiring for this field
+            # depends on (see SectionForm._wire_material_sweep's docstring
+            # for why that rule matters).
+            self.path_edit.editingFinished.emit()
+
+    def load_names(self, names: List[str]) -> None:
+        """Adopt `names` as the selection -- e.g. from a curated `.txt` the
+        path row was just pointed at (SectionForm reads the file and calls
+        this once it has resolved something).
+
+        Marks the selection touched exactly as a real click would: a curated
+        list the user just loaded is a deliberate choice, not "nothing
+        decided yet", so a later rescan of the structure/potential
+        directories must not silently widen it back to "everything usable".
+        """
+        self._selection_touched = True
+        self.set_document_names(names)
+        self.set_selected(names)
+        self._rescan_summary()
         self.changed.emit()
 
     # ----------------------------------------------------------------- value
@@ -302,11 +365,13 @@ class MaterialListEditor(FieldEditor):
 
     def set_value(self, value) -> None:
         self._path = value if isinstance(value, str) and value else None
+        self.path_edit.setText(self._path or '')
         self.set_sweeping(bool(self._path))
 
     def note_written(self, path: Optional[Path]) -> None:
         """Record where SectionForm.commit put the list."""
         self._path = str(path) if path else None
+        self.path_edit.setText(self._path or '')
 
 
 register_editor('material_list', MaterialListEditor)

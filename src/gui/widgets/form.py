@@ -228,6 +228,7 @@ class SectionForm(QGroupBox):
         hidden = hidden_fields(document.model, section.key)
         for spec in _ordered_fields(section, self.override, hidden):
             self._add_field(spec)
+        self._insert_material_list_row()
         self._build_gates()
         self._wire_material_sweep()
 
@@ -317,6 +318,31 @@ class SectionForm(QGroupBox):
 
         self._rows[spec.key] = (label, caption)
         self.form.addRow(label, caption)
+
+    def _insert_material_list_row(self) -> None:
+        """Slot the tick list in as its own row, right after `mat`.
+
+        `materials_list`'s own row (added by the ordered-fields loop above,
+        at the override's order=0 slot) holds only MaterialListEditor's
+        checkbox -- the .txt picker and tick list are `list_panel`, a
+        second widget the editor builds but never adds to its own layout
+        (see materials.py). Inserting it here, after every field has its
+        row, is what lets the checkbox stay first (so it visibly governs
+        cif_path/pot_type/pot_path below it) while the list itself sits
+        after `mat`, per the user's chosen layout -- one FieldSpec, two
+        rows, without `_ordered_fields`' single (order, key) sort needing to
+        know about it.
+        """
+        material_editor = self.editors.get('materials_list')
+        if self.section.key != '2D' or not hasattr(material_editor, 'list_panel'):
+            return
+        mat_label, _mat_cell = self._rows.get('mat', (None, None))
+        if mat_label is None:
+            return
+        row, _role = self.form.getWidgetPosition(mat_label)
+        if row < 0:
+            return
+        self.form.insertRow(row + 1, material_editor.list_panel)
 
     def _build_gates(self) -> None:
         """One checkbox per declared gate, inserted just above the first
@@ -789,6 +815,13 @@ class SectionForm(QGroupBox):
         changed -> _on_field_changed -> rescan -> ... These two connections
         are the only rescan triggers besides `load()` and a browse-dialog
         selection (which raises editingFinished itself, see _PathEditor).
+
+        The materials_list `.txt` picker's own editingFinished is wired here
+        too, to `_on_materials_path_finished` -- not a rescan (it reads a
+        file, not the two directories), but the same rule applies: it must
+        never run from `_on_field_changed`, or focusing away from the path
+        box mid-edit would recommit on every keystroke's eventual
+        editingFinished.
         """
         material_editor = self.editors.get('materials_list')
         if self.section.key != '2D' or not hasattr(material_editor, 'is_sweeping'):
@@ -798,6 +831,8 @@ class SectionForm(QGroupBox):
             path_editor = self.editors.get(key)
             if path_editor is not None:
                 path_editor.edit.editingFinished.connect(self._on_sweep_paths_finished)
+        material_editor.path_edit.editingFinished.connect(
+            self._on_materials_path_finished)
 
     def _on_sweep_box_toggled(self, _checked: bool) -> None:
         self._apply_sweep_mode()
@@ -809,6 +844,31 @@ class SectionForm(QGroupBox):
         material_editor = self.editors.get('materials_list')
         if material_editor is not None and material_editor.is_sweeping():
             material_editor.rescan(*self._sweep_directories())
+
+    def _on_materials_path_finished(self) -> None:
+        """Point `materials_list` at whatever `.txt` the user just typed or
+        browsed to, and load its names as the selection.
+
+        Writes the document directly, like `apply_material_directories`
+        does for cif_path/pot_path -- not through the generic per-field
+        commit loop, which never touches materials_list at all (see
+        `commit`'s docstring: it is always fully owned by
+        `_commit_material_sweep`). Guarded against a same-text refire (a
+        plain focus-out re-raises editingFinished without the text having
+        changed) and against an unreadable path -- a typo mid-edit must not
+        wipe out whatever was already ticked.
+        """
+        material_editor = self.editors.get('materials_list')
+        if material_editor is None or not material_editor.is_sweeping():
+            return
+        text = material_editor.path_edit.text().strip()
+        if not text or text == self.document.get('2D', 'materials_list'):
+            return
+        self.document.set('2D', 'materials_list', text)
+        names = self.document.material_names()
+        if names:
+            material_editor.load_names(names)
+        material_editor.note_written(text)
 
     def _on_sweep_paths_finished(self) -> None:
         material_editor = self.editors.get('materials_list')

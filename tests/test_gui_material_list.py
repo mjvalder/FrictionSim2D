@@ -78,6 +78,108 @@ def test_materials_row_is_first_in_2d_section():
     assert field_override('afm', '2D', 'materials_list').order == 0
 
 
+def test_the_sweep_checkbox_carries_no_text_of_its_own(qt_app):
+    """The row label ('Sweep over materials', from the override) already
+    names the checkbox -- giving the checkbox its own text too ('Sweep over
+    many materials') was the duplicated wording the user's screenshot
+    flagged."""
+    from src.gui.schema.introspect import FieldKind, FieldSpec
+    from src.gui.widgets.materials import MaterialListEditor
+
+    spec = FieldSpec(name='materials_list', key='materials_list',
+                     kind=FieldKind.STR, required=False)
+    editor = MaterialListEditor(spec)
+    assert editor.sweep_box.text() == ''
+
+
+def test_2d_section_row_order_is_checkbox_mat_list_then_paths(qt_app,
+                                                              monkeypatch):
+    """User's chosen layout: the checkbox governs the cells below it, so it
+    stays first; the tick list (and its `.txt` picker) sit after `mat`, ahead
+    of Structure/Potential type/Potential file."""
+    from src.gui.controllers.document import ConfigDocument
+    from src.gui.widgets.form import SectionForm
+
+    monkeypatch.chdir(REPO_ROOT)
+    document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+    form = SectionForm(document.section('2D'), document)
+
+    material_editor = form.editors['materials_list']
+
+    def _row(key):
+        _label, cell = form._rows[key]
+        row, _role = form.form.getWidgetPosition(cell)
+        return row
+
+    checkbox_row = _row('materials_list')
+    mat_row = _row('mat')
+    list_row, _role = form.form.getWidgetPosition(material_editor.list_panel)
+    cif_row = _row('cif_path')
+    pot_type_row = _row('pot_type')
+    pot_path_row = _row('pot_path')
+
+    assert -1 not in (checkbox_row, mat_row, list_row, cif_row, pot_type_row,
+                      pot_path_row)
+    assert (checkbox_row < mat_row < list_row < cif_row
+            < pot_type_row < pot_path_row)
+
+
+class TestMaterialsPathPicker:
+    """The `.txt` picker: a normal editable path row (line edit + browse),
+    bound to `materials_list`, letting the user point at an existing curated
+    file instead of only ever configuring a sweep through two directories."""
+
+    def test_the_path_row_is_browsable(self, qt_app, monkeypatch):
+        """Mirrors TestPathEditorBrowse in test_gui_field_editors.py: a browse
+        selection sets the text and raises editingFinished itself, since
+        setText() alone would not."""
+        from PySide6.QtWidgets import QFileDialog
+        from src.gui.schema.introspect import FieldKind, FieldSpec
+        from src.gui.widgets.materials import MaterialListEditor
+
+        spec = FieldSpec(name='materials_list', key='materials_list',
+                         kind=FieldKind.STR, required=False)
+        editor = MaterialListEditor(spec)
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName',
+                            lambda *a, **k: ('/some/curated_materials.txt', ''))
+
+        fired = []
+        editor.path_edit.editingFinished.connect(lambda: fired.append(1))
+        editor._browse_list()
+
+        assert fired
+        assert editor.path_edit.text() == '/some/curated_materials.txt'
+
+    def test_pointing_the_path_row_at_a_curated_file_loads_its_names(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The headline behaviour: browsing (or typing and finishing) to an
+        existing curated `.txt` loads its names as the selection, driven
+        through SectionForm exactly as a real editingFinished would."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        curated = tmp_path / 'curated_materials.txt'
+        curated.write_text('h-MoS2\nb-AlSb\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.apply_material_directories(structures, potentials, '.sw')
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+        editor.rescan(structures, potentials, '.sw')
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+
+        assert set(editor.selected_names()) == {'h-MoS2', 'b-AlSb'}
+        assert document.get('2D', 'materials_list') == str(curated)
+        form.deleteLater()
+
+
 def test_path_editor_directory_mode(qt_app):
     """set_directory_mode is what SectionForm flips as the sweep is ticked or
     unticked -- the widget only remembers the flag and browses accordingly.
