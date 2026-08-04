@@ -31,6 +31,7 @@ from ..controllers.elements import scan_config_elements
 from ..schema.introspect import FieldKind, FieldSpec, SectionSpec
 from ..schema.overrides import (
     ENABLED,
+    SET,
     SectionOverride,
     hidden_fields,
     overrides_for,
@@ -848,7 +849,14 @@ class SectionForm(QGroupBox):
             value = other.value() if other else self.document.get(
                 self.section.key, other_key)
 
-            enabled = bool(value) if expected is ENABLED else value == expected
+            if expected is ENABLED:
+                enabled = bool(value)
+            elif expected is SET:
+                # Holds a value at all, as opposed to any truthy value: 0 /
+                # 0.0 is a real scan angle (a straight-line scan), not "unset".
+                enabled = value not in (None, '', [])
+            else:
+                enabled = value == expected
             editor.setEnabled(enabled)
 
             label, _cell = self._rows.get(key, (None, None))
@@ -861,6 +869,13 @@ class SectionForm(QGroupBox):
                 bubble.setToolTip(
                     field_override.enable_hint if not enabled
                     else self._composed_tooltips.get(key, ''))
+
+            # A greyed row with no on-screen explanation reads as a missing
+            # feature (only the ⓘ bubble said why, and nothing prompts anyone
+            # to hover it). Put the same reason in the control itself.
+            if field_override.enable_hint:
+                editor.set_disabled_hint(
+                    None if enabled else field_override.enable_hint)
 
     def _load_gates(self) -> None:
         """Tick each gate iff a field it guards actually differs from its

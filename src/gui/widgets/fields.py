@@ -45,6 +45,15 @@ class FieldEditor(QWidget):
         #: show_errors(), including the common case where there is nothing to
         #: report.
         self._base_tooltip: str = ''
+        #: The `enable_hint` currently shown as placeholder text, or None when
+        #: the row is enabled. Tracked so `set_disabled_hint` is idempotent
+        #: (`_apply_dependencies` calls it on every commit) and so re-enabling
+        #: knows to restore rather than merely clear.
+        self._disabled_hint: Optional[str] = None
+        #: Each QLineEdit's placeholder as it was before a disabled-hint
+        #: overwrote it (e.g. "default: 2.0"), so re-enabling gives it back
+        #: instead of leaving the placeholder blank.
+        self._saved_placeholders: Dict[QLineEdit, str] = {}
 
     def value(self) -> Any:
         raise NotImplementedError
@@ -70,6 +79,30 @@ class FieldEditor(QWidget):
     def error(self) -> Optional[str]:
         """The validation message currently shown against this field, if any."""
         return self._error
+
+    def set_disabled_hint(self, hint: Optional[str]) -> None:
+        """Show `hint` (an `enable_if` reason) as placeholder text while the
+        control is disabled; restore each field's normal placeholder (e.g. a
+        "default: X" from `_prefill_required`'s sibling editors) once it is
+        enabled again.
+
+        A tooltip-only explanation needs a hover to find; a greyed row with
+        nothing on screen reads as a missing feature rather than an inert
+        one. Works generically across every editor kind via `findChildren`,
+        the same trick `_apply_error_style` uses, rather than each editor
+        having to plumb this through by hand.
+        """
+        if hint == self._disabled_hint:
+            return
+        self._disabled_hint = hint
+        for line_edit in self.findChildren(QLineEdit):
+            if hint is not None:
+                self._saved_placeholders.setdefault(
+                    line_edit, line_edit.placeholderText())
+                line_edit.setPlaceholderText(hint)
+            else:
+                line_edit.setPlaceholderText(
+                    self._saved_placeholders.pop(line_edit, ''))
 
     def warning(self) -> Optional[str]:
         """A non-fatal note about the current value, or None.

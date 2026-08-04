@@ -140,6 +140,43 @@ class TestDependentFieldsKeepTheirHint:
             'Set one or more scan angles first.'
 
 
+class TestScanAngleZeroIsSet:
+    """scan_angle defaults to 0.0 -- a legitimate straight-line scan, not
+    "unset" -- so scan_angle_force's `enable_if` must test presence (`SET`),
+    not truthiness (`ENABLED`), or the row is permanently greyed on every
+    blank config with no on-screen reason (Task 6 moved that reason into a
+    tooltip-only bubble)."""
+
+    def test_scan_angle_force_enabled_on_blank_config(self, form):
+        section = form.sections['general']
+        assert section.document.get('general', 'scan_angle') == 0.0
+        assert section.editors['scan_angle_force'].isEnabled()
+        label, _cell = section._rows['scan_angle_force']
+        assert label.isEnabled()
+
+    def test_scan_angle_force_disabled_when_scan_angle_cleared(self, form):
+        section = form.sections['general']
+        section.editors['scan_angle'].set_value(None)
+        section._apply_dependencies()
+        assert not section.editors['scan_angle_force'].isEnabled()
+        label, _cell = section._rows['scan_angle_force']
+        assert not label.isEnabled()
+
+    def test_visible_hint_while_disabled_and_placeholder_restored_when_enabled(
+            self, form):
+        section = form.sections['general']
+        editor = section.editors['scan_angle_force']
+        normal_placeholder = editor.edit.placeholderText()
+
+        section.editors['scan_angle'].set_value(None)
+        section._apply_dependencies()
+        assert editor.edit.placeholderText() == 'Set one or more scan angles first.'
+
+        section.editors['scan_angle'].set_value(5.0)
+        section._apply_dependencies()
+        assert editor.edit.placeholderText() == normal_placeholder
+
+
 class TestNestedFieldsAreNotHidden:
     """A nested sub-model has no flat control, so it is not rendered. Silently
     omitting it is indistinguishable from the field not existing."""

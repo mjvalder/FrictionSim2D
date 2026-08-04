@@ -20,11 +20,18 @@ from .simulation_types import MODES
 
 __all__ = [
     'FieldOverride', 'SectionOverride', 'overrides_for', 'section_override',
-    'ENABLED', 'field_override', 'CAPTION_BUDGET',
+    'ENABLED', 'SET', 'field_override', 'CAPTION_BUDGET',
 ]
 
 #: Sentinel for ``enable_if``: the other field just has to hold a truthy value.
+#: Wrong for a field whose valid range includes a falsy-but-meaningful value
+#: (0 is a real scan angle, a straight-line scan) -- use ``SET`` for those.
 ENABLED = object()
+
+#: Sentinel for ``enable_if``: the other field just has to hold a value at
+#: all -- not ``None``, not ``''``, not ``[]``. Unlike ``ENABLED`` this does
+#: not test truthiness, so 0 / 0.0 count as set.
+SET = object()
 
 #: Caption length budget, in characters. Enforced by tests/test_gui_schema.py.
 CAPTION_BUDGET = 70
@@ -40,7 +47,8 @@ class FieldOverride:
     group: Optional[str] = None
     order: int = 100
     #: Disable unless another field in the same section is set. Given as
-    #: ``(field key, required value)``; ``ENABLED`` means "any truthy value".
+    #: ``(field key, required value)``; ``ENABLED`` means "any truthy value",
+    #: ``SET`` means "holds a value at all" (0 / 0.0 count).
     #: A greyed control says "this does nothing yet" far more clearly than a
     #: value that is quietly ignored.
     enable_if: Optional[Tuple[str, object]] = None
@@ -235,7 +243,7 @@ _COMMON: Dict[str, SectionOverride] = {
             'scan_angle': FieldOverride(label='Scan angle', unit='deg', order=5),
             'scan_angle_force': FieldOverride(
                 label='Scan angles apply at these loads', unit='nN', order=6,
-                enable_if=('scan_angle', ENABLED),
+                enable_if=('scan_angle', SET),
                 enable_hint='Set one or more scan angles first.',
                 help='Empty: every angle at every load.',
                 detail=('Give loads here to pair them with the scan angles instead, in '
