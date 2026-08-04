@@ -280,6 +280,67 @@ class TestFixedList:
         assert editor.warning() is not None
 
 
+class TestPathEditorBrowse:
+    """_browse's comment: setText() alone does not fire editingFinished, so a
+    browse selection has to raise it explicitly, or the [2D] section's
+    material-sweep rescan wiring (which listens on editingFinished, not
+    `changed` -- see SectionForm._wire_material_sweep) never refreshes the
+    listing after a browse pick."""
+
+    def test_a_file_browse_selection_raises_editing_finished(self, qt_app, monkeypatch):
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.gui.widgets.fields import build_editor
+
+        ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
+                                    kind=FieldKind.PATH, required=True))
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName',
+                            lambda *a, **k: ('/some/chosen/path.cif', ''))
+
+        fired = []
+        ed.edit.editingFinished.connect(lambda: fired.append(1))
+        ed._browse()
+
+        assert fired
+        assert ed.edit.text() == '/some/chosen/path.cif'
+
+    def test_a_directory_browse_selection_raises_editing_finished(self, qt_app,
+                                                                   monkeypatch):
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.gui.widgets.fields import build_editor
+
+        ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
+                                    kind=FieldKind.PATH, required=True))
+        ed.set_directory_mode(True)
+        monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
+                            lambda *a, **k: '/some/chosen/dir')
+
+        fired = []
+        ed.edit.editingFinished.connect(lambda: fired.append(1))
+        ed._browse()
+
+        assert fired
+        assert ed.edit.text() == '/some/chosen/dir'
+
+    def test_a_cancelled_browse_does_not_raise_editing_finished(self, qt_app,
+                                                                 monkeypatch):
+        """No path chosen -- nothing changed, nothing to rescan."""
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.gui.widgets.fields import build_editor
+
+        ed = build_editor(FieldSpec(name='cif_path', key='cif_path',
+                                    kind=FieldKind.PATH, required=True))
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: ('', ''))
+
+        fired = []
+        ed.edit.editingFinished.connect(lambda: fired.append(1))
+        ed._browse()
+
+        assert not fired
+
+
 class TestSetErrorIdempotence:
     """set_error should not restyle the field when repeating the same state."""
 

@@ -372,10 +372,19 @@ class TestMainWindow:
     def test_scroll_position_retained_when_mode_changes(self, window, qt_app):
         """Switching simulation mode preserves the form's scroll position.
 
-        Verifies that _on_mode_changed saves and restores the scroll position
-        by spying on setValue calls. A mode switch (AFM → Sheet) changes the
-        form height significantly, risking scrollbar value clamping; the restore
-        ensures users stay at their position even if the layout changes.
+        A real end-state assertion (scrollbar.value() == saved_value after the
+        switch) was tried and rejected: verified directly against this exact
+        window, offscreen Qt does not settle the rebuilt scrollbar's range
+        synchronously, so `_on_mode_changed`'s restore call clamps to 0 against
+        a transiently empty range and never recovers -- even though the code
+        does the restore in the documented, correct order (after rebuild()).
+        Perversely, moving the restore to *before* rebuild() (the exact bug
+        this test exists to catch) reads back as 50 in that same offscreen
+        run, because the old, still-large range is still in effect at the
+        moment of the call. A bare "does the final value match" assertion is
+        therefore backwards here, not just unstable -- so this pins down the
+        actual causal claim instead: the restore call happens, and it happens
+        strictly after rebuild() has run.
         """
         from unittest.mock import patch
 
@@ -388,23 +397,33 @@ class TestMainWindow:
         scrollbar.setValue(50)
         saved_value = scrollbar.value()
 
-        # Spy on setValue calls during the mode change
-        with patch.object(scrollbar, 'setValue', wraps=scrollbar.setValue) as mock_set:
+        order = []
+        real_rebuild = window.form.rebuild
+        real_set_value = scrollbar.setValue
+
+        def rebuild_spy():
+            order.append('rebuild')
+            return real_rebuild()
+
+        def set_value_spy(value):
+            if value == saved_value:
+                order.append('restore')
+            return real_set_value(value)
+
+        with patch.object(window.form, 'rebuild', side_effect=rebuild_spy), \
+             patch.object(scrollbar, 'setValue', side_effect=set_value_spy):
             # Change mode: AFM (with tip section) → Sheet (no tip section) = height change
             # Switch to sheetonsheet family first for greater height difference
             window.family_box.setCurrentIndex(1)  # Switch family to sheet-on-sheet
             qt_app.processEvents()
             window.mode_box.setCurrentIndex(0)  # Switch to sheetonsheet mode
 
-        # Verify that setValue was called during the rebuild with the saved value.
-        # The calls list includes: the initial scroll + the restore call.
-        # The restore call should have the saved_value as an argument.
-        restore_calls = [call for call in mock_set.call_args_list
-                         if call[0][0] == saved_value]
-        assert len(restore_calls) > 0, (
-            f"scrollbar.setValue({saved_value}) was never called during mode switch. "
-            f"All calls: {mock_set.call_args_list}"
-        )
+        assert 'restore' in order, (
+            f"scrollbar.setValue({saved_value}) was never called during mode "
+            f"switch. Calls: {order}")
+        assert 'rebuild' in order
+        assert order.index('restore') > order.index('rebuild'), (
+            f"the restore ran before rebuild(), which then wipes it: {order}")
 
 
 class TestSettingsTakeEffect:
@@ -459,6 +478,41 @@ class TestSettingsTakeEffect:
         bubble = section._bubbles.get('modules')
         assert bubble is not None
         assert 'no job scripts' in bubble.toolTip()
+
+    def test_applying_settings_moves_the_star_on_the_onscreen_config_form(
+            self, window):
+        """_apply_settings must fan the new settings out to window.form (the
+        actual on-screen config form), not only to window.settings -- driving
+        the check through SectionForm.set_settings directly (as
+        TestDependentFields and friends do) cannot catch the app wiring that
+        calls it being dropped."""
+        window.family_box.setCurrentIndex(1)   # sheet-on-sheet: has driving_spring
+        window.mode_box.setCurrentIndex(0)
+
+        label, _cell = window.form.sections['general']._rows['driving_spring']
+        assert '*' in label.text()   # sanity: virtual_atom is the default drive method
+
+        window.settings_form.sections['simulation'].editors['drive_method'].set_value('smd')
+        assert window._apply_settings() is None
+
+        label, _cell = window.form.sections['general']._rows['driving_spring']
+        assert '*' not in label.text()
+
+    def test_saving_settings_moves_the_star_on_the_onscreen_config_form(
+            self, window):
+        """Same claim as above, through _save_settings (the Settings tab's
+        'Save to workspace' button) instead of _apply_settings."""
+        window.family_box.setCurrentIndex(1)   # sheet-on-sheet: has driving_spring
+        window.mode_box.setCurrentIndex(0)
+
+        label, _cell = window.form.sections['general']._rows['driving_spring']
+        assert '*' in label.text()
+
+        window.settings_form.sections['simulation'].editors['drive_method'].set_value('smd')
+        window._save_settings()
+
+        label, _cell = window.form.sections['general']._rows['driving_spring']
+        assert '*' not in label.text()
 
     def test_reverting_settings_refreshes_self_settings_and_the_form(self, window):
         """_apply_settings and _save_settings both refresh self.settings (and
@@ -523,6 +577,63 @@ class TestRenderIgnoresNonBlockingRequired:
                             lambda request: generate_calls.append(request))
         window._generate()
         assert not generate_calls, 'Generate must still refuse the missing load'
+
+
+class TestValidateEnforcesBlockingRequired:
+    """`missing_required()` only reports which fields are empty and whether
+    they are supposed to block; nothing before this pinned down that
+    `_validate()` actually acts on that report -- `blocking` could be thrown
+    away entirely and every other assertion in this file would still pass."""
+
+    @pytest.fixture(name='window')
+    def _window(self, qt_app, workspace, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        from src.gui.app import MainWindow
+        window = MainWindow(workspace)
+        yield window
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
+
+    def test_an_empty_blocking_field_fails_validate(self, window):
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        window.form.sections['general'].editors['force'].set_value('')
+        window.form.commit()
+
+        assert not window._validate()
+
+    def test_enforce_required_false_lets_the_same_config_through(self, window):
+        """_render's own use of enforce_required=False (see
+        TestRenderIgnoresNonBlockingRequired) already covers this end to end;
+        pinned down here directly against _validate() so the two do not only
+        agree by accident."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        window.form.sections['general'].editors['force'].set_value('')
+        window.form.commit()
+
+        assert window._validate(enforce_required=False)
+
+    def test_the_issues_panel_names_the_empty_required_field(self, window):
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        window.form.sections['general'].editors['force'].set_value('')
+        window.form.commit()
+
+        window._validate()
+        issues_text = window.issues.toPlainText()
+        assert '[general] Normal load' in issues_text
+        assert 'required, currently empty' in issues_text
 
 
 class TestSubstrateSection:

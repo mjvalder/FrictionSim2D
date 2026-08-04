@@ -80,7 +80,12 @@ def test_materials_row_is_first_in_2d_section():
 
 def test_path_editor_directory_mode(qt_app):
     """set_directory_mode is what SectionForm flips as the sweep is ticked or
-    unticked -- the widget only remembers the flag and browses accordingly."""
+    unticked -- the widget only remembers the flag and browses accordingly.
+
+    This only pins the primitive's own get/set round trip -- it would still
+    pass if SectionForm never called it at all. See
+    test_ticking_the_sweep_switches_structure_and_potential_to_folder_pickers
+    below for the actual headline behaviour, driven through SectionForm."""
     from src.gui.schema.introspect import FieldKind, FieldSpec
     from src.gui.widgets.fields import build_editor
 
@@ -91,6 +96,78 @@ def test_path_editor_directory_mode(qt_app):
     assert ed._directory_mode
     ed.set_directory_mode(False)
     assert not ed._directory_mode
+
+
+def test_ticking_the_sweep_switches_structure_and_potential_to_folder_pickers(
+        qt_app, monkeypatch, tmp_path):
+    """Commit 3efbbea's headline behaviour: opening a config that actually
+    has a materials_list must switch the [2D] section's cif_path/pot_path
+    cells from single-file to directory pickers, and closing the sweep must
+    switch them back. Driven through SectionForm.load(), which is what calls
+    _apply_sweep_mode() -- exercising set_directory_mode() directly (as
+    test_path_editor_directory_mode does) cannot catch _apply_sweep_mode's
+    own loop being gutted. (It does *not*, on its own, catch load()'s call to
+    _apply_sweep_mode() being skipped: ticking/unticking here both go through
+    a real sweep_box.toggled transition, which independently re-applies
+    folder mode via _on_sweep_box_toggled -- see
+    test_reloading_an_already_ticked_sweep_still_reapplies_folder_mode for
+    the isolated case where the checkbox does not change and only load()'s
+    own call is left to do it.)"""
+    from src.gui.controllers.document import ConfigDocument
+    from src.gui.widgets.form import SectionForm
+
+    monkeypatch.chdir(REPO_ROOT)
+    listing = tmp_path / 'mats.txt'
+    listing.write_text('h-MoS2\n', encoding='utf-8')
+
+    document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+    document.set('2D', 'materials_list', str(listing))
+
+    form = SectionForm(document.section('2D'), document)
+    form.load()
+
+    assert form.editors['cif_path']._directory_mode is True
+    assert form.editors['pot_path']._directory_mode is True
+
+    document.set('2D', 'materials_list', None)
+    form.load()
+
+    assert form.editors['cif_path']._directory_mode is False
+    assert form.editors['pot_path']._directory_mode is False
+
+
+def test_reloading_an_already_ticked_sweep_still_reapplies_folder_mode(
+        qt_app, monkeypatch, tmp_path):
+    """load() calls _apply_sweep_mode() itself, not only in reaction to the
+    sweep checkbox's own toggled signal -- reloading a config whose sweep is
+    already ticked (re-opening the same file, or loading a second config that
+    is also swept) never re-ticks the checkbox, so `toggled` does not fire a
+    second time and _on_sweep_box_toggled's own call to _apply_sweep_mode()
+    is never reached. Only load()'s own explicit call can be what puts the
+    path editors back into folder mode here."""
+    from src.gui.controllers.document import ConfigDocument
+    from src.gui.widgets.form import SectionForm
+
+    monkeypatch.chdir(REPO_ROOT)
+    listing = tmp_path / 'mats.txt'
+    listing.write_text('h-MoS2\n', encoding='utf-8')
+
+    document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+    document.set('2D', 'materials_list', str(listing))
+
+    form = SectionForm(document.section('2D'), document)
+    form.load()
+    assert form.editors['cif_path']._directory_mode is True   # sanity
+
+    # Simulate folder mode having been lost some other way, with the sweep
+    # box left ticked -- so the next load() has no state change to toggle on.
+    form.editors['cif_path']._directory_mode = False
+    form.editors['pot_path']._directory_mode = False
+
+    form.load()
+
+    assert form.editors['cif_path']._directory_mode is True
+    assert form.editors['pot_path']._directory_mode is True
 
 
 class TestSweepIsReachable:
@@ -358,6 +435,24 @@ class TestMaterialListEditor:
         editor._scanned = None
         editor.rescan(*dirs, '.sw')
         assert editor.selected_names() == []
+
+    def test_set_document_names_is_the_rescan_fallback(self, editor, dirs, tmp_path):
+        """set_document_names records the floor rescan() falls back to when
+        the widget's own selection has gone empty for a reason other than the
+        user actually choosing that -- e.g. an intermediate scan of a
+        directory that briefly does not resolve (a moved share, mid-browse).
+        Unlike test_deselecting_everything_survives_a_rescan, the emptiness
+        here comes from a bad scan, not from the user clicking None, so
+        falling back to the document's own recorded list is the right call
+        here (and would be the wrong one there)."""
+        editor.set_selected(['h-MoS2'])          # touch the selection for real
+        editor.set_document_names(['h-MoS2', 't-MoS2'])
+
+        editor.rescan(tmp_path / 'nonexistent', dirs[1], '.sw')
+        assert editor.selected_names() == []      # sanity: the bad scan empties it
+
+        editor.rescan(*dirs, '.sw')
+        assert editor.selected_names() == ['h-MoS2', 't-MoS2']
 
     def test_rescan_is_noop_for_unchanged_triple(self, editor, dirs):
         """Re-scanning the same (structures, potentials, extension) triple --
@@ -726,7 +821,17 @@ class TestSweepRoundTrip:
         must not read as 'the user emptied the sweep' and overwrite a curated
         .txt with 'everything' or 'nothing' once the real directory is
         scanned. The document's own material list is the floor rescan()
-        falls back to."""
+        falls back to.
+
+        Both `editor.rescan()` calls below fire `changed`, which -- wired
+        through `_on_field_changed` -- commits the [2D] section after each
+        one, so `document.material_names()` is not an independent oracle: a
+        selection the bogus scan wiped would itself get committed (as
+        `write_material_names([])`, dropping `materials_list` from the
+        document entirely) and then read right back as '[] == []' against an
+        equally-wiped selection. Pinning both sides to the literal curated
+        names, and re-reading the .txt from disk, is what actually catches
+        that -- see the regression this guards in the commit history."""
         from src.gui.widgets.form import ConfigForm
 
         monkeypatch.chdir(REPO_ROOT)
@@ -745,5 +850,7 @@ class TestSweepRoundTrip:
         editor.rescan(tmp_path / 'nonexistent', potentials, '.sw')
         editor.rescan(structures, potentials, '.sw')
 
-        assert set(editor.selected_names()) == set(document.material_names())
+        assert set(editor.selected_names()) == {'h-MoS2', 't-MoS2'}
+        assert document.material_names() == ['h-MoS2', 't-MoS2']
+        assert set(listing.read_text().split()) == {'h-MoS2', 't-MoS2'}
         form.deleteLater()
