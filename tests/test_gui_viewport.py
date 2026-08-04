@@ -72,17 +72,21 @@ def live_panel(qt_app, monkeypatch):
     -- the framing decision and ``_last_cell`` bookkeeping under test live
     inside it, so a test using this fixture must exercise the real method.
     Only what would touch real OVITO/GL objects is stubbed: ``_ensure_widget``
-    (never creates a viewport widget) and ``build_data_collection`` (returns a
-    sentinel instead of a real ``DataCollection``). A stub pipeline is
-    preloaded so ``_update_pipeline`` always takes the "pipeline already
-    exists" branch -- the one this test cares about -- rather than the
-    pipeline-construction branch, which imports real ``ovito.pipeline``
-    classes.
+    (never creates a viewport widget), ``build_data_collection`` (returns a
+    sentinel instead of a real ``DataCollection``) and ``_install_data``
+    (assigns the sentinel onto the stub source instead of constructing a real
+    ``StaticSource``, which validates its ``data`` argument and would reject
+    the sentinel). A stub pipeline is preloaded so ``_update_pipeline`` always
+    takes the "pipeline already exists" branch -- the one this test cares
+    about -- rather than the pipeline-construction branch, which imports real
+    ``ovito.pipeline`` classes.
     """
     from src.gui.preview import viewport as vp
     monkeypatch.setattr(vp.ViewportPanel, '_ensure_widget', lambda self: None)
     monkeypatch.setattr(vp, 'build_data_collection',
                         lambda subset, colours=None, radii=None: object())
+    monkeypatch.setattr(vp, '_install_data',
+                        lambda pipeline, data: setattr(pipeline.source, 'data', data))
     instance = vp.ViewportPanel()
     instance._pipeline = _StubPipeline()
     return instance

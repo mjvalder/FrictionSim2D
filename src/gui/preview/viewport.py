@@ -36,6 +36,19 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['ViewportPanel', 'COLOUR_MODES', 'distinct_colour']
 
+
+def _install_data(pipeline, data) -> None:
+    """Put a new DataCollection on an existing pipeline.
+
+    Assigning ``pipeline.source.data`` looks right and even reads back, but
+    OVITO keeps serving the cached collection -- so colours, visibility and
+    geometry silently never change on screen. Replacing the source is what
+    actually invalidates. The Pipeline object itself is preserved, which is
+    what keeps the camera where the user put it.
+    """
+    from ovito.pipeline import StaticSource  # noqa: PLC0415
+    pipeline.source = StaticSource(data=data)
+
 #: Sentinel for "no cell has ever been framed yet", distinct from the
 #: legitimate ``None`` that :meth:`ViewportPanel._frame_and_refresh` records
 #: when the *framed* system itself has no cell (e.g. a multi-placement build
@@ -261,7 +274,7 @@ class ViewportPanel(QWidget):
                 # to an empty scene leaves the camera pointing at nothing.
                 self._frame_and_refresh()
             else:
-                self._pipeline.source.data = data
+                _install_data(self._pipeline, data)
                 if self._needs_framing():
                     self._frame_and_refresh()
                 else:
