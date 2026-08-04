@@ -49,7 +49,61 @@ Two families, each with a mode:
 | | PES scan | `run pes-sheet` |
 
 The mode changes which sections are offered — `[indent]` only for an indent run,
-`[pes]` only for a scan — and which run scripts the build produces.
+`[pes]` only for a scan — and which run scripts the build produces. The form
+keeps its scroll position across the switch, so re-picking a mode does not
+throw you back to the top of a long section list.
+
+## Units
+
+A couple of fields store a unit LAMMPS does not drive with directly — both
+say so in their ⓘ bubble (see [Fields](#fields)), but it is worth stating up
+front:
+
+- **Scan speed** is metres per second. The generated script divides it by
+  100 to get the Å/ps LAMMPS actually drives with: 100 m/s = 1 Å/ps.
+- **Driving spring** and **bond spring** (sheet-on-sheet) are newtons per
+  metre. The builder divides by 16.02 to get eV/Å² before writing it into
+  the LAMMPS input.
+
+Separately, `[tip] damping_ratio` now defaults to 0.0 (off) rather than
+0.0072. `dspring` — a raw viscous override — already takes precedence
+whenever it is set, so this only changes anything for a config that leaves
+`dspring` blank too.
+
+## Fields
+
+Every field's explanation lives behind an ⓘ button at the end of its row
+rather than a caption underneath it: hover or click it for the same
+information a caption used to carry — the override's help text, further
+detail, the list-sweep behaviour from
+[Which fields may hold a list](#which-fields-may-hold-a-list), and the
+default, when there is one.
+
+**Required fields** are marked with a star. Most are unconditionally
+required; the driving spring (`[general] driving_spring`, sheet-on-sheet) is
+starred only when Settings → Simulation → drive method is `virtual_atom`,
+since it does nothing otherwise. An empty starred field blocks Generate for
+both **force** (AFM) and **pressure** (sheet-on-sheet): an absent value
+renders an unparseable LAMMPS line (`variable ... equal None`), not a
+zero-load run. Pressure has a builder-level `[0.0]` fallback, but only on
+the `outer_loop` expansion paths — the default single-script path passes
+`general.pressure` straight into the template unguarded, so an absent
+pressure is exactly as broken there as an absent force. Both block.
+
+**Defaults** are shown two ways: a starred field with a default is
+pre-filled with it, so a required field is never confusingly blank; every
+other field with a default shows it as grey placeholder text (e.g.
+`default: 300.0`) instead of making you go find it. An enum with a default
+shows `(default: X)` as its unset entry, rather than a bare `(unset)`.
+
+**Tip position** (`[tip] tip_x`, `tip_y`, and their two offsets) stays out
+of the form until **Set tip position** is ticked. Unticking it removes
+those keys from the config entirely, not just blanks them. One consequence
+worth knowing: a hand-written config with an explicit `tip_x_offset = 0.0`
+loads as untouched — 0.0 is the offset's own default — so it ticks no gate
+and loses that key on the next save. This is a no-op semantically: the
+builder already treats an absent offset as 0.0, so nothing about how the
+config builds changes, only how it looks on disk.
 
 ## Reading the run count
 
@@ -86,13 +140,17 @@ becomes a separate simulation. Setting all of that by hand means keeping four
 things in sync — the `.txt`, and `{mat}` placeholders in `mat`, `cif_path` and
 `pot_path` — which is why the field was effectively undiscoverable before.
 
-Ticking **Sweep over many materials** in `[2D]` reveals two directory
-pickers, **Structures** and **Potentials**, alongside the existing `mat`,
-`cif_path` and `pot_path` fields — it does not replace or hide them.
-Committing a sweep rewrites those three to `{mat}` templates (see below).
-Pointing at the two directories mirrors a real run directory — a `cif/`
-beside a `sw_lammps/` — so it is usually just pointing at the pair that
-already exists.
+**Sweep over many materials** is the first field in `[2D]`. Ticking it
+switches the `cif_path` and `pot_path` cells from single-file pickers to
+directory pickers — their browse button and tooltip change to say so — and
+scans whatever the two cells hold. Pointing at the two directories mirrors
+a real run directory — a `cif/` beside a `sw_lammps/` — so it is usually
+just pointing at the pair that already exists.
+
+Committing a sweep rewrites `mat`, `cif_path` and `pot_path` to `{mat}`
+templates (see below); from then on the same two cells show that templated
+path rather than the bare directory, which is expected — it is what the
+config actually holds now.
 
 The material list is the **intersection** of the two directories: a material
 needs a structure file and a potential file to be usable. The potential file
@@ -121,19 +179,34 @@ and generates normally.
 
 ## Render
 
-**Render** builds the configured components, assembles them as the generated
-LAMMPS script specifies, and displays the result. It never minimises and never
-runs a melt-quench: if an amorphous structure is not already cached, the build
-refuses rather than spending minutes in `mpiexec` and writing into the packaged
-materials directory.
+**Render** (**Ctrl+R**) builds the configured components, assembles them as
+the generated LAMMPS script specifies, and displays the result. It never
+minimises and never runs a melt-quench: if an amorphous structure is not
+already cached, the build refuses rather than spending minutes in `mpiexec`
+and writing into the packaged materials directory.
 
 What you see is parsed out of the build's own outputs — the assembly script for
 the cell and component placement, `system.in.settings` for component membership
 and the element legend — so the preview cannot drift from what LAMMPS will read.
 
+A render updates the existing viewport in place rather than tearing it down
+and rebuilding it: the camera position, zoom, per-component visibility ticks
+and the selected colour mode all survive a re-render. Only the first render,
+a **Clear**, or a cell whose largest dimension has drifted more than 10% from
+the one last framed triggers a re-frame — anything smaller (recolouring,
+toggling a component, toggling the box) leaves the camera exactly where you
+put it. Validating the form no longer repaints every field on every pass,
+either — a field only gets restyled when its error state actually changes,
+so typing in one box does not flicker the rest of an already-validated
+section.
+
 The viewport controls:
 
-- **Colour** by atom type (with a legend) or by component;
+- **Colour** by **Element**, **LAMMPS type** or **Component**, each with a
+  swatch per type in the legend. LAMMPS type assigns every type its own
+  colour off a golden-angle hue walk, which is what keeps a component with
+  many LAMMPS types — an 18-type system, say — readable; colouring by
+  element runs out of visually distinct assignments much sooner;
 - **Box** toggles the simulation cell;
 - **Show** hides individual components. Sheets are what most often generate
   incorrectly, and you cannot inspect one through a substrate;
@@ -148,14 +221,28 @@ of closing the window. Repeating a render with unchanged inputs reuses the
 cached build; the cache key includes a fingerprint of the builder and template
 sources, so editing a template invalidates it.
 
+Editing the config after a render — without re-rendering — marks the preview
+stale: the viewport shows a "config changed since last render" badge, so an
+outdated preview does not pass for current.
+
 ## Generate
 
-**Generate** writes the full package — every config in the sweep, every layer —
-into the workspace, optionally with HPC job scripts. It asks for confirmation
-with the three counts first.
+**Generate** (**Ctrl+G**) writes the full package — every config in the
+sweep, every layer — into the workspace, optionally with HPC job scripts. It
+asks for confirmation with the three counts first, followed by the output
+directories it is about to create (up to 8, then "… and N more"). Any two
+that coincide are called out with a warning — that means two runs would
+overwrite each other, the exact hazard the
+[loopability rule](#which-fields-may-hold-a-list) exists to prevent.
 
 Unlike Render, this may generate a missing amorphous structure, because here it
 is what you asked for rather than a side effect of looking.
+
+Validation (not just the Generate confirmation) also warns — without
+blocking — when an AFM-like sheet's footprint is under twice the tip
+diameter: the same PBC self-interaction rule Render calls out on a built
+system, checked here against the configured `x`/`y`/`r` values before you
+have even rendered.
 
 ## Configs
 
@@ -173,6 +260,12 @@ Two limits worth knowing:
 Relative paths in a config are resolved against the config's own directory and
 its parents, so a config written for the project root still works when opened
 from elsewhere.
+
+Closing the window with an unsaved config or settings edit prompts
+**Save / Discard / Cancel** rather than discarding it silently. **Cancel**
+leaves the window open; so does a **Save** that is itself cancelled (e.g. the
+file-save dialog) or fails — the window only closes once nothing is left
+unsaved.
 
 ## Settings
 
@@ -205,6 +298,44 @@ since the keys are dump-phase names the user picks), and
 unrecognised hand-written value rather than silently snapping it to a choice —
 the model types the field as a plain string, so a config with something else
 in it round-trips unchanged.
+
+## LJ overrides
+
+The optional `[lj_override]` table (see [configuration.md](configuration.md))
+gets a dedicated editor. Each row's two elements are dropdowns pre-filled with whatever the
+*configured* simulation actually places — read from the CIF a component
+points at, or its `mat` text when the CIF cannot be read — so typing a pair
+no longer means guessing symbols right by hand. Typing something the scan
+never saw still works; the scan is advisory, not a validator.
+
+Two things get a non-blocking note in the row rather than a rejection:
+
+- a **duplicate pair** — `Mo-S` and `S-Mo` normalise to the same key, the
+  way `PotentialManager._pair_key` treats them, so the second occurrence is
+  flagged as a duplicate of the first;
+- an **unknown element** — one the scan never saw in this configuration, in
+  case it is a typo.
+
+**Shared overrides file** — `[lj_override] file = lj.txt` — covers a whole
+material sweep from one plain-text table instead of retyping the same pairs
+into every config:
+
+```
+# comment
+Mo-S 0.4124 3.75114
+S-S  0.1984 3.62368
+```
+
+One `El1-El2 epsilon sigma` line per pair (whitespace- or comma-separated),
+`#` starts a comment, blank lines are ignored. Inline rows already in the
+`.ini` win over the file's — a single run can still override one pair
+without touching the shared table. A missing or unreadable file is skipped
+silently, the same as a half-typed `materials_list` path. **Import…** pulls
+the file's rows into the table as ordinary editable rows for a quick look
+or a one-off tweak, but does not replace the file reference — it is still
+resolved independently when the config is expanded, and the merged table
+(inline rows plus whatever the file adds) is what gets inlined into every
+generated config.
 
 ## Not included
 
