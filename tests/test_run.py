@@ -11,6 +11,7 @@ from src.core.run import (
     collect_hpc_simulation_paths,
     expand_config_sweeps,
     output_dir_for,
+    resolve_lj_override_file,
     run_simulations,
 )
 
@@ -115,6 +116,76 @@ def test_expand_config_sweeps_expands_general_non_lammps_lists() -> None:
     assert temps == [300.0, 350.0]
     for conf in expanded:
         assert conf["general"]["scan_speed"] == [1.0, 2.0]
+
+
+def test_lj_file_merges_inline_wins(tmp_path: Path) -> None:
+    """A shared overrides file fills in pairs the section did not already
+    name; an inline entry with the same key is left untouched."""
+    lj_file = tmp_path / 'lj.txt'
+    lj_file.write_text('# master table\nMo-S  0.4124  3.75114\nS-S, 0.198, 3.62\n')
+    section = {'file': str(lj_file), 'Mo-S': [9.9, 9.9]}
+
+    out = resolve_lj_override_file(section, tmp_path)
+
+    assert out['Mo-S'] == [9.9, 9.9]          # inline wins
+    assert out['S-S'] == [0.198, 3.62]
+    assert 'file' not in out
+
+
+def test_lj_file_missing_is_skipped_silently(tmp_path: Path) -> None:
+    """An unreadable/missing shared file is advisory, not fatal -- same
+    tolerance as materials_list."""
+    section = {'file': str(tmp_path / 'does-not-exist.txt'), 'Mo-S': [1.0, 2.0]}
+
+    out = resolve_lj_override_file(section, tmp_path)
+
+    assert out == {'Mo-S': [1.0, 2.0]}
+
+
+def test_expansion_inlines_lj_file_on_the_no_sweep_path(tmp_path: Path) -> None:
+    """expand_config_sweeps' early `return [base_config]` -- taken whenever
+    nothing else is swept -- is the common case, so the [lj_override] file
+    has to be resolved there too, not only on the itertools.product path
+    below it."""
+    lj_file = tmp_path / 'lj.txt'
+    lj_file.write_text('Mo-S  0.4124  3.75114\n')
+    base_config = {
+        "general": {"temp": 300.0},
+        "2D": {
+            "mat": "h-MoS2", "pot_type": "sw",
+            "pot_path": "dummy.sw", "cif_path": "dummy.cif",
+            "x": 20.0, "y": 20.0,
+        },
+        "lj_override": {"file": str(lj_file)},
+    }
+
+    expanded = expand_config_sweeps(base_config, base_dir=tmp_path)
+
+    assert len(expanded) == 1
+    assert expanded[0]["lj_override"] == {"Mo-S": [0.4124, 3.75114]}
+    assert "file" not in expanded[0]["lj_override"]
+
+
+def test_expansion_inlines_lj_file_on_the_swept_path(tmp_path: Path) -> None:
+    """The same file resolution also has to apply to every config produced
+    by the itertools.product expansion, not just the no-sweep case."""
+    lj_file = tmp_path / 'lj.txt'
+    lj_file.write_text('Mo-S  0.4124  3.75114\n')
+    base_config = {
+        "general": {"temp": [300.0, 350.0]},
+        "2D": {
+            "mat": "h-MoS2", "pot_type": "sw",
+            "pot_path": "dummy.sw", "cif_path": "dummy.cif",
+            "x": 20.0, "y": 20.0,
+        },
+        "lj_override": {"file": str(lj_file)},
+    }
+
+    expanded = expand_config_sweeps(base_config, base_dir=tmp_path)
+
+    assert len(expanded) == 2
+    for conf in expanded:
+        assert conf["lj_override"] == {"Mo-S": [0.4124, 3.75114]}
 
 
 def test_collect_hpc_simulation_paths_detects_valid_inputs(tmp_path: Path) -> None:

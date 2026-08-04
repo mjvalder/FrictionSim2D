@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..controllers.document import ConfigDocument
+from ..controllers.elements import scan_config_elements
 from ..schema.introspect import FieldKind, FieldSpec, SectionSpec
 from ..schema.overrides import (
     ENABLED,
@@ -220,6 +221,8 @@ class SectionForm(QGroupBox):
         if section.key == 'lj_override':
             self.pair_editor = PairOverrideEditor(self.body)
             self.pair_editor.changed.connect(self._on_field_changed)
+            self.pair_editor.set_base_dir(document.base_dir)
+            self.pair_editor.set_known_elements(scan_config_elements(document))
             body_layout.addWidget(self.pair_editor)
 
         hidden = hidden_fields(document.model, section.key)
@@ -452,6 +455,9 @@ class SectionForm(QGroupBox):
             for key, editor in self.editors.items():
                 editor.set_value(self.document.get(self.section.key, key))
             if self.pair_editor is not None:
+                self.pair_editor.set_base_dir(self.document.base_dir)
+                self.pair_editor.set_known_elements(
+                    scan_config_elements(self.document))
                 self.pair_editor.set_value(
                     self.document.values.get(self.section.key) or {})
 
@@ -939,9 +945,25 @@ class ConfigForm(QWidget):
                     self.start_collapsed or _starts_collapsed(section, self.document))
                 form.set_collapsed(collapsed)
 
+            # A material change lives in [2D] (or another component section),
+            # not [lj_override] -- but it changes which elements the pair
+            # combos should offer, so every other section's commit refreshes
+            # them too. `lj_override` itself is excluded: its own edits do
+            # not change what elements the simulation places.
+            if 'lj_override' in self.sections:
+                for key, form in self.sections.items():
+                    if key != 'lj_override':
+                        form.changed.connect(self._refresh_lj_known_elements)
+
             self._layout.addStretch(1)
         finally:
             self.setUpdatesEnabled(True)
+
+    def _refresh_lj_known_elements(self) -> None:
+        section_form = self.sections.get('lj_override')
+        pair_editor = section_form.pair_editor if section_form else None
+        if pair_editor is not None:
+            pair_editor.set_known_elements(scan_config_elements(self.document))
 
     # ------------------------------------------------------------- collapsing
 

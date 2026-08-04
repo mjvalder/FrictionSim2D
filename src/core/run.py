@@ -190,6 +190,73 @@ def preflight_materials(materials: List[str],
     return result
 
 
+def resolve_lj_override_file(section: Dict[str, Any],
+                             base_dir: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """Merge a shared LJ-override table into an ``[lj_override]`` section.
+
+    ``file`` names a plain-text table of ``pair  epsilon  sigma`` rows (comma
+    or whitespace separated, ``#`` comments and blank lines allowed) meant to
+    cover a whole material sweep: its keys are element pairs, not materials,
+    so pairs whose elements are absent from a given run are simply unused.
+    Inline keys already in ``section`` win over the file, so a single run can
+    still override one pair without editing the shared table. The file is
+    resolved and the ``'file'`` key dropped either way -- the rest of the
+    pipeline (``PotentialManager.set_lj_overrides``) never sees it.
+
+    Missing or unreadable files are skipped silently, same as
+    ``materials_list``: a half-typed path is worked on more often than it is
+    finished, and this is advisory convenience, not a required input.
+    """
+    result = dict(section)
+    file_path = result.pop('file', None)
+    if not file_path:
+        return result
+
+    found = _find_existing(str(file_path), base_dir)
+    if found is None:
+        logger.warning("LJ override file '%s' not found; ignoring.", file_path)
+        return result
+
+    try:
+        text = found.read_text(encoding='utf-8')
+    except OSError as exc:
+        logger.warning("LJ override file '%s' could not be read (%s); ignoring.",
+                       file_path, exc)
+        return result
+
+    for raw_line in text.splitlines():
+        line = raw_line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        tokens = [tok for tok in re.split(r'[\s,]+', line) if tok]
+        if len(tokens) != 3:
+            continue
+        pair_key, epsilon, sigma = tokens
+        try:
+            values = [float(epsilon), float(sigma)]
+        except ValueError:
+            continue
+        # Inline wins: only fill in a pair the section did not already name.
+        result.setdefault(pair_key, values)
+
+    return result
+
+
+def _resolve_lj_override_files(configs: List[Dict[str, Any]],
+                               base_dir: Optional[Union[str, Path]]) -> List[Dict[str, Any]]:
+    """Apply `resolve_lj_override_file` to every config's [lj_override].
+
+    A shared list, not a per-config check for `'file' in section`: this has
+    to run on every config `expand_config_sweeps` returns, including the
+    no-sweep early return below, which is the common case.
+    """
+    for config in configs:
+        section = config.get('lj_override')
+        if isinstance(section, dict):
+            config['lj_override'] = resolve_lj_override_file(section, base_dir)
+    return configs
+
+
 def expand_config_sweeps(base_config: Dict[str, Any],
                          base_dir: Optional[Union[str, Path]] = None,
                          notes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
@@ -267,7 +334,7 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                 sweep_params[('general', key)] = val
 
     if not sweep_params:
-        return [base_config]
+        return _resolve_lj_override_files([base_config], base_dir)
 
     keys, values = zip(*sweep_params.items())
     permutations = [dict(zip(keys, v)) for v in itertools.product(*values)]
@@ -285,7 +352,7 @@ def expand_config_sweeps(base_config: Dict[str, Any],
 
         expanded_configs.append(new_conf)
 
-    return expanded_configs
+    return _resolve_lj_override_files(expanded_configs, base_dir)
 
 
 #: How a list value in each config key is interpreted. A parameter may only be
