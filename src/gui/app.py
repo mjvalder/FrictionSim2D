@@ -477,7 +477,9 @@ class MainWindow(QMainWindow):
 
         self.form.rebuild()
 
-        # Restore scroll position after rebuild
+        # Restore scroll position after rebuild. The scrollbar range settles on a
+        # deferred layout pass, so this restore relies on returning to the event
+        # loop before repaint.
         self.config_scroll.verticalScrollBar().setValue(scroll_value)
 
         self._refresh_counts()

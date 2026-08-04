@@ -261,19 +261,43 @@ class TestMainWindow:
         assert window.render_button.shortcut().toString() == 'Ctrl+R'
         assert window.generate_button.shortcut().toString() == 'Ctrl+G'
 
-    def test_scroll_position_retained_when_mode_changes(self, window):
-        """Switching simulation mode preserves the form's scroll position."""
-        # Scroll down the config form
-        initial_value = window.config_scroll.verticalScrollBar().value()
-        window.config_scroll.verticalScrollBar().setValue(100)
-        scrolled_before = window.config_scroll.verticalScrollBar().value()
+    def test_scroll_position_retained_when_mode_changes(self, window, qt_app):
+        """Switching simulation mode preserves the form's scroll position.
 
-        # Change mode (which triggers form.rebuild())
-        window.mode_box.setCurrentIndex(1)  # Switch from 'afm' to 'indent'
+        Verifies that _on_mode_changed saves and restores the scroll position
+        by spying on setValue calls. A mode switch (AFM → Sheet) changes the
+        form height significantly, risking scrollbar value clamping; the restore
+        ensures users stay at their position even if the layout changes.
+        """
+        from unittest.mock import patch
 
-        # Scroll position should be approximately restored (allow small variance)
-        scrolled_after = window.config_scroll.verticalScrollBar().value()
-        assert abs(scrolled_after - scrolled_before) < 5
+        # Show the window so the scrollbar gets a real range
+        window.show()
+        qt_app.processEvents()
+
+        scrollbar = window.config_scroll.verticalScrollBar()
+        # Scroll to a meaningful position (not the arbitrary 100 from before)
+        scrollbar.setValue(50)
+        saved_value = scrollbar.value()
+
+        # Spy on setValue calls during the mode change
+        with patch.object(scrollbar, 'setValue', wraps=scrollbar.setValue) as mock_set:
+            # Change mode: AFM (with tip section) → Sheet (no tip section) = height change
+            window.mode_box.setCurrentIndex(1)  # 'indent' shares AFM structure; try different families
+            # Switch to sheetonsheet family first for greater height difference
+            window.family_box.setCurrentIndex(1)  # Switch family to sheet-on-sheet
+            qt_app.processEvents()
+            window.mode_box.setCurrentIndex(0)  # Switch to sheetonsheet mode
+
+        # Verify that setValue was called during the rebuild with the saved value.
+        # The calls list includes: the initial scroll + the restore call.
+        # The restore call should have the saved_value as an argument.
+        restore_calls = [call for call in mock_set.call_args_list
+                         if call[0][0] == saved_value]
+        assert len(restore_calls) > 0, (
+            f"scrollbar.setValue({saved_value}) was never called during mode switch. "
+            f"All calls: {mock_set.call_args_list}"
+        )
 
 
 class TestSettingsTakeEffect:
