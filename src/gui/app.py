@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
-from ..core.run import hpc_generation_blocker
+from ..core.run import AFM_LIKE_MODELS, hpc_generation_blocker
 from .controllers.settings_document import SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
@@ -55,6 +55,26 @@ APP_NAME = 'FrictionSim2D'
 def plural(count: int, word: str) -> str:
     """'1 config', '2 configs'. Every word here pluralises with a bare s."""
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def _min_numeric(value: object) -> Optional[float]:
+    """The smallest numeric value in `value`, which may be a scalar, a sweep
+    list, absent (None), or a non-numeric placeholder.
+
+    Returns None -- "nothing usable" -- rather than raising or silently
+    dropping bad entries, so a precheck built on this can skip a field
+    entirely instead of half-trusting a list with one unresolved member.
+    """
+    items = value if isinstance(value, list) else [value]
+    if not items:
+        return None
+    numbers = []
+    for item in items:
+        try:
+            numbers.append(float(item))
+        except (TypeError, ValueError):
+            return None
+    return min(numbers)
 
 
 def _fold_controls(parent: QWidget, form: ConfigForm) -> QHBoxLayout:
@@ -445,6 +465,20 @@ class MainWindow(QMainWindow):
             lines += [n for n in expansion.notes
                      if n.startswith('[2D] materials_list')]
 
+        if self.document.model in AFM_LIKE_MODELS:
+            # Non-blocking: a footprint under 2x the tip diameter lets the
+            # tip interact with its own periodic image, but plenty of valid
+            # setups (small scans, deliberately, or values still being
+            # sized) fall in this range, so it is reported and not gated on.
+            sheet_x = _min_numeric(self.document.get('2D', 'x'))
+            sheet_y = _min_numeric(self.document.get('2D', 'y'))
+            tip_r = _min_numeric(self.document.get('tip', 'r'))
+            if sheet_x is not None and sheet_y is not None and tip_r is not None \
+                    and min(sheet_x, sheet_y) < 4 * tip_r:
+                lines.append(
+                    "[tip] sheet footprint < 2× tip diameter; the tip will "
+                    "interact with its own periodic image")
+
         if self.document.pending_template_issues:
             # Still worth saying the placeholders are pending even when the
             # count is not available; the count is the part at risk.
@@ -643,6 +677,21 @@ class MainWindow(QMainWindow):
             f"This will generate {summary.configs} config(s), {summary.builds} "
             f"build(s) and {summary.jobs} job(s) into:\n{self.workspace.runs_dir}"
         )
+
+        dirs = self.document.expansion_output_dirs()
+        if dirs:
+            shown = dirs[:8]
+            message += "\n\n" + "\n".join(str(d) for d in shown)
+            if len(dirs) > 8:
+                message += f"\n… and {len(dirs) - 8} more"
+
+            duplicates = sorted({str(d) for d in dirs if dirs.count(d) > 1})
+            if duplicates:
+                message += (
+                    "\n\nWARNING: these output directories are shared by more "
+                    "than one run and would overwrite each other:\n" +
+                    "\n".join(duplicates)
+                )
 
         # Say up front that the tick box will not produce anything, rather than
         # after the build has run.

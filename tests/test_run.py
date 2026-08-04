@@ -10,8 +10,37 @@ from src.core.run import (
     _build_hpc_manifest_entries,
     collect_hpc_simulation_paths,
     expand_config_sweeps,
+    output_dir_for,
     run_simulations,
 )
+
+
+def test_output_dir_for_matches_run_layout() -> None:
+    """A pure extraction of the naming block in run_simulations -- the path
+    it returns (relative to the simulation root) must match what the AFM
+    dispatch test above observes run_simulations actually build."""
+    run_dict = {
+        '2D': {'mat': 'h_MoS2', 'x': 100, 'y': 100},
+        'general': {'temp': 300},
+        'tip': {'mat': 'Si', 'amorph': 'a', 'r': 25},
+        'sub': {'mat': 'Si', 'amorph': 'a'},
+    }
+
+    path = output_dir_for(run_dict, 'afm')
+
+    assert str(path) == 'afm/h_MoS2/100x_100y/sub_aSi_tip_aSi_r25/K300'
+
+
+def test_output_dir_for_sheet_like_model_has_no_tip_or_sub_segment() -> None:
+    """Sheet-on-sheet layouts skip the tip/substrate naming segment entirely."""
+    run_dict = {
+        '2D': {'mat': 'h_MoS2', 'x': 100, 'y': 100},
+        'general': {'temp': 300},
+    }
+
+    path = output_dir_for(run_dict, 'sheetonsheet')
+
+    assert str(path) == 'sheetonsheet/h_MoS2/100x_100y/K300'
 
 
 def test_expand_config_sweeps_does_not_expand_2d_layers() -> None:

@@ -215,6 +215,52 @@ class TestExpansion:
         assert document.expansion().configs == 2
 
 
+class TestExpansionOutputDirs:
+    """The Generate confirmation previews these dirs and flags collisions
+    among them -- the exact hazard the loopability rule exists to prevent."""
+
+    def test_one_dir_per_config_matching_the_real_layout(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        dirs = document.expansion_output_dirs()
+        assert len(dirs) == document.expansion().configs == 1
+        assert str(dirs[0]) == 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300'
+
+    def test_a_sweep_gives_one_distinct_dir_per_member(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.set('general', 'temp', [300, 500])
+        dirs = document.expansion_output_dirs()
+        assert len(dirs) == 2
+        assert len(set(dirs)) == 2
+
+    def test_temperatures_truncating_to_the_same_kelvin_collide(self, monkeypatch):
+        """K{int(temp)} truncates: a sweep of 300.1 and 300.9 both round down
+        to K300 and would build into the very same directory, silently
+        overwriting each other -- despite `temp` being a supported sweep
+        field. This is exactly the collision the Generate confirmation must
+        be able to surface."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.set('general', 'temp', [300.1, 300.9])
+        dirs = document.expansion_output_dirs()
+        assert len(dirs) == 2
+        assert len(set(dirs)) == 1
+
+    def test_a_config_that_cannot_expand_reports_no_dirs(self, monkeypatch):
+        """expand_config_sweeps raises when a materials_list resolves to
+        materials none of which are usable (see its docstring); that is a
+        config mid-edit, not a crash, so this must swallow it rather than
+        propagate -- exactly like the exception path expansion() itself
+        already tolerates via _refresh_counts' try/except."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        monkeypatch.setattr(
+            'src.gui.controllers.document.expand_config_sweeps',
+            lambda *a, **k: (_ for _ in ()).throw(ValueError('no usable materials')))
+        assert document.expansion_output_dirs() == []
+
+
 class TestLoopability:
     """A list is only a sweep when it changes the output directory name."""
 

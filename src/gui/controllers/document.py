@@ -27,7 +27,8 @@ from ...core.config import (
 from ...core.config_io import write_config
 from ...core.config_validation import ConfigValidation, validate_config
 from ...core.run import (
-    ExpansionSummary, count_expansion, loopability, read_material_list,
+    ExpansionSummary, count_expansion, expand_config_sweeps, loopability,
+    output_dir_for, read_material_list,
 )
 from ..schema.introspect import SectionSpec, describe_model
 from ..schema.overrides import overrides_for
@@ -381,6 +382,24 @@ class ConfigDocument:
         """How many configs, builds and jobs this would generate."""
         return count_expansion(copy.deepcopy(self.values), self.model,
                                base_dir=self.base_dir)
+
+    def expansion_output_dirs(self) -> List[Path]:
+        """Output directory each expanded config would build into.
+
+        Uses the same expansion `expansion()` counts, mapped through the
+        same `output_dir_for` a real run would use, so what the Generate
+        confirmation lists matches what generation will actually produce --
+        including duplicates, which are the exact hazard the "list is not
+        sweepable" rule exists to prevent. A config mid-edit can fail to
+        expand at all; that is advisory information, not a validation
+        error, so any exception yields an empty list rather than raising.
+        """
+        try:
+            expanded = expand_config_sweeps(
+                copy.deepcopy(self.values), self.base_dir)
+            return [output_dir_for(run_dict, self.model) for run_dict in expanded]
+        except Exception:  # pylint: disable=broad-except
+            return []
 
     def loopability_of(self, section: str, key: str) -> str:
         """How a list in this field would be interpreted.

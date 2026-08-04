@@ -675,6 +675,41 @@ def _select_sheet_builder_cls(model, config_obj):
     return SheetOnSheetSimulation
 
 
+def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
+    """The output directory a run config builds into, relative to the
+    simulation root.
+
+    Extracted verbatim from the naming block in `run_simulations` so callers
+    that never build anything -- the GUI's Generate preview, in particular --
+    can predict a run's directory (and so spot sweep members that would
+    collide) without duplicating the layout rules here.
+    """
+    mat = run_dict['2D'].get('mat', 'unknown')
+    x = run_dict['2D'].get('x', 100)
+    y = run_dict['2D'].get('y', 100)
+    temp = run_dict['general'].get('temp', 300)
+    size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
+
+    top_dir = model  # 'afm' | 'sheetonsheet' | 'pes_tip' | 'pes_sheet'
+    if model in AFM_LIKE_MODELS:
+        tip_mat = run_dict.get('tip', {}).get('mat', 'Si')
+        tip_amorph = run_dict.get('tip', {}).get('amorph', 'c')
+        tip_r = run_dict.get('tip', {}).get('r', 25)
+        sub_mat = run_dict.get('sub', {}).get('mat', 'Si')
+        sub_amorph = run_dict.get('sub', {}).get('amorph', 'a')
+
+        sub_str = f"{sub_amorph}{sub_mat}" if sub_amorph == 'a' else sub_mat
+        tip_str = f"{tip_amorph}{tip_mat}" if tip_amorph == 'a' else tip_mat
+
+        return (
+            Path(top_dir) / mat / size_token /
+            f"sub_{sub_str}_tip_{tip_str}_r{int(tip_r)}" /
+            f"K{int(temp)}"
+        )
+
+    return Path(top_dir) / mat / size_token / f"K{int(temp)}"
+
+
 def run_simulations(
     config_file: str,
     model: str,
@@ -747,33 +782,7 @@ def run_simulations(
     for run_dict in configs_to_run:
         run_dict['settings'] = defaults.model_dump()
 
-        mat = run_dict['2D'].get('mat', 'unknown')
-        x = run_dict['2D'].get('x', 100)
-        y = run_dict['2D'].get('y', 100)
-        temp = run_dict['general'].get('temp', 300)
-        size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
-
-        top_dir = model  # 'afm' | 'sheetonsheet' | 'pes_tip' | 'pes_sheet'
-        if model in AFM_LIKE_MODELS:
-            tip_mat = run_dict.get('tip', {}).get('mat', 'Si')
-            tip_amorph = run_dict.get('tip', {}).get('amorph', 'c')
-            tip_r = run_dict.get('tip', {}).get('r', 25)
-            sub_mat = run_dict.get('sub', {}).get('mat', 'Si')
-            sub_amorph = run_dict.get('sub', {}).get('amorph', 'a')
-
-            sub_str = f"{sub_amorph}{sub_mat}" if sub_amorph == 'a' else sub_mat
-            tip_str = f"{tip_amorph}{tip_mat}" if tip_amorph == 'a' else tip_mat
-
-            output_dir = (
-                simulation_root / top_dir / mat / size_token /
-                f"sub_{sub_str}_tip_{tip_str}_r{int(tip_r)}" /
-                f"K{int(temp)}"
-            )
-        else:
-            output_dir = (
-                simulation_root / top_dir / mat / size_token /
-                f"K{int(temp)}"
-            )
+        output_dir = simulation_root / output_dir_for(run_dict, model)
 
         prov_dir = output_dir / 'provenance'
         prov_dir.mkdir(parents=True, exist_ok=True)

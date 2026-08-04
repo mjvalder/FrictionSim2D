@@ -210,7 +210,13 @@ class TestMainWindow:
         window.form.document = window.document
         window.form.rebuild()
         assert window._validate()
-        assert 'valid' in window.issues.toPlainText()
+        # indent_config.ini's 60x60 sheet against a r=25 tip is under the
+        # 2x-diameter sizing threshold (D12), so it now also reports the
+        # non-blocking tip-sizing warning -- see
+        # test_tip_sizing_warning_is_non_blocking, which pins that behaviour
+        # down explicitly. It stays non-blocking, so no error lines appear.
+        assert 'required' not in window.issues.toPlainText()
+        assert 'Input should be' not in window.issues.toPlainText()
 
     def test_validation_reports_and_decorates_a_bad_field(self, window):
         window.document = ConfigDocument.from_file(
@@ -236,6 +242,82 @@ class TestMainWindow:
         window.form.sections['tip'].editors['r'].set_value([10, 20])
         window._validate()
         assert 'overwrite each other' in window.issues.toPlainText()
+
+    def test_tip_sizing_warning(self, window):
+        """A footprint under 2x the tip diameter lets the tip interact with
+        its own periodic image (D12) -- non-blocking, but worth flagging.
+        Set through the editors (as a user would), not the document directly:
+        `_validate` calls `form.commit()` first, which would otherwise write
+        the still-blank editor values straight back over a direct set()."""
+        window.form.sections['2D'].editors['x'].set_value(40.0)
+        window.form.sections['2D'].editors['y'].set_value(40.0)
+        window.form.sections['tip'].editors['r'].set_value(25.0)
+        window._validate()
+        assert '2× tip diameter' in window.issues.toPlainText()
+
+    def test_tip_sizing_warning_is_non_blocking(self, window):
+        """The precheck must not make an otherwise-valid config invalid."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+        # indent_config.ini already has x=60, y=60, r=25 -- under the 2x
+        # threshold -- so the warning fires without further edits.
+        assert window._validate()
+        assert '2× tip diameter' in window.issues.toPlainText()
+
+    def test_generate_confirmation_lists_the_output_dir(self, window, monkeypatch):
+        """The Generate confirmation must preview the directory(ies) it is
+        about to create -- and, with nothing colliding, no warning."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        captured = {}
+
+        def fake_question(*args, **_kwargs):
+            captured['message'] = args[2]
+            return QMessageBox.No  # abort before generator.start actually runs
+
+        monkeypatch.setattr(QMessageBox, 'question', fake_question)
+        window._generate()
+
+        message = captured['message']
+        assert 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300' in message
+        assert 'WARNING' not in message
+
+    def test_generate_confirmation_flags_duplicate_output_dirs(self, window, monkeypatch):
+        """When two members of a sweep would build into the same directory --
+        the exact hazard the loopability rule exists to prevent, e.g. a
+        temperature sweep whose members both truncate to the same K{int(temp)}
+        -- the confirmation must call it out. Exercised directly against
+        `expansion_output_dirs` (already covered producing a real collision
+        for a truncating temperature sweep in test_gui_document.py) so this
+        test is about `_generate`'s handling of that list, not about
+        reproducing the collision through form/pydantic validation, which a
+        temp sweep does not pass (`temp` is a scalar field on the model)."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        dup = Path('indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300')
+        monkeypatch.setattr(window.document, 'expansion_output_dirs', lambda: [dup, dup])
+
+        captured = {}
+
+        def fake_question(*args, **_kwargs):
+            captured['message'] = args[2]
+            return QMessageBox.No
+
+        monkeypatch.setattr(QMessageBox, 'question', fake_question)
+        window._generate()
+
+        message = captured['message']
+        assert message.count(str(dup)) >= 2
+        assert 'WARNING' in message
+        assert str(dup) in message.split('WARNING', 1)[1]
 
     def test_saving_produces_a_config_the_cli_can_read(self, window, tmp_path):
         from src.core.config import parse_config
