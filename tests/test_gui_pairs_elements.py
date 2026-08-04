@@ -61,6 +61,20 @@ def test_scan_elements_across_material_sweep(tmp_path):
     assert set(scan_config_elements(doc)) == {'Fe', 'Cu'}
 
 
+def test_scan_elements_mat_fallback_reachable_without_cif_path():
+    """A missing/blank cif_path must not skip the section outright -- the
+    third-tier `mat`-token fallback has to run even when there is no CIF to
+    even attempt reading."""
+    from src.gui.controllers.elements import scan_config_elements
+
+    doc = ConfigDocument.blank('sheetonsheet')
+    doc.set('2D', 'mat', 'h_MoS2')
+    doc.set('2D', 'cif_path', None)
+    doc.source_path = Path('.').resolve() / 'x.ini'
+
+    assert set(scan_config_elements(doc)) == {'Mo', 'S'}
+
+
 def test_scan_elements_falls_back_to_mat_text_when_cif_is_unreadable():
     from src.gui.controllers.elements import scan_config_elements
 
@@ -151,3 +165,44 @@ class TestPairOverrideEditorElements:
         editor._import_file()  # pylint: disable=protected-access
 
         assert editor.value()['Mo-S'] == [0.4124, 3.75114]
+
+
+# ------------------------------------------------------------ live refresh
+
+
+def test_known_elements_refresh_is_not_per_keystroke(qt_app, monkeypatch):
+    """`_wire_material_sweep`'s docstring (form.py) explains why a
+    disk-touching rescan must never be wired through `changed` --
+    `_on_field_changed` fires it on every keystroke (textEdited), not just a
+    settled edit. The lj_override known-elements refresh reads CIFs off disk
+    the same way `scan_config_elements` does, so it has to obey the same
+    rule: only `editingFinished` (or a section toggle, or a materials-list
+    change) may trigger it, never a keystroke."""
+    import src.gui.widgets.form as form_module
+
+    calls = []
+
+    def fake_scan(_document):
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(form_module, 'scan_config_elements', fake_scan)
+
+    doc = ConfigDocument.blank('afm')
+    cform = form_module.ConfigForm(doc)
+    try:
+        calls.clear()  # ignore whatever construction itself scanned
+
+        mat_edit = cform.sections['2D'].editors['mat'].edit
+        for ch in 'h_MoS2':
+            mat_edit.setText(mat_edit.text() + ch)
+            mat_edit.textEdited.emit(mat_edit.text())
+
+        assert calls == [], (
+            f"expected zero scans from {len('h_MoS2')} keystrokes, got {len(calls)}")
+
+        mat_edit.editingFinished.emit()
+
+        assert len(calls) == 1
+    finally:
+        cform.deleteLater()

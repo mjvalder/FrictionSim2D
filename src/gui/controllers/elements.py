@@ -8,13 +8,14 @@ the pair column into dropdowns and to flag a pair scanning never saw.
 
 Scanning is advisory, never authoritative: an unreadable or missing CIF is
 skipped rather than raised, the same way an in-progress edit leaves most of
-the form incomplete. Qt-free, so it is exercised directly, without a display.
+the form incomplete. Qt-free, so it is exercised directly, without a display
+-- callers decide when it is cheap enough to run (see `gui.widgets.form`,
+which only calls this on a settled edit, never per keystroke).
 
-Deliberately does not import ``ase.io`` (the ASE CIF reader `cifread` in
-`core.utils` uses): a lightweight text scan for element symbols does not need
-a full structure parse, and keeping this Qt-free-and-light means it can run
-on every keystroke without pulling in ASE's IO stack. `ase.data.atomic_numbers`
-is reused for the known-symbols table (already a project dependency; see
+Parses CIF text directly with a handful of regexes rather than going through
+`cifread` in `core.utils` (the ASE CIF reader): a scan for element symbols
+does not need a full structure parse. `ase.data.atomic_numbers` is reused for
+the known-symbols table (already a project dependency; see
 `core.potential_manager`), not a new one.
 """
 
@@ -62,11 +63,17 @@ def scan_config_elements(document: Any) -> List[str]:
         section_values = document.values.get(section_key) or {}
         cif_template = section_values.get('cif_path')
         mat_template = section_values.get('mat')
-        if not isinstance(cif_template, str) or not cif_template:
+        if not isinstance(cif_template, str):
+            cif_template = ''
+        # A missing/blank cif_path must not skip the section outright: the
+        # third-tier `mat`-token fallback (_scan_component, below) can still
+        # find something in `mat` on its own, and only continue-ing here
+        # when *both* are unusable kept that fallback unreachable.
+        if not cif_template and not isinstance(mat_template, str):
             continue
 
         materials: List[str] = []
-        if section_key == '2D' and '{mat}' in cif_template:
+        if section_key == '2D' and cif_template and '{mat}' in cif_template:
             materials = document.material_names()
 
         if materials:

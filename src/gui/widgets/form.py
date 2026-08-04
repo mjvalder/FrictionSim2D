@@ -945,19 +945,44 @@ class ConfigForm(QWidget):
                     self.start_collapsed or _starts_collapsed(section, self.document))
                 form.set_collapsed(collapsed)
 
-            # A material change lives in [2D] (or another component section),
-            # not [lj_override] -- but it changes which elements the pair
-            # combos should offer, so every other section's commit refreshes
-            # them too. `lj_override` itself is excluded: its own edits do
-            # not change what elements the simulation places.
-            if 'lj_override' in self.sections:
-                for key, form in self.sections.items():
-                    if key != 'lj_override':
-                        form.changed.connect(self._refresh_lj_known_elements)
+            # A material change lives in a component section, not
+            # [lj_override], but it changes which elements the pair combos
+            # should offer. This must NOT go through `changed` -- that is
+            # `_on_field_changed`'s per-keystroke commit signal (see
+            # `_wire_material_sweep`'s docstring above for the same hazard
+            # with rescan()), and scanning re-reads CIFs off disk. So this
+            # listens for the same kind of settled-edit points rescan()
+            # itself uses: `editingFinished` on the mat/cif_path text
+            # editors, a materials-list change (MaterialListEditor's own
+            # `changed`, emitted only from rescan()/a checkbox click, never a
+            # keystroke), and a section being switched on or off.
+            self._wire_lj_known_elements_refresh()
 
             self._layout.addStretch(1)
         finally:
             self.setUpdatesEnabled(True)
+
+    #: Sections `scan_config_elements` actually reads; only these need to
+    #: trigger a refresh.
+    _LJ_ELEMENT_SECTIONS = ('2D', '2D-2', 'tip', 'sub', 'flake')
+
+    def _wire_lj_known_elements_refresh(self) -> None:
+        if 'lj_override' not in self.sections:
+            return
+        for key in self._LJ_ELEMENT_SECTIONS:
+            form = self.sections.get(key)
+            if form is None:
+                continue
+            for field_key in ('mat', 'cif_path'):
+                edit_widget = getattr(form.editors.get(field_key), 'edit', None)
+                if edit_widget is not None:
+                    edit_widget.editingFinished.connect(
+                        self._refresh_lj_known_elements)
+            material_editor = form.editors.get('materials_list')
+            if material_editor is not None:
+                material_editor.changed.connect(self._refresh_lj_known_elements)
+            form.section_toggled.connect(
+                lambda _key, _enabled: self._refresh_lj_known_elements())
 
     def _refresh_lj_known_elements(self) -> None:
         section_form = self.sections.get('lj_override')
