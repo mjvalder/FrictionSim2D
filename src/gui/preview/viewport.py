@@ -133,6 +133,20 @@ class ViewportPanel(QWidget):
         self.warning.hide()
         layout.addWidget(self.warning)
 
+        # Eager, not lazy: creating the GL widget on first render means
+        # creating it after the window is already shown, and adding a
+        # QOpenGLWidget to an already-shown top-level window forces Qt to
+        # recreate the native window -- on X11 that unmaps and remaps it, so
+        # the whole app visibly closes and reopens. Building it here, during
+        # construction (always before ``window.show()``), avoids that. A
+        # machine with no ovito, or a broken GL stack, must still be able to
+        # start the app -- fall back to the placeholder rather than raising.
+        try:
+            self._ensure_widget()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("Could not create the viewport widget eagerly; "
+                              "falling back to the placeholder")
+
     # -------------------------------------------------------------- controls
 
     def _build_controls(self) -> QHBoxLayout:
@@ -201,6 +215,13 @@ class ViewportPanel(QWidget):
                             for c in system.components}
         if not same_names:
             self._rebuild_component_toggles()
+        # The placeholder is what the user sees until the first real render;
+        # hidden here rather than in _ensure_widget, which now runs eagerly
+        # during __init__ -- long before there is anything to show.
+        # _update_pipeline's except-clause re-shows it if display fails.
+        self.placeholder.hide()
+        if self._widget is not None:
+            self._widget.show()
         self._update_pipeline()
         self._update_legend()
         self._update_warnings()
@@ -210,6 +231,8 @@ class ViewportPanel(QWidget):
         self._framed = False
         self._last_cell = _UNFRAMED
         self._teardown_view()
+        if self._widget is not None:
+            self._widget.hide()
         self.placeholder.show()
         self.legend.setText('')
         self.warning.hide()
@@ -286,7 +309,18 @@ class ViewportPanel(QWidget):
             self.placeholder.show()
 
     def _ensure_widget(self) -> None:
-        """Create the ovito viewport widget once."""
+        """Create the ovito viewport widget once.
+
+        Called eagerly from ``__init__`` (before the window is ever shown)
+        as well as defensively from :meth:`_update_pipeline` (idempotent
+        no-op if that already succeeded). Starts out hidden: ``_view_container``
+        is a plain ``QVBoxLayout``, not a stacked layout, so the placeholder
+        and the GL widget would otherwise both take space and both be
+        visible at once. The placeholder stays what the user sees until
+        :meth:`show_system` swaps the two -- hiding it and showing the
+        widget -- so it remains on top until the first real render even
+        though the GL widget underneath it already exists.
+        """
         if self._widget is not None:
             return
 
@@ -299,8 +333,8 @@ class ViewportPanel(QWidget):
         self._viewport.camera_dir = (-2.0, 1.0, -0.6)
         self._widget = self._viewport.create_qt_widget(parent=self)
         self._widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.placeholder.hide()
         self._view_container.addWidget(self._widget, 1)
+        self._widget.hide()
 
     def _teardown_view(self) -> None:
         if self._pipeline is not None:

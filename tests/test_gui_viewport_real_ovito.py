@@ -20,7 +20,7 @@ pytest.importorskip('PySide6')
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMainWindow  # noqa: E402
 
 from src.gui.preview.assemble import (  # noqa: E402
     AssembledSystem,
@@ -84,3 +84,78 @@ def test_show_system_twice_updates_the_live_pipeline(qt_app):
     panel.show_system(_system(2))
     panel.show_system(_system(5))
     assert panel._pipeline.compute().particles.count == 5
+
+
+# --------------------------------------------------------------------- task 2
+# _ensure_widget built the ovito GL widget lazily, on the first render --
+# always after the window is already shown. Adding a QOpenGLWidget to an
+# already-shown top-level window forces Qt/X11 to recreate the native
+# window, which unmaps and remaps it: the whole app visibly closes and
+# reopens.
+
+
+def test_widget_is_created_eagerly_during_construction(qt_app):
+    """The GL widget must exist right after ``__init__`` -- before any system
+    is ever shown -- so that it never has to be added to a window that is
+    already visible. Creating it lazily (on first render, which always
+    happens after ``window.show()``) is exactly the old bug."""
+    from src.gui.preview.viewport import ViewportPanel
+
+    panel = ViewportPanel()
+    assert panel._widget is not None
+
+
+def test_native_window_is_not_recreated_by_the_first_render(qt_app):
+    from src.gui.preview.viewport import ViewportPanel
+
+    win = QMainWindow()
+    panel = ViewportPanel(win)
+    win.setCentralWidget(panel)
+    win.resize(800, 600)
+    win.show()
+    qt_app.processEvents()
+
+    before = int(win.winId())
+    panel.show_system(_system(4))
+    qt_app.processEvents()
+
+    assert int(win.winId()) == before, "the GL widget recreated the native window"
+
+
+def test_panel_constructs_when_ovito_is_unavailable(qt_app, monkeypatch):
+    """The app must never fail to *start* because eager widget creation
+    couldn't import ovito or initialise a GL context -- a headless machine or
+    a broken GL stack must fall back to the placeholder instead."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == 'ovito.vis' or name.startswith('ovito.vis.'):
+            raise ImportError("simulated: no ovito on this machine")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', _fake_import)
+
+    from src.gui.preview.viewport import ViewportPanel
+
+    panel = ViewportPanel()  # must not raise
+    panel.show()
+    qt_app.processEvents()
+    assert panel._widget is None
+    assert panel.placeholder.isVisible()
+
+
+def test_placeholder_hides_only_once_a_system_is_shown(qt_app):
+    from src.gui.preview.viewport import ViewportPanel
+
+    panel = ViewportPanel()
+    panel.show()
+    qt_app.processEvents()
+    # The widget is created eagerly, but the placeholder must still be what
+    # the user sees until the first real render.
+    assert panel.placeholder.isVisible()
+    panel.show_system(_system(3))
+    assert not panel.placeholder.isVisible()
+    panel.clear()
+    assert panel.placeholder.isVisible()
