@@ -350,12 +350,57 @@ class MaterialListEditor(FieldEditor):
         list the user just loaded is a deliberate choice, not "nothing
         decided yet", so a later rescan of the structure/potential
         directories must not silently widen it back to "everything usable".
+
+        If the listing is currently empty -- no structure/potential
+        directory has resolved to anything yet, whatever the reason -- there
+        is nothing real in `self.listing` to tick against: `set_selected`
+        would silently no-op and the summary would read "0 of 0 usable", as
+        if pointing the picker at the file had done nothing at all. Showing
+        the loaded names as unusable-until-scanned placeholders instead
+        makes that legible without pretending any of them have actually been
+        checked against a directory -- `has_usable_names()` still reports
+        False for every one of them, so the orphan-scan guard in
+        `_commit_material_sweep` is untouched: there is still nothing here a
+        commit could destroy.
         """
         self._selection_touched = True
         self.set_document_names(names)
-        self.set_selected(names)
-        self._rescan_summary()
+        if self.listing.count() == 0:
+            self._seed_placeholder_listing(names)
+        else:
+            self.set_selected(names)
+            self._rescan_summary()
         self.changed.emit()
+
+    def _seed_placeholder_listing(self, names: List[str]) -> None:
+        """Show `names` as loaded-but-unchecked, before any directory scan.
+
+        Every item is unusable (not `Qt.ItemIsUserCheckable`), exactly like a
+        real orphan from `scan_material_directories` -- `has_usable_names()`
+        must keep reporting False here, the same as an empty listing would,
+        since nothing has actually been verified against a structure or
+        potential directory yet. A real `rescan()` later discards these
+        placeholders outright (it clears and rebuilds the listing from
+        `scan_material_directories`'s candidates), so this state is only ever
+        seen between loading a `.txt` and choosing both directories.
+        """
+        self.listing.blockSignals(True)
+        try:
+            self.listing.clear()
+            for name in names:
+                item = QListWidgetItem(
+                    f"{name}   (choose both directories to check this)",
+                    self.listing)
+                item.setData(Qt.UserRole, name)
+                item.setFlags(item.flags() & ~Qt.ItemIsUserCheckable
+                              & ~Qt.ItemIsEnabled)
+                item.setCheckState(Qt.Unchecked)
+        finally:
+            self.listing.blockSignals(False)
+        self.extension_label.setText('')
+        self.summary.setText(
+            f"{len(names)} material(s) loaded from the list -- choose "
+            f"both directories to check which are usable.")
 
     # ----------------------------------------------------------------- value
 

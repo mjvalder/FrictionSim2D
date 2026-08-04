@@ -179,6 +179,102 @@ class TestMaterialsPathPicker:
         assert document.get('2D', 'materials_list') == str(curated)
         form.deleteLater()
 
+    def test_ticking_after_loading_a_curated_file_rewrites_that_file(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINDING 1: write_material_names used to always retarget to
+        `{stem}_materials.txt`, ignoring what `materials_list` already
+        pointed at -- so browsing to a curated file and then changing a
+        tick silently abandoned it (stale contents) in favour of a
+        freshly created default file. Ticking must rewrite the SAME file
+        the picker was pointed at.
+
+        The picker is pointed at the curated file *before* any directory is
+        scanned -- the realistic order for "I already have a list, let me
+        point the GUI at it" -- so no stem-based default is ever created
+        along the way for the fix to coincidentally paper over."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        curated = tmp_path / 'my_curated_materials.txt'
+        curated.write_text('h-MoS2\nb-AlSb\nt-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+        assert document.get('2D', 'materials_list') == str(curated)
+
+        editor.rescan(structures, potentials, '.sw')
+        assert set(editor.selected_names()) == {'h-MoS2', 'b-AlSb', 't-MoS2'}
+        # The rescan's own auto-commit must not have retargeted materials_list
+        # either: the curated names and the document's were already equal.
+        assert document.get('2D', 'materials_list') == str(curated)
+
+        # A real click, not a same-commit no-op: narrow the selection.
+        editor.set_selected(['h-MoS2', 'b-AlSb'])
+        section.commit()
+
+        assert set(curated.read_text().split()) == {'h-MoS2', 'b-AlSb'}
+
+        stored = document.get('2D', 'materials_list')
+        resolved = Path(stored)
+        if not resolved.is_absolute():
+            resolved = document.base_dir / resolved
+        assert resolved.resolve() == curated.resolve()
+
+        default_target = tmp_path / 'run_materials.txt'
+        assert not default_target.exists()
+        form.deleteLater()
+
+    def test_pointing_at_a_curated_file_before_any_scan_is_legible(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINDING 2: before any structure/potential directory has been
+        scanned, `self.listing` is necessarily empty, so ticking against it
+        is a no-op -- but that must read as "loaded, not yet checked", not
+        as a bare "0 of 0 usable" that looks like nothing happened. The
+        orphan-scan guard must survive: nothing here is usable yet, so a
+        commit still cannot destroy anything."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        curated = tmp_path / 'curated_materials.txt'
+        curated.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+
+        # Nothing has been scanned: the orphan-scan guard must still see
+        # this as "nothing usable", not as a real (empty) selection.
+        assert not editor.has_usable_names()
+        assert '2' in editor.summary_text()
+        assert 'choose' in editor.summary_text().lower()
+        assert set(editor.listed_names()) == {'h-MoS2', 't-MoS2'}
+
+        # Once the user actually picks both directories, the curated names
+        # become the real, usable selection -- the `_document_names`
+        # fallback this relies on was primed by load_names() above.
+        editor.rescan(structures, potentials, '.sw')
+
+        assert editor.has_usable_names()
+        assert set(editor.selected_names()) == {'h-MoS2', 't-MoS2'}
+        form.deleteLater()
+
 
 def test_path_editor_directory_mode(qt_app):
     """set_directory_mode is what SectionForm flips as the sweep is ticked or

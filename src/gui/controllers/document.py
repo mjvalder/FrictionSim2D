@@ -30,6 +30,7 @@ from ...core.run import (
     ExpansionSummary, count_expansion, expand_config_sweeps, loopability,
     output_dir_for, read_material_list,
 )
+from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..schema.introspect import SectionSpec, describe_model
 from ..schema.overrides import overrides_for
 from ..schema.simulation_types import MODES, sections_for
@@ -286,6 +287,16 @@ class ConfigDocument:
         Selected names have to reach disk as the .txt the CLI reads; there is no
         GUI-only representation of a sweep. Written beside the config when it has
         been saved, so the pair travels together.
+
+        A currently configured ``materials_list`` that resolves to a real file
+        is written back to that same file -- not retargeted to the
+        config-stem default. Without this, pointing the GUI's `.txt` picker
+        at a curated file and then ticking/unticking a material silently
+        abandoned the curated file (left with stale contents) in favour of a
+        freshly created ``{stem}_materials.txt``, defeating the whole point
+        of browsing to an existing list. The stem-based default is only ever
+        used the first time a sweep is configured, when there is nothing to
+        resolve yet.
         """
         names = [n.strip() for n in names if n and n.strip()]
         if not names:
@@ -293,17 +304,34 @@ class ConfigDocument:
             self.dirty = True
             return None
 
-        if self.source_path is not None:
-            target = self.source_path.parent / \
-                f"{self.source_path.stem}_materials.txt"
-        else:
-            target = Path.cwd() / 'materials.txt'
+        target = self._existing_material_list_target()
+        if target is None:
+            if self.source_path is not None:
+                target = self.source_path.parent / \
+                    f"{self.source_path.stem}_materials.txt"
+            else:
+                target = Path.cwd() / 'materials.txt'
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('\n'.join(names) + '\n', encoding='utf-8')
         self.set('2D', 'materials_list', str(
             self._relative_to_config(target)))
         return target
+
+    def _existing_material_list_target(self) -> Optional[Path]:
+        """Where a currently configured ``materials_list`` actually lives on
+        disk, resolved the same way `read_material_list` resolves it (via
+        `base_dir`) -- so `write_material_names` rewrites that file rather
+        than silently retargeting to the config-stem default. None when
+        nothing is configured yet, or the configured value does not resolve
+        to an existing file (e.g. it was typed but never actually read
+        successfully) -- in either case there is nothing to rewrite, only a
+        fresh default to create.
+        """
+        current = self.get('2D', 'materials_list')
+        if not isinstance(current, str) or not current:
+            return None
+        return _find_existing(current, self.base_dir)
 
     def _relative_to_config(self, path: Path) -> Path:
         """A path relative to the config's directory where that is possible.
