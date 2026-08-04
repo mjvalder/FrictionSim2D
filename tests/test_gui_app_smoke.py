@@ -13,16 +13,19 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 pytest.importorskip('PySide6')
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtGui import QCloseEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from src.gui.controllers.document import ConfigDocument  # noqa: E402
 from src.gui.controllers.preview import cache_key, code_fingerprint  # noqa: E402
+from src.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
 from src.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +42,23 @@ def _qt_app():
 @pytest.fixture(name='workspace')
 def _workspace(tmp_path):
     return Workspace.open(tmp_path / 'ws')
+
+
+@pytest.fixture
+def two_component_system():
+    """A minimal 4-atom assembled system -- enough to make the viewport treat
+    a system as "shown" without needing a real render. Mirrors the fixture of
+    the same name in tests/test_gui_viewport.py (Task 4); redefined locally
+    per the Task 12 brief rather than importing across test modules."""
+    return AssembledSystem(
+        positions=np.array([[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]),
+        type_ids=np.array([1, 1, 2, 2]),
+        group_ids=np.array([0, 0, 1, 1]),
+        cell=(0., 10., 0., 10., 0., 10.),
+        components=[ComponentSlice('tip', 0, 0, 2, [1]),
+                    ComponentSlice('sub', 1, 2, 2, [2])],
+        legend={1: 'Si', 2: 'Mo'},
+    )
 
 
 class TestWorkspace:
@@ -124,6 +144,12 @@ class TestMainWindow:
         from src.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
+        # Tests here exercise edits that mark the document/settings dirty;
+        # closeEvent now prompts to save on a dirty close, which would block
+        # forever on the real QMessageBox with no one to click it. Cleanup
+        # is not the thing under test, so close it quietly.
+        window.document.dirty = False
+        window.settings_document.dirty = False
         window.close()
 
     def test_window_opens(self, window):
@@ -310,6 +336,10 @@ class TestSettingsTakeEffect:
         from src.gui.app import MainWindow
         window = MainWindow(workspace)
         yield window
+        # See TestMainWindow's fixture: avoid a real, blocking save prompt
+        # from closeEvent during teardown of a dirty settings document.
+        window.document.dirty = False
+        window.settings_document.dirty = False
         window.close()
 
     def test_hpc_scripts_are_blocked_until_modules_are_set(self, window):
@@ -696,3 +726,208 @@ class TestFormEditors:
         form.commit()
         out = form.document.save(tmp_path / 'c.ini')
         assert parse_config(out) == before
+
+
+class TestCloseConfirmation:
+    """Closing the window used to silently discard an edited config or
+    settings document. Now it must ask first."""
+
+    @pytest.fixture(name='window')
+    def _window(self, qt_app, workspace, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        from src.gui.app import MainWindow
+        window = MainWindow(workspace)
+        yield window
+        # Several tests here deliberately leave the document/settings dirty
+        # (and, within their own body, monkeypatch QMessageBox.question --
+        # a monkeypatch that is undone by the time teardown runs). Without
+        # resetting dirty first, this close() would hit the real, blocking
+        # QMessageBox with nothing able to click it.
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
+
+    def test_close_prompts_when_dirty(self, window, monkeypatch):
+        window.document.dirty = True
+        asked = []
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: asked.append(1) or QMessageBox.Cancel)
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert asked and not event.isAccepted()
+
+    def test_close_prompts_when_only_settings_are_dirty(self, window, monkeypatch):
+        window.document.dirty = False
+        window.settings_document.dirty = True
+        asked = []
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: asked.append(1) or QMessageBox.Cancel)
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert asked and not event.isAccepted()
+
+    def test_close_does_not_prompt_when_clean(self, window, monkeypatch):
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        asked = []
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: asked.append(1) or QMessageBox.Cancel)
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert not asked
+        assert event.isAccepted()
+
+    def test_close_discard_accepts_without_saving(self, window, monkeypatch):
+        window.document.dirty = True
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Discard)
+        saved = []
+        monkeypatch.setattr(window, '_save_config', lambda: saved.append(1))
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert event.isAccepted()
+        assert not saved
+
+    def test_close_save_routes_through_save_config_and_accepts(self, window, monkeypatch):
+        window.document.dirty = True
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Save)
+
+        def fake_save():
+            window.document.dirty = False
+        saved = []
+        monkeypatch.setattr(window, '_save_config',
+                            lambda: (saved.append(1), fake_save())[-1])
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert saved
+        assert event.isAccepted()
+
+    def test_cancelled_save_dialog_does_not_close_the_window(self, window, monkeypatch):
+        """Choosing Save but then cancelling the file dialog leaves the
+        document dirty -- the window must stay open, not close anyway."""
+        window.document.dirty = True
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Save)
+        # _save_config's own file dialog was cancelled: it returns without
+        # touching dirty.
+        monkeypatch.setattr(window, '_save_config', lambda: None)
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert not event.isAccepted()
+
+    def test_close_save_routes_through_settings_save_when_only_settings_dirty(
+            self, window, monkeypatch):
+        """A settings-only edit must save through the settings path, not the
+        config one -- routing it to _save_config used to open the wrong
+        dialog and then close the window with the settings edits lost."""
+        window.document.dirty = False
+        window.settings_document.dirty = True
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Save)
+
+        def fake_save_settings():
+            window.settings_document.dirty = False
+        settings_saved = []
+        config_saved = []
+        monkeypatch.setattr(
+            window, '_save_settings',
+            lambda: (settings_saved.append(1), fake_save_settings())[-1])
+        monkeypatch.setattr(window, '_save_config', lambda: config_saved.append(1))
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert settings_saved
+        assert not config_saved
+        assert event.isAccepted()
+
+    def test_settings_save_failure_does_not_close_the_window(self, window, monkeypatch):
+        """An invalid settings document (or a save the user backs out of)
+        leaves settings_document.dirty True -- the window must stay open,
+        not close with the edits discarded."""
+        window.document.dirty = False
+        window.settings_document.dirty = True
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Save)
+        # _save_settings warns and returns without clearing dirty -- the
+        # real method does this when validation fails.
+        monkeypatch.setattr(window, '_save_settings', lambda: None)
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert not event.isAccepted()
+
+    def test_close_save_message_names_what_is_unsaved(self, window, monkeypatch):
+        """The settings-only case must not blame 'the configuration' -- that
+        used to be the only wording, regardless of which document was dirty."""
+        window.document.dirty = False
+        window.settings_document.dirty = True
+        messages = []
+
+        def fake_question(*args, **kwargs):
+            messages.append(args[2])
+            return QMessageBox.Cancel
+        monkeypatch.setattr(QMessageBox, 'question', fake_question)
+        event = QCloseEvent()
+        window.closeEvent(event)
+        assert messages and 'settings' in messages[0].lower()
+        assert 'configuration' not in messages[0].lower()
+
+
+class TestStaleRenderBadge:
+    """The viewport keeps showing the previous system after an edit unless
+    told otherwise -- the badge is the only sign anything is out of date."""
+
+    @pytest.fixture(name='window')
+    def _window(self, qt_app, workspace, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        from src.gui.app import MainWindow
+        window = MainWindow(workspace)
+        yield window
+        # See TestCloseConfirmation's fixture: avoid a real, blocking save
+        # prompt from closeEvent when a test's edits left the document dirty.
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
+
+    def test_stale_badge_toggles(self, qt_app, two_component_system):
+        from src.gui.preview.viewport import ViewportPanel
+
+        panel = ViewportPanel()
+        panel.set_stale(True)
+        assert panel.stale_label.isVisibleTo(panel) is False   # no system yet
+        panel.system = two_component_system
+        panel.set_stale(True)
+        assert panel.stale_label.isVisibleTo(panel)
+        panel.set_stale(False)
+        assert not panel.stale_label.isVisibleTo(panel)
+
+    def test_editing_after_a_render_marks_the_badge_stale(self, window, monkeypatch,
+                                                          two_component_system):
+        monkeypatch.setattr(window.viewport.__class__, '_update_pipeline',
+                            lambda self: None)
+        monkeypatch.setattr(window.viewport.__class__, '_ensure_widget',
+                            lambda self: None)
+
+        window._on_preview_ready(two_component_system)
+        assert window._render_snapshot == window.document.to_dict()
+        assert window.viewport.stale_label.isVisibleTo(window.viewport) is False
+
+        window.form.sections['2D'].editors['mat'].set_value('WS2')
+        window.form.commit()
+        window._on_config_changed()
+        assert window.viewport.stale_label.isVisibleTo(window.viewport)
+
+    def test_re_rendering_clears_the_badge(self, window, monkeypatch,
+                                           two_component_system):
+        monkeypatch.setattr(window.viewport.__class__, '_update_pipeline',
+                            lambda self: None)
+        monkeypatch.setattr(window.viewport.__class__, '_ensure_widget',
+                            lambda self: None)
+
+        window._on_preview_ready(two_component_system)
+        window.form.sections['2D'].editors['mat'].set_value('WS2')
+        window.form.commit()
+        window._on_config_changed()
+        assert window.viewport.stale_label.isVisibleTo(window.viewport)
+
+        window._on_preview_ready(two_component_system)
+        assert window.viewport.stale_label.isVisibleTo(window.viewport) is False

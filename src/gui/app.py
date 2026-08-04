@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -95,6 +96,10 @@ class MainWindow(QMainWindow):
 
         self.preview = PreviewController(workspace, self)
         self.generator = GenerateController(workspace, self)
+        # What was last rendered, so an edit afterwards can be flagged as
+        # stale rather than leaving the viewport showing a superseded system
+        # with no indication anything changed.
+        self._render_snapshot: Optional[dict] = None
 
         self.setWindowTitle(f"{APP_NAME} — Simulation Builder")
         self.resize(1500, 950)
@@ -458,6 +463,52 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------------- events
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Ask before discarding an edited config or settings document.
+
+        A quit that silently threw away unsaved work used to be the only
+        behaviour on offer; this puts the same Save/Discard/Cancel choice in
+        front of the user that closing an editor normally would.
+        """
+        config_dirty = self.document.dirty
+        settings_dirty = self.settings_document.dirty
+        if not (config_dirty or settings_dirty):
+            event.accept()
+            return
+
+        if config_dirty and settings_dirty:
+            what = 'The configuration and the settings have'
+        elif settings_dirty:
+            what = 'The settings have'
+        else:
+            what = 'The configuration has'
+
+        choice = QMessageBox.question(
+            self, 'Unsaved changes',
+            f'{what} unsaved changes. Save before closing?',
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save)
+
+        if choice == QMessageBox.Cancel:
+            event.ignore()
+            return
+        if choice == QMessageBox.Discard:
+            event.accept()
+            return
+
+        # Save: route through whichever document(s) are actually dirty. Each
+        # save path may itself be cancelled (a file dialog) or fail
+        # (validation), leaving its document dirty -- in that case the
+        # window must not close, or the edits it holds would still be lost.
+        if config_dirty:
+            self._save_config()
+        if settings_dirty:
+            self._save_settings()
+        if self.document.dirty or self.settings_document.dirty:
+            event.ignore()
+            return
+        event.accept()
+
     def _on_family_changed(self) -> None:
         self._populate_modes()
         self._on_mode_changed()
@@ -486,6 +537,8 @@ class MainWindow(QMainWindow):
 
     def _on_config_changed(self) -> None:
         self._refresh_counts()
+        if self._render_snapshot is not None:
+            self.viewport.set_stale(self.document.to_dict() != self._render_snapshot)
 
     def _open_config(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -568,6 +621,8 @@ class MainWindow(QMainWindow):
     def _on_preview_ready(self, system) -> None:
         self._busy(f"Rendered {system.count:,} atoms.", False)
         self.viewport.show_system(system)
+        self._render_snapshot = self.document.to_dict()
+        self.viewport.set_stale(False)
         if system.warnings:
             self.issues.setPlainText('\n'.join(system.warnings))
 

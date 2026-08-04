@@ -128,6 +128,11 @@ class TestWindowIntegration:
         from src.gui.app import MainWindow  # noqa: PLC0415
         window = MainWindow(workspace)
         yield window
+        # closeEvent (Task 12) prompts to save when the document is dirty --
+        # a real, blocking QMessageBox with no one to click it under these
+        # tests. Cleanup is not what is under test here, so close quietly.
+        window.document.dirty = False
+        window.settings_document.dirty = False
         window.close()
 
     def test_valid_sweep_validates_and_reports_pending(self, window, materials_file):

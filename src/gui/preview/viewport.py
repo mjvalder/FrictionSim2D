@@ -94,6 +94,11 @@ class ViewportPanel(QWidget):
         self.placeholder.setStyleSheet(CAPTION + ' padding: 40px;')
         self._view_container.addWidget(self.placeholder)
 
+        self.stale_label = QLabel('Config changed since last render', self)
+        self.stale_label.setStyleSheet(WARNING)
+        self.stale_label.hide()
+        layout.addWidget(self.stale_label)
+
         layout.addLayout(self._build_controls())
 
         self.legend = QLabel('', self)
@@ -187,6 +192,15 @@ class ViewportPanel(QWidget):
         self.placeholder.show()
         self.legend.setText('')
         self.warning.hide()
+        self.stale_label.hide()
+
+    def set_stale(self, stale: bool) -> None:
+        """Show or hide the "config changed since last render" caption.
+
+        Stays hidden while no system has been shown yet -- there is nothing
+        stale relative to before the first render.
+        """
+        self.stale_label.setVisible(stale and self.system is not None)
 
     # ------------------------------------------------------------- rendering
 
