@@ -96,6 +96,16 @@ other field with a default shows it as grey placeholder text (e.g.
 `default: 300.0`) instead of making you go find it. An enum with a default
 shows `(default: X)` as its unset entry, rather than a bare `(unset)`.
 
+**Disabled rows** state why on screen, not only behind the ⓘ. A row gated by
+another field (e.g. **Scan angles apply at these loads**, which needs a scan
+angle set first) shows the ⓘ's `enable_hint` as the control's own grey
+placeholder text while it is disabled, restoring whatever placeholder it had
+(a default, say) once it is enabled again. A scan angle of `0.0` — a
+straight-line scan, a real and meaningful value — counts as set for this: the
+gate checks whether the other field holds a value at all, not whether it is
+truthy, so pairing loads with a zero scan angle no longer leaves that row
+permanently greyed out.
+
 **Tip position** (`[tip] tip_x`, `tip_y`, and their two offsets) stays out
 of the form until **Set tip position** is ticked. Unticking it removes
 those keys from the config entirely, not just blanks them. One consequence
@@ -140,12 +150,18 @@ becomes a separate simulation. Setting all of that by hand means keeping four
 things in sync — the `.txt`, and `{mat}` placeholders in `mat`, `cif_path` and
 `pot_path` — which is why the field was effectively undiscoverable before.
 
-**Sweep over many materials** is the first field in `[2D]`. Ticking it
-switches the `cif_path` and `pot_path` cells from single-file pickers to
-directory pickers — their browse button and tooltip change to say so — and
-scans whatever the two cells hold. Pointing at the two directories mirrors
-a real run directory — a `cif/` beside a `sw_lammps/` — so it is usually
-just pointing at the pair that already exists.
+**Sweep over materials** is the first field in `[2D]` — a bare checkbox now;
+its row label carries the only copy of that text (it used to be repeated on
+the checkbox itself). Ticking it does two things: it reveals a `.txt` picker
+and a checkable material list right after the **Material** row below it, and
+further down it switches the `cif_path` and `pot_path` cells from
+single-file pickers to directory pickers — their browse button and tooltip
+change to say so — and scans whatever the two cells hold. Pointing at the
+two directories mirrors a real run directory — a `cif/` beside a
+`sw_lammps/` — so it is usually just pointing at the pair that already
+exists. Top-to-bottom the block reads: the checkbox, **Material**, the `.txt`
+picker and tick list, then the structure/potential cells the checkbox
+governs.
 
 Committing a sweep rewrites `mat`, `cif_path` and `pot_path` to `{mat}`
 templates (see below); from then on the same two cells show that templated
@@ -164,11 +180,27 @@ The derived names appear as a checkable list, so the sweep can be narrowed
 below "everything usable". A summary line reads e.g. `12 of 14 usable → 9
 configs`. **Select all** / **None** act on the currently usable names.
 
-Committing a sweep writes the checked names to `<config>_materials.txt`
-beside the config, and fills `mat = {mat}`, `cif_path =
-<structures>/{mat}.cif`, `pot_path = <potentials>/{mat}<ext>` — paths are
-stored relative to the config's own directory where that is possible. If the
-selection matches what is already on disk, nothing is rewritten.
+Above the list, a `.txt` path field with its own browse button (`…`) points
+at an existing curated materials list instead of building one purely from
+the two directories — leave it blank to do the latter. Pointing it at a file
+before both directories have been scanned cannot check anything yet, so
+rather than a bare "0 of 0 usable" (which reads as nothing having happened),
+the loaded names appear as unusable, greyed placeholders with a summary
+naming the count (e.g. "2 material(s) loaded from the list — choose both
+directories to check which are usable"); scanning both directories replaces
+them with the real, tickable entries.
+
+Committing a sweep writes the checked names back to whatever file
+`materials_list` currently resolves to — the same `.txt` the picker was
+pointed at, or the one an already-opened config's `materials_list` names —
+so pointing the picker at your own curated list and then changing a tick
+updates that file in place rather than silently abandoning it for a fresh
+one. Only when nothing is configured yet (a brand-new sweep) does it fall
+back to creating `<config>_materials.txt` beside the config. Either way it
+also fills `mat = {mat}`, `cif_path = <structures>/{mat}.cif`, `pot_path =
+<potentials>/{mat}<ext>` — paths, including the materials-list path itself,
+are stored relative to the config's own directory where that is possible. If
+the selection matches what is already on disk, nothing is rewritten.
 
 Opening a config with an existing `materials_list` loads those names as the
 current selection; the two directories (recovered from the `{mat}` templates
