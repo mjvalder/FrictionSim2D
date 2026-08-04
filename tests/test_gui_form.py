@@ -256,6 +256,24 @@ class TestRequiredStars:
         form.set_settings(_settings_with_drive('virtual_atom'))
         assert label.text().endswith(REQUIRED_MARK)
 
+    def test_set_settings_prefills_a_field_newly_required_by_the_switch(self, qt_app):
+        """A field that becomes required only after `set_settings` (not at
+        form-build time) must be pre-filled just like `load()`'s own prefill
+        does for one that was required from the start -- otherwise it sits
+        starred-and-blank, blocking Generate, even though it has a perfectly
+        good default."""
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.values['general'].pop('driving_spring', None)
+        form = SectionForm(doc.section('general'), doc,
+                           settings=_settings_with_drive('smd'))
+        assert form.editors['driving_spring'].value() in (None, '', [])
+
+        form.set_settings(_settings_with_drive('virtual_atom'))
+        assert form.editors['driving_spring'].value() not in (None, '', [])
+
     def test_force_is_required_and_blocks(self):
         from src.gui.schema.overrides import overrides_for
 
@@ -343,6 +361,24 @@ class TestTipPositionGate:
         form._gate_boxes['tip_position'].setChecked(False)
         form.commit()
         assert doc.get('tip', 'tip_x') is None
+
+    def test_opening_the_example_config_stays_clean_after_a_commit(self, qt_app):
+        """examples/afm_config.ini ships an explicit `tip_x_offset = 0.0` --
+        equal to the field's own spec default. `_load_gates` reads that as
+        untouched and ticks no box, so `commit()` pops it right back out;
+        that pop is a no-op (the builder already treats an absent offset as
+        0.0) and must not be reported as a real edit. Since `_validate()`
+        calls `commit()` on every Render, failing this used to mark a config
+        the user never touched dirty just from pressing the button."""
+        from src.gui.controllers.document import ConfigDocument
+        from src.gui.widgets.form import SectionForm
+
+        doc = ConfigDocument.from_file(
+            REPO_ROOT / 'examples' / 'afm_config.ini', 'afm')
+        assert not doc.dirty
+        form = SectionForm(doc.section('tip'), doc)
+        form.commit()
+        assert not doc.dirty
 
 
 class TestCountsRead:

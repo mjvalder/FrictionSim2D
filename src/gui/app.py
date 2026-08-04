@@ -361,6 +361,16 @@ class MainWindow(QMainWindow):
         self.settings_form.document = self.settings_document
         self.settings_form.rebuild()
         self._refresh_settings_origin()
+        # _apply_settings and _save_settings both refresh self.settings and
+        # fan it out to the config form after changing the settings document
+        # (Task 7); this path did not, so a star -- and _validate, which
+        # hands self.settings straight to document.validate -- kept reading
+        # the pre-revert object even though the Settings tab itself already
+        # showed defaults. A fresh `SettingsDocument.defaults()` is never
+        # dirty, so `_apply_settings`'s early return could not repair this
+        # later either.
+        self.settings = self.settings_document.as_settings()
+        self.form.set_settings(self.settings)
 
     def _apply_settings(self) -> Optional[str]:
         """Make what is on the Settings tab the settings the build will use.
@@ -425,8 +435,19 @@ class MainWindow(QMainWindow):
         if text != self.counts.text():
             self.counts.setText(text)
 
-    def _validate(self) -> bool:
-        """Validate and surface the result. Returns True when valid."""
+    def _validate(self, enforce_required: bool = True) -> bool:
+        """Validate and surface the result. Returns True when valid.
+
+        `enforce_required` gates only the starred-but-empty-and-blocking
+        term: `_render` passes False so a cleared `force`/`pressure` (marked
+        `required_blocks` for Generate, but not read by the preview builder)
+        does not stop a user from previewing the geometry while trying
+        another load value. `_generate` leaves it True -- an actually
+        unbuildable LAMMPS script must still be refused. Every other
+        validation failure (the document's own `validate()`, unsupported
+        lists) blocks both regardless, and the issue lines are reported the
+        same either way.
+        """
         self.form.commit()
         result = self.document.validate(self.settings)
         self.form.show_errors(result.issues)
@@ -493,7 +514,10 @@ class MainWindow(QMainWindow):
         if text != self.issues.toPlainText():
             self.issues.setPlainText(text)
         self._refresh_counts()
-        return result.ok and not unsupported and not any(blocking)
+        ok = result.ok and not unsupported
+        if enforce_required:
+            ok = ok and not any(blocking)
+        return ok
 
     # --------------------------------------------------------------- events
 
@@ -568,6 +592,13 @@ class MainWindow(QMainWindow):
         self.config_scroll.verticalScrollBar().setValue(scroll_value)
 
         self._refresh_counts()
+        # A mode switch swaps the document's model wholesale -- the largest
+        # possible edit short of opening a different file -- so the badge
+        # must reflect it just as it would a single field edit. `form.changed`
+        # is not emitted here: `rebuild()` runs under each SectionForm's own
+        # `load()`, not a user edit. `_on_config_changed` already no-ops when
+        # nothing has been rendered yet.
+        self._on_config_changed()
 
     def _on_config_changed(self) -> None:
         self._refresh_counts()
@@ -594,6 +625,11 @@ class MainWindow(QMainWindow):
         self.form.document = self.document
         self.form.rebuild()
         self._validate()
+        # Opening a different config swaps the whole document out from under
+        # a render -- the largest staleness event there is -- yet it never
+        # goes through `form.changed` (`load()` runs under `_loading`), so
+        # the badge stayed hidden until the user separately touched a field.
+        self._on_config_changed()
         self.statusBar().showMessage(f"Opened {path}")
 
     def _save_config(self) -> None:
@@ -628,7 +664,7 @@ class MainWindow(QMainWindow):
     def _render(self) -> None:
         if not self._sync_settings():
             return
-        if not self._validate():
+        if not self._validate(enforce_required=False):
             self.statusBar().showMessage('Fix the reported problems first.')
             return
 

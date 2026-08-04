@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['ViewportPanel', 'COLOUR_MODES', 'distinct_colour']
 
+#: Sentinel for "no cell has ever been framed yet", distinct from the
+#: legitimate ``None`` that :meth:`ViewportPanel._frame_and_refresh` records
+#: when the *framed* system itself has no cell (e.g. a multi-placement build
+#: with no explicit box, see ``Assembly.effective_cell()``). Plain ``None``
+#: used to serve both meanings, which made a cell-less system re-frame on
+#: every single update -- see :meth:`ViewportPanel._needs_framing`.
+_UNFRAMED = object()
+
 COLOUR_BY_ELEMENT = 'Element'      # was 'Atom type', which coloured by element
 COLOUR_BY_TYPE = 'LAMMPS type'
 COLOUR_BY_COMPONENT = 'Component'
@@ -79,7 +87,7 @@ class ViewportPanel(QWidget):
         self._widget: Optional[QWidget] = None
         self._visibility: Dict[str, bool] = {}
         self._framed = False
-        self._last_cell: Optional[tuple] = None
+        self._last_cell: object = _UNFRAMED
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -187,7 +195,7 @@ class ViewportPanel(QWidget):
     def clear(self) -> None:
         self.system = None
         self._framed = False
-        self._last_cell = None
+        self._last_cell = _UNFRAMED
         self._teardown_view()
         self.placeholder.show()
         self.legend.setText('')
@@ -366,24 +374,30 @@ class ViewportPanel(QWidget):
     def _needs_framing(self) -> bool:
         """Whether the camera should be (re-)framed on this update.
 
-        True on the first render and after :meth:`clear` (nothing has been
-        framed yet), when the last-framed cell is unknown despite the view
-        supposedly being framed (an inconsistent state that should not be
-        trusted to mean "skip framing"), or when the new cell's max extent
-        differs from the one last framed by more than 10% -- a materially
-        different box would otherwise be shown through a camera set up for a
-        different scale. Anything smaller than that (recolouring, toggling a
-        component, toggling the box outline) leaves the camera exactly where
-        the user put it.
+        True on the first render and after :meth:`clear` (``_last_cell`` is
+        still the ``_UNFRAMED`` sentinel -- nothing has been framed yet).
+        Once framed, ``_last_cell`` may legitimately be ``None`` itself: that
+        is what :meth:`_frame_and_refresh` records when the framed system's
+        own cell is ``None`` (a multi-placement build with no explicit box).
+        A cell-less system followed by another cell-less system is therefore
+        a steady state, not "unknown", and must not force a re-frame -- the
+        bug this sentinel exists to prevent reinstates itself the moment
+        ``None`` is read as ambiguous rather than as a real, previously-framed
+        value. Any other change of cell-ness (cell to no cell, or no cell to
+        cell) is material and does reframe, as does the new cell's max extent
+        differing from the one last framed by more than 10%. Anything smaller
+        than that (recolouring, toggling a component, toggling the box
+        outline) leaves the camera exactly where the user put it.
         """
         if not self._framed:
             return True
-        if self._last_cell is None:
+        if self._last_cell is _UNFRAMED:
             return True
-        if self.system is None or self.system.cell is None:
-            return False
+        current_cell = self.system.cell if self.system is not None else None
+        if current_cell is None or self._last_cell is None:
+            return current_cell != self._last_cell
         previous = self._max_extent(self._last_cell)
-        current = self._max_extent(self.system.cell)
+        current = self._max_extent(current_cell)
         if previous == 0:
             return current != 0
         return abs(current - previous) / previous > 0.10

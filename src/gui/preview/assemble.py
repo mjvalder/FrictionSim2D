@@ -265,6 +265,12 @@ def to_ovito(system: AssembledSystem,
              radii: Optional[Dict[int, float]] = None):
     """Convert an assembled system into an ovito pipeline for display.
 
+    Retained for tests and back-compat callers: production code (
+    `ViewportPanel._update_pipeline`) builds the data collection itself via
+    `build_data_collection` instead, so it can update an existing pipeline's
+    source in place rather than constructing a new `Pipeline` on every
+    render.
+
     Args:
         system: The assembled system.
         colours: Optional ``type id -> (r, g, b)``, see :func:`build_data_collection`.

@@ -176,9 +176,7 @@ class MaterialListEditor(FieldEditor):
                 Qt.Checked if item.data(Qt.UserRole) in wanted else Qt.Unchecked)
 
     def select_all(self) -> None:
-        self.set_selected(
-            [c for c in self.listed_names()]
-        )
+        self.set_selected(self.listed_names())
 
     def select_none(self) -> None:
         self.set_selected([])

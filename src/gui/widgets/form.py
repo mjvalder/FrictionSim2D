@@ -222,7 +222,6 @@ class SectionForm(QGroupBox):
             self.pair_editor = PairOverrideEditor(self.body)
             self.pair_editor.changed.connect(self._on_field_changed)
             self.pair_editor.set_base_dir(document.base_dir)
-            self.pair_editor.set_known_elements(scan_config_elements(document))
             body_layout.addWidget(self.pair_editor)
 
         hidden = hidden_fields(document.model, section.key)
@@ -431,7 +430,19 @@ class SectionForm(QGroupBox):
     def set_settings(self, settings: Optional[object]) -> None:
         """Re-derive every row's star in place, e.g. after Settings changes
         the drive method. Rebuilding the whole form would work too, but would
-        also discard whatever the user has open/collapsed/typed elsewhere."""
+        also discard whatever the user has open/collapsed/typed elsewhere.
+
+        Also re-runs the required-field prefill (`load()`'s, extracted into
+        `_prefill_required`): a field that becomes required only because of
+        this settings change (e.g. `driving_spring` once `drive_method`
+        flips to `virtual_atom`) would otherwise sit starred-and-blank,
+        blocking Generate until the user notices and fills it in by hand --
+        contradicting documentation/gui.md's promise that a starred field
+        with a default is pre-filled with it. Wrapped in `_loading` so the
+        prefill's own `editor.set_value` calls do not fire a commit here;
+        the next real commit (validation, Render, Generate) picks the
+        prefilled value up normally.
+        """
         self.settings = settings
         for key in self.editors:
             spec = self.section.field_map().get(key)
@@ -445,6 +456,12 @@ class SectionForm(QGroupBox):
                 label.setText(f"{text}{REQUIRED_MARK}")
             else:
                 label.setText(text)
+
+        self._loading = True
+        try:
+            self._prefill_required()
+        finally:
+            self._loading = False
 
     # ---------------------------------------------------------------- state
 
@@ -493,26 +510,51 @@ class SectionForm(QGroupBox):
 
                 self._apply_sweep_mode()
 
-            # A starred field left empty has no way to show the user what
-            # will actually be built without pre-filling it: unlike the ghost
-            # placeholder on an optional field, a required field's blank box
-            # blocks Render entirely, so the default has to actually land in
-            # the control (and, on commit, the document) rather than just be
-            # suggested.
-            specs = self.section.field_map()
-            for key, editor in self.editors.items():
-                spec = specs.get(key)
-                if spec is None or spec.default is None:
-                    continue
-                if not self.effective_required(key):
-                    continue
-                if editor.value() in (None, '', []):
-                    editor.set_value(spec.default)
-
             self._load_gates()
+            self._prefill_required()
         finally:
             self._loading = False
         self._apply_dependencies()
+
+    def _gate_is_open(self, key: str) -> bool:
+        """Whether `key`'s row is currently visible, i.e. not hidden behind
+        an unticked gate checkbox. A field with no gate (the common case) is
+        always open."""
+        field_override = self.override.fields.get(key) if self.override else None
+        if not field_override or not field_override.gate:
+            return True
+        box = self._gate_boxes.get(field_override.gate)
+        return box is None or box.isChecked()
+
+    def _prefill_required(self) -> None:
+        """Fill every starred-but-empty editor with its spec default.
+
+        A starred field left empty has no way to show the user what will
+        actually be built without pre-filling it: unlike the ghost
+        placeholder on an optional field, a required field's blank box
+        blocks Render entirely, so the default has to actually land in
+        the control (and, on commit, the document) rather than just be
+        suggested. Run after `_load_gates()` so `_gate_is_open` sees each
+        gate's real, just-loaded state.
+
+        Skips a gated-but-invisible field: prefilling into a hidden editor
+        would only have `commit()` pop it right back out (the gate is off),
+        while `missing_required` still reported it as blocking with no
+        visible row for the user to fix it on. Not reachable by any gated
+        field today -- none is also `required=True` -- but cheap to guard
+        against a future one that is.
+        """
+        specs = self.section.field_map()
+        for key, editor in self.editors.items():
+            spec = specs.get(key)
+            if spec is None or spec.default is None:
+                continue
+            if not self.effective_required(key):
+                continue
+            if not self._gate_is_open(key):
+                continue
+            if editor.value() in (None, '', []):
+                editor.set_value(spec.default)
 
     def commit(self) -> None:
         """Write the editors' values back to the document.
@@ -586,7 +628,15 @@ class SectionForm(QGroupBox):
                     # reappear on the next commit.
                     removed = self.document.values.get(
                         self.section.key, {}).pop(key, None)
-                    if removed is not None:
+                    spec = specs.get(key)
+                    # Popping a value that just equals the field's own spec
+                    # default is a no-op, not an edit: a hand-written config
+                    # with an explicit `tip_x_offset = 0.0` (see
+                    # `_load_gates`'s docstring) reads as untouched, ticks no
+                    # gate, and would otherwise mark a freshly-opened,
+                    # never-edited config dirty on the very first commit --
+                    # which `_validate()` runs on every Render.
+                    if removed is not None and (spec is None or removed != spec.default):
                         self.document.dirty = True
                     continue
 
@@ -1039,6 +1089,8 @@ class ConfigForm(QWidget):
             field_map = form.section.field_map()
             for key, spec in field_map.items():
                 if key not in form.editors or not form.effective_required(key):
+                    continue
+                if not form._gate_is_open(key):
                     continue
                 if self.document.get(section_key, key) not in (None, '', []):
                     continue

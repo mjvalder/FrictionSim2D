@@ -110,12 +110,35 @@ def test_framing_only_needed_once(panel, two_component_system):
 def test_unknown_last_cell_owes_a_reframe_even_if_marked_framed(panel, two_component_system):
     """`_framed` and `_last_cell` are meant to be set together by
     `_frame_and_refresh`; if they ever disagree (`_framed` True but no
-    `_last_cell` on record), that is an unknown state and must not be
-    silently trusted as "already correctly framed"."""
+    `_last_cell` on record -- the `_UNFRAMED` sentinel), that is an unknown
+    state and must not be silently trusted as "already correctly framed"."""
+    from src.gui.preview.viewport import _UNFRAMED
+
     panel.show_system(two_component_system)
     panel._framed = True
-    panel._last_cell = None
+    panel._last_cell = _UNFRAMED
     assert panel._needs_framing()
+
+
+def test_cell_less_system_is_not_reframed_forever(panel, two_component_system):
+    """A real (non-sentinel) `None` `_last_cell` means the last system that
+    was actually framed had no cell -- e.g. a multi-placement build with no
+    explicit box (`Assembly.effective_cell()` returns `None`). Following it
+    with another cell-less system must not force a re-frame: the old code
+    read any `_last_cell is None` as "unknown" and reframed forever, silently
+    reinstating the camera-reset bug Task 4 fixed."""
+    system = AssembledSystem(
+        positions=two_component_system.positions,
+        type_ids=two_component_system.type_ids,
+        group_ids=two_component_system.group_ids,
+        cell=None,
+        components=two_component_system.components,
+        legend=two_component_system.legend,
+    )
+    panel.show_system(system)
+    panel._framed = True
+    panel._last_cell = None
+    assert not panel._needs_framing()
 
 
 def test_cumulative_drift_from_the_last_framed_cell_triggers_a_reframe(
@@ -162,6 +185,33 @@ def test_cumulative_drift_from_the_last_framed_cell_triggers_a_reframe(
     # which does trigger a reframe -- _last_cell moves to the new cell.
     panel.show_system(_with_extent(11.2))
     assert panel._last_cell != framed_cell
+
+
+def test_cell_less_system_does_not_reframe_on_recolour(live_panel, monkeypatch):
+    """Drives the real `_update_pipeline` (via `_apply_colours`, what the
+    colour-mode combo box calls) rather than poking `_needs_framing`
+    directly: the regression this guards against -- re-framing on every
+    recolour, component toggle and Box toggle for a cell-less system -- lived
+    in the interaction between `_update_pipeline` and `_needs_framing`, which
+    a direct predicate check cannot see."""
+    panel = live_panel
+    system = AssembledSystem(
+        positions=np.array([[0., 0., 0.], [1., 0., 0.]]),
+        type_ids=np.array([1, 2]),
+        group_ids=np.array([0, 0]),
+        cell=None,
+        components=[ComponentSlice('2D', 0, 0, 2, [1, 2])],
+        legend={1: 'Si', 2: 'Mo'},
+    )
+    panel.show_system(system)
+    assert panel._framed
+
+    reframes = []
+    from src.gui.preview import viewport as vp
+    monkeypatch.setattr(vp.ViewportPanel, '_frame_and_refresh',
+                        lambda self: reframes.append(1))
+    panel._apply_colours()
+    assert reframes == []
 
 
 def test_lammps_type_mode_gives_distinct_colours(panel):

@@ -21,7 +21,7 @@ pytest.importorskip('PySide6')
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtGui import QCloseEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
 
 from src.gui.controllers.document import ConfigDocument  # noqa: E402
 from src.gui.controllers.preview import cache_key, code_fingerprint  # noqa: E402
@@ -384,14 +384,13 @@ class TestMainWindow:
         qt_app.processEvents()
 
         scrollbar = window.config_scroll.verticalScrollBar()
-        # Scroll to a meaningful position (not the arbitrary 100 from before)
+        # Scroll to a meaningful position
         scrollbar.setValue(50)
         saved_value = scrollbar.value()
 
         # Spy on setValue calls during the mode change
         with patch.object(scrollbar, 'setValue', wraps=scrollbar.setValue) as mock_set:
             # Change mode: AFM (with tip section) → Sheet (no tip section) = height change
-            window.mode_box.setCurrentIndex(1)  # 'indent' shares AFM structure; try different families
             # Switch to sheetonsheet family first for greater height difference
             window.family_box.setCurrentIndex(1)  # Switch family to sheet-on-sheet
             qt_app.processEvents()
@@ -460,6 +459,70 @@ class TestSettingsTakeEffect:
         bubble = section._bubbles.get('modules')
         assert bubble is not None
         assert 'no job scripts' in bubble.toolTip()
+
+    def test_reverting_settings_refreshes_self_settings_and_the_form(self, window):
+        """_apply_settings and _save_settings both refresh self.settings (and
+        fan it out to the config form) after changing the settings document;
+        _revert_settings must too, or a star -- and _validate, which hands
+        self.settings straight to document.validate -- keeps reading the
+        pre-revert object even though the Settings tab itself already shows
+        defaults. A fresh SettingsDocument.defaults() is never dirty, so
+        _apply_settings's own early return can never repair this later."""
+        window.settings_form.sections['simulation'].editors['drive_method'].set_value('smd')
+        window.settings_form.commit()
+        assert window._apply_settings() is None
+        assert window.settings.simulation.drive_method == 'smd'
+        assert window.form.settings.simulation.drive_method == 'smd'
+
+        window._revert_settings()
+
+        assert window.settings.simulation.drive_method == 'virtual_atom'
+        assert window.form.settings.simulation.drive_method == 'virtual_atom'
+
+
+class TestRenderIgnoresNonBlockingRequired:
+    """`force`/`pressure` are starred and `required_blocks` for Generate (an
+    absent load breaks the LAMMPS script), but they do not affect the
+    rendered geometry -- a user clearing a load to try another value must
+    still be able to preview."""
+
+    @pytest.fixture(name='window')
+    def _window(self, qt_app, workspace, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        from src.gui.app import MainWindow
+        window = MainWindow(workspace)
+        yield window
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
+
+    def test_render_proceeds_but_generate_still_refuses(self, window, monkeypatch):
+        # indent_config.ini validates cleanly out of the box (unlike
+        # afm_config.ini, whose materials_list path is relative to a `run/`
+        # directory this checkout does not carry) so the only thing standing
+        # between _render and the preview request is the field cleared below.
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        window.form.sections['general'].editors['force'].set_value('')
+        window.form.commit()
+        missing = {(sec, key): blocks for sec, key, _label, blocks
+                  in window.form.missing_required()}
+        assert missing.get(('general', 'force')) is True
+
+        render_calls = []
+        monkeypatch.setattr(window.preview, 'start',
+                            lambda request: render_calls.append(request))
+        window._render()
+        assert render_calls, 'a blocked-but-cosmetic field must not stop Render'
+
+        generate_calls = []
+        monkeypatch.setattr(window.generator, 'start',
+                            lambda request: generate_calls.append(request))
+        window._generate()
+        assert not generate_calls, 'Generate must still refuse the missing load'
 
 
 class TestSubstrateSection:
@@ -1013,3 +1076,24 @@ class TestStaleRenderBadge:
 
         window._on_preview_ready(two_component_system)
         assert window.viewport.stale_label.isVisibleTo(window.viewport) is False
+
+    def test_opening_a_config_marks_the_badge_stale(self, window, monkeypatch,
+                                                     two_component_system):
+        """Opening a different config swaps the whole document out from
+        under a render -- the largest staleness event there is -- yet
+        `_open_config` never emitted `changed` (`load()` runs under
+        `_loading`), so the badge stayed hidden until the user separately
+        edited a field by hand."""
+        monkeypatch.setattr(window.viewport.__class__, '_update_pipeline',
+                            lambda self: None)
+        monkeypatch.setattr(window.viewport.__class__, '_ensure_widget',
+                            lambda self: None)
+
+        window._on_preview_ready(two_component_system)
+        assert window.viewport.stale_label.isVisibleTo(window.viewport) is False
+
+        monkeypatch.setattr(
+            QFileDialog, 'getOpenFileName',
+            lambda *a, **k: (str(EXAMPLES / 'afm_config.ini'), ''))
+        window._open_config()
+        assert window.viewport.stale_label.isVisibleTo(window.viewport)

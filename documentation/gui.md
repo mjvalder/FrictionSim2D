@@ -192,7 +192,7 @@ and the element legend — so the preview cannot drift from what LAMMPS will rea
 A render updates the existing viewport in place rather than tearing it down
 and rebuilding it: the camera position, zoom, per-component visibility ticks
 and the selected colour mode all survive a re-render. Only the first render,
-a **Clear**, or a cell whose largest dimension has drifted more than 10% from
+or a cell whose largest dimension has drifted more than 10% from
 the one last framed triggers a re-frame — anything smaller (recolouring,
 toggling a component, toggling the box) leaves the camera exactly where you
 put it. Validating the form no longer repaints every field on every pass,
