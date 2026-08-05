@@ -274,7 +274,7 @@ class MainWindow(QMainWindow):
         self.render_button.setToolTip(
             'Build the configured components and show the assembled system. '
             'Never runs a melt-quench or a minimisation. (Ctrl+R)')
-        self.render_button.clicked.connect(self._render)
+        self.render_button.clicked.connect(self._on_render_clicked)
         row.addWidget(self.render_button)
 
         self.generate_button = QPushButton('Generate', self)
@@ -291,11 +291,11 @@ class MainWindow(QMainWindow):
         self.mode_box.currentIndexChanged.connect(self._on_mode_changed)
         self.form.changed.connect(self._on_config_changed)
 
-        self.preview.started.connect(lambda: self._busy('Building preview…', True))
+        self.preview.started.connect(self._on_preview_started)
         self.preview.progress.connect(self.statusBar().showMessage)
         self.preview.finished.connect(self._on_preview_ready)
         self.preview.failed.connect(self._on_preview_failed)
-        self.preview.cancelled.connect(lambda: self._busy('Preview cancelled.', False))
+        self.preview.cancelled.connect(self._on_preview_cancelled)
 
         self.generator.started.connect(lambda: self._busy('Generating…', True))
         self.generator.progress.connect(self.statusBar().showMessage)
@@ -320,6 +320,32 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
         self.render_button.setEnabled(not busy)
         self.generate_button.setEnabled(not busy)
+
+    def _set_render_building(self, building: bool) -> None:
+        """Keep Render pressable, as a Cancel action, while a preview builds.
+
+        `_busy` disables Render along with Generate; this overrides that for
+        Render specifically, right after. A build that is slow (one heavy
+        member) or hung must always leave the user a way out, rather than a
+        button that looks the same whether it will re-enable in a second or
+        never -- which is what "greyed out and I couldn't press it" was.
+        """
+        self.render_button.setText('Cancel' if building else 'Render')
+        self.render_button.setEnabled(True)
+
+    def _on_render_clicked(self) -> None:
+        if self.preview.running:
+            self.preview.cancel()
+        else:
+            self._render()
+
+    def _on_preview_started(self) -> None:
+        self._busy('Building preview…', True)
+        self._set_render_building(True)
+
+    def _on_preview_cancelled(self) -> None:
+        self._set_render_building(False)
+        self._busy('Preview cancelled.', False)
 
     def _update_workspace_label(self) -> None:
         self.workspace_label.setText(str(self.workspace.root))
@@ -689,6 +715,7 @@ class MainWindow(QMainWindow):
         return out
 
     def _on_preview_ready(self, system) -> None:
+        self._set_render_building(False)
         message = f"Rendered {system.count:,} atoms."
         # A sweep config previews exactly one member (see PreviewController);
         # say which, so what is shown is never a silent, arbitrary choice.
@@ -702,6 +729,7 @@ class MainWindow(QMainWindow):
             self.issues.setPlainText('\n'.join(system.warnings))
 
     def _on_preview_failed(self, message: str) -> None:
+        self._set_render_building(False)
         self._busy('Preview failed.', False)
         self.issues.setPlainText(message)
         QMessageBox.warning(self, 'Preview failed', message)

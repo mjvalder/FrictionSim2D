@@ -231,6 +231,7 @@ class PreviewController(QObject):
         process.setProcessChannelMode(QProcess.MergedChannels)
         process.readyReadStandardOutput.connect(self._on_output)
         process.finished.connect(self._on_finished)
+        process.errorOccurred.connect(self._on_error)
         self._process = process
         process.start()
 
@@ -270,6 +271,28 @@ class PreviewController(QObject):
             self._deliver(self._result_file)
         else:
             self.failed.emit('The preview build produced no result.')
+
+    def _on_error(self, error: QProcess.ProcessError) -> None:
+        """Handle a process that Qt will never call `_on_finished` for.
+
+        `finished` is only *not* emitted for one reason: the process could
+        not be started at all (bad interpreter path, missing module,
+        permission denied) -- Qt's docs call this out explicitly. Every
+        other `QProcess.ProcessError` (crash, timeout, I/O) is still
+        followed by `finished`, which `_on_finished` already turns into
+        `failed` when no result file appears; reacting to those here too
+        would emit `failed` twice for one build.
+
+        Without this, a failed-to-start process left `_process` set and
+        `running` True forever -- indistinguishable, from the Render
+        button's point of view, from a build that runs forever.
+        """
+        if error != QProcess.FailedToStart:
+            return
+        process, self._process = self._process, None
+        if self._cancelled or process is None:
+            return
+        self.failed.emit('The preview build process failed to start.')
 
     def _deliver(self, result_file: Path) -> None:
         """Parse a completed build and emit the assembled system."""
