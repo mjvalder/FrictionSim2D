@@ -107,6 +107,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.workspace = workspace
         self.document = ConfigDocument.blank('afm')
+        # An unsaved config still needs somewhere to write a material list --
+        # see ConfigDocument.write_material_names' docstring for why it
+        # refuses to fall back to the process's cwd.
+        self.document.workspace_dir = workspace.configs_dir
         # A workspace settings.yaml is used when present, but only because it
         # is passed explicitly; nothing picks it up from the directory itself.
         workspace_settings = workspace.settings_path
@@ -648,6 +652,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, 'Could not read the config', str(exc))
             return
 
+        # A loaded document always has source_path set, so write_material_names
+        # never actually consults this -- set for consistency with __init__
+        # and _choose_workspace rather than because this document needs it.
+        self.document.workspace_dir = self.workspace.configs_dir
         self.form.document = self.document
         self.form.rebuild()
         self._validate()
@@ -682,6 +690,11 @@ class MainWindow(QMainWindow):
         RecentWorkspaces().add(chosen)
         self.preview.workspace = self.workspace
         self.generator.workspace = self.workspace
+        # Only meaningful for an unsaved document (write_material_names falls
+        # back to source_path's own directory once there is one) -- but keep
+        # it correct regardless, so switching workspaces before ever saving
+        # does not leave the old workspace's directory behind.
+        self.document.workspace_dir = self.workspace.configs_dir
         self._update_workspace_label()
         self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
 

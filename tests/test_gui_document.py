@@ -305,3 +305,50 @@ class TestDirtyTracking:
     def test_saving_without_a_path_raises(self):
         with pytest.raises(DocumentError, match='No path'):
             ConfigDocument.blank('afm').save()
+
+
+class TestMaterialListTarget:
+    """write_material_names' fallback when there is no saved config to write
+    beside. It used to fall back to Path.cwd(), dropping a materials.txt
+    wherever the process happened to be launched from -- see the method's
+    docstring for why that is worse than mere litter: a stray materials.txt
+    in the repo root silently shadows any other config's relatively
+    referenced list (src.core.utils.search_paths tries the name as given,
+    i.e. against the cwd, before base_dir -- deliberately, so this ordering
+    must not change)."""
+
+    def test_declines_without_a_source_path_or_workspace_dir(self, monkeypatch,
+                                                              tmp_path):
+        monkeypatch.chdir(tmp_path)
+        document = ConfigDocument.blank('indent')
+        assert document.write_material_names(['h-MoS2']) is None
+        assert document.get('2D', 'materials_list') is None
+        assert not (tmp_path / 'materials.txt').exists()
+
+    def test_writes_into_workspace_dir_when_unsaved(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(REPO_ROOT)
+        workspace_dir = tmp_path / 'configs'
+        workspace_dir.mkdir()
+        document = ConfigDocument.blank('indent')
+        document.workspace_dir = workspace_dir
+
+        target = document.write_material_names(['h-MoS2', 't-MoS2'])
+
+        assert target == workspace_dir / 'materials.txt'
+        assert target.read_text(encoding='utf-8') == 'h-MoS2\nt-MoS2\n'
+        assert document.get('2D', 'materials_list') == str(target)
+        assert not (REPO_ROOT / 'materials.txt').exists()
+
+    def test_a_saved_config_still_prefers_its_own_directory(self, monkeypatch,
+                                                             tmp_path):
+        """source_path wins over workspace_dir when both are set: the pair
+        travels together beside the config, not scattered into the
+        workspace's own configs directory."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.workspace_dir = tmp_path / 'somewhere_else'
+
+        target = document.write_material_names(['h-MoS2'])
+
+        assert target == tmp_path / 'run_materials.txt'

@@ -731,7 +731,7 @@ class SectionForm(QGroupBox):
         # treat that as a change and retarget a file that nothing actually
         # asked to change.
         if set(selected) != set(self.document.material_names()):
-            self.document.write_material_names(selected)
+            written = self.document.write_material_names(selected)
             # Read back what the document actually holds -- a relative path,
             # per _relative_to_config -- rather than reusing
             # write_material_names' return value, which is the absolute
@@ -739,8 +739,34 @@ class SectionForm(QGroupBox):
             # generic loop used to write whichever one note_written was
             # given straight back into the document.
             editor.note_written(self.document.get('2D', 'materials_list'))
+            if written is None and selected:
+                # None is ambiguous on its own: write_material_names also
+                # returns it for an empty `selected` (a legitimate clear, not
+                # a problem). Only a real, non-empty selection failing to
+                # land anywhere -- an unsaved document with no workspace to
+                # fall back to -- is the decline this warns about. The
+                # document is unchanged either way; note_written above just
+                # read that back, so the selection on screen has nothing
+                # behind it until the user saves.
+                self._warn_material_list_not_written()
 
         return True
+
+    def _warn_material_list_not_written(self) -> None:
+        """Tell the user why a ticked selection did not reach disk.
+
+        Local import, like `MaterialListEditor._browse_list`'s QFileDialog:
+        this module already depends on Qt throughout, so pulling the dialog
+        class in here rather than routing a message through a new signal
+        keeps the fix contained to the one place that needs it.
+        """
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+        QMessageBox.warning(
+            self, 'Material list not saved',
+            'This configuration has not been saved yet and no workspace is '
+            'open, so there is nowhere to write the material list.\n\n'
+            'Save the configuration first, then tick materials again.')
 
     # ----------------------------------------------------------- sweep mode
 

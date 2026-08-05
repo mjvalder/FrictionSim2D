@@ -1052,3 +1052,42 @@ class TestSweepRoundTrip:
         assert document.material_names() == ['h-MoS2', 't-MoS2']
         assert set(listing.read_text().split()) == {'h-MoS2', 't-MoS2'}
         form.deleteLater()
+
+
+class TestNoCwdPollution:
+    """Regression guard for the cwd-pollution bug: write_material_names used
+    to fall back to Path.cwd() when a document had never been saved, so
+    ticking a sweep on a brand-new config dropped a materials.txt wherever
+    the app happened to be launched from -- a real 156-line file landed in
+    the repo root exactly this way during a test run. Because
+    src.core.utils.search_paths resolves a relative name against the cwd
+    before base_dir (deliberately, so that ordering is not touched here),
+    the stray file silently shadowed other configs' own relative
+    materials_list and broke an unrelated test
+    (test_gui_pairs_elements.py::test_scan_elements_across_material_sweep).
+    """
+
+    def test_ticking_a_sweep_on_an_unsaved_config_does_not_write_into_the_cwd(
+            self, qt_app, dirs, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        # A real, blocking QMessageBox with no one to click it -- see the
+        # window fixture above for the same reasoning. Declining to write
+        # here is expected to warn the user; the warning itself is not what
+        # this test is checking.
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
+        before = set(REPO_ROOT.iterdir())
+
+        document = ConfigDocument.blank('indent')  # never saved
+        form = ConfigForm(document)
+        section = form.sections['2D']
+        editor = section.editors['materials_list']
+        editor.set_sweeping(True)
+        editor.rescan(*dirs, '.sw')
+        section.commit()
+
+        assert not document.has_material_list()
+        assert set(REPO_ROOT.iterdir()) == before
+        form.deleteLater()

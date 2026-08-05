@@ -67,6 +67,13 @@ class ConfigDocument:
     model: str = 'afm'
     values: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     source_path: Optional[Path] = None
+    #: Fallback directory for files an unsaved document needs to write (e.g.
+    #: a material list) when there is no `source_path` to write beside yet.
+    #: `MainWindow` sets this from its `Workspace` -- never a substitute for
+    #: `source_path`'s directory, only what is used in its absence. Left None
+    #: outside the GUI (e.g. in CLI/test use of this class), which is exactly
+    #: when there is no workspace to fall back to.
+    workspace_dir: Optional[Path] = None
     dirty: bool = False
     #: `unexpanded_template` issues held back by the most recent validate().
     #: Not an error when a material sweep is configured -- expansion
@@ -297,6 +304,21 @@ class ConfigDocument:
         of browsing to an existing list. The stem-based default is only ever
         used the first time a sweep is configured, when there is nothing to
         resolve yet.
+
+        Returns:
+            Where the list was written, or None when nothing was written --
+            either because `names` was empty (the sweep was cleared, not an
+            error) or because there is nowhere safe to put it (see below).
+
+        An unsaved document (`source_path` is None) with no `workspace_dir`
+        either has nowhere legitimate to write: falling back to the process's
+        current directory used to drop a `materials.txt` wherever the app
+        happened to be launched from, silently shadowing any other config's
+        relatively-referenced list that happened to resolve there first (see
+        `src.core.utils.search_paths`, which tries the name as given -- i.e.
+        against the cwd -- before `base_dir`). Declining and returning None is
+        deliberate: the caller is responsible for telling the user to save
+        the config first, not this Qt-free class.
         """
         names = [n.strip() for n in names if n and n.strip()]
         if not names:
@@ -309,8 +331,10 @@ class ConfigDocument:
             if self.source_path is not None:
                 target = self.source_path.parent / \
                     f"{self.source_path.stem}_materials.txt"
+            elif self.workspace_dir is not None:
+                target = Path(self.workspace_dir) / 'materials.txt'
             else:
-                target = Path.cwd() / 'materials.txt'
+                return None
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('\n'.join(names) + '\n', encoding='utf-8')
