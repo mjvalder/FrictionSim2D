@@ -148,11 +148,14 @@ Putting a list in the last category is reported before anything is generated.
 `scan_angle` is one of the fields **Split run phase by** (`outer_loop`) can
 act on, and it behaves like `force`/`pressure`/`scan_speed`: by default every
 angle in `[general] scan_angle` loops inside one run script; choosing
-**Split run phase by → Scan angle** instead emits one script — and one HPC
+**Split run phase by → angle** instead emits one script — and one HPC
 job — per angle, named `slide_a<token>.in` (`slide_a30.in` for 30°,
 `slide_am15.in` for -15°, `slide_a2p5.in` for 2.5°). A single configured
 angle is never split, whichever is chosen: the combined system+slide HPC path
 depends on the literal name `slide.in`, so a lone angle always keeps it.
+
+The dropdown reads **angle**; the value written to the `.ini` is still
+`outer_loop = scan_angle`, after the `[general]` key it names.
 
 The split cannot be combined with **Scan angles apply at these loads**
 (`scan_angle_force`): a per-angle script has no per-force selector left to
