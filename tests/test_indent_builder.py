@@ -1,6 +1,7 @@
 """Tests for the AFM indentation ("indent") builder (src/builders/indent.py)."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.builders.indent import (
     DEFAULT_HOLD_STEPS,
@@ -118,6 +119,54 @@ def test_slide_template_is_the_indent():
 def test_hpc_job_name(tmp_path: Path):
     builder = IndentSimulation(_afm_cfg(tmp_path, force=[10, 30]), output_dir=str(tmp_path / "o"))
     assert builder._get_hpc_job_name() == "indent_h-MoS2"
+
+
+def test_indent_opts_out_of_angle_split():
+    """afm/indent.lmp declares the angle var but never reads it (no lateral
+    drive), so IndentSimulation must opt out of the outer_loop='scan_angle'
+    split AFMSimulation supports (see SUPPORTS_ANGLE_SPLIT on both)."""
+    assert IndentSimulation.SUPPORTS_ANGLE_SPLIT is False
+
+
+def test_indent_outer_loop_scan_angle_does_not_split(tmp_path: Path):
+    """SUPPORTS_ANGLE_SPLIT=False must actually prevent the split at runtime.
+
+    Mirrors test_afm_outer_loop_scan_angle_splits_slide_per_angle in
+    tests/test_afm_builder.py, which exercises the True (splitting) side of
+    the same flag for AFMSimulation. Here, with the identical outer_loop +
+    multi-angle config, IndentSimulation must keep the single slide.in.
+    """
+    config = _afm_cfg(tmp_path, force=10.0)
+    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.outer_loop = "scan_angle"
+
+    builder = IndentSimulation(config, output_dir=str(tmp_path / "out"))
+
+    output_dir = tmp_path / "out"
+    layer_dir = output_dir / "L1"
+    builder.output_dir = output_dir
+    builder.relative_run_dir = Path("out")
+    builder.output_dir_layer[1] = layer_dir
+    builder.relative_run_dir_layer[1] = Path("out") / "L1"
+    builder.sheet_paths[1] = tmp_path / "sheet.lmp"
+    builder.tip_path = tmp_path / "tip.lmp"
+    builder.sub_path = tmp_path / "sub.lmp"
+    builder.z_positions[1] = {"sub": 0.0, "sheet": 16.0, "tip": 40.0, "tip_contact_gap": 3.5}
+    builder.groups[1] = {"sub_types": "1", "tip_types": "2", "sheet_types": "3"}
+    builder.pm[1] = SimpleNamespace(types=[1, 2, 3])
+    builder.lat_c = 6.0
+    sheet_dims = {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zlo": 0.0, "zhi": 12.0}
+    builder.sheet_dims = dict(sheet_dims)
+    builder.box_dims = dict(sheet_dims)
+    builder.sheet_offset = {"x": 0.0, "y": 0.0}
+    for path in (builder.sheet_paths[1], builder.tip_path, builder.sub_path):
+        path.write_text("# dummy\n", encoding="utf-8")
+
+    builder.write_inputs(1)
+    lammps_dir = layer_dir / "lammps"
+
+    assert (lammps_dir / "slide.in").exists()
+    assert not list(lammps_dir.glob("slide_a*.in"))
 
 
 def test_velocity_seed_records_and_matches_derivation(tmp_path: Path):

@@ -31,6 +31,14 @@ class AFMSimulation(SimulationBase):
     #: production run (e.g. the indent hold+retract replaces the slide).
     SLIDE_TEMPLATE: str = "afm/slide.lmp"
 
+    #: Whether SLIDE_TEMPLATE actually loops over scan_angle in-script (see
+    #: afm/slide.lmp's scan_angle_is_sequence switch), i.e. whether
+    #: outer_loop='scan_angle' has anything real to split per angle.
+    #: Subclasses whose SLIDE_TEMPLATE doesn't use the angle at all (e.g.
+    #: IndentSimulation's afm/indent.lmp) must override this False, else the
+    #: split would emit N physically-identical scripts.
+    SUPPORTS_ANGLE_SPLIT: bool = True
+
     def __init__(self, config: AFMSimulationConfig, output_dir: str,
                     config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
@@ -640,10 +648,11 @@ class AFMSimulation(SimulationBase):
         be silently dropped, changing what a force-gated scan means. Reject the
         combination instead.
 
-        Only applies when this builder's ``SLIDE_TEMPLATE`` is the stock
-        ``afm/slide.lmp`` (i.e. not overridden, as :class:`IndentSimulation`
-        does with ``afm/indent.lmp``, which has no angle loop to collapse --
-        splitting there would just emit N physically-identical scripts).
+        Only applies when ``self.SUPPORTS_ANGLE_SPLIT`` is True (the default).
+        :class:`IndentSimulation` overrides it False because its
+        ``afm/indent.lmp`` template declares the angle variable but never
+        uses it (no lateral drive) -- splitting there would just emit N
+        physically-identical scripts.
         """
         outer_loop = getattr(self.config.general, 'outer_loop', None)
         force = self.config.general.force
@@ -665,9 +674,7 @@ class AFMSimulation(SimulationBase):
         angles = scan_angle if isinstance(scan_angle, list) else (
             [] if scan_angle is None else [scan_angle]
         )
-        angle_split_supported = self.SLIDE_TEMPLATE == AFMSimulation.SLIDE_TEMPLATE
-
-        if outer_loop == 'scan_angle' and len(angles) > 1 and angle_split_supported:
+        if outer_loop == 'scan_angle' and len(angles) > 1 and self.SUPPORTS_ANGLE_SPLIT:
             if self.config.general.scan_angle_force is not None:
                 raise ValueError(
                     "outer_loop='scan_angle' cannot be combined with "

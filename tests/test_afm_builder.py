@@ -511,6 +511,12 @@ def test_afm_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: Path) -> N
     assert _normalize_random_seeds(slide_script.rstrip()) == _EXPECTED_SLIDE_UNSET_OUTER_LOOP
 
 
+def test_afm_supports_angle_split_by_default() -> None:
+    """AFMSimulation opts into the angle split; only opt-out subclasses (e.g.
+    IndentSimulation, see tests/test_indent_builder.py) flip this False."""
+    assert AFMSimulation.SUPPORTS_ANGLE_SPLIT is True
+
+
 def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> None:
     """outer_loop=scan_angle emits one slide_a<angle>.in per angle, sharing system.in."""
     config = _make_afm_config(tmp_path, layers=[1])

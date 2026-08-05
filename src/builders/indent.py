@@ -83,6 +83,11 @@ class IndentSimulation(AFMSimulation):
     #: Swap the sliding run for the hold+retract; the build + system.in are reused.
     SLIDE_TEMPLATE = "afm/indent.lmp"
 
+    #: afm/indent.lmp declares the angle variable but never reads it (the
+    #: hold+retract run has no lateral drive), so splitting per scan_angle
+    #: would just emit N physically-identical scripts -- opt out.
+    SUPPORTS_ANGLE_SPLIT = False
+
     def __init__(self, config: AFMSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
