@@ -200,8 +200,9 @@ stays one `slide.in` and one job — the predicted job count says so too.
 | `run pes-tip`, `run pes-sheet` | PES scans | nothing — the run phase is replaced entirely |
 
 The GUI reflects the last two rows: it shows no split control at all for the
-PES modes, and its job count for a twisted, numbered-sheet or flake
-sheet-on-sheet config stays at one job per build.
+PES modes, and its job count for a twisted or flake sheet-on-sheet config
+stays at one job per build. A numbered `[2D-1]`/`[2D-2]` config is not
+editable in the GUI at all — open it with the CLI.
 
 ```ini
 [general]

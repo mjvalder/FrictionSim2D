@@ -170,10 +170,11 @@ template never reads the angle variable, so it keeps `force` and drops
 never look at `outer_loop` at all, so they offer no split of any kind to
 choose from (with nothing to offer, the control is not shown).
 
-A sheet-on-sheet config that carries a **twist angle**, numbered `[2D-N]`
-sheets or a `[Flake]` section builds through a different builder, which
-ignores `outer_loop` entirely — no split of any kind, and the job count
-shown reflects that.
+A sheet-on-sheet config that carries a **twist angle** or a `[Flake]` section
+builds through a different builder, which ignores `outer_loop` entirely — no
+split of any kind, and the job count shown reflects that. (A numbered
+`[2D-1]`/`[2D-2]` config routes there too, but the GUI declines to open one
+at all, so the question never arises in this window.)
 
 ### Sweeping over materials
 
