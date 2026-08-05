@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import parse_config
+from src.core.config import GeneralConfig, parse_config
 from src.core.config_io import write_config
 from src.core.run import (
     count_expansion,
@@ -135,13 +135,34 @@ class TestInFileLoopsDoNotMultiplyConfigs:
         assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 4)
 
     def test_outer_loop_scan_angle_multiplies_jobs_only(self, monkeypatch):
-        """_run_scripts_per_build reads general.get(outer_loop) generically, so
-        'scan_angle' is already counted correctly even though no builder splits
-        the slide phase by angle yet (that lands in Tasks 2-3). This test pins
-        the counting side of that gap."""
+        """Pins two things at once, deliberately routed through the validated
+        model rather than a raw dict:
+
+        1. outer_loop='scan_angle' must pass GeneralConfig validation -- the
+           GeneralConfig(**raw['general']) call below raises ValidationError
+           if the Literal in config.py is ever reverted to its pre-Task-1
+           three values, so this test actually depends on the change made in
+           this task (a raw-dict-only version does not: count_expansion ->
+           expand_config_sweeps -> _run_scripts_per_build never construct a
+           GeneralConfig, so a raw dict sails through regardless of what the
+           Literal allows).
+        2. Once validated, _run_scripts_per_build's generic
+           general.get(outer_loop) handling (no per-value branching) counts
+           one job per angle -- the same generic mechanism already pinned for
+           outer_loop='force' above, now exercised for 'scan_angle'. This is
+           the number Task 5's GUI expansion count depends on.
+
+        No builder splits the slide phase by angle yet (that lands in Tasks
+        2-3); this test only pins the *counting* layer, which already handles
+        it because it has no per-value branching to update.
+        """
         monkeypatch.chdir(REPO_ROOT)
         raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
         raw['general']['scan_angle'] = [0, 45, 90]
         raw['general']['outer_loop'] = 'scan_angle'
+
+        validated_general = GeneralConfig(**raw['general'])
+        raw['general'] = validated_general.model_dump()
+
         summary = count_expansion(raw, 'afm')
         assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 3)
