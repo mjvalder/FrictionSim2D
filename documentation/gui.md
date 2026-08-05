@@ -159,8 +159,8 @@ The dropdown reads **angle**; the value written to the `.ini` is still
 
 The split cannot be combined with **Scan angles apply at these loads**
 (`scan_angle_force`): a per-angle script has no per-force selector left to
-apply that filter to, so pairing the two raises a build-time error rather
-than silently dropping it.
+apply that filter to, so the validation panel reports the pair — before
+anything is built — rather than silently dropping the filter.
 
 **Split run phase by** offers `scan_angle` only in the two modes whose slide
 phase actually reads it — AFM's **Dynamic + indent** and sheet-on-sheet's
@@ -168,7 +168,12 @@ phase actually reads it — AFM's **Dynamic + indent** and sheet-on-sheet's
 template never reads the angle variable, so it keeps `force` and drops
 `scan_angle`; the two **PES scan** modes replace the run phase entirely and
 never look at `outer_loop` at all, so they offer no split of any kind to
-choose from.
+choose from (with nothing to offer, the control is not shown).
+
+A sheet-on-sheet config that carries a **twist angle**, numbered `[2D-N]`
+sheets or a `[Flake]` section builds through a different builder, which
+ignores `outer_loop` entirely — no split of any kind, and the job count
+shown reflects that.
 
 ### Sweeping over materials
 

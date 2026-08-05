@@ -153,6 +153,9 @@ they run in parallel rather than back-to-back:
 | `scan_speed` | sheet-on-sheet | `slide_<value>ms.in` | one job per speed |
 | `scan_angle` | AFM / sheet-on-sheet (dynamic modes) | `slide_a<angle>.in` | one job per angle |
 
+Every row assumes the config routes to the homogeneous AFM or sheet-on-sheet
+builder — see *Which builders honour `outer_loop`* below.
+
 For AFM `outer_loop = force`, a single `system.in` (indentation phase) still
 writes every `load_<load>N.data`, and each `slide_f<load>N.in` reads its own
 load file. The HPC generator wires this as a two-phase submission: the per-load
@@ -173,19 +176,32 @@ token (`slide_a30.in` for 30, `slide_am15.in` for -15, `slide_a2p5.in` for
 the combined system+slide HPC path depends on that literal name, so a lone
 angle is never split. It cannot be combined with `scan_angle_force`: a
 per-angle script has no per-force selector left to apply that filter to, so
-the combination is rejected when the config is validated — before anything is
-built — rather than silently dropping it.
+the combination is refused before anything is built (and reported in the GUI
+validation panel) rather than silently dropping the filter. It is refused
+only for the builders that really split by angle — where the run phase stays
+a single script the filter is honoured in-script, so the pair is accepted.
 
 Only the angle is collapsed: each per-angle script still loops in-script over
 every `force`/`pressure` and `scan_speed` value configured, exactly as the
 unsplit `slide.in` would.
 
-`outer_loop = scan_angle` is only acted on by the two dynamic models above.
-`run indent` shares AFM's `[general]` fields but its template never reads the
-angle variable, so setting it there splits nothing. `run pes-tip` and
-`run pes-sheet` replace the run phase entirely and never read `outer_loop` at
-all, regardless of its value — the GUI reflects this by not showing the
-split control at all for those two modes.
+#### Which builders honour `outer_loop`
+
+`outer_loop` is acted on by the builder the config routes to, not by the
+`run` command alone. Where the selected builder ignores it, the run phase
+stays one `slide.in` and one job — the predicted job count says so too.
+
+| Config | Builder | Honours |
+|---|---|---|
+| `run afm` (dynamic + indent) | AFM (incl. hetero AFM) | `force`, `scan_angle` |
+| `run indent` | indent | `force` only — the hold/retract never reads the angle |
+| `run sheetonsheet`, single `[2D]`, no twist | sheet-on-sheet | `pressure`, `scan_speed`, `scan_angle` |
+| `run sheetonsheet` with `[general] twist_angle`, `[2D-1]`/`[2D-2]`, or `[Flake]` | hetero / flake slide | nothing — every value stays an in-script loop |
+| `run pes-tip`, `run pes-sheet` | PES scans | nothing — the run phase is replaced entirely |
+
+The GUI reflects the last two rows: it shows no split control at all for the
+PES modes, and its job count for a twisted, numbered-sheet or flake
+sheet-on-sheet config stays at one job per build.
 
 ```ini
 [general]

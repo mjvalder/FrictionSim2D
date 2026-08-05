@@ -123,8 +123,9 @@ AFM = SimulationFamily(
             # PESTipSimulation.write_inputs overrides the run phase entirely
             # (a single self-contained lammps/slide.in) and never reads
             # outer_loop; offering 'force' here would configure a split that
-            # silently does nothing, and count_expansion would still predict
-            # the split job count the build never produces.
+            # silently does nothing. (count_expansion no longer over-reports
+            # it -- it reads the builder's SPLIT_OUTER_LOOPS -- but a control
+            # that configures nothing is still worth not offering.)
             outer_loop_choices=(),
         ),
     ),

@@ -14,6 +14,8 @@ from types import SimpleNamespace
 import itertools
 import re
 
+from pydantic import TypeAdapter, ValidationError
+
 from .config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
@@ -412,6 +414,23 @@ def _as_list(value: Any) -> List[Any]:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
+#: Coerces a raw value the way the pydantic models do. `read_config` leaves
+#: `.ini` values as strings, and `bool('false')` is True -- the opposite of
+#: what a config saying `finite_sheet = false` means (and of what the model
+#: would produce). Reusing pydantic's own parser keeps the two in step.
+_BOOL_ADAPTER = TypeAdapter(bool)
+
+
+def _as_model_bool(value: Any, default: bool = False) -> bool:
+    """`value` as pydantic would read it, or `default` if it would not."""
+    if value is None:
+        return default
+    try:
+        return _BOOL_ADAPTER.validate_python(value)
+    except ValidationError:
+        return default
+
+
 def _routing_view(config: Dict[str, Any], model: str) -> SimpleNamespace:
     """A stand-in for the validated config object, built from a raw mapping.
 
@@ -432,13 +451,17 @@ def _routing_view(config: Dict[str, Any], model: str) -> SimpleNamespace:
     numbered = [k for k in config if isinstance(k, str) and k.startswith('2D-')]
     sheets = numbered or (['2D'] if '2D' in config else [])
     flake_key = 'flake' if model in AFM_LIKE_MODELS else 'Flake'
+    twist = general.get('twist_angle')
     return SimpleNamespace(
         sub=config.get('sub'),
         sheets=sheets,
         flake=config.get(flake_key),
         general=SimpleNamespace(
-            twist_angle=general.get('twist_angle'),
-            finite_sheet=bool(general.get('finite_sheet', False)),
+            # A blank value is an unset key, not a twist of nothing: configparser
+            # gives None, but a half-typed GUI field or a JSON config can hand
+            # over ''. Only presence is read, so '' would route to hetero.
+            twist_angle=None if twist == '' else twist,
+            finite_sheet=_as_model_bool(general.get('finite_sheet')),
         ),
     )
 

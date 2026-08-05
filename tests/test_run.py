@@ -93,6 +93,59 @@ def test_runtime_validation_rejects_selector_not_in_target_order() -> None:
         )
 
 
+class TestRoutingViewMatchesTheModel:
+    """The view exists to answer routing questions exactly as the validated
+    config would. `.ini` values arrive as the strings configparser produced,
+    so the view has to coerce them the way pydantic does -- `finite_sheet =
+    false` is the string 'false', which is truthy."""
+
+    @staticmethod
+    def _hetero_afm_raw(finite_sheet):
+        return {
+            'general': {'temp': 300, 'finite_sheet': finite_sheet},
+            'tip': {'mat': 'Si', 'r': 25},
+            'sub': {'mat': 'Si', 'amorph': 'a'},
+            '2D': {'mat': 'h-MoS2'},
+            '2D-1': {'mat': 'h-MoS2'},
+            '2D-2': {'mat': 'h-WS2'},
+        }
+
+    def test_a_false_string_is_not_a_finite_sheet(self):
+        from src.builders.hetero_afm import HeteroAFMSimulation
+        from src.core.run import _builder_cls_for_count
+
+        assert _builder_cls_for_count(
+            self._hetero_afm_raw('false'), 'afm') is HeteroAFMSimulation
+
+    def test_a_true_string_still_routes_to_the_finite_builder(self):
+        from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+        from src.core.run import _builder_cls_for_count
+
+        assert _builder_cls_for_count(
+            self._hetero_afm_raw('true'), 'afm') is FiniteHeteroAFMSimulation
+
+    def test_a_real_bool_is_unaffected(self):
+        from src.builders.hetero_afm import (
+            FiniteHeteroAFMSimulation, HeteroAFMSimulation,
+        )
+        from src.core.run import _builder_cls_for_count
+
+        assert _builder_cls_for_count(
+            self._hetero_afm_raw(False), 'afm') is HeteroAFMSimulation
+        assert _builder_cls_for_count(
+            self._hetero_afm_raw(True), 'afm') is FiniteHeteroAFMSimulation
+
+    def test_a_blank_twist_angle_is_not_a_twist(self):
+        """An empty `.ini` key reads as None, but a blank string reaching the
+        view (a half-typed GUI field, a JSON config) must not route a
+        single-material sheet config to the hetero builder."""
+        from src.builders.sheetonsheet import SheetOnSheetSimulation
+        from src.core.run import _builder_cls_for_count
+
+        raw = {'general': {'temp': 300, 'twist_angle': ''}, '2D': {'mat': 'h-MoS2'}}
+        assert _builder_cls_for_count(raw, 'sheetonsheet') is SheetOnSheetSimulation
+
+
 class TestAngleSplitWithAForceGate:
     """``outer_loop='scan_angle'`` cannot carry ``scan_angle_force`` -- the
     split applies its one angle to every force, silently dropping the gate.
