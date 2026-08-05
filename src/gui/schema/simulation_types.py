@@ -34,6 +34,15 @@ class SimulationMode:
     sections: Tuple[str, ...] = ()
     #: True when the build writes an approach + indentation `system.in`.
     has_system_phase: bool = True
+    #: Narrows the family's ``outer_loop_choices`` for this mode specifically.
+    #: ``None`` (the default) means "use the family's value". Set this when a
+    #: mode's build path does not act on a value the family otherwise
+    #: supports -- e.g. AFM's ``dynamic_indent`` mode writes one
+    #: ``slide_a<angle>.in`` per angle, but ``indent`` never reads the angle
+    #: variable and ``pes`` overrides the build entirely, so offering
+    #: ``scan_angle`` there would configure a split that silently does
+    #: nothing.
+    outer_loop_choices: Optional[Tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +68,14 @@ class SimulationFamily:
     def mode(self, key: str) -> Optional[SimulationMode]:
         return next((m for m in self.modes if m.key == key), None)
 
+    def outer_loop_choices_for(self, mode: SimulationMode) -> Tuple[str, ...]:
+        """Effective ``outer_loop`` choices for one mode of this family.
+
+        Falls back to the family's own value when the mode does not narrow it.
+        """
+        return (mode.outer_loop_choices if mode.outer_loop_choices is not None
+                else self.outer_loop_choices)
+
     def supports(self, section: str, key: str) -> bool:
         """Whether a config key does anything for this family."""
         return not (section == 'general' and key in self.unsupported_general)
@@ -83,6 +100,10 @@ AFM = SimulationFamily(
             key='dynamic_indent', model='afm',
             label='Dynamic + indent',
             description='Approach and indent, then slide under load.',
+            # Only mode in the family whose slide phase actually honors
+            # outer_loop='scan_angle' (afm.py's _write_slide_scripts writes
+            # one slide_a<angle>.in per angle here).
+            outer_loop_choices=('force', 'scan_angle'),
         ),
         SimulationMode(
             key='indent', model='indent',
@@ -119,6 +140,11 @@ SHEET_ON_SHEET = SimulationFamily(
             key='dynamic', model='sheetonsheet',
             label='Dynamic (slide)',
             description='Slide the upper sheet under load.',
+            # Only mode in the family whose slide phase actually honors
+            # outer_loop='scan_angle' (sheetonsheet.py writes one
+            # slide_a<angle>.in per angle here); the PES scan below
+            # overrides write_inputs entirely and never looks at outer_loop.
+            outer_loop_choices=('pressure', 'scan_speed', 'scan_angle'),
         ),
         SimulationMode(
             key='pes', model='pes_sheet',

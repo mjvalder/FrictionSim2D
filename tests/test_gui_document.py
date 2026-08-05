@@ -214,6 +214,22 @@ class TestExpansion:
         document.set('general', 'temp', [300, 500])
         assert document.expansion().configs == 2
 
+    def test_outer_loop_scan_angle_multiplies_jobs_for_afm(self, monkeypatch):
+        """The GUI's displayed count follows core.run.count_expansion, which
+        Task 1 already made generic over which parameter is named by
+        outer_loop -- this pins that the GUI side of that plumbing (the
+        document -> count_expansion call) actually reflects it, now that the
+        dropdown offers scan_angle for this mode."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'afm_flake_config.ini', 'afm')
+        baseline = document.expansion()
+        assert (baseline.configs, baseline.builds, baseline.jobs) == (1, 1, 1)
+
+        document.set('general', 'outer_loop', 'scan_angle')
+        document.set('general', 'scan_angle', [0, 30, 60])
+        split = document.expansion()
+        assert (split.configs, split.builds, split.jobs) == (1, 1, 3)
+
 
 class TestExpansionOutputDirs:
     """The Generate confirmation previews these dirs and flags collisions

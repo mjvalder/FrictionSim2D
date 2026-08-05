@@ -722,9 +722,11 @@ class TestFamilyFieldFiltering:
         assert 'bond_spring' in general_fields('sheetonsheet')
 
     @pytest.mark.parametrize('model,expected', [
-        ('afm', {'force'}),
+        ('afm', {'force', 'scan_angle'}),
         ('indent', {'force'}),
-        ('sheetonsheet', {'pressure', 'scan_speed'}),
+        ('pes_tip', {'force'}),
+        ('sheetonsheet', {'pressure', 'scan_speed', 'scan_angle'}),
+        ('pes_sheet', {'pressure', 'scan_speed'}),
     ])
     def test_outer_loop_offers_only_what_the_builder_acts_on(self, qt_app, model,
                                                              expected, monkeypatch):

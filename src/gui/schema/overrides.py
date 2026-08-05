@@ -261,9 +261,12 @@ _COMMON: Dict[str, SectionOverride] = {
             'outer_loop': FieldOverride(
                 label='Split run phase by', order=7,
                 help='One run script per value instead of one in-script loop.',
-                detail=('Emits one run script per value of the named parameter instead '
-                        'of looping inside a single script. This is what multiplies '
-                        'the HPC job count.'),
+                detail=('By default every value of a swept parameter -- e.g. every '
+                        'scan angle -- loops inside one run script. Choosing a '
+                        'parameter here instead emits one run script, and one HPC '
+                        'job, per value; this is what multiplies the job count. A '
+                        'parameter with only one configured value is never split, '
+                        'whether or not it is chosen here.'),
             ),
             'finite_sheet': FieldOverride(
                 label='Finite sheet', order=8,
@@ -484,7 +487,7 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
     if entry is None:
         return result
 
-    family, _mode = entry
+    family, mode = entry
 
     if model != 'pes_tip':
         substrate = result.get('sub', SectionOverride())
@@ -502,11 +505,12 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
         key: value for key, value in general.fields.items()
         if family.supports('general', key)
     }
-    if family.outer_loop_choices and 'outer_loop' in fields:
+    outer_loop_choices = family.outer_loop_choices_for(mode)
+    if outer_loop_choices and 'outer_loop' in fields:
         existing = fields['outer_loop']
         fields['outer_loop'] = FieldOverride(
             label=existing.label, unit=existing.unit, help=existing.help,
-            order=existing.order, choices=family.outer_loop_choices,
+            order=existing.order, choices=outer_loop_choices,
             detail=existing.detail, editor=existing.editor,
         )
     result['general'] = SectionOverride(

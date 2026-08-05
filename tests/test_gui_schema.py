@@ -267,11 +267,40 @@ class TestRebuiltOverridesKeepTheirMetadata:
                (source.label, source.help, source.detail, source.order)
 
     def test_the_narrowed_outer_loop_keeps_its_detail(self):
-        """The nested rebuild: `choices` is replaced per family, and everything
-        else has to be carried across by hand."""
+        """The nested rebuild: `choices` is replaced per mode (falling back to
+        the family), and everything else has to be carried across by hand."""
         outer_loop = overrides_for('afm')['general'].fields['outer_loop']
-        assert outer_loop.choices == ('force',)   # it *was* rebuilt
+        assert outer_loop.choices == ('force', 'scan_angle')   # it *was* rebuilt
         assert 'job count' in outer_loop.detail
+
+
+class TestOuterLoopChoicesNarrowByMode:
+    """`scan_angle` only does something in the two modes whose builder emits
+    one run script per angle (dynamic_indent/'afm' and dynamic/'sheetonsheet').
+    'indent' shares the AFM family but its template never reads the angle
+    variable (SUPPORTS_ANGLE_SPLIT = False); both PES scan modes override
+    write_inputs entirely and never look at outer_loop at all. Offering
+    scan_angle there would let someone configure a split that silently does
+    nothing -- exactly what outer_loop_choices exists to prevent."""
+
+    def test_scan_angle_offered_where_the_split_is_real(self):
+        assert 'scan_angle' in overrides_for('afm')['general'].fields['outer_loop'].choices
+        assert 'scan_angle' in \
+            overrides_for('sheetonsheet')['general'].fields['outer_loop'].choices
+
+    def test_scan_angle_not_offered_where_the_split_is_a_no_op(self):
+        assert 'scan_angle' not in overrides_for('indent')['general'].fields['outer_loop'].choices
+        assert 'scan_angle' not in overrides_for('pes_tip')['general'].fields['outer_loop'].choices
+        assert 'scan_angle' not in \
+            overrides_for('pes_sheet')['general'].fields['outer_loop'].choices
+
+    def test_unnarrowed_choices_are_unaffected(self):
+        """`indent` still offers `force` exactly as before -- this task does
+        not touch that narrowing."""
+        assert overrides_for('indent')['general'].fields['outer_loop'].choices == ('force',)
+        assert overrides_for('pes_tip')['general'].fields['outer_loop'].choices == ('force',)
+        assert overrides_for('pes_sheet')['general'].fields['outer_loop'].choices == \
+            ('pressure', 'scan_speed')
 
 
 class TestOverrides:
