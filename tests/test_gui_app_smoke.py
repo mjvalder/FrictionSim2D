@@ -243,6 +243,22 @@ class TestMainWindow:
         window._validate()
         assert 'overwrite each other' in window.issues.toPlainText()
 
+    def test_angle_split_with_a_force_gate_is_reported(self, window):
+        """The angle split cannot honour scan_angle_force, and the builders
+        only say so from write_inputs -- after the geometry has been built,
+        leaving a half-written tree behind. The model rejects it, so the panel
+        has to show it here, before Generate is ever pressed."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'afm_flake_config.ini', 'afm')
+        window.form.document = window.document
+        window.form.rebuild()
+        window.form.sections['general'].editors['scan_angle'].set_value([0.0, 30.0])
+        window.form.sections['general'].editors['scan_angle_force'].set_value(30.0)
+        window.form.sections['general'].editors['outer_loop'].set_value('scan_angle')
+
+        assert not window._validate()
+        assert 'scan_angle_force' in window.issues.toPlainText()
+
     def test_tip_sizing_warning(self, window):
         """A footprint under 2x the tip diameter lets the tip interact with
         its own periodic image (D12) -- non-blocking, but worth flagging.

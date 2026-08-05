@@ -554,6 +554,40 @@ def test_outer_loop_accepts_scan_angle_and_rejects_unknown_values():
         GeneralConfig(temp=300, outer_loop='not_a_real_choice')
 
 
+class TestAngleSplitRejectsScanAngleForce:
+    """outer_loop='scan_angle' cannot honour scan_angle_force.
+
+    The split applies its one fixed angle to every force/pressure in every
+    per-angle script, so the force-selective filter would be silently dropped.
+    The builders raise on it -- but only from write_inputs, after the whole
+    geometry has been built. Catching it on the model means the CLI, the API
+    and the GUI's validation panel all report it before anything is written.
+    """
+
+    def test_rejected_when_the_split_would_happen(self):
+        with pytest.raises(ValidationError, match='scan_angle_force'):
+            GeneralConfig(temp=300, outer_loop='scan_angle',
+                          scan_angle=[0.0, 30.0, 60.0], scan_angle_force=30.0)
+
+    def test_a_single_angle_is_untouched(self):
+        """One angle falls through to the single-script path, which honours
+        the filter (the builders only split on len(angles) > 1)."""
+        g = GeneralConfig(temp=300, outer_loop='scan_angle',
+                          scan_angle=[30.0], scan_angle_force=30.0)
+        assert g.scan_angle_force == 30.0
+
+    def test_the_in_script_angle_loop_is_untouched(self):
+        """Without the split the filter is exactly what scan_angle_force is
+        for -- rejecting it there would break every gated angle scan."""
+        g = GeneralConfig(temp=300, scan_angle=[0.0, 30.0], scan_angle_force=30.0)
+        assert g.outer_loop is None
+
+    def test_another_outer_loop_is_untouched(self):
+        g = GeneralConfig(temp=300, outer_loop='force', force=[5.0, 10.0],
+                          scan_angle=[0.0, 30.0], scan_angle_force=30.0)
+        assert g.outer_loop == 'force'
+
+
 def test_damping_ratio_defaults_to_zero():
     from src.core.config import TipConfig
     assert TipConfig.model_fields['damping_ratio'].default == 0.0

@@ -483,6 +483,42 @@ class GeneralConfig(BaseModel):
     )
 
     @model_validator(mode='after')
+    def _reject_angle_split_with_a_force_gate(self) -> 'GeneralConfig':
+        """``outer_loop='scan_angle'`` cannot carry ``scan_angle_force``.
+
+        ``scan_angle_force`` restricts which force/pressure value(s) the
+        ``scan_angle`` list applies to (the templates' angle_loop gate), but
+        the split applies its one fixed angle to every force in every per-angle
+        script -- so the selector would be silently dropped, changing what a
+        gated scan means.
+
+        The builders raise on this too, but only from ``write_inputs``: by then
+        the geometry has been built and a partially written tree is on disk
+        (for sheet-on-sheet with ``constraint_mode='atom_bonds'``, the sheet
+        ``.lmp`` has already been rewritten in place). Rejecting it here means
+        the CLI, the API and the GUI validation panel all report it before
+        anything is built; the builder-side raise stays as the backstop for
+        configs assembled without going through this model.
+
+        Only a real split is rejected -- a single angle falls through to the
+        in-script loop, which honours the gate.
+        """
+        if self.outer_loop != 'scan_angle':
+            return self
+        if self.scan_angle_force is None:
+            return self
+        angles = self.scan_angle if isinstance(self.scan_angle, list) else []
+        if len(angles) > 1:
+            raise ValueError(
+                "outer_loop='scan_angle' cannot be combined with "
+                "scan_angle_force: splitting into one script per angle applies "
+                "each angle to every force/pressure value, silently dropping "
+                "the selective filter. Remove scan_angle_force, or drop "
+                "outer_loop to keep the in-script angle loop (which honors it)."
+            )
+        return self
+
+    @model_validator(mode='after')
     def _validate_twist_angle(self) -> 'GeneralConfig':
         """Restrict twist_angle to the hexagonal irreducible wedge [0, 60)."""
         if self.twist_angle is not None and not (0.0 <= self.twist_angle < 60.0):

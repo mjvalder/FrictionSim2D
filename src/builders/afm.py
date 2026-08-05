@@ -646,7 +646,9 @@ class AFMSimulation(SimulationBase):
         (afm/slide.lmp's angle_loop gate), but the split applies its one fixed
         angle to every force in every per-angle script -- so the selector would
         be silently dropped, changing what a force-gated scan means. Reject the
-        combination instead.
+        combination instead. ``GeneralConfig`` rejects it first (before the
+        build), so this raise is the backstop for configs assembled without
+        going through the model.
 
         Only applies when ``'scan_angle' in self.SPLIT_OUTER_LOOPS`` (the
         default). :class:`IndentSimulation` drops it because its
