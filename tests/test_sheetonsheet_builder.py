@@ -1,11 +1,143 @@
 """Tests for SheetOnSheetSimulation builder behavior."""
 
+import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.builders.sheetonsheet import SheetOnSheetSimulation
 from src.core.config import SheetOnSheetSimulationConfig, load_settings
+
+# slide.lmp embeds two fresh `{{ range(1, 999999) | random }}` seeds on every
+# render (velocity create + langevin fix), so raw output can't be pinned
+# literally. Normalize both seeds to a fixed placeholder before comparing.
+_VELOCITY_SEED_RE = re.compile(
+    r'(velocity        center create [\d.]+ )\d+'
+)
+_LANGEVIN_SEED_RE = re.compile(
+    r'(langevin [\d.]+ [\d.]+ \$\(100\.0\*dt\) )\d+( zero yes)'
+)
+
+
+def _normalize_random_seeds(content: str) -> str:
+    content = _VELOCITY_SEED_RE.sub(r'\1SEED', content)
+    content = _LANGEVIN_SEED_RE.sub(r'\1SEED\2', content)
+    return content
+
+
+# Captured from SheetOnSheetSimulation.write_inputs() with outer_loop unset,
+# on the `_make_sheetonsheet_config` fixture config (pressure=1.0), before
+# the scan_angle split was added. Pins that the unset (default) path is
+# byte-identical to today.
+_EXPECTED_SLIDE_UNSET_OUTER_LOOP = """\
+# LAMMPS Input Script for Sheet-vs-Sheet Sliding
+# 3-layer model, constraint_mode: none
+
+variable        speed equal 2.0
+
+variable        pressure equal 1.0
+
+variable        a equal 0.0
+
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+comm_style      tiled
+
+region          box block 0.0 100.0 0.0 100.0 -15.0 30.0 units box
+create_box      3 box
+
+read_data       out/build/sheet.lmp add append group bot
+
+include         out/lammps/system.in.settings
+
+
+
+dump            sys all atom 10000 out/visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+# Thermostat on middle layers (2 through 2)
+group           center union layer_2
+velocity        center create 300.0 SEED
+fix             lang center langevin 300.0 300.0 $(100.0*dt) SEED zero yes
+fix             nve_center center nve
+
+timestep        0.001
+thermo          100000
+
+# Top layer (layer 3): driven
+fix             fstage_top layer_3 rigid/nve single force * on on on torque * off off off
+# Bottom layer (layer 1): fixed
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# COM computes for key layers
+compute         COM_top layer_3 com
+variable        comx_top equal c_COM_top[1]
+variable        comy_top equal c_COM_top[2]
+variable        comz_top equal c_COM_top[3]
+
+compute         COM_ctop layer_2 com
+variable        comx_ctop equal c_COM_ctop[1]
+variable        comy_ctop equal c_COM_ctop[2]
+variable        comz_ctop equal c_COM_ctop[3]
+
+compute         COM_cbot layer_2 com
+variable        comx_cbot equal c_COM_cbot[1]
+variable        comy_cbot equal c_COM_cbot[2]
+variable        comz_cbot equal c_COM_cbot[3]
+
+compute         COM_bot layer_1 com
+variable        comx_bot equal c_COM_bot[1]
+variable        comy_bot equal c_COM_bot[2]
+variable        comz_bot equal c_COM_bot[3]
+
+# Apply Uniform Pressure
+# 1 eV/Å³ = 160.2176565 GPa
+variable        A equal (100.0-0.0)*(100.0-0.0)
+variable        p equal v_pressure/160.2176565
+variable        f equal -v_p*v_A/(count(layer_3))
+
+fix             force layer_3 aveforce 0.0 0.0 $f
+
+variable        fx equal f_force[1]*1.602176565
+variable        fy equal f_force[2]*1.602176565
+variable        fz equal f_force[3]*1.602176565
+variable        sx equal f_fsbot[1]*1.602176565
+variable        sy equal f_fsbot[2]*1.602176565
+variable        sz equal f_fsbot[3]*1.602176565
+
+compute         frict layer_2 group/group layer_1
+variable        xfrict equal c_frict[1]
+variable        yfrict equal c_frict[2]
+
+run             10000
+
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+create_atoms    3 single $(xcm(layer_3,x)) $(xcm(layer_3,y)) $(xcm(layer_3,z)+10) units box
+group           virtual type 3
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr layer_3 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
+fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
+
+fix             fc_ave all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file out/results/friction_p${pressure}_a${a}_s${speed}
+
+run             500000"""
 
 
 def _make_sheetonsheet_config(tmp_path: Path, layers: list[int]) -> SheetOnSheetSimulationConfig:
@@ -148,3 +280,120 @@ def test_sheetonsheet_collect_simulation_paths(tmp_path: Path) -> None:
 
     (out_dir / "lammps").mkdir(parents=True, exist_ok=True)
     assert builder._collect_simulation_paths() == ["."]
+
+
+def _seed_builder_state(builder: SheetOnSheetSimulation, tmp_path: Path) -> Path:
+    """Seed builder state so write_inputs can render slide.in in isolation.
+
+    Bypasses build()/_generate_potentials() by hand-populating the attributes
+    write_inputs() reads: structure_paths, lat_c, sheet_dims, pm, groups.
+    """
+    output_dir = tmp_path / "out"
+    builder.output_dir = output_dir
+    builder.relative_run_dir = Path("out")
+
+    sheet_path = tmp_path / "sheet.lmp"
+    sheet_path.write_text("# dummy\n", encoding="utf-8")
+    builder.structure_paths["sheet"] = sheet_path
+
+    builder.lat_c = 3.0
+    builder.sheet_dims = {
+        "xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zhi": 15.0,
+    }
+    builder.pm = SimpleNamespace(types=[1, 2, 3], is_sheet_lj=lambda _pt: True)
+    builder.groups = {
+        "layer_1": "1",
+        "layer_2": "2",
+        "layer_3": "3",
+        "center": "2",
+        "all_types": "1 2 3",
+    }
+    return output_dir
+
+
+def _prepare_builder_for_slide_write(builder: SheetOnSheetSimulation, tmp_path: Path) -> Path:
+    """Seed builder state and render slide.in."""
+    output_dir = _seed_builder_state(builder, tmp_path)
+    builder.write_inputs()
+    return output_dir / "lammps" / "slide.in"
+
+
+def test_sheetonsheet_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: Path) -> None:
+    """outer_loop unset must emit byte-identical slide.in to today (pinned)."""
+    config = _make_sheetonsheet_config(tmp_path, layers=[3])
+    config.general.pressure = 1.0
+
+    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    slide_script = slide_path.read_text(encoding="utf-8")
+
+    assert _normalize_random_seeds(slide_script.rstrip()) == _EXPECTED_SLIDE_UNSET_OUTER_LOOP
+
+
+def test_sheetonsheet_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> None:
+    """outer_loop=scan_angle emits one slide_a<angle>.in per angle."""
+    config = _make_sheetonsheet_config(tmp_path, layers=[3])
+    config.general.pressure = 1.0
+    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.outer_loop = "scan_angle"
+
+    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
+    output_dir = _seed_builder_state(builder, tmp_path)
+    builder.write_inputs()
+    lammps_dir = output_dir / "lammps"
+
+    # No monolithic slide.in; one per angle instead.
+    assert not (lammps_dir / "slide.in").exists()
+    slide_scripts = sorted(p.name for p in lammps_dir.glob("slide_*.in"))
+    assert slide_scripts == ["slide_a0.in", "slide_a30.in", "slide_a60.in"]
+
+    # Each split slide pins a scalar angle (no in-script angle loop), while
+    # the pressure axis keeps its full config (still a single value here).
+    slide_30 = (lammps_dir / "slide_a30.in").read_text(encoding="utf-8")
+    assert "variable        a equal 30.0" in slide_30
+    assert "label           angle_loop" not in slide_30
+    assert "variable        a index" not in slide_30
+
+    slide_0 = (lammps_dir / "slide_a0.in").read_text(encoding="utf-8")
+    assert "variable        a equal 0.0" in slide_0
+    slide_60 = (lammps_dir / "slide_a60.in").read_text(encoding="utf-8")
+    assert "variable        a equal 60.0" in slide_60
+
+
+def test_sheetonsheet_outer_loop_scan_angle_single_angle_stays_slide_in(tmp_path: Path) -> None:
+    """A single angle keeps slide.in so the combined HPC path applies."""
+    config = _make_sheetonsheet_config(tmp_path, layers=[3])
+    config.general.pressure = 1.0
+    config.general.scan_angle = [15.0]
+    config.general.outer_loop = "scan_angle"
+
+    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
+    output_dir = _seed_builder_state(builder, tmp_path)
+    builder.write_inputs()
+    lammps_dir = output_dir / "lammps"
+
+    assert (lammps_dir / "slide.in").exists()
+    assert not list(lammps_dir.glob("slide_a*.in"))
+
+
+def test_sheetonsheet_outer_loop_scan_angle_rejects_scan_angle_force(tmp_path: Path) -> None:
+    """The split can't honor a pressure-selective angle filter; reject it clearly.
+
+    scan_angle_force restricts which pressure value(s) the scan_angle list
+    applies to (sheetonsheet/slide.lmp's angle_loop gate, comparing against
+    v_pressure at line ~202). Splitting into one script per angle applies
+    each angle to every pressure value in that script, silently dropping the
+    filter -- so reject the combination instead of changing what the scan
+    means.
+    """
+    config = _make_sheetonsheet_config(tmp_path, layers=[3])
+    config.general.pressure = [1.0, 2.0, 3.0]
+    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.scan_angle_force = 2.0
+    config.general.outer_loop = "scan_angle"
+
+    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
+    _seed_builder_state(builder, tmp_path)
+
+    with pytest.raises(ValueError, match="scan_angle_force"):
+        builder.write_inputs()

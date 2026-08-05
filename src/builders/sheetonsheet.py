@@ -324,10 +324,35 @@ class SheetOnSheetSimulation(SimulationBase):
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)
 
-        # NOTE: outer_loop='scan_angle' is a valid config value (config.py) but
-        # this builder does not split the slide phase by angle yet -- that is
-        # Task 2/3 of the outer-loop-scan-angle plan. Until then it falls
-        # through to the single-script path below, same as outer_loop unset.
+        # outer_loop='scan_angle' emits one slide_a<angle>.in per angle,
+        # mirroring AFMSimulation's split (src/builders/afm.py). A
+        # single-element (or empty/scalar) angle list falls through to the
+        # single-script path below, same as outer_loop unset, so the
+        # combined-HPC path that references the literal name slide.in still
+        # applies.
+        angles = self._to_list(self.config.general.scan_angle)
+        if outer_loop == 'scan_angle' and len(angles) > 1:
+            if self.config.general.scan_angle_force is not None:
+                raise ValueError(
+                    "outer_loop='scan_angle' cannot be combined with "
+                    "scan_angle_force: splitting into one script per angle "
+                    "applies each angle to every pressure value, silently "
+                    "dropping the pressure-selective filter. Remove "
+                    "scan_angle_force, or drop outer_loop to keep the "
+                    "in-script angle loop (which honors it)."
+                )
+            for angle in angles:
+                context = dict(base_context)
+                context['scan_angle_config'] = float(angle)
+                context['pressures'] = self.config.general.pressure
+                context['scan_speed_config'] = self.config.general.scan_speed
+                script_name = f"slide_a{format_numeric_token(float(angle))}.in"
+                script = self.render_template("sheetonsheet/slide.lmp", context)
+                self.write_file(f"lammps/{script_name}", script)
+            logger.info("Split slide phase into %d per-angle scripts.", len(angles))
+            logger.info("Inputs written to %s/lammps/", self.output_dir)
+            return
+
         if outer_loop not in ('pressure', 'scan_speed'):
             context = dict(base_context)
             context['pressures'] = self.config.general.pressure
