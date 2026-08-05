@@ -408,8 +408,12 @@ class PlotCommonMixin(PlotterMixinBase):
                 if 'id' not in new_params:
                     new_params['id'] = key.strip()
                 else:
+                    # The value is signed: the angle level is keyed a{angle}
+                    # (read_data), and a negative scan angle gives 'a-15'.
+                    # Without the sign that key matches nothing and the run
+                    # reaches the plots with no angle at all.
                     match_prefix = re.match(
-                        r'([a-zA-Z]+)(\d+\.?\d*)', key,
+                        r'([a-zA-Z]+)(-?\d+\.?\d*)', key,
                     )
                     if match_prefix:
                         prefix, val_str = match_prefix.groups()

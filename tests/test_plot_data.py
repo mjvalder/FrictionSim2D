@@ -56,6 +56,33 @@ def test_material_names_match_is_prefix_and_underscore_tolerant(tmp_path):
     assert not plotter._material_names_match("h_MoS2", "WSe2")  # pylint: disable=protected-access
 
 
+def test_extract_all_runs_keeps_a_negative_scan_angle(tmp_path):
+    """The per-angle leaf keys carry the sign (a-15 for -15 deg), so the key
+    parser has to as well -- otherwise a negative-angle run reaches the plots
+    with no angle at all and is dropped by every angle filter."""
+    outputs_dir = tmp_path / "data" / "outputs"
+    outputs_dir.mkdir(parents=True)
+
+    leaf = {"columns": ["lfx", "lfy", "nf"], "data": [[1.0, 0.0, 10.0]] * 5}
+    synthetic = {
+        "metadata": {},
+        "results": {"MoS2": {"f10.0": {"a0": leaf, "a-15": leaf}}},
+    }
+    (outputs_dir / "output_full_100x100y.json").write_text(
+        json.dumps(synthetic), encoding="utf-8"
+    )
+
+    plotter = Plotter(
+        data_dirs=[str(tmp_path / "data")],
+        labels=["test"],
+        output_dir=str(tmp_path / "out"),
+    )
+
+    runs = list(plotter._extract_all_runs("test", "100x100y"))  # pylint: disable=protected-access
+
+    assert sorted(run["angle"] for run in runs) == [-15.0, 0.0]
+
+
 def test_generate_summary_plot_creates_output_png(tmp_path):
     """Plotter with synthetic data should write a PNG without error."""
     outputs_dir = tmp_path / "data" / "outputs"
