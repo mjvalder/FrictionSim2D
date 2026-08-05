@@ -546,6 +546,14 @@ def test_twist_angle_config_defaults_and_range():
         GeneralConfig(temp=300, twist_angle=-1.0)   # below range
 
 
+def test_outer_loop_accepts_scan_angle_and_rejects_unknown_values():
+    """scan_angle is a fourth valid outer_loop choice; nonsense values still fail."""
+    g = GeneralConfig(temp=300, outer_loop='scan_angle')
+    assert g.outer_loop == 'scan_angle'
+    with pytest.raises(ValidationError):
+        GeneralConfig(temp=300, outer_loop='not_a_real_choice')
+
+
 def test_damping_ratio_defaults_to_zero():
     from src.core.config import TipConfig
     assert TipConfig.model_fields['damping_ratio'].default == 0.0

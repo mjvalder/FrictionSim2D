@@ -324,6 +324,10 @@ class SheetOnSheetSimulation(SimulationBase):
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)
 
+        # NOTE: outer_loop='scan_angle' is a valid config value (config.py) but
+        # this builder does not split the slide phase by angle yet -- that is
+        # Task 2/3 of the outer-loop-scan-angle plan. Until then it falls
+        # through to the single-script path below, same as outer_loop unset.
         if outer_loop not in ('pressure', 'scan_speed'):
             context = dict(base_context)
             context['pressures'] = self.config.general.pressure

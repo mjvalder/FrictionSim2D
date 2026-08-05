@@ -635,6 +635,11 @@ class AFMSimulation(SimulationBase):
 
         # Keep a single load on slide.in so the combined system+slide HPC path
         # (which references the literal name slide.in) still applies.
+        #
+        # NOTE: outer_loop='scan_angle' is a valid config value (config.py) but
+        # this builder does not split the slide phase by angle yet -- that is
+        # Task 2/3 of the outer-loop-scan-angle plan. Until then it falls
+        # through to the single-script path below, same as outer_loop unset.
         if outer_loop == 'force' and len(forces) > 1:
             for load in forces:
                 slide_context = dict(context)

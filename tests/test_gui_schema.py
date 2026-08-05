@@ -197,7 +197,7 @@ class TestFieldClassification:
     def test_enum_choices_are_captured(self, afm):
         assert set(afm['tip']['amorph'].choices) == {'a', 'c'}
         assert set(afm['general']['outer_loop'].choices) == \
-            {'pressure', 'scan_speed', 'force'}
+            {'pressure', 'scan_speed', 'force', 'scan_angle'}
 
     def test_required_flags(self, afm):
         assert afm['2D']['mat'].required

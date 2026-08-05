@@ -418,15 +418,17 @@ class GeneralConfig(BaseModel):
         )
     )
     scan_speed: Optional[Union[float, List[float]]] = 2.0
-    outer_loop: Optional[Literal['pressure', 'scan_speed', 'force']] = Field(
+    outer_loop: Optional[Literal['pressure', 'scan_speed', 'force', 'scan_angle']] = Field(
         None,
         description=(
             "Parameter expanded as separate LAMMPS slide input files "
             "(slide_*.in), one per value, instead of a single in-script loop. "
             "'pressure'/'scan_speed' apply to sheet-on-sheet runs; 'force' "
             "applies to AFM runs (emits slide_f<load>N.in per load, all sharing "
-            "the single system.in indentation phase). If omitted, single-script "
-            "behavior is used."
+            "the single system.in indentation phase). 'scan_angle' applies to "
+            "either family, one script per angle, all sharing the single "
+            "indentation/pre-slide phase. If omitted, single-script behavior "
+            "is used."
         )
     )
     bond_spring: Optional[float] = Field(80.0, description="Spring constant for harmonically bonded sheets")

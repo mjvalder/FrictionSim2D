@@ -133,3 +133,15 @@ class TestInFileLoopsDoNotMultiplyConfigs:
         raw['general']['outer_loop'] = 'force'
         summary = count_expansion(raw, 'afm')
         assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 4)
+
+    def test_outer_loop_scan_angle_multiplies_jobs_only(self, monkeypatch):
+        """_run_scripts_per_build reads general.get(outer_loop) generically, so
+        'scan_angle' is already counted correctly even though no builder splits
+        the slide phase by angle yet (that lands in Tasks 2-3). This test pins
+        the counting side of that gap."""
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
+        raw['general']['scan_angle'] = [0, 45, 90]
+        raw['general']['outer_loop'] = 'scan_angle'
+        summary = count_expansion(raw, 'afm')
+        assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 3)
