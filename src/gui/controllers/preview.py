@@ -112,18 +112,47 @@ def _first_sweep_member(
     materials_list): the real build hits the same error and reports it
     through the existing failure path, so silently falling back here is
     just deferring to that, not hiding anything.
+
+    Whether a material sweep actually happened is decided by whether
+    ``materials_list`` disappeared between ``config`` and the returned
+    member -- not by ``len(members)`` -- because those are different
+    questions. A sweep of exactly one selected material still substitutes
+    ``{mat}`` and strips ``materials_list``, so ``expand_config_sweeps``
+    correctly returns a single, already-substituted member; treating "one
+    member" as "no sweep" (the previous rule here) discarded that
+    substitution and previewed the original config with a literal ``{mat}``
+    still in ``cif_path``/``pot_path``, which the builder cannot resolve.
+    Conversely, a config with no ``materials_list`` at all also produces
+    exactly one, unsubstituted member -- ``materials_list`` was never there
+    to strip -- and that case must still fall back to ``config`` unchanged.
+
+    Only the ``[2D]`` key is checked, not a numbered ``[2D-N]`` alias:
+    ``expand_config_sweeps`` itself only ever reads ``base_config['2D']``
+    (numbered sheet sections are folded into ``2D``/``sheets`` later, by the
+    pydantic model, well after this runs), so a ``materials_list`` living
+    only under ``[2D-1]`` is never substituted here regardless -- checking
+    for it too would misreport that case as a resolved sweep.
     """
     try:
         members = expand_config_sweeps(config, base_dir)
     except Exception:  # pylint: disable=broad-except
         return config, None
-    if len(members) <= 1:
-        return config, None
 
     member = members[0]
+    material_swept = (
+        'materials_list' in config.get('2D', {})
+        and 'materials_list' not in member.get('2D', {})
+    )
+    if len(members) <= 1 and not material_swept:
+        return config, None
+
     material = member.get('2D', {}).get('mat')
-    shown = f"material {material}" if material else "the first configuration"
-    label = f"Previewing {shown} (1 of {len(members)} in the sweep)."
+    if material_swept and len(members) == 1:
+        shown = f"material {material}" if material else "the configured material"
+        label = f"Previewing {shown} (the only material in the sweep)."
+    else:
+        shown = f"material {material}" if material else "the first configuration"
+        label = f"Previewing {shown} (1 of {len(members)} in the sweep)."
     return member, label
 
 

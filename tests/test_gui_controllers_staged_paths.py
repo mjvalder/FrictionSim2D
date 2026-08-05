@@ -81,11 +81,22 @@ def _document_dir(tmp_path):
     (directory / 'sw_lammps').mkdir()
     (directory / 'sw_lammps' / 'h_MoS2.sw').write_text('pot contents')
     (directory / 'sw_lammps' / 'h_WS2.sw').write_text('pot contents')
-    # Two materials, not one: expand_config_sweeps treats a single-material
-    # list as "not really a sweep" and returns the config unexpanded (a
-    # separate, pre-existing quirk, unrelated to path resolution) -- two
-    # materials keeps this test on the actual sweep-expansion path.
     (directory / 'materials.txt').write_text('h_MoS2\nh_WS2\n')
+    return directory
+
+
+@pytest.fixture(name='one_material_document_dir')
+def _one_material_document_dir(tmp_path):
+    """Same shape as `document_dir`, but the sweep is narrowed to exactly
+    one ticked material -- an ordinary thing for a user to do, and the case
+    `_first_sweep_member` used to mishandle (see
+    `tests/test_gui_preview_sweep_member.py::TestOneMaterialSweepStillSubstitutes`)."""
+    directory = tmp_path / 'myruns'
+    (directory / 'cif').mkdir(parents=True)
+    (directory / 'cif' / 'h_MoS2.cif').write_text('cif contents')
+    (directory / 'sw_lammps').mkdir()
+    (directory / 'sw_lammps' / 'h_MoS2.sw').write_text('pot contents')
+    (directory / 'materials.txt').write_text('h_MoS2\n')
     return directory
 
 
@@ -138,6 +149,47 @@ class TestPreviewControllerStagesAbsolutePaths:
         # concrete file must actually exist at the staged path.
         assert Path(cif_path).exists()
         assert Path(pot_path).exists()
+
+
+class TestPreviewControllerOneMaterialSweepStagesSubstitutedPaths:
+    """Ticking exactly one material must render, not silently preview a
+    config still carrying literal `{mat}` placeholders.
+
+    Unlike the two-material case above, this exercises `PreviewRequest`'s
+    sweep-member selection itself (`_first_sweep_member`), not just staging:
+    before the fix, a one-material sweep was misclassified as "not a sweep"
+    and the *unexpanded* config -- `{mat}` and all -- was staged, so the
+    build could never find the structure/potential files."""
+
+    def test_staged_config_ini_has_mat_substituted_everywhere(
+            self, qt_app, workspace, one_material_document_dir, monkeypatch):
+        del qt_app
+        import src.gui.controllers.preview as preview_module
+        monkeypatch.setattr(
+            preview_module.sys, 'executable', '/nonexistent/not-a-real-interpreter-xyz')
+
+        controller = PreviewController(workspace)
+        config = _swept_config(one_material_document_dir)
+        request = PreviewRequest(
+            config=config, model='indent', base_dir=one_material_document_dir)
+
+        controller.start(request)
+        _run_until(controller.failed, timeout_ms=5000)
+
+        directory = workspace.preview_path(request.key())
+        written = parse_config(directory / 'config.ini')
+
+        assert 'materials_list' not in written['2D']
+        assert written['2D']['mat'] == 'h_MoS2'
+        for value in written['2D'].values():
+            if isinstance(value, str):
+                assert '{mat}' not in value, \
+                    f"template marker survived a one-material sweep: {value!r}"
+
+        cif_path = written['2D']['cif_path']
+        pot_path = written['2D']['pot_path']
+        assert Path(cif_path).is_absolute() and Path(cif_path).exists(), cif_path
+        assert Path(pot_path).is_absolute() and Path(pot_path).exists(), pot_path
 
 
 class TestGenerateControllerStagesAbsolutePaths:
