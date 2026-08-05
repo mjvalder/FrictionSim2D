@@ -120,6 +120,12 @@ AFM = SimulationFamily(
             ),
             sections=('pes',),
             has_system_phase=False,
+            # PESTipSimulation.write_inputs overrides the run phase entirely
+            # (a single self-contained lammps/slide.in) and never reads
+            # outer_loop; offering 'force' here would configure a split that
+            # silently does nothing, and count_expansion would still predict
+            # the split job count the build never produces.
+            outer_loop_choices=(),
         ),
     ),
 )
@@ -151,6 +157,11 @@ SHEET_ON_SHEET = SimulationFamily(
             label='PES scan',
             description='Static corrugation scan of one sheet over the other.',
             sections=('pes',),
+            # PESSheetSimulation.write_inputs overrides the run phase entirely
+            # (writes lammps/slide.in, or slide.in + slide_refine.in, directly)
+            # and never reads outer_loop; offering pressure/scan_speed here
+            # would configure a split that silently does nothing.
+            outer_loop_choices=(),
         ),
     ),
 )

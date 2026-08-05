@@ -298,9 +298,16 @@ class TestOuterLoopChoicesNarrowByMode:
         """`indent` still offers `force` exactly as before -- this task does
         not touch that narrowing."""
         assert overrides_for('indent')['general'].fields['outer_loop'].choices == ('force',)
-        assert overrides_for('pes_tip')['general'].fields['outer_loop'].choices == ('force',)
-        assert overrides_for('pes_sheet')['general'].fields['outer_loop'].choices == \
-            ('pressure', 'scan_speed')
+
+    def test_pes_modes_offer_no_split_at_all(self):
+        """Neither PES scan reaches the split code path (see
+        src/builders/pes_scan.py -- both write_inputs overrides render a
+        single ``lammps/slide.in`` directly, without ever branching on
+        ``outer_loop``), so unlike `indent` (which still narrows to `force`)
+        the PES modes narrow all the way down to zero choices -- not `force`,
+        not `pressure`/`scan_speed`, nothing selectable."""
+        assert overrides_for('pes_tip')['general'].fields['outer_loop'].choices == ()
+        assert overrides_for('pes_sheet')['general'].fields['outer_loop'].choices == ()
 
 
 class TestOverrides:

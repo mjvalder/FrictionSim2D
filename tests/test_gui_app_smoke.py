@@ -724,9 +724,14 @@ class TestFamilyFieldFiltering:
     @pytest.mark.parametrize('model,expected', [
         ('afm', {'force', 'scan_angle'}),
         ('indent', {'force'}),
-        ('pes_tip', {'force'}),
+        # Both PES scans override write_inputs entirely and never look at
+        # outer_loop -- offering a split here would silently do nothing, and
+        # count_expansion (which counts splits generically off the config)
+        # would predict a job count the build never produces. See
+        # test_expansion_count.py for the build-side pin.
+        ('pes_tip', set()),
         ('sheetonsheet', {'pressure', 'scan_speed', 'scan_angle'}),
-        ('pes_sheet', {'pressure', 'scan_speed'}),
+        ('pes_sheet', set()),
     ])
     def test_outer_loop_offers_only_what_the_builder_acts_on(self, qt_app, model,
                                                              expected, monkeypatch):

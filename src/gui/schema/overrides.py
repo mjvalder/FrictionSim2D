@@ -506,7 +506,12 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
         if family.supports('general', key)
     }
     outer_loop_choices = family.outer_loop_choices_for(mode)
-    if outer_loop_choices and 'outer_loop' in fields:
+    # outer_loop_choices_for always returns a tuple (never None), so an empty
+    # tuple here is deliberate -- a mode whose build never reads outer_loop at
+    # all (e.g. the PES scans) -- not "leave unrestricted". Narrow whenever
+    # the field exists, so that case actually offers zero choices instead of
+    # silently falling back to every value the underlying model allows.
+    if 'outer_loop' in fields:
         existing = fields['outer_loop']
         fields['outer_loop'] = FieldOverride(
             label=existing.label, unit=existing.unit, help=existing.help,
