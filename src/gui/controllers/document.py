@@ -25,10 +25,10 @@ from ...core.config import (
     parse_config,
 )
 from ...core.config_io import write_config
-from ...core.config_validation import ConfigValidation, validate_config
+from ...core.config_validation import ConfigIssue, ConfigValidation, validate_config
 from ...core.run import (
     ExpansionSummary, count_expansion, expand_config_sweeps, loopability,
-    output_dir_for, read_material_list,
+    outer_loop_conflict, output_dir_for, read_material_list,
 )
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..schema.introspect import SectionSpec, describe_model
@@ -251,12 +251,24 @@ class ConfigDocument:
         preflight finds unresolved templates so the model was never
         constructed. Callers must not assume `.config` is usable when `ok` is
         True; check `pending_template_issues` first.
+
+        One check cannot come from the model: whether `outer_loop` conflicts
+        with `scan_angle_force` depends on which builder the config routes to
+        (`core.run.outer_loop_conflict`), which a pydantic model cannot see.
+        It is asked here rather than reimplemented, so the panel refuses
+        exactly what `run_simulations` refuses.
         """
         payload = copy.deepcopy(self.values)
         payload['settings'] = (settings or load_settings()).model_dump()
         result = validate_config(
             payload, root_model_for(self.model), base_dir=self.base_dir,
         )
+
+        conflict = outer_loop_conflict(self.values, self.model)
+        if conflict is not None:
+            result.issues.append(ConfigIssue(
+                message=conflict, section='general', key='outer_loop',
+            ))
 
         self.pending_template_issues = []
         if not self.has_material_list():

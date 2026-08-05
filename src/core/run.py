@@ -462,6 +462,54 @@ def _builder_cls_for_count(config: Dict[str, Any], model: str) -> Optional[type]
     return None
 
 
+def outer_loop_conflict(config: Dict[str, Any], model: str) -> Optional[str]:
+    """Why this config's ``outer_loop`` cannot be honoured, or None.
+
+    One conflict today: ``outer_loop='scan_angle'`` with ``scan_angle_force``.
+    The selector restricts which force/pressure value(s) the ``scan_angle``
+    list applies to (the templates' angle_loop gate), but a per-angle script
+    applies its one fixed angle to every force in it -- so the selector would
+    be silently dropped, changing what a gated scan means.
+
+    Routing-aware, and it has to be: the conflict exists only where the split
+    exists. The indent, both PES scans and the hetero/flake slides never split
+    by angle (``SPLIT_OUTER_LOOPS``), and the hetero/flake slide templates
+    genuinely honour the in-script gate -- so for them a stray ``outer_loop``
+    beside a real gate is inert, and rejecting it would fail a config that
+    builds and runs correctly. Only a config whose selected builder really
+    splits is a conflict, and only with more than one angle (a single angle
+    falls through to the in-script loop, which honours the gate).
+
+    An unroutable config reports nothing: it has no build to protect, and the
+    builder-side raises remain the backstop.
+
+    Called before anything is built -- by :func:`run_simulations` (which
+    raises) and by the GUI's validation panel (which lists it) -- because the
+    builders only raise from ``write_inputs``, by which point the geometry is
+    built and a partially written tree is on disk.
+    """
+    general = config.get('general', {}) or {}
+    if general.get('outer_loop') != 'scan_angle':
+        return None
+    if general.get('scan_angle_force') is None:
+        return None
+    if len(_as_list(general.get('scan_angle'))) <= 1:
+        return None
+
+    builder_cls = _builder_cls_for_count(config, model)
+    if builder_cls is None or 'scan_angle' not in builder_cls.SPLIT_OUTER_LOOPS:
+        return None
+
+    return (
+        "outer_loop='scan_angle' cannot be combined with scan_angle_force: "
+        f"{builder_cls.__name__} splits the run phase into one script per "
+        "angle, and each script applies its angle to every force/pressure "
+        "value -- silently dropping the selective filter. Remove "
+        "scan_angle_force, or drop outer_loop to keep the in-script angle "
+        "loop (which honors it)."
+    )
+
+
 def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, List[str]]:
     """How many run scripts one built directory will contain.
 
@@ -899,6 +947,12 @@ def run_simulations(
 
     for run_dict in configs_to_run:
         _validate_runtime_sweep_ordering(run_dict.get('general', {}))
+        # Before the simulation root exists: a conflict the builders would
+        # only raise on from write_inputs, i.e. after a full geometry build
+        # onto a tree that then stays half written.
+        conflict = outer_loop_conflict(run_dict, model)
+        if conflict is not None:
+            raise ValueError(conflict)
 
     root_name = simulation_root_name or datetime.now().strftime("simulation_%Y%m%d_%H%M%S")
     base_root = Path(output_root) if output_root is not None else Path.cwd()

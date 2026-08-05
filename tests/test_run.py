@@ -15,6 +15,9 @@ from src.core.run import (
     run_simulations,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES = REPO_ROOT / 'examples'
+
 
 def test_output_dir_for_matches_run_layout() -> None:
     """A pure extraction of the naming block in run_simulations -- the path
@@ -88,6 +91,93 @@ def test_runtime_validation_rejects_selector_not_in_target_order() -> None:
         _validate_runtime_sweep_ordering(
             {"pressure": [0.1, 1.0, 10.0], "scan_angle_force": [0.1, 5.0]}
         )
+
+
+class TestAngleSplitWithAForceGate:
+    """``outer_loop='scan_angle'`` cannot carry ``scan_angle_force`` -- the
+    split applies its one angle to every force, silently dropping the gate.
+
+    But only where the split actually happens. Every other builder keeps the
+    in-script angle loop, which honours the gate (hetero/slide.lmp and
+    flake/slide.lmp really do gate on it), so the same config is correct
+    there and must still build. The check therefore has to know which builder
+    the config routes to -- a rule stated without that knowledge rejects
+    working configs.
+    """
+
+    @staticmethod
+    def _write(raw, tmp_path, name):
+        from src.core.config_io import write_config
+        raw['general']['scan_angle'] = [0, 30]
+        raw['general']['scan_angle_force'] = 30
+        raw['general']['outer_loop'] = 'scan_angle'
+        return write_config(raw, tmp_path / name)
+
+    def test_rejected_before_anything_is_built(self, tmp_path, monkeypatch):
+        """The AFM slide really does split, so this one is the conflict --
+        and it must be refused before the geometry build, not from
+        write_inputs with a half-written tree already on disk."""
+        from src.core.config import parse_config
+
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
+        config_path = self._write(raw, tmp_path, 'afm_gate.ini')
+
+        with pytest.raises(ValueError, match='scan_angle_force'):
+            run_simulations(config_file=str(config_path), model='afm',
+                            settings_file=None, output_root=tmp_path / 'out',
+                            generate_hpc=False)
+
+        assert not (tmp_path / 'out').exists()
+
+    def test_the_indent_still_builds(self, tmp_path, monkeypatch):
+        """IndentSimulation never splits by angle (SPLIT_OUTER_LOOPS), so the
+        combination is inert there -- it built before and must keep building."""
+        from src.core.config import parse_config
+
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'indent_config.ini')
+        config_path = self._write(raw, tmp_path, 'indent_gate.ini')
+
+        created, _, _, _ = run_simulations(
+            config_file=str(config_path), model='indent', settings_file=None,
+            output_root=tmp_path / 'out', generate_hpc=False,
+        )
+        assert len(created) == 1
+
+    def test_a_hetero_sheet_config_still_builds(self, tmp_path, monkeypatch):
+        """The hetero slide ignores outer_loop and honours the gate in-script,
+        so a stray outer_loop next to a real gate must not fail the build."""
+        from src.core.config import parse_config  # noqa: F401  (parity with above)
+        from src.core.config_io import write_config
+
+        monkeypatch.chdir(REPO_ROOT)
+        sheet_1 = {
+            'mat': 'h-MoS2', 'cif_path': 'examples/materials/h-MoS2.cif',
+            'pot_path': 'examples/potentials/sw/MoS2_wen.sw', 'pot_type': 'sw',
+            'x': 12.0, 'y': 12.0, 'layers': [2],
+        }
+        raw = {
+            '2D': dict(sheet_1),
+            '2D-1': dict(sheet_1),
+            '2D-2': {
+                'mat': 'h-WS2', 'cif_path': 'examples/materials/h-WS2.cif',
+                'pot_path': 'examples/potentials/sw/sw_lammps/t-WS2.sw',
+                'pot_type': 'sw', 'x': 12.0, 'y': 12.0, 'layers': [2],
+            },
+            'general': {
+                'temp': 300, 'scan_speed': 1, 'pressure': [0.1, 30],
+                'scan_angle': [0, 30], 'scan_angle_force': 30,
+                'outer_loop': 'scan_angle',
+            },
+        }
+        config_path = write_config(raw, tmp_path / 'hetero_gate.ini')
+
+        created, _, _, _ = run_simulations(
+            config_file=str(config_path), model='sheetonsheet', settings_file=None,
+            output_root=tmp_path / 'out', generate_hpc=False,
+        )
+        assert len(created) == 1
 
 
 def test_expand_config_sweeps_expands_general_non_lammps_lists() -> None:

@@ -200,6 +200,39 @@ class TestValidation:
         assert result.issues_for('tip', 'r')
 
 
+class TestAngleSplitWithAForceGate:
+    """The panel must refuse exactly what run_simulations refuses -- and that
+    depends on which builder the config routes to, which the pydantic models
+    cannot see. Reported for a builder that really splits the run phase per
+    angle; silent for one that keeps the in-script loop and honours the gate.
+    """
+
+    @staticmethod
+    def _document(name, model):
+        document = ConfigDocument.from_file(EXAMPLES / name, model)
+        document.set('general', 'scan_angle', [0, 30])
+        document.set('general', 'scan_angle_force', 30)
+        document.set('general', 'outer_loop', 'scan_angle')
+        return document
+
+    def test_reported_where_the_split_is_real(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        result = self._document('afm_flake_config.ini', 'afm').validate()
+
+        assert not result.ok
+        issues = result.issues_for('general', 'outer_loop')
+        assert issues and 'scan_angle_force' in issues[0].message
+
+    def test_silent_where_the_builder_never_splits(self, monkeypatch):
+        """IndentSimulation keeps a single slide.in whatever outer_loop says,
+        and afm/indent.lmp honours the gate in-script, so this config builds
+        and runs correctly -- reporting it would refuse working work."""
+        monkeypatch.chdir(REPO_ROOT)
+        result = self._document('indent_config.ini', 'indent').validate()
+
+        assert result.ok, result.render()
+
+
 class TestExpansion:
 
     def test_counts_match_the_known_tree(self, monkeypatch):

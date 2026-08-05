@@ -342,8 +342,8 @@ class SheetOnSheetSimulation(SimulationBase):
         # applies.
         angles = self._to_list(self.config.general.scan_angle)
         if outer_loop == 'scan_angle' and len(angles) > 1:
-            # GeneralConfig rejects this first (before the build); the raise
-            # below is the backstop for configs built without the model.
+            # src.core.run.outer_loop_conflict rejects this first (before the
+            # build); the raise below is the backstop for direct builds.
             if self.config.general.scan_angle_force is not None:
                 raise ValueError(
                     "outer_loop='scan_angle' cannot be combined with "

@@ -246,8 +246,10 @@ class TestMainWindow:
     def test_angle_split_with_a_force_gate_is_reported(self, window):
         """The angle split cannot honour scan_angle_force, and the builders
         only say so from write_inputs -- after the geometry has been built,
-        leaving a half-written tree behind. The model rejects it, so the panel
-        has to show it here, before Generate is ever pressed."""
+        leaving a half-written tree behind. The panel has to show it here,
+        before Generate is ever pressed. The mirror case (a model whose
+        builder never splits, where the pair is inert and must NOT be
+        reported) is pinned in tests/test_gui_document.py."""
         window.document = ConfigDocument.from_file(
             EXAMPLES / 'afm_flake_config.ini', 'afm')
         window.form.document = window.document
@@ -257,7 +259,10 @@ class TestMainWindow:
         window.form.sections['general'].editors['outer_loop'].set_value('scan_angle')
 
         assert not window._validate()
-        assert 'scan_angle_force' in window.issues.toPlainText()
+        text = window.issues.toPlainText()
+        assert 'scan_angle_force' in text
+        # Reported because *this* builder splits, and it names which one.
+        assert 'AFMSimulation' in text
 
     def test_tip_sizing_warning(self, window):
         """A footprint under 2x the tip diameter lets the tip interact with
