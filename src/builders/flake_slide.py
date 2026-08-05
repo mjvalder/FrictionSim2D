@@ -109,6 +109,12 @@ class FlakeSlideSimulation(SimulationBase):
     #: interior band -> the substrate sheet must have >= 2 layers.
     MIN_SHEET_LAYERS: int = 2
 
+    #: Like the hetero slide, this builder writes a single lammps/slide.in and
+    #: never reads outer_loop, so a [Flake] section collapses any configured
+    #: split to one job. Explicit (the base default is the same) because the
+    #: reroute from sheet-on-sheet is silent.
+    SPLIT_OUTER_LOOPS = frozenset()
+
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)

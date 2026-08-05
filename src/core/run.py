@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from copy import deepcopy
+from types import SimpleNamespace
 import itertools
 import re
 
@@ -411,11 +412,64 @@ def _as_list(value: Any) -> List[Any]:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
+def _routing_view(config: Dict[str, Any], model: str) -> SimpleNamespace:
+    """A stand-in for the validated config object, built from a raw mapping.
+
+    The builder-routing functions (:func:`_select_afm_builder_cls`,
+    :func:`_select_sheet_builder_cls`) read a handful of fields off a validated
+    config object. The prediction path has only the raw mapping and cannot
+    validate it -- ``AFMSimulationConfig`` / ``SheetOnSheetSimulationConfig``
+    resolve potential files and require a ``GlobalSettings``, so they raise on
+    configs that are perfectly countable -- so they are handed this view
+    instead.
+
+    Only the *fields* are mirrored here (the ``2D-N`` folding of
+    ``_fold_sheet_sections``, and the ``flake``/``Flake`` section alias, which
+    differs between the two families). The routing *rules* stay in the two
+    selector functions, so there is exactly one copy of them.
+    """
+    general = config.get('general', {}) or {}
+    numbered = [k for k in config if isinstance(k, str) and k.startswith('2D-')]
+    sheets = numbered or (['2D'] if '2D' in config else [])
+    flake_key = 'flake' if model in AFM_LIKE_MODELS else 'Flake'
+    return SimpleNamespace(
+        sub=config.get('sub'),
+        sheets=sheets,
+        flake=config.get(flake_key),
+        general=SimpleNamespace(
+            twist_angle=general.get('twist_angle'),
+            finite_sheet=bool(general.get('finite_sheet', False)),
+        ),
+    )
+
+
+def _builder_cls_for_count(config: Dict[str, Any], model: str) -> Optional[type]:
+    """The builder class a raw config would route to, or None if undecidable.
+
+    None means "route it like the model's default builder": an unroutable
+    config (e.g. a substrate-free AFM, which raises
+    :class:`FreestandingConfigError`) has no build to predict anyway, so the
+    caller keeps its previous, model-only answer rather than inventing one.
+    """
+    view = _routing_view(config, model)
+    try:
+        if model in AFM_LIKE_MODELS:
+            return _select_afm_builder_cls(model, view)
+        if model in SHEET_LIKE_MODELS:
+            return _select_sheet_builder_cls(model, view)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return None
+
+
 def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, List[str]]:
     """How many run scripts one built directory will contain.
 
-    Mirrors the builders: ``outer_loop`` promotes one in-file loop to separate
-    ``slide_*.in`` files, and a PES sheet scan adds a refinement script. Pinned
+    Asks the builder the config actually routes to: ``outer_loop`` promotes one
+    in-file loop to separate ``slide_*.in`` files only when that builder
+    declares the parameter in ``SPLIT_OUTER_LOOPS`` (the indent's hold+retract
+    and the hetero/flake/PES builders write a single run script whatever
+    ``outer_loop`` says), and a PES sheet scan adds a refinement script. Pinned
     against real generated trees by ``test_expansion_count``.
     """
     general = config.get('general', {}) or {}
@@ -425,9 +479,17 @@ def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, Lis
     scripts = 1
     if outer_loop:
         values = _as_list(general.get(outer_loop))
-        if len(values) > 1:
+        builder_cls = _builder_cls_for_count(config, model)
+        splits = (outer_loop in builder_cls.SPLIT_OUTER_LOOPS
+                  if builder_cls is not None else True)
+        if len(values) > 1 and splits:
             scripts = len(values)
             notes.append(f"outer_loop={outer_loop} splits the run phase into {scripts} scripts")
+        elif len(values) > 1:
+            notes.append(
+                f"outer_loop={outer_loop} is ignored by {builder_cls.__name__}: "
+                f"the run phase stays a single script"
+            )
 
     if model == 'pes_sheet':
         pes = config.get('pes', {}) or {}

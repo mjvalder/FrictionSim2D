@@ -85,8 +85,9 @@ class IndentSimulation(AFMSimulation):
 
     #: afm/indent.lmp declares the angle variable but never reads it (the
     #: hold+retract run has no lateral drive), so splitting per scan_angle
-    #: would just emit N physically-identical scripts -- opt out.
-    SUPPORTS_ANGLE_SPLIT = False
+    #: would just emit N physically-identical scripts -- drop 'scan_angle'
+    #: from the AFM set and keep the per-load split.
+    SPLIT_OUTER_LOOPS = frozenset({'force'})
 
     def __init__(self, config: AFMSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):

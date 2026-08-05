@@ -278,7 +278,7 @@ class TestOuterLoopChoicesNarrowByMode:
     """`scan_angle` only does something in the two modes whose builder emits
     one run script per angle (dynamic_indent/'afm' and dynamic/'sheetonsheet').
     'indent' shares the AFM family but its template never reads the angle
-    variable (SUPPORTS_ANGLE_SPLIT = False); both PES scan modes override
+    variable ('scan_angle' not in SPLIT_OUTER_LOOPS); both PES scan modes override
     write_inputs entirely and never look at outer_loop at all. Offering
     scan_angle there would let someone configure a split that silently does
     nothing -- exactly what outer_loop_choices exists to prevent."""

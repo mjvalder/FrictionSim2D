@@ -108,6 +108,11 @@ class PESSheetSimulation(SheetOnSheetSimulation):
     #: A bilayer is enough (and cheapest) for a static PES.
     MIN_LAYERS: int = PES_SHEET_LAYERS
 
+    #: write_inputs below replaces the sliding run phase entirely and never
+    #: reads outer_loop, so nothing here is ever split (the grid variants are
+    #: counted separately, see src.core.run._run_scripts_per_build).
+    SPLIT_OUTER_LOOPS = frozenset()
+
     def build(self) -> None:
         if self.n_layers != PES_SHEET_LAYERS:
             raise ValueError(
@@ -201,6 +206,10 @@ class PESTipSimulation(AFMSimulation):
     held at each grid point while the sheet + substrate relax, recording the
     total energy and the lateral force on the tip.
     """
+
+    #: write_inputs below replaces the AFM run phase with a single
+    #: self-contained scan script and never reads outer_loop -- nothing splits.
+    SPLIT_OUTER_LOOPS = frozenset()
 
     def _get_hpc_job_name(self) -> str:
         return f"pes_tip_{self.config.sheet.mat}"

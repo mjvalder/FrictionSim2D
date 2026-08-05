@@ -36,6 +36,10 @@ class SheetOnSheetSimulation(SimulationBase):
     #: Minimum number of layers this builder accepts. Subclasses (e.g. the
     #: static PES bilayer scan) may lower it.
     MIN_LAYERS: int = MIN_LAYERS
+
+    #: The sheet-on-sheet run phase splits per pressure, per scan speed and per
+    #: scan angle (see write_inputs); there is no normal load to split by.
+    SPLIT_OUTER_LOOPS = frozenset({'pressure', 'scan_speed', 'scan_angle'})
     """Builder for Sheet-on-Sheet friction simulations.
 
     Creates an N-layer stack of the same 2D material:
@@ -323,6 +327,12 @@ class SheetOnSheetSimulation(SimulationBase):
         }
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)
+        # A builder splits only by what it declares in SPLIT_OUTER_LOOPS;
+        # anything else falls through to the single-script path below. The
+        # job-count prediction reads the same declaration, so what it predicts
+        # is what is written here.
+        if outer_loop not in self.SPLIT_OUTER_LOOPS:
+            outer_loop = None
 
         # outer_loop='scan_angle' emits one slide_a<angle>.in per angle,
         # mirroring AFMSimulation's split (src/builders/afm.py). A

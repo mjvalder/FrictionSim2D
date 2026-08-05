@@ -513,8 +513,10 @@ def test_afm_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: Path) -> N
 
 def test_afm_supports_angle_split_by_default() -> None:
     """AFMSimulation opts into the angle split; only opt-out subclasses (e.g.
-    IndentSimulation, see tests/test_indent_builder.py) flip this False."""
-    assert AFMSimulation.SUPPORTS_ANGLE_SPLIT is True
+    IndentSimulation, see tests/test_indent_builder.py) drop it. The same
+    declaration drives the job-count prediction (src/core/run.py)."""
+    assert 'scan_angle' in AFMSimulation.SPLIT_OUTER_LOOPS
+    assert 'force' in AFMSimulation.SPLIT_OUTER_LOOPS
 
 
 def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> None:

@@ -124,12 +124,14 @@ def test_hpc_job_name(tmp_path: Path):
 def test_indent_opts_out_of_angle_split():
     """afm/indent.lmp declares the angle var but never reads it (no lateral
     drive), so IndentSimulation must opt out of the outer_loop='scan_angle'
-    split AFMSimulation supports (see SUPPORTS_ANGLE_SPLIT on both)."""
-    assert IndentSimulation.SUPPORTS_ANGLE_SPLIT is False
+    split AFMSimulation supports (see SPLIT_OUTER_LOOPS on both)."""
+    assert 'scan_angle' not in IndentSimulation.SPLIT_OUTER_LOOPS
+    # The per-load split is unaffected.
+    assert 'force' in IndentSimulation.SPLIT_OUTER_LOOPS
 
 
 def test_indent_outer_loop_scan_angle_does_not_split(tmp_path: Path):
-    """SUPPORTS_ANGLE_SPLIT=False must actually prevent the split at runtime.
+    """Dropping 'scan_angle' must actually prevent the split at runtime.
 
     Mirrors test_afm_outer_loop_scan_angle_splits_slide_per_angle in
     tests/test_afm_builder.py, which exercises the True (splitting) side of

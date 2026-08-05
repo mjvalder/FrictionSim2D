@@ -23,6 +23,7 @@ from src.core.run import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / 'examples'
+MATERIALS, SW = 'examples/materials', 'examples/potentials/sw'
 
 #: (config, model, expected configs, builds, jobs) -- measured from real trees.
 CASES = [
@@ -166,3 +167,94 @@ class TestInFileLoopsDoNotMultiplyConfigs:
 
         summary = count_expansion(raw, 'afm')
         assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 3)
+
+
+class TestPredictionFollowsBuilderRouting:
+    """The prediction must count what the *selected* builder writes.
+
+    Which builder a config routes to is decided by the config itself (a twist
+    routes sheet-on-sheet to the hetero builder; the model name picks the
+    indent builder), and the selected builder decides how many run scripts the
+    build contains. Counting ``len(general[outer_loop])`` regardless reports
+    jobs that are never generated. Same generate-and-compare cross-check as
+    ``test_scan_angle_manifest_count_matches_predicted_job_count``.
+    """
+
+    def test_indent_never_splits_by_angle(self, tmp_path, monkeypatch):
+        """IndentSimulation's hold+retract has no lateral drive, so it does not
+        honour outer_loop='scan_angle' (one slide.in per build, not one per
+        angle)."""
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'indent_config.ini')
+        raw['general']['scan_angle'] = [0, 30, 60]
+        raw['general']['outer_loop'] = 'scan_angle'
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        predicted = count_expansion(raw, 'indent')
+
+        config_path = write_config(raw, tmp_path / 'indent_angles.ini')
+        created, simulation_root, _, _ = run_simulations(
+            config_file=str(config_path), model='indent', settings_file=None,
+            output_root=tmp_path / 'out', generate_hpc=False,
+        )
+        assert len(created) == predicted.configs
+        assert count_generated_jobs(simulation_root) == predicted.jobs
+        assert predicted.jobs == 2          # 2 layer builds x a single slide.in
+
+    def test_hetero_sheet_on_sheet_never_splits_by_angle(self, tmp_path, monkeypatch):
+        """Two materials route sheet-on-sheet to the hetero slide builder,
+        which writes a single slide.in and ignores outer_loop entirely."""
+        monkeypatch.chdir(REPO_ROOT)
+        sheet_1 = {
+            'mat': 'h-MoS2', 'cif_path': f'{MATERIALS}/h-MoS2.cif',
+            'pot_path': f'{SW}/MoS2_wen.sw', 'pot_type': 'sw',
+            'x': 12.0, 'y': 12.0, 'layers': [2],
+        }
+        raw = {
+            # [2D] mirrors [2D-1]: output_dir_for still reads the plain section.
+            '2D': dict(sheet_1),
+            '2D-1': dict(sheet_1),
+            '2D-2': {
+                'mat': 'h-WS2', 'cif_path': f'{MATERIALS}/h-WS2.cif',
+                'pot_path': f'{SW}/sw_lammps/t-WS2.sw', 'pot_type': 'sw',
+                'x': 12.0, 'y': 12.0, 'layers': [2],
+            },
+            'general': {
+                'temp': 300, 'scan_speed': 1, 'pressure': 0.1,
+                'scan_angle': [0, 30, 60], 'outer_loop': 'scan_angle',
+            },
+        }
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        predicted = count_expansion(raw, 'sheetonsheet')
+
+        config_path = write_config(raw, tmp_path / 'hetero_angles.ini')
+        created, simulation_root, _, _ = run_simulations(
+            config_file=str(config_path), model='sheetonsheet', settings_file=None,
+            output_root=tmp_path / 'out', generate_hpc=False,
+        )
+        assert len(created) == predicted.configs
+        assert count_generated_jobs(simulation_root) == predicted.jobs
+        assert predicted.jobs == 1
+
+    def test_twisted_single_material_predicts_a_single_job(self, monkeypatch):
+        """The GUI-reachable case: the sheet-on-sheet form offers both the
+        twist angle and the angle split. A twist routes a single [2D] material
+        to the same hetero slide builder, so the split never happens there
+        either (routing pinned by test_hetero_slide.py).
+        """
+        monkeypatch.chdir(REPO_ROOT)
+        raw = {
+            '2D': {
+                'mat': 'h-MoS2', 'cif_path': f'{MATERIALS}/h-MoS2.cif',
+                'pot_path': f'{SW}/MoS2_wen.sw', 'pot_type': 'sw',
+                'x': 8.0, 'y': 8.0, 'layers': [4],
+            },
+            'general': {
+                'temp': 300, 'scan_speed': 1, 'pressure': 0.1, 'twist_angle': 21.8,
+                'scan_angle': [0, 30, 60], 'outer_loop': 'scan_angle',
+            },
+        }
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        assert count_expansion(raw, 'sheetonsheet').jobs == 1

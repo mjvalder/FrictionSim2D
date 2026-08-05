@@ -53,6 +53,17 @@ class SimulationBase(ABC):
         jinja_env: Template engine environment.
     """
 
+    #: ``[general] outer_loop`` values whose run phase this builder actually
+    #: splits into one ``slide_*.in`` per value. Empty here: a builder that
+    #: writes a single run script regardless (the hetero/flake slides, both PES
+    #: scans) inherits the default and needs no declaration.
+    #:
+    #: This is the one place each builder states what it splits: the builders
+    #: gate their split on it, and the job-count prediction
+    #: (``src.core.run._run_scripts_per_build``) reads it off the builder class
+    #: the config routes to, so the predicted and generated counts cannot drift.
+    SPLIT_OUTER_LOOPS: frozenset = frozenset()
+
     def __init__(self, config: Any, output_dir: Union[str, Path],
                     config_path: Optional[Union[str, Path]] = None):
         """Initialize the simulation base.

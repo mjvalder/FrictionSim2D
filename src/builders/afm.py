@@ -31,13 +31,13 @@ class AFMSimulation(SimulationBase):
     #: production run (e.g. the indent hold+retract replaces the slide).
     SLIDE_TEMPLATE: str = "afm/slide.lmp"
 
-    #: Whether SLIDE_TEMPLATE actually loops over scan_angle in-script (see
-    #: afm/slide.lmp's scan_angle_is_sequence switch), i.e. whether
-    #: outer_loop='scan_angle' has anything real to split per angle.
+    #: The AFM run phase splits per load and per scan angle. 'scan_angle' is
+    #: here because afm/slide.lmp really loops over the angle in-script (its
+    #: scan_angle_is_sequence switch), so there is something to split.
     #: Subclasses whose SLIDE_TEMPLATE doesn't use the angle at all (e.g.
-    #: IndentSimulation's afm/indent.lmp) must override this False, else the
-    #: split would emit N physically-identical scripts.
-    SUPPORTS_ANGLE_SPLIT: bool = True
+    #: IndentSimulation's afm/indent.lmp) must drop it, else the split would
+    #: emit N physically-identical scripts.
+    SPLIT_OUTER_LOOPS = frozenset({'force', 'scan_angle'})
 
     def __init__(self, config: AFMSimulationConfig, output_dir: str,
                     config_path: Optional[str] = None):
@@ -648,8 +648,8 @@ class AFMSimulation(SimulationBase):
         be silently dropped, changing what a force-gated scan means. Reject the
         combination instead.
 
-        Only applies when ``self.SUPPORTS_ANGLE_SPLIT`` is True (the default).
-        :class:`IndentSimulation` overrides it False because its
+        Only applies when ``'scan_angle' in self.SPLIT_OUTER_LOOPS`` (the
+        default). :class:`IndentSimulation` drops it because its
         ``afm/indent.lmp`` template declares the angle variable but never
         uses it (no lateral drive) -- splitting there would just emit N
         physically-identical scripts.
@@ -660,7 +660,8 @@ class AFMSimulation(SimulationBase):
 
         # Keep a single load on slide.in so the combined system+slide HPC path
         # (which references the literal name slide.in) still applies.
-        if outer_loop == 'force' and len(forces) > 1:
+        if (outer_loop == 'force' and len(forces) > 1
+                and 'force' in self.SPLIT_OUTER_LOOPS):
             for load in forces:
                 slide_context = dict(context)
                 slide_context['forces'] = load
@@ -674,7 +675,8 @@ class AFMSimulation(SimulationBase):
         angles = scan_angle if isinstance(scan_angle, list) else (
             [] if scan_angle is None else [scan_angle]
         )
-        if outer_loop == 'scan_angle' and len(angles) > 1 and self.SUPPORTS_ANGLE_SPLIT:
+        if (outer_loop == 'scan_angle' and len(angles) > 1
+                and 'scan_angle' in self.SPLIT_OUTER_LOOPS):
             if self.config.general.scan_angle_force is not None:
                 raise ValueError(
                     "outer_loop='scan_angle' cannot be combined with "

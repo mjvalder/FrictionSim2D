@@ -127,6 +127,13 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     #: driven top across TWO materials -> at least 2 + 2 layers.
     MIN_LAYERS: int = 4
 
+    #: This builder writes a single lammps/slide.in and never reads outer_loop
+    #: (pressure/scan_speed/scan_angle all stay in-script), so a config that
+    #: sets outer_loop produces one job here, not one per value. Explicit (the
+    #: base default is the same) because a twist or a second material silently
+    #: reroutes a sheet-on-sheet config here.
+    SPLIT_OUTER_LOOPS = frozenset()
+
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
