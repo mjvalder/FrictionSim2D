@@ -520,7 +520,9 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
     # tuple here is deliberate -- a mode whose build never reads outer_loop at
     # all (e.g. the PES scans) -- not "leave unrestricted". Narrow whenever
     # the field exists, so that case actually offers zero choices instead of
-    # silently falling back to every value the underlying model allows.
+    # silently falling back to every value the underlying model allows. The
+    # zero-choice case renders no row at all (see hidden_fields below): an
+    # empty combo reads as a broken control rather than as "not applicable".
     if 'outer_loop' in fields:
         existing = fields['outer_loop']
         fields['outer_loop'] = FieldOverride(
@@ -538,8 +540,18 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
 
 
 def hidden_fields(model: str, section: str) -> Tuple[str, ...]:
-    """Keys this model's templates never read, so the form should not offer them."""
+    """Keys this model's templates never read, so the form should not offer them.
+
+    ``outer_loop`` joins them for a mode that offers no split at all (both PES
+    scans): the combo would render holding nothing but its '(unset)' entry,
+    which reads as a broken control rather than as "this mode has nothing to
+    split".
+    """
     entry = MODES.get(model)
     if entry is None or section != 'general':
         return ()
-    return entry[0].unsupported_general
+    family, mode = entry
+    hidden = tuple(family.unsupported_general)
+    if not family.outer_loop_choices_for(mode):
+        hidden += ('outer_loop',)
+    return hidden

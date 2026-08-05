@@ -742,9 +742,10 @@ class TestFamilyFieldFiltering:
         ('indent', {'force'}),
         # Both PES scans override write_inputs entirely and never look at
         # outer_loop -- offering a split here would silently do nothing, and
-        # count_expansion (which counts splits generically off the config)
-        # would predict a job count the build never produces. See
-        # test_expansion_count.py for the build-side pin.
+        # the job count would predict a split the build never produces. See
+        # test_expansion_count.py for the build-side pin. With nothing to
+        # offer, the row is not rendered at all (see
+        # TestEmptySplitControlIsHidden in test_gui_form.py).
         ('pes_tip', set()),
         ('sheetonsheet', {'pressure', 'scan_speed', 'scan_angle'}),
         ('pes_sheet', set()),
@@ -755,7 +756,11 @@ class TestFamilyFieldFiltering:
 
         monkeypatch.chdir(REPO_ROOT)
         form = ConfigForm(ConfigDocument.blank(model))
-        box = form.sections['general'].editors['outer_loop'].box
+        editors = form.sections['general'].editors
+        if not expected:
+            assert 'outer_loop' not in editors
+            return
+        box = editors['outer_loop'].box
         choices = {box.itemData(i) for i in range(box.count())} - {None}
         assert choices == expected
 

@@ -453,6 +453,35 @@ class TestOuterLoopAngleLabel:
         assert parse_config(out)['general']['outer_loop'] == 'scan_angle'
 
 
+class TestEmptySplitControlIsHidden:
+    """Both PES modes offer no outer_loop choice at all (their builders
+    override write_inputs and never read it), which left the combo rendering
+    with nothing in it but '(unset)'. An empty control reads as a bug; the
+    row is dropped instead, like any other key the family cannot use."""
+
+    @pytest.mark.parametrize('model', ['pes_tip', 'pes_sheet'])
+    def test_no_split_control_where_there_is_nothing_to_split(self, qt_app,
+                                                              monkeypatch, model):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank(model))
+        section = form.sections['general']
+        assert 'outer_loop' not in section.editors
+        assert 'outer_loop' not in section._rows
+        form.deleteLater()
+
+    @pytest.mark.parametrize('model', ['afm', 'indent', 'sheetonsheet'])
+    def test_the_control_stays_where_a_split_is_offered(self, qt_app,
+                                                        monkeypatch, model):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank(model))
+        assert 'outer_loop' in form.sections['general'].editors
+        form.deleteLater()
+
+
 class TestCountsRead:
 
     @pytest.mark.parametrize('n,word,expected', [

@@ -173,14 +173,19 @@ token (`slide_a30.in` for 30, `slide_am15.in` for -15, `slide_a2p5.in` for
 the combined system+slide HPC path depends on that literal name, so a lone
 angle is never split. It cannot be combined with `scan_angle_force`: a
 per-angle script has no per-force selector left to apply that filter to, so
-the combination raises a build-time error rather than silently dropping it.
+the combination is rejected when the config is validated — before anything is
+built — rather than silently dropping it.
+
+Only the angle is collapsed: each per-angle script still loops in-script over
+every `force`/`pressure` and `scan_speed` value configured, exactly as the
+unsplit `slide.in` would.
 
 `outer_loop = scan_angle` is only acted on by the two dynamic models above.
 `run indent` shares AFM's `[general]` fields but its template never reads the
 angle variable, so setting it there splits nothing. `run pes-tip` and
 `run pes-sheet` replace the run phase entirely and never read `outer_loop` at
-all, regardless of its value — the GUI reflects this by not offering the
-field's split choices for those two modes.
+all, regardless of its value — the GUI reflects this by not showing the
+split control at all for those two modes.
 
 ```ini
 [general]
