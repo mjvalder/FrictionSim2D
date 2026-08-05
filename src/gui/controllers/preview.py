@@ -22,6 +22,7 @@ from PySide6.QtCore import QObject, QProcess, Signal
 
 from ...core.config_io import write_config
 from ...core.run import expand_config_sweeps
+from .staged_paths import absolutize_staged_paths
 from ..preview.assemble import AssembledSystem, assemble
 from ..preview.init_script import parse_assembly
 from ..preview.settings_file import parse_identity
@@ -82,7 +83,9 @@ def cache_key(config: Dict[str, Any], model: str, layer: Optional[int],
     return digest.hexdigest()[:24]
 
 
-def _first_sweep_member(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+def _first_sweep_member(
+        config: Dict[str, Any],
+        base_dir: Optional[Path] = None) -> Tuple[Dict[str, Any], Optional[str]]:
     """The first member of a sweep to preview, and a label naming it.
 
     A material (or other) sweep expands to one config per combination.
@@ -95,6 +98,15 @@ def _first_sweep_member(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Optiona
     selection rule, so it is genuinely one the real run would produce:
     placeholders substituted, ``materials_list`` stripped.
 
+    Args:
+        base_dir: The document's own directory, i.e. what a relative
+            ``materials_list`` is relative to. Without this, a swept config
+            opened from anywhere other than the current working directory
+            silently fails to resolve its material list here (see
+            ``expand_config_sweeps``, which only logs and returns no
+            materials on a resolution failure) and previews as if it had no
+            sweep at all -- ``{mat}`` unsubstituted.
+
     Returns ``config`` unchanged, with no label, when it carries no sweep --
     including when expansion itself fails (e.g. an unreadable
     materials_list): the real build hits the same error and reports it
@@ -102,7 +114,7 @@ def _first_sweep_member(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Optiona
     just deferring to that, not hiding anything.
     """
     try:
-        members = expand_config_sweeps(config)
+        members = expand_config_sweeps(config, base_dir)
     except Exception:  # pylint: disable=broad-except
         return config, None
     if len(members) <= 1:
@@ -124,6 +136,12 @@ class PreviewRequest:
     layer: Optional[int] = None
     settings_file: Optional[Path] = None
     referenced_files: List[Path] = field(default_factory=list)
+    #: The *original* document's directory (`ConfigDocument.base_dir`) --
+    #: where relative `cif_path`/`pot_path`/`materials_list` values are meant
+    #: to resolve against. Not the directory the preview is staged into; see
+    #: `staged_paths.absolutize_staged_paths`, which `PreviewController.start`
+    #: uses this for.
+    base_dir: Optional[Path] = None
     #: Memoized (single-member config, label) -- see `_resolve`. Not part of
     #: the request's identity: two requests with the same `config` must
     #: resolve to the same member regardless of whether either has resolved
@@ -133,7 +151,7 @@ class PreviewRequest:
 
     def _resolve(self) -> Tuple[Dict[str, Any], Optional[str]]:
         if self._resolved is None:
-            self._resolved = _first_sweep_member(self.config)
+            self._resolved = _first_sweep_member(self.config, self.base_dir)
         return self._resolved
 
     def single_member(self) -> Dict[str, Any]:
@@ -208,7 +226,13 @@ class PreviewController(QObject):
             return
 
         directory.mkdir(parents=True, exist_ok=True)
-        config_path = write_config(config, directory / 'config.ini')
+        # The config is about to be written into the preview cache directory,
+        # not wherever the document itself lives -- absolutise its relative
+        # paths against the *original* document's directory first, or
+        # search_paths would resolve them (wrongly) against `directory`
+        # instead. See `staged_paths` for why.
+        staged_config = absolutize_staged_paths(config, request.base_dir)
+        config_path = write_config(staged_config, directory / 'config.ini')
 
         payload = {
             'config_file': str(config_path),

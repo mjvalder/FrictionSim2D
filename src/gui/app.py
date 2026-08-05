@@ -713,6 +713,7 @@ class MainWindow(QMainWindow):
             layer=None,
             settings_file=self.settings_file,
             referenced_files=self._referenced_files(),
+            base_dir=self.document.base_dir,
         )
         self.preview.start(request)
 
@@ -795,6 +796,7 @@ class MainWindow(QMainWindow):
             model=self.document.model,
             generate_hpc=self.hpc_box.isChecked(),
             settings_file=self.settings_file,
+            base_dir=self.document.base_dir,
         ))
 
     def _on_generated(self, result: dict) -> None:
