@@ -624,10 +624,26 @@ class AFMSimulation(SimulationBase):
 
         With ``outer_loop = force`` (and more than one load) each load is emitted
         as its own ``slide_f<load>N.in`` reading its shared ``load_<load>N.data``,
-        mirroring the sheet-on-sheet ``outer_loop`` split. Each becomes an
-        independent HPC job (the two-phase generator makes them depend on the
-        shared system.in phase). Otherwise a single ``slide.in`` loops over the
-        loads in-script, as before.
+        mirroring the sheet-on-sheet ``outer_loop`` split. With ``outer_loop =
+        scan_angle`` (and more than one angle) each angle is emitted as its own
+        ``slide_a<angle>.in``, passing a scalar ``scan_angle_config`` so the
+        template's own ``scan_angle_is_sequence`` switch (afm/slide.lmp) collapses
+        the in-script angle loop -- no parallel code path needed. Both split
+        modes become independent HPC jobs (the two-phase generator makes them
+        depend on the shared system.in phase). Otherwise a single ``slide.in``
+        loops over the loads/angles in-script, as before.
+
+        The angle split does not carry the ``scan_angle_force`` selector: that
+        option restricts which force value(s) the scan_angle list applies to
+        (afm/slide.lmp's angle_loop gate), but the split applies its one fixed
+        angle to every force in every per-angle script -- so the selector would
+        be silently dropped, changing what a force-gated scan means. Reject the
+        combination instead.
+
+        Only applies when this builder's ``SLIDE_TEMPLATE`` is the stock
+        ``afm/slide.lmp`` (i.e. not overridden, as :class:`IndentSimulation`
+        does with ``afm/indent.lmp``, which has no angle loop to collapse --
+        splitting there would just emit N physically-identical scripts).
         """
         outer_loop = getattr(self.config.general, 'outer_loop', None)
         force = self.config.general.force
@@ -635,11 +651,6 @@ class AFMSimulation(SimulationBase):
 
         # Keep a single load on slide.in so the combined system+slide HPC path
         # (which references the literal name slide.in) still applies.
-        #
-        # NOTE: outer_loop='scan_angle' is a valid config value (config.py) but
-        # this builder does not split the slide phase by angle yet -- that is
-        # Task 2/3 of the outer-loop-scan-angle plan. Until then it falls
-        # through to the single-script path below, same as outer_loop unset.
         if outer_loop == 'force' and len(forces) > 1:
             for load in forces:
                 slide_context = dict(context)
@@ -648,6 +659,31 @@ class AFMSimulation(SimulationBase):
                 script_name = f"slide_f{format_numeric_token(float(load))}N.in"
                 self.write_file(f"lammps/{script_name}", script, output_root)
             logger.info("Split slide phase into %d per-load scripts.", len(forces))
+            return
+
+        scan_angle = self.config.general.scan_angle
+        angles = scan_angle if isinstance(scan_angle, list) else (
+            [] if scan_angle is None else [scan_angle]
+        )
+        angle_split_supported = self.SLIDE_TEMPLATE == AFMSimulation.SLIDE_TEMPLATE
+
+        if outer_loop == 'scan_angle' and len(angles) > 1 and angle_split_supported:
+            if self.config.general.scan_angle_force is not None:
+                raise ValueError(
+                    "outer_loop='scan_angle' cannot be combined with "
+                    "scan_angle_force: splitting into one script per angle "
+                    "applies each angle to every force value, silently "
+                    "dropping the force-selective filter. Remove "
+                    "scan_angle_force, or drop outer_loop to keep the "
+                    "in-script angle loop (which honors it)."
+                )
+            for angle in angles:
+                slide_context = dict(context)
+                slide_context['scan_angle_config'] = float(angle)
+                script = self.render_template(self.SLIDE_TEMPLATE, slide_context)
+                script_name = f"slide_a{format_numeric_token(float(angle))}.in"
+                self.write_file(f"lammps/{script_name}", script, output_root)
+            logger.info("Split slide phase into %d per-angle scripts.", len(angles))
             return
 
         slide_script = self.render_template(self.SLIDE_TEMPLATE, context)
