@@ -58,6 +58,12 @@ class FieldOverride:
     read_only: bool = False
     #: Restrict an enum's choices below what the model allows.
     choices: Optional[Tuple[object, ...]] = None
+    #: Display text for individual enum choices, keyed by the stored value.
+    #: A choice absent here still renders (as `str(choice)`, the existing
+    #: behaviour) -- this only relabels what is shown, never what is stored.
+    #: `_EnumEditor` keeps the item's `itemData` as the real value, so this
+    #: is purely cosmetic: the config still reads/writes the original string.
+    choice_labels: Optional[Dict[object, str]] = None
     #: Long-form explanation. Tooltip only -- never rendered as a caption,
     #: because a caption under every control is what made the form unreadable.
     detail: Optional[str] = None
@@ -267,6 +273,10 @@ _COMMON: Dict[str, SectionOverride] = {
                         'job, per value; this is what multiplies the job count. A '
                         'parameter with only one configured value is never split, '
                         'whether or not it is chosen here.'),
+                # Display only -- the stored/written value stays 'scan_angle'
+                # (see FieldOverride.choice_labels). run.py's job-count lookup
+                # and the builders both key off the literal 'scan_angle'.
+                choice_labels={'scan_angle': 'angle'},
             ),
             'finite_sheet': FieldOverride(
                 label='Finite sheet', order=8,
@@ -517,6 +527,7 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
             label=existing.label, unit=existing.unit, help=existing.help,
             order=existing.order, choices=outer_loop_choices,
             detail=existing.detail, editor=existing.editor,
+            choice_labels=existing.choice_labels,
         )
     result['general'] = SectionOverride(
         label=general.label, help=general.help, order=general.order, fields=fields,

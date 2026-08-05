@@ -246,7 +246,8 @@ class SectionForm(QGroupBox):
         editor = build_editor(
             spec, self,
             choices=(field_override.choices if field_override else None),
-            editor=(field_override.editor if field_override else None))
+            editor=(field_override.editor if field_override else None),
+            choice_labels=(field_override.choice_labels if field_override else None))
         editor.changed.connect(self._on_field_changed)
         self.editors[spec.key] = editor
 

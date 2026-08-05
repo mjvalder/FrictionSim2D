@@ -251,7 +251,8 @@ class _EnumEditor(FieldEditor):
 
     UNKNOWN_SUFFIX = ' (not recognised)'
 
-    def __init__(self, spec: FieldSpec, parent=None, choices=None) -> None:
+    def __init__(self, spec: FieldSpec, parent=None, choices=None,
+                choice_labels=None) -> None:
         super().__init__(spec, parent)
         self._unknown: Optional[Any] = None
         layout = QHBoxLayout(self)
@@ -264,8 +265,11 @@ class _EnumEditor(FieldEditor):
         # Choices may be narrowed below what the model allows: outer_loop
         # accepts pressure/scan_speed/force, but each family's builder only
         # acts on some of them.
+        labels = choice_labels or {}
         for choice in (choices if choices is not None else spec.choices):
-            self.box.addItem(str(choice), choice)
+            # itemData keeps the real stored value regardless of the label,
+            # so a relabelled choice still round-trips as the original string.
+            self.box.addItem(labels.get(choice, str(choice)), choice)
         self.box.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self.box)
         layout.addStretch(1)
@@ -495,7 +499,8 @@ def register_editor(slug: str, factory: type) -> None:
 
 
 def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
-                 choices=None, editor: Optional[str] = None) -> FieldEditor:
+                 choices=None, editor: Optional[str] = None,
+                 choice_labels=None) -> FieldEditor:
     """The editor for a field.
 
     Anything without a dedicated editor falls back to text rather than being
@@ -513,6 +518,10 @@ def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
             slug falls back to the field kind rather than failing, so an
             override naming a widget that has not been written yet still
             renders something editable.
+        choice_labels: Display text for individual enum choices, keyed by the
+            stored value -- e.g. outer_loop's `scan_angle` shown as "angle".
+            Cosmetic only: the combo's `itemData` (and so `value()`) still
+            holds the original string.
     """
     if editor and editor in EDITOR_REGISTRY:
         return EDITOR_REGISTRY[editor](spec, parent)
@@ -522,7 +531,7 @@ def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
     if spec.kind is FieldKind.FLOAT:
         return _NumberEditor(spec, parent, integer=False)
     if spec.kind is FieldKind.ENUM or (choices and spec.kind is FieldKind.STR):
-        return _EnumEditor(spec, parent, choices=choices)
+        return _EnumEditor(spec, parent, choices=choices, choice_labels=choice_labels)
 
     factory = _EDITORS.get(spec.kind)
     return factory(spec, parent) if factory else _TextEditor(spec, parent)

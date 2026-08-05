@@ -418,6 +418,41 @@ class TestTipPositionGate:
         assert not doc.dirty
 
 
+class TestOuterLoopAngleLabel:
+    """The dropdown shows 'angle' for the scan_angle split, but the stored
+    value -- and what gets written to the .ini -- must stay 'scan_angle':
+    run.py's `_run_scripts_per_build` does a literal `general.get(outer_loop)`
+    lookup, and the builders / GeneralConfig.outer_loop's Literal all compare
+    against the string 'scan_angle'. A label change that leaked into the
+    stored value would silently break every job-count and build that uses it."""
+
+    def test_combo_displays_angle_for_the_scan_angle_choice(self, form):
+        box = form.sections['general'].editors['outer_loop'].box
+        index = box.findData('scan_angle')
+        assert index != -1
+        assert box.itemText(index) == 'angle'
+
+    def test_other_choices_keep_their_own_text(self, form):
+        box = form.sections['general'].editors['outer_loop'].box
+        index = box.findData('force')
+        assert index != -1
+        assert box.itemText(index) == 'force'
+
+    def test_value_stays_scan_angle_once_angle_is_selected(self, form):
+        editor = form.sections['general'].editors['outer_loop']
+        editor.box.setCurrentIndex(editor.box.findData('scan_angle'))
+        assert editor.value() == 'scan_angle'
+
+    def test_saved_config_writes_scan_angle_not_angle(self, form, tmp_path):
+        from src.core.config import parse_config
+
+        editor = form.sections['general'].editors['outer_loop']
+        editor.box.setCurrentIndex(editor.box.findData('scan_angle'))
+        form.commit()
+        out = form.document.save(tmp_path / 'afm.ini')
+        assert parse_config(out)['general']['outer_loop'] == 'scan_angle'
+
+
 class TestCountsRead:
 
     @pytest.mark.parametrize('n,word,expected', [
