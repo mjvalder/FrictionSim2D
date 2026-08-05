@@ -143,6 +143,30 @@ last.
 
 Putting a list in the last category is reported before anything is generated.
 
+### Splitting the run phase by scan angle
+
+`scan_angle` is one of the fields **Split run phase by** (`outer_loop`) can
+act on, and it behaves like `force`/`pressure`/`scan_speed`: by default every
+angle in `[general] scan_angle` loops inside one run script; choosing
+**Split run phase by → Scan angle** instead emits one script — and one HPC
+job — per angle, named `slide_a<token>.in` (`slide_a30.in` for 30°,
+`slide_am15.in` for -15°, `slide_a2p5.in` for 2.5°). A single configured
+angle is never split, whichever is chosen: the combined system+slide HPC path
+depends on the literal name `slide.in`, so a lone angle always keeps it.
+
+The split cannot be combined with **Scan angles apply at these loads**
+(`scan_angle_force`): a per-angle script has no per-force selector left to
+apply that filter to, so pairing the two raises a build-time error rather
+than silently dropping it.
+
+**Split run phase by** offers `scan_angle` only in the two modes whose slide
+phase actually reads it — AFM's **Dynamic + indent** and sheet-on-sheet's
+**Dynamic (slide)**. **Indent only** shares the AFM family's field but its
+template never reads the angle variable, so it keeps `force` and drops
+`scan_angle`; the two **PES scan** modes replace the run phase entirely and
+never look at `outer_loop` at all, so they offer no split of any kind to
+choose from.
+
 ### Sweeping over materials
 
 `[2D] materials_list` names a `.txt` of material names, one per line, and each

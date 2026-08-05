@@ -151,6 +151,7 @@ they run in parallel rather than back-to-back:
 | `force` | AFM | `slide_f<load>N.in` | one job per load |
 | `pressure` | sheet-on-sheet | `slide_p<value>gpa.in` | one job per pressure |
 | `scan_speed` | sheet-on-sheet | `slide_<value>ms.in` | one job per speed |
+| `scan_angle` | AFM / sheet-on-sheet (dynamic modes) | `slide_a<angle>.in` | one job per angle |
 
 For AFM `outer_loop = force`, a single `system.in` (indentation phase) still
 writes every `load_<load>N.data`, and each `slide_f<load>N.in` reads its own
@@ -162,6 +163,29 @@ slide array depends on the shared system job completing first. A single-value
 [general]
 force = [2, 5, 10, 20, 30, 50, 70, 85, 100]
 outer_loop = force
+```
+
+`outer_loop = scan_angle` works the same way, in AFM's `afm` (dynamic + indent)
+model and sheet-on-sheet's `sheetonsheet` model: each configured angle becomes
+its own `slide_a<angle>.in`, with `-` formatted as `m` and `.` as `p` in the
+token (`slide_a30.in` for 30, `slide_am15.in` for -15, `slide_a2p5.in` for
+2.5). As with `force`, a single-value `scan_angle` list stays as `slide.in` —
+the combined system+slide HPC path depends on that literal name, so a lone
+angle is never split. It cannot be combined with `scan_angle_force`: a
+per-angle script has no per-force selector left to apply that filter to, so
+the combination raises a build-time error rather than silently dropping it.
+
+`outer_loop = scan_angle` is only acted on by the two dynamic models above.
+`run indent` shares AFM's `[general]` fields but its template never reads the
+angle variable, so setting it there splits nothing. `run pes-tip` and
+`run pes-sheet` replace the run phase entirely and never read `outer_loop` at
+all, regardless of its value — the GUI reflects this by not offering the
+field's split choices for those two modes.
+
+```ini
+[general]
+scan_angle = [0, 30, 60, 90]
+outer_loop = scan_angle
 ```
 
 ### Material list expansion
