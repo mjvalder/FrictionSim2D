@@ -16,11 +16,12 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
 from ...core.config_io import write_config
+from ...core.run import expand_config_sweeps
 from ..preview.assemble import AssembledSystem, assemble
 from ..preview.init_script import parse_assembly
 from ..preview.settings_file import parse_identity
@@ -81,6 +82,39 @@ def cache_key(config: Dict[str, Any], model: str, layer: Optional[int],
     return digest.hexdigest()[:24]
 
 
+def _first_sweep_member(config: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """The first member of a sweep to preview, and a label naming it.
+
+    A material (or other) sweep expands to one config per combination.
+    Handing the whole thing to ``generate_package`` -- as the preview used
+    to -- built every member just to show one: slow, and which member landed
+    first in ``result.created`` was arbitrary from the user's point of view.
+
+    This picks the first member deterministically, through the same
+    ``expand_config_sweeps`` a real run uses rather than a re-implemented
+    selection rule, so it is genuinely one the real run would produce:
+    placeholders substituted, ``materials_list`` stripped.
+
+    Returns ``config`` unchanged, with no label, when it carries no sweep --
+    including when expansion itself fails (e.g. an unreadable
+    materials_list): the real build hits the same error and reports it
+    through the existing failure path, so silently falling back here is
+    just deferring to that, not hiding anything.
+    """
+    try:
+        members = expand_config_sweeps(config)
+    except Exception:  # pylint: disable=broad-except
+        return config, None
+    if len(members) <= 1:
+        return config, None
+
+    member = members[0]
+    material = member.get('2D', {}).get('mat')
+    shown = f"material {material}" if material else "the first configuration"
+    label = f"Previewing {shown} (1 of {len(members)} in the sweep)."
+    return member, label
+
+
 @dataclass
 class PreviewRequest:
     """One preview build."""
@@ -90,9 +124,34 @@ class PreviewRequest:
     layer: Optional[int] = None
     settings_file: Optional[Path] = None
     referenced_files: List[Path] = field(default_factory=list)
+    #: Memoized (single-member config, label) -- see `_resolve`. Not part of
+    #: the request's identity: two requests with the same `config` must
+    #: resolve to the same member regardless of whether either has resolved
+    #: yet.
+    _resolved: Optional[Tuple[Dict[str, Any], Optional[str]]] = field(
+        default=None, init=False, repr=False, compare=False)
+
+    def _resolve(self) -> Tuple[Dict[str, Any], Optional[str]]:
+        if self._resolved is None:
+            self._resolved = _first_sweep_member(self.config)
+        return self._resolved
+
+    def single_member(self) -> Dict[str, Any]:
+        """The config to actually build.
+
+        `config` unchanged, or the first member of the sweep it configures --
+        never the whole sweep, which is what made the previewed material
+        arbitrary and the build take one pass per material.
+        """
+        return self._resolve()[0]
+
+    def preview_label(self) -> Optional[str]:
+        """Which sweep member `single_member` is, or None outside a sweep."""
+        return self._resolve()[1]
 
     def key(self) -> str:
-        return cache_key(self.config, self.model, self.layer, self.referenced_files)
+        return cache_key(
+            self.single_member(), self.model, self.layer, self.referenced_files)
 
 
 class PreviewController(QObject):
@@ -110,6 +169,10 @@ class PreviewController(QObject):
         self._process: Optional[QProcess] = None
         self._result_file: Optional[Path] = None
         self._cancelled = False
+        #: Which sweep member `finished`/`failed` refer to, or None outside a
+        #: sweep -- set in `start`, read back by the caller once the build
+        #: settles, so the shown material is never a silent, arbitrary choice.
+        self.current_label: Optional[str] = None
 
     @property
     def running(self) -> bool:
@@ -118,15 +181,26 @@ class PreviewController(QObject):
     # ------------------------------------------------------------------ run
 
     def start(self, request: PreviewRequest) -> None:
-        """Build (or reuse) a preview for this request."""
+        """Build (or reuse) a preview for this request.
+
+        A sweep is reduced to its first member here, before anything is
+        written to disk: the worker builds exactly what `request.key()` was
+        computed from, so the cache and the build always agree on which
+        member this is.
+        """
         if self.running:
             self.cancel()
+
+        config = request.single_member()
+        self.current_label = request.preview_label()
 
         key = request.key()
         directory = self.workspace.preview_path(key)
         result_file = directory / 'preview.json'
 
         self.started.emit()
+        if self.current_label:
+            self.progress.emit(self.current_label)
 
         if result_file.exists():
             self.progress.emit('reusing cached preview')
@@ -134,7 +208,7 @@ class PreviewController(QObject):
             return
 
         directory.mkdir(parents=True, exist_ok=True)
-        config_path = write_config(request.config, directory / 'config.ini')
+        config_path = write_config(config, directory / 'config.ini')
 
         payload = {
             'config_file': str(config_path),

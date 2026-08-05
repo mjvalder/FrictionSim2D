@@ -689,7 +689,12 @@ class MainWindow(QMainWindow):
         return out
 
     def _on_preview_ready(self, system) -> None:
-        self._busy(f"Rendered {system.count:,} atoms.", False)
+        message = f"Rendered {system.count:,} atoms."
+        # A sweep config previews exactly one member (see PreviewController);
+        # say which, so what is shown is never a silent, arbitrary choice.
+        if self.preview.current_label:
+            message += f" {self.preview.current_label}"
+        self._busy(message, False)
         self.viewport.show_system(system)
         self._render_snapshot = self.document.to_dict()
         self.viewport.set_stale(False)
