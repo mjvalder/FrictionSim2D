@@ -571,6 +571,49 @@ def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, Lis
     return scripts, notes
 
 
+def _numbered_sheet_keys(run_dict: Dict[str, Any]) -> List[str]:
+    """Every '2D-N' key in ``run_dict``, sorted by N ascending.
+
+    Keys are matched by prefix and sorted numerically (so '2D-2' sorts
+    before '2D-10'); a non-numeric suffix sorts last rather than raising.
+    """
+    return sorted(
+        (k for k in run_dict if isinstance(k, str) and k.startswith('2D-')),
+        key=lambda key: int(key.split('-', 1)[1])
+        if key.split('-', 1)[1].isdigit() else 10**9,
+    )
+
+
+def primary_sheet(run_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """The primary [2D] section: plain '2D', else the first numbered '2D-N'.
+
+    Numbered-only configs are legal -- the pydantic fold mirrors 2D-1 onto
+    '2D' -- but the naming and counting code below runs before any model is
+    built, straight off the raw config dict, so it needs its own fallback.
+    """
+    if '2D' in run_dict:
+        return run_dict['2D']
+    numbered = _numbered_sheet_keys(run_dict)
+    if numbered:
+        return run_dict[numbered[0]]
+    raise KeyError('2D')
+
+
+def material_token(run_dict: Dict[str, Any]) -> str:
+    """Directory token for the material(s): 'mat' or 'mat1+mat2+...'.
+
+    Two hetero runs differing only in material 2 must not share a directory,
+    so every numbered sheet section contributes its 'mat' in numeric order.
+    Joined with '+' rather than '-': material names themselves contain '-'
+    (e.g. 'h-MoS2'), which would make a '-' join unsplittable, and
+    postprocessing already folds '-' into '_' for its own filter keys.
+    """
+    numbered = _numbered_sheet_keys(run_dict)
+    if numbered:
+        return '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
+    return str(primary_sheet(run_dict).get('mat', 'unknown'))
+
+
 def count_expansion(base_config: Dict[str, Any],
                     model: str,
                     base_dir: Optional[Union[str, Path]] = None) -> ExpansionSummary:
@@ -592,7 +635,7 @@ def count_expansion(base_config: Dict[str, Any],
     builds = 0
     jobs = 0
     for config in expanded:
-        layers = _as_list(config.get('2D', {}).get('layers')) or [1]
+        layers = _as_list(primary_sheet(config).get('layers')) or [1]
         scripts, script_notes = _run_scripts_per_build(config, model)
         builds += len(layers)
         jobs += len(layers) * scripts
@@ -883,10 +926,15 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     that never build anything -- the GUI's Generate preview, in particular --
     can predict a run's directory (and so spot sweep members that would
     collide) without duplicating the layout rules here.
+
+    ``mat`` covers every numbered sheet section (see :func:`material_token`)
+    so two hetero runs differing only in the second material do not collide;
+    ``x``/``y`` come from the primary sheet (see :func:`primary_sheet`).
     """
-    mat = run_dict['2D'].get('mat', 'unknown')
-    x = run_dict['2D'].get('x', 100)
-    y = run_dict['2D'].get('y', 100)
+    mat = material_token(run_dict)
+    sheet = primary_sheet(run_dict)
+    x = sheet.get('x', 100)
+    y = sheet.get('y', 100)
     temp = run_dict['general'].get('temp', 300)
     size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
 
