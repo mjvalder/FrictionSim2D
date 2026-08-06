@@ -1,330 +1,436 @@
-# MLIP Support for FrictionSim2D — Design Specification
+# MLIP Support for FrictionSim2D — Design Specification (v2)
 
 **Date:** 2026-08-06
 **Branch:** `mlip` (worktree off `gui-p2`)
-**Status:** Draft — pending adversarial review + user approval
+**Status:** v2 — revised after adversarial review + moderation; pending user approval
+**Review provenance:** v1 was attacked by an adversarial reviewer (25 findings,
+5 blockers) and arbitrated by a moderator (all upheld, 4 additional findings).
+This version incorporates every binding disposition. Where v1 claimed
+capabilities upstream projects have rejected, v2 states the honest limits.
 
 ## Goal
 
-Add machine-learned interatomic potential (MLIP) support to FrictionSim2D so that
-four MoS2 simulation setups can be generated, run on Imperial RCS clusters
-(CX3 / HX1) with correct GPU/CPU resource requests, and reproduced on a local
-GPU workstation:
+Add machine-learned interatomic potential (MLIP) support to FrictionSim2D so
+that four MoS2 setups can be generated, run on Imperial RCS clusters with
+correct GPU/CPU resource requests, and reproduced on a local GPU workstation:
 
-1. **Sheet-on-sheet, MLIP intralayer + LJ interlayer** — each MoS2 layer is
-   described by its own MLIP instance (as SW is applied per-layer today);
-   interlayer interactions remain `lj/cut`.
-2. **Sheet-on-sheet, full MLIP** — one MLIP describes the whole simulation
-   cell, intralayer and interlayer.
-3. **AFM tip / sheet / substrate, MLIP sheet intralayer** — sheet layers use
-   per-layer MLIP instances; tip and substrate stay SW; LJ between sheet
-   layers and between sheet and tip/substrate.
-4. **AFM tip / sheet / substrate, MLIP sheet intra+interlayer** — the whole
-   sheet stack (both layers plus their interlayer interaction) uses one MLIP;
-   tip and substrate stay SW; LJ only between the sheet and tip/substrate.
+1. **Sheet-on-sheet, MLIP intralayer + LJ interlayer** — one MLIP hybrid
+   sub-style instance per layer (≥3 layers; the builder enforces
+   `MIN_LAYERS = 3`), interlayer pairs on `lj/cut`.
+2. **Sheet-on-sheet, full MLIP** — one MLIP describes the whole cell,
+   intralayer and interlayer.
+3. **AFM tip/sheet/substrate, MLIP sheet intralayer** — per-layer MLIP
+   instances for the sheet; SW tip and substrate; LJ between sheet layers and
+   between sheet and tip/substrate.
+4. **AFM tip/sheet/substrate, MLIP sheet intra+interlayer** — one MLIP
+   instance covering all sheet types (NULL-partitioned in hybrid); SW tip and
+   substrate; LJ only between sheet and tip/substrate.
 
-Frameworks: **MACE** and **DeePMD**, implemented in parallel, using
-**foundation models** (MACE-MP family; DeePMD DPA family). Training new
-models is **out of scope**. Each MLIP setup runs both **without** and
-**with D3 dispersion** (base values are needed as the comparison baseline;
-D3 is the physically-corrected target).
+Frameworks: **MACE** and **DeePMD**, foundation models (MACE-MP family;
+DeePMD DPA family). Training/fine-tuning is out of scope. Dispersion: runs
+**without** and **with D3** where possible (base values are the comparison
+baseline).
 
-GUI integration is **out of scope** for this spec (backend only). The GUI
-will later expose the new `pot_type` values and switches; the config surface
-below is the interface it will build on.
+GUI integration is out of scope (backend only); the config surface in §1 is
+the interface the GUI will later expose.
+
+## Capability matrix (binding)
+
+Upstream constraints — verified against LAMMPS docs, the ACEsuit maintainer's
+own statements, and community reports — make the honest matrix:
+
+| Setup | DeePMD base | DeePMD + D3 | MACE base | MACE + D3 |
+|---|---|---|---|---|
+| 1. SoS, MLIP intra + LJ inter | Conditional¹ | No² | No³ | No |
+| 2. SoS, full MLIP | Yes | Conditional¹ | Yes⁴ | Conditional¹˒⁴ |
+| 3. AFM, MLIP sheet intra | Conditional¹ | No² | No³ | No |
+| 4. AFM, MLIP sheet intra+inter | Conditional¹ | No² | No³ | No |
+
+¹ Mechanism is documented/community-confirmed but unproven in our stack —
+  gated on **Milestone 0** (§7). Nothing is called "verified" until it passes.
+² Stock `pair_style dispersion/d3` requires a real element for **every** atom
+  type (no NULL): it cannot be restricted to MLIP pairs, so partial-cell D3
+  would double-count dispersion over SW/LJ pairs. D3 is therefore valid
+  **only** for full-cell-MLIP runs (setup 2). A NULL-aware `dispersion/d3`
+  fork is documented future work (§10), not a deliverable.
+³ `pair_style mace` does not support NULL type maps — segfaults, and the
+  maintainer has rejected selective type exclusion as architecturally
+  incompatible (ACEsuit discussion #1314). **MACE serves setup 2 only.**
+  The MACE-vs-DeePMD comparison exists only at setup 2; setups 1/3/4 are
+  DeePMD-only. "Map tip/sub Si to real Si in MACE-MP" is NOT a workaround:
+  MACE would then compute tip/substrate/sheet↔Si interactions that SW and LJ
+  also compute (double counting). A pure full-cell-MACE AFM run is a distinct
+  optional future experiment (§10), not a substitute for setups 3/4.
+⁴ Requires a non-virtual `drive_method` (see §1.4). Full-cell MACE + D3 via
+  `hybrid/overlay` is a community-confirmed pattern (matsci #62930) but still
+  Milestone-0-gated.
 
 ## Non-goals
 
-- Training or fine-tuning MLIPs.
-- GUI changes (deferred to gui-p2 work).
-- Multi-GPU / multi-node MLIP runs (system sizes here are 10³–10⁴ atoms;
-  one GPU per job is the design point).
-- Refactoring existing potentials (SW, ReaxFF, …) into the new registry —
-  documented as future work (see §9).
-
-## Background constraints (verified)
-
-- **`pair_style dispersion/d3`** exists in stock LAMMPS (EXTRA-PAIR package,
-  metal units) and is documented as intended for overlaying D3 on
-  ML potentials via `pair_style hybrid/overlay`.
-- **MACE + hybrid is risky.** `pair_style mace` lives in the ACEsuit LAMMPS
-  fork; community reports show `hybrid/overlay` combinations failing, and
-  `no_domain_decomposition` (recommended for small systems) breaks with
-  multiple MPI ranks. Mitigation: DeePMD is the verified path for setups
-  1 and 3; an early MACE-in-hybrid smoke test is a plan milestone
-  (see Risks, §8).
-- **DeePMD** (`pair_style deepmd`) has mature hybrid support including
-  `NULL` type mapping, and its own GPU backend (no Kokkos suffix needed).
-- **CX3 GPU jobs**: PBS `select=1:ncpus=N:mem=Mgb:ngpus=G:gpu_type=T`,
-  queue `gpu72`, L40S default (48 GB), A100 limited. **HX1**: PBS,
-  4× A100-80GB nodes. Both remain configurable via profiles (§5).
-- Existing `PotentialManager` machinery already handles per-layer many-body
-  application through hybrid NULL maps (`_add_layer_self_interaction`) —
-  setups 1/3 reuse this path; setups 2/4 reuse the single whole-component
-  path.
+- Training or fine-tuning MLIPs; GUI changes; multi-GPU/multi-node runs
+  (design point: 1 GPU per job at 10³–10⁴ atoms).
+- MLIP support for the other builder families (indent, PES scans, hetero,
+  flake variants). Config validation **rejects** MLIP `pot_type` outside
+  `sheetonsheet` and `afm` dynamic runs in this iteration.
+- Patching LAMMPS pair styles (the NULL-aware d3 fork is future work).
 
 ## 1. Configuration surface
 
 ### 1.1 Per-run `.ini` keys
 
-Per component (existing keys, new accepted values):
-
 ```ini
 [2D]
-pot_type = mace            ; or deepmd (alongside existing sw, reaxff, ...)
+pot_type = mace            ; or deepmd (alongside existing sw, ...)
 pot_path = ../models/mace-mp-0b3-medium.model-lammps.pt
-```
-
-New sheet-section keys (only meaningful when the component's `pot_type` is
-an MLIP; validation rejects them otherwise):
-
-```ini
 mlip_interlayer = lj       ; 'lj' (setups 1,3) | 'native' (setups 2,4)
 dispersion = none          ; 'none' | 'd3'
+lat_c = 3.16               ; MANDATORY for MLIP pot_types (see §3.3)
 ```
 
-- `mlip_interlayer = lj`: sheet registered with per-layer types (as today for
-  SW); one MLIP hybrid sub-style instance per layer via NULL maps; interlayer
-  pairs assigned `lj/cut` (existing `add_interlayer_interaction` /
-  `add_ghost_lj` path).
-- `mlip_interlayer = native`: sheet registered as one MLIP-covered component;
-  no interlayer LJ lines are emitted; the MLIP's pair_coeff covers all sheet
-  types. Cross-component LJ (sheet↔tip, sheet↔sub) is emitted exactly as
-  today.
-- `dispersion = d3`: the potential file uses `pair_style hybrid/overlay`
-  with a `dispersion/d3` sub-style whose pair_coeff covers **only the
-  MLIP-described type pairs** (intralayer for setups 1/3; intra+interlayer
-  sheet pairs for setups 2/4). SW/LJ-described pairs get no D3 (their
-  parametrizations already include dispersion empirically).
+Validation rules (config layer, hard errors):
+- `mlip_interlayer` / `dispersion` require an MLIP `pot_type`.
+- MLIP `pot_type` on tip or substrate is rejected (SW by design).
+- `dispersion = d3` requires: sheetonsheet model, `mlip_interlayer = native`,
+  and a non-virtual `drive_method` (§1.4).
+- `pot_type = mace` requires `mlip_interlayer = native`, sheetonsheet model,
+  and a non-virtual `drive_method`.
+- MLIP `pot_type` requires explicit `lat_c` and a model file whose extension
+  matches the framework (`.model-lammps.pt`/`.pt` for MACE; `.pb`/`.pth` for
+  DeePMD).
+- MLIP `pot_type` outside sheetonsheet/afm models is rejected (§ Non-goals).
+- Supported `constraint_mode` / `drive_method` combinations per setup are
+  enumerated in the validation table (see §3.4); everything else rejected.
 
 ### 1.2 `settings.yaml` additions
 
-Under `potential:` (defaults; overridable per run):
-
 ```yaml
 potential:
-  d3_functional: pbe       # functional the damping params are fitted to
-  d3_damping: d3bj         # damping variant supported by pair_style dispersion/d3
-  d3_cutoff: 16.0          # Å, dispersion cutoff
-  d3_cn_cutoff: 8.0        # Å, coordination-number cutoff
+  d3_functional: pbe
+  d3_damping: bj        # canonical name; enum-validated
+  d3_cutoff: 16.0       # Å
+  d3_cn_cutoff: 8.0     # Å
 ```
 
-Exact argument order/names for `dispersion/d3` are pinned to the LAMMPS
-version selected by the build recipes (§6); the registry emits them, tests
-golden-check them.
+`d3_damping` is a **canonical** name that the registry translates into the
+token each LAMMPS build actually accepts: the ACEsuit fork ships an older
+`dispersion/d3` (pre-rename tokens, different arg conventions) than pinned
+mainline (`original|bj|zerom|bjm`). Emitted syntax is pinned and golden-tested
+**per framework build**, not globally.
 
 ### 1.3 Output directory naming (sweep-loopability rule)
 
-Any parameter that distinguishes runs must appear in the output dir name.
-MLIP runs append a potential-flavor token:
+MLIP runs append a flavor token to the **innermost run-parameter segment** of
+the output path (the same segment that already encodes temperature/spring
+variants, so upstream segments used by postprocessing filters — material,
+size — are untouched):
 
 ```
-<existing name>_<pot_type>-<interlayer>-<dispersion>
-e.g. ..._mace-native-d3, ..._deepmd-lj-base
+<...>/K<temp>_<pot_type>-<interlayer>-<disp>
+disp token: 'base' when dispersion=none, 'd3' when dispersion=d3
+e.g. .../K0_deepmd-lj-base, .../K0_mace-native-d3
 ```
 
-Non-MLIP runs keep their existing names byte-for-byte (regression-tested).
+Non-MLIP paths are byte-identical to today (regression-tested), and a
+postprocessing filter test proves existing segment parsing still works.
+
+### 1.4 Drive method constraint
+
+The default `drive_method = virtual_atom` registers a massless `Virtual` atom
+type with no chemical element; it forces hybrid mode and takes
+`lj/cut 1e-100` coefficients. `pair_style mace` cannot NULL-map it and
+`dispersion/d3` cannot assign it an element — so **all MACE runs and all D3
+runs must use a non-virtual drive** (`smd` or `fix_move`), enforced by
+validation. DeePMD-base runs may keep `virtual_atom` (NULL covers it).
+
+The non-virtual drive paths are currently under-exercised in the codebase
+(e.g. `hetero.py` registers the Virtual type unconditionally — evidence these
+branches aren't uniformly wired). Milestone 0 therefore includes golden +
+smoke tests of `smd` and `fix_move` on sheetonsheet and afm **before** they
+are mandated for MLIP runs.
 
 ## 2. `src/core/mlip.py` — MLIP registry
-
-New module, consumed by `PotentialManager`. Contents:
 
 ```python
 @dataclass(frozen=True)
 class MLIPSpec:
-    name: str                      # 'mace' | 'deepmd'
-    model_in_style_line: bool      # deepmd: True (model path in pair_style args)
-                                   # mace:   False (model path in pair_coeff)
-    style_args: Callable           # (model_path, opts) -> pair_style argument string
-    coeff_line: Callable           # (index_str, model_path, null_map) -> pair_coeff line
-    supports_hybrid: bool          # deepmd: True; mace: False-until-verified
-    launcher: LauncherSpec         # flags for lmp invocation (see below)
-    file_extensions: tuple         # accepted model file suffixes (validation)
-    notes: str                     # human-readable caveats (surfaced in docs)
+    name: str                   # 'mace' | 'deepmd'
+    model_in_style_line: bool   # deepmd: True; mace: False (model in pair_coeff)
+    style_args: Callable        # (model_path, opts) -> pair_style argument string
+    coeff_line: Callable        # (index_str, model_path, null_map) -> pair_coeff line
+    supports_null: bool         # deepmd: True; mace: False  → gates setups 1/3/4
+    supports_overlay: bool      # per-style flag; overlay layout derived from these
+    launcher: LauncherSpec
+    file_extensions: tuple      # validation (.pt/.model-lammps.pt vs .pb/.pth)
+    d3_tokens: Callable         # canonical damping/functional -> build-specific tokens
+    notes: str
 
 @dataclass(frozen=True)
 class LauncherSpec:
-    mpi_ranks: int                 # 1 for MACE (no_domain_decomposition)
-    lmp_flags: str                 # e.g. '-k on g 1 -sf kk -pk kokkos newton on neigh half'
-    env_lines: list[str]           # activation lines injected into job scripts
+    binary: str                 # per-framework lmp binary/alias — MACE (ACEsuit
+                                # fork) and DeePMD (plugin build) are two
+                                # incompatible LAMMPS builds; jobs must resolve
+                                # the right one
+    modules: list[str]          # per-framework module set (merged onto profile)
+    env_lines: list[str]
+    mpi_ranks: int              # 1 for MACE (no_domain_decomposition)
+    lmp_flags: str              # only doc-verified flags pinned (MACE: '-k on g 1
+                                # -sf kk'); anything further is added only after
+                                # Milestone 0 verifies it
 ```
 
-- `MLIP_REGISTRY: dict[str, MLIPSpec]` with `mace` and `deepmd` entries.
-- `is_mlip(pot_type) -> bool` helper.
-- `d3_overlay(elements, null_map, settings) -> list[str]`: emits the
-  `dispersion/d3` style token and pair_coeff lines restricted to the given
-  types.
+- `MLIP_REGISTRY: dict[str, MLIPSpec]`, `is_mlip(pot_type)` helper.
+- `d3_overlay(settings, spec) -> list[str]`: full-cell only; emits the
+  build-correct `dispersion/d3` style token + a pair_coeff line listing a real
+  element for **every** atom type (guaranteed by the §1.1 validation that D3
+  runs are full-cell MLIP + non-virtual drive).
 
-### `PotentialManager` integration (surgical)
+### `PotentialManager` / call-site integration (enumerated, not "surgical")
 
-- `is_sheet_lj(pot_type)` gains an MLIP branch: for MLIPs the answer depends
-  on the sheet's `mlip_interlayer` mode, so the sheet component's registration
-  records the mode and `add_self_interaction` routes accordingly (per-layer
-  NULL maps vs whole-component map). No change to non-MLIP paths.
-- `write_file` style-line assembly generalizes the existing ReaxFF
-  special-case: each used style asks the registry (or the ReaxFF branch) for
-  its style-line arguments. `hybrid/overlay` is selected instead of `hybrid`
-  when a D3 overlay is present. (LAMMPS `hybrid/overlay` accepts the same
-  type-partitioned many-body sub-styles; only D3 actually overlays.)
-- Model files are staged through the existing `_get_potential_path`
-  copy-and-prefix mechanism, unchanged.
-- Per-layer MLIP instances (setups 1/3) follow the existing numeric-suffix
-  convention (`mace 1`, `mace 2`) exactly as SW multilayer does today.
-  Memory note: two model instances on one GPU (~2× model VRAM — fine for
-  foundation models on 48 GB L40S).
+The v1 claim that `is_sheet_lj(pot_type)` could be routed internally was
+wrong: the interlayer decision must reach **five** string-only call sites.
+The signature changes to accept the component context (pot_type + interlayer
+mode), and every site is updated:
+
+1. `potential_manager.py` `register_component` (`potential_usage` accounting
+   — per-layer MLIP counts as n_layers instances, native as 1),
+2. `potential_manager.py` `add_self_interaction` routing,
+3. `components.py` `stack_multilayer_sheet` (stacking pot file contents),
+4. `sheetonsheet.py` `has_internal_lj` template flag (2 sites),
+5. `afm.py` `has_internal_lj` template flag.
+
+Other integration points:
+- `write_file`: per-style argument assembly generalizes the ReaxFF
+  special-case via the registry; `hybrid/overlay` is chosen from the
+  `supports_overlay` flags when a D3 overlay is present.
+- **`count_atomtypes` fix (was a guaranteed crash):** `utils.py` opens the
+  potential file as UTF-8 text; binary model files crash it. MLIP pot_types
+  and extensions (`.pt`, `.pth`, `.pb`, `.model-lammps.pt`) are added to the
+  single-type short-circuit — at **both** call sites, including the one that
+  passes no `pot_type` (extension check is load-bearing there). Unit-tested.
+- **Model staging:** `_get_potential_path` currently copies the potential
+  into every run directory; a 100-run sweep × a foundation model = gigabytes
+  duplicated locally and over rsync. MLIP models are staged **once at the
+  simulation root** (shared `potentials/` with a relative prefix); classical
+  potentials keep today's behavior.
+- Per-layer instances use the numeric-suffix convention (`deepmd 1`,
+  `deepmd 2`, …) — ≥3 instances for sheet-on-sheet. **Warning encoded in the
+  registry docs:** the documented multi-model form `pair_style deepmd m1 m2`
+  is model-deviation mode (only the first model drives forces) — a one-typo
+  trap the generator must never emit.
 
 ## 3. Builders
 
-`sheetonsheet.py` and `afm.py`:
+### 3.1 Routing
 
-- Parse `mlip_interlayer` and `dispersion`; validate (`native`/`d3` require
-  an MLIP `pot_type`; MLIP `pot_type` on tip/sub is rejected in this
-  iteration — tip and substrate stay SW by design).
-- Route sheet registration: `native` → single self-interaction across all
-  layers, skip interlayer LJ; `lj` → existing per-layer path.
-- Append the potential-flavor token to output dir names (§1.3).
-- Everything else (geometry, groups, thermostats, drives) is untouched:
-  MLIP types are ordinary LAMMPS types.
+`sheetonsheet.py` / `afm.py`: parse the new keys; `native` → single
+self-interaction across all sheet layers, no interlayer LJ; `lj` → existing
+per-layer path (≥3 instances for sheet-on-sheet). Cross-component LJ
+(sheet↔tip, sheet↔sub) unchanged.
 
-## 4. HPC layer — GPU resources and cluster profiles
+### 3.2 VRAM sizing (measured, not asserted)
 
-### 4.1 Settings model
+MLIP inference memory is dominated by graph activations scaling with
+atoms × neighbors (MACE-converted models default to float64), **not** by
+weight size. The bilayer benchmark (§5) records measured VRAM vs atom count
+per framework and instance count; job sizing guidance in `documentation/`
+uses those measurements. No a-priori "it fits" claims.
+
+### 3.3 Stacking without an MLIP-enabled generation machine
+
+`stack_multilayer_sheet` executes LAMMPS **in-process** (python `lammps`
+module) for every multilayer build — even when `lat_c` is supplied — and its
+rendered script `include`s a potential file derived from the sheet's
+`pot_type`. Without intervention, merely *generating* MLIP inputs would
+require an MLIP-enabled python-LAMMPS on the generation machine (and CI).
+
+Design: for MLIP sheets, the stacking step receives a **surrogate SW
+potential file** (config copy with `pot_type='sw'` + the material's SW path;
+type counts and `atom_style` match). Since `lat_c` is mandatory for MLIP
+configs (§1.1), no minimization runs during stacking — the surrogate exists
+solely to make the `include` loadable; it never influences geometry.
+
+**Real caveat (benchmark-gated):** the user-supplied `lat_c` and the
+LJ-derived initial interlayer gap may mismatch the MLIP's equilibrium
+geometry. A too-small initial spacing under an attractive foundation model is
+the known "dome plow" failure mode. The bilayer benchmark (§5) reports the
+MLIP equilibrium lattice constant and interlayer spacing so configs can be
+set consistently; `documentation/mlip.md` states this workflow.
+
+### 3.4 Supported-mode table
+
+The spec's validation table (implemented in config validation, documented in
+mlip.md):
+
+| Mode | MLIP support |
+|---|---|
+| `drive_method = virtual_atom` | DeePMD-base only |
+| `drive_method = smd`, `fix_move` | all MLIP runs (required for MACE/D3) |
+| `constraint_mode = atom_bonds`, `com_spring` | **unsupported** with MLIP in this iteration (molecular conversion + harmonic bonds + special_bonds exclusions interacting with MLIP neighbor lists is unvalidated; Milestone 0 may lift this) |
+
+## 4. HPC layer
+
+### 4.1 Settings model — profiles with a per-framework axis
 
 ```yaml
 hpc:
   active_profile: cx3
   profiles:
     cx3:
-      queue: gpu72
+      queue: gpu72            # verify explicit -q is accepted (RCS docs use
+                              # automatic routing); drop if routing suffices
       gpu: {ngpus: 1, gpu_type: L40S}
       num_cpus: 8
       memory_gb: 64
-      modules: [tools/prod, ...]
-      env_lines: ["source $HOME/venvs/lammps-mlip/bin/activate"]
-      mpi_command: "mpirun -np 1"
-      lmp_flags: ""            # filled per-run from LauncherSpec
-    hx1:
-      gpu: {ngpus: 1, gpu_type: A100}
+      modules: [tools/prod]
+      frameworks:             # per-framework overlay (two incompatible builds)
+        mace:   {binary: "$HOME/lammps-mace/build/lmp",  env_lines: [...]}
+        deepmd: {binary: "$HOME/deepmd-kit/bin/lmp",     env_lines: [...]}
+    hx1:                      # VRAM escape hatch ONLY: RCS policy says
+      queue: a100             # single-node/small jobs belong on CX3; use HX1
+      gpu: {ngpus: 1, gpu_type: A100}   # only if 48GB L40S VRAM is exceeded
       ...
 ```
 
-- `HPCSettings` gains `gpu: Optional[GPUSettings]` (`ngpus`, `gpu_type`),
-  `env_lines: list[str]`, `profiles: dict[str, HPCProfile]`,
-  `active_profile: Optional[str]`. A profile is a partial override set
-  merged onto the base `hpc:` block; no profile → today's behavior,
+- CX3 is the default GPU target. Known constraints recorded in docs: L40S
+  48 GB (default), RTX6000 24 GB, A100 40 GB (limited); **12 concurrent GPUs
+  per user** on gpu72 — array campaigns serialize beyond that.
+- A profile is a partial override merged onto the base `hpc:` block; the
+  framework overlay merges last. No profile → today's behavior,
   byte-identical scripts (regression-tested).
-- CLI: `FrictionSim2D hpc generate ... --profile cx3` overrides
-  `active_profile`.
+- CLI: `FrictionSim2D hpc generate ... --profile cx3`.
 
-### 4.2 Script generation & templates
+### 4.2 Manifest schema + CPU/GPU splitting (new machinery, not reuse)
 
-- `HPCConfig.to_dict()` renders the select line with
-  `:ngpus={n}:gpu_type={t}` appended when GPU is enabled, and passes
-  `env_lines` and a fully-resolved `launch_command` (mpi command + `lmp` +
-  merged flags: profile flags + the MLIP `LauncherSpec` flags recorded in the
-  job manifest at generation time).
-- Templates (`pbs_array.j2`, `pbs_combined.j2`, slurm twins): the hardcoded
-  `{{ mpi_command }} lmp {{ lmp_flags }}` lines become `{{ launch_command }}`;
-  an `env_lines` block renders after `module load`s. CPU-only rendering is
-  unchanged output.
-- The job manifest records, per job, whether it needs GPU and which launcher
-  flags apply, so mixed CPU/GPU campaigns can be split into separate array
-  scripts (one CPU array, one GPU array) by the existing chunking machinery.
+v1 claimed the existing chunking could split mixed campaigns; it cannot —
+manifests are flat path strings and `JobEntry` has no resource fields. Design:
 
-### 4.3 GPU/CPU balance guidance (documented, defaults encoded in profiles)
+- `JobEntry` gains `needs_gpu: bool`, `framework: Optional[str]`,
+  `launcher_flags: str` (recorded at generation time from the registry).
+- `HPCScriptGenerator` groups jobs by `(needs_gpu, framework)` and emits one
+  array script per group, each rendered with its own resource context
+  (CPU groups render exactly as today). `submit_all` lists every script.
 
-- MLIP jobs: 1 MPI rank, 1 GPU, 4–8 CPU cores (host-side hybrid sub-styles
-  SW/LJ + D3 run on CPU within the same rank; a few cores cover them at
-  these system sizes).
-- Pure-CPU jobs (all-SW): unchanged (`num_cpus` ranks, no GPU request).
+### 4.3 Select line + launcher
 
-### 4.4 Local runs (`core/run.py`)
+- GPU select: `select=1:ncpus={n}:mem={m}gb:ngpus={g}:gpu_type={t}` with
+  **`mpiprocs={LauncherSpec.mpi_ranks}`** — not the CPU path's
+  `mpiprocs=ncpus` (an inconsistent declaration when running
+  `mpirun -np 1`).
+- Templates: `{{ mpi_command }} lmp {{ lmp_flags }}` becomes
+  `{{ launch_command }}` (fully resolved: mpi command, per-framework binary,
+  merged flags); an `env_lines` block renders after the module loads.
+  CPU-only rendering is unchanged output.
 
-- `run.py` accepts an optional launcher override (binary path + flags)
-  resolved from the same profile/LauncherSpec mechanism, so the GPU
-  workstation runs the identical inputs with its local `lmp`. No scheduler
-  logic locally.
+### 4.4 Local execution (honest scope)
 
-## 5. Build recipes and handoff documentation (first-class deliverables)
+`run.py` does not execute production LAMMPS today (it only builds inputs), so
+there is no launcher to "override". Local MLIP execution on the GPU
+workstation is delivered as **documentation + a thin helper script**
+(`scripts/run_local.sh <sim_dir> <framework>`) that resolves the same
+per-framework binary/flags from settings and invokes `lmp` on
+`system.in`/`slide.in`. Promoting this into `run.py` proper is future work.
 
-The implementation work transfers to another PC with a small GPU; docs must
-be complete enough to continue there without this session's context.
+## 5. Build recipes, benchmark, and handoff documentation
 
-- `scripts/hpc/build_lammps_mace.sh` and `scripts/hpc/build_lammps_deepmd.sh`
-  with per-cluster module preambles (CX3, HX1) and a local-workstation
-  variant: pinned LAMMPS version, EXTRA-PAIR (D3) enabled, Kokkos+CUDA for
-  MACE (libtorch), DeePMD-kit v3 plugin build. Idempotent, commented, and
-  runnable step-by-step.
-- `documentation/mlip.md`:
-  - foundation model acquisition (MACE-MP-0b3 medium download + LAMMPS
-    conversion via `mace_create_lammps_model`; DeePMD DPA model download +
-    freeze/convert),
-  - the four setups with their exact example configs,
-  - base-vs-D3 workflow,
-  - cluster profiles and GPU sizing guidance,
-  - local GPU-PC setup section (env, drivers, smoke test),
-  - troubleshooting (known MACE hybrid failure modes and the DeePMD
-    fallback).
-- `examples/mlip/`: four ready-to-run configs —
-  `sheet_mlip_lj.ini`, `sheet_mlip_full.ini`, `afm_mlip_lj.ini`,
-  `afm_mlip_full.ini` (each dispersion-toggleable).
-- `scripts/mlip_bilayer_benchmark.py`: standalone bilayer MoS2 binding-curve
-  benchmark (rigid z-displacement single-point evaluations) comparing
-  SW+LJ vs MLIP-base vs MLIP+D3 per framework — the go/no-go physics check
-  before production friction runs.
+- `scripts/hpc/build_lammps_mace.sh`, `scripts/hpc/build_lammps_deepmd.sh`:
+  per-cluster module preambles (CX3, HX1) + local-workstation variant.
+  **Two separate builds** (ACEsuit fork + libtorch + Kokkos-CUDA vs pinned
+  mainline + deepmd-kit v3 plugin), each with EXTRA-PAIR (D3) enabled,
+  versions pinned per build. Idempotent and commented.
+- **Foundation models pinned exactly** in `documentation/mlip.md`:
+  - MACE: named MACE-MP release (e.g. `mace-mp-0b3-medium`) + the
+    `mace_create_lammps_model` conversion command (note: float64 default).
+  - DeePMD: exact DPA model + deepmd-kit version + per-head freeze/convert
+    commands (`DP_ENABLE_PYTORCH=1` caveats included). A published MoS2
+    DeePMD model is the **code-path test fallback only** — it does not
+    substitute for the foundation-model comparison scientifically.
+- `scripts/mlip_bilayer_benchmark.py`: bilayer MoS2 binding curve (rigid
+  z-displacement single points) for SW+LJ vs MLIP-base vs MLIP+D3 per
+  framework. Additionally reports: MLIP equilibrium lattice constant and
+  interlayer spacing (feeds §3.3), and measured VRAM vs atom count
+  (feeds §3.2). This is the go/no-go physics gate before production.
+- `documentation/mlip.md`: model acquisition, the four setups + example
+  configs, capability matrix, base-vs-D3 workflow, profiles + GPU sizing,
+  local-GPU-PC setup, troubleshooting (MACE hybrid limits, deepmd
+  multi-instance notes, model-deviation trap).
+- `examples/mlip/`: `sheet_mlip_lj.ini`, `sheet_mlip_full.ini`,
+  `afm_mlip_lj.ini`, `afm_mlip_full.ini` (dispersion toggleable only where
+  the matrix allows).
 
 ## 6. Testing
 
-All input generation is text; no GPU needed in CI:
+- **Golden-block tests** for every *allowed* cell of the capability matrix
+  (setups × frameworks × dispersion), covering pair_style/pair_coeff/mass/
+  group blocks, per-build D3 token emission, and ≥3-instance suffixing.
+- **Config validation tests**: every rejection rule in §1.1/§3.4 (including
+  MLIP on indent/PES/hetero/flake models, virtual_atom×MACE/D3, missing
+  lat_c, wrong model extension).
+- **HPC rendering tests**: GPU select line (incl. `mpiprocs=1`), profile +
+  framework-overlay merge, env_lines, CPU/GPU/framework array splitting,
+  JobEntry schema; regression: non-MLIP scripts byte-identical.
+- **Registry/unit tests**: count_atomtypes short-circuit (both call sites),
+  shared model staging, d3 token translation per build.
+- **Postprocessing filter test**: existing path-segment parsing (material,
+  size tokens) unaffected by the flavor token (§1.3).
+- **Smoke tests**: gated on an actual **GPU probe** (not just `lmp` presence
+  — CX3 login nodes have no GPUs); runnable on the GPU workstation or as a
+  short gpu72 job.
 
-- **Golden-block tests**: exact pair_style/pair_coeff/mass/group output for
-  each of the 4 setups × 2 frameworks × {base, d3} (16 cases) plus
-  representative sweeps.
-- **Config validation tests**: `mlip_interlayer`/`dispersion` rejected
-  without MLIP pot_type; MLIP on tip/sub rejected; model file extension
-  checks.
-- **HPC rendering tests**: GPU select line, profile merge/override,
-  env_lines injection, CPU/GPU array splitting; regression tests asserting
-  non-MLIP scripts and non-profile settings render byte-identically to
-  current output.
-- **Registry unit tests**: style-line vs coeff-line model placement per
-  framework; D3 overlay type restriction.
-- **Smoke tests** (skip-unless-available): tiny LAMMPS runs gated on an
-  `lmp` binary with the required packages, runnable on the GPU PC and
-  cluster login/dev nodes.
+## 7. Milestone 0 — feasibility gate (first implementation step)
 
-## 7. Simulation flow (unchanged shape)
+Before any deep implementation, on the GPU workstation (or a short gpu72
+job), with tiny systems:
+
+1. DeePMD: two (then three) independent `deepmd` sub-style instances in one
+   `pair_style hybrid` with NULL maps + `lj/cut` + `sw` (setups 1/3/4
+   mechanism).
+2. DeePMD under `hybrid/overlay` with `dispersion/d3` (setup 2 + D3);
+   known segfault reports exist — this is genuinely open.
+3. MACE: pure `pair_style mace` (setup 2 base) and full-cell
+   `hybrid/overlay mace + dispersion/d3` (setup 2 + D3).
+4. `smd` and `fix_move` drive methods on sheetonsheet and afm (golden +
+   smoke) — they become load-bearing for MLIP runs (§1.4).
+5. (Stretch) `constraint_mode` × MLIP neighbor-list check, to decide whether
+   §3.4's restriction can be lifted.
+
+Milestone 0 results update the capability matrix from "Conditional" to
+Yes/No before the main build-out proceeds.
+
+## 8. Simulation flow (unchanged shape)
 
 ```
 .ini (+ mlip keys) + settings.yaml (+ profiles)
-  → builders (route MLIP registration) → LAMMPS inputs (hybrid[/overlay] blocks)
-  → hpc/ (GPU-aware scripts via profile)  OR  run.py (local launcher override)
-  → results → existing postprocessing (COF, stick-slip) — no changes needed;
-    MLIP runs produce the same output_full_*.json schema.
+  → builders (validation → MLIP routing; SW surrogate for stacking)
+  → LAMMPS inputs (hybrid[/overlay] per capability matrix)
+  → hpc/ (per-framework GPU scripts)  OR  scripts/run_local.sh (workstation)
+  → results → existing postprocessing (schema unchanged; filter test in §6)
 ```
 
-## 8. Risks and mitigations
+## 9. Risks (post-review)
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| `pair_style mace` unusable as hybrid sub-style (setups 1/3) or under `hybrid/overlay` with D3 | MACE limited to setup 2/4-base | **Milestone 0 smoke test** on the GPU PC before deep MACE work; DeePMD is the verified path for all four setups; spec treats MACE hybrid as conditional |
-| `no_domain_decomposition` requires single MPI rank | Caps MACE throughput | Acceptable at 10³–10⁴ atoms; encoded in `LauncherSpec.mpi_ranks = 1` |
-| Two MLIP instances per GPU (setups 1/3) exceed VRAM | Job failure | Foundation models are ≲1 GB; 48 GB L40S has ample headroom; documented check in mlip.md |
-| `dispersion/d3` argument syntax varies across LAMMPS versions | Broken inputs | LAMMPS version pinned in build scripts; golden tests pin the emitted syntax to that version |
-| DeePMD foundation (DPA) model needs conversion / v3-only features | Setup friction | Conversion steps documented; fallback: any published MoS2 DeePMD model exercises the identical code path |
-| Foundation-model physics (underbound vdW) even with D3 | Scientific validity | Bilayer benchmark (§5) is the explicit go/no-go gate before production |
-| gpu72 walltime/core limits differ from CPU queues | Rejected jobs | Profile carries queue-specific walltime/core defaults; documented |
+| DeePMD multi-instance hybrid unproven (no documented precedent) | Setups 1/3 blocked for both frameworks | Milestone 0 item 1 is the first thing built; setup 4 (single NULL-partitioned instance, documented) is the strongest DeePMD case and proceeds regardless |
+| DeePMD under overlay segfaults (community reports) | Setup 2+D3 loses DeePMD | Milestone 0 item 2; MACE covers setup 2+D3 if its overlay path passes |
+| MACE fork / mainline d3 syntax skew | Broken inputs on one build | Per-build token translation + per-build golden tests (§1.2, §2) |
+| Non-virtual drive paths under-exercised | Silent breakage where MLIP runs are forced onto smd/fix_move | Milestone 0 item 4 before mandating |
+| lat_c / initial gap vs MLIP equilibrium mismatch ("dome plow") | Unphysical starts | Benchmark reports MLIP equilibrium geometry; documented config workflow |
+| VRAM under multi-instance + float64 | Job failures | Measured atoms-vs-VRAM from benchmark gates job sizing; HX1 A100-80GB escape hatch |
+| DPA-in-LAMMPS conversion friction (v3, per-head freeze, custom OPs) | DeePMD foundation runs delayed | Exact pinned commands in docs; published-model fallback keeps code-path work unblocked (labeled non-substitute) |
+| gpu72 12-GPU user limit | Campaign serialization | Documented; array sizing guidance |
+| Foundation-model physics even with D3 | Scientific validity | Benchmark is the explicit go/no-go gate |
 
-## 9. Future work (documented, not implemented)
+## 10. Future work (documented, not implemented)
 
-- **Full potential-plugin refactor (approach C)**: promote SW, ReaxFF,
-  Tersoff, … into the same registry pattern as `MLIP_REGISTRY`, replacing
-  `POTENTIALS_WITH_INTERNAL_LJ` / `POTENTIALS_REQUIRING_LJ` sets and the
-  ReaxFF special-cases with per-potential descriptors (possibly entry-point
-  based). Do this as a dedicated cleanup once MLIP support is stable and
-  golden tests exist to guard the migration.
-- GUI exposure of `pot_type` MLIP options, `mlip_interlayer`, `dispersion`
-  (gui-p2 work).
-- Multi-GPU scaling if system sizes grow (Allegro-class models would then be
-  reconsidered).
+- **NULL-aware `dispersion/d3` fork** — would unlock D3 for setups 1/3/4;
+  carried as a patch deliverable only if partial-cell D3 becomes scientifically
+  necessary.
+- **Full-cell MACE AFM** (tip+substrate+sheet all MACE, no SW/LJ) — a
+  legitimate *fifth* experiment; explicitly not a substitute for setups 3/4.
+- **Full potential-plugin refactor (approach C)**: promote SW/ReaxFF/… into
+  the registry pattern, replacing the `POTENTIALS_*` sets and ReaxFF
+  special-cases; do it once MLIP golden tests exist to guard the migration.
+- Promote `scripts/run_local.sh` into `run.py` proper.
+- GUI exposure of the new config surface (gui-p2).
+- Multi-GPU scaling / Allegro-class models if system sizes grow.
 - MACE fine-tuned on MoS2 sliding configurations (separate research project).
