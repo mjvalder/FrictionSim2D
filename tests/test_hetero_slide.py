@@ -393,6 +393,38 @@ def test_routing_single_material_no_twist_stays_homogeneous():
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is SheetOnSheetSimulation
 
 
+# --- Fix round 1: hetero sheet-on-sheet job names must not collide on material 2 ---
+
+def test_hetero_sheet_job_name_differs_by_full_pair():
+    """Two hetero sheet-on-sheet configs sharing material 1 but differing in
+    material 2 must NOT produce the same HPC job name. Before the fix this
+    builder had no _get_hpc_job_name override at all and fell back to
+    SimulationBase's generic single-sheet default (friction_{sheet 1's mat}),
+    the same sheet-1-alone collision confirmed on HeteroAFMSimulation."""
+    raw_a = {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
+        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [2]},
+        "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [2]},
+    }
+    raw_b = {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
+        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [2]},
+        "2D-2": {"mat": "h-WSe2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [2]},
+    }
+    cfg_a = SheetOnSheetSimulationConfig(**raw_a, settings=load_settings())
+    cfg_b = SheetOnSheetSimulationConfig(**raw_b, settings=load_settings())
+    sim_a = HeteroSheetOnSheetSimulation(cfg_a, "out_a")
+    sim_b = HeteroSheetOnSheetSimulation(cfg_b, "out_b")
+    name_a, name_b = sim_a._get_hpc_job_name(), sim_b._get_hpc_job_name()
+    assert name_a != name_b
+    assert name_a == "friction_h-MoS2+h-WS2"
+    assert name_b == "friction_h-MoS2+h-WSe2"
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end smoke: build a real 2+2 MoS2/WS2 hetero slide and RUN it in LAMMPS
 # --------------------------------------------------------------------------- #

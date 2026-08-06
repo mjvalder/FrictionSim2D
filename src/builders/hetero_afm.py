@@ -195,6 +195,23 @@ def assert_sheet_block_matches_data(pm: PotentialManager, data_path, offset: int
 _assert_sheet_block_matches_data = assert_sheet_block_matches_data
 
 
+def _pair_material_token(config) -> str:
+    """The numeric-``[2D-N]``-order ``+``-joined material pair token.
+
+    E.g. ``h-MoS2+h-WS2``. Shared by :class:`HeteroAFMSimulation` and
+    :class:`HeteroIndentSimulation`'s ``_material_id`` overrides — the latter
+    can't just inherit the former's: :class:`~src.builders.indent.IndentSimulation`
+    sits before :class:`HeteroAFMSimulation` in :class:`HeteroIndentSimulation`'s
+    MRO (it needs its own single-material ``_material_id`` for the
+    homogeneous indent path), so :class:`HeteroIndentSimulation` needs its own
+    override too — but both should compute the pair token the same way.
+    Mirrors :func:`src.core.run.material_token`'s convention on the raw-dict
+    side (that function isn't reusable directly here: the builder only has
+    the validated config object, not the raw config mapping).
+    """
+    return '+'.join(sheet.mat for sheet in config.sheets)
+
+
 class HeteroAFMSimulation(AFMSimulation):
     """Periodic hetero (2-material) AFM tip-slide on an amorphous substrate.
 
@@ -203,10 +220,31 @@ class HeteroAFMSimulation(AFMSimulation):
     build (hetero stack -> in-plane replicate -> ``nocoeff`` data) and potential
     registration (``sheet`` -> ``sheet_1`` + ``sheet_2`` + cross-interaction +
     ``2D``/``2D_all`` union groups). The AFM templates are reused unchanged.
+
+    ``_material_id`` is overridden (not just ``_get_hpc_job_name``) so the pair
+    token also reaches :class:`FiniteHeteroAFMSimulation` for free through
+    inheritance, and any future material-keyed metadata added to the AFM base
+    picks it up automatically rather than needing its own override.
     """
 
     #: Run-phase template — unchanged from AFMSimulation; explicit for clarity.
     SLIDE_TEMPLATE = "afm/slide.lmp"
+
+    def _material_id(self) -> str:
+        """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
+        in the numeric ``[2D-N]`` order the config fold already preserves,
+        joined with ``+`` — same convention as
+        :func:`src.core.run.material_token` and
+        :meth:`HeteroIndentSimulation._material_id` below. Without this,
+        ``_get_hpc_job_name`` (inherited from :class:`AFMSimulation`) named
+        every hetero AFM job after sheet 1 alone, so two pairs sharing
+        material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-WSe2``) produced the
+        identical HPC job name ``afm_h-MoS2`` despite building into distinct
+        output directories (the directory itself was already pair-token-safe
+        via Task 1's ``output_dir_for``/``material_token`` — only the job
+        *name* still collided).
+        """
+        return _pair_material_token(self.config)
 
     #: Per-material sheet region split; None here, D5 (finite) sets [None, 'edge'].
     _sheet_regions = None
@@ -595,11 +633,9 @@ class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
     """
 
     def _material_id(self) -> str:
-        """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
-        in the numeric ``[2D-N]`` order the config fold already preserves,
-        joined with ``+`` — the same convention as
-        :func:`src.core.run.material_token` on the raw-dict side (that
-        function can't be reused directly here: the builder only has the
-        validated ``AFMSimulationConfig``, not the raw config mapping).
+        """Pair token (``h-MoS2+h-WS2``) via the shared :func:`_pair_material_token`
+        helper (see its docstring for why this can't just inherit
+        :meth:`HeteroAFMSimulation._material_id` despite computing the same
+        thing).
         """
-        return '+'.join(sheet.mat for sheet in self.config.sheets)
+        return _pair_material_token(self.config)

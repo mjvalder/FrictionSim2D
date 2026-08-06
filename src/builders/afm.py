@@ -121,9 +121,21 @@ class AFMSimulation(SimulationBase):
             self.lat_c = lat_c
             self.sheet_dims = dict(sheet_dims)
 
+    def _material_id(self) -> str:
+        """Material token used in the HPC job name.
+
+        Single-material AFM: the sheet's material name. Overridden by
+        :class:`~src.builders.hetero_afm.HeteroAFMSimulation` (inherited by
+        :class:`~src.builders.hetero_afm.FiniteHeteroAFMSimulation`) to return
+        the numeric-order ``+``-joined pair token instead, so two hetero
+        configs sharing material 1 don't collide on HPC job identity (mirrors
+        :meth:`~src.builders.indent.IndentSimulation._material_id`).
+        """
+        return self.config.sheet.mat
+
     def _get_hpc_job_name(self) -> str:
         """Get AFM-specific job name."""
-        return f"afm_{self.config.sheet.mat}"
+        return f"afm_{self._material_id()}"
 
     def _velocity_seed(self, n_layers: int) -> Optional[int]:
         """Explicit ``velocity create`` seed for system.in, or None for random.

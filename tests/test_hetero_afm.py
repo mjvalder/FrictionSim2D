@@ -187,6 +187,38 @@ def test_hetero_afm_system_init_references_replicated_stack(tmp_path):
     assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text
 
 
+# --- Fix round 1: hetero AFM job names must not collide on material 2 ---
+
+def test_hetero_afm_job_name_differs_by_full_pair():
+    """Two periodic hetero AFM configs sharing material 1 but differing in
+    material 2 must NOT produce the same HPC job name -- confirmed by
+    construction (build both configs, compare _get_hpc_job_name()) per the
+    review that found afm_h-MoS2 was emitted for both."""
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    raw_a = _afm_hetero_raw()
+    raw_b = _afm_hetero_raw()
+    raw_b["2D-2"]["mat"] = "h-WSe2"
+    raw_b["2D-2"]["cif_path"] = f"{MAT}/h-WS2.cif"        # geometry irrelevant; job name only
+    cfg_a = AFMSimulationConfig(**raw_a, settings=load_settings())
+    cfg_b = AFMSimulationConfig(**raw_b, settings=load_settings())
+    sim_a = HeteroAFMSimulation(cfg_a, "out_a")
+    sim_b = HeteroAFMSimulation(cfg_b, "out_b")
+    name_a, name_b = sim_a._get_hpc_job_name(), sim_b._get_hpc_job_name()
+    assert name_a != name_b
+    assert name_a == "afm_h-MoS2+h-WS2"
+    assert name_b == "afm_h-MoS2+h-WSe2"
+
+
+def test_finite_hetero_afm_job_name_also_uses_full_pair():
+    """FiniteHeteroAFMSimulation doesn't override _get_hpc_job_name -- it must
+    inherit the fixed HeteroAFMSimulation._material_id, not AFMSimulation's
+    single-sheet default."""
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
+    sim = FiniteHeteroAFMSimulation(cfg, "out")
+    assert sim._get_hpc_job_name() == "afm_h-MoS2+h-WS2"
+
+
 # --- Task 6: routing ---
 
 def test_routing_selects_hetero_afm_for_two_materials():
