@@ -92,6 +92,23 @@ def test_unexpanded_template_is_reported_as_its_own_kind(monkeypatch):
     assert 'unexpanded_template' in kinds, result.render()
 
 
+def test_pair_template_is_unexpanded_not_missing_file():
+    """A {mat1}/{mat2} heterostructure-pair template must classify the same
+    way a plain {mat} does. Getting this wrong is the most dangerous failure
+    mode in the pair-sweep feature: 'missing_file' is a hard error that
+    permanently blocks Render and Generate for every pair config, since the
+    file that is 'missing' can never be found -- it does not exist until the
+    sweep expands the template."""
+    issues = preflight_paths({
+        '2D-1': {'cif_path': 'cif/{mat1}.cif', 'pot_path': 'pot/{mat1}.sw'},
+        '2D-2': {'cif_path': 'cif/{mat2}.cif', 'pot_path': 'pot/{mat2}.sw'},
+    })
+    assert issues, "expected issues for unresolved templated paths"
+    kinds = {i.kind for i in issues}
+    assert kinds == {'unexpanded_template'}
+    assert 'missing_file' not in kinds
+
+
 def test_type_errors_are_reported_with_a_location(monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     raw = _raw('indent_config.ini')

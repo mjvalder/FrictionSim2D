@@ -22,6 +22,7 @@ from .config import (
     load_settings,
     parse_config,
 )
+from .material_templates import has_template_marker, substitute_materials
 from .path_utils import format_dimension_token
 from .utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..builders.afm import AFMSimulation
@@ -104,49 +105,130 @@ def _validate_runtime_sweep_ordering(general_cfg: Dict[str, Any]) -> None:
         )
 
 
-def read_material_list(path: Union[str, Path],
-                       base_dir: Optional[Union[str, Path]] = None) -> List[str]:
-    """Read a material list file, tolerating the ways people actually write them.
+def read_material_entries(path: Union[str, Path],
+                          base_dir: Optional[Union[str, Path]] = None
+                          ) -> List[Tuple[str, ...]]:
+    """Read a material list file as ordered entries -- singles or pairs.
 
-    Blank lines, surrounding whitespace, ``#`` comments (whole-line or trailing)
-    and duplicate entries are all handled. Entries may be one per line or
-    comma-separated, or a mixture.
+    Same line reading as the old single-material ``read_material_list``:
+    blank lines, surrounding whitespace, ``#`` comments (whole-line or
+    trailing) all handled. A comma-separated line is still multiple single
+    materials (``'MoS2, WS2'`` -> ``('MoS2',), ('WS2',)``) -- that behaviour
+    is pinned by ``tests/test_material_list_robustness.py`` and predates
+    heterostructure pairs, so it is untouched here. A ``'+'`` line is new: it
+    names one ORDERED pair for a two-sheet sweep (``'h-MoS2 + h-WS2'`` ->
+    ``('h-MoS2', 'h-WS2')``) -- order is never normalised, since sheet 1 and
+    sheet 2 are different positions in the stack, not a set.
+
+    A line cannot mix the two separators (a comma implies multiple single
+    entries; a pair is exactly one entry, so a comma on a ``'+'`` line is
+    ambiguous) and a ``'+'`` line naming more than two materials has no
+    ``[2D-N]`` section to hold the extra members. Both raise ``ValueError``
+    naming the offending line.
 
     Args:
         path: Path to the list file.
         base_dir: Directory to resolve a relative ``path`` against.
 
     Returns:
-        Material names, in file order, without duplicates.
+        Entries in file order. Duplicates dedupe order-preservingly, matching
+        the old single-material behaviour; a duplicated pair also logs a
+        warning, since two pair lines colliding is more likely to be a
+        copy-paste mistake than a duplicated single name is.
 
     Raises:
         FileNotFoundError: If the file does not exist.
         OSError: If the file cannot be read.
+        ValueError: If a line mixes ',' and '+', or a '+' line does not name
+            exactly two materials.
     """
     found = _find_existing(str(path), base_dir)
     if found is None:
         raise FileNotFoundError(f"Material list file '{path}' not found.")
 
-    materials: List[str] = []
+    entries: List[Tuple[str, ...]] = []
     seen = set()
     for raw_line in found.read_text(encoding='utf-8').splitlines():
         line = raw_line.split('#', 1)[0].strip()
         if not line:
             continue
-        for entry in line.split(','):
-            name = entry.strip()
-            if name and name not in seen:
-                seen.add(name)
-                materials.append(name)
-    return materials
+
+        if '+' in line:
+            if ',' in line:
+                raise ValueError(
+                    f"Material list line '{line}' mixes ',' and '+': a pair "
+                    "line ('mat1 + mat2') cannot also list comma-separated "
+                    "materials."
+                )
+            members = tuple(m.strip() for m in line.split('+'))
+            if not all(members):
+                raise ValueError(
+                    f"Material list line '{line}' has an empty member around '+'."
+                )
+            if len(members) != 2:
+                raise ValueError(
+                    f"Material list line '{line}' names {len(members)} materials; "
+                    "an ordered pair needs exactly 2, e.g. 'mat1 + mat2'."
+                )
+            if members in seen:
+                logger.warning("Duplicate material pair '%s' ignored.",
+                               ' + '.join(members))
+                continue
+            seen.add(members)
+            entries.append(members)
+            continue
+
+        for raw_name in line.split(','):
+            name = raw_name.strip()
+            if not name:
+                continue
+            single = (name,)
+            if single in seen:
+                continue
+            seen.add(single)
+            entries.append(single)
+
+    return entries
+
+
+def read_material_list(path: Union[str, Path],
+                       base_dir: Optional[Union[str, Path]] = None) -> List[str]:
+    """Read a material list file of single materials only.
+
+    A thin wrapper over :func:`read_material_entries` that keeps the original
+    ``List[str]`` contract (and its comma-means-multiple-singles behaviour)
+    unchanged for callers that do not know about ordered pairs. A ``'+'``
+    pair line is not a single material, so it raises rather than silently
+    collapsing to one of its members.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        OSError: If the file cannot be read.
+        ValueError: If the file contains a ``'+'`` pair line.
+    """
+    entries = read_material_entries(path, base_dir)
+    pairs = [e for e in entries if len(e) != 1]
+    if pairs:
+        raise ValueError(
+            f"Material list '{path}' contains an ordered pair "
+            f"('{' + '.join(pairs[0])}'), which read_material_list does not "
+            "support -- use read_material_entries for a two-sheet sweep."
+        )
+    return [m for e in entries for m in (e if len(e) == 1 else ())]
 
 
 @dataclass
 class MaterialPreflight:
-    """Which materials in a sweep can actually be built."""
+    """Which materials in a sweep can actually be built.
 
-    usable: List[str] = dataclass_field(default_factory=list)
-    skipped: List[Tuple[str, str]] = dataclass_field(default_factory=list)
+    ``usable``/``skipped`` hold plain material names for
+    :func:`preflight_materials`, or ordered ``(mat1, mat2)`` pairs for
+    :func:`preflight_material_pairs` -- both share this result type and
+    ``summary()`` rendering.
+    """
+
+    usable: List[Any] = dataclass_field(default_factory=list)
+    skipped: List[Tuple[Any, str]] = dataclass_field(default_factory=list)
 
     def summary(self) -> str:
         if not self.skipped:
@@ -183,13 +265,59 @@ def preflight_materials(materials: List[str],
             template = section_config.get(key)
             if not isinstance(template, str) or not template:
                 continue
-            candidate = template.replace('{mat}', mat)
+            candidate = substitute_materials(template, mat)
             if _find_existing(candidate, base_dir) is None:
                 missing.append(f"{key}={candidate}")
         if missing:
             result.skipped.append((mat, "missing " + ", ".join(missing)))
         else:
             result.usable.append(mat)
+    return result
+
+
+def preflight_material_pairs(entries: List[Tuple[str, str]],
+                             primary_section: Dict[str, Any],
+                             second_section: Dict[str, Any],
+                             base_dir: Optional[Union[str, Path]] = None
+                             ) -> MaterialPreflight:
+    """Check which ordered material pairs have both sheets' files on disk.
+
+    The pair analogue of :func:`preflight_materials`: member 1 (``mat1``) is
+    checked against the primary section's ``cif_path``/``pot_path``
+    templates, member 2 (``mat2``) against ``second_section``'s -- a pair is
+    usable only when both sides resolve, since a hetero build needs both
+    sheets.
+
+    Args:
+        entries: Ordered 2-tuples, e.g. from :func:`read_material_entries`.
+        primary_section: The ``[2D]``/``[2D-1]`` config section, checked
+            against ``mat1``.
+        second_section: The ``[2D-2]`` config section, checked against
+            ``mat2``.
+        base_dir: Directory to resolve relative paths against.
+
+    Returns:
+        The usable pairs and the reason each skipped one was dropped.
+    """
+    result = MaterialPreflight()
+    for mat1, mat2 in entries:
+        missing = []
+        for label, section, key in (
+            ('2D-1', primary_section, 'cif_path'),
+            ('2D-1', primary_section, 'pot_path'),
+            ('2D-2', second_section, 'cif_path'),
+            ('2D-2', second_section, 'pot_path'),
+        ):
+            template = (section or {}).get(key)
+            if not isinstance(template, str) or not template:
+                continue
+            candidate = substitute_materials(template, mat1, mat2)
+            if _find_existing(candidate, base_dir) is None:
+                missing.append(f"[{label}] {key}={candidate}")
+        if missing:
+            result.skipped.append((f"{mat1} + {mat2}", "missing " + ", ".join(missing)))
+        else:
+            result.usable.append((mat1, mat2))
     return result
 
 
@@ -279,20 +407,37 @@ def expand_config_sweeps(base_config: Dict[str, Any],
     """
     sweep_params = {}
 
-    def resolve_materials_list(section_config: Dict[str, Any]) -> List[str]:
+    # The primary sheet section: plain '2D', else the first numbered '2D-N'
+    # (mirrors primary_sheet(), but this runs on the raw dict before any
+    # model exists, and needs the *key* to write expanded values back under,
+    # not just the section). A numbered-only config used to be silently
+    # skipped here -- only a plain '2D' was ever checked -- so its
+    # materials_list never expanded into a sweep at all.
+    if '2D' in base_config:
+        primary_key: Optional[str] = '2D'
+    else:
+        numbered = _numbered_sheet_keys(base_config)
+        primary_key = numbered[0] if numbered else None
+
+    has_second_sheet = '2D-2' in base_config
+
+    def resolve_material_entries(section_config: Dict[str, Any]) -> List[Tuple[str, ...]]:
         if 'materials_list' not in section_config:
             return []
 
         mat_list_path = section_config.get('materials_list', '')
         if not isinstance(mat_list_path, str) or not mat_list_path.endswith(".txt"):
             if mat_list_path and notes is not None:
+                # Literally '[2D]', even when the primary section is numbered:
+                # MainWindow._validate (src/gui/app.py) filters expansion
+                # notes on this exact prefix.
                 notes.append(
                     f"[2D] materials_list: '{mat_list_path}' is not a .txt file, "
                     f"so no material sweep was expanded.")
             return []
 
         try:
-            materials = read_material_list(mat_list_path, base_dir)
+            entries = read_material_entries(mat_list_path, base_dir)
         except (FileNotFoundError, OSError) as exc:
             logger.warning("%s", exc)
             if notes is not None:
@@ -301,33 +446,59 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     f"({exc}), so no material sweep was expanded.")
             return []
 
-        preflight = preflight_materials(materials, section_config, base_dir)
+        for entry in entries:
+            is_pair = len(entry) == 2
+            if is_pair and not has_second_sheet:
+                raise ValueError(
+                    f"Material list '{mat_list_path}' line "
+                    f"'{' + '.join(entry)}' names an ordered pair, but this "
+                    "config has no [2D-2] section to hold the second material."
+                )
+            if not is_pair and has_second_sheet:
+                raise ValueError(
+                    f"Material list '{mat_list_path}' line '{entry[0]}' names "
+                    "a single material, but this config has a [2D-2] section "
+                    "and expects ordered pairs ('mat1 + mat2')."
+                )
+
+        if has_second_sheet:
+            preflight = preflight_material_pairs(
+                entries, section_config, base_config.get('2D-2', {}), base_dir)
+        else:
+            preflight = preflight_materials(
+                [e[0] for e in entries], section_config, base_dir)
+            preflight = MaterialPreflight(
+                usable=[(mat,) for mat in preflight.usable],
+                skipped=preflight.skipped,
+            )
+
         if preflight.skipped:
             logger.warning(
                 "Material list %s: %s", mat_list_path, preflight.summary()
             )
-        if materials and not preflight.usable:
+        if entries and not preflight.usable:
             raise ValueError(
-                f"None of the {len(materials)} materials in '{mat_list_path}' could "
+                f"None of the {len(entries)} materials in '{mat_list_path}' could "
                 f"be resolved. {preflight.summary()}"
             )
         return preflight.usable
 
-    def expand_mat_template(section_config: Dict[str, Any], mat_value: str) -> Dict[str, Any]:
+    def expand_mat_template(section_config: Dict[str, Any], mat1: str,
+                            mat2: Optional[str] = None) -> Dict[str, Any]:
         expanded = {}
         for key, val in section_config.items():
             if key == 'materials_list':
                 continue
-            if isinstance(val, str) and '{mat}' in val:
-                expanded[key] = val.replace('{mat}', mat_value)
+            if isinstance(val, str) and has_template_marker(val):
+                expanded[key] = substitute_materials(val, mat1, mat2)
             else:
                 expanded[key] = val
         return expanded
 
-    if '2D' in base_config:
-        materials = resolve_materials_list(base_config['2D'])
-        if materials:
-            sweep_params[('2D', '_material_expand')] = materials
+    if primary_key is not None:
+        entries = resolve_material_entries(base_config[primary_key])
+        if entries:
+            sweep_params[(primary_key, '_material_expand')] = entries
 
     lammps_loop_params = {'force', 'scan_angle', 'pressure', 'scan_speed'}
 
@@ -346,9 +517,14 @@ def expand_config_sweeps(base_config: Dict[str, Any],
     for perm in permutations:
         new_conf = deepcopy(base_config)
 
-        mat_value = perm.pop(('2D', '_material_expand'), None)
-        if mat_value and '2D' in new_conf:
-            new_conf['2D'] = expand_mat_template(new_conf['2D'], mat_value)
+        mat_entry = (perm.pop((primary_key, '_material_expand'), None)
+                    if primary_key is not None else None)
+        if mat_entry and primary_key in new_conf:
+            mat1 = mat_entry[0]
+            mat2 = mat_entry[1] if len(mat_entry) > 1 else None
+            new_conf[primary_key] = expand_mat_template(new_conf[primary_key], mat1, mat2)
+            if mat2 is not None and '2D-2' in new_conf:
+                new_conf['2D-2'] = expand_mat_template(new_conf['2D-2'], mat1, mat2)
 
         for (section, key), val in perm.items():
             new_conf[section][key] = val

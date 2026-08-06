@@ -50,8 +50,11 @@ _PATH_LIKE_KEYS = frozenset(PATH_KEYS) | {_MATERIALS_LIST_KEY}
 #: Matches a ``{mat}``, ``{mat1}``, ``{mat2}``, ... placeholder left for
 #: ``expand_config_sweeps`` to substitute later. Not anchored to a specific
 #: name -- any future per-sheet placeholder needs no change here -- and
-#: deliberately broader than ``config_validation.TEMPLATE_MARKER`` (which
-#: only ever names ``{mat}``) for the same reason.
+#: deliberately broader than ``material_templates.TEMPLATE_MARKERS`` (a fixed
+#: ``('{mat}', '{mat1}', '{mat2}')`` tuple) for the same reason: this module
+#: only needs to know "is this value templated at all", not which specific
+#: marker it holds, so narrowing it to the fixed set would silently stop
+#: resolving a not-yet-invented per-sheet placeholder.
 _TEMPLATE_TOKEN = re.compile(r'\{[^{}]+\}')
 
 

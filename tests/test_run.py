@@ -261,6 +261,78 @@ def test_expand_config_sweeps_expands_general_non_lammps_lists() -> None:
         assert conf["general"]["scan_speed"] == [1.0, 2.0]
 
 
+class TestOrderedPairSweeps:
+    """A materials_list of ordered pairs ('mat1 + mat2') drives both the
+    primary sheet and '2D-2' -- one heterostructure combination per line,
+    never sorted or deduped across order (h-MoS2+h-WS2 != h-WS2+h-MoS2)."""
+
+    def test_pair_line_requires_second_section(self, tmp_path: Path) -> None:
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2\n')
+        config = {'2D': {'mat': '{mat}', 'cif_path': 'c/{mat}.cif',
+                         'pot_path': 'p/{mat}.sw', 'materials_list': str(f)},
+                  'general': {}}
+        with pytest.raises(ValueError, match='2D-2'):
+            expand_config_sweeps(config, base_dir=tmp_path)
+
+    def test_single_name_line_rejected_when_config_expects_a_pair(
+            self, tmp_path: Path) -> None:
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2\n')
+        config = {
+            '2D-1': {'mat': '{mat1}', 'cif_path': 'c/{mat1}.cif',
+                     'pot_path': 'p/{mat1}.sw', 'materials_list': str(f)},
+            '2D-2': {'mat': '{mat2}', 'cif_path': 'c/{mat2}.cif',
+                     'pot_path': 'p/{mat2}.sw'},
+            'general': {},
+        }
+        with pytest.raises(ValueError, match='2D-2'):
+            expand_config_sweeps(config, base_dir=tmp_path)
+
+    def test_pair_sweep_expands_both_sections(self, tmp_path: Path) -> None:
+        # Real files for both members of both pair orderings, so the preflight
+        # that gates a material sweep resolves everything -- the same
+        # real-file fixture pattern TestExpansionSkipsUnusableMaterials uses,
+        # just for two sections instead of one.
+        (tmp_path / 'c').mkdir()
+        (tmp_path / 'p').mkdir()
+        for mat in ('h-MoS2', 'h-WS2'):
+            (tmp_path / 'c' / f'{mat}.cif').write_text('', encoding='utf-8')
+            (tmp_path / 'p' / f'{mat}.sw').write_text('', encoding='utf-8')
+
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2\nh-WS2 + h-MoS2\n')
+        config = {
+            '2D-1': {'mat': '{mat1}', 'cif_path': 'c/{mat1}.cif',
+                     'pot_path': 'p/{mat1}.sw', 'materials_list': str(f)},
+            '2D-2': {'mat': '{mat2}', 'cif_path': 'c/{mat2}.cif',
+                     'pot_path': 'p/{mat2}.sw'},
+            'general': {},
+        }
+        out = expand_config_sweeps(config, base_dir=tmp_path)
+        assert len(out) == 2
+        assert out[0]['2D-1']['mat'] == 'h-MoS2' and out[0]['2D-2']['mat'] == 'h-WS2'
+        assert out[1]['2D-1']['mat'] == 'h-WS2' and out[1]['2D-2']['mat'] == 'h-MoS2'
+        assert 'materials_list' not in out[0]['2D-1']
+        assert out[0]['2D-1']['cif_path'] == 'c/h-MoS2.cif'
+        assert out[0]['2D-2']['cif_path'] == 'c/h-WS2.cif'
+
+    def test_numbered_only_primary_still_uses_the_2d_note_prefix(
+            self, tmp_path: Path) -> None:
+        """The GUI filters expansion notes on the literal '[2D] materials_list'
+        prefix (app.py); a numbered-only primary section must not change it."""
+        from src.core.run import count_expansion
+
+        listing = tmp_path / 'mats.csv'
+        listing.write_text('h-MoS2\n', encoding='utf-8')
+        config = {
+            '2D-1': {'mat': '{mat1}', 'materials_list': str(listing)},
+            'general': {},
+        }
+        summary = count_expansion(config, 'sheetonsheet')
+        assert any(n.startswith('[2D] materials_list') for n in summary.notes)
+
+
 def test_lj_file_merges_inline_wins(tmp_path: Path) -> None:
     """A shared overrides file fills in pairs the section did not already
     name; an inline entry with the same key is left untouched."""
