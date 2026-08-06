@@ -147,10 +147,21 @@ def test_hetero_pes_tip_build_scan_period_is_coincidence_cell(tmp_path):
     period_x_emitted = _extract("Lx")
     period_y_emitted = _extract("Ly")
 
-    # Internal consistency: matches what _build_hetero_sheet exposed.
-    lx_cell, ly_cell = sim._hetero_coincidence_cell
-    assert period_x_emitted == pytest.approx(lx_cell)
-    assert period_y_emitted == pytest.approx(ly_cell)
+    # Independent check: the coincidence (matched-interface) cell for this
+    # EXACT fixture (h-MoS2 12x12, h-WS2 12x12, both `sw`, hetero_stacking
+    # 'grouped'), measured once via build_hetero_structure ->
+    # build_matched_supercells -> find_coincidence_lattice (Zur-McGill) and
+    # hardcoded here deliberately -- NOT read back from
+    # sim._hetero_coincidence_cell. Comparing the emitted period against that
+    # same attribute would be a tautology: write_inputs faithfully renders
+    # whatever sheet_unit_cell holds, so a bug that fed it the wrong value
+    # (e.g. the REPLICATED box instead of the unreplicated interface cell)
+    # would still pass that comparison. This is the matched interface cell,
+    # not either constituent's own unit cell (~3.18x5.51 A for both
+    # materials here -- see the own_cells loop below).
+    EXPECTED_LX, EXPECTED_LY = 12.740025, 11.033185146491927
+    assert period_x_emitted == pytest.approx(EXPECTED_LX, rel=1e-4)
+    assert period_y_emitted == pytest.approx(EXPECTED_LY, rel=1e-4)
 
     # Now build each constituent material's OWN unit cell standalone and
     # confirm the emitted scan period is neither of them (the whole point of
