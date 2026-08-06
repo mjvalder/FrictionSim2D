@@ -10,6 +10,7 @@ the derive_seed input, and indent_meta.json.
 """
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,7 @@ from src.core.config import AFMSimulationConfig, load_settings
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _indent_hetero_raw():
@@ -79,16 +81,51 @@ def test_routing_keeps_homogeneous_indent_for_single_material():
 
 def test_routing_hetero_indent_rejects_finite_sheet():
     """Only plain 'afm' has a finite hetero variant (FiniteHeteroAFMSimulation);
-    a finite hetero indent config must raise a clear ValueError rather than
-    silently building a periodic patch under a name that promises edges."""
-    from src.core.run import _select_afm_builder_cls
+    a finite hetero indent config must raise the dedicated NoHeteroBuilderError
+    (a ValueError sibling to FreestandingConfigError, same hard-abort
+    treatment -- see test_finite_hetero_indent_aborts_run_simulations below)
+    rather than silently building a periodic patch under a name that promises
+    edges."""
+    from src.core.run import NoHeteroBuilderError, _select_afm_builder_cls
     raw = _indent_hetero_raw()
     raw["general"]["finite_sheet"] = True
     raw["sub"]["x"] = 80.0        # finite_sheet AFM requires substrate x/y set
     raw["sub"]["y"] = 80.0
     cfg = AFMSimulationConfig(**raw, settings=load_settings())
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(NoHeteroBuilderError, match="finite"):
         _select_afm_builder_cls("indent", cfg)
+
+
+def test_finite_hetero_indent_aborts_run_simulations_not_skips(tmp_path, monkeypatch):
+    """finite_sheet is a config-level [general] setting, not a per-sweep-member
+    one -- every member of a sweep would fail identically. run_simulations
+    must therefore propagate NoHeteroBuilderError and abort (no output
+    directory created), not swallow it via its per-config broad-except and
+    report a misleading "created 0 simulation(s)". Mirrors how
+    FreestandingConfigError is proven to hard-abort in test_run.py."""
+    from src.core.config_io import write_config
+    from src.core.run import NoHeteroBuilderError, run_simulations
+
+    monkeypatch.chdir(REPO_ROOT)
+    raw = _indent_hetero_raw()
+    raw["general"]["finite_sheet"] = True
+    raw["sub"]["x"] = 80.0
+    raw["sub"]["y"] = 80.0
+    config_path = write_config(raw, tmp_path / "finite_hetero_indent.ini")
+
+    # The call must raise -- not return normally with an empty/partial
+    # created_simulations list (that would be the "catch-and-skip" behaviour
+    # the coordinator ruled out: a misleading "created 0 simulation(s)" with
+    # no actionable reason).
+    with pytest.raises(NoHeteroBuilderError, match="finite"):
+        run_simulations(config_file=str(config_path), model="indent",
+                        settings_file=None, output_root=tmp_path / "out",
+                        generate_hpc=False)
+
+    # No build ever ran (builder selection failed before build()): the
+    # per-config scaffolding (provenance dir) may exist, but no LAMMPS inputs
+    # were written for this config.
+    assert not list((tmp_path / "out").rglob("lammps"))
 
 
 # --- real-LAMMPS build smoke -------------------------------------------------

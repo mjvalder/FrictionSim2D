@@ -1039,6 +1039,22 @@ class FreestandingConfigError(ValueError):
     """
 
 
+class NoHeteroBuilderError(ValueError):
+    """No builder exists for a hetero (>=2-material) model/config combination.
+
+    Sibling to :class:`FreestandingConfigError` — same category ("this
+    config-level setting has no builder that can serve it", not a
+    per-sweep-member build failure) and the same hard-abort treatment:
+    deliberately NOT caught by ``run_simulations``'s per-config broad-except.
+    Raised by :func:`_select_afm_builder_cls` for ``finite_sheet`` + hetero
+    ``indent`` (only plain ``afm`` has a finite hetero variant). ``finite_sheet``
+    is set once in ``[general]``, so every member of a sweep would fail
+    identically — catching it per-config would silently skip every member and
+    report a misleading "created 0 simulation(s)" instead of aborting with a
+    message naming the problem.
+    """
+
+
 def _select_afm_builder_cls(model, config_obj):
     """Pick the builder class, routing substrate-free configs to freestanding.
 
@@ -1070,7 +1086,7 @@ def _select_afm_builder_cls(model, config_obj):
         if model == 'indent':
             from src.builders.hetero_afm import HeteroIndentSimulation
             if getattr(config_obj.general, 'finite_sheet', False):
-                raise ValueError(
+                raise NoHeteroBuilderError(
                     "finite_sheet hetero indent is not supported: only the "
                     "periodic (non-finite) hetero AFM builder has an indent "
                     "variant. Only plain 'afm' has a finite hetero variant "
@@ -1249,10 +1265,14 @@ def run_simulations(
             builder.build()
             created_simulations.append(output_dir)
 
-        except FreestandingConfigError:
+        except (FreestandingConfigError, NoHeteroBuilderError):
             # Hard misconfiguration (substrate-free config on a model with no
-            # freestanding builder) — abort the whole run instead of silently
-            # skipping this config and reporting a false "N/M successful".
+            # freestanding builder, or a hetero combination -- e.g. finite_sheet
+            # hetero indent -- with no builder at all) — abort the whole run
+            # instead of silently skipping this config and reporting a false
+            # "N/M successful". Both are config-level settings that would fail
+            # identically for every member of a sweep, not an isolated
+            # per-config build error.
             raise
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Build failed for %s: %s", output_dir, exc)
