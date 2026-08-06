@@ -104,42 +104,138 @@ def _tile_count(full_dims: Dict[str, float], unit_cell: Dict[str, float]) -> int
     return int(nx * ny)
 
 
-class PESSheetSimulation(SheetOnSheetSimulation):
-    """Sheet-on-sheet interlayer PES scan (frozen bilayer, static lateral grid).
+class PESGridMixin:
+    """The sheet-PES grid/scan-script logic, independent of how the bilayer was built.
 
-    Reuses the sheet-on-sheet geometry/potential setup with a two-layer stack and
-    plain real interlayer LJ (no bonds/springs, no driving atom), then writes a
-    static grid-scan script instead of the sliding one.
+    Extracted from :class:`PESSheetSimulation` so the same static lateral grid
+    can be written over a *heterostructure* bilayer
+    (:class:`HeteroPESSheetSimulation`), whose geometry builder
+    (:class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`) differs
+    from the homogeneous one in four places. This is deliberately NOT a
+    drop-in: the mixin owns only what the two flavours share (grid resolution,
+    the base/refine script variants, the render-and-write loop, the job-name
+    shape, the bilayer layer-count gate) and delegates every point of
+    divergence to a hook the concrete class implements.
+
+    **Step-1 hook list** (each verified against both builders, not inferred):
+
+    * :meth:`_scan_template` — the LAMMPS template. The homogeneous
+      ``sheetonsheet/pes_scan.lmp`` selects ``layer_1``/``layer_2`` by ATOM
+      TYPE (the groups are written into ``system.in.settings`` by
+      :class:`~src.core.potential_manager.PotentialManager`). Heterostructure
+      layers share atom types, so they can only be selected by z-band REGION —
+      the very reason ``hetero_slide`` exists — hence the separate
+      ``hetero/pes_scan.lmp``, which emits the same region/group convention as
+      ``hetero/slide.lmp`` and then shares the scan body via
+      ``common/pes_scan_body.lmp``.
+    * :meth:`_scan_data_file` / :meth:`_scan_potential_file` /
+      :meth:`_scan_results_path` — the path convention. The homogeneous builder
+      is SIM-ROOT-relative (``{relative_run_dir}/build/<sheet>.lmp``, LAMMPS run
+      from the simulation root); the hetero builder is RUN-DIR-relative
+      (``hetero.data``, ``lammps/system.in.settings``, ``results/...``, LAMMPS
+      run with ``cwd = output_dir`` so the settings file's staged
+      ``provenance/potentials/...`` prefix resolves). Mixing them yields a
+      script LAMMPS cannot open, so neither convention is hardcoded here.
+    * :meth:`_scan_periods` — the scan period, i.e. the surface cell the top
+      layer is rastered over. Homogeneous: the material's own orthogonalized
+      unit cell, filled by ``components.build_sheet(..., unit_cell_out=...)``
+      into ``self.sheet_unit_cell``. Hetero: the **coincidence cell** of the
+      matched interface (both lattices were strained onto it), which is the
+      assembled stack's own periodic box — using either constituent's unit cell
+      there would give a plausible-looking but physically wrong PES.
+    * :meth:`_scan_n_cells` — the per-surface-cell energy normalization.
+      Homogeneous: ``_tile_count(sheet_dims, sheet_unit_cell)``, the number of
+      unit cells tiling the built footprint. Hetero: 1 — the box IS one
+      coincidence cell (no in-plane replication), and that cell is the
+      interface's repeat unit.
+    * :meth:`_scan_atom_style` / :meth:`_scan_pot_type` — ``atom_style`` comes
+      from the sheet's potential type homogeneously, and from the assembled
+      data file (``_detect_atom_style``) for hetero.
+    * :meth:`_scan_extra_context` — extra template variables; ``{}``
+      homogeneously, the box + z-band layer list for hetero.
+    * :meth:`_material_id` — the job-name token (``pes_sheet_<mat>`` vs
+      ``pes_sheet_<mat1>+<mat2>``). Defined on
+      :class:`~src.builders.sheetonsheet.SheetOnSheetSimulation` and overridden
+      by the hetero builder, mirroring the Task-3 AFM-family hook.
+
+    **State the mixin may touch**: only ``self.config`` (``.pes``,
+    ``.settings.simulation``) and the :class:`~src.core.simulation_base.SimulationBase`
+    services ``render_template`` / ``write_file`` / ``output_dir``. It never
+    reads ``self.pm``, ``self.sheet_dims``, ``self.structure_paths``,
+    ``self.relative_run_dir`` or any hetero stack attribute directly — those
+    are reachable only through the hooks above, which is what keeps it valid on
+    both builders (the hetero builder has no ``pm``/``sheet_dims``/
+    ``structure_paths`` at all).
+
+    ``SPLIT_OUTER_LOOPS`` is declared here (and so inherited by both concrete
+    classes, ahead of any base's value in MRO order): the scan replaces the run
+    phase outright and never reads ``outer_loop``, so nothing is ever split.
+    The grid variants below are counted separately by
+    ``src.core.run._run_scripts_per_build`` (keyed on the ``pes_sheet`` model,
+    so the refinement script is predicted for the hetero variant too).
     """
+
+    #: The run phase is a static scan that never reads outer_loop.
+    SPLIT_OUTER_LOOPS = frozenset()
 
     #: A bilayer is enough (and cheapest) for a static PES.
     MIN_LAYERS: int = PES_SHEET_LAYERS
 
-    #: write_inputs below replaces the sliding run phase entirely and never
-    #: reads outer_loop, so nothing here is ever split (the grid variants are
-    #: counted separately, see src.core.run._run_scripts_per_build).
-    SPLIT_OUTER_LOOPS = frozenset()
+    # ---------------------------------------------------------------- hooks --
 
-    def build(self) -> None:
-        if self.n_layers != PES_SHEET_LAYERS:
+    def _scan_template(self) -> str:
+        raise NotImplementedError
+
+    def _scan_data_file(self) -> str:
+        raise NotImplementedError
+
+    def _scan_potential_file(self) -> str:
+        raise NotImplementedError
+
+    def _scan_results_path(self, csv_name: str) -> str:
+        raise NotImplementedError
+
+    def _scan_periods(self) -> tuple:
+        raise NotImplementedError
+
+    def _scan_n_cells(self) -> int:
+        raise NotImplementedError
+
+    def _scan_pot_type(self) -> str:
+        raise NotImplementedError
+
+    def _scan_atom_style(self) -> str:
+        raise NotImplementedError
+
+    def _scan_extra_context(self) -> Dict:
+        """Template variables beyond the shared scan set (default: none)."""
+        return {}
+
+    # ------------------------------------------------------------ shared --
+
+    def _layer_count_hint(self) -> str:
+        """How the user sets the two layers, for the bilayer-gate message."""
+        return f"set [2D] layers = [{PES_SHEET_LAYERS}]"
+
+    def _require_pes_bilayer(self, n_layers: int) -> None:
+        """Reject anything but a frozen-bottom + scanned-top bilayer."""
+        if n_layers != PES_SHEET_LAYERS:
             raise ValueError(
                 "PES sheet scan requires exactly 2 layers (a frozen bottom + a "
-                f"scanned top); set [2D] layers = [{PES_SHEET_LAYERS}], got {self.n_layers}."
+                f"scanned top); {self._layer_count_hint()}, got {n_layers}."
             )
-        # A static PES has no interlayer bonds/springs — just the real LJ that
-        # governs the corrugation. Force 'none' regardless of the run settings.
-        self.config.settings.simulation.constraint_mode = 'none'
-        super().build()
-
-    def _register_drive_atom(self, pm: PotentialManager) -> None:
-        """No driving atom in a static scan (keeps types aligned with the data)."""
 
     def _get_hpc_job_name(self) -> str:
-        return f"pes_sheet_{self.config.sheet.mat}"
+        """``pes_sheet_<material token>`` (a pair token for the hetero variant)."""
+        return f"pes_sheet_{self._material_id()}"
 
     def _grid_n(self) -> int:
         pes = getattr(self.config, 'pes', None)
         return int(pes.grid_n) if pes is not None else DEFAULT_GRID_N
+
+    def _z_relax(self) -> bool:
+        pes = getattr(self.config, 'pes', None)
+        return bool(pes.z_relax) if pes is not None else True
 
     def _grid_variants(self) -> List[tuple]:
         """Return (script_name, csv_name, grid_n) pairs to emit.
@@ -156,32 +252,21 @@ class PESSheetSimulation(SheetOnSheetSimulation):
             )
         return variants
 
-    def write_inputs(self) -> None:
+    def write_scan_scripts(self) -> None:
         """Render the static interlayer PES scan script(s)."""
         logger.info("Writing sheet PES scan inputs...")
 
-        assert self.pm is not None
-        assert self.sheet_dims is not None
-
-        pot_type = normalize_potential_type(self.config.sheet.pot_type)
-        atom_style = 'charge' if pot_type in ('reaxff', 'reax/c') else 'atomic'
-
         sim = self.config.settings.simulation
-        rel = str(self.relative_run_dir)
-        pes = getattr(self.config, 'pes', None)
-        z_relax = bool(pes.z_relax) if pes is not None else True
-
-        period_x = _cell_period(self.sheet_unit_cell, "x")
-        period_y = _cell_period(self.sheet_unit_cell, "y")
-        n_cells = _tile_count(self.sheet_dims, self.sheet_unit_cell)
+        period_x, period_y = self._scan_periods()
+        n_cells = self._scan_n_cells()
 
         base_context = {
-            'atom_style': atom_style,
-            'pot_type': pot_type,
+            'atom_style': self._scan_atom_style(),
+            'pot_type': self._scan_pot_type(),
             'neighbor_list': sim.neighbor_list,
             'neigh_modify_command': sim.neigh_modify_command,
-            'data_file': f"{rel}/build/{self.structure_paths['sheet'].name}",
-            'potential_file': f"{rel}/lammps/system.in.settings",
+            'data_file': self._scan_data_file(),
+            'potential_file': self._scan_potential_file(),
             'min_style': sim.min_style,
             'minimization_command': PES_MINIMIZE_COMMAND,
             'timestep': sim.timestep,
@@ -189,20 +274,80 @@ class PESSheetSimulation(SheetOnSheetSimulation):
             'period_x': period_x,
             'period_y': period_y,
             'n_cells': n_cells,
-            'z_relax': z_relax,
+            'z_relax': self._z_relax(),
         }
+        base_context.update(self._scan_extra_context())
 
+        template = self._scan_template()
         for script_name, csv_name, grid_n in self._grid_variants():
             context = dict(base_context)
             context['grid_n'] = grid_n
-            context['results_csv'] = f"{rel}/results/{csv_name}"
-            script = self.render_template("sheetonsheet/pes_scan.lmp", context)
+            context['results_csv'] = self._scan_results_path(csv_name)
+            script = self.render_template(template, context)
             self.write_file(script_name, script)
 
         logger.info(
             "Sheet PES scan written to %s/lammps/ (grid periods %.3f×%.3f Å, %d cells)",
             self.output_dir, period_x, period_y, n_cells,
         )
+
+    def write_inputs(self) -> None:
+        """Run-phase entry point for the homogeneous builder's ``build``."""
+        self.write_scan_scripts()
+
+    def write_run_scripts(self) -> None:
+        """Run-phase entry point for the hetero builder's ``build`` seam."""
+        self.write_scan_scripts()
+
+
+class PESSheetSimulation(PESGridMixin, SheetOnSheetSimulation):
+    """Sheet-on-sheet interlayer PES scan (frozen bilayer, static lateral grid).
+
+    Reuses the sheet-on-sheet geometry/potential setup with a two-layer stack and
+    plain real interlayer LJ (no bonds/springs, no driving atom), then writes a
+    static grid-scan script instead of the sliding one (:class:`PESGridMixin`,
+    whose hooks this class implements with the homogeneous conventions:
+    sim-root-relative paths, atom-type layer groups, the material's own surface
+    unit cell as the scan period).
+    """
+
+    def build(self) -> None:
+        self._require_pes_bilayer(self.n_layers)
+        # A static PES has no interlayer bonds/springs — just the real LJ that
+        # governs the corrugation. Force 'none' regardless of the run settings.
+        self.config.settings.simulation.constraint_mode = 'none'
+        super().build()
+
+    def _register_drive_atom(self, pm: PotentialManager) -> None:
+        """No driving atom in a static scan (keeps types aligned with the data)."""
+
+    # -- PESGridMixin hooks: the homogeneous conventions ---------------------
+
+    def _scan_template(self) -> str:
+        return "sheetonsheet/pes_scan.lmp"
+
+    def _scan_data_file(self) -> str:
+        return f"{self.relative_run_dir}/build/{self.structure_paths['sheet'].name}"
+
+    def _scan_potential_file(self) -> str:
+        return f"{self.relative_run_dir}/lammps/system.in.settings"
+
+    def _scan_results_path(self, csv_name: str) -> str:
+        return f"{self.relative_run_dir}/results/{csv_name}"
+
+    def _scan_periods(self) -> tuple:
+        return (_cell_period(self.sheet_unit_cell, "x"),
+                _cell_period(self.sheet_unit_cell, "y"))
+
+    def _scan_n_cells(self) -> int:
+        assert self.sheet_dims is not None
+        return _tile_count(self.sheet_dims, self.sheet_unit_cell)
+
+    def _scan_pot_type(self) -> str:
+        return normalize_potential_type(self.config.sheet.pot_type)
+
+    def _scan_atom_style(self) -> str:
+        return 'charge' if self._scan_pot_type() in ('reaxff', 'reax/c') else 'atomic'
 
 
 class PESTipSimulation(AFMSimulation):

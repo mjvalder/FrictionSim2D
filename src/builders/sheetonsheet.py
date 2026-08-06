@@ -139,6 +139,18 @@ class SheetOnSheetSimulation(SimulationBase):
         self._generate_hpc_scripts()
         logger.info("Build complete.")
 
+    def _material_id(self) -> str:
+        """Material token for HPC job names: this builder's single material.
+
+        The sheet-family counterpart of
+        :meth:`~src.builders.afm.AFMSimulation._material_id`, added so the PES
+        scan's job name can be composed from one hook rather than hardcoding
+        ``config.sheet.mat``: the hetero builder overrides it with the
+        ``mat1+mat2`` pair token (two pairs sharing material 1 would otherwise
+        collide on one job name).
+        """
+        return self.config.sheet.mat
+
     def _get_hpc_job_name(self) -> str:
         """Get sheet-on-sheet specific job name."""
         return f"sheet_{self.config.sheet.mat}"
