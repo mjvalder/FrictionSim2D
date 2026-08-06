@@ -138,6 +138,43 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
         self.config: SheetOnSheetSimulationConfig = config
+        # Assembled-stack state, populated by build() and consumed by
+        # write_run_scripts() (the run-phase seam a subclass overrides to write
+        # something other than the dynamic slide -- see
+        # :class:`~src.builders.pes_scan.HeteroPESSheetSimulation`).
+        self._stack = None
+        self._layer_bands: List[Dict] = []
+        self._hetero_box: Dict[str, float] = {}
+        #: (lx, ly) of the assembled stack's in-plane box. The hetero
+        #: sheet-on-sheet stack is NOT replicated in-plane, so this box IS the
+        #: matched interface's coincidence cell -- the cell both materials'
+        #: lattices were strained onto, and the only in-plane periodicity the
+        #: interface actually has. Exposed under the same name
+        #: ``HeteroAFMSimulation._build_hetero_sheet`` uses (where the box IS
+        #: replicated, so the two are distinct there) for the static PES scan,
+        #: whose scan period must be this cell rather than either
+        #: constituent's own unit cell.
+        self._hetero_coincidence_cell: Optional[tuple] = None
+        #: xy tilt of the assembled box; a triclinic cell cannot be scanned by
+        #: an axis-aligned (dx, dy) grid, so the PES variant refuses it.
+        self._hetero_cell_xy_tilt: float = 0.0
+        self._hetero_atom_style: str = "atomic"
+        self._hetero_lat_c: Optional[float] = None
+        self._hetero_num_atom_types: int = 0
+        self._hetero_virtual_type_reserved: bool = False
+
+    def _material_id(self) -> str:
+        """Every configured material, numeric ``[2D-N]`` order, joined with ``+``.
+
+        The hetero override of
+        :meth:`~src.builders.sheetonsheet.SheetOnSheetSimulation._material_id`
+        (same convention as :func:`src.core.run.material_token` and
+        :meth:`src.builders.hetero_afm.HeteroAFMSimulation._material_id`), so
+        every job name built from it -- this class's ``friction_<pair>`` and
+        the PES variant's ``pes_sheet_<pair>`` -- keys on the full pair rather
+        than material 1 alone.
+        """
+        return '+'.join(sheet.mat for sheet in self.config.sheets)
 
     def _get_hpc_job_name(self) -> str:
         """Job name keyed by every configured material, not just sheet 1.
@@ -154,10 +191,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         numeric-``[2D-N]``-order ``+``-joined convention as
         :func:`src.core.run.material_token` /
         :func:`~src.builders.hetero_afm._pair_material_token`; kept as a
-        private inline join here rather than importing from ``hetero_afm``
-        since the two builder families are otherwise independent.
+        private inline join (in :meth:`_material_id`) rather than importing
+        from ``hetero_afm`` since the two builder families are otherwise
+        independent.
         """
-        return f"friction_{'+'.join(sheet.mat for sheet in self.config.sheets)}"
+        return f"friction_{self._material_id()}"
 
     @property
     def n_layers(self) -> int:
@@ -190,7 +228,12 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             self._add_component_files_to_provenance(f"sheet_{i + 1}", sheet)
 
     def build(self) -> None:
-        """Assemble the hetero stack and write ``lammps/slide.in``."""
+        """Assemble the hetero stack and write the run phase (``lammps/slide.in``).
+
+        The run phase itself is delegated to :meth:`write_run_scripts` (the
+        seam a subclass overrides to emit something other than the dynamic
+        slide); everything here is stack assembly shared by both.
+        """
         n = self.n_layers
         if n < self.MIN_LAYERS:
             raise ValueError(
@@ -221,9 +264,6 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         zhi = float(at.get_positions()[:, 2].max())
 
         settings = self.config.settings
-        sim = settings.simulation
-        out = settings.output
-        general = self.config.general
 
         atom_style = _detect_atom_style(stack.data_path)  # 'atomic' for sw
         lat_c = stack.interface_spacing or settings.geometry.lat_c_default
@@ -241,7 +281,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # (``SheetOnSheetSimulation._register_drive_atom`` ->
         # ``PotentialManager.register_virtual_atom``), add one extra
         # non-interacting type and make the box reserve room for it.
-        reserve_virtual_type = sim.drive_method == "virtual_atom"
+        reserve_virtual_type = self._reserve_drive_virtual_type()
         num_atom_types = stack.total_types
         if reserve_virtual_type:
             # Re-register the (geometry-independent, deterministic) hetero
@@ -290,25 +330,93 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             # virtual type) to hp.settings_path -- no second write needed.
             num_atom_types = len(hp.pm.types)  # == stack.total_types + 1
 
+        # Hand the assembled-stack state to the run-phase seam. Everything
+        # below this point that a subclass might want to replace lives in
+        # write_run_scripts(); everything above (the stack assembly, the layer
+        # bands, the type/virtual-atom spine) is shared.
+        self._stack = stack
+        self._layer_bands = bands
+        self._hetero_box = {"xlo": xlo, "xhi": xhi, "ylo": ylo, "yhi": yhi, "zhi": zhi}
+        self._hetero_coincidence_cell = (xhi - xlo, yhi - ylo)
+        self._hetero_cell_xy_tilt = float(cell[1, 0])
+        self._hetero_atom_style = atom_style
+        self._hetero_lat_c = lat_c
+        self._hetero_num_atom_types = num_atom_types
+        self._hetero_virtual_type_reserved = reserve_virtual_type
+
+        self.write_run_scripts()
+
+        # D3: record the achieved twist angle + moiré period into the run
+        # manifest (achieved != target for discrete commensurate angles; always
+        # log the achieved value). Inert for the non-twist hetero slide
+        # (twist_angle_achieved is None), so the aligned path is unaffected.
+        if stack.twist_angle_achieved is not None:
+            self._record_twist_manifest(stack, self.config.general.twist_angle)
+
+        # Reuse the homogeneous HPC scaffolding, but do NOT let it block the
+        # slide.in write. It also assumes the sim-root-relative path convention;
+        # the hetero slide is run-dir-relative, so any script it emits needs a
+        # path-convention follow-up (Task 5) rather than being forced here.
+        try:
+            self._generate_hpc_scripts()
+        except Exception as exc:  # pragma: no cover - defensive, non-fatal
+            logger.warning(
+                "HPC script generation skipped for hetero slide (%s). The "
+                "homogeneous HPC path assumes sim-root-relative paths while the "
+                "hetero slide is run-dir-relative; deferring to Task 5.", exc,
+            )
+
+    def _reserve_drive_virtual_type(self) -> bool:
+        """Whether the run phase needs a dedicated non-interacting drive atom.
+
+        Seam (not inlined in :meth:`build`) because it is a property of the RUN
+        PHASE, not of the stack: a static PES scan has no drive at all, so
+        :class:`~src.builders.pes_scan.HeteroPESSheetSimulation` returns False
+        and the extra virtual type is never registered — mirroring
+        :meth:`PESSheetSimulation._register_drive_atom`'s no-op on the
+        homogeneous side, which likewise keeps the type count aligned with the
+        real atoms in the data file.
+        """
+        return self.config.settings.simulation.drive_method == "virtual_atom"
+
+    def write_run_scripts(self) -> None:
+        """Render and write the run phase (``lammps/slide.in``): the dynamic slide.
+
+        The run-script seam of :meth:`build`. Everything it needs was placed on
+        ``self`` by ``build`` (``_stack``, ``_layer_bands``, ``_hetero_box``,
+        ``_hetero_atom_style``, ``_hetero_lat_c``, ``_hetero_num_atom_types``,
+        ``_hetero_virtual_type_reserved``), so a subclass can swap the whole
+        run phase — e.g. a static PES grid scan instead of a slide — without
+        reimplementing the stack assembly above it.
+        """
+        stack = self._stack
+        bands = self._layer_bands
+        box = self._hetero_box
+        n = self.n_layers
+        settings = self.config.settings
+        sim = settings.simulation
+        out = settings.output
+        general = self.config.general
+
         # Same key set as SheetOnSheetSimulation.write_inputs' base_context (only
         # the keys the template actually references), with hetero-specific values
         # and RUN-DIR-RELATIVE paths.
         context = {
             "temp": general.temp,
-            "xlo": xlo,
-            "xhi": xhi,
-            "ylo": ylo,
-            "yhi": yhi,
-            "zhi": zhi,
+            "xlo": box["xlo"],
+            "xhi": box["xhi"],
+            "ylo": box["ylo"],
+            "yhi": box["yhi"],
+            "zhi": box["zhi"],
             "data_file": "hetero.data",
             "potential_file": "lammps/system.in.settings",
-            "num_atom_types": num_atom_types,
-            "reserve_virtual_type": reserve_virtual_type,
+            "num_atom_types": self._hetero_num_atom_types,
+            "reserve_virtual_type": self._hetero_virtual_type_reserved,
             "ngroups": stack.total_types,
             "n_layers": n,
             "constraint_mode": "none",
             "n_bond_types": 0,
-            "atom_style": atom_style,
+            "atom_style": self._hetero_atom_style,
             "pot_type": "sw",
             "has_internal_lj": True,  # hybrid sw -> reaction-force friction proxy
             # Default an unset load to 0.0 (zero-load slide). A raw None renders
@@ -341,7 +449,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             ),
             "driving_spring_ev": (general.driving_spring or 50.0) / NM_TO_EV_A2,
             "bond_spring_ev": (general.bond_spring or 80.0) / NM_TO_EV_A2,
-            "lat_c": lat_c,
+            "lat_c": self._hetero_lat_c,
             "ev_a_to_nn": EV_A_TO_NN,
             "ev_a3_to_gpa": EV_A3_TO_GPA,
             "layers": bands,
@@ -350,26 +458,6 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         script = self.render_template("hetero/slide.lmp", context)
         self.write_file("lammps/slide.in", script)
         logger.info("Wrote hetero slide script to %s/lammps/slide.in", self.output_dir)
-
-        # D3: record the achieved twist angle + moiré period into the run
-        # manifest (achieved != target for discrete commensurate angles; always
-        # log the achieved value). Inert for the non-twist hetero slide
-        # (twist_angle_achieved is None), so the aligned path is unaffected.
-        if stack.twist_angle_achieved is not None:
-            self._record_twist_manifest(stack, general.twist_angle)
-
-        # Reuse the homogeneous HPC scaffolding, but do NOT let it block the
-        # slide.in write. It also assumes the sim-root-relative path convention;
-        # the hetero slide is run-dir-relative, so any script it emits needs a
-        # path-convention follow-up (Task 5) rather than being forced here.
-        try:
-            self._generate_hpc_scripts()
-        except Exception as exc:  # pragma: no cover - defensive, non-fatal
-            logger.warning(
-                "HPC script generation skipped for hetero slide (%s). The "
-                "homogeneous HPC path assumes sim-root-relative paths while the "
-                "hetero slide is run-dir-relative; deferring to Task 5.", exc,
-            )
 
     def _record_twist_manifest(self, stack, twist_angle_target) -> None:
         """Write the achieved twist angle + moiré period into the run manifest.

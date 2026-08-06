@@ -1212,17 +1212,28 @@ def _select_sheet_builder_cls(model, config_obj):
     same-material moiré, so it must also reach the hetero builder (which
     synthesises the two sheets). A single material with no twist stays on the
     homogeneous builder (unchanged).
+
+    The same rule applies to the static ``pes_sheet`` scan: a two-material (or
+    twisted) bilayer is scanned over the matched interface's coincidence cell
+    by :class:`~src.builders.pes_scan.HeteroPESSheetSimulation`, since the
+    homogeneous scan builder can neither assemble the stack nor group its
+    layers (hetero layers share atom types).
     """
+    sheets = getattr(config_obj, 'sheets', None) or []
+    twist = getattr(getattr(config_obj, 'general', None), 'twist_angle', None)
+    is_hetero = len(sheets) >= 2 or twist is not None
+
     if model == 'pes_sheet':
+        if is_hetero:
+            from src.builders.pes_scan import HeteroPESSheetSimulation
+            return HeteroPESSheetSimulation
         return PESSheetSimulation
     # A [Flake] section switches sheet-on-sheet to the D4 flake-driven slide,
     # regardless of the substrate being homogeneous or hetero (precedence).
     if model == 'sheetonsheet' and getattr(config_obj, 'flake', None) is not None:
         from src.builders.flake_slide import FlakeSlideSimulation
         return FlakeSlideSimulation
-    sheets = getattr(config_obj, 'sheets', None) or []
-    twist = getattr(getattr(config_obj, 'general', None), 'twist_angle', None)
-    if len(sheets) >= 2 or twist is not None:
+    if is_hetero:
         return HeteroSheetOnSheetSimulation
     return SheetOnSheetSimulation
 

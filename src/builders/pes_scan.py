@@ -21,11 +21,21 @@ array/combined job generation applies unchanged. The scan writes its grid to
 ``results/pes_scan.csv``; :mod:`src.postprocessing.pes_scan` reduces the grids
 to per-material descriptors.
 
-:class:`HeteroPESTipSimulation` (bottom of this module) is a third, MRO-composed
-flavour: the same tip-on-sheet static scan, but over a two-material
-heterostructure sheet built by :class:`~src.builders.hetero_afm.HeteroAFMSimulation`,
-scanning the matched interface's coincidence cell rather than a single
-material's own unit cell.
+Both are MRO-composed with the heterostructure builders to give two more
+flavours, each scanning the *matched interface's coincidence cell* rather than
+a single material's own unit cell:
+
+    - :class:`HeteroPESTipSimulation` — the tip scan over a two-material
+      heterostructure sheet built by
+      :class:`~src.builders.hetero_afm.HeteroAFMSimulation`.
+    - :class:`HeteroPESSheetSimulation` — the interlayer scan over a 1+1
+      heterostructure bilayer built by
+      :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`.
+
+The sheet flavours share their grid/scan-script logic through
+:class:`PESGridMixin`, whose hooks isolate the four places the homogeneous and
+hetero builders genuinely differ (template/layer selection, path convention,
+scan period, energy normalization).
 """
 
 import logging
@@ -35,7 +45,9 @@ from ..core.potential_manager import PotentialManager
 from ..core.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from .afm import AFMSimulation
+from .hetero import _detect_atom_style
 from .hetero_afm import HeteroAFMSimulation
+from .hetero_slide import HeteroSheetOnSheetSimulation
 from .sheetonsheet import SheetOnSheetSimulation
 
 logger = logging.getLogger(__name__)
@@ -126,8 +138,9 @@ class PESGridMixin:
       layers share atom types, so they can only be selected by z-band REGION —
       the very reason ``hetero_slide`` exists — hence the separate
       ``hetero/pes_scan.lmp``, which emits the same region/group convention as
-      ``hetero/slide.lmp`` and then shares the scan body via
-      ``common/pes_scan_body.lmp``.
+      ``hetero/slide.lmp`` before the (deliberately duplicated, per this
+      package's one-template-per-family convention — cf. ``afm/pes_scan.lmp``
+      vs ``afm_freestanding/pes_scan.lmp``) scan loop.
     * :meth:`_scan_data_file` / :meth:`_scan_potential_file` /
       :meth:`_scan_results_path` — the path convention. The homogeneous builder
       is SIM-ROOT-relative (``{relative_run_dir}/build/<sheet>.lmp``, LAMMPS run
@@ -551,3 +564,138 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
     def _get_hpc_job_name(self) -> str:
         """``pes_tip_<pair>`` via :meth:`_material_id`, not sheet 1 alone."""
         return f"pes_tip_{self._material_id()}"
+
+
+class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
+    """Sheet-on-sheet interlayer PES scan over a heterostructure bilayer.
+
+    A 1+1 stack of two matched materials — the bottom layer frozen, the top
+    laterally grid-scanned — assembled by
+    :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation` (Zur-McGill
+    coincidence match, symmetric strain onto the shared mean cell, real-
+    minimization interface spacing) and written as a static scan by
+    :class:`PESGridMixin` instead of the dynamic slide.
+
+    This is the composition the mixin exists for; the four seams it crosses
+    (each implemented as a hook below, and each a real difference, not a
+    naming detail):
+
+    1. **Layer selection.** Heterostructure layers share atom types, so the
+       homogeneous template's type-based ``layer_1``/``layer_2`` groups cannot
+       exist. ``hetero/pes_scan.lmp`` selects them by z-band REGION, using the
+       same ``compute_layer_zbands`` bands and the same
+       ``region``/``group ... region`` convention as ``hetero/slide.lmp``.
+    2. **Path convention.** Every path is RUN-DIR-RELATIVE (``hetero.data``,
+       ``lammps/system.in.settings``, ``results/...``), matching the hetero
+       slide — the stack is built into the run dir precisely so the settings
+       file's staged ``provenance/potentials/...`` prefix resolves with
+       ``cwd = output_dir``. The homogeneous sim-root-relative paths would not
+       open.
+    3. **Scan period.** The matched interface's COINCIDENCE cell, i.e. the
+       assembled stack's own in-plane box (the hetero sheet-on-sheet stack is
+       not replicated in-plane, so box == cell). Either constituent's own unit
+       cell is NOT a periodicity of the interface — scanning it would give a
+       plausible-looking but physically wrong PES. Correspondingly the energy
+       is normalized per coincidence cell (``n_cells == 1``).
+    4. **Layer gate.** The dynamic slide needs >= 4 layers (fixed bottom,
+       thermostatted middle, driven top across two materials); a static PES
+       needs exactly 2 (one per material). ``MIN_LAYERS`` is relaxed HERE only
+       — :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation` keeps
+       its 4-layer gate and its message, so a 1+1 *dynamic* slide is still
+       refused.
+
+    ``SPLIT_OUTER_LOOPS`` resolves to ``frozenset()`` from
+    :class:`PESGridMixin` (which precedes the hetero builder in MRO); both
+    candidates are ``frozenset()`` anyway, and the static scan never reads
+    ``outer_loop``. Pinned by ``tests/test_hetero_pes_sheet.py``.
+    """
+
+    #: Exactly one layer per material: frozen bottom + scanned top.
+    MIN_LAYERS: int = PES_SHEET_LAYERS
+
+    def build(self) -> None:
+        self._require_pes_bilayer(self.n_layers)
+        # A static PES has no interlayer bonds/springs — just the real (hybrid)
+        # interaction that governs the corrugation. The hetero slide already
+        # renders constraint_mode 'none'; force it on the config too so any
+        # settings-driven branch below sees the static intent.
+        self.config.settings.simulation.constraint_mode = 'none'
+        super().build()
+
+    def _layer_count_hint(self) -> str:
+        return "set each material's [2D-N] layers = [1]"
+
+    def _reserve_drive_virtual_type(self) -> bool:
+        """A static scan has no drive, so no virtual atom type is reserved."""
+        return False
+
+    # -- PESGridMixin hooks: the hetero conventions --------------------------
+
+    def _scan_template(self) -> str:
+        return "hetero/pes_scan.lmp"
+
+    def _scan_data_file(self) -> str:
+        """Run-dir-relative, like the hetero slide (LAMMPS runs from the run dir)."""
+        return "hetero.data"
+
+    def _scan_potential_file(self) -> str:
+        return "lammps/system.in.settings"
+
+    def _scan_results_path(self, csv_name: str) -> str:
+        return f"results/{csv_name}"
+
+    def _scan_periods(self) -> tuple:
+        """The matched interface's coincidence cell (== the assembled box).
+
+        Set by :meth:`HeteroSheetOnSheetSimulation.build` from the assembled
+        ``hetero.data``; unreplicated, so it is the interface's true in-plane
+        periodicity. A triclinic cell is refused: the scan grid steps along
+        +x/+y, so a tilted cell's grid points would not be lattice
+        translations of the interface.
+        """
+        if self._hetero_coincidence_cell is None:
+            raise ValueError(
+                "Hetero PES scan period unavailable: the coincidence cell is "
+                "populated by the hetero stack assembly in build(); "
+                "write_run_scripts() cannot be called before it."
+            )
+        lx, ly = self._hetero_coincidence_cell
+        if abs(self._hetero_cell_xy_tilt) > 1e-6:
+            raise ValueError(
+                f"Hetero coincidence cell is triclinic (xy tilt="
+                f"{self._hetero_cell_xy_tilt:.4f} A); an axis-aligned (dx, dy) "
+                "PES grid over it would not step by lattice translations. Use a "
+                "pair whose coincidence cell canonicalises orthogonal."
+            )
+        if lx <= 0.0 or ly <= 0.0:
+            raise ValueError(
+                f"Non-positive hetero coincidence cell: {lx} x {ly} A."
+            )
+        return (lx, ly)
+
+    def _scan_n_cells(self) -> int:
+        """One: the box holds exactly one coincidence cell.
+
+        The energy is therefore reported per interface repeat unit. Dividing by
+        a constituent's unit-cell count instead would mix two different
+        periodicities and mislabel the barrier.
+        """
+        return 1
+
+    def _scan_pot_type(self) -> str:
+        """``sw`` — the hetero spine is a ``pair_style hybrid`` of ``sw`` blocks
+        plus UFF-mixed ``lj/cut`` cross-terms, exactly as ``hetero/slide.lmp``
+        hardcodes. Only used to gate the ReaxFF ``qeq`` fix, which does not
+        apply here."""
+        return "sw"
+
+    def _scan_atom_style(self) -> str:
+        """Detected from the assembled data file, like the hetero slide's."""
+        assert self._stack is not None
+        return _detect_atom_style(self._stack.data_path)
+
+    def _scan_extra_context(self) -> Dict:
+        """Box + z-band layer groups (hetero layers share atom types)."""
+        context = dict(self._hetero_box)
+        context['layers'] = self._layer_bands
+        return context
