@@ -106,12 +106,24 @@ class IndentSimulation(AFMSimulation):
         #: n_layers -> derived velocity seed (populated during build()).
         self.indent_seeds: Dict[int, int] = {}
 
+    def _material_id(self) -> str:
+        """Material token used in the job name, seed derivation, and indent_meta.
+
+        Single-material indent: the sheet's material name. Overridden by
+        :class:`~src.builders.hetero_afm.HeteroIndentSimulation` to return the
+        pair token instead, so two hetero pairs sharing material 1 don't
+        collide on job name, derived seed, or the ``indent_meta.json`` manifest
+        key (see :func:`src.core.run.material_token` for the sibling convention
+        on the raw-dict side).
+        """
+        return self.config.sheet.mat
+
     def _get_hpc_job_name(self) -> str:
-        return f"indent_{self.config.sheet.mat}"
+        return f"indent_{self._material_id()}"
 
     def _velocity_seed(self, n_layers: int) -> int:
         """Fresh, recorded ``velocity create`` seed for this (material, layer)."""
-        seed = derive_seed(self.base_seed, self.config.sheet.mat, n_layers)
+        seed = derive_seed(self.base_seed, self._material_id(), n_layers)
         self.indent_seeds[n_layers] = seed
         return seed
 
@@ -157,7 +169,7 @@ class IndentSimulation(AFMSimulation):
             'hold_steps': self.hold_steps,
             'z_step': self.z_step,
             'n_steps': self.n_steps,
-            'material': self.config.sheet.mat,
+            'material': self._material_id(),
             'layers': {str(n): seed for n, seed in sorted(self.indent_seeds.items())},
             'loads': self._loads(),
         }

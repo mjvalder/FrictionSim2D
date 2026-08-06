@@ -1061,14 +1061,28 @@ def _select_afm_builder_cls(model, config_obj):
     # Hetero AFM when >=2 materials are configured (amorphous sub). ONE hetero
     # decision point: a finite ([general] finite_sheet) stack routes to the D5
     # edge-typed FiniteHeteroAFMSimulation, else the D2 periodic HeteroAFMSimulation.
-    # pes_tip/indent are NOT rerouted here — their hetero variants are later phases.
-    # TODO(future): hetero pes_tip/indent.
+    # 'indent' reroutes to the pure-MRO HeteroIndentSimulation (no finite variant
+    # exists for it — only plain 'afm' has one). pes_tip is NOT rerouted here —
+    # its hetero variant is a later phase.
+    # TODO(future): hetero pes_tip.
     sheets = getattr(config_obj, 'sheets', []) or []
-    if model == 'afm' and len(sheets) >= 2:
-        from src.builders.hetero_afm import HeteroAFMSimulation, FiniteHeteroAFMSimulation
-        if getattr(config_obj.general, 'finite_sheet', False):
-            return FiniteHeteroAFMSimulation
-        return HeteroAFMSimulation
+    if len(sheets) >= 2:
+        if model == 'indent':
+            from src.builders.hetero_afm import HeteroIndentSimulation
+            if getattr(config_obj.general, 'finite_sheet', False):
+                raise ValueError(
+                    "finite_sheet hetero indent is not supported: only the "
+                    "periodic (non-finite) hetero AFM builder has an indent "
+                    "variant. Only plain 'afm' has a finite hetero variant "
+                    "(FiniteHeteroAFMSimulation). Drop [general] finite_sheet "
+                    "for a hetero indent run."
+                )
+            return HeteroIndentSimulation
+        if model == 'afm':
+            from src.builders.hetero_afm import HeteroAFMSimulation, FiniteHeteroAFMSimulation
+            if getattr(config_obj.general, 'finite_sheet', False):
+                return FiniteHeteroAFMSimulation
+            return HeteroAFMSimulation
     return default_cls
 
 
