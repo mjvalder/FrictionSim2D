@@ -256,9 +256,15 @@ class HeteroAFMSimulation(AFMSimulation):
 
         Sets ``self._hetero_rep_path`` (the replicated ``nocoeff`` data file),
         ``self._hetero_rep_box`` = ``(lx, ly, z_extent)`` of the replicated cell,
-        and ``self._hetero_replication`` = ``(nx, ny)``. Raises ``ValueError`` on
-        a triclinic coincidence cell (xy tilt != 0) — an orthogonal amorphous box
-        cannot tile it; twisted/triclinic pairs are D3.
+        ``self._hetero_replication`` = ``(nx, ny)``, and
+        ``self._hetero_coincidence_cell`` = ``(lx_cell, ly_cell)`` — the
+        *unreplicated* matched-interface cell both materials' surface lattices
+        were strained onto (before the in-plane tiling below). Exposed for
+        :class:`~src.builders.pes_scan.HeteroPESTipSimulation`, whose static
+        scan must repeat over this coincidence cell, not either constituent's
+        own unit cell. Raises ``ValueError`` on a triclinic coincidence cell
+        (xy tilt != 0) — an orthogonal amorphous box cannot tile it;
+        twisted/triclinic pairs are D3.
         """
         build_dir = Path(build_dir)
         build_dir.mkdir(parents=True, exist_ok=True)
@@ -277,6 +283,7 @@ class HeteroAFMSimulation(AFMSimulation):
             )
 
         lx_cell, ly_cell = float(cell[0, 0]), float(cell[1, 1])
+        self._hetero_coincidence_cell = (lx_cell, ly_cell)
         nx, ny = compute_replication_factors(lx_cell, ly_cell, self.config.tip.r)
 
         rep = build_dir / "hetero_rep.data"

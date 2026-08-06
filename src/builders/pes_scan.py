@@ -20,6 +20,12 @@ production-run slot the recipe swaps the sliding out of), so all existing HPC
 array/combined job generation applies unchanged. The scan writes its grid to
 ``results/pes_scan.csv``; :mod:`src.postprocessing.pes_scan` reduces the grids
 to per-material descriptors.
+
+:class:`HeteroPESTipSimulation` (bottom of this module) is a third, MRO-composed
+flavour: the same tip-on-sheet static scan, but over a two-material
+heterostructure sheet built by :class:`~src.builders.hetero_afm.HeteroAFMSimulation`,
+scanning the matched interface's coincidence cell rather than a single
+material's own unit cell.
 """
 
 import logging
@@ -29,6 +35,7 @@ from ..core.potential_manager import PotentialManager
 from ..core.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from .afm import AFMSimulation
+from .hetero_afm import HeteroAFMSimulation
 from .sheetonsheet import SheetOnSheetSimulation
 
 logger = logging.getLogger(__name__)
@@ -301,3 +308,101 @@ class PESTipSimulation(AFMSimulation):
         self.write_file("lammps/slide.in", scan_script, out_dir)
 
         logger.info("Tip PES scan written to %s/lammps/", out_dir)
+
+
+class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
+    """Tip-on-heterostructure static PES scan (two-material coincidence cell).
+
+    Pure MRO composition, mirroring
+    :class:`~src.builders.hetero_afm.HeteroIndentSimulation`:
+    :class:`PESTipSimulation` supplies the run-phase identity (the
+    self-contained static-scan ``write_inputs``, ``SPLIT_OUTER_LOOPS``),
+    :class:`~src.builders.hetero_afm.HeteroAFMSimulation` supplies the
+    component build (hetero stack -> in-plane replicate, ``sheet_1``/
+    ``sheet_2`` potential split). Only the scan-period population and the
+    job-name token are added here.
+
+    **Step-1 state-contract audit** (verified by printing/asserting in
+    ``tests/test_hetero_pes_tip.py``, not inferred):
+
+    - MRO: ``HeteroPESTipSimulation -> PESTipSimulation -> HeteroAFMSimulation
+      -> AFMSimulation -> SimulationBase -> ABC -> object``.
+      ``PESTipSimulation`` resolves before ``HeteroAFMSimulation``, so
+      ``write_inputs`` is its self-contained static-scan version (not
+      ``AFMSimulation``'s indentation + slide), and
+      ``SPLIT_OUTER_LOOPS == frozenset()`` (``PESTipSimulation`` declares that
+      class attribute directly, ahead of ``HeteroAFMSimulation``'s *inherited*
+      ``AFMSimulation.SPLIT_OUTER_LOOPS == {'force', 'scan_angle'}`` in MRO
+      order) — correct here too: a static scan replaces the run phase outright
+      and never reads ``outer_loop``, hetero or not. Pinned by
+      ``test_hetero_pes_tip_mro_and_split_outer_loops`` so a future
+      MRO/base-class change cannot silently flip it and make the GUI promise a
+      job count the build never produces (the exact bug class fixed elsewhere
+      on this branch).
+    - Every attribute ``PESTipSimulation.write_inputs``/its helpers read,
+      and where the hetero build populates each:
+
+        * ``self.sheet_unit_cell`` (via ``_cell_period``, the scan period) —
+          the homogeneous path fills it from ``build_sheet(...,
+          unit_cell_out=...)``: one material's own orthogonalized unit cell.
+          For a matched heterostructure interface that would be *physically
+          wrong* — the scan must repeat over the **coincidence cell** of the
+          interface (the cell both lattices were strained onto to match), not
+          either constituent's own cell; using a constituent's cell would
+          produce a plausible-looking but wrong PES. ``HeteroAFMSimulation.
+          _build_hetero_sheet`` already computes this cell (the *unreplicated*
+          assembled-stack box, before in-plane tiling) and now exposes it as
+          ``self._hetero_coincidence_cell``. Populated here by overriding
+          :meth:`_build_sheet_for_layers` to call ``super()`` (dispatches to
+          ``HeteroAFMSimulation``'s override, which sets
+          ``self._hetero_coincidence_cell``) and then filling
+          ``self.sheet_unit_cell = {'xlo': 0.0, 'xhi': lx_cell, 'ylo': 0.0,
+          'yhi': ly_cell}`` — the same ``xlo``/``xhi``/``ylo``/``yhi`` shape
+          ``_cell_period`` expects, matching the homogeneous
+          ``unit_cell_out`` contract exactly.
+        * ``self.sheet_dims`` (the built footprint; read by ``build_sheet``'s
+          sibling ``PESSheetSimulation._tile_count``, not by
+          ``PESTipSimulation.write_inputs`` itself, but by
+          ``build_render_context`` for tip centring) — already populated by
+          ``_build_hetero_sheet`` from the *replicated* box (distinct from the
+          unreplicated coincidence cell above); no override needed.
+        * ``self.box_dims`` (read by ``_warn_if_footprint_too_small`` for the
+          tip-periodic-image guard) — populated by the inherited
+          ``AFMSimulation.build()`` calling ``self._get_substrate_box_dims()``
+          after ``_build_components``; neither is overridden by
+          ``HeteroAFMSimulation``, so it already works off the hetero
+          ``self.sheet_dims``; no override needed.
+        * ``self.config.tip.r`` (also read by ``_warn_if_footprint_too_small``)
+          — plain config, unaffected by hetero.
+        * ``build_render_context`` (called by ``write_inputs``) reads
+          ``self.pm[n]``, ``self.sheet_offset``, ``self.lat_c``,
+          ``self.z_positions[n]``, ``self.groups[n]``, ``self.sheet_paths[n]``,
+          ``self.tip_path``, ``self.sub_path``, ``self.sheet_dims`` — all
+          already populated by ``HeteroAFMSimulation``'s overridden
+          ``_build_components`` / ``_generate_potentials`` /
+          ``_calculate_z_positions`` (documented on that class); no additional
+          override needed for the build/render path itself.
+    - Job name: ``PESTipSimulation._get_hpc_job_name`` hardcodes
+      ``f"pes_tip_{self.config.sheet.mat}"`` (sheet 1's material only — it
+      does NOT call ``_material_id()``), so MRO alone would collide two hetero
+      pairs sharing material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-WSe2``)
+      on the identical job name ``pes_tip_h-MoS2``. Overridden below to
+      compose ``pes_tip_<pair>`` from
+      :meth:`~src.builders.afm.AFMSimulation._material_id` (which
+      ``HeteroAFMSimulation`` overrides to the numeric-order pair token) —
+      reusing the Task-3 hook built for exactly this, rather than duplicating
+      its pair-token logic.
+    """
+
+    def _build_sheet_for_layers(self, build_dir, n_layers):
+        """Populate ``sheet_unit_cell`` from the coincidence cell after the
+        inherited hetero build. See the class docstring's state-contract
+        audit for why the coincidence cell (not either constituent's own
+        unit cell) is the physically correct scan period."""
+        super()._build_sheet_for_layers(build_dir, n_layers)
+        lx_cell, ly_cell = self._hetero_coincidence_cell
+        self.sheet_unit_cell = {'xlo': 0.0, 'xhi': lx_cell, 'ylo': 0.0, 'yhi': ly_cell}
+
+    def _get_hpc_job_name(self) -> str:
+        """``pes_tip_<pair>`` via :meth:`_material_id`, not sheet 1 alone."""
+        return f"pes_tip_{self._material_id()}"

@@ -1157,7 +1157,16 @@ def _select_afm_builder_cls(model, config_obj):
     """
     afm_builders = {'pes_tip': PESTipSimulation, 'indent': IndentSimulation}
     default_cls = afm_builders.get(model, AFMSimulation)
+    sheets = getattr(config_obj, 'sheets', []) or []
+    is_hetero = len(sheets) >= 2
     if getattr(config_obj, 'sub', None) is None:
+        if is_hetero:
+            raise FreestandingConfigError(
+                "A substrate-free config (no [sub] section) with 2 or more [2D-N] "
+                "materials is not supported: heterostructure freestanding is "
+                "unsupported. Add a [sub] section for a two-material config, or "
+                "drop to a single [2D] material for the freestanding tip PES."
+            )
         freestanding = {'pes_tip': FreestandingPESTipSimulation}
         if model in freestanding:
             return freestanding[model]
@@ -1170,11 +1179,10 @@ def _select_afm_builder_cls(model, config_obj):
     # decision point: a finite ([general] finite_sheet) stack routes to the D5
     # edge-typed FiniteHeteroAFMSimulation, else the D2 periodic HeteroAFMSimulation.
     # 'indent' reroutes to the pure-MRO HeteroIndentSimulation (no finite variant
-    # exists for it — only plain 'afm' has one). pes_tip is NOT rerouted here —
-    # its hetero variant is a later phase.
-    # TODO(future): hetero pes_tip.
-    sheets = getattr(config_obj, 'sheets', []) or []
-    if len(sheets) >= 2:
+    # exists for it — only plain 'afm' has one). 'pes_tip' reroutes to the
+    # pure-MRO HeteroPESTipSimulation (scans the matched interface's coincidence
+    # cell rather than either material's own unit cell).
+    if is_hetero:
         if model == 'indent':
             from src.builders.hetero_afm import HeteroIndentSimulation
             if getattr(config_obj.general, 'finite_sheet', False):
@@ -1191,6 +1199,9 @@ def _select_afm_builder_cls(model, config_obj):
             if getattr(config_obj.general, 'finite_sheet', False):
                 return FiniteHeteroAFMSimulation
             return HeteroAFMSimulation
+        if model == 'pes_tip':
+            from src.builders.pes_scan import HeteroPESTipSimulation
+            return HeteroPESTipSimulation
     return default_cls
 
 

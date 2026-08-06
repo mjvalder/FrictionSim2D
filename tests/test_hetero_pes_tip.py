@@ -1,0 +1,175 @@
+"""Tests for hetero (two-material) tip-on-sheet static PES scan.
+
+Config fixture modelled on tests/test_hetero_afm.py's `_afm_hetero_raw()` (tip
++ sub + [2D-1]/[2D-2]), plus a `[pes]` section per tests/test_pes_scan_builder.py.
+Covers the MRO/SPLIT_OUTER_LOOPS resolution, routing (including the
+freestanding guard), and a real-LAMMPS build smoke that checks the emitted
+scan script's period is the *coincidence cell* of the matched interface, not
+either constituent material's own unit cell.
+"""
+import shutil
+from pathlib import Path
+
+import pytest
+
+from src.core.config import AFMSimulationConfig, load_settings
+
+MAT, POT = "examples/materials", "examples/potentials/sw"
+LMP = shutil.which("lmp_serial")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _pes_tip_hetero_raw():
+    return {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
+        "tip": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
+                "pot_type": "sw", "r": 10.0},
+        "sub": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
+                "pot_type": "sw", "amorph": "a", "thickness": 12.0},
+        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
+        "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
+                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
+        "pes": {"grid_n": 4},
+    }
+
+
+# --- MRO / SPLIT_OUTER_LOOPS resolution (Step 1) -----------------------------
+
+def test_hetero_pes_tip_mro_and_split_outer_loops():
+    """Pin the MRO/SPLIT_OUTER_LOOPS resolution the class docstring documents:
+    PESTipSimulation must resolve before HeteroAFMSimulation so the run-phase
+    identity (self-contained static-scan write_inputs) is the PES tip's, not
+    the plain hetero AFM slide's, and SPLIT_OUTER_LOOPS stays frozenset() (a
+    static scan never reads outer_loop). A wrong SPLIT_OUTER_LOOPS would
+    silently make the GUI promise a job count the build never produces (the
+    exact bug class fixed elsewhere on this branch)."""
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.pes_scan import HeteroPESTipSimulation, PESTipSimulation
+
+    mro = [c.__name__ for c in HeteroPESTipSimulation.__mro__]
+    print("HeteroPESTipSimulation MRO:", mro)
+    print("HeteroPESTipSimulation.SPLIT_OUTER_LOOPS:", HeteroPESTipSimulation.SPLIT_OUTER_LOOPS)
+    assert mro.index("PESTipSimulation") < mro.index("HeteroAFMSimulation")
+    assert HeteroPESTipSimulation.SPLIT_OUTER_LOOPS == frozenset()
+    assert HeteroPESTipSimulation.SPLIT_OUTER_LOOPS == PESTipSimulation.SPLIT_OUTER_LOOPS
+
+
+# --- routing ------------------------------------------------------------------
+
+def test_routing_selects_hetero_pes_tip_for_two_materials_with_substrate():
+    from src.builders.pes_scan import HeteroPESTipSimulation
+    from src.core.run import _select_afm_builder_cls
+    cfg = AFMSimulationConfig(**_pes_tip_hetero_raw(), settings=load_settings())
+    assert _select_afm_builder_cls("pes_tip", cfg) is HeteroPESTipSimulation
+
+
+def test_routing_keeps_homogeneous_pes_tip_for_single_material():
+    from src.builders.pes_scan import PESTipSimulation
+    from src.core.run import _select_afm_builder_cls
+    raw = _pes_tip_hetero_raw()
+    del raw["2D-2"]
+    raw["2D"] = raw.pop("2D-1")
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    assert _select_afm_builder_cls("pes_tip", cfg) is PESTipSimulation
+
+
+def test_routing_hetero_pes_tip_freestanding_raises():
+    """A freestanding (no [sub]) two-material config has no hetero freestanding
+    builder -- must raise FreestandingConfigError naming the gap explicitly,
+    not silently fall back to FreestandingPESTipSimulation (which cannot build
+    a two-material stack) or route to the periodic hetero builder."""
+    from src.core.run import FreestandingConfigError, _select_afm_builder_cls
+    raw = _pes_tip_hetero_raw()
+    del raw["sub"]
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    with pytest.raises(FreestandingConfigError, match="heterostructure freestanding is unsupported"):
+        _select_afm_builder_cls("pes_tip", cfg)
+
+
+def test_freestanding_hetero_pes_tip_aborts_run_simulations_not_skips(tmp_path, monkeypatch):
+    """No [sub] + 2 materials is a config-level setting, not a per-sweep-member
+    one -- every member of a sweep would fail identically. run_simulations must
+    propagate FreestandingConfigError and abort (no build), mirroring the
+    hetero-indent finite_sheet NoHeteroBuilderError hard-abort test."""
+    from src.core.config_io import write_config
+    from src.core.run import FreestandingConfigError, run_simulations
+
+    monkeypatch.chdir(REPO_ROOT)
+    raw = _pes_tip_hetero_raw()
+    del raw["sub"]
+    config_path = write_config(raw, tmp_path / "freestanding_hetero_pes_tip.ini")
+
+    with pytest.raises(FreestandingConfigError, match="heterostructure freestanding is unsupported"):
+        run_simulations(config_file=str(config_path), model="pes_tip",
+                        settings_file=None, output_root=tmp_path / "out",
+                        generate_hpc=False)
+    assert not list((tmp_path / "out").rglob("lammps"))
+
+
+# --- real-LAMMPS build smoke: coincidence cell, not either material's own ---
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_pes_tip_build_scan_period_is_coincidence_cell(tmp_path):
+    """builder.build() must emit the self-contained static scan script
+    (lammps/slide.in, no separate system.in indentation phase, mirroring the
+    homogeneous PESTipSimulation build layout) over the hetero-built system,
+    and its scan period (Lx/Ly in the rendered script) must equal the
+    *coincidence cell* of the matched interface -- NOT either constituent
+    material's own standalone unit cell. Also checks the job name carries the
+    pair token, not sheet 1's material alone."""
+    from src.builders import components
+    from src.builders.pes_scan import HeteroPESTipSimulation
+
+    cfg = AFMSimulationConfig(**_pes_tip_hetero_raw(), settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]   # HPC script gen needs a non-empty module list
+    sim = HeteroPESTipSimulation(cfg, str(tmp_path))
+    sim.build()
+
+    pair = "h-MoS2+h-WS2"
+    layer_dir = sim.output_dir_layer[1]
+    lammps_dir = layer_dir / "lammps"
+    assert (lammps_dir / "slide.in").exists()
+    assert not (lammps_dir / "system.in").exists()   # self-contained scan, no indent phase
+    assert (sim.output_dir / "build" / "hetero_rep.data").exists()
+
+    assert sim._get_hpc_job_name() == f"pes_tip_{pair}"
+
+    slide_text = (lammps_dir / "slide.in").read_text(encoding="utf-8")
+
+    def _extract(var):
+        for line in slide_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(f"variable        {var}"):
+                return float(stripped.split("equal", 1)[1].strip())
+        raise AssertionError(f"variable {var} not found in slide.in")
+
+    period_x_emitted = _extract("Lx")
+    period_y_emitted = _extract("Ly")
+
+    # Internal consistency: matches what _build_hetero_sheet exposed.
+    lx_cell, ly_cell = sim._hetero_coincidence_cell
+    assert period_x_emitted == pytest.approx(lx_cell)
+    assert period_y_emitted == pytest.approx(ly_cell)
+
+    # Now build each constituent material's OWN unit cell standalone and
+    # confirm the emitted scan period is neither of them (the whole point of
+    # using the coincidence cell instead).
+    own_cells = []
+    for sheet_cfg in cfg.sheets:
+        own_dir = tmp_path / f"own_{sheet_cfg.mat}"
+        own_dir.mkdir()
+        unit_cell_out = {}
+        components.build_sheet(
+            sheet_cfg, own_dir, settings=cfg.settings,
+            unit_cell_out=unit_cell_out,
+        )
+        own_x = unit_cell_out["xhi"] - unit_cell_out["xlo"]
+        own_y = unit_cell_out["yhi"] - unit_cell_out["ylo"]
+        own_cells.append((own_x, own_y))
+
+    for own_x, own_y in own_cells:
+        assert period_x_emitted != pytest.approx(own_x) or period_y_emitted != pytest.approx(own_y), (
+            f"Scan period {period_x_emitted}x{period_y_emitted} matches a constituent's "
+            f"own unit cell {own_x}x{own_y}; the scan must use the coincidence cell instead."
+        )
