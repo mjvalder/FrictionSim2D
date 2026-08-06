@@ -719,3 +719,47 @@ def test_afm_flake_twist_rotates_and_runs(tmp_path):
     loads = list((tmp_path / "tw" / "L1" / "data").glob("load_*N.data"))
     assert loads and all(p.stat().st_size > 0 for p in loads), \
         f"no non-empty load_*N.data written by the twisted-flake indent: {loads}"
+
+
+# --- Fix round 2: provenance must record every sheet's files, not just sheet 1 ---
+
+def test_hetero_afm_init_provenance_records_both_sheets(tmp_path):
+    """AFMSimulation._init_provenance previously iterated only self.config.sheet
+    (sheet 1) -- never self.config.sheets -- so for every heterostructure AFM
+    build, sheet 2's cif/potential files were silently never copied into
+    provenance/. HeteroAFMSimulation inherits _init_provenance unmodified, so
+    this proves the fix from the hetero AFM builder (the affected path)."""
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim._init_provenance()
+
+    prov_dir = tmp_path / "provenance"
+    assert (prov_dir / "cif" / "h-MoS2.cif").exists()
+    assert (prov_dir / "cif" / "h-WS2.cif").exists()
+    assert (prov_dir / "potentials" / "MoS2_wen.sw").exists()
+    assert (prov_dir / "potentials" / "t-WS2.sw").exists()
+
+
+def test_afm_init_provenance_single_material_unchanged(tmp_path):
+    """The single-material path must still record exactly what it recorded
+    before this fix: the sheet under the plain 'sheet' component name (not
+    'sheet_1'), plus tip/sub."""
+    from src.builders.afm import AFMSimulation
+    cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
+    sim = AFMSimulation(cfg, str(tmp_path))
+
+    seen = []
+    real_add = sim._add_component_files_to_provenance
+
+    def _spy(name, config):
+        seen.append(name)
+        return real_add(name, config)
+
+    sim._add_component_files_to_provenance = _spy
+    sim._init_provenance()
+
+    assert seen == ["sheet", "tip", "sub"]
+    prov_dir = tmp_path / "provenance"
+    assert (prov_dir / "cif" / "h-MoS2.cif").exists()
+    assert (prov_dir / "potentials" / "MoS2_wen.sw").exists()

@@ -147,15 +147,32 @@ class AFMSimulation(SimulationBase):
         return None
 
     def _init_provenance(self) -> None:
-        """Initialize provenance folder and collect input files."""
+        """Initialize provenance folder and collect input files.
+
+        Records every configured sheet, not just sheet 1: ``self.config.sheets``
+        is the per-material stack folded from ``[2D-1]``, ``[2D-2]``, ... (or a
+        one-element wrap of the single ``[2D]``), so a heterostructure build
+        (``HeteroAFMSimulation``/``HeteroIndentSimulation``, which inherit this
+        method unmodified) needs every material's cif/potential copied for
+        portability, not just the first. The single-material path keeps the
+        plain ``'sheet'`` component name (byte-identical to before this fix);
+        only a genuine multi-material stack uses the numbered ``sheet_1``/
+        ``sheet_2`` names already used elsewhere (e.g.
+        :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`'s own
+        ``_init_provenance``, the potential registration's component names).
+        """
         prov_dir = self.output_dir / 'provenance'
         prov_dir.mkdir(parents=True, exist_ok=True)
         logger.debug("Provenance folder initialized at: %s", prov_dir)
 
-        provenance_components = [
-            ('sheet', self.config.sheet),
-            ('tip', self.config.tip),
-        ]
+        sheets = self.config.sheets or [self.config.sheet]
+        if len(sheets) > 1:
+            provenance_components = [
+                (f'sheet_{i + 1}', sheet) for i, sheet in enumerate(sheets)
+            ]
+        else:
+            provenance_components = [('sheet', self.config.sheet)]
+        provenance_components.append(('tip', self.config.tip))
         if self.config.sub is not None:
             provenance_components.append(('sub', self.config.sub))
         if self.config.flake is not None:
