@@ -257,6 +257,91 @@ def test_flake_slide_builder_requires_multilayer_substrate(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Output-dir / HPC-job-name collision: two flake configs differing ONLY in
+# their flake material must not build into the same output directory (the
+# defect: output_dir_for/material_token never looked at flake_sheets/[Flake],
+# so they silently overwrote each other -- data loss, not just a name clash).
+# --------------------------------------------------------------------------- #
+
+def _flake_slide_raw(flake_mat=None):
+    """A [2D]+[Flake] raw config dict (pre-pydantic), optionally overriding the
+    flake's material away from the substrate's."""
+    raw = {
+        "general": {"temp": 300, "scan_speed": 100},
+        "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+               "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+               "x": 16.0, "y": 16.0, "layers": [2]},
+        "Flake": {"shape": "hexagon", "edge_length": 5.0, "corner_radius": 3.5,
+                  "corner_spring_k": 10.0},
+    }
+    if flake_mat is not None:
+        raw["Flake"]["mat"] = flake_mat
+    return raw
+
+
+def test_output_dir_differs_when_only_flake_material_differs():
+    from src.core.run import output_dir_for, material_token
+
+    run_a = _flake_slide_raw(flake_mat="h-MoS2")
+    run_b = _flake_slide_raw(flake_mat="h-WS2")
+
+    assert material_token(run_a) != material_token(run_b)
+    assert output_dir_for(run_a, "sheetonsheet") != output_dir_for(run_b, "sheetonsheet")
+
+
+def test_hpc_job_name_differs_when_only_flake_material_differs(tmp_path):
+    from src.builders.flake_slide import FlakeSlideSimulation
+
+    cfg_a = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-MoS2"), settings=load_settings())
+    cfg_b = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-WS2"), settings=load_settings())
+    sim_a = FlakeSlideSimulation(cfg_a, str(tmp_path / "a"))
+    sim_b = FlakeSlideSimulation(cfg_b, str(tmp_path / "b"))
+
+    assert sim_a._get_hpc_job_name() != sim_b._get_hpc_job_name()
+
+
+def test_output_dir_and_job_name_unaffected_by_absent_flake_section():
+    """A config with no [Flake] section at all is unaffected by the fix."""
+    from src.core.run import output_dir_for
+
+    no_flake = {
+        "general": {"temp": 300},
+        "2D": {"mat": "h-MoS2", "x": 100, "y": 100},
+    }
+    assert str(output_dir_for(no_flake, "sheetonsheet")) == "sheetonsheet/h-MoS2/100x_100y/K300"
+
+
+def test_output_dir_byte_identical_when_flake_reuses_substrate_material(tmp_path):
+    """A single-[2D]-plus-[Flake] config that omits the flake's own material
+    (the common case -- the flake reuses the substrate's) must build into the
+    SAME directory / job name as before this fix (no [Flake] section at all)."""
+    from src.core.run import output_dir_for
+
+    no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
+    reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
+
+    assert output_dir_for(no_flake, "sheetonsheet") == output_dir_for(reused_flake, "sheetonsheet")
+
+    from src.builders.flake_slide import FlakeSlideSimulation
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)  # omits flake.mat -> reuses [2D]'s
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    assert sim._get_hpc_job_name() == f"flake_{cfg.sheet.mat}"
+
+
+def test_output_dir_distinguishes_hetero_flake_pair():
+    """A [Flake-1]/[Flake-2] hetero flake must also be reflected in the token
+    (it always names two materials explicitly, unlike a single [Flake])."""
+    from src.core.run import output_dir_for
+
+    raw = _flake_slide_raw()
+    raw["Flake-1"] = {"mat": "h-MoS2", "x": 12.0, "y": 12.0}
+    raw["Flake-2"] = {"mat": "h-WS2", "x": 12.0, "y": 12.0}
+    single = _flake_slide_raw()
+
+    assert output_dir_for(raw, "sheetonsheet") != output_dir_for(single, "sheetonsheet")
+
+
+# --------------------------------------------------------------------------- #
 # End-to-end smoke: build a real MoS2 flake on a MoS2 sheet and RUN the drive.
 # Reuses the D1 slide runner + friction-record parser (imported at module top).
 # --------------------------------------------------------------------------- #

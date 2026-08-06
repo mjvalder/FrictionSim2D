@@ -347,7 +347,32 @@ class FlakeSlideSimulation(SimulationBase):
         return self.output_dir
 
     def _get_hpc_job_name(self) -> str:
-        return f"flake_{self.config.sheet.mat}"
+        """Job name keyed by the substrate AND the flake material(s).
+
+        Named off the substrate ``[2D]`` material alone before this fix -- the
+        same collision as ``output_dir_for``/``material_token`` (see
+        :func:`src.core.run.flake_material_token`): two flake configs sharing
+        the substrate but differing only in flake material produced identical
+        HPC job identities. Mirrors that helper's rule exactly, so the two
+        stay in lockstep: a hetero flake (``flake_sheets`` has 2 entries, each
+        with a required ``mat``) always contributes; a single ``[Flake]``
+        section only contributes when it sets an EXPLICIT ``mat`` of its own
+        (``self.config.flake.mat`` stays ``None`` otherwise --
+        ``_filled_flake_config`` returns a copy and never mutates
+        ``self.config.flake``) -- the common single-material case (the flake
+        reuses the substrate's material) stays byte-identical to before this
+        fix.
+        """
+        sheet_mat = self.config.sheet.mat
+        if len(self.config.flake_sheets) == 2:
+            flake_token = '+'.join(fs.mat for fs in self.config.flake_sheets)
+        elif self.config.flake is not None and self.config.flake.mat is not None:
+            flake_token = self.config.flake.mat
+        else:
+            flake_token = None
+        if flake_token is not None:
+            return f"flake_{sheet_mat}+flake-{flake_token}"
+        return f"flake_{sheet_mat}"
 
     def _record_twist_manifest(self, twist_angle_applied: float) -> None:
         """Record the applied flake twist into the run manifest (D3b).

@@ -775,6 +775,52 @@ def primary_sheet(run_dict: Dict[str, Any]) -> Dict[str, Any]:
     raise KeyError('2D')
 
 
+def _numbered_flake_keys(run_dict: Dict[str, Any]) -> List[str]:
+    """Every 'Flake-N' key in ``run_dict``, sorted by N ascending.
+
+    Mirrors :func:`_numbered_sheet_keys` for the dedicated hetero-flake
+    sections (folded into ``flake_sheets`` by the pydantic model).
+    """
+    return sorted(
+        (k for k in run_dict if isinstance(k, str) and k.startswith('Flake-')),
+        key=lambda key: int(key.split('-', 1)[1])
+        if key.split('-', 1)[1].isdigit() else 10**9,
+    )
+
+
+def flake_material_token(run_dict: Dict[str, Any]) -> Optional[str]:
+    """Directory-token contribution for a ``[Flake]``/``[Flake-N]`` section, or
+    ``None`` when the flake doesn't change the built system's material identity.
+
+    A flake config (:class:`~src.builders.flake_slide.FlakeSlideSimulation`,
+    routed from ``run sheetonsheet`` by a ``[Flake]`` section) is named off the
+    substrate material only today, and ``material_token``/``output_dir_for``
+    never look at ``flake_sheets``/``[Flake-N]`` at all -- so two flake configs
+    differing ONLY in their flake material silently build into the same output
+    directory and overwrite each other.
+
+    A hetero flake (``[Flake-1]``/``[Flake-2]``, folded into ``flake_sheets``)
+    always names two materials explicitly (``mat`` is required on those
+    sections), so it always contributes -- there is no established directory
+    convention for it to stay byte-identical to (today it always collides).
+
+    A single ``[Flake]`` section may omit ``mat`` entirely, in which case the
+    builder reuses the substrate ``[2D]``'s material
+    (:meth:`~src.builders.flake_slide.FlakeSlideSimulation._filled_flake_config`).
+    That's the common case, and it must keep building into today's directory
+    (no ``[Flake]`` at all), so it contributes nothing here. Only an EXPLICIT
+    ``mat`` in ``[Flake]`` contributes -- that's the case that actually changes
+    what gets built and so must change the directory.
+    """
+    numbered = _numbered_flake_keys(run_dict)
+    if numbered:
+        return '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
+    flake = run_dict.get('Flake')
+    if isinstance(flake, dict) and flake.get('mat') is not None:
+        return str(flake['mat'])
+    return None
+
+
 def material_token(run_dict: Dict[str, Any]) -> str:
     """Directory token for the material(s): 'mat' or 'mat1+mat2+...'.
 
@@ -783,11 +829,21 @@ def material_token(run_dict: Dict[str, Any]) -> str:
     Joined with '+' rather than '-': material names themselves contain '-'
     (e.g. 'h-MoS2'), which would make a '-' join unsplittable, and
     postprocessing already folds '-' into '_' for its own filter keys.
+
+    A flake section (see :func:`flake_material_token`) that names a distinct
+    flake material contributes a '+flake-<mat...>' suffix, so a flake config
+    doesn't collide with a hetero substrate ([2D-1]/[2D-2]) config whose
+    material token happens to look the same joined with a bare '+'.
     """
     numbered = _numbered_sheet_keys(run_dict)
     if numbered:
-        return '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
-    return str(primary_sheet(run_dict).get('mat', 'unknown'))
+        base = '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
+    else:
+        base = str(primary_sheet(run_dict).get('mat', 'unknown'))
+    flake_suffix = flake_material_token(run_dict)
+    if flake_suffix is not None:
+        return f"{base}+flake-{flake_suffix}"
+    return base
 
 
 def count_expansion(base_config: Dict[str, Any],
