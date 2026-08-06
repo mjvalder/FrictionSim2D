@@ -242,9 +242,11 @@ class HeteroAFMSimulation(AFMSimulation):
         identical HPC job name ``afm_h-MoS2`` despite building into distinct
         output directories (the directory itself was already pair-token-safe
         via Task 1's ``output_dir_for``/``material_token`` — only the job
-        *name* still collided).
+        *name* still collided). Also includes
+        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
+        unmodified) so a hetero AFM's ``[flake]`` also keys the job name.
         """
-        return _pair_material_token(self.config)
+        return _pair_material_token(self.config) + self._flake_id_suffix()
 
     #: Per-material sheet region split; None here, D5 (finite) sets [None, 'edge'].
     _sheet_regions = None
@@ -636,6 +638,9 @@ class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
         """Pair token (``h-MoS2+h-WS2``) via the shared :func:`_pair_material_token`
         helper (see its docstring for why this can't just inherit
         :meth:`HeteroAFMSimulation._material_id` despite computing the same
-        thing).
+        thing). Also includes
+        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
+        unmodified) so a hetero indent's ``[flake]`` also keys the job name,
+        derived seed, and ``indent_meta.json``.
         """
-        return _pair_material_token(self.config)
+        return _pair_material_token(self.config) + self._flake_id_suffix()

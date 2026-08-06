@@ -763,3 +763,78 @@ def test_afm_init_provenance_single_material_unchanged(tmp_path):
     prov_dir = tmp_path / "provenance"
     assert (prov_dir / "cif" / "h-MoS2.cif").exists()
     assert (prov_dir / "potentials" / "MoS2_wen.sw").exists()
+
+
+# --- Fix round 1 (cont'd): AFM's own [flake] must key output dir + job name ---
+#
+# AFMSimulationConfig.flake uses alias='flake' (lowercase) -- distinct from
+# SheetOnSheetSimulationConfig.flake's alias='Flake' -- but shares the
+# identical FlakeConfig model. flake_material_token only recognised the
+# capital-F key, so it silently never saw an AFM [flake] section at all: two
+# `run afm` configs sharing [2D] but naming different [flake] materials built
+# into the SAME output directory and the SAME HPC job name (verified by
+# construction below, mirroring examples/afm_flake_config.ini).
+
+def test_output_dir_differs_when_only_afm_flake_material_differs():
+    from src.core.run import output_dir_for, material_token
+
+    raw_a = _afm_flake_raw()
+    raw_b = _afm_flake_raw()
+    raw_b["flake"]["mat"] = "h-WS2"
+    raw_b["flake"]["cif_path"] = f"{MAT}/h-WS2.cif"
+    raw_b["flake"]["pot_path"] = f"{POT}/sw_lammps/t-WS2.sw"
+
+    dir_a = output_dir_for(raw_a, "afm")
+    dir_b = output_dir_for(raw_b, "afm")
+    assert dir_a != dir_b
+    assert material_token(raw_a, "afm") != material_token(raw_b, "afm")
+    # Pin the exact collision the reviewer constructed against 72109b7.
+    assert str(dir_a) == "afm/h-MoS2+flake-h-MoS2/40x_40y/sub_aSi_tip_Si_r5/K1"
+    assert str(dir_b) == "afm/h-MoS2+flake-h-WS2/40x_40y/sub_aSi_tip_Si_r5/K1"
+
+
+def test_hpc_job_name_differs_when_only_afm_flake_material_differs():
+    from src.builders.afm import AFMSimulation
+
+    raw_a = _afm_flake_raw()
+    raw_b = _afm_flake_raw()
+    raw_b["flake"]["mat"] = "h-WS2"
+    raw_b["flake"]["cif_path"] = f"{MAT}/h-WS2.cif"
+    raw_b["flake"]["pot_path"] = f"{POT}/sw_lammps/t-WS2.sw"
+
+    cfg_a = AFMSimulationConfig(**raw_a, settings=load_settings())
+    cfg_b = AFMSimulationConfig(**raw_b, settings=load_settings())
+    sim_a = AFMSimulation(cfg_a, "out_a")
+    sim_b = AFMSimulation(cfg_b, "out_b")
+
+    name_a, name_b = sim_a._get_hpc_job_name(), sim_b._get_hpc_job_name()
+    assert name_a != name_b
+    assert name_a == "afm_h-MoS2+flake-h-MoS2"
+    assert name_b == "afm_h-MoS2+flake-h-WS2"
+
+
+def test_output_dir_and_job_name_unaffected_by_absent_afm_flake_section():
+    """An AFM config with no [flake] section at all is unaffected."""
+    from src.core.run import output_dir_for
+    from src.builders.afm import AFMSimulation
+
+    raw = _afm_flake_raw()
+    del raw["flake"]
+    assert str(output_dir_for(raw, "afm")) == "afm/h-MoS2/40x_40y/sub_aSi_tip_Si_r5/K1"
+
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    sim = AFMSimulation(cfg, "out")
+    assert sim._get_hpc_job_name() == "afm_h-MoS2"
+
+
+def test_sheetonsheet_flake_omit_mat_directory_still_byte_identical():
+    """The sheet-on-sheet flake convention this fix must not disturb: a
+    [Flake] section that omits mat (reuses the substrate's) still builds into
+    today's directory -- unchanged by teaching flake_material_token about the
+    AFM family's lowercase 'flake' key too."""
+    from src.core.run import output_dir_for
+
+    no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
+    reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
+
+    assert output_dir_for(no_flake, "sheetonsheet") == output_dir_for(reused_flake, "sheetonsheet")

@@ -788,40 +788,74 @@ def _numbered_flake_keys(run_dict: Dict[str, Any]) -> List[str]:
     )
 
 
-def flake_material_token(run_dict: Dict[str, Any]) -> Optional[str]:
-    """Directory-token contribution for a ``[Flake]``/``[Flake-N]`` section, or
-    ``None`` when the flake doesn't change the built system's material identity.
+def _flake_section(run_dict: Dict[str, Any], model: Optional[str]) -> Any:
+    """The raw ``[Flake]``/``[flake]`` section, whichever alias applies.
 
-    A flake config (:class:`~src.builders.flake_slide.FlakeSlideSimulation`,
-    routed from ``run sheetonsheet`` by a ``[Flake]`` section) is named off the
-    substrate material only today, and ``material_token``/``output_dir_for``
-    never look at ``flake_sheets``/``[Flake-N]`` at all -- so two flake configs
-    differing ONLY in their flake material silently build into the same output
-    directory and overwrite each other.
+    The single-flake-shape section's key differs by family:
+    ``SheetOnSheetSimulationConfig.flake`` aliases ``'Flake'`` (capital),
+    ``AFMSimulationConfig.flake`` aliases ``'flake'`` (lowercase) -- same
+    ``FlakeConfig`` model, different ini/dict key. This mirrors
+    :func:`_routing_view`'s already-established
+    ``flake_key = 'flake' if model in AFM_LIKE_MODELS else 'Flake'`` rule
+    (the routing functions hit this exact casing split first) rather than
+    inventing a second convention. When ``model`` isn't known (the two
+    existing bare ``material_token(run_dict)`` call sites, with no model
+    param, predate this fix) both keys are checked -- a real run_dict from a
+    single family only ever populates one of them.
+    """
+    if model is not None:
+        return run_dict.get('flake' if model in AFM_LIKE_MODELS else 'Flake')
+    flake = run_dict.get('Flake')
+    return flake if flake is not None else run_dict.get('flake')
 
-    A hetero flake (``[Flake-1]``/``[Flake-2]``, folded into ``flake_sheets``)
-    always names two materials explicitly (``mat`` is required on those
-    sections), so it always contributes -- there is no established directory
-    convention for it to stay byte-identical to (today it always collides).
 
-    A single ``[Flake]`` section may omit ``mat`` entirely, in which case the
-    builder reuses the substrate ``[2D]``'s material
+def flake_material_token(run_dict: Dict[str, Any], model: Optional[str] = None) -> Optional[str]:
+    """Directory-token contribution for a ``[Flake]``/``[flake]``/``[Flake-N]``
+    section, or ``None`` when the flake doesn't change the built system's
+    material identity.
+
+    A flake config -- :class:`~src.builders.flake_slide.FlakeSlideSimulation`
+    (routed from ``run sheetonsheet`` by a ``[Flake]`` section) or an AFM
+    ``[flake]`` (the finite shaped flake between tip and sheet, built by
+    :class:`~src.builders.afm.AFMSimulation`) -- was named off the substrate
+    material only: ``material_token``/``output_dir_for`` never looked at
+    ``flake_sheets``/``[Flake-N]``/``[flake]`` at all, so two flake configs
+    differing ONLY in their flake material silently built into the same
+    output directory and overwrote each other. (The first fix for this only
+    checked the capital-F ``'Flake'`` key, so it closed the sheet-on-sheet
+    flake path but missed AFM's lowercase ``'flake'`` alias entirely --
+    ``run_dict.get('Flake')`` is always ``None`` for an AFM config, so the
+    AFM ``[flake]`` collision was never actually closed. See
+    :func:`_flake_section` for the casing rule.)
+
+    A hetero flake (``[Flake-1]``/``[Flake-2]``, folded into ``flake_sheets``
+    for both families) always names two materials explicitly (``mat`` is
+    required on those sections), so it always contributes -- there is no
+    established directory convention for it to stay byte-identical to (today
+    it always collides).
+
+    A single flake section may omit ``mat`` entirely for the sheet-on-sheet
+    family, in which case the builder reuses the substrate ``[2D]``'s
+    material
     (:meth:`~src.builders.flake_slide.FlakeSlideSimulation._filled_flake_config`).
-    That's the common case, and it must keep building into today's directory
-    (no ``[Flake]`` at all), so it contributes nothing here. Only an EXPLICIT
-    ``mat`` in ``[Flake]`` contributes -- that's the case that actually changes
-    what gets built and so must change the directory.
+    That's the common case there, and it must keep building into today's
+    directory (no flake section at all), so it contributes nothing here. AFM's
+    own ``[flake]`` has no such substrate fallback (its builder always needs
+    an explicit ``mat``/``cif_path``/``pot_path`` to carve the flake), so a
+    configured AFM flake always contributes. Either way, only an EXPLICIT
+    ``mat`` contributes -- that's the case that actually changes what gets
+    built and so must change the directory.
     """
     numbered = _numbered_flake_keys(run_dict)
     if numbered:
         return '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
-    flake = run_dict.get('Flake')
+    flake = _flake_section(run_dict, model)
     if isinstance(flake, dict) and flake.get('mat') is not None:
         return str(flake['mat'])
     return None
 
 
-def material_token(run_dict: Dict[str, Any]) -> str:
+def material_token(run_dict: Dict[str, Any], model: Optional[str] = None) -> str:
     """Directory token for the material(s): 'mat' or 'mat1+mat2+...'.
 
     Two hetero runs differing only in material 2 must not share a directory,
@@ -833,14 +867,16 @@ def material_token(run_dict: Dict[str, Any]) -> str:
     A flake section (see :func:`flake_material_token`) that names a distinct
     flake material contributes a '+flake-<mat...>' suffix, so a flake config
     doesn't collide with a hetero substrate ([2D-1]/[2D-2]) config whose
-    material token happens to look the same joined with a bare '+'.
+    material token happens to look the same joined with a bare '+'. ``model``
+    is optional (existing callers predate it) but should be passed whenever
+    known -- see :func:`_flake_section`.
     """
     numbered = _numbered_sheet_keys(run_dict)
     if numbered:
         base = '+'.join(str(run_dict[k].get('mat', 'unknown')) for k in numbered)
     else:
         base = str(primary_sheet(run_dict).get('mat', 'unknown'))
-    flake_suffix = flake_material_token(run_dict)
+    flake_suffix = flake_material_token(run_dict, model)
     if flake_suffix is not None:
         return f"{base}+flake-{flake_suffix}"
     return base
@@ -1193,7 +1229,7 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     so two hetero runs differing only in the second material do not collide;
     ``x``/``y`` come from the primary sheet (see :func:`primary_sheet`).
     """
-    mat = material_token(run_dict)
+    mat = material_token(run_dict, model)
     sheet = primary_sheet(run_dict)
     x = sheet.get('x', 100)
     y = sheet.get('y', 100)

@@ -114,9 +114,11 @@ class IndentSimulation(AFMSimulation):
         pair token instead, so two hetero pairs sharing material 1 don't
         collide on job name, derived seed, or the ``indent_meta.json`` manifest
         key (see :func:`src.core.run.material_token` for the sibling convention
-        on the raw-dict side).
+        on the raw-dict side). Includes
+        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
+        unmodified) so an indent's ``[flake]`` also keys all three.
         """
-        return self.config.sheet.mat
+        return self.config.sheet.mat + self._flake_id_suffix()
 
     def _get_hpc_job_name(self) -> str:
         return f"indent_{self._material_id()}"

@@ -130,8 +130,40 @@ class AFMSimulation(SimulationBase):
         the numeric-order ``+``-joined pair token instead, so two hetero
         configs sharing material 1 don't collide on HPC job identity (mirrors
         :meth:`~src.builders.indent.IndentSimulation._material_id`).
+
+        Includes :meth:`_flake_id_suffix` so an AFM ``[flake]`` also keys the
+        job name -- see that method's docstring for the collision this closes.
         """
-        return self.config.sheet.mat
+        return self.config.sheet.mat + self._flake_id_suffix()
+
+    def _flake_id_suffix(self) -> str:
+        """``'+flake-<mat...>'`` when a flake section names a flake material
+        that changes what gets built, else ``''``.
+
+        Mirrors :func:`src.core.run.flake_material_token`'s rule exactly (kept
+        in lockstep so the job name and the output directory always agree on
+        whether a flake changes a config's identity): a hetero flake
+        (``flake_sheets`` has 2 entries, ``mat`` required on each) always
+        contributes; a single ``[flake]`` section contributes whenever it
+        names a material (``self.config.flake.mat``) -- AFM's own flake,
+        unlike the sheet-on-sheet flake slide's, has no substrate fallback
+        (``components.build_flake_component`` needs its own
+        ``mat``/``cif_path``/``pot_path`` to build the flake at all), so a
+        configured AFM flake always contributes. No ``[flake]``/
+        ``[flake-N]`` section at all -> ``''``, so the job name stays
+        byte-identical to before this method existed.
+
+        Shared (not overridden) by every ``_material_id`` in this family --
+        :class:`~src.builders.indent.IndentSimulation` and
+        :class:`~src.builders.hetero_afm.HeteroAFMSimulation`/
+        :class:`~src.builders.hetero_afm.HeteroIndentSimulation` all inherit
+        it unmodified and only append it to their own material token.
+        """
+        if len(self.config.flake_sheets) == 2:
+            return '+flake-' + '+'.join(fs.mat for fs in self.config.flake_sheets)
+        if self.config.flake is not None and self.config.flake.mat is not None:
+            return f'+flake-{self.config.flake.mat}'
+        return ''
 
     def _get_hpc_job_name(self) -> str:
         """Get AFM-specific job name."""
