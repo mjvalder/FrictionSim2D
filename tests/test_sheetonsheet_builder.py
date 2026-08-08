@@ -397,3 +397,24 @@ def test_sheetonsheet_outer_loop_scan_angle_rejects_scan_angle_force(tmp_path: P
 
     with pytest.raises(ValueError, match="scan_angle_force"):
         builder.write_inputs()
+
+
+def test_hpc_job_name_goes_through_the_material_id_hook(tmp_path: Path) -> None:
+    """The job name must read the hook, not `config.sheet.mat` a second time.
+
+    `_material_id` exists so the hetero builders can key the name on the full
+    `mat1+mat2` pair. A `_get_hpc_job_name` that re-reads `config.sheet.mat`
+    happens to agree here, which is exactly why the divergence would go
+    unnoticed until a subclass overrode one and not the other.
+    """
+    config = _make_sheetonsheet_config(tmp_path, layers=[3])
+    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
+
+    assert builder._get_hpc_job_name() == f"sheet_{builder._material_id()}"
+
+    class _Paired(SheetOnSheetSimulation):
+        def _material_id(self) -> str:
+            return "mat1+mat2"
+
+    paired = _Paired(config, output_dir=str(tmp_path / "out"))
+    assert paired._get_hpc_job_name() == "sheet_mat1+mat2"

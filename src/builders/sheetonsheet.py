@@ -152,8 +152,15 @@ class SheetOnSheetSimulation(SimulationBase):
         return self.config.sheet.mat
 
     def _get_hpc_job_name(self) -> str:
-        """Get sheet-on-sheet specific job name."""
-        return f"sheet_{self.config.sheet.mat}"
+        """Get sheet-on-sheet specific job name.
+
+        Through :meth:`_material_id` rather than ``config.sheet.mat`` directly:
+        two spellings of the same token one line apart is how they drift, and
+        the hook is what the hetero builders override to key the name on the
+        full pair. Inert here (this builder's ``_material_id`` IS
+        ``config.sheet.mat``) — it is the consistency that matters.
+        """
+        return f"sheet_{self._material_id()}"
 
     def _collect_simulation_paths(self) -> List[str]:
         """Sheet-on-sheet has single simulation directory."""
