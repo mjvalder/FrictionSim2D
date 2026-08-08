@@ -115,12 +115,18 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     read from the bottom-layer reaction force (many-body ``sw`` hybrid, no
     ``compute group/group``).
 
-    Path convention (diverges from the homogeneous builder, intentional for D1):
-    every path in the render context is RUN-DIR-RELATIVE (``hetero.data``,
-    ``lammps/system.in.settings``, ``results/...``, ``visuals/...``). The stack
-    is built directly into ``output_dir`` so the potential settings' run-dir-
-    relative ``provenance/potentials/...`` prefix lines up when LAMMPS is run
-    with ``cwd = output_dir`` (Task 5's e2e).
+    Path convention: the SAME as every other builder in the package -- every
+    path in the render context, and the ``provenance/potentials/...`` prefix in
+    the written ``system.in.settings``, is prefixed with
+    :attr:`~src.core.simulation_base.SimulationBase.relative_run_dir`, i.e. it
+    is relative to the SIMULATION ROOT. That is the directory the generated HPC
+    job scripts run LAMMPS from (``cd $PBS_O_WORKDIR``, or the scratch mirror
+    of it), so a hetero run's job scripts open the same files a local run does.
+    The stack is still assembled directly into ``output_dir``; only how the
+    scripts *name* those files is root-relative. When the builder is used
+    standalone (no ``set_base_output_dir``), ``relative_run_dir`` is the
+    ``output_dir`` argument itself, so an absolute ``output_dir`` yields
+    absolute paths that resolve from any working directory.
     """
 
     #: A dynamic hetero slide needs a fixed bottom, a thermostatted middle and a
@@ -175,6 +181,22 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         than material 1 alone.
         """
         return '+'.join(sheet.mat for sheet in self.config.sheets)
+
+    def _potentials_prefix(self) -> str:
+        """How the written ``pair_coeff`` lines name the staged potential files.
+
+        Sim-root-relative, exactly like
+        :meth:`SheetOnSheetSimulation._generate_potentials` and
+        :meth:`HeteroAFMSimulation`'s own :class:`PotentialManager`: the
+        generated HPC scripts run LAMMPS from the simulation root, so a bare
+        ``provenance/potentials/...`` would be looked up beside the root rather
+        than inside this run's directory.
+        """
+        return str(self.relative_run_dir / "provenance" / "potentials")
+
+    def _run_dir_path(self, *parts: str) -> str:
+        """A run-dir file named the way the LAMMPS scripts must name it."""
+        return str(Path(self.relative_run_dir, *parts))
 
     def _get_hpc_job_name(self) -> str:
         """Job name keyed by every configured material, not just sheet 1.
@@ -245,12 +267,13 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         self._create_directories()
         self._init_provenance()
 
-        # Build the stack INTO the run dir so the potential settings' run-dir-
-        # relative prefix (provenance/potentials/...) resolves when LAMMPS runs
-        # from output_dir (Task 5). This writes output_dir/hetero.data,
-        # output_dir/lammps/system.in.settings and output_dir/provenance/.
+        # Build the stack INTO the run dir (output_dir/hetero.data,
+        # output_dir/lammps/system.in.settings, output_dir/provenance/), but
+        # have the settings NAME the staged potentials sim-root-relatively --
+        # that is the directory the HPC job scripts run LAMMPS from.
         stack = build_hetero_structure(
-            self.config, self.config.settings, workdir=self.output_dir
+            self.config, self.config.settings, workdir=self.output_dir,
+            potentials_prefix=self._potentials_prefix(),
         )
 
         bands = compute_layer_zbands(stack.data_path, stack.layers)
@@ -300,6 +323,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                 self.config.settings,
                 self.output_dir,
                 reserve_virtual_type=True,
+                potentials_prefix=self._potentials_prefix(),
             )
             # Fail loud on any real-type-layout divergence: never ship an
             # inconsistent settings/data pairing. type_ids covers the REAL
@@ -353,18 +377,14 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         if stack.twist_angle_achieved is not None:
             self._record_twist_manifest(stack, self.config.general.twist_angle)
 
-        # Reuse the homogeneous HPC scaffolding, but do NOT let it block the
-        # slide.in write. It also assumes the sim-root-relative path convention;
-        # the hetero slide is run-dir-relative, so any script it emits needs a
-        # path-convention follow-up (Task 5) rather than being forced here.
-        try:
-            self._generate_hpc_scripts()
-        except Exception as exc:  # pragma: no cover - defensive, non-fatal
-            logger.warning(
-                "HPC script generation skipped for hetero slide (%s). The "
-                "homogeneous HPC path assumes sim-root-relative paths while the "
-                "hetero slide is run-dir-relative; deferring to Task 5.", exc,
-            )
+        # The homogeneous HPC scaffolding, used unmodified: this builder renders
+        # sim-root-relative paths (see the class docstring), which is the
+        # convention that scaffolding — and the job scripts it writes — assume.
+        # Called bare, like SheetOnSheetSimulation.build and AFMSimulation.build:
+        # a failure here (e.g. settings.hpc.modules unset) is a real, reportable
+        # misconfiguration, and swallowing it produced a tree with no job scripts
+        # and nothing but a log line to say why.
+        self._generate_hpc_scripts()
 
     def _reserve_drive_virtual_type(self) -> bool:
         """Whether the run phase needs a dedicated non-interacting drive atom.
@@ -400,7 +420,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
         # Same key set as SheetOnSheetSimulation.write_inputs' base_context (only
         # the keys the template actually references), with hetero-specific values
-        # and RUN-DIR-RELATIVE paths.
+        # and the same SIM-ROOT-RELATIVE paths that builder uses.
         context = {
             "temp": general.temp,
             "xlo": box["xlo"],
@@ -408,8 +428,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "ylo": box["ylo"],
             "yhi": box["yhi"],
             "zhi": box["zhi"],
-            "data_file": "hetero.data",
-            "potential_file": "lammps/system.in.settings",
+            "data_file": self._run_dir_path("hetero.data"),
+            "potential_file": self._run_dir_path("lammps", "system.in.settings"),
             "num_atom_types": self._hetero_num_atom_types,
             "reserve_virtual_type": self._hetero_virtual_type_reserved,
             "ngroups": stack.total_types,
@@ -441,11 +461,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "results_freq": out.results_frequency,
             "dump_freq": out.dump_frequency.get("slide", 1000),
             "dump_enabled": out.dump.get("slide", False),
-            "results_file_pattern": (
-                "results/friction_p${pressure}_a${a}_s${speed}"
+            "results_file_pattern": self._run_dir_path(
+                "results", "friction_p${pressure}_a${a}_s${speed}"
             ),
-            "dump_file_pattern": (
-                "visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj"
+            "dump_file_pattern": self._run_dir_path(
+                "visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"
             ),
             "driving_spring_ev": (general.driving_spring or 50.0) / NM_TO_EV_A2,
             "bond_spring_ev": (general.bond_spring or 80.0) / NM_TO_EV_A2,

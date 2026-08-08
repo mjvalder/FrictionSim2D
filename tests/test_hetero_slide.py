@@ -17,10 +17,22 @@ from src.builders.hetero_slide import (
     render_hetero_slide,
 )
 from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.core.run import _select_sheet_builder_cls
+from src.core.run import _select_sheet_builder_cls, generate_hpc_scripts_for_root
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
+
+
+def _settings():
+    """Settings a full ``build()`` can complete on.
+
+    ``hpc.modules`` gates job-script generation, which ``build()`` runs and
+    (like every other builder in the package) does not swallow the failure of.
+    Same one-liner ``test_hetero_afm`` uses for its full builds.
+    """
+    settings = load_settings()
+    settings.hpc.modules = ["lammps"]
+    return settings
 
 
 def _hetero_2p2_config():
@@ -31,7 +43,7 @@ def _hetero_2p2_config():
         "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
                  "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [2]},
     }
-    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
 def _hetero_1p1_config():
@@ -42,7 +54,7 @@ def _hetero_1p1_config():
         "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
                  "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
     }
-    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
 def test_layer_zbands_partition_all_atoms(tmp_path):
@@ -425,6 +437,82 @@ def test_hetero_sheet_job_name_differs_by_full_pair():
     assert name_b == "friction_h-MoS2+h-WSe2"
 
 
+# --- HPC job scripts for a hetero run ------------------------------------- #
+
+#: Every path a LAMMPS script opens for reading, as written into the script.
+_READ_PATH_RE = re.compile(r'^(?:read_data|include)\s+(\S+)', re.M)
+
+
+def _referenced_input_paths(script_text):
+    return _READ_PATH_RE.findall(script_text)
+
+
+def _staged_potential_paths(settings_text):
+    """The potential files ``pair_coeff`` lines point at, as written.
+
+    A ``pair_coeff`` line mixes path tokens with pair-style names that also
+    contain a slash (``lj/cut``); only the former carry a file extension.
+    """
+    return [
+        token
+        for line in settings_text.splitlines()
+        if line.strip().startswith('pair_coeff')
+        for token in line.split()
+        if '/' in token and Path(token).suffix
+    ]
+
+
+def test_hetero_run_writes_hpc_scripts_whose_paths_resolve(tmp_path):
+    """A hetero run must produce submittable job scripts, not a log warning.
+
+    The scripts run LAMMPS from the SIMULATION ROOT (``cd $PBS_O_WORKDIR`` /
+    the scratch mirror of it), so every path the hetero slide references has to
+    resolve from there. Rendering run-dir-relative paths instead produced a
+    script LAMMPS could not open -- and the builder swallowing the generation
+    error meant nothing said so.
+    """
+    root = tmp_path / "simulation_root"
+    run_dir = root / "sheetonsheet" / "h-MoS2+h-WS2" / "12x_12y" / "K300"
+    cfg = _hetero_2p2_config()
+
+    sim = HeteroSheetOnSheetSimulation(cfg, str(run_dir))
+    sim.set_base_output_dir(root)
+    sim.build()
+
+    assert generate_hpc_scripts_for_root(root, cfg.settings) is None
+    scripts = sorted(p.name for p in (root / "hpc").iterdir())
+    assert "run.pbs" in scripts
+
+    slide = (run_dir / "lammps" / "slide.in").read_text()
+    referenced = _referenced_input_paths(slide)
+    assert referenced, "slide.in references no input files at all"
+    for path in referenced:
+        assert (root / path).is_file(), (
+            f"{path} does not resolve from the simulation root {root}")
+
+    settings_text = (run_dir / "lammps" / "system.in.settings").read_text()
+    staged = _staged_potential_paths(settings_text)
+    assert staged, "no staged potential files referenced"
+    for path in staged:
+        assert (root / path).is_file(), (
+            f"staged potential {path} does not resolve from {root}")
+
+
+def test_hetero_build_does_not_swallow_hpc_generation_failures(tmp_path):
+    """``hpc.modules`` unset is a real, reportable precondition.
+
+    The homogeneous builders raise it out of ``build()``; the hetero one used
+    to catch every exception from HPC generation and log a warning, so the same
+    misconfiguration produced no scripts and no error.
+    """
+    cfg = _hetero_2p2_config()
+    cfg.settings.hpc.modules = None
+    sim = HeteroSheetOnSheetSimulation(cfg, str(tmp_path / "run"))
+
+    with pytest.raises(ValueError, match="modules"):
+        sim.build()
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end smoke: build a real 2+2 MoS2/WS2 hetero slide and RUN it in LAMMPS
 # --------------------------------------------------------------------------- #
@@ -498,7 +586,7 @@ def _twisted_moire_config():
         "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
                  "pot_type": "sw", "x": 8.0, "y": 8.0, "layers": [2]},
     }
-    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")

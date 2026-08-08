@@ -927,3 +927,61 @@ def test_hetero_edge_and_multilayer_coexist(tmp_path):
     # No lost atoms with the extra layers + edge types either.
     energy = _lammps_run0_energy(stack.data_path, stack.settings_path)
     assert np.isfinite(energy) and abs(energy) < 1e6
+
+
+# =============================================================================
+# potentials_prefix: how the RUN scripts name the staged potential files
+# =============================================================================
+
+
+def _pair_coeff_potential_paths(settings_path):
+    """The potential-file tokens the written ``pair_coeff`` lines carry.
+
+    A ``pair_coeff`` line also holds pair-style names containing a slash
+    (``lj/cut``); only the file tokens have an extension.
+    """
+    return [
+        token
+        for line in Path(settings_path).read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("pair_coeff")
+        for token in line.split()
+        if "/" in token and Path(token).suffix
+    ]
+
+
+def test_default_prefix_is_run_dir_relative(tmp_path):
+    """Unchanged for callers that run LAMMPS from the run directory itself."""
+    cfg = _two_material_config()
+    stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
+    paths = _pair_coeff_potential_paths(stack.settings_path)
+    assert paths
+    assert all(p.startswith("provenance/potentials/") for p in paths), paths
+
+
+@pytest.mark.parametrize("edge_width", [1.5, 0.0])
+@pytest.mark.parametrize("finite", [False, True])
+def test_requested_prefix_reaches_the_written_settings(tmp_path, finite, edge_width):
+    """The prefix must survive every branch that writes the settings file.
+
+    Three of them do: the plain assembly, the finite/edge re-registration, and
+    a finite config whose ``finite_sheet_edge_width`` is 0 -- where the edge
+    path no-ops and the plain retarget has to run instead. Assembly itself
+    always needs the run-dir-relative prefix (it runs LAMMPS from the work
+    directory), so this is necessarily a rewrite after the fact, and missing
+    any one branch ships a script LAMMPS cannot open.
+    """
+    cfg = _finite_hetero_cfg(tmp_path) if finite else _two_material_config()
+    cfg.settings.geometry.finite_sheet_edge_width = edge_width
+    prefix = "sheetonsheet/h-MoS2+h-WS2/run/provenance/potentials"
+
+    stack = build_hetero_structure(
+        cfg, cfg.settings, workdir=tmp_path, potentials_prefix=prefix
+    )
+
+    paths = _pair_coeff_potential_paths(stack.settings_path)
+    assert paths
+    assert all(p.startswith(prefix + "/") for p in paths), paths
+    # The staged files really are where the prefix says, relative to a root
+    # that contains the run directory.
+    for path in paths:
+        assert (tmp_path / "provenance" / "potentials" / Path(path).name).is_file()

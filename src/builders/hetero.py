@@ -223,6 +223,7 @@ def register_hetero_potentials(
     workdir: PathLike,
     reserve_virtual_type: bool = False,
     regions: Optional[List[Optional[str]]] = None,
+    potentials_prefix: Optional[str] = None,
 ) -> HeteroPotentials:
     """Register the stacked materials as PotentialManager components.
 
@@ -273,6 +274,15 @@ def register_hetero_potentials(
             the assembled data file. Edge ids are then exposed via
             ``pm.types.ids_by_component_region('sheet_i', 'edge')``. Default
             ``None`` leaves the periodic registration byte-identical.
+        potentials_prefix: Path prefix the written ``pair_coeff`` lines use to
+            reach the staged potential files. The files themselves always land
+            in ``<workdir>/provenance/potentials``; this is only how the LAMMPS
+            script names them, so it must be relative to the directory LAMMPS
+            is run from. Default ``None`` keeps the run-dir-relative
+            ``provenance/potentials`` -- correct when ``workdir`` IS that
+            directory. A builder whose scripts run from a shared simulation
+            root passes its own sim-root-relative prefix (see
+            :meth:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation._potentials_prefix`).
 
     Returns:
         :class:`HeteroPotentials` exposing the configured manager, the written
@@ -297,11 +307,14 @@ def register_hetero_potentials(
 
     # Mirror the AFM / sheet-on-sheet potential path exactly: stage the real
     # potential files under the run dir's provenance folder and reference them
-    # by a run-dir-relative prefix in the pair_coeff lines.
+    # by the caller's prefix in the pair_coeff lines.
     pm = PotentialManager(
         settings,
         potentials_dir=workdir / "provenance" / "potentials",
-        potentials_prefix=str(Path("provenance") / "potentials"),
+        potentials_prefix=(
+            potentials_prefix if potentials_prefix is not None
+            else str(Path("provenance") / "potentials")
+        ),
     )
 
     # 1. One component per material -> disjoint, contiguous global type blocks
@@ -1570,6 +1583,7 @@ def build_hetero_structure(
     config: SheetOnSheetSimulationConfig,
     settings: GlobalSettings,
     workdir: PathLike,
+    potentials_prefix: Optional[str] = None,
 ) -> HeteroStack:
     """Build a ready heterostructure stack from a two-material config.
 
@@ -1610,6 +1624,10 @@ def build_hetero_structure(
         workdir: Run directory. All artefacts (per-material supercells,
             ``lammps/system.in.settings``, staged ``provenance/potentials``, and
             the final ``hetero.data``) are written under it.
+        potentials_prefix: How the written ``pair_coeff`` lines name the staged
+            potential files -- forwarded verbatim to
+            :func:`register_hetero_potentials`, whose docstring states the
+            contract. Default ``None`` keeps the run-dir-relative prefix.
 
     Returns:
         The assembled :class:`HeteroStack`; ``.data_path`` and ``.settings_path``
@@ -1669,6 +1687,12 @@ def build_hetero_structure(
     #    The finite/edge path needs the SINGLE-type spine here (assembly aligns
     #    the data file to it); the doubled core/edge spine is registered AFTER
     #    the patch is edge-typed (below), so the two stay consistent.
+    #
+    #    Always the DEFAULT run-dir-relative prefix, whatever the caller asked
+    #    for: assembly below runs LAMMPS with ``cwd = workdir``, so that is the
+    #    only prefix its own minimization runs can open. A caller-supplied
+    #    prefix is for the RUN scripts, which may start elsewhere, and is
+    #    applied by re-registering once the assembly is done (step 6).
     hetero_potentials = register_hetero_potentials(sheets, settings, workdir)
 
     # 4. Assemble into one periodic hetero.data aligned to that spine.
@@ -1689,8 +1713,29 @@ def build_hetero_structure(
     #    (apply_sheet_edge_types keys off bound(all,*), the atom bounding box).
     #    Doing it per-monolayer before tiling would bury the band in the
     #    coincidence supercell's interior (the cell is generally not 1x1).
+    edged = False
     if bool(config.general.finite_sheet) and len(sheets) >= 2:
-        _apply_finite_hetero_edges(stack, sheets, settings, workdir)
+        edged = _apply_finite_hetero_edges(
+            stack, sheets, settings, workdir,
+            potentials_prefix=potentials_prefix,
+        )
+
+    # 6. Re-write the settings so the ``pair_coeff`` lines name the staged
+    #    potentials the way the RUN scripts must name them. Assembly needed the
+    #    run-dir-relative prefix (it runs LAMMPS from ``workdir``); a builder
+    #    whose job scripts start from the simulation root needs its own. The
+    #    registration is geometry-independent and deterministic, so replaying it
+    #    changes the path strings and nothing else.
+    #
+    #    Skipped only when the edge path ABOVE actually re-registered: that
+    #    write carries the doubled core/edge types and the appended edge groups,
+    #    which a plain re-registration here would silently drop. It returns False
+    #    when it no-ops (edge_width <= 0), and then this must still run.
+    if potentials_prefix is not None and not edged:
+        retargeted = register_hetero_potentials(
+            sheets, settings, workdir, potentials_prefix=potentials_prefix
+        )
+        stack.settings_path = Path(retargeted.settings_path)
 
     return stack
 
@@ -1700,7 +1745,8 @@ def _apply_finite_hetero_edges(
     sheets: List[SheetConfig],
     settings: GlobalSettings,
     workdir: Path,
-) -> None:
+    potentials_prefix: Optional[str] = None,
+) -> bool:
     """Edge-type an assembled hetero patch in place and re-register its spine.
 
     Mirrors the homogeneous finite path's replicate-then-edge-type ordering
@@ -1712,6 +1758,18 @@ def _apply_finite_hetero_edges(
     potential spine is re-registered with ``regions=[None, 'edge']`` so
     ``system.in.settings`` describes the doubled types. ``stack`` is updated in
     place (``settings_path`` / ``total_types``).
+
+    This re-registration is also where a caller-supplied ``potentials_prefix``
+    lands on the finite path: it is the last write of the settings file, so it
+    is the one the run scripts read. See
+    :func:`register_hetero_potentials` for what the prefix means.
+
+    Returns:
+        Whether the spine was re-registered. False means this was a no-op
+        (``finite_sheet_edge_width <= 0``) and the settings file still holds
+        whatever the assembly wrote -- which is why
+        :func:`build_hetero_structure` reads this rather than assuming the
+        finite branch always had the last word on the prefix.
 
     Raises:
         ValueError: If ``finite_sheet_edge_width`` is not smaller than half the
@@ -1744,7 +1802,8 @@ def _apply_finite_hetero_edges(
     # system.in.settings matches the retyped data file (same shared
     # register_sheet_block routine, now with regions).
     hp_edge = register_hetero_potentials(
-        sheets, settings, workdir, regions=[None, "edge"]
+        sheets, settings, workdir, regions=[None, "edge"],
+        potentials_prefix=potentials_prefix,
     )
     stack.settings_path = Path(hp_edge.settings_path)
     stack.total_types = len(hp_edge.pm.types)

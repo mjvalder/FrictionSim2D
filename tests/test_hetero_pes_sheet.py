@@ -39,9 +39,20 @@ def _hetero_pes_raw(layers=(1, 1), grid_n=4):
     }
 
 
+def _settings():
+    """Settings a full ``build()`` can complete on.
+
+    ``hpc.modules`` gates job-script generation, which ``build()`` runs and
+    does not swallow the failure of -- see ``test_hetero_slide``.
+    """
+    settings = load_settings()
+    settings.hpc.modules = ["lammps"]
+    return settings
+
+
 def _hetero_pes_config(layers=(1, 1), grid_n=4):
     return SheetOnSheetSimulationConfig(**_hetero_pes_raw(layers, grid_n),
-                                        settings=load_settings())
+                                        settings=_settings())
 
 
 def _single_material_pes_config():
@@ -224,12 +235,14 @@ def test_hetero_pes_sheet_build_emits_scan_over_interface_repeat(tmp_path):
     assert "aveforce" not in text and "langevin" not in text
     assert "create_atoms" not in text          # no virtual drive atom
 
-    # (2) run-dir-relative hetero data file (resolves with cwd = run dir)
-    assert "read_data       hetero.data" in text
+    # (2) the assembled hetero stack, named relative to `relative_run_dir`
+    #     (here the absolute output_dir, since no simulation root was set) --
+    #     NOT the homogeneous builder's build/<sheet>.lmp.
+    assert f"read_data       {tmp_path}/hetero.data" in text
     assert "build/" not in text
     assert (tmp_path / "hetero.data").exists()
-    assert "include         lammps/system.in.settings" in text
-    assert "results/pes_scan.csv" in text
+    assert f"include         {tmp_path}/lammps/system.in.settings" in text
+    assert f"{tmp_path}/results/pes_scan.csv" in text
 
     # (3) z-band region groups (hetero layers share atom types)
     assert "group           layer_1 region reg_layer_1" in text
@@ -302,10 +315,13 @@ def test_hetero_pes_sheet_build_emits_scan_over_interface_repeat(tmp_path):
 def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     """Capstone smoke: the emitted scan is valid LAMMPS and actually runs.
 
-    ``cwd`` MUST be the run dir: every path in the script is run-dir-relative
-    (``hetero.data``, ``lammps/system.in.settings``, and the settings file's
-    staged ``provenance/potentials/...`` prefix), so this also proves the path
-    convention. Checks a real corrugation was written to ``results/``.
+    Every path in the script -- ``hetero.data``, ``lammps/system.in.settings``,
+    the settings file's staged ``provenance/potentials/...``, the results CSV --
+    is written relative to ``relative_run_dir``, which for a builder used
+    without ``set_base_output_dir`` is the absolute ``output_dir``. So the
+    script resolves from any ``cwd``; the sim-root-relative form the HPC job
+    scripts get is covered in ``test_hetero_slide``. Checks a real corrugation
+    was written to ``results/``.
     """
     import subprocess
 
@@ -319,7 +335,7 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     # a 12 A target gives an ~11.03 A edge (too tight), 14 A gives ~12.7 A.
     for key in ("2D-1", "2D-2"):
         raw[key]["x"] = raw[key]["y"] = 14.0
-    cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
     sim = HeteroPESSheetSimulation(cfg, str(tmp_path))
     sim.build()

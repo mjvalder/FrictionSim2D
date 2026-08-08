@@ -144,13 +144,12 @@ class PESGridMixin:
       package's one-template-per-family convention — cf. ``afm/pes_scan.lmp``
       vs ``afm_freestanding/pes_scan.lmp``) scan loop.
     * :meth:`_scan_data_file` / :meth:`_scan_potential_file` /
-      :meth:`_scan_results_path` — the path convention. The homogeneous builder
-      is SIM-ROOT-relative (``{relative_run_dir}/build/<sheet>.lmp``, LAMMPS run
-      from the simulation root); the hetero builder is RUN-DIR-relative
-      (``hetero.data``, ``lammps/system.in.settings``, ``results/...``, LAMMPS
-      run with ``cwd = output_dir`` so the settings file's staged
-      ``provenance/potentials/...`` prefix resolves). Mixing them yields a
-      script LAMMPS cannot open, so neither convention is hardcoded here.
+      :meth:`_scan_results_path` — *which* files, not which convention. Both
+      families are SIM-ROOT-relative (``{relative_run_dir}/...``, LAMMPS run
+      from the simulation root by the generated job scripts), but they name
+      different artefacts: the homogeneous builder's ``build/<sheet>.lmp``
+      versus the hetero builder's assembled ``hetero.data``. Hardcoding either
+      set yields a script LAMMPS cannot open, so neither is hardcoded here.
     * :meth:`_scan_periods` — the scan period, i.e. the surface cell the top
       layer is rastered over. Homogeneous: the material's own orthogonalized
       unit cell, filled by ``components.build_sheet(..., unit_cell_out=...)``
@@ -664,14 +663,19 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
         return "hetero/pes_scan.lmp"
 
     def _scan_data_file(self) -> str:
-        """Run-dir-relative, like the hetero slide (LAMMPS runs from the run dir)."""
-        return "hetero.data"
+        """Sim-root-relative, like the hetero slide this builder inherits from.
+
+        The assembled stack lives in the run dir, but the generated HPC job
+        scripts run LAMMPS from the simulation root, so the script names it
+        from there (:meth:`HeteroSheetOnSheetSimulation._run_dir_path`).
+        """
+        return self._run_dir_path("hetero.data")
 
     def _scan_potential_file(self) -> str:
-        return "lammps/system.in.settings"
+        return self._run_dir_path("lammps", "system.in.settings")
 
     def _scan_results_path(self, csv_name: str) -> str:
-        return f"results/{csv_name}"
+        return self._run_dir_path("results", csv_name)
 
     def _interface_repeat(self) -> tuple:
         """``((period_x, period_y), (nx, ny))`` for the assembled interface.
