@@ -17,6 +17,10 @@ Global parameters live in `settings.yaml` and are documented separately in
 
 Optional in any model: `[lj_override]`.
 
+Every model's `[2D]` may instead be written as numbered `[2D-1]`/`[2D-2]`
+sections, which stack the two materials into a heterostructure — see
+[heterostructure pair sweeps](#heterostructure-pair-sweeps).
+
 ## Core fields
 
 ### [2D]
@@ -222,9 +226,78 @@ cif_path = examples/materials/{mat}.cif
 pot_path = examples/potentials/sw/sw_lammps/{mat}.sw
 ```
 
-`materials_list` format: one material token per line, no header. Potential and CIF
-paths resolve literally — there is no search path — so every `{mat}` must have a
-matching file.
+`materials_list` format: one material token per line, no header. Blank lines and
+`#` comments (whole-line or trailing) are ignored. Potential and CIF paths
+resolve literally — there is no search path — so every `{mat}` must have a
+matching file; a name whose files cannot be found is skipped with a warning, and
+a list where none resolve is an error rather than a run that generates nothing.
+
+A comma-separated line is several separate single materials: `h-MoS2, h-WS2`
+means two runs, one per material.
+
+### Heterostructure pair sweeps
+
+A config with two numbered sheet sections, `[2D-1]` and `[2D-2]`, builds a
+heterostructure. Its material list holds one **ordered pair** per line, members
+joined with `+`:
+
+```
+h-MoS2 + h-WS2
+h-MoS2 + h-WSe2
+h-MoSe2 + h-WS2
+```
+
+```ini
+[2D-1]
+materials_list = examples/hetero_pairs.txt
+mat = {mat1}
+cif_path = examples/materials/{mat1}.cif
+pot_path = examples/potentials/sw/sw_lammps/{mat1}.sw
+
+[2D-2]
+mat = {mat2}
+cif_path = examples/materials/{mat2}.cif
+pot_path = examples/potentials/sw/sw_lammps/{mat2}.sw
+```
+
+The runnable version is [../examples/hetero_pair_sweep.ini](../examples/hetero_pair_sweep.ini)
+with [../examples/hetero_pairs.txt](../examples/hetero_pairs.txt); the three
+lines above expand into three runs.
+
+Points worth knowing:
+
+- **`+`, not a comma.** A comma line still means two separate single materials —
+  long-standing behaviour that pair support did not change. A line cannot mix
+  the two separators, and a `+` line must name exactly two materials — there is
+  no `[2D-3]` for a third.
+- **Order matters.** Member 1 fills `[2D-1]`, member 2 fills `[2D-2]`. Pairs are
+  never sorted or normalised, so `h-MoS2 + h-WS2` and `h-WS2 + h-MoS2` are
+  different stacks and different runs.
+- **Only `[2D-1]` carries `materials_list`.** `[2D-2]` is filled from the same
+  line's second member.
+- **Placeholders.** `{mat1}` and `{mat2}` are the pair's two members;
+  `{mat}` is equivalent to `{mat1}`. Both sections may use either.
+- **Output directories join with `+`**, e.g. `h-MoS2+h-WS2` — real material
+  names contain `-`, so a `-` join could not be split back apart.
+- **Arity must agree with the sections.** A pair line in a config with no
+  `[2D-2]` is an error, and so is a single-name line in a config that has one.
+  Both name the offending line.
+
+#### Which models accept a heterostructure config
+
+`[2D-1]`/`[2D-2]` are accepted by `sheetonsheet`, `afm`, `indent`, `pes_tip` and
+`pes_sheet`; each routes to that model's heterostructure builder. Two
+restrictions apply to the AFM family: a `[sub]` section is required (there is no
+freestanding heterostructure), and `[general] finite_sheet` is supported only by
+`afm`, not by `indent`.
+
+Each material's `layers` holds exactly one value and the counts add up:
+`[2] + [2]` is the four-layer sheet-on-sheet stack (fixed bottom, thermostatted
+middle, driven top), while `pes_sheet` wants `[1] + [1]` — a frozen bottom
+monolayer and a scanned top one. `[general] hetero_stacking` chooses whether
+each material's layers stay together (`grouped`) or interleave (`alternating`),
+and `[general] twist_angle` builds a moiré — including from a single `[2D]`
+section, which is the one heterostructure config that needs no second material.
 
 ## Scan angle formats
 

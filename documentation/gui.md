@@ -242,6 +242,11 @@ is selected. Paths that still contain `{mat}` are reported as pending
 substitutions rather than as validation errors, so a templated config renders
 and generates normally.
 
+The list may also hold `mat1 + mat2` pair lines, which sweep a heterostructure
+config's `[2D-1]`/`[2D-2]` over ordered material pairs. That form is CLI-only —
+this window declines to open a numbered config at all — and is documented in
+[configuration.md](configuration.md#heterostructure-pair-sweeps).
+
 ## Render
 
 **Render** (**Ctrl+R**) builds the configured components, assembles them as

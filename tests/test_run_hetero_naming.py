@@ -76,3 +76,72 @@ def test_output_dir_for_numbered_only_uses_first_sheet_for_size():
     path = output_dir_for(run_dict, 'sheetonsheet')
 
     assert str(path) == 'sheetonsheet/h-MoS2+h-WS2/50x_60y/K300'
+
+
+class TestShippedPairSweepExample:
+    """`examples/hetero_pair_sweep.ini` is documented as runnable.
+
+    A shipped example that does not run is worse than none, and the ways it
+    rots are silent: a renamed CIF, a pair that stops matching, a placeholder
+    that no longer substitutes. These check everything a build would consume
+    without paying for the build.
+    """
+
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+
+    @pytest.fixture(name='expanded')
+    def _expanded(self):
+        from src.core.run import expand_config_sweeps
+        from src.core.config import parse_config
+
+        root = self.REPO_ROOT
+        return expand_config_sweeps(
+            parse_config(root / 'examples' / 'hetero_pair_sweep.ini'), root)
+
+    def test_it_expands_to_the_documented_runs(self, expanded):
+        assert [str(output_dir_for(c, 'sheetonsheet')) for c in expanded] == [
+            'sheetonsheet/h-MoS2+h-WS2/12x_12y/K300',
+            'sheetonsheet/h-MoSe2+h-WSe2/12x_12y/K300',
+            'sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300',
+        ]
+
+    def test_each_member_lands_in_its_own_numbered_section(self, expanded):
+        assert [(c['2D-1']['mat'], c['2D-2']['mat']) for c in expanded] == [
+            ('h-MoS2', 'h-WS2'),
+            ('h-MoSe2', 'h-WSe2'),
+            ('h-MoTe2', 'h-WTe2'),
+        ]
+
+    def test_every_referenced_structure_and_potential_exists(self, expanded):
+        for config in expanded:
+            for section in ('2D-1', '2D-2'):
+                for key in ('cif_path', 'pot_path'):
+                    path = self.REPO_ROOT / config[section][key]
+                    assert path.is_file(), f"{section}.{key} -> {path}"
+
+    def test_no_placeholder_survives_expansion(self, expanded):
+        for config in expanded:
+            for section in ('2D-1', '2D-2'):
+                for key, value in config[section].items():
+                    assert '{mat' not in str(value), f"{section}.{key} = {value}"
+
+    def test_every_pair_is_commensurate(self, expanded, tmp_path, monkeypatch):
+        """The failure that resolving files does NOT catch.
+
+        The first draft of this example paired h-MoS2 with h-WSe2, whose ~4%
+        mismatch exceeds the default 2% strain_tol: every file resolved, and
+        two of the three runs still failed to build. Only running the matcher
+        catches that, so it is worth the few seconds.
+        """
+        from src.builders.components import build_monolayer
+        from src.builders.hetero import build_matched_supercells
+        from src.core.config import SheetConfig
+
+        monkeypatch.chdir(self.REPO_ROOT)
+        for config in expanded:
+            monos = [
+                Path(build_monolayer(SheetConfig(**config[section]))[0])
+                for section in ('2D-1', '2D-2')
+            ]
+            pair = f"{config['2D-1']['mat']}+{config['2D-2']['mat']}"
+            build_matched_supercells(monos[0], monos[1], tmp_path / pair)
