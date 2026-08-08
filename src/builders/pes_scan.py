@@ -22,8 +22,10 @@ array/combined job generation applies unchanged. The scan writes its grid to
 to per-material descriptors.
 
 Both are MRO-composed with the heterostructure builders to give two more
-flavours, each scanning the *matched interface's coincidence cell* rather than
-a single material's own unit cell:
+flavours, each scanning the *matched interface's minimal in-plane repeat unit*
+(:func:`~src.builders.hetero.detect_inplane_repeat`) rather than a single
+material's own unit cell — and, for the sheet flavour, normalizing the energy
+per repeat unit rather than per assembled box:
 
     - :class:`HeteroPESTipSimulation` — the tip scan over a two-material
       heterostructure sheet built by
@@ -45,7 +47,7 @@ from ..core.potential_manager import PotentialManager
 from ..core.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from .afm import AFMSimulation
-from .hetero import _detect_atom_style
+from .hetero import detect_inplane_repeat
 from .hetero_afm import HeteroAFMSimulation
 from .hetero_slide import HeteroSheetOnSheetSimulation
 from .sheetonsheet import SheetOnSheetSimulation
@@ -152,15 +154,17 @@ class PESGridMixin:
     * :meth:`_scan_periods` — the scan period, i.e. the surface cell the top
       layer is rastered over. Homogeneous: the material's own orthogonalized
       unit cell, filled by ``components.build_sheet(..., unit_cell_out=...)``
-      into ``self.sheet_unit_cell``. Hetero: the **coincidence cell** of the
-      matched interface (both lattices were strained onto it), which is the
-      assembled stack's own periodic box — using either constituent's unit cell
-      there would give a plausible-looking but physically wrong PES.
+      into ``self.sheet_unit_cell``. Hetero: the matched interface's **minimal
+      in-plane repeat unit**, measured off the assembled stack by
+      :func:`~src.builders.hetero.detect_inplane_repeat` — which is generally a
+      SUB-cell of the coincidence cell, because each material is tiled to the
+      configured footprint before the match runs.
     * :meth:`_scan_n_cells` — the per-surface-cell energy normalization.
       Homogeneous: ``_tile_count(sheet_dims, sheet_unit_cell)``, the number of
-      unit cells tiling the built footprint. Hetero: 1 — the box IS one
-      coincidence cell (no in-plane replication), and that cell is the
-      interface's repeat unit.
+      unit cells tiling the built footprint. Hetero: the number of interface
+      repeat units tiling the assembled box, from the same detection. Both
+      report per surface unit cell, so the two families' barriers are
+      comparable and neither depends on the configured footprint.
     * :meth:`_scan_atom_style` / :meth:`_scan_pot_type` — ``atom_style`` comes
       from the sheet's potential type homogeneously, and from the assembled
       data file (``_detect_atom_style``) for hetero.
@@ -469,7 +473,7 @@ class PESTipSimulation(AFMSimulation):
 
 
 class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
-    """Tip-on-heterostructure static PES scan (two-material coincidence cell).
+    """Tip-on-heterostructure static PES scan (matched interface's repeat unit).
 
     Pure MRO composition, mirroring
     :class:`~src.builders.hetero_afm.HeteroIndentSimulation`:
@@ -502,28 +506,32 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
 
         * ``self.sheet_unit_cell`` (via ``_cell_period``, the scan period) —
           the homogeneous path fills it from ``build_sheet(...,
-          unit_cell_out=...)``: one material's own orthogonalized unit cell.
-          For a matched heterostructure interface that would be *physically
-          wrong* — the scan must repeat over the **coincidence cell** of the
-          interface (the cell both lattices were strained onto to match), not
-          either constituent's own cell; using a constituent's cell would
-          produce a plausible-looking but wrong PES. ``HeteroAFMSimulation.
-          _build_hetero_sheet`` already computes this cell (the *unreplicated*
-          assembled-stack box, before in-plane tiling) and now exposes it as
-          ``self._hetero_coincidence_cell``. Populated here by overriding
-          :meth:`_build_sheet_for_layers` to call ``super()`` (dispatches to
-          ``HeteroAFMSimulation``'s override, which sets
-          ``self._hetero_coincidence_cell``) and then filling
-          ``self.sheet_unit_cell = {'xlo': 0.0, 'xhi': lx_cell, 'ylo': 0.0,
-          'yhi': ly_cell}`` — the same ``xlo``/``xhi``/``ylo``/``yhi`` shape
-          ``_cell_period`` expects, matching the homogeneous
-          ``unit_cell_out`` contract exactly.
+          unit_cell_out=...)``: one material's own orthogonalized unit cell,
+          i.e. the smallest lateral displacement that returns the tip to an
+          equivalent registry. The hetero analogue is the assembled stack's
+          MINIMAL in-plane repeat, measured off the *unreplicated* stack by
+          :func:`~src.builders.hetero.detect_inplane_repeat` and filled here by
+          overriding :meth:`_build_sheet_for_layers` (which calls ``super()``,
+          dispatching to ``HeteroAFMSimulation``'s override) into the same
+          ``xlo``/``xhi``/``ylo``/``yhi`` shape ``_cell_period`` expects.
+
+          An earlier revision used ``self._hetero_coincidence_cell`` (the whole
+          unreplicated assembled box) here on the premise that the coincidence
+          cell is the interface's periodicity. Measurement refutes that for the
+          shipped fixture: each material is tiled to the configured x/y
+          footprint *before* the match runs, so the pair matches with
+          (near-)identity matrices and the box is a 4x2 superlattice of the
+          real repeat (3.185 x 5.517 Å). Scanning the box wasted 4x2 of the
+          grid re-visiting registries it had already sampled. Unlike the sheet
+          flavour there is no energy-normalization consequence here:
+          ``afm/pes_scan.lmp`` records the total energy and the lateral force
+          on the tip, with no per-cell divisor.
         * ``self.sheet_dims`` (the built footprint; read by ``build_sheet``'s
           sibling ``PESSheetSimulation._tile_count``, not by
           ``PESTipSimulation.write_inputs`` itself, but by
           ``build_render_context`` for tip centring) — already populated by
-          ``_build_hetero_sheet`` from the *replicated* box (distinct from the
-          unreplicated coincidence cell above); no override needed.
+          ``_build_hetero_sheet`` from the *replicated* box (distinct from both
+          the coincidence cell and the repeat unit above); no override needed.
         * ``self.box_dims`` (read by ``_warn_if_footprint_too_small`` for the
           tip-periodic-image guard) — populated by the inherited
           ``AFMSimulation.build()`` calling ``self._get_substrate_box_dims()``
@@ -553,13 +561,22 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
     """
 
     def _build_sheet_for_layers(self, build_dir, n_layers):
-        """Populate ``sheet_unit_cell`` from the coincidence cell after the
-        inherited hetero build. See the class docstring's state-contract
-        audit for why the coincidence cell (not either constituent's own
-        unit cell) is the physically correct scan period."""
+        """Populate ``sheet_unit_cell`` with the hetero surface's MINIMAL repeat.
+
+        The homogeneous path fills ``sheet_unit_cell`` from ``build_sheet(...,
+        unit_cell_out=...)`` with the material's own orthogonalized unit cell —
+        the smallest lateral displacement that returns the tip to an equivalent
+        registry. The hetero analogue is the assembled stack's minimal in-plane
+        repeat, which is generally a SUB-cell of the coincidence cell (see the
+        class docstring and
+        :func:`~src.builders.hetero.detect_inplane_repeat`). Detection runs on
+        the UNREPLICATED stack: in-plane replication cannot change the repeat
+        unit, and the unreplicated file is much the smaller of the two.
+        """
         super()._build_sheet_for_layers(build_dir, n_layers)
-        lx_cell, ly_cell = self._hetero_coincidence_cell
-        self.sheet_unit_cell = {'xlo': 0.0, 'xhi': lx_cell, 'ylo': 0.0, 'yhi': ly_cell}
+        (period_x, period_y), _ = detect_inplane_repeat(self._hetero_stack.data_path)
+        self.sheet_unit_cell = {'xlo': 0.0, 'xhi': period_x,
+                                'ylo': 0.0, 'yhi': period_y}
 
     def _get_hpc_job_name(self) -> str:
         """``pes_tip_<pair>`` via :meth:`_material_id`, not sheet 1 alone."""
@@ -591,12 +608,24 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
        file's staged ``provenance/potentials/...`` prefix resolves with
        ``cwd = output_dir``. The homogeneous sim-root-relative paths would not
        open.
-    3. **Scan period.** The matched interface's COINCIDENCE cell, i.e. the
-       assembled stack's own in-plane box (the hetero sheet-on-sheet stack is
-       not replicated in-plane, so box == cell). Either constituent's own unit
-       cell is NOT a periodicity of the interface — scanning it would give a
-       plausible-looking but physically wrong PES. Correspondingly the energy
-       is normalized per coincidence cell (``n_cells == 1``).
+    3. **Scan period.** The interface's MINIMAL in-plane repeat unit, measured
+       off the assembled ``hetero.data`` by
+       :func:`~src.builders.hetero.detect_inplane_repeat`, with the energy
+       normalized per repeat unit (``n_cells`` = how many tile the box).
+
+       The coincidence cell is *not* that repeat unit in general, and on the
+       shipped fixtures it is not one in practice either: ``build_monolayer``
+       tiles each material to the configured x/y footprint before the match
+       runs, so a near-lattice-matched pair (MoS2/WS2 here) matches with
+       (near-)identity matrices on already-tiled cells and the assembled box
+       comes out a 4x2 (footprint 12 Å) or 4x3 (footprint 14 Å) superlattice of
+       the true repeat. Both constituents' strained unit cells ARE therefore a
+       periodicity of this interface — an earlier revision of this docstring
+       asserted the opposite, and the measurement refutes it: the assembled
+       stack is invariant under ``(Lx/4, 0)`` and ``(0, Ly/2)`` to within
+       2e-7 Å. Treating the box as the cell reported a per-BOX energy (8x/12x
+       too large) that changed with the configured footprint, which no physical
+       barrier may do.
     4. **Layer gate.** The dynamic slide needs >= 4 layers (fixed bottom,
        thermostatted middle, driven top across two materials); a static PES
        needs exactly 2 (one per material). ``MIN_LAYERS`` is relaxed HERE only
@@ -644,22 +673,32 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
     def _scan_results_path(self, csv_name: str) -> str:
         return f"results/{csv_name}"
 
-    def _scan_periods(self) -> tuple:
-        """The matched interface's coincidence cell (== the assembled box).
+    def _interface_repeat(self) -> tuple:
+        """``((period_x, period_y), (nx, ny))`` for the assembled interface.
 
-        Set by :meth:`HeteroSheetOnSheetSimulation.build` from the assembled
-        ``hetero.data``; unreplicated, so it is the interface's true in-plane
-        periodicity. A triclinic cell is refused: the scan grid steps along
-        +x/+y, so a tilted cell's grid points would not be lattice
-        translations of the interface.
+        The coincidence cell is NOT in general the interface's minimal repeat.
+        ``build_monolayer`` tiles each material to the configured x/y footprint
+        *before* the match runs, so a near-lattice-matched pair matches with
+        (near-)identity matrices on cells that are already an n x m tiling of
+        their own primitive — leaving the assembled box a superlattice of the
+        actual repeat unit. Measured directly off ``hetero.data`` by
+        :func:`~src.builders.hetero.detect_inplane_repeat` (see its docstring
+        for the tolerance and why detection beats the algebraic route), cached
+        because the scan writes up to two grid variants.
         """
+        if getattr(self, "_interface_repeat_cache", None) is None:
+            assert self._stack is not None
+            self._interface_repeat_cache = detect_inplane_repeat(self._stack.data_path)
+        return self._interface_repeat_cache
+
+    def _guard_scannable_cell(self) -> None:
+        """Refuse a cell an axis-aligned (dx, dy) grid cannot step over."""
         if self._hetero_coincidence_cell is None:
             raise ValueError(
                 "Hetero PES scan period unavailable: the coincidence cell is "
                 "populated by the hetero stack assembly in build(); "
                 "write_run_scripts() cannot be called before it."
             )
-        lx, ly = self._hetero_coincidence_cell
         if abs(self._hetero_cell_xy_tilt) > 1e-6:
             raise ValueError(
                 f"Hetero coincidence cell is triclinic (xy tilt="
@@ -667,20 +706,40 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
                 "PES grid over it would not step by lattice translations. Use a "
                 "pair whose coincidence cell canonicalises orthogonal."
             )
+        lx, ly = self._hetero_coincidence_cell
         if lx <= 0.0 or ly <= 0.0:
             raise ValueError(
                 f"Non-positive hetero coincidence cell: {lx} x {ly} A."
             )
-        return (lx, ly)
+
+    def _scan_periods(self) -> tuple:
+        """The interface's MINIMAL in-plane repeat, not the assembled box.
+
+        Scanning the whole box re-measures the same registries n x m times over
+        and resolves only ``grid_n / n`` distinct x-registries; scanning the
+        repeat unit spends every grid point on a distinct registry. A triclinic
+        cell is refused: the grid steps along +x/+y, so a tilted cell's grid
+        points would not be lattice translations of the interface.
+        """
+        self._guard_scannable_cell()
+        (period_x, period_y), _ = self._interface_repeat()
+        return (period_x, period_y)
 
     def _scan_n_cells(self) -> int:
-        """One: the box holds exactly one coincidence cell.
+        """How many interface repeat units tile the assembled box.
 
-        The energy is therefore reported per interface repeat unit. Dividing by
-        a constituent's unit-cell count instead would mix two different
-        periodicities and mislabel the barrier.
+        The template divides the box's total ``pe`` by this, so the CSV carries
+        an energy PER INTERFACE REPEAT UNIT — the same normalization the
+        homogeneous path gets from ``_tile_count``, and the only one that is
+        footprint-independent. The old hardcoded ``1`` reported a per-box
+        energy: on the shipped fixture that is 8x (footprint 12 Å) or 12x
+        (footprint 14 Å) too large, so the *same* physical pair produced
+        barriers differing by 1.5x purely from the configured footprint, and
+        every hetero barrier landed ~an order of magnitude above the
+        homogeneous ones ``src.postprocessing.pes_scan`` compares them with.
         """
-        return 1
+        _, (nx, ny) = self._interface_repeat()
+        return int(nx * ny)
 
     def _scan_pot_type(self) -> str:
         """``sw`` — the hetero spine is a ``pair_style hybrid`` of ``sw`` blocks
@@ -690,9 +749,15 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
         return "sw"
 
     def _scan_atom_style(self) -> str:
-        """Detected from the assembled data file, like the hetero slide's."""
-        assert self._stack is not None
-        return _detect_atom_style(self._stack.data_path)
+        """The style ``build`` already detected from the assembled data file.
+
+        ``HeteroSheetOnSheetSimulation.build`` runs ``_detect_atom_style`` on
+        ``hetero.data`` and stores the result in ``self._hetero_atom_style``
+        before handing over to the run-phase seam, so re-reading the file here
+        would only re-derive the identical value — a second source of truth
+        that could drift, plus a needless file read.
+        """
+        return self._hetero_atom_style
 
     def _scan_extra_context(self) -> Dict:
         """Box + z-band layer groups (hetero layers share atom types)."""

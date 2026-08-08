@@ -8,9 +8,9 @@ section as in ``tests/test_pes_scan_builder.py``.
 Covers the MRO/``SPLIT_OUTER_LOOPS`` resolution, routing, the relaxed layer
 gate (and that the *dynamic* hetero slide keeps its own 4-layer gate), and a
 real-geometry build smoke asserting that the emitted scan script uses the
-hetero data file, z-band layer groups, and a scan period equal to the
-**coincidence cell** of the matched interface -- not either constituent's own
-unit cell.
+hetero data file, z-band layer groups, and a scan period equal to the matched
+interface's **minimal in-plane repeat** -- not the assembled box, which is a
+4x2 superlattice of it here, and whose use also mis-normalized the energy.
 """
 import shutil
 from pathlib import Path
@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from ase.io import read
 
+from src.builders import components
 from src.core.config import SheetOnSheetSimulationConfig, load_settings
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
@@ -196,7 +197,7 @@ def test_hetero_pes_sheet_job_name_carries_pair_token():
 # --- real-geometry build smoke -------------------------------------------------
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
-def test_hetero_pes_sheet_build_emits_scan_over_coincidence_cell(tmp_path):
+def test_hetero_pes_sheet_build_emits_scan_over_interface_repeat(tmp_path):
     """Build a real 1+1 MoS2/WS2 hetero bilayer and check the emitted scan.
 
     Asserts the four seams this variant exists for:
@@ -245,34 +246,54 @@ def test_hetero_pes_sheet_build_emits_scan_over_coincidence_cell(tmp_path):
     period_x, period_y = _extract("Lx"), _extract("Ly")
 
     # Independent expectation for THIS EXACT fixture (h-MoS2 + h-WS2, both
-    # x=y=12 A, `sw`): the mean in-plane cell the two monolayers are strained
-    # onto, measured once by running build_monolayer -> build_matched_supercells
-    # directly (h-MoS2 cell 12.736266 x 11.029930, h-WS2 cell 12.743784 x
-    # 11.036441, mean 12.740025 x 11.033185) and hardcoded here on purpose --
-    # NOT read back from sim._hetero_coincidence_cell. Comparing the emitted
-    # period against the attribute it was rendered from proves nothing: the
-    # renderer faithfully emits whatever that attribute holds, so a bug that
-    # stored the wrong cell there (a constituent's own unit cell, or a
-    # replicated box) would still pass. Same value pinned independently in
-    # tests/test_hetero_pes_tip.py for the tip scan over the same pair.
-    EXPECTED_LX, EXPECTED_LY = 12.740024828691185, 11.033185146491927
+    # x=y=12 A, `sw`): the interface's MINIMAL in-plane repeat, hardcoded here
+    # on purpose -- NOT read back from sim._hetero_coincidence_cell or
+    # sim.sheet_unit_cell. Comparing the emitted period against the attribute it
+    # was rendered from proves nothing: the renderer faithfully emits whatever
+    # that attribute holds, so a bug that stored the wrong cell would still pass.
+    #
+    # This is NOT the coincidence cell (12.740025 x 11.033185, which an earlier
+    # revision of this test pinned). build_monolayer tiles each material to the
+    # configured footprint BEFORE the match runs, so this near-lattice-matched
+    # pair matches with (near-)identity matrices on already-tiled cells and the
+    # box comes out a 4x2 superlattice of the true repeat. Same value pinned
+    # independently in tests/test_hetero_pes_tip.py for the same pair.
+    EXPECTED_LX, EXPECTED_LY = 3.18500625, 5.516592573245964
     assert period_x == pytest.approx(EXPECTED_LX, rel=1e-6)
     assert period_y == pytest.approx(EXPECTED_LY, rel=1e-6)
 
-    # ... and it is neither constituent's own primitive unit cell (~3.19 x 5.52).
-    assert period_x > 10.0 and period_y > 10.0
+    # Both constituents' strained cells ARE a periodicity of this interface --
+    # find_coincidence_lattice strains both onto a shared MEAN cell, so the
+    # repeat is that mean. Derived here from the constituents, independently of
+    # any builder state, as a second route to the same number.
+    own_cells = []
+    for sheet_cfg in cfg.sheets:
+        own_dir = tmp_path / f"own_{sheet_cfg.mat}"
+        own_dir.mkdir(exist_ok=True)
+        unit_cell_out = {}
+        components.build_sheet(
+            sheet_cfg, own_dir, settings=cfg.settings,
+            unit_cell_out=unit_cell_out,
+        )
+        own_cells.append((unit_cell_out["xhi"] - unit_cell_out["xlo"],
+                          unit_cell_out["yhi"] - unit_cell_out["ylo"]))
+    assert period_x == pytest.approx(
+        sum(c[0] for c in own_cells) / len(own_cells), rel=1e-6)
+    assert period_y == pytest.approx(
+        sum(c[1] for c in own_cells) / len(own_cells), rel=1e-6)
 
-    # The scanned box IS one coincidence cell, so the per-cell energy
-    # normalization divides by exactly one cell.
-    assert _extract("ncell") == pytest.approx(1.0)
+    # The energy is normalized per repeat unit, not per box: 4x2 = 8 of them
+    # tile this box. The old hardcoded 1 reported a per-BOX energy that scaled
+    # with the configured footprint -- 8x too large here, 12x at footprint 14 --
+    # so the same physical pair produced different barriers.
+    assert _extract("ncell") == pytest.approx(8.0)
 
-    # The emitted period matches the assembled stack's own periodic box (the
-    # hetero sheet-on-sheet stack is NOT replicated in-plane), so displacing the
-    # top layer by one period is exactly one lattice translation.
+    # The box is an exact integer multiple of the emitted period, so displacing
+    # the top layer by one period is exactly one lattice translation.
     at = read(str(tmp_path / "hetero.data"), format="lammps-data")
     cell = np.array(at.cell)
-    assert period_x == pytest.approx(float(cell[0, 0]), rel=1e-9)
-    assert period_y == pytest.approx(float(cell[1, 1]), rel=1e-9)
+    assert float(cell[0, 0]) / period_x == pytest.approx(4.0, rel=1e-9)
+    assert float(cell[1, 1]) / period_y == pytest.approx(2.0, rel=1e-9)
 
     assert sim._get_hpc_job_name() == "pes_sheet_h-MoS2+h-WS2"
 
