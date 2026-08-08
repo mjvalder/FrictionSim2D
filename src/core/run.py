@@ -559,9 +559,25 @@ LOOPABILITY: Dict[Tuple[str, str], str] = {
 LAMMPS_LOOP_PARAMS = frozenset({'force', 'scan_angle', 'pressure', 'scan_speed'})
 
 
+#: A heterostructure config splits the sheet into ``[2D-1]``/``[2D-2]`` instead
+#: of a single ``[2D]``. Every one of them is a sheet section obeying the sheet
+#: rules above, so the lookup is keyed on the plain name.
+_NUMBERED_SHEET_SECTION = re.compile(r'^2D-\d+$')
+
+
+def loopability_section(section: str) -> str:
+    """The :data:`LOOPABILITY` key a config section is classified under.
+
+    Only ``2D-N`` folds (onto ``2D``); everything else is its own key. Nothing
+    that merely *looks* like a sheet section (``2D-``, ``2Dx``, ``flake-1``)
+    may borrow the sheet rules.
+    """
+    return '2D' if _NUMBERED_SHEET_SECTION.match(section) else section
+
+
 def loopability(section: str, key: str) -> str:
     """How a list value in ``[section] key`` would be interpreted."""
-    return LOOPABILITY.get((section, key), 'scalar')
+    return LOOPABILITY.get((loopability_section(section), key), 'scalar')
 
 
 @dataclass

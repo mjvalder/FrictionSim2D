@@ -90,6 +90,45 @@ class TestLoopability:
         assert loopability('general', 'not_a_real_key') == 'scalar'
 
 
+class TestNumberedSheetSectionsShareTheSheetRules:
+    """A heterostructure config writes ``[2D-1]``/``[2D-2]`` instead of ``[2D]``.
+
+    Both sections are sheet sections and both accept the same lists the plain
+    one does, so keying the classification on the literal name ``'2D'`` made a
+    perfectly legal ``layers`` or ``materials_list`` list report as "a list here
+    is not supported".
+    """
+
+    @pytest.mark.parametrize('section', ['2D-1', '2D-2', '2D-10'])
+    @pytest.mark.parametrize('key,expected', [
+        ('layers', 'layer'),
+        ('materials_list', 'sweep'),
+        ('x', 'scalar'),
+    ])
+    def test_numbered_sections_classify_like_the_plain_one(self, section, key, expected):
+        assert loopability(section, key) == expected
+
+    @pytest.mark.parametrize('section', ['2D-', '2Dx', '2D-1a', 'flake-1'])
+    def test_only_numbered_sheet_sections_are_folded(self, section):
+        """Nothing else may borrow the sheet rules by looking vaguely similar."""
+        assert loopability(section, 'layers') == 'scalar'
+
+    def test_a_hetero_config_reports_no_unsupported_lists(self):
+        """What CLI/GUI validation actually asks."""
+        from src.gui.controllers.document import ConfigDocument
+
+        document = ConfigDocument(
+            model='sheetonsheet',
+            values={
+                'general': {'temp': 300},
+                '2D-1': {'mat': 'h-MoS2', 'layers': [2],
+                         'materials_list': ['h-MoS2 + h-WS2']},
+                '2D-2': {'mat': 'h-WS2', 'layers': [2]},
+            },
+        )
+        assert document.unsupported_lists() == []
+
+
 class TestTemperatureSweep:
     """temp is the one [general] key that is genuinely sweep-safe: it appears in
     the directory name as K{temp}."""
