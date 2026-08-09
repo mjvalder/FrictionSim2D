@@ -182,22 +182,6 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         """
         return '+'.join(sheet.mat for sheet in self.config.sheets)
 
-    def _potentials_prefix(self) -> str:
-        """How the written ``pair_coeff`` lines name the staged potential files.
-
-        Sim-root-relative, exactly like
-        :meth:`SheetOnSheetSimulation._generate_potentials` and
-        :meth:`HeteroAFMSimulation`'s own :class:`PotentialManager`: the
-        generated HPC scripts run LAMMPS from the simulation root, so a bare
-        ``provenance/potentials/...`` would be looked up beside the root rather
-        than inside this run's directory.
-        """
-        return str(self.relative_run_dir / "provenance" / "potentials")
-
-    def _run_dir_path(self, *parts: str) -> str:
-        """A run-dir file named the way the LAMMPS scripts must name it."""
-        return str(Path(self.relative_run_dir, *parts))
-
     def _get_hpc_job_name(self) -> str:
         """Job name keyed by every configured material, not just sheet 1.
 

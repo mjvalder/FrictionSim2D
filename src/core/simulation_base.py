@@ -139,6 +139,26 @@ class SimulationBase(ABC):
         except ValueError:
             self.relative_run_dir = Path(self.output_dir)
 
+    def _run_dir_path(self, *parts: str) -> str:
+        """A file inside this run's directory, named as a LAMMPS script must name it.
+
+        The generated HPC scripts run LAMMPS from the simulation ROOT, not from
+        the run directory, so every path a script emits has to carry
+        ``relative_run_dir``. Standalone (no ``set_base_output_dir``) that
+        prefix is the output directory itself, so this is correct either way.
+        """
+        return str(Path(self.relative_run_dir, *parts))
+
+    def _potentials_prefix(self) -> str:
+        """How written ``pair_coeff`` lines name the staged potential files.
+
+        Sim-root-relative for the reason above: a bare
+        ``provenance/potentials/...`` would be looked up beside the root rather
+        than inside this run's directory, and LAMMPS would abort with "cannot
+        open potential file" the moment the job was submitted.
+        """
+        return self._run_dir_path("provenance", "potentials")
+
     def write_file(self, filename: Union[str, Path],
                     content: str, output_dir: Optional[Union[str, Path]] = None) -> Path:
         """Write string content to a file in the output directory.
