@@ -11,11 +11,30 @@ from pathlib import Path
 
 import pytest
 from src.core.config import SheetOnSheetSimulationConfig, load_settings
-# Reuse the D1 slide runner + friction-record parser for the e2e smoke.
-from tests.test_hetero_slide import _read_friction_records, _run_lammps_slide
+# Reuse the D1 slide runner + friction-record parser for the e2e smoke, and its
+# path extractors for the sim-root resolution check.
+from tests.test_hetero_slide import (
+    _read_friction_records,
+    _referenced_input_paths,
+    _run_lammps_slide,
+    _staged_potential_paths,
+)
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
+
+
+def _settings():
+    """Settings a full standalone ``build()`` can complete on.
+
+    ``hpc.modules`` gates job-script generation, which ``build()`` now runs
+    without swallowing the failure of -- mirroring ``test_hetero_slide``. The
+    CLI is unaffected either way: ``run_simulations`` calls
+    ``set_base_output_dir``, so per-simulation generation returns early there.
+    """
+    settings = load_settings()
+    settings.hpc.modules = ["lammps"]
+    return settings
 
 
 def _minimal_flake_slide_context():
@@ -155,7 +174,7 @@ def _flake_on_sheet_cfg(hetero_flake: bool = False):
         raw["Flake-2"] = {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif",
                           "pot_path": f"{POT}/sw_lammps/t-WS2.sw", "pot_type": "sw",
                           "x": 12.0, "y": 12.0, "layers": [1]}
-    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
@@ -223,7 +242,7 @@ def _single_material_cfg():
                "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
                "x": 8, "y": 8, "layers": [4]},
     }
-    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
 def test_routing_flake_section_selects_flake_slide():
@@ -292,8 +311,8 @@ def test_output_dir_differs_when_only_flake_material_differs():
 def test_hpc_job_name_differs_when_only_flake_material_differs(tmp_path):
     from src.builders.flake_slide import FlakeSlideSimulation
 
-    cfg_a = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-MoS2"), settings=load_settings())
-    cfg_b = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-WS2"), settings=load_settings())
+    cfg_a = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-MoS2"), settings=_settings())
+    cfg_b = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-WS2"), settings=_settings())
     sim_a = FlakeSlideSimulation(cfg_a, str(tmp_path / "a"))
     sim_b = FlakeSlideSimulation(cfg_b, str(tmp_path / "b"))
 
@@ -492,3 +511,47 @@ def test_twist_angle_applied_recorded_in_manifest(tmp_path):
     manifest = next(Path(tmp_path).rglob("*manifest*"))
     text = manifest.read_text()
     assert "17.5" in text or "twist" in text.lower()
+
+
+# --- HPC job scripts for a flake run --------------------------------------- #
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
+    """Every path the flake slide references must resolve from the SIM ROOT.
+
+    The generated job scripts run LAMMPS from the simulation root, not from the
+    run dir, so run-dir-relative paths produce a script that aborts on
+    submission with "cannot open sw potential file" -- after the build reported
+    success. The potential spine needs a second registration for this: assembly
+    runs LAMMPS with cwd = output_dir and can only open run-dir-relative paths,
+    and pair_coeff lines are baked at registration time, so the sim-root prefix
+    has to be re-registered once assembly is done (build step 4b). Mirrors
+    test_hetero_slide's equivalent.
+    """
+    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.core.run import generate_hpc_scripts_for_root
+
+    root = tmp_path / "simulation_root"
+    run_dir = root / "sheetonsheet" / "h-MoS2" / "16x_16y" / "K300"
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+
+    sim = FlakeSlideSimulation(cfg, str(run_dir))
+    sim.set_base_output_dir(root)
+    sim.build()
+
+    assert generate_hpc_scripts_for_root(root, cfg.settings) is None
+    assert "run.pbs" in sorted(p.name for p in (root / "hpc").iterdir())
+
+    slide = (run_dir / "lammps" / "slide.in").read_text()
+    referenced = _referenced_input_paths(slide)
+    assert referenced, "slide.in references no input files at all"
+    for path in referenced:
+        assert (root / path).is_file(), (
+            f"{path} does not resolve from the simulation root {root}")
+
+    staged = _staged_potential_paths(
+        (run_dir / "lammps" / "system.in.settings").read_text())
+    assert staged, "no staged potential files referenced"
+    for path in staged:
+        assert (root / path).is_file(), (
+            f"staged potential {path} does not resolve from {root}")
