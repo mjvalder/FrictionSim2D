@@ -38,6 +38,10 @@ BUILDABLE_EXAMPLES = [
 UNRESOLVABLE_EXAMPLES = [
     'afm_config.ini', 'sheet_config.ini',
     'indent_campaign.ini', 'afm_freestanding_pes_campaign.ini',
+    # Pair sweep: {mat1}/{mat2} must report as unexpanded_template, NOT as
+    # missing_file -- the latter is a hard error that would block the GUI's
+    # Render/Generate for every pair config.
+    'hetero_pair_sweep.ini',
 ]
 
 
