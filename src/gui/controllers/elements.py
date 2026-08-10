@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional, Set, Tuple
 
 from ase.data import atomic_numbers
 
+from ...core.material_templates import has_template_marker, substitute_materials
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 
 __all__ = ['scan_config_elements']
@@ -38,6 +39,11 @@ __all__ = ['scan_config_elements']
 #: version does not itself build but may still hold in `document.values`.
 _COMPONENT_SECTIONS = ('2D', '2D-2', 'tip', 'sub', 'flake')
 
+#: Sections a material sweep templates. Only the sheets: the list names sheet
+#: materials, so unioning a templated tip or substrate over it would scan
+#: paths the sweep never builds.
+_SWEEPING_SECTIONS = ('2D', '2D-2')
+
 _KNOWN_SYMBOLS = set(atomic_numbers)
 
 _ELEMENT_TOKEN_RE = re.compile(r'[A-Z][a-z]?')
@@ -48,11 +54,18 @@ _FORMULA_SUM_RE = re.compile(r'_chemical_formula_sum\s+["\']?([^"\'\n]+)')
 def scan_config_elements(document: Any) -> List[str]:
     """Element symbols placed by every component section the document has.
 
-    For `[2D]` with a `{mat}` template and a configured material sweep, the
-    union is taken over every selected material's CIF (the structure
-    directory), not just the one literal path in the section -- a shared
+    For a templated sheet section with a configured material sweep, the union
+    is taken over every material the sweep names (that sheet's own member of
+    each entry), not just the one literal path in the section -- a shared
     override file is meant to cover a whole sweep, so the scan has to see
     every element the sweep could actually place.
+
+    That covers a heterostructure pair too: `[2D]` templates on `{mat1}` and
+    `[2D-2]` on `{mat2}`, and each takes its own column of the pair list.
+    Testing for the literal `'{mat}'` instead left a pair config falling
+    through to a path that cannot exist (`.../{mat1}.cif`) with no element
+    tokens in `'{mat1}'` to fall back on, so the LJ pair picker came back
+    empty for exactly the configs that need it most.
     """
     base_dir = getattr(document, 'base_dir', None)
     elements: Set[str] = set()
@@ -72,20 +85,41 @@ def scan_config_elements(document: Any) -> List[str]:
         if not cif_template and not isinstance(mat_template, str):
             continue
 
-        materials: List[str] = []
-        if section_key == '2D' and cif_template and '{mat}' in cif_template:
-            materials = document.material_names()
+        entries: List[Tuple[str, ...]] = []
+        if section_key in _SWEEPING_SECTIONS and has_template_marker(cif_template):
+            entries = _sweep_entries(document)
 
-        if materials:
-            for name in materials:
-                mat_text = (mat_template.replace('{mat}', name)
-                           if isinstance(mat_template, str) else name)
+        if entries:
+            for entry in entries:
+                # Every section is substituted with the whole entry, so each
+                # takes whichever member its own placeholder names: `{mat1}`
+                # in `[2D]`, `{mat2}` in `[2D-2]`. A single-material entry
+                # answers for both.
+                mat1 = entry[0]
+                mat2 = entry[1] if len(entry) > 1 else entry[0]
+                mat_text = (substitute_materials(mat_template, mat1, mat2)
+                            if isinstance(mat_template, str) else mat1)
                 elements |= _scan_component(
-                    cif_template.replace('{mat}', name), mat_text, base_dir)
+                    substitute_materials(cif_template, mat1, mat2),
+                    mat_text, base_dir)
         else:
             elements |= _scan_component(cif_template, mat_template, base_dir)
 
     return sorted(elements)
+
+
+def _sweep_entries(document: Any) -> List[Tuple[str, ...]]:
+    """The sweep's entries -- singles or ordered pairs -- or [] when unreadable.
+
+    Asked of the document rather than re-read here, so the scan sees exactly
+    the list the run would. `material_entries` is the pair-aware reader;
+    `material_names` is the fallback for a document that predates it.
+    """
+    reader = getattr(document, 'material_entries', None)
+    if reader is not None:
+        return list(reader())
+    names = getattr(document, 'material_names', None)
+    return [(name,) for name in names()] if names is not None else []
 
 
 def _scan_component(cif_path: str, mat_text: Optional[str],

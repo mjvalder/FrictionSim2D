@@ -551,3 +551,28 @@ class TestPairConfigSurvivesTheForm:
 
         assert doc.to_dict() == before
         form.deleteLater()
+
+
+class TestSweepDirectoriesFromPairTemplates:
+    """`_sweep_directories` reads the path editors, so it has to recognise
+    every placeholder spelling: a `{mat1}` path's directory is its parent, not
+    the path itself. Testing for the literal `'{mat}'` makes the structure
+    picker of an opened pair config point at a file-shaped 'directory' that
+    does not exist, so the material listing scans empty and every ticked
+    material reads as unusable."""
+
+    def test_a_pair_template_resolves_to_its_directory(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.from_file(
+            REPO_ROOT / 'examples' / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        form = ConfigForm(doc)
+
+        structures, potentials, extension = form.sections['2D']._sweep_directories()
+
+        base = doc.base_dir
+        assert structures == base / 'examples' / 'materials'
+        assert potentials == base / 'examples' / 'potentials' / 'sw' / 'sw_lammps'
+        assert extension == '.sw'
+        form.deleteLater()

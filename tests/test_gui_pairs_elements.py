@@ -61,6 +61,31 @@ def test_scan_elements_across_material_sweep(tmp_path):
     assert set(scan_config_elements(doc)) == {'Fe', 'Cu'}
 
 
+def test_scan_elements_across_a_pair_sweep(tmp_path):
+    """Both sheets of a pair sweep contribute, each taking its own member of
+    each entry. Gating the union on the literal '{mat}' left a pair config
+    scanning `.../{mat1}.cif` -- a path that cannot exist, with no element
+    token in '{mat1}' to fall back on -- so the LJ pair picker came back
+    empty for the very configs that need it."""
+    from src.gui.controllers.elements import scan_config_elements
+
+    (tmp_path / 'A.cif').write_text('data_a\n_chemical_formula_sum   "Fe1"\n')
+    (tmp_path / 'B.cif').write_text('data_b\n_chemical_formula_sum   "Cu1"\n')
+    (tmp_path / 'C.cif').write_text('data_c\n_chemical_formula_sum   "Ni1"\n')
+    (tmp_path / 'pairs.txt').write_text('A + B\nA + C\n')
+
+    doc = ConfigDocument.blank('sheetonsheet')
+    doc.source_path = tmp_path / 'x.ini'
+    doc.add_second_material()
+    doc.set('2D', 'materials_list', 'pairs.txt')
+    doc.set('2D', 'mat', '{mat1}')
+    doc.set('2D', 'cif_path', '{mat1}.cif')
+    doc.set('2D-2', 'mat', '{mat2}')
+    doc.set('2D-2', 'cif_path', '{mat2}.cif')
+
+    assert set(scan_config_elements(doc)) == {'Fe', 'Cu', 'Ni'}
+
+
 def test_scan_elements_mat_fallback_reachable_without_cif_path():
     """A missing/blank cif_path must not skip the section outright -- the
     third-tier `mat`-token fallback has to run even when there is no CIF to

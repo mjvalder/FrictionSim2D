@@ -360,6 +360,56 @@ class TestMaterialEntries:
             document.write_material_names([('a', 'b', 'c')])
 
 
+class TestPairBuiltInTheGui:
+    """A pair assembled in the GUI -- blank config, "add a material", tick the
+    sweep -- must sweep BOTH sheets. Templating only the first (which a plain
+    `{mat}` does) leaves the second pinned to whatever it holds, and every run
+    in the sweep then builds the same second material: wrong results from a
+    config that reads as correct.
+    """
+
+    @staticmethod
+    def _pair_sweep(tmp_path):
+        materials = tmp_path / 'materials'
+        potentials = tmp_path / 'potentials'
+        for name in ('h-MoS2', 'h-WS2', 'h-MoSe2', 'h-WSe2'):
+            materials.mkdir(exist_ok=True)
+            potentials.mkdir(exist_ok=True)
+            (materials / f'{name}.cif').write_text('data_x\n', encoding='utf-8')
+            (potentials / f'{name}.sw').write_text('# sw\n', encoding='utf-8')
+
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'pair.ini'
+        document.add_second_material()
+        document.apply_material_directories(materials, potentials, '.sw')
+        document.write_material_names([('h-MoS2', 'h-WS2'), ('h-MoSe2', 'h-WSe2')])
+        return document
+
+    def test_each_sheet_gets_its_own_placeholder(self, tmp_path):
+        document = self._pair_sweep(tmp_path)
+        assert document.get('2D', 'mat') == '{mat1}'
+        assert document.get('2D-2', 'mat') == '{mat2}'
+        assert document.get('2D-2', 'cif_path').endswith('{mat2}.cif')
+
+    def test_the_second_material_actually_varies_across_the_sweep(self, tmp_path):
+        from src.core.run import expand_config_sweeps
+
+        document = self._pair_sweep(tmp_path)
+        expanded = expand_config_sweeps(document.normalised_values(),
+                                        document.base_dir)
+
+        assert [run['2D-1']['mat'] for run in expanded] == ['h-MoS2', 'h-MoSe2']
+        assert [run['2D-2']['mat'] for run in expanded] == ['h-WS2', 'h-WSe2']
+
+    def test_a_single_material_keeps_the_original_spelling(self, tmp_path):
+        """`{mat}` is what every shipped config uses; a lone sheet must not
+        start writing `{mat1}` just because the pair path exists."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'single.ini'
+        document.apply_material_directories(tmp_path / 'cif', tmp_path / 'pot', '.sw')
+        assert document.get('2D', 'mat') == '{mat}'
+
+
 class TestTemplateMarkers:
     """A pair config templates on {mat1}/{mat2}; a literal '{mat}' test leaves
     its placeholders behind on untick and reads back nothing on open."""

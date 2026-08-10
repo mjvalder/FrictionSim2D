@@ -627,15 +627,39 @@ class ConfigDocument:
         """Point the per-material fields at two directories.
 
         This is what makes a material list actually sweep: `expand_config_sweeps`
-        substitutes {mat} per material, and without the placeholders every config
+        substitutes the placeholder per material, and without them every config
         in the sweep would build the same material.
+
+        With a second material present the two sheets take *different*
+        placeholders -- `{mat1}` and `{mat2}` -- because each line of the list
+        names an ordered pair and the second sheet has to move with it.
+        Templating only the first sheet (which `{mat}` alone does) leaves the
+        second one pinned to whatever material it happened to hold, so every
+        run in the sweep would silently build the same second material: wrong
+        results, not a wrong-looking config.
+
+        Both sheets read the same two directories: one list, one structure
+        directory, one potential directory -- a pair whose members live apart
+        has no way to be named on a single line.
         """
         structures = self._relative_to_config(Path(structure_dir))
         potentials = self._relative_to_config(Path(potential_dir))
 
-        self.set('2D', 'mat', '{mat}')
-        self.set('2D', 'cif_path', f"{structures}/{{mat}}{STRUCTURE_EXTENSION}")
-        self.set('2D', 'pot_path', f"{potentials}/{{mat}}{potential_extension}")
+        def apply(section: str, marker: str) -> None:
+            self.set(section, 'mat', marker)
+            self.set(section, 'cif_path',
+                     f"{structures}/{marker}{STRUCTURE_EXTENSION}")
+            self.set(section, 'pot_path',
+                     f"{potentials}/{marker}{potential_extension}")
+
+        if self.has_second_material():
+            apply('2D', '{mat1}')
+            apply(self.SECOND_SHEET, '{mat2}')
+        else:
+            # Single material keeps the original `{mat}` spelling: it is what
+            # every existing config and every example uses, and it substitutes
+            # identically to `{mat1}`.
+            apply('2D', '{mat}')
 
     def clear_material_directories(self) -> bool:
         """Undo apply_material_directories: drop the {mat} placeholders.
