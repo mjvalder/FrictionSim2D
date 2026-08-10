@@ -70,6 +70,24 @@ def _dirs(tmp_path):
     return structures, potentials
 
 
+@pytest.fixture(name='editor')
+def _editor(qt_app, dirs):
+    """A bare MaterialListEditor with `dirs` already scanned.
+
+    Module-level rather than class-level: the pair table below is the same
+    editor in another mode, and re-declaring the fixture per class is how the
+    two would drift apart.
+    """
+    from src.gui.schema.introspect import FieldKind, FieldSpec
+    from src.gui.widgets.materials import MaterialListEditor
+
+    spec = FieldSpec(name='materials_list', key='materials_list',
+                     kind=FieldKind.STR, required=False)
+    editor = MaterialListEditor(spec)
+    editor.rescan(*dirs, '.sw')
+    return editor
+
+
 def test_materials_row_is_first_in_2d_section():
     """The sweep is the first decision a [2D] section should ask -- it
     decides whether Structure/Potential below it are files or folders."""
@@ -568,17 +586,6 @@ class TestApplyingMaterialDirectories:
 
 class TestMaterialListEditor:
 
-    @pytest.fixture(name='editor')
-    def _editor(self, qt_app, dirs):
-        from src.gui.schema.introspect import FieldKind, FieldSpec
-        from src.gui.widgets.materials import MaterialListEditor
-
-        spec = FieldSpec(name='materials_list', key='materials_list',
-                         kind=FieldKind.STR, required=False)
-        editor = MaterialListEditor(spec)
-        editor.rescan(*dirs, '.sw')
-        return editor
-
     def test_it_starts_not_sweeping(self, qt_app):
         from src.gui.schema.introspect import FieldKind, FieldSpec
         from src.gui.widgets.materials import MaterialListEditor
@@ -696,6 +703,363 @@ class TestMaterialListEditor:
         # And it left no trace: the in-flight rescan(other, ...) is still
         # what the widget reports, not the reentrant call's triple.
         assert editor.directories() == (other, potentials, '.sw')
+
+
+class TestPairTable:
+    """A pair sweep names an ORDERED pair per line, so its selection is a
+    two-column table, not a tick list: which material is sheet 1 and which is
+    sheet 2 is the whole content of a heterostructure, and a set of ticks
+    cannot say it."""
+
+    def test_pair_mode_swaps_the_list_for_the_table(self, editor):
+        editor.set_pair_mode(True)
+        assert editor.pair_table.isVisibleTo(editor.list_panel)
+        assert not editor.listing.isVisibleTo(editor.list_panel)
+
+        editor.set_pair_mode(False)
+        assert not editor.pair_table.isVisibleTo(editor.list_panel)
+        assert editor.listing.isVisibleTo(editor.list_panel)
+
+    def test_generate_pairs_ordered(self, editor):
+        """Both orders, because AB and BA are different stacks -- the
+        interface is the same but which layer sits on the substrate is not."""
+        editor.set_pair_mode(True)
+        editor.set_selected(['h-MoS2', 't-MoS2'])
+        editor.generate_pairs(include_reversed=True, include_same=False)
+
+        assert set(editor.selected_pairs()) == {('h-MoS2', 't-MoS2'),
+                                                ('t-MoS2', 'h-MoS2')}
+        assert len(editor.selected_pairs()) == 2
+
+    def test_generate_pairs_is_one_way_by_default(self, editor):
+        editor.set_selected(['h-MoS2', 't-MoS2'])
+        editor.generate_pairs()
+        assert editor.selected_pairs() == [('h-MoS2', 't-MoS2')]
+
+    def test_generate_pairs_can_include_same_material_pairs(self, editor):
+        """A homostructure bilayer is a legitimate reference run, but it is
+        not what 'pair up these materials' means by default."""
+        editor.set_selected(['h-MoS2', 't-MoS2'])
+        editor.generate_pairs(include_same=True)
+        assert editor.selected_pairs() == [('h-MoS2', 'h-MoS2'),
+                                           ('h-MoS2', 't-MoS2'),
+                                           ('t-MoS2', 't-MoS2')]
+
+    def test_an_unusable_material_is_never_paired(self, editor):
+        """Si has a structure file and no potential -- it cannot be either
+        member of a pair, exactly as it cannot be a single sweep member."""
+        editor.select_all()
+        editor.generate_pairs(include_reversed=True)
+        assert editor.selected_pairs()
+        assert all('Si' not in pair for pair in editor.selected_pairs())
+
+    def test_pairs_round_trip_through_the_table(self, editor):
+        pairs = [('h-MoS2', 't-MoS2'), ('t-MoS2', 'b-AlSb')]
+        editor.set_selected_pairs(pairs)
+        assert editor.selected_pairs() == pairs
+
+    def test_a_pair_member_the_scan_cannot_see_is_kept(self, editor, dirs):
+        """A curated list may name a material this machine's directories do
+        not currently hold (h-WS2 has a potential and no structure here).
+        Rebuilding the combos on a rescan must not quietly drop it -- that is
+        the same silent narrowing the tick list's own keep-selection logic
+        exists to prevent."""
+        editor.set_selected_pairs([('h-MoS2', 'h-WS2')])
+        assert editor.selected_pairs() == [('h-MoS2', 'h-WS2')]
+
+        editor._scanned = None            # force a real rebuild of the listing
+        editor.rescan(*dirs, '.sw')
+
+        assert editor.selected_pairs() == [('h-MoS2', 'h-WS2')]
+
+    def test_a_rescan_offers_the_new_materials_to_existing_rows(self, qt_app,
+                                                                dirs):
+        """A row built before any directory resolved can only offer what was
+        known then. Scanning is what makes the rest available -- without the
+        combos being rebuilt, choosing the second member of a pair the user
+        already started would be impossible."""
+        from src.gui.schema.introspect import FieldKind, FieldSpec
+        from src.gui.widgets.materials import MaterialListEditor
+
+        unscanned = MaterialListEditor(
+            FieldSpec(name='materials_list', key='materials_list',
+                      kind=FieldKind.STR, required=False))
+        unscanned.set_selected_pairs([('h-MoS2', 'h-MoS2')])
+        assert unscanned.pair_table.cellWidget(0, 1).count() == 1
+
+        unscanned.rescan(*dirs, '.sw')
+
+        combo = unscanned.pair_table.cellWidget(0, 1)
+        offered = {combo.itemText(i) for i in range(combo.count())}
+        assert {'b-AlSb', 'h-MoS2', 't-MoS2'} <= offered
+        assert unscanned.selected_pairs() == [('h-MoS2', 'h-MoS2')]
+
+    def test_generate_pairs_falls_back_to_everything_usable(self, editor):
+        """The tick list is hidden in pair mode, so an empty selection there
+        is far more likely to mean 'not used' than 'deliberately none' -- and
+        a Generate that produced nothing would just look broken."""
+        editor.select_none()
+        editor.generate_pairs()
+        assert set(editor.selected_pairs()) == {
+            ('b-AlSb', 'h-MoS2'), ('b-AlSb', 't-MoS2'), ('h-MoS2', 't-MoS2')}
+
+    def test_adding_a_pair_appends_a_row(self, editor):
+        editor.set_selected_pairs([('h-MoS2', 't-MoS2')])
+        editor.add_pair()
+        assert len(editor.selected_pairs()) == 2
+
+    def test_removing_a_pair_drops_the_selected_row(self, editor):
+        editor.set_selected_pairs([('h-MoS2', 't-MoS2'), ('t-MoS2', 'b-AlSb')])
+        editor.pair_table.setCurrentCell(0, 0)
+        editor.remove_pair()
+        assert editor.selected_pairs() == [('t-MoS2', 'b-AlSb')]
+
+    def test_each_mode_keeps_its_own_selection(self, editor):
+        """Toggling the second material on and off flips the mode; neither
+        half of the widget may silently lose what was chosen in it."""
+        editor.set_selected(['h-MoS2'])
+        editor.set_selected_pairs([('h-MoS2', 't-MoS2')])
+
+        editor.set_pair_mode(True)
+        editor.set_pair_mode(False)
+
+        assert editor.selected_names() == ['h-MoS2']
+        assert editor.selected_pairs() == [('h-MoS2', 't-MoS2')]
+
+    def test_the_summary_counts_pairs_while_pairing(self, editor):
+        editor.set_pair_mode(True)
+        editor.set_selected_pairs([('h-MoS2', 't-MoS2'), ('t-MoS2', 'b-AlSb')])
+        assert '2 pair' in editor.summary_text()
+
+
+class TestPairSweepCommit:
+    """Committing a pair sweep: 'mat1 + mat2' lines, and a placeholder on each
+    sheet. Both halves or neither -- a pair list with an untemplated second
+    sheet builds the same second material for every run, inside directories
+    named after the pairs that were asked for."""
+
+    @staticmethod
+    def _pair_form(tmp_path, monkeypatch, dirs=None, pairs=None, listing=None):
+        """A [2D]+[2D-2] indent config, its form built and the sweep ticked."""
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
+                                            'indent')
+        document.source_path = tmp_path / 'c.ini'
+        document.add_second_material()
+        if listing is not None:
+            document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        editor.set_sweeping(True)
+        if dirs is not None:
+            editor.rescan(*dirs, '.sw')
+        if pairs is not None:
+            editor.set_selected_pairs(pairs)
+        return form, editor
+
+    def test_pair_commit_writes_pair_lines_and_both_templates(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        form, _editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs,
+            pairs=[('h-MoS2', 'h-WS2'), ('t-MoS2', 'b-AlSb')])
+        form.commit()
+
+        txt = (tmp_path / 'c_materials.txt').read_text(encoding='utf-8')
+        assert 'h-MoS2 + h-WS2' in txt
+        assert 't-MoS2 + b-AlSb' in txt
+        assert form.document.get('2D', 'cif_path').endswith('/{mat1}.cif')
+        assert form.document.get('2D-2', 'cif_path').endswith('/{mat2}.cif')
+        assert form.document.get('2D-2', 'mat') == '{mat2}'
+        assert form.document.material_entries() == [('h-MoS2', 'h-WS2'),
+                                                    ('t-MoS2', 'b-AlSb')]
+        form.deleteLater()
+
+    def test_the_pair_table_appears_only_with_a_second_material(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """Pair mode is sweeping AND a second sheet -- neither alone."""
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        listing = tmp_path / 'singles.txt'
+        listing.write_text('h-MoS2\n', encoding='utf-8')
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
+                                            'indent')
+        document.source_path = tmp_path / 'c.ini'
+        document.set('2D', 'materials_list', str(listing))
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        assert editor.is_sweeping()
+        assert not editor.is_pair_mode()
+
+        document.add_second_material()
+        form.rebuild()
+        editor = form.sections['2D'].editors['materials_list']
+        assert editor.is_sweeping()
+        assert editor.is_pair_mode()
+        form.deleteLater()
+
+    def test_adding_a_material_while_sweeping_keeps_the_sweep_ticked(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """Ticking the box before choosing anything writes nothing to the
+        document, so the rebuild that 'Add a material' triggers had nothing to
+        restore the tick from: the sweep silently switched itself off, and the
+        two directories the user then picked were saved as literal paths.
+
+        The natural order for building a pair -- sweep, then second material,
+        then the directories -- has to survive the rebuild."""
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
+                                            'indent')
+        document.source_path = tmp_path / 'c.ini'
+
+        form = ConfigForm(document)
+        form.sections['2D'].editors['materials_list'].set_sweeping(True)
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()            # the rebuild is deferred by a timer
+
+        editor = form.sections['2D'].editors['materials_list']
+        assert editor.is_sweeping()
+        assert editor.is_pair_mode()
+        assert form.sections['2D'].editors['cif_path']._directory_mode is True
+        form.deleteLater()
+
+    def test_the_second_sheets_paths_follow_the_sweep_into_folder_mode(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """[2D-2]'s Structure/Potential mean a directory while the sweep is
+        writing them, exactly as [2D]'s do -- a single-file picker there
+        offers to overwrite the sweep with one material's file."""
+        form, _editor = self._pair_form(tmp_path, monkeypatch, dirs=dirs)
+        second = form.sections['2D-2']
+        assert second.editors['cif_path']._directory_mode is True
+        assert second.editors['pot_path']._directory_mode is True
+        form.deleteLater()
+
+    def test_opening_a_pair_sweep_shows_its_pairs(self, qt_app, dirs, tmp_path,
+                                                  monkeypatch):
+        listing = tmp_path / 'pairs.txt'
+        listing.write_text('h-MoS2 + t-MoS2\nt-MoS2 + b-AlSb\n',
+                           encoding='utf-8')
+        form, editor = self._pair_form(tmp_path, monkeypatch, listing=listing)
+
+        assert editor.is_pair_mode()
+        assert editor.selected_pairs() == [('h-MoS2', 't-MoS2'),
+                                           ('t-MoS2', 'b-AlSb')]
+        form.deleteLater()
+
+    def test_pointing_the_picker_at_a_curated_pair_list_loads_its_pairs(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The pair analogue of the curated-`.txt` path row: `material_names`
+        reports nothing at all for a pair list, so loading through it would
+        leave the table empty and the sweep looking unconfigured."""
+        curated = tmp_path / 'curated_pairs.txt'
+        curated.write_text('h-MoS2 + h-WS2\nt-MoS2 + b-AlSb\n', encoding='utf-8')
+        form, editor = self._pair_form(tmp_path, monkeypatch, dirs=dirs)
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+
+        assert editor.selected_pairs() == [('h-MoS2', 'h-WS2'),
+                                           ('t-MoS2', 'b-AlSb')]
+        assert form.document.get('2D', 'materials_list') == str(curated)
+        form.deleteLater()
+
+    def test_an_empty_pair_table_does_not_delete_the_list(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """Pressing 'Add a material' on a live single-material sweep lands
+        here on the very next commit: pair mode is on and no pair has been
+        chosen yet. An empty table there means 'not paired up yet', and the
+        list the user is in the middle of pairing up must survive it."""
+        listing = tmp_path / 'singles.txt'
+        listing.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+        form, editor = self._pair_form(tmp_path, monkeypatch, dirs=dirs,
+                                       listing=listing)
+        assert editor.selected_pairs() == []
+
+        form.commit()
+
+        assert form.document.has_material_list()
+        assert set(listing.read_text(encoding='utf-8').split()) == {'h-MoS2',
+                                                                    't-MoS2'}
+        form.deleteLater()
+
+    def test_emptying_a_table_that_held_pairs_clears_the_sweep(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The other side of the coin: removing every row of a pair sweep is
+        the same deliberate act as unticking every material, and clears it."""
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        form.commit()
+        assert form.document.has_material_list()
+
+        editor.set_selected_pairs([])
+        form.commit()
+
+        assert not form.document.has_material_list()
+        form.deleteLater()
+
+    def test_repointing_the_directories_survives_the_second_sheets_commit(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """[2D]'s commit writes [2D-2]'s placeholders straight into the
+        document, bypassing its editors. Committing [2D-2] afterwards without
+        resyncing them writes the stale text back over what the sweep just
+        decided -- the second sheet silently reverts to the old directory (or,
+        on a freshly added sheet, to nothing at all)."""
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        form.commit()
+
+        moved_structures = tmp_path / 'moved_cif'
+        moved_potentials = tmp_path / 'moved_sw'
+        moved_structures.mkdir()
+        moved_potentials.mkdir()
+        for name in ('h-MoS2', 't-MoS2'):
+            (moved_structures / f'{name}.cif').write_text('', encoding='utf-8')
+            (moved_potentials / f'{name}.sw').write_text('', encoding='utf-8')
+
+        section = form.sections['2D']
+        section.editors['cif_path'].edit.setText(str(moved_structures))
+        section.editors['cif_path'].edit.editingFinished.emit()
+        section.editors['pot_path'].edit.setText(str(moved_potentials))
+        section.editors['pot_path'].edit.editingFinished.emit()
+        form.commit()
+
+        assert form.document.get('2D-2', 'cif_path') == 'moved_cif/{mat2}.cif'
+        assert form.document.get('2D-2', 'pot_path') == 'moved_sw/{mat2}.sw'
+        form.deleteLater()
+
+    def test_generating_pairs_commits_them(self, qt_app, dirs, tmp_path,
+                                           monkeypatch):
+        """Generate is a real edit, like ticking a material: it must reach the
+        document rather than sitting in the table until something else
+        happens to commit."""
+        form, editor = self._pair_form(tmp_path, monkeypatch, dirs=dirs)
+        editor.set_selected(['h-MoS2', 't-MoS2'])
+        editor.generate_pairs(include_reversed=True)
+
+        assert form.document.material_entries() == [('h-MoS2', 't-MoS2'),
+                                                    ('t-MoS2', 'h-MoS2')]
+        form.deleteLater()
+
+    def test_unticking_a_pair_sweep_clears_both_sheets(self, qt_app, dirs,
+                                                       tmp_path, monkeypatch):
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        form.commit()
+        assert form.document.get('2D-2', 'mat') == '{mat2}'
+
+        editor.set_sweeping(False)
+        form.commit()
+
+        assert not form.document.has_material_list()
+        assert form.document.get('2D-2', 'mat') != '{mat2}'
+        assert form.document.get('2D', 'mat') != '{mat1}'
+        form.deleteLater()
 
 
 class TestSweepRoundTrip:

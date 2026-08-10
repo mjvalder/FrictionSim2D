@@ -156,6 +156,15 @@ class SectionForm(QGroupBox):
     #: so the whole form has to be rebuilt, not merely reloaded. Distinct from
     #: `changed`, which reports a value edit and never moves a section.
     structure_changed = Signal()
+    #: `[2D]` only: the material sweep was ticked or unticked. The second
+    #: sheet's path cells follow it into (and out of) folder mode, and only
+    #: `ConfigForm` owns both sections.
+    sweep_mode_changed = Signal(bool)
+    #: `[2D]` only: this commit rewrote the `{mat}` placeholders, which for a
+    #: pair sweep includes `[2D-2]`'s -- straight into the document, behind
+    #: its editors' backs. They have to be resynced before that section
+    #: commits, or it writes its stale text back over them.
+    templates_written = Signal()
 
     def __init__(self, section: SectionSpec, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
@@ -643,6 +652,11 @@ class SectionForm(QGroupBox):
                 # _sweep_directories() (reading those editors) sees exactly
                 # what a freshly opened config carries -- templated or not.
                 names = self.document.material_names()
+                # Pairs are invisible to material_names(), which is exactly
+                # why they are read separately: read_material_list refuses an
+                # 'a + b' line and the document reports [] for it.
+                pairs = [e for e in self.document.material_entries()
+                         if len(e) == 2]
                 material_editor.set_document_names(names)
                 material_editor.rescan(*self._sweep_directories())
 
@@ -653,7 +667,12 @@ class SectionForm(QGroupBox):
                 # must not have the box invented for it.
                 material_editor.set_sweeping(self.document.has_material_list())
 
-                if names:
+                if pairs:
+                    # A pair list is the selection outright: which material
+                    # is sheet 1 and which is sheet 2 is written down in it,
+                    # and no scan of the directories can reconstruct that.
+                    material_editor.set_selected_pairs(pairs)
+                elif names:
                     # An existing list is the selection; the directories
                     # only decide what is available to tick.
                     material_editor.set_selected(names)
@@ -778,11 +797,11 @@ class SectionForm(QGroupBox):
                 # mat/cif_path/pot_path exactly as editable as any other
                 # field, or a same-commit edit to one of them is silently
                 # reverted before it ever reaches the document.
-                for key in self.document.TEMPLATED_KEYS:
-                    templated_editor = self.editors.get(key)
-                    if templated_editor is not None:
-                        templated_editor.set_value(
-                            self.document.get(self.section.key, key))
+                self.sync_templated_editors()
+                # The same resync is owed to `[2D-2]`, whose placeholders a
+                # pair sweep writes from here too -- but that section is
+                # another SectionForm, so ConfigForm does it.
+                self.templates_written.emit()
 
         existing = self.document.values.get(self.section.key, {})
         specs = self.section.field_map()
@@ -820,6 +839,29 @@ class SectionForm(QGroupBox):
                                      and not self.effective_required(key)):
                     continue
             self.document.set(self.section.key, key, value)
+
+    def sync_templated_editors(self) -> None:
+        """Re-read mat/cif_path/pot_path from the document into their editors.
+
+        The sweep writes those three keys straight into the document, bypassing
+        the editors, which still hold whatever text was on screen before. Any
+        commit of this section afterwards would read that stale text back and
+        write it over what the sweep just decided.
+        """
+        for key in self.document.TEMPLATED_KEYS:
+            editor = self.editors.get(key)
+            if editor is not None:
+                editor.set_value(self.document.get(self.section.key, key))
+
+    def _pair_sweeping(self) -> bool:
+        """Whether this section's sweep names ordered pairs.
+
+        The document's shape decides it, not the widget's: each line of the
+        list has to name exactly as many materials as there are sheet sections
+        to hold them (`core.run` refuses either mismatch outright).
+        """
+        has_second = getattr(self.document, 'has_second_material', None)
+        return bool(has_second is not None and has_second())
 
     def _commit_material_sweep(self, editor) -> bool:
         """Write the three things a sweep needs, when they actually changed.
@@ -867,9 +909,18 @@ class SectionForm(QGroupBox):
             # simply cannot see right now.
             return False
 
+        pair_mode = self._pair_sweeping()
         self.document.apply_material_directories(
-            structures, potentials, extension)
+            structures, potentials, extension, pair_mode=pair_mode)
 
+        if pair_mode:
+            self._commit_pair_list(editor)
+        else:
+            self._commit_single_list(editor)
+        return True
+
+    def _commit_single_list(self, editor) -> None:
+        """Write the ticked material names, when they actually changed."""
         selected = editor.selected_names()
         # Order-insensitive: selected_names() comes back in
         # scan_material_directories' alphabetical order, but a hand-maintained
@@ -877,26 +928,51 @@ class SectionForm(QGroupBox):
         # treat that as a change and retarget a file that nothing actually
         # asked to change.
         if set(selected) != set(self.document.material_names()):
-            written = self.document.write_material_names(selected)
-            # Read back what the document actually holds -- a relative path,
-            # per _relative_to_config -- rather than reusing
-            # write_material_names' return value, which is the absolute
-            # target it wrote to disk. The two are not the same, and the
-            # generic loop used to write whichever one note_written was
-            # given straight back into the document.
-            editor.note_written(self.document.get('2D', 'materials_list'))
-            if written is None and selected:
-                # None is ambiguous on its own: write_material_names also
-                # returns it for an empty `selected` (a legitimate clear, not
-                # a problem). Only a real, non-empty selection failing to
-                # land anywhere -- an unsaved document with no workspace to
-                # fall back to -- is the decline this warns about. The
-                # document is unchanged either way; note_written above just
-                # read that back, so the selection on screen has nothing
-                # behind it until the user saves.
-                self._warn_material_list_not_written()
+            self._write_material_list(editor, selected)
 
-        return True
+    def _commit_pair_list(self, editor) -> None:
+        """Write the table's ordered pairs as ``'mat1 + mat2'`` lines.
+
+        Compared against the configured list's *pairs only*, which is what
+        makes "the table has nothing in it yet" different from "the user
+        emptied the table". Pressing *Add a material* on a live
+        single-material sweep lands exactly here on the very next commit --
+        pair mode on, no pair chosen -- and comparing against the whole list
+        would read as a change from three single materials to nothing, and
+        delete the list the user is in the middle of pairing up. Against the
+        pairs alone it is [] vs [], which is no change at all.
+
+        Emptying a table that *did* hold pairs still clears the sweep, exactly
+        as unticking every material does in the single-material branch.
+
+        Order matters and is preserved: the pairs are compared as sets only to
+        decide whether anything changed, exactly as the single-material branch
+        does, but written in table order.
+        """
+        selected = editor.selected_pairs()
+        current = [e for e in self.document.material_entries() if len(e) == 2]
+        if set(selected) != set(current):
+            self._write_material_list(editor, selected)
+
+    def _write_material_list(self, editor, entries) -> None:
+        written = self.document.write_material_names(entries)
+        # Read back what the document actually holds -- a relative path,
+        # per _relative_to_config -- rather than reusing
+        # write_material_names' return value, which is the absolute
+        # target it wrote to disk. The two are not the same, and the
+        # generic loop used to write whichever one note_written was
+        # given straight back into the document.
+        editor.note_written(self.document.get('2D', 'materials_list'))
+        if written is None and entries:
+            # None is ambiguous on its own: write_material_names also
+            # returns it for an empty `entries` (a legitimate clear, not
+            # a problem). Only a real, non-empty selection failing to
+            # land anywhere -- an unsaved document with no workspace to
+            # fall back to -- is the decline this warns about. The
+            # document is unchanged either way; note_written above just
+            # read that back, so the selection on screen has nothing
+            # behind it until the user saves.
+            self._warn_material_list_not_written()
 
     def _warn_material_list_not_written(self) -> None:
         """Tell the user why a ticked selection did not reach disk.
@@ -954,6 +1030,27 @@ class SectionForm(QGroupBox):
             return None
         return Path(text).parent if has_template_marker(text) else Path(text)
 
+    def is_material_sweeping(self) -> bool:
+        """Whether this section's sweep box is ticked. False for any section
+        that has no material list at all."""
+        editor = self.editors.get('materials_list')
+        return bool(hasattr(editor, 'is_sweeping') and editor.is_sweeping())
+
+    def set_material_sweep_mode(self, sweeping: bool) -> None:
+        """Folder pickers and a sweep-owned `mat`, or hand-edited ones.
+
+        Applies to any sheet section whose material the sweep writes -- `[2D]`
+        drives its own, and `ConfigForm` drives `[2D-2]`'s from it, because a
+        pair sweep writes both sheets from one list.
+        """
+        for key in ('cif_path', 'pot_path'):
+            path_editor = self.editors.get(key)
+            if path_editor is not None and hasattr(path_editor, 'set_directory_mode'):
+                path_editor.set_directory_mode(sweeping)
+        mat_editor = self.editors.get('mat')
+        if mat_editor is not None:
+            mat_editor.setEnabled(not sweeping)
+
     def _apply_sweep_mode(self) -> None:
         """Folder pickers while sweeping, single-file pickers otherwise.
 
@@ -962,18 +1059,20 @@ class SectionForm(QGroupBox):
         widgets happened to be left in. The mat field is only ever set to
         '{mat}' by the post-apply resync in commit(), never here: ticking the
         box alone must not manufacture a {mat}-with-no-materials_list config.
+
+        The same state decides whether the selection is a tick list or a pair
+        table: pair mode is sweeping AND a second sheet, because that is
+        exactly when each line of the list has to name two materials. Adding
+        or dropping the second material rebuilds the form, which re-enters
+        here, so the mode follows the button with nothing else to wire up.
         """
         material_editor = self.editors.get('materials_list')
         if self.section.key != '2D' or not hasattr(material_editor, 'is_sweeping'):
             return
         sweeping = material_editor.is_sweeping()
-        for key in ('cif_path', 'pot_path'):
-            path_editor = self.editors.get(key)
-            if path_editor is not None and hasattr(path_editor, 'set_directory_mode'):
-                path_editor.set_directory_mode(sweeping)
-        mat_editor = self.editors.get('mat')
-        if mat_editor is not None:
-            mat_editor.setEnabled(not sweeping)
+        self.set_material_sweep_mode(sweeping)
+        material_editor.set_pair_mode(sweeping and self._pair_sweeping())
+        self.sweep_mode_changed.emit(sweeping)
 
     def _wire_material_sweep(self) -> None:
         """Connect the sweep checkbox and the two path editors'
@@ -1037,8 +1136,11 @@ class SectionForm(QGroupBox):
         if not text or text == self.document.get('2D', 'materials_list'):
             return
         self.document.set('2D', 'materials_list', text)
+        pairs = [e for e in self.document.material_entries() if len(e) == 2]
         names = self.document.material_names()
-        if names:
+        if pairs and material_editor.is_pair_mode():
+            material_editor.load_pairs(pairs)
+        elif names:
             material_editor.load_names(names)
         material_editor.note_written(text)
 
@@ -1222,6 +1324,13 @@ class ConfigForm(QWidget):
 
     def rebuild(self) -> None:
         """Recreate every section form, e.g. after the model changed."""
+        # Read before anything is torn down: a ticked sweep box that has not
+        # been configured yet writes nothing to the document, so the rebuilt
+        # form has nothing to restore it from. Adding a second material is
+        # precisely when that happens -- the button rebuilds the form -- and
+        # the sweep silently switching itself off there took the two
+        # directories picked next down with it, saving them as literal paths.
+        sweeping = self._material_sweep_state()
         self.setUpdatesEnabled(False)
         try:
             while self._layout.count():
@@ -1250,7 +1359,10 @@ class ConfigForm(QWidget):
             # editors, a materials-list change (MaterialListEditor's own
             # `changed`, emitted only from rescan()/a checkbox click, never a
             # keystroke), and a section being switched on or off.
+            if sweeping:
+                self._restore_material_sweep()
             self._wire_lj_known_elements_refresh()
+            self._wire_second_sheet_to_the_sweep()
 
             self._layout.addStretch(1)
         finally:
@@ -1290,6 +1402,59 @@ class ConfigForm(QWidget):
         spec = self.document.second_material_spec()
         spec.optional = False
         return spec
+
+    def _material_sweep_state(self) -> bool:
+        """Whether `[2D]`'s sweep box is currently ticked, before a rebuild
+        throws the widget away. False when there is no `[2D]` form yet."""
+        primary = self.sections.get('2D')
+        return primary is not None and primary.is_material_sweeping()
+
+    def _restore_material_sweep(self) -> None:
+        """Re-tick the sweep on the rebuilt `[2D]`.
+
+        Only ever re-ticks: `load()` has already ticked the box for any sweep
+        the document actually holds, and this restores the one state the
+        document cannot express -- ticked, nothing chosen yet.
+        """
+        primary = self.sections.get('2D')
+        editor = primary.editors.get('materials_list') if primary else None
+        if editor is not None and hasattr(editor, 'set_sweeping'):
+            editor.set_sweeping(True)
+
+    def _second_sheet_form(self) -> Optional[SectionForm]:
+        return self.sections.get(
+            getattr(self.document, 'SECOND_SHEET', None) or '')
+
+    def _wire_second_sheet_to_the_sweep(self) -> None:
+        """Let `[2D]`'s material sweep drive `[2D-2]`, which it also writes.
+
+        A pair sweep fills both sheets from one list, so the second sheet's
+        Structure/Potential cells mean a directory exactly when the first
+        one's do, and its placeholders are written from the first section's
+        commit -- behind its own editors' backs. Only this class owns both
+        sections, so both connections are made here rather than between two
+        `SectionForm`s that cannot see each other.
+
+        The initial `set_material_sweep_mode` call is not redundant with the
+        signal: `[2D]` applies its own sweep mode during construction, before
+        `[2D-2]` exists to hear about it.
+        """
+        primary = self.sections.get('2D')
+        if primary is None or self._second_sheet_form() is None:
+            return
+        primary.sweep_mode_changed.connect(self._on_sweep_mode_changed)
+        primary.templates_written.connect(self._on_templates_written)
+        self._on_sweep_mode_changed(primary.is_material_sweeping())
+
+    def _on_sweep_mode_changed(self, sweeping: bool) -> None:
+        second = self._second_sheet_form()
+        if second is not None:
+            second.set_material_sweep_mode(sweeping)
+
+    def _on_templates_written(self) -> None:
+        second = self._second_sheet_form()
+        if second is not None:
+            second.sync_templated_editors()
 
     def _on_structure_changed(self) -> None:
         """Rebuild after the *set* of sections changed, not just a value.
@@ -1342,8 +1507,21 @@ class ConfigForm(QWidget):
         return sorted(k for k, f in self.sections.items() if f.is_collapsed())
 
     def commit(self) -> None:
+        """Commit every section, `[2D]` first.
+
+        The order is load-bearing for a pair sweep: `[2D]`'s commit writes
+        `[2D-2]`'s `{mat2}` placeholders straight into the document, and
+        `[2D-2]`'s own commit would write its (pre-sweep) editor text back
+        over them. Committing the sweep first means the resync
+        `templates_written` triggers has already happened by the time the
+        second sheet's turn comes.
+        """
+        primary = self.sections.get('2D')
+        if primary is not None:
+            primary.commit()
         for form in self.sections.values():
-            form.commit()
+            if form is not primary:
+                form.commit()
 
     def load(self) -> None:
         for form in self.sections.values():

@@ -29,12 +29,15 @@ from typing import List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -83,6 +86,10 @@ class MaterialListEditor(FieldEditor):
         #: `_commit_material_sweep`.
         self._scanned: Optional[Tuple[Optional[Path], Optional[Path],
                                       Optional[str]]] = None
+        #: Whether the selection is a table of ordered pairs rather than a
+        #: tick list of single materials. Driven by SectionForm from the
+        #: document's shape (sweeping AND a second sheet), never chosen here.
+        self._pair_mode = False
         #: material_names() as of the last load(), passed in via
         #: set_document_names. The floor a rescan's "keep the selection"
         #: logic falls back to when the widget's own selection has gone empty
@@ -139,16 +146,43 @@ class MaterialListEditor(FieldEditor):
         self.listing.itemChanged.connect(self._on_item_changed)
         panel.addWidget(self.listing)
 
-        buttons = QHBoxLayout()
-        for label, slot in (('Select all', self.select_all),
-                            ('None', self.select_none)):
-            button = QPushButton(label, self.list_panel)
-            button.clicked.connect(slot)
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-        panel.addLayout(buttons)
+        self.list_buttons = self._button_row(
+            (('Select all', self.select_all), ('None', self.select_none)))
+        panel.addWidget(self.list_buttons)
+
+        # The pair half: same widget, other mode. A pair sweep names an
+        # ORDERED pair per line, and which material is sheet 1 and which is
+        # sheet 2 is the whole content of a heterostructure -- a set of ticks
+        # cannot say it, so pair mode swaps the list for a two-column table.
+        self.pair_table = QTableWidget(0, 2, self.list_panel)
+        self.pair_table.setHorizontalHeaderLabels(['Material 1', 'Material 2'])
+        self.pair_table.verticalHeader().setVisible(False)
+        self.pair_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch)
+        self.pair_table.setMaximumHeight(160)
+        self.pair_table.setVisible(False)
+        panel.addWidget(self.pair_table)
+
+        self.pair_buttons = self._button_row(
+            (('Add pair', self.add_pair), ('Remove pair', self.remove_pair),
+             ('Generate pairs…', self._open_generate_dialog)))
+        self.pair_buttons.setVisible(False)
+        panel.addWidget(self.pair_buttons)
 
         self.list_panel.setVisible(False)
+
+    def _button_row(self, entries) -> QWidget:
+        """One row of push buttons, in a widget of its own so the row can be
+        shown or hidden as a unit when the mode changes."""
+        row = QWidget(self.list_panel)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        for label, slot in entries:
+            button = QPushButton(label, row)
+            button.clicked.connect(slot)
+            layout.addWidget(button)
+        layout.addStretch(1)
+        return row
 
     # ----------------------------------------------------------------- state
 
@@ -212,6 +246,180 @@ class MaterialListEditor(FieldEditor):
 
     def summary_text(self) -> str:
         return self.summary.text()
+
+    # ------------------------------------------------------------ pair mode
+
+    def is_pair_mode(self) -> bool:
+        return self._pair_mode
+
+    def set_pair_mode(self, pair_mode: bool) -> None:
+        """Swap the tick list for the pair table, or back.
+
+        The two selections are kept side by side rather than converted into
+        each other: adding a second material and changing one's mind about it
+        is one click each way, and a conversion would have to invent the
+        member the other mode never had.
+        """
+        self._pair_mode = bool(pair_mode)
+        self.listing.setVisible(not self._pair_mode)
+        self.list_buttons.setVisible(not self._pair_mode)
+        self.pair_table.setVisible(self._pair_mode)
+        self.pair_buttons.setVisible(self._pair_mode)
+        self._update_summary()
+
+    def usable_names(self) -> List[str]:
+        """Listed names that have both a structure and a potential file."""
+        return [
+            self.listing.item(index).data(Qt.UserRole)
+            for index in range(self.listing.count())
+            if self.listing.item(index).flags() & Qt.ItemIsUserCheckable
+        ]
+
+    def pair_pool(self) -> List[str]:
+        """The materials `generate_pairs` builds from.
+
+        The ticked ones, falling back to everything usable when nothing is
+        ticked: the tick list is hidden in pair mode, so an empty selection
+        there is far more likely to mean "not used" than "deliberately none",
+        and a Generate that produced nothing at all would just look broken.
+        """
+        return self.selected_names() or self.usable_names()
+
+    def selected_pairs(self) -> List[Tuple[str, str]]:
+        """The ordered pairs currently in the table, in table order."""
+        pairs: List[Tuple[str, str]] = []
+        for row in range(self.pair_table.rowCount()):
+            first = self.pair_table.cellWidget(row, 0)
+            second = self.pair_table.cellWidget(row, 1)
+            if first is None or second is None:
+                continue
+            mat1, mat2 = first.currentText().strip(), second.currentText().strip()
+            if mat1 and mat2:
+                pairs.append((mat1, mat2))
+        return pairs
+
+    def set_selected_pairs(self, pairs) -> None:
+        """Replace the table's rows. Emits nothing: this is how a document is
+        loaded into the widget, and committing on load is how an open turns
+        into a write."""
+        self.pair_table.setRowCount(0)
+        for pair in pairs:
+            members = list(pair)
+            self._append_pair_row(members[0] if members else None,
+                                  members[1] if len(members) > 1 else None)
+        self._update_summary()
+
+    def add_pair(self) -> None:
+        """Append a row, defaulted to the first two materials available."""
+        pool = self.pair_pool()
+        self._append_pair_row(pool[0] if pool else None,
+                              pool[1] if len(pool) > 1 else
+                              (pool[0] if pool else None))
+        self._selection_touched = True
+        self._update_summary()
+        self.changed.emit()
+
+    def remove_pair(self) -> None:
+        """Drop the selected row, or the last one when nothing is selected."""
+        if not self.pair_table.rowCount():
+            return
+        row = self.pair_table.currentRow()
+        if row < 0:
+            row = self.pair_table.rowCount() - 1
+        self.pair_table.removeRow(row)
+        self._selection_touched = True
+        self._update_summary()
+        self.changed.emit()
+
+    def generate_pairs(self, include_reversed: bool = False,
+                       include_same: bool = False) -> None:
+        """Fill the table with every ordered pair over `pair_pool()`.
+
+        `include_reversed` is off by default even though AB and BA really are
+        different stacks: doubling the sweep is a decision, not a default.
+        `include_same` adds the homostructure bilayers (``a + a``), which are
+        a legitimate reference run but not what "pair these up" asks for.
+        """
+        pool = self.pair_pool()
+        pairs = [
+            (first, second)
+            for i, first in enumerate(pool)
+            for j, second in enumerate(pool)
+            if not (i == j and not include_same)
+            and not (j < i and not include_reversed)
+        ]
+        self.set_selected_pairs(pairs)
+        self._selection_touched = True
+        self.changed.emit()
+
+    def _append_pair_row(self, first: Optional[str] = None,
+                         second: Optional[str] = None) -> None:
+        row = self.pair_table.rowCount()
+        self.pair_table.insertRow(row)
+        for column, name in ((0, first), (1, second)):
+            self.pair_table.setCellWidget(row, column, self._pair_combo(name))
+
+    def _pair_combo(self, current: Optional[str]) -> QComboBox:
+        """One cell: the usable materials, plus whatever this cell already
+        holds.
+
+        A curated list may name a material neither directory holds on this
+        machine -- a moved share, a potential not yet generated. Offering only
+        what the last scan saw would silently rewrite that member to something
+        else the moment the combo was built, which is the same silent
+        narrowing the tick list's keep-selection logic exists to prevent.
+
+        The signal is connected only after the current item is set, so
+        populating a row never reads as the user editing it.
+        """
+        combo = QComboBox(self.pair_table)
+        names = self.usable_names()
+        if current and current not in names:
+            names = [current] + names
+        combo.addItems(names)
+        if current:
+            index = combo.findText(current)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.currentTextChanged.connect(self._on_pair_changed)
+        return combo
+
+    def _on_pair_changed(self, _text: str) -> None:
+        self._selection_touched = True
+        self._update_summary()
+        self.changed.emit()
+
+    def _open_generate_dialog(self) -> None:
+        """Ask for the two options, then build the pairs.
+
+        Local import, like `_browse_list`'s QFileDialog: the dialog is only
+        ever needed when the button is actually pressed.
+        """
+        from PySide6.QtWidgets import (  # noqa: PLC0415
+            QDialog, QDialogButtonBox,
+        )
+
+        pool = self.pair_pool()
+        dialog = QDialog(self.list_panel)
+        dialog.setWindowTitle('Generate pairs')
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            f"Pairs will be built from the {len(pool)} material(s) currently "
+            f"available: {', '.join(pool) or '(none)'}.", dialog))
+        reversed_box = QCheckBox('Include the reversed order (b + a)', dialog)
+        same_box = QCheckBox('Include same-material pairs (a + a)', dialog)
+        layout.addWidget(reversed_box)
+        layout.addWidget(same_box)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() == QDialog.Accepted:
+            self.generate_pairs(include_reversed=reversed_box.isChecked(),
+                                include_same=same_box.isChecked())
 
     # --------------------------------------------------------------- scanning
 
@@ -287,11 +495,16 @@ class MaterialListEditor(FieldEditor):
             finally:
                 self.listing.blockSignals(False)
 
-            usable = sum(1 for c in candidates if c.usable)
+            # Rebuild the pair combos against the new listing, keeping the
+            # pairs themselves: a scan changes what is *available*, not what
+            # the user has chosen.
+            self.set_selected_pairs(self.selected_pairs())
+
             self.extension_label.setText(self._extension or '')
-            self.summary.setText(
-                f"{usable} of {len(candidates)} usable → {len(self.selected_names())} "
-                f"configs" if candidates else 'Choose both directories.')
+            if candidates:
+                self._update_summary()
+            else:
+                self.summary.setText('Choose both directories.')
 
             # Emitted inside the guarded region, not after: `_rescanning` is
             # what a reentrant rescan() call checks, so it must still be True
@@ -308,10 +521,16 @@ class MaterialListEditor(FieldEditor):
         # has never touched the selection" from "the user touched it and
         # ended up at empty".
         self._selection_touched = True
-        self._rescan_summary()
+        self._update_summary()
         self.changed.emit()
 
-    def _rescan_summary(self) -> None:
+    def _update_summary(self) -> None:
+        """What this selection would build, counted the way the current mode
+        actually expands: one config per ticked material, or one per pair."""
+        if self._pair_mode:
+            count = len(self.selected_pairs())
+            self.summary.setText(f"{count} pair(s) → {count} configs")
+            return
         total = self.listing.count()
         usable = sum(
             1 for i in range(total)
@@ -369,7 +588,20 @@ class MaterialListEditor(FieldEditor):
             self._seed_placeholder_listing(names)
         else:
             self.set_selected(names)
-            self._rescan_summary()
+            self._update_summary()
+        self.changed.emit()
+
+    def load_pairs(self, pairs) -> None:
+        """Adopt `pairs` as the selection -- the pair-mode sibling of
+        `load_names`, for a curated `.txt` of ``'mat1 + mat2'`` lines the
+        path row was just pointed at.
+
+        No placeholder listing to seed: the table's combos already carry a
+        member the last scan could not see (see `_pair_combo`), so a curated
+        pair list is legible before either directory has resolved.
+        """
+        self._selection_touched = True
+        self.set_selected_pairs(pairs)
         self.changed.emit()
 
     def _seed_placeholder_listing(self, names: List[str]) -> None:

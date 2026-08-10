@@ -318,17 +318,60 @@ class ConfigDocument:
             self._write_material_templates(structures, potentials, extension)
 
     def remove_second_material(self) -> None:
-        """Drop the second sheet and the stacking that only it gives meaning.
+        """Drop the second sheet, and everything that only it gives meaning.
 
         ``hetero_stacking`` orders the layers of a two-material stack; left
         behind on a single-material config it configures nothing, and reads as
         though a heterostructure were still being built.
+
+        A *pair* material list is the dangerous leftover, and the reason this
+        does more than delete a section. Its lines name two materials each
+        (``'a + b'``), which `read_material_list` refuses outright --
+        `material_names` swallows that and reports ``[]``, so the sweep stops
+        sweeping and the user gets one run instead of N with nothing reported
+        anywhere. The list is rewritten to each pair's *first* member, which
+        is the sheet that is left; the second members go with the sheet that
+        was removed.
         """
-        if self.has_second_material():
-            del self.values[self.SECOND_SHEET]
-            self.dirty = True
+        if not self.has_second_material():
+            # The stacking pop below is still worth doing on its own -- a
+            # hand-written config can carry it without a [2D-2] -- but the
+            # list and template rewrites are meaningless without a pair.
+            if (self.values.get('general') or {}).pop(
+                    'hetero_stacking', None) is not None:
+                self.dirty = True
+            return
+
+        del self.values[self.SECOND_SHEET]
+        self.dirty = True
         if (self.values.get('general') or {}).pop('hetero_stacking', None) is not None:
             self.dirty = True
+
+        self._collapse_pair_material_list()
+
+        # Re-spell the surviving sheet from `{mat1}` back to `{mat}`. Both
+        # substitute identically, so this is legibility rather than
+        # correctness -- but a one-sheet config spelled for a pair reads as
+        # though the pair were still there. Mirrors `add_second_material`,
+        # which templates the new sheet the same way round.
+        structures, potentials, extension = self.material_directories()
+        if structures is not None:
+            self._write_material_templates(structures, potentials, extension)
+
+    def _collapse_pair_material_list(self) -> None:
+        """Rewrite a pair material list to its first members, in file order.
+
+        Deduped: two pairs may share a first member (``'a + b'``, ``'a + c'``),
+        and a list naming the same material twice would build the same run
+        twice into the same directory. A list of single materials is left
+        untouched -- there is nothing to collapse, and rewriting it would
+        retarget a file nothing asked to change.
+        """
+        entries = self.material_entries()
+        if not any(len(entry) == 2 for entry in entries):
+            return
+        firsts = list(dict.fromkeys(entry[0] for entry in entries if entry))
+        self.write_material_names(firsts)
 
     def conflicts(self) -> List[str]:
         """Settings that do nothing as configured, in plain words.
@@ -657,7 +700,8 @@ class ConfigDocument:
             return Path(path)
 
     def apply_material_directories(self, structure_dir, potential_dir,
-                                   potential_extension: str) -> None:
+                                   potential_extension: str,
+                                   pair_mode: Optional[bool] = None) -> None:
         """Point the per-material fields at two directories.
 
         This is what makes a material list actually sweep: `expand_config_sweeps`
@@ -675,7 +719,31 @@ class ConfigDocument:
         Both sheets read the same two directories: one list, one structure
         directory, one potential directory -- a pair whose members live apart
         has no way to be named on a single line.
+
+        Args:
+            pair_mode: What the caller believes it is configuring -- an
+                ordered-pair sweep (True) or a single-material one (False).
+                None, the default, derives it from the document, which is the
+                only thing that can actually be right: which markers the
+                sheets take follows the presence of ``[2D-2]``, not a flag.
+                A stated `pair_mode` that disagrees with the document is
+                refused rather than obeyed -- obeying True without a
+                ``[2D-2]`` would conjure that section out of a template
+                write, and obeying False with one would leave the second
+                sheet pinned to a single material for every run of the sweep,
+                which is silently wrong results rather than a wrong-looking
+                config.
+
+        Raises:
+            DocumentError: If `pair_mode` contradicts the document's shape.
         """
+        if pair_mode is not None and pair_mode != self.has_second_material():
+            raise DocumentError(
+                f"pair_mode={pair_mode} contradicts this config, which has "
+                f"{'a' if self.has_second_material() else 'no'} "
+                f"[{self.SECOND_SHEET}] section: the {{mat1}}/{{mat2}} "
+                "placeholders follow the sheets that actually exist."
+            )
         self._write_material_templates(
             self._relative_to_config(Path(structure_dir)),
             self._relative_to_config(Path(potential_dir)),

@@ -479,6 +479,106 @@ class TestPairBuiltInTheGui:
         assert document.get('2D', 'mat') == '{mat}'
 
 
+class TestRemovingTheSecondMaterial:
+    """Dropping the second sheet has to leave a config that still sweeps.
+
+    A pair list left pointed at a one-sheet config is the silent failure:
+    `read_material_list` refuses an 'a + b' line, `material_names()` swallows
+    that and reports [], and the sweep quietly stops sweeping -- one run
+    instead of N, with nothing reported anywhere.
+    """
+
+    @staticmethod
+    def _pair_document(tmp_path, entries):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'pair.ini'
+        document.add_second_material()
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'pot', '.sw')
+        document.write_material_names(entries)
+        return document
+
+    def test_a_pair_list_collapses_to_its_first_members(self, tmp_path):
+        document = self._pair_document(
+            tmp_path, [('h-MoS2', 'h-WS2'), ('t-MoS2', 'h-WS2'),
+                       ('h-MoS2', 'h-WSe2')])
+        # Sanity: while the list names pairs, the single-material reader
+        # reports nothing at all -- which is exactly what makes the leftover
+        # state invisible.
+        assert document.material_names() == []
+
+        document.remove_second_material()
+
+        # Deduped, in file order: the first members are what the remaining
+        # sheet builds, and 'h-MoS2' heads two of the three pairs. A list
+        # naming it twice would build the same run twice, into the same
+        # directory.
+        assert document.material_names() == ['h-MoS2', 't-MoS2']
+        assert (tmp_path / 'pair_materials.txt').read_text(
+            encoding='utf-8') == 'h-MoS2\nt-MoS2\n'
+
+    def test_a_single_material_list_is_left_alone(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'single.ini'
+        document.add_second_material()
+        document.write_material_names(['h-MoS2', 't-MoS2'])
+
+        document.remove_second_material()
+
+        assert document.material_names() == ['h-MoS2', 't-MoS2']
+
+    def test_the_primary_sheet_goes_back_to_the_plain_spelling(self, tmp_path):
+        """`{mat1}` substitutes identically to `{mat}`, but a one-sheet config
+        spelled for a pair reads as though the pair were still there."""
+        document = self._pair_document(tmp_path, [('h-MoS2', 'h-WS2')])
+        assert document.get('2D', 'mat') == '{mat1}'
+
+        document.remove_second_material()
+
+        assert document.get('2D', 'mat') == '{mat}'
+        assert document.get('2D', 'cif_path') == 'cif/{mat}.cif'
+        assert document.get('2D', 'pot_path') == 'pot/{mat}.sw'
+
+    def test_an_untemplated_config_gains_no_placeholders(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'plain.ini'
+        document.set('2D', 'mat', 'h-MoS2')
+        document.add_second_material()
+
+        document.remove_second_material()
+
+        assert document.get('2D', 'mat') == 'h-MoS2'
+
+
+class TestApplyPairModeArgument:
+    """`pair_mode` is what the caller believes; the document is what is true."""
+
+    def test_stating_the_pair_mode_writes_the_pair_markers(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'pair.ini'
+        document.add_second_material()
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'pot', '.sw', pair_mode=True)
+        assert document.get('2D', 'mat') == '{mat1}'
+        assert document.get('2D-2', 'mat') == '{mat2}'
+
+    def test_a_pair_mode_the_config_contradicts_is_refused(self, tmp_path):
+        """Obeying `pair_mode=True` without a `[2D-2]` would conjure the
+        section out of a template write; obeying `pair_mode=False` with one
+        would pin the second sheet for every run of the sweep."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'single.ini'
+        with pytest.raises(DocumentError, match='pair_mode'):
+            document.apply_material_directories(
+                tmp_path / 'cif', tmp_path / 'pot', '.sw', pair_mode=True)
+        assert document.get('2D-2', 'mat') is None
+
+        document.add_second_material()
+        with pytest.raises(DocumentError, match='pair_mode'):
+            document.apply_material_directories(
+                tmp_path / 'cif', tmp_path / 'pot', '.sw', pair_mode=False)
+
+
 class TestTemplateMarkers:
     """A pair config templates on {mat1}/{mat2}; a literal '{mat}' test leaves
     its placeholders behind on untick and reads back nothing on open."""
