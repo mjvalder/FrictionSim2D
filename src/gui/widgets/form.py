@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.material_templates import has_template_marker
-from ..controllers.document import ConfigDocument
+from ..controllers.document import ConfigDocument, DocumentError
 from ..controllers.elements import scan_config_elements
 from ..schema.introspect import FieldKind, FieldSpec, SectionSpec
 from ..schema.overrides import (
@@ -317,15 +317,69 @@ class SectionForm(QGroupBox):
 
         The rebuild is left to `structure_changed`: this handler runs from a
         button that the rebuild deletes, so it cannot do it itself.
+
+        Removing is the half that can refuse. A pair material list has to be
+        collapsed to its first members, and that reaches disk immediately --
+        unlike every other edit here, which the user can still throw away by
+        closing without saving. So it is asked about first, and a failed
+        write leaves the document untouched (the document rolls itself back)
+        and this handler returns before touching the button or the form: the
+        alternative was a form showing a second sheet the document no longer
+        had.
         """
         self.commit()
         if self.document.has_second_material():
-            self.document.remove_second_material()
+            if not self._confirm_pair_list_collapse():
+                return
+            try:
+                self.document.remove_second_material()
+            except DocumentError as exc:
+                self._warn(
+                    'Could not remove the second material', str(exc))
+                return
         else:
             self.document.add_second_material()
         self._update_material_button()
         self.structure_changed.emit()
         self.changed.emit()
+
+    def _confirm_pair_list_collapse(self) -> bool:
+        """Ask before discarding the second material of every pair.
+
+        True when there is nothing to ask about -- no pair list, nothing lost
+        -- because a prompt on every Remove is how a real warning becomes one
+        nobody reads.
+        """
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+        planner = getattr(self.document, 'pair_list_collapse_plan', None)
+        plan = planner() if planner is not None else None
+        if plan is None:
+            return True
+
+        dropped = ', '.join(plan.dropped[:6])
+        if len(plan.dropped) > 6:
+            dropped += ', …'
+        target = plan.target.name if plan.target else 'the config'
+        same_file = (plan.source is not None and plan.target is not None
+                     and Path(plan.source) == Path(plan.target))
+        where = (f"The single-material list will be written to '{target}'"
+                 + ('.' if same_file else
+                    f", leaving '{plan.source.name}' as it is."
+                    if plan.source else '.'))
+        return QMessageBox.question(
+            self, 'Remove the second material?',
+            f"The material list names {plan.pairs} ordered pair(s). Keeping "
+            f"only the first material of each drops the second one from the "
+            f"sweep: {dropped}.\n\n{where}\n\nRemove the second material?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) == QMessageBox.Yes
+
+    def _warn(self, title: str, text: str) -> None:
+        """A modal warning. Local import, like every other dialog here."""
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+        QMessageBox.warning(self, title, text)
 
     def _build_stacking_proxy(self) -> None:
         """Show `[general] hetero_stacking` on the second sheet.
@@ -667,10 +721,20 @@ class SectionForm(QGroupBox):
                 # must not have the box invented for it.
                 material_editor.set_sweeping(self.document.has_material_list())
 
-                if pairs:
+                if pairs and self._pair_sweeping():
                     # A pair list is the selection outright: which material
                     # is sheet 1 and which is sheet 2 is written down in it,
                     # and no scan of the directories can reconstruct that.
+                    #
+                    # Only when there is a second sheet to hold it. A pair
+                    # list on a one-sheet config -- hand-edited, or written
+                    # before the second sheet was dropped -- is exactly the
+                    # stale state `remove_second_material`'s collapse exists
+                    # for, and it commits down the single-material branch:
+                    # adopting the pairs here would skip the empty-selection
+                    # fallback below and leave the tick list at the scan's
+                    # "everything usable" default, overwriting the curated
+                    # file with three unrelated materials on the first commit.
                     material_editor.set_selected_pairs(pairs)
                 elif names:
                     # An existing list is the selection; the directories
@@ -909,7 +973,14 @@ class SectionForm(QGroupBox):
             # simply cannot see right now.
             return False
 
-        pair_mode = self._pair_sweeping()
+        # The widget's own mode, not the document's shape re-derived: those
+        # two are what have to agree, and stating the one the user is actually
+        # looking at is the only way the document's check has anything to
+        # catch. A pair table committed into a config with no [2D-2] would
+        # otherwise write 'a + b' lines under a single-material {mat}
+        # template -- refused by `core.run` much later, with the GUI insisting
+        # throughout that the config is fine.
+        pair_mode = editor.is_pair_mode()
         self.document.apply_material_directories(
             structures, potentials, extension, pair_mode=pair_mode)
 
@@ -1305,6 +1376,10 @@ class ConfigForm(QWidget):
                  start_collapsed: bool = False,
                  settings: Optional[object] = None) -> None:
         super().__init__(parent)
+        self._document: Optional[ConfigDocument] = None
+        #: Whether `document` has been pointed at a different config since the
+        #: last rebuild. See the property setter below.
+        self._document_swapped = False
         self.document = document
         #: Forwarded to every `SectionForm`; None on the Settings tab's own
         #: form, which keeps passing nothing -- it has no settings of its own
@@ -1322,6 +1397,26 @@ class ConfigForm(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self.rebuild()
 
+    @property
+    def document(self) -> ConfigDocument:
+        return self._document
+
+    @document.setter
+    def document(self, document: ConfigDocument) -> None:
+        """Point the form at another config.
+
+        A property purely so a *swap* is observable. `app._open_config`
+        assigns here and then calls `rebuild()`, which carries a ticked sweep
+        box across -- and that tick belongs to the config being closed. Left
+        standing on the config being opened it turned a `{mat}`-templated
+        config with no `materials_list` into a full sweep on the `_validate()`
+        of the very next line: a `.txt` written beside a file the user had
+        only just opened, with no action of theirs at all.
+        """
+        if document is not self._document:
+            self._document_swapped = True
+        self._document = document
+
     def rebuild(self) -> None:
         """Recreate every section form, e.g. after the model changed."""
         # Read before anything is torn down: a ticked sweep box that has not
@@ -1330,7 +1425,9 @@ class ConfigForm(QWidget):
         # precisely when that happens -- the button rebuilds the form -- and
         # the sweep silently switching itself off there took the two
         # directories picked next down with it, saving them as literal paths.
-        sweeping = self._material_sweep_state()
+        # Only within one document, though: see the `document` setter.
+        sweeping = self._material_sweep_state() and not self._document_swapped
+        self._document_swapped = False
         self.setUpdatesEnabled(False)
         try:
             while self._layout.count():

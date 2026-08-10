@@ -76,6 +76,32 @@ class DocumentError(Exception):
     """The document cannot represent this config."""
 
 
+@dataclass(frozen=True)
+class PairListCollapse:
+    """What dropping the second sheet would do to an ordered-pair list.
+
+    Handed to the caller *before* anything happens, because the caller is the
+    only one that can ask the user: the material list is the one part of a
+    config edit that reaches disk immediately, so collapsing it is not
+    undoable by closing without saving the way every other edit is.
+    """
+
+    #: The pair list as configured today, resolved on disk.
+    source: Optional[Path]
+    #: Where the single-material list will be written -- the config's own
+    #: list, never `source`'s file unless they are already the same. None
+    #: when there is nowhere legitimate to write (an unsaved config with no
+    #: workspace), which `remove_second_material` refuses on.
+    target: Optional[Path]
+    #: How many pair lines the list holds.
+    pairs: int
+    #: The second members, which the remaining sheet has no use for. What the
+    #: user is actually being asked about.
+    dropped: List[str]
+    #: The first members, deduped in file order: the collapsed list itself.
+    firsts: List[str]
+
+
 def hetero_support_error(model: str) -> Optional[str]:
     """Why ``model`` cannot hold a second material, or None when it can.
 
@@ -317,6 +343,28 @@ class ConfigDocument:
         if structures is not None:
             self._write_material_templates(structures, potentials, extension)
 
+    def pair_list_collapse_plan(self) -> Optional[PairListCollapse]:
+        """What removing the second sheet would do to the material list, or
+        None when it would do nothing to it.
+
+        None covers every case worth not asking about: no second sheet, no
+        list, an unreadable one, or one that names single materials already.
+        A prompt raised on all of those is a prompt nobody reads.
+        """
+        if not self.has_second_material():
+            return None
+        entries = self.material_entries()
+        pairs = [entry for entry in entries if len(entry) == 2]
+        if not pairs:
+            return None
+        return PairListCollapse(
+            source=self._existing_material_list_target(),
+            target=self._default_material_list_target(),
+            pairs=len(pairs),
+            dropped=list(dict.fromkeys(entry[1] for entry in pairs)),
+            firsts=list(dict.fromkeys(entry[0] for entry in entries if entry)),
+        )
+
     def remove_second_material(self) -> None:
         """Drop the second sheet, and everything that only it gives meaning.
 
@@ -329,9 +377,22 @@ class ConfigDocument:
         (``'a + b'``), which `read_material_list` refuses outright --
         `material_names` swallows that and reports ``[]``, so the sweep stops
         sweeping and the user gets one run instead of N with nothing reported
-        anywhere. The list is rewritten to each pair's *first* member, which
-        is the sheet that is left; the second members go with the sheet that
-        was removed.
+        anywhere. The collapsed list -- each pair's *first* member, which is
+        the sheet that is left -- is written to *this config's own* list file,
+        never over the file the picker was pointed at unless they are already
+        the same. A curated list can live anywhere and be shared by several
+        configs, and every other edit in a document is discardable by closing
+        without saving; a rewritten `.txt` is not.
+
+        Ask `pair_list_collapse_plan()` first if the user should be consulted
+        -- this method does not ask, and does not know how to.
+
+        Raises:
+            DocumentError: If the collapsed list has nowhere to go, or could
+                not be written. Nothing is changed in either case: dropping
+                the sheet regardless would leave the config pointed at a list
+                of pairs it can no longer use, which is the silent
+                stop-sweeping this whole path exists to prevent.
         """
         if not self.has_second_material():
             # The stacking pop below is still worth doing on its own -- a
@@ -342,36 +403,46 @@ class ConfigDocument:
                 self.dirty = True
             return
 
-        del self.values[self.SECOND_SHEET]
-        self.dirty = True
-        if (self.values.get('general') or {}).pop('hetero_stacking', None) is not None:
+        plan = self.pair_list_collapse_plan()
+        if plan is not None and plan.target is None:
+            raise DocumentError(
+                "This config's material list names ordered pairs, and there "
+                "is nowhere to write the single-material list that replaces "
+                "them. Save the config first, then remove the second material."
+            )
+
+        # Everything below either all happens or none of it does: the write is
+        # the one step that can fail, and half a removal -- section gone, pair
+        # list still configured -- is worse than either outcome on its own.
+        snapshot = copy.deepcopy(self.values)
+        was_dirty = self.dirty
+        try:
+            del self.values[self.SECOND_SHEET]
             self.dirty = True
+            if (self.values.get('general') or {}).pop(
+                    'hetero_stacking', None) is not None:
+                self.dirty = True
 
-        self._collapse_pair_material_list()
+            if plan is not None:
+                self.write_material_names(plan.firsts, target=plan.target)
 
-        # Re-spell the surviving sheet from `{mat1}` back to `{mat}`. Both
-        # substitute identically, so this is legibility rather than
-        # correctness -- but a one-sheet config spelled for a pair reads as
-        # though the pair were still there. Mirrors `add_second_material`,
-        # which templates the new sheet the same way round.
-        structures, potentials, extension = self.material_directories()
-        if structures is not None:
-            self._write_material_templates(structures, potentials, extension)
-
-    def _collapse_pair_material_list(self) -> None:
-        """Rewrite a pair material list to its first members, in file order.
-
-        Deduped: two pairs may share a first member (``'a + b'``, ``'a + c'``),
-        and a list naming the same material twice would build the same run
-        twice into the same directory. A list of single materials is left
-        untouched -- there is nothing to collapse, and rewriting it would
-        retarget a file nothing asked to change.
-        """
-        entries = self.material_entries()
-        if not any(len(entry) == 2 for entry in entries):
-            return
-        firsts = list(dict.fromkeys(entry[0] for entry in entries if entry))
-        self.write_material_names(firsts)
+            # Re-spell the surviving sheet from `{mat1}` back to `{mat}`. Both
+            # substitute identically, so this is legibility rather than
+            # correctness -- but a one-sheet config spelled for a pair reads
+            # as though the pair were still there. Mirrors
+            # `add_second_material`, which templates the new sheet the same
+            # way round.
+            structures, potentials, extension = self.material_directories()
+            if structures is not None:
+                self._write_material_templates(structures, potentials, extension)
+        except OSError as exc:
+            self.values = snapshot
+            self.dirty = was_dirty
+            raise DocumentError(
+                f"The single-material list could not be written to "
+                f"'{plan.target if plan else ''}' ({exc}), so the second "
+                "material was left in place."
+            ) from exc
 
     def conflicts(self) -> List[str]:
         """Settings that do nothing as configured, in plain words.
@@ -613,8 +684,14 @@ class ConfigDocument:
                 lines.append(str(entry).strip())
         return lines
 
-    def write_material_names(self, names: Sequence[Any]) -> Optional[Path]:
+    def write_material_names(self, names: Sequence[Any],
+                             target: Optional[Path] = None) -> Optional[Path]:
         """Write the material list and point the config at it.
+
+        `target` overrides where it goes. Only one caller states it --
+        `remove_second_material`, which must write the collapsed list to this
+        config's own file rather than over a curated pair list several configs
+        may share -- and the resolution below is the default for everyone else.
 
         ``names`` holds plain material names, or ``(mat1, mat2)`` ordered
         pairs for a two-sheet sweep -- written as ``'mat1 + mat2'`` lines,
@@ -655,21 +732,28 @@ class ConfigDocument:
             self.dirty = True
             return None
 
-        target = self._existing_material_list_target()
         if target is None:
-            if self.source_path is not None:
-                target = self.source_path.parent / \
-                    f"{self.source_path.stem}_materials.txt"
-            elif self.workspace_dir is not None:
-                target = Path(self.workspace_dir) / 'materials.txt'
-            else:
-                return None
+            target = (self._existing_material_list_target()
+                      or self._default_material_list_target())
+        if target is None:
+            return None
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.set('2D', 'materials_list', str(
             self._relative_to_config(target)))
         return target
+
+    def _default_material_list_target(self) -> Optional[Path]:
+        """This config's own list file: beside the saved config, else in the
+        workspace, else nowhere at all -- see `write_material_names` for why
+        the process's current directory is not a fallback."""
+        if self.source_path is not None:
+            return self.source_path.parent / \
+                f"{self.source_path.stem}_materials.txt"
+        if self.workspace_dir is not None:
+            return Path(self.workspace_dir) / 'materials.txt'
+        return None
 
     def _existing_material_list_target(self) -> Optional[Path]:
         """Where a currently configured ``materials_list`` actually lives on

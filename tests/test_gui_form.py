@@ -644,6 +644,124 @@ class TestAddASecondMaterial:
         assert '{mat2}' in doc.get('2D-2', 'cif_path')
         form.deleteLater()
 
+    @staticmethod
+    def _pair_sweep_form(tmp_path, monkeypatch, curated=False):
+        """A pair sweep with its list on disk, and its form built.
+
+        `curated=True` points the config at a list *outside* its own directory
+        -- a shared, hand-maintained file -- which is the case where the
+        collapse's source and target are two different files.
+        """
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.source_path = tmp_path / 'pair.ini'
+        doc.add_second_material()
+        doc.apply_material_directories(tmp_path / 'cif', tmp_path / 'pot', '.sw')
+        if curated:
+            shared = tmp_path / 'shared' / 'curated_pairs.txt'
+            shared.parent.mkdir()
+            shared.write_text('h-MoS2 + h-WS2\nt-MoS2 + h-WSe2\n',
+                              encoding='utf-8')
+            doc.set('2D', 'materials_list', str(shared))
+        else:
+            doc.write_material_names([('h-MoS2', 'h-WS2'), ('t-MoS2', 'h-WSe2')])
+        return ConfigForm(doc), doc
+
+    def test_removing_material_2_asks_before_collapsing_a_pair_list(
+            self, qt_app, tmp_path, monkeypatch):
+        """FIX ROUND 1: one click on a toggle discarded every second member of
+        a material list, on disk, immediately. It has to be asked about, and
+        declining has to leave everything exactly as it was."""
+        from PySide6.QtWidgets import QMessageBox
+
+        form, doc = self._pair_sweep_form(tmp_path, monkeypatch)
+        asked = []
+
+        def _question(_parent, title, text, *args, **kwargs):
+            asked.append((title, text))
+            return QMessageBox.No
+
+        monkeypatch.setattr(QMessageBox, 'question', _question)
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert asked, 'the collapse was never confirmed'
+        # The prompt has to name the file and what is lost, or it is not a
+        # decision the user can actually make.
+        assert 'pair_materials.txt' in asked[0][1]
+        assert 'h-WS2' in asked[0][1]
+        assert doc.has_second_material()
+        assert doc.material_entries() == [('h-MoS2', 'h-WS2'),
+                                          ('t-MoS2', 'h-WSe2')]
+        form.deleteLater()
+
+    def test_a_failed_collapse_leaves_the_form_and_document_consistent(
+            self, qt_app, tmp_path, monkeypatch):
+        """FIX ROUND 1: the write can fail (read-only file, unwritable share).
+        Letting that out of the slot left [2D-2] deleted in the document, the
+        pair list still configured, and the form still showing the second
+        sheet -- worse than either outcome on its own."""
+        from PySide6.QtWidgets import QMessageBox
+
+        form, doc = self._pair_sweep_form(tmp_path, monkeypatch, curated=True)
+        (tmp_path / 'pair_materials.txt').mkdir()      # unwritable target
+
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Yes)
+        warned = []
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda _p, title, text, *a, **k: warned.append(text))
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert warned, 'the failure was never reported'
+        assert doc.has_second_material()
+        assert '2D-2' in form.sections
+        assert form.sections['2D'].add_material_button.text() == 'Remove material 2'
+        assert doc.material_entries() == [('h-MoS2', 'h-WS2'),
+                                          ('t-MoS2', 'h-WSe2')]
+        form.deleteLater()
+
+    def test_a_confirmed_collapse_goes_through(self, qt_app, tmp_path,
+                                               monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        form, doc = self._pair_sweep_form(tmp_path, monkeypatch)
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: QMessageBox.Yes)
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert not doc.has_second_material()
+        assert doc.material_names() == ['h-MoS2', 't-MoS2']
+        assert '2D-2' not in form.sections
+        form.deleteLater()
+
+    def test_removing_without_a_pair_list_asks_nothing(self, qt_app,
+                                                       monkeypatch):
+        """Nothing is lost, so there is nothing to confirm -- a prompt on
+        every Remove is how a real warning becomes one nobody reads."""
+        from PySide6.QtWidgets import QMessageBox
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        form = ConfigForm(doc)
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: pytest.fail('asked needlessly'))
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert not doc.has_second_material()
+        form.deleteLater()
+
     def test_stacking_is_not_offered_in_run_parameters(self, qt_app, monkeypatch):
         """It orders the layers of a two-material stack; on the Run parameters
         form of a single-material config it configures nothing."""

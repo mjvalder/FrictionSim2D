@@ -517,6 +517,104 @@ class TestRemovingTheSecondMaterial:
         assert (tmp_path / 'pair_materials.txt').read_text(
             encoding='utf-8') == 'h-MoS2\nt-MoS2\n'
 
+    def test_the_configured_pair_file_is_left_untouched(self, tmp_path):
+        """FIX ROUND 1: the collapse writes a NEW list beside the config
+        rather than rewriting whatever the picker was pointed at. A curated
+        list can live outside the config's directory and be shared by several
+        configs -- collapsing it in place discards every second member for all
+        of them, immediately and permanently, for an in-memory edit the user
+        can still throw away by closing without saving."""
+        curated = tmp_path / 'shared' / 'curated_pairs.txt'
+        curated.parent.mkdir()
+        original = 'h-MoS2 + h-WS2\nt-MoS2 + h-WS2\n'
+        curated.write_text(original, encoding='utf-8')
+
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'pair.ini'
+        document.add_second_material()
+        document.set('2D', 'materials_list', str(curated))
+
+        document.remove_second_material()
+
+        assert curated.read_text(encoding='utf-8') == original
+        assert document.material_names() == ['h-MoS2', 't-MoS2']
+        assert document.get('2D', 'materials_list') == 'pair_materials.txt'
+
+    def test_a_collapse_plan_names_the_two_files_and_the_loss(self, tmp_path):
+        """What the confirmation prompt is built from. None when there is
+        nothing to collapse, so the prompt is never raised for a config that
+        would lose nothing."""
+        document = self._pair_document(
+            tmp_path, [('h-MoS2', 'h-WS2'), ('t-MoS2', 'h-WSe2')])
+
+        plan = document.pair_list_collapse_plan()
+        assert plan is not None
+        assert plan.pairs == 2
+        assert plan.dropped == ['h-WS2', 'h-WSe2']
+        assert plan.target.name == 'pair_materials.txt'
+        assert plan.source.name == 'pair_materials.txt'
+
+        document.remove_second_material()
+        assert document.pair_list_collapse_plan() is None
+
+    def test_a_single_material_list_needs_no_plan(self, tmp_path):
+        """Nothing is lost collapsing a list that names no pairs, so there is
+        nothing to confirm -- a prompt raised here is one nobody reads."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'single.ini'
+        document.add_second_material()
+        document.write_material_names(['h-MoS2', 't-MoS2'])
+
+        assert document.pair_list_collapse_plan() is None
+
+    def test_a_failed_collapse_changes_nothing(self, tmp_path):
+        """FIX ROUND 1: the write is the one irreversible step, and it can
+        fail. Letting the exception out mid-way left [2D-2] already deleted,
+        the pair list still configured and the caller's own bookkeeping never
+        reached -- the exact broken state this method exists to prevent."""
+        curated = tmp_path / 'shared' / 'curated_pairs.txt'
+        curated.parent.mkdir()
+        curated.write_text('h-MoS2 + h-WS2\n', encoding='utf-8')
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'pair.ini'
+        document.add_second_material()
+        document.apply_material_directories(
+            tmp_path / 'cif', tmp_path / 'pot', '.sw')
+        document.set('2D', 'materials_list', str(curated))
+        before = {section: dict(values)
+                  for section, values in document.values.items()}
+        # A directory where the new list has to go: write_text raises
+        # IsADirectoryError, an OSError like any other unwritable target.
+        (tmp_path / 'pair_materials.txt').mkdir()
+
+        with pytest.raises(DocumentError, match='material list'):
+            document.remove_second_material()
+
+        assert document.has_second_material()
+        assert document.values == before
+        assert document.get('2D', 'mat') == '{mat1}'
+
+    def test_a_pair_list_with_nowhere_to_go_refuses_rather_than_dropping_it(
+            self, tmp_path):
+        """An unsaved config with no workspace has nowhere to write the
+        collapsed list. Removing the sheet anyway would leave the pair list
+        behind -- the silent stop-sweeping this whole fix is about.
+
+        The list is a copy in `tmp_path`, never a file in `examples/`: run
+        against the pre-fix code, this test collapsed the repository's own
+        `hetero_pairs.txt` in place -- which is precisely the shared-curated-
+        file hazard the new-file target now removes.
+        """
+        curated = tmp_path / 'pairs.txt'
+        curated.write_text('h-MoS2 + h-WS2\n', encoding='utf-8')
+        document = ConfigDocument.blank('sheetonsheet')
+        document.set('2D', 'materials_list', str(curated))
+        document.add_second_material()
+
+        with pytest.raises(DocumentError, match='[Ss]ave the config first'):
+            document.remove_second_material()
+        assert document.has_second_material()
+
     def test_a_single_material_list_is_left_alone(self, tmp_path):
         document = ConfigDocument.blank('sheetonsheet')
         document.source_path = tmp_path / 'single.ini'

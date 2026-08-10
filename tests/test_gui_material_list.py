@@ -475,6 +475,40 @@ class TestWindowIntegration:
         # When count fails, it falls back to a generic message
         assert 'substituted' in issues_text
 
+    def test_opening_a_config_does_not_carry_the_previous_sweep_over(
+            self, window, dirs, tmp_path, monkeypatch):
+        """FIX ROUND 1 (critical): the ticked-sweep carry-over that survives a
+        rebuild must not survive a *document swap*. `_open_config` assigns the
+        new document and then rebuilds, so a tick belonging to the config
+        being closed was restored onto the config being opened -- and the
+        `_validate()` on the very next line committed it, inventing a
+        three-material sweep and a `.txt` beside a config the user had only
+        just opened. `load()`'s own rule: a {mat} config with no
+        materials_list is unfinished, not swept."""
+        from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        opened = ConfigDocument.blank('afm')
+        opened.source_path = tmp_path / 'opened.ini'
+        opened.apply_material_directories(structures, potentials, '.sw')
+        opened.save(tmp_path / 'opened.ini')
+        assert not opened.has_material_list()          # templated, never swept
+
+        # The config on screen has its sweep ticked but nothing chosen yet --
+        # the one state the document cannot express, and the whole reason the
+        # tick is carried across a rebuild at all.
+        window.form.sections['2D'].editors['materials_list'].set_sweeping(True)
+
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName',
+                            lambda *a, **k: (str(tmp_path / 'opened.ini'), ''))
+        window._open_config()
+
+        editor = window.form.sections['2D'].editors['materials_list']
+        assert not editor.is_sweeping()
+        assert not window.document.has_material_list()
+        assert not (tmp_path / 'opened_materials.txt').exists()
+
     def test_a_missing_materials_list_is_reported(self, window, tmp_path, monkeypatch):
         """FINDING 2: a materials_list pointing at a file that does not exist
         must be surfaced to the user, not silently swallowed. ExpansionSummary
@@ -803,6 +837,28 @@ class TestPairTable:
         assert set(editor.selected_pairs()) == {
             ('b-AlSb', 'h-MoS2'), ('b-AlSb', 't-MoS2'), ('h-MoS2', 't-MoS2')}
 
+    def test_the_generate_dialog_passes_its_checkboxes_through(self, editor,
+                                                                monkeypatch):
+        """The dialog is the only way a user reaches `generate_pairs`, and its
+        two checkboxes are the only thing it contributes -- wired to the wrong
+        arguments it silently generates the wrong sweep."""
+        from PySide6.QtWidgets import QCheckBox, QDialog
+
+        editor.set_pair_mode(True)
+        editor.set_selected(['h-MoS2', 't-MoS2'])
+
+        def _accept(dialog):
+            for box in dialog.findChildren(QCheckBox):
+                if 'reversed' in box.text():
+                    box.setChecked(True)
+            return QDialog.Accepted
+
+        monkeypatch.setattr(QDialog, 'exec', _accept)
+        editor._open_generate_dialog()
+
+        assert set(editor.selected_pairs()) == {('h-MoS2', 't-MoS2'),
+                                                ('t-MoS2', 'h-MoS2')}
+
     def test_adding_a_pair_appends_a_row(self, editor):
         editor.set_selected_pairs([('h-MoS2', 't-MoS2')])
         editor.add_pair()
@@ -988,6 +1044,40 @@ class TestPairSweepCommit:
                                                                     't-MoS2'}
         form.deleteLater()
 
+    def test_a_pair_list_on_a_single_sheet_config_is_not_overwritten(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FIX ROUND 1 (important): a pair list configured on a config with NO
+        [2D-2] -- hand-edited, or written by a build predating the pair
+        support -- is exactly the stale population the collapse feature exists
+        for, and opening it must not destroy it.
+
+        `load()` adopting the pairs regardless of the document's shape skipped
+        the empty-selection fallback, leaving the tick list at the scan's
+        'everything usable' default while the commit ran down the
+        single-material branch: the curated file came back as three unrelated
+        single materials on the first commit after opening."""
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        curated = tmp_path / 'curated_pairs.txt'
+        original = 'h-MoS2 + t-MoS2\nt-MoS2 + b-AlSb\n'
+        curated.write_text(original, encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
+                                            'indent')
+        document.source_path = tmp_path / 'c.ini'
+        document.apply_material_directories(*dirs, '.sw')
+        document.set('2D', 'materials_list', str(curated))
+        assert not document.has_second_material()
+
+        form = ConfigForm(document)
+        form.commit()
+
+        assert curated.read_text(encoding='utf-8') == original
+        assert document.material_entries() == [('h-MoS2', 't-MoS2'),
+                                               ('t-MoS2', 'b-AlSb')]
+        form.deleteLater()
+
     def test_emptying_a_table_that_held_pairs_clears_the_sweep(
             self, qt_app, dirs, tmp_path, monkeypatch):
         """The other side of the coin: removing every row of a pair sweep is
@@ -1001,6 +1091,28 @@ class TestPairSweepCommit:
         form.commit()
 
         assert not form.document.has_material_list()
+        form.deleteLater()
+
+    def test_a_widget_and_document_that_disagree_are_refused(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FIX ROUND 1: what `pair_mode=` is for. The commit states the mode
+        the *widget* is in -- a pair table on screen -- and the document
+        refuses it when its own shape says otherwise. Without a real second
+        sheet the pairs would be written as 'a + b' lines under a `{mat}`
+        single-material template: a config `core.run` refuses much later, with
+        the GUI insisting it is fine."""
+        from src.gui.controllers.document import DocumentError  # noqa: PLC0415
+
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        assert editor.is_pair_mode()
+
+        # The second sheet goes away without the form being rebuilt -- the
+        # shape the widget still believes in is now a lie.
+        del form.document.values['2D-2']
+
+        with pytest.raises(DocumentError, match='pair_mode'):
+            form.sections['2D'].commit()
         form.deleteLater()
 
     def test_repointing_the_directories_survives_the_second_sheets_commit(
