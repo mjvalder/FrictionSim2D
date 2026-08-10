@@ -22,7 +22,11 @@ from .config import (
     load_settings,
     parse_config,
 )
-from .material_templates import has_template_marker, substitute_materials
+from .material_templates import (
+    TEMPLATE_MARKERS,
+    has_template_marker,
+    substitute_materials,
+)
 from .path_utils import format_dimension_token
 from .utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..builders.afm import AFMSimulation
@@ -321,20 +325,65 @@ def preflight_material_pairs(entries: List[Tuple[str, str]],
     return result
 
 
-def _section_carries_template(section: Optional[Dict[str, Any]]) -> bool:
-    """Whether a sheet section still holds a material placeholder anywhere.
+#: The placeholders each sheet of an ordered pair may template on. The primary
+#: sheet accepts both spellings of the first material: ``{mat}`` predates the
+#: pair form and substitutes identically to ``{mat1}`` (see
+#: :func:`substitute_materials`), so a single-material config that later gains
+#: a second sheet keeps sweeping without being rewritten.
+PRIMARY_PAIR_MARKERS = ('{mat}', '{mat1}')
+SECOND_PAIR_MARKERS = ('{mat2}',)
 
-    The one thing that makes a section *participate* in a material sweep:
-    :func:`expand_config_sweeps` substitutes only values that carry a marker,
-    so a section with none is pinned to whatever it literally holds, for every
-    member of the sweep.
+
+def _section_markers(section: Optional[Dict[str, Any]]) -> Tuple[str, ...]:
+    """Every placeholder a sheet section templates on, in TEMPLATE_MARKERS order.
+
+    Drawn from the shared marker vocabulary rather than matched literally, so
+    this cannot drift from what :func:`substitute_materials` actually replaces.
 
     ``materials_list`` is excluded because it names the file that *drives* the
     sweep rather than a value the sweep fills in -- a placeholder there would
-    never be substituted, so it must not count as being templated.
+    never be substituted, so it must not count as templating.
     """
-    return any(key != 'materials_list' and has_template_marker(value)
-               for key, value in (section or {}).items())
+    values = [value for key, value in (section or {}).items()
+              if key != 'materials_list']
+    return tuple(marker for marker in TEMPLATE_MARKERS
+                 if any(isinstance(value, str) and marker in value
+                        for value in values))
+
+
+def _pair_template_fault(section: Optional[Dict[str, Any]],
+                         accepted: Tuple[str, ...],
+                         canonical: str,
+                         pinned: str) -> Optional[str]:
+    """Why this sheet cannot take its member of an ordered pair, or None.
+
+    Two faults, reported separately because they mislead differently. A
+    section carrying no marker is pinned to its literal value for every member
+    of the sweep. A section carrying the *other* sheet's marker does vary --
+    it just varies with the wrong member, so both sheets build one material
+    while the directory is still named after the pair that was asked for.
+
+    The wrong marker is a fault even when the right one is also present,
+    because the markers are per *key*, not per section. The realistic mistake
+    is a ``[2D-2]`` pasted from ``[2D-1]`` whose ``mat`` was updated to
+    ``{mat2}`` while its ``cif_path``/``pot_path`` still read ``{mat1}``: the
+    section holds ``{mat2}``, yet both sheets load the first material's files.
+    """
+    found = _section_markers(section)
+    wrong = [marker for marker in found if marker not in accepted]
+    if wrong:
+        return (
+            f"templates on {', '.join(repr(marker) for marker in wrong)}, "
+            "which names the other sheet's material, so both sheets would "
+            f"build the same one. Use '{canonical}' in its mat, cif_path and "
+            "pot_path"
+        )
+    if not found:
+        return (
+            f"holds no material template, so {pinned}. Write '{canonical}' "
+            "into its mat, cif_path and pot_path"
+        )
+    return None
 
 
 def resolve_lj_override_file(section: Dict[str, Any],
@@ -462,14 +511,22 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     f"({exc}), so no material sweep was expanded.")
             return []
 
-        # A section with no placeholder is never substituted, so it stays
-        # pinned to its literal value for every member of the sweep -- and the
-        # run still lands in a directory named after the pair the list asked
-        # for. Nothing downstream catches that: the literal files exist, so the
-        # preflight below is happy and validation is clean. Checked once, up
-        # front, rather than per entry.
-        primary_templated = _section_carries_template(section_config)
-        second_templated = _section_carries_template(base_config.get('2D-2'))
+        # Each sheet of a pair must template on its OWN marker. A section with
+        # the wrong marker, or none, still expands and still lands in a
+        # directory named after the pair the list asked for, while building
+        # something else. Nothing downstream catches that: the substituted
+        # paths exist, so the preflight below is happy and validation is
+        # clean. A config-level property, so it is decided once here rather
+        # than per entry.
+        pair_faults = [
+            (label, _pair_template_fault(section, accepted, canonical, pinned))
+            for label, section, accepted, canonical, pinned in (
+                (primary_key, section_config, PRIMARY_PAIR_MARKERS, '{mat1}',
+                 'every run would build the same first material'),
+                ('2D-2', base_config.get('2D-2'), SECOND_PAIR_MARKERS, '{mat2}',
+                 'every run would build the same second material'),
+            )
+        ]
 
         for entry in entries:
             is_pair = len(entry) == 2
@@ -485,22 +542,14 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     "a single material, but this config has a [2D-2] section "
                     "and expects ordered pairs ('mat1 + mat2')."
                 )
-            if is_pair and not primary_templated:
-                raise ValueError(
-                    f"Material list '{mat_list_path}' line "
-                    f"'{' + '.join(entry)}' names an ordered pair, but the "
-                    f"[{primary_key}] section holds no material template, so "
-                    "every run would build the same first material. Write "
-                    "'{mat1}' into its mat, cif_path and pot_path."
-                )
-            if is_pair and not second_templated:
-                raise ValueError(
-                    f"Material list '{mat_list_path}' line "
-                    f"'{' + '.join(entry)}' names an ordered pair, but the "
-                    "[2D-2] section holds no material template, so every run "
-                    "would build the same second material. Write '{mat2}' "
-                    "into its mat, cif_path and pot_path."
-                )
+            if is_pair:
+                for label, fault in pair_faults:
+                    if fault is not None:
+                        raise ValueError(
+                            f"Material list '{mat_list_path}' line "
+                            f"'{' + '.join(entry)}' names an ordered pair, but "
+                            f"the [{label}] section {fault}."
+                        )
 
         if has_second_sheet:
             preflight = preflight_material_pairs(

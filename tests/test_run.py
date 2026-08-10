@@ -365,6 +365,88 @@ class TestOrderedPairSweeps:
         with pytest.raises(ValueError, match=r'\[2D-1\].*\{mat1\}'):
             expand_config_sweeps(config, base_dir=tmp_path)
 
+    @staticmethod
+    def _pair_files(tmp_path: Path) -> Path:
+        """Real files for every member, so the preflight resolves and only the
+        template check can be what refuses the config."""
+        (tmp_path / 'c').mkdir()
+        (tmp_path / 'p').mkdir()
+        for mat in ('h-MoS2', 'h-MoSe2', 'h-WS2', 'h-WSe2'):
+            (tmp_path / 'c' / f'{mat}.cif').write_text('', encoding='utf-8')
+            (tmp_path / 'p' / f'{mat}.sw').write_text('', encoding='utf-8')
+        listing = tmp_path / 'm.txt'
+        listing.write_text('h-MoS2 + h-WS2\nh-MoSe2 + h-WSe2\n')
+        return listing
+
+    def test_second_section_pasted_from_the_first_is_refused(
+            self, tmp_path: Path) -> None:
+        """The most plausible edit in the whole format: copy the [2D-1] block,
+        paste it as [2D-2], change `mat` and forget cif_path/pot_path. Both
+        sheets then load the FIRST material's files -- a homostructure under a
+        correctly named heterostructure directory. The section does carry
+        '{mat2}', so presence alone cannot catch this; the wrong marker has to
+        be refused wherever it appears."""
+        listing = self._pair_files(tmp_path)
+        config = {
+            '2D-1': {'mat': '{mat1}', 'cif_path': 'c/{mat1}.cif',
+                     'pot_path': 'p/{mat1}.sw', 'materials_list': str(listing)},
+            '2D-2': {'mat': '{mat2}', 'cif_path': 'c/{mat1}.cif',
+                     'pot_path': 'p/{mat1}.sw'},
+            'general': {},
+        }
+        with pytest.raises(ValueError) as excinfo:
+            expand_config_sweeps(config, base_dir=tmp_path)
+        message = str(excinfo.value)
+        assert '[2D-2]' in message and "'{mat1}'" in message
+        assert "'{mat2}'" in message      # says which marker belongs there
+
+    def test_second_section_templated_on_the_first_marker_is_refused(
+            self, tmp_path: Path) -> None:
+        listing = self._pair_files(tmp_path)
+        config = {
+            '2D-1': {'mat': '{mat1}', 'cif_path': 'c/{mat1}.cif',
+                     'pot_path': 'p/{mat1}.sw', 'materials_list': str(listing)},
+            '2D-2': {'mat': '{mat1}', 'cif_path': 'c/{mat1}.cif',
+                     'pot_path': 'p/{mat1}.sw'},
+            'general': {},
+        }
+        with pytest.raises(ValueError, match=r"\[2D-2\].*'\{mat2\}'"):
+            expand_config_sweeps(config, base_dir=tmp_path)
+
+    def test_primary_section_templated_on_the_second_marker_is_refused(
+            self, tmp_path: Path) -> None:
+        listing = self._pair_files(tmp_path)
+        config = {
+            '2D-1': {'mat': '{mat2}', 'cif_path': 'c/{mat2}.cif',
+                     'pot_path': 'p/{mat2}.sw', 'materials_list': str(listing)},
+            '2D-2': {'mat': '{mat2}', 'cif_path': 'c/{mat2}.cif',
+                     'pot_path': 'p/{mat2}.sw'},
+            'general': {},
+        }
+        with pytest.raises(ValueError, match=r"\[2D-1\].*'\{mat1\}'"):
+            expand_config_sweeps(config, base_dir=tmp_path)
+
+    def test_the_primary_may_still_spell_its_marker_mat(
+            self, tmp_path: Path) -> None:
+        """`{mat}` and `{mat1}` are the same placeholder (material_templates),
+        so a single-material config that later gains a second sheet must not
+        have to be rewritten to keep sweeping."""
+        listing = self._pair_files(tmp_path)
+        config = {
+            '2D-1': {'mat': '{mat}', 'cif_path': 'c/{mat}.cif',
+                     'pot_path': 'p/{mat}.sw', 'materials_list': str(listing)},
+            '2D-2': {'mat': '{mat2}', 'cif_path': 'c/{mat2}.cif',
+                     'pot_path': 'p/{mat2}.sw'},
+            'general': {},
+        }
+        out = expand_config_sweeps(config, base_dir=tmp_path)
+        assert [(c['2D-1']['mat'], c['2D-2']['mat']) for c in out] == [
+            ('h-MoS2', 'h-WS2'), ('h-MoSe2', 'h-WSe2')]
+        assert [c['2D-1']['cif_path'] for c in out] == [
+            'c/h-MoS2.cif', 'c/h-MoSe2.cif']
+        assert [c['2D-2']['cif_path'] for c in out] == [
+            'c/h-WS2.cif', 'c/h-WSe2.cif']
+
     def test_a_single_material_sweep_needs_no_pair_template(
             self, tmp_path: Path) -> None:
         """The installed base: a one-name-per-line list with no [2D-2] is not
