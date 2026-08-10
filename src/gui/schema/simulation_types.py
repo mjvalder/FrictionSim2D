@@ -34,6 +34,16 @@ class SimulationMode:
     sections: Tuple[str, ...] = ()
     #: True when the build writes an approach + indentation `system.in`.
     has_system_phase: bool = True
+    #: Whether a two-material (``[2D-1]``/``[2D-2]``) config routes to a
+    #: heterostructure builder for this mode. True for every mode currently
+    #: offered -- ``HeteroAFMSimulation``, ``HeteroIndentSimulation``,
+    #: ``HeteroPESTipSimulation``, ``HeteroPESSheetSimulation`` and
+    #: ``HeteroSheetOnSheetSimulation`` cover all five -- so nothing is
+    #: refused on account of it today. It is declared rather than assumed so
+    #: that a mode added without a hetero build path refuses the second
+    #: material outright instead of silently dropping it on the way to a
+    #: builder that ignores `sheets`.
+    supports_hetero: bool = True
     #: Narrows the family's ``outer_loop_choices`` for this mode specifically.
     #: ``None`` (the default) means "use the family's value". Set this when a
     #: mode's build path does not act on a value the family otherwise

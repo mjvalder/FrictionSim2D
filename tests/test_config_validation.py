@@ -113,6 +113,33 @@ def test_pair_template_is_unexpanded_not_missing_file():
     assert 'missing_file' not in kinds
 
 
+def test_a_second_sheet_error_keeps_its_field_name(monkeypatch):
+    """A list-indexed loc -- ('sheets', 1, 'x') -- must report the field, not
+    the index. Keeping only the first two elements makes every second-sheet
+    failure arrive as key='1', which names no editor, so the GUI decorates
+    nothing however well it maps the section."""
+    monkeypatch.chdir(REPO_ROOT)
+    raw = _raw('pes_sheet_config.ini')
+    raw['2D-1'] = raw.pop('2D')
+    raw['2D-2'] = dict(raw['2D-1'], x='not-a-number')
+    result = validate_config(raw, SheetOnSheetSimulationConfig)
+
+    indexed = [i for i in result.issues if i.section == 'sheets']
+    assert indexed, result.render()
+    # One report per union member (float | list[float]); all of them located.
+    assert {(i.index, i.key) for i in indexed} == {(1, 'x')}
+
+
+def test_a_plain_nested_loc_is_unchanged(monkeypatch):
+    """Only list indices are pulled out: a nested model's ('settings', 'x')
+    style loc must keep reporting its own second element as the key."""
+    monkeypatch.chdir(REPO_ROOT)
+    raw = _raw('indent_config.ini')
+    raw['tip']['r'] = 'not-a-number'
+    issue = validate_config(raw, AFMSimulationConfig).issues_for('tip', 'r')[0]
+    assert issue.index is None
+
+
 def test_type_errors_are_reported_with_a_location(monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     raw = _raw('indent_config.ini')

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...core.material_templates import has_template_marker
 from ..controllers.document import ConfigDocument
 from ..controllers.elements import scan_config_elements
 from ..schema.introspect import FieldKind, FieldSpec, SectionSpec
@@ -792,7 +793,7 @@ class SectionForm(QGroupBox):
 
         structures = self._directory_from_field(cif_text)
         potentials = self._directory_from_field(pot_text)
-        extension = Path(pot_text).suffix if '{mat}' in pot_text else None
+        extension = Path(pot_text).suffix if has_template_marker(pot_text) else None
 
         base = self.document.base_dir
         if base is not None:
@@ -807,7 +808,7 @@ class SectionForm(QGroupBox):
         text = (text or '').strip()
         if not text:
             return None
-        return Path(text).parent if '{mat}' in text else Path(text)
+        return Path(text).parent if has_template_marker(text) else Path(text)
 
     def _apply_sweep_mode(self) -> None:
         """Folder pickers while sweeping, single-file pickers otherwise.

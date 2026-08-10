@@ -14,43 +14,87 @@ Qt-free.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from ...core.config import (
     AFMSimulationConfig,
+    SheetConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
     parse_config,
 )
 from ...core.config_io import write_config
 from ...core.config_validation import ConfigIssue, ConfigValidation, validate_config
+from ...core.material_templates import has_template_marker
 from ...core.run import (
     ExpansionSummary, count_expansion, expand_config_sweeps, loopability,
-    outer_loop_conflict, output_dir_for, read_material_list,
+    outer_loop_conflict, output_dir_for, read_material_entries,
+    read_material_list,
 )
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
-from ..schema.introspect import SectionSpec, describe_model
+from ..schema.introspect import SectionSpec, describe_model, describe_section
 from ..schema.overrides import overrides_for
 from ..schema.simulation_types import MODES, sections_for
 from .materials import STRUCTURE_EXTENSION
 
-__all__ = ['ConfigDocument', 'DocumentError', 'HETERO_SECTION_HINT']
+__all__ = ['ConfigDocument', 'DocumentError', 'hetero_support_error']
 
-#: Sections that fold into the derived `sheets` list and route the build to the
-#: heterostructure builders.
-_HETERO_SECTION_PREFIX = '2D-'
+#: A numbered sheet section. Two of them make a heterostructure: `[2D-1]` is
+#: the first material, `[2D-2]` the second. Matched exactly, so nothing that
+#: merely looks like one (`2D-`, `2Dx`) is folded (mirrors
+#: `core.run.loopability_section`).
+_NUMBERED_SHEET = re.compile(r'^2D-(\d+)$')
 
-HETERO_SECTION_HINT = (
-    "This config defines numbered sheet sections ({sections}), which build a "
-    "heterostructure. Those are not editable in this version -- open it in the "
-    "CLI instead."
+#: The written spelling of the first sheet when there is a second one. The
+#: document itself always calls it `2D` -- see `normalised_values`.
+FIRST_SHEET = '2D-1'
+
+TOO_MANY_SHEETS = (
+    "This config defines {count} sheet sections ({sections}). A "
+    "heterostructure is exactly two materials, [2D-1] and [2D-2]; more than "
+    "that has no section in the form to hold it -- open it in the CLI instead."
+)
+
+NON_CANONICAL_SHEETS = (
+    "This config numbers its sheet sections {sections}. The form holds the "
+    "first material as [2D-1] and the second as [2D-2]; loading this would "
+    "have to renumber the config silently."
+)
+
+MIXED_SHEET_SECTIONS = (
+    "This config mixes a plain [2D] section with numbered ones ({sections}). "
+    "Only the numbered sections build the stack -- [2D] is overwritten by the "
+    "first of them -- so the config does not mean what it reads as. Give the "
+    "first material as [2D-1] instead."
 )
 
 
 class DocumentError(Exception):
     """The document cannot represent this config."""
+
+
+def hetero_support_error(model: str) -> Optional[str]:
+    """Why ``model`` cannot hold a second material, or None when it can.
+
+    Every mode the GUI offers routes a two-material config to a
+    heterostructure builder (see ``SimulationMode.supports_hetero``), so this
+    returns None for every real model today and the refusal below is currently
+    unreachable. It is asked rather than assumed so that a mode added without
+    a hetero build path refuses the second material instead of dropping it on
+    the way to a builder that ignores ``sheets``.
+    """
+    entry = MODES.get(model)
+    if entry is None:
+        return f"Unknown simulation model: {model}"
+    if entry[1].supports_hetero:
+        return None
+    return (
+        f"'{entry[1].label}' has no heterostructure build, so it cannot keep "
+        "the second material. Remove the second material first."
+    )
 
 
 def root_model_for(model: str):
@@ -86,20 +130,53 @@ class ConfigDocument:
     def from_file(cls, path: Union[str, Path], model: str) -> 'ConfigDocument':
         """Load an existing config.
 
+        A heterostructure config -- ``[2D-1]`` plus ``[2D-2]`` -- is held as
+        the first sheet under the document's usual ``2D`` key and the second
+        under ``2D-2``, so every existing single-material code path keeps
+        working unchanged and only the second material is new.
+
         Raises:
-            DocumentError: If the config builds a heterostructure, which this
-                version cannot represent. Refusing is better than silently
-                editing a config whose numbered sheet sections would route the
-                build somewhere the GUI does not describe.
+            DocumentError: If the config's sheet sections are not something
+                the form can hold: more than two, numbered non-canonically, or
+                a plain ``[2D]`` mixed with numbered ones. Refusing beats
+                silently renumbering someone's config.
         """
         path = Path(path)
-        values = parse_config(path)
-
-        hetero = sorted(s for s in values if s.startswith(_HETERO_SECTION_PREFIX))
-        if hetero:
-            raise DocumentError(HETERO_SECTION_HINT.format(sections=', '.join(hetero)))
-
+        values = cls._absorb_numbered_sheets(parse_config(path), model)
         return cls(model=model, values=values, source_path=path, dirty=False)
+
+    @staticmethod
+    def _absorb_numbered_sheets(values: Dict[str, Dict[str, Any]],
+                                model: str) -> Dict[str, Dict[str, Any]]:
+        """Rename ``[2D-1]`` to the document's own ``2D`` key, in place order.
+
+        ``[2D-2]`` keeps its name: it is the document's key for the second
+        material. A lone ``[2D-1]`` is a single-material config written in the
+        numbered spelling, and loads as one -- it will be written back as a
+        plain ``[2D]``, which is the same config.
+        """
+        numbered = [k for k in values if _NUMBERED_SHEET.match(k)]
+        if not numbered:
+            return values
+
+        numbered.sort(key=lambda k: int(_NUMBERED_SHEET.match(k).group(1)))
+        listed = ', '.join(numbered)
+
+        if '2D' in values:
+            raise DocumentError(MIXED_SHEET_SECTIONS.format(sections=listed))
+        if len(numbered) > 2:
+            raise DocumentError(
+                TOO_MANY_SHEETS.format(count=len(numbered), sections=listed))
+        if numbered not in ([FIRST_SHEET], [FIRST_SHEET, ConfigDocument.SECOND_SHEET]):
+            raise DocumentError(NON_CANONICAL_SHEETS.format(sections=listed))
+
+        reason = (hetero_support_error(model)
+                  if len(numbered) == 2 else None)
+        if reason:
+            raise DocumentError(reason)
+
+        return {('2D' if key == FIRST_SHEET else key): section
+                for key, section in values.items()}
 
     @classmethod
     def blank(cls, model: str) -> 'ConfigDocument':
@@ -189,25 +266,109 @@ class ConfigDocument:
         """Whether a nominally optional section cannot actually be removed."""
         return self.section_lock_reason(key) is not None
 
+    # ----------------------------------------------------- second material
+
+    #: The document's key for the second sheet of a heterostructure. The
+    #: first keeps the plain `2D` key every single-material config uses, so
+    #: nothing that reads `[2D]` has to learn about pairs; only writing out
+    #: renames it (`normalised_values`).
+    SECOND_SHEET = '2D-2'
+
+    def has_second_material(self) -> bool:
+        """Whether this config builds a two-material heterostructure."""
+        return self.SECOND_SHEET in self.values
+
+    def second_material_spec(self) -> SectionSpec:
+        """The schema of the second sheet's section.
+
+        The same ``SheetConfig`` the first sheet uses, minus
+        ``materials_list``: only the first sheet carries the sweep list, and
+        each of its lines names *both* materials, so a second list would be a
+        second, conflicting sweep.
+        """
+        spec = describe_section(
+            SheetConfig, name='second_material', key=self.SECOND_SHEET,
+            optional=True,
+        )
+        spec.fields = [f for f in spec.fields if f.key != 'materials_list']
+        return spec
+
+    def add_second_material(self) -> None:
+        """Add the second sheet, defaulted. A no-op when there is one already
+        -- adding twice must not wipe what is in it."""
+        if self.has_second_material():
+            return
+        self.values[self.SECOND_SHEET] = self._defaults_for(
+            self.second_material_spec())
+        self.dirty = True
+
+    def remove_second_material(self) -> None:
+        """Drop the second sheet and the stacking that only it gives meaning.
+
+        ``hetero_stacking`` orders the layers of a two-material stack; left
+        behind on a single-material config it configures nothing, and reads as
+        though a heterostructure were still being built.
+        """
+        if self.has_second_material():
+            del self.values[self.SECOND_SHEET]
+            self.dirty = True
+        if (self.values.get('general') or {}).pop('hetero_stacking', None) is not None:
+            self.dirty = True
+
+    def conflicts(self) -> List[str]:
+        """Settings that do nothing as configured, in plain words.
+
+        Not validation errors: each of these builds and runs, it just does not
+        do what it looks like it does. A material sweep together with a second
+        material is deliberately absent -- that combination is the ordered-pair
+        sweep, not a conflict.
+        """
+        out: List[str] = []
+        if self.get('general', 'hetero_stacking') and not self.has_second_material():
+            out.append(
+                "[general] hetero_stacking orders the layers of a two-material "
+                "stack; with a single material it has no effect."
+            )
+        return out
+
     def section_lock_reason(self, key: str) -> Optional[str]:
         override = overrides_for(self.model).get(key)
         return override.required_reason if override else None
 
     # ----------------------------------------------------------- simulation
 
-    def set_model(self, model: str) -> None:
+    def set_model(self, model: str, drop_second: bool = False) -> None:
         """Switch simulation model, keeping the sections the new one shares.
 
         Sections the new model has no use for are dropped, and its required
         ones are added with defaults, so the document always matches its model.
+
+        The second material is *not* one of those sections: it survives the
+        switch, because every mode builds a heterostructure. Pass
+        ``drop_second`` to discard it deliberately.
+
+        Raises:
+            DocumentError: If the target model is unknown, or (see
+                `hetero_support_error` -- currently unreachable) has no
+                heterostructure build while a second material is present.
+                Losing a whole material to a dropdown change would be silent
+                and unrecoverable.
         """
-        if model == self.model:
-            return
         if model not in MODES:
             raise DocumentError(f"Unknown simulation model: {model}")
 
+        if drop_second:
+            self.remove_second_material()
+        elif self.has_second_material():
+            reason = hetero_support_error(model)
+            if reason:
+                raise DocumentError(reason)
+
+        if model == self.model:
+            return
+
         self.model = model
-        relevant = set(sections_for(model))
+        relevant = set(sections_for(model)) | {self.SECOND_SHEET}
 
         for key in [k for k in self.values if k not in relevant]:
             del self.values[key]
@@ -258,11 +419,12 @@ class ConfigDocument:
         It is asked here rather than reimplemented, so the panel refuses
         exactly what `run_simulations` refuses.
         """
-        payload = copy.deepcopy(self.values)
+        payload = self.normalised_values()
         payload['settings'] = (settings or load_settings()).model_dump()
         result = validate_config(
             payload, root_model_for(self.model), base_dir=self.base_dir,
         )
+        result.issues = self._issues_for_form(result.issues)
 
         conflict = outer_loop_conflict(self.values, self.model)
         if conflict is not None:
@@ -279,6 +441,41 @@ class ConfigDocument:
             (pending if issue.kind == 'unexpanded_template' else hard).append(issue)
         self.pending_template_issues = pending
         return ConfigValidation(issues=hard, config=result.config)
+
+    def _issues_for_form(self, issues: List[ConfigIssue]) -> List[ConfigIssue]:
+        """Re-address validated-config issues to the sections the form shows.
+
+        Validation sees the written shape (`normalised_values`) and the model's
+        own derived `sheets` list; the form shows `2D` and `2D-2`. Three
+        spellings therefore have to come home:
+
+        * ``[2D-1]``, from the path preflight, is the first sheet -- ``2D``;
+        * ``sheets[0]`` is the same sheet again (the model mirrors the first
+          numbered section onto its `2D` field as well as into the list), so
+          it maps to ``2D`` and then dedupes against the report that already
+          arrived there;
+        * ``sheets[1]`` is the second material -- ``2D-2``.
+
+        The *key* is left alone throughout: it is the field name, which is
+        what the form decorates by. An issue mapped to the right section but
+        keyed by a list index decorates nothing at all.
+        """
+        mapped: List[ConfigIssue] = []
+        seen = set()
+        for issue in issues:
+            if issue.section == FIRST_SHEET:
+                issue = replace(issue, section='2D')
+            elif issue.section == 'sheets':
+                issue = replace(
+                    issue, index=None,
+                    section=(self.SECOND_SHEET if (issue.index or 0) >= 1 else '2D'),
+                )
+            marker = (issue.section, issue.key, issue.kind, issue.message)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            mapped.append(issue)
+        return mapped
 
     def has_material_list(self) -> bool:
         """Whether a material sweep is configured."""
@@ -300,8 +497,51 @@ class ConfigDocument:
         except (FileNotFoundError, OSError, ValueError):
             return []
 
-    def write_material_names(self, names: List[str]) -> Optional[Path]:
+    def material_entries(self) -> List[Tuple[str, ...]]:
+        """The configured list read as entries: singles, or ordered pairs.
+
+        The pair-aware sibling of `material_names`, which cannot represent a
+        ``'a + b'`` line at all (`read_material_list` refuses one rather than
+        silently keeping half of it). Unreadable is not an error, for the same
+        reason as there: the field is mid-edit more often than not.
+        """
+        path = self.get('2D', 'materials_list')
+        if not isinstance(path, str) or not path:
+            return []
+        try:
+            return read_material_entries(path, self.base_dir)
+        except (FileNotFoundError, OSError, ValueError):
+            return []
+
+    @staticmethod
+    def _material_list_lines(entries: Sequence[Any]) -> List[str]:
+        """One list line per entry: a name, or ``'mat1 + mat2'`` for a pair.
+
+        ``'+'`` and not ``','``: a comma line already means several separate
+        single materials, and has meant that since before pairs existed.
+        """
+        lines: List[str] = []
+        for entry in entries:
+            if isinstance(entry, (tuple, list)):
+                members = [str(m).strip() for m in entry if str(m).strip()]
+                if not members:
+                    continue
+                if len(members) > 2:
+                    raise DocumentError(
+                        f"'{' + '.join(members)}' names {len(members)} materials; "
+                        "an ordered pair is exactly 2, one per sheet section."
+                    )
+                lines.append(' + '.join(members))
+            elif entry and str(entry).strip():
+                lines.append(str(entry).strip())
+        return lines
+
+    def write_material_names(self, names: Sequence[Any]) -> Optional[Path]:
         """Write the material list and point the config at it.
+
+        ``names`` holds plain material names, or ``(mat1, mat2)`` ordered
+        pairs for a two-sheet sweep -- written as ``'mat1 + mat2'`` lines,
+        which is what `read_material_entries` reads back.
 
         Selected names have to reach disk as the .txt the CLI reads; there is no
         GUI-only representation of a sweep. Written beside the config when it has
@@ -332,8 +572,8 @@ class ConfigDocument:
         deliberate: the caller is responsible for telling the user to save
         the config first, not this Qt-free class.
         """
-        names = [n.strip() for n in names if n and n.strip()]
-        if not names:
+        lines = self._material_list_lines(names)
+        if not lines:
             self.values.get('2D', {}).pop('materials_list', None)
             self.dirty = True
             return None
@@ -349,7 +589,7 @@ class ConfigDocument:
                 return None
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text('\n'.join(names) + '\n', encoding='utf-8')
+        target.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.set('2D', 'materials_list', str(
             self._relative_to_config(target)))
         return target
@@ -409,6 +649,11 @@ class ConfigDocument:
         key reads as "not set yet", which is what it is: the user must type a
         real value in before the config can build again.
 
+        Every placeholder counts, not the literal '{mat}': a pair sweep
+        templates the first sheet on {mat1} and the second on {mat2}, and
+        testing for '{mat}' alone would leave both behind on untick -- a
+        config that still reads as swept but has no list to expand it.
+
         Returns:
             Whether anything was actually removed. Callers use this to decide
             whether the mat/cif_path/pot_path editors need resyncing from the
@@ -416,16 +661,16 @@ class ConfigDocument:
             edit to a plain (non-templated) 'mat' on every commit of an
             ordinary, never-swept config.
         """
-        section = self.values.get('2D')
-        if not section:
-            return False
         changed = False
-        for key in self.TEMPLATED_KEYS:
-            value = section.get(key)
-            if isinstance(value, str) and '{mat}' in value:
-                del section[key]
-                self.dirty = True
-                changed = True
+        for section_key in ('2D', self.SECOND_SHEET):
+            section = self.values.get(section_key)
+            if not section:
+                continue
+            for key in self.TEMPLATED_KEYS:
+                if has_template_marker(section.get(key)):
+                    del section[key]
+                    self.dirty = True
+                    changed = True
         return changed
 
     def material_directories(self):
@@ -437,14 +682,13 @@ class ConfigDocument:
         """
         cif = self.get('2D', 'cif_path')
         pot = self.get('2D', 'pot_path')
-        if not (isinstance(cif, str) and isinstance(pot, str)
-                and '{mat}' in cif and '{mat}' in pot):
+        if not (has_template_marker(cif) and has_template_marker(pot)):
             return (None, None, None)
         return (Path(cif).parent, Path(pot).parent, Path(pot).suffix)
 
     def expansion(self) -> ExpansionSummary:
         """How many configs, builds and jobs this would generate."""
-        return count_expansion(copy.deepcopy(self.values), self.model,
+        return count_expansion(self.normalised_values(), self.model,
                                base_dir=self.base_dir)
 
     def expansion_output_dirs(self) -> List[Path]:
@@ -460,7 +704,7 @@ class ConfigDocument:
         """
         try:
             expanded = expand_config_sweeps(
-                copy.deepcopy(self.values), self.base_dir)
+                self.normalised_values(), self.base_dir)
             return [output_dir_for(run_dict, self.model) for run_dict in expanded]
         except Exception:  # pylint: disable=broad-except
             return []
@@ -486,8 +730,42 @@ class ConfigDocument:
 
     # --------------------------------------------------------------- output
 
+    def normalised_values(self) -> Dict[str, Dict[str, Any]]:
+        """A deep copy in the shape the CLI reads.
+
+        The document keeps the first sheet under the plain ``2D`` key whether
+        or not there is a second one, so nothing that reads ``[2D]`` has to
+        know about heterostructures. On the way out that only holds for a
+        single material: with a second sheet present the pair must be written
+        as ``[2D-1]`` and ``[2D-2]``, because the models fold *numbered*
+        sections into ``sheets`` and a lone ``[2D]`` beside a ``[2D-2]`` would
+        build a one-material stack out of the wrong section.
+
+        A single-material config still comes out as a plain ``[2D]`` -- every
+        config ever written by this program and every example in the repo has
+        that shape, and a bare ``[2D-1]`` would be a gratuitous churn of all
+        of them.
+        """
+        values = copy.deepcopy(self.values)
+        second = values.pop(self.SECOND_SHEET, None)
+        if second is None:
+            return values
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for key, section in values.items():
+            if key == '2D':
+                # Renamed in place, with the second sheet directly after it:
+                # a config where the two materials are pages apart is a
+                # config nobody can read.
+                out[FIRST_SHEET] = section
+                out[self.SECOND_SHEET] = second
+            else:
+                out[key] = section
+        out.setdefault(self.SECOND_SHEET, second)
+        return out
+
     def to_dict(self) -> Dict[str, Dict[str, Any]]:
-        return copy.deepcopy(self.values)
+        return self.normalised_values()
 
     def comments(self) -> Dict[str, Dict[str, str]]:
         """Canonical inline comments, rebuilt from the override metadata.
@@ -495,11 +773,16 @@ class ConfigDocument:
         The reader strips comments, so a round trip cannot preserve the user's.
         Re-emitting unit and help text keeps a written config at least as
         readable as a hand-written one.
+
+        Keyed by the *written* section names, so the two sheets of a pair are
+        annotated as `[2D-1]` and `[2D-2]`. Both read the `[2D]` overrides:
+        they are the same model, and without that a pair config would come
+        out with every unit and help line stripped.
         """
         out: Dict[str, Dict[str, str]] = {}
         overrides = overrides_for(self.model)
-        for section_key, values in self.values.items():
-            section_override = overrides.get(section_key)
+        for section_key, values in self.normalised_values().items():
+            section_override = overrides.get(self._override_key(section_key))
             if not section_override:
                 continue
             annotations = {}
@@ -518,14 +801,28 @@ class ConfigDocument:
                 out[section_key] = annotations
         return out
 
+    @staticmethod
+    def _override_key(section_key: str) -> str:
+        """The override table entry a section reads its labels from.
+
+        Every numbered sheet section is a sheet, so they all share `[2D]`'s
+        entry -- mirroring `core.run.loopability_section`, which folds them
+        the same way for the same reason.
+        """
+        return '2D' if _NUMBERED_SHEET.match(section_key) else section_key
+
     def save(self, path: Optional[Union[str, Path]] = None) -> Path:
-        """Write the config, defaulting to where it was loaded from."""
+        """Write the config, defaulting to where it was loaded from.
+
+        Written in the CLI's own shape (`normalised_values`): a pair goes out
+        as `[2D-1]` + `[2D-2]`, a single material as a plain `[2D]`.
+        """
         target = Path(path) if path is not None else self.source_path
         if target is None:
             raise DocumentError("No path to save to.")
 
         written = write_config(
-            self.values, target,
+            self.normalised_values(), target,
             comments=self.comments(),
             header=f"FrictionSim2D {self.model} configuration",
         )

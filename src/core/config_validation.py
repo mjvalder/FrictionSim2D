@@ -48,13 +48,22 @@ class ConfigIssue:
     section: Optional[str] = None
     key: Optional[str] = None
     kind: str = 'validation'
+    #: Position within a list-valued section, when the failing value sits in
+    #: one -- ``sheets[1].cif_path`` is ``section='sheets'``, ``index=1``,
+    #: ``key='cif_path'``. Section and key alone cannot say which member
+    #: failed, and the key must stay the field name or there is nothing for a
+    #: form to decorate.
+    index: Optional[int] = None
 
     @property
     def location(self) -> str:
-        if self.section and self.key:
-            return f"[{self.section}] {self.key}"
-        if self.section:
-            return f"[{self.section}]"
+        section = self.section
+        if section and self.index is not None:
+            section = f"{section}[{self.index}]"
+        if section and self.key:
+            return f"[{section}] {self.key}"
+        if section:
+            return f"[{section}]"
         return "(config)"
 
     def render(self) -> str:
@@ -130,17 +139,27 @@ def preflight_paths(config: Mapping[str, Any],
 
 
 def _issue_from_pydantic_error(error: Mapping[str, Any]) -> ConfigIssue:
-    """Map one pydantic error dict onto a section/key."""
+    """Map one pydantic error dict onto a section/key.
+
+    A loc through a list -- ``('sheets', 1, 'cif_path')``, which is how every
+    second-sheet failure of a heterostructure config arrives -- keeps the
+    index separately and the *field* as the key. Taking the first two elements
+    would report ``key='1'``, naming no field, and a form that decorates by
+    key would then decorate nothing however precisely it maps the section.
+    """
     loc: Sequence[Any] = error.get('loc', ())
     section: Optional[str] = None
     key: Optional[str] = None
-    if len(loc) >= 2:
+    index: Optional[int] = None
+    if len(loc) >= 3 and isinstance(loc[1], int):
+        section, index, key = str(loc[0]), loc[1], str(loc[2])
+    elif len(loc) >= 2:
         section, key = str(loc[0]), str(loc[1])
     elif len(loc) == 1:
         section = str(loc[0])
     return ConfigIssue(
         message=error.get('msg', 'invalid value'),
-        section=section, key=key, kind='validation',
+        section=section, key=key, kind='validation', index=index,
     )
 
 

@@ -28,6 +28,7 @@ EXAMPLE_MODELS = [
     ('afm_freestanding_pes_config.ini', 'pes_tip'),
     ('indent_campaign.ini', 'indent'),
     ('afm_freestanding_pes_campaign.ini', 'pes_tip'),
+    ('hetero_pair_sweep.ini', 'sheetonsheet'),
 ]
 
 ALL_MODELS = ['afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet']
@@ -60,24 +61,325 @@ class TestRoundTrip:
         assert parse_config(out) == parse_config(EXAMPLES / 'indent_config.ini')
 
 
-class TestHeteroGuard:
-    """Numbered sheet sections route the build to the heterostructure builders,
-    which this version does not describe."""
+PAIR_CONFIG = "[2D-1]\nmat = h_MoS2\n\n[2D-2]\nmat = h_WS2\n\n[general]\ntemp = 300\n"
 
-    def test_a_numbered_sheet_config_is_refused(self, tmp_path):
-        config = tmp_path / 'hetero.ini'
-        config.write_text(
-            "[2D-1]\nmat = MoS2\n\n[2D-2]\nmat = WS2\n\n[general]\ntemp = 300\n",
-            encoding='utf-8')
-        with pytest.raises(DocumentError, match='heterostructure'):
-            ConfigDocument.from_file(config, 'afm')
 
-    def test_the_message_names_the_sections(self, tmp_path):
-        config = tmp_path / 'hetero.ini'
-        config.write_text("[2D-1]\nmat = MoS2\n\n[2D-2]\nmat = WS2\n", encoding='utf-8')
+def _config(tmp_path, text, name='hetero.ini'):
+    path = tmp_path / name
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
+class TestSecondSheetLoading:
+    """Numbered sheet sections route the build to the heterostructure
+    builders. Every mode has one now (HeteroAFM/Indent/PESTip/PESSheet/
+    SheetOnSheet), so a two-sheet config must be held, not refused -- but only
+    the canonical `[2D-1]` + `[2D-2]` pair the document can represent.
+    """
+
+    @pytest.mark.parametrize('model', ALL_MODELS)
+    def test_a_pair_is_accepted_by_every_mode(self, model, tmp_path):
+        document = ConfigDocument.from_file(_config(tmp_path, PAIR_CONFIG), model)
+        assert document.has_second_material()
+
+    def test_two_sheet_config_round_trips(self, tmp_path):
+        document = ConfigDocument.from_file(
+            _config(tmp_path, PAIR_CONFIG), 'sheetonsheet')
+        assert document.has_second_material()
+        assert document.get('2D', 'mat') == 'h_MoS2'
+        assert document.get('2D-2', 'mat') == 'h_WS2'
+        out = document.normalised_values()
+        assert {k for k in out if k.startswith('2D')} == {'2D-1', '2D-2'}
+
+    def test_three_sheets_still_refused(self, tmp_path):
+        config = _config(
+            tmp_path, "[2D-1]\nmat = a\n\n[2D-2]\nmat = b\n\n[2D-3]\nmat = c\n")
+        with pytest.raises(DocumentError, match='two'):
+            ConfigDocument.from_file(config, 'sheetonsheet')
+
+    def test_the_refusal_names_the_sections(self, tmp_path):
+        config = _config(
+            tmp_path, "[2D-1]\nmat = a\n\n[2D-2]\nmat = b\n\n[2D-3]\nmat = c\n")
         with pytest.raises(DocumentError) as excinfo:
-            ConfigDocument.from_file(config, 'afm')
-        assert '2D-1' in str(excinfo.value) and '2D-2' in str(excinfo.value)
+            ConfigDocument.from_file(config, 'sheetonsheet')
+        assert '2D-3' in str(excinfo.value)
+
+    def test_plain_2d_mixed_with_numbered_sections_is_refused(self, tmp_path):
+        """The model folds only the numbered sections into `sheets` and leaves
+        `[2D]` to be overwritten by the first of them -- so a config carrying
+        both means something different from what it looks like."""
+        config = _config(tmp_path, "[2D]\nmat = a\n\n[2D-2]\nmat = b\n")
+        with pytest.raises(DocumentError, match=r'\[2D\]'):
+            ConfigDocument.from_file(config, 'sheetonsheet')
+
+    def test_a_gap_in_the_numbering_is_refused(self, tmp_path):
+        """`[2D-1]` + `[2D-3]` builds (the core folds by numeric order), but
+        the document would have to silently renumber it to hold it."""
+        config = _config(tmp_path, "[2D-1]\nmat = a\n\n[2D-3]\nmat = b\n")
+        with pytest.raises(DocumentError, match='2D-2'):
+            ConfigDocument.from_file(config, 'sheetonsheet')
+
+    def test_a_lone_first_sheet_loads_as_a_single_material(self, tmp_path):
+        config = _config(tmp_path, "[2D-1]\nmat = a\n\n[general]\ntemp = 300\n")
+        document = ConfigDocument.from_file(config, 'sheetonsheet')
+        assert not document.has_second_material()
+        assert document.get('2D', 'mat') == 'a'
+        assert '2D-1' not in document.normalised_values()
+
+
+class TestSecondMaterial:
+    """Holding, normalising and dropping the second sheet."""
+
+    def test_single_material_emits_plain_2d(self):
+        out = ConfigDocument.blank('sheetonsheet').normalised_values()
+        assert '2D' in out and '2D-1' not in out
+
+    def test_a_blank_document_has_no_second_material(self):
+        assert not ConfigDocument.blank('sheetonsheet').has_second_material()
+
+    def test_adding_one_defaults_its_fields(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        assert document.has_second_material()
+        assert document.get('2D-2', 'stack_type') == 'AA'
+
+    def test_adding_twice_does_not_wipe_it(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D-2', 'mat', 'h_WS2')
+        document.add_second_material()
+        assert document.get('2D-2', 'mat') == 'h_WS2'
+
+    def test_normalised_values_renames_only_when_paired(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        out = document.normalised_values()
+        assert '2D' not in out
+        assert list(out).index('2D-1') + 1 == list(out).index('2D-2')
+
+    def test_normalised_values_is_a_copy(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.normalised_values()['2D']['mat'] = 'mutated'
+        assert document.get('2D', 'mat') != 'mutated'
+
+    def test_the_second_sheet_spec_offers_no_sweep_field(self):
+        """Only `[2D-1]` carries `materials_list`: the second member of each
+        pair comes from the same line of the same list."""
+        spec = ConfigDocument.blank('sheetonsheet').second_material_spec()
+        assert spec.key == '2D-2'
+        assert spec.optional
+        keys = [f.key for f in spec.fields]
+        assert 'materials_list' not in keys
+        assert 'cif_path' in keys
+
+    def test_layers_list_in_second_sheet_is_not_flagged(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D-2', 'layers', [1])
+        assert ('2D-2', 'layers') not in document.unsupported_lists()
+
+    def test_a_scalar_list_in_the_second_sheet_is_still_flagged(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D-2', 'x', [10, 20])
+        assert ('2D-2', 'x') in document.unsupported_lists()
+
+    def test_remove_second_material_pops_stacking(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('general', 'hetero_stacking', 'alternating')
+        document.remove_second_material()
+        assert not document.has_second_material()
+        assert document.get('general', 'hetero_stacking') is None
+
+    def test_a_pair_saves_as_numbered_sections(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D-2', 'mat', 'h_WS2')
+        text = document.save(tmp_path / 'pair.ini').read_text(encoding='utf-8')
+        assert '[2D-1]' in text and '[2D-2]' in text
+        assert '\n[2D]\n' not in text
+
+    def test_a_saved_pair_reopens_as_a_pair(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D-2', 'mat', 'h_WS2')
+        reopened = ConfigDocument.from_file(
+            document.save(tmp_path / 'pair.ini'), 'sheetonsheet')
+        assert reopened.get('2D-2', 'mat') == 'h_WS2'
+
+    def test_the_written_pair_is_annotated_like_the_first_sheet(self, tmp_path):
+        """`comments()` is keyed by section; without re-keying, a pair config
+        would come out with every unit and help line stripped."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        annotations = document.comments()
+        assert '2D-1' in annotations and '2D-2' in annotations
+        assert '2D' not in annotations
+        assert annotations['2D-2'] == annotations['2D-1']
+
+    def test_to_dict_carries_the_numbered_sections(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        assert set(document.to_dict()) >= {'2D-1', '2D-2'}
+
+
+class TestModelSwitchingWithASecondMaterial:
+
+    @pytest.mark.parametrize('model', ALL_MODELS)
+    def test_switching_keeps_material_2(self, model):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D-2', 'mat', 'h_WS2')
+        document.set_model(model)
+        assert document.has_second_material()
+        assert document.get('2D-2', 'mat') == 'h_WS2'
+
+    def test_dropping_it_is_explicit(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set_model('afm', drop_second=True)
+        assert not document.has_second_material()
+
+
+class TestConflicts:
+
+    def test_stacking_without_a_second_material_is_reported(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.set('general', 'hetero_stacking', 'alternating')
+        assert any('hetero_stacking' in line for line in document.conflicts())
+
+    def test_stacking_with_a_second_material_is_silent(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('general', 'hetero_stacking', 'alternating')
+        assert document.conflicts() == []
+
+    def test_sweep_plus_second_material_is_not_a_conflict(self):
+        """A material list and a second sheet together are the pair mode, not
+        two features fighting."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D', 'materials_list', 'mats.txt')
+        assert not any('mutually exclusive' in line
+                       for line in document.conflicts())
+
+
+class TestSecondMaterialValidation:
+
+    def test_issues_map_to_form_sections(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()      # required fields empty -> errors
+        result = document.validate()
+        assert not result.ok
+        sections = {i.section for i in result.issues}
+        assert '2D-1' not in sections and 'sheets' not in sections
+
+    def test_an_issue_keeps_the_field_that_caused_it(self, monkeypatch):
+        """The pydantic loc is ('sheets', 1, 'cif_path'); mapping only the
+        section leaves the issue keyed by the list index, which decorates no
+        editor at all (SectionForm.show_errors matches on issue.key)."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        result = document.validate()
+        assert result.issues_for('2D-2', 'cif_path'), result.render()
+
+    def test_the_first_sheet_is_not_reported_twice(self, monkeypatch):
+        """The model mirrors [2D-1] onto its `2D` field as well as into
+        `sheets[0]`, so the same failure arrives twice."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        issues = document.validate().issues_for('2D', 'cif_path')
+        assert len(issues) == 1, [i.render() for i in issues]
+
+    def test_a_pair_sweep_validates_with_only_pending_templates(self, monkeypatch):
+        """{mat1}/{mat2} are not errors when a pair list is configured."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        result = document.validate()
+        assert result.ok, result.render()
+        assert document.pending_template_issues
+
+
+class TestPairExpansion:
+
+    def test_one_config_per_ordered_pair(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        assert document.expansion().configs == 3
+
+    def test_each_pair_gets_its_own_directory(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        dirs = document.expansion_output_dirs()
+        assert len(dirs) == 3 and len(set(dirs)) == 3
+
+
+class TestMaterialEntries:
+    """Pair-aware reading and writing of the material list."""
+
+    def test_pair_entries_round_trip(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'c.ini'
+        document.write_material_names([('h_MoS2', 'h_WS2'), ('h_WS2', 'h_MoS2')])
+        assert document.material_entries() == [('h_MoS2', 'h_WS2'),
+                                               ('h_WS2', 'h_MoS2')]
+
+    def test_single_names_still_write_one_per_line(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'c.ini'
+        target = document.write_material_names(['h_MoS2', 'h_WS2'])
+        assert target.read_text(encoding='utf-8') == 'h_MoS2\nh_WS2\n'
+        assert document.material_entries() == [('h_MoS2',), ('h_WS2',)]
+
+    def test_a_pair_list_is_read_as_entries_not_names(self, monkeypatch):
+        """read_material_list refuses a '+' line, so the single-material
+        accessor must report nothing rather than raise."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        assert document.material_names() == []
+        assert document.material_entries() == [
+            ('h-MoS2', 'h-WS2'), ('h-MoSe2', 'h-WSe2'), ('h-MoTe2', 'h-WTe2')]
+
+    def test_an_unreadable_list_is_not_an_error(self):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.set('2D', 'materials_list', 'nowhere.txt')
+        assert document.material_entries() == []
+
+    def test_an_entry_that_is_not_a_pair_is_refused(self, tmp_path):
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'c.ini'
+        with pytest.raises(DocumentError, match='ordered pair'):
+            document.write_material_names([('a', 'b', 'c')])
+
+
+class TestTemplateMarkers:
+    """A pair config templates on {mat1}/{mat2}; a literal '{mat}' test leaves
+    its placeholders behind on untick and reads back nothing on open."""
+
+    def test_pair_templates_are_read_back(self, tmp_path):
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        structures, potentials, extension = document.material_directories()
+        assert structures == Path('examples/materials')
+        assert potentials == Path('examples/potentials/sw/sw_lammps')
+        assert extension == '.sw'
+
+    def test_clearing_removes_pair_placeholders(self):
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        assert document.clear_material_directories()
+        assert document.get('2D', 'cif_path') is None
+        assert document.get('2D', 'mat') is None
+        assert document.get('2D-2', 'cif_path') is None
+        assert document.get('2D-2', 'mat') is None
 
 
 class TestBlankDocument:

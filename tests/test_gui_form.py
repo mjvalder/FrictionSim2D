@@ -493,3 +493,61 @@ class TestCountsRead:
         from src.gui.app import plural
 
         assert plural(n, word) == expected
+
+
+class TestSecondMaterialErrors:
+    """A validation failure on the second sheet must land on the editor that
+    owns it. Pydantic locates it at ('sheets', 1, 'cif_path'), and
+    `show_errors` matches on `issue.key` -- so mapping the section alone
+    leaves the issue keyed by the list index and decorates nothing at all.
+    """
+
+    def test_a_second_sheet_issue_decorates_its_editor(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import SectionForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()           # required fields empty -> errors
+        form = SectionForm(doc.second_material_spec(), doc)
+
+        form.show_errors(doc.validate().issues)
+
+        assert form.editors['cif_path'].error()
+        form.deleteLater()
+
+    def test_the_first_sheet_editor_is_still_decorated(self, qt_app, monkeypatch):
+        """The pair renames [2D] to [2D-1] on the way out; the form section is
+        still '2D', so its issues must be mapped back."""
+        from src.gui.widgets.form import SectionForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        form = SectionForm(doc.section('2D'), doc)
+
+        form.show_errors(doc.validate().issues)
+
+        assert form.editors['cif_path'].error()
+        form.deleteLater()
+
+
+class TestPairConfigSurvivesTheForm:
+    """Making a pair config openable (Task 1) also makes it commit-able. The
+    `[2D]` section owns the sweep fields, and its commit path rewrites
+    mat/cif_path/pot_path whenever it decides a sweep is configured -- so an
+    untouched round trip through the form must leave both sheets' {mat1}/
+    {mat2} templates and the pair list exactly where they were."""
+
+    def test_an_untouched_commit_changes_nothing(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.from_file(
+            REPO_ROOT / 'examples' / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        before = doc.to_dict()
+
+        form = ConfigForm(doc)
+        form.commit()
+
+        assert doc.to_dict() == before
+        form.deleteLater()
