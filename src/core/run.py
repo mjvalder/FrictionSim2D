@@ -321,6 +321,22 @@ def preflight_material_pairs(entries: List[Tuple[str, str]],
     return result
 
 
+def _section_carries_template(section: Optional[Dict[str, Any]]) -> bool:
+    """Whether a sheet section still holds a material placeholder anywhere.
+
+    The one thing that makes a section *participate* in a material sweep:
+    :func:`expand_config_sweeps` substitutes only values that carry a marker,
+    so a section with none is pinned to whatever it literally holds, for every
+    member of the sweep.
+
+    ``materials_list`` is excluded because it names the file that *drives* the
+    sweep rather than a value the sweep fills in -- a placeholder there would
+    never be substituted, so it must not count as being templated.
+    """
+    return any(key != 'materials_list' and has_template_marker(value)
+               for key, value in (section or {}).items())
+
+
 def resolve_lj_override_file(section: Dict[str, Any],
                              base_dir: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """Merge a shared LJ-override table into an ``[lj_override]`` section.
@@ -446,6 +462,15 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     f"({exc}), so no material sweep was expanded.")
             return []
 
+        # A section with no placeholder is never substituted, so it stays
+        # pinned to its literal value for every member of the sweep -- and the
+        # run still lands in a directory named after the pair the list asked
+        # for. Nothing downstream catches that: the literal files exist, so the
+        # preflight below is happy and validation is clean. Checked once, up
+        # front, rather than per entry.
+        primary_templated = _section_carries_template(section_config)
+        second_templated = _section_carries_template(base_config.get('2D-2'))
+
         for entry in entries:
             is_pair = len(entry) == 2
             if is_pair and not has_second_sheet:
@@ -459,6 +484,22 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     f"Material list '{mat_list_path}' line '{entry[0]}' names "
                     "a single material, but this config has a [2D-2] section "
                     "and expects ordered pairs ('mat1 + mat2')."
+                )
+            if is_pair and not primary_templated:
+                raise ValueError(
+                    f"Material list '{mat_list_path}' line "
+                    f"'{' + '.join(entry)}' names an ordered pair, but the "
+                    f"[{primary_key}] section holds no material template, so "
+                    "every run would build the same first material. Write "
+                    "'{mat1}' into its mat, cif_path and pot_path."
+                )
+            if is_pair and not second_templated:
+                raise ValueError(
+                    f"Material list '{mat_list_path}' line "
+                    f"'{' + '.join(entry)}' names an ordered pair, but the "
+                    "[2D-2] section holds no material template, so every run "
+                    "would build the same second material. Write '{mat2}' "
+                    "into its mat, cif_path and pot_path."
                 )
 
         if has_second_sheet:

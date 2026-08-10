@@ -317,6 +317,85 @@ class TestOrderedPairSweeps:
         assert out[0]['2D-1']['cif_path'] == 'c/h-MoS2.cif'
         assert out[0]['2D-2']['cif_path'] == 'c/h-WS2.cif'
 
+    def test_pair_line_requires_a_template_in_the_second_section(
+            self, tmp_path: Path) -> None:
+        """A literal [2D-2] against a pair list builds the SAME second material
+        for every member, under a directory named after the pair the list asked
+        for -- wrong results that look plausible and do not collide. The files
+        it names exist, so the preflight is happy and validation is clean; only
+        the missing placeholder gives it away."""
+        (tmp_path / 'c').mkdir()
+        (tmp_path / 'p').mkdir()
+        for mat in ('h-MoS2', 'h-MoSe2', 'h-WS2', 'h-WSe2'):
+            (tmp_path / 'c' / f'{mat}.cif').write_text('', encoding='utf-8')
+            (tmp_path / 'p' / f'{mat}.sw').write_text('', encoding='utf-8')
+
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2\nh-MoSe2 + h-WSe2\n')
+        config = {
+            '2D': {'mat': '{mat}', 'cif_path': 'c/{mat}.cif',
+                   'pot_path': 'p/{mat}.sw', 'materials_list': str(f)},
+            '2D-2': {'mat': 'h-WS2', 'cif_path': 'c/h-WS2.cif',
+                     'pot_path': 'p/h-WS2.sw'},
+            'general': {},
+        }
+        with pytest.raises(ValueError, match=r'\[2D-2\].*\{mat2\}'):
+            expand_config_sweeps(config, base_dir=tmp_path)
+
+    def test_pair_line_requires_a_template_in_the_primary_section(
+            self, tmp_path: Path) -> None:
+        """The mirror hole: a literal primary sheet pins mat1 across the sweep
+        while [2D-2] varies, so the runs differ in directory name but every one
+        of them builds the same bottom material."""
+        (tmp_path / 'c').mkdir()
+        (tmp_path / 'p').mkdir()
+        for mat in ('h-MoS2', 'h-MoSe2', 'h-WS2', 'h-WSe2'):
+            (tmp_path / 'c' / f'{mat}.cif').write_text('', encoding='utf-8')
+            (tmp_path / 'p' / f'{mat}.sw').write_text('', encoding='utf-8')
+
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2\nh-MoSe2 + h-WSe2\n')
+        config = {
+            '2D-1': {'mat': 'h-MoS2', 'cif_path': 'c/h-MoS2.cif',
+                     'pot_path': 'p/h-MoS2.sw', 'materials_list': str(f)},
+            '2D-2': {'mat': '{mat2}', 'cif_path': 'c/{mat2}.cif',
+                     'pot_path': 'p/{mat2}.sw'},
+            'general': {},
+        }
+        with pytest.raises(ValueError, match=r'\[2D-1\].*\{mat1\}'):
+            expand_config_sweeps(config, base_dir=tmp_path)
+
+    def test_a_single_material_sweep_needs_no_pair_template(
+            self, tmp_path: Path) -> None:
+        """The installed base: a one-name-per-line list with no [2D-2] is not
+        a pair sweep, so the pair-template rule must never fire on it."""
+        (tmp_path / 'c').mkdir()
+        (tmp_path / 'p').mkdir()
+        for mat in ('h-MoS2', 'h-WS2'):
+            (tmp_path / 'c' / f'{mat}.cif').write_text('', encoding='utf-8')
+            (tmp_path / 'p' / f'{mat}.sw').write_text('', encoding='utf-8')
+
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2\nh-WS2\n')
+        config = {
+            '2D': {'mat': '{mat}', 'cif_path': 'c/{mat}.cif',
+                   'pot_path': 'p/{mat}.sw', 'materials_list': str(f)},
+            'general': {},
+        }
+        out = expand_config_sweeps(config, base_dir=tmp_path)
+        assert [conf['2D']['mat'] for conf in out] == ['h-MoS2', 'h-WS2']
+
+    def test_the_shipped_pair_sweep_still_expands(self, monkeypatch) -> None:
+        """examples/hetero_pair_sweep.ini is the correctly-templated reference:
+        three distinct ordered pairs, unaffected by the guard."""
+        from src.core.config import parse_config
+
+        monkeypatch.chdir(REPO_ROOT)
+        out = expand_config_sweeps(parse_config(EXAMPLES / 'hetero_pair_sweep.ini'))
+
+        assert [(c['2D-1']['mat'], c['2D-2']['mat']) for c in out] == [
+            ('h-MoS2', 'h-WS2'), ('h-MoSe2', 'h-WSe2'), ('h-MoTe2', 'h-WTe2')]
+
     def test_numbered_only_primary_still_uses_the_2d_note_prefix(
             self, tmp_path: Path) -> None:
         """The GUI filters expansion notes on the literal '[2D] materials_list'
