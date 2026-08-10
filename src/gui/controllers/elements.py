@@ -112,14 +112,10 @@ def _sweep_entries(document: Any) -> List[Tuple[str, ...]]:
     """The sweep's entries -- singles or ordered pairs -- or [] when unreadable.
 
     Asked of the document rather than re-read here, so the scan sees exactly
-    the list the run would. `material_entries` is the pair-aware reader;
-    `material_names` is the fallback for a document that predates it.
+    the list the run would. `material_entries` is the pair-aware reader, and
+    already returns 1-tuples for a single-material list.
     """
-    reader = getattr(document, 'material_entries', None)
-    if reader is not None:
-        return list(reader())
-    names = getattr(document, 'material_names', None)
-    return [(name,) for name in names()] if names is not None else []
+    return list(document.material_entries())
 
 
 def _scan_component(cif_path: str, mat_text: Optional[str],

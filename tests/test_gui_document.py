@@ -401,6 +401,66 @@ class TestPairBuiltInTheGui:
         assert [run['2D-1']['mat'] for run in expanded] == ['h-MoS2', 'h-MoSe2']
         assert [run['2D-2']['mat'] for run in expanded] == ['h-WS2', 'h-WSe2']
 
+    @staticmethod
+    def _pair_sweep_reversed(tmp_path):
+        """The other click order: tick the sweep first, add the material after.
+        The document must come out identical -- a config saved half-templated
+        and run from the CLI never reaches the commit path that would heal it.
+        """
+        materials = tmp_path / 'materials'
+        potentials = tmp_path / 'potentials'
+        materials.mkdir(exist_ok=True)
+        potentials.mkdir(exist_ok=True)
+        for name in ('h-MoS2', 'h-WS2', 'h-MoSe2', 'h-WSe2'):
+            (materials / f'{name}.cif').write_text('data_x\n', encoding='utf-8')
+            (potentials / f'{name}.sw').write_text('# sw\n', encoding='utf-8')
+
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'pair.ini'
+        document.apply_material_directories(materials, potentials, '.sw')
+        document.add_second_material()
+        document.write_material_names([('h-MoS2', 'h-WS2'), ('h-MoSe2', 'h-WSe2')])
+        return document
+
+    def test_adding_the_material_last_still_templates_both_sheets(self, tmp_path):
+        document = self._pair_sweep_reversed(tmp_path)
+        assert document.get('2D', 'mat') == '{mat1}'
+        assert document.get('2D-2', 'mat') == '{mat2}'
+        assert document.get('2D-2', 'cif_path').endswith('{mat2}.cif')
+        assert document.get('2D-2', 'pot_path').endswith('{mat2}.sw')
+
+    def test_either_click_order_gives_the_same_document(self, tmp_path):
+        (tmp_path / 'a').mkdir()
+        (tmp_path / 'b').mkdir()
+        forward = self._pair_sweep(tmp_path / 'a')
+        reversed_ = self._pair_sweep_reversed(tmp_path / 'b')
+        for section in ('2D', '2D-2'):
+            assert ({k: v for k, v in forward.values[section].items()
+                     if k in ConfigDocument.TEMPLATED_KEYS} ==
+                    {k: v for k, v in reversed_.values[section].items()
+                     if k in ConfigDocument.TEMPLATED_KEYS})
+
+    def test_the_reversed_order_sweeps_the_second_material_too(self, tmp_path):
+        from src.core.run import expand_config_sweeps
+
+        document = self._pair_sweep_reversed(tmp_path)
+        expanded = expand_config_sweeps(document.normalised_values(),
+                                        document.base_dir)
+
+        assert [run['2D-1']['mat'] for run in expanded] == ['h-MoS2', 'h-MoSe2']
+        assert [run['2D-2']['mat'] for run in expanded] == ['h-WS2', 'h-WSe2']
+
+    def test_adding_a_material_to_an_untemplated_config_stays_untemplated(
+            self, tmp_path):
+        """Seeding templates is only right when the first sheet already has
+        them; an ordinary two-material config must not sprout placeholders."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'plain.ini'
+        document.set('2D', 'mat', 'h-MoS2')
+        document.add_second_material()
+        assert document.get('2D', 'mat') == 'h-MoS2'
+        assert not document.get('2D-2', 'cif_path')
+
     def test_a_single_material_keeps_the_original_spelling(self, tmp_path):
         """`{mat}` is what every shipped config uses; a lone sheet must not
         start writing `{mat1}` just because the pair path exists."""

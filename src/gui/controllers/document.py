@@ -295,12 +295,27 @@ class ConfigDocument:
 
     def add_second_material(self) -> None:
         """Add the second sheet, defaulted. A no-op when there is one already
-        -- adding twice must not wipe what is in it."""
+        -- adding twice must not wipe what is in it.
+
+        On a config that is *already* templated for a material sweep the new
+        sheet is templated to match, and the first is re-spelled from `{mat}`
+        to `{mat1}`. Which button the user pressed first must not decide
+        whether the sweep is correct: a `[2D-2]` seeded with plain defaults
+        under a pair list carries no placeholder, so expansion leaves it
+        pinned and every run builds the same second material. The GUI's commit
+        path re-templates on the next commit with the sweep box ticked, but a
+        config *saved* in the half-templated state and run from the CLI never
+        gets that chance.
+        """
         if self.has_second_material():
             return
         self.values[self.SECOND_SHEET] = self._defaults_for(
             self.second_material_spec())
         self.dirty = True
+
+        structures, potentials, extension = self.material_directories()
+        if structures is not None:
+            self._write_material_templates(structures, potentials, extension)
 
     def remove_second_material(self) -> None:
         """Drop the second sheet and the stacking that only it gives meaning.
@@ -642,9 +657,23 @@ class ConfigDocument:
         directory, one potential directory -- a pair whose members live apart
         has no way to be named on a single line.
         """
-        structures = self._relative_to_config(Path(structure_dir))
-        potentials = self._relative_to_config(Path(potential_dir))
+        self._write_material_templates(
+            self._relative_to_config(Path(structure_dir)),
+            self._relative_to_config(Path(potential_dir)),
+            potential_extension,
+        )
 
+    def _write_material_templates(self, structures, potentials,
+                                  potential_extension: str) -> None:
+        """Write the placeholders into whichever sheet sections exist.
+
+        Split out of `apply_material_directories` because the directories
+        arrive already spelled the way the config should hold them: that
+        caller relativises them first, while `add_second_material` reads them
+        back off a config that is already templated, where relativising a
+        second time would resolve a relative path against the process's
+        working directory instead of the config's own.
+        """
         def apply(section: str, marker: str) -> None:
             self.set(section, 'mat', marker)
             self.set(section, 'cif_path',
