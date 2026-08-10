@@ -530,6 +530,11 @@ class MainWindow(QMainWindow):
                     "[tip] sheet footprint < 2× tip diameter; the tip will "
                     "interact with its own periodic image")
 
+        # Non-blocking by construction: each of these builds and runs, it just
+        # does not do what it looks like it does (see `ConfigDocument.conflicts`),
+        # so it is said out loud and `ok` is left alone.
+        lines += self.document.conflicts()
+
         if self.document.pending_template_issues:
             # Still worth saying the placeholders are pending even when the
             # count is not available; the count is the part at risk.
@@ -609,6 +614,7 @@ class MainWindow(QMainWindow):
             self.document.set_model(model)
         except DocumentError as exc:
             QMessageBox.warning(self, 'Cannot switch', str(exc))
+            self._resync_mode_box()
             return
 
         # Save scroll position before rebuild
@@ -629,6 +635,27 @@ class MainWindow(QMainWindow):
         # `load()`, not a user edit. `_on_config_changed` already no-ops when
         # nothing has been rendered yet.
         self._on_config_changed()
+
+    def _resync_mode_box(self) -> None:
+        """Put the selector back on the model the document is actually in.
+
+        A refused switch that leaves the combo reading the mode it refused is
+        worse than the refusal itself: `_on_mode_changed` returns early when
+        the combo already matches `document.model`, so the *next* attempt to
+        select that same mode -- after fixing whatever the refusal asked for --
+        would silently do nothing at all.
+
+        Restored under `blockSignals` so putting it back does not re-enter this
+        handler and warn a second time.
+        """
+        index = self.mode_box.findData(self.document.model)
+        if index < 0:
+            return
+        self.mode_box.blockSignals(True)
+        try:
+            self.mode_box.setCurrentIndex(index)
+        finally:
+            self.mode_box.blockSignals(False)
 
     def _on_config_changed(self) -> None:
         self._refresh_counts()

@@ -553,6 +553,152 @@ class TestPairConfigSurvivesTheForm:
         form.deleteLater()
 
 
+class TestAddASecondMaterial:
+    """Turning a single-material config into a heterostructure from the form.
+
+    The button lives in the `[2D]` section because a second material is a
+    property of the sheet, not of the run.
+    """
+
+    def test_add_material_builds_second_section(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        form = ConfigForm(doc)
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert doc.has_second_material()
+        assert '2D-2' in form.sections
+        form.sections['2D-2'].stacking_box.setCurrentText('alternating')
+        assert doc.get('general', 'hetero_stacking') == 'alternating'
+        form.deleteLater()
+
+    def test_the_second_section_follows_the_first(self, qt_app, monkeypatch):
+        """A config whose two materials are pages apart is unreadable."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        form = ConfigForm(doc)
+
+        order = [form._layout.itemAt(i).widget() for i in range(form._layout.count())]
+        order = [w for w in order if w is not None]
+        assert order.index(form.sections['2D-2']) == order.index(form.sections['2D']) + 1
+        form.deleteLater()
+
+    def test_the_button_removes_it_again(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        form = ConfigForm(doc)
+        assert form.sections['2D'].add_material_button.text() == 'Remove material 2'
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert not doc.has_second_material()
+        assert '2D-2' not in form.sections
+        form.deleteLater()
+
+    def test_add_material_enabled_while_sweeping(self, qt_app, tmp_path, monkeypatch):
+        """A sweep over ordered pairs is exactly the case that needs a second
+        sheet, so a configured material list must not lock the button."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        (tmp_path / 'm.txt').write_text('h_MoS2\n', encoding='utf-8')
+        doc.set('2D', 'materials_list', str(tmp_path / 'm.txt'))
+        form = ConfigForm(doc)
+
+        assert form.sections['2D'].add_material_button.isEnabled()
+        form.deleteLater()
+
+    def test_adding_under_a_live_sweep_templates_both_sheets(self, qt_app, monkeypatch):
+        """The hazard this button exists to avoid: a `[2D-2]` seeded with plain
+        defaults under a material list carries no placeholder, so expansion
+        leaves it pinned and every member of the sweep builds the same second
+        material -- wrong results inside correctly-named directories."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.from_file(
+            REPO_ROOT / 'examples' / 'sheet_config.ini', 'sheetonsheet')
+        doc.set('2D', 'materials_list', 'examples/material_list.txt')
+        doc.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+        doc.set('2D', 'pot_path', 'examples/potentials/sw/sw_lammps/{mat}.sw')
+        doc.set('2D', 'mat', '{mat}')
+        form = ConfigForm(doc)
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert doc.get('2D-2', 'mat') == '{mat2}'
+        assert doc.get('2D', 'mat') == '{mat1}'
+        assert '{mat2}' in doc.get('2D-2', 'cif_path')
+        form.deleteLater()
+
+    def test_stacking_is_not_offered_in_run_parameters(self, qt_app, monkeypatch):
+        """It orders the layers of a two-material stack; on the Run parameters
+        form of a single-material config it configures nothing."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank('sheetonsheet'))
+        assert 'hetero_stacking' not in form.sections['general'].editors
+        form.deleteLater()
+
+    def test_the_stacking_proxy_is_not_a_second_sheet_field(self, qt_app, monkeypatch):
+        """It writes to `[general]`. Keeping it in `editors` would have
+        `commit()` write a `hetero_stacking` key into `[2D-2]`, which the
+        sheet model does not have."""
+        from src.gui.widgets.form import SectionForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        form = SectionForm(doc.second_material_spec(), doc)
+
+        form.stacking_box.setCurrentText('alternating')
+        form.commit()
+
+        assert 'hetero_stacking' not in doc.values['2D-2']
+        assert doc.get('general', 'hetero_stacking') == 'alternating'
+        form.deleteLater()
+
+    def test_the_stacking_proxy_shows_what_the_config_holds(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import SectionForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        doc.set('general', 'hetero_stacking', 'alternating')
+        form = SectionForm(doc.second_material_spec(), doc)
+
+        assert form.stacking_box.currentText() == 'alternating'
+        form.deleteLater()
+
+    def test_the_second_sheet_has_no_on_off_tick(self, qt_app, monkeypatch):
+        """`enable_section('2D-2')` is not a thing the document accepts -- the
+        section is added and dropped by the `[2D]` button, so a group-box tick
+        would only raise."""
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.blank('sheetonsheet')
+        doc.add_second_material()
+        form = ConfigForm(doc)
+
+        assert not form.sections['2D-2'].isCheckable()
+        form.deleteLater()
+
+
 class TestSweepDirectoriesFromPairTemplates:
     """`_sweep_directories` reads the path editors, so it has to recognise
     every placeholder spelling: a `{mat1}` path's directory is its parent, not

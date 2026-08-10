@@ -244,6 +244,15 @@ class TestModelSwitchingWithASecondMaterial:
 
 class TestConflicts:
 
+    def test_the_default_stacking_is_not_reported(self):
+        """Every blank config carries `hetero_stacking = grouped`, because the
+        model defaults it and `_defaults_for` seeds every defaulted key. That
+        is not a setting anybody chose, and reporting it would put a conflict
+        line on every single-material config the GUI ever opens."""
+        document = ConfigDocument.blank('sheetonsheet')
+        assert document.get('general', 'hetero_stacking') == 'grouped'
+        assert document.conflicts() == []
+
     def test_stacking_without_a_second_material_is_reported(self):
         document = ConfigDocument.blank('sheetonsheet')
         document.set('general', 'hetero_stacking', 'alternating')

@@ -12,14 +12,16 @@ import html
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QToolButton,
     QToolTip,
     QVBoxLayout,
@@ -34,6 +36,7 @@ from ..schema.overrides import (
     ENABLED,
     SET,
     SectionOverride,
+    field_override,
     hidden_fields,
     overrides_for,
 )
@@ -136,12 +139,23 @@ def _ordered_fields(section: SectionSpec,
     return sorted(visible, key=key)
 
 
+#: The `[2D]` button's two states. Adding a second material is a change to the
+#: *shape* of the config, not to a value, which is why it is a button and not
+#: a field: it adds a whole section.
+ADD_MATERIAL = 'Add a material'
+REMOVE_MATERIAL = 'Remove material 2'
+
+
 class SectionForm(QGroupBox):
     """One config section."""
 
     changed = Signal()
     section_toggled = Signal(str, bool)
     collapsed_changed = Signal(str, bool)
+    #: The set of sections changed -- a second material was added or dropped --
+    #: so the whole form has to be rebuilt, not merely reloaded. Distinct from
+    #: `changed`, which reports a value edit and never moves a section.
+    structure_changed = Signal()
 
     def __init__(self, section: SectionSpec, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
@@ -226,15 +240,130 @@ class SectionForm(QGroupBox):
             self.pair_editor.set_base_dir(document.base_dir)
             body_layout.addWidget(self.pair_editor)
 
+        #: The Add/Remove control for the second material -- `[2D]` only.
+        self.add_material_button: Optional[QPushButton] = None
+        #: The `hetero_stacking` proxy -- `[2D-2]` only. Deliberately not a
+        #: `FieldEditor` in `self.editors`: it writes to `[general]`.
+        self.stacking_box: Optional[QComboBox] = None
+
         hidden = hidden_fields(document.model, section.key)
         for spec in _ordered_fields(section, self.override, hidden):
             self._add_field(spec)
         self._insert_material_list_row()
         self._build_gates()
         self._wire_material_sweep()
+        self._build_stacking_proxy()
+        self._build_material_button(body_layout)
 
         self.load()
         self._apply_dependencies()
+
+    # ------------------------------------------------------ second material
+
+    def _build_material_button(self, body_layout: QVBoxLayout) -> None:
+        """The `[2D]` section's own Add/Remove control for the second material.
+
+        It sits under the sheet rather than beside the family/mode selectors
+        because a heterostructure is a property of the sheet, not of the run --
+        every mode builds one.
+
+        Always enabled, including while a material sweep is configured. The
+        pair sweep (one ordered pair per list line) is precisely the case that
+        needs a second sheet, so excluding it while sweeping would make that
+        configuration unreachable from the form.
+        """
+        if self.section.key != '2D' or not hasattr(self.document, 'has_second_material'):
+            return
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        self.add_material_button = QPushButton(self.body)
+        self.add_material_button.clicked.connect(self._on_material_button_clicked)
+        row.addWidget(self.add_material_button)
+        row.addStretch(1)
+        body_layout.addLayout(row)
+        self._update_material_button()
+
+    def _update_material_button(self) -> None:
+        if self.add_material_button is None:
+            return
+        second = self.document.has_second_material()
+        self.add_material_button.setText(
+            REMOVE_MATERIAL if second else ADD_MATERIAL)
+        self.add_material_button.setToolTip(
+            'Drop the second material and build a single-material stack.'
+            if second else
+            'Stack a second material with this one to build a heterostructure.')
+
+    def _on_material_button_clicked(self) -> None:
+        """Add or drop the second sheet, then ask the form to rebuild.
+
+        `commit()` runs first, and that ordering is the whole point.
+        `add_second_material` seeds the new sheet's `{mat2}` by reading the
+        placeholders back off the *document*, so a sweep whose directories have
+        only reached the editors so far would leave `[2D-2]` untemplated -- and
+        an untemplated second sheet under a pair list is not a visible failure:
+        expansion leaves it pinned and every member of the sweep builds the
+        same second material, inside correctly-named heterostructure
+        directories.
+
+        The rebuild is left to `structure_changed`: this handler runs from a
+        button that the rebuild deletes, so it cannot do it itself.
+        """
+        self.commit()
+        if self.document.has_second_material():
+            self.document.remove_second_material()
+        else:
+            self.document.add_second_material()
+        self._update_material_button()
+        self.structure_changed.emit()
+        self.changed.emit()
+
+    def _build_stacking_proxy(self) -> None:
+        """Show `[general] hetero_stacking` on the second sheet.
+
+        It orders the layers of a two-material stack, so this is the only place
+        it means anything -- `hidden_fields` takes it out of Run parameters for
+        every mode so it is not offered twice.
+
+        A plain `QComboBox` and deliberately *not* an entry in `self.editors`:
+        everything in there is committed to this section, and this value
+        belongs to `[general]`. Committing it here would write a
+        `hetero_stacking` key into `[2D-2]`, which `SheetConfig` does not
+        have. The choices come from the model's own Literal, so adding a
+        stacking there adds it here.
+        """
+        if self.section.key != getattr(self.document, 'SECOND_SHEET', None):
+            return
+        general = self.document.section('general')
+        spec = general.field_map().get('hetero_stacking') if general else None
+        if spec is None:
+            return
+
+        override = field_override(self.document.model, 'general', 'hetero_stacking')
+        self.stacking_box = QComboBox(self)
+        for choice in spec.choices:
+            self.stacking_box.addItem(str(choice), choice)
+        # Connected after populating: addItem() moves the current index off -1
+        # and would otherwise write the first choice over whatever the config
+        # actually holds before `load()` ever reads it.
+        self.stacking_box.currentTextChanged.connect(self._on_stacking_changed)
+
+        text = override.label if override and override.label else 'Layer stacking'
+        label = QLabel(text, self)
+        tooltip = _compose_tooltip(
+            override.help if override else None,
+            override.detail if override else None,
+            spec.doc, '', spec.default)
+        if tooltip:
+            label.setToolTip(tooltip)
+            self.stacking_box.setToolTip(tooltip)
+        self.form.addRow(label, self.stacking_box)
+
+    def _on_stacking_changed(self, text: str) -> None:
+        if self._loading:
+            return
+        self.document.set('general', 'hetero_stacking', text)
+        self.changed.emit()
 
     def _add_field(self, spec: FieldSpec) -> None:
         """One labelled row: control, required marker, and an info bubble."""
@@ -539,11 +668,26 @@ class SectionForm(QGroupBox):
 
                 self._apply_sweep_mode()
 
+            self._load_stacking()
             self._load_gates()
             self._prefill_required()
         finally:
             self._loading = False
         self._apply_dependencies()
+
+    def _load_stacking(self) -> None:
+        """Point the stacking proxy at what `[general]` currently holds.
+
+        A value the model does not offer (a hand-edited config) leaves the box
+        alone rather than silently rewriting it to the first choice: validation
+        reports it, and the form must not quietly repair what it is reporting.
+        """
+        if self.stacking_box is None:
+            return
+        index = self.stacking_box.findData(
+            self.document.get('general', 'hetero_stacking'))
+        if index >= 0:
+            self.stacking_box.setCurrentIndex(index)
 
     def _gate_is_open(self, key: str) -> bool:
         """Whether `key`'s row is currently visible, i.e. not hidden behind
@@ -1087,16 +1231,13 @@ class ConfigForm(QWidget):
             self.sections.clear()
 
             for section in self.document.sections():
-                form = SectionForm(section, self.document, self, settings=self.settings)
-                form.changed.connect(self.changed)
-                form.collapsed_changed.connect(self._remember_collapsed)
-                self.sections[section.key] = form
-                self._layout.addWidget(form)
-
-                collapsed = self._collapsed.get(
-                    section.key,
-                    self.start_collapsed or _starts_collapsed(section, self.document))
-                form.set_collapsed(collapsed)
+                self._add_section(section)
+                if section.key == '2D':
+                    second = self._second_material_section()
+                    if second is not None:
+                        # Directly after the first sheet: a config whose two
+                        # materials are pages apart is one nobody can read.
+                        self._add_section(second)
 
             # A material change lives in a component section, not
             # [lj_override], but it changes which elements the pair combos
@@ -1114,6 +1255,50 @@ class ConfigForm(QWidget):
             self._layout.addStretch(1)
         finally:
             self.setUpdatesEnabled(True)
+
+    def _add_section(self, section: SectionSpec) -> None:
+        """One SectionForm, wired and folded to its remembered state."""
+        form = SectionForm(section, self.document, self, settings=self.settings)
+        form.changed.connect(self.changed)
+        form.collapsed_changed.connect(self._remember_collapsed)
+        form.structure_changed.connect(self._on_structure_changed)
+        self.sections[section.key] = form
+        self._layout.addWidget(form)
+
+        collapsed = self._collapsed.get(
+            section.key,
+            self.start_collapsed or _starts_collapsed(section, self.document))
+        form.set_collapsed(collapsed)
+
+    def _second_material_section(self) -> Optional[SectionSpec]:
+        """The synthetic `[2D-2]` spec, or None when there is no second sheet.
+
+        Not part of `document.sections()`, because the second sheet has no
+        field on the root model at all -- a model validator folds numbered
+        sections into a derived `sheets` list, so introspection of the root
+        model can never produce it. It is described from `SheetConfig` on
+        demand instead.
+
+        Forced non-optional: an optional section renders with a group-box tick
+        that routes through `enable_section('2D-2')`, which the document
+        refuses (there is no such section spec to enable). The second material
+        is added and dropped by the `[2D]` button, not by a tick.
+        """
+        has_second = getattr(self.document, 'has_second_material', None)
+        if has_second is None or not has_second():
+            return None
+        spec = self.document.second_material_spec()
+        spec.optional = False
+        return spec
+
+    def _on_structure_changed(self) -> None:
+        """Rebuild after the *set* of sections changed, not just a value.
+
+        Deferred by a zero timer because the request comes from a button inside
+        the very SectionForm `rebuild()` is about to delete; tearing that widget
+        down from inside its own signal handler is a crash, not an error.
+        """
+        QTimer.singleShot(0, self.rebuild)
 
     #: Sections `scan_config_elements` actually reads; only these need to
     #: trigger a refresh.

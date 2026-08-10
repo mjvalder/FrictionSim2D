@@ -122,43 +122,69 @@ _COMPONENT_FIELDS = {
     'pot_path': FieldOverride(label='Potential file', order=4),
 }
 
+#: Field overrides for a sheet section. Shared by `[2D]` and `[2D-2]`: they
+#: are the same `SheetConfig`, so restating them would only let the two
+#: sheets of one heterostructure drift into different labels and units.
+_SHEET_FIELDS = {
+    **_COMPONENT_FIELDS,
+    # Shifted down from _COMPONENT_FIELDS' shared order (2/3/4) to
+    # leave a gap for the material-list block, which SectionForm
+    # inserts as its own row right after `mat` -- see
+    # SectionForm._insert_material_list_row. Only this section
+    # reorders them; tip/sub/flake keep _COMPONENT_FIELDS' order as
+    # they have no materials_list field to make room for.
+    'cif_path': replace(_COMPONENT_FIELDS['cif_path'], order=3),
+    'pot_type': replace(_COMPONENT_FIELDS['pot_type'], order=4),
+    'pot_path': replace(_COMPONENT_FIELDS['pot_path'], order=5),
+    'x': FieldOverride(label='Length (x)', unit=A, order=10),
+    'y': FieldOverride(label='Width (y)', unit=A, order=11),
+    'layers': FieldOverride(label='Layers', order=12),
+    'stack_type': FieldOverride(
+        label='Stacking', order=13,
+        choices=('AA', 'AB'),
+        help='AA: layers aligned. AB: alternate layers shifted.',
+        detail=('Only affects runs with more than one layer. The builders test '
+                'for AA and treat every other value as AB.'),
+    ),
+    'lat_c': FieldOverride(label='Interlayer spacing', unit=A, order=14),
+    'materials_list': FieldOverride(
+        label='Sweep over materials', order=0, editor='material_list',
+        detail=('Each material becomes a separate simulation. The structure '
+                'and potential directories decide which are available: a '
+                'material needs a file in both.'),
+    ),
+}
+
 #: Section overrides shared by both families.
 _COMMON: Dict[str, SectionOverride] = {
     '2D': SectionOverride(
         label='2D sheet', order=1,
         help='The sheet being slid or indented.',
-        fields={
-            **_COMPONENT_FIELDS,
-            # Shifted down from _COMPONENT_FIELDS' shared order (2/3/4) to
-            # leave a gap for the material-list block, which SectionForm
-            # inserts as its own row right after `mat` -- see
-            # SectionForm._insert_material_list_row. Only this section
-            # reorders them; tip/sub/flake keep _COMPONENT_FIELDS' order as
-            # they have no materials_list field to make room for.
-            'cif_path': replace(_COMPONENT_FIELDS['cif_path'], order=3),
-            'pot_type': replace(_COMPONENT_FIELDS['pot_type'], order=4),
-            'pot_path': replace(_COMPONENT_FIELDS['pot_path'], order=5),
-            'x': FieldOverride(label='Length (x)', unit=A, order=10),
-            'y': FieldOverride(label='Width (y)', unit=A, order=11),
-            'layers': FieldOverride(label='Layers', order=12),
-            'stack_type': FieldOverride(
-                label='Stacking', order=13,
-                choices=('AA', 'AB'),
-                help='AA: layers aligned. AB: alternate layers shifted.',
-                detail=('Only affects runs with more than one layer. The builders test '
-                        'for AA and treat every other value as AB.'),
-            ),
-            'lat_c': FieldOverride(label='Interlayer spacing', unit=A, order=14),
-            'materials_list': FieldOverride(
-                label='Sweep over materials', order=0, editor='material_list',
-                detail=('Each material becomes a separate simulation. The structure '
-                        'and potential directories decide which are available: a '
-                        'material needs a file in both.'),
-            ),
-        },
+        fields=dict(_SHEET_FIELDS),
     ),
+    # The second sheet of a heterostructure. `ConfigDocument.SECOND_SHEET`
+    # spells the same key; it is repeated rather than imported because the
+    # document imports this module, not the other way round.
+    #
+    # No `order`: this section is never sorted. It has no field on the root
+    # model at all (the models fold numbered sections into a derived `sheets`
+    # list), so it never appears in `ConfigDocument.sections()` -- `ConfigForm`
+    # builds it from `second_material_spec()` and inserts it directly after
+    # `[2D]`, where a heterostructure's two materials have to be read together.
+    '2D-2': SectionOverride(
+        label='Material 2 (heterostructure)',
+        help='The second material; the two are stacked into one cell.',
+        # Minus `materials_list`: only the first sheet carries the sweep list,
+        # and each of its lines names *both* materials, so a second list would
+        # be a second, conflicting sweep.
+        fields={key: value for key, value in _SHEET_FIELDS.items()
+                if key != 'materials_list'},
+    ),
+    # Ahead of tip/substrate/run parameters: lattice matching is how the sheets
+    # are made commensurate with each other, so it is read with them.
+    'lattice_match': SectionOverride(label='Lattice matching', order=2),
     'tip': SectionOverride(
-        label='Tip', order=2,
+        label='Tip', order=3,
         help='The indenting tip.',
         gates={'tip_position': 'Set tip position'},
         fields={
@@ -196,7 +222,7 @@ _COMMON: Dict[str, SectionOverride] = {
         },
     ),
     'sub': SectionOverride(
-        label='Substrate', order=3,
+        label='Substrate', order=4,
         help='The supporting block beneath the sheet.',
         fields={
             **_COMPONENT_FIELDS,
@@ -222,7 +248,7 @@ _COMMON: Dict[str, SectionOverride] = {
         },
     ),
     'general': SectionOverride(
-        label='Run parameters', order=4,
+        label='Run parameters', order=5,
         fields={
             'temp': FieldOverride(label='Temperature', unit='K', order=1, required=True),
             'force': FieldOverride(
@@ -317,15 +343,22 @@ _COMMON: Dict[str, SectionOverride] = {
                 enable_hint='Set a twist angle first.',
                 help='Largest supercell searched for a coincidence cell.',
             ),
+            # Written to [general], but shown on the second sheet's section
+            # (see `hidden_fields`) -- the label and help below are what that
+            # proxy row renders, so this entry is still the single source of
+            # both, and `ConfigDocument.comments()` still annotates the written
+            # key from it.
             'hetero_stacking': FieldOverride(
-                label='Heterostructure stacking', order=15,
-                help='Layer ordering across multiple sheet materials.',
-                detail='Has no effect on a single-material run.',
+                label='Layer stacking', order=15,
+                help='How the two materials interleave in the stack.',
+                detail=("'grouped' puts every layer of the first material "
+                        "below every layer of the second; 'alternating' "
+                        "interleaves them. Only affects multi-layer sheets."),
             ),
         },
     ),
     'flake': SectionOverride(
-        label='Flake', order=5,
+        label='Flake', order=6,
         help='A finite patch placed between tip and sheet.',
         fields={
             **_COMPONENT_FIELDS,
@@ -338,7 +371,7 @@ _COMMON: Dict[str, SectionOverride] = {
         },
     ),
     'pes': SectionOverride(
-        label='PES scan', order=6,
+        label='PES scan', order=7,
         help='Static potential-energy-surface scan settings.',
         fields={
             'grid_n': FieldOverride(label='Grid points', order=1),
@@ -349,10 +382,9 @@ _COMMON: Dict[str, SectionOverride] = {
         },
     ),
     'indent': SectionOverride(
-        label='Indent', order=7,
+        label='Indent', order=8,
         help='Hold-and-retract settings for an indent-only run.',
     ),
-    'lattice_match': SectionOverride(label='Lattice matching', order=8),
     'lj_override': SectionOverride(
         label='Lennard-Jones overrides', order=9,
         help='Free-form pair overrides; keys are chosen by you.',
@@ -546,12 +578,20 @@ def hidden_fields(model: str, section: str) -> Tuple[str, ...]:
     scans): the combo would render holding nothing but its '(unset)' entry,
     which reads as a broken control rather than as "this mode has nothing to
     split".
+
+    ``hetero_stacking`` is hidden for *every* mode, and for a different reason:
+    it is not unsupported, it has simply moved. It orders the layers of a
+    two-material stack, so the form shows it on the second sheet's own section
+    (``widgets.form.SectionForm``'s stacking proxy), where there is a second
+    material for it to order. Left in Run parameters as well it would be the
+    same setting in two places, and on a single-material config it would be a
+    control that silently does nothing at all.
     """
     entry = MODES.get(model)
     if entry is None or section != 'general':
         return ()
     family, mode = entry
-    hidden = tuple(family.unsupported_general)
+    hidden = tuple(family.unsupported_general) + ('hetero_stacking',)
     if not family.outer_loop_choices_for(mode):
         hidden += ('outer_loop',)
     return hidden

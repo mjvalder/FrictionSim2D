@@ -337,14 +337,33 @@ class ConfigDocument:
         do what it looks like it does. A material sweep together with a second
         material is deliberately absent -- that combination is the ordered-pair
         sweep, not a conflict.
+
+        A value equal to the model's own default is never reported. `blank()`
+        seeds every defaulted key, so `hetero_stacking` is present as
+        ``'grouped'`` on every single-material config the GUI creates;
+        reporting that would put a "this does nothing" line under every new
+        config, for a setting nobody chose -- which is how a panel of real
+        warnings becomes one nobody reads.
         """
         out: List[str] = []
-        if self.get('general', 'hetero_stacking') and not self.has_second_material():
+        stacking = self.get('general', 'hetero_stacking')
+        if (stacking and stacking != self._field_default('general', 'hetero_stacking')
+                and not self.has_second_material()):
             out.append(
                 "[general] hetero_stacking orders the layers of a two-material "
                 "stack; with a single material it has no effect."
             )
         return out
+
+    def _field_default(self, section: str, key: str) -> Any:
+        """The model's own default for a field, or None when it has none.
+
+        Read off the introspected spec rather than restated here, so a default
+        changed in `core.config` cannot leave a copy of the old one behind.
+        """
+        spec = self.section(section)
+        field_spec = spec.field_map().get(key) if spec else None
+        return field_spec.default if field_spec else None
 
     def section_lock_reason(self, key: str) -> Optional[str]:
         override = overrides_for(self.model).get(key)

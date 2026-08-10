@@ -287,6 +287,41 @@ class TestMainWindow:
         assert window._validate()
         assert '2× tip diameter' in window.issues.toPlainText()
 
+    def test_a_setting_that_does_nothing_is_reported_not_blocked(self, window):
+        """`hetero_stacking` orders the layers of a two-material stack. On a
+        single-material config it builds and runs, it just does not do what it
+        looks like it does -- so it is said, not refused."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+        window.document.set('general', 'hetero_stacking', 'alternating')
+
+        ok = window._validate()
+
+        assert 'hetero_stacking' in window.issues.toPlainText()
+        assert ok
+
+    def test_a_refused_mode_switch_puts_the_selector_back(self, window, monkeypatch):
+        """A refusal that leaves the combo showing a mode the document is not
+        in is worse than the refusal: `_on_mode_changed` returns early when the
+        combo already reads the document's model, so selecting that same mode
+        again would then silently do nothing at all."""
+        from src.gui.controllers.document import DocumentError
+
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda *args, **kwargs: QMessageBox.Ok)
+
+        def refuse(_model, drop_second=False):
+            raise DocumentError('no heterostructure build for that mode')
+
+        monkeypatch.setattr(window.document, 'set_model', refuse)
+
+        window.mode_box.setCurrentIndex(1)          # 'indent'
+
+        assert window.document.model == 'afm'
+        assert window.mode_box.currentData() == 'afm'
+
     def test_generate_confirmation_lists_the_output_dir(self, window, monkeypatch):
         """The Generate confirmation must preview the directory(ies) it is
         about to create -- and, with nothing colliding, no warning."""

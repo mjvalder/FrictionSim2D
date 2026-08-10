@@ -73,6 +73,57 @@ class TestSimulationTypes:
         assert 'tip' not in sections_for('sheetonsheet')
 
 
+class TestHeterostructureSupport:
+    """Every mode routes a two-material config to a heterostructure builder,
+    so the 'Add a material' button is offered everywhere -- and the stacking
+    that only a pair gives meaning to moves out of Run parameters onto the
+    second sheet."""
+
+    def test_all_modes_support_hetero(self):
+        from src.gui.schema.simulation_types import MODES as ALL
+
+        assert all(ALL[m][1].supports_hetero
+                   for m in ('afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet'))
+
+    def test_hetero_stacking_hidden_from_run_parameters(self):
+        from src.gui.schema.overrides import hidden_fields
+
+        assert 'hetero_stacking' in hidden_fields('sheetonsheet', 'general')
+
+    @pytest.mark.parametrize('model', ALL_MODELS)
+    def test_stacking_is_hidden_for_every_mode(self, model):
+        """It is shown on the `[2D-2]` form instead, which exists for every
+        mode -- so no mode may keep it in Run parameters."""
+        from src.gui.schema.overrides import hidden_fields
+
+        assert 'hetero_stacking' in hidden_fields(model, 'general')
+
+    def test_the_second_sheet_has_its_own_override(self):
+        second = section_override('2D-2')
+        assert second.label == 'Material 2 (heterostructure)'
+
+    def test_the_second_sheet_carries_no_sweep_list(self):
+        """One list, one sweep: each of its lines names both materials, so a
+        second `materials_list` would be a second, conflicting sweep."""
+        second = section_override('2D-2')
+        assert set(second.fields) == set(section_override('2D').fields) - {'materials_list'}
+
+
+class TestSectionOrder:
+    """Lattice matching describes how two sheets are made commensurate, so it
+    belongs beside them rather than at the bottom of the form."""
+
+    def test_lattice_matching_sits_beside_the_sheets(self):
+        assert overrides_for('sheetonsheet')['lattice_match'].order == 2
+
+    @pytest.mark.parametrize('model', ALL_MODELS)
+    def test_no_two_sections_claim_the_same_slot(self, model):
+        """`ConfigDocument.sections()` sorts on this number alone, so a
+        collision leaves the order of the two colliding sections undefined."""
+        orders = [s.order for key, s in overrides_for(model).items() if key != '2D-2']
+        assert len(set(orders)) == len(orders)
+
+
 class TestIntrospectionCoverage:
     """The canary for config-model changes."""
 
