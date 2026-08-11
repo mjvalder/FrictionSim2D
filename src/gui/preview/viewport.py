@@ -88,6 +88,22 @@ _ELEMENT_COLOURS = {
     'C': (0.30, 0.30, 0.30),
 }
 
+#: Components that are meant to be finite in x/y, and so are the only ones a
+#: periodic wall is a problem for.
+#:
+#: Named positively, and that is the point. The check used to exempt the two
+#: components known to span the cell (``sub`` and ``2D``) and flag everything
+#: else, which quietly assumed the AFM family's naming was the only naming
+#: there is. It is not: the sheet family assembles its whole stack into one
+#: pre-assembled data file, read under a single group -- ``bot`` when
+#: homogeneous, ``all_atoms`` for a heterostructure or a flake slide -- and
+#: that component fills the cell by construction. For a heterostructure the
+#: cell IS the matched interface's coincidence cell, i.e. the only in-plane
+#: periodicity the interface has, so "enlarge the sheet footprint" was advice
+#: that could not be taken even in principle. Every one of those previews
+#: reported a self-interaction that was not there.
+_FINITE_COMPONENTS = ('tip', 'flake')
+
 
 class ViewportPanel(QWidget):
     """An ovito viewport plus the controls that make it useful."""
@@ -509,9 +525,9 @@ class ViewportPanel(QWidget):
         messages: List[str] = list(self.system.warnings)
 
         touching = [name for name, hits in self.system.touches_boundary().items() if hits]
-        # The sheet and substrate are meant to span the cell; a tip or flake
-        # reaching the wall would interact with its own periodic image.
-        unexpected = [n for n in touching if n not in ('sub', '2D')]
+        # Only a component that is meant to be finite can be too big for the
+        # cell; everything else is built to span it. See _FINITE_COMPONENTS.
+        unexpected = [n for n in touching if n in _FINITE_COMPONENTS]
         if unexpected:
             messages.append(
                 f"{', '.join(unexpected)} reaches the periodic boundary and will "
