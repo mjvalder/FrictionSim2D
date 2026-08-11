@@ -87,9 +87,15 @@ class MaterialListEditor(FieldEditor):
         self._scanned: Optional[Tuple[Optional[Path], Optional[Path],
                                       Optional[str]]] = None
         #: Whether the selection is a table of ordered pairs rather than a
-        #: tick list of single materials. Driven by SectionForm from the
-        #: document's shape (sweeping AND a second sheet), never chosen here.
+        #: tick list of single materials. Always `_pair_capable` AND
+        #: `is_sweeping()`; never set independently of those two.
         self._pair_mode = False
+        #: Whether this config has a second sheet to hold the second member
+        #: of each pair. SectionForm's to know (it reads the document) and
+        #: this widget's to remember, because the widget is what has to keep
+        #: `_pair_mode` true to it the instant the box is ticked -- see
+        #: `_on_sweep_toggled`.
+        self._pair_capable = False
         #: material_names() as of the last load(), passed in via
         #: set_document_names. The floor a rescan's "keep the selection"
         #: logic falls back to when the widget's own selection has gone empty
@@ -251,6 +257,24 @@ class MaterialListEditor(FieldEditor):
 
     def is_pair_mode(self) -> bool:
         return self._pair_mode
+
+    def set_pair_capable(self, capable: bool) -> None:
+        """Record whether this config has a second sheet, and re-derive the
+        mode from it.
+
+        The mode itself is never handed in from outside any more. It used to
+        be, and the ordering that made that wrong is worth stating: this
+        widget connects its own `toggled` handler in the constructor, before
+        `SectionForm` connects the one that would have re-applied the mode,
+        and Qt delivers slots in connection order. So the commit that a
+        re-tick fires ran while the mode was still whatever the *untick* left
+        behind -- and a stale mode is not a cosmetic disagreement, it is what
+        `apply_material_directories`' `pair_mode` refuses outright. Keeping
+        the ingredients here and deriving the mode from them means the widget
+        cannot be caught mid-update by its own signal.
+        """
+        self._pair_capable = bool(capable)
+        self.set_pair_mode(self._pair_capable and self.is_sweeping())
 
     def set_pair_mode(self, pair_mode: bool) -> None:
         """Swap the tick list for the pair table, or back.
@@ -540,6 +564,9 @@ class MaterialListEditor(FieldEditor):
 
     def _on_sweep_toggled(self, sweeping: bool) -> None:
         self.list_panel.setVisible(sweeping)
+        # Before the emit, always: `changed` is what commits the section, and
+        # a commit reads `is_pair_mode()`. See `set_pair_capable`.
+        self.set_pair_mode(self._pair_capable and sweeping)
         self.changed.emit()
 
     # ------------------------------------------------------------- .txt path

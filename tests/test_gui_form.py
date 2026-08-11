@@ -742,6 +742,38 @@ class TestAddASecondMaterial:
         assert '2D-2' not in form.sections
         form.deleteLater()
 
+    def test_a_collapse_with_nowhere_to_write_refuses_once(self, qt_app,
+                                                            tmp_path,
+                                                            monkeypatch):
+        """FIX ROUND 2: an unsaved config with no workspace has nowhere to put
+        the collapsed list, so the document refuses. Asking first put two
+        dialogs in front of one refusal -- and the question's 'Yes' could not
+        have been honoured anyway."""
+        from PySide6.QtWidgets import QMessageBox
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        curated = tmp_path / 'pairs.txt'
+        curated.write_text('h-MoS2 + h-WS2\n', encoding='utf-8')
+        doc = ConfigDocument.blank('sheetonsheet')     # never saved
+        doc.set('2D', 'materials_list', str(curated))
+        doc.add_second_material()
+        form = ConfigForm(doc)
+
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: pytest.fail('asked needlessly'))
+        warned = []
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda _p, _t, text, *a, **k: warned.append(text))
+
+        form.sections['2D'].add_material_button.click()
+        qt_app.processEvents()
+
+        assert len(warned) == 1
+        assert 'Save the config first' in warned[0]
+        assert doc.has_second_material()
+        form.deleteLater()
+
     def test_removing_without_a_pair_list_asks_nothing(self, qt_app,
                                                        monkeypatch):
         """Nothing is lost, so there is nothing to confirm -- a prompt on

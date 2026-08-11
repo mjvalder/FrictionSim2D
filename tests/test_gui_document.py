@@ -615,6 +615,54 @@ class TestRemovingTheSecondMaterial:
             document.remove_second_material()
         assert document.has_second_material()
 
+    def test_a_failed_write_leaves_the_previous_list_intact(self, tmp_path,
+                                                            monkeypatch):
+        """FIX ROUND 2: `write_text` truncates before it writes, so a failure
+        part-way through (a full disk) left a half-written list behind while
+        the caller rolled the document back to the old one -- two sources of
+        truth disagreeing, and the file the CLI actually reads being the wrong
+        one. The write goes to a sibling and is renamed over the target, so
+        the old list survives every failure short of the rename itself.
+
+        The failure is injected *during* the write, which is the only place it
+        discriminates: a write that fails before touching the file at all
+        (an unwritable target) leaves the old contents alone either way."""
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'c.ini'
+        document.write_material_names(['h-MoS2', 't-MoS2'])
+        listing = tmp_path / 'c_materials.txt'
+        original = listing.read_text(encoding='utf-8')
+
+        real_write_text = Path.write_text
+
+        def _dies_midway(self, text, *args, **kwargs):
+            real_write_text(self, text[:3], *args, **kwargs)
+            raise OSError(28, 'No space left on device')
+
+        monkeypatch.setattr(Path, 'write_text', _dies_midway)
+
+        with pytest.raises(OSError):
+            document.write_material_names(['b-AlSb', 'h-WS2'])
+
+        assert listing.read_text(encoding='utf-8') == original
+        assert not list(tmp_path.glob('.*.tmp'))
+
+    def test_a_symlinked_list_is_still_followed(self, tmp_path):
+        """The user pointed the config at a link on purpose; replacing the
+        link with a regular file is not this code's decision to make."""
+        real = tmp_path / 'real_materials.txt'
+        real.write_text('h-MoS2\n', encoding='utf-8')
+        link = tmp_path / 'c_materials.txt'
+        link.symlink_to(real)
+
+        document = ConfigDocument.blank('sheetonsheet')
+        document.source_path = tmp_path / 'c.ini'
+        document.set('2D', 'materials_list', 'c_materials.txt')
+        document.write_material_names(['t-MoS2'])
+
+        assert link.is_symlink()
+        assert real.read_text(encoding='utf-8') == 't-MoS2\n'
+
     def test_a_single_material_list_is_left_alone(self, tmp_path):
         document = ConfigDocument.blank('sheetonsheet')
         document.source_path = tmp_path / 'single.ini'

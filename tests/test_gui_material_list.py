@@ -1093,6 +1093,64 @@ class TestPairSweepCommit:
         assert not form.document.has_material_list()
         form.deleteLater()
 
+    def test_unticking_and_reticking_a_pair_sweep_commits_again(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FIX ROUND 2: `MaterialListEditor` connects its own `toggled`
+        handler -- which emits `changed`, and so commits -- in its
+        constructor, before `SectionForm._wire_material_sweep` connects the
+        one that re-applies the sweep mode. Qt delivers in connection order,
+        so the commit fired by a re-tick ran with `is_pair_mode()` still False
+        from the untick while the document still held `[2D-2]`: the commit
+        raised `DocumentError` at the signal boundary and aborted, writing
+        neither the templates nor the list, and the next unrelated commit
+        healed it. An intermittent silent no-op.
+
+        Driven through the checkbox itself, and asserting the commit actually
+        happened -- "no exception escaped" is what the old behaviour looked
+        like from the outside too."""
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        form.commit()
+        assert form.document.has_material_list()
+
+        editor.sweep_box.setChecked(False)
+        assert not form.document.has_material_list()      # the untick cleared it
+        editor.sweep_box.setChecked(True)
+
+        assert editor.is_pair_mode()
+        assert form.document.get('2D', 'mat') == '{mat1}'
+        assert form.document.get('2D-2', 'mat') == '{mat2}'
+        assert form.document.material_entries() == [('h-MoS2', 't-MoS2')]
+        form.deleteLater()
+
+    def test_a_refused_commit_is_reported_rather_than_thrown(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FIX ROUND 2: a `DocumentError` reaching a Qt slot is invisible --
+        `app.py` installs no excepthook, so it prints a traceback to stderr
+        and the edit silently does nothing. The document keeps refusing
+        loudly; it is the UI that has to say so."""
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+        warned = []
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda _p, _t, text, *a, **k: warned.append(text))
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+
+        # Widget and document disagree, which is what `pair_mode` exists to
+        # catch -- here it is reached through the slots Qt itself calls.
+        del form.document.values['2D-2']
+
+        form.sections['2D']._on_field_changed()
+        form.commit()
+
+        # Both slots reported rather than threw. (The orphaned `[2D-2]` form
+        # left behind by the teardown above refuses its own commit too --
+        # 'Unknown section' -- and that is reported by the same guard, which
+        # is the guarantee under test: no refusal reaches a Qt slot boundary.)
+        assert sum('pair_mode' in text for text in warned) >= 2
+        form.deleteLater()
+
     def test_a_widget_and_document_that_disagree_are_refused(
             self, qt_app, dirs, tmp_path, monkeypatch):
         """FIX ROUND 1: what `pair_mode=` is for. The commit states the mode

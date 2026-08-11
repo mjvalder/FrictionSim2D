@@ -14,6 +14,7 @@ Qt-free.
 from __future__ import annotations
 
 import copy
+import os
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -100,6 +101,30 @@ class PairListCollapse:
     dropped: List[str]
     #: The first members, deduped in file order: the collapsed list itself.
     firsts: List[str]
+
+
+def _write_atomically(target: Path, text: str) -> None:
+    """Write `text` to `target`, or leave `target` exactly as it was.
+
+    A plain ``write_text`` truncates first, so a write that fails part-way --
+    a full disk, a share that drops -- leaves a half-written material list
+    behind while the caller's own rollback restores a document that no longer
+    matches it. Writing a sibling and renaming makes the swap atomic: the old
+    list survives every failure mode except the rename itself.
+
+    A symlinked target is resolved first, so this keeps following the link (a
+    list the user deliberately pointed the config at through one) instead of
+    quietly replacing the link with a regular file.
+    """
+    resolved = Path(os.path.realpath(target))
+    scratch = resolved.with_name(f".{resolved.name}.tmp")
+    try:
+        scratch.write_text(text, encoding='utf-8')
+        scratch.replace(resolved)
+    finally:
+        # A failed write leaves the sibling behind; a successful one has
+        # already renamed it away.
+        scratch.unlink(missing_ok=True)
 
 
 def hetero_support_error(model: str) -> Optional[str]:
@@ -739,7 +764,7 @@ class ConfigDocument:
             return None
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        _write_atomically(target, '\n'.join(lines) + '\n')
         self.set('2D', 'materials_list', str(
             self._relative_to_config(target)))
         return target

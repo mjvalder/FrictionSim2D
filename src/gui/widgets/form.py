@@ -356,6 +356,12 @@ class SectionForm(QGroupBox):
         plan = planner() if planner is not None else None
         if plan is None:
             return True
+        if plan.target is None:
+            # Nowhere to write the collapsed list, so `remove_second_material`
+            # will refuse outright and this handler reports that. Asking first
+            # would be two dialogs for one refusal -- and a question whose
+            # 'Yes' cannot be honoured.
+            return True
 
         dropped = ', '.join(plan.dropped[:6])
         if len(plan.dropped) > 6:
@@ -1142,7 +1148,10 @@ class SectionForm(QGroupBox):
             return
         sweeping = material_editor.is_sweeping()
         self.set_material_sweep_mode(sweeping)
-        material_editor.set_pair_mode(sweeping and self._pair_sweeping())
+        # The document's shape, not the mode itself: the widget derives the
+        # mode from this and its own tick, so that a tick can never commit
+        # while the two disagree (see `MaterialListEditor.set_pair_capable`).
+        material_editor.set_pair_capable(self._pair_sweeping())
         self.sweep_mode_changed.emit(sweeping)
 
     def _wire_material_sweep(self) -> None:
@@ -1345,7 +1354,17 @@ class SectionForm(QGroupBox):
     def _on_field_changed(self) -> None:
         if self._loading:
             return
-        self.commit()
+        try:
+            self.commit()
+        except DocumentError as exc:
+            # A refusal has to be said out loud. This is a Qt slot: an
+            # exception out of here is printed to stderr by the signal
+            # machinery (app.py installs no excepthook) and the edit silently
+            # does nothing -- indistinguishable, from the user's side, from a
+            # GUI that ignored them. `commit()` itself keeps raising, so the
+            # document's contract stays as loud as it was.
+            self._warn('This edit could not be applied', str(exc))
+            return
         self._apply_dependencies()
         if self.is_collapsed():
             self.summary.setText(self.summarise())
@@ -1615,10 +1634,27 @@ class ConfigForm(QWidget):
         """
         primary = self.sections.get('2D')
         if primary is not None:
-            primary.commit()
+            self._commit_section(primary)
         for form in self.sections.values():
             if form is not primary:
-                form.commit()
+                self._commit_section(form)
+
+    def _commit_section(self, form: SectionForm) -> None:
+        """Commit one section, reporting a refusal rather than raising it.
+
+        `commit()` is called from Render, Generate and Save -- all of them Qt
+        slots in `app.py`, none with a handler of its own -- so a
+        `DocumentError` escaping here is a stderr traceback and a button that
+        appears to have done nothing. Reported once per commit: a config with
+        two sheets would otherwise raise the same dialog twice.
+        """
+        try:
+            form.commit()
+        except DocumentError as exc:
+            from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+            QMessageBox.warning(self, 'This config could not be committed',
+                                str(exc))
 
     def load(self) -> None:
         for form in self.sections.values():
