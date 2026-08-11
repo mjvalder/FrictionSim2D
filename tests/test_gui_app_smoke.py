@@ -302,6 +302,65 @@ class TestMainWindow:
         assert 'hetero_stacking' in window.issues.toPlainText()
         assert ok
 
+    def test_a_refused_commit_reaches_the_issues_panel(self, window, monkeypatch):
+        """REVIEW (task 3): a section the form could not commit used to be a
+        modal, one per failing section, raised from the path Render, Generate
+        and Save all take. Offscreen there is nobody to dismiss it, so a
+        regression on that path hung instead of failing.
+
+        It belongs in the panel that already holds every other reason the
+        config will not build -- and it has to survive `_validate`, which
+        rewrites that panel from scratch straight after the commit that
+        produced the refusal.
+        """
+        from src.gui.controllers.document import DocumentError
+
+        dialogs = []
+        for name in ('warning', 'critical', 'information'):
+            monkeypatch.setattr(QMessageBox, name,
+                                lambda *a, _n=name, **k: (dialogs.append(_n),
+                                                          QMessageBox.Ok)[1])
+
+        def refuse():
+            raise DocumentError('pair_mode says this config is not a pair')
+
+        monkeypatch.setattr(window.form.sections['2D'], 'commit', refuse)
+
+        window._validate()
+
+        assert 'pair_mode' in window.issues.toPlainText()
+        assert dialogs == [], f'a refused commit opened a dialog: {dialogs}'
+
+    def test_a_refusal_stops_being_reported_once_it_is_fixed(self, window,
+                                                             monkeypatch):
+        """Refusals are per-commit, not cumulative. A list that is only ever
+        appended to would leave the panel accusing a config of a problem the
+        user had already fixed -- and there would be no way to clear it."""
+        from src.gui.controllers.document import DocumentError
+
+        section = window.form.sections['2D']
+        original = section.commit
+
+        def refuse():
+            raise DocumentError('pair_mode says this config is not a pair')
+
+        monkeypatch.setattr(section, 'commit', refuse)
+        window._validate()
+        assert 'pair_mode' in window.issues.toPlainText()
+
+        monkeypatch.setattr(section, 'commit', original)      # the fixing edit
+        window._validate()
+
+        assert 'pair_mode' not in window.issues.toPlainText()
+
+    def test_a_refused_edit_reaches_the_status_bar(self, window):
+        """The per-keystroke path (`SectionForm._on_field_changed`) has no
+        validation pass behind it to write the panel, so it says so in the
+        status bar -- and, again, without waiting for anyone to click."""
+        window.form.refused.emit('[2D] pair_mode disagrees with the document')
+
+        assert 'pair_mode' in window.statusBar().currentMessage()
+
     def test_a_refused_mode_switch_puts_the_selector_back(self, window, monkeypatch):
         """A refusal that leaves the combo showing a mode the document is not
         in is worse than the refusal: `_on_mode_changed` returns early when the

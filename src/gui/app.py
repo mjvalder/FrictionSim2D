@@ -294,6 +294,12 @@ class MainWindow(QMainWindow):
         self.family_box.currentIndexChanged.connect(self._on_family_changed)
         self.mode_box.currentIndexChanged.connect(self._on_mode_changed)
         self.form.changed.connect(self._on_config_changed)
+        # A refusal from a per-keystroke commit has no validation pass behind
+        # it to write it into the issues panel, so it is said in the status
+        # bar. The ones raised by `_validate`'s own commit are folded into the
+        # panel there instead, where they stay readable.
+        self.form.refused.connect(self._on_commit_refused)
+        self.settings_form.refused.connect(self._on_commit_refused)
 
         self.preview.started.connect(self._on_preview_started)
         self.preview.progress.connect(self.statusBar().showMessage)
@@ -483,7 +489,12 @@ class MainWindow(QMainWindow):
         self.form.show_errors(result.issues)
 
         unsupported = self.document.unsupported_lists()
-        lines = [issue.render() for issue in result.issues]
+        # A section the form could not commit is the first thing wrong with
+        # this config: what is on screen is not what would be built. It used
+        # to be a modal per failing section; here it reads alongside every
+        # other reason the config will not build, and blocks nothing.
+        lines = list(self.form.refusals())
+        lines += [issue.render() for issue in result.issues]
         lines += [
             f"[{section}] {key}: a list here is not supported -- it would not "
             f"change the output directory, so the runs would overwrite each other"
@@ -656,6 +667,17 @@ class MainWindow(QMainWindow):
             self.mode_box.setCurrentIndex(index)
         finally:
             self.mode_box.blockSignals(False)
+
+    def _on_commit_refused(self, message: str) -> None:
+        """Show a refused commit without blocking on it.
+
+        Deliberately not a dialog: this arrives from `_on_field_changed`,
+        which fires on ordinary field edits, so a modal would interrupt typing
+        -- and, with no one to dismiss it in an automated run, would hang
+        rather than fail.
+        """
+        logger.warning("commit refused: %s", message)
+        self.statusBar().showMessage(message)
 
     def _on_config_changed(self) -> None:
         self._refresh_counts()

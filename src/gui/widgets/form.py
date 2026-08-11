@@ -165,6 +165,9 @@ class SectionForm(QGroupBox):
     #: its editors' backs. They have to be resynced before that section
     #: commits, or it writes its stale text back over them.
     templates_written = Signal()
+    #: The document refused this section's commit. Carries a message ready to
+    #: show; deliberately NOT a dialog, see `_on_field_changed`.
+    refused = Signal(str)
 
     def __init__(self, section: SectionSpec, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
@@ -1363,7 +1366,13 @@ class SectionForm(QGroupBox):
             # does nothing -- indistinguishable, from the user's side, from a
             # GUI that ignored them. `commit()` itself keeps raising, so the
             # document's contract stays as loud as it was.
-            self._warn('This edit could not be applied', str(exc))
+            #
+            # Reported through a signal and NOT a modal, unlike the collapse
+            # confirmation, which genuinely needs a blocking yes/no. This slot
+            # runs on ordinary field edits: a dialog here interrupts typing,
+            # and -- with no event loop to dismiss it -- turns any future
+            # regression on this path into a hang instead of a test failure.
+            self.refused.emit(f"[{self.section.key}] {exc}")
             return
         self._apply_dependencies()
         if self.is_collapsed():
@@ -1389,6 +1398,10 @@ class ConfigForm(QWidget):
     """Every section of a config."""
 
     changed = Signal()
+    #: A section's commit was refused, with a message ready to show. Raised by
+    #: `_commit_section` and forwarded from every `SectionForm.refused`, so a
+    #: window has one place to listen. See `_record_refusal`.
+    refused = Signal(str)
 
     def __init__(self, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
@@ -1411,6 +1424,11 @@ class ConfigForm(QWidget):
         #: Fold state survives a rebuild -- switching mode should not reopen
         #: everything the user just tidied away.
         self._collapsed: Dict[str, bool] = {}
+        #: Refusals since the last `commit()`. The signal alone is not enough:
+        #: `_validate` runs a commit and then rewrites the issues panel from
+        #: scratch, so a refusal that only ever existed as a signal would be
+        #: erased by the very validation that provoked it.
+        self._refusals: List[str] = []
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -1490,6 +1508,7 @@ class ConfigForm(QWidget):
         form.changed.connect(self.changed)
         form.collapsed_changed.connect(self._remember_collapsed)
         form.structure_changed.connect(self._on_structure_changed)
+        form.refused.connect(self._record_refusal)
         self.sections[section.key] = form
         self._layout.addWidget(form)
 
@@ -1632,6 +1651,7 @@ class ConfigForm(QWidget):
         `templates_written` triggers has already happened by the time the
         second sheet's turn comes.
         """
+        self._refusals = []
         primary = self.sections.get('2D')
         if primary is not None:
             self._commit_section(primary)
@@ -1639,22 +1659,40 @@ class ConfigForm(QWidget):
             if form is not primary:
                 self._commit_section(form)
 
+    def refusals(self) -> List[str]:
+        """What the last `commit()` could not apply, ready to show.
+
+        Read by the window after its own `commit()`, so the refusals land in
+        the issues panel alongside the validation messages and stay readable
+        instead of scrolling past in the status bar.
+        """
+        return list(self._refusals)
+
+    def _record_refusal(self, message: str) -> None:
+        """Remember a refusal and pass it on."""
+        self._refusals.append(message)
+        self.refused.emit(message)
+
     def _commit_section(self, form: SectionForm) -> None:
         """Commit one section, reporting a refusal rather than raising it.
 
         `commit()` is called from Render, Generate and Save -- all of them Qt
         slots in `app.py`, none with a handler of its own -- so a
         `DocumentError` escaping here is a stderr traceback and a button that
-        appears to have done nothing. Reported once per commit: a config with
-        two sheets would otherwise raise the same dialog twice.
+        appears to have done nothing.
+
+        Reported, not shown: this used to raise a modal per failing section,
+        which meant a config refusing in two sections put two dialogs in front
+        of one mistake, and -- since Render, Generate and Save all come
+        through here -- any headless or offscreen driver of `commit()` blocked
+        forever on a dialog nothing could dismiss. Collecting them lets the
+        window say all of them at once, in the panel that already holds the
+        other reasons a config will not build.
         """
         try:
             form.commit()
         except DocumentError as exc:
-            from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
-
-            QMessageBox.warning(self, 'This config could not be committed',
-                                str(exc))
+            self._record_refusal(f"[{form.section.key}] {exc}")
 
     def load(self) -> None:
         for form in self.sections.values():

@@ -1129,13 +1129,10 @@ class TestPairSweepCommit:
         `app.py` installs no excepthook, so it prints a traceback to stderr
         and the edit silently does nothing. The document keeps refusing
         loudly; it is the UI that has to say so."""
-        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
-
-        warned = []
-        monkeypatch.setattr(QMessageBox, 'warning',
-                            lambda _p, _t, text, *a, **k: warned.append(text))
         form, editor = self._pair_form(
             tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        announced = []
+        form.refused.connect(announced.append)
 
         # Widget and document disagree, which is what `pair_mode` exists to
         # catch -- here it is reached through the slots Qt itself calls.
@@ -1148,7 +1145,50 @@ class TestPairSweepCommit:
         # left behind by the teardown above refuses its own commit too --
         # 'Unknown section' -- and that is reported by the same guard, which
         # is the guarantee under test: no refusal reaches a Qt slot boundary.)
-        assert sum('pair_mode' in text for text in warned) >= 2
+        assert sum('pair_mode' in text for text in announced) >= 2
+        # `commit()` is the path Render/Generate/Save take, so what it
+        # refused has to still be readable once the signal has been and gone:
+        # that is what the window folds into the issues panel.
+        assert any('pair_mode' in text for text in form.refusals())
+        form.deleteLater()
+
+    def test_a_refused_commit_does_not_block_on_a_modal(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """REVIEW (task 3): reporting a refusal with `QMessageBox` turns a
+        future regression into a *hang* rather than a test failure.
+
+        `_on_field_changed` fires on ordinary field edits and `_commit_section`
+        raises one dialog per failing section, so the modal version stopped an
+        offscreen run dead -- no event loop to click it -- and made a
+        two-section refusal two dialogs for one mistake. The refusal still has
+        to be said out loud; it just has to be said somewhere that does not
+        wait for an answer.
+        """
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+        dialogs = []
+        for name, answer in (('warning', QMessageBox.Ok),
+                             ('critical', QMessageBox.Ok),
+                             ('information', QMessageBox.Ok),
+                             ('question', QMessageBox.No)):
+            monkeypatch.setattr(
+                QMessageBox, name,
+                # Records instead of blocking: a real modal here would never
+                # return, which is the failure mode under test.
+                lambda *a, _n=name, _r=answer, **k: (dialogs.append(_n), _r)[1])
+
+        form, editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        announced = []
+        form.refused.connect(announced.append)
+        del form.document.values['2D-2']
+
+        form.sections['2D']._on_field_changed()
+        form.commit()
+
+        assert announced, 'the refusal was not reported at all'
+        assert dialogs == [], \
+            f'a commit refusal opened a blocking dialog: {dialogs}'
         form.deleteLater()
 
     def test_a_widget_and_document_that_disagree_are_refused(
