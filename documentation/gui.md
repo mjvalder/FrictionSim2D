@@ -345,18 +345,12 @@ three or more sheet sections, sheets numbered other than `[2D-1]`/`[2D-2]`,
 and a plain `[2D]` mixed with numbered ones. Each is refused with the reason;
 use the CLI for those.
 
-Two preview limitations are worth knowing, since both look like the config
-being wrong:
-
-- A pair sweep is previewed one member at a time like any other sweep, but the
-  status line reads *"Previewing the first configuration (1 of N in the
-  sweep)"* rather than naming the pair — the label is read off `[2D]`, which a
-  numbered config does not have.
-- A pair list holding **exactly one** line is not recognised as a sweep at all,
-  so the preview builds the config as it stands, `{mat1}`/`{mat2}` unsubstituted,
-  and the build fails on the literal path. Generate is unaffected — it expands
-  properly — so the workaround is a second pair line, or previewing with the
-  names typed in directly.
+A pair sweep is previewed one member at a time like any other sweep, and the
+status line names the pair on screen: *"Previewing pair h_MoS2 + h_WS2 (1 of N
+in the sweep)"*, or *"(the only pair in the sweep)"* for a list of exactly one
+line. Which member that is comes from the same expansion Generate uses, so it
+is genuinely one of the runs that would be produced — `{mat1}`/`{mat2}`
+substituted, `materials_list` gone.
 
 ## Render
 

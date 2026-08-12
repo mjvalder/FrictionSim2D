@@ -126,12 +126,17 @@ def _first_sweep_member(
     exactly one, unsubstituted member -- ``materials_list`` was never there
     to strip -- and that case must still fall back to ``config`` unchanged.
 
-    Only the ``[2D]`` key is checked, not a numbered ``[2D-N]`` alias:
-    ``expand_config_sweeps`` itself only ever reads ``base_config['2D']``
-    (numbered sheet sections are folded into ``2D``/``sheets`` later, by the
-    pydantic model, well after this runs), so a ``materials_list`` living
-    only under ``[2D-1]`` is never substituted here regardless -- checking
-    for it too would misreport that case as a resolved sweep.
+    The sheet section is looked up the way ``expand_config_sweeps`` itself
+    looks it up -- a plain ``[2D]`` if there is one, else the first numbered
+    ``[2D-N]`` (see ``_primary_sheet_key``). It used to check ``[2D]`` alone,
+    on the since-outdated grounds that expansion only ever read
+    ``base_config['2D']``; it was taught the numbered fallback, and a
+    heterostructure config has ``[2D-1]``/``[2D-2]`` and never a plain
+    ``[2D]``, so the old rule reported ``material_swept`` False for *every*
+    pair sweep. Two or more pairs were saved by the ``len(members)`` term;
+    exactly one pair -- add a material, add one pair, Render -- had both
+    terms False and previewed the original config, literal ``{mat1}`` in
+    ``cif_path`` and all.
     """
     try:
         members = expand_config_sweeps(config, base_dir)
@@ -139,21 +144,59 @@ def _first_sweep_member(
         return config, None
 
     member = members[0]
+    sheet = _primary_sheet_key(config)
     material_swept = (
-        'materials_list' in config.get('2D', {})
-        and 'materials_list' not in member.get('2D', {})
+        'materials_list' in config.get(sheet, {})
+        and 'materials_list' not in member.get(sheet, {})
     )
     if len(members) <= 1 and not material_swept:
         return config, None
 
-    material = member.get('2D', {}).get('mat')
+    material = _member_material(member, sheet)
+    # What the sweep is over, so a pair sweep does not read as "the only
+    # material in the sweep" while naming two of them.
+    noun = 'pair' if material and ' + ' in material else 'material'
     if material_swept and len(members) == 1:
-        shown = f"material {material}" if material else "the configured material"
-        label = f"Previewing {shown} (the only material in the sweep)."
+        shown = f"{noun} {material}" if material else "the configured material"
+        label = f"Previewing {shown} (the only {noun} in the sweep)."
     else:
-        shown = f"material {material}" if material else "the first configuration"
+        shown = f"{noun} {material}" if material else "the first configuration"
         label = f"Previewing {shown} (1 of {len(members)} in the sweep)."
     return member, label
+
+
+def _primary_sheet_key(config: Dict[str, Any]) -> str:
+    """The section a ``materials_list`` lives in: ``[2D]``, else ``[2D-1]``.
+
+    Mirrors ``expand_config_sweeps``' own choice of primary key (plain
+    ``'2D'`` when present, otherwise the lowest-numbered ``2D-N``) so the two
+    are asking about the same section. Falls back to ``'2D'`` when there is
+    no sheet section at all, which reads the same as the old behaviour: a
+    missing key means no sweep.
+    """
+    if '2D' in config:
+        return '2D'
+    numbered = sorted(
+        (k for k in config if isinstance(k, str) and k.startswith('2D-')),
+        key=lambda key: int(key.split('-', 1)[1])
+        if key.split('-', 1)[1].isdigit() else 10**9,
+    )
+    return numbered[0] if numbered else '2D'
+
+
+def _member_material(member: Dict[str, Any], sheet: str) -> Optional[str]:
+    """What to call the member on screen: ``mat``, or ``mat1 + mat2``.
+
+    A pair sweep's member is a stack of two materials and naming only the
+    first would be actively misleading -- ``h_MoS2`` on ``h_WS2`` and
+    ``h_MoS2`` on ``h_graphene`` are different runs with the same first
+    sheet.
+    """
+    first = member.get(sheet, {}).get('mat')
+    second = member.get('2D-2', {}).get('mat') if sheet != '2D-2' else None
+    if first and second:
+        return f"{first} + {second}"
+    return first
 
 
 @dataclass

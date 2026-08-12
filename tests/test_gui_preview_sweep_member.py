@@ -179,3 +179,87 @@ class TestOneMaterialSweepStillSubstitutes:
 
         assert request.single_member() == config
         assert request.preview_label() is None
+
+
+class TestPairSweepIsSubstitutedToo:
+    """A heterostructure config has `[2D-1]`/`[2D-2]`, never a plain `[2D]`.
+
+    `_first_sweep_member` decided "did a material sweep happen?" by looking
+    for `materials_list` under `'2D'` alone, so the answer for a pair sweep
+    was always no. With two or more pairs the `len(members) <= 1` term
+    happened to cover for it; with exactly ONE pair -- "add a material, add
+    one pair, Render", the first thing anyone does with the feature -- both
+    terms were False and the *unsubstituted* config was previewed, so the
+    build died on a literal `cif/{mat1}.cif`.
+    """
+
+    @staticmethod
+    def _pair_config(pairs_txt: Path) -> dict:
+        # cif_path/pot_path omitted for the same reason as the single-material
+        # configs above: `preflight_material_pairs` only checks the keys the
+        # section actually has, so what is under test stays member selection.
+        return {
+            '2D-1': {'materials_list': str(pairs_txt), 'mat': '{mat1}',
+                     'x': 60, 'y': 60},
+            '2D-2': {'mat': '{mat2}'},
+            'general': {'temp': 300},
+        }
+
+    @pytest.fixture(name='one_pair_txt')
+    def _one_pair_txt(self, tmp_path) -> Path:
+        path = tmp_path / 'one_pair.txt'
+        path.write_text('h_MoS2 + h_WS2\n', encoding='utf-8')
+        return path
+
+    @pytest.fixture(name='two_pairs_txt')
+    def _two_pairs_txt(self, tmp_path) -> Path:
+        path = tmp_path / 'two_pairs.txt'
+        path.write_text('h_MoS2 + h_WS2\nh_WS2 + h_MoS2\n', encoding='utf-8')
+        return path
+
+    def test_a_single_pair_sweep_is_substituted(self, one_pair_txt):
+        request = PreviewRequest(config=self._pair_config(one_pair_txt),
+                                 model='sheetonsheet')
+
+        single = request.single_member()
+
+        assert 'materials_list' not in single['2D-1']
+        assert single['2D-1']['mat'] == 'h_MoS2'
+        assert single['2D-2']['mat'] == 'h_WS2'
+
+    def test_a_single_pair_sweep_gets_a_label_naming_both_materials(
+            self, one_pair_txt):
+        """"Previewing the first configuration" is what the `[2D]`-only
+        lookup could say about a pair; the label is only useful if it names
+        the stack actually on screen."""
+        request = PreviewRequest(config=self._pair_config(one_pair_txt),
+                                 model='sheetonsheet')
+
+        label = request.preview_label()
+
+        assert label is not None
+        assert 'h_MoS2' in label and 'h_WS2' in label
+        assert '1 of 1' not in label
+
+    def test_a_multi_pair_sweep_names_the_first_pair_and_counts_the_rest(
+            self, two_pairs_txt):
+        request = PreviewRequest(config=self._pair_config(two_pairs_txt),
+                                 model='sheetonsheet')
+
+        assert request.single_member()['2D-1']['mat'] == 'h_MoS2'
+        label = request.preview_label()
+        assert 'h_MoS2' in label and 'h_WS2' in label
+        assert '1 of 2' in label
+
+    def test_a_numbered_config_with_no_list_is_still_not_a_sweep(self):
+        """The other half of the discrimination, for numbered sections: no
+        `materials_list` anywhere means one unsubstituted member, and that
+        must still fall back to the config unchanged."""
+        config = {
+            '2D-1': {'mat': 'h_MoS2', 'cif_path': 'cif/h_MoS2.cif'},
+            '2D-2': {'mat': 'h_WS2', 'cif_path': 'cif/h_WS2.cif'},
+        }
+        request = PreviewRequest(config=config, model='sheetonsheet')
+
+        assert request.single_member() == config
+        assert request.preview_label() is None
