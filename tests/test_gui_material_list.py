@@ -88,6 +88,25 @@ def _editor(qt_app, dirs):
     return editor
 
 
+def pair_mode(editor, pairing: bool = True) -> None:
+    """Put `editor` into (or out of) pair mode the way production reaches it.
+
+    `_pair_mode` is derived, deliberately: `set_pair_capable` re-computes it
+    from the second-sheet flag AND the sweep tick, so a commit can never read
+    a mode the document disagrees with -- see
+    `MaterialListEditor.set_pair_capable` for the signal-ordering bug that
+    made an independently-settable mode wrong.
+
+    Calling `set_pair_mode` from a test therefore sets exactly the state
+    `SectionForm` can no longer produce, and such a test would keep passing
+    if the derivation were reverted -- which is the property it exists to
+    protect. The two ingredients go in instead, and the widget derives.
+    """
+    editor.set_sweeping(True)
+    editor.set_pair_capable(pairing)
+    assert editor.is_pair_mode() is pairing
+
+
 def test_materials_row_is_first_in_2d_section():
     """The sweep is the first decision a [2D] section should ask -- it
     decides whether Structure/Potential below it are files or folders."""
@@ -927,18 +946,18 @@ class TestPairTable:
     cannot say it."""
 
     def test_pair_mode_swaps_the_list_for_the_table(self, editor):
-        editor.set_pair_mode(True)
+        pair_mode(editor)
         assert editor.pair_table.isVisibleTo(editor.list_panel)
         assert not editor.listing.isVisibleTo(editor.list_panel)
 
-        editor.set_pair_mode(False)
+        pair_mode(editor, False)
         assert not editor.pair_table.isVisibleTo(editor.list_panel)
         assert editor.listing.isVisibleTo(editor.list_panel)
 
     def test_generate_pairs_ordered(self, editor):
         """Both orders, because AB and BA are different stacks -- the
         interface is the same but which layer sits on the substrate is not."""
-        editor.set_pair_mode(True)
+        pair_mode(editor)
         editor.set_selected(['h-MoS2', 't-MoS2'])
         editor.generate_pairs(include_reversed=True, include_same=False)
 
@@ -1025,7 +1044,7 @@ class TestPairTable:
         arguments it silently generates the wrong sweep."""
         from PySide6.QtWidgets import QCheckBox, QDialog
 
-        editor.set_pair_mode(True)
+        pair_mode(editor)
         editor.set_selected(['h-MoS2', 't-MoS2'])
 
         def _accept(dialog):
@@ -1057,14 +1076,14 @@ class TestPairTable:
         editor.set_selected(['h-MoS2'])
         editor.set_selected_pairs([('h-MoS2', 't-MoS2')])
 
-        editor.set_pair_mode(True)
-        editor.set_pair_mode(False)
+        pair_mode(editor)
+        pair_mode(editor, False)
 
         assert editor.selected_names() == ['h-MoS2']
         assert editor.selected_pairs() == [('h-MoS2', 't-MoS2')]
 
     def test_the_summary_counts_pairs_while_pairing(self, editor):
-        editor.set_pair_mode(True)
+        pair_mode(editor)
         editor.set_selected_pairs([('h-MoS2', 't-MoS2'), ('t-MoS2', 'b-AlSb')])
         assert '2 pair' in editor.summary_text()
 
