@@ -631,6 +631,47 @@ class MaterialListEditor(FieldEditor):
         self.set_selected_pairs(pairs)
         self.changed.emit()
 
+    def clear_selection(self, note: Optional[str] = None) -> None:
+        """Drop whatever is selected *in the current mode*, and say why.
+
+        The picker's counterpart to the empty-selection fallback in
+        `SectionForm.load()`: a `.txt` this widget cannot use as a selection
+        (ordered pairs under a one-sheet config, single names under a
+        two-sheet one, an unreadable or empty file) must be neither adopted
+        nor overwritten, and an empty selection is what makes the next commit
+        compare empty against empty and write nothing.
+
+        Only the live half is cleared -- the hidden one is the other mode's
+        memory, which `set_pair_mode` deliberately keeps side by side.
+
+        `_selection_touched` is set for the same reason `load_names` sets it:
+        this is a deliberate empty selection, so a later directory rescan must
+        not read it as "nobody has decided yet" and widen it back to
+        everything usable -- which would overwrite the curated file after all,
+        one scan later. `_document_names` is cleared with it so the rescan's
+        own fallback cannot restore the pre-picker names either.
+
+        Emits nothing, and unticks under `blockSignals`: `set_selected` goes
+        through the listing's own `itemChanged`, so clearing three ticks
+        without the block fires three `changed` signals, each of which commits
+        the section -- the first of them with the selection only *partly*
+        cleared, which is a real change from the document's point of view and
+        writes those leftovers over the very file this is protecting.
+        """
+        self._selection_touched = True
+        self.set_document_names([])
+        if self._pair_mode:
+            self.set_selected_pairs([])
+        else:
+            self.listing.blockSignals(True)
+            try:
+                self.set_selected([])
+            finally:
+                self.listing.blockSignals(False)
+        self._update_summary()
+        if note:
+            self.summary.setText(note)
+
     def _seed_placeholder_listing(self, names: List[str]) -> None:
         """Show `names` as loaded-but-unchecked, before any directory scan.
 

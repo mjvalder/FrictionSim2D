@@ -331,6 +331,15 @@ selection and not overwritten: the tick list opens empty, so committing the
 section changes nothing on disk. It does not sweep either, and generation says
 so, naming the line that asks for a pair the config has no `[2D-2]` to hold.
 
+The same holds for the `.txt` picker, in both directions: pointing it at a
+list of the wrong kind — ordered pairs while this config has one material,
+single names while it has two — selects nothing and leaves the file alone.
+The caption under the picker says which shape this config needs and that the
+file was not touched. The selection stays empty through a later directory
+scan too, so choosing the two folders afterwards cannot quietly turn the
+curated file into the other kind of list. Fix it by editing the `.txt`, or by
+adding/removing the second material so the config wants what the file holds.
+
 Configs the window still declines to open are the ones it cannot represent:
 three or more sheet sections, sheets numbered other than `[2D-1]`/`[2D-2]`,
 and a plain `[2D]` mixed with numbered ones. Each is refused with the reason;

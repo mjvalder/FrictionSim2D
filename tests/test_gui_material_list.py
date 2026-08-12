@@ -293,6 +293,142 @@ class TestMaterialsPathPicker:
         assert set(editor.selected_names()) == {'h-MoS2', 't-MoS2'}
         form.deleteLater()
 
+    def test_the_picker_does_not_overwrite_a_pair_list_on_a_one_sheet_config(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINAL REVIEW (critical): `load()` refuses to adopt *or* overwrite a
+        pair list under a one-sheet config -- the picker path had the same two
+        branches and no fallback, so it repointed `materials_list` at the
+        curated file and left the tick list exactly as it was. The very next
+        commit (any field edit, Render, Generate or Save) then compared a full
+        selection against the `[]` a pair file reports through
+        `material_names()`, called that a change, and rewrote both ordered
+        pairs as two bare single names.
+
+        The picker's own file is what has to survive here -- not the config's,
+        which is untouched either way.
+        """
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        curated = tmp_path / 'curated_pairs.txt'
+        original = 'h-MoS2 + t-MoS2\nt-MoS2 + b-AlSb\n'
+        curated.write_text(original, encoding='utf-8')
+
+        own = tmp_path / 'run_materials.txt'
+        own.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.set('2D', 'materials_list', own.name)
+        document.apply_material_directories(structures, potentials, '.sw')
+        assert not document.has_second_material()
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        assert editor.is_sweeping() and not editor.is_pair_mode()
+        assert set(editor.selected_names()) == {'h-MoS2', 't-MoS2'}
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+
+        # Neither adopted (a one-sheet config cannot sweep ordered pairs)...
+        assert editor.selected_names() == []
+        # ...nor overwritten, on this commit or any later one.
+        form.commit()
+        assert curated.read_text(encoding='utf-8') == original
+        # And the widget says why, rather than looking like nothing happened.
+        assert 'pair' in editor.summary_text().lower()
+
+        # One scan later is still too late to lose it: the cleared selection
+        # is a deliberate empty one, so a rescan must not read it as "nobody
+        # has decided yet" and widen it back to everything usable -- nor
+        # restore the pre-picker names through the `_document_names` fallback.
+        editor._scanned = None            # force a real rebuild of the listing
+        editor.rescan(structures, potentials, '.sw')
+        form.commit()
+
+        assert editor.selected_names() == []
+        assert curated.read_text(encoding='utf-8') == original
+        form.deleteLater()
+
+    def test_a_wrong_kind_list_pointed_at_before_any_scan_stays_unselected(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The other realistic order -- "I already have a list, let me point
+        the GUI at it, then pick the directories" -- reaches the same hazard
+        one step later. Before any scan the tick list is empty, so clearing it
+        ticks nothing off and the *only* thing standing between the curated
+        pair file and the first rescan is the cleared selection being recorded
+        as a deliberate one: otherwise the scan defaults to everything usable
+        and the commit it emits writes three single names over the pairs."""
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        curated = tmp_path / 'curated_pairs.txt'
+        original = 'h-MoS2 + t-MoS2\nt-MoS2 + b-AlSb\n'
+        curated.write_text(original, encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        editor.set_sweeping(True)
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+
+        # Now the directories arrive, exactly as picking them would deliver
+        # them -- and the rescan's own `changed` commits the section.
+        editor.rescan(structures, potentials, '.sw')
+        form.commit()
+
+        assert editor.selected_names() == []
+        assert curated.read_text(encoding='utf-8') == original
+        form.deleteLater()
+
+    def test_the_picker_does_not_overwrite_a_single_list_in_pair_mode(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The mirror image: a two-sheet config in pair mode, pointed at a
+        curated list of single names. `material_names()` reads those happily,
+        so the picker took the `elif names:` branch and ticked them into the
+        (hidden) tick list, leaving the pair table's row untouched -- and the
+        next commit went down the pair branch and wrote that one pair over the
+        three curated single materials."""
+        from src.gui.widgets.form import ConfigForm  # noqa: PLC0415
+
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        curated = tmp_path / 'curated_singles.txt'
+        original = 'h-MoS2\nt-MoS2\nb-AlSb\n'
+        curated.write_text(original, encoding='utf-8')
+
+        own = tmp_path / 'run_materials.txt'
+        own.write_text('h-MoS2 + t-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        document.source_path = tmp_path / 'run.ini'
+        document.add_second_material()
+        document.set('2D', 'materials_list', own.name)
+        document.apply_material_directories(structures, potentials, '.sw',
+                                            pair_mode=True)
+
+        form = ConfigForm(document)
+        editor = form.sections['2D'].editors['materials_list']
+        editor.rescan(structures, potentials, '.sw')
+        assert editor.is_pair_mode()
+        assert editor.selected_pairs() == [('h-MoS2', 't-MoS2')]
+
+        editor.path_edit.setText(str(curated))
+        editor.path_edit.editingFinished.emit()
+
+        assert editor.selected_pairs() == []
+        form.commit()
+        assert curated.read_text(encoding='utf-8') == original
+        assert 'pair' in editor.summary_text().lower()
+        form.deleteLater()
+
 
 def test_path_editor_directory_mode(qt_app):
     """set_directory_mode is what SectionForm flips as the sweep is ticked or

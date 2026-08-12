@@ -1211,6 +1211,26 @@ class SectionForm(QGroupBox):
         plain focus-out re-raises editingFinished without the text having
         changed) and against an unreadable path -- a typo mid-edit must not
         wipe out whatever was already ticked.
+
+        A `.txt` of the *other* kind -- ordered pairs while this config has
+        one sheet, single names while it has two -- is neither adopted nor
+        overwritten, the same rule `load()` follows for a list already
+        configured (see its `set_selected([])` fallback). The fallback is the
+        whole point, and this path had the two branches without it: the line
+        above has already repointed `materials_list` at the curated file, so
+        leaving the previous selection standing means the next commit -- any
+        field edit, Render, Generate or Save -- compares a full selection
+        against the *nothing* an unusable list reports, calls that a change,
+        and rewrites the curated file into the other kind of list. Clearing
+        the live selection makes that comparison empty against empty, i.e. a
+        no-op, and the note says so on the widget rather than leaving the
+        picker looking like it did nothing at all.
+
+        This is the only path that repoints `materials_list` from the picker:
+        `MaterialListEditor._browse_list` raises `editingFinished` itself
+        rather than writing the document, so a browse and a typed path both
+        arrive here, and the only other writers of that key are `load()`
+        (which reads, never writes) and `_write_material_list`.
         """
         material_editor = self.editors.get('materials_list')
         if material_editor is None or not material_editor.is_sweeping():
@@ -1221,11 +1241,39 @@ class SectionForm(QGroupBox):
         self.document.set('2D', 'materials_list', text)
         pairs = [e for e in self.document.material_entries() if len(e) == 2]
         names = self.document.material_names()
-        if pairs and material_editor.is_pair_mode():
-            material_editor.load_pairs(pairs)
+        if material_editor.is_pair_mode():
+            if pairs:
+                material_editor.load_pairs(pairs)
+            else:
+                material_editor.clear_selection(self._unusable_list_note(
+                    text, wanted_pairs=True, found_other=bool(names)))
         elif names:
             material_editor.load_names(names)
+        else:
+            material_editor.clear_selection(self._unusable_list_note(
+                text, wanted_pairs=False, found_other=bool(pairs)))
         material_editor.note_written(text)
+
+    @staticmethod
+    def _unusable_list_note(text: str, wanted_pairs: bool,
+                            found_other: bool) -> str:
+        """Why the `.txt` just chosen was not loaded as the selection.
+
+        Names the file and the shape this config needs, because the two ways
+        of getting here want opposite fixes: a list of the wrong kind means
+        either the file or the number of sheets is wrong, while an unreadable
+        one is a path problem.
+        """
+        name = Path(text).name or text
+        wanted = ("ordered pairs ('mat1 + mat2'), one per line"
+                  if wanted_pairs else 'one material name per line')
+        if found_other:
+            found = ('single material names'
+                     if wanted_pairs else "ordered pairs ('mat1 + mat2')")
+            return (f"'{name}' names {found}, but this config needs {wanted}. "
+                    f"Nothing was selected; the file was left as it is.")
+        return (f"'{name}' could not be read as {wanted}. Nothing was "
+                f"selected; the file was left as it is.")
 
     def _on_sweep_paths_finished(self) -> None:
         material_editor = self.editors.get('materials_list')
