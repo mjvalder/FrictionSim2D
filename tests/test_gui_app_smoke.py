@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -134,6 +135,24 @@ class TestCacheKey:
             code_fingerprint(),
         ])
         assert cache_key(config, 'afm', 1)  # smoke: fingerprint is included
+
+
+class TestRawIniTruthiness:
+    """`bool('false')` is True, and a config read from a file holds exactly
+    that until the pydantic model coerces it -- so a flag read straight off
+    the document has to be interpreted, not just tested for truth."""
+
+    @pytest.mark.parametrize('value', ['false', 'False', 'FALSE', 'no', '0',
+                                       'off', '', '  false  ', None, False, 0])
+    def test_falsey(self, value):
+        from src.gui.app import _is_true
+        assert _is_true(value) is False
+
+    @pytest.mark.parametrize('value', ['true', 'True', 'yes', '1', 'on',
+                                       ' True ', True, 1])
+    def test_truthy(self, value):
+        from src.gui.app import _is_true
+        assert _is_true(value) is True
 
 
 class TestMainWindow:
@@ -352,6 +371,142 @@ class TestMainWindow:
         window._validate()
 
         assert 'pair_mode' not in window.issues.toPlainText()
+
+    @staticmethod
+    def _refuse_a_section(window, monkeypatch, form=None, key='2D'):
+        """Make one section of `form` refuse its commit, as the document does
+        when the form and the document have diverged."""
+        from src.gui.controllers.document import DocumentError
+
+        def refuse():
+            raise DocumentError('pair_mode says this config is not a pair')
+
+        target = (form or window.form).sections[key]
+        monkeypatch.setattr(target, 'commit', refuse)
+
+    def test_a_refused_commit_blocks_save_and_leaves_a_message(
+            self, window, monkeypatch):
+        """REVIEW (round 1): routing the refusal to the status bar made it
+        *invisible* on this path. `_save_config` does not call `_validate`, so
+        the only report was a status-bar line -- overwritten by this method's
+        own `Saved …` a few lines later, behind an intervening file dialog.
+        The `.ini` on disk silently disagreed with the form. Trading a modal
+        for an invisible message is worse than the modal.
+
+        So: it blocks (the file is the artefact; writing a config the user
+        never approved is a wrong-results path), and it is said in the issues
+        panel, which survives, as well as in a dialog the user cannot miss.
+        """
+        dialogs = []
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda *a, **k: (dialogs.append(a[1:3]),
+                                             QMessageBox.Ok)[1])
+        monkeypatch.setattr(
+            QFileDialog, 'getSaveFileName',
+            lambda *a, **k: pytest.fail('a refused config reached the file dialog'))
+        self._refuse_a_section(window, monkeypatch)
+
+        window._save_config()
+
+        assert 'pair_mode' in window.issues.toPlainText()
+        assert dialogs, 'the refusal was not reported at all'
+        assert 'pair_mode' in dialogs[0][1]
+
+    @staticmethod
+    def _valid_config(window):
+        """A config that validates, so a later block can only be the refusal."""
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'indent_config.ini', 'indent')
+        window.form.document = window.document
+        window.form.rebuild()
+
+    def test_a_refused_commit_blocks_generate(self, window, monkeypatch):
+        """Generate launches work from `self.document`. After a refusal that
+        document is not what is on screen, so building from it is a
+        wrong-results path -- it must not even reach the confirmation.
+
+        The same config reaches the confirmation without the refusal, so what
+        stops it here is the refusal and not some unrelated invalidity."""
+        self._valid_config(window)
+        asked = []
+        monkeypatch.setattr(QMessageBox, 'question',
+                            lambda *a, **k: (asked.append(1), QMessageBox.No)[1])
+
+        window._generate()
+        assert asked, 'this config does not reach the confirmation even when valid'
+
+        self._refuse_a_section(window, monkeypatch)
+        asked.clear()
+        window._generate()
+
+        assert not asked, 'a refused config reached the Generate confirmation'
+        assert 'pair_mode' in window.issues.toPlainText()
+
+    def test_a_refused_commit_does_not_block_render(self, window, monkeypatch):
+        """Render persists nothing and launches nothing, and looking at the
+        geometry is often how the disagreement gets diagnosed -- so there the
+        refusal is reported and not gated on."""
+        self._valid_config(window)
+        started = []
+        monkeypatch.setattr(window.preview, 'start', started.append)
+        self._refuse_a_section(window, monkeypatch)
+
+        window._render()
+
+        assert started, 'a refusal must not stop a preview'
+        assert 'pair_mode' in window.issues.toPlainText()
+
+    def test_a_refused_settings_commit_blocks_the_build(self, window, monkeypatch):
+        """The Settings tab has the same overwrite pattern: `_apply_settings`
+        would have returned None and let the build run on settings that do not
+        match the tab."""
+        self._refuse_a_section(window, monkeypatch,
+                               form=window.settings_form,
+                               key=next(iter(window.settings_form.sections)))
+
+        error = window._apply_settings()
+
+        assert error and 'pair_mode' in error
+        assert 'pair_mode' in window.issues.toPlainText()
+
+    def test_a_refused_settings_commit_blocks_saving_settings(
+            self, window, monkeypatch):
+        """`_save_settings` has the same overwrite pattern as `_save_config`:
+        its `Saved …` would have been the only thing left on screen."""
+        dialogs = []
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda *a, **k: (dialogs.append(a[1:3]),
+                                             QMessageBox.Ok)[1])
+        monkeypatch.setattr(
+            window.settings_document, 'save',
+            lambda *a, **k: pytest.fail('refused settings were written anyway'))
+        self._refuse_a_section(window, monkeypatch,
+                               form=window.settings_form,
+                               key=next(iter(window.settings_form.sections)))
+
+        window._save_settings()
+
+        assert 'pair_mode' in window.issues.toPlainText()
+        assert dialogs and 'pair_mode' in dialogs[0][1]
+
+    def test_a_finite_sheet_makes_the_sheet_worth_warning_about(
+            self, window, monkeypatch):
+        """`[general] finite_sheet` sizes `2D` as an island inside the
+        substrate box, so it is genuinely finite -- and nothing in the
+        assembled system records that, so the window has to say it."""
+        declared = []
+        monkeypatch.setattr(window.viewport, 'set_finite_components',
+                            declared.append)
+        monkeypatch.setattr(window.viewport, 'show_system', lambda _s: None)
+        system = SimpleNamespace(count=0, warnings=[])
+
+        window.document.set('general', 'finite_sheet', 'false')
+        window._on_preview_ready(system)
+        assert '2D' not in declared[-1]
+
+        window.document.set('general', 'finite_sheet', 'true')
+        window._on_preview_ready(system)
+        assert '2D' in declared[-1]
 
     def test_a_refused_edit_reaches_the_status_bar(self, window):
         """The per-keystroke path (`SectionForm._on_field_changed`) has no

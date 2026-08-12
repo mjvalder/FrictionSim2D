@@ -1143,8 +1143,13 @@ class TestPairSweepCommit:
 
         # Both slots reported rather than threw. (The orphaned `[2D-2]` form
         # left behind by the teardown above refuses its own commit too --
-        # 'Unknown section' -- and that is reported by the same guard, which
-        # is the guarantee under test: no refusal reaches a Qt slot boundary.)
+        # 'Unknown section' -- and that is reported by the same guard.)
+        #
+        # Note what this does NOT claim: `_on_field_changed` and
+        # `_commit_section` are guarded, but `_on_material_button_clicked`
+        # calls `self.commit()` outside any try, so a `DocumentError` there
+        # still escapes into the clicked() slot. Pre-existing and untouched
+        # by this round.
         assert sum('pair_mode' in text for text in announced) >= 2
         # `commit()` is the path Render/Generate/Save take, so what it
         # refused has to still be readable once the signal has been and gone:

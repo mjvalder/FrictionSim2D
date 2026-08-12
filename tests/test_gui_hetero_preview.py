@@ -365,12 +365,22 @@ class TestTheViewportDoesNotInventAProblem:
     def test_the_finite_list_can_be_put_back(self, panel):
         """Left standing after a finite_sheet config, a `2D` in the list would
         warn about every ordinary sheet from then on -- every one of which
-        spans its cell by design."""
+        spans its cell by design.
+
+        `None` has to restore the *default*, not merely empty the list: both
+        silence `2D`, but only one of them leaves the check working at all.
+        So the tip is checked too.
+        """
         panel.set_finite_components(['tip', 'flake', '2D'])
         panel.set_finite_components(None)
-        panel.show_system(_spanning('2D'))
 
+        panel.show_system(_spanning('2D'))
         assert panel.warning.isHidden(), panel.warning.text()
+
+        panel.show_system(_spanning('tip'))
+        assert not panel.warning.isHidden(), \
+            'the reset emptied the list instead of restoring the default'
+        assert 'tip' in panel.warning.text()
 
 
 class TestTheSuppressionOnRealGeometry:

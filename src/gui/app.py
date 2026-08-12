@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
@@ -42,7 +42,7 @@ from ..core.run import AFM_LIKE_MODELS, hpc_generation_blocker
 from .controllers.settings_document import SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
-from .preview.viewport import ViewportPanel
+from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
@@ -75,6 +75,18 @@ def _min_numeric(value: object) -> Optional[float]:
         except (TypeError, ValueError):
             return None
     return min(numbers)
+
+
+def _is_true(value: object) -> bool:
+    """Truthiness of a config flag that may still be raw `.ini` text.
+
+    A document read from a file holds `'false'` for an unticked box until the
+    pydantic model coerces it, and `bool('false')` is True -- which would make
+    every non-finite_sheet config look finite.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in ('true', 'yes', 'on', '1')
+    return bool(value)
 
 
 def _fold_controls(parent: QWidget, form: ConfigForm) -> QHBoxLayout:
@@ -375,6 +387,12 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         """Write the complete settings file into the workspace."""
         self.settings_form.commit()
+        if self.settings_form.refusals():
+            QMessageBox.warning(
+                self, 'Settings were not saved',
+                self._record_refusals('Save settings',
+                                      self.settings_form.refusals()))
+            return
         result = self.settings_document.validate()
         self.settings_form.show_errors(result.issues)
         if not result.ok:
@@ -419,6 +437,11 @@ class MainWindow(QMainWindow):
             None on success, otherwise why the settings could not be applied.
         """
         self.settings_form.commit()
+        # Checked before the dirty gate: a section that refused its commit
+        # may be exactly the reason the document looks unchanged.
+        if self.settings_form.refusals():
+            return self._record_refusals('Applying settings',
+                                         self.settings_form.refusals())
         if not self.settings_document.dirty:
             return None
 
@@ -471,7 +494,8 @@ class MainWindow(QMainWindow):
         if text != self.counts.text():
             self.counts.setText(text)
 
-    def _validate(self, enforce_required: bool = True) -> bool:
+    def _validate(self, enforce_required: bool = True,
+                  refusals_block: bool = True) -> bool:
         """Validate and surface the result. Returns True when valid.
 
         `enforce_required` gates only the starred-but-empty-and-blocking
@@ -483,6 +507,14 @@ class MainWindow(QMainWindow):
         validation failure (the document's own `validate()`, unsupported
         lists) blocks both regardless, and the issue lines are reported the
         same either way.
+
+        `refusals_block` decides whether a section the form could not commit
+        stops the action. It does by default: after a refusal the document no
+        longer matches the form, so Generate would build from a config the
+        user never approved. `_render` passes False -- a preview persists
+        nothing and launches nothing, and being able to look at the geometry
+        is often how the disagreement gets diagnosed -- so there it is
+        reported and not gated on.
         """
         self.form.commit()
         result = self.document.validate(self.settings)
@@ -490,10 +522,11 @@ class MainWindow(QMainWindow):
 
         unsupported = self.document.unsupported_lists()
         # A section the form could not commit is the first thing wrong with
-        # this config: what is on screen is not what would be built. It used
-        # to be a modal per failing section; here it reads alongside every
-        # other reason the config will not build, and blocks nothing.
-        lines = list(self.form.refusals())
+        # this config: what is on screen is not what would be built. Reported
+        # here, alongside every other reason the config will not build, rather
+        # than as the modal-per-section this used to raise.
+        refusals = self.form.refusals()
+        lines = list(refusals)
         lines += [issue.render() for issue in result.issues]
         lines += [
             f"[{section}] {key}: a list here is not supported -- it would not "
@@ -563,6 +596,8 @@ class MainWindow(QMainWindow):
         ok = result.ok and not unsupported
         if enforce_required:
             ok = ok and not any(blocking)
+        if refusals_block:
+            ok = ok and not refusals
         return ok
 
     # --------------------------------------------------------------- events
@@ -675,9 +710,31 @@ class MainWindow(QMainWindow):
         which fires on ordinary field edits, so a modal would interrupt typing
         -- and, with no one to dismiss it in an automated run, would hang
         rather than fail.
+
+        The status bar is enough *here* only because nothing has been written
+        or launched yet. The moment an action would persist something, the
+        refusal has to stop it and be said somewhere that survives -- see
+        `_record_refusals`.
         """
         logger.warning("commit refused: %s", message)
         self.statusBar().showMessage(message)
+
+    def _record_refusals(self, action: str, refusals: List[str]) -> str:
+        """Put refusals in the issues panel and return them as one message.
+
+        The status bar cannot carry these. `_save_config` overwrites it with
+        its own `Saved …` a few lines later -- behind an intervening file
+        dialog -- so the only trace of the disagreement vanished and a file
+        was left on disk that silently did not match the form. The panel
+        survives until the next validation, and the caller adds a dialog when
+        it is refusing an action the user explicitly started.
+        """
+        logger.warning("%s refused: %s", action, refusals)
+        text = '\n'.join(refusals)
+        self.issues.setPlainText(
+            f"{action} refused -- the form and the config disagree, so what "
+            f"would be written is not what is on screen:\n{text}")
+        return text
 
     def _on_config_changed(self) -> None:
         self._refresh_counts()
@@ -717,6 +774,15 @@ class MainWindow(QMainWindow):
 
     def _save_config(self) -> None:
         self.form.commit()
+        # A refused commit means the document no longer matches the form.
+        # Writing it anyway produces a `.ini` that disagrees with the screen
+        # -- the file is the artefact, so this is a wrong-results path and it
+        # stops here rather than being noted in passing.
+        if self.form.refusals():
+            QMessageBox.warning(
+                self, 'This config was not saved',
+                self._record_refusals('Save', self.form.refusals()))
+            return
         suggested = self.document.source_path or \
             self.workspace.default_config_path(self.document.model)
         path, _ = QFileDialog.getSaveFileName(
@@ -752,7 +818,7 @@ class MainWindow(QMainWindow):
     def _render(self) -> None:
         if not self._sync_settings():
             return
-        if not self._validate(enforce_required=False):
+        if not self._validate(enforce_required=False, refusals_block=False):
             self.statusBar().showMessage('Fix the reported problems first.')
             return
 
@@ -785,6 +851,15 @@ class MainWindow(QMainWindow):
         if self.preview.current_label:
             message += f" {self.preview.current_label}"
         self._busy(message, False)
+        # `finite_sheet` makes `2D` an island inside the substrate box rather
+        # than a sheet spanning it, so there -- and only there -- a `2D`
+        # reaching the periodic wall is the >=2x tip-diameter failure rather
+        # than the geometry working as intended. Nothing in the assembled
+        # system records which it is, so it is said here, where the config is.
+        finite = list(FINITE_COMPONENTS)
+        if _is_true(self.document.get('general', 'finite_sheet')):
+            finite.append('2D')
+        self.viewport.set_finite_components(finite)
         self.viewport.show_system(system)
         self._render_snapshot = self.document.to_dict()
         self.viewport.set_stale(False)
