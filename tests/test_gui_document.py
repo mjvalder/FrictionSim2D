@@ -994,6 +994,37 @@ class TestExpansionOutputDirs:
         assert preview.dirs == []
         assert preview.error == 'no usable materials'
 
+    def test_a_real_pair_guard_message_reaches_the_preview(self, monkeypatch):
+        """End to end, with no raise injected: a real config, broken the way a
+        user actually breaks it, must arrive as the guard's own sentence.
+
+        The other two error tests monkeypatch `expand_config_sweeps` to throw,
+        which pins the handler but not the chain. This pins the chain: the
+        guard lives in `core.run`, several layers below, and the failure it
+        catches -- `[2D-2]` whose `mat` was updated to `{mat2}` while its
+        `cif_path` still says `{mat1}` -- builds a *homostructure* under a
+        correctly-named heterostructure directory. It is silent by nature, so
+        the sentence explaining it is the only thing standing between the user
+        and a directory of runs that are not what they asked for.
+        """
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        assert document.expansion_output_dirs().dirs, "example must expand first"
+
+        document.set('2D-2', 'cif_path',
+                     document.get('2D-2', 'cif_path').replace('{mat2}', '{mat1}'))
+        preview = document.expansion_output_dirs()
+
+        assert preview.dirs == []
+        assert preview.error is not None
+        # The guard names the offending section, the marker it wrongly carries,
+        # the consequence, and the fix. An empty list carries none of that.
+        assert '[2D-2]' in preview.error
+        assert '{mat1}' in preview.error
+        assert 'both sheets would build the same one' in preview.error
+        assert '{mat2}' in preview.error
+
     def test_an_unexpected_failure_is_reported_without_raising(self, monkeypatch):
         """The preview runs on the GUI thread, so a bug in the expansion must
         not take the window down -- but it must not read as "this config
