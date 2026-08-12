@@ -325,6 +325,14 @@ downstream notices, so the expansion refuses it by name — and Generate reports
 that refusal (see [Generate](#generate)) instead of previewing an empty list of
 output directories.
 
+Any refusal that stops the sweep being counted — that one, a list whose lines
+name the wrong number of materials for the sheet sections present, materials
+whose files do not resolve — is reported in the issues panel on every
+validation pass, Render included, in the expansion's own words. While one
+stands, the panel says the `{mat}` placeholders *cannot* be substituted rather
+than promising that they will be, and the config counts in the header read as
+`—`.
+
 A pair list left behind on a single-material config — hand-edited, or written
 before the second material was dropped some other way — is not adopted as a
 selection and not overwritten: the tick list opens empty, so committing the

@@ -545,9 +545,19 @@ class MainWindow(QMainWindow):
         try:
             expansion = self.document.expansion()
         except Exception as exc:  # pylint: disable=broad-except
-            # The sweep cannot be counted yet -- typically a materials_list
-            # whose per-material files do not resolve.
+            # The sweep cannot be counted -- a materials_list whose
+            # per-material files do not resolve, or whose lines name a
+            # different number of materials than there are sheet sections.
+            #
+            # Reported, not swallowed. `expansion_output_dirs()` runs the same
+            # expansion and hands back its message verbatim, which is the
+            # sentence saying what to fix ("...names a single material, but
+            # this config has a [2D-2] section and expects ordered pairs...").
+            # Generate has shown it since it started asking that method first;
+            # here it was caught into a debug log, so Render and this panel
+            # showed a config that read as fine.
             logger.debug("expansion count failed: %s", exc)
+            lines.append(self.document.expansion_output_dirs().error or str(exc))
 
         if expansion is not None:
             # Only the material-sweep notes: a materials_list that could not
@@ -580,14 +590,21 @@ class MainWindow(QMainWindow):
         lines += self.document.conflicts()
 
         if self.document.pending_template_issues:
-            # Still worth saying the placeholders are pending even when the
-            # count is not available; the count is the part at risk.
-            target = f"{expansion.configs} config(s)" if expansion is not None \
-                else "each material in the sweep"
-            lines.append(
-                f"{len(self.document.pending_template_issues)} path(s) contain "
-                f"{{mat}}; they will be substituted across {target} when you "
-                f"generate.")
+            # Still worth saying the placeholders are pending -- but only the
+            # working case may promise they get filled in. When the expansion
+            # was refused above, "they will be substituted across each
+            # material in the sweep when you generate" contradicts the
+            # refusal, and it is the line that reads as "the config is fine".
+            count = len(self.document.pending_template_issues)
+            if expansion is None:
+                lines.append(
+                    f"{count} path(s) contain {{mat}}; none of them can be "
+                    f"substituted until the problem above is fixed.")
+            else:
+                lines.append(
+                    f"{count} path(s) contain {{mat}}; they will be "
+                    f"substituted across {expansion.configs} config(s) when "
+                    f"you generate.")
 
         text = '\n'.join(lines) if lines else 'Config is valid.'
         if text != self.issues.toPlainText():

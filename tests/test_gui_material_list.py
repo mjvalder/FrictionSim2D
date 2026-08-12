@@ -608,8 +608,11 @@ class TestWindowIntegration:
         # The issues pane should still mention pending substitutions
         issues_text = window.issues.toPlainText()
         assert '{mat}' in issues_text
-        # When count fails, it falls back to a generic message
-        assert 'substituted' in issues_text
+        # ...and, when the count fails, say why rather than promising a
+        # substitution the refused expansion is never going to perform.
+        assert str(bad_materials) in issues_text
+        assert 'could be resolved' in issues_text
+        assert 'will be substituted' not in issues_text
 
     def test_opening_a_config_does_not_carry_the_previous_sweep_over(
             self, window, dirs, tmp_path, monkeypatch):
@@ -663,6 +666,48 @@ class TestWindowIntegration:
         window._validate()
         issues_text = window.issues.toPlainText()
         assert 'typo_materials.txt' in issues_text
+
+    def test_a_refused_expansion_is_reported_not_swallowed(
+            self, window, dirs, tmp_path, monkeypatch):
+        """FINAL REVIEW: the journey "open a swept single-material config,
+        press Add a material" leaves a list of single names under a two-sheet
+        config. `expand_config_sweeps` refuses that in one clear sentence, and
+        Generate has reported it since it started calling
+        `expansion_output_dirs()` -- but `_validate` caught the same exception
+        into a `logger.debug` and said nothing, so Render and the issues panel
+        showed a config that reads as fine.
+
+        Worse than silence: the panel went on to promise that the four `{mat}`
+        paths "will be substituted across each material in the sweep when you
+        generate", which is exactly what the refusal says will not happen.
+        """
+        monkeypatch.chdir(REPO_ROOT)
+        structures, potentials = dirs
+        singles = tmp_path / 'c_materials.txt'
+        singles.write_text('h-MoS2\nt-MoS2\n', encoding='utf-8')
+
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini',
+                                            'indent')
+        document.source_path = tmp_path / 'c.ini'
+        document.set('2D', 'materials_list', singles.name)
+        document.apply_material_directories(structures, potentials, '.sw')
+        document.add_second_material()
+
+        window.document = document
+        window.form.document = document
+        window.form.rebuild()
+
+        window._validate()
+        issues_text = window.issues.toPlainText()
+
+        # The expansion's own sentence, which names the line and what it
+        # would take to fix it.
+        assert 'h-MoS2' in issues_text
+        assert '[2D-2]' in issues_text
+        assert 'ordered pairs' in issues_text
+        # And no promise that the placeholders are going to be filled in.
+        assert 'will be substituted' not in issues_text
+        assert document.pending_template_issues                # sanity
 
 
 class TestScanningMaterialDirectories:
