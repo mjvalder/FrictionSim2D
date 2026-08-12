@@ -170,11 +170,10 @@ template never reads the angle variable, so it keeps `force` and drops
 never look at `outer_loop` at all, so they offer no split of any kind to
 choose from (with nothing to offer, the control is not shown).
 
-A sheet-on-sheet config that carries a **twist angle** or a `[Flake]` section
-builds through a different builder, which ignores `outer_loop` entirely — no
-split of any kind, and the job count shown reflects that. (A numbered
-`[2D-1]`/`[2D-2]` config routes there too, but the GUI declines to open one
-at all, so the question never arises in this window.)
+A sheet-on-sheet config that carries a **twist angle**, a `[Flake]` section or
+a second material builds through a different builder, which ignores
+`outer_loop` entirely — no split of any kind, and the job count shown reflects
+that.
 
 ### Sweeping over materials
 
@@ -243,9 +242,112 @@ substitutions rather than as validation errors, so a templated config renders
 and generates normally.
 
 The list may also hold `mat1 + mat2` pair lines, which sweep a heterostructure
-config's `[2D-1]`/`[2D-2]` over ordered material pairs. That form is CLI-only —
-this window declines to open a numbered config at all — and is documented in
+config's `[2D-1]`/`[2D-2]` over ordered material pairs. The window builds and
+edits those too — see [Two materials](#two-materials-heterostructures) below.
+The file format is the CLI's, unchanged, and is specified in
 [configuration.md](configuration.md#heterostructure-pair-sweeps).
+
+## Two materials (heterostructures)
+
+A config can hold two materials, stacked into one cell: `[2D-1]` and `[2D-2]`
+in the `.ini`, **2D sheet** and **Material 2 (heterostructure)** in the form.
+All five modes accept one — each routes to that mode's heterostructure
+builder — so the second material survives a change of family or mode rather
+than being dropped by the dropdown.
+
+### Adding and removing the second material
+
+At the bottom of the **2D sheet** section is one button: **Add a material**,
+which becomes **Remove material 2** once there is one. Adding inserts a
+**Material 2 (heterostructure)** section directly after `[2D]` — the two are
+read together, so they are shown together. It carries the same fields as the
+first sheet minus **Sweep over materials**: only the first sheet holds the
+list, and each of its lines names *both* materials.
+
+The button is available while a material sweep is configured, because the pair
+sweep below is exactly the case that needs a second sheet. Adding one to a
+config that is already templated for a sweep re-spells the first sheet from
+`{mat}` to `{mat1}` and seeds the new one with `{mat2}`, pointing at the same
+two directories; removing it puts `{mat}` back. Which button you press first
+therefore does not decide whether the sweep is correct.
+
+`[general] hetero_stacking` — **Layer stacking**, `grouped` (1,1,2,2) or
+`alternating` (1,2,1,2) — is shown on the **Material 2** section rather than
+under Run parameters, since it orders the layers of a two-material stack and
+means nothing without one. It is hidden from Run parameters in every mode so
+it is never offered twice. A hand-written single-material config that carries
+a non-default `hetero_stacking` gets a note in the validation panel saying it
+has no effect; it does not block.
+
+### Sweeping over material pairs
+
+Tick **Sweep over materials** on a config that has two materials and the tick
+list is replaced by a two-column table, **Material 1** / **Material 2**, with
+**Add pair**, **Remove pair** and **Generate pairs…**. Each row is one run:
+the pair is written to the `.txt` as `a + b`, and `[2D-1]`/`[2D-2]` are
+templated on `{mat1}`/`{mat2}` on commit. The summary line reads `N pair(s) →
+N configs`.
+
+Order is part of the pair. `a + b` and `b + a` stack the two materials the
+other way up and are different runs, so nothing here sorts or dedupes them.
+**Generate pairs…** builds every combination of the materials currently
+available — the ticked ones, or everything usable when nothing is ticked — and
+offers the two decisions that would otherwise be silent:
+
+- **Include the reversed order (b + a)** — off by default, because doubling
+  the sweep is a decision;
+- **Include same-material pairs (a + a)** — off by default: a homostructure
+  bilayer is a legitimate reference run, but not what "pair these up" asks
+  for.
+
+Each cell is a dropdown of the usable materials plus whatever that cell
+already holds, so a curated list naming a material this machine cannot see
+(a moved share, a potential not generated yet) is shown as it is rather than
+silently rewritten to something else.
+
+**Removing material 2 while a pair list is configured** cannot leave the list
+alone: its `a + b` lines are unusable by a one-sheet config, and the sweep
+would silently stop sweeping. The list is collapsed to each pair's first
+member, after a confirmation naming how many pairs there are and which second
+materials are being dropped. The collapsed list is written to *this config's
+own* list file — never over a curated `.txt` the picker was merely pointed at,
+which the dialog says by name. An unsaved config with nowhere to write it
+refuses the removal and asks you to save first; a failed write leaves the
+second material in place rather than half-removing it.
+
+### What the GUI checks, and what it does not
+
+Both sheets must template on their own placeholder, and this is checked **per
+key**, not per section: a `[2D-2]` whose `mat` reads `{mat2}` while its
+`cif_path` still reads `{mat1}` builds the first material twice, inside
+directories correctly named after the pair. Every path resolves and nothing
+downstream notices, so the expansion refuses it by name — and Generate reports
+that refusal (see [Generate](#generate)) instead of previewing an empty list of
+output directories.
+
+A pair list left behind on a single-material config — hand-edited, or written
+before the second material was dropped some other way — is not adopted as a
+selection and not overwritten: the tick list opens empty, so committing the
+section changes nothing on disk. It does not sweep either, and generation says
+so, naming the line that asks for a pair the config has no `[2D-2]` to hold.
+
+Configs the window still declines to open are the ones it cannot represent:
+three or more sheet sections, sheets numbered other than `[2D-1]`/`[2D-2]`,
+and a plain `[2D]` mixed with numbered ones. Each is refused with the reason;
+use the CLI for those.
+
+Two preview limitations are worth knowing, since both look like the config
+being wrong:
+
+- A pair sweep is previewed one member at a time like any other sweep, but the
+  status line reads *"Previewing the first configuration (1 of N in the
+  sweep)"* rather than naming the pair — the label is read off `[2D]`, which a
+  numbered config does not have.
+- A pair list holding **exactly one** line is not recognised as a sweep at all,
+  so the preview builds the config as it stands, `{mat1}`/`{mat2}` unsubstituted,
+  and the build fails on the literal path. Generate is unaffected — it expands
+  properly — so the workaround is a second pair line, or previewing with the
+  names typed in directly.
 
 ## Render
 
@@ -285,6 +387,10 @@ The viewport controls:
 
 A component that reaches a periodic boundary is called out: it will interact
 with its own image, which is what the ≥2× tip-diameter rule exists to prevent.
+Sheet stacks are exempt, tip and flake are not. A sheet-family heterostructure
+arrives as a single component (`all_atoms`) spanning the coincidence cell — the
+cell *is* the interface's only in-plane periodicity, so touching the wall is
+what it is supposed to do and there is nothing a user could enlarge.
 
 Builds run in a separate process, so a LAMMPS failure reports an error instead
 of closing the window. Repeating a render with unchanged inputs reuses the
@@ -305,6 +411,13 @@ that coincide are called out with a warning — that means two runs would
 overwrite each other, the exact hazard the
 [loopability rule](#which-fields-may-hold-a-list) exists to prevent.
 
+A config that cannot be expanded at all — a material list none of whose
+materials resolve, a pair sweep whose sheets are templated on the wrong
+placeholder — never reaches that confirmation. The reason the expansion gives
+is reported in a dialog and written into the issues panel, and nothing is
+generated: it names the section at fault and what to put in it, which an empty
+list of output directories does not.
+
 Unlike Render, this may generate a missing amorphous structure, because here it
 is what you asked for rather than a side effect of looking.
 
@@ -324,8 +437,11 @@ Two limits worth knowing:
 
 - Inline comments are not preserved. The reader discards them, so a round trip
   cannot keep yours; canonical unit and help comments are re-emitted instead.
-- Heterostructure configs — those with numbered `[2D-1]`, `[2D-2]` sections —
-  are refused rather than silently edited. Use the CLI for those.
+- A heterostructure is exactly two materials. A config with three or more sheet
+  sections, one numbering them anything other than `[2D-1]`/`[2D-2]`, or one
+  mixing a plain `[2D]` with numbered sections, is refused with that reason
+  rather than silently renumbered. Ordinary `[2D-1]`/`[2D-2]` pairs open
+  normally — see [Two materials](#two-materials-heterostructures).
 
 Relative paths in a config are resolved against the config's own directory and
 its parents, so a config written for the project root still works when opened
@@ -410,4 +526,5 @@ generated config.
 ## Not included
 
 Job monitoring and the results database (Parts 2 and 3 of the requirements),
-heterostructure configs, and standalone single-component builds.
+and standalone single-component builds. Stacks of more than two materials are
+not editable here either — see [Configs](#configs).

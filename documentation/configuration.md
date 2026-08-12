@@ -264,6 +264,10 @@ The runnable version is [../examples/hetero_pair_sweep.ini](../examples/hetero_p
 with [../examples/hetero_pairs.txt](../examples/hetero_pairs.txt); the three
 lines above expand into three runs.
 
+The desktop application writes exactly this form — a second material, the pair
+table and the `.txt` it produces — see
+[gui.md](gui.md#two-materials-heterostructures).
+
 Points worth knowing:
 
 - **`+`, not a comma.** A comma line still means two separate single materials —
@@ -275,8 +279,18 @@ Points worth knowing:
   different stacks and different runs.
 - **Only `[2D-1]` carries `materials_list`.** `[2D-2]` is filled from the same
   line's second member.
-- **Placeholders.** `{mat1}` and `{mat2}` are the pair's two members;
-  `{mat}` is equivalent to `{mat1}`. Both sections may use either.
+- **Placeholders, one per sheet.** `{mat1}` and `{mat2}` are the pair's two
+  members. `[2D-1]` may spell its own member either `{mat1}` or `{mat}` — the
+  two substitute identically, so a single-material config that gains a second
+  sheet keeps working — but `[2D-2]` accepts only `{mat2}`.
+- **The placeholder is checked per key, not per section.** A `[2D-2]` whose
+  `mat` reads `{mat2}` while its `cif_path` or `pot_path` still reads `{mat1}`
+  is refused, even though the section does hold `{mat2}` somewhere. Left to
+  run, it would load the first material's files for both sheets while the
+  output directory kept the pair's name: every path resolves, nothing fails,
+  and the results are quietly a homostructure. A sheet holding no placeholder
+  at all is refused for the same reason — it would be pinned to one material
+  for every member of the sweep. Both messages name the section and the line.
 - **Output directories join with `+`**, e.g. `h-MoS2+h-WS2` — real material
   names contain `-`, so a `-` join could not be split back apart.
 - **Arity must agree with the sections.** A pair line in a config with no

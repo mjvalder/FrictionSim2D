@@ -8,9 +8,9 @@ Read in this order if you are new; each document also stands alone.
 |---|---|---|
 | 1 | [installation.md](installation.md) | Environment setup, optional extras, verification, troubleshooting |
 | 2 | [overview.md](overview.md) | What the package does, the five simulation models, output layout, quick start |
-| 3 | [configuration.md](configuration.md) | Writing `.ini` config files, sweep behaviour, worked examples |
+| 3 | [configuration.md](configuration.md) | Writing `.ini` config files, sweep behaviour, heterostructure pairs, worked examples |
 | 4 | [commands.md](commands.md) | Complete CLI reference for every command group |
-| 5 | [gui.md](gui.md) | Desktop application: configure, preview in 3D, generate |
+| 5 | [gui.md](gui.md) | Desktop application: configure, preview in 3D, generate, build heterostructures |
 | 6 | [examples.md](examples.md) | End-to-end workflows from generation to plots |
 | 7 | [settings.md](settings.md) | Every `settings.yaml` section and its defaults |
 | 8 | [pes_scan.md](pes_scan.md) | Static potential-energy-surface (corrugation-barrier) scans |
