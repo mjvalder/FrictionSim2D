@@ -24,7 +24,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox  # noqa: E402
 
-from src.gui.controllers.document import ConfigDocument  # noqa: E402
+from src.gui.controllers.document import ConfigDocument, ExpansionDirs  # noqa: E402
 from src.gui.controllers.preview import cache_key, code_fingerprint  # noqa: E402
 from src.gui.preview.assemble import AssembledSystem, ComponentSlice  # noqa: E402
 from src.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
@@ -557,6 +557,33 @@ class TestMainWindow:
         assert 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300' in message
         assert 'WARNING' not in message
 
+    def test_generate_reports_why_a_pair_config_cannot_expand(self, window, monkeypatch):
+        """A pair config whose [2D-2] is templated on the wrong marker cannot
+        expand at all. Both the counts and the directory preview come from that
+        same expansion, so before this the click raised out of the slot and the
+        user got nothing. It must come back as the expansion's own message, and
+        must not reach the confirmation -- there is nothing to confirm."""
+        monkeypatch.chdir(REPO_ROOT)
+        window.document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        window.document.set('2D-2', 'cif_path', 'examples/materials/{mat1}.cif')
+        window.form.document = window.document
+        window.form.rebuild()
+
+        warned = {}
+        monkeypatch.setattr(QMessageBox, 'warning',
+                            lambda *args, **_kw: warned.setdefault('text', args[2]))
+        monkeypatch.setattr(
+            QMessageBox, 'question',
+            lambda *args, **_kw: pytest.fail('confirmation shown for a config '
+                                             'that cannot expand'))
+
+        window._generate()
+
+        assert '[2D-2]' in warned['text']
+        assert '{mat2}' in warned['text']
+        assert '[2D-2]' in window.issues.toPlainText()
+
     def test_generate_confirmation_flags_duplicate_output_dirs(self, window, monkeypatch):
         """When two members of a sweep would build into the same directory --
         the exact hazard the loopability rule exists to prevent, e.g. a
@@ -573,7 +600,8 @@ class TestMainWindow:
         window.form.rebuild()
 
         dup = Path('indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300')
-        monkeypatch.setattr(window.document, 'expansion_output_dirs', lambda: [dup, dup])
+        monkeypatch.setattr(window.document, 'expansion_output_dirs',
+                            lambda: ExpansionDirs([dup, dup]))
 
         captured = {}
 

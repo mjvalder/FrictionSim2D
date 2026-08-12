@@ -16,9 +16,10 @@ from __future__ import annotations
 import copy
 import os
 import re
+import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from ...core.config import (
     AFMSimulationConfig,
@@ -41,7 +42,26 @@ from ..schema.overrides import overrides_for
 from ..schema.simulation_types import MODES, sections_for
 from .materials import STRUCTURE_EXTENSION
 
-__all__ = ['ConfigDocument', 'DocumentError', 'hetero_support_error']
+__all__ = ['ConfigDocument', 'DocumentError', 'ExpansionDirs',
+           'hetero_support_error']
+
+logger = logging.getLogger(__name__)
+
+
+class ExpansionDirs(NamedTuple):
+    """The Generate preview: where this config would build, or why it cannot.
+
+    Exactly one side is populated. `error` carries the expansion's own
+    message verbatim -- the pair guards in `core.run.expand_config_sweeps`
+    say precisely which section is wrong and what to put there, and that
+    sentence is the whole value of showing it.
+    """
+
+    #: One directory per expanded config, duplicates included.
+    dirs: List[Path]
+    #: Why nothing could be expanded, or None when it could.
+    error: Optional[str] = None
+
 
 #: A numbered sheet section. Two of them make a heterostructure: `[2D-1]` is
 #: the first material, `[2D-2]` the second. Matched exactly, so nothing that
@@ -940,23 +960,41 @@ class ConfigDocument:
         return count_expansion(self.normalised_values(), self.model,
                                base_dir=self.base_dir)
 
-    def expansion_output_dirs(self) -> List[Path]:
+    def expansion_output_dirs(self) -> ExpansionDirs:
         """Output directory each expanded config would build into.
 
         Uses the same expansion `expansion()` counts, mapped through the
         same `output_dir_for` a real run would use, so what the Generate
         confirmation lists matches what generation will actually produce --
         including duplicates, which are the exact hazard the "list is not
-        sweepable" rule exists to prevent. A config mid-edit can fail to
-        expand at all; that is advisory information, not a validation
-        error, so any exception yields an empty list rather than raising.
+        sweepable" rule exists to prevent.
+
+        A config mid-edit can fail to expand at all -- an unresolvable
+        material, or a pair sweep whose sheets are templated on the wrong
+        marker. That is advisory information, not a validation error, so it
+        never raises; but it is *reported* rather than swallowed. Returning a
+        bare empty list here is how a config that expansion could explain in
+        one sentence ("the [2D-2] section templates on '{mat1}'...") used to
+        reach the user as an unexplained absence of directories.
+
+        The config-level failures (`ValueError` from the sweep guards,
+        `OSError`/`KeyError` from a path or section that is not there yet) are
+        reported verbatim. Anything else is a bug in this program rather than
+        in the config, so it is logged with its traceback and reported as
+        unexpected -- still without taking the window down, because this runs
+        on the GUI thread.
         """
         try:
             expanded = expand_config_sweeps(
                 self.normalised_values(), self.base_dir)
-            return [output_dir_for(run_dict, self.model) for run_dict in expanded]
-        except Exception:  # pylint: disable=broad-except
-            return []
+            return ExpansionDirs(
+                [output_dir_for(run_dict, self.model) for run_dict in expanded])
+        except (ValueError, OSError, KeyError) as exc:
+            return ExpansionDirs([], str(exc))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("expansion preview failed")
+            return ExpansionDirs(
+                [], f"Could not work out what this config would generate: {exc}")
 
     def loopability_of(self, section: str, key: str) -> str:
         """How a list in this field would be interpreted.

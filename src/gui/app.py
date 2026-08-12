@@ -879,13 +879,25 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage('Fix the reported problems first.')
             return
 
+        # Asked before the counts, which come from the same expansion and so
+        # would raise the very message this reports -- as a traceback out of a
+        # Qt slot, where the user never sees it.
+        preview = self.document.expansion_output_dirs()
+        if preview.error:
+            self.issues.setPlainText(preview.error)
+            QMessageBox.warning(
+                self, 'Cannot expand this config',
+                f"Nothing was generated.\n\n{preview.error}")
+            self.statusBar().showMessage('Fix the reported problems first.')
+            return
+        dirs = preview.dirs
+
         summary = self.document.expansion()
         message = (
             f"This will generate {summary.configs} config(s), {summary.builds} "
             f"build(s) and {summary.jobs} job(s) into:\n{self.workspace.runs_dir}"
         )
 
-        dirs = self.document.expansion_output_dirs()
         if dirs:
             shown = dirs[:8]
             message += "\n\n" + "\n".join(str(d) for d in shown)

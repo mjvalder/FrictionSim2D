@@ -326,8 +326,24 @@ class TestPairExpansion:
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(
             EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
-        dirs = document.expansion_output_dirs()
+        dirs = document.expansion_output_dirs().dirs
         assert len(dirs) == 3 and len(set(dirs)) == 3
+
+    def test_a_wrongly_templated_pair_reports_its_guard_message(self, monkeypatch):
+        """A [2D-2] left on '{mat1}' expands into a directory named after the
+        pair while building the first material twice, so `expand_config_sweeps`
+        refuses it with a sentence saying exactly that. The Generate preview
+        must carry that sentence out: an empty directory list on its own reads
+        as "this config generates nothing", which is a different problem with a
+        different fix."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        document.set('2D-2', 'cif_path', 'examples/materials/{mat1}.cif')
+        preview = document.expansion_output_dirs()
+        assert preview.dirs == []
+        assert '[2D-2]' in preview.error
+        assert '{mat2}' in preview.error
 
 
 class TestMaterialEntries:
@@ -938,15 +954,16 @@ class TestExpansionOutputDirs:
     def test_one_dir_per_config_matching_the_real_layout(self, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
-        dirs = document.expansion_output_dirs()
-        assert len(dirs) == document.expansion().configs == 1
-        assert str(dirs[0]) == 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300'
+        preview = document.expansion_output_dirs()
+        assert preview.error is None
+        assert len(preview.dirs) == document.expansion().configs == 1
+        assert str(preview.dirs[0]) == 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300'
 
     def test_a_sweep_gives_one_distinct_dir_per_member(self, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         document.set('general', 'temp', [300, 500])
-        dirs = document.expansion_output_dirs()
+        dirs = document.expansion_output_dirs().dirs
         assert len(dirs) == 2
         assert len(set(dirs)) == 2
 
@@ -959,22 +976,36 @@ class TestExpansionOutputDirs:
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         document.set('general', 'temp', [300.1, 300.9])
-        dirs = document.expansion_output_dirs()
+        dirs = document.expansion_output_dirs().dirs
         assert len(dirs) == 2
         assert len(set(dirs)) == 1
 
-    def test_a_config_that_cannot_expand_reports_no_dirs(self, monkeypatch):
+    def test_a_config_that_cannot_expand_reports_why(self, monkeypatch):
         """expand_config_sweeps raises when a materials_list resolves to
         materials none of which are usable (see its docstring); that is a
-        config mid-edit, not a crash, so this must swallow it rather than
-        propagate -- exactly like the exception path expansion() itself
-        already tolerates via _refresh_counts' try/except."""
+        config mid-edit, not a crash, so this must not propagate -- but the
+        reason must come back with the empty list, not instead of it."""
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
         monkeypatch.setattr(
             'src.gui.controllers.document.expand_config_sweeps',
             lambda *a, **k: (_ for _ in ()).throw(ValueError('no usable materials')))
-        assert document.expansion_output_dirs() == []
+        preview = document.expansion_output_dirs()
+        assert preview.dirs == []
+        assert preview.error == 'no usable materials'
+
+    def test_an_unexpected_failure_is_reported_without_raising(self, monkeypatch):
+        """The preview runs on the GUI thread, so a bug in the expansion must
+        not take the window down -- but it must not read as "this config
+        generates nothing" either."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'indent_config.ini', 'indent')
+        monkeypatch.setattr(
+            'src.gui.controllers.document.expand_config_sweeps',
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
+        preview = document.expansion_output_dirs()
+        assert preview.dirs == []
+        assert 'boom' in preview.error
 
 
 class TestLoopability:
