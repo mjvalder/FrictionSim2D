@@ -1196,6 +1196,36 @@ class TestPairSweepCommit:
         assert second.editors['pot_path']._directory_mode is True
         form.deleteLater()
 
+    def test_the_second_sheets_paths_are_greyed_while_the_sweep_writes_them(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """FINAL REVIEW: both sheets of a pair sweep share ONE structure and
+        ONE potential directory -- `_write_material_templates` builds
+        `[2D-2]`'s paths out of the folders `[2D]` holds, on every commit. A
+        live folder picker on `[2D-2]` therefore accepts a directory that the
+        next commit silently reverts, usually one triggered by an unrelated
+        keystroke. Greyed, with the reason in the control, says where the
+        choice actually lives.
+
+        `[2D]`'s own pickers must stay live -- that IS the choice -- and
+        unticking the sweep hands `[2D-2]`'s back, since without a sweep each
+        sheet names its own file again."""
+        form, editor = self._pair_form(tmp_path, monkeypatch, dirs=dirs)
+        second = form.sections['2D-2']
+
+        assert not second.editors['cif_path'].isEnabled()
+        assert not second.editors['pot_path'].isEnabled()
+        assert 'first material' in \
+            second.editors['cif_path'].edit.placeholderText()
+        assert form.sections['2D'].editors['cif_path'].isEnabled()
+
+        editor.sweep_box.setChecked(False)
+
+        assert second.editors['cif_path'].isEnabled()
+        assert second.editors['pot_path'].isEnabled()
+        assert 'first material' not in \
+            second.editors['cif_path'].edit.placeholderText()
+        form.deleteLater()
+
     def test_opening_a_pair_sweep_shows_its_pairs(self, qt_app, dirs, tmp_path,
                                                   monkeypatch):
         listing = tmp_path / 'pairs.txt'

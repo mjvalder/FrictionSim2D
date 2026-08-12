@@ -1116,17 +1116,45 @@ class SectionForm(QGroupBox):
         editor = self.editors.get('materials_list')
         return bool(hasattr(editor, 'is_sweeping') and editor.is_sweeping())
 
-    def set_material_sweep_mode(self, sweeping: bool) -> None:
+    #: Why `[2D-2]`'s folder pickers are greyed while a pair sweep is on.
+    #: Shown in the control itself, not only as a tooltip: a greyed row with
+    #: nothing on screen reads as a missing feature (see
+    #: `FieldEditor.set_disabled_hint`).
+    SHARED_DIRECTORY_HINT = ('Chosen on the first material -- both sheets of a '
+                             'pair sweep share one folder')
+
+    def set_material_sweep_mode(self, sweeping: bool,
+                                owns_directories: bool = True) -> None:
         """Folder pickers and a sweep-owned `mat`, or hand-edited ones.
 
         Applies to any sheet section whose material the sweep writes -- `[2D]`
         drives its own, and `ConfigForm` drives `[2D-2]`'s from it, because a
         pair sweep writes both sheets from one list.
+
+        `owns_directories` is False for `[2D-2]`, which does not pick its own:
+        `ConfigDocument._write_material_templates` builds *both* sheets'
+        cif_path/pot_path out of the one structure and one potential directory
+        `[2D]` holds, on every commit. A live picker there accepts a folder
+        that the next commit silently reverts -- and that commit is usually
+        fired by an unrelated keystroke, so the value disappears with no act of
+        the user's to blame it on. Greyed, with the reason in the control, is
+        the honest version: the choice is one row up, in `[2D]`.
+
+        Unticking the sweep hands the pickers back, because without one each
+        sheet names its own file again.
         """
         for key in ('cif_path', 'pot_path'):
             path_editor = self.editors.get(key)
-            if path_editor is not None and hasattr(path_editor, 'set_directory_mode'):
-                path_editor.set_directory_mode(sweeping)
+            if path_editor is None or not hasattr(path_editor, 'set_directory_mode'):
+                continue
+            path_editor.set_directory_mode(sweeping)
+            enabled = owns_directories or not sweeping
+            path_editor.setEnabled(enabled)
+            path_editor.set_disabled_hint(
+                None if enabled else self.SHARED_DIRECTORY_HINT)
+            label, _cell = self._rows.get(key, (None, None))
+            if label is not None:
+                label.setEnabled(enabled)
         mat_editor = self.editors.get('mat')
         if mat_editor is not None:
             mat_editor.setEnabled(not sweeping)
@@ -1632,7 +1660,9 @@ class ConfigForm(QWidget):
     def _on_sweep_mode_changed(self, sweeping: bool) -> None:
         second = self._second_sheet_form()
         if second is not None:
-            second.set_material_sweep_mode(sweeping)
+            # `owns_directories=False`: the sweep writes [2D-2]'s paths from
+            # the folders [2D] holds, so its own pickers would be reverted.
+            second.set_material_sweep_mode(sweeping, owns_directories=False)
 
     def _on_templates_written(self) -> None:
         second = self._second_sheet_form()

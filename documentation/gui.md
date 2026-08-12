@@ -305,6 +305,12 @@ already holds, so a curated list naming a material this machine cannot see
 (a moved share, a potential not generated yet) is shown as it is rather than
 silently rewritten to something else.
 
+Both sheets share **one** structure folder and **one** potential folder — the
+commit builds `[2D-2]`'s paths out of the folders `[2D]` holds — so while the
+sweep is on, Material 2's own Structure and Potential pickers are greyed and
+say the choice is made on the first material. Untick the sweep and they come
+back, since without one each sheet names its own file.
+
 **Removing material 2 while a pair list is configured** cannot leave the list
 alone: its `a + b` lines are unusable by a one-sheet config, and the sweep
 would silently stop sweeping. The list is collapsed to each pair's first
