@@ -387,10 +387,30 @@ The viewport controls:
 
 A component that reaches a periodic boundary is called out: it will interact
 with its own image, which is what the ≥2× tip-diameter rule exists to prevent.
-Sheet stacks are exempt, tip and flake are not. A sheet-family heterostructure
-arrives as a single component (`all_atoms`) spanning the coincidence cell — the
-cell *is* the interface's only in-plane periodicity, so touching the wall is
-what it is supposed to do and there is nothing a user could enlarge.
+The warning names the components that are *meant* to be finite — `tip` and
+`flake` — rather than exempting the ones known to span. A sheet-family
+heterostructure arrives as a single component (`all_atoms`) spanning the
+coincidence cell: the cell *is* the interface's only in-plane periodicity, so
+touching the wall is what it is supposed to do and there is nothing a user
+could enlarge. Warning about it said only that a heterostructure had been
+built.
+
+Two things follow from naming components positively, and both are deliberate:
+
+- `[general] finite_sheet` sizes the sheet as an island inside the substrate
+  box while still reading it as `group 2D`. There — and only there — a `2D`
+  touching the wall *is* the ≥2× failure, so the config adds `2D` to the list
+  for that render. Nothing in an assembled system records which geometry it
+  came from, so this is known from the config, not from the atoms.
+- A flake in the **sheet** family has no component of its own: it is inside
+  `all_atoms` with the substrate that legitimately spans. An oversized flake
+  is therefore not called out there. Separating it would mean reading the
+  builder's own per-layer placements rather than the run script.
+
+On the heterostructure AFM path the warning is quiet by construction: the
+builder replicates the coincidence cell until the footprint is at least four
+tip radii, so a centred tip cannot reach the wall. The homogeneous AFM path
+uses your `[2D] x`/`y` directly, where it can.
 
 Builds run in a separate process, so a LAMMPS failure reports an error instead
 of closing the window. Repeating a render with unchanged inputs reuses the
@@ -446,6 +466,19 @@ Two limits worth knowing:
 Relative paths in a config are resolved against the config's own directory and
 its parents, so a config written for the project root still works when opened
 from elsewhere.
+
+A section can occasionally **refuse its commit** — the form holds something the
+document will not accept, such as a pair selection that no longer matches the
+config's shape. When that happens the form and the config disagree, and what
+would be written is not what is on screen. **Save**, **Generate** and applying
+settings therefore stop rather than proceed: you get a dialog naming the
+disagreement, and the same text stays in the issues panel, which the status bar
+could not do — it is overwritten by the next message, and a saved `.ini` that
+silently disagreed with the form would be indistinguishable from a correct one.
+**Render** is the exception: it persists nothing and launches nothing, and
+looking at the geometry is often how the disagreement gets diagnosed, so there
+the refusal is reported without blocking. There is no override — a refusal has
+to be resolved in the form.
 
 Closing the window with an unsaved config or settings edit prompts
 **Save / Discard / Cancel** rather than discarding it silently. **Cancel**
