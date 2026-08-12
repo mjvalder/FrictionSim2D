@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -34,7 +34,7 @@ from ..style import CAPTION, WARNING
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['ViewportPanel', 'COLOUR_MODES', 'distinct_colour']
+__all__ = ['ViewportPanel', 'COLOUR_MODES', 'FINITE_COMPONENTS', 'distinct_colour']
 
 
 def _install_data(pipeline, data) -> None:
@@ -88,8 +88,8 @@ _ELEMENT_COLOURS = {
     'C': (0.30, 0.30, 0.30),
 }
 
-#: Components that are meant to be finite in x/y, and so are the only ones a
-#: periodic wall is a problem for.
+#: Components that are finite in x/y under the *default* geometry, and so are
+#: the ones a periodic wall is a problem for.
 #:
 #: Named positively, and that is the point. The check used to exempt the two
 #: components known to span the cell (``sub`` and ``2D``) and flag everything
@@ -102,7 +102,25 @@ _ELEMENT_COLOURS = {
 #: periodicity the interface has, so "enlarge the sheet footprint" was advice
 #: that could not be taken even in principle. Every one of those previews
 #: reported a self-interaction that was not there.
-_FINITE_COMPONENTS = ('tip', 'flake')
+#:
+#: NOT a complete list of everything that can be finite, and must not be read
+#: as one. Two known cases fall outside it:
+#:
+#: * ``[general] finite_sheet``. That AFM geometry sizes the sheet island
+#:   inside the substrate box (``builders/afm.py``) and still reads it as
+#:   ``group 2D``, so ``2D`` is genuinely finite there. `MainWindow` knows the
+#:   config and adds it via :meth:`ViewportPanel.set_finite_components`; the
+#:   default here cannot, because nothing in an `AssembledSystem` records it.
+#: * A flake in the *sheet* family. ``templates/flake/slide.lmp`` reads one
+#:   pre-assembled file, so the flake has no component of its own to warn
+#:   about -- it is inside ``all_atoms`` along with the substrate that
+#:   legitimately spans. An oversized flake is silent there.
+#:
+#: The second is not a regression (the old rule warned on 100% of those
+#: previews, which carries no information either way), but it is a real gap,
+#: and splitting it would mean reading `stack_hetero.lmp`/the flake builder's
+#: own placements rather than the run script.
+FINITE_COMPONENTS = ('tip', 'flake')
 
 
 class ViewportPanel(QWidget):
@@ -117,6 +135,11 @@ class ViewportPanel(QWidget):
         self._visibility: Dict[str, bool] = {}
         self._framed = False
         self._last_cell: object = _UNFRAMED
+        #: Which components the periodic-image check applies to. Overridable
+        #: because whether a component is finite is sometimes a property of
+        #: the *config* rather than of its name -- see `FINITE_COMPONENTS`
+        #: and `set_finite_components`.
+        self._finite_components: Tuple[str, ...] = FINITE_COMPONENTS
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -214,6 +237,23 @@ class ViewportPanel(QWidget):
             self._component_row.addWidget(box)
 
     # ----------------------------------------------------------------- state
+
+    def set_finite_components(self, names: Optional[Iterable[str]] = None) -> None:
+        """Name the components the periodic-image check applies to.
+
+        For the caller that knows the config. `[general] finite_sheet` makes
+        `2D` a finite island inside the substrate box, which no
+        `AssembledSystem` records and no component name reveals -- so without
+        this the one geometry where a sheet touching the wall IS the >=2x
+        failure would go unwarned.
+
+        `None` restores the default, which matters when the mode changes: a
+        `2D` left in the list from a previous finite_sheet config would warn
+        about every ordinary sheet from then on.
+        """
+        self._finite_components = (FINITE_COMPONENTS if names is None
+                                   else tuple(names))
+        self._update_warnings()
 
     def show_system(self, system: AssembledSystem) -> None:
         """Display an assembled system.
@@ -525,9 +565,11 @@ class ViewportPanel(QWidget):
         messages: List[str] = list(self.system.warnings)
 
         touching = [name for name, hits in self.system.touches_boundary().items() if hits]
-        # Only a component that is meant to be finite can be too big for the
-        # cell; everything else is built to span it. See _FINITE_COMPONENTS.
-        unexpected = [n for n in touching if n in _FINITE_COMPONENTS]
+        # A component built to span the cell reaching the wall says nothing;
+        # only a finite one is reporting a real self-interaction. Which of
+        # them are finite is not always readable from the name alone -- see
+        # `FINITE_COMPONENTS` for what this deliberately does not cover.
+        unexpected = [n for n in touching if n in self._finite_components]
         if unexpected:
             messages.append(
                 f"{', '.join(unexpected)} reaches the periodic boundary and will "
