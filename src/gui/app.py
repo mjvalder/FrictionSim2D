@@ -502,12 +502,23 @@ class MainWindow(QMainWindow):
         (small scans, deliberately, or values still being sized) fall in this
         range, so it is reported and not gated on.
 
+        Silent on a two-material config, where the two dimensions it reads
+        are not the footprint that gets built. `hetero_afm` replicates the
+        coincidence cell until the periodic footprint is >= `4 * tip_r`
+        (`compute_replication_factors`) whatever `[2D] x`/`y` say -- neither
+        `hetero_afm.py` nor `hetero.py` reads them -- so the warning was
+        advice about numbers the build never consults, on a geometry that
+        satisfies the rule by construction. The homogeneous AFM path does
+        build the footprint out of those two fields, and keeps warning.
+
         Its own method rather than a block inside `_validate`: it needs three
         locals of its own to read a value that may be a sweep list, and
         `_validate` had grown past the point where three more could be told
         apart from the ten it already carries.
         """
         if self.document.model not in AFM_LIKE_MODELS:
+            return []
+        if self.document.has_second_material():
             return []
 
         sheet_x = _min_numeric(self.document.get('2D', 'x'))

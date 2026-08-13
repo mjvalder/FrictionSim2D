@@ -295,6 +295,27 @@ class TestMainWindow:
         window._validate()
         assert '2× tip diameter' in window.issues.toPlainText()
 
+    def test_tip_sizing_warning_is_not_raised_for_a_heterostructure(self, window):
+        """`[2D] x`/`y` are not the built footprint on the hetero path: the
+        builder replicates the coincidence cell until it is >= 2x the tip
+        diameter (`hetero_afm.compute_replication_factors`), and neither
+        `hetero_afm.py` nor `hetero.py` reads those two fields at all. The
+        same false alarm was removed from the 3D viewport; this is the other
+        place that made the claim."""
+        window.form.sections['2D'].editors['x'].set_value(40.0)
+        window.form.sections['2D'].editors['y'].set_value(40.0)
+        window.form.sections['tip'].editors['r'].set_value(25.0)
+        window._validate()
+        # The single-material config it starts from does warn -- without this
+        # the assertion below would pass on a config that never qualified.
+        assert '2× tip diameter' in window.issues.toPlainText()
+
+        window.document.add_second_material()
+        window.form.rebuild()
+        window._validate()
+
+        assert '2× tip diameter' not in window.issues.toPlainText()
+
     def test_tip_sizing_warning_is_non_blocking(self, window):
         """The precheck must not make an otherwise-valid config invalid."""
         window.document = ConfigDocument.from_file(
