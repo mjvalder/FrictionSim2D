@@ -494,6 +494,32 @@ class MainWindow(QMainWindow):
         if text != self.counts.text():
             self.counts.setText(text)
 
+    def _tip_footprint_issues(self) -> List[str]:
+        """The tip-vs-periodic-image precheck, as issue lines.
+
+        Non-blocking: a footprint under 2x the tip diameter lets the tip
+        interact with its own periodic image, but plenty of valid setups
+        (small scans, deliberately, or values still being sized) fall in this
+        range, so it is reported and not gated on.
+
+        Its own method rather than a block inside `_validate`: it needs three
+        locals of its own to read a value that may be a sweep list, and
+        `_validate` had grown past the point where three more could be told
+        apart from the ten it already carries.
+        """
+        if self.document.model not in AFM_LIKE_MODELS:
+            return []
+
+        sheet_x = _min_numeric(self.document.get('2D', 'x'))
+        sheet_y = _min_numeric(self.document.get('2D', 'y'))
+        tip_r = _min_numeric(self.document.get('tip', 'r'))
+        if sheet_x is None or sheet_y is None or tip_r is None:
+            return []
+        if min(sheet_x, sheet_y) >= 4 * tip_r:
+            return []
+        return ["[tip] sheet footprint < 2× tip diameter; the tip will "
+                "interact with its own periodic image"]
+
     def _validate(self, enforce_required: bool = True,
                   refusals_block: bool = True) -> bool:
         """Validate and surface the result. Returns True when valid.
@@ -570,19 +596,7 @@ class MainWindow(QMainWindow):
             lines += [n for n in expansion.notes
                      if n.startswith('[2D] materials_list')]
 
-        if self.document.model in AFM_LIKE_MODELS:
-            # Non-blocking: a footprint under 2x the tip diameter lets the
-            # tip interact with its own periodic image, but plenty of valid
-            # setups (small scans, deliberately, or values still being
-            # sized) fall in this range, so it is reported and not gated on.
-            sheet_x = _min_numeric(self.document.get('2D', 'x'))
-            sheet_y = _min_numeric(self.document.get('2D', 'y'))
-            tip_r = _min_numeric(self.document.get('tip', 'r'))
-            if sheet_x is not None and sheet_y is not None and tip_r is not None \
-                    and min(sheet_x, sheet_y) < 4 * tip_r:
-                lines.append(
-                    "[tip] sheet footprint < 2× tip diameter; the tip will "
-                    "interact with its own periodic image")
+        lines += self._tip_footprint_issues()
 
         # Non-blocking by construction: each of these builds and runs, it just
         # does not do what it looks like it does (see `ConfigDocument.conflicts`),
