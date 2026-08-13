@@ -247,9 +247,15 @@ class ViewportPanel(QWidget):
         this the one geometry where a sheet touching the wall IS the >=2x
         failure would go unwarned.
 
-        `None` restores the default, which matters when the mode changes: a
-        `2D` left in the list from a previous finite_sheet config would warn
-        about every ordinary sheet from then on.
+        `None` restores the default. Nothing in the window passes it today --
+        `MainWindow._on_preview_ready` recomputes the whole list from the
+        config on every render, so a `2D` added for a finite_sheet config is
+        already gone the next time a plain one is previewed. It is kept as
+        the widget's own way back to `FINITE_COMPONENTS`: this panel owns
+        that default, and a caller undoing an override should not have to
+        import the constant to restore what it never chose. Restoring it is
+        deliberately not the same as emptying the list -- both silence `2D`,
+        only one leaves the check working -- which is what the test pins.
         """
         self._finite_components = (FINITE_COMPONENTS if names is None
                                    else tuple(names))

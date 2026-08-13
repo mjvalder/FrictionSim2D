@@ -540,6 +540,14 @@ class ConfigDocument:
         switch, because every mode builds a heterostructure. Pass
         ``drop_second`` to discard it deliberately.
 
+        ``drop_second`` has no caller in the GUI, and cannot get one while
+        every mode supports a heterostructure -- the mode combo has no reason
+        to throw a material away. It is kept because it is the far side of
+        the refusal below: a mode that could not build one would make
+        `set_model` raise rather than lose a material silently, and this is
+        the argument that says "yes, drop it" instead. Deleting it would
+        leave that refusal with no documented way past it.
+
         Raises:
             DocumentError: If the target model is unknown, or (see
                 `hetero_support_error` -- currently unreachable) has no
