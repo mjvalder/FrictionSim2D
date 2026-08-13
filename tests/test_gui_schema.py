@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from src.core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
+from src.gui.schema import introspect
 from src.gui.schema.introspect import (
     EXCLUDED_ROOT_FIELDS,
     FieldKind,
@@ -191,6 +192,51 @@ class TestIntrospectionCoverage:
         model_fields -- a key the model does not declare cannot be edited."""
         sheet = {s.key: s for s in describe_model(model)}['2D']
         assert 'materials_list' in sheet.field_map()
+
+
+class TestIntrospectionIsCached:
+    """`ConfigDocument.conflicts()` runs on every Render and every Generate,
+    and reaches a field default through `section()` -> `sections()` ->
+    `describe_model`. Walking every pydantic model of the config on each of
+    those is work whose answer cannot change between two calls."""
+
+    def test_a_model_is_walked_once(self, monkeypatch):
+        describe_model.cache_clear()
+        calls = []
+        original = introspect.describe_section
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(introspect, 'describe_section', counting)
+
+        first = len(describe_model(AFMSimulationConfig)), len(calls)
+        for _ in range(5):
+            describe_model(AFMSimulationConfig)
+
+        assert first[1] > 0, 'the first walk described no sections at all'
+        assert len(calls) == first[1], 'the model was re-walked on a repeat call'
+
+    def test_each_model_is_described_separately(self):
+        """The cache is keyed on the model class, and the two families have
+        different ones -- a switch between them must not serve the sections of
+        the model the user just left."""
+        describe_model.cache_clear()
+        afm = [s.key for s in describe_model(AFMSimulationConfig)]
+        sheet = [s.key for s in describe_model(SheetOnSheetSimulationConfig)]
+        assert 'tip' in afm and 'tip' not in sheet
+
+    def test_callers_cannot_edit_each_others_sections(self):
+        """`ConfigDocument.second_material_spec` drops a field from the list it
+        is handed, and the form sorts what it gets. Handing every caller the
+        one cached object would let one of them edit the schema underneath the
+        others -- so each call gets its own list."""
+        first = {s.key: s for s in describe_model(AFMSimulationConfig)}['2D']
+        first.fields = [f for f in first.fields if f.key != 'materials_list']
+
+        second = {s.key: s for s in describe_model(AFMSimulationConfig)}['2D']
+        assert 'materials_list' in second.field_map()
 
 
 class TestSectionStructure:
