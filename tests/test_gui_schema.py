@@ -18,7 +18,7 @@ from src.gui.schema.introspect import (
     describe_model,
     describe_section,
 )
-from src.gui.schema.overrides import overrides_for, section_override
+from src.gui.schema.overrides import SectionOverride, overrides_for, section_override
 from src.gui.schema.simulation_types import (
     FAMILIES,
     MODES,
@@ -119,8 +119,23 @@ class TestSectionOrder:
     @pytest.mark.parametrize('model', ALL_MODELS)
     def test_no_two_sections_claim_the_same_slot(self, model):
         """`ConfigDocument.sections()` sorts on this number alone, so a
-        collision leaves the order of the two colliding sections undefined."""
-        orders = [s.order for key, s in overrides_for(model).items() if key != '2D-2']
+        collision leaves the order of the two colliding sections undefined.
+
+        The exempt section is identified by its *order*, not by its key:
+        `2D-2` declares none because the form positions it directly after
+        `[2D]` and nothing ever sorts it, and excluding it by name would hand
+        the same silence to any future section that forgot to declare one.
+        Its being the only such section is asserted rather than assumed --
+        two undeclared orders are themselves a collision, with nothing left
+        to decide which of the two comes first.
+        """
+        default_order = SectionOverride().order
+        undeclared = sorted(key for key, s in overrides_for(model).items()
+                            if s.order == default_order)
+        assert undeclared == ['2D-2']
+
+        orders = [s.order for s in overrides_for(model).values()
+                  if s.order != default_order]
         assert len(set(orders)) == len(orders)
 
 
