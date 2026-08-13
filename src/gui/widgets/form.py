@@ -116,14 +116,14 @@ __all__ = ['SectionForm', 'ConfigForm']
 
 def _label_for(spec: FieldSpec, override: Optional[SectionOverride]) -> str:
     """Display label for a field: the override's, else a tidied field name."""
-    field_override = override.fields.get(spec.key) if override else None
-    if field_override and field_override.label:
-        label = field_override.label
+    key_override = override.fields.get(spec.key) if override else None
+    if key_override and key_override.label:
+        label = key_override.label
     else:
         label = spec.key.replace('_', ' ').strip().capitalize()
 
-    if field_override and field_override.unit:
-        label = f"{label} ({field_override.unit})"
+    if key_override and key_override.unit:
+        label = f"{label} ({key_override.unit})"
     return label
 
 
@@ -132,8 +132,8 @@ def _ordered_fields(section: SectionSpec,
                     hidden: Tuple[str, ...] = ()) -> List[FieldSpec]:
     """Fields in display order, minus any this model's templates never read."""
     def key(spec: FieldSpec):
-        field_override = override.fields.get(spec.key) if override else None
-        return (field_override.order if field_override else 100, spec.key)
+        key_override = override.fields.get(spec.key) if override else None
+        return (key_override.order if key_override else 100, spec.key)
 
     visible = [f for f in section.fields if f.key not in hidden]
     return sorted(visible, key=key)
@@ -443,13 +443,13 @@ class SectionForm(QGroupBox):
             self._add_nested_row(spec)
             return
 
-        field_override = self.override.fields.get(spec.key) if self.override else None
+        key_override = self.override.fields.get(spec.key) if self.override else None
 
         editor = build_editor(
             spec, self,
-            choices=(field_override.choices if field_override else None),
-            editor=(field_override.editor if field_override else None),
-            choice_labels=(field_override.choice_labels if field_override else None))
+            choices=(key_override.choices if key_override else None),
+            editor=(key_override.editor if key_override else None),
+            choice_labels=(key_override.choice_labels if key_override else None))
         editor.changed.connect(self._on_field_changed)
         self.editors[spec.key] = editor
 
@@ -461,11 +461,11 @@ class SectionForm(QGroupBox):
         if required:
             label.setToolTip('Required')
 
-        help_text = field_override.help if field_override else None
-        detail_text = field_override.detail if field_override else None
+        help_text = key_override.help if key_override else None
+        detail_text = key_override.detail if key_override else None
         hint = loopability_hint(self.document, self.section.key, spec.key)
         tooltip_text = _compose_tooltip(help_text, detail_text, spec.doc, hint, spec.default)
-        enable_hint = field_override.enable_hint if field_override else None
+        enable_hint = key_override.enable_hint if key_override else None
 
         cell = QWidget(self)
         cell_layout = QHBoxLayout(cell)
@@ -494,8 +494,8 @@ class SectionForm(QGroupBox):
             # to report -- would otherwise blank it right back out.
             editor.set_base_tooltip(tooltip_text)
 
-        if field_override and field_override.gate:
-            self._gate_first_row.setdefault(field_override.gate, self.form.rowCount())
+        if key_override and key_override.gate:
+            self._gate_first_row.setdefault(key_override.gate, self.form.rowCount())
 
         self._rows[spec.key] = (label, cell)
         self.form.addRow(label, cell)
@@ -785,10 +785,10 @@ class SectionForm(QGroupBox):
         """Whether `key`'s row is currently visible, i.e. not hidden behind
         an unticked gate checkbox. A field with no gate (the common case) is
         always open."""
-        field_override = self.override.fields.get(key) if self.override else None
-        if not field_override or not field_override.gate:
+        key_override = self.override.fields.get(key) if self.override else None
+        if not key_override or not key_override.gate:
             return True
-        box = self._gate_boxes.get(field_override.gate)
+        box = self._gate_boxes.get(key_override.gate)
         return box is None or box.isChecked()
 
     def _prefill_required(self) -> None:
@@ -883,9 +883,9 @@ class SectionForm(QGroupBox):
             if is_material_section and key == 'materials_list':
                 continue
 
-            field_override = self.override.fields.get(key) if self.override else None
-            if field_override and field_override.gate:
-                gate_box = self._gate_boxes.get(field_override.gate)
+            key_override = self.override.fields.get(key) if self.override else None
+            if key_override and key_override.gate:
+                gate_box = self._gate_boxes.get(key_override.gate)
                 if gate_box is not None and not gate_box.isChecked():
                     # The gate is off: this key must not survive in the
                     # document, or a value typed before unticking (or one
@@ -1333,11 +1333,11 @@ class SectionForm(QGroupBox):
             return
 
         for key, editor in self.editors.items():
-            field_override = self.override.fields.get(key)
-            if not field_override or not field_override.enable_if:
+            key_override = self.override.fields.get(key)
+            if not key_override or not key_override.enable_if:
                 continue
 
-            other_key, expected = field_override.enable_if
+            other_key, expected = key_override.enable_if
             other = self.editors.get(other_key)
             value = other.value() if other else self.document.get(
                 self.section.key, other_key)
@@ -1356,19 +1356,19 @@ class SectionForm(QGroupBox):
             if label is not None:
                 label.setEnabled(enabled)
             bubble = self._bubbles.get(key)
-            if bubble is not None and field_override.enable_hint:
+            if bubble is not None and key_override.enable_hint:
                 # The composed tooltip carries the loopability hint, which the
                 # override alone does not -- recomputing from `help` drops it.
                 bubble.setToolTip(
-                    field_override.enable_hint if not enabled
+                    key_override.enable_hint if not enabled
                     else self._composed_tooltips.get(key, ''))
 
             # A greyed row with no on-screen explanation reads as a missing
             # feature (only the ⓘ bubble said why, and nothing prompts anyone
             # to hover it). Put the same reason in the control itself.
-            if field_override.enable_hint:
+            if key_override.enable_hint:
                 editor.set_disabled_hint(
-                    None if enabled else field_override.enable_hint)
+                    None if enabled else key_override.enable_hint)
 
     def _load_gates(self) -> None:
         """Tick each gate iff a field it guards actually differs from its
@@ -1415,8 +1415,8 @@ class SectionForm(QGroupBox):
             return
         for gate_key, checkbox in self._gate_boxes.items():
             on = checkbox.isChecked()
-            for key, field_override in self.override.fields.items():
-                if field_override.gate != gate_key:
+            for key, key_override in self.override.fields.items():
+                if key_override.gate != gate_key:
                     continue
                 label, _cell = self._rows.get(key, (None, None))
                 if label is None:
@@ -1810,7 +1810,7 @@ class ConfigForm(QWidget):
                 if self.document.get(section_key, key) not in (None, '', []):
                     continue
                 label = _label_for(spec, form.override)
-                field_override = form.override.fields.get(key) if form.override else None
-                blocks = field_override.required_blocks if field_override else True
+                key_override = form.override.fields.get(key) if form.override else None
+                blocks = key_override.required_blocks if key_override else True
                 missing.append((section_key, key, label, blocks))
         return missing
