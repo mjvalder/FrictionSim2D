@@ -1426,6 +1426,90 @@ class TestPairSweepCommit:
             f'a commit refusal opened a blocking dialog: {dialogs}'
         form.deleteLater()
 
+    @staticmethod
+    def _read_only(path):
+        """`path`, unwritable, restored however the test leaves."""
+        import contextlib  # noqa: PLC0415
+
+        @contextlib.contextmanager
+        def guard():
+            path.chmod(0o500)
+            try:
+                yield
+            finally:
+                path.chmod(0o700)
+        return guard()
+
+    def test_a_write_the_filesystem_refuses_is_reported_not_thrown(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """The material list is the one part of an edit that reaches disk while
+        it is being made, so it is the one part the filesystem can refuse --
+        a read-only config directory, a share that dropped, a full disk.
+        `write_material_names` raises OSError, and neither slot that commits
+        caught anything but `DocumentError`: the tick printed a traceback to
+        stderr from inside a Qt slot and the user saw nothing at all.
+
+        A read-only *directory*, deliberately: the write goes to a sibling
+        temp file and is renamed into place (`_write_atomically`), so it needs
+        permission to create a file in the directory, where the in-place
+        truncation it replaced only needed the list file itself writable.
+        """
+        if os.geteuid() == 0:
+            pytest.skip('root writes through the directory mode this relies on')
+
+        form, _editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        announced = []
+        form.refused.connect(announced.append)
+
+        with self._read_only(tmp_path):
+            # The per-keystroke slot: this is the one where the refusal was
+            # completely invisible, since nothing downstream of it reports.
+            form.sections['2D']._on_field_changed()
+            assert announced, 'a refused write said nothing at all'
+
+            # And the path Render, Generate and Save take, whose refusals the
+            # window folds into the issues panel.
+            form.commit()
+
+        assert any('material list' in text for text in form.refusals())
+        assert any('directory' in text for text in form.refusals()), \
+            'the message does not say which permission is missing'
+        assert not (tmp_path / 'c_materials.txt').exists()
+        form.deleteLater()
+
+    def test_a_refused_write_does_not_block_on_a_modal(
+            self, qt_app, dirs, tmp_path, monkeypatch):
+        """Same rule as a refused commit: `_on_field_changed` runs on ordinary
+        edits, so a dialog here interrupts typing and hangs any offscreen
+        driver of `commit()` that has no event loop to dismiss it."""
+        if os.geteuid() == 0:
+            pytest.skip('root writes through the directory mode this relies on')
+
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+
+        dialogs = []
+        for name, answer in (('warning', QMessageBox.Ok),
+                             ('critical', QMessageBox.Ok),
+                             ('information', QMessageBox.Ok),
+                             ('question', QMessageBox.No)):
+            monkeypatch.setattr(
+                QMessageBox, name,
+                lambda *a, _n=name, _r=answer, **k: (dialogs.append(_n), _r)[1])
+
+        form, _editor = self._pair_form(
+            tmp_path, monkeypatch, dirs=dirs, pairs=[('h-MoS2', 't-MoS2')])
+        announced = []
+        form.refused.connect(announced.append)
+
+        with self._read_only(tmp_path):
+            form.sections['2D']._on_field_changed()
+            form.commit()
+
+        assert announced, 'the refused write was not reported at all'
+        assert dialogs == [], f'a refused write opened a blocking dialog: {dialogs}'
+        form.deleteLater()
+
     def test_a_widget_and_document_that_disagree_are_refused(
             self, qt_app, dirs, tmp_path, monkeypatch):
         """FIX ROUND 1: what `pair_mode=` is for. The commit states the mode

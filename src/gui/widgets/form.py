@@ -127,6 +127,35 @@ def _label_for(spec: FieldSpec, override: Optional[SectionOverride]) -> str:
     return label
 
 
+def _refusal_line(section_key: str, exc: Exception) -> str:
+    """One section's refusal, ready to show, whichever layer refused it.
+
+    Two things can refuse a commit and both are the user's to see:
+
+    * `DocumentError` -- the document cannot represent what the form is
+      holding. Its message is already a sentence written for the user.
+    * `OSError` -- the material list is the one part of an edit that reaches
+      disk as it is made (`ConfigDocument.write_material_names`), so it is
+      the one part the filesystem can refuse: a read-only config directory,
+      a share that dropped, a full disk. It arrives as an errno, which says
+      nothing about what the user was doing, so it is given a sentence here.
+
+    The directory permission is worth naming. The list is written to a
+    sibling temp file and renamed into place (`_write_atomically`), so the
+    write now needs permission to create a file *in the directory* -- the
+    in-place truncation it replaced only needed the list file writable, and
+    "but the file is writable" is otherwise a fair objection.
+    """
+    if isinstance(exc, DocumentError):
+        return f"[{section_key}] {exc}"
+    return (
+        f"[{section_key}] the material list could not be written ({exc}). "
+        "The sweep on screen is not saved anywhere. The list goes next to "
+        "the config as a temporary file that is then renamed into place, so "
+        "the config's directory has to be writable, not only the list file."
+    )
+
+
 def _ordered_fields(section: SectionSpec,
                     override: Optional[SectionOverride],
                     hidden: Tuple[str, ...] = ()) -> List[FieldSpec]:
@@ -1058,6 +1087,13 @@ class SectionForm(QGroupBox):
     def _warn_material_list_not_written(self) -> None:
         """Tell the user why a ticked selection did not reach disk.
 
+        This is the *declined* write -- nowhere legitimate to put the list --
+        which `write_material_names` reports by returning None. Its sibling is
+        the write that was attempted and refused by the filesystem, which
+        raises `OSError` instead; that one is reported through `refused` (see
+        `_refusal_line`), not through a dialog, because it can arrive on the
+        per-keystroke path where a modal cannot.
+
         Local import, like `MaterialListEditor._browse_list`'s QFileDialog:
         this module already depends on Qt throughout, so pulling the dialog
         class in here rather than routing a message through a new signal
@@ -1436,7 +1472,7 @@ class SectionForm(QGroupBox):
             return
         try:
             self.commit()
-        except DocumentError as exc:
+        except (DocumentError, OSError) as exc:
             # A refusal has to be said out loud. This is a Qt slot: an
             # exception out of here is printed to stderr by the signal
             # machinery (app.py installs no excepthook) and the edit silently
@@ -1444,12 +1480,17 @@ class SectionForm(QGroupBox):
             # GUI that ignored them. `commit()` itself keeps raising, so the
             # document's contract stays as loud as it was.
             #
+            # `OSError` for the same reason and by the same route: committing
+            # a sweep writes the material list to disk, so a read-only config
+            # directory refuses the edit here, in a slot, where the traceback
+            # goes to a terminal nobody is reading.
+            #
             # Reported through a signal and NOT a modal, unlike the collapse
             # confirmation, which genuinely needs a blocking yes/no. This slot
             # runs on ordinary field edits: a dialog here interrupts typing,
             # and -- with no event loop to dismiss it -- turns any future
             # regression on this path into a hang instead of a test failure.
-            self.refused.emit(f"[{self.section.key}] {exc}")
+            self.refused.emit(_refusal_line(self.section.key, exc))
             return
         self._apply_dependencies()
         if self.is_collapsed():
@@ -1760,6 +1801,11 @@ class ConfigForm(QWidget):
         `DocumentError` escaping here is a stderr traceback and a button that
         appears to have done nothing.
 
+        `OSError` travels the same way and for the same reason: committing a
+        material sweep writes the list to disk, and a config directory the
+        user cannot write refuses it. Left uncaught it crashed out of those
+        three slots rather than merely doing nothing.
+
         Reported, not shown: this used to raise a modal per failing section,
         which meant a config refusing in two sections put two dialogs in front
         of one mistake, and -- since Render, Generate and Save all come
@@ -1770,8 +1816,8 @@ class ConfigForm(QWidget):
         """
         try:
             form.commit()
-        except DocumentError as exc:
-            self._record_refusal(f"[{form.section.key}] {exc}")
+        except (DocumentError, OSError) as exc:
+            self._record_refusal(_refusal_line(form.section.key, exc))
 
     def load(self) -> None:
         for form in self.sections.values():
