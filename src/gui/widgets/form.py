@@ -38,7 +38,7 @@ from ..schema.overrides import (
     SectionOverride,
     field_override,
     hidden_fields,
-    overrides_for,
+    override_for_section,
 )
 from .fields import FieldEditor, build_editor
 from .pairs import PairOverrideEditor
@@ -172,8 +172,9 @@ class SectionForm(QGroupBox):
     def __init__(self, section: SectionSpec, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
                  settings: Optional[object] = None) -> None:
-        overrides = overrides_for(document.model)
-        self.override = overrides.get(section.key)
+        # The same resolution `ConfigDocument.comments()` uses to write this
+        # text back into the file -- one rule, so the two cannot drift.
+        self.override = override_for_section(document.model, section.key)
         title = (self.override.label if self.override and self.override.label
                  else _prettify(section.key))
 

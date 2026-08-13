@@ -38,7 +38,7 @@ from ...core.run import (
 )
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..schema.introspect import SectionSpec, describe_model, describe_section
-from ..schema.overrides import overrides_for
+from ..schema.overrides import override_for_section, overrides_for
 from ..schema.simulation_types import MODES, sections_for
 from .materials import STRUCTURE_EXTENSION
 
@@ -1070,14 +1070,15 @@ class ConfigDocument:
         readable as a hand-written one.
 
         Keyed by the *written* section names, so the two sheets of a pair are
-        annotated as `[2D-1]` and `[2D-2]`. Both read the `[2D]` overrides:
-        they are the same model, and without that a pair config would come
-        out with every unit and help line stripped.
+        annotated as `[2D-1]` and `[2D-2]`. Which override entry each of
+        those reads is `override_for_section`'s single answer, shared with
+        the form -- the two used to decide it separately, so text added to
+        the second sheet's entry alone would have appeared on screen and
+        never in the file.
         """
         out: Dict[str, Dict[str, str]] = {}
-        overrides = overrides_for(self.model)
         for section_key, values in self.normalised_values().items():
-            section_override = overrides.get(self._override_key(section_key))
+            section_override = override_for_section(self.model, section_key)
             if not section_override:
                 continue
             annotations = {}
@@ -1095,16 +1096,6 @@ class ConfigDocument:
             if annotations:
                 out[section_key] = annotations
         return out
-
-    @staticmethod
-    def _override_key(section_key: str) -> str:
-        """The override table entry a section reads its labels from.
-
-        Every numbered sheet section is a sheet, so they all share `[2D]`'s
-        entry -- mirroring `core.run.loopability_section`, which folds them
-        the same way for the same reason.
-        """
-        return '2D' if _NUMBERED_SHEET.match(section_key) else section_key
 
     def save(self, path: Optional[Union[str, Path]] = None) -> Path:
         """Write the config, defaulting to where it was loaded from.

@@ -13,6 +13,7 @@ corrected; do not take a unit from an example comment.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from typing import Dict, Optional, Tuple
 
@@ -20,8 +21,12 @@ from .simulation_types import MODES
 
 __all__ = [
     'FieldOverride', 'SectionOverride', 'overrides_for', 'section_override',
-    'ENABLED', 'SET', 'field_override', 'CAPTION_BUDGET',
+    'override_for_section', 'ENABLED', 'SET', 'field_override',
+    'CAPTION_BUDGET',
 ]
+
+#: A numbered sheet section as it is written to disk: ``[2D-1]``, ``[2D-2]``.
+_NUMBERED_SHEET = re.compile(r'^2D-\d+$')
 
 #: Sentinel for ``enable_if``: the other field just has to hold a truthy value.
 #: Wrong for a field whose valid range includes a falsy-but-meaningful value
@@ -501,6 +506,32 @@ _SETTINGS: Dict[str, SectionOverride] = {
 def section_override(section_key: str) -> SectionOverride:
     """Display metadata for a section, empty if none is declared."""
     return _COMMON.get(section_key, SectionOverride())
+
+
+def override_for_section(model: str, section_key: str) -> Optional[SectionOverride]:
+    """The override entry a section takes its labels, units and help from.
+
+    The one rule, for both readers: `widgets.form.SectionForm`, which puts
+    that text on screen, and `ConfigDocument.comments()`, which writes the
+    same text back into the saved `.ini`. A section with an entry of its own
+    uses it -- `[2D-2]` has one, because its field list differs (no
+    `materials_list`: one list names both materials of every pair) -- and
+    every other numbered sheet folds onto `[2D]`, since `[2D-1]` *is* the
+    first sheet under its written name. `core.run.loopability_section` folds
+    them the same way for the same reason.
+
+    The two readers used to resolve this separately: the form looked the key
+    up directly, `comments()` folded every numbered sheet onto `[2D]`. They
+    agreed only because the two entries happen to carry the same text -- an
+    override added to `[2D-2]` alone would have rendered on screen and been
+    silently dropped from the file.
+    """
+    table = overrides_for(model)
+    if section_key in table:
+        return table[section_key]
+    if _NUMBERED_SHEET.match(section_key):
+        return table.get('2D')
+    return None
 
 
 def field_override(model: str, section: str, key: str) -> Optional[FieldOverride]:

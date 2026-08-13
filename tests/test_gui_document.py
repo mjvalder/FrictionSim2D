@@ -218,6 +218,57 @@ class TestSecondMaterial:
         assert '2D' not in annotations
         assert annotations['2D-2'] == annotations['2D-1']
 
+    def test_the_second_sheets_own_override_annotates_it(self, monkeypatch):
+        """One rule, two readers. The form reads `[2D-2]`'s own override entry
+        and `comments()` used to fold `2D-2` onto `[2D]` instead; identical
+        today only because the two entries carry the same text. An override
+        added to the second sheet alone rendered on screen and was dropped on
+        the way to the file."""
+        from dataclasses import replace  # noqa: PLC0415
+        from src.gui.schema import overrides as overrides_module  # noqa: PLC0415
+
+        second = overrides_module._COMMON['2D-2']
+        monkeypatch.setitem(
+            overrides_module._COMMON, '2D-2',
+            replace(second, fields={
+                **second.fields,
+                'mat': replace(second.fields['mat'],
+                               help='the second material of the pair'),
+            }))
+
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        annotations = document.comments()
+
+        assert 'the second material of the pair' in annotations['2D-2']['mat']
+        assert 'the second material of the pair' not in annotations['2D-1']['mat']
+
+    def test_the_second_sheet_is_not_annotated_as_carrying_the_sweep_list(self, monkeypatch):
+        """The other half of the same rule. `materials_list` is in `[2D]`'s
+        override and deliberately not in `[2D-2]`'s -- one list names both
+        materials of every pair -- so a hand-written one in the second section
+        must not be commented as though the form offered it there."""
+        from dataclasses import replace  # noqa: PLC0415
+        from src.gui.schema import overrides as overrides_module  # noqa: PLC0415
+
+        first = overrides_module._COMMON['2D']
+        monkeypatch.setitem(
+            overrides_module._COMMON, '2D',
+            replace(first, fields={
+                **first.fields,
+                'materials_list': replace(first.fields['materials_list'],
+                                          help='one line per material'),
+            }))
+
+        document = ConfigDocument.blank('sheetonsheet')
+        document.add_second_material()
+        document.set('2D', 'materials_list', 'pairs.txt')
+        document.set('2D-2', 'materials_list', 'pairs.txt')
+        annotations = document.comments()
+
+        assert 'one line per material' in annotations['2D-1']['materials_list']
+        assert 'materials_list' not in annotations['2D-2']
+
     def test_to_dict_carries_the_numbered_sections(self):
         document = ConfigDocument.blank('sheetonsheet')
         document.add_second_material()
