@@ -1,4 +1,5 @@
 # LAMMPS input script for AFM Sliding Simulation
+{% import 'common/observables.lmp' as obs %}
 
 {% if scan_speed_config is iterable and scan_speed_config is not string %}
 variable        speed index {{ scan_speed_config | join(' ') }}
@@ -87,6 +88,7 @@ variable        comx_tip equal c_COM_tip[1]
 variable        comy_tip equal c_COM_tip[2]
 variable        comz_tip equal c_COM_tip[3]
 
+{{ obs.emit_observables(obs_ctx) }}
 run             0
 
 variable        Ftotal equal -v_find/{{ ev_a_to_nn }}
@@ -98,7 +100,7 @@ variable        fz_tip equal f_forcetip[3]*{{ ev_a_to_nn }}
 variable        fx_spr equal f_spr[1]*{{ ev_a_to_nn }}
 variable        fy_spr equal f_spr[2]*{{ ev_a_to_nn }}
 
-fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file {{ results_file_pattern }}
+{{ obs.emit_output_fixes(obs_ctx) }}
 
 {% if damp_ev is not none %}
 fix             damp {{ tip_fix_group }} viscous {{ damp_ev }}

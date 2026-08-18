@@ -858,10 +858,12 @@ class PotentialManager:
         return "\n".join(lines)
 
     def get_layer_groups_string(self) -> str:
-        """Generate LAMMPS group commands for multi-layer components only.
+        """Generate LAMMPS group commands for the sheet's layer groups.
 
-        Only outputs layer groups for components with n_layers > 1.
-        Single-layer components define their groups in the main LAMMPS script.
+        Emitted for EVERY layer count, including monolayers: the observable
+        registry's layer-resolved COM channels (comx_L1, ...) reference
+        ``layer_1`` unconditionally, so a monolayer must still define it
+        (spec §5 F1; a monolayer's comz_L1 must equal comz exactly).
 
         Returns:
             String with group commands like:
@@ -873,11 +875,15 @@ class PotentialManager:
             name = comp['name']
             n_layers = comp['n_layers']
 
-            if n_layers > 1:
-                for layer in range(n_layers):
-                    types = self.types.get_layer_group_string(name, layer)
-                    if types:
-                        lines.append(f"group layer_{layer+1} type {types}")
+            for layer in range(n_layers):
+                types = self.types.get_layer_group_string(name, layer)
+                if not types and n_layers == 1:
+                    # monolayer whose types carry no per-layer tag: layer_1
+                    # is the whole component
+                    all_ids = self.types.ids_by_component(name)
+                    types = ' '.join(map(str, all_ids))
+                if types:
+                    lines.append(f"group layer_{layer+1} type {types}")
 
         return "\n".join(lines)
 
@@ -924,11 +930,16 @@ class PotentialManager:
                     types_str = ' '.join(map(str, edge_types))
                     lines.append(f"group 2D_edge type {types_str}")
 
-                if n_layers > 1:
-                    for layer in range(n_layers):
-                        layer_types = self.types.get_layer_group_string(name, layer)
-                        if layer_types:
-                            lines.append(f"group layer_{layer+1} type {layer_types}")
+                # Layer groups for EVERY layer count, monolayers included:
+                # the registry's comx_L1... channels reference layer_1
+                # unconditionally (spec §5 F1). A monolayer whose types carry
+                # no per-layer tag falls back to the whole sheet.
+                for layer in range(n_layers):
+                    layer_types = self.types.get_layer_group_string(name, layer)
+                    if not layer_types and n_layers == 1 and all_types:
+                        layer_types = ' '.join(map(str, all_types))
+                    if layer_types:
+                        lines.append(f"group layer_{layer+1} type {layer_types}")
 
             elif use_langevin and name in ('tip', 'sub'):
                 # Langevin components: split into all, fix, thermo

@@ -18,6 +18,11 @@ from . import components
 
 logger = logging.getLogger(__name__)
 
+# Contact-cutoff rule (spec §5 F3): K_CONTACT * max UFF sigma over the
+# tip-sheet element pairs, recorded in provenance with its source.
+K_CONTACT = 1.5
+_CONTACT_CUTOFF_FALLBACK = 5.0  # Angstrom; used only when the CIF is unreadable
+
 
 class AFMSimulation(SimulationBase):
     """Builder for AFM simulations (Tip + Sheet + Substrate).
@@ -692,7 +697,97 @@ class AFMSimulation(SimulationBase):
             'seed_thermal_sub': self._derived_seed(n_layers, 'thermal_sub'),
         }
         context.update(flake_ctx)
+        context['obs_ctx'] = self._build_obs_ctx(
+            n_layers, context['results_file_pattern'],
+            use_langevin=context['use_langevin'])
         return context
+
+    def _build_obs_ctx(self, n_layers: int, results_file_pattern: str,
+                       use_langevin: bool) -> Dict[str, object]:
+        """Assemble the observable-registry context for the macro library.
+
+        A single dict passed under the ``obs_ctx`` key — the macros receive it
+        explicitly (the Jinja env has no StrictUndefined, so a missing key
+        would silently render empty; the contract test's varlist assertions
+        are the guard). Thermostat-work channels are filtered out for
+        non-Langevin runs: their f_lang_* references would not exist.
+        """
+        from ..core.observables import channels_for, layer_channels
+
+        static_layer_names = {f'com{ax}_L{lyr}'
+                              for lyr in (1, 2) for ax in ('x', 'y', 'z')}
+        win = [ob for ob in channels_for('afm', 'window')
+               if ob.name not in static_layer_names]
+        win += [ob for ob in layer_channels(n_layers) if ob.tier == 'window']
+        if not use_langevin:
+            win = [ob for ob in win if not ob.name.startswith('w_thermostat')]
+        pa = [ob for ob in channels_for('afm', 'peratom')
+              if ob.stream == 'results']
+
+        def native(ob):
+            return ob.rename_to or f'v_{ob.name}'
+
+        contact_cutoff = round(self._contact_cutoff(), 4)
+
+        # Dedupe compute lines: sibling channels (comx/comy/comz_L1) share one
+        # compute; emitting it per channel would redefine it. Order-preserving.
+        compute_lines: list = []
+        variable_lines: list = []
+        for ob in [*win, *pa]:
+            if ob.lammps_compute:
+                line = ob.lammps_compute.replace(
+                    '{contact_cutoff}', str(contact_cutoff))
+                if line not in compute_lines:
+                    compute_lines.append(line)
+            if ob.lammps_variable:
+                variable_lines.append(ob.lammps_variable)
+
+        return {
+            'compute_lines': compute_lines,
+            'variable_lines': variable_lines,
+            'window_varlist': ' '.join(native(ob) for ob in win),
+            'raw_varlist': ('v_fx_spr v_fy_spr v_fz_tip '
+                            'v_comx_tip v_comy_tip v_comz_tip'),
+            'peratom_varlist': ' '.join(native(ob) for ob in pa),
+            'contact_cutoff': contact_cutoff,
+            'results_file_pattern': results_file_pattern,
+            'results_file_raw':
+                results_file_pattern.replace('friction_', 'raw_'),
+            'results_file_peratom':
+                results_file_pattern.replace('friction_', 'peratom_'),
+        }
+
+    def _contact_cutoff(self) -> float:
+        """Per-material contact cutoff from the tip-sheet UFF LJ sigma.
+
+        The SW potential does not act between tip and sheet — the cross
+        coupling is lj/cut with UFF element parameters — so the contact
+        criterion is K_CONTACT * max(sigma_ij) over the Si-(sheet element)
+        pairs (spec §5 F3). A fixed absolute cutoff would conflate "more atoms
+        in contact" with "larger atoms". Capped below the pair cutoff (LAMMPS
+        errors if coord/atom's cutoff exceeds it). Falls back to a documented
+        default when the sheet elements cannot be read (dummy-CIF test
+        configs); provenance records which route was taken.
+        """
+        from itertools import product
+        from ..core.utils import lj_params, cifread
+
+        lj_cut = getattr(self.config.settings.potential, 'lj_cutoff', 11.0)
+        try:
+            sheet_els = cifread(self.config.sheet.cif_path)['elements']
+            tip_els = [self.config.tip.mat]
+            sigma_max = max(lj_params(a, b)[1]
+                            for a, b in product(tip_els, sheet_els))
+            self._contact_cutoff_source = f'uff_sigma_k{K_CONTACT}'
+            cut = K_CONTACT * sigma_max
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                "Contact cutoff fallback: could not derive UFF sigma for "
+                "sheet '%s'; using %.1f A.",
+                self.config.sheet.mat, _CONTACT_CUTOFF_FALLBACK)
+            self._contact_cutoff_source = 'fallback_default'
+            cut = _CONTACT_CUTOFF_FALLBACK
+        return min(cut, 0.95 * lj_cut)
 
     def write_inputs(self, n_layers: int) -> None:
         """Generates the LAMMPS input scripts.

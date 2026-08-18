@@ -84,6 +84,40 @@ variable        comx_tip equal c_COM_tip[1]
 variable        comy_tip equal c_COM_tip[2]
 variable        comz_tip equal c_COM_tip[3]
 
+# --- observable registry channels (spec §3) ---------------------------------
+compute T_sheet 2D_all temp
+compute cz_tip_s tip_all reduce min z
+compute COM_L1 layer_1 com
+compute eint tip_all group/group 2D_all pair yes
+compute peat_tip_all tip_all pe/atom
+compute pesum_tip_all tip_all reduce sum c_peat_tip_all
+compute peat_sub_all sub_all pe/atom
+compute pesum_sub_all sub_all reduce sum c_peat_sub_all
+compute peat_2D_all 2D_all pe/atom
+compute pesum_2D_all 2D_all reduce sum c_peat_2D_all
+compute coordc 2D_all coord/atom cutoff 5.0 group tip_all
+compute contacts 2D_all reduce sum c_coordc
+compute satom 2D_all stress/atom NULL
+compute sxx 2D_all reduce sum c_satom[1]
+compute syy 2D_all reduce sum c_satom[2]
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable w_lang_tip equal f_lang_tip
+variable w_lang_sub equal f_lang_sub
+variable temp_sheet equal c_T_sheet
+variable tip_min_z equal c_cz_tip_s
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable e_int equal c_eint
+variable pe_tip_all equal c_pesum_tip_all
+variable pe_sub_all equal c_pesum_sub_all
+variable pe_2D_all equal c_pesum_2D_all
+variable n_contact equal c_contacts
+variable sxx_2d equal c_sxx
+variable syy_2d equal c_syy
+
 run             0
 
 variable        Ftotal equal -v_find/1.602176565
@@ -95,7 +129,10 @@ variable        fz_tip equal f_forcetip[3]*1.602176565
 variable        fx_spr equal f_spr[1]*1.602176565
 variable        fy_spr equal f_spr[2]*1.602176565
 
-fix             fc_ave all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file out/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt
+fix             fc_win all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip v_etot v_pe_now v_ke_now v_w_lang_tip v_w_lang_sub v_temp_sheet v_tip_min_z v_comx_L1 v_comy_L1 v_comz_L1 file out/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt
+fix             fc_raw all ave/time 100 1 100 v_fx_spr v_fy_spr v_fz_tip v_comx_tip v_comy_tip v_comz_tip file out/L1/results/raw_f$(v_find)_a${a}_s${speed}_layer1.txt
+fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all v_pe_2D_all v_n_contact v_sxx_2d v_syy_2d file out/L1/results/peratom_f$(v_find)_a${a}_s${speed}_layer1.txt
+
 
 fix             damp tip_fix viscous 6.25
 
