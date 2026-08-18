@@ -204,10 +204,10 @@ def assemble(assembly: Assembly, identity: Optional[Identity] = None) -> Assembl
     )
 
 
-def to_ovito(system: AssembledSystem,
-             colours: Optional[Dict[int, Tuple[float, float, float]]] = None,
-             radii: Optional[Dict[int, float]] = None):
-    """Convert an assembled system into an ovito pipeline for display.
+def build_data_collection(system: AssembledSystem,
+                          colours: Optional[Dict[int, Tuple[float, float, float]]] = None,
+                          radii: Optional[Dict[int, float]] = None):
+    """Convert an assembled system into an ovito ``DataCollection``.
 
     Args:
         system: The assembled system.
@@ -217,11 +217,12 @@ def to_ovito(system: AssembledSystem,
         radii: Optional ``type id -> display radius``.
 
     Returns:
-        An ``ovito.pipeline.Pipeline`` whose source holds the assembled data,
-        carrying ``Position``, ``Particle Type`` and ``Group`` properties.
+        A ``DataCollection`` carrying ``Position``, ``Particle Type`` and
+        ``Group`` properties, ready to be wrapped in a ``StaticSource`` -- or
+        assigned directly to an existing pipeline's ``source.data`` to update
+        it in place.
     """
     from ovito.data import DataCollection, ElementType  # noqa: PLC0415
-    from ovito.pipeline import Pipeline, StaticSource  # noqa: PLC0415
 
     data = DataCollection()
 
@@ -256,4 +257,30 @@ def to_ovito(system: AssembledSystem,
             element_type.radius = radii[type_id]
         types_property.types.append(element_type)
 
+    return data
+
+
+def to_ovito(system: AssembledSystem,
+             colours: Optional[Dict[int, Tuple[float, float, float]]] = None,
+             radii: Optional[Dict[int, float]] = None):
+    """Convert an assembled system into an ovito pipeline for display.
+
+    Retained for tests and back-compat callers: production code (
+    `ViewportPanel._update_pipeline`) builds the data collection itself via
+    `build_data_collection` instead, so it can update an existing pipeline's
+    source in place rather than constructing a new `Pipeline` on every
+    render.
+
+    Args:
+        system: The assembled system.
+        colours: Optional ``type id -> (r, g, b)``, see :func:`build_data_collection`.
+        radii: Optional ``type id -> display radius``.
+
+    Returns:
+        An ``ovito.pipeline.Pipeline`` whose source holds the assembled data,
+        carrying ``Position``, ``Particle Type`` and ``Group`` properties.
+    """
+    from ovito.pipeline import Pipeline, StaticSource  # noqa: PLC0415
+
+    data = build_data_collection(system, colours=colours, radii=radii)
     return Pipeline(source=StaticSource(data=data))

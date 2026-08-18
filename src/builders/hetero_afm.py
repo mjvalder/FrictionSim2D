@@ -19,6 +19,7 @@ from ase.io import read
 from src.builders import components
 from src.builders.afm import AFMSimulation
 from src.builders.hetero import build_hetero_structure, register_sheet_block
+from src.builders.indent import IndentSimulation
 from src.core.potential_manager import PotentialManager
 from src.core.utils import get_model_dimensions
 
@@ -194,6 +195,23 @@ def assert_sheet_block_matches_data(pm: PotentialManager, data_path, offset: int
 _assert_sheet_block_matches_data = assert_sheet_block_matches_data
 
 
+def _pair_material_token(config) -> str:
+    """The numeric-``[2D-N]``-order ``+``-joined material pair token.
+
+    E.g. ``h-MoS2+h-WS2``. Shared by :class:`HeteroAFMSimulation` and
+    :class:`HeteroIndentSimulation`'s ``_material_id`` overrides — the latter
+    can't just inherit the former's: :class:`~src.builders.indent.IndentSimulation`
+    sits before :class:`HeteroAFMSimulation` in :class:`HeteroIndentSimulation`'s
+    MRO (it needs its own single-material ``_material_id`` for the
+    homogeneous indent path), so :class:`HeteroIndentSimulation` needs its own
+    override too — but both should compute the pair token the same way.
+    Mirrors :func:`src.core.run.material_token`'s convention on the raw-dict
+    side (that function isn't reusable directly here: the builder only has
+    the validated config object, not the raw config mapping).
+    """
+    return '+'.join(sheet.mat for sheet in config.sheets)
+
+
 class HeteroAFMSimulation(AFMSimulation):
     """Periodic hetero (2-material) AFM tip-slide on an amorphous substrate.
 
@@ -202,10 +220,33 @@ class HeteroAFMSimulation(AFMSimulation):
     build (hetero stack -> in-plane replicate -> ``nocoeff`` data) and potential
     registration (``sheet`` -> ``sheet_1`` + ``sheet_2`` + cross-interaction +
     ``2D``/``2D_all`` union groups). The AFM templates are reused unchanged.
+
+    ``_material_id`` is overridden (not just ``_get_hpc_job_name``) so the pair
+    token also reaches :class:`FiniteHeteroAFMSimulation` for free through
+    inheritance, and any future material-keyed metadata added to the AFM base
+    picks it up automatically rather than needing its own override.
     """
 
     #: Run-phase template — unchanged from AFMSimulation; explicit for clarity.
     SLIDE_TEMPLATE = "afm/slide.lmp"
+
+    def _material_id(self) -> str:
+        """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
+        in the numeric ``[2D-N]`` order the config fold already preserves,
+        joined with ``+`` — same convention as
+        :func:`src.core.run.material_token` and
+        :meth:`HeteroIndentSimulation._material_id` below. Without this,
+        ``_get_hpc_job_name`` (inherited from :class:`AFMSimulation`) named
+        every hetero AFM job after sheet 1 alone, so two pairs sharing
+        material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-WSe2``) produced the
+        identical HPC job name ``afm_h-MoS2`` despite building into distinct
+        output directories (the directory itself was already pair-token-safe
+        via Task 1's ``output_dir_for``/``material_token`` — only the job
+        *name* still collided). Also includes
+        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
+        unmodified) so a hetero AFM's ``[flake]`` also keys the job name.
+        """
+        return _pair_material_token(self.config) + self._flake_id_suffix()
 
     #: Per-material sheet region split; None here, D5 (finite) sets [None, 'edge'].
     _sheet_regions = None
@@ -215,9 +256,15 @@ class HeteroAFMSimulation(AFMSimulation):
 
         Sets ``self._hetero_rep_path`` (the replicated ``nocoeff`` data file),
         ``self._hetero_rep_box`` = ``(lx, ly, z_extent)`` of the replicated cell,
-        and ``self._hetero_replication`` = ``(nx, ny)``. Raises ``ValueError`` on
-        a triclinic coincidence cell (xy tilt != 0) — an orthogonal amorphous box
-        cannot tile it; twisted/triclinic pairs are D3.
+        ``self._hetero_replication`` = ``(nx, ny)``, and
+        ``self._hetero_coincidence_cell`` = ``(lx_cell, ly_cell)`` — the
+        *unreplicated* matched-interface cell both materials' surface lattices
+        were strained onto (before the in-plane tiling below). Exposed for
+        :class:`~src.builders.pes_scan.HeteroPESTipSimulation`, whose static
+        scan must repeat over this coincidence cell, not either constituent's
+        own unit cell. Raises ``ValueError`` on a triclinic coincidence cell
+        (xy tilt != 0) — an orthogonal amorphous box cannot tile it;
+        twisted/triclinic pairs are D3.
         """
         build_dir = Path(build_dir)
         build_dir.mkdir(parents=True, exist_ok=True)
@@ -236,6 +283,7 @@ class HeteroAFMSimulation(AFMSimulation):
             )
 
         lx_cell, ly_cell = float(cell[0, 0]), float(cell[1, 1])
+        self._hetero_coincidence_cell = (lx_cell, ly_cell)
         nx, ny = compute_replication_factors(lx_cell, ly_cell, self.config.tip.r)
 
         rep = build_dir / "hetero_rep.data"
@@ -529,3 +577,77 @@ class FiniteHeteroAFMSimulation(HeteroAFMSimulation):
         )
         with open(settings_path, 'a', encoding='utf-8') as fh:
             fh.write("\n".join(lines) + "\n")
+
+
+class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
+    """Indent (hold + retract) on a two-material periodic heterostructure sheet.
+
+    Pure MRO composition: :class:`IndentSimulation` supplies the run-script
+    identity (``SLIDE_TEMPLATE``, ``SPLIT_OUTER_LOOPS``, the hold/retract
+    render-context additions, ``build()``'s ``_write_indent_meta`` tail),
+    :class:`HeteroAFMSimulation` supplies the component build (hetero stack ->
+    in-plane replicate, ``sheet_1``/``sheet_2`` potential split). No method
+    bodies are duplicated here; only the material-token trio below is added.
+
+    **Step-1 findings (verified by printing, not inferred):**
+
+    - MRO is ``HeteroIndentSimulation -> IndentSimulation ->
+      HeteroAFMSimulation -> AFMSimulation -> SimulationBase -> ABC ->
+      object``. Both class attributes ``IndentSimulation`` declares resolve
+      from it first: ``SLIDE_TEMPLATE == "afm/indent.lmp"`` (not
+      ``HeteroAFMSimulation``'s ``"afm/slide.lmp"``) and
+      ``SPLIT_OUTER_LOOPS == frozenset({'force'})`` (not AFM's
+      ``{'force', 'scan_angle'}``) — correct here too: the hold+retract
+      template (``afm/indent.lmp``) declares the angle variable but never
+      drives laterally with it, hetero or not, so splitting per scan_angle
+      would still just emit physically-identical scripts. No explicit
+      re-declaration was needed; :func:`test_hetero_indent_mro_and_split_outer_loops`
+      pins both values so a future MRO/base-class change cannot silently
+      flip them.
+    - ``IndentSimulation.build()`` calls ``super().build()`` then
+      ``self._write_indent_meta()``. ``super()`` from an instance of this
+      class resolves to ``HeteroAFMSimulation`` next — which does not
+      override ``build`` — so it falls through to ``AFMSimulation.build()``.
+      That method's internal calls (``self._build_sheet_for_layers``,
+      ``self._build_components``, ``self._generate_potentials``,
+      ``self._calculate_z_positions``) dispatch dynamically on the instance,
+      landing on ``HeteroAFMSimulation``'s overrides, exactly as for plain
+      ``HeteroAFMSimulation``.
+    - ``build_render_context`` chain: ``IndentSimulation.build_render_context``
+      calls ``super().build_render_context(n_layers)``, which — since
+      ``HeteroAFMSimulation`` has no override — resolves to
+      ``AFMSimulation.build_render_context``. That base method reads
+      ``self.pm[n]``, ``self.box_dims``, ``self.sheet_offset``, ``self.lat_c``,
+      ``self.z_positions[n]`` (keys ``sub``/``sheet``/``tip``/
+      ``tip_contact_gap``), ``self.groups[n]`` (keys ``sub_types``/
+      ``tip_types``/``sheet_types``, plus flake keys when a flake is
+      configured), ``self.sheet_paths[n]``, ``self.tip_path``,
+      ``self.sub_path``, ``self.sheet_dims``, and
+      ``self.config.sheet.pot_type`` (for the reaxff/atom_style check — safe:
+      ``config.sheet`` is always the first sheet, mirrored by
+      ``_fold_sheet_sections`` even in the hetero case). Every one of these is
+      already populated by ``HeteroAFMSimulation``'s overridden
+      ``_build_hetero_sheet`` / ``_build_components`` / ``_generate_potentials``
+      / ``_calculate_z_positions`` (the same attributes, same shapes, that
+      :class:`HeteroAFMSimulation`'s own docstring documents) — so no
+      additional override is needed for the build/render path itself.
+    - The one contract MRO does *not* satisfy for free: ``IndentSimulation``
+      keys the job name (``_get_hpc_job_name``), the ``derive_seed`` input
+      (``_velocity_seed``), and ``indent_meta.json``'s ``"material"`` field
+      off a single ``self._material_id()`` hook (added alongside this class),
+      which defaults to ``self.config.sheet.mat`` — sheet 1 only. Overridden
+      below to the numeric-order ``+``-joined pair token, so two hetero pairs
+      sharing material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-BN``) get
+      distinct job names, seeds, and manifest keys instead of colliding.
+    """
+
+    def _material_id(self) -> str:
+        """Pair token (``h-MoS2+h-WS2``) via the shared :func:`_pair_material_token`
+        helper (see its docstring for why this can't just inherit
+        :meth:`HeteroAFMSimulation._material_id` despite computing the same
+        thing). Also includes
+        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
+        unmodified) so a hetero indent's ``[flake]`` also keys the job name,
+        derived seed, and ``indent_meta.json``.
+        """
+        return _pair_material_token(self.config) + self._flake_id_suffix()

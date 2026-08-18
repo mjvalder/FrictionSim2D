@@ -11,7 +11,7 @@ reader reads back as ``None``) rather than an empty string.
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from ..schema.introspect import FieldKind, FieldSpec
 
-__all__ = ['FieldEditor', 'build_editor']
+__all__ = ['FieldEditor', 'build_editor', 'EDITOR_REGISTRY', 'register_editor']
 
 
 class FieldEditor(QWidget):
@@ -38,6 +38,22 @@ class FieldEditor(QWidget):
         super().__init__(parent)
         self.spec = spec
         self._error: Optional[str] = None
+        #: The explanatory tooltip set by the form builder (help/detail text),
+        #: as opposed to a transient error message. Remembered separately so
+        #: clearing an error can restore it instead of leaving the tooltip
+        #: blank -- set_error(None) is called on every editor on every
+        #: show_errors(), including the common case where there is nothing to
+        #: report.
+        self._base_tooltip: str = ''
+        #: The `enable_hint` currently shown as placeholder text, or None when
+        #: the row is enabled. Tracked so `set_disabled_hint` is idempotent
+        #: (`_apply_dependencies` calls it on every commit) and so re-enabling
+        #: knows to restore rather than merely clear.
+        self._disabled_hint: Optional[str] = None
+        #: Each QLineEdit's placeholder as it was before a disabled-hint
+        #: overwrote it (e.g. "default: 2.0"), so re-enabling gives it back
+        #: instead of leaving the placeholder blank.
+        self._saved_placeholders: Dict[QLineEdit, str] = {}
 
     def value(self) -> Any:
         raise NotImplementedError
@@ -45,11 +61,56 @@ class FieldEditor(QWidget):
     def set_value(self, value: Any) -> None:
         raise NotImplementedError
 
+    def set_base_tooltip(self, text: Optional[str]) -> None:
+        """The tooltip to show when there is no validation error."""
+        self._base_tooltip = text or ''
+        if not self._error:
+            self.setToolTip(self._base_tooltip)
+
     def set_error(self, message: Optional[str]) -> None:
-        """Mark the field as holding an invalid value."""
+        """Mark the field invalid. Idempotent: repeating the same state is a
+        no-op, so a full-form show_errors() pass does not repaint every row."""
+        if message == self._error:
+            return
         self._error = message
-        self.setToolTip(message or '')
+        self.setToolTip(message or self._base_tooltip)
         self._apply_error_style(bool(message))
+
+    def error(self) -> Optional[str]:
+        """The validation message currently shown against this field, if any."""
+        return self._error
+
+    def set_disabled_hint(self, hint: Optional[str]) -> None:
+        """Show `hint` (an `enable_if` reason) as placeholder text while the
+        control is disabled; restore each field's normal placeholder (e.g. a
+        "default: X" from `_prefill_required`'s sibling editors) once it is
+        enabled again.
+
+        A tooltip-only explanation needs a hover to find; a greyed row with
+        nothing on screen reads as a missing feature rather than an inert
+        one. Works generically across every editor kind via `findChildren`,
+        the same trick `_apply_error_style` uses, rather than each editor
+        having to plumb this through by hand.
+        """
+        if hint == self._disabled_hint:
+            return
+        self._disabled_hint = hint
+        for line_edit in self.findChildren(QLineEdit):
+            if hint is not None:
+                self._saved_placeholders.setdefault(
+                    line_edit, line_edit.placeholderText())
+                line_edit.setPlaceholderText(hint)
+            else:
+                line_edit.setPlaceholderText(
+                    self._saved_placeholders.pop(line_edit, ''))
+
+    def warning(self) -> Optional[str]:
+        """A non-fatal note about the current value, or None.
+
+        Distinct from `set_error`, which reports a validation failure the model
+        raised. This is the widget noticing something itself.
+        """
+        return None
 
     def _apply_error_style(self, invalid: bool) -> None:
         for child in self.findChildren(QLineEdit):
@@ -67,6 +128,8 @@ class _TextEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit)
 
     def value(self) -> Any:
@@ -97,6 +160,8 @@ class _NumberEditor(FieldEditor):
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit)
 
     def _parse(self, text: str) -> Any:
@@ -175,29 +240,87 @@ class _BoolEditor(FieldEditor):
 
 
 class _EnumEditor(FieldEditor):
+    """A fixed set of choices, preserving anything it was not expecting.
 
-    def __init__(self, spec: FieldSpec, parent=None, choices=None) -> None:
+    Snapping an unrecognised value to the first choice is destructive: for a
+    field the model types as a plain `str` -- `stack_type` -- opening a config
+    and saving it would silently rewrite the value. For a real Literal field the
+    value is a validation error, and reporting it beats substituting a legal one
+    before validation ever sees the original.
+    """
+
+    UNKNOWN_SUFFIX = ' (not recognised)'
+
+    def __init__(self, spec: FieldSpec, parent=None, choices=None,
+                choice_labels=None) -> None:
         super().__init__(spec, parent)
+        self._unknown: Optional[Any] = None
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.box = QComboBox(self)
         if not spec.required:
-            self.box.addItem('(unset)', None)
+            unset_text = ('(unset)' if spec.default in (None, '')
+                          else f'(default: {spec.default})')
+            self.box.addItem(unset_text, None)
         # Choices may be narrowed below what the model allows: outer_loop
         # accepts pressure/scan_speed/force, but each family's builder only
         # acts on some of them.
+        labels = choice_labels or {}
         for choice in (choices if choices is not None else spec.choices):
-            self.box.addItem(str(choice), choice)
-        self.box.currentIndexChanged.connect(self.changed)
+            # itemData keeps the real stored value regardless of the label,
+            # so a relabelled choice still round-trips as the original string.
+            self.box.addItem(labels.get(choice, str(choice)), choice)
+        self.box.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self.box)
         layout.addStretch(1)
+
+    def _on_changed(self) -> None:
+        # Selecting a real value retires the synthetic entry. Clearing the flag
+        # without removing the item leaves findData() able to match it later,
+        # so the value stops being recognised as unrecognised.
+        if self._unknown is not None and self.box.currentData() != self._unknown:
+            self.box.blockSignals(True)
+            try:
+                self._drop_unknown_item()
+            finally:
+                self.box.blockSignals(False)
+        self.changed.emit()
 
     def value(self) -> Any:
         return self.box.currentData()
 
+    def _drop_unknown_item(self) -> None:
+        """Remove the synthetic entry, if one is present.
+
+        set_value owns its lifetime: leaving it behind makes the next
+        findData() succeed against a stale item, so the value is no longer
+        recognised as unrecognised.
+        """
+        if self._unknown is None:
+            return
+        index = self.box.findData(self._unknown)
+        if index >= 0:
+            self.box.removeItem(index)
+        self._unknown = None
+
     def set_value(self, value: Any) -> None:
-        index = self.box.findData(value)
-        self.box.setCurrentIndex(index if index >= 0 else 0)
+        self.box.blockSignals(True)
+        try:
+            self._drop_unknown_item()
+            index = self.box.findData(value)
+            if index < 0 and value not in (None, ''):
+                self._unknown = value
+                self.box.addItem(f"{value}{self.UNKNOWN_SUFFIX}", value)
+                index = self.box.count() - 1
+            self.box.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self.box.blockSignals(False)
+
+    def warning(self) -> Optional[str]:
+        if self._unknown is None or self.box.currentData() != self._unknown:
+            return None
+        return (f"'{self._unknown}' is not one of the recognised values; "
+                f"it is kept as written.")
 
 
 class _ListEditor(FieldEditor):
@@ -210,6 +333,8 @@ class _ListEditor(FieldEditor):
         self.edit = QLineEdit(self)
         self.edit.setPlaceholderText('e.g. 1, 2, 3')
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit)
 
     def _coerce(self, text: str) -> Any:
@@ -249,7 +374,8 @@ class _ScalarOrListEditor(_ListEditor):
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
-        self.edit.setPlaceholderText('one value, or a comma-separated list')
+        if spec.default in (None, ''):
+            self.edit.setPlaceholderText('one value, or a comma-separated list')
 
     def value(self) -> Any:
         text = self.edit.text().strip()
@@ -264,30 +390,56 @@ class _ScalarOrListEditor(_ListEditor):
 
 
 class _PathEditor(FieldEditor):
-    """A file path, with a browse button."""
+    """A file path, with a browse button.
+
+    Directory mode is a separate axis from the field itself: `cif_path`/
+    `pot_path` mean a single file normally, but a directory to scan while a
+    material sweep is on. `SectionForm` is what knows which is current --
+    this widget only needs to remember the flag and act on it.
+    """
 
     def __init__(self, spec: FieldSpec, parent=None) -> None:
         super().__init__(spec, parent)
         self._was_string = False
+        self._directory_mode = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.edit = QLineEdit(self)
         self.edit.textEdited.connect(self.changed)
+        if spec.default not in (None, ''):
+            self.edit.setPlaceholderText(f'default: {spec.default}')
         layout.addWidget(self.edit, 1)
 
-        browse = QPushButton('…', self)
-        browse.setFixedWidth(30)
-        browse.setToolTip('Browse for a file')
-        browse.clicked.connect(self._browse)
-        layout.addWidget(browse)
+        self._browse_button = QPushButton('…', self)
+        self._browse_button.setFixedWidth(30)
+        self._browse_button.setToolTip('Browse for a file')
+        self._browse_button.clicked.connect(self._browse)
+        layout.addWidget(self._browse_button)
+
+    def set_directory_mode(self, directory: bool) -> None:
+        """Switch the browse button (and its tooltip) between file and
+        directory pickers -- called by SectionForm as the sweep is ticked or
+        unticked, never decided by this widget on its own."""
+        self._directory_mode = directory
+        self._browse_button.setToolTip(
+            'Browse for a directory' if directory else 'Browse for a file')
 
     def _browse(self) -> None:
         from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
 
-        chosen, _ = QFileDialog.getOpenFileName(self, f'Select {self.spec.key}')
+        if self._directory_mode:
+            chosen = QFileDialog.getExistingDirectory(self, f'Select {self.spec.key}')
+        else:
+            chosen, _ = QFileDialog.getOpenFileName(self, f'Select {self.spec.key}')
         if chosen:
             self.edit.setText(chosen)
             self.changed.emit()
+            # A rescan trigger for the 2D section's sweep pickers (wired via
+            # editingFinished, not this widget's own `changed`): setText()
+            # alone does not fire editingFinished, so a browse selection has
+            # to raise it explicitly or the listing would only ever refresh
+            # on the next manual edit.
+            self.edit.editingFinished.emit()
 
     def value(self) -> Any:
         text = self.edit.text().strip()
@@ -335,8 +487,20 @@ _EDITORS = {
 }
 
 
+#: Purpose-built editors, keyed by the slug a FieldOverride requests.
+#: Populated by the widget modules themselves so this module does not import
+#: them -- see widgets/bands.py and widgets/keyvalue.py.
+EDITOR_REGISTRY: Dict[str, type] = {}
+
+
+def register_editor(slug: str, factory: type) -> None:
+    """Make a purpose-built editor requestable by slug."""
+    EDITOR_REGISTRY[slug] = factory
+
+
 def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
-                 choices=None) -> FieldEditor:
+                 choices=None, editor: Optional[str] = None,
+                 choice_labels=None) -> FieldEditor:
     """The editor for a field.
 
     Anything without a dedicated editor falls back to text rather than being
@@ -347,14 +511,27 @@ def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,
         spec: The field to build a control for.
         parent: Qt parent.
         choices: Narrowed enum choices, where the model permits more than this
-            simulation family can act on.
+            simulation family can act on. Declared choices on a plain `str`
+            field also select a combo -- `stack_type` is typed `str` but the
+            builders only act on AA versus not-AA.
+        editor: Registry slug requesting a purpose-built editor. An unknown
+            slug falls back to the field kind rather than failing, so an
+            override naming a widget that has not been written yet still
+            renders something editable.
+        choice_labels: Display text for individual enum choices, keyed by the
+            stored value -- e.g. outer_loop's `scan_angle` shown as "angle".
+            Cosmetic only: the combo's `itemData` (and so `value()`) still
+            holds the original string.
     """
+    if editor and editor in EDITOR_REGISTRY:
+        return EDITOR_REGISTRY[editor](spec, parent)
+
     if spec.kind is FieldKind.INT:
         return _NumberEditor(spec, parent, integer=True)
     if spec.kind is FieldKind.FLOAT:
         return _NumberEditor(spec, parent, integer=False)
-    if spec.kind is FieldKind.ENUM:
-        return _EnumEditor(spec, parent, choices=choices)
+    if spec.kind is FieldKind.ENUM or (choices and spec.kind is FieldKind.STR):
+        return _EnumEditor(spec, parent, choices=choices, choice_labels=choice_labels)
 
     factory = _EDITORS.get(spec.kind)
     return factory(spec, parent) if factory else _TextEditor(spec, parent)

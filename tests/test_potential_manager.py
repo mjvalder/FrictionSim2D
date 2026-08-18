@@ -190,6 +190,16 @@ class TestLJOverrides:
         # Last assignment for the same canonical pair wins
         assert pm.lj_overrides[('Mo', 'S')] == (0.4999, 3.9)
 
+    def test_set_lj_overrides_ignores_file_key(self, mock_settings):
+        """A literal 'file' key reaching here (a config built without going
+        through expand_config_sweeps/resolve_lj_override_file) must be
+        skipped, not handed to _parse_override_pair and crash."""
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.set_lj_overrides({'file': 'lj.txt', 'Mo-S': [0.4, 3.7]})
+
+        assert len(pm.lj_overrides) == 1
+        assert pm.lj_overrides[('Mo', 'S')] == (0.4, 3.7)
+
     def test_interlayer_uses_override_values(
         self, mock_settings, mos2_sheet_config
     ):

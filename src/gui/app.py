@@ -12,9 +12,10 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -37,11 +38,11 @@ from PySide6.QtWidgets import (
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
-from ..core.run import hpc_generation_blocker
+from ..core.run import AFM_LIKE_MODELS, hpc_generation_blocker
 from .controllers.settings_document import SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
-from .preview.viewport import ViewportPanel
+from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
@@ -49,6 +50,43 @@ from .workspace import RecentWorkspaces, Workspace
 logger = logging.getLogger(__name__)
 
 APP_NAME = 'FrictionSim2D'
+
+
+def plural(count: int, word: str) -> str:
+    """'1 config', '2 configs'. Every word here pluralises with a bare s."""
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def _min_numeric(value: object) -> Optional[float]:
+    """The smallest numeric value in `value`, which may be a scalar, a sweep
+    list, absent (None), or a non-numeric placeholder.
+
+    Returns None -- "nothing usable" -- rather than raising or silently
+    dropping bad entries, so a precheck built on this can skip a field
+    entirely instead of half-trusting a list with one unresolved member.
+    """
+    items = value if isinstance(value, list) else [value]
+    if not items:
+        return None
+    numbers = []
+    for item in items:
+        try:
+            numbers.append(float(item))
+        except (TypeError, ValueError):
+            return None
+    return min(numbers)
+
+
+def _is_true(value: object) -> bool:
+    """Truthiness of a config flag that may still be raw `.ini` text.
+
+    A document read from a file holds `'false'` for an unticked box until the
+    pydantic model coerces it, and `bool('false')` is True -- which would make
+    every non-finite_sheet config look finite.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in ('true', 'yes', 'on', '1')
+    return bool(value)
 
 
 def _fold_controls(parent: QWidget, form: ConfigForm) -> QHBoxLayout:
@@ -81,6 +119,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.workspace = workspace
         self.document = ConfigDocument.blank('afm')
+        # An unsaved config still needs somewhere to write a material list --
+        # see ConfigDocument.write_material_names' docstring for why it
+        # refuses to fall back to the process's cwd.
+        self.document.workspace_dir = workspace.configs_dir
         # A workspace settings.yaml is used when present, but only because it
         # is passed explicitly; nothing picks it up from the directory itself.
         workspace_settings = workspace.settings_path
@@ -90,6 +132,10 @@ class MainWindow(QMainWindow):
 
         self.preview = PreviewController(workspace, self)
         self.generator = GenerateController(workspace, self)
+        # What was last rendered, so an edit afterwards can be flagged as
+        # stale rather than leaving the viewport showing a superseded system
+        # with no indication anything changed.
+        self._render_snapshot: Optional[dict] = None
 
         self.setWindowTitle(f"{APP_NAME} — Simulation Builder")
         self.resize(1500, 950)
@@ -161,13 +207,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.form = ConfigForm(self.document, page)
+        self.form = ConfigForm(self.document, page, settings=self.settings)
         layout.addLayout(_fold_controls(page, self.form))
 
-        scroll = QScrollArea(page)
-        scroll.setWidget(self.form)
-        scroll.setWidgetResizable(True)
-        layout.addWidget(scroll, 1)
+        self.config_scroll = QScrollArea(page)
+        self.config_scroll.setWidget(self.form)
+        self.config_scroll.setWidgetResizable(True)
+        layout.addWidget(self.config_scroll, 1)
 
         self.tabs.addTab(page, 'Config')
         self.tabs.addTab(self._build_settings_tab(), 'Settings')
@@ -240,15 +286,17 @@ class MainWindow(QMainWindow):
         row.addWidget(self.hpc_box)
 
         self.render_button = QPushButton('Render', self)
+        self.render_button.setShortcut('Ctrl+R')
         self.render_button.setToolTip(
             'Build the configured components and show the assembled system. '
-            'Never runs a melt-quench or a minimisation.')
-        self.render_button.clicked.connect(self._render)
+            'Never runs a melt-quench or a minimisation. (Ctrl+R)')
+        self.render_button.clicked.connect(self._on_render_clicked)
         row.addWidget(self.render_button)
 
         self.generate_button = QPushButton('Generate', self)
+        self.generate_button.setShortcut('Ctrl+G')
         self.generate_button.setToolTip(
-            'Write the full simulation package into the workspace.')
+            'Write the full simulation package into the workspace. (Ctrl+G)')
         self.generate_button.clicked.connect(self._generate)
         row.addWidget(self.generate_button)
 
@@ -258,12 +306,18 @@ class MainWindow(QMainWindow):
         self.family_box.currentIndexChanged.connect(self._on_family_changed)
         self.mode_box.currentIndexChanged.connect(self._on_mode_changed)
         self.form.changed.connect(self._on_config_changed)
+        # A refusal from a per-keystroke commit has no validation pass behind
+        # it to write it into the issues panel, so it is said in the status
+        # bar. The ones raised by `_validate`'s own commit are folded into the
+        # panel there instead, where they stay readable.
+        self.form.refused.connect(self._on_commit_refused)
+        self.settings_form.refused.connect(self._on_commit_refused)
 
-        self.preview.started.connect(lambda: self._busy('Building preview…', True))
+        self.preview.started.connect(self._on_preview_started)
         self.preview.progress.connect(self.statusBar().showMessage)
         self.preview.finished.connect(self._on_preview_ready)
         self.preview.failed.connect(self._on_preview_failed)
-        self.preview.cancelled.connect(lambda: self._busy('Preview cancelled.', False))
+        self.preview.cancelled.connect(self._on_preview_cancelled)
 
         self.generator.started.connect(lambda: self._busy('Generating…', True))
         self.generator.progress.connect(self.statusBar().showMessage)
@@ -289,6 +343,32 @@ class MainWindow(QMainWindow):
         self.render_button.setEnabled(not busy)
         self.generate_button.setEnabled(not busy)
 
+    def _set_render_building(self, building: bool) -> None:
+        """Keep Render pressable, as a Cancel action, while a preview builds.
+
+        `_busy` disables Render along with Generate; this overrides that for
+        Render specifically, right after. A build that is slow (one heavy
+        member) or hung must always leave the user a way out, rather than a
+        button that looks the same whether it will re-enable in a second or
+        never -- which is what "greyed out and I couldn't press it" was.
+        """
+        self.render_button.setText('Cancel' if building else 'Render')
+        self.render_button.setEnabled(True)
+
+    def _on_render_clicked(self) -> None:
+        if self.preview.running:
+            self.preview.cancel()
+        else:
+            self._render()
+
+    def _on_preview_started(self) -> None:
+        self._busy('Building preview…', True)
+        self._set_render_building(True)
+
+    def _on_preview_cancelled(self) -> None:
+        self._set_render_building(False)
+        self._busy('Preview cancelled.', False)
+
     def _update_workspace_label(self) -> None:
         self.workspace_label.setText(str(self.workspace.root))
 
@@ -307,6 +387,12 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         """Write the complete settings file into the workspace."""
         self.settings_form.commit()
+        if self.settings_form.refusals():
+            QMessageBox.warning(
+                self, 'Settings were not saved',
+                self._record_refusals('Save settings',
+                                      self.settings_form.refusals()))
+            return
         result = self.settings_document.validate()
         self.settings_form.show_errors(result.issues)
         if not result.ok:
@@ -320,6 +406,7 @@ class MainWindow(QMainWindow):
             return
 
         self.settings = self.settings_document.as_settings()
+        self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage(f"Saved {written}")
 
@@ -328,6 +415,16 @@ class MainWindow(QMainWindow):
         self.settings_form.document = self.settings_document
         self.settings_form.rebuild()
         self._refresh_settings_origin()
+        # _apply_settings and _save_settings both refresh self.settings and
+        # fan it out to the config form after changing the settings document
+        # (Task 7); this path did not, so a star -- and _validate, which
+        # hands self.settings straight to document.validate -- kept reading
+        # the pre-revert object even though the Settings tab itself already
+        # showed defaults. A fresh `SettingsDocument.defaults()` is never
+        # dirty, so `_apply_settings`'s early return could not repair this
+        # later either.
+        self.settings = self.settings_document.as_settings()
+        self.form.set_settings(self.settings)
 
     def _apply_settings(self) -> Optional[str]:
         """Make what is on the Settings tab the settings the build will use.
@@ -340,6 +437,11 @@ class MainWindow(QMainWindow):
             None on success, otherwise why the settings could not be applied.
         """
         self.settings_form.commit()
+        # Checked before the dirty gate: a section that refused its commit
+        # may be exactly the reason the document looks unchanged.
+        if self.settings_form.refusals():
+            return self._record_refusals('Applying settings',
+                                         self.settings_form.refusals())
         if not self.settings_document.dirty:
             return None
 
@@ -350,6 +452,7 @@ class MainWindow(QMainWindow):
 
         self.settings_document.save(self.workspace.settings_path)
         self.settings = self.settings_document.as_settings()
+        self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage('Applied settings changes.')
         return None
@@ -381,32 +484,211 @@ class MainWindow(QMainWindow):
     def _refresh_counts(self) -> None:
         try:
             summary = self.document.expansion()
-            self.counts.setText(
-                f"{summary.configs} config → {summary.builds} builds → "
-                f"{summary.jobs} jobs")
+            text = (
+                f"{plural(summary.configs, 'config')} → "
+                f"{plural(summary.builds, 'build')} → "
+                f"{plural(summary.jobs, 'job')}")
         except Exception as exc:  # pylint: disable=broad-except
-            self.counts.setText('—')
+            text = '—'
             logger.debug("count failed: %s", exc)
+        if text != self.counts.text():
+            self.counts.setText(text)
 
-    def _validate(self) -> bool:
-        """Validate and surface the result. Returns True when valid."""
+    def _tip_footprint_issues(self) -> List[str]:
+        """The tip-vs-periodic-image precheck, as issue lines.
+
+        Non-blocking: a footprint under 2x the tip diameter lets the tip
+        interact with its own periodic image, but plenty of valid setups
+        (small scans, deliberately, or values still being sized) fall in this
+        range, so it is reported and not gated on.
+
+        Silent on a two-material config, where the two dimensions it reads
+        are not the footprint that gets built. `hetero_afm` replicates the
+        coincidence cell until the periodic footprint is >= `4 * tip_r`
+        (`compute_replication_factors`) whatever `[2D] x`/`y` say -- neither
+        `hetero_afm.py` nor `hetero.py` reads them -- so the warning was
+        advice about numbers the build never consults, on a geometry that
+        satisfies the rule by construction. The homogeneous AFM path does
+        build the footprint out of those two fields, and keeps warning.
+
+        Its own method rather than a block inside `_validate`: it needs three
+        locals of its own to read a value that may be a sweep list, and
+        `_validate` had grown past the point where three more could be told
+        apart from the ten it already carries.
+        """
+        if self.document.model not in AFM_LIKE_MODELS:
+            return []
+        if self.document.has_second_material():
+            return []
+
+        sheet_x = _min_numeric(self.document.get('2D', 'x'))
+        sheet_y = _min_numeric(self.document.get('2D', 'y'))
+        tip_r = _min_numeric(self.document.get('tip', 'r'))
+        if sheet_x is None or sheet_y is None or tip_r is None:
+            return []
+        if min(sheet_x, sheet_y) >= 4 * tip_r:
+            return []
+        return ["[tip] sheet footprint < 2× tip diameter; the tip will "
+                "interact with its own periodic image"]
+
+    def _validate(self, enforce_required: bool = True,
+                  refusals_block: bool = True) -> bool:
+        """Validate and surface the result. Returns True when valid.
+
+        `enforce_required` gates only the starred-but-empty-and-blocking
+        term: `_render` passes False so a cleared `force`/`pressure` (marked
+        `required_blocks` for Generate, but not read by the preview builder)
+        does not stop a user from previewing the geometry while trying
+        another load value. `_generate` leaves it True -- an actually
+        unbuildable LAMMPS script must still be refused. Every other
+        validation failure (the document's own `validate()`, unsupported
+        lists) blocks both regardless, and the issue lines are reported the
+        same either way.
+
+        `refusals_block` decides whether a section the form could not commit
+        stops the action. It does by default: after a refusal the document no
+        longer matches the form, so Generate would build from a config the
+        user never approved. `_render` passes False -- a preview persists
+        nothing and launches nothing, and being able to look at the geometry
+        is often how the disagreement gets diagnosed -- so there it is
+        reported and not gated on.
+        """
         self.form.commit()
         result = self.document.validate(self.settings)
         self.form.show_errors(result.issues)
 
         unsupported = self.document.unsupported_lists()
-        lines = [issue.render() for issue in result.issues]
+        # A section the form could not commit is the first thing wrong with
+        # this config: what is on screen is not what would be built. Reported
+        # here, alongside every other reason the config will not build, rather
+        # than as the modal-per-section this used to raise.
+        refusals = self.form.refusals()
+        lines = list(refusals)
+        lines += [issue.render() for issue in result.issues]
         lines += [
             f"[{section}] {key}: a list here is not supported -- it would not "
             f"change the output directory, so the runs would overwrite each other"
             for section, key in unsupported
         ]
 
-        self.issues.setPlainText('\n'.join(lines) if lines else 'Config is valid.')
+        missing = self.form.missing_required()
+        lines += [
+            f"[{sec}] {label}: required, currently empty"
+            for sec, _key, label, _blocks in missing
+        ]
+        blocking = [blocks for _sec, _key, _label, blocks in missing]
+
+        expansion = None
+        try:
+            expansion = self.document.expansion()
+        except Exception as exc:  # pylint: disable=broad-except
+            # The sweep cannot be counted -- a materials_list whose
+            # per-material files do not resolve, or whose lines name a
+            # different number of materials than there are sheet sections.
+            #
+            # Reported, not swallowed. `expansion_output_dirs()` runs the same
+            # expansion and hands back its message verbatim, which is the
+            # sentence saying what to fix ("...names a single material, but
+            # this config has a [2D-2] section and expects ordered pairs...").
+            # Generate has shown it since it started asking that method first;
+            # here it was caught into a debug log, so Render and this panel
+            # showed a config that read as fine.
+            logger.debug("expansion count failed: %s", exc)
+            lines.append(self.document.expansion_output_dirs().error or str(exc))
+
+        if expansion is not None:
+            # Only the material-sweep notes: a materials_list that could not
+            # be read is reported here rather than silently falling back to
+            # "nothing configured", which is how a typo in the path used to
+            # become a full sweep. ExpansionSummary.notes also carries
+            # routine, non-error information (outer_loop splitting the run
+            # phase, a PES refinement script) that does not belong beside a
+            # "config is valid" message.
+            lines += [n for n in expansion.notes
+                     if n.startswith('[2D] materials_list')]
+
+        lines += self._tip_footprint_issues()
+
+        # Non-blocking by construction: each of these builds and runs, it just
+        # does not do what it looks like it does (see `ConfigDocument.conflicts`),
+        # so it is said out loud and `ok` is left alone.
+        lines += self.document.conflicts()
+
+        if self.document.pending_template_issues:
+            # Still worth saying the placeholders are pending -- but only the
+            # working case may promise they get filled in. When the expansion
+            # was refused above, "they will be substituted across each
+            # material in the sweep when you generate" contradicts the
+            # refusal, and it is the line that reads as "the config is fine".
+            count = len(self.document.pending_template_issues)
+            if expansion is None:
+                lines.append(
+                    f"{count} path(s) contain {{mat}}; none of them can be "
+                    f"substituted until the problem above is fixed.")
+            else:
+                lines.append(
+                    f"{count} path(s) contain {{mat}}; they will be "
+                    f"substituted across {expansion.configs} config(s) when "
+                    f"you generate.")
+
+        text = '\n'.join(lines) if lines else 'Config is valid.'
+        if text != self.issues.toPlainText():
+            self.issues.setPlainText(text)
         self._refresh_counts()
-        return result.ok and not unsupported
+        ok = result.ok and not unsupported
+        if enforce_required:
+            ok = ok and not any(blocking)
+        if refusals_block:
+            ok = ok and not refusals
+        return ok
 
     # --------------------------------------------------------------- events
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Ask before discarding an edited config or settings document.
+
+        A quit that silently threw away unsaved work used to be the only
+        behaviour on offer; this puts the same Save/Discard/Cancel choice in
+        front of the user that closing an editor normally would.
+        """
+        config_dirty = self.document.dirty
+        settings_dirty = self.settings_document.dirty
+        if not (config_dirty or settings_dirty):
+            event.accept()
+            return
+
+        if config_dirty and settings_dirty:
+            what = 'The configuration and the settings have'
+        elif settings_dirty:
+            what = 'The settings have'
+        else:
+            what = 'The configuration has'
+
+        choice = QMessageBox.question(
+            self, 'Unsaved changes',
+            f'{what} unsaved changes. Save before closing?',
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save)
+
+        if choice == QMessageBox.Cancel:
+            event.ignore()
+            return
+        if choice == QMessageBox.Discard:
+            event.accept()
+            return
+
+        # Save: route through whichever document(s) are actually dirty. Each
+        # save path may itself be cancelled (a file dialog) or fail
+        # (validation), leaving its document dirty -- in that case the
+        # window must not close, or the edits it holds would still be lost.
+        if config_dirty:
+            self._save_config()
+        if settings_dirty:
+            self._save_settings()
+        if self.document.dirty or self.settings_document.dirty:
+            event.ignore()
+            return
+        event.accept()
 
     def _on_family_changed(self) -> None:
         self._populate_modes()
@@ -420,12 +702,86 @@ class MainWindow(QMainWindow):
             self.document.set_model(model)
         except DocumentError as exc:
             QMessageBox.warning(self, 'Cannot switch', str(exc))
+            self._resync_mode_box()
             return
+
+        # Save scroll position before rebuild
+        scroll_value = self.config_scroll.verticalScrollBar().value()
+
         self.form.rebuild()
+
+        # Restore scroll position after rebuild. The scrollbar range settles on a
+        # deferred layout pass, so this restore relies on returning to the event
+        # loop before repaint.
+        self.config_scroll.verticalScrollBar().setValue(scroll_value)
+
         self._refresh_counts()
+        # A mode switch swaps the document's model wholesale -- the largest
+        # possible edit short of opening a different file -- so the badge
+        # must reflect it just as it would a single field edit. `form.changed`
+        # is not emitted here: `rebuild()` runs under each SectionForm's own
+        # `load()`, not a user edit. `_on_config_changed` already no-ops when
+        # nothing has been rendered yet.
+        self._on_config_changed()
+
+    def _resync_mode_box(self) -> None:
+        """Put the selector back on the model the document is actually in.
+
+        A refused switch that leaves the combo reading the mode it refused is
+        worse than the refusal itself: `_on_mode_changed` returns early when
+        the combo already matches `document.model`, so the *next* attempt to
+        select that same mode -- after fixing whatever the refusal asked for --
+        would silently do nothing at all.
+
+        Restored under `blockSignals` so putting it back does not re-enter this
+        handler and warn a second time.
+        """
+        index = self.mode_box.findData(self.document.model)
+        if index < 0:
+            return
+        self.mode_box.blockSignals(True)
+        try:
+            self.mode_box.setCurrentIndex(index)
+        finally:
+            self.mode_box.blockSignals(False)
+
+    def _on_commit_refused(self, message: str) -> None:
+        """Show a refused commit without blocking on it.
+
+        Deliberately not a dialog: this arrives from `_on_field_changed`,
+        which fires on ordinary field edits, so a modal would interrupt typing
+        -- and, with no one to dismiss it in an automated run, would hang
+        rather than fail.
+
+        The status bar is enough *here* only because nothing has been written
+        or launched yet. The moment an action would persist something, the
+        refusal has to stop it and be said somewhere that survives -- see
+        `_record_refusals`.
+        """
+        logger.warning("commit refused: %s", message)
+        self.statusBar().showMessage(message)
+
+    def _record_refusals(self, action: str, refusals: List[str]) -> str:
+        """Put refusals in the issues panel and return them as one message.
+
+        The status bar cannot carry these. `_save_config` overwrites it with
+        its own `Saved …` a few lines later -- behind an intervening file
+        dialog -- so the only trace of the disagreement vanished and a file
+        was left on disk that silently did not match the form. The panel
+        survives until the next validation, and the caller adds a dialog when
+        it is refusing an action the user explicitly started.
+        """
+        logger.warning("%s refused: %s", action, refusals)
+        text = '\n'.join(refusals)
+        self.issues.setPlainText(
+            f"{action} refused -- the form and the config disagree, so what "
+            f"would be written is not what is on screen:\n{text}")
+        return text
 
     def _on_config_changed(self) -> None:
         self._refresh_counts()
+        if self._render_snapshot is not None:
+            self.viewport.set_stale(self.document.to_dict() != self._render_snapshot)
 
     def _open_config(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -444,13 +800,31 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, 'Could not read the config', str(exc))
             return
 
+        # A loaded document always has source_path set, so write_material_names
+        # never actually consults this -- set for consistency with __init__
+        # and _choose_workspace rather than because this document needs it.
+        self.document.workspace_dir = self.workspace.configs_dir
         self.form.document = self.document
         self.form.rebuild()
         self._validate()
+        # Opening a different config swaps the whole document out from under
+        # a render -- the largest staleness event there is -- yet it never
+        # goes through `form.changed` (`load()` runs under `_loading`), so
+        # the badge stayed hidden until the user separately touched a field.
+        self._on_config_changed()
         self.statusBar().showMessage(f"Opened {path}")
 
     def _save_config(self) -> None:
         self.form.commit()
+        # A refused commit means the document no longer matches the form.
+        # Writing it anyway produces a `.ini` that disagrees with the screen
+        # -- the file is the artefact, so this is a wrong-results path and it
+        # stops here rather than being noted in passing.
+        if self.form.refusals():
+            QMessageBox.warning(
+                self, 'This config was not saved',
+                self._record_refusals('Save', self.form.refusals()))
+            return
         suggested = self.document.source_path or \
             self.workspace.default_config_path(self.document.model)
         path, _ = QFileDialog.getSaveFileName(
@@ -473,6 +847,11 @@ class MainWindow(QMainWindow):
         RecentWorkspaces().add(chosen)
         self.preview.workspace = self.workspace
         self.generator.workspace = self.workspace
+        # Only meaningful for an unsaved document (write_material_names falls
+        # back to source_path's own directory once there is one) -- but keep
+        # it correct regardless, so switching workspaces before ever saving
+        # does not leave the old workspace's directory behind.
+        self.document.workspace_dir = self.workspace.configs_dir
         self._update_workspace_label()
         self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
 
@@ -481,7 +860,7 @@ class MainWindow(QMainWindow):
     def _render(self) -> None:
         if not self._sync_settings():
             return
-        if not self._validate():
+        if not self._validate(enforce_required=False, refusals_block=False):
             self.statusBar().showMessage('Fix the reported problems first.')
             return
 
@@ -491,6 +870,7 @@ class MainWindow(QMainWindow):
             layer=None,
             settings_file=self.settings_file,
             referenced_files=self._referenced_files(),
+            base_dir=self.document.base_dir,
         )
         self.preview.start(request)
 
@@ -506,12 +886,30 @@ class MainWindow(QMainWindow):
         return out
 
     def _on_preview_ready(self, system) -> None:
-        self._busy(f"Rendered {system.count:,} atoms.", False)
+        self._set_render_building(False)
+        message = f"Rendered {system.count:,} atoms."
+        # A sweep config previews exactly one member (see PreviewController);
+        # say which, so what is shown is never a silent, arbitrary choice.
+        if self.preview.current_label:
+            message += f" {self.preview.current_label}"
+        self._busy(message, False)
+        # `finite_sheet` makes `2D` an island inside the substrate box rather
+        # than a sheet spanning it, so there -- and only there -- a `2D`
+        # reaching the periodic wall is the >=2x tip-diameter failure rather
+        # than the geometry working as intended. Nothing in the assembled
+        # system records which it is, so it is said here, where the config is.
+        finite = list(FINITE_COMPONENTS)
+        if _is_true(self.document.get('general', 'finite_sheet')):
+            finite.append('2D')
+        self.viewport.set_finite_components(finite)
         self.viewport.show_system(system)
+        self._render_snapshot = self.document.to_dict()
+        self.viewport.set_stale(False)
         if system.warnings:
             self.issues.setPlainText('\n'.join(system.warnings))
 
     def _on_preview_failed(self, message: str) -> None:
+        self._set_render_building(False)
         self._busy('Preview failed.', False)
         self.issues.setPlainText(message)
         QMessageBox.warning(self, 'Preview failed', message)
@@ -523,11 +921,38 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage('Fix the reported problems first.')
             return
 
+        # Asked before the counts, which come from the same expansion and so
+        # would raise the very message this reports -- as a traceback out of a
+        # Qt slot, where the user never sees it.
+        preview = self.document.expansion_output_dirs()
+        if preview.error:
+            self.issues.setPlainText(preview.error)
+            QMessageBox.warning(
+                self, 'Cannot expand this config',
+                f"Nothing was generated.\n\n{preview.error}")
+            self.statusBar().showMessage('Fix the reported problems first.')
+            return
+        dirs = preview.dirs
+
         summary = self.document.expansion()
         message = (
             f"This will generate {summary.configs} config(s), {summary.builds} "
             f"build(s) and {summary.jobs} job(s) into:\n{self.workspace.runs_dir}"
         )
+
+        if dirs:
+            shown = dirs[:8]
+            message += "\n\n" + "\n".join(str(d) for d in shown)
+            if len(dirs) > 8:
+                message += f"\n… and {len(dirs) - 8} more"
+
+            duplicates = sorted({str(d) for d in dirs if dirs.count(d) > 1})
+            if duplicates:
+                message += (
+                    "\n\nWARNING: these output directories are shared by more "
+                    "than one run and would overwrite each other:\n" +
+                    "\n".join(duplicates)
+                )
 
         # Say up front that the tick box will not produce anything, rather than
         # after the build has run.
@@ -549,6 +974,7 @@ class MainWindow(QMainWindow):
             model=self.document.model,
             generate_hpc=self.hpc_box.isChecked(),
             settings_file=self.settings_file,
+            base_dir=self.document.base_dir,
         ))
 
     def _on_generated(self, result: dict) -> None:

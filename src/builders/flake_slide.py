@@ -109,6 +109,12 @@ class FlakeSlideSimulation(SimulationBase):
     #: interior band -> the substrate sheet must have >= 2 layers.
     MIN_SHEET_LAYERS: int = 2
 
+    #: Like the hetero slide, this builder writes a single lammps/slide.in and
+    #: never reads outer_loop, so a [Flake] section collapses any configured
+    #: split to one job. Explicit (the base default is the same) because the
+    #: reroute from sheet-on-sheet is silent.
+    SPLIT_OUTER_LOOPS = frozenset()
+
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
@@ -211,34 +217,42 @@ class FlakeSlideSimulation(SimulationBase):
             logger.info("Twisted flake by %.3f deg (D3b incommensurate)", float(twist))
 
         # 3. ONE PotentialManager: sheet -> flake(s) -> reserved virtual, so global
-        #    atom types are sheet 1..S, flake S+1..S+F, virtual S+F+1. Run-dir-
-        #    relative potential staging (LAMMPS runs with cwd = output_dir).
-        pm = PotentialManager(
-            settings,
-            potentials_dir=self.output_dir / "provenance" / "potentials",
-            potentials_prefix="provenance/potentials",
-        )
-        pm.set_lj_overrides(self.config.lj_override)
-        pm.register_component("sheet", sheet_cfg, n_layers=1)
-        n_sheet_types = len(pm.types)
-        for name, comp in zip(flake_names, flake_components):
-            pm.register_component(name, comp, regions=[None, "corner"])
-
+        #    atom types are sheet 1..S, flake S+1..S+F, virtual S+F+1.
+        #
+        #    The RUN-DIR-relative prefix here, always: assembly (step 4) runs
+        #    LAMMPS with cwd = output_dir, so that is the only prefix its
+        #    minimization can open. The run scripts start from the simulation
+        #    ROOT instead, so the settings are re-registered with the sim-root
+        #    prefix once assembly is done (step 4b) -- the same two-phase dance
+        #    build_hetero_structure does.
         reserve_virtual_type = settings.simulation.drive_method == "virtual_atom"
-        if reserve_virtual_type:
-            pm.register_virtual_atom()
-
-        pm.add_self_interaction("sheet")
-        for name in flake_names:
-            pm.add_self_interaction(name)
-        for name in flake_names:
-            pm.add_cross_interaction("sheet", name)
-        for i in range(len(flake_names)):
-            for j in range(i + 1, len(flake_names)):
-                pm.add_cross_interaction(flake_names[i], flake_names[j])
-
         settings_path = self.output_dir / "lammps" / "system.in.settings"
-        pm.write_file(settings_path)
+
+        def _register(prefix: str) -> PotentialManager:
+            pm = PotentialManager(
+                settings,
+                potentials_dir=self.output_dir / "provenance" / "potentials",
+                potentials_prefix=prefix,
+            )
+            pm.set_lj_overrides(self.config.lj_override)
+            pm.register_component("sheet", sheet_cfg, n_layers=1)
+            for name, comp in zip(flake_names, flake_components):
+                pm.register_component(name, comp, regions=[None, "corner"])
+            if reserve_virtual_type:
+                pm.register_virtual_atom()
+            pm.add_self_interaction("sheet")
+            for name in flake_names:
+                pm.add_self_interaction(name)
+            for name in flake_names:
+                pm.add_cross_interaction("sheet", name)
+            for i in range(len(flake_names)):
+                for j in range(i + 1, len(flake_names)):
+                    pm.add_cross_interaction(flake_names[i], flake_names[j])
+            pm.write_file(settings_path)
+            return pm
+
+        pm = _register("provenance/potentials")
+        n_sheet_types = len(pm.types.ids_by_component("sheet"))
 
         # Flake type-groups (combined) + corner type-ids, read back from the PM.
         flake_group_ids: List[int] = []
@@ -260,6 +274,17 @@ class FlakeSlideSimulation(SimulationBase):
             bottom_flake_component=flake_names[0],
         )
 
+        # 4b. Retarget the settings for the RUN scripts. Assembly above is done,
+        #     so the pair_coeff lines may now name the staged potentials
+        #     sim-root-relatively -- which is what the generated HPC job scripts
+        #     need, because they run LAMMPS from the simulation root, not from
+        #     this run dir. Left run-dir-relative, every submitted flake job dies
+        #     with "cannot open sw potential file". Re-registering (rather than
+        #     mutating the prefix) is required: pair_coeff lines are built at
+        #     registration time and only re-emitted by write_file. Standalone,
+        #     relative_run_dir is the output dir itself, so this is a no-op.
+        pm = _register(self._potentials_prefix())
+
         # 5. Substrate-sheet z-region bands (from the standalone, unshifted sheet
         #    file -- it is placed at shift 0 0 0 in the combined data).
         sheet_layers = compute_sheet_zbands(sheet_path, n_sheet_layers)
@@ -279,8 +304,8 @@ class FlakeSlideSimulation(SimulationBase):
             "ylo": 0.0,
             "yhi": float(cell[1, 1]),
             "zhi": zhi,
-            "data_file": combined_path.name,
-            "potential_file": "lammps/system.in.settings",
+            "data_file": self._run_dir_path(combined_path.name),
+            "potential_file": self._run_dir_path("lammps", "system.in.settings"),
             "num_atom_types": len(pm.types),
             # The reserved virtual type is baked into the assembled data file
             # (an extra type with zero atoms), so the slide read_data needs no
@@ -308,8 +333,10 @@ class FlakeSlideSimulation(SimulationBase):
             "results_freq": out.results_frequency,
             "dump_freq": out.dump_frequency.get("slide", 1000),
             "dump_enabled": out.dump.get("slide", False),
-            "results_file_pattern": "results/friction_p${pressure}_a${a}_s${speed}",
-            "dump_file_pattern": "visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj",
+            "results_file_pattern": self._run_dir_path(
+                "results", "friction_p${pressure}_a${a}_s${speed}"),
+            "dump_file_pattern": self._run_dir_path(
+                "visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"),
             "driving_spring_ev": (general.driving_spring or 50.0) / NM_TO_EV_A2,
             "bond_spring_ev": (general.bond_spring or 80.0) / NM_TO_EV_A2,
             "lat_c": lat_c if lat_c is not None else settings.geometry.lat_c_default,
@@ -327,21 +354,39 @@ class FlakeSlideSimulation(SimulationBase):
         self.write_file("lammps/slide.in", script)
         logger.info("Wrote flake slide script to %s/lammps/slide.in", self.output_dir)
 
-        try:
-            self._generate_hpc_scripts()
-        except Exception as exc:  # pragma: no cover - defensive, non-fatal
-            logger.warning(
-                "HPC script generation skipped for flake slide (%s); the "
-                "homogeneous HPC path assumes sim-root-relative paths while the "
-                "flake slide is run-dir-relative.", exc,
-            )
+        self._generate_hpc_scripts()
 
     def run_dir(self) -> Path:
         """Return the run directory (where LAMMPS is launched: cwd = output_dir)."""
         return self.output_dir
 
     def _get_hpc_job_name(self) -> str:
-        return f"flake_{self.config.sheet.mat}"
+        """Job name keyed by the substrate AND the flake material(s).
+
+        Named off the substrate ``[2D]`` material alone before this fix -- the
+        same collision as ``output_dir_for``/``material_token`` (see
+        :func:`src.core.run.flake_material_token`): two flake configs sharing
+        the substrate but differing only in flake material produced identical
+        HPC job identities. Mirrors that helper's rule exactly, so the two
+        stay in lockstep: a hetero flake (``flake_sheets`` has 2 entries, each
+        with a required ``mat``) always contributes; a single ``[Flake]``
+        section only contributes when it sets an EXPLICIT ``mat`` of its own
+        (``self.config.flake.mat`` stays ``None`` otherwise --
+        ``_filled_flake_config`` returns a copy and never mutates
+        ``self.config.flake``) -- the common single-material case (the flake
+        reuses the substrate's material) stays byte-identical to before this
+        fix.
+        """
+        sheet_mat = self.config.sheet.mat
+        if len(self.config.flake_sheets) == 2:
+            flake_token = '+'.join(fs.mat for fs in self.config.flake_sheets)
+        elif self.config.flake is not None and self.config.flake.mat is not None:
+            flake_token = self.config.flake.mat
+        else:
+            flake_token = None
+        if flake_token is not None:
+            return f"flake_{sheet_mat}+flake-{flake_token}"
+        return f"flake_{sheet_mat}"
 
     def _record_twist_manifest(self, twist_angle_applied: float) -> None:
         """Record the applied flake twist into the run manifest (D3b).

@@ -445,6 +445,15 @@ class JobManifest:
                 force_match = re.match(r"slide_f([0-9]+(?:p[0-9]+)?)N$", stem)
                 if force_match:
                     force = float(force_match.group(1).replace('p', '.'))
+                # Per-angle slide scripts (outer_loop=scan_angle): slide_a<token>.in,
+                # token from format_numeric_token: 'm' negative prefix, 'p' decimal.
+                angle = 0.0
+                angle_match = re.match(r"slide_a(m?[0-9]+(?:p[0-9]+)?)$", stem)
+                if angle_match:
+                    token = angle_match.group(1)
+                    sign = -1.0 if token.startswith('m') else 1.0
+                    digits = token[1:] if token.startswith('m') else token
+                    angle = sign * float(digits.replace('p', '.'))
                 manifest.add_job(JobEntry(
                     job_id=job_id,
                     simulation_path=str(sim_info['rel_path']),
@@ -452,6 +461,7 @@ class JobManifest:
                     material=sim_info['material'],
                     layers=sim_info['layers'],
                     force=force,
+                    angle=angle,
                     speed=speed,
                 ))
         return manifest

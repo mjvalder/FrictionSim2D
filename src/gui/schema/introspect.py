@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import enum
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, Type, Union, get_args, get_origin
 
 from pydantic import BaseModel
@@ -132,7 +133,14 @@ def _classify(annotation: Any, name: str) -> Tuple[FieldKind, Tuple[Any, ...], O
         return FieldKind.LIST, (), item
 
     if origin in (dict, Dict):
-        return FieldKind.DICT, (), None
+        # The value type, not the key type -- KeyValueGridEditor needs it to
+        # give a newly added row the right control (a checkbox for
+        # Dict[str, bool], a text cell otherwise) without having to guess
+        # from a runtime value that may just be the empty string add_row()
+        # is handed by default.
+        args = get_args(annotation)
+        item = _scalar_kind(args[1], name) if len(args) > 1 else FieldKind.UNKNOWN
+        return FieldKind.DICT, (), item
 
     if origin is Union:
         args = get_args(annotation)
@@ -210,7 +218,32 @@ def describe_model(model: Type[BaseModel]) -> List[SectionSpec]:
     Each nested model field becomes one section; ``settings`` and ``sheets`` are
     excluded (see module docs). A ``Dict`` field is also a section, because that
     is how it is written in an ``.ini``: the section's keys are the dict's.
+
+    Cached on the model class, which is the whole of the input: a class's
+    fields are fixed once it is defined, so two calls with the same class
+    cannot disagree. The cache matters because
+    ``ConfigDocument.conflicts()`` -- run on every Render and every Generate
+    -- reaches one field default through ``section()``, and each of those
+    walked every model of the config.
+
+    A model *switch* cannot serve a stale answer: the two families have
+    different root classes, so they are different cache keys. The one thing
+    that would break it is a class edited in place after being described,
+    which nothing does outside a debugger; ``cache_clear`` is there if it
+    ever becomes necessary.
+
+    Each call still gets its own ``SectionSpec`` objects and its own field
+    lists, because callers edit what they are handed --
+    ``ConfigDocument.second_material_spec`` drops ``materials_list`` from the
+    list it gets. ``FieldSpec`` is frozen, so those are shared as they are.
     """
+    return [replace(spec, fields=list(spec.fields))
+            for spec in _describe_model(model)]
+
+
+@lru_cache(maxsize=None)
+def _describe_model(model: Type[BaseModel]) -> Tuple[SectionSpec, ...]:
+    """The walk itself. See `describe_model`, which owns the copying."""
     sections: List[SectionSpec] = []
 
     for field_name, info in model.model_fields.items():
@@ -232,4 +265,10 @@ def describe_model(model: Type[BaseModel]) -> List[SectionSpec]:
                 doc='Free-form key/value overrides.',
             ))
 
-    return sections
+    return tuple(sections)
+
+
+#: Exposed on the public name, which is the one callers know. Nothing in the
+#: app calls it -- a described class never changes -- but a test proving the
+#: walk happens at all has to be able to empty the cache first.
+describe_model.cache_clear = _describe_model.cache_clear

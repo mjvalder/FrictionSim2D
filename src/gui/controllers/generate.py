@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from PySide6.QtCore import QObject, QProcess, Signal
 
 from ...core.config_io import write_config
+from .staged_paths import absolutize_staged_paths
 from ..workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,13 @@ class GenerateRequest:
     generate_hpc: bool = False
     settings_file: Optional[Path] = None
     root_name: Optional[str] = None
+    #: The *original* document's directory (`ConfigDocument.base_dir`) --
+    #: where relative `cif_path`/`pot_path`/`materials_list` values are meant
+    #: to resolve against, as opposed to the `_generate` staging directory
+    #: this request's config is actually written into. See
+    #: `staged_paths.absolutize_staged_paths`, which `GenerateController.start`
+    #: uses this for.
+    base_dir: Optional[Path] = None
 
 
 class GenerateController(QObject):
@@ -64,7 +72,13 @@ class GenerateController(QObject):
 
         staging = self.workspace.preview_dir / '_generate'
         staging.mkdir(parents=True, exist_ok=True)
-        config_path = write_config(request.config, staging / 'config.ini')
+        # The config is about to be written somewhere other than where it
+        # lived when its relative paths were written -- absolutise them
+        # against the *original* document's directory first, or search_paths
+        # would resolve them (wrongly) against `staging` instead. See
+        # `staged_paths` for why.
+        staged_config = absolutize_staged_paths(request.config, request.base_dir)
+        config_path = write_config(staged_config, staging / 'config.ini')
         result_file = staging / 'result.json'
         if result_file.exists():
             result_file.unlink()

@@ -187,6 +187,38 @@ def test_hetero_afm_system_init_references_replicated_stack(tmp_path):
     assert "group 2D_all union sheet_1_all sheet_2_all" in settings_text
 
 
+# --- Fix round 1: hetero AFM job names must not collide on material 2 ---
+
+def test_hetero_afm_job_name_differs_by_full_pair():
+    """Two periodic hetero AFM configs sharing material 1 but differing in
+    material 2 must NOT produce the same HPC job name -- confirmed by
+    construction (build both configs, compare _get_hpc_job_name()) per the
+    review that found afm_h-MoS2 was emitted for both."""
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    raw_a = _afm_hetero_raw()
+    raw_b = _afm_hetero_raw()
+    raw_b["2D-2"]["mat"] = "h-WSe2"
+    raw_b["2D-2"]["cif_path"] = f"{MAT}/h-WS2.cif"        # geometry irrelevant; job name only
+    cfg_a = AFMSimulationConfig(**raw_a, settings=load_settings())
+    cfg_b = AFMSimulationConfig(**raw_b, settings=load_settings())
+    sim_a = HeteroAFMSimulation(cfg_a, "out_a")
+    sim_b = HeteroAFMSimulation(cfg_b, "out_b")
+    name_a, name_b = sim_a._get_hpc_job_name(), sim_b._get_hpc_job_name()
+    assert name_a != name_b
+    assert name_a == "afm_h-MoS2+h-WS2"
+    assert name_b == "afm_h-MoS2+h-WSe2"
+
+
+def test_finite_hetero_afm_job_name_also_uses_full_pair():
+    """FiniteHeteroAFMSimulation doesn't override _get_hpc_job_name -- it must
+    inherit the fixed HeteroAFMSimulation._material_id, not AFMSimulation's
+    single-sheet default."""
+    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
+    sim = FiniteHeteroAFMSimulation(cfg, "out")
+    assert sim._get_hpc_job_name() == "afm_h-MoS2+h-WS2"
+
+
 # --- Task 6: routing ---
 
 def test_routing_selects_hetero_afm_for_two_materials():
@@ -687,3 +719,122 @@ def test_afm_flake_twist_rotates_and_runs(tmp_path):
     loads = list((tmp_path / "tw" / "L1" / "data").glob("load_*N.data"))
     assert loads and all(p.stat().st_size > 0 for p in loads), \
         f"no non-empty load_*N.data written by the twisted-flake indent: {loads}"
+
+
+# --- Fix round 2: provenance must record every sheet's files, not just sheet 1 ---
+
+def test_hetero_afm_init_provenance_records_both_sheets(tmp_path):
+    """AFMSimulation._init_provenance previously iterated only self.config.sheet
+    (sheet 1) -- never self.config.sheets -- so for every heterostructure AFM
+    build, sheet 2's cif/potential files were silently never copied into
+    provenance/. HeteroAFMSimulation inherits _init_provenance unmodified, so
+    this proves the fix from the hetero AFM builder (the affected path)."""
+    from src.builders.hetero_afm import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim._init_provenance()
+
+    prov_dir = tmp_path / "provenance"
+    assert (prov_dir / "cif" / "h-MoS2.cif").exists()
+    assert (prov_dir / "cif" / "h-WS2.cif").exists()
+    assert (prov_dir / "potentials" / "MoS2_wen.sw").exists()
+    assert (prov_dir / "potentials" / "t-WS2.sw").exists()
+
+
+def test_afm_init_provenance_single_material_unchanged(tmp_path):
+    """The single-material path must still record exactly what it recorded
+    before this fix: the sheet under the plain 'sheet' component name (not
+    'sheet_1'), plus tip/sub."""
+    from src.builders.afm import AFMSimulation
+    cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
+    sim = AFMSimulation(cfg, str(tmp_path))
+
+    seen = []
+    real_add = sim._add_component_files_to_provenance
+
+    def _spy(name, config):
+        seen.append(name)
+        return real_add(name, config)
+
+    sim._add_component_files_to_provenance = _spy
+    sim._init_provenance()
+
+    assert seen == ["sheet", "tip", "sub"]
+    prov_dir = tmp_path / "provenance"
+    assert (prov_dir / "cif" / "h-MoS2.cif").exists()
+    assert (prov_dir / "potentials" / "MoS2_wen.sw").exists()
+
+
+# --- Fix round 1 (cont'd): AFM's own [flake] must key output dir + job name ---
+#
+# AFMSimulationConfig.flake uses alias='flake' (lowercase) -- distinct from
+# SheetOnSheetSimulationConfig.flake's alias='Flake' -- but shares the
+# identical FlakeConfig model. flake_material_token only recognised the
+# capital-F key, so it silently never saw an AFM [flake] section at all: two
+# `run afm` configs sharing [2D] but naming different [flake] materials built
+# into the SAME output directory and the SAME HPC job name (verified by
+# construction below, mirroring examples/afm_flake_config.ini).
+
+def test_output_dir_differs_when_only_afm_flake_material_differs():
+    from src.core.run import output_dir_for, material_token
+
+    raw_a = _afm_flake_raw()
+    raw_b = _afm_flake_raw()
+    raw_b["flake"]["mat"] = "h-WS2"
+    raw_b["flake"]["cif_path"] = f"{MAT}/h-WS2.cif"
+    raw_b["flake"]["pot_path"] = f"{POT}/sw_lammps/t-WS2.sw"
+
+    dir_a = output_dir_for(raw_a, "afm")
+    dir_b = output_dir_for(raw_b, "afm")
+    assert dir_a != dir_b
+    assert material_token(raw_a, "afm") != material_token(raw_b, "afm")
+    # Pin the exact collision the reviewer constructed against 72109b7.
+    assert str(dir_a) == "afm/h-MoS2+flake-h-MoS2/40x_40y/sub_aSi_tip_Si_r5/K1"
+    assert str(dir_b) == "afm/h-MoS2+flake-h-WS2/40x_40y/sub_aSi_tip_Si_r5/K1"
+
+
+def test_hpc_job_name_differs_when_only_afm_flake_material_differs():
+    from src.builders.afm import AFMSimulation
+
+    raw_a = _afm_flake_raw()
+    raw_b = _afm_flake_raw()
+    raw_b["flake"]["mat"] = "h-WS2"
+    raw_b["flake"]["cif_path"] = f"{MAT}/h-WS2.cif"
+    raw_b["flake"]["pot_path"] = f"{POT}/sw_lammps/t-WS2.sw"
+
+    cfg_a = AFMSimulationConfig(**raw_a, settings=load_settings())
+    cfg_b = AFMSimulationConfig(**raw_b, settings=load_settings())
+    sim_a = AFMSimulation(cfg_a, "out_a")
+    sim_b = AFMSimulation(cfg_b, "out_b")
+
+    name_a, name_b = sim_a._get_hpc_job_name(), sim_b._get_hpc_job_name()
+    assert name_a != name_b
+    assert name_a == "afm_h-MoS2+flake-h-MoS2"
+    assert name_b == "afm_h-MoS2+flake-h-WS2"
+
+
+def test_output_dir_and_job_name_unaffected_by_absent_afm_flake_section():
+    """An AFM config with no [flake] section at all is unaffected."""
+    from src.core.run import output_dir_for
+    from src.builders.afm import AFMSimulation
+
+    raw = _afm_flake_raw()
+    del raw["flake"]
+    assert str(output_dir_for(raw, "afm")) == "afm/h-MoS2/40x_40y/sub_aSi_tip_Si_r5/K1"
+
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    sim = AFMSimulation(cfg, "out")
+    assert sim._get_hpc_job_name() == "afm_h-MoS2"
+
+
+def test_sheetonsheet_flake_omit_mat_directory_still_byte_identical():
+    """The sheet-on-sheet flake convention this fix must not disturb: a
+    [Flake] section that omits mat (reuses the substrate's) still builds into
+    today's directory -- unchanged by teaching flake_material_token about the
+    AFM family's lowercase 'flake' key too."""
+    from src.core.run import output_dir_for
+
+    no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
+    reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
+
+    assert output_dir_for(no_flake, "sheetonsheet") == output_dir_for(reused_flake, "sheetonsheet")

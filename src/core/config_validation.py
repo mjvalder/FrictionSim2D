@@ -27,15 +27,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Type, Union
 
 from pydantic import BaseModel, ValidationError
 
+from .material_templates import TEMPLATE_MARKERS, has_template_marker
 from .utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 
 __all__ = ['ConfigIssue', 'ConfigValidation', 'validate_config', 'preflight_paths']
 
 #: Config keys that name a file on disk, and the resolver each one needs.
 PATH_KEYS = ('pot_path', 'cif_path')
-
-#: Placeholder left in templated configs until sweep expansion substitutes it.
-TEMPLATE_MARKER = '{mat}'
 
 #: Issue kinds raised by the path preflight. Used to suppress the same problem
 #: arriving a second time, unlocated, from inside a field validator.
@@ -50,13 +48,22 @@ class ConfigIssue:
     section: Optional[str] = None
     key: Optional[str] = None
     kind: str = 'validation'
+    #: Position within a list-valued section, when the failing value sits in
+    #: one -- ``sheets[1].cif_path`` is ``section='sheets'``, ``index=1``,
+    #: ``key='cif_path'``. Section and key alone cannot say which member
+    #: failed, and the key must stay the field name or there is nothing for a
+    #: form to decorate.
+    index: Optional[int] = None
 
     @property
     def location(self) -> str:
-        if self.section and self.key:
-            return f"[{self.section}] {self.key}"
-        if self.section:
-            return f"[{self.section}]"
+        section = self.section
+        if section and self.index is not None:
+            section = f"{section}[{self.index}]"
+        if section and self.key:
+            return f"[{section}] {self.key}"
+        if section:
+            return f"[{section}]"
         return "(config)"
 
     def render(self) -> str:
@@ -95,9 +102,13 @@ def preflight_paths(config: Mapping[str, Any],
     the exception raised later from inside the validator does not say which
     section it came from.
 
-    Unexpanded ``{mat}`` templates are reported as their own kind, because they
-    are not user error -- they are configs that must be expanded before they can
-    be validated at all.
+    Unexpanded ``{mat}``/``{mat1}``/``{mat2}`` templates are reported as their
+    own kind, because they are not user error -- they are configs that must
+    be expanded before they can be validated at all. Missing this for a
+    heterostructure pair's ``{mat1}``/``{mat2}`` (rather than just ``{mat}``)
+    would classify it as a missing file instead -- a hard error that
+    permanently blocks Render/Generate, since a template placeholder can
+    never resolve to an existing path.
     """
     issues: List[ConfigIssue] = []
     for section, values in config.items():
@@ -107,11 +118,13 @@ def preflight_paths(config: Mapping[str, Any],
             value = values.get(key)
             if not isinstance(value, str) or not value:
                 continue
-            if TEMPLATE_MARKER in value:
+            if has_template_marker(value):
+                markers = '/'.join(TEMPLATE_MARKERS)
                 issues.append(ConfigIssue(
                     message=(
-                        f"'{value}' still contains {TEMPLATE_MARKER}; expand the "
-                        "material sweep before validating"
+                        f"'{value}' still contains an unexpanded template "
+                        f"placeholder ({markers}); expand the material sweep "
+                        "before validating"
                     ),
                     section=section, key=key, kind='unexpanded_template',
                 ))
@@ -126,17 +139,27 @@ def preflight_paths(config: Mapping[str, Any],
 
 
 def _issue_from_pydantic_error(error: Mapping[str, Any]) -> ConfigIssue:
-    """Map one pydantic error dict onto a section/key."""
+    """Map one pydantic error dict onto a section/key.
+
+    A loc through a list -- ``('sheets', 1, 'cif_path')``, which is how every
+    second-sheet failure of a heterostructure config arrives -- keeps the
+    index separately and the *field* as the key. Taking the first two elements
+    would report ``key='1'``, naming no field, and a form that decorates by
+    key would then decorate nothing however precisely it maps the section.
+    """
     loc: Sequence[Any] = error.get('loc', ())
     section: Optional[str] = None
     key: Optional[str] = None
-    if len(loc) >= 2:
+    index: Optional[int] = None
+    if len(loc) >= 3 and isinstance(loc[1], int):
+        section, index, key = str(loc[0]), loc[1], str(loc[2])
+    elif len(loc) >= 2:
         section, key = str(loc[0]), str(loc[1])
     elif len(loc) == 1:
         section = str(loc[0])
     return ConfigIssue(
         message=error.get('msg', 'invalid value'),
-        section=section, key=key, kind='validation',
+        section=section, key=key, kind='validation', index=index,
     )
 
 

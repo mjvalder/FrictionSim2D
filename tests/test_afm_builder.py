@@ -1,5 +1,6 @@
 """Tests for AFMSimulation builder layer sweep behavior."""
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,114 @@ import pytest
 from src.builders.afm import AFMSimulation
 from src.core.config import AFMSimulationConfig, load_settings
 from src.core.utils import normalize_potential_type
+
+# The langevin fixes embed a fresh `{{ range(1, 999999) | random }}` seed on
+# every render (see afm/slide.lmp), so raw output can't be pinned literally.
+# Normalize both seeds to a fixed placeholder before comparing.
+_SEED_RE = re.compile(
+    r'(langevin [\d.]+ [\d.]+ \$\(100\.0\*dt\) )\d+( zero yes)'
+)
+
+
+def _normalize_random_seeds(content: str) -> str:
+    return _SEED_RE.sub(r'\1SEED\2', content)
+
+
+# Captured from AFMSimulation.write_inputs() with outer_loop unset, on the
+# `_make_afm_config` fixture config, before the scan_angle split was added.
+# Pins that the unset (default) path is byte-identical to today.
+_EXPECTED_SLIDE_UNSET_OUTER_LOOP = """\
+# LAMMPS input script for AFM Sliding Simulation
+
+variable        speed equal 2.0
+
+variable        find equal 10.0
+
+
+variable        a equal 0.0
+
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+timestep        0.001
+thermo          100000
+comm_style      tiled
+
+read_data       out/L1/data/load_$(v_find)N.data
+include         out/L1/lammps/system.in.settings
+
+group           2D type 3
+velocity        2D zero angular
+
+
+
+dump            sys all atom 10000 out/L1/visuals/slide_f$(v_find)_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+fix             sub_fix sub_fix setforce 0.0 0.0 0.0
+fix             tip_f tip_fix rigid/nve single force * on on on torque * off off off
+
+compute         temp_tip tip_thermo temp/partial 0 1 0
+fix             lang_tip tip_thermo langevin 300.0 300.0 $(100.0*dt) SEED zero yes
+fix_modify      lang_tip temp temp_tip
+
+compute         temp_sub sub_thermo temp/partial 0 1 0
+fix             lang_sub sub_thermo langevin 300.0 300.0 $(100.0*dt) SEED zero yes
+fix_modify      lang_sub temp temp_sub
+
+group           nve_apply subtract all sub_fix tip_fix
+fix             nve_all nve_apply nve
+
+compute         COM_top 2D_all com
+variable        comx equal c_COM_top[1]
+variable        comy equal c_COM_top[2]
+variable        comz equal c_COM_top[3]
+
+compute         COM_tip tip_fix com
+variable        comx_tip equal c_COM_tip[1]
+variable        comy_tip equal c_COM_tip[2]
+variable        comz_tip equal c_COM_tip[3]
+
+run             0
+
+variable        Ftotal equal -v_find/1.602176565
+variable        n equal v_Ftotal/count(tip_fix)
+fix             forcetip tip_fix aveforce 0.0 0.0 $n
+
+variable        fz_tip equal f_forcetip[3]*1.602176565
+
+variable        fx_spr equal f_spr[1]*1.602176565
+variable        fy_spr equal f_spr[2]*1.602176565
+
+fix             fc_ave all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip file out/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt
+
+fix             damp tip_fix viscous 6.25
+
+variable        spring_x equal cos(v_a*PI/180)
+variable        spring_y equal sin(v_a*PI/180)
+variable        drive_vx equal v_spring_x*v_speed/100
+variable        drive_vy equal v_spring_y*v_speed/100
+
+run             0
+variable        virtual_x equal xcm(tip_fix,x)+30.0*v_spring_x
+variable        virtual_y equal xcm(tip_fix,y)+30.0*v_spring_y
+variable        virtual_z equal xcm(tip_fix,z)
+
+create_atoms    3 single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
+group           virtual type 3
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr tip_fix spring couple virtual 3.1210986267166043 0.0 0.0 NULL 30.0
+fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
+
+run             500000"""
 
 
 def _make_afm_config(tmp_path: Path, layers: list[int]) -> AFMSimulationConfig:
@@ -187,8 +296,13 @@ def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> 
     assert sorted(builder.output_dir_layer.keys()) == [2, 4]
 
 
-def _prepare_builder_for_slide_write(builder: AFMSimulation, tmp_path: Path) -> Path:
-    """Seed builder state so write_inputs can render slide.in in isolation."""
+def _seed_builder_state(builder: AFMSimulation, tmp_path: Path) -> Path:
+    """Seed builder state so write_inputs can render slide.in in isolation.
+
+    Does not call write_inputs -- callers that need to assert on a raised
+    error wrap that call themselves; callers that just want the rendered
+    slide.in should use :func:`_prepare_builder_for_slide_write` instead.
+    """
     output_dir = tmp_path / "out"
     layer_dir = output_dir / "L1"
 
@@ -224,6 +338,12 @@ def _prepare_builder_for_slide_write(builder: AFMSimulation, tmp_path: Path) -> 
     for path in (builder.sheet_paths[1], builder.tip_path, builder.sub_path):
         path.write_text("# dummy\n", encoding="utf-8")
 
+    return layer_dir
+
+
+def _prepare_builder_for_slide_write(builder: AFMSimulation, tmp_path: Path) -> Path:
+    """Seed builder state and render slide.in."""
+    layer_dir = _seed_builder_state(builder, tmp_path)
     builder.write_inputs(1)
     return layer_dir / "lammps" / "slide.in"
 
@@ -378,6 +498,89 @@ def test_afm_outer_loop_force_single_load_stays_slide_in(tmp_path: Path) -> None
 
     assert (lammps_dir / "slide.in").exists()
     assert not list(lammps_dir.glob("slide_f*.in"))
+
+
+def test_afm_slide_unset_outer_loop_matches_pinned_baseline(tmp_path: Path) -> None:
+    """outer_loop unset must emit byte-identical slide.in to today (pinned)."""
+    config = _make_afm_config(tmp_path, layers=[1])
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    slide_script = slide_path.read_text(encoding="utf-8")
+
+    assert _normalize_random_seeds(slide_script.rstrip()) == _EXPECTED_SLIDE_UNSET_OUTER_LOOP
+
+
+def test_afm_supports_angle_split_by_default() -> None:
+    """AFMSimulation opts into the angle split; only opt-out subclasses (e.g.
+    IndentSimulation, see tests/test_indent_builder.py) drop it. The same
+    declaration drives the job-count prediction (src/core/run.py)."""
+    assert 'scan_angle' in AFMSimulation.SPLIT_OUTER_LOOPS
+    assert 'force' in AFMSimulation.SPLIT_OUTER_LOOPS
+
+
+def test_afm_outer_loop_scan_angle_splits_slide_per_angle(tmp_path: Path) -> None:
+    """outer_loop=scan_angle emits one slide_a<angle>.in per angle, sharing system.in."""
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.outer_loop = "scan_angle"
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    lammps_dir = tmp_path / "out" / "L1" / "lammps"
+
+    # One shared system.in; one slide script per angle; no monolithic slide.in.
+    assert (lammps_dir / "system.in").exists()
+    assert not (lammps_dir / "slide.in").exists()
+    slide_scripts = sorted(p.name for p in lammps_dir.glob("slide_*.in"))
+    assert slide_scripts == ["slide_a0.in", "slide_a30.in", "slide_a60.in"]
+
+    # Each split slide pins a scalar angle (no in-script angle loop).
+    slide_30 = (lammps_dir / "slide_a30.in").read_text(encoding="utf-8")
+    assert "variable        a equal 30.0" in slide_30
+    assert "label           angle_loop" not in slide_30
+    assert "variable        a index" not in slide_30
+
+    slide_0 = (lammps_dir / "slide_a0.in").read_text(encoding="utf-8")
+    assert "variable        a equal 0.0" in slide_0
+    slide_60 = (lammps_dir / "slide_a60.in").read_text(encoding="utf-8")
+    assert "variable        a equal 60.0" in slide_60
+
+
+def test_afm_outer_loop_scan_angle_single_angle_stays_slide_in(tmp_path: Path) -> None:
+    """A single angle keeps slide.in so the combined system+slide HPC path applies."""
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.scan_angle = [15.0]
+    config.general.outer_loop = "scan_angle"
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    lammps_dir = tmp_path / "out" / "L1" / "lammps"
+
+    assert (lammps_dir / "slide.in").exists()
+    assert not list(lammps_dir.glob("slide_a*.in"))
+
+
+def test_afm_outer_loop_scan_angle_rejects_scan_angle_force(tmp_path: Path) -> None:
+    """The split can't honor a force-selective angle filter; reject it clearly.
+
+    scan_angle_force restricts which force value(s) the scan_angle list applies
+    to (afm/slide.lmp's angle_loop gate at line ~140). Splitting into one script
+    per angle applies each angle to every force value in that script, silently
+    dropping the filter -- so reject the combination instead of changing what
+    the physics means.
+    """
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.force = [2.0, 5.0, 10.0]
+    config.general.scan_angle = [0.0, 30.0, 60.0]
+    config.general.scan_angle_force = 5.0
+    config.general.outer_loop = "scan_angle"
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _seed_builder_state(builder, tmp_path)
+
+    with pytest.raises(ValueError, match="scan_angle_force"):
+        builder.write_inputs(1)
 
 
 def test_afm_explicit_tip_x_ignores_tip_x_offset(tmp_path: Path) -> None:

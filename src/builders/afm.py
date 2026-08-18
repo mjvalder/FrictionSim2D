@@ -31,6 +31,14 @@ class AFMSimulation(SimulationBase):
     #: production run (e.g. the indent hold+retract replaces the slide).
     SLIDE_TEMPLATE: str = "afm/slide.lmp"
 
+    #: The AFM run phase splits per load and per scan angle. 'scan_angle' is
+    #: here because afm/slide.lmp really loops over the angle in-script (its
+    #: scan_angle_is_sequence switch), so there is something to split.
+    #: Subclasses whose SLIDE_TEMPLATE doesn't use the angle at all (e.g.
+    #: IndentSimulation's afm/indent.lmp) must drop it, else the split would
+    #: emit N physically-identical scripts.
+    SPLIT_OUTER_LOOPS = frozenset({'force', 'scan_angle'})
+
     def __init__(self, config: AFMSimulationConfig, output_dir: str,
                     config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
@@ -113,9 +121,53 @@ class AFMSimulation(SimulationBase):
             self.lat_c = lat_c
             self.sheet_dims = dict(sheet_dims)
 
+    def _material_id(self) -> str:
+        """Material token used in the HPC job name.
+
+        Single-material AFM: the sheet's material name. Overridden by
+        :class:`~src.builders.hetero_afm.HeteroAFMSimulation` (inherited by
+        :class:`~src.builders.hetero_afm.FiniteHeteroAFMSimulation`) to return
+        the numeric-order ``+``-joined pair token instead, so two hetero
+        configs sharing material 1 don't collide on HPC job identity (mirrors
+        :meth:`~src.builders.indent.IndentSimulation._material_id`).
+
+        Includes :meth:`_flake_id_suffix` so an AFM ``[flake]`` also keys the
+        job name -- see that method's docstring for the collision this closes.
+        """
+        return self.config.sheet.mat + self._flake_id_suffix()
+
+    def _flake_id_suffix(self) -> str:
+        """``'+flake-<mat...>'`` when a flake section names a flake material
+        that changes what gets built, else ``''``.
+
+        Mirrors :func:`src.core.run.flake_material_token`'s rule exactly (kept
+        in lockstep so the job name and the output directory always agree on
+        whether a flake changes a config's identity): a hetero flake
+        (``flake_sheets`` has 2 entries, ``mat`` required on each) always
+        contributes; a single ``[flake]`` section contributes whenever it
+        names a material (``self.config.flake.mat``) -- AFM's own flake,
+        unlike the sheet-on-sheet flake slide's, has no substrate fallback
+        (``components.build_flake_component`` needs its own
+        ``mat``/``cif_path``/``pot_path`` to build the flake at all), so a
+        configured AFM flake always contributes. No ``[flake]``/
+        ``[flake-N]`` section at all -> ``''``, so the job name stays
+        byte-identical to before this method existed.
+
+        Shared (not overridden) by every ``_material_id`` in this family --
+        :class:`~src.builders.indent.IndentSimulation` and
+        :class:`~src.builders.hetero_afm.HeteroAFMSimulation`/
+        :class:`~src.builders.hetero_afm.HeteroIndentSimulation` all inherit
+        it unmodified and only append it to their own material token.
+        """
+        if len(self.config.flake_sheets) == 2:
+            return '+flake-' + '+'.join(fs.mat for fs in self.config.flake_sheets)
+        if self.config.flake is not None and self.config.flake.mat is not None:
+            return f'+flake-{self.config.flake.mat}'
+        return ''
+
     def _get_hpc_job_name(self) -> str:
         """Get AFM-specific job name."""
-        return f"afm_{self.config.sheet.mat}"
+        return f"afm_{self._material_id()}"
 
     def _velocity_seed(self, n_layers: int) -> Optional[int]:
         """Explicit ``velocity create`` seed for system.in, or None for random.
@@ -127,15 +179,32 @@ class AFMSimulation(SimulationBase):
         return None
 
     def _init_provenance(self) -> None:
-        """Initialize provenance folder and collect input files."""
+        """Initialize provenance folder and collect input files.
+
+        Records every configured sheet, not just sheet 1: ``self.config.sheets``
+        is the per-material stack folded from ``[2D-1]``, ``[2D-2]``, ... (or a
+        one-element wrap of the single ``[2D]``), so a heterostructure build
+        (``HeteroAFMSimulation``/``HeteroIndentSimulation``, which inherit this
+        method unmodified) needs every material's cif/potential copied for
+        portability, not just the first. The single-material path keeps the
+        plain ``'sheet'`` component name (byte-identical to before this fix);
+        only a genuine multi-material stack uses the numbered ``sheet_1``/
+        ``sheet_2`` names already used elsewhere (e.g.
+        :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`'s own
+        ``_init_provenance``, the potential registration's component names).
+        """
         prov_dir = self.output_dir / 'provenance'
         prov_dir.mkdir(parents=True, exist_ok=True)
         logger.debug("Provenance folder initialized at: %s", prov_dir)
 
-        provenance_components = [
-            ('sheet', self.config.sheet),
-            ('tip', self.config.tip),
-        ]
+        sheets = self.config.sheets or [self.config.sheet]
+        if len(sheets) > 1:
+            provenance_components = [
+                (f'sheet_{i + 1}', sheet) for i, sheet in enumerate(sheets)
+            ]
+        else:
+            provenance_components = [('sheet', self.config.sheet)]
+        provenance_components.append(('tip', self.config.tip))
         if self.config.sub is not None:
             provenance_components.append(('sub', self.config.sub))
         if self.config.flake is not None:
@@ -624,10 +693,29 @@ class AFMSimulation(SimulationBase):
 
         With ``outer_loop = force`` (and more than one load) each load is emitted
         as its own ``slide_f<load>N.in`` reading its shared ``load_<load>N.data``,
-        mirroring the sheet-on-sheet ``outer_loop`` split. Each becomes an
-        independent HPC job (the two-phase generator makes them depend on the
-        shared system.in phase). Otherwise a single ``slide.in`` loops over the
-        loads in-script, as before.
+        mirroring the sheet-on-sheet ``outer_loop`` split. With ``outer_loop =
+        scan_angle`` (and more than one angle) each angle is emitted as its own
+        ``slide_a<angle>.in``, passing a scalar ``scan_angle_config`` so the
+        template's own ``scan_angle_is_sequence`` switch (afm/slide.lmp) collapses
+        the in-script angle loop -- no parallel code path needed. Both split
+        modes become independent HPC jobs (the two-phase generator makes them
+        depend on the shared system.in phase). Otherwise a single ``slide.in``
+        loops over the loads/angles in-script, as before.
+
+        The angle split does not carry the ``scan_angle_force`` selector: that
+        option restricts which force value(s) the scan_angle list applies to
+        (afm/slide.lmp's angle_loop gate), but the split applies its one fixed
+        angle to every force in every per-angle script -- so the selector would
+        be silently dropped, changing what a force-gated scan means. Reject the
+        combination instead. :func:`src.core.run.outer_loop_conflict` rejects it
+        first (before the build, and only for the builders that really split),
+        so this raise is the backstop for builds driven directly.
+
+        Only applies when ``'scan_angle' in self.SPLIT_OUTER_LOOPS`` (the
+        default). :class:`IndentSimulation` drops it because its
+        ``afm/indent.lmp`` template declares the angle variable but never
+        uses it (no lateral drive) -- splitting there would just emit N
+        physically-identical scripts.
         """
         outer_loop = getattr(self.config.general, 'outer_loop', None)
         force = self.config.general.force
@@ -635,7 +723,8 @@ class AFMSimulation(SimulationBase):
 
         # Keep a single load on slide.in so the combined system+slide HPC path
         # (which references the literal name slide.in) still applies.
-        if outer_loop == 'force' and len(forces) > 1:
+        if (outer_loop == 'force' and len(forces) > 1
+                and 'force' in self.SPLIT_OUTER_LOOPS):
             for load in forces:
                 slide_context = dict(context)
                 slide_context['forces'] = load
@@ -643,6 +732,30 @@ class AFMSimulation(SimulationBase):
                 script_name = f"slide_f{format_numeric_token(float(load))}N.in"
                 self.write_file(f"lammps/{script_name}", script, output_root)
             logger.info("Split slide phase into %d per-load scripts.", len(forces))
+            return
+
+        scan_angle = self.config.general.scan_angle
+        angles = scan_angle if isinstance(scan_angle, list) else (
+            [] if scan_angle is None else [scan_angle]
+        )
+        if (outer_loop == 'scan_angle' and len(angles) > 1
+                and 'scan_angle' in self.SPLIT_OUTER_LOOPS):
+            if self.config.general.scan_angle_force is not None:
+                raise ValueError(
+                    "outer_loop='scan_angle' cannot be combined with "
+                    "scan_angle_force: splitting into one script per angle "
+                    "applies each angle to every force value, silently "
+                    "dropping the force-selective filter. Remove "
+                    "scan_angle_force, or drop outer_loop to keep the "
+                    "in-script angle loop (which honors it)."
+                )
+            for angle in angles:
+                slide_context = dict(context)
+                slide_context['scan_angle_config'] = float(angle)
+                script = self.render_template(self.SLIDE_TEMPLATE, slide_context)
+                script_name = f"slide_a{format_numeric_token(float(angle))}.in"
+                self.write_file(f"lammps/{script_name}", script, output_root)
+            logger.info("Split slide phase into %d per-angle scripts.", len(angles))
             return
 
         slide_script = self.render_template(self.SLIDE_TEMPLATE, context)

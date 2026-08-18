@@ -16,11 +16,13 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
 from ...core.config_io import write_config
+from ...core.run import expand_config_sweeps
+from .staged_paths import absolutize_staged_paths
 from ..preview.assemble import AssembledSystem, assemble
 from ..preview.init_script import parse_assembly
 from ..preview.settings_file import parse_identity
@@ -81,6 +83,122 @@ def cache_key(config: Dict[str, Any], model: str, layer: Optional[int],
     return digest.hexdigest()[:24]
 
 
+def _first_sweep_member(
+        config: Dict[str, Any],
+        base_dir: Optional[Path] = None) -> Tuple[Dict[str, Any], Optional[str]]:
+    """The first member of a sweep to preview, and a label naming it.
+
+    A material (or other) sweep expands to one config per combination.
+    Handing the whole thing to ``generate_package`` -- as the preview used
+    to -- built every member just to show one: slow, and which member landed
+    first in ``result.created`` was arbitrary from the user's point of view.
+
+    This picks the first member deterministically, through the same
+    ``expand_config_sweeps`` a real run uses rather than a re-implemented
+    selection rule, so it is genuinely one the real run would produce:
+    placeholders substituted, ``materials_list`` stripped.
+
+    Args:
+        base_dir: The document's own directory, i.e. what a relative
+            ``materials_list`` is relative to. Without this, a swept config
+            opened from anywhere other than the current working directory
+            silently fails to resolve its material list here (see
+            ``expand_config_sweeps``, which only logs and returns no
+            materials on a resolution failure) and previews as if it had no
+            sweep at all -- ``{mat}`` unsubstituted.
+
+    Returns ``config`` unchanged, with no label, when it carries no sweep --
+    including when expansion itself fails (e.g. an unreadable
+    materials_list): the real build hits the same error and reports it
+    through the existing failure path, so silently falling back here is
+    just deferring to that, not hiding anything.
+
+    Whether a material sweep actually happened is decided by whether
+    ``materials_list`` disappeared between ``config`` and the returned
+    member -- not by ``len(members)`` -- because those are different
+    questions. A sweep of exactly one selected material still substitutes
+    ``{mat}`` and strips ``materials_list``, so ``expand_config_sweeps``
+    correctly returns a single, already-substituted member; treating "one
+    member" as "no sweep" (the previous rule here) discarded that
+    substitution and previewed the original config with a literal ``{mat}``
+    still in ``cif_path``/``pot_path``, which the builder cannot resolve.
+    Conversely, a config with no ``materials_list`` at all also produces
+    exactly one, unsubstituted member -- ``materials_list`` was never there
+    to strip -- and that case must still fall back to ``config`` unchanged.
+
+    The sheet section is looked up the way ``expand_config_sweeps`` itself
+    looks it up -- a plain ``[2D]`` if there is one, else the first numbered
+    ``[2D-N]`` (see ``_primary_sheet_key``). It used to check ``[2D]`` alone,
+    on the since-outdated grounds that expansion only ever read
+    ``base_config['2D']``; it was taught the numbered fallback, and a
+    heterostructure config has ``[2D-1]``/``[2D-2]`` and never a plain
+    ``[2D]``, so the old rule reported ``material_swept`` False for *every*
+    pair sweep. Two or more pairs were saved by the ``len(members)`` term;
+    exactly one pair -- add a material, add one pair, Render -- had both
+    terms False and previewed the original config, literal ``{mat1}`` in
+    ``cif_path`` and all.
+    """
+    try:
+        members = expand_config_sweeps(config, base_dir)
+    except Exception:  # pylint: disable=broad-except
+        return config, None
+
+    member = members[0]
+    sheet = _primary_sheet_key(config)
+    material_swept = (
+        'materials_list' in config.get(sheet, {})
+        and 'materials_list' not in member.get(sheet, {})
+    )
+    if len(members) <= 1 and not material_swept:
+        return config, None
+
+    material = _member_material(member, sheet)
+    # What the sweep is over, so a pair sweep does not read as "the only
+    # material in the sweep" while naming two of them.
+    noun = 'pair' if material and ' + ' in material else 'material'
+    if material_swept and len(members) == 1:
+        shown = f"{noun} {material}" if material else "the configured material"
+        label = f"Previewing {shown} (the only {noun} in the sweep)."
+    else:
+        shown = f"{noun} {material}" if material else "the first configuration"
+        label = f"Previewing {shown} (1 of {len(members)} in the sweep)."
+    return member, label
+
+
+def _primary_sheet_key(config: Dict[str, Any]) -> str:
+    """The section a ``materials_list`` lives in: ``[2D]``, else ``[2D-1]``.
+
+    Mirrors ``expand_config_sweeps``' own choice of primary key (plain
+    ``'2D'`` when present, otherwise the lowest-numbered ``2D-N``) so the two
+    are asking about the same section. Falls back to ``'2D'`` when there is
+    no sheet section at all, which reads the same as the old behaviour: a
+    missing key means no sweep.
+    """
+    if '2D' in config:
+        return '2D'
+    numbered = sorted(
+        (k for k in config if isinstance(k, str) and k.startswith('2D-')),
+        key=lambda key: int(key.split('-', 1)[1])
+        if key.split('-', 1)[1].isdigit() else 10**9,
+    )
+    return numbered[0] if numbered else '2D'
+
+
+def _member_material(member: Dict[str, Any], sheet: str) -> Optional[str]:
+    """What to call the member on screen: ``mat``, or ``mat1 + mat2``.
+
+    A pair sweep's member is a stack of two materials and naming only the
+    first would be actively misleading -- ``h_MoS2`` on ``h_WS2`` and
+    ``h_MoS2`` on ``h_graphene`` are different runs with the same first
+    sheet.
+    """
+    first = member.get(sheet, {}).get('mat')
+    second = member.get('2D-2', {}).get('mat') if sheet != '2D-2' else None
+    if first and second:
+        return f"{first} + {second}"
+    return first
+
+
 @dataclass
 class PreviewRequest:
     """One preview build."""
@@ -90,9 +208,40 @@ class PreviewRequest:
     layer: Optional[int] = None
     settings_file: Optional[Path] = None
     referenced_files: List[Path] = field(default_factory=list)
+    #: The *original* document's directory (`ConfigDocument.base_dir`) --
+    #: where relative `cif_path`/`pot_path`/`materials_list` values are meant
+    #: to resolve against. Not the directory the preview is staged into; see
+    #: `staged_paths.absolutize_staged_paths`, which `PreviewController.start`
+    #: uses this for.
+    base_dir: Optional[Path] = None
+    #: Memoized (single-member config, label) -- see `_resolve`. Not part of
+    #: the request's identity: two requests with the same `config` must
+    #: resolve to the same member regardless of whether either has resolved
+    #: yet.
+    _resolved: Optional[Tuple[Dict[str, Any], Optional[str]]] = field(
+        default=None, init=False, repr=False, compare=False)
+
+    def _resolve(self) -> Tuple[Dict[str, Any], Optional[str]]:
+        if self._resolved is None:
+            self._resolved = _first_sweep_member(self.config, self.base_dir)
+        return self._resolved
+
+    def single_member(self) -> Dict[str, Any]:
+        """The config to actually build.
+
+        `config` unchanged, or the first member of the sweep it configures --
+        never the whole sweep, which is what made the previewed material
+        arbitrary and the build take one pass per material.
+        """
+        return self._resolve()[0]
+
+    def preview_label(self) -> Optional[str]:
+        """Which sweep member `single_member` is, or None outside a sweep."""
+        return self._resolve()[1]
 
     def key(self) -> str:
-        return cache_key(self.config, self.model, self.layer, self.referenced_files)
+        return cache_key(
+            self.single_member(), self.model, self.layer, self.referenced_files)
 
 
 class PreviewController(QObject):
@@ -110,6 +259,10 @@ class PreviewController(QObject):
         self._process: Optional[QProcess] = None
         self._result_file: Optional[Path] = None
         self._cancelled = False
+        #: Which sweep member `finished`/`failed` refer to, or None outside a
+        #: sweep -- set in `start`, read back by the caller once the build
+        #: settles, so the shown material is never a silent, arbitrary choice.
+        self.current_label: Optional[str] = None
 
     @property
     def running(self) -> bool:
@@ -118,15 +271,26 @@ class PreviewController(QObject):
     # ------------------------------------------------------------------ run
 
     def start(self, request: PreviewRequest) -> None:
-        """Build (or reuse) a preview for this request."""
+        """Build (or reuse) a preview for this request.
+
+        A sweep is reduced to its first member here, before anything is
+        written to disk: the worker builds exactly what `request.key()` was
+        computed from, so the cache and the build always agree on which
+        member this is.
+        """
         if self.running:
             self.cancel()
+
+        config = request.single_member()
+        self.current_label = request.preview_label()
 
         key = request.key()
         directory = self.workspace.preview_path(key)
         result_file = directory / 'preview.json'
 
         self.started.emit()
+        if self.current_label:
+            self.progress.emit(self.current_label)
 
         if result_file.exists():
             self.progress.emit('reusing cached preview')
@@ -134,7 +298,13 @@ class PreviewController(QObject):
             return
 
         directory.mkdir(parents=True, exist_ok=True)
-        config_path = write_config(request.config, directory / 'config.ini')
+        # The config is about to be written into the preview cache directory,
+        # not wherever the document itself lives -- absolutise its relative
+        # paths against the *original* document's directory first, or
+        # search_paths would resolve them (wrongly) against `directory`
+        # instead. See `staged_paths` for why.
+        staged_config = absolutize_staged_paths(config, request.base_dir)
+        config_path = write_config(staged_config, directory / 'config.ini')
 
         payload = {
             'config_file': str(config_path),
@@ -157,6 +327,7 @@ class PreviewController(QObject):
         process.setProcessChannelMode(QProcess.MergedChannels)
         process.readyReadStandardOutput.connect(self._on_output)
         process.finished.connect(self._on_finished)
+        process.errorOccurred.connect(self._on_error)
         self._process = process
         process.start()
 
@@ -196,6 +367,28 @@ class PreviewController(QObject):
             self._deliver(self._result_file)
         else:
             self.failed.emit('The preview build produced no result.')
+
+    def _on_error(self, error: QProcess.ProcessError) -> None:
+        """Handle a process that Qt will never call `_on_finished` for.
+
+        `finished` is only *not* emitted for one reason: the process could
+        not be started at all (bad interpreter path, missing module,
+        permission denied) -- Qt's docs call this out explicitly. Every
+        other `QProcess.ProcessError` (crash, timeout, I/O) is still
+        followed by `finished`, which `_on_finished` already turns into
+        `failed` when no result file appears; reacting to those here too
+        would emit `failed` twice for one build.
+
+        Without this, a failed-to-start process left `_process` set and
+        `running` True forever -- indistinguishable, from the Render
+        button's point of view, from a build that runs forever.
+        """
+        if error != QProcess.FailedToStart:
+            return
+        process, self._process = self._process, None
+        if self._cancelled or process is None:
+            return
+        self.failed.emit('The preview build process failed to start.')
 
     def _deliver(self, result_file: Path) -> None:
         """Parse a completed build and emit the assembled system."""

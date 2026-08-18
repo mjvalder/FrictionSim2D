@@ -16,6 +16,21 @@ Result: a timestamped simulation root under `./simulation_output/`.
 FrictionSim2D run sheetonsheet examples/sheet_config.ini --output-dir ./simulation_output
 ```
 
+### Sweeping over heterostructure pairs
+
+`[2D-1]`/`[2D-2]` stack two materials, and a material list of `mat1 + mat2`
+lines sweeps the pair:
+
+```bash
+FrictionSim2D run sheetonsheet examples/hetero_pair_sweep.ini --output-dir ./hetero_output
+```
+
+The three lines in `examples/hetero_pairs.txt` become three runs, one per pair,
+under `sheetonsheet/h-MoS2+h-WS2/`, `sheetonsheet/h-MoSe2+h-WSe2/` and
+`sheetonsheet/h-MoTe2+h-WTe2/`. See
+[configuration.md](configuration.md#heterostructure-pair-sweeps) for the list
+format and which models accept these sections.
+
 ## 3. Generate PES scans
 
 Interlayer scan on a frozen bilayer, then a tip-on-sheet scan:

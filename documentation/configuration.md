@@ -17,6 +17,10 @@ Global parameters live in `settings.yaml` and are documented separately in
 
 Optional in any model: `[lj_override]`.
 
+Every model's `[2D]` may instead be written as numbered `[2D-1]`/`[2D-2]`
+sections, which stack the two materials into a heterostructure — see
+[heterostructure pair sweeps](#heterostructure-pair-sweeps).
+
 ## Core fields
 
 ### [2D]
@@ -151,6 +155,10 @@ they run in parallel rather than back-to-back:
 | `force` | AFM | `slide_f<load>N.in` | one job per load |
 | `pressure` | sheet-on-sheet | `slide_p<value>gpa.in` | one job per pressure |
 | `scan_speed` | sheet-on-sheet | `slide_<value>ms.in` | one job per speed |
+| `scan_angle` | AFM / sheet-on-sheet (dynamic modes) | `slide_a<angle>.in` | one job per angle |
+
+Every row assumes the config routes to the homogeneous AFM or sheet-on-sheet
+builder — see *Which builders honour `outer_loop`* below.
 
 For AFM `outer_loop = force`, a single `system.in` (indentation phase) still
 writes every `load_<load>N.data`, and each `slide_f<load>N.in` reads its own
@@ -162,6 +170,48 @@ slide array depends on the shared system job completing first. A single-value
 [general]
 force = [2, 5, 10, 20, 30, 50, 70, 85, 100]
 outer_loop = force
+```
+
+`outer_loop = scan_angle` works the same way, in AFM's `afm` (dynamic + indent)
+model and sheet-on-sheet's `sheetonsheet` model: each configured angle becomes
+its own `slide_a<angle>.in`, with `-` formatted as `m` and `.` as `p` in the
+token (`slide_a30.in` for 30, `slide_am15.in` for -15, `slide_a2p5.in` for
+2.5). As with `force`, a single-value `scan_angle` list stays as `slide.in` —
+the combined system+slide HPC path depends on that literal name, so a lone
+angle is never split. It cannot be combined with `scan_angle_force`: a
+per-angle script has no per-force selector left to apply that filter to, so
+the combination is refused before anything is built (and reported in the GUI
+validation panel) rather than silently dropping the filter. It is refused
+only for the builders that really split by angle — where the run phase stays
+a single script the filter is honoured in-script, so the pair is accepted.
+
+Only the angle is collapsed: each per-angle script still loops in-script over
+every `force`/`pressure` and `scan_speed` value configured, exactly as the
+unsplit `slide.in` would.
+
+#### Which builders honour `outer_loop`
+
+`outer_loop` is acted on by the builder the config routes to, not by the
+`run` command alone. Where the selected builder ignores it, the run phase
+stays one `slide.in` and one job — the predicted job count says so too.
+
+| Config | Builder | Honours |
+|---|---|---|
+| `run afm` (dynamic + indent) | AFM (incl. hetero AFM) | `force`, `scan_angle` |
+| `run indent` | indent | `force` only — the hold/retract never reads the angle |
+| `run sheetonsheet`, single `[2D]`, no twist | sheet-on-sheet | `pressure`, `scan_speed`, `scan_angle` |
+| `run sheetonsheet` with `[general] twist_angle`, `[2D-1]`/`[2D-2]`, or `[Flake]` | hetero / flake slide | nothing — every value stays an in-script loop |
+| `run pes-tip`, `run pes-sheet` | PES scans | nothing — the run phase is replaced entirely |
+
+The GUI reflects the last two rows: it shows no split control at all for the
+PES modes, and its job count for a twisted or flake sheet-on-sheet config
+stays at one job per build. A numbered `[2D-1]`/`[2D-2]` config is not
+editable in the GUI at all — open it with the CLI.
+
+```ini
+[general]
+scan_angle = [0, 30, 60, 90]
+outer_loop = scan_angle
 ```
 
 ### Material list expansion
@@ -176,9 +226,92 @@ cif_path = examples/materials/{mat}.cif
 pot_path = examples/potentials/sw/sw_lammps/{mat}.sw
 ```
 
-`materials_list` format: one material token per line, no header. Potential and CIF
-paths resolve literally — there is no search path — so every `{mat}` must have a
-matching file.
+`materials_list` format: one material token per line, no header. Blank lines and
+`#` comments (whole-line or trailing) are ignored. Potential and CIF paths
+resolve literally — there is no search path — so every `{mat}` must have a
+matching file; a name whose files cannot be found is skipped with a warning, and
+a list where none resolve is an error rather than a run that generates nothing.
+
+A comma-separated line is several separate single materials: `h-MoS2, h-WS2`
+means two runs, one per material.
+
+### Heterostructure pair sweeps
+
+A config with two numbered sheet sections, `[2D-1]` and `[2D-2]`, builds a
+heterostructure. Its material list holds one **ordered pair** per line, members
+joined with `+`:
+
+```
+h-MoS2 + h-WS2
+h-MoS2 + h-WSe2
+h-MoSe2 + h-WS2
+```
+
+```ini
+[2D-1]
+materials_list = examples/hetero_pairs.txt
+mat = {mat1}
+cif_path = examples/materials/{mat1}.cif
+pot_path = examples/potentials/sw/sw_lammps/{mat1}.sw
+
+[2D-2]
+mat = {mat2}
+cif_path = examples/materials/{mat2}.cif
+pot_path = examples/potentials/sw/sw_lammps/{mat2}.sw
+```
+
+The runnable version is [../examples/hetero_pair_sweep.ini](../examples/hetero_pair_sweep.ini)
+with [../examples/hetero_pairs.txt](../examples/hetero_pairs.txt); the three
+lines above expand into three runs.
+
+The desktop application writes exactly this form — a second material, the pair
+table and the `.txt` it produces — see
+[gui.md](gui.md#two-materials-heterostructures).
+
+Points worth knowing:
+
+- **`+`, not a comma.** A comma line still means two separate single materials —
+  long-standing behaviour that pair support did not change. A line cannot mix
+  the two separators, and a `+` line must name exactly two materials — there is
+  no `[2D-3]` for a third.
+- **Order matters.** Member 1 fills `[2D-1]`, member 2 fills `[2D-2]`. Pairs are
+  never sorted or normalised, so `h-MoS2 + h-WS2` and `h-WS2 + h-MoS2` are
+  different stacks and different runs.
+- **Only `[2D-1]` carries `materials_list`.** `[2D-2]` is filled from the same
+  line's second member.
+- **Placeholders, one per sheet.** `{mat1}` and `{mat2}` are the pair's two
+  members. `[2D-1]` may spell its own member either `{mat1}` or `{mat}` — the
+  two substitute identically, so a single-material config that gains a second
+  sheet keeps working — but `[2D-2]` accepts only `{mat2}`.
+- **The placeholder is checked per key, not per section.** A `[2D-2]` whose
+  `mat` reads `{mat2}` while its `cif_path` or `pot_path` still reads `{mat1}`
+  is refused, even though the section does hold `{mat2}` somewhere. Left to
+  run, it would load the first material's files for both sheets while the
+  output directory kept the pair's name: every path resolves, nothing fails,
+  and the results are quietly a homostructure. A sheet holding no placeholder
+  at all is refused for the same reason — it would be pinned to one material
+  for every member of the sweep. Both messages name the section and the line.
+- **Output directories join with `+`**, e.g. `h-MoS2+h-WS2` — real material
+  names contain `-`, so a `-` join could not be split back apart.
+- **Arity must agree with the sections.** A pair line in a config with no
+  `[2D-2]` is an error, and so is a single-name line in a config that has one.
+  Both name the offending line.
+
+#### Which models accept a heterostructure config
+
+`[2D-1]`/`[2D-2]` are accepted by `sheetonsheet`, `afm`, `indent`, `pes_tip` and
+`pes_sheet`; each routes to that model's heterostructure builder. Two
+restrictions apply to the AFM family: a `[sub]` section is required (there is no
+freestanding heterostructure), and `[general] finite_sheet` is supported only by
+`afm`, not by `indent`.
+
+Each material's `layers` holds exactly one value and the counts add up:
+`[2] + [2]` is the four-layer sheet-on-sheet stack (fixed bottom, thermostatted
+middle, driven top), while `pes_sheet` wants `[1] + [1]` — a frozen bottom
+monolayer and a scanned top one. `[general] hetero_stacking` chooses whether
+each material's layers stay together (`grouped`) or interleave (`alternating`),
+and `[general] twist_angle` builds a moiré — including from a single `[2D]`
+section, which is the one heterostructure config that needs no second material.
 
 ## Scan angle formats
 

@@ -1,0 +1,109 @@
+# LAMMPS input script for heterostructure interlayer PES scan
+# Static energy-vs-lateral-position map over the matched interface's MINIMAL
+# in-plane repeat unit -- measured off the assembled stack by
+# src.builders.hetero.detect_inplane_repeat. That is generally a SUB-cell of the
+# assembled box: each material is tiled to the configured x/y footprint before
+# the coincidence match runs, so a near-lattice-matched pair matches with
+# (near-)identity matrices and the box comes out an n x m superlattice of the
+# repeat unit.
+#   - Bottom layer (layer_1, material 1) frozen.
+#   - Top layer (layer_2, material 2) rigid in-plane, grid-scanned laterally.
+#   - At each (dx, dy){% if z_relax %} the out-of-plane (z) coordinates relax{% else %} the layers stay rigid{% endif %}, then the
+#     total potential energy is recorded, divided by n_cells = how many repeat
+#     units tile the box -- so the CSV is an energy PER INTERFACE REPEAT UNIT,
+#     independent of the configured footprint and directly comparable with the
+#     homogeneous scan's per-unit-cell energy.
+# No dynamics, no thermostat, no sliding, no drive: each grid point is one
+# energy evaluation. Every path is RUN-DIR-RELATIVE (hetero.data,
+# lammps/system.in.settings, results/...), like hetero/slide.lmp: LAMMPS must be
+# launched with cwd = the run dir so the settings file's staged
+# provenance/potentials/... prefix resolves.
+
+clear
+units           metal
+atom_style      {{ atom_style }}
+boundary        p p p
+
+neighbor        {{ neighbor_list }} bin
+{{ neigh_modify_command }}
+comm_style      tiled
+
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -15.0 {{ zhi + 15 }} units box
+read_data       {{ data_file }} group all_atoms
+change_box      all z final -15.0 {{ zhi + 15 }} units box
+
+include         {{ potential_file }}
+
+# ---- Layer groups by initial z-slab (hetero: shared types, so region not type) ----
+# Identical convention to hetero/slide.lmp: heterostructure layers share atom
+# types, so the type-based layer_N groups the homogeneous PES scan relies on
+# cannot exist here. Bands come from compute_layer_zbands (known placement).
+{% for layer in layers %}
+region          reg_layer_{{ layer.idx }} block INF INF INF INF {{ '%.4f'|format(layer.zlo) }} {{ '%.4f'|format(layer.zhi) }} units box
+group           layer_{{ layer.idx }} region reg_layer_{{ layer.idx }}
+{% endfor %}
+
+{% if pot_type == 'reaxff' %}
+fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
+{% elif pot_type == 'reax/c' %}
+fix             qeq all qeq/reax 1 0.0 10.0 1.0e-6 reax/c
+{% endif %}
+
+velocity        layer_1 set 0.0 0.0 0.0 units box
+velocity        layer_2 set 0.0 0.0 0.0 units box
+
+# Bottom layer fully frozen; top layer held rigid in-plane.
+fix             freeze_bottom layer_1 setforce 0.0 0.0 0.0
+{% if z_relax %}
+# setforce with a NULL z-component leaves the top layer free to relax out-of-plane.
+fix             top_inplane layer_2 setforce 0.0 0.0 NULL
+{% else %}
+fix             top_inplane layer_2 setforce 0.0 0.0 0.0
+{% endif %}
+
+min_style       {{ min_style }}
+timestep        {{ timestep }}
+thermo          {{ thermo }}
+
+# --- lateral scan grid over ONE interface repeat unit --------------------------
+variable        Nx     equal {{ grid_n }}
+variable        Ny     equal {{ grid_n }}
+variable        Lx     equal {{ period_x }}
+variable        Ly     equal {{ period_y }}
+variable        ncell  equal {{ n_cells }}
+variable        dxstep equal v_Lx/v_Nx
+variable        dystep equal v_Ly/v_Ny
+
+# Energy per interface repeat unit: ncell of them tile the box.
+variable        pe_cell equal pe/v_ncell
+
+# CSV: dx, dy in Angstrom (top-layer displacement); energy_eV per surface cell.
+print           "dx,dy,energy_eV" file {{ results_csv }} screen no
+
+# We only ever move the top layer by the delta from the previous grid point to
+# the current one, so the xy positions stay exactly on the grid (z relaxation
+# never touches xy) and periodic wrap-around is harmless. prev_dx/prev_dy are
+# snapshotted with immediate $(...) evaluation each step: `variable ... equal v_dx`
+# would be re-evaluated lazily (always == current dx), making the delta always 0.
+variable        prev_dx equal 0.0
+variable        prev_dy equal 0.0
+
+variable        ix loop ${Nx}
+label           loop_ix
+variable        iy loop ${Ny}
+label           loop_iy
+variable        dx equal (v_ix-1)*v_dxstep
+variable        dy equal (v_iy-1)*v_dystep
+displace_atoms  layer_2 move $(v_dx-v_prev_dx) $(v_dy-v_prev_dy) 0.0 units box
+variable        prev_dx equal $(v_dx)
+variable        prev_dy equal $(v_dy)
+{% if z_relax %}
+{{ minimization_command }}
+{% else %}
+run             0
+{% endif %}
+print           "$(v_dx),$(v_dy),$(v_pe_cell)" append {{ results_csv }} screen no
+next            iy
+jump            SELF loop_iy
+next            ix
+jump            SELF loop_ix

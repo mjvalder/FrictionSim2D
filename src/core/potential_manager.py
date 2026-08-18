@@ -361,6 +361,14 @@ class PotentialManager:
             return
 
         for pair_key, values in overrides.items():
+            if pair_key == 'file':
+                # A config built without going through expand_config_sweeps
+                # (or handed a raw [lj_override] section directly) still has
+                # the shared-file reference in it; expansion is what resolves
+                # and drops it for the normal run path, so a literal 'file'
+                # key reaching here is skipped rather than crashing on
+                # _parse_override_pair.
+                continue
             el1, el2 = self._parse_override_pair(str(pair_key))
             epsilon, sigma = self._parse_override_values(str(pair_key), values)
             self.lj_overrides[self._pair_key(el1, el2)] = (epsilon, sigma)

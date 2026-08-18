@@ -11,8 +11,11 @@ import pytest
 
 from src.core.run import (
     expand_config_sweeps,
+    has_template_marker,
     preflight_materials,
+    read_material_entries,
     read_material_list,
+    substitute_materials,
 )
 
 
@@ -130,3 +133,58 @@ class TestExpansionSkipsUnusableMaterials:
         assert 'not found' in caplog.text
         # No material expansion, but the config itself still passes through.
         assert len(expanded) == 1
+
+
+class TestOrderedPairEntries:
+    """A '+' line is one ordered 2-tuple, additive to the existing
+    comma-means-multiple-singles behaviour, not a replacement for it."""
+
+    def test_read_material_entries_pairs_and_singles(self, tmp_path):
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2\nh-MoS2 + h-WS2\n# comment\nMoS2, WS2\nh-WS2+h-MoTe2\n')
+        assert read_material_entries(f) == [
+            ('h-MoS2',), ('h-MoS2', 'h-WS2'), ('MoS2',), ('WS2',),
+            ('h-WS2', 'h-MoTe2')]
+
+    def test_comma_lines_still_mean_single_materials(self, tmp_path):
+        f = tmp_path / 'm.txt'
+        f.write_text('MoS2, WS2\nWSe2\n')
+        assert read_material_list(f) == ['MoS2', 'WS2', 'WSe2']   # pinned behaviour
+
+    def test_read_material_list_rejects_a_pair_line(self, tmp_path):
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2\n')
+        with pytest.raises(ValueError, match='h-MoS2 \\+ h-WS2'):
+            read_material_list(f)
+
+    def test_a_comma_on_a_plus_line_is_rejected(self, tmp_path):
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2, h-MoTe2\n')
+        with pytest.raises(ValueError, match='h-MoS2 \\+ h-WS2, h-MoTe2'):
+            read_material_entries(f)
+
+    def test_more_than_two_members_is_rejected(self, tmp_path):
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2 + h-MoTe2\n')
+        with pytest.raises(ValueError, match='h-MoS2 \\+ h-WS2 \\+ h-MoTe2'):
+            read_material_entries(f)
+
+    def test_duplicate_pairs_dedupe_and_warn(self, tmp_path, caplog):
+        f = tmp_path / 'm.txt'
+        f.write_text('h-MoS2 + h-WS2\nh-MoS2 + h-WS2\n')
+        with caplog.at_level('WARNING'):
+            entries = read_material_entries(f)
+        assert entries == [('h-MoS2', 'h-WS2')]
+        assert 'h-MoS2' in caplog.text and 'h-WS2' in caplog.text
+
+
+class TestTemplateMarkers:
+
+    def test_template_markers_recognised(self):
+        assert has_template_marker('cif/{mat1}.cif')
+        assert substitute_materials('c/{mat1}.cif', 'a', 'b') == 'c/a.cif'
+        assert substitute_materials('c/{mat2}.sw', 'a', 'b') == 'c/b.sw'
+        assert substitute_materials('c/{mat}.cif', 'a') == 'c/a.cif'
+
+    def test_plain_path_has_no_marker(self):
+        assert not has_template_marker('cif/h-MoS2.cif')

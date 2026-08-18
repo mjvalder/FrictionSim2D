@@ -12,13 +12,14 @@ from __future__ import annotations
 import pytest
 
 from src.core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
+from src.gui.schema import introspect
 from src.gui.schema.introspect import (
     EXCLUDED_ROOT_FIELDS,
     FieldKind,
     describe_model,
     describe_section,
 )
-from src.gui.schema.overrides import overrides_for, section_override
+from src.gui.schema.overrides import SectionOverride, overrides_for, section_override
 from src.gui.schema.simulation_types import (
     FAMILIES,
     MODES,
@@ -73,6 +74,72 @@ class TestSimulationTypes:
         assert 'tip' not in sections_for('sheetonsheet')
 
 
+class TestHeterostructureSupport:
+    """Every mode routes a two-material config to a heterostructure builder,
+    so the 'Add a material' button is offered everywhere -- and the stacking
+    that only a pair gives meaning to moves out of Run parameters onto the
+    second sheet."""
+
+    def test_all_modes_support_hetero(self):
+        from src.gui.schema.simulation_types import MODES as ALL
+
+        assert all(ALL[m][1].supports_hetero
+                   for m in ('afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet'))
+
+    def test_hetero_stacking_hidden_from_run_parameters(self):
+        from src.gui.schema.overrides import hidden_fields
+
+        assert 'hetero_stacking' in hidden_fields('sheetonsheet', 'general')
+
+    @pytest.mark.parametrize('model', ALL_MODELS)
+    def test_stacking_is_hidden_for_every_mode(self, model):
+        """It is shown on the `[2D-2]` form instead, which exists for every
+        mode -- so no mode may keep it in Run parameters."""
+        from src.gui.schema.overrides import hidden_fields
+
+        assert 'hetero_stacking' in hidden_fields(model, 'general')
+
+    def test_the_second_sheet_has_its_own_override(self):
+        second = section_override('2D-2')
+        assert second.label == 'Material 2 (heterostructure)'
+
+    def test_the_second_sheet_carries_no_sweep_list(self):
+        """One list, one sweep: each of its lines names both materials, so a
+        second `materials_list` would be a second, conflicting sweep."""
+        second = section_override('2D-2')
+        assert set(second.fields) == set(section_override('2D').fields) - {'materials_list'}
+
+
+class TestSectionOrder:
+    """Lattice matching describes how two sheets are made commensurate, so it
+    belongs beside them rather than at the bottom of the form."""
+
+    def test_lattice_matching_sits_beside_the_sheets(self):
+        assert overrides_for('sheetonsheet')['lattice_match'].order == 2
+
+    @pytest.mark.parametrize('model', ALL_MODELS)
+    def test_no_two_sections_claim_the_same_slot(self, model):
+        """`ConfigDocument.sections()` sorts on this number alone, so a
+        collision leaves the order of the two colliding sections undefined.
+
+        The exempt section is identified by its *order*, not by its key:
+        `2D-2` declares none because the form positions it directly after
+        `[2D]` and nothing ever sorts it, and excluding it by name would hand
+        the same silence to any future section that forgot to declare one.
+        Its being the only such section is asserted rather than assumed --
+        two undeclared orders are themselves a collision, with nothing left
+        to decide which of the two comes first.
+        """
+        default_order = SectionOverride().order
+        undeclared = sorted(key for key, s in overrides_for(model).items()
+                            if s.order == default_order)
+        assert undeclared == ['2D-2']
+
+        orders = [s.order for s in overrides_for(model).values()
+                  if s.order != default_order]
+        assert len(set(orders)) == len(orders)
+
+
 class TestIntrospectionCoverage:
     """The canary for config-model changes."""
 
@@ -118,6 +185,58 @@ class TestIntrospectionCoverage:
             print("fields with neither an override label nor a description:")
             for item in missing:
                 print(f"  {item}")
+
+    @pytest.mark.parametrize('model', ROOT_MODELS, ids=lambda m: m.__name__)
+    def test_the_material_list_is_an_introspected_field(self, model):
+        """It drives the material sweep, and the form is built from
+        model_fields -- a key the model does not declare cannot be edited."""
+        sheet = {s.key: s for s in describe_model(model)}['2D']
+        assert 'materials_list' in sheet.field_map()
+
+
+class TestIntrospectionIsCached:
+    """`ConfigDocument.conflicts()` runs on every Render and every Generate,
+    and reaches a field default through `section()` -> `sections()` ->
+    `describe_model`. Walking every pydantic model of the config on each of
+    those is work whose answer cannot change between two calls."""
+
+    def test_a_model_is_walked_once(self, monkeypatch):
+        describe_model.cache_clear()
+        calls = []
+        original = introspect.describe_section
+
+        def counting(*args, **kwargs):
+            calls.append(args[0])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(introspect, 'describe_section', counting)
+
+        first = len(describe_model(AFMSimulationConfig)), len(calls)
+        for _ in range(5):
+            describe_model(AFMSimulationConfig)
+
+        assert first[1] > 0, 'the first walk described no sections at all'
+        assert len(calls) == first[1], 'the model was re-walked on a repeat call'
+
+    def test_each_model_is_described_separately(self):
+        """The cache is keyed on the model class, and the two families have
+        different ones -- a switch between them must not serve the sections of
+        the model the user just left."""
+        describe_model.cache_clear()
+        afm = [s.key for s in describe_model(AFMSimulationConfig)]
+        sheet = [s.key for s in describe_model(SheetOnSheetSimulationConfig)]
+        assert 'tip' in afm and 'tip' not in sheet
+
+    def test_callers_cannot_edit_each_others_sections(self):
+        """`ConfigDocument.second_material_spec` drops a field from the list it
+        is handed, and the form sorts what it gets. Handing every caller the
+        one cached object would let one of them edit the schema underneath the
+        others -- so each call gets its own list."""
+        first = {s.key: s for s in describe_model(AFMSimulationConfig)}['2D']
+        first.fields = [f for f in first.fields if f.key != 'materials_list']
+
+        second = {s.key: s for s in describe_model(AFMSimulationConfig)}['2D']
+        assert 'materials_list' in second.field_map()
 
 
 class TestSectionStructure:
@@ -178,10 +297,19 @@ class TestFieldClassification:
     def test_list_item_kind_is_captured(self, afm):
         assert afm['2D']['layers'].item_kind is FieldKind.INT
 
+    def test_dict_item_kind_is_captured(self):
+        """output.dump is Dict[str, bool]: KeyValueGridEditor.add_row needs
+        this to give a newly added row a checkbox instead of a text box."""
+        from src.core.config import GlobalSettings
+
+        settings = {s.key: s.field_map() for s in describe_model(GlobalSettings)}
+        assert settings['output']['dump'].item_kind is FieldKind.BOOL
+        assert settings['output']['dump_frequency'].item_kind is FieldKind.INT
+
     def test_enum_choices_are_captured(self, afm):
         assert set(afm['tip']['amorph'].choices) == {'a', 'c'}
         assert set(afm['general']['outer_loop'].choices) == \
-            {'pressure', 'scan_speed', 'force'}
+            {'pressure', 'scan_speed', 'force', 'scan_angle'}
 
     def test_required_flags(self, afm):
         assert afm['2D']['mat'].required
@@ -193,6 +321,105 @@ class TestFieldClassification:
 
     def test_descriptions_come_through(self, afm):
         assert 'radius' in afm['tip']['r'].doc.lower()
+
+
+class TestCaptionBudget:
+    """Captions render permanently under every control. Long ones are why the
+    form read as a wall of grey text; the long form belongs in the tooltip."""
+
+    def _all_overrides(self):
+        from src.gui.schema.overrides import SETTINGS_MODEL
+
+        for model in list(ALL_MODELS) + [SETTINGS_MODEL]:
+            for section_key, section in overrides_for(model).items():
+                yield model, section_key, None, section
+                for key, field in section.fields.items():
+                    yield model, section_key, key, field
+
+    def test_every_caption_is_one_short_line(self):
+        from src.gui.schema.overrides import CAPTION_BUDGET
+
+        offenders = [
+            f"{model} [{section}] {key or '(section)'}: {len(entry.help)} chars"
+            for model, section, key, entry in self._all_overrides()
+            if entry.help and (
+                len(entry.help) > CAPTION_BUDGET or '\n' in entry.help)
+        ]
+        assert not offenders, (
+            "these captions exceed CAPTION_BUDGET or wrap; move the long form "
+            "to `detail`:\n  " + "\n  ".join(offenders))
+
+
+class TestRebuiltOverridesKeepTheirMetadata:
+    """`overrides_for` reconstructs three entries -- the substrate section, the
+    general section, and `outer_loop` when narrowing its per-family choices.
+    Each copies attributes by name, so anything left out of the copy is
+    dropped silently. `sub` and `general` reconstruct only the SectionOverride
+    wrapper -- their `fields` dict passes through by reference, so it is each
+    section's own attributes (label, help, detail, order) that are at risk,
+    not anything inside `fields`. `outer_loop` is the opposite: it reconstructs
+    a FieldOverride itself, so its own attributes (detail, editor, ...) are
+    what a copy can drop."""
+
+    def test_the_rebuilt_substrate_keeps_its_section_metadata(self):
+        """The `sub` rebuild copies the section's own attributes by name and
+        adds `required_reason`. Its `fields` dict passes through by reference,
+        so the section attributes are the only thing this site can drop."""
+        source = section_override('sub')
+        rebuilt = overrides_for('afm')['sub']
+        assert rebuilt.required_reason          # it *was* rebuilt
+        assert (rebuilt.label, rebuilt.help, rebuilt.detail, rebuilt.order) == \
+               (source.label, source.help, source.detail, source.order)
+
+    def test_the_rebuilt_general_section_keeps_its_section_metadata(self):
+        source = section_override('general')
+        rebuilt = overrides_for('afm')['general']
+        assert set(rebuilt.fields) < set(source.fields)   # it *was* rebuilt
+        assert (rebuilt.label, rebuilt.help, rebuilt.detail, rebuilt.order) == \
+               (source.label, source.help, source.detail, source.order)
+
+    def test_the_narrowed_outer_loop_keeps_its_detail(self):
+        """The nested rebuild: `choices` is replaced per mode (falling back to
+        the family), and everything else has to be carried across by hand."""
+        outer_loop = overrides_for('afm')['general'].fields['outer_loop']
+        assert outer_loop.choices == ('force', 'scan_angle')   # it *was* rebuilt
+        assert 'job count' in outer_loop.detail
+
+
+class TestOuterLoopChoicesNarrowByMode:
+    """`scan_angle` only does something in the two modes whose builder emits
+    one run script per angle (dynamic_indent/'afm' and dynamic/'sheetonsheet').
+    'indent' shares the AFM family but its template never reads the angle
+    variable ('scan_angle' not in SPLIT_OUTER_LOOPS); both PES scan modes override
+    write_inputs entirely and never look at outer_loop at all. Offering
+    scan_angle there would let someone configure a split that silently does
+    nothing -- exactly what outer_loop_choices exists to prevent."""
+
+    def test_scan_angle_offered_where_the_split_is_real(self):
+        assert 'scan_angle' in overrides_for('afm')['general'].fields['outer_loop'].choices
+        assert 'scan_angle' in \
+            overrides_for('sheetonsheet')['general'].fields['outer_loop'].choices
+
+    def test_scan_angle_not_offered_where_the_split_is_a_no_op(self):
+        assert 'scan_angle' not in overrides_for('indent')['general'].fields['outer_loop'].choices
+        assert 'scan_angle' not in overrides_for('pes_tip')['general'].fields['outer_loop'].choices
+        assert 'scan_angle' not in \
+            overrides_for('pes_sheet')['general'].fields['outer_loop'].choices
+
+    def test_unnarrowed_choices_are_unaffected(self):
+        """`indent` still offers `force` exactly as before -- this task does
+        not touch that narrowing."""
+        assert overrides_for('indent')['general'].fields['outer_loop'].choices == ('force',)
+
+    def test_pes_modes_offer_no_split_at_all(self):
+        """Neither PES scan reaches the split code path (see
+        src/builders/pes_scan.py -- both write_inputs overrides render a
+        single ``lammps/slide.in`` directly, without ever branching on
+        ``outer_loop``), so unlike `indent` (which still narrows to `force`)
+        the PES modes narrow all the way down to zero choices -- not `force`,
+        not `pressure`/`scan_speed`, nothing selectable."""
+        assert overrides_for('pes_tip')['general'].fields['outer_loop'].choices == ()
+        assert overrides_for('pes_sheet')['general'].fields['outer_loop'].choices == ()
 
 
 class TestOverrides:
@@ -212,16 +439,26 @@ class TestOverrides:
         assert overrides_for('pes_tip')['sub'].required_reason is None
 
     def test_sweep_semantics_are_explained_where_they_bite(self):
+        """Long by nature, so it lives in `detail`, not the caption."""
         general = section_override('general').fields
-        assert 'separate simulation' in general['temp'].help
-        assert 'does not multiply' in general['force'].help
-        assert 'job count' in general['outer_loop'].help
+        assert 'job count' in general['outer_loop'].detail
 
     def test_tip_radius_carries_the_pbc_rule(self):
-        assert 'periodic image' in section_override('tip').fields['r'].help
+        assert 'periodic image' in section_override('tip').fields['r'].detail
 
     def test_unknown_section_yields_an_empty_override(self):
         assert section_override('not_a_section').fields == {}
+
+    def test_scan_speed_is_metres_per_second(self):
+        from src.gui.schema.overrides import field_override
+        fo = field_override('sheetonsheet', 'general', 'scan_speed')
+        assert fo.unit == 'm/s'
+        assert '100 m/s = 1 Å/ps' in (fo.help or '') + (fo.detail or '')
+
+    def test_spring_constants_have_units(self):
+        from src.gui.schema.overrides import field_override
+        assert field_override('sheetonsheet', 'general', 'driving_spring').unit == 'N/m'
+        assert field_override('sheetonsheet', 'general', 'bond_spring').unit == 'N/m'
 
 
 class TestDescribeSection:

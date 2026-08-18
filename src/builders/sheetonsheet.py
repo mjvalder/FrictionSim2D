@@ -36,6 +36,10 @@ class SheetOnSheetSimulation(SimulationBase):
     #: Minimum number of layers this builder accepts. Subclasses (e.g. the
     #: static PES bilayer scan) may lower it.
     MIN_LAYERS: int = MIN_LAYERS
+
+    #: The sheet-on-sheet run phase splits per pressure, per scan speed and per
+    #: scan angle (see write_inputs); there is no normal load to split by.
+    SPLIT_OUTER_LOOPS = frozenset({'pressure', 'scan_speed', 'scan_angle'})
     """Builder for Sheet-on-Sheet friction simulations.
 
     Creates an N-layer stack of the same 2D material:
@@ -135,9 +139,28 @@ class SheetOnSheetSimulation(SimulationBase):
         self._generate_hpc_scripts()
         logger.info("Build complete.")
 
+    def _material_id(self) -> str:
+        """Material token for HPC job names: this builder's single material.
+
+        The sheet-family counterpart of
+        :meth:`~src.builders.afm.AFMSimulation._material_id`, added so the PES
+        scan's job name can be composed from one hook rather than hardcoding
+        ``config.sheet.mat``: the hetero builder overrides it with the
+        ``mat1+mat2`` pair token (two pairs sharing material 1 would otherwise
+        collide on one job name).
+        """
+        return self.config.sheet.mat
+
     def _get_hpc_job_name(self) -> str:
-        """Get sheet-on-sheet specific job name."""
-        return f"sheet_{self.config.sheet.mat}"
+        """Get sheet-on-sheet specific job name.
+
+        Through :meth:`_material_id` rather than ``config.sheet.mat`` directly:
+        two spellings of the same token one line apart is how they drift, and
+        the hook is what the hetero builders override to key the name on the
+        full pair. Inert here (this builder's ``_material_id`` IS
+        ``config.sheet.mat``) — it is the consistency that matters.
+        """
+        return f"sheet_{self._material_id()}"
 
     def _collect_simulation_paths(self) -> List[str]:
         """Sheet-on-sheet has single simulation directory."""
@@ -323,6 +346,43 @@ class SheetOnSheetSimulation(SimulationBase):
         }
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)
+        # A builder splits only by what it declares in SPLIT_OUTER_LOOPS;
+        # anything else falls through to the single-script path below. The
+        # job-count prediction reads the same declaration, so what it predicts
+        # is what is written here.
+        if outer_loop not in self.SPLIT_OUTER_LOOPS:
+            outer_loop = None
+
+        # outer_loop='scan_angle' emits one slide_a<angle>.in per angle,
+        # mirroring AFMSimulation's split (src/builders/afm.py). A
+        # single-element (or empty/scalar) angle list falls through to the
+        # single-script path below, same as outer_loop unset, so the
+        # combined-HPC path that references the literal name slide.in still
+        # applies.
+        angles = self._to_list(self.config.general.scan_angle)
+        if outer_loop == 'scan_angle' and len(angles) > 1:
+            # src.core.run.outer_loop_conflict rejects this first (before the
+            # build); the raise below is the backstop for direct builds.
+            if self.config.general.scan_angle_force is not None:
+                raise ValueError(
+                    "outer_loop='scan_angle' cannot be combined with "
+                    "scan_angle_force: splitting into one script per angle "
+                    "applies each angle to every pressure value, silently "
+                    "dropping the pressure-selective filter. Remove "
+                    "scan_angle_force, or drop outer_loop to keep the "
+                    "in-script angle loop (which honors it)."
+                )
+            for angle in angles:
+                context = dict(base_context)
+                context['scan_angle_config'] = float(angle)
+                context['pressures'] = self.config.general.pressure
+                context['scan_speed_config'] = self.config.general.scan_speed
+                script_name = f"slide_a{format_numeric_token(float(angle))}.in"
+                script = self.render_template("sheetonsheet/slide.lmp", context)
+                self.write_file(f"lammps/{script_name}", script)
+            logger.info("Split slide phase into %d per-angle scripts.", len(angles))
+            logger.info("Inputs written to %s/lammps/", self.output_dir)
+            return
 
         if outer_loop not in ('pressure', 'scan_speed'):
             context = dict(base_context)

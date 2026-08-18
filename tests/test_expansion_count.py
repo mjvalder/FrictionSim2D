@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import parse_config
+from src.core.config import GeneralConfig, parse_config
 from src.core.config_io import write_config
 from src.core.run import (
     count_expansion,
@@ -23,6 +23,7 @@ from src.core.run import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / 'examples'
+MATERIALS, SW = 'examples/materials', 'examples/potentials/sw'
 
 #: (config, model, expected configs, builds, jobs) -- measured from real trees.
 CASES = [
@@ -89,6 +90,45 @@ class TestLoopability:
         assert loopability('general', 'not_a_real_key') == 'scalar'
 
 
+class TestNumberedSheetSectionsShareTheSheetRules:
+    """A heterostructure config writes ``[2D-1]``/``[2D-2]`` instead of ``[2D]``.
+
+    Both sections are sheet sections and both accept the same lists the plain
+    one does, so keying the classification on the literal name ``'2D'`` made a
+    perfectly legal ``layers`` or ``materials_list`` list report as "a list here
+    is not supported".
+    """
+
+    @pytest.mark.parametrize('section', ['2D-1', '2D-2', '2D-10'])
+    @pytest.mark.parametrize('key,expected', [
+        ('layers', 'layer'),
+        ('materials_list', 'sweep'),
+        ('x', 'scalar'),
+    ])
+    def test_numbered_sections_classify_like_the_plain_one(self, section, key, expected):
+        assert loopability(section, key) == expected
+
+    @pytest.mark.parametrize('section', ['2D-', '2Dx', '2D-1a', 'flake-1'])
+    def test_only_numbered_sheet_sections_are_folded(self, section):
+        """Nothing else may borrow the sheet rules by looking vaguely similar."""
+        assert loopability(section, 'layers') == 'scalar'
+
+    def test_a_hetero_config_reports_no_unsupported_lists(self):
+        """What CLI/GUI validation actually asks."""
+        from src.gui.controllers.document import ConfigDocument
+
+        document = ConfigDocument(
+            model='sheetonsheet',
+            values={
+                'general': {'temp': 300},
+                '2D-1': {'mat': 'h-MoS2', 'layers': [2],
+                         'materials_list': ['h-MoS2 + h-WS2']},
+                '2D-2': {'mat': 'h-WS2', 'layers': [2]},
+            },
+        )
+        assert document.unsupported_lists() == []
+
+
 class TestTemperatureSweep:
     """temp is the one [general] key that is genuinely sweep-safe: it appears in
     the directory name as K{temp}."""
@@ -133,3 +173,127 @@ class TestInFileLoopsDoNotMultiplyConfigs:
         raw['general']['outer_loop'] = 'force'
         summary = count_expansion(raw, 'afm')
         assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 4)
+
+    def test_outer_loop_scan_angle_multiplies_jobs_only(self, monkeypatch):
+        """Pins two things at once, deliberately routed through the validated
+        model rather than a raw dict:
+
+        1. outer_loop='scan_angle' must pass GeneralConfig validation -- the
+           GeneralConfig(**raw['general']) call below raises ValidationError
+           if the Literal in config.py is ever reverted to its pre-Task-1
+           three values, so this test actually depends on the change made in
+           this task (a raw-dict-only version does not: count_expansion ->
+           expand_config_sweeps -> _run_scripts_per_build never construct a
+           GeneralConfig, so a raw dict sails through regardless of what the
+           Literal allows).
+        2. Once validated, _run_scripts_per_build's generic
+           general.get(outer_loop) handling (no per-value branching) counts
+           one job per angle -- the same generic mechanism already pinned for
+           outer_loop='force' above, now exercised for 'scan_angle'. This is
+           the number Task 5's GUI expansion count depends on.
+
+        No builder splits the slide phase by angle yet (that lands in Tasks
+        2-3); this test only pins the *counting* layer, which already handles
+        it because it has no per-value branching to update.
+        """
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'afm_flake_config.ini')
+        raw['general']['scan_angle'] = [0, 45, 90]
+        raw['general']['outer_loop'] = 'scan_angle'
+
+        validated_general = GeneralConfig(**raw['general'])
+        raw['general'] = validated_general.model_dump()
+
+        summary = count_expansion(raw, 'afm')
+        assert (summary.configs, summary.builds, summary.jobs) == (1, 1, 3)
+
+
+class TestPredictionFollowsBuilderRouting:
+    """The prediction must count what the *selected* builder writes.
+
+    Which builder a config routes to is decided by the config itself (a twist
+    routes sheet-on-sheet to the hetero builder; the model name picks the
+    indent builder), and the selected builder decides how many run scripts the
+    build contains. Counting ``len(general[outer_loop])`` regardless reports
+    jobs that are never generated. Same generate-and-compare cross-check as
+    ``test_scan_angle_manifest_count_matches_predicted_job_count``.
+    """
+
+    def test_indent_never_splits_by_angle(self, tmp_path, monkeypatch):
+        """IndentSimulation's hold+retract has no lateral drive, so it does not
+        honour outer_loop='scan_angle' (one slide.in per build, not one per
+        angle)."""
+        monkeypatch.chdir(REPO_ROOT)
+        raw = parse_config(EXAMPLES / 'indent_config.ini')
+        raw['general']['scan_angle'] = [0, 30, 60]
+        raw['general']['outer_loop'] = 'scan_angle'
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        predicted = count_expansion(raw, 'indent')
+
+        config_path = write_config(raw, tmp_path / 'indent_angles.ini')
+        created, simulation_root, _, _ = run_simulations(
+            config_file=str(config_path), model='indent', settings_file=None,
+            output_root=tmp_path / 'out', generate_hpc=False,
+        )
+        assert len(created) == predicted.configs
+        assert count_generated_jobs(simulation_root) == predicted.jobs
+        assert predicted.jobs == 2          # 2 layer builds x a single slide.in
+
+    def test_hetero_sheet_on_sheet_never_splits_by_angle(self, tmp_path, monkeypatch):
+        """Two materials route sheet-on-sheet to the hetero slide builder,
+        which writes a single slide.in and ignores outer_loop entirely."""
+        monkeypatch.chdir(REPO_ROOT)
+        sheet_1 = {
+            'mat': 'h-MoS2', 'cif_path': f'{MATERIALS}/h-MoS2.cif',
+            'pot_path': f'{SW}/MoS2_wen.sw', 'pot_type': 'sw',
+            'x': 12.0, 'y': 12.0, 'layers': [2],
+        }
+        raw = {
+            # [2D] mirrors [2D-1]: output_dir_for still reads the plain section.
+            '2D': dict(sheet_1),
+            '2D-1': dict(sheet_1),
+            '2D-2': {
+                'mat': 'h-WS2', 'cif_path': f'{MATERIALS}/h-WS2.cif',
+                'pot_path': f'{SW}/sw_lammps/t-WS2.sw', 'pot_type': 'sw',
+                'x': 12.0, 'y': 12.0, 'layers': [2],
+            },
+            'general': {
+                'temp': 300, 'scan_speed': 1, 'pressure': 0.1,
+                'scan_angle': [0, 30, 60], 'outer_loop': 'scan_angle',
+            },
+        }
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        predicted = count_expansion(raw, 'sheetonsheet')
+
+        config_path = write_config(raw, tmp_path / 'hetero_angles.ini')
+        created, simulation_root, _, _ = run_simulations(
+            config_file=str(config_path), model='sheetonsheet', settings_file=None,
+            output_root=tmp_path / 'out', generate_hpc=False,
+        )
+        assert len(created) == predicted.configs
+        assert count_generated_jobs(simulation_root) == predicted.jobs
+        assert predicted.jobs == 1
+
+    def test_twisted_single_material_predicts_a_single_job(self, monkeypatch):
+        """The GUI-reachable case: the sheet-on-sheet form offers both the
+        twist angle and the angle split. A twist routes a single [2D] material
+        to the same hetero slide builder, so the split never happens there
+        either (routing pinned by test_hetero_slide.py).
+        """
+        monkeypatch.chdir(REPO_ROOT)
+        raw = {
+            '2D': {
+                'mat': 'h-MoS2', 'cif_path': f'{MATERIALS}/h-MoS2.cif',
+                'pot_path': f'{SW}/MoS2_wen.sw', 'pot_type': 'sw',
+                'x': 8.0, 'y': 8.0, 'layers': [4],
+            },
+            'general': {
+                'temp': 300, 'scan_speed': 1, 'pressure': 0.1, 'twist_angle': 21.8,
+                'scan_angle': [0, 30, 60], 'outer_loop': 'scan_angle',
+            },
+        }
+        raw['general'] = GeneralConfig(**raw['general']).model_dump()
+
+        assert count_expansion(raw, 'sheetonsheet').jobs == 1

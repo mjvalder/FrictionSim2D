@@ -544,3 +544,28 @@ def test_twist_angle_config_defaults_and_range():
         GeneralConfig(temp=300, twist_angle=95.0)   # out of [0,60)
     with pytest.raises(ValueError):
         GeneralConfig(temp=300, twist_angle=-1.0)   # below range
+
+
+def test_outer_loop_accepts_scan_angle_and_rejects_unknown_values():
+    """scan_angle is a fourth valid outer_loop choice; nonsense values still fail."""
+    g = GeneralConfig(temp=300, outer_loop='scan_angle')
+    assert g.outer_loop == 'scan_angle'
+    with pytest.raises(ValidationError):
+        GeneralConfig(temp=300, outer_loop='not_a_real_choice')
+
+
+def test_the_model_does_not_judge_the_angle_split():
+    """outer_loop='scan_angle' + scan_angle_force is a conflict only for the
+    builders that really split by angle, which this model cannot see. The
+    check is routing-aware and lives in core.run.outer_loop_conflict (pinned
+    by tests/test_run.py::TestAngleSplitWithAForceGate); GeneralConfig must
+    keep accepting the combination so the builders that honour the gate
+    in-script (indent, hetero, flake) still build."""
+    g = GeneralConfig(temp=300, outer_loop='scan_angle',
+                      scan_angle=[0.0, 30.0], scan_angle_force=30.0)
+    assert g.scan_angle_force == 30.0
+
+
+def test_damping_ratio_defaults_to_zero():
+    from src.core.config import TipConfig
+    assert TipConfig.model_fields['damping_ratio'].default == 0.0

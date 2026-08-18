@@ -53,6 +53,17 @@ class SimulationBase(ABC):
         jinja_env: Template engine environment.
     """
 
+    #: ``[general] outer_loop`` values whose run phase this builder actually
+    #: splits into one ``slide_*.in`` per value. Empty here: a builder that
+    #: writes a single run script regardless (the hetero/flake slides, both PES
+    #: scans) inherits the default and needs no declaration.
+    #:
+    #: This is the one place each builder states what it splits: the builders
+    #: gate their split on it, and the job-count prediction
+    #: (``src.core.run._run_scripts_per_build``) reads it off the builder class
+    #: the config routes to, so the predicted and generated counts cannot drift.
+    SPLIT_OUTER_LOOPS: frozenset = frozenset()
+
     def __init__(self, config: Any, output_dir: Union[str, Path],
                     config_path: Optional[Union[str, Path]] = None):
         """Initialize the simulation base.
@@ -127,6 +138,26 @@ class SimulationBase(ABC):
             self.relative_run_dir = self.output_dir.relative_to(base_output_dir)
         except ValueError:
             self.relative_run_dir = Path(self.output_dir)
+
+    def _run_dir_path(self, *parts: str) -> str:
+        """A file inside this run's directory, named as a LAMMPS script must name it.
+
+        The generated HPC scripts run LAMMPS from the simulation ROOT, not from
+        the run directory, so every path a script emits has to carry
+        ``relative_run_dir``. Standalone (no ``set_base_output_dir``) that
+        prefix is the output directory itself, so this is correct either way.
+        """
+        return str(Path(self.relative_run_dir, *parts))
+
+    def _potentials_prefix(self) -> str:
+        """How written ``pair_coeff`` lines name the staged potential files.
+
+        Sim-root-relative for the reason above: a bare
+        ``provenance/potentials/...`` would be looked up beside the root rather
+        than inside this run's directory, and LAMMPS would abort with "cannot
+        open potential file" the moment the job was submitted.
+        """
+        return self._run_dir_path("provenance", "potentials")
 
     def write_file(self, filename: Union[str, Path],
                     content: str, output_dir: Optional[Union[str, Path]] = None) -> Path:
