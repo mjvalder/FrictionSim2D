@@ -20,6 +20,16 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+class SchemaError(ValueError):
+    """Results file layout does not match any known schema (spec §1.1).
+
+    Raised instead of silently mis-aligning: a header-less file whose column
+    count differs from the LEGACY_2026 positional list is corrupt or from an
+    unknown template revision, and parsing it positionally would shift every
+    value.
+    """
+
+
 class _NpEncoder(json.JSONEncoder):
     """JSON encoder that handles NumPy and pandas types."""
 
@@ -88,8 +98,12 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
     # Path patterns (compiled once at class level)
     _PATH_PATTERN_TIP = re.compile(r'(\d+x_\d+y)/sub_(\w+)_tip_(\w+)_(r\d+)')
+    # pot_ segment consumed NON-capturing so group 3 keeps its legacy meaning
+    # (substrate token). A repeated capturing group would capture only the
+    # LAST repetition and record pot_... as substrate_material.
     _PATH_PATTERN_SHEET = re.compile(
-        r'(?:sheetvsheet/)?([\w\d\-_]+)/(\d+x_\d+y)/([\w\d\-_]+)?/?results'
+        r'(?:sheetvsheet/)?([\w\d\-_]+)/(\d+x_\d+y)/'
+        r'(?!pot_)([\w\d\-_]+)?/?(?:pot_[^/]+/)?results'
     )
 
     def __init__(self, results_dir: str = 'results_110725_test') -> None:
@@ -204,36 +218,70 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         return None
 
     def _read_dataframe(self, filepath: Path, sim_type: str) -> pd.DataFrame:
-        """Read a LAMMPS output file and return a labelled DataFrame."""
+        """Read a LAMMPS output file and return a labelled DataFrame.
+
+        Header-first for BOTH sim types: real campaign files carry the
+        ``# TimeStep v_x v_y ...`` line LAMMPS writes, and the observable
+        registry owns the native-name -> column-name map (per tier, chosen by
+        filename prefix). The positional ``LEGACY_2026`` lists survive only as
+        a strict fallback for header-less files: the width must match exactly,
+        otherwise :class:`SchemaError` is raised. The old behaviour —
+        ``pd.read_csv(names=...)`` with too few names — silently promoted the
+        extra columns to an index AND shifted every value one column left,
+        while keeping ``df.shape[1]`` equal to the expected count so the guard
+        could never fire (spec §1.1 defect 1).
+        """
+        from src.core.observables import rename_map
+
+        header_cols: list[str] | None = None
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
+                header_lines = [next(fh, ''), next(fh, '')]
+            if len(header_lines) > 1 and header_lines[1].startswith('#'):
+                tokens = header_lines[1].lstrip('#').strip().split()
+                if tokens:
+                    header_cols = [
+                        'time' if t == 'TimeStep' else t for t in tokens
+                    ]
+        except OSError:
+            pass
+
+        if header_cols:
+            df = pd.read_csv(
+                filepath, sep=r'\s+', header=None, names=header_cols,
+                skiprows=2,
+            )
+            # tier from filename prefix: friction_/fc_ave_ -> window,
+            # raw_ -> raw, peratom_ -> peratom (per-tier rename maps)
+            stem = filepath.name
+            tier = ('raw' if stem.startswith('raw_') else
+                    'peratom' if stem.startswith('peratom_') else 'window')
+            rmap = rename_map(
+                'sheetonsheet' if sim_type == 'sheet' else 'afm', tier,
+            )
+            df.rename(columns={**self._SHEET_COLUMN_RENAME, **rmap},
+                      inplace=True)
+            return df
+
+        # LEGACY_2026 positional fallback — width must match EXACTLY
+        legacy = (self._SHEET_FILE_COLUMNS if sim_type == 'sheet'
+                  else self._AFM_FILE_COLUMNS)
+        try:
+            probe = pd.read_csv(
+                filepath, sep=r'\s+', header=None, skiprows=2, nrows=1,
+            )
+        except pd.errors.EmptyDataError as exc:
+            raise SchemaError(f"{filepath}: no data rows") from exc
+        if probe.shape[1] != len(legacy):
+            raise SchemaError(
+                f"{filepath}: {probe.shape[1]} columns, LEGACY_2026 expects "
+                f"{len(legacy)} and no header is present"
+            )
+        df = pd.read_csv(
+            filepath, sep=r'\s+', header=None, names=legacy, skiprows=2,
+        )
         if sim_type == 'sheet':
-            sheet_col_names: list[str] | None = None
-            try:
-                with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
-                    header_lines = [next(fh, ''), next(fh, '')]
-                if len(header_lines) > 1 and header_lines[1].startswith('#'):
-                    tokens = header_lines[1].lstrip('#').strip().split()
-                    if tokens:
-                        sheet_col_names = [
-                            'time' if t == 'TimeStep' else t for t in tokens
-                        ]
-            except OSError:
-                pass
-            col_names = sheet_col_names or self._SHEET_FILE_COLUMNS
-            df = pd.read_csv(
-                filepath, sep=r'\s+', header=None, names=col_names, skiprows=2,
-            )
             df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
-        else:
-            df = pd.read_csv(
-                filepath, sep=r'\s+', header=None,
-                names=self._AFM_FILE_COLUMNS, skiprows=2,
-            )
-            if df.shape[1] != len(self._AFM_FILE_COLUMNS):
-                logger.warning(
-                    "Column count mismatch in %s: got %d, expected %d. "
-                    "Template fix fc_ave order may have changed.",
-                    filepath, df.shape[1], len(self._AFM_FILE_COLUMNS),
-                )
         return df
 
     def _parse_filename_params(
