@@ -172,11 +172,35 @@ class AFMSimulation(SimulationBase):
     def _velocity_seed(self, n_layers: int) -> Optional[int]:
         """Explicit ``velocity create`` seed for system.in, or None for random.
 
-        AFM draws a fresh random seed each render (None). The indent overrides this
-        to inject a recorded, reproducible per-(material, layer) seed so the fresh
-        contact trajectory is captured in the manifest.
+        With ``[general] campaign_seed`` set, the seed derives deterministically
+        from the run identity (spec §5 F5) so a rebuild is byte-identical.
+        Without it, AFM keeps the legacy fresh-random-per-render behaviour. The
+        indent builder overrides this with its own recorded per-(material,
+        layer) seed manifest.
         """
-        return None
+        return self._derived_seed(n_layers, 'velocity')
+
+    def _derived_seed(self, n_layers: int, channel: str) -> Optional[int]:
+        """Deterministic per-(material, layer, channel) seed, or None.
+
+        Loads and angles are LAMMPS in-file loops for the AFM scripts, so the
+        per-run identity here is (material, layer, seed_index); load/angle are
+        passed as None. None return (no campaign_seed) keeps the template's
+        legacy Jinja-random fallback.
+        """
+        base = self.config.general.campaign_seed
+        if base is None:
+            return None
+        from ..core.seeds import derive_seed
+        return derive_seed(
+            base,
+            material=self.config.sheet.mat,
+            layer=n_layers,
+            load=None,
+            angle=None,
+            seed_index=self.config.general.seed_index,
+            channel=channel,
+        )
 
     def _init_provenance(self) -> None:
         """Initialize provenance folder and collect input files.
@@ -664,6 +688,8 @@ class AFMSimulation(SimulationBase):
             'finite_sheet_edge_width': self.config.settings.geometry.finite_sheet_edge_width,
             'finite_sheet_edge_spring_k': self.config.settings.geometry.finite_sheet_edge_spring_k,
             'velocity_seed': self._velocity_seed(n_layers),
+            'seed_thermal_tip': self._derived_seed(n_layers, 'thermal_tip'),
+            'seed_thermal_sub': self._derived_seed(n_layers, 'thermal_sub'),
         }
         context.update(flake_ctx)
         return context

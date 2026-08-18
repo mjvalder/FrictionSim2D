@@ -431,6 +431,22 @@ class GeneralConfig(BaseModel):
             "is used."
         )
     )
+    campaign_seed: Optional[int] = Field(
+        default=None,
+        description=(
+            "Base seed for deterministic per-run seed derivation (spec §5 F5). "
+            "Every thermostat/velocity seed is a pure hash of (campaign_seed, "
+            "material, layer, load, angle, seed_index, channel), replacing the "
+            "render-time Jinja random. None keeps the legacy random behaviour."
+        ),
+    )
+    seed_index: int = Field(
+        default=0,
+        description=(
+            "Replicate index folded into seed derivation. Two seed sets of a "
+            "campaign differ only in this value."
+        ),
+    )
     bond_spring: Optional[float] = Field(80.0, description="Spring constant for harmonically bonded sheets")
     driving_spring: Optional[float] = Field(50, description="Driving spring constant for virtual atom method")
     finite_sheet: bool = Field(
