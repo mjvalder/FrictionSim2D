@@ -98,6 +98,15 @@ fix             tip_f {{ tip_fix_group }} rigid/nve single force * off off off t
 run             10000
 unfix           tip_f
 
+# --- Unloaded reference (spec §5 F3): per-layer sheet z AFTER equilibration,
+# BEFORE any load. deflect_max is computed in post against these values (the
+# slide script clears and reads the already-loaded .data, so no unloaded
+# reference is in scope there). Parsed into provenance.json from the log.
+{% for lyr in range(1, n_sheet_layers + 1) %}
+variable        zref_L{{ lyr }} equal xcm(layer_{{ lyr }},z)
+print           "# UNLOADED_REF layer={{ lyr }} z=$(v_zref_L{{ lyr }})"
+{% endfor %}
+
 fix             tip_f {{ tip_fix_group }} rigid/nve single force * off off on torque * off off off
 variable        f equal 0.0
 

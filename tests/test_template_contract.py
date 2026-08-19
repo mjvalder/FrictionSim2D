@@ -133,3 +133,13 @@ def test_conditional_interlayer_channel():
     assert 'variable        e_int_il equal c_frict' in sw_text
     rb_text = _render_sheet_slide(has_internal_lj=True)
     assert 'e_int_il' not in rb_text
+
+
+def test_unloaded_reference_lines_in_system_init(tmp_path):
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
+    assert 'variable        zref_L1 equal xcm(layer_1,z)' in text
+    assert 'UNLOADED_REF layer=1' in text
