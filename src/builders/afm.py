@@ -808,7 +808,75 @@ class AFMSimulation(SimulationBase):
 
         self._write_slide_scripts(context, output_root)
 
+        self._write_provenance(n_layers, context, output_root)
+
         logger.info("Inputs written to %s/lammps/", output_root)
+
+    def _write_provenance(self, n_layers: int, context: Dict,
+                          output_root: Path) -> None:
+        """Emit provenance.json for this layer configuration (spec §5 F5).
+
+        Build-time fields only; RAMP_STATUS/UNLOADED_REF/lammps_version are
+        enriched post-run via provenance.parse_log_extras. A failure here
+        fails the build — provenance is not optional.
+        """
+        import hashlib
+        import subprocess
+        from ..data.provenance import (ProvenanceRecord, sha256_file,
+                                       write_provenance)
+
+        try:
+            git_commit = subprocess.run(
+                ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                cwd=Path(__file__).parent, timeout=10,
+            ).stdout.strip() or 'unknown'
+            git_dirty = bool(subprocess.run(
+                ['git', 'status', '--porcelain'], capture_output=True,
+                text=True, cwd=Path(__file__).parent, timeout=10,
+            ).stdout.strip())
+        except Exception:  # pylint: disable=broad-except
+            git_commit, git_dirty = 'unknown', False
+
+        pm = self.pm[n_layers]
+        layer_type_map = {}
+        get_layer = getattr(getattr(pm, 'types', None),
+                            'get_layer_group_string', None)
+        if callable(get_layer):
+            for layer in range(n_layers):
+                ids = get_layer('sheet', layer)
+                if ids:
+                    layer_type_map[f'layer_{layer + 1}'] = [
+                        int(t) for t in ids.split()]
+
+        sub_sha = (sha256_file(self.sub_path)
+                   if self.sub_path and Path(self.sub_path).is_file() else None)
+
+        force = self.config.general.force
+        load_requested = (float(force)
+                          if isinstance(force, (int, float)) else None)
+
+        record = ProvenanceRecord(
+            seed_thermal_tip=context.get('seed_thermal_tip'),
+            seed_thermal_sub=context.get('seed_thermal_sub'),
+            seed_velocity=context.get('velocity_seed'),
+            substrate_realization_id=sub_sha,
+            damping_ratio=context.get('damping_ratio'),
+            damp_ev=context.get('damp_ev'),
+            git_commit=git_commit,
+            git_dirty=git_dirty,
+            config_hash=hashlib.sha256(
+                self.config.model_dump_json().encode()).hexdigest(),
+            layer_type_map=layer_type_map,
+            contact_cutoff=context['obs_ctx']['contact_cutoff'],
+            cutoff_source=getattr(self, '_contact_cutoff_source', 'unknown'),
+            thermostat_scheme=(
+                'langevin_y_tip_sub_nve_sheet'
+                if context.get('use_langevin') else
+                f"{self.config.settings.thermostat.type}_system"),
+            run_role='label',
+            load_requested=load_requested,
+        )
+        write_provenance(output_root, record)
 
     def _write_slide_scripts(self, context: Dict, output_root: Path) -> None:
         """Write the slide phase script(s).
