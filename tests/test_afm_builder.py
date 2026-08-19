@@ -153,7 +153,11 @@ velocity        virtual set 0.0 0.0 0.0
 fix             spr tip_fix spring couple virtual 3.1210986267166043 0.0 0.0 NULL 30.0
 fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 
-run             500000"""
+run             500000
+
+# Final-state retention (spec §5 F6): the post-slide configuration is always
+# available for contact/deflection reconstruction — never lucky again.
+write_data      out/L1/data/final_f$(v_find)N_a$(v_a).data"""
 
 
 def _make_afm_config(tmp_path: Path, layers: list[int]) -> AFMSimulationConfig:

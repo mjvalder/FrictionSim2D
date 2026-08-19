@@ -308,6 +308,7 @@ class SheetOnSheetSimulation(SimulationBase):
 
         base_context = {
             'seed_sheet_center': self._derived_seed('sheet_center'),
+            'data_dir': f"{rel_run_dir_str}/data",   # final-state retention
             'temp': self.config.general.temp,
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,

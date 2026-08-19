@@ -138,6 +138,10 @@ fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 
 run             {{ run_steps }}
 
+# Final-state retention (spec §5 F6): the post-slide configuration is always
+# available for contact/deflection reconstruction — never lucky again.
+write_data      {{ output_dir }}/final_f$(v_find)N_a$(v_a).data
+
 {% if scan_angle_is_sequence %}
 {% if scan_angle_force is number or scan_angle_force_is_sequence %}
 if              'abs(v_find-v_scan_angle_force) < 1.0e-12' then &

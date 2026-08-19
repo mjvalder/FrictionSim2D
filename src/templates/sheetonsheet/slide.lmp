@@ -188,6 +188,9 @@ fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict 
 
 run             {{ run_steps }}
 
+# Final-state retention (spec §5 F6)
+write_data      {{ data_dir }}/final_p$(v_pressure)GPa_a$(v_a).data
+
 {% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
 {% if scan_angle_force is number or scan_angle_force_is_sequence %}
 if              'abs(v_pressure-v_scan_angle_force) < 1.0e-12' then &
