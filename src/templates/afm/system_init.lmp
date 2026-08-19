@@ -140,7 +140,15 @@ fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
 variable        dispz equal xcm(tip_all,z)
 run             100 pre yes post no
 
+# --- Capped settle loop (spec §1.1 defect 4). Previously the outer jump was
+# unbounded and a seized contact spun forever. On exhaustion, `next` deletes
+# ramp_iter and skips the jump below, falling through to the unconverged
+# branch. The converged branch deletes ramp_iter itself: LAMMPS silently
+# ignores re-declaration of an existing loop variable, so without the delete
+# the cap would shrink across the enclosing force loop.
 label           check_r
+variable        ramp_iter loop {{ ramp_max_iterations }}
+label           ramp_iter_loop
 variable        disp_l equal ${dispz}
 variable        disp_h equal ${dispz}
 variable        disploop loop 50
@@ -153,9 +161,31 @@ next            disploop
 jump            SELF disp
 
 variable        r equal ${disp_h}-${disp_l}
-if              '${r} < 0.1' then 'jump SELF loop_end' else 'jump SELF check_r'
+if              '${r} < 0.1' then 'jump SELF loop_end'
+next            ramp_iter
+jump            SELF ramp_iter_loop
+# cap exhausted (next deleted ramp_iter and skipped the jump above)
+print           "# RAMP_STATUS converged=0 r=${r} iterations={{ ramp_max_iterations }}"
+jump            SELF hold_start
 
 label           loop_end
+print           "# RAMP_STATUS converged=1 r=${r} iterations=${ramp_iter}"
+variable        ramp_iter delete
+
+label           hold_start
+# --- Instrumented constant-load hold (spec §6): channel_role=diagnostic,
+# forbidden as ML features (same run as the COF label). Self-contained
+# variables: v_fz_tip/v_comz live only in slide.lmp.
+variable        hold_fz   equal f_forcetip[3]*{{ ev_a_to_nn }}
+variable        hold_tipz equal xcm(tip_all,z)
+variable        hold_shz  equal xcm(2D_all,z)
+fix             hold_ave all ave/time 1 1000 1000 v_hold_fz v_hold_tipz v_hold_shz file {{ output_dir }}/hold_$(v_find)N.txt
+run             10000
+unfix           hold_ave
+variable        hold_fz delete
+variable        hold_tipz delete
+variable        hold_shz delete
+
 write_data      {{ output_dir }}/load_$(v_find)N.data
 
 {% if forces is iterable and forces is not string %}

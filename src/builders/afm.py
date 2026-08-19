@@ -667,6 +667,7 @@ class AFMSimulation(SimulationBase):
             'neighbor_list': sim.neighbor_list,
             'neigh_modify_command': sim.neigh_modify_command,
             'run_steps': sim.slide_run_steps,
+            'ramp_max_iterations': sim.ramp_max_iterations,
             'drive_method': sim.drive_method,
             'damp_ev': damp_ev,
             'damping_ratio': damping_ratio,

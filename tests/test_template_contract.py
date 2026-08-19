@@ -143,3 +143,26 @@ def test_unloaded_reference_lines_in_system_init(tmp_path):
     text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
     assert 'variable        zref_L1 equal xcm(layer_1,z)' in text
     assert 'UNLOADED_REF layer=1' in text
+
+
+def test_settle_loop_is_capped(tmp_path):
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
+    # guards the silent-empty-render failure (env has no StrictUndefined)
+    assert 'variable        ramp_iter loop 40' in text
+    assert 'RAMP_STATUS' in text
+    assert 'variable        ramp_iter delete' in text   # cap resets per load
+
+
+def test_hold_channels_emitted_selfcontained(tmp_path):
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
+    assert 'fix             hold_ave' in text
+    assert 'v_hold_fz v_hold_tipz v_hold_shz' in text   # NOT v_fz_tip - undefined here
+    assert 'hold_$(v_find)N.txt' in text

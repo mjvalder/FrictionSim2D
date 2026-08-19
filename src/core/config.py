@@ -65,6 +65,15 @@ class SimulationSettings(BaseModel):
     slide_run_steps: int = 500000
     drive_method: Literal['smd', 'fix_move', 'virtual_atom'] = 'virtual_atom'
     constraint_mode: Literal['atom_bonds', 'com_spring', 'none'] = 'none'
+    ramp_max_iterations: int = Field(
+        default=40,
+        description=(
+            "Cap on the post-ramp settle loop in system_init (spec §1.1 "
+            "defect 4). Previously unbounded: a seized or punched-through "
+            "contact could spin indefinitely. On exhaustion the run records "
+            "RAMP_STATUS converged=0 and continues."
+        ),
+    )
 
 
 class QuenchSettings(BaseModel):
