@@ -81,7 +81,7 @@ velocity        center create {{ temp }} {{ seed_sheet_center if seed_sheet_cent
 {% if thermostat_type == 'nose-hoover' %}
 fix             nvt_center center nvt temp {{ temp }} {{ temp }} $(100.0*dt)
 {% else %}
-fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center if seed_sheet_center is defined and seed_sheet_center is not none else (range(1, 999999) | random) }} zero yes
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center if seed_sheet_center is defined and seed_sheet_center is not none else (range(1, 999999) | random) }} zero yes tally yes
 fix             nve_center center nve
 {% endif %}
 
@@ -145,6 +145,9 @@ variable        yfrict equal v_sy
 compute         frict layer_{{ n_layers - 1 }} group/group layer_{{ n_layers - 2 }}
 variable        xfrict equal c_frict[1]
 variable        yfrict equal c_frict[2]
+# The group/group scalar IS the interlayer interaction energy of the shearing
+# interface (spec §5 F2, conditional on is_sheet_lj) — free alongside frict.
+variable        e_int_il equal c_frict
 {% endif %}
 
 run             10000

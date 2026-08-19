@@ -68,11 +68,11 @@ velocity        2D zero angular
 
 {% if thermostat_type == 'langevin' %}
 compute         temp_tip tip_thermo temp/partial 0 1 0
-fix             lang_tip tip_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_thermal_tip if seed_thermal_tip is defined and seed_thermal_tip is not none else (range(1, 999999) | random) }} zero yes
+fix             lang_tip tip_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_thermal_tip if seed_thermal_tip is defined and seed_thermal_tip is not none else (range(1, 999999) | random) }} zero yes tally yes
 fix_modify      lang_tip temp temp_tip
 
 compute         temp_sub sub_thermo temp/partial 0 1 0
-fix             lang_sub sub_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_thermal_sub if seed_thermal_sub is defined and seed_thermal_sub is not none else (range(1, 999999) | random) }} zero yes
+fix             lang_sub sub_thermo langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_thermal_sub if seed_thermal_sub is defined and seed_thermal_sub is not none else (range(1, 999999) | random) }} zero yes tally yes
 fix_modify      lang_sub temp temp_sub
 
 group           nve_apply subtract all sub_fix {{ tip_fix_group }}

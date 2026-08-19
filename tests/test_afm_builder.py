@@ -64,11 +64,11 @@ fix             sub_fix sub_fix setforce 0.0 0.0 0.0
 fix             tip_f tip_fix rigid/nve single force * on on on torque * off off off
 
 compute         temp_tip tip_thermo temp/partial 0 1 0
-fix             lang_tip tip_thermo langevin 300.0 300.0 $(100.0*dt) SEED zero yes
+fix             lang_tip tip_thermo langevin 300.0 300.0 $(100.0*dt) SEED zero yes tally yes
 fix_modify      lang_tip temp temp_tip
 
 compute         temp_sub sub_thermo temp/partial 0 1 0
-fix             lang_sub sub_thermo langevin 300.0 300.0 $(100.0*dt) SEED zero yes
+fix             lang_sub sub_thermo langevin 300.0 300.0 $(100.0*dt) SEED zero yes tally yes
 fix_modify      lang_sub temp temp_sub
 
 group           nve_apply subtract all sub_fix tip_fix
