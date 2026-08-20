@@ -99,6 +99,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    "lammps: executes real LAMMPS runs (skipped when lmp_serial is absent; deselect with -m 'not lammps')",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

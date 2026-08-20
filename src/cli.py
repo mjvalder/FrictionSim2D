@@ -513,6 +513,18 @@ def aiida_group():
         click.echo("   conda install -c conda-forge aiida-core", err=True)
         raise click.Abort()
 
+@aiida_group.command('preflight')
+def aiida_preflight():
+    """Verify profile, database and entry points before generating a campaign.
+
+    Distinguishes "no profile initialised here" (fine on a generation-only
+    machine) from "profile broken" (spec §8). Exit code 0 only when a healthy
+    profile and the friction2d entry points are both present.
+    """
+    from .aiida.preflight import main as preflight_main
+    raise SystemExit(preflight_main())
+
+
 @aiida_group.command('status')
 def aiida_status():
     """Check AiiDA installation and profile status."""

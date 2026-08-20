@@ -109,11 +109,20 @@ class LammpsFrictionCalcJob(CalcJob):
         calcinfo.codes_info = code_infos
         calcinfo.retrieve_list = [
             'results/*', 'visuals/*', 'log.lammps', '*.out', 'array_status/*',
+            # Instrumentation schema (spec §5 F5/F6): provenance + retention.
+            # results/* already covers the raw_*/peratom_* tiers; data/* adds
+            # the per-load, final-state and hold artefacts.
+            'provenance.json', 'data/hold_*.txt', 'data/final_*.data',
+            'data/load_*.data',
         ]
         if sim_prefix:
             calcinfo.retrieve_list.extend([
                 f'{sim_prefix}/results/*',
                 f'{sim_prefix}/visuals/*',
+                f'{sim_prefix}/provenance.json',
+                f'{sim_prefix}/data/hold_*.txt',
+                f'{sim_prefix}/data/final_*.data',
+                f'{sim_prefix}/data/load_*.data',
             ])
         return calcinfo
 
