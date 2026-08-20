@@ -875,6 +875,13 @@ class AFMSimulation(SimulationBase):
                 f"{self.config.settings.thermostat.type}_system"),
             run_role='label',
             load_requested=load_requested,
+            pot_path=str(self.config.sheet.pot_path),
+            pot_type=self.config.sheet.pot_type,
+            pot_resolution_route=getattr(
+                self.config.sheet, 'pot_resolution_route', None),
+            pot_file_sha256=(
+                sha256_file(Path(self.config.sheet.pot_path))
+                if Path(self.config.sheet.pot_path).is_file() else None),
         )
         write_provenance(output_root, record)
 

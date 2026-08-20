@@ -154,8 +154,13 @@ class TestTemperatureSweep:
             output_root=tmp_path / 'out', generate_hpc=False,
         )
         assert len(created) == 2
-        # Distinct K{temp} directories: the sweep must not overwrite itself.
-        assert len({p.name for p in created}) == 2
+        # Distinct directories: the sweep must not overwrite itself. The leaf
+        # is now the always-on pot_ token (spec §13.4), so compare full paths
+        # and assert the K{temp} segment differs.
+        assert len(set(created)) == 2
+        k_segments = {next(part for part in p.parts if part.startswith('K'))
+                      for p in created}
+        assert k_segments == {'K300', 'K500'}
 
 
 class TestInFileLoopsDoNotMultiplyConfigs:

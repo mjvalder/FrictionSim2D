@@ -597,6 +597,28 @@ def expand_config_sweeps(base_config: Dict[str, Any],
             if isinstance(val, list) and key not in lammps_loop_params:
                 sweep_params[('general', key)] = val
 
+    # Potential sweep (spec §13): a pot_path LIST on the primary sheet sweeps
+    # into separate runs, one directory per member (pot_ token appended by
+    # output_dir_for — the LOOPABILITY rule). Homogeneous sheets only: two
+    # distinct 2D materials or a flake make a single potential axis ambiguous.
+    if primary_key is not None:
+        pot_val = base_config.get(primary_key, {}).get('pot_path')
+        if isinstance(pot_val, list):
+            hetero_markers = [k for k in base_config
+                              if k.startswith('2D-') and k != primary_key]
+            has_flake = any(k == 'flake' or k.startswith('flake-')
+                            for k in base_config)
+            if hetero_markers or has_flake:
+                raise ValueError(
+                    "potential sweep is not supported on heterostructure or "
+                    "flake configs (spec §13.2): a pot_path list needs a "
+                    "single homogeneous 2D material"
+                )
+            from .potential_resolve import resolve_pot_type
+            root = Path(base_dir) if base_dir else Path('.')
+            resolved = [resolve_pot_type(entry, root) for entry in pot_val]
+            sweep_params[(primary_key, '_pot_expand')] = resolved
+
     if not sweep_params:
         return _resolve_lj_override_files([base_config], base_dir)
 
@@ -615,6 +637,13 @@ def expand_config_sweeps(base_config: Dict[str, Any],
             new_conf[primary_key] = expand_mat_template(new_conf[primary_key], mat1, mat2)
             if mat2 is not None and '2D-2' in new_conf:
                 new_conf['2D-2'] = expand_mat_template(new_conf['2D-2'], mat1, mat2)
+
+        pot_entry = (perm.pop((primary_key, '_pot_expand'), None)
+                     if primary_key is not None else None)
+        if pot_entry is not None and primary_key in new_conf:
+            new_conf[primary_key]['pot_path'] = pot_entry.path
+            new_conf[primary_key]['pot_type'] = pot_entry.pot_type
+            new_conf[primary_key]['pot_resolution_route'] = pot_entry.route
 
         for (section, key), val in perm.items():
             new_conf[section][key] = val
@@ -636,6 +665,7 @@ def expand_config_sweeps(base_config: Dict[str, Any],
 #:   'scalar'   a list here is not supported
 LOOPABILITY: Dict[Tuple[str, str], str] = {
     ('2D', 'materials_list'): 'sweep',
+    ('2D', 'pot_path'): 'sweep',   # spec §13: one pot_ directory per member
     ('general', 'temp'): 'sweep',
     ('2D', 'layers'): 'layer',
     ('general', 'force'): 'in_file',
@@ -1364,6 +1394,16 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     temp = run_dict['general'].get('temp', 300)
     size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
 
+    # Potential token (spec §13.4): always emitted when the sheet names a
+    # potential, so paths are self-describing and a pot_path sweep can never
+    # collide (the LOOPABILITY rule: sweepable only if it changes the
+    # directory name). LEGACY_2026 layouts without the segment stay readable.
+    pot_segment = None
+    pot_path = sheet.get('pot_path')
+    if pot_path:
+        from .potential_resolve import pot_dir_token
+        pot_segment = pot_dir_token(sheet.get('pot_type', 'sw'), pot_path)
+
     top_dir = model  # 'afm' | 'sheetonsheet' | 'pes_tip' | 'pes_sheet'
     if model in AFM_LIKE_MODELS:
         tip_mat = run_dict.get('tip', {}).get('mat', 'Si')
@@ -1375,13 +1415,15 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
         sub_str = f"{sub_amorph}{sub_mat}" if sub_amorph == 'a' else sub_mat
         tip_str = f"{tip_amorph}{tip_mat}" if tip_amorph == 'a' else tip_mat
 
-        return (
+        base = (
             Path(top_dir) / mat / size_token /
             f"sub_{sub_str}_tip_{tip_str}_r{int(tip_r)}" /
             f"K{int(temp)}"
         )
+        return base / pot_segment if pot_segment else base
 
-    return Path(top_dir) / mat / size_token / f"K{int(temp)}"
+    base = Path(top_dir) / mat / size_token / f"K{int(temp)}"
+    return base / pot_segment if pot_segment else base
 
 
 def run_simulations(
