@@ -55,9 +55,12 @@ def built_run(tmp_path_factory):
     scripts += sorted((out / "L1" / "lammps").glob("slide*.in"))
     logs = []
     for script in scripts:
+        # one log per phase: a shared log.lammps would let the slide phase
+        # overwrite system.in's RAMP_STATUS/UNLOADED_REF lines
+        log_file = out / f"log_{script.stem}.lammps"
         proc = subprocess.run(
-            ["lmp_serial", "-in", str(script)], cwd=str(out),
-            capture_output=True, text=True, timeout=1800,
+            ["lmp_serial", "-in", str(script), "-log", str(log_file)],
+            cwd=str(out), capture_output=True, text=True, timeout=1800,
         )
         logs.append(proc.stdout + proc.stderr)
         assert proc.returncode == 0, (
@@ -87,12 +90,16 @@ def test_pe_partition_reconciles(built_run):
     r = DataReader.__new__(DataReader)
     df = r._read_dataframe(next(out.rglob("results/peratom_*")), "tip")
     win = r._read_dataframe(next(out.rglob("results/friction_*")), "tip")
-    total = (df["pe_sum_tip_all"] + df["pe_sum_sub_all"]
-             + df["pe_sum_2D_all"])
-    pe = win["pe"].iloc[-len(df):].to_numpy()
-    # group pe/atom sums partition global pe (virtual atom contributes ~0);
-    # tolerance covers the different sampling instants of the two fixes
-    rel = abs(total.to_numpy() - pe) / abs(pe)
+    df["pe_total"] = (df["pe_sum_tip_all"] + df["pe_sum_sub_all"]
+                      + df["pe_sum_2D_all"])
+    # align by timestep: fc_pa's aligned immediate sample gives it an extra
+    # row relative to fc_win, so positional slicing mismatches
+    merged = df.merge(win[["time", "pe"]], on="time")
+    assert len(merged) > 0, (list(df["time"]), list(win["time"]))
+    # group pe/atom sums partition global pe (virtual atom contributes ~0).
+    # NB fc_win's pe is a 1000-step BLOCK MEAN while fc_pa's sums are
+    # instantaneous; at 1 K the fluctuation is tiny, hence the loose band.
+    rel = (merged["pe_total"] - merged["pe"]).abs() / merged["pe"].abs()
     assert rel.max() < 1e-3, rel.max()
 
 
@@ -103,10 +110,11 @@ def test_ramp_status_and_hold_emitted(built_run):
     assert "RAMP_STATUS" in log_text
     holds = list(out.rglob("data/hold_*N.txt"))
     assert holds, "hold file missing"
-    log = out / "log.lammps"
-    if log.is_file():
-        up = parse_log_extras(log)
-        assert "ramp_converged" in up
+    sys_log = out / "log_system.lammps"
+    assert sys_log.is_file()
+    up = parse_log_extras(sys_log)
+    assert "ramp_converged" in up
+    assert "unloaded_reference_z" in up
 
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")

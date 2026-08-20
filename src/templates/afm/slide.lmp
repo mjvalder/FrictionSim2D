@@ -100,8 +100,6 @@ variable        fz_tip equal f_forcetip[3]*{{ ev_a_to_nn }}
 variable        fx_spr equal f_spr[1]*{{ ev_a_to_nn }}
 variable        fy_spr equal f_spr[2]*{{ ev_a_to_nn }}
 
-{{ obs.emit_output_fixes(obs_ctx) }}
-
 {% if damp_ev is not none %}
 fix             damp {{ tip_fix_group }} viscous {{ damp_ev }}
 {% else %}
@@ -135,6 +133,14 @@ velocity        virtual set 0.0 0.0 0.0
 fix             spr {{ tip_fix_group }} spring couple virtual {{ spring_ev }} 0.0 0.0 NULL {{ virtual_offset }}
 fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 {% endif %}
+
+# Output fixes AFTER the drive block: fix spr must exist before any tier can
+# sample v_fx_spr. With Nrepeat=1, ave/time samples IMMEDIATELY at setup when
+# the (restored) timestep is a multiple of Nfreq — the load_*.data timestep
+# always is a multiple of 100, so fc_raw defined earlier fires at run 0 and
+# dies on the missing fix. (The legacy fc_ave survived the same layout only
+# because Nrepeat=1000's phase shift never aligns.)
+{{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
 
