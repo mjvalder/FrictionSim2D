@@ -65,6 +65,14 @@ class SimulationSettings(BaseModel):
     slide_run_steps: int = 500000
     drive_method: Literal['smd', 'fix_move', 'virtual_atom'] = 'virtual_atom'
     constraint_mode: Literal['atom_bonds', 'com_spring', 'none'] = 'none'
+    sheet_hold_steps: int = Field(
+        default=20000,
+        description=(
+            "Constant-pressure compression hold before sheet sliding "
+            "(spec §6.1) — the sheet's penetration analogue. Logs interlayer "
+            "separation at the shearing interface (layer_{n-1}/layer_{n-2})."
+        ),
+    )
     ramp_max_iterations: int = Field(
         default=40,
         description=(

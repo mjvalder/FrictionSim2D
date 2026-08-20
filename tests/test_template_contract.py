@@ -166,3 +166,30 @@ def test_hold_channels_emitted_selfcontained(tmp_path):
     assert 'fix             hold_ave' in text
     assert 'v_hold_fz v_hold_tipz v_hold_shz' in text   # NOT v_fz_tip - undefined here
     assert 'hold_$(v_find)N.txt' in text
+
+
+def test_sheet_hold_logs_shearing_interface():
+    text = _render_sheet_slide(has_internal_lj=False)   # n_layers=4
+    # shearing interface for n=4 is L3/L2 (spec §6.1)
+    assert 'variable        d_shear equal v_comz_L3-v_comz_L2' in text
+    assert 'hold_p$(v_pressure)GPa.txt' in text
+    assert text.index('fix             hold_ave') > text.index('run             10000')
+
+
+def test_sheet_three_tiers():
+    text = _render_sheet_slide(has_internal_lj=False)
+    assert 'fc_win' in text and 'fc_raw' in text and 'fc_pa' in text
+    # fc_win keeps the legacy 16-column prefix
+    win = [l for l in text.splitlines()
+           if 'fc_win' in l and l.strip().startswith('fix')][0]
+    assert win.split('ave/time 1 1000')[1].split()[1:17] == [
+        'v_xfrict', 'v_yfrict', 'v_sx', 'v_sy', 'v_sz', 'v_fx', 'v_fy',
+        'v_fz', 'v_comx_top', 'v_comy_top', 'v_comx_ctop', 'v_comy_ctop',
+        'v_comz_ctop', 'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot']
+
+
+def test_sheet_peratom_absent_for_internal_lj():
+    text = _render_sheet_slide(has_internal_lj=True)
+    # an empty-varlist fix would be invalid LAMMPS: fc_pa must vanish entirely
+    assert 'fc_pa' not in text
+    assert 'fc_win' in text and 'fc_raw' in text

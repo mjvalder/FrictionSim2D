@@ -698,13 +698,43 @@ class AFMSimulation(SimulationBase):
             'seed_thermal_sub': self._derived_seed(n_layers, 'thermal_sub'),
         }
         context.update(flake_ctx)
+        context['layer_groups_available'] = \
+            self._layer_groups_available(n_layers)
         context['obs_ctx'] = self._build_obs_ctx(
             n_layers, context['results_file_pattern'],
-            use_langevin=context['use_langevin'])
+            use_langevin=context['use_langevin'],
+            layer_groups_available=context['layer_groups_available'])
         return context
 
+    def _layer_groups_available(self, n_layers: int) -> bool:
+        """Whether layer_{1..n} groups will exist in the rendered system.
+
+        True for the plain single-material AFM (the potential include emits
+        them, including the monolayer fallback). False for hetero stacks,
+        whose components are named sheet_1/sheet_2 and emit no layer_N groups
+        yet — referencing layer_1 there is a runtime LAMMPS error. Gates the
+        zref block and the layer-resolved COM channels.
+        """
+        pm = self.pm.get(n_layers)
+        types = getattr(pm, 'types', None)
+        get_layer = getattr(types, 'get_layer_group_string', None)
+        ids_by_comp = getattr(types, 'ids_by_component', None)
+        if not callable(get_layer) or not callable(ids_by_comp):
+            return False   # test stubs / exotic builders: fail safe
+        try:
+            if not ids_by_comp('sheet'):
+                return False
+            for layer in range(n_layers):
+                if not get_layer('sheet', layer) and n_layers > 1:
+                    return False
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
     def _build_obs_ctx(self, n_layers: int, results_file_pattern: str,
-                       use_langevin: bool) -> Dict[str, object]:
+                       use_langevin: bool,
+                       layer_groups_available: bool = True
+                       ) -> Dict[str, object]:
         """Assemble the observable-registry context for the macro library.
 
         A single dict passed under the ``obs_ctx`` key — the macros receive it
@@ -719,7 +749,9 @@ class AFMSimulation(SimulationBase):
                               for lyr in (1, 2) for ax in ('x', 'y', 'z')}
         win = [ob for ob in channels_for('afm', 'window')
                if ob.name not in static_layer_names]
-        win += [ob for ob in layer_channels(n_layers) if ob.tier == 'window']
+        if layer_groups_available:
+            win += [ob for ob in layer_channels(n_layers)
+                    if ob.tier == 'window']
         if not use_langevin:
             win = [ob for ob in win if not ob.name.startswith('w_thermostat')]
         pa = [ob for ob in channels_for('afm', 'peratom')

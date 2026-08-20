@@ -362,7 +362,17 @@ def _seed_builder_state(builder: AFMSimulation, tmp_path: Path) -> Path:
         "tip_types": "2",
         "sheet_types": "3",
     }
-    builder.pm[1] = SimpleNamespace(types=[1, 2, 3])
+    class _StubTypes(list):
+        """Minimal stand-in for PotentialManager.types: len() + the two
+        queries _layer_groups_available needs (sheet type 3, one layer)."""
+
+        def get_layer_group_string(self, component, layer):
+            return '3' if (component == 'sheet' and layer == 0) else ''
+
+        def ids_by_component(self, component):
+            return [3] if component == 'sheet' else []
+
+    builder.pm[1] = SimpleNamespace(types=_StubTypes([1, 2, 3]))
     builder.lat_c = 6.0
     sheet_dims = {
         "xlo": 0.0,

@@ -355,6 +355,15 @@ class SheetOnSheetSimulation(SimulationBase):
                 f"{rel_run_dir_str}/results/"
                 f"friction_p${{pressure}}_a${{a}}_s${{speed}}"
             ),
+            'results_file_raw': (
+                f"{rel_run_dir_str}/results/"
+                f"raw_p${{pressure}}_a${{a}}_s${{speed}}"
+            ),
+            'results_file_peratom': (
+                f"{rel_run_dir_str}/results/"
+                f"peratom_p${{pressure}}_a${{a}}_s${{speed}}"
+            ),
+            'hold_steps': sim.sheet_hold_steps,
             'dump_file_pattern': (
                 f"{rel_run_dir_str}/visuals/"
                 f"slide_p${{pressure}}_a${{a}}_s${{speed}}.lammpstrj"

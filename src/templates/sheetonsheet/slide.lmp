@@ -119,6 +119,19 @@ variable        comx_bot equal c_COM_bot[1]
 variable        comy_bot equal c_COM_bot[2]
 variable        comz_bot equal c_COM_bot[3]
 
+# --- observable registry channels (spec §3): layer-resolved COM for every
+# layer, plus global energies. Lateral layer COMs are the realized-registry
+# observable (spec §12 — registry is measured, not imposed).
+{% for i in range(1, n_layers + 1) %}
+compute         COM_L{{ i }} layer_{{ i }} com
+variable        comx_L{{ i }} equal c_COM_L{{ i }}[1]
+variable        comy_L{{ i }} equal c_COM_L{{ i }}[2]
+variable        comz_L{{ i }} equal c_COM_L{{ i }}[3]
+{% endfor %}
+variable        etot equal etotal
+variable        pe_now equal pe
+variable        ke_now equal ke
+
 # Apply Uniform Pressure
 # 1 eV/Å³ = {{ ev_a3_to_gpa }} GPa
 variable        A equal ({{ xhi }}-{{ xlo }})*({{ yhi }}-{{ ylo }})
@@ -152,6 +165,18 @@ variable        e_int_il equal c_frict
 
 run             10000
 
+# --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
+# analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
+# SHEARING interface (layer_{{ n_layers - 1 }}/layer_{{ n_layers - 2 }}); the
+# other gaps are reported alongside. channel_role=diagnostic.
+variable        d_shear equal v_comz_L{{ n_layers - 1 }}-v_comz_L{{ n_layers - 2 }}
+{% for i in range(1, n_layers) %}
+variable        gap_L{{ i }}_L{{ i + 1 }} equal v_comz_L{{ i + 1 }}-v_comz_L{{ i }}
+{% endfor %}
+fix             hold_ave all ave/time 1 1000 1000 v_d_shear {% for i in range(1, n_layers) %}v_gap_L{{ i }}_L{{ i + 1 }} {% endfor %}v_fz file {{ data_dir }}/hold_p$(v_pressure)GPa.txt
+run             {{ hold_steps }}
+unfix           hold_ave
+
 {% if constraint_mode == 'atom_bonds' %}
 # Recalibrate top bond equilibrium distance after minimization
 thermo_style    custom v_comz_top v_comz_ctop
@@ -184,7 +209,14 @@ fix             spr layer_{{ n_layers }} spring couple virtual {{ driving_spring
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 {% endif %}
 
-fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file {{ results_file_pattern }}
+# Three sampling tiers (spec §4). fc_win keeps the legacy 16-column prefix.
+# NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
+# exemption: it is the label itself and its cost was already paid campaign-wide.
+fix             fc_win all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot {% for i in range(1, n_layers + 1) %}v_comx_L{{ i }} v_comy_L{{ i }} v_comz_L{{ i }} {% endfor %}v_etot v_pe_now v_ke_now file {{ results_file_pattern }}
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file {{ results_file_raw }}
+{% if not has_internal_lj %}
+fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file {{ results_file_peratom }}
+{% endif %}
 
 run             {{ run_steps }}
 
