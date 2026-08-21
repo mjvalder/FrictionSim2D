@@ -685,7 +685,10 @@ class TestFileOutput:
         pm.add_self_interaction('sheet')
         
         layer_groups = pm.get_layer_groups_string()
-        assert layer_groups == ''  # No layer groups for single layer
+        # Monolayers now emit layer_1 = the whole sheet (spec §5 F1): the
+        # registry's comx_L1... channels reference layer_1 unconditionally,
+        # and a monolayer's comz_L1 must equal comz exactly.
+        assert layer_groups.startswith('group layer_1 type ')
 
         # Multi-layer
         pm2 = PotentialManager(mock_settings, use_langevin=False)

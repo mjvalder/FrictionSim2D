@@ -70,7 +70,7 @@ minimize 1e-4 1e-8 1000000 1000000
 # Thermostat on middle layers (2 through 2)
 group           center union layer_2
 velocity        center create 300.0 SEED
-fix             lang center langevin 300.0 300.0 $(100.0*dt) SEED zero yes
+fix             lang center langevin 300.0 300.0 $(100.0*dt) SEED zero yes tally yes
 fix             nve_center center nve
 
 timestep        0.001
@@ -103,6 +103,25 @@ variable        comx_bot equal c_COM_bot[1]
 variable        comy_bot equal c_COM_bot[2]
 variable        comz_bot equal c_COM_bot[3]
 
+# --- observable registry channels (spec §3): layer-resolved COM for every
+# layer, plus global energies. Lateral layer COMs are the realized-registry
+# observable (spec §12 — registry is measured, not imposed).
+compute         COM_L1 layer_1 com
+variable        comx_L1 equal c_COM_L1[1]
+variable        comy_L1 equal c_COM_L1[2]
+variable        comz_L1 equal c_COM_L1[3]
+compute         COM_L2 layer_2 com
+variable        comx_L2 equal c_COM_L2[1]
+variable        comy_L2 equal c_COM_L2[2]
+variable        comz_L2 equal c_COM_L2[3]
+compute         COM_L3 layer_3 com
+variable        comx_L3 equal c_COM_L3[1]
+variable        comy_L3 equal c_COM_L3[2]
+variable        comz_L3 equal c_COM_L3[3]
+variable        etot equal etotal
+variable        pe_now equal pe
+variable        ke_now equal ke
+
 # Apply Uniform Pressure
 # 1 eV/Å³ = 160.2176565 GPa
 variable        A equal (100.0-0.0)*(100.0-0.0)
@@ -121,8 +140,22 @@ variable        sz equal f_fsbot[3]*1.602176565
 compute         frict layer_2 group/group layer_1
 variable        xfrict equal c_frict[1]
 variable        yfrict equal c_frict[2]
+# The group/group scalar IS the interlayer interaction energy of the shearing
+# interface (spec §5 F2, conditional on is_sheet_lj) — free alongside frict.
+variable        e_int_il equal c_frict
 
 run             10000
+
+# --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
+# analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
+# SHEARING interface (layer_2/layer_1); the
+# other gaps are reported alongside. channel_role=diagnostic.
+variable        d_shear equal v_comz_L2-v_comz_L1
+variable        gap_L1_L2 equal v_comz_L2-v_comz_L1
+variable        gap_L2_L3 equal v_comz_L3-v_comz_L2
+fix             hold_ave all ave/time 1 1000 1000 v_d_shear v_gap_L1_L2 v_gap_L2_L3 v_fz file out/data/hold_p$(v_pressure)GPa.txt
+run             20000
+unfix           hold_ave
 
 
 variable        speed_x equal cos(v_a*PI/180)
@@ -135,9 +168,17 @@ velocity        virtual set 0.0 0.0 0.0
 fix             spr layer_3 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 
-fix             fc_ave all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file out/results/friction_p${pressure}_a${a}_s${speed}
+# Three sampling tiers (spec §4). fc_win keeps the legacy 16-column prefix.
+# NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
+# exemption: it is the label itself and its cost was already paid campaign-wide.
+fix             fc_win all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 v_etot v_pe_now v_ke_now file out/results/friction_p${pressure}_a${a}_s${speed}
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file out/results/raw_p${pressure}_a${a}_s${speed}
+fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file out/results/peratom_p${pressure}_a${a}_s${speed}
 
-run             500000"""
+run             500000
+
+# Final-state retention (spec §5 F6)
+write_data      out/data/final_p$(v_pressure)GPa_a$(v_a).data"""
 
 
 def _make_sheetonsheet_config(tmp_path: Path, layers: list[int]) -> SheetOnSheetSimulationConfig:

@@ -100,9 +100,9 @@ class TestShippedPairSweepExample:
 
     def test_it_expands_to_the_documented_runs(self, expanded):
         assert [str(output_dir_for(c, 'sheetonsheet')) for c in expanded] == [
-            'sheetonsheet/h-MoS2+h-WS2/12x_12y/K300',
-            'sheetonsheet/h-MoSe2+h-WSe2/12x_12y/K300',
-            'sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300',
+            'sheetonsheet/h-MoS2+h-WS2/12x_12y/K300/pot_sw_h-MoS2',
+            'sheetonsheet/h-MoSe2+h-WSe2/12x_12y/K300/pot_sw_h-MoSe2',
+            'sheetonsheet/h-MoTe2+h-WTe2/12x_12y/K300/pot_sw_h-MoTe2',
         ]
 
     def test_each_member_lands_in_its_own_numbered_section(self, expanded):

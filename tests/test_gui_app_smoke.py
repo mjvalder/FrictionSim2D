@@ -575,7 +575,7 @@ class TestMainWindow:
         window._generate()
 
         message = captured['message']
-        assert 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300' in message
+        assert 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300/pot_sw_MoS2_wen' in message
         assert 'WARNING' not in message
 
     def test_generate_reports_why_a_pair_config_cannot_expand(self, window, monkeypatch):
@@ -620,7 +620,7 @@ class TestMainWindow:
         window.form.document = window.document
         window.form.rebuild()
 
-        dup = Path('indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300')
+        dup = Path('indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300/pot_sw_MoS2_wen')
         monkeypatch.setattr(window.document, 'expansion_output_dirs',
                             lambda: ExpansionDirs([dup, dup]))
 
