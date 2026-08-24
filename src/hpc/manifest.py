@@ -472,23 +472,3 @@ class JobManifest:
                 f"{self.n_failed} failed)>")
 
 
-def create_manifest_from_package(package_dir: Path) -> JobManifest:
-    """Create manifest from exported HPC package directory.
-    
-    Args:
-        package_dir: Path to HPC package directory.
-        
-    Returns:
-        JobManifest instance with all jobs marked as exported.
-    """
-    package_dir = Path(package_dir)
-    info_file = package_dir / 'package_info.json'
-    info = json.loads(info_file.read_text()) if info_file.exists() else {}
-    sim_dir = package_dir / 'simulations'
-    manifest = (JobManifest.from_simulation_directory(sim_dir, name=package_dir.name)
-                if sim_dir.exists() else JobManifest(name=package_dir.name))
-    manifest.scheduler = info.get('scheduler', 'pbs')
-    manifest.package_directory = str(package_dir)
-    for job in manifest.jobs:
-        job.update_status(JobStatus.EXPORTED)
-    return manifest

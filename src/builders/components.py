@@ -820,12 +820,6 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
     _snap_small_tilts(output_path)
 
 
-def _element_z(symbol: str) -> int:
-    """Return atomic number for element symbol."""
-    from ase.data import atomic_numbers  # pylint: disable=import-outside-toplevel
-    return atomic_numbers.get(symbol, 1)
-
-
 def _find_ortho_transform(cell) -> "np.ndarray":
     """Find a transformation matrix P such that P @ cell is (nearly) orthogonal.
 
@@ -1116,74 +1110,6 @@ def _duplicate_lammps_data(
     finally:
         lmp.close()
 
-
-def _annotate_masses(path: Path, type_element_map: Dict[int, str]) -> None:
-    """Re-add ``# element`` comments to the Masses section of a LAMMPS data file.
-
-    LAMMPS ``write_data`` strips element comments; this restores them so that
-    ``renumber_atom_types`` can read the element names in its PASS 1.
-
-    Args:
-        path: Path to LAMMPS data file (modified in-place).
-        type_element_map: Mapping of atom-type int -> element symbol.
-    """
-    content = path.read_text(encoding='utf-8')
-    lines = content.splitlines(keepends=True)
-    in_masses = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped == 'Masses':
-            in_masses = True
-            new_lines.append(line)
-            continue
-        if in_masses:
-            if not stripped:
-                new_lines.append(line)
-                continue
-            if not stripped[0].isdigit():
-                in_masses = False
-                new_lines.append(line)
-                continue
-            parts = stripped.split()
-            type_id = int(parts[0])
-            if type_id in type_element_map and '#' not in stripped:
-                line = line.rstrip('\n').rstrip() + f'  # {type_element_map[type_id]}\n'
-            new_lines.append(line)
-        else:
-            new_lines.append(line)
-    path.write_text(''.join(new_lines), encoding='utf-8')
-
-
-def _strip_velocities(path: Path) -> None:
-    """Remove the Velocities section (and any extra 0 0 0 velocities) from a LAMMPS data file.
-
-    LAMMPS ``write_data`` writes a Velocities section; ``renumber_atom_types``
-    appends atom lines at the end of the file, so the Velocities section must
-    be removed first to keep Atoms as the last section.
-
-    Args:
-        path: Path to LAMMPS data file (modified in-place).
-    """
-    content = path.read_text(encoding='utf-8')
-    lines = content.splitlines(keepends=True)
-    new_lines = []
-    skip = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped == 'Velocities':
-            skip = True
-            continue
-        if skip:
-            # Skip until next section header or end of file
-            if stripped and not stripped[0].isdigit() and not stripped[0] == '-':
-                # New section header
-                skip = False
-                new_lines.append(line)
-            # else skip this line (velocity data or blank)
-        else:
-            new_lines.append(line)
-    path.write_text(''.join(new_lines), encoding='utf-8')
 
 def calculate_layer_shifts(
     mat_name: str,

@@ -153,10 +153,3 @@ def _to_plain(value: Any) -> Any:
     return value
 
 
-def round_trip(config: Mapping[str, Any], path: Union[str, Path]) -> Dict[str, Any]:
-    """Write ``config`` then read it back. Used by tests and by the GUI's
-    save-and-verify path."""
-    from .config import parse_config  # noqa: PLC0415  (circular at module level)
-
-    written = write_config(config, path)
-    return parse_config(written)
