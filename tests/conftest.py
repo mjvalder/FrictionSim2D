@@ -97,6 +97,18 @@ def temp_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def package_materials_path() -> Path:
+    """Canonical home of shipped material data (``src/data/materials``).
+
+    This is the only copy that survives installation -- the sdist ships
+    ``src/**`` only -- and it is what ``get_amorphous_path`` resolves via
+    ``importlib.resources``. Use this for ``.lmp`` structures; use
+    ``materials_path`` for the ``.cif`` example library.
+    """
+    return Path(str(resources.files('src.data'))) / 'materials'
+
+
+@pytest.fixture
 def materials_path() -> Path:
     """Returns the path to examples materials directory."""
     return Path(__file__).resolve().parents[1] / 'examples' / 'materials'

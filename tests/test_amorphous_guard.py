@@ -14,6 +14,7 @@ too small.
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,9 @@ MATERIALS_DIR = Path(__file__).resolve().parents[1] / 'src' / 'data' / 'material
 
 #: The one material with a structure shipped in the repo.
 CACHED_MATERIAL = 'Si'
+#: Canonical shipped-material dir; the only copy that survives install.
+PACKAGE_MATERIALS = Path(str(resources.files('src.data'))) / 'materials'
+SI_STRUCTURE = PACKAGE_MATERIALS / 'Si.lmp'
 
 
 def _cached_extent(mat: str) -> tuple:
@@ -74,7 +78,7 @@ class TestMakeAmorphousRefusesToGenerate:
     def _guard(self, tmp_path):
         """Call make_amorphous with generation forbidden, for a too-large box."""
         x, y, z = _cached_extent(CACHED_MATERIAL)
-        cif = Path('examples/materials/Si.lmp')
+        cif = SI_STRUCTURE
 
         def call(output_dir: Path = None):
             return make_amorphous(
@@ -109,7 +113,7 @@ class TestMakeAmorphousRefusesToGenerate:
     def test_a_usable_cache_still_returns_without_generating(self, tmp_path):
         x, y, z = _cached_extent(CACHED_MATERIAL)
         result = make_amorphous(
-            CACHED_MATERIAL, Path('examples/materials/Si.lmp'),
+            CACHED_MATERIAL, SI_STRUCTURE,
             target_x=x / 2, target_y=y / 2, target_z=z / 2,
             pot_path=Path('examples/potentials/sw/Si.sw'), pot_type='sw',
             output_dir=tmp_path, settings=GlobalSettings(),

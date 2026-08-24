@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from importlib import resources
 from pathlib import Path
 
 import numpy as np
@@ -77,7 +78,8 @@ LMP_SERIAL = shutil.which('lmp_serial')
 #: running a melt-quench (`allow_generate_amorphous=False`), so it can only be
 #: built from this cached structure. Missing, the AFM-family modes are skipped
 #: rather than failing on something that is not what they test.
-AMORPHOUS_SI = MATERIALS / 'amor_Si.lmp'
+#: Amorphous cache lives in package data, not the examples library.
+AMORPHOUS_SI = (Path(str(resources.files('src.data'))) / 'materials' / 'amor_Si.lmp')
 
 AFM_FAMILY = ('afm', 'indent', 'pes_tip')
 
