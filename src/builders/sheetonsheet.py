@@ -60,27 +60,6 @@ class SheetOnSheetSimulation(SimulationBase):
         self.sheet_dims: Optional[Dict] = None
         self.sheet_unit_cell: Dict[str, float] = {}
 
-    def _derived_seed(self, channel: str) -> Optional[int]:
-        """Deterministic seed for this run, or None for legacy Jinja random.
-
-        Pressures and angles are LAMMPS in-file loops for the sheet script, so
-        the per-run identity is (material, n_layers, seed_index); load/angle
-        are passed as None (spec §5 F5).
-        """
-        base = self.config.general.campaign_seed
-        if base is None:
-            return None
-        from ..core.seeds import derive_seed
-        return derive_seed(
-            base,
-            material=self.config.sheet.mat,
-            layer=self.n_layers,
-            load=None,
-            angle=None,
-            seed_index=self.config.general.seed_index,
-            channel=channel,
-        )
-
     @property
     def n_layers(self) -> int:
         """Number of layers derived from sheet configuration.
@@ -307,7 +286,7 @@ class SheetOnSheetSimulation(SimulationBase):
             atomic2molecular(self.structure_paths['sheet'])
 
         base_context = {
-            'seed_sheet_center': self._derived_seed('sheet_center'),
+            'seed_sheet_center': self._run_seed('sheet_center'),
             'data_dir': f"{rel_run_dir_str}/data",   # final-state retention
             'temp': self.config.general.temp,
             'scan_angle_config': self.config.general.scan_angle,

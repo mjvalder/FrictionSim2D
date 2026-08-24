@@ -1,4 +1,4 @@
-"""Per-run provenance record (spec §5 F5).
+"""Per-run provenance record.
 
 One ``provenance.json`` per run, written by the builder at build time and
 enriched post-run from the LAMMPS log (``parse_log_extras``). A missing
@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 PROVENANCE_SCHEMA_VERSION = '1.0.0'
 
@@ -19,16 +19,11 @@ _RAMP_RE = re.compile(
 _ZREF_RE = re.compile(r'# UNLOADED_REF layer=(\d+) z=([\d.eE+-]+)')
 
 
-class RetainedArtefact(BaseModel):
-    path: str
-    sha256: str
-
-
 class ProvenanceRecord(BaseModel):
     """Everything needed to reproduce and audit one run (spec §5 F5)."""
     schema_version: str = PROVENANCE_SCHEMA_VERSION
 
-    # seeds — deterministic per-run derivation (src/core/seeds.py)
+    # seeds — drawn in the builder (not in the template) so they land here
     seed_thermal_tip: Optional[int]
     seed_thermal_sub: Optional[int]
     seed_velocity: Optional[int]
@@ -78,13 +73,6 @@ class ProvenanceRecord(BaseModel):
     wall_time_s: Optional[float] = None
     n_procs: Optional[int] = None
     atoms_per_proc: Optional[float] = None
-
-    # QC (spec §7; enriched by the classifier)
-    qc_status: Optional[str] = None
-    qc_classifier_version: Optional[str] = None
-
-    # retention (spec §5 F6)
-    retained_artefacts: List[RetainedArtefact] = Field(default_factory=list)
 
 
 def sha256_file(path: Path) -> str:

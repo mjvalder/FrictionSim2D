@@ -1,11 +1,11 @@
-"""End-to-end LAMMPS smoke suite for the instrumentation (spec §10, Task 14).
+"""End-to-end LAMMPS smoke suite for the instrumentation.
 
 Builds a REAL homogeneous h-MoS2 AFM run (the empirically tuned minimal
 config from tests/test_hetero_afm.py: r=5 tip, 1 K, single 10 nN load) and
-executes system.in + the slide script under lmp_serial, then asserts the
-spec §10 smoke rows: all three result tiers parse with registry names, the
-pe/atom partition reconciles with global pe, RAMP_STATUS and the hold file
-exist, and the final-state retention landed.
+executes system.in + the slide script under lmp_serial, then asserts: all
+three result tiers parse with registry names, the pe/atom partition
+reconciles with global pe, RAMP_STATUS and the hold file exist, and the
+final-state .data was written.
 
 Marked `lammps`; skipped when lmp_serial is absent. Runtime ~2 min.
 """
@@ -45,7 +45,6 @@ def built_run(tmp_path_factory):
     cfg.settings.hpc.modules = ["lammps"]
     cfg.settings.geometry.tip_reduction_factor = 0.7
     cfg.settings.simulation.slide_run_steps = 2000
-    cfg.general.campaign_seed = 20260819
 
     AFMSimulation(cfg, str(out)).build()
 
@@ -118,16 +117,11 @@ def test_ramp_status_and_hold_emitted(built_run):
 
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
-def test_final_state_retained_and_verifiable(built_run):
-    from src.postprocessing.retention import (register_artefacts,
-                                              verify_retention)
+def test_final_state_written(built_run):
     out, _ = built_run
     finals = list(out.rglob("data/final_*.data"))
     assert finals, "final-state .data missing"
-    run_dir = out / "L1"
-    entries = register_artefacts(run_dir, ["data/*.data", "results/*"])
-    assert entries
-    assert verify_retention(run_dir, {"retained_artefacts": entries}) == []
+    assert finals[0].stat().st_size > 0
 
 
 @pytest.mark.skipif(not LMP, reason="lmp_serial not on PATH")
@@ -137,5 +131,8 @@ def test_provenance_written_at_build(built_run):
     prov = out / "L1" / "provenance.json"
     assert prov.is_file()
     data = json.loads(prov.read_text())
-    assert data["seed_thermal_tip"] is not None   # campaign_seed was set
+    # seeds are drawn in the builder, so provenance records them (a
+    # template-side random would leave these null)
+    assert isinstance(data["seed_thermal_tip"], int)
+    assert data["seed_thermal_tip"] != data["seed_thermal_sub"]
     assert data["cutoff_source"].startswith("uff_sigma")

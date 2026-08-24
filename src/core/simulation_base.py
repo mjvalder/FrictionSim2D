@@ -6,6 +6,7 @@ required by all specific simulation types (AFM, Sheet-on-Sheet, etc.).
 """
 import os
 import logging
+import random
 from abc import ABC
 from pathlib import Path
 from typing import Any, Dict, List, Union, Optional
@@ -64,6 +65,18 @@ class SimulationBase(ABC):
     #: the config routes to, so the predicted and generated counts cannot drift.
     SPLIT_OUTER_LOOPS: frozenset = frozenset()
 
+    def _run_seed(self, channel: str) -> int:
+        """A fresh random seed for one RNG channel, drawn once per build.
+
+        Drawn here rather than in the Jinja template on purpose: a template-side
+        ``| random`` leaves the seed only in the rendered script, so
+        ``provenance.json`` records nothing and a replicate cannot be told apart
+        from a rerun. Every template that takes a seed must be handed one.
+        """
+        if channel not in self._seeds:
+            self._seeds[channel] = random.randint(1, 900_000_000)
+        return self._seeds[channel]
+
     def __init__(self, config: Any, output_dir: Union[str, Path],
                     config_path: Optional[Union[str, Path]] = None):
         """Initialize the simulation base.
@@ -79,6 +92,7 @@ class SimulationBase(ABC):
         self.output_dir = Path(output_dir).resolve()
         self.config_path = Path(config_path).resolve() if config_path else None
         self.base_output_dir: Optional[Path] = None
+        self._seeds: Dict[str, int] = {}
         try:
             self.atomsk: Optional[AtomskWrapper] = AtomskWrapper()
         except RuntimeError:

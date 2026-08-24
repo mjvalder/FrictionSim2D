@@ -193,3 +193,50 @@ def test_sheet_peratom_absent_for_internal_lj():
     # an empty-varlist fix would be invalid LAMMPS: fc_pa must vanish entirely
     assert 'fc_pa' not in text
     assert 'fc_win' in text and 'fc_raw' in text
+
+
+# --- seeded lines must carry a real integer ----------------------------------
+# The templates used to fall back to a Jinja-side `range(1, 999999) | random`
+# when the builder supplied no seed. That fallback is gone (a template-drawn
+# seed is invisible to provenance.json), which means a builder that forgets to
+# supply one would now render an EMPTY seed field -- valid Jinja, invalid
+# LAMMPS. These tests are the tripwire.
+
+_SEEDED_RE = re.compile(
+    r'^\s*(?:fix\s+\S+\s+\S+\s+langevin\s+\S+\s+\S+\s+\S+\s+(?P<lang>\S*)'
+    r'|velocity\s+\S+\s+create\s+\S+\s+(?P<vel>\S*))',
+    re.M)
+
+
+def _assert_seeds_are_integers(text, where):
+    hits = list(_SEEDED_RE.finditer(text))
+    assert hits, f'{where}: no seeded lines found -- regex drifted?'
+    for m in hits:
+        seed = m.group('lang') or m.group('vel')
+        assert seed.isdigit(), f'{where}: non-integer seed {seed!r} in {m.group(0)!r}'
+
+
+def test_afm_scripts_have_integer_seeds(tmp_path):
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    lammps_dir = tmp_path / "out" / "L1" / "lammps"
+    for script in sorted(lammps_dir.glob("*.in")):
+        _assert_seeds_are_integers(script.read_text(encoding='utf-8'), script.name)
+
+
+def test_sheet_slide_has_integer_seeds():
+    _assert_seeds_are_integers(_render_sheet_slide(has_internal_lj=False),
+                               'sheetonsheet/slide.lmp')
+
+
+def test_seed_channels_are_distinct_and_recorded(tmp_path):
+    # tip and substrate thermostats must not share an RNG stream, and both
+    # must reach provenance
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    seeds = {c: builder._run_seed(c)
+             for c in ('velocity', 'thermal_tip', 'thermal_sub')}
+    assert len(set(seeds.values())) == 3, seeds
+    # stable within one build (system.in and slide.in must agree)
+    assert builder._run_seed('thermal_tip') == seeds['thermal_tip']

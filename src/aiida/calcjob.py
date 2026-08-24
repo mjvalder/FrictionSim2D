@@ -109,9 +109,10 @@ class LammpsFrictionCalcJob(CalcJob):
         calcinfo.codes_info = code_infos
         calcinfo.retrieve_list = [
             'results/*', 'visuals/*', 'log.lammps', '*.out', 'array_status/*',
-            # Instrumentation schema (spec §5 F5/F6): provenance + retention.
-            # results/* already covers the raw_*/peratom_* tiers; data/* adds
-            # the per-load, final-state and hold artefacts.
+            # Retention list (spec §5 F6). results/* already covers the
+            # raw_*/peratom_* tiers; data/* adds the per-load, final-state and
+            # hold artefacts. AiiDA content-addresses whatever lands here, so
+            # this list IS the retention guarantee -- nothing re-checksums it.
             'provenance.json', 'data/hold_*.txt', 'data/final_*.data',
             'data/load_*.data',
         ]

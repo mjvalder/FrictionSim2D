@@ -77,11 +77,11 @@ min_style       {{ min_style }}
 # Thermostat on middle layers (2 through {{ n_layers - 1 }})
 group           center union {% for i in range(2, n_layers) %}layer_{{ i }}{{ ' ' if not loop.last }}{% endfor %}
 
-velocity        center create {{ temp }} {{ seed_sheet_center if seed_sheet_center is defined and seed_sheet_center is not none else (range(1, 999999) | random) }}
+velocity        center create {{ temp }} {{ seed_sheet_center }}
 {% if thermostat_type == 'nose-hoover' %}
 fix             nvt_center center nvt temp {{ temp }} {{ temp }} $(100.0*dt)
 {% else %}
-fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center if seed_sheet_center is defined and seed_sheet_center is not none else (range(1, 999999) | random) }} zero yes tally yes
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center }} zero yes tally yes
 fix             nve_center center nve
 {% endif %}
 

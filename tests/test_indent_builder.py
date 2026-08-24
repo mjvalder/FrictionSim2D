@@ -305,10 +305,18 @@ def test_system_init_injects_explicit_velocity_seed(tmp_path: Path):
     assert "velocity        system create 300 424242" in script
 
 
-def test_system_init_random_seed_when_none(tmp_path: Path):
+def test_system_init_seed_always_comes_from_the_builder(tmp_path: Path):
+    """The template no longer draws its own seed.
+
+    It used to fall back to a Jinja ``range(1, 999999) | random`` when the
+    context carried no seed -- which put the seed somewhere provenance could
+    not see it. Every builder in this family now supplies one, so the assertion
+    is on the builder, not on a template fallback.
+    """
     builder = IndentSimulation(_afm_cfg(tmp_path, force=[10]), output_dir=str(tmp_path / "o"))
-    ctx = _system_init_context(velocity_seed=None)
-    script = builder.render_template("afm/system_init.lmp", ctx)
+    seed = builder._velocity_seed(1)
+    assert isinstance(seed, int) and seed >= 1
+    script = builder.render_template("afm/system_init.lmp",
+                                     _system_init_context(velocity_seed=seed))
     line = next(l for l in script.splitlines() if "system create" in l)
-    assert "None" not in line
-    assert int(line.split()[-1]) >= 1                        # a real random seed
+    assert line.split()[-1] == str(seed)
