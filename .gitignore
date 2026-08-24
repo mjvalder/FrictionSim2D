@@ -13,3 +13,5 @@ frictionsim2d-file-audit.md
 docs/
 AGENTS.md
 CLAUDE.md
+log.lammps
+.conda/
