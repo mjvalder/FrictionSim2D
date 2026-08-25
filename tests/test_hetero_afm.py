@@ -444,7 +444,7 @@ def _fake_pm_with_sheet_block(block):
     resolve exactly as on a real build -- without a full LAMMPS assembly.
     """
     from types import SimpleNamespace
-    from src.core.potential_manager import TypeRegistry
+    from src.potentials.manager import TypeRegistry
     reg = TypeRegistry()
     labels = []
     for pot_label, element, _mass, region in block:

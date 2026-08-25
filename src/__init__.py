@@ -23,7 +23,7 @@ if TYPE_CHECKING:
         load_settings,
         parse_config,
     )
-    from .core.potential_manager import PotentialManager
+    from .potentials.manager import PotentialManager
     from .core.run import run_simulations
 
 _AIIDA_AVAILABLE = find_spec('aiida') is not None
@@ -51,7 +51,7 @@ def __getattr__(name: str):
         )
         return _SheetOnSheetSimulation
     if name == 'PotentialManager':
-        from .core.potential_manager import PotentialManager as _PotentialManager
+        from .potentials.manager import PotentialManager as _PotentialManager
         return _PotentialManager
     if name == 'AFMSimulationConfig':
         from .core.config import AFMSimulationConfig as _AFMSimulationConfig

@@ -481,6 +481,34 @@ def format_numeric_token(value: float) -> str:
     return re.sub(r'[^A-Za-z0-9_]+', '_', token)
 
 
+def get_potential_path(pot_name: str,
+                       base_dir: Optional[Union[str, Path]] = None) -> Path:
+    """Find potential files.
+
+    Args:
+        pot_name: Potential name or file path.
+        base_dir: Directory to resolve relative paths against (normally the
+            directory holding the config file). Optional; when omitted the
+            behaviour is the historical current-working-directory lookup.
+
+    Returns:
+        Path to the potential file.
+
+    Raises:
+        FileNotFoundError: If the potential file is not found.
+    """
+    found = _find_existing(pot_name, base_dir)
+    if found is not None:
+        return found
+
+    raise FileNotFoundError(
+        f"Potential file '{pot_name}' not found. "
+        f"Please provide a valid path to a potential file. "
+        f"For a collection of potential files (sw, tersoff, rebo, reaxff, etc.), "
+        f"check the 'examples/potentials' folder in the GitHub repository: "
+        f"https://github.com/Mclat16/FrictionSim2D"
+    )
+
 def format_dimension_token(value: Any) -> str:
     """Format a numeric dimension for directory names.
 
@@ -517,7 +545,6 @@ def format_dimension_token(value: Any) -> str:
 _POTENTIALS_UTILS_EXPORTS = frozenset({
     'check_potential_cif_compatibility',
     'get_potential_element_order',
-    'get_potential_path',
     'lj_params',
     'normalize_potential_type',
 })

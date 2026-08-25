@@ -618,7 +618,7 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     "flake configs (spec §13.2): a pot_path list needs a "
                     "single homogeneous 2D material"
                 )
-            from .potential_resolve import resolve_pot_type
+            from ..potentials.utils import resolve_pot_type
             root = Path(base_dir) if base_dir else Path('.')
             resolved = [resolve_pot_type(entry, root) for entry in pot_val]
             sweep_params[(primary_key, '_pot_expand')] = resolved

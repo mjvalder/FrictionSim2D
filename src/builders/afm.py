@@ -11,7 +11,7 @@ from typing import Dict, Optional, Tuple
 
 from ..core.simulation_base import SimulationBase
 from ..core.config import AFMSimulationConfig
-from ..core.potential_manager import PotentialManager
+from ..potentials.manager import PotentialManager
 from ..core.utils import get_model_dimensions, format_numeric_token, normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from . import components

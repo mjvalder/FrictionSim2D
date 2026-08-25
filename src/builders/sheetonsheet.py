@@ -20,7 +20,8 @@ from typing import Dict, Optional, List, Union
 
 from ..core.simulation_base import SimulationBase
 from ..core.config import SheetOnSheetSimulationConfig
-from ..core.potential_manager import PotentialManager, POTENTIALS_WITH_INTERNAL_LJ
+from ..potentials.manager import PotentialManager
+from ..potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
 from ..core.utils import atomic2molecular, format_numeric_token, normalize_potential_type
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from . import components

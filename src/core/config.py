@@ -13,8 +13,7 @@ from typing import List, Optional, Union, Dict, Any, Literal, Mapping, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-from .utils import get_material_path, _is_float  # noqa: PLC2701
-from ..potentials.utils import get_potential_path
+from .utils import get_material_path, get_potential_path, _is_float  # noqa: PLC2701
 
 # --- Internal Settings ---
 

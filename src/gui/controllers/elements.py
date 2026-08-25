@@ -16,7 +16,7 @@ Parses CIF text directly with a handful of regexes rather than going through
 `cifread` in `core.utils` (the ASE CIF reader): a scan for element symbols
 does not need a full structure parse. `ase.data.atomic_numbers` is reused for
 the known-symbols table (already a project dependency; see
-`core.potential_manager`), not a new one.
+`potentials.manager`), not a new one.
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.potential_resolve import (
+from src.potentials.utils import (
     PotentialTypeError, pot_dir_token, resolve_pot_type,
 )
 from src.core.run import expand_config_sweeps, output_dir_for

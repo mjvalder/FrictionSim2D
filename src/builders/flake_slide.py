@@ -20,7 +20,7 @@ from ase.io import read
 from jinja2 import Environment
 
 from ..core.config import SheetOnSheetSimulationConfig
-from ..core.potential_manager import PotentialManager
+from ..potentials.manager import PotentialManager
 from ..core.simulation_base import SimulationBase
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..interfaces.jinja import PackageLoader

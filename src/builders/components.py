@@ -30,7 +30,7 @@ from jinja2 import Environment
 from ..core.config import (
     GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig, FlakeConfig
 )
-from ..core.potential_manager import PotentialManager
+from ..potentials.manager import PotentialManager
 from ..core.utils import (
     cifread, get_material_path, get_model_dimensions,
     check_potential_cif_compatibility, get_num_atom_types,

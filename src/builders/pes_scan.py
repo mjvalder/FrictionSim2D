@@ -43,7 +43,7 @@ scan period, energy normalization).
 import logging
 from typing import Dict, List, Optional, Union
 
-from ..core.potential_manager import PotentialManager
+from ..potentials.manager import PotentialManager
 from ..core.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from .afm import AFMSimulation
@@ -136,7 +136,7 @@ class PESGridMixin:
     * :meth:`_scan_template` — the LAMMPS template. The homogeneous
       ``sheetonsheet/pes_scan.lmp`` selects ``layer_1``/``layer_2`` by ATOM
       TYPE (the groups are written into ``system.in.settings`` by
-      :class:`~src.core.potential_manager.PotentialManager`). Heterostructure
+      :class:`~src.potentials.manager.PotentialManager`). Heterostructure
       layers share atom types, so they can only be selected by z-band REGION —
       the very reason ``hetero_slide`` exists — hence the separate
       ``hetero/pes_scan.lmp``, which emits the same region/group convention as

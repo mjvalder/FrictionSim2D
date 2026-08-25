@@ -18,7 +18,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from src.core.potential_manager import (
+from src.potentials.manager import (
     PotentialManager,
     POTENTIALS_WITH_INTERNAL_LJ,
     POTENTIALS_REQUIRING_LJ,
@@ -96,11 +96,11 @@ class TestNormalizationGuards:
             lambda _path: Path(_path)
         )
         monkeypatch.setattr(
-            'src.core.potential_manager.cifread',
+            'src.potentials.manager.cifread',
             lambda _path: {'elements': ['Si']}
         )
         monkeypatch.setattr(
-            'src.core.potential_manager.count_atomtypes',
+            'src.potentials.manager.count_atomtypes',
             lambda _path, _elements, pot_type=None: {'Si': 1}
         )
 
@@ -131,11 +131,11 @@ class TestNormalizationGuards:
             lambda _path: Path(_path)
         )
         monkeypatch.setattr(
-            'src.core.potential_manager.cifread',
+            'src.potentials.manager.cifread',
             lambda _path: {'elements': ['Si']}
         )
         monkeypatch.setattr(
-            'src.core.potential_manager.count_atomtypes',
+            'src.potentials.manager.count_atomtypes',
             lambda _path, _elements, pot_type=None: {'Si': 1}
         )
 
@@ -204,7 +204,7 @@ class TestLJOverrides:
         self, mock_settings, mos2_sheet_config
     ):
         """Interlayer pair_coeff should use override epsilon/sigma for matching pairs."""
-        import src.core.potential_manager as pm_module
+        import src.potentials.manager as pm_module
 
         def mock_cifread(path):
             return {'elements': ['Mo', 'S']}
@@ -428,7 +428,7 @@ class TestAFMSystem:
     ):
         """AFM system should register all three components."""
         # Need to mock both Si and MoS2 cifread
-        import src.core.potential_manager as pm_module
+        import src.potentials.manager as pm_module
         
         def mock_cifread(path):
             if 'MoS2' in str(path) or 'h-Mo' in str(path):
@@ -465,7 +465,7 @@ class TestAFMSystem:
         self, mock_settings, si_tip_config, si_sub_config, mos2_sheet_config
     ):
         """AFM system should have cross-interactions between all pairs."""
-        import src.core.potential_manager as pm_module
+        import src.potentials.manager as pm_module
         
         def mock_cifread(path):
             if 'MoS2' in str(path) or 'h-Mo' in str(path):
@@ -740,7 +740,7 @@ class TestGapCalculation:
 
     def test_calculate_gap_different_elements(self, mock_settings, tmp_path):
         """Gap between different elements should use mixing rules."""
-        import src.core.potential_manager as pm_module
+        import src.potentials.manager as pm_module
         from src.core.config import SheetConfig, TipConfig
         
         def mock_cifread(path):

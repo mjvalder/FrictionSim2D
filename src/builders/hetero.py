@@ -73,7 +73,7 @@ from ..lattice.matching import (
     find_commensurate_twist,
     scan_registry_index,
 )
-from ..core.potential_manager import PotentialManager
+from ..potentials.manager import PotentialManager
 from ..interfaces.jinja import PackageLoader
 from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
 
