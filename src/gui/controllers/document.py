@@ -29,7 +29,7 @@ from ...core.config import (
     parse_config,
 )
 from ...core.config_io import write_config
-from ...core.config_validation import ConfigIssue, ConfigValidation, validate_config
+from ..config_validation import ConfigIssue, ConfigValidation, validate_config
 from ...core.material_templates import has_template_marker
 from ...core.run import (
     ExpansionSummary, count_expansion, expand_config_sweeps, loopability,

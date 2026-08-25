@@ -112,7 +112,7 @@ class SettingsDocument:
 
     def validate(self):
         """Validate against ``GlobalSettings``, reporting per field."""
-        from ...core.config_validation import ConfigIssue, ConfigValidation
+        from ..config_validation import ConfigIssue, ConfigValidation
 
         try:
             settings = GlobalSettings.model_validate(copy.deepcopy(self.values))

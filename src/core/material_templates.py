@@ -6,7 +6,7 @@ material name (``cif_path``, ``pot_path``, ``mat`` itself) until
 ``expand_config_sweeps`` substitutes it. Two very different callers need to
 agree on exactly what a marker looks like:
 
-* ``config_validation.preflight_paths`` must recognise a still-templated path
+* ``gui.config_validation.preflight_paths`` must recognise a still-templated path
   as its own issue kind (``unexpanded_template``), not a missing file -- the
   file genuinely does not exist yet, but for a reason the user cannot fix by
   finding a file, unlike a real typo. Missing this distinction for ``{mat1}``/

@@ -16,7 +16,7 @@ from src.core.config import (
     load_settings,
     parse_config,
 )
-from src.core.config_validation import preflight_paths, validate_config
+from src.gui.config_validation import preflight_paths, validate_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / 'examples'

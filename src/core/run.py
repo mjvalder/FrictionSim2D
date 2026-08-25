@@ -27,7 +27,7 @@ from .material_templates import (
     has_template_marker,
     substitute_materials,
 )
-from .path_utils import format_dimension_token
+from .utils import format_dimension_token
 from .utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..builders.afm import AFMSimulation
 from ..builders.afm_freestanding import FreestandingPESTipSimulation

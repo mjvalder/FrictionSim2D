@@ -481,6 +481,23 @@ def format_numeric_token(value: float) -> str:
     return re.sub(r'[^A-Za-z0-9_]+', '_', token)
 
 
+def format_dimension_token(value: Any) -> str:
+    """Format a numeric dimension for directory names.
+
+    Integer-valued floats are rendered without a trailing decimal so
+    ``100.0`` becomes ``100`` and the rebuilt directory layout matches the
+    original simulation tree.
+    """
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if numeric.is_integer():
+        return str(int(numeric))
+    return f"{numeric:g}"
+
+
 # ---------------------------------------------------------------------------
 # Backward-compatible re-exports
 # ---------------------------------------------------------------------------

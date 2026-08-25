@@ -33,7 +33,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Union
 
-from ...core.config_validation import PATH_KEYS
+from ..config_validation import PATH_KEYS
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 
 __all__ = ['absolutize_staged_paths']
