@@ -231,7 +231,7 @@ class AFMSimulation(SimulationBase):
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is None:
             return
-        from ..core.lattice_apply import rotate_flake_in_plane  # lazy: avoid cycle
+        from ..lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
         rotate_flake_in_plane(self.flake_path, float(twist))
         logger.info("Twisted AFM flake by %.3f deg (D3b)", float(twist))
 

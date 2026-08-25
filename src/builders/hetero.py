@@ -64,8 +64,8 @@ from ase.io import read, write
 from jinja2 import Environment
 
 from ..core.config import GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig
-from ..core.lattice_apply import rotate_layer_to_angle
-from ..core.lattice_matching import (
+from ..lattice.apply import rotate_layer_to_angle
+from ..lattice.matching import (
     MatchResult,
     _max_strain,
     _relative_rotation_strain,
@@ -841,7 +841,7 @@ def build_matched_supercells(
             (created if missing).
         strain_tol: Max per-material strain (vs the symmetric mean cell) allowed
             both when searching for a coincidence match (forwarded to
-            :func:`~src.core.lattice_matching.find_coincidence_lattice`) and as
+            :func:`~src.lattice.matching.find_coincidence_lattice`) and as
             the fail-loud bound on each material's applied mean-cell strain.
         max_supercell: Max supercell repeat along each axis for the match search.
         area_tol: Relative supercell-area agreement tolerance for the search.
@@ -968,7 +968,7 @@ def build_twisted_supercells(
     The D3 twist analogue of :func:`build_matched_supercells`. Where the plain
     path finds the *aligned* coincidence lattice, this finds the commensurate
     moiré **approximant nearest a user-selected twist angle**
-    (:func:`~src.core.lattice_matching.find_commensurate_twist`) and emits both
+    (:func:`~src.lattice.matching.find_commensurate_twist`) and emits both
     layers tiled into the shared **orthorhombic** moiré box (xy tilt ≈ 0 --
     downstream requires an orthogonal box; the search wraps the rhombic moiré in
     its minimal rectangular super-supercell).
@@ -983,7 +983,7 @@ def build_twisted_supercells(
     ``set_cell(scale_atoms=True)`` (which also closes the residual strain)
     realises the relative twist in the atomic positions while emitting one
     shared orthogonal box. Layer B is first passed through
-    :func:`~src.core.lattice_apply.rotate_layer_to_angle` (the reorientation
+    :func:`~src.lattice.apply.rotate_layer_to_angle` (the reorientation
     primitive); a rigid rotation of a periodic monolayer canonicalises to the
     same on-disk cell, so the twist is carried by the commensurate tiling, not
     by that write.

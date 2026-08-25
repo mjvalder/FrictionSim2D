@@ -1,7 +1,7 @@
 import numpy as np
 from ase import Atoms
 from ase.io import write, read
-from src.core.lattice_apply import strain_monolayer_to_cell
+from src.lattice.apply import strain_monolayer_to_cell
 
 
 def _write_square_monolayer(path, a=3.0):
@@ -75,7 +75,7 @@ def _write_hex_monolayer(path, a=3.16):
 
 
 def test_strain_hex_cell_preserves_z_and_returns_strain(tmp_path):
-    from src.core.lattice_apply import canonicalize_cell_to_lammps
+    from src.lattice.apply import canonicalize_cell_to_lammps
     src = tmp_path / "hex.data"; out = tmp_path / "hex_s.data"
     _write_hex_monolayer(src, a=3.16)
     # target: same hex shape scaled +3% (a1 along x, a2 tilted) -> exercises the xy branch
@@ -103,7 +103,7 @@ def _build_mos2_monolayer():
 
 
 def test_rotate_layer_to_angle_produces_intended_rotation(tmp_path):
-    from src.core.lattice_apply import rotate_layer_to_angle
+    from src.lattice.apply import rotate_layer_to_angle
     src = _build_mos2_monolayer()
     out = tmp_path / "rot.data"
     achieved = rotate_layer_to_angle(src, 12.0, str(out))
@@ -160,7 +160,7 @@ def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     from ase.io import read
     from src.core.config import FlakeConfig
     from src.builders.components import build_flake_component
-    from src.core.lattice_apply import rotate_flake_in_plane
+    from src.lattice.apply import rotate_flake_in_plane
 
     MAT, POT = "examples/materials", "examples/potentials/sw"
     flake_cfg = FlakeConfig(shape="hexagon", edge_length=14.0, corner_radius=3.0,

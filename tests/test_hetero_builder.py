@@ -32,7 +32,7 @@ from src.builders.hetero import (
     register_hetero_potentials,
 )
 from src.core.config import SheetConfig, SheetOnSheetSimulationConfig, load_settings
-from src.core.lattice_matching import find_coincidence_lattice
+from src.lattice.matching import find_coincidence_lattice
 
 MOS2_CIF = "examples/materials/h-MoS2.cif"
 WS2_CIF = "examples/materials/h-WS2.cif"

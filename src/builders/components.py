@@ -1317,7 +1317,7 @@ def build_matched_crystalline_substrate(
     Fixed-reference coincidence build: the hetero box is pinned and the crystalline
     substrate is strained onto it so the substrate tiles the same periodic cell with
     no seam. Pipeline: extract the substrate surface cell ->
-    :func:`~src.core.lattice_matching.match_to_fixed_box` (fail-loud if the residual
+    :func:`~src.lattice.matching.match_to_fixed_box` (fail-loud if the residual
     strain exceeds ``2 * match_strain_tol``) -> apply the supercell matrix in-plane
     -> strain onto the hetero box -> a proper full-thickness crystalline block.
 
@@ -1346,8 +1346,8 @@ def build_matched_crystalline_substrate(
             the least-strain supercell is sheared (non-diagonal) — an orthogonal box
             cannot be tiled by a sheared substrate cell.
     """
-    from ..core.lattice_matching import match_to_fixed_box
-    from ..core.lattice_apply import strain_monolayer_to_cell
+    from ..lattice.matching import match_to_fixed_box
+    from ..lattice.apply import strain_monolayer_to_cell
 
     hetero_box = np.asarray(hetero_box, dtype=float)
     build_dir = Path(build_dir)

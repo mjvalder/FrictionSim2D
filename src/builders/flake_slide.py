@@ -211,7 +211,7 @@ class FlakeSlideSimulation(SimulationBase):
         #     None -> the D4 flake path stays byte-identical.
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is not None:
-            from ..core.lattice_apply import rotate_flake_in_plane  # lazy: avoid cycle
+            from ..lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
             rotate_flake_in_plane(flake_path, float(twist))   # in-place twist, box unchanged
             self._record_twist_manifest(float(twist))
             logger.info("Twisted flake by %.3f deg (D3b incommensurate)", float(twist))
