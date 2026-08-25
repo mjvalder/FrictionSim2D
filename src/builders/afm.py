@@ -732,6 +732,14 @@ class AFMSimulation(SimulationBase):
         pa = [ob for ob in channels_for('afm', 'peratom')
               if ob.stream == 'results']
 
+        # settings.output.channels gates each tier's fix ave/time. A disabled
+        # peratom tier must also drop its computes -- they are the expensive
+        # ones (compute group/group rebuilds a neighbour list per invocation),
+        # so emitting them for a fix that is never written wastes the run.
+        enabled = self.config.settings.output.channels
+        if not enabled.get('peratom', True):
+            pa = []
+
         def native(ob):
             return ob.rename_to or f'v_{ob.name}'
 
@@ -753,6 +761,9 @@ class AFMSimulation(SimulationBase):
         return {
             'compute_lines': compute_lines,
             'variable_lines': variable_lines,
+            'emit_window': bool(enabled.get('window', True)),
+            'emit_raw': bool(enabled.get('raw', True)),
+            'emit_peratom': bool(enabled.get('peratom', True)),
             'window_varlist': ' '.join(native(ob) for ob in win),
             'raw_varlist': ('v_fx_spr v_fy_spr v_fz_tip '
                             'v_comx_tip v_comy_tip v_comz_tip'),

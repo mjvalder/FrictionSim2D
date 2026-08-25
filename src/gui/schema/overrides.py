@@ -495,6 +495,15 @@ _SETTINGS: Dict[str, SectionOverride] = {
             'dump_frequency': FieldOverride(
                 label='Dump frequency', order=2, editor='key_value',
                 help='Steps between dumps, per phase.'),
+            'channels': FieldOverride(
+                label='Observable channels', order=3, editor='key_value',
+                help='Sampling tiers written as fix ave/time.',
+                detail=('"window" is the COF source and the only tier '
+                        'postprocessing currently reads. "raw" (100 fs '
+                        'instantaneous samples) and "peratom" (per-atom '
+                        'computes) cost runtime and disk; disabling '
+                        '"peratom" also drops its group/group computes, '
+                        'which rebuild a neighbour list per invocation.')),
         },
     ),
     'potential': SectionOverride(label='Potential'),

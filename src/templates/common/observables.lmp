@@ -21,7 +21,13 @@
 {% endmacro %}
 
 {% macro emit_output_fixes(obs_ctx) %}
+{% if obs_ctx.emit_window %}
 fix             fc_win all ave/time 1 1000 1000 {{ obs_ctx.window_varlist }} file {{ obs_ctx.results_file_pattern }}
+{% endif %}
+{% if obs_ctx.emit_raw %}
 fix             fc_raw all ave/time 100 1 100 {{ obs_ctx.raw_varlist }} file {{ obs_ctx.results_file_raw }}
+{% endif %}
+{% if obs_ctx.emit_peratom %}
 fix             fc_pa all ave/time 1000 1 1000 {{ obs_ctx.peratom_varlist }} file {{ obs_ctx.results_file_peratom }}
+{% endif %}
 {% endmacro %}

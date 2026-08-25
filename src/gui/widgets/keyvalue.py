@@ -24,6 +24,19 @@ from .fields import FieldEditor, parse_bool, register_editor
 
 __all__ = ['KeyValueGridEditor', 'FixedListEditor']
 
+#: Display text for dict keys whose stored form reads badly in a form. The
+#: stored key is never changed -- only the QLabel beside its control -- so the
+#: YAML round-trip is untouched.
+_KEY_LABELS = {
+    'peratom': 'per atom',
+}
+
+
+def _key_label(key: str) -> str:
+    """Form caption for a dict key; the raw key unless one is declared."""
+    return _KEY_LABELS.get(key, key)
+
+
 #: Cell labels for a three-element dimension list.
 _XYZ = ('x', 'y', 'z')
 
@@ -77,7 +90,7 @@ class KeyValueGridEditor(FieldEditor):
         row = QWidget(self._rows_host)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel(key, row))
+        layout.addWidget(QLabel(_key_label(key), row))
 
         if self.spec.item_kind is FieldKind.BOOL:
             control = QCheckBox(row)

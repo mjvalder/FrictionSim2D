@@ -114,6 +114,13 @@ class OutputSettings(BaseModel):
     dump_frequency: Dict[str, int] = Field(
         default_factory=lambda: {'system_init': 1000, 'slide': 10000})
     results_frequency: int = 1000
+    #: Which observable sampling tiers get a ``fix ave/time``. 'window' is the
+    #: COF source and postprocessing's only ingested tier; 'raw' (100 fs
+    #: instantaneous samples) and 'peratom' (per-atom computes, incl. the
+    #: neighbour-list-rebuilding group/group) cost runtime and disk. Default on
+    #: to preserve existing behaviour; turn off when not analysing them.
+    channels: Dict[str, bool] = Field(
+        default_factory=lambda: {'window': True, 'raw': True, 'peratom': True})
 
 class PotentialSettings(BaseModel):
     """Settings for interatomic potentials."""
