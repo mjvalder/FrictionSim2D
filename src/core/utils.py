@@ -276,69 +276,6 @@ def _normalize_element_symbol(value: str) -> str:
 
 
 
-def _remove_inline_comments(config: configparser.ConfigParser) -> configparser.ConfigParser:
-    """Remove inline comments from a ConfigParser object.
-
-    Args:
-        config: The ConfigParser object to process.
-
-    Returns:
-        The object with inline comments removed.
-    """
-    for section in config.sections():
-        for item in config.items(section):
-            config.set(section, item[0], item[1].split("#")[0].strip())
-    return config
-
-def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
-    """Read a configuration file and return a dictionary with parsed values.
-
-    Args:
-        filepath: Path to the configuration file.
-
-    Returns:
-        Dictionary containing the parsed configuration parameters.
-    """
-    # interpolation=None: configparser's default BasicInterpolation raises on a
-    # bare '%' in any value. No config in this project uses '%(name)s'
-    # substitution, so the feature only ever cost us a crash on values a user
-    # could reasonably type.
-    config = configparser.ConfigParser(interpolation=None)
-    config.read(filepath)
-    config = _remove_inline_comments(config)
-
-    params = {}
-    for section in config.sections():
-        params[section] = {}
-        for key in config[section]:
-            value = config.get(section, key)
-
-            if value == '':
-                params[section][key] = None
-                continue
-
-            if value.endswith(']'):
-                try:
-                    params[section][key] = json.loads(value)
-                except json.JSONDecodeError:
-                    cleaned = value.strip('[]')
-                    items = [item.strip() for item in cleaned.split(',')]
-                    parsed_items = []
-                    for item in items:
-                        if item.isdigit():
-                            parsed_items.append(int(item))
-                        elif _is_float(item):
-                            parsed_items.append(float(item))
-                        else:
-                            parsed_items.append(item)
-                    params[section][key] = parsed_items
-            elif value.isdigit():
-                params[section][key] = int(value)
-            elif _is_float(value):
-                params[section][key] = float(value)
-            else:
-                params[section][key] = value
-    return params
 
 
 def _is_int_token(value: str) -> bool:
@@ -569,8 +506,21 @@ _POTENTIALS_UTILS_EXPORTS = frozenset({
 })
 
 
+#: Canonical home is src.core.config, which merged the reader half of the
+#: config format registry with the writer half. Same lazy treatment and same
+#: reason: config.py imports get_material_path from this module, so an eager
+#: import in either direction deadlocks whichever module is entered first.
+_CONFIG_EXPORTS = frozenset({
+    'read_config',
+    '_remove_inline_comments',
+})
+
+
 def __getattr__(name: str):
     if name in _POTENTIALS_UTILS_EXPORTS:
         from ..potentials import utils as _potentials_utils
         return getattr(_potentials_utils, name)
+    if name in _CONFIG_EXPORTS:
+        from . import config as _config
+        return getattr(_config, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

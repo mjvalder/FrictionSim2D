@@ -5,14 +5,16 @@ parameters. By leveraging Pydantic, it ensures that all configurations—from
 low-level engine settings to high-level experimental parameters—are validated
 for correctness before a simulation is executed.
 """
+import configparser
 import json
 import os
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, Literal, cast
+from typing import List, Optional, Union, Dict, Any, Literal, Mapping, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-from .utils import read_config, get_potential_path, get_material_path
+from .utils import get_material_path, _is_float  # noqa: PLC2701
+from ..potentials.utils import get_potential_path
 
 # --- Internal Settings ---
 
@@ -1016,3 +1018,221 @@ def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, A
 
     else:
         raise TypeError(f"Unsupported configuration source type: {type(config_source)}")
+
+
+# ---------------------------------------------------------------------------
+# Config file I/O
+# ---------------------------------------------------------------------------
+# Merged in from the former src/core/config_io.py (the writer half) and from
+# src/core/utils.py (read_config, the reader half). Reader and writer are
+# inverses of one another and now live together so the .ini value grammar is
+# documented and maintained in one place.
+#
+# The .ini writer is the inverse of read_config, whose value grammar is
+# implicit and easy to violate:
+#
+# * an empty right-hand side reads back as None, so None must be written as an
+#   empty value, never as the string "None";
+# * list detection is triggered by a trailing "]", so lists are written as JSON;
+# * value.isdigit() decides int-vs-float, so a float must carry a decimal point
+#   or an exponent or it will read back as an int. Note that "-5".isdigit() is
+#   False, so a *negative* integer reads back as a float. That asymmetry is
+#   pre-existing behaviour of the reader; the writer reproduces whatever it was
+#   given and the round-trip test pins it;
+# * everything after a "#" is stripped as an inline comment, so a value
+#   containing "#" cannot survive and is rejected here rather than silently
+#   truncated on the next read.
+
+#: The writer-half surface, re-exported by the deprecated src.core.config_io
+#: shim. Deliberately NOT named __all__: config.py also defines ~30 pydantic
+#: models, and an __all__ listing only these three would silently hide them
+#: from any future `from src.core.config import *`.
+CONFIG_IO_EXPORTS = ['write_config', 'format_ini_value', 'SUPPORTED_WRITE_FORMATS']
+
+SUPPORTED_WRITE_FORMATS = ('.ini', '.yaml', '.yml', '.json')
+
+#: Mapping of ``section -> key -> comment`` used to annotate ``.ini`` output.
+CommentMap = Mapping[str, Mapping[str, str]]
+
+
+def format_ini_value(value: Any) -> str:
+    """Render a Python value as an ``.ini`` right-hand side.
+
+    Inverse of the value parsing in :func:`src.core.utils.read_config`.
+
+    Raises:
+        ValueError: If the value contains ``#``, which the reader would strip.
+    """
+    if value is None:
+        return ''
+
+    if isinstance(value, bool):
+        # The reader has no bool rule; these come back as strings and Pydantic
+        # coerces them. 'True'/'False' is what the existing configs use.
+        return 'True' if value else 'False'
+
+    if isinstance(value, (list, tuple)):
+        rendered = json.dumps(list(value))
+    elif isinstance(value, float):
+        rendered = repr(value)
+        # repr() of an integral float already includes '.0'; guard anything odd
+        # (e.g. a float subclass) that would read back as an int.
+        if rendered.isdigit():
+            rendered += '.0'
+    elif isinstance(value, int):
+        rendered = str(value)
+    else:
+        rendered = str(value)
+
+    if '#' in rendered:
+        raise ValueError(
+            f"Config values cannot contain '#': {rendered!r}. The reader treats "
+            "it as the start of an inline comment and would truncate the value."
+        )
+    return rendered
+
+
+def _render_ini(config: Mapping[str, Mapping[str, Any]],
+                comments: Optional[CommentMap] = None,
+                header: Optional[str] = None) -> str:
+    """Render a section mapping as ``.ini`` text.
+
+    Written by hand rather than via ``configparser.write`` so that inline
+    comments can be attached and so that ``%`` needs no interpolation escaping.
+    """
+    comments = comments or {}
+    lines = []
+
+    if header:
+        lines.extend(f"# {line}" if line else "#" for line in header.splitlines())
+        lines.append("")
+
+    for section, values in config.items():
+        lines.append(f"[{section}]")
+        section_comments = comments.get(section, {})
+        for key, value in values.items():
+            rendered = format_ini_value(value)
+            comment = section_comments.get(key)
+            if comment:
+                lines.append(f"{key} = {rendered} # {comment}")
+            else:
+                lines.append(f"{key} = {rendered}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def write_config(config: Mapping[str, Any],
+                 path: Union[str, Path],
+                 *,
+                 comments: Optional[CommentMap] = None,
+                 header: Optional[str] = None) -> Path:
+    """Write a config mapping to ``path``, dispatching on the file extension.
+
+    Args:
+        config: Section mapping, in the shape ``parse_config`` returns.
+        path: Destination. The suffix selects the format.
+        comments: Optional ``section -> key -> comment`` annotations. Applied to
+            ``.ini`` output only; other formats ignore it.
+        header: Optional comment block for the top of an ``.ini`` file.
+
+    Returns:
+        The path written.
+
+    Raises:
+        ValueError: If the extension is not supported.
+    """
+    path = Path(path)
+    ext = path.suffix.lower()
+
+    if ext == '.ini':
+        text = _render_ini(config, comments=comments, header=header)
+    elif ext in ('.yaml', '.yml'):
+        text = yaml.safe_dump(_to_plain(config), sort_keys=False)
+    elif ext == '.json':
+        text = json.dumps(_to_plain(config), indent=2) + "\n"
+    else:
+        raise ValueError(
+            f"Unsupported configuration file format: {ext}. "
+            f"Supported formats: {', '.join(SUPPORTED_WRITE_FORMATS)}"
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
+def _to_plain(value: Any) -> Any:
+    """Convert nested mappings to plain dicts for the yaml/json writers."""
+    if isinstance(value, Mapping):
+        return {k: _to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    return value
+
+
+
+
+def _remove_inline_comments(config: configparser.ConfigParser) -> configparser.ConfigParser:
+    """Remove inline comments from a ConfigParser object.
+
+    Args:
+        config: The ConfigParser object to process.
+
+    Returns:
+        The object with inline comments removed.
+    """
+    for section in config.sections():
+        for item in config.items(section):
+            config.set(section, item[0], item[1].split("#")[0].strip())
+    return config
+
+def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
+    """Read a configuration file and return a dictionary with parsed values.
+
+    Args:
+        filepath: Path to the configuration file.
+
+    Returns:
+        Dictionary containing the parsed configuration parameters.
+    """
+    # interpolation=None: configparser's default BasicInterpolation raises on a
+    # bare '%' in any value. No config in this project uses '%(name)s'
+    # substitution, so the feature only ever cost us a crash on values a user
+    # could reasonably type.
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(filepath)
+    config = _remove_inline_comments(config)
+
+    params = {}
+    for section in config.sections():
+        params[section] = {}
+        for key in config[section]:
+            value = config.get(section, key)
+
+            if value == '':
+                params[section][key] = None
+                continue
+
+            if value.endswith(']'):
+                try:
+                    params[section][key] = json.loads(value)
+                except json.JSONDecodeError:
+                    cleaned = value.strip('[]')
+                    items = [item.strip() for item in cleaned.split(',')]
+                    parsed_items = []
+                    for item in items:
+                        if item.isdigit():
+                            parsed_items.append(int(item))
+                        elif _is_float(item):
+                            parsed_items.append(float(item))
+                        else:
+                            parsed_items.append(item)
+                    params[section][key] = parsed_items
+            elif value.isdigit():
+                params[section][key] = int(value)
+            elif _is_float(value):
+                params[section][key] = float(value)
+            else:
+                params[section][key] = value
+    return params
