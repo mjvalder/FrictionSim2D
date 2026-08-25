@@ -236,3 +236,17 @@ def mock_count_atomtypes_mos2_simple(monkeypatch):
     def mock_count(*args, **kwargs):
         return {'Mo': 1, 'S': 1}
     monkeypatch.setattr('src.core.potential_manager.count_atomtypes', mock_count)
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    """Tag every ``lmp_serial``-guarded test with the ``lammps`` marker.
+
+    The guards (42 sites, 12 files) predate the marker registered in
+    pyproject.toml. Deriving the marker from the guard keeps the two from
+    drifting apart, instead of hand-editing every site.
+    """
+    for item in items:
+        for mark in item.iter_markers(name="skipif"):
+            if "lmp_serial" in str(mark.kwargs.get("reason", "")):
+                item.add_marker(pytest.mark.lammps)
+                break
