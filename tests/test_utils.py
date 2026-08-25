@@ -15,7 +15,6 @@ from src.core.utils import (
     atomic2charge,
     charge2atom,
     atomic2molecular,
-    renumber_atom_types,
     get_potential_element_order,
 )
 
@@ -350,61 +349,8 @@ Velocities
         path.unlink()
 
 
-class TestRobustRenumbering:
-    """Test cases for robust atom type renumbering with explicit CIF-potential mapping."""
-
-    def test_renumber_preserves_atom_ids(self, tmp_path: Path) -> None:
-        """Renumbering should only change atom types, never atom IDs."""
-        lmp_file = tmp_path / "test.lmp"
-        lmp_file.write_text(
-            """LAMMPS data file
- 4 atoms
- 2 atom types
-
-Masses
-
-1 12.0 # C
-2 14.0 # N
-
-Atoms # atomic
-
-1 1 0.0 0.0 0.0
-2 2 1.0 1.0 1.0
-3 1 2.0 2.0 2.0
-4 2 3.0 3.0 3.0
-""",
-            encoding="utf-8",
-        )
-
-        renumber_atom_types(lmp_file, pot=["N", "C"])
-        content = lmp_file.read_text(encoding="utf-8")
-
-        # After renumbering with pot=["N", "C"] and type_offset=2 (interleaving):
-        # N atoms (original type 2) → intermediate types 2, 4 → final sequential types 1, 2
-        # C atoms (original type 1) → intermediate types 1, 3 → final sequential types 3, 4
-        # Each atom ID must be preserved; atom IDs must NOT be renumbered
-        lines = content.strip().split("\n")
-        atoms_idx = next((i for i, l in enumerate(lines) if "Atoms" in l), -1)
-        assert atoms_idx >= 0, "Atoms section not found"
-
-        atom_data = {
-            int(p.split()[0]): int(p.split()[1])
-            for p in (l.strip() for l in lines[atoms_idx + 2:] if l.strip())
-            if len(p.split()) >= 2
-        }
-
-        # All original atom IDs must still exist in the file
-        assert set(atom_data.keys()) == {1, 2, 3, 4}, f"Atom IDs changed: {set(atom_data.keys())}"
-        # N atoms (IDs 2, 4) → sequential types 1, 2 (N comes first in pot)
-        assert atom_data[2] in {1, 2}, f"N atom 2 got unexpected type {atom_data[2]}"
-        assert atom_data[4] in {1, 2}, f"N atom 4 got unexpected type {atom_data[4]}"
-        # C atoms (IDs 1, 3) → sequential types 3, 4 (C comes after N in pot)
-        assert atom_data[1] in {3, 4}, f"C atom 1 got unexpected type {atom_data[1]}"
-        assert atom_data[3] in {3, 4}, f"C atom 3 got unexpected type {atom_data[3]}"
-        # All N types must differ from all C types
-        n_types = {atom_data[2], atom_data[4]}
-        c_types = {atom_data[1], atom_data[3]}
-        assert n_types.isdisjoint(c_types), f"N and C types overlap: {n_types} vs {c_types}"
+class TestPotentialElementOrder:
+    """Test cases for deriving potential element order from a CIF."""
 
     def test_get_potential_element_order_single_type(self, tmp_path: Path) -> None:
         """Single-type potentials should return one type per element."""
@@ -509,75 +455,3 @@ value2 = 3.14 # pi value
         assert config['section']['value2'] == 3.14
         config_with_comments.unlink()
 
-
-class TestRenumberAtomTypes:
-    """Behavioral tests for renumber_atom_types."""
-
-    @pytest.fixture
-    def lammps_data_with_two_types(self):
-        """Create a minimal atomic-style LAMMPS data file with repeated types."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
-            f.write("""LAMMPS data file
- 4 atoms
- 2 atom types
-
-Masses
-
-1 32.06 # S
-2 95.95 # Mo
-
-Atoms # atomic
-
-1 2 0.0 0.0 0.0
-2 1 1.0 0.0 0.0
-3 1 0.0 1.0 0.0
-4 2 1.0 1.0 0.0
-
-Velocities
-""")
-            return Path(f.name)
-
-    @staticmethod
-    def _read_atoms_section(filepath: Path):
-        """Return list of (atom_id, atom_type) from the Atoms section."""
-        lines = filepath.read_text(encoding='utf-8').splitlines()
-        in_atoms = False
-        atoms = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith('Atoms'):
-                in_atoms = True
-                continue
-            if in_atoms and stripped.startswith('Velocities'):
-                break
-            if in_atoms and stripped:
-                parts = stripped.split()
-                if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-                    atoms.append((int(parts[0]), int(parts[1])))
-        return atoms
-
-    def test_renumber_atom_types_preserves_atom_ids(self, lammps_data_with_two_types):
-        """Renumbering types should not rewrite atom IDs."""
-        renumber_atom_types(lammps_data_with_two_types)
-
-        atoms = self._read_atoms_section(lammps_data_with_two_types)
-        atom_ids = [atom_id for atom_id, _ in atoms]
-
-        assert atom_ids == [1, 2, 3, 4]
-        lammps_data_with_two_types.unlink()
-
-    def test_renumber_atom_types_matches_potential_order(self, lammps_data_with_two_types):
-        """Type IDs should be remapped to the provided potential element order."""
-        renumber_atom_types(lammps_data_with_two_types, pot=['Mo', 'S'])
-
-        content = lammps_data_with_two_types.read_text(encoding='utf-8')
-        assert any(line.strip() == '2  atom types' for line in content.splitlines())
-        assert '1 95.95  #Mo' in content
-        assert '2 32.06  #S' in content
-
-        atoms = self._read_atoms_section(lammps_data_with_two_types)
-        atom_types = [atom_type for _, atom_type in atoms]
-        # Original ordering by atom id had Mo,S,S,Mo as old types 2,1,1,2.
-        # After pot=['Mo','S'], expected new types become 1,2,2,1.
-        assert atom_types == [1, 2, 2, 1]
-        lammps_data_with_two_types.unlink()

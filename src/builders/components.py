@@ -33,7 +33,7 @@ from ..core.config import (
 from ..core.potential_manager import PotentialManager
 from ..core.utils import (
     cifread, get_material_path, get_model_dimensions,
-    renumber_atom_types, check_potential_cif_compatibility, get_num_atom_types,
+    check_potential_cif_compatibility, get_num_atom_types,
     atomic2charge, charge2atom, shift_atoms_to_z_zero, get_potential_element_order
 )
 from ..interfaces.atomsk import AtomskWrapper
@@ -694,9 +694,10 @@ def _write_cif_as_lammps_atomic(
 ) -> None:
     """Write a CIF structure as LAMMPS data in atomic style.
 
-    ASE's LAMMPS writer omits the Masses section, which is required by
-    renumber_atom_types for element identification.  This function injects
-    the missing Masses block after the atom-type count header.
+    ASE's LAMMPS writer omits the Masses section, which LAMMPS requires and
+    which downstream readers use for element identification.  This function
+    injects the missing Masses block after the atom-type count header.
+    Type order is set by ``specorder`` rather than by post-hoc renumbering.
 
     Args:
         cif_path: Input CIF path.
