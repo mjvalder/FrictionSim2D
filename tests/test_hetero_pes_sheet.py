@@ -86,7 +86,7 @@ def test_hetero_pes_sheet_mro_and_split_outer_loops():
     run-phase identity is the static scan's, and ``SPLIT_OUTER_LOOPS`` must stay
     ``frozenset()``: the scan replaces the run phase outright and never reads
     ``outer_loop``, so a non-empty value would make the GUI's job-count
-    prediction (``src.core.run._run_scripts_per_build``) promise scripts the
+    prediction (``src.run.expand._run_scripts_per_build``) promise scripts the
     build never writes.
     """
     from src.builders.hetero_slide import HeteroSheetOnSheetSimulation
@@ -113,7 +113,7 @@ def test_hetero_pes_sheet_mro_and_split_outer_loops():
 def test_hetero_pes_sheet_run_script_count_is_one_per_build():
     """``outer_loop`` must not multiply the run scripts for the hetero PES scan,
     while ``pes.grid_n_refine`` must still add exactly one refinement script."""
-    from src.core.run import _run_scripts_per_build
+    from src.run.expand import _run_scripts_per_build
 
     raw = _hetero_pes_raw()
     raw["general"]["outer_loop"] = "pressure"
@@ -130,14 +130,14 @@ def test_hetero_pes_sheet_run_script_count_is_one_per_build():
 
 def test_routing_selects_hetero_pes_sheet_for_two_materials():
     from src.builders.pes_scan import HeteroPESSheetSimulation
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     cfg = _hetero_pes_config()
     assert _select_sheet_builder_cls("pes_sheet", cfg) is HeteroPESSheetSimulation
 
 
 def test_routing_selects_hetero_pes_sheet_for_single_material_twist():
     from src.builders.pes_scan import HeteroPESSheetSimulation
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     cfg = _twist_pes_config()
     assert len(cfg.sheets) == 1 and cfg.general.twist_angle is not None
     assert _select_sheet_builder_cls("pes_sheet", cfg) is HeteroPESSheetSimulation
@@ -145,7 +145,7 @@ def test_routing_selects_hetero_pes_sheet_for_single_material_twist():
 
 def test_routing_keeps_homogeneous_pes_sheet_for_single_material():
     from src.builders.pes_scan import PESSheetSimulation
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     cfg = _single_material_pes_config()
     assert _select_sheet_builder_cls("pes_sheet", cfg) is PESSheetSimulation
 
@@ -153,7 +153,7 @@ def test_routing_keeps_homogeneous_pes_sheet_for_single_material():
 def test_routing_hetero_slide_unchanged_for_sheetonsheet():
     """The dynamic model must keep routing to the plain hetero slide builder."""
     from src.builders.hetero_slide import HeteroSheetOnSheetSimulation
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     cfg = _hetero_pes_config(layers=(2, 2))
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is HeteroSheetOnSheetSimulation
 

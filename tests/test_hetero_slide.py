@@ -17,7 +17,8 @@ from src.builders.hetero_slide import (
     render_hetero_slide,
 )
 from src.builders.sheetonsheet import SheetOnSheetSimulation
-from src.core.run import _select_sheet_builder_cls, generate_hpc_scripts_for_root
+from src.run.hpc_dispatch import generate_hpc_scripts_for_root
+from src.run.simulate import _select_sheet_builder_cls
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")

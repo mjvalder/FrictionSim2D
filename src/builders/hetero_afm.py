@@ -205,7 +205,7 @@ def _pair_material_token(config) -> str:
     MRO (it needs its own single-material ``_material_id`` for the
     homogeneous indent path), so :class:`HeteroIndentSimulation` needs its own
     override too — but both should compute the pair token the same way.
-    Mirrors :func:`src.core.run.material_token`'s convention on the raw-dict
+    Mirrors :func:`src.run.naming.material_token`'s convention on the raw-dict
     side (that function isn't reusable directly here: the builder only has
     the validated config object, not the raw config mapping).
     """
@@ -234,7 +234,7 @@ class HeteroAFMSimulation(AFMSimulation):
         """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
         in the numeric ``[2D-N]`` order the config fold already preserves,
         joined with ``+`` — same convention as
-        :func:`src.core.run.material_token` and
+        :func:`src.run.naming.material_token` and
         :meth:`HeteroIndentSimulation._material_id` below. Without this,
         ``_get_hpc_job_name`` (inherited from :class:`AFMSimulation`) named
         every hetero AFM job after sheet 1 alone, so two pairs sharing

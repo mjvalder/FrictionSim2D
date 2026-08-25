@@ -6,7 +6,8 @@ import pytest
 from src.potentials.utils import (
     PotentialTypeError, pot_dir_token, resolve_pot_type,
 )
-from src.core.run import expand_config_sweeps, output_dir_for
+from src.run.expand import expand_config_sweeps
+from src.run.naming import output_dir_for
 
 ROOT = Path('examples/potentials')
 

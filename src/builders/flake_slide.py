@@ -365,7 +365,7 @@ class FlakeSlideSimulation(SimulationBase):
 
         Named off the substrate ``[2D]`` material alone before this fix -- the
         same collision as ``output_dir_for``/``material_token`` (see
-        :func:`src.core.run.flake_material_token`): two flake configs sharing
+        :func:`src.run.naming.flake_material_token`): two flake configs sharing
         the substrate but differing only in flake material produced identical
         HPC job identities. Mirrors that helper's rule exactly, so the two
         stay in lockstep: a hetero flake (``flake_sheets`` has 2 entries, each

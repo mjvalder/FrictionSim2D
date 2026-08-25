@@ -61,7 +61,7 @@ class SimulationBase(ABC):
     #:
     #: This is the one place each builder states what it splits: the builders
     #: gate their split on it, and the job-count prediction
-    #: (``src.core.run._run_scripts_per_build``) reads it off the builder class
+    #: (``src.run.expand._run_scripts_per_build``) reads it off the builder class
     #: the config routes to, so the predicted and generated counts cannot drift.
     SPLIT_OUTER_LOOPS: frozenset = frozenset()
 

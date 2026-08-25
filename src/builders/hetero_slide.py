@@ -174,7 +174,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
         The hetero override of
         :meth:`~src.builders.sheetonsheet.SheetOnSheetSimulation._material_id`
-        (same convention as :func:`src.core.run.material_token` and
+        (same convention as :func:`src.run.naming.material_token` and
         :meth:`src.builders.hetero_afm.HeteroAFMSimulation._material_id`), so
         every job name built from it -- this class's ``friction_<pair>`` and
         the PES variant's ``pes_sheet_<pair>`` -- keys on the full pair rather
@@ -195,7 +195,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         HPC job identities despite building into distinct output directories
         (already pair-token-safe via Task 1's ``output_dir_for``). Same
         numeric-``[2D-N]``-order ``+``-joined convention as
-        :func:`src.core.run.material_token` /
+        :func:`src.run.naming.material_token` /
         :func:`~src.builders.hetero_afm._pair_material_token`; kept as a
         private inline join (in :meth:`_material_id`) rather than importing
         from ``hetero_afm`` since the two builder families are otherwise

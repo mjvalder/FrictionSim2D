@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from src.core.config import GlobalSettings
-from src.core.orchestration import generate_package
-from src.core.run import generate_hpc_scripts_for_root, hpc_generation_blocker
+from src.run.artifacts import generate_package
+from src.run.hpc_dispatch import generate_hpc_scripts_for_root, hpc_generation_blocker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / 'examples'

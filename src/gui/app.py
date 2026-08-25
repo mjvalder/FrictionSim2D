@@ -38,7 +38,8 @@ from PySide6.QtWidgets import (
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
-from ..core.run import AFM_LIKE_MODELS, hpc_generation_blocker
+from ..run.hpc_dispatch import hpc_generation_blocker
+from ..run.naming import AFM_LIKE_MODELS
 from .controllers.settings_document import SettingsDocument
 from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION

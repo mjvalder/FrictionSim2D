@@ -59,14 +59,14 @@ def test_hetero_pes_tip_mro_and_split_outer_loops():
 
 def test_routing_selects_hetero_pes_tip_for_two_materials_with_substrate():
     from src.builders.pes_scan import HeteroPESTipSimulation
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     cfg = AFMSimulationConfig(**_pes_tip_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("pes_tip", cfg) is HeteroPESTipSimulation
 
 
 def test_routing_keeps_homogeneous_pes_tip_for_single_material():
     from src.builders.pes_scan import PESTipSimulation
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     raw = _pes_tip_hetero_raw()
     del raw["2D-2"]
     raw["2D"] = raw.pop("2D-1")
@@ -79,7 +79,7 @@ def test_routing_hetero_pes_tip_freestanding_raises():
     builder -- must raise FreestandingConfigError naming the gap explicitly,
     not silently fall back to FreestandingPESTipSimulation (which cannot build
     a two-material stack) or route to the periodic hetero builder."""
-    from src.core.run import FreestandingConfigError, _select_afm_builder_cls
+    from src.run.simulate import FreestandingConfigError, _select_afm_builder_cls
     raw = _pes_tip_hetero_raw()
     del raw["sub"]
     cfg = AFMSimulationConfig(**raw, settings=load_settings())
@@ -93,7 +93,7 @@ def test_freestanding_hetero_pes_tip_aborts_run_simulations_not_skips(tmp_path, 
     propagate FreestandingConfigError and abort (no build), mirroring the
     hetero-indent finite_sheet NoHeteroBuilderError hard-abort test."""
     from src.core.config_io import write_config
-    from src.core.run import FreestandingConfigError, run_simulations
+    from src.run.simulate import FreestandingConfigError, run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     raw = _pes_tip_hetero_raw()

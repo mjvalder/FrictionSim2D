@@ -187,7 +187,7 @@ class PESGridMixin:
     classes, ahead of any base's value in MRO order): the scan replaces the run
     phase outright and never reads ``outer_loop``, so nothing is ever split.
     The grid variants below are counted separately by
-    ``src.core.run._run_scripts_per_build`` (keyed on the ``pes_sheet`` model,
+    ``src.run.expand._run_scripts_per_build`` (keyed on the ``pes_sheet`` model,
     so the refinement script is predicted for the hetero variant too).
     """
 

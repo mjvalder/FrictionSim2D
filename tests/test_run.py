@@ -5,15 +5,10 @@ from pathlib import Path
 import pytest
 
 from src.core.config import load_settings as real_load_settings
-from src.core.run import (
-    _validate_runtime_sweep_ordering,
-    _build_hpc_manifest_entries,
-    collect_hpc_simulation_paths,
-    expand_config_sweeps,
-    output_dir_for,
-    resolve_lj_override_file,
-    run_simulations,
-)
+from src.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps, resolve_lj_override_file
+from src.run.hpc_dispatch import _build_hpc_manifest_entries, collect_hpc_simulation_paths
+from src.run.naming import output_dir_for
+from src.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -112,14 +107,14 @@ class TestRoutingViewMatchesTheModel:
 
     def test_a_false_string_is_not_a_finite_sheet(self):
         from src.builders.hetero_afm import HeteroAFMSimulation
-        from src.core.run import _builder_cls_for_count
+        from src.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw('false'), 'afm') is HeteroAFMSimulation
 
     def test_a_true_string_still_routes_to_the_finite_builder(self):
         from src.builders.hetero_afm import FiniteHeteroAFMSimulation
-        from src.core.run import _builder_cls_for_count
+        from src.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw('true'), 'afm') is FiniteHeteroAFMSimulation
@@ -128,7 +123,7 @@ class TestRoutingViewMatchesTheModel:
         from src.builders.hetero_afm import (
             FiniteHeteroAFMSimulation, HeteroAFMSimulation,
         )
-        from src.core.run import _builder_cls_for_count
+        from src.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw(False), 'afm') is HeteroAFMSimulation
@@ -140,7 +135,7 @@ class TestRoutingViewMatchesTheModel:
         view (a half-typed GUI field, a JSON config) must not route a
         single-material sheet config to the hetero builder."""
         from src.builders.sheetonsheet import SheetOnSheetSimulation
-        from src.core.run import _builder_cls_for_count
+        from src.run.expand import _builder_cls_for_count
 
         raw = {'general': {'temp': 300, 'twist_angle': ''}, '2D': {'mat': 'h-MoS2'}}
         assert _builder_cls_for_count(raw, 'sheetonsheet') is SheetOnSheetSimulation
@@ -482,7 +477,7 @@ class TestOrderedPairSweeps:
             self, tmp_path: Path) -> None:
         """The GUI filters expansion notes on the literal '[2D] materials_list'
         prefix (app.py); a numbered-only primary section must not change it."""
-        from src.core.run import count_expansion
+        from src.run.expand import count_expansion
 
         listing = tmp_path / 'mats.csv'
         listing.write_text('h-MoS2\n', encoding='utf-8')
@@ -658,9 +653,9 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     settings = real_load_settings()
     settings.hpc.lammps_scripts = ["slide.in"]
 
-    monkeypatch.setattr("src.core.run.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.core.run.load_settings", lambda **_kwargs: settings)
-    monkeypatch.setattr("src.core.run.expand_config_sweeps", lambda _c: [dict(base_dict)])
+    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("src.run.simulate.expand_config_sweeps", lambda _c: [dict(base_dict)])
 
     class FakeConfig:
         def __init__(self, **kwargs):
@@ -684,10 +679,10 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
         def build(self):
             calls["build"] += 1
 
-    monkeypatch.setattr("src.core.run.AFMSimulationConfig", FakeConfig)
-    monkeypatch.setattr("src.core.run.AFMSimulation", FakeAFMBuilder)
+    monkeypatch.setattr("src.run.simulate.AFMSimulationConfig", FakeConfig)
+    monkeypatch.setattr("src.run.simulate.AFMSimulation", FakeAFMBuilder)
     monkeypatch.setattr(
-        "src.core.run.generate_hpc_scripts_for_root",
+        "src.run.simulate.generate_hpc_scripts_for_root",
         lambda _root, _settings: calls.__setitem__("hpc", calls["hpc"] + 1),
     )
 
@@ -722,9 +717,9 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
     settings = real_load_settings()
     settings.hpc.lammps_scripts = ["system.in", "slide.in"]
 
-    monkeypatch.setattr("src.core.run.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.core.run.load_settings", lambda **_kwargs: settings)
-    monkeypatch.setattr("src.core.run.expand_config_sweeps", lambda _c: [dict(base_dict)])
+    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("src.run.simulate.expand_config_sweeps", lambda _c: [dict(base_dict)])
 
     class FakeConfig:
         def __init__(self, **kwargs):
@@ -743,8 +738,8 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
         def build(self):
             pass
 
-    monkeypatch.setattr("src.core.run.SheetOnSheetSimulationConfig", FakeConfig)
-    monkeypatch.setattr("src.core.run.SheetOnSheetSimulation", FakeSheetBuilder)
+    monkeypatch.setattr("src.run.simulate.SheetOnSheetSimulationConfig", FakeConfig)
+    monkeypatch.setattr("src.run.simulate.SheetOnSheetSimulation", FakeSheetBuilder)
 
     _created, _root, _configs, returned_settings = run_simulations(
         config_file=str(config_file),
@@ -772,10 +767,10 @@ def test_run_simulations_continues_after_build_failure(
     }
 
     settings = real_load_settings()
-    monkeypatch.setattr("src.core.run.parse_config", lambda _p: base_dict)
-    monkeypatch.setattr("src.core.run.load_settings", lambda **_kwargs: settings)
+    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
     monkeypatch.setattr(
-        "src.core.run.expand_config_sweeps",
+        "src.run.simulate.expand_config_sweeps",
         lambda _c: [dict(base_dict), dict(base_dict)],
     )
 
@@ -801,8 +796,8 @@ def test_run_simulations_continues_after_build_failure(
             if call_counter["builds"] == 1:
                 raise RuntimeError("boom")
 
-    monkeypatch.setattr("src.core.run.AFMSimulationConfig", FakeConfig)
-    monkeypatch.setattr("src.core.run.AFMSimulation", FlakyAFMBuilder)
+    monkeypatch.setattr("src.run.simulate.AFMSimulationConfig", FakeConfig)
+    monkeypatch.setattr("src.run.simulate.AFMSimulation", FlakyAFMBuilder)
 
     created, _root, _configs, _returned_settings = run_simulations(
         config_file=str(config_file),
@@ -826,7 +821,7 @@ def test_run_simulations_raises_for_missing_config_file(tmp_path: Path) -> None:
 
 
 def test_pes_tip_no_substrate_selects_freestanding_builder():
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     from src.builders.afm_freestanding import FreestandingPESTipSimulation
     from src.builders.pes_scan import PESTipSimulation
 
@@ -840,7 +835,7 @@ def test_pes_tip_no_substrate_selects_freestanding_builder():
 
 
 def test_afm_no_substrate_raises():
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     import pytest
     class _Cfg:
         sub = None
@@ -859,7 +854,7 @@ class TestMaterialListIsNotLostSilently:
         }
 
     def test_a_non_txt_path_is_reported(self, tmp_path):
-        from src.core.run import count_expansion
+        from src.run.expand import count_expansion
 
         listing = tmp_path / 'mats.csv'
         listing.write_text('h-MoS2\n', encoding='utf-8')
@@ -869,7 +864,7 @@ class TestMaterialListIsNotLostSilently:
         assert any('.txt' in note for note in summary.notes)
 
     def test_a_txt_path_produces_no_note(self, tmp_path):
-        from src.core.run import count_expansion
+        from src.run.expand import count_expansion
 
         listing = tmp_path / 'mats.txt'
         listing.write_text('h-MoS2\n', encoding='utf-8')

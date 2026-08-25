@@ -145,7 +145,7 @@ class AFMSimulation(SimulationBase):
         """``'+flake-<mat...>'`` when a flake section names a flake material
         that changes what gets built, else ``''``.
 
-        Mirrors :func:`src.core.run.flake_material_token`'s rule exactly (kept
+        Mirrors :func:`src.run.naming.flake_material_token`'s rule exactly (kept
         in lockstep so the job name and the output directory always agree on
         whether a flake changes a config's identity): a hetero flake
         (``flake_sheets`` has 2 entries, ``mat`` required on each) always
@@ -922,7 +922,7 @@ class AFMSimulation(SimulationBase):
         (afm/slide.lmp's angle_loop gate), but the split applies its one fixed
         angle to every force in every per-angle script -- so the selector would
         be silently dropped, changing what a force-gated scan means. Reject the
-        combination instead. :func:`src.core.run.outer_loop_conflict` rejects it
+        combination instead. :func:`src.run.expand.outer_loop_conflict` rejects it
         first (before the build, and only for the builders that really split),
         so this raise is the backstop for builds driven directly.
 

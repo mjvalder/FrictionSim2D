@@ -21,8 +21,8 @@ def _emit(kind: str, **payload: Any) -> None:
 
 
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
-    from ..core.orchestration import generate_package
-    from ..core.run import count_generated_jobs, hpc_generation_blocker
+    from ..run.artifacts import generate_package
+    from ..run.hpc_dispatch import count_generated_jobs, hpc_generation_blocker
 
     _emit('progress', message=f"generating {request['model']}")
 

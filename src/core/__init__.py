@@ -70,10 +70,10 @@ _EXPORT_MAP = {
     "atomic2molecular": (".utils", "atomic2molecular"),
     "get_potential_element_order": ("..potentials.utils", "get_potential_element_order"),
     "check_potential_cif_compatibility": ("..potentials.utils", "check_potential_cif_compatibility"),
-    "expand_config_sweeps": (".run", "expand_config_sweeps"),
-    "collect_hpc_simulation_paths": (".run", "collect_hpc_simulation_paths"),
-    "generate_hpc_scripts_for_root": (".run", "generate_hpc_scripts_for_root"),
-    "run_simulations": (".run", "run_simulations"),
+    "expand_config_sweeps": ("..run.expand", "expand_config_sweeps"),
+    "collect_hpc_simulation_paths": ("..run.hpc_dispatch", "collect_hpc_simulation_paths"),
+    "generate_hpc_scripts_for_root": ("..run.hpc_dispatch", "generate_hpc_scripts_for_root"),
+    "run_simulations": ("..run.simulate", "run_simulations"),
 }
 
 

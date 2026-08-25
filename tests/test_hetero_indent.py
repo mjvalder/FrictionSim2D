@@ -64,14 +64,14 @@ def test_hetero_indent_mro_and_split_outer_loops():
 
 def test_routing_selects_hetero_indent_for_two_materials():
     from src.builders.hetero_afm import HeteroIndentSimulation
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     cfg = AFMSimulationConfig(**_indent_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("indent", cfg) is HeteroIndentSimulation
 
 
 def test_routing_keeps_homogeneous_indent_for_single_material():
     from src.builders.indent import IndentSimulation
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     raw = _indent_hetero_raw()
     del raw["2D-2"]
     raw["2D"] = raw.pop("2D-1")
@@ -86,7 +86,7 @@ def test_routing_hetero_indent_rejects_finite_sheet():
     treatment -- see test_finite_hetero_indent_aborts_run_simulations below)
     rather than silently building a periodic patch under a name that promises
     edges."""
-    from src.core.run import NoHeteroBuilderError, _select_afm_builder_cls
+    from src.run.simulate import NoHeteroBuilderError, _select_afm_builder_cls
     raw = _indent_hetero_raw()
     raw["general"]["finite_sheet"] = True
     raw["sub"]["x"] = 80.0        # finite_sheet AFM requires substrate x/y set
@@ -104,7 +104,7 @@ def test_finite_hetero_indent_aborts_run_simulations_not_skips(tmp_path, monkeyp
     report a misleading "created 0 simulation(s)". Mirrors how
     FreestandingConfigError is proven to hard-abort in test_run.py."""
     from src.core.config_io import write_config
-    from src.core.run import NoHeteroBuilderError, run_simulations
+    from src.run.simulate import NoHeteroBuilderError, run_simulations
 
     monkeypatch.chdir(REPO_ROOT)
     raw = _indent_hetero_raw()

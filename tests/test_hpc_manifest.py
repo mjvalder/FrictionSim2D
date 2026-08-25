@@ -4,7 +4,8 @@ import pytest
 
 from src.core.config import GeneralConfig, parse_config
 from src.core.config_io import write_config
-from src.core.run import count_expansion, run_simulations
+from src.run.expand import count_expansion
+from src.run.simulate import run_simulations
 from src.hpc.manifest import JobManifest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

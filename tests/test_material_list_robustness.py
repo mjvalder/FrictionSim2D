@@ -9,13 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from src.core.run import (
+from src.core.material_templates import has_template_marker, substitute_materials
+from src.run.expand import (
     expand_config_sweeps,
-    has_template_marker,
     preflight_materials,
     read_material_entries,
     read_material_list,
-    substitute_materials,
 )
 
 

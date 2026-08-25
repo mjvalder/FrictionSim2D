@@ -113,7 +113,7 @@ class IndentSimulation(AFMSimulation):
         :class:`~src.builders.hetero_afm.HeteroIndentSimulation` to return the
         pair token instead, so two hetero pairs sharing material 1 don't
         collide on job name, derived seed, or the ``indent_meta.json`` manifest
-        key (see :func:`src.core.run.material_token` for the sibling convention
+        key (see :func:`src.run.naming.material_token` for the sibling convention
         on the raw-dict side). Includes
         :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
         unmodified) so an indent's ``[flake]`` also keys all three.

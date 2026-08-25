@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.orchestration import discover_preview_target, generate_package
+from src.run.artifacts import discover_preview_target, generate_package
 from src.gui.preview.init_script import (
     Placement,
     parse_assembly,

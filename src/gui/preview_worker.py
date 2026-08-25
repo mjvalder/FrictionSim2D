@@ -26,7 +26,7 @@ def _emit(kind: str, **payload: Any) -> None:
 
 def run(request: Dict[str, Any]) -> Dict[str, Any]:
     """Generate a single-member package for preview."""
-    from ..core.orchestration import discover_preview_target, generate_package
+    from ..run.artifacts import discover_preview_target, generate_package
 
     config_file = request['config_file']
     model = request['model']

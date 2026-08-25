@@ -14,12 +14,10 @@ import pytest
 
 from src.core.config import GeneralConfig, parse_config
 from src.core.config_io import write_config
-from src.core.run import (
-    count_expansion,
-    count_generated_jobs,
-    loopability,
-    run_simulations,
-)
+from src.run.expand import count_expansion
+from src.run.hpc_dispatch import count_generated_jobs
+from src.run.naming import loopability
+from src.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / 'examples'

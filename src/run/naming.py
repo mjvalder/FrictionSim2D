@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .utils import format_dimension_token
+from ..core.utils import format_dimension_token
 
 #: Simulation models sharing the AFM stack (tip + sheet + substrate) and its
 #: two-phase system.in → slide.in layout. The indent reuses the AFM build and

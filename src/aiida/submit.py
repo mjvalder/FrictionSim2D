@@ -20,7 +20,8 @@ from aiida.orm import QueryBuilder
 from aiida.engine import submit as aiida_submit
 
 from ..core.config import GlobalSettings, load_settings
-from ..core.run import run_simulations, layer_aware_path_sort_key
+from ..run.naming import layer_aware_path_sort_key
+from ..run.simulate import run_simulations
 from .calcjob import (
     LammpsFrictionCalcJob,
     prepare_simulation_folder,

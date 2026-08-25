@@ -24,7 +24,7 @@ if TYPE_CHECKING:
         parse_config,
     )
     from .potentials.manager import PotentialManager
-    from .core.run import run_simulations
+    from .run.simulate import run_simulations
 
 _AIIDA_AVAILABLE = find_spec('aiida') is not None
 
@@ -40,7 +40,7 @@ def _default_settings_file() -> str | None:
 def __getattr__(name: str):
     """Lazily expose top-level API symbols to minimize import-time cost."""
     if name == 'run_simulations':
-        from .core.run import run_simulations as _run_simulations
+        from .run.simulate import run_simulations as _run_simulations
         return _run_simulations
     if name == 'AFMSimulation':
         from .builders.afm import AFMSimulation as _AFMSimulation
@@ -113,7 +113,7 @@ def _run_all(config_file: str, model: str = "afm", output_root: str = ".",
         output_root: Base directory for the simulation root folder.
         settings_file: Path to settings.yaml; falls back to ./settings.yaml if present.
     """
-    from .core.run import run_simulations
+    from .run.simulate import run_simulations
 
     created_simulations, simulation_root, configs_to_run, _ = run_simulations(
         config_file=config_file,

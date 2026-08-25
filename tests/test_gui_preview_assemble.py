@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.core.orchestration import discover_preview_target, generate_package
+from src.run.artifacts import discover_preview_target, generate_package
 from src.gui.preview.assemble import assemble, to_ovito
 from src.gui.preview.init_script import parse_assembly
 from src.gui.preview.settings_file import parse_identity

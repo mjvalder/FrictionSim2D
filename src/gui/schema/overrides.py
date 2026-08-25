@@ -526,7 +526,7 @@ def override_for_section(model: str, section_key: str) -> Optional[SectionOverri
     uses it -- `[2D-2]` has one, because its field list differs (no
     `materials_list`: one list names both materials of every pair) -- and
     every other numbered sheet folds onto `[2D]`, since `[2D-1]` *is* the
-    first sheet under its written name. `core.run.loopability_section` folds
+    first sheet under its written name. `src.run.naming.loopability_section` folds
     them the same way for the same reason.
 
     The two readers used to resolve this separately: the form looked the key

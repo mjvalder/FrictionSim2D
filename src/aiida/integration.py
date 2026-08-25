@@ -1237,7 +1237,7 @@ def rebuild_simulation_set(
     the full directory tree of LAMMPS input files.
 
     The reconstructed tree mirrors the layout produced by
-    :func:`src.core.run.run_simulations` so that the result can be used directly
+    :func:`src.run.simulate.run_simulations` so that the result can be used directly
     with the HPC submission workflow.
 
     Args:
@@ -1387,7 +1387,7 @@ def rebuild_simulation_set(
 
     if generate_hpc and created_dirs:
         try:
-            from ..core.run import generate_hpc_scripts_for_root  # pylint: disable=import-outside-toplevel
+            from ..run.hpc_dispatch import generate_hpc_scripts_for_root
             generate_hpc_scripts_for_root(simulation_root, defaults)
         except ImportError:
             logger.warning(

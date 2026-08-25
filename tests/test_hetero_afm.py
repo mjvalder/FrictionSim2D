@@ -222,14 +222,14 @@ def test_finite_hetero_afm_job_name_also_uses_full_pair():
 # --- Task 6: routing ---
 
 def test_routing_selects_hetero_afm_for_two_materials():
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     from src.builders.hetero_afm import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is HeteroAFMSimulation
 
 
 def test_routing_keeps_homogeneous_afm_for_single_material():
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     from src.builders.afm import AFMSimulation
     cfg = AFMSimulationConfig(**_afm_homogeneous_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is AFMSimulation
@@ -548,14 +548,14 @@ def test_finite_hetero_afm_renders_edge_fix(tmp_path):
 # --- D5 Task 3: routing (finite hetero before periodic hetero) ---
 
 def test_routing_finite_hetero_selects_finite_builder():
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     from src.builders.hetero_afm import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is FiniteHeteroAFMSimulation
 
 
 def test_routing_periodic_hetero_still_selects_d2():
-    from src.core.run import _select_afm_builder_cls
+    from src.run.simulate import _select_afm_builder_cls
     from src.builders.hetero_afm import HeteroAFMSimulation
     raw = _finite_hetero_afm_raw()
     raw["general"]["finite_sheet"] = False
@@ -776,7 +776,7 @@ def test_afm_init_provenance_single_material_unchanged(tmp_path):
 # construction below, mirroring examples/afm_flake_config.ini).
 
 def test_output_dir_differs_when_only_afm_flake_material_differs():
-    from src.core.run import output_dir_for, material_token
+    from src.run.naming import material_token, output_dir_for
 
     raw_a = _afm_flake_raw()
     raw_b = _afm_flake_raw()
@@ -815,7 +815,7 @@ def test_hpc_job_name_differs_when_only_afm_flake_material_differs():
 
 def test_output_dir_and_job_name_unaffected_by_absent_afm_flake_section():
     """An AFM config with no [flake] section at all is unaffected."""
-    from src.core.run import output_dir_for
+    from src.run.naming import output_dir_for
     from src.builders.afm import AFMSimulation
 
     raw = _afm_flake_raw()
@@ -832,7 +832,7 @@ def test_sheetonsheet_flake_omit_mat_directory_still_byte_identical():
     [Flake] section that omits mat (reuses the substrate's) still builds into
     today's directory -- unchanged by teaching flake_material_token about the
     AFM family's lowercase 'flake' key too."""
-    from src.core.run import output_dir_for
+    from src.run.naming import output_dir_for
 
     no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
     reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}

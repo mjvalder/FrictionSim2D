@@ -246,7 +246,7 @@ def _single_material_cfg():
 
 
 def test_routing_flake_section_selects_flake_slide():
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     from src.builders.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
@@ -255,7 +255,7 @@ def test_routing_flake_section_selects_flake_slide():
 
 
 def test_routing_no_flake_unchanged():
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     from src.builders.sheetonsheet import SheetOnSheetSimulation
 
     cfg = _single_material_cfg()
@@ -299,7 +299,7 @@ def _flake_slide_raw(flake_mat=None):
 
 
 def test_output_dir_differs_when_only_flake_material_differs():
-    from src.core.run import output_dir_for, material_token
+    from src.run.naming import material_token, output_dir_for
 
     run_a = _flake_slide_raw(flake_mat="h-MoS2")
     run_b = _flake_slide_raw(flake_mat="h-WS2")
@@ -321,7 +321,7 @@ def test_hpc_job_name_differs_when_only_flake_material_differs(tmp_path):
 
 def test_output_dir_and_job_name_unaffected_by_absent_flake_section():
     """A config with no [Flake] section at all is unaffected by the fix."""
-    from src.core.run import output_dir_for
+    from src.run.naming import output_dir_for
 
     no_flake = {
         "general": {"temp": 300},
@@ -334,7 +334,7 @@ def test_output_dir_byte_identical_when_flake_reuses_substrate_material(tmp_path
     """A single-[2D]-plus-[Flake] config that omits the flake's own material
     (the common case -- the flake reuses the substrate's) must build into the
     SAME directory / job name as before this fix (no [Flake] section at all)."""
-    from src.core.run import output_dir_for
+    from src.run.naming import output_dir_for
 
     no_flake = {"general": {"temp": 300}, "2D": {"mat": "h-MoS2", "x": 100, "y": 100}}
     reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
@@ -350,7 +350,7 @@ def test_output_dir_byte_identical_when_flake_reuses_substrate_material(tmp_path
 def test_output_dir_distinguishes_hetero_flake_pair():
     """A [Flake-1]/[Flake-2] hetero flake must also be reflected in the token
     (it always names two materials explicitly, unlike a single [Flake])."""
-    from src.core.run import output_dir_for
+    from src.run.naming import output_dir_for
 
     raw = _flake_slide_raw()
     raw["Flake-1"] = {"mat": "h-MoS2", "x": 12.0, "y": 12.0}
@@ -435,7 +435,7 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
 
 def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
     # [Flake] + twist must go to the FLAKE builder (D3b), not the D3 periodic hetero builder.
-    from src.core.run import _select_sheet_builder_cls
+    from src.run.simulate import _select_sheet_builder_cls
     from src.builders.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 12.0
@@ -529,7 +529,7 @@ def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
     test_hetero_slide's equivalent.
     """
     from src.builders.flake_slide import FlakeSlideSimulation
-    from src.core.run import generate_hpc_scripts_for_root
+    from src.run.hpc_dispatch import generate_hpc_scripts_for_root
 
     root = tmp_path / "simulation_root"
     run_dir = root / "sheetonsheet" / "h-MoS2" / "16x_16y" / "K300"

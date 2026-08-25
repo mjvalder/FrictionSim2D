@@ -762,12 +762,12 @@ class TestSettingsTakeEffect:
         window.close()
 
     def test_hpc_scripts_are_blocked_until_modules_are_set(self, window):
-        from src.core.run import hpc_generation_blocker
+        from src.run.hpc_dispatch import hpc_generation_blocker
 
         assert hpc_generation_blocker(window.settings) is not None
 
     def test_typing_modules_applies_without_a_separate_save(self, window):
-        from src.core.run import hpc_generation_blocker
+        from src.run.hpc_dispatch import hpc_generation_blocker
 
         window.settings_form.sections['hpc'].editors['modules'].set_value(
             ['lammps', 'openmpi'])

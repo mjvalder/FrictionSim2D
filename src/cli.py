@@ -11,12 +11,9 @@ from typing import List, Optional, NoReturn
 import click
 
 from .core.config import load_settings, settings_origin, _global_settings_path
-from .core.run import (
-    run_simulations,
-    _build_hpc_manifest_entries,
-    dispatch_hpc_generation,
-    layer_aware_path_sort_key,
-)
+from .run.hpc_dispatch import _build_hpc_manifest_entries, dispatch_hpc_generation
+from .run.naming import layer_aware_path_sort_key
+from .run.simulate import run_simulations
 
 logging.basicConfig(
     level=logging.INFO,

@@ -510,7 +510,7 @@ class GeneralConfig(BaseModel):
     # NOTE: outer_loop='scan_angle' cannot carry scan_angle_force -- but only
     # for the builders that really split by angle, and this model cannot see
     # which builder its config routes to. The check therefore lives in
-    # src.core.run.outer_loop_conflict (routing-aware), not here.
+    # src.run.expand.outer_loop_conflict (routing-aware), not here.
 
     @model_validator(mode='after')
     def _validate_twist_angle(self) -> 'GeneralConfig':

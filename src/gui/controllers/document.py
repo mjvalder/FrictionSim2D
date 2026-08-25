@@ -31,11 +31,11 @@ from ...core.config import (
 from ...core.config_io import write_config
 from ..config_validation import ConfigIssue, ConfigValidation, validate_config
 from ...core.material_templates import has_template_marker
-from ...core.run import (
-    ExpansionSummary, count_expansion, expand_config_sweeps, loopability,
-    outer_loop_conflict, output_dir_for, read_material_entries,
-    read_material_list,
+from ...run.expand import (
+    ExpansionSummary, count_expansion, expand_config_sweeps,
+    outer_loop_conflict, read_material_entries, read_material_list,
 )
+from ...run.naming import loopability, output_dir_for
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..schema.introspect import SectionSpec, describe_model, describe_section
 from ..schema.overrides import override_for_section, overrides_for
@@ -52,7 +52,7 @@ class ExpansionDirs(NamedTuple):
     """The Generate preview: where this config would build, or why it cannot.
 
     Exactly one side is populated. `error` carries the expansion's own
-    message verbatim -- the pair guards in `core.run.expand_config_sweeps`
+    message verbatim -- the pair guards in `src.run.expand.expand_config_sweeps`
     say precisely which section is wrong and what to put there, and that
     sentence is the whole value of showing it.
     """
@@ -66,7 +66,7 @@ class ExpansionDirs(NamedTuple):
 #: A numbered sheet section. Two of them make a heterostructure: `[2D-1]` is
 #: the first material, `[2D-2]` the second. Matched exactly, so nothing that
 #: merely looks like one (`2D-`, `2Dx`) is folded (mirrors
-#: `core.run.loopability_section`).
+#: `src.run.naming.loopability_section`).
 _NUMBERED_SHEET = re.compile(r'^2D-(\d+)$')
 
 #: The written spelling of the first sheet when there is a second one. The
@@ -170,7 +170,7 @@ def hetero_support_error(model: str) -> Optional[str]:
 
 def root_model_for(model: str):
     """The pydantic root model a simulation model validates against."""
-    from ...core.run import AFM_LIKE_MODELS  # noqa: PLC0415
+    from ...run.naming import AFM_LIKE_MODELS  # noqa: PLC0415
 
     return AFMSimulationConfig if model in AFM_LIKE_MODELS else SheetOnSheetSimulationConfig
 
@@ -616,7 +616,7 @@ class ConfigDocument:
 
         One check cannot come from the model: whether `outer_loop` conflicts
         with `scan_angle_force` depends on which builder the config routes to
-        (`core.run.outer_loop_conflict`), which a pydantic model cannot see.
+        (`src.run.expand.outer_loop_conflict`), which a pydantic model cannot see.
         It is asked here rather than reimplemented, so the panel refuses
         exactly what `run_simulations` refuses.
         """

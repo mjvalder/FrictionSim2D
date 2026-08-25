@@ -17,7 +17,7 @@ non-blocking note in the fourth column, mirroring
 ``PotentialManager._pair_key``'s own normalisation so the note means the same
 thing the potential manager would do silently.
 
-A shared overrides ``.txt`` (see ``core.run.resolve_lj_override_file``) covers
+A shared overrides ``.txt`` (see ``src.run.expand.resolve_lj_override_file``) covers
 a whole material sweep from one file -- its keys are element pairs, not
 materials, so pairs whose elements are absent from a given run are simply
 unused. The file path lives in its own row, independent of the table: it is
@@ -308,7 +308,7 @@ class PairOverrideEditor(QWidget):
         """Pull the shared file's pairs into the table as editable rows.
 
         Convenience only -- the file is still resolved independently at
-        expansion time (`core.run.resolve_lj_override_file`), so importing is
+        expansion time (`src.run.expand.resolve_lj_override_file`), so importing is
         never required for the file to take effect; it just lets high-
         throughput users see and tweak individual pairs without opening the
         .txt in another editor. Inline rows already present win, matching the
@@ -317,7 +317,7 @@ class PairOverrideEditor(QWidget):
         path = self.file_edit.text().strip()
         if not path:
             return
-        from ...core.run import resolve_lj_override_file  # noqa: PLC0415
+        from ...run.expand import resolve_lj_override_file  # noqa: PLC0415
 
         try:
             merged = resolve_lj_override_file(

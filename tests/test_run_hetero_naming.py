@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.run import material_token, output_dir_for, primary_sheet
+from src.run.naming import material_token, output_dir_for, primary_sheet
 
 
 def test_primary_sheet_falls_back_to_numbered_sections():
@@ -91,7 +91,7 @@ class TestShippedPairSweepExample:
 
     @pytest.fixture(name='expanded')
     def _expanded(self):
-        from src.core.run import expand_config_sweeps
+        from src.run.expand import expand_config_sweeps
         from src.core.config import parse_config
 
         root = self.REPO_ROOT
