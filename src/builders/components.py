@@ -32,9 +32,11 @@ from ..core.config import (
 )
 from ..potentials.manager import PotentialManager
 from ..core.utils import (
-    cifread, get_material_path, get_model_dimensions,
-    check_potential_cif_compatibility, get_num_atom_types,
-    atomic2charge, charge2atom, shift_atoms_to_z_zero, get_potential_element_order
+    cifread, get_material_path, get_model_dimensions, get_num_atom_types,
+    atomic2charge, charge2atom, shift_atoms_to_z_zero
+)
+from ..potentials.utils import (
+    check_potential_cif_compatibility, get_potential_element_order
 )
 from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader

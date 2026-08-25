@@ -4,8 +4,8 @@ Driving the package from Python instead of the CLI, using the APIs exposed in
 `src/__init__.py` and the package modules.
 
 > `src/core/` was split into `core/` + `run/` + `potentials/` + `lattice/`. The old
-> `src.core.*` paths still work through deprecation shims, but the canonical paths
-> below are what new code should import. See CLAUDE.md for the full mapping.
+> `src.core.run` / `src.core.potential_manager` paths no longer exist — import from
+> the canonical modules shown below. See CLAUDE.md for the full mapping.
 
 ## High-level imports
 

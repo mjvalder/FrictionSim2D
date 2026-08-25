@@ -8,7 +8,7 @@ import pytest
 
 from src.builders.afm import AFMSimulation
 from src.core.config import AFMSimulationConfig, load_settings
-from src.core.utils import normalize_potential_type
+from src.potentials.utils import normalize_potential_type
 
 # The langevin fixes embed a fresh `{{ range(1, 999999) | random }}` seed on
 # every render (see afm/slide.lmp), so raw output can't be pinned literally.

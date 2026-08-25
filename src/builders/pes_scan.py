@@ -44,7 +44,7 @@ import logging
 from typing import Dict, List, Optional, Union
 
 from ..potentials.manager import PotentialManager
-from ..core.utils import normalize_potential_type
+from ..potentials.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from .afm import AFMSimulation
 from .hetero import detect_inplane_repeat

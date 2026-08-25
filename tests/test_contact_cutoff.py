@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.builders.afm import AFMSimulation, K_CONTACT
-from src.core.utils import lj_params
+from src.potentials.utils import lj_params
 from tests.test_afm_builder import _make_afm_config
 
 MATERIALS = Path(__file__).parent.parent / 'examples' / 'materials'

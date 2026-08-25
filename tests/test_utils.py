@@ -7,16 +7,15 @@ import pytest
 import tempfile
 from pathlib import Path
 
+from src.core.config import read_config
 from src.core.utils import (
     _is_float,
-    lj_params,
     get_model_dimensions,
-    read_config,
     atomic2charge,
     charge2atom,
     atomic2molecular,
-    get_potential_element_order,
 )
+from src.potentials.utils import lj_params, get_potential_element_order
 
 
 class TestIsFloat:
