@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
-from ...core.config_io import write_config
+from ...core.config import write_config
 from .staged_paths import absolutize_staged_paths
 from ..workspace import Workspace
 

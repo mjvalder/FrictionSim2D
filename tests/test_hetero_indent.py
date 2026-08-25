@@ -103,7 +103,7 @@ def test_finite_hetero_indent_aborts_run_simulations_not_skips(tmp_path, monkeyp
     directory created), not swallow it via its per-config broad-except and
     report a misleading "created 0 simulation(s)". Mirrors how
     FreestandingConfigError is proven to hard-abort in test_run.py."""
-    from src.core.config_io import write_config
+    from src.core.config import write_config
     from src.run.simulate import NoHeteroBuilderError, run_simulations
 
     monkeypatch.chdir(REPO_ROOT)

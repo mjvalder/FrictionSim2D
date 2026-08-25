@@ -12,13 +12,13 @@ agree on exactly what a marker looks like:
   finding a file, unlike a real typo. Missing this distinction for ``{mat1}``/
   ``{mat2}`` (a literal check for ``{mat}`` alone) turns every heterostructure
   pair config into a hard validation error that blocks Render and Generate.
-* ``src.core.run`` substitutes the markers once real material names are
+* ``src.run.expand`` substitutes the markers once real material names are
   known, both for a single-material sweep (``{mat}`` and ``{mat1}`` are
   equivalent there) and for an ordered pair (``{mat1}`` / ``{mat2}``).
 
 Kept in its own module, not in either of the two, so ``config_validation``
 (imported by GUI validation on every keystroke) does not have to pull in
-``src.core.run``'s builder imports to get it.
+``src.run.expand``'s builder imports to get it.
 """
 
 from __future__ import annotations

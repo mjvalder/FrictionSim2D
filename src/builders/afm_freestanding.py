@@ -4,7 +4,7 @@ A self-supported multilayer slab of the sheet material replaces the amorphous
 substrate: the bottom layer (``layer_1``) is held fixed and the upper layers
 relax, so the tip-felt PES corrugation is not contaminated by a disordered
 sheet-substrate registry. Selected automatically when a ``pes-tip`` config has
-no ``[sub]`` section (see ``core.run``). Reuses the entire AFM build via the
+no ``[sub]`` section (see ``run.simulate``). Reuses the entire AFM build via the
 substrate-optional path in :class:`~src.builders.afm.AFMSimulation`.
 """
 

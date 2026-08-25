@@ -155,7 +155,7 @@ class TestAngleSplitWithAForceGate:
 
     @staticmethod
     def _write(raw, tmp_path, name):
-        from src.core.config_io import write_config
+        from src.core.config import write_config
         raw['general']['scan_angle'] = [0, 30]
         raw['general']['scan_angle_force'] = 30
         raw['general']['outer_loop'] = 'scan_angle'
@@ -197,7 +197,7 @@ class TestAngleSplitWithAForceGate:
         """The hetero slide ignores outer_loop and honours the gate in-script,
         so a stray outer_loop next to a real gate must not fail the build."""
         from src.core.config import parse_config  # noqa: F401  (parity with above)
-        from src.core.config_io import write_config
+        from src.core.config import write_config
 
         monkeypatch.chdir(REPO_ROOT)
         sheet_1 = {

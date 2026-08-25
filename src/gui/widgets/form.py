@@ -51,7 +51,7 @@ _ACRONYMS = {'hpc': 'HPC', 'aiida': 'AiiDA', 'lj': 'LJ', 'pes': 'PES'}
 
 #: What a list in a field means, keyed by ConfigDocument.loopability_of().
 #: Generated rather than restated per field, so this and the LOOPABILITY map
-#: in core.run cannot drift apart.
+#: in run.naming cannot drift apart.
 LOOPABILITY_HINTS = {
     'sweep': 'A list runs each value as a separate simulation.',
     'layer': 'A list builds one L{n} tree per value.',
@@ -961,7 +961,7 @@ class SectionForm(QGroupBox):
 
         The document's shape decides it, not the widget's: each line of the
         list has to name exactly as many materials as there are sheet sections
-        to hold them (`core.run` refuses either mismatch outright).
+        to hold them (`run.expand` refuses either mismatch outright).
         """
         has_second = getattr(self.document, 'has_second_material', None)
         return bool(has_second is not None and has_second())
@@ -1017,7 +1017,7 @@ class SectionForm(QGroupBox):
         # looking at is the only way the document's check has anything to
         # catch. A pair table committed into a config with no [2D-2] would
         # otherwise write 'a + b' lines under a single-material {mat}
-        # template -- refused by `core.run` much later, with the GUI insisting
+        # template -- refused by `run.expand` much later, with the GUI insisting
         # throughout that the config is fine.
         pair_mode = editor.is_pair_mode()
         self.document.apply_material_directories(

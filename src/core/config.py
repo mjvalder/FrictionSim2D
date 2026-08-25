@@ -1042,12 +1042,6 @@ def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, A
 #   containing "#" cannot survive and is rejected here rather than silently
 #   truncated on the next read.
 
-#: The writer-half surface, re-exported by the deprecated src.core.config_io
-#: shim. Deliberately NOT named __all__: config.py also defines ~30 pydantic
-#: models, and an __all__ listing only these three would silently hide them
-#: from any future `from src.core.config import *`.
-CONFIG_IO_EXPORTS = ['write_config', 'format_ini_value', 'SUPPORTED_WRITE_FORMATS']
-
 SUPPORTED_WRITE_FORMATS = ('.ini', '.yaml', '.yml', '.json')
 
 #: Mapping of ``section -> key -> comment`` used to annotate ``.ini`` output.

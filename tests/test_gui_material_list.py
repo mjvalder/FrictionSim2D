@@ -1516,7 +1516,7 @@ class TestPairSweepCommit:
         the *widget* is in -- a pair table on screen -- and the document
         refuses it when its own shape says otherwise. Without a real second
         sheet the pairs would be written as 'a + b' lines under a `{mat}`
-        single-material template: a config `core.run` refuses much later, with
+        single-material template: a config `run.expand` refuses much later, with
         the GUI insisting it is fine."""
         from src.gui.controllers.document import DocumentError  # noqa: PLC0415
 

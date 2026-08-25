@@ -92,7 +92,7 @@ def test_freestanding_hetero_pes_tip_aborts_run_simulations_not_skips(tmp_path, 
     one -- every member of a sweep would fail identically. run_simulations must
     propagate FreestandingConfigError and abort (no build), mirroring the
     hetero-indent finite_sheet NoHeteroBuilderError hard-abort test."""
-    from src.core.config_io import write_config
+    from src.core.config import write_config
     from src.run.simulate import FreestandingConfigError, run_simulations
 
     monkeypatch.chdir(REPO_ROOT)

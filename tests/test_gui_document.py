@@ -1051,7 +1051,7 @@ class TestExpansionOutputDirs:
 
         The other two error tests monkeypatch `expand_config_sweeps` to throw,
         which pins the handler but not the chain. This pins the chain: the
-        guard lives in `core.run`, several layers below, and the failure it
+        guard lives in `run.expand`, several layers below, and the failure it
         catches -- `[2D-2]` whose `mat` was updated to `{mat2}` while its
         `cif_path` still says `{mat1}` -- builds a *homostructure* under a
         correctly-named heterostructure directory. It is silent by nature, so

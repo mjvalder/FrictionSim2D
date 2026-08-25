@@ -58,7 +58,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.core.config_io import write_config  # noqa: E402
+from src.core.config import write_config  # noqa: E402
 from src.gui.preview.assemble import (  # noqa: E402
     AssembledSystem, ComponentSlice, assemble,
 )

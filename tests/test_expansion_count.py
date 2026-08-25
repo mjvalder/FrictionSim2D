@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from src.core.config import GeneralConfig, parse_config
-from src.core.config_io import write_config
+from src.core.config import write_config
 from src.run.expand import count_expansion
 from src.run.hpc_dispatch import count_generated_jobs
 from src.run.naming import loopability

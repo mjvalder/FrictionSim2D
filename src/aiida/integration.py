@@ -1391,7 +1391,7 @@ def rebuild_simulation_set(
             generate_hpc_scripts_for_root(simulation_root, defaults)
         except ImportError:
             logger.warning(
-                "generate_hpc_scripts_for_root not available in core.run — skipping HPC script generation"
+                "generate_hpc_scripts_for_root not available in run.hpc_dispatch — skipping HPC script generation"
             )
 
     return created_dirs, simulation_root

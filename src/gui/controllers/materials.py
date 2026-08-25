@@ -2,7 +2,7 @@
 
 The material list is the intersection of the two: a material can be run only
 if both its structure file and its potential file exist. ``preflight_materials``
-in ``src.core.run`` computes exactly this at build time, dropping what it cannot
+in ``src.run.expand`` computes exactly this at build time, dropping what it cannot
 resolve; doing it here means the answer is visible while the sweep is being
 configured rather than after a build has started.
 

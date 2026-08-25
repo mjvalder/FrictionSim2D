@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
-from ...core.config_io import write_config
+from ...core.config import write_config
 from ...run.expand import expand_config_sweeps
 from .staged_paths import absolutize_staged_paths
 from ..preview.assemble import AssembledSystem, assemble
