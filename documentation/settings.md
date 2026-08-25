@@ -101,7 +101,26 @@ output:
     system_init: 10000
     slide: 10000
   results_frequency: 1000
+  channels:
+    window: true
+    raw: true
+    peratom: true
 ```
+
+### `output.channels`
+
+Gates which observable sampling tiers get a `fix ave/time` in the generated
+LAMMPS input. All three default to `true`, preserving previous behaviour.
+
+| channel | what it samples | cost |
+|---|---|---|
+| `window` | time-averaged over `results_frequency` — the COF source, and the only tier postprocessing currently ingests | cheap; leave on |
+| `raw` | instantaneous samples every 100 fs | runtime + disk |
+| `peratom` | per-atom computes, including the neighbour-list-rebuilding `group/group` | the most expensive of the three |
+
+Turning `peratom` off also drops its `group/group` computes, not just the
+output file. Turn `raw` and `peratom` off when you are not analysing them —
+they cost runtime and disk on every run. See `tests/test_output_channels.py`.
 
 ## potential
 

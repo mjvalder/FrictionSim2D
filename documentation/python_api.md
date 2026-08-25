@@ -1,6 +1,11 @@
 # Python API
 
-Driving the package from Python instead of the CLI, using the APIs exposed in `src/__init__.py` and the core modules.
+Driving the package from Python instead of the CLI, using the APIs exposed in
+`src/__init__.py` and the package modules.
+
+> `src/core/` was split into `core/` + `run/` + `potentials/` + `lattice/`. The old
+> `src.core.*` paths still work through deprecation shims, but the canonical paths
+> below are what new code should import. See CLAUDE.md for the full mapping.
 
 ## High-level imports
 
@@ -35,7 +40,7 @@ sheetonsheet(config_file="sheet_config.ini", output_root="./simulation_output")
 ## 3. Use `run_simulations` directly
 
 ```python
-from src.core.run import run_simulations
+from src.run.simulate import run_simulations
 
 created, root, expanded, settings = run_simulations(
     config_file="afm_config.ini",
