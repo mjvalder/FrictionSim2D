@@ -40,7 +40,7 @@ class PESGridMixin:
     Extracted from :class:`PESSheetSimulation` so the same static lateral grid
     can be written over a *heterostructure* bilayer
     (:class:`HeteroPESSheetSimulation`), whose geometry builder
-    (:class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`) differs
+    (:class:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation`) differs
     from the homogeneous one in four places. This is deliberately NOT a
     drop-in: the mixin owns only what the two flavours share (grid resolution,
     the base/refine script variants, the render-and-write loop, the job-name
@@ -287,7 +287,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
 
     A 1+1 stack of two matched materials — the bottom layer frozen, the top
     laterally grid-scanned — assembled by
-    :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation` (Zur-McGill
+    :class:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation` (Zur-McGill
     coincidence match, symmetric strain onto the shared mean cell, real-
     minimization interface spacing) and written as a static scan by
     :class:`PESGridMixin` instead of the dynamic slide.
@@ -328,7 +328,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
     4. **Layer gate.** The dynamic slide needs >= 4 layers (fixed bottom,
        thermostatted middle, driven top across two materials); a static PES
        needs exactly 2 (one per material). ``MIN_LAYERS`` is relaxed HERE only
-       — :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation` keeps
+       — :class:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation` keeps
        its 4-layer gate and its message, so a 1+1 *dynamic* slide is still
        refused.
 

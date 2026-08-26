@@ -50,7 +50,7 @@ DEFAULT_N_STEPS = 100
 #: many-hundred-eV system, quits after 1–2 iterations and buries the sub-nN
 #: pull-off signal in noise. etol=0 forces convergence on an absolute force
 #: tolerance (size-independent), giving a clean force–distance curve — the same
-#: reasoning as the PES scan (see :mod:`src.builders.pes_scan`).
+#: reasoning as the PES scan (see :mod:`src.builders.afm.pes_tip / sheetonsheet.pes_sheet`).
 INDENT_MINIMIZE_COMMAND = "minimize 0.0 1.0e-6 10000 100000"
 
 #: Modulus for deriving per-run velocity seeds (prime; keeps seeds in 1..this).

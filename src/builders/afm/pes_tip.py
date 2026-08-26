@@ -138,10 +138,10 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
     """Tip-on-heterostructure static PES scan (matched interface's repeat unit).
 
     Pure MRO composition, mirroring
-    :class:`~src.builders.hetero_afm.HeteroIndentSimulation`:
+    :class:`~src.builders.afm.hetero.HeteroIndentSimulation`:
     :class:`PESTipSimulation` supplies the run-phase identity (the
     self-contained static-scan ``write_inputs``, ``SPLIT_OUTER_LOOPS``),
-    :class:`~src.builders.hetero_afm.HeteroAFMSimulation` supplies the
+    :class:`~src.builders.afm.hetero.HeteroAFMSimulation` supplies the
     component build (hetero stack -> in-plane replicate, ``sheet_1``/
     ``sheet_2`` potential split). Only the scan-period population and the
     job-name token are added here.

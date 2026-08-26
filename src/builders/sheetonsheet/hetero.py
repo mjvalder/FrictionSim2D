@@ -147,7 +147,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # Assembled-stack state, populated by build() and consumed by
         # write_run_scripts() (the run-phase seam a subclass overrides to write
         # something other than the dynamic slide -- see
-        # :class:`~src.builders.pes_scan.HeteroPESSheetSimulation`).
+        # :class:`~src.builders.sheetonsheet.pes_sheet.HeteroPESSheetSimulation`).
         self._stack = None
         self._layer_bands: List[Dict] = []
         self._hetero_box: Dict[str, float] = {}
@@ -175,7 +175,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         The hetero override of
         :meth:`~src.builders.sheetonsheet.SheetOnSheetSimulation._material_id`
         (same convention as :func:`src.run.naming.material_token` and
-        :meth:`src.builders.hetero_afm.HeteroAFMSimulation._material_id`), so
+        :meth:`src.builders.afm.hetero.HeteroAFMSimulation._material_id`), so
         every job name built from it -- this class's ``friction_<pair>`` and
         the PES variant's ``pes_sheet_<pair>`` -- keys on the full pair rather
         than material 1 alone.
@@ -189,14 +189,14 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         (it subclasses :class:`SimulationBase` directly), so without this
         override it fell back to :meth:`SimulationBase._get_hpc_job_name`'s
         generic ``friction_{sheet 1's material}`` default — the same
-        sheet-1-alone collision :class:`~src.builders.hetero_afm.HeteroAFMSimulation`
+        sheet-1-alone collision :class:`~src.builders.afm.hetero.HeteroAFMSimulation`
         had: two hetero pairs sharing material 1 (or a twist-only single
         material, whose token is just that one material) produced identical
         HPC job identities despite building into distinct output directories
         (already pair-token-safe via Task 1's ``output_dir_for``). Same
         numeric-``[2D-N]``-order ``+``-joined convention as
         :func:`src.run.naming.material_token` /
-        :func:`~src.builders.hetero_afm._pair_material_token`; kept as a
+        :func:`~src.builders.afm.hetero._pair_material_token`; kept as a
         private inline join (in :meth:`_material_id`) rather than importing
         from ``hetero_afm`` since the two builder families are otherwise
         independent.
@@ -375,7 +375,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
         Seam (not inlined in :meth:`build`) because it is a property of the RUN
         PHASE, not of the stack: a static PES scan has no drive at all, so
-        :class:`~src.builders.pes_scan.HeteroPESSheetSimulation` returns False
+        :class:`~src.builders.sheetonsheet.pes_sheet.HeteroPESSheetSimulation` returns False
         and the extra virtual type is never registered — mirroring
         :meth:`PESSheetSimulation._register_drive_atom`'s no-op on the
         homogeneous side, which likewise keeps the type count aligned with the

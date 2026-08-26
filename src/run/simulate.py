@@ -128,7 +128,7 @@ def _select_sheet_builder_cls(model, config_obj):
 
     The same rule applies to the static ``pes_sheet`` scan: a two-material (or
     twisted) bilayer is scanned over the matched interface's coincidence cell
-    by :class:`~src.builders.pes_scan.HeteroPESSheetSimulation`, since the
+    by :class:`~src.builders.sheetonsheet.pes_sheet.HeteroPESSheetSimulation`, since the
     homogeneous scan builder can neither assemble the stack nor group its
     layers (hetero layers share atom types).
     """

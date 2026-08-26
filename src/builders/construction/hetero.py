@@ -288,7 +288,7 @@ def register_hetero_potentials(
             ``provenance/potentials`` -- correct when ``workdir`` IS that
             directory. A builder whose scripts run from a shared simulation
             root passes its own sim-root-relative prefix (see
-            :meth:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation._potentials_prefix`).
+            :meth:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation._potentials_prefix`).
 
     Returns:
         :class:`HeteroPotentials` exposing the configured manager, the written

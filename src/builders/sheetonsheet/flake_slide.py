@@ -98,7 +98,7 @@ class FlakeSlideSimulation(SimulationBase):
     observable). Routed from ``run sheetonsheet`` when a ``[Flake]`` section is
     present.
 
-    Mirrors :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`'s
+    Mirrors :class:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation`'s
     run-dir-relative convention: everything (``flake_slide.data``,
     ``lammps/system.in.settings``, ``provenance/potentials/...``, ``results/...``)
     is written into ``output_dir`` and referenced run-dir-relatively, so LAMMPS

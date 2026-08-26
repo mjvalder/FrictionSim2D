@@ -200,7 +200,7 @@ def _pair_material_token(config) -> str:
     E.g. ``h-MoS2+h-WS2``. Used by :class:`HeteroAFMSimulation._material_id`,
     which :class:`HeteroIndentSimulation` now simply inherits.
 
-    It previously could not: :class:`~src.builders.indent.IndentSimulation`
+    It previously could not: :class:`~src.builders.afm.indent.IndentSimulation`
     carried a ``_material_id`` byte-identical to the one it inherited from
     :class:`~src.builders.afm.AFMSimulation`, and that redundant override sat
     before :class:`HeteroAFMSimulation` in
@@ -266,7 +266,7 @@ class HeteroAFMSimulation(AFMSimulation):
         ``self._hetero_coincidence_cell`` = ``(lx_cell, ly_cell)`` — the
         *unreplicated* matched-interface cell both materials' surface lattices
         were strained onto (before the in-plane tiling below). Exposed for
-        :class:`~src.builders.pes_scan.HeteroPESTipSimulation`, whose static
+        :class:`~src.builders.afm.pes_tip.HeteroPESTipSimulation`, whose static
         scan must repeat over this coincidence cell, not either constituent's
         own unit cell. Raises ``ValueError`` on a triclinic coincidence cell
         (xy tilt != 0) — an orthogonal amorphous box cannot tile it;

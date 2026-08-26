@@ -1,7 +1,7 @@
 """PES-scan descriptor extraction.
 
 Reduces the raw ``results/pes_scan.csv`` energy/force grids produced by the
-static PES scans (:mod:`src.builders.pes_scan`) to a handful of per-material
+static PES scans (:mod:`src.builders.afm.pes_tip / sheetonsheet.pes_sheet`) to a handful of per-material
 scalar descriptors — the corrugation-barrier quantities the friction literature
 relies on (Prandtl–Tomlinson) — and writes:
 

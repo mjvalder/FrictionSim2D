@@ -132,11 +132,11 @@ class AFMSimulation(SimulationBase):
         """Material token used in the HPC job name.
 
         Single-material AFM: the sheet's material name. Overridden by
-        :class:`~src.builders.hetero_afm.HeteroAFMSimulation` (inherited by
-        :class:`~src.builders.hetero_afm.FiniteHeteroAFMSimulation`) to return
+        :class:`~src.builders.afm.hetero.HeteroAFMSimulation` (inherited by
+        :class:`~src.builders.afm.hetero.FiniteHeteroAFMSimulation`) to return
         the numeric-order ``+``-joined pair token instead, so two hetero
         configs sharing material 1 don't collide on HPC job identity (mirrors
-        :meth:`~src.builders.indent.IndentSimulation._material_id`).
+        :meth:`~src.builders.afm.indent.IndentSimulation._material_id`).
 
         Includes :meth:`_flake_id_suffix` so an AFM ``[flake]`` also keys the
         job name -- see that method's docstring for the collision this closes.
@@ -161,9 +161,9 @@ class AFMSimulation(SimulationBase):
         byte-identical to before this method existed.
 
         Shared (not overridden) by every ``_material_id`` in this family --
-        :class:`~src.builders.indent.IndentSimulation` and
-        :class:`~src.builders.hetero_afm.HeteroAFMSimulation`/
-        :class:`~src.builders.hetero_afm.HeteroIndentSimulation` all inherit
+        :class:`~src.builders.afm.indent.IndentSimulation` and
+        :class:`~src.builders.afm.hetero.HeteroAFMSimulation`/
+        :class:`~src.builders.afm.hetero.HeteroIndentSimulation` all inherit
         it unmodified and only append it to their own material token.
         """
         if len(self.config.flake_sheets) == 2:
@@ -196,7 +196,7 @@ class AFMSimulation(SimulationBase):
         plain ``'sheet'`` component name (byte-identical to before this fix);
         only a genuine multi-material stack uses the numbered ``sheet_1``/
         ``sheet_2`` names already used elsewhere (e.g.
-        :class:`~src.builders.hetero_slide.HeteroSheetOnSheetSimulation`'s own
+        :class:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation`'s own
         ``_init_provenance``, the potential registration's component names).
         """
         prov_dir = self.output_dir / 'provenance'
@@ -226,7 +226,7 @@ class AFMSimulation(SimulationBase):
         Rotates the finite flake's atoms about z in the fixed box frame (a
         genuine lattice twist vs the sheet below -- the flake is finite, so any
         angle is legal and no commensurate snapping applies). Shared by
-        :class:`AFMSimulation` and :class:`~src.builders.hetero_afm.HeteroAFMSimulation`.
+        :class:`AFMSimulation` and :class:`~src.builders.afm.hetero.HeteroAFMSimulation`.
         Inert when ``twist_angle is None`` -> the AFM flake path stays
         byte-identical.
         """
