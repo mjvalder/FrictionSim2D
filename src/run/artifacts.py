@@ -98,7 +98,7 @@ def generate_package(config_file: Union[str, Path],
         simulation_root_name: Explicit root directory name. Without it the name
             is a timestamp to the second, so two runs in the same second merge.
         allow_generate_amorphous: False forbids a melt-quench (see
-            :func:`src.builders.components.make_amorphous`).
+            :func:`src.builders.construction.components.make_amorphous`).
         ensure_hpc_settings: Optional callable applied to the HPC settings.
 
     Returns:

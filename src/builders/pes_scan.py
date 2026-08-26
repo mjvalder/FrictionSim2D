@@ -23,7 +23,7 @@ to per-material descriptors.
 
 Both are MRO-composed with the heterostructure builders to give two more
 flavours, each scanning the *matched interface's minimal in-plane repeat unit*
-(:func:`~src.builders.hetero.detect_inplane_repeat`) rather than a single
+(:func:`~src.builders.construction.hetero.detect_inplane_repeat`) rather than a single
 material's own unit cell — and, for the sheet flavour, normalizing the energy
 per repeat unit rather than per assembled box:
 
@@ -155,7 +155,7 @@ class PESGridMixin:
       unit cell, filled by ``components.build_sheet(..., unit_cell_out=...)``
       into ``self.sheet_unit_cell``. Hetero: the matched interface's **minimal
       in-plane repeat unit**, measured off the assembled stack by
-      :func:`~src.builders.hetero.detect_inplane_repeat` — which is generally a
+      :func:`~src.builders.construction.hetero.detect_inplane_repeat` — which is generally a
       SUB-cell of the coincidence cell, because each material is tiled to the
       configured footprint before the match runs.
     * :meth:`_scan_n_cells` — the per-surface-cell energy normalization.
@@ -516,7 +516,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
           i.e. the smallest lateral displacement that returns the tip to an
           equivalent registry. The hetero analogue is the assembled stack's
           MINIMAL in-plane repeat, measured off the *unreplicated* stack by
-          :func:`~src.builders.hetero.detect_inplane_repeat` and filled here by
+          :func:`~src.builders.construction.hetero.detect_inplane_repeat` and filled here by
           overriding :meth:`_build_sheet_for_layers` (which calls ``super()``,
           dispatching to ``HeteroAFMSimulation``'s override) into the same
           ``xlo``/``xhi``/``ylo``/``yhi`` shape ``_cell_period`` expects.
@@ -575,7 +575,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
         registry. The hetero analogue is the assembled stack's minimal in-plane
         repeat, which is generally a SUB-cell of the coincidence cell (see the
         class docstring and
-        :func:`~src.builders.hetero.detect_inplane_repeat`). Detection runs on
+        :func:`~src.builders.construction.hetero.detect_inplane_repeat`). Detection runs on
         the UNREPLICATED stack: in-plane replication cannot change the repeat
         unit, and the unreplicated file is much the smaller of the two.
         """
@@ -616,7 +616,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
        open.
     3. **Scan period.** The interface's MINIMAL in-plane repeat unit, measured
        off the assembled ``hetero.data`` by
-       :func:`~src.builders.hetero.detect_inplane_repeat`, with the energy
+       :func:`~src.builders.construction.hetero.detect_inplane_repeat`, with the energy
        normalized per repeat unit (``n_cells`` = how many tile the box).
 
        The coincidence cell is *not* that repeat unit in general, and on the
@@ -693,7 +693,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
         (near-)identity matrices on cells that are already an n x m tiling of
         their own primitive — leaving the assembled box a superlattice of the
         actual repeat unit. Measured directly off ``hetero.data`` by
-        :func:`~src.builders.hetero.detect_inplane_repeat` (see its docstring
+        :func:`~src.builders.construction.hetero.detect_inplane_repeat` (see its docstring
         for the tolerance and why detection beats the algebraic route), cached
         because the scan writes up to two grid variants.
         """

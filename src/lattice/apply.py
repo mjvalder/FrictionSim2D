@@ -158,7 +158,7 @@ def rotate_layer_to_angle(mono_path: str,
     write re-canonicalises the box to the LAMMPS frame (first vector along +x),
     preserving every LAMMPS type as a distinct placeholder element, the real
     ``Masses`` section, per-atom charges, and the ``atom_style`` -- reusing
-    :func:`~src.builders.hetero.build_matched_supercells`' metadata machinery,
+    :func:`~src.builders.construction.hetero.build_matched_supercells`' metadata machinery,
     so nothing is dropped the way a bare ASE round-trip would.
 
     Note on periodicity: a rigid rotation of a *periodic* cell is a
@@ -167,7 +167,7 @@ def rotate_layer_to_angle(mono_path: str,
     only becomes physically observable **relative to another layer**. The
     twisted heterostructure realises the relative twist by tiling this layer
     with its commensurate moiré supercell matrix into the shared moiré box (see
-    :func:`~src.builders.hetero.build_twisted_supercells`); this function is the
+    :func:`~src.builders.construction.hetero.build_twisted_supercells`); this function is the
     reorientation primitive and the achieved-angle reporter.
 
     Args:

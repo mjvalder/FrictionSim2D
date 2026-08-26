@@ -326,9 +326,9 @@ class HeteroAFMSimulation(AFMSimulation):
         langevin region handling are unchanged), overriding only the substrate: when
         ``sub.amorph == 'c' and sub.match`` the substrate is built by straining its
         surface cell onto the fixed hetero box (``self._hetero_rep_box``) via
-        :func:`~src.builders.components.build_matched_crystalline_substrate`, so it
+        :func:`~src.builders.construction.components.build_matched_crystalline_substrate`, so it
         tiles the periodic cell with no seam. Otherwise the amorphous/unmatched D2
-        path (:func:`~src.builders.components.build_substrate`) is used unchanged.
+        path (:func:`~src.builders.construction.components.build_substrate`) is used unchanged.
 
         ``_build_components`` is fully overridden (not extended) because the base
         builds the substrate inline; Task 5's scope is this file only, so the tip /

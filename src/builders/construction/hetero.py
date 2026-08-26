@@ -48,6 +48,15 @@ by the same rotation, so their on-disk boxes coincide exactly and the relative
 A/B registry survives. Per-atom metadata (charges for ``atom_style charge``)
 round-trips through :func:`_write_supercell` (``specorder`` + ``atom_style``),
 so no ReaxFF charge information is lost.
+
+
+Note this module defines no builder class. It is a structure library --
+five dataclasses and twenty module functions -- consumed by the hetero
+builders (``hetero_afm.py``, ``hetero_slide.py``) and by ``components.py``.
+It lives under ``construction/`` for that reason: it generates geometry,
+it does not set up a simulation. That was a deliberate choice when the
+file was created, to avoid growing components.py further; the directory
+now says so where a reader looks first.
 """
 from __future__ import annotations
 
@@ -158,7 +167,7 @@ class HeteroFlakePotentials:
     ``component_names`` / ``type_ids`` / ``type_offsets``) but the two materials
     are registered as ``flake_1`` / ``flake_2`` with ``regions=[None, 'corner']``
     so every type is split into an interleaved core / corner pair — matching the
-    data file :func:`~src.builders.components.apply_flake_corner_types` writes.
+    data file :func:`~src.builders.construction.components.apply_flake_corner_types` writes.
     It additionally exposes the corner atom-type ids the shape-hold restraint
     (D4 / a hetero-flake AFM) needs, emitted as explicit LAMMPS groups because
     :meth:`PotentialManager.get_component_groups_string` special-cases only the
@@ -267,7 +276,7 @@ def register_hetero_potentials(
             :meth:`PotentialManager.register_component`. The finite/edge path
             passes ``[None, 'edge']`` so every material's types double into an
             interleaved core (odd) / edge (even) pair, matching the layout
-            :func:`~src.builders.components.apply_sheet_edge_types` writes into
+            :func:`~src.builders.construction.components.apply_sheet_edge_types` writes into
             the assembled data file. Edge ids are then exposed via
             ``pm.types.ids_by_component_region('sheet_i', 'edge')``. Default
             ``None`` leaves the periodic registration byte-identical.
@@ -373,7 +382,7 @@ def register_hetero_flake_potentials(
     ``add_cross_interaction`` between the two materials), but registers each
     material as ``flake_{i+1}`` with ``regions=[None, 'corner']`` so every type
     is split into an interleaved core ``2t-1`` / corner ``2t`` pair -- exactly
-    the layout :func:`~src.builders.components.apply_flake_corner_types` writes
+    the layout :func:`~src.builders.construction.components.apply_flake_corner_types` writes
     into the carved bilayer data file, so ``read_data`` types line up with this
     PM.
 
@@ -1603,7 +1612,7 @@ def build_hetero_structure(
     require:
 
     1. **Monolayers.** Build each material's orthogonalized monolayer with the
-       existing :func:`~src.builders.components.build_monolayer` (first return
+       existing :func:`~src.builders.construction.components.build_monolayer` (first return
        value is the data-file path).
     2. **Match (Task 3).** :func:`build_matched_supercells` finds the two
        monolayers' coincidence lattice on their actual in-plane cells, tiles
@@ -1760,10 +1769,10 @@ def _apply_finite_hetero_edges(
     """Edge-type an assembled hetero patch in place and re-register its spine.
 
     Mirrors the homogeneous finite path's replicate-then-edge-type ordering
-    (:func:`~src.builders.components.build_monolayer`): the assembled
+    (:func:`~src.builders.construction.components.build_monolayer`): the assembled
     ``hetero.data`` is retyped so every original type ``t`` splits into an
     interleaved core (``2t-1``) / edge (``2t``) pair via
-    :func:`~src.builders.components.apply_sheet_edge_types` (which keys off the
+    :func:`~src.builders.construction.components.apply_sheet_edge_types` (which keys off the
     atom bounding box, so the edge band is the patch's true perimeter), then the
     potential spine is re-registered with ``regions=[None, 'edge']`` so
     ``system.in.settings`` describes the doubled types. ``stack`` is updated in

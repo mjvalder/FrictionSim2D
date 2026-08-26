@@ -9,7 +9,7 @@ halves do not mean the same thing:
 * **substrate** bands are a *fraction of the substrate thickness* measured *up
   from the bottom* (``f_zlo = fix[0] * thickness``).
 
-See :func:`src.builders.components.apply_langevin_regions`. Nothing stated this
+See :func:`src.builders.construction.components.apply_langevin_regions`. Nothing stated this
 anywhere, so the table states it.
 """
 

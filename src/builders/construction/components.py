@@ -601,9 +601,9 @@ def build_hetero_flake_component(
     The single-material :func:`build_flake_component` sources its flake from one
     monolayer; this hetero variant instead assembles the two ``flake_sheets``
     materials into a stacked bilayer (the SAME proven Phase-B pipeline
-    :func:`~src.builders.hetero.build_hetero_structure` uses —
-    :func:`~src.builders.hetero.build_matched_supercells` +
-    :func:`~src.builders.hetero.assemble_hetero_stack`), then reuses the existing
+    :func:`~src.builders.construction.hetero.build_hetero_structure` uses —
+    :func:`~src.builders.construction.hetero.build_matched_supercells` +
+    :func:`~src.builders.construction.hetero.assemble_hetero_stack`), then reuses the existing
     :func:`build_flake` to carve the outline and :func:`apply_flake_corner_types`
     to split every bilayer type into interleaved core ``2t-1`` / corner ``2t``
     types. The carved flake therefore carries **both** materials' types

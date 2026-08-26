@@ -171,7 +171,7 @@ def run_simulations(
             member failed.
         allow_generate_amorphous: When False, a missing amorphous structure
             raises instead of triggering a melt-quench. See
-            :func:`src.builders.components.make_amorphous`.
+            :func:`src.builders.construction.components.make_amorphous`.
 
     Returns a tuple of (created_simulations, simulation_root, configs_to_run, settings).
     """
