@@ -5,7 +5,7 @@ CIF structures, interatomic potentials, config files, and a
 manifest mapping files to their simulation components (tip, substrate, etc.).
 
 The node is populated from the ``provenance/`` folder created by
-:class:`~src.builders.base.SimulationBase` during simulation setup.
+:class:`~src.builders.simulation_base.SimulationBase` during simulation setup.
 """
 
 import hashlib

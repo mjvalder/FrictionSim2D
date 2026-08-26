@@ -14,7 +14,7 @@ from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN
 from ..construction.hetero import detect_inplane_repeat
-from ..pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
+from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import SheetOnSheetSimulation
 from .hetero import HeteroSheetOnSheetSimulation
 
@@ -91,7 +91,7 @@ class PESGridMixin:
       by the hetero builder, mirroring the Task-3 AFM-family hook.
 
     **State the mixin may touch**: only ``self.config`` (``.pes``,
-    ``.settings.simulation``) and the :class:`~src.builders.base.SimulationBase`
+    ``.settings.simulation``) and the :class:`~src.builders.simulation_base.SimulationBase`
     services ``render_template`` / ``write_file`` / ``output_dir``. It never
     reads ``self.pm``, ``self.sheet_dims``, ``self.structure_paths``,
     ``self.relative_run_dir`` or any hetero stack attribute directly — those

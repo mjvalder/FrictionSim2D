@@ -11,7 +11,7 @@ from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN
 from ..construction.hetero import detect_inplane_repeat
-from ..pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
+from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import AFMSimulation
 from .hetero import HeteroAFMSimulation
 

@@ -27,7 +27,7 @@ ASE_FREE_MODULES = [
     "src.core.config",
     "src.core.utils.paths",
     "src.core.utils.tokens",
-    "src.builders.lammps_data",
+    "src.builders.utils.lammps_data",
     "src.core.__init__",
     "src.interfaces",
     "src.interfaces.ase",   # the adapter itself defers the import into the call

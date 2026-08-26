@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.builders.afm.pes_tip import PESTipSimulation
-from src.builders.pes_common import _cell_period
+from src.builders.utils.pes_common import _cell_period
 from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation, _tile_count
 from src.core.config import (
     AFMSimulationConfig,

@@ -2,7 +2,7 @@
 
 Exports are resolved lazily to keep import-time side effects low and to avoid
 builder/run/hpc circular imports: ``SimulationBase`` now lives in
-``src.builders.base``, and resolving it eagerly here would pull the builders --
+``src.builders.simulation_base``, and resolving it eagerly here would pull the builders --
 and through them ``src.hpc`` -- into every ``import src.core``.
 
 This package holds the shared contracts and vocabulary that everything else
@@ -60,17 +60,17 @@ _EXPORT_MAP = {
     "load_settings": (".config", "load_settings"),
     "parse_config": (".config", "parse_config"),
     "PotentialManager": ("..potentials.manager", "PotentialManager"),
-    "SimulationBase": ("..builders.base", "SimulationBase"),
+    "SimulationBase": ("..builders.simulation_base", "SimulationBase"),
     "cifread": (".utils.structures", "cifread"),
     "count_atomtypes": (".utils.structures", "count_atomtypes"),
     "lj_params": ("..potentials.utils", "lj_params"),
     "get_material_path": (".utils.paths", "get_material_path"),
     "get_potential_path": (".utils.paths", "get_potential_path"),
     "read_config": (".config", "read_config"),
-    "get_model_dimensions": ("..builders.lammps_data", "get_model_dimensions"),
-    "get_num_atom_types": ("..builders.lammps_data", "get_num_atom_types"),
-    "charge2atom": ("..builders.lammps_data", "charge2atom"),
-    "atomic2molecular": ("..builders.lammps_data", "atomic2molecular"),
+    "get_model_dimensions": ("..builders.utils.lammps_data", "get_model_dimensions"),
+    "get_num_atom_types": ("..builders.utils.lammps_data", "get_num_atom_types"),
+    "charge2atom": ("..builders.utils.lammps_data", "charge2atom"),
+    "atomic2molecular": ("..builders.utils.lammps_data", "atomic2molecular"),
     "get_potential_element_order": ("..potentials.utils", "get_potential_element_order"),
     "check_potential_cif_compatibility": ("..potentials.utils", "check_potential_cif_compatibility"),
     "expand_config_sweeps": ("..run.expand", "expand_config_sweeps"),

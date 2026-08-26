@@ -9,10 +9,10 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from ..base import SimulationBase
+from ..simulation_base import SimulationBase
 from ...core.config import AFMSimulationConfig
 from ...potentials.manager import PotentialManager
-from ..lammps_data import get_model_dimensions
+from ..utils.lammps_data import get_model_dimensions
 from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN

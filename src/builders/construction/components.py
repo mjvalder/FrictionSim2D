@@ -32,7 +32,7 @@ from ...core.config import (
     GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig, FlakeConfig
 )
 from ...potentials.manager import PotentialManager
-from ..lammps_data import (
+from ..utils.lammps_data import (
     atomic2charge, charge2atom, get_model_dimensions,
     get_num_atom_types, shift_atoms_to_z_zero,
 )

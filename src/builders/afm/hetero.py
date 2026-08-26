@@ -19,7 +19,7 @@ from src.builders.afm import AFMSimulation
 from src.builders.construction.hetero import build_hetero_structure, register_sheet_block
 from src.builders.afm.indent import IndentSimulation
 from src.potentials.manager import PotentialManager
-from src.builders.lammps_data import get_model_dimensions
+from src.builders.utils.lammps_data import get_model_dimensions
 from src.interfaces.ase import element_mass, read_lammps_data
 
 logger = logging.getLogger(__name__)

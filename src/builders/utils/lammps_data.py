@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from ..core.utils.tokens import _is_int_token  # noqa: PLC2701
+from ...core.utils.tokens import _is_int_token  # noqa: PLC2701
 
 logger = logging.getLogger(__name__)
 
