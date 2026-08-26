@@ -83,11 +83,11 @@ min_style       {{ min_style }}
 # Thermostat: the substrate-sheet interior (layer 2 .. {{ n_layers }}) + the flake.
 group           center union {% for i in range(2, n_layers + 1) %}layer_{{ i }} {% endfor %}flake
 
-velocity        center create {{ temp }} {{ range(1, 999999) | random }}
+velocity        center create {{ temp }} {{ seed_sheet_center }}
 {% if thermostat_type == 'nose-hoover' %}
 fix             nvt_center center nvt temp {{ temp }} {{ temp }} $(100.0*dt)
 {% else %}
-fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ range(1, 999999) | random }} zero yes
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center }} zero yes
 fix             nve_center center nve
 {% endif %}
 

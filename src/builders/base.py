@@ -68,10 +68,18 @@ class SimulationBase(ABC):
     def _run_seed(self, channel: str) -> int:
         """A fresh random seed for one RNG channel, drawn once per build.
 
-        Drawn here rather than in the Jinja template on purpose: a template-side
-        ``| random`` leaves the seed only in the rendered script, so
-        ``provenance.json`` records nothing and a replicate cannot be told apart
-        from a rerun. Every template that takes a seed must be handed one.
+        The seed exists to make runs independent samples of the thermostat
+        ensemble, not to make a run reproducible: a friction result that
+        depends on which seed it drew is a sampling problem, not a provenance
+        one. So this is a consistency mechanism, not a correctness one.
+
+        It is drawn here rather than by a template-side ``| random`` for two
+        practical reasons: one channel gets one seed no matter how many
+        templates read it (``| random`` re-draws per occurrence, so a velocity
+        and a thermostat line in the same script would silently disagree), and
+        the value is available to the builder afterwards -- for a provenance
+        record, or simply to log. Templates that take a seed should be handed
+        one so every family behaves the same way.
         """
         if channel not in self._seeds:
             self._seeds[channel] = random.randint(1, 900_000_000)

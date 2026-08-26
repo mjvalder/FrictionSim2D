@@ -299,6 +299,10 @@ class FlakeSlideSimulation(SimulationBase):
 
         context = {
             "temp": general.temp,
+            # One seed per channel, drawn in the builder like every other
+            # family -- see SimulationBase._run_seed for why, and note a
+            # template-side `| random` re-draws per occurrence.
+            "seed_sheet_center": self._run_seed('sheet_center'),
             "xlo": 0.0,
             "xhi": float(cell[0, 0]),
             "ylo": 0.0,

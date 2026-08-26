@@ -407,6 +407,10 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # and the same SIM-ROOT-RELATIVE paths that builder uses.
         context = {
             "temp": general.temp,
+            # One seed per channel, drawn in the builder like every other
+            # family -- see SimulationBase._run_seed for why, and note a
+            # template-side `| random` re-draws per occurrence.
+            "seed_sheet_center": self._run_seed('sheet_center'),
             "xlo": box["xlo"],
             "xhi": box["xhi"],
             "ylo": box["ylo"],
