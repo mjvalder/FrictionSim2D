@@ -1,6 +1,6 @@
 """Indent-simulation delivery: penetration (hold) + adhesion (retract) in one pass.
 
-Each AFM indentation ("indent") run (:mod:`src.builders.indent`) writes, per
+Each AFM indentation ("indent") run (:mod:`src.builders.afm.indent`) writes, per
 ``(material, layer, load)``, both:
 
     - the 10-column hold file ``results/friction_f<load>_a0_s<speed>_layer<N>.txt``

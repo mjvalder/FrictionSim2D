@@ -9,14 +9,14 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from .base import SimulationBase
-from ..core.config import AFMSimulationConfig
-from ..potentials.manager import PotentialManager
-from .lammps_data import get_model_dimensions
-from ..core.utils.tokens import format_numeric_token
-from ..potentials.utils import normalize_potential_type
-from ..data.models import EV_A_TO_NN
-from .construction import components
+from ..base import SimulationBase
+from ...core.config import AFMSimulationConfig
+from ...potentials.manager import PotentialManager
+from ..lammps_data import get_model_dimensions
+from ...core.utils.tokens import format_numeric_token
+from ...potentials.utils import normalize_potential_type
+from ...data.models import EV_A_TO_NN
+from ..construction import components
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ class AFMSimulation(SimulationBase):
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is None:
             return
-        from ..lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
+        from ...lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
         rotate_flake_in_plane(self.flake_path, float(twist))
         logger.info("Twisted AFM flake by %.3f deg (D3b)", float(twist))
 
@@ -720,7 +720,7 @@ class AFMSimulation(SimulationBase):
         are the guard). Thermostat-work channels are filtered out for
         non-Langevin runs: their f_lang_* references would not exist.
         """
-        from ..core.observables import channels_for, layer_channels
+        from ...core.observables import channels_for, layer_channels
 
         static_layer_names = {f'com{ax}_L{lyr}'
                               for lyr in (1, 2) for ax in ('x', 'y', 'z')}
@@ -791,8 +791,8 @@ class AFMSimulation(SimulationBase):
         configs); provenance records which route was taken.
         """
         from itertools import product
-        from ..core.utils.structures import cifread
-        from ..potentials.utils import lj_params
+        from ...core.utils.structures import cifread
+        from ...potentials.utils import lj_params
 
         lj_cut = getattr(self.config.settings.potential, 'lj_cutoff', 11.0)
         try:
@@ -843,7 +843,7 @@ class AFMSimulation(SimulationBase):
         """
         import hashlib
         import subprocess
-        from ..data.provenance import (ProvenanceRecord, sha256_file,
+        from ...data.provenance import (ProvenanceRecord, sha256_file,
                                        write_provenance)
 
         try:

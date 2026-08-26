@@ -46,8 +46,8 @@ def test_hetero_indent_mro_and_split_outer_loops():
     a wrong SPLIT_OUTER_LOOPS here would silently make the GUI promise a job
     count the build never produces (the exact bug class fixed elsewhere on
     this branch)."""
-    from src.builders.hetero_afm import HeteroAFMSimulation, HeteroIndentSimulation
-    from src.builders.indent import IndentSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
+    from src.builders.afm.indent import IndentSimulation
 
     mro = [c.__name__ for c in HeteroIndentSimulation.__mro__]
     print("HeteroIndentSimulation MRO:", mro)
@@ -63,14 +63,14 @@ def test_hetero_indent_mro_and_split_outer_loops():
 # --- routing ----------------------------------------------------------------
 
 def test_routing_selects_hetero_indent_for_two_materials():
-    from src.builders.hetero_afm import HeteroIndentSimulation
+    from src.builders.afm.hetero import HeteroIndentSimulation
     from src.run.simulate import _select_afm_builder_cls
     cfg = AFMSimulationConfig(**_indent_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("indent", cfg) is HeteroIndentSimulation
 
 
 def test_routing_keeps_homogeneous_indent_for_single_material():
-    from src.builders.indent import IndentSimulation
+    from src.builders.afm.indent import IndentSimulation
     from src.run.simulate import _select_afm_builder_cls
     raw = _indent_hetero_raw()
     del raw["2D-2"]
@@ -139,8 +139,8 @@ def test_hetero_indent_build_produces_scripts_data_and_pair_token(tmp_path):
     MRO composition actually builds, not just imports. The job name,
     derive_seed input and indent_meta.json must all carry the pair token
     'h-MoS2+h-WS2', not just sheet 1's material."""
-    from src.builders.hetero_afm import HeteroIndentSimulation
-    from src.builders.indent import derive_seed
+    from src.builders.afm.hetero import HeteroIndentSimulation
+    from src.builders.afm.indent import derive_seed
 
     cfg = AFMSimulationConfig(**_indent_hetero_raw(), settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]   # HPC script gen needs a non-empty module list

@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ..builders.afm import AFMSimulation
-from ..builders.afm_freestanding import FreestandingPESTipSimulation
-from ..builders.hetero_slide import HeteroSheetOnSheetSimulation
-from ..builders.indent import IndentSimulation
-from ..builders.pes_scan import PESSheetSimulation, PESTipSimulation
+from ..builders.afm.freestanding import FreestandingPESTipSimulation
+from ..builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+from ..builders.afm.indent import IndentSimulation
+from ..builders.afm.pes_tip import PESTipSimulation
+from ..builders.sheetonsheet.pes_sheet import PESSheetSimulation
 from ..builders.sheetonsheet import SheetOnSheetSimulation
 from ..core.config import (
     AFMSimulationConfig,
@@ -96,7 +97,7 @@ def _select_afm_builder_cls(model, config_obj):
     # cell rather than either material's own unit cell).
     if is_hetero:
         if model == 'indent':
-            from src.builders.hetero_afm import HeteroIndentSimulation
+            from src.builders.afm.hetero import HeteroIndentSimulation
             if getattr(config_obj.general, 'finite_sheet', False):
                 raise NoHeteroBuilderError(
                     "finite_sheet hetero indent is not supported: only the "
@@ -107,12 +108,12 @@ def _select_afm_builder_cls(model, config_obj):
                 )
             return HeteroIndentSimulation
         if model == 'afm':
-            from src.builders.hetero_afm import HeteroAFMSimulation, FiniteHeteroAFMSimulation
+            from src.builders.afm.hetero import HeteroAFMSimulation, FiniteHeteroAFMSimulation
             if getattr(config_obj.general, 'finite_sheet', False):
                 return FiniteHeteroAFMSimulation
             return HeteroAFMSimulation
         if model == 'pes_tip':
-            from src.builders.pes_scan import HeteroPESTipSimulation
+            from src.builders.afm.pes_tip import HeteroPESTipSimulation
             return HeteroPESTipSimulation
     return default_cls
 
@@ -137,13 +138,13 @@ def _select_sheet_builder_cls(model, config_obj):
 
     if model == 'pes_sheet':
         if is_hetero:
-            from src.builders.pes_scan import HeteroPESSheetSimulation
+            from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
             return HeteroPESSheetSimulation
         return PESSheetSimulation
     # A [Flake] section switches sheet-on-sheet to the D4 flake-driven slide,
     # regardless of the substrate being homogeneous or hetero (precedence).
     if model == 'sheetonsheet' and getattr(config_obj, 'flake', None) is not None:
-        from src.builders.flake_slide import FlakeSlideSimulation
+        from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
         return FlakeSlideSimulation
     if is_hetero:
         return HeteroSheetOnSheetSimulation

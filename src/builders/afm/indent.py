@@ -30,9 +30,9 @@ import logging
 import random
 from typing import Dict, List, Optional
 
-from ..core.config import AFMSimulationConfig
-from ..data.models import EV_A_TO_NN
-from .afm import AFMSimulation
+from ...core.config import AFMSimulationConfig
+from ...data.models import EV_A_TO_NN
+from .base import AFMSimulation
 
 logger = logging.getLogger(__name__)
 

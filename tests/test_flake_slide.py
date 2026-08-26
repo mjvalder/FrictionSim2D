@@ -97,7 +97,7 @@ def _minimal_flake_slide_context():
 
 
 def test_flake_slide_drives_flake_group_not_layer():
-    from src.builders.flake_slide import render_flake_slide
+    from src.builders.sheetonsheet.flake_slide import render_flake_slide
 
     ctx = _minimal_flake_slide_context()
     ctx["drive_method"] = "virtual_atom"
@@ -121,7 +121,7 @@ def test_flake_slide_drives_flake_group_not_layer():
 
 
 def test_flake_slide_defines_sheet_layer_groups_and_flake_group():
-    from src.builders.flake_slide import render_flake_slide
+    from src.builders.sheetonsheet.flake_slide import render_flake_slide
 
     ctx = _minimal_flake_slide_context()
     script = render_flake_slide(ctx)
@@ -141,7 +141,7 @@ def test_flake_slide_defines_sheet_layer_groups_and_flake_group():
 
 
 def test_flake_slide_corner_hold_can_be_disabled():
-    from src.builders.flake_slide import render_flake_slide
+    from src.builders.sheetonsheet.flake_slide import render_flake_slide
 
     ctx = _minimal_flake_slide_context()
     ctx["corner_hold"] = False
@@ -179,7 +179,7 @@ def _flake_on_sheet_cfg(hetero_flake: bool = False):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.settings.simulation.drive_method = "virtual_atom"
@@ -196,7 +196,7 @@ def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_driven_group_is_flake_and_virtual_type_reserved(tmp_path):
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.settings.simulation.drive_method = "virtual_atom"
@@ -247,7 +247,7 @@ def _single_material_cfg():
 
 def test_routing_flake_section_selects_flake_slide():
     from src.run.simulate import _select_sheet_builder_cls
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     assert cfg.flake is not None
@@ -265,7 +265,7 @@ def test_routing_no_flake_unchanged():
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_builder_requires_multilayer_substrate(tmp_path):
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.sheet.layers = [1]          # single-layer substrate -> no fixed bottom + interior
@@ -309,7 +309,7 @@ def test_output_dir_differs_when_only_flake_material_differs():
 
 
 def test_hpc_job_name_differs_when_only_flake_material_differs(tmp_path):
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg_a = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-MoS2"), settings=_settings())
     cfg_b = SheetOnSheetSimulationConfig(**_flake_slide_raw(flake_mat="h-WS2"), settings=_settings())
@@ -341,7 +341,7 @@ def test_output_dir_byte_identical_when_flake_reuses_substrate_material(tmp_path
 
     assert output_dir_for(no_flake, "sheetonsheet") == output_dir_for(reused_flake, "sheetonsheet")
 
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)  # omits flake.mat -> reuses [2D]'s
     sim = FlakeSlideSimulation(cfg, str(tmp_path))
     assert sim._get_hpc_job_name() == f"flake_{cfg.sheet.mat}"
@@ -374,7 +374,7 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
     baked reserved virtual type, a live flake drive (the flake COM translates),
     no lost atoms and complete pair coeffs.
     """
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.settings.simulation.drive_method = "virtual_atom"
@@ -436,7 +436,7 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
 def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
     # [Flake] + twist must go to the FLAKE builder (D3b), not the D3 periodic hetero builder.
     from src.run.simulate import _select_sheet_builder_cls
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 12.0
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is FlakeSlideSimulation
@@ -445,7 +445,7 @@ def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_flake_slide_twist_rotates_the_flake(tmp_path):
     from ase.io import read
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from tests.test_lattice_apply import _flake_lattice_orientation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 20.0
@@ -463,7 +463,7 @@ def test_flake_slide_twist_rotates_the_flake(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_flake_slide_twisted_runs_and_holds(tmp_path):
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 20.0
     cfg.settings.simulation.slide_run_steps = 4000
@@ -487,7 +487,7 @@ def test_flake_slide_twisted_runs_and_holds(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_hetero_flake_slide_twist_rotates(tmp_path):
     from ase.io import read
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from tests.test_lattice_apply import _flake_lattice_orientation
     cfg = _flake_on_sheet_cfg(hetero_flake=True)      # MoS2/WS2 hetero flake
     cfg.sheet.x = cfg.sheet.y = 30.0                  # room for the ~16 A hetero flake footprint
@@ -505,7 +505,7 @@ def test_hetero_flake_slide_twist_rotates(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_twist_angle_applied_recorded_in_manifest(tmp_path):
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False); cfg.general.twist_angle = 17.5
     sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
     manifest = next(Path(tmp_path).rglob("*manifest*"))
@@ -528,7 +528,7 @@ def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
     has to be re-registered once assembly is done (build step 4b). Mirrors
     test_hetero_slide's equivalent.
     """
-    from src.builders.flake_slide import FlakeSlideSimulation
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     from src.run.hpc_dispatch import generate_hpc_scripts_for_root
 
     root = tmp_path / "simulation_root"

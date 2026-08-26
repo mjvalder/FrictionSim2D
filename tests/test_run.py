@@ -106,21 +106,21 @@ class TestRoutingViewMatchesTheModel:
         }
 
     def test_a_false_string_is_not_a_finite_sheet(self):
-        from src.builders.hetero_afm import HeteroAFMSimulation
+        from src.builders.afm.hetero import HeteroAFMSimulation
         from src.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw('false'), 'afm') is HeteroAFMSimulation
 
     def test_a_true_string_still_routes_to_the_finite_builder(self):
-        from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+        from src.builders.afm.hetero import FiniteHeteroAFMSimulation
         from src.run.expand import _builder_cls_for_count
 
         assert _builder_cls_for_count(
             self._hetero_afm_raw('true'), 'afm') is FiniteHeteroAFMSimulation
 
     def test_a_real_bool_is_unaffected(self):
-        from src.builders.hetero_afm import (
+        from src.builders.afm.hetero import (
             FiniteHeteroAFMSimulation, HeteroAFMSimulation,
         )
         from src.run.expand import _builder_cls_for_count
@@ -822,8 +822,8 @@ def test_run_simulations_raises_for_missing_config_file(tmp_path: Path) -> None:
 
 def test_pes_tip_no_substrate_selects_freestanding_builder():
     from src.run.simulate import _select_afm_builder_cls
-    from src.builders.afm_freestanding import FreestandingPESTipSimulation
-    from src.builders.pes_scan import PESTipSimulation
+    from src.builders.afm.freestanding import FreestandingPESTipSimulation
+    from src.builders.afm.pes_tip import PESTipSimulation
 
     class _Cfg:  # minimal stand-in with the only attribute the selector reads
         sub = None

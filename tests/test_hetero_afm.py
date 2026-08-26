@@ -58,7 +58,7 @@ def test_afm_config_single_sheet_is_homogeneous():
 # --- Task 2: in-plane replication helpers ---
 
 def test_replication_factor_meets_two_diameter_rule():
-    from src.builders.hetero_afm import compute_replication_factors
+    from src.builders.afm.hetero import compute_replication_factors
     # footprint must be >= 4*r in each direction, min 1
     assert compute_replication_factors(lx=19.0, ly=22.0, tip_r=10.0) == (
         max(1, math.ceil(40.0 / 19.0)), max(1, math.ceil(40.0 / 22.0)))   # (3, 2)
@@ -71,7 +71,7 @@ def test_replication_factor_meets_two_diameter_rule():
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_replicated_data_has_no_pair_coeffs(tmp_path):
     from src.builders.construction.hetero import build_hetero_structure
-    from src.builders.hetero_afm import replicate_hetero_in_plane
+    from src.builders.afm.hetero import replicate_hetero_in_plane
     from src.core.config import SheetOnSheetSimulationConfig
     raw = {
         "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
@@ -93,7 +93,7 @@ def test_replicated_data_has_no_pair_coeffs(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_build_replicates_and_orthogonal(tmp_path):
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     sim._build_hetero_sheet(build_dir=Path(tmp_path) / "build")   # structure-only entry
@@ -104,7 +104,7 @@ def test_hetero_afm_build_replicates_and_orthogonal(tmp_path):
 
 
 def test_hetero_afm_rejects_triclinic_cell(tmp_path, monkeypatch):
-    from src.builders import hetero_afm as ha
+    from src.builders.afm import hetero as ha
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = ha.HeteroAFMSimulation(cfg, str(tmp_path))
 
@@ -137,7 +137,7 @@ def _prep_layer_dirs(sim, n):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_potentials_layout_and_2D_group(tmp_path):
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     build_dir = Path(tmp_path) / "build"
@@ -169,7 +169,7 @@ def test_hetero_afm_potentials_layout_and_2D_group(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_system_init_references_replicated_stack(tmp_path):
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]           # HPC script gen needs a non-empty module list
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
@@ -190,7 +190,7 @@ def test_hetero_afm_job_name_differs_by_full_pair():
     material 2 must NOT produce the same HPC job name -- confirmed by
     construction (build both configs, compare _get_hpc_job_name()) per the
     review that found afm_h-MoS2 was emitted for both."""
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     raw_a = _afm_hetero_raw()
     raw_b = _afm_hetero_raw()
     raw_b["2D-2"]["mat"] = "h-WSe2"
@@ -209,7 +209,7 @@ def test_finite_hetero_afm_job_name_also_uses_full_pair():
     """FiniteHeteroAFMSimulation doesn't override _get_hpc_job_name -- it must
     inherit the fixed HeteroAFMSimulation._material_id, not AFMSimulation's
     single-sheet default."""
-    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     sim = FiniteHeteroAFMSimulation(cfg, "out")
     assert sim._get_hpc_job_name() == "afm_h-MoS2+h-WS2"
@@ -219,7 +219,7 @@ def test_finite_hetero_afm_job_name_also_uses_full_pair():
 
 def test_routing_selects_hetero_afm_for_two_materials():
     from src.run.simulate import _select_afm_builder_cls
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is HeteroAFMSimulation
 
@@ -282,7 +282,7 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
     templates (reused unchanged); ``slide_run_steps`` only shortens the already
     trivial (~0.3 s) slide phase.
     """
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["general"]["force"] = 10.0          # single deployable load -> one ramp
     raw["general"]["temp"] = 1.0            # so the indent convergence loop settles
@@ -340,7 +340,7 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_uses_crystalline_matched_substrate(tmp_path):
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["sub"]["amorph"] = "c"
     raw["sub"]["match"] = True
@@ -380,7 +380,7 @@ def test_hetero_afm_crystalline_runs_no_seam(tmp_path):
     30-min+ timeout was observed). Keeping the match strain low is what makes this
     end-to-end smoke both stable and reasonably fast.
     """
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     raw = _afm_hetero_raw()
     raw["sub"]["amorph"] = "c"
     raw["sub"]["match"] = True
@@ -471,7 +471,7 @@ def _write_data_with_masses(path, masses):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_finite_hetero_afm_builds_edge_typed_centered_patch(tmp_path):
     from ase.io import read
-    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
     cfg.settings.hpc.modules = ["lammps"]
@@ -490,7 +490,7 @@ def test_finite_hetero_layout_guard_covers_the_region_split(tmp_path):
     # future-works §2: with regions=[None,'edge'] the type count doubles but a
     # COUNT-only assert cannot catch an ordering divergence. Prove the
     # single-sourced numbering + the element-wise guard cover the region-split path.
-    from src.builders.hetero_afm import FiniteHeteroAFMSimulation, assert_sheet_block_matches_data
+    from src.builders.afm.hetero import FiniteHeteroAFMSimulation, assert_sheet_block_matches_data
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
     cfg.settings.hpc.modules = ["lammps"]
@@ -506,7 +506,7 @@ def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
     # NEGATIVE: a data file whose sheet block is a PERMUTATION of the PM's block at
     # equal count (the silent-corruption mode). The guard MUST raise; a count check
     # would not.
-    from src.builders.hetero_afm import assert_sheet_block_matches_data
+    from src.builders.afm.hetero import assert_sheet_block_matches_data
     pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
                                     ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
     data = _write_data_with_masses(
@@ -521,7 +521,7 @@ def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_finite_hetero_afm_renders_edge_fix(tmp_path):
-    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     cfg.settings.geometry.finite_sheet_afm_edge_mode = "spring"
     cfg.settings.hpc.modules = ["lammps"]
@@ -545,14 +545,14 @@ def test_finite_hetero_afm_renders_edge_fix(tmp_path):
 
 def test_routing_finite_hetero_selects_finite_builder():
     from src.run.simulate import _select_afm_builder_cls
-    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
     cfg = AFMSimulationConfig(**_finite_hetero_afm_raw(), settings=load_settings())
     assert _select_afm_builder_cls("afm", cfg) is FiniteHeteroAFMSimulation
 
 
 def test_routing_periodic_hetero_still_selects_d2():
     from src.run.simulate import _select_afm_builder_cls
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     raw = _finite_hetero_afm_raw()
     raw["general"]["finite_sheet"] = False
     del raw["sub"]["x"]
@@ -592,7 +592,7 @@ def test_finite_hetero_afm_runs_with_edge_tether(tmp_path):
     Runtime ~140 s (dominated by ``system.in``'s hardcoded equilibration + load ramp +
     settling); ``slide_run_steps`` only shortens the trivial slide phase.
     """
-    from src.builders.hetero_afm import FiniteHeteroAFMSimulation
+    from src.builders.afm.hetero import FiniteHeteroAFMSimulation
     raw = _finite_hetero_afm_raw()
     raw["general"]["force"] = 30.0        # firm press -> pins the free z drum-mode
     raw["general"]["temp"] = 1.0
@@ -725,7 +725,7 @@ def test_hetero_afm_init_provenance_records_both_sheets(tmp_path):
     build, sheet 2's cif/potential files were silently never copied into
     provenance/. HeteroAFMSimulation inherits _init_provenance unmodified, so
     this proves the fix from the hetero AFM builder (the affected path)."""
-    from src.builders.hetero_afm import HeteroAFMSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
     cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
     sim = HeteroAFMSimulation(cfg, str(tmp_path))
     sim._init_provenance()

@@ -105,7 +105,7 @@ def test_afm_builder_structure(afm_config, mock_atomsk, temp_dir):
     """AFM builder orchestrates component generation for one-layer config."""
     with patch("src.builders.components.build_tip", return_value=(Path("tip.lmp"), 10.0)), \
          patch("src.builders.components.build_substrate", return_value=Path("sub.lmp")), \
-            patch("src.builders.afm.get_model_dimensions", return_value={'xlo': 0.0, 'xhi': 10.0, 'ylo': 0.0, 'yhi': 10.0, 'zlo': -5.0, 'zhi': 0.0}), \
+            patch("src.builders.afm.base.get_model_dimensions", return_value={'xlo': 0.0, 'xhi': 10.0, 'ylo': 0.0, 'yhi': 10.0, 'zlo': -5.0, 'zhi': 0.0}), \
          patch("src.builders.components.build_sheet", return_value=(Path("sheet.lmp"), {'xlo': 0, 'xhi': 10, 'ylo': 0, 'yhi': 10, 'zlo': 0, 'zhi': 10}, 3.0)), \
             patch("src.builders.components.apply_langevin_regions"), \
          patch("src.builders.afm.AFMSimulation._init_provenance"), \

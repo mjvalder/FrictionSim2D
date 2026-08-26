@@ -621,7 +621,7 @@ class IndentConfig(BaseModel):
     """AFM indentation ("indent") parameters — damped hold + pull-off retract.
 
     An indent run does the standard AFM build + indentation ramp (``system.in``)
-    to each normal load in ``[general] force``, then (see :mod:`src.builders.indent`,
+    to each normal load in ``[general] force``, then (see :mod:`src.builders.afm.indent`,
     ``POKE_SIM_RECIPE.md``) runs one hold+retract per load without ever sliding:
 
         1. holds the (rigid, laterally-fixed) tip at the target load for a short

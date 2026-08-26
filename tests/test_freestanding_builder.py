@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.afm_freestanding import FreestandingPESTipSimulation
+from src.builders.afm.freestanding import FreestandingPESTipSimulation
 from src.core.config import AFMSimulationConfig, load_settings
 
 

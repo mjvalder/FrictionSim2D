@@ -13,8 +13,8 @@ indent job after material 1 alone.
 import pytest
 
 from src.builders.afm import AFMSimulation
-from src.builders.hetero_afm import HeteroAFMSimulation, HeteroIndentSimulation
-from src.builders.indent import IndentSimulation
+from src.builders.afm.hetero import HeteroAFMSimulation, HeteroIndentSimulation
+from src.builders.afm.indent import IndentSimulation
 
 
 def _owner(cls, name):

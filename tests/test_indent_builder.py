@@ -3,7 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.builders.indent import (
+from src.builders.afm.indent import (
     DEFAULT_HOLD_STEPS,
     DEFAULT_N_STEPS,
     DEFAULT_Z_STEP,

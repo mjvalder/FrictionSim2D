@@ -150,7 +150,7 @@ def flake_material_token(run_dict: Dict[str, Any], model: Optional[str] = None) 
     section, or ``None`` when the flake doesn't change the built system's
     material identity.
 
-    A flake config -- :class:`~src.builders.flake_slide.FlakeSlideSimulation`
+    A flake config -- :class:`~src.builders.sheetonsheet.flake_slide.FlakeSlideSimulation`
     (routed from ``run sheetonsheet`` by a ``[Flake]`` section) or an AFM
     ``[flake]`` (the finite shaped flake between tip and sheet, built by
     :class:`~src.builders.afm.AFMSimulation`) -- was named off the substrate
@@ -173,7 +173,7 @@ def flake_material_token(run_dict: Dict[str, Any], model: Optional[str] = None) 
     A single flake section may omit ``mat`` entirely for the sheet-on-sheet
     family, in which case the builder reuses the substrate ``[2D]``'s
     material
-    (:meth:`~src.builders.flake_slide.FlakeSlideSimulation._filled_flake_config`).
+    (:meth:`~src.builders.sheetonsheet.flake_slide.FlakeSlideSimulation._filled_flake_config`).
     That's the common case there, and it must keep building into today's
     directory (no flake section at all), so it contributes nothing here. AFM's
     own ``[flake]`` has no such substrate fallback (its builder always needs

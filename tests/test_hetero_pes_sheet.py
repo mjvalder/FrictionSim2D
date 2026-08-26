@@ -89,8 +89,8 @@ def test_hetero_pes_sheet_mro_and_split_outer_loops():
     prediction (``src.run.expand._run_scripts_per_build``) promise scripts the
     build never writes.
     """
-    from src.builders.hetero_slide import HeteroSheetOnSheetSimulation
-    from src.builders.pes_scan import (
+    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import (
         HeteroPESSheetSimulation,
         PESGridMixin,
         PESSheetSimulation,
@@ -129,14 +129,14 @@ def test_hetero_pes_sheet_run_script_count_is_one_per_build():
 # --- routing -----------------------------------------------------------------
 
 def test_routing_selects_hetero_pes_sheet_for_two_materials():
-    from src.builders.pes_scan import HeteroPESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     from src.run.simulate import _select_sheet_builder_cls
     cfg = _hetero_pes_config()
     assert _select_sheet_builder_cls("pes_sheet", cfg) is HeteroPESSheetSimulation
 
 
 def test_routing_selects_hetero_pes_sheet_for_single_material_twist():
-    from src.builders.pes_scan import HeteroPESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     from src.run.simulate import _select_sheet_builder_cls
     cfg = _twist_pes_config()
     assert len(cfg.sheets) == 1 and cfg.general.twist_angle is not None
@@ -144,7 +144,7 @@ def test_routing_selects_hetero_pes_sheet_for_single_material_twist():
 
 
 def test_routing_keeps_homogeneous_pes_sheet_for_single_material():
-    from src.builders.pes_scan import PESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
     from src.run.simulate import _select_sheet_builder_cls
     cfg = _single_material_pes_config()
     assert _select_sheet_builder_cls("pes_sheet", cfg) is PESSheetSimulation
@@ -152,7 +152,7 @@ def test_routing_keeps_homogeneous_pes_sheet_for_single_material():
 
 def test_routing_hetero_slide_unchanged_for_sheetonsheet():
     """The dynamic model must keep routing to the plain hetero slide builder."""
-    from src.builders.hetero_slide import HeteroSheetOnSheetSimulation
+    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
     from src.run.simulate import _select_sheet_builder_cls
     cfg = _hetero_pes_config(layers=(2, 2))
     assert _select_sheet_builder_cls("sheetonsheet", cfg) is HeteroSheetOnSheetSimulation
@@ -161,7 +161,7 @@ def test_routing_hetero_slide_unchanged_for_sheetonsheet():
 # --- layer gate ---------------------------------------------------------------
 
 def test_hetero_pes_sheet_min_layers_relaxed_to_two():
-    from src.builders.pes_scan import HeteroPESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     assert HeteroPESSheetSimulation.MIN_LAYERS == 2
 
 
@@ -170,7 +170,7 @@ def test_dynamic_hetero_slide_keeps_four_layer_gate(tmp_path):
     slide: a 1+1 dynamic hetero slide is physically meaningless (no fixed
     bottom + thermostatted middle + driven top) and must still be refused with
     the existing message."""
-    from src.builders.hetero_slide import HeteroSheetOnSheetSimulation
+    from src.builders.sheetonsheet.hetero import HeteroSheetOnSheetSimulation
     assert HeteroSheetOnSheetSimulation.MIN_LAYERS == 4
     sim = HeteroSheetOnSheetSimulation(_hetero_pes_config(), str(tmp_path))
     with pytest.raises(ValueError, match=r"[Aa]t least 4"):
@@ -179,7 +179,7 @@ def test_dynamic_hetero_slide_keeps_four_layer_gate(tmp_path):
 
 def test_hetero_pes_sheet_rejects_non_bilayer(tmp_path):
     """More than one layer per material is not a PES bilayer."""
-    from src.builders.pes_scan import HeteroPESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
     sim = HeteroPESSheetSimulation(_hetero_pes_config(layers=(2, 2)), str(tmp_path))
     with pytest.raises(ValueError, match="exactly 2 layers"):
         sim.build()
@@ -189,7 +189,7 @@ def test_hetero_pes_sheet_rejects_non_bilayer(tmp_path):
 
 def test_hetero_pes_sheet_job_name_carries_pair_token():
     """Two pairs sharing material 1 must not collide on the HPC job name."""
-    from src.builders.pes_scan import HeteroPESSheetSimulation, PESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation, PESSheetSimulation
 
     raw_b = _hetero_pes_raw()
     raw_b["2D-2"]["mat"] = "h-WSe2"
@@ -220,7 +220,7 @@ def test_hetero_pes_sheet_build_emits_scan_over_interface_repeat(tmp_path):
     3. layer groups come from z-band regions (hetero layers share atom types);
     4. the scan period is the matched interface's COINCIDENCE cell.
     """
-    from src.builders.pes_scan import HeteroPESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
 
     cfg = _hetero_pes_config()
     sim = HeteroPESSheetSimulation(cfg, str(tmp_path))
@@ -325,7 +325,7 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     """
     import subprocess
 
-    from src.builders.pes_scan import HeteroPESSheetSimulation
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
 
     raw = _hetero_pes_raw(grid_n=3)
     # The matched supercell must exceed the hetero cross-LJ cutoff

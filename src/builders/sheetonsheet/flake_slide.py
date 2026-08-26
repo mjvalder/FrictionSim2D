@@ -18,14 +18,14 @@ from typing import Dict, List, Optional
 import numpy as np
 from jinja2 import Environment
 
-from ..core.config import SheetOnSheetSimulationConfig
-from ..potentials.manager import PotentialManager
-from .base import SimulationBase
-from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
-from ..interfaces.jinja import PackageLoader
-from .construction import components
-from .construction.hetero import _box_region_cmd, _detect_atom_style, _run_lammps
-from ..interfaces.ase import read_lammps_data
+from ...core.config import SheetOnSheetSimulationConfig
+from ...potentials.manager import PotentialManager
+from ..base import SimulationBase
+from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
+from ...interfaces.jinja import PackageLoader
+from ..construction import components
+from ..construction.hetero import _box_region_cmd, _detect_atom_style, _run_lammps
+from ...interfaces.ase import read_lammps_data
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +211,7 @@ class FlakeSlideSimulation(SimulationBase):
         #     None -> the D4 flake path stays byte-identical.
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is not None:
-            from ..lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
+            from ...lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
             rotate_flake_in_plane(flake_path, float(twist))   # in-place twist, box unchanged
             self._record_twist_manifest(float(twist))
             logger.info("Twisted flake by %.3f deg (D3b incommensurate)", float(twist))

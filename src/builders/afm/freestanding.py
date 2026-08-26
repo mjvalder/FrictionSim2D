@@ -10,8 +10,9 @@ substrate-optional path in :class:`~src.builders.afm.AFMSimulation`.
 
 import logging
 
-from ..data.models import EV_A_TO_NN
-from .pes_scan import PESTipSimulation, PES_TIP_CONTACT_GAP, PES_MINIMIZE_COMMAND, _cell_period
+from ...data.models import EV_A_TO_NN
+from ..pes_common import PES_MINIMIZE_COMMAND, _cell_period
+from .pes_tip import PESTipSimulation, PES_TIP_CONTACT_GAP
 
 logger = logging.getLogger(__name__)
 

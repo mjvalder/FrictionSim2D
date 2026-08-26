@@ -44,8 +44,8 @@ def test_hetero_pes_tip_mro_and_split_outer_loops():
     static scan never reads outer_loop). A wrong SPLIT_OUTER_LOOPS would
     silently make the GUI promise a job count the build never produces (the
     exact bug class fixed elsewhere on this branch)."""
-    from src.builders.hetero_afm import HeteroAFMSimulation
-    from src.builders.pes_scan import HeteroPESTipSimulation, PESTipSimulation
+    from src.builders.afm.hetero import HeteroAFMSimulation
+    from src.builders.afm.pes_tip import HeteroPESTipSimulation, PESTipSimulation
 
     mro = [c.__name__ for c in HeteroPESTipSimulation.__mro__]
     print("HeteroPESTipSimulation MRO:", mro)
@@ -58,14 +58,14 @@ def test_hetero_pes_tip_mro_and_split_outer_loops():
 # --- routing ------------------------------------------------------------------
 
 def test_routing_selects_hetero_pes_tip_for_two_materials_with_substrate():
-    from src.builders.pes_scan import HeteroPESTipSimulation
+    from src.builders.afm.pes_tip import HeteroPESTipSimulation
     from src.run.simulate import _select_afm_builder_cls
     cfg = AFMSimulationConfig(**_pes_tip_hetero_raw(), settings=load_settings())
     assert _select_afm_builder_cls("pes_tip", cfg) is HeteroPESTipSimulation
 
 
 def test_routing_keeps_homogeneous_pes_tip_for_single_material():
-    from src.builders.pes_scan import PESTipSimulation
+    from src.builders.afm.pes_tip import PESTipSimulation
     from src.run.simulate import _select_afm_builder_cls
     raw = _pes_tip_hetero_raw()
     del raw["2D-2"]
@@ -119,7 +119,7 @@ def test_hetero_pes_tip_build_scan_period_is_interface_repeat(tmp_path):
     4x2 superlattice of it for this pair. Also checks the job name carries the
     pair token, not sheet 1's material alone."""
     from src.builders import components
-    from src.builders.pes_scan import HeteroPESTipSimulation
+    from src.builders.afm.pes_tip import HeteroPESTipSimulation
 
     cfg = AFMSimulationConfig(**_pes_tip_hetero_raw(), settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]   # HPC script gen needs a non-empty module list

@@ -4,12 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.pes_scan import (
-    PESSheetSimulation,
-    PESTipSimulation,
-    _cell_period,
-    _tile_count,
-)
+from src.builders.afm.pes_tip import PESTipSimulation
+from src.builders.pes_common import _cell_period
+from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation, _tile_count
 from src.core.config import (
     AFMSimulationConfig,
     SheetOnSheetSimulationConfig,
@@ -135,7 +132,7 @@ def test_pes_sheet_write_inputs_renders_scan(tmp_path: Path):
 
 def test_pes_tip_uses_fixed_contact_gap():
     """Tip scan is a fixed firm-contact scan (no repulsive-load setpoint)."""
-    from src.builders.pes_scan import PES_TIP_CONTACT_GAP
+    from src.builders.afm.pes_tip import PES_TIP_CONTACT_GAP
     assert PES_TIP_CONTACT_GAP > 0
 
 
