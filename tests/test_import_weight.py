@@ -2,8 +2,8 @@
 
 ``ase.io`` costs roughly 270 ms -- more than the entire rest of a
 ``src.core.config`` import. ``core/utils`` is split by job so that only
-structure-reading code pays it: ``paths``, ``tokens`` and ``lammps_data`` are
-cheap, ``structures`` is not.
+structure-reading code pays it: ``paths`` and ``tokens`` are cheap, and so is
+``builders/lammps_data.py``; ``structures`` is not.
 
 That split is easy to undo by accident. Adding a convenience re-export to
 ``src/core/utils/__init__.py``, or registering ``src.interfaces.ase`` in
@@ -27,7 +27,7 @@ ASE_FREE_MODULES = [
     "src.core.config",
     "src.core.utils.paths",
     "src.core.utils.tokens",
-    "src.core.utils.lammps_data",
+    "src.builders.lammps_data",
     "src.core.__init__",
     "src.interfaces",
     "src.interfaces.ase",   # the adapter itself defers the import into the call

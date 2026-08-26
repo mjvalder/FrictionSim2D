@@ -1,10 +1,17 @@
-"""Reading and rewriting LAMMPS data files (atom styles, section surgery)."""
+"""Reading and rewriting LAMMPS data files (atom styles, section surgery).
+
+Lives under builders/ rather than core/utils/ because every consumer is a
+builder: core, run, potentials, lattice and gui never touch a LAMMPS data
+file directly. get_model_dimensions and get_num_atom_types were previously
+filed under core/utils/structures.py next to cifread -- they read LAMMPS data
+files, not structure files, and use no ASE.
+"""
 import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from .tokens import _is_int_token  # noqa: PLC2701
+from ..core.utils.tokens import _is_int_token  # noqa: PLC2701
 
 logger = logging.getLogger(__name__)
 
@@ -186,3 +193,68 @@ def shift_atoms_to_z_zero(filename: Union[str, Path]) -> None:
 
     with open(filename, 'w', encoding='utf-8') as f:
         f.writelines(lines)
+
+
+def get_model_dimensions(lmp_path: Union[str, Path]) -> Dict[str, Optional[float]]:
+    """Read a LAMMPS data file and extract the simulation box dimensions.
+
+    Args:
+        lmp_path: Path to the LAMMPS data file.
+
+    Returns:
+        Dictionary containing the box dimensions with keys 'xlo', 'xhi',
+        'ylo', 'yhi', 'zlo', 'zhi'. Returns None for any dimension that
+        cannot be parsed from the file.
+        
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file is missing critical dimension lines.
+    """
+    lmp_path = Path(lmp_path)
+    if not lmp_path.exists():
+        raise FileNotFoundError(f"LAMMPS data file not found: {lmp_path}")
+
+    dims: Dict[str, Optional[float]] = {k: None for k in ["xlo", "xhi", "ylo", "yhi", "zlo", "zhi"]}
+    found_dims = set()
+
+    with open(lmp_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        for line in lines:
+            try:
+                if "xlo xhi" in line:
+                    dims["xlo"], dims["xhi"] = map(float, line.split()[0:2])
+                    found_dims.add("xlo")
+                elif "ylo yhi" in line:
+                    dims["ylo"], dims["yhi"] = map(float, line.split()[0:2])
+                    found_dims.add("ylo")
+                elif "zlo zhi" in line:
+                    dims["zlo"], dims["zhi"] = map(float, line.split()[0:2])
+                    found_dims.add("zlo")
+            except (ValueError, IndexError) as e:
+                logger.warning("Failed to parse dimension line '%s': %s", line.strip(), e)
+
+    expected_dims = {"xlo", "ylo", "zlo"}
+    missing = expected_dims - found_dims
+    if missing:
+        logger.warning(
+            "LAMMPS file %s missing dimension markers: %s. Some dimension values are None.",
+            lmp_path, missing
+        )
+
+    return dims
+
+
+def get_num_atom_types(lmp_path: Union[str, Path]) -> int:
+    """Read a LAMMPS data file and extract the number of atom types.
+
+    Args:
+        lmp_path: Path to the LAMMPS data file.
+
+    Returns:
+        Number of atom types in the file.
+    """
+    with open(lmp_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if "atom types" in line:
+                return int(line.split()[0])
+    return 1
