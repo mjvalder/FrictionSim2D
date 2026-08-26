@@ -128,7 +128,7 @@ retract does not record — the approach is the `system.in` aveforce ramp, which
 per-step curve.
 
 The delivery maths lives in [`src/postprocessing/indent.py`](../src/postprocessing/indent.py),
-the builder in [`src/builders/indent.py`](../src/builders/indent.py), and the run-phase
+the builder in [`src/builders/afm/indent.py`](../src/builders/afm/indent.py), and the run-phase
 template in [`src/templates/afm/indent.lmp`](../src/templates/afm/indent.lmp).
 
 ## Checks before trusting a run
