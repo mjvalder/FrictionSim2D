@@ -35,6 +35,13 @@ ASE_FREE_MODULES = [
     "src.run.naming",
     "src.run.placeholders",
     "src.gui.config_validation",
+    # Deferred at the call site rather than by module split -- these use ASE's
+    # object model directly and import it inside the functions that need it.
+    "src.potentials.manager",
+    "src.builders.components",
+    "src.builders.afm",
+    "src.builders.sheetonsheet",
+    "src.gui.controllers.elements",
 ]
 
 

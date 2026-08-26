@@ -1,9 +1,20 @@
-"""Interface wrapper for the ASE (Atomic Simulation Environment) library.
+"""Structure-file reading, with ASE's import cost deferred.
 
-ASE is the heaviest import in the package -- roughly 270 ms, more than the
-whole rest of a ``src.core.config`` import combined -- and it is needed by
-exactly one operation: reading a structure file. Confining it here means the
-cost is paid only by code that actually reads structures.
+**Scope: this is not a general ASE facade.** It wraps one operation --
+reading a structure file into plain Python data -- for callers that want a
+cell and a composition and nothing more. The builders use ASE's object model
+directly (``Atoms``, ``make_supercell``, ``io.write``) and should keep doing
+so; funnelling that through here would be a pass-through layer that hides
+nothing. ``src.interfaces.jinja`` is the same shape: one ``PackageLoader``,
+not a Jinja2 facade.
+
+What it buys is import weight. ``ase.io`` costs ~355 ms and ``ase.data``
+~74 ms, and the import is deferred into the function body below, so ASE loads
+when a structure is actually read rather than when a module that might read
+one is imported. ``src.core.utils.structures`` is the only consumer.
+
+Modules that genuinely need ASE's object model import it directly and defer it
+into the functions that use it -- see ``src/builders/components.py``.
 
 .. warning::
    This module is deliberately **absent** from ``src/interfaces/__init__.py``.

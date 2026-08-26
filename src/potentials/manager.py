@@ -20,8 +20,6 @@ import logging
 import re
 import shutil
 
-from ase.data import atomic_masses, atomic_numbers
-
 from ..core.config import ComponentConfig, GlobalSettings
 from ..core.utils.structures import cifread, count_atomtypes
 from .utils import (
@@ -406,6 +404,8 @@ class PotentialManager:
         Returns:
             List of LAMMPS commands (pair_style, pair_coeff, mass).
         """
+        from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
+
         commands = []
         pot_type = config.pot_type.lower()
         pot_path = self._get_potential_path(config.pot_path)
@@ -828,6 +828,8 @@ class PotentialManager:
         Returns:
             String with mass commands, one per line.
         """
+        from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
+
         element_types: Dict[str, List[int]] = defaultdict(list)
         for atype in self.types:
             element_types[atype.element].append(atype.type_id)

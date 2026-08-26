@@ -22,10 +22,10 @@ the known-symbols table (already a project dependency; see
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, List, Optional, Set, Tuple
 
-from ase.data import atomic_numbers
 
 from ...run.placeholders import has_template_marker, substitute_materials
 from ...core.utils.paths import _find_existing  # noqa: PLC2701
@@ -44,7 +44,17 @@ _COMPONENT_SECTIONS = ('2D', '2D-2', 'tip', 'sub', 'flake')
 #: paths the sweep never builds.
 _SWEEPING_SECTIONS = ('2D', '2D-2')
 
-_KNOWN_SYMBOLS = set(atomic_numbers)
+@lru_cache(maxsize=1)
+def _known_symbols() -> frozenset:
+    """Every element symbol ASE knows, loaded on first use.
+
+    ``ase.data`` costs ~74 ms and this module is on the GUI startup path
+    (``widgets/form.py`` imports it), while the symbol table is only needed
+    once a config is actually scanned. Cached: the set is built once.
+    """
+    from ase.data import atomic_numbers  # pylint: disable=import-outside-toplevel
+
+    return frozenset(atomic_numbers)
 
 _ELEMENT_TOKEN_RE = re.compile(r'[A-Z][a-z]?')
 _ATOM_SITE_SYMBOL_TAG = '_atom_site_type_symbol'
@@ -174,7 +184,7 @@ def _parse_atom_site_loop(text: str) -> Set[str]:
                 match = re.match(r'[A-Za-z]+', tokens[index])
                 if match:
                     symbol = match.group(0).capitalize()
-                    if symbol in _KNOWN_SYMBOLS:
+                    if symbol in _known_symbols():
                         elements.add(symbol)
             i += 1
         if elements:
@@ -197,4 +207,4 @@ def _elements_from_text(text: Optional[str]) -> Set[str]:
     """
     if not isinstance(text, str) or not text:
         return set()
-    return {tok for tok in _ELEMENT_TOKEN_RE.findall(text) if tok in _KNOWN_SYMBOLS}
+    return {tok for tok in _ELEMENT_TOKEN_RE.findall(text) if tok in _known_symbols()}

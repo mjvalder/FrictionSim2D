@@ -24,7 +24,6 @@ import math
 import subprocess
 import numpy as np
 
-from ase import io as ase_io
 from jinja2 import Environment
 
 from ..core.config import (
@@ -705,6 +704,7 @@ def _write_cif_as_lammps_atomic(
         output_path: Output LAMMPS data path.
         specorder: Optional element order for deterministic type assignment.
     """
+    from ase import io as ase_io  # pylint: disable=import-outside-toplevel
     from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
 
     atoms = ase_io.read(str(cif_path))
@@ -759,6 +759,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
         output_path: Orthogonalized output path.
     """
     import re as _re  # pylint: disable=import-outside-toplevel
+    from ase import io as ase_io  # pylint: disable=import-outside-toplevel
     from ase.build import make_supercell as _make_supercell  # pylint: disable=import-outside-toplevel
 
     if output_path.exists():
@@ -1295,6 +1296,8 @@ def extract_substrate_surface_cell(
     # Slice the topmost atomic layer -> a one-layer surface data file. The
     # coincidence search only needs the surface termination (single layer), not
     # the full z-repeat, as its representative atom set.
+    from ase import io as ase_io  # pylint: disable=import-outside-toplevel
+
     atoms = ase_io.read(str(prim_cell), format="lammps-data")
     z = atoms.get_positions()[:, 2]
     top_mask = z >= (z.max() - 0.5)          # topmost atomic plane (~0 A ptp)
