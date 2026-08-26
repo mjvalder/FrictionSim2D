@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
-from ase.io import read
 from jinja2 import Environment
 
 from ..core.config import SheetOnSheetSimulationConfig
@@ -26,6 +25,7 @@ from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..interfaces.jinja import PackageLoader
 from . import components
 from .hetero import _box_region_cmd, _detect_atom_style, _run_lammps
+from ..interfaces.ase import read_lammps_data
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Di
 
     Returns one ``{'idx', 'zlo', 'zhi'}`` per band (idx 1..n bottom->top).
     """
-    z = np.sort(read(str(sheet_path), format="lammps-data").get_positions()[:, 2])
+    z = np.sort(read_lammps_data(sheet_path).positions[:, 2])
     if n_layers <= 1:
         return [{"idx": 1, "zlo": float(z.min()) - pad, "zhi": float(z.max()) + pad}]
 
@@ -290,8 +290,8 @@ class FlakeSlideSimulation(SimulationBase):
         sheet_layers = compute_sheet_zbands(sheet_path, n_sheet_layers)
 
         # 6. Render context + slide.in.
-        at = read(str(combined_path), format="lammps-data")
-        cell = np.array(at.cell)
+        at = read_lammps_data(combined_path)
+        cell = at.cell
         general = self.config.general
         sim = settings.simulation
         out = settings.output
@@ -437,14 +437,14 @@ class FlakeSlideSimulation(SimulationBase):
         Returns ``(combined_path, zhi)`` where ``zhi`` is the topmost atom z
         (the template adds the z-vacuum itself via ``change_box``).
         """
-        sheet_at = read(str(sheet_path), format="lammps-data")
-        cell = np.array(sheet_at.cell)
+        sheet_at = read_lammps_data(sheet_path)
+        cell = sheet_at.cell
         lx, ly, xy = float(cell[0, 0]), float(cell[1, 1]), float(cell[1, 0])
-        s_pos = sheet_at.get_positions()
+        s_pos = sheet_at.positions
         sheet_bot, sheet_top = float(s_pos[:, 2].min()), float(s_pos[:, 2].max())
 
-        flake_at = read(str(flake_path), format="lammps-data")
-        f_pos = flake_at.get_positions()
+        flake_at = read_lammps_data(flake_path)
+        f_pos = flake_at.positions
         fxc = 0.5 * (float(f_pos[:, 0].min()) + float(f_pos[:, 0].max()))
         fyc = 0.5 * (float(f_pos[:, 1].min()) + float(f_pos[:, 1].max()))
         f_zmin, f_zmax = float(f_pos[:, 2].min()), float(f_pos[:, 2].max())
@@ -498,5 +498,5 @@ write_data      {combined_path}
                 f"_assemble_flake_on_sheet: LAMMPS did not produce {combined_path}."
             )
 
-        placed = read(str(combined_path), format="lammps-data").get_positions()
+        placed = read_lammps_data(combined_path).positions
         return combined_path, float(placed[:, 2].max())

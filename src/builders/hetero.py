@@ -57,10 +57,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from ase import Atoms
-from ase.build import make_supercell
-from ase.data import atomic_masses, atomic_numbers, chemical_symbols
-from ase.io import read, write
 from jinja2 import Environment
 
 from ..core.config import GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig
@@ -76,6 +72,7 @@ from ..lattice.matching import (
 from ..potentials.manager import PotentialManager
 from ..interfaces.jinja import PackageLoader
 from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
+from ..interfaces.ase import element_mass, read_lammps_data
 
 PathLike = Union[str, Path]
 
@@ -623,16 +620,16 @@ def detect_inplane_repeat(
         sub-box translation is found (an incommensurate/twisted stack), which is
         exactly the pre-fix behaviour and is always safe.
     """
-    atoms = read(str(data_path), format="lammps-data")
-    cell = np.array(atoms.cell)
+    atoms = read_lammps_data(data_path)
+    cell = atoms.cell
     lx, ly = float(cell[0, 0]), float(cell[1, 1])
     if lx <= 0.0 or ly <= 0.0:
         raise ValueError(
             f"Non-positive in-plane box in {data_path}: {lx} x {ly} A."
         )
 
-    pos = np.asarray(atoms.get_positions(), dtype=float)
-    species = np.asarray(atoms.get_atomic_numbers())
+    pos = np.asarray(atoms.positions, dtype=float)
+    species = np.asarray(atoms.numbers)
 
     counts = []
     for axis, length in ((0, lx), (1, ly)):
@@ -745,6 +742,9 @@ def _monolayer_to_atoms(mono: Dict[str, object]) -> Atoms:
     that happen to share a real element. Per-atom charges are attached when the
     source used ``atom_style charge``.
     """
+    from ase import Atoms  # pylint: disable=import-outside-toplevel
+    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
+
     types: List[int] = mono["types"]  # type: ignore[assignment]
     placeholders = [chemical_symbols[t] for t in types]
     atoms = Atoms(
@@ -766,6 +766,8 @@ def _restore_masses_section(path: Path, masses: Dict[int, Tuple[float, str]], n_
     the placeholder element's standard mass for any type absent from the source
     Masses section (should not happen for build_monolayer output).
     """
+    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
+
     if n_types < 1:
         return
     block = "Masses\n\n"
@@ -774,7 +776,7 @@ def _restore_masses_section(path: Path, masses: Dict[int, Tuple[float, str]], n_
             mass, elem = masses[t]
         else:
             elem = chemical_symbols[t]
-            mass = float(atomic_masses[atomic_numbers[elem]])
+            mass = element_mass(elem)
         block += f"{t} {mass:.6f}  # {elem}\n"
     block += "\n"
 
@@ -804,6 +806,10 @@ def _write_supercell(
     Returns:
         The written in-plane 2x2 cell (LAMMPS-canonical), read back from disk.
     """
+    from ase import Atoms  # pylint: disable=import-outside-toplevel
+    from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
+    from ase.io import read, write  # pylint: disable=import-outside-toplevel
+
     if out_path.exists():
         out_path.unlink()
     specorder = [chemical_symbols[t] for t in range(1, n_types + 1)]
@@ -862,6 +868,8 @@ def build_matched_supercells(
             commensurate at this match -- fail loud rather than silently emit an
             incommensurate "matched" stack).
     """
+    from ase.build import make_supercell  # pylint: disable=import-outside-toplevel
+
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     mono_a_path = Path(mono_a_path)
@@ -1010,6 +1018,8 @@ def build_twisted_supercells(
             nearest achievable angle), or if a per-material strain onto the
             emitted box exceeds ``strain_tol``.
     """
+    from ase.build import make_supercell  # pylint: disable=import-outside-toplevel
+
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     mono_a_path = Path(mono_a_path)
@@ -1217,9 +1227,9 @@ def _box_region_cmd(lx: float, ly: float, xy: float, zlo: float, zhi: float) -> 
 
 def _read_layer_geometry(path: Path) -> Tuple[np.ndarray, np.ndarray, float, float]:
     """Return (in-plane Cartesian xy, 2x2 cell, z-min, z-max) of a supercell."""
-    at = read(str(path), format="lammps-data")
-    pos = at.get_positions()
-    cell2 = np.array(at.cell)[:2, :2]
+    at = read_lammps_data(path)
+    pos = at.positions
+    cell2 = at.cell[:2, :2]
     return pos[:, :2], cell2, float(pos[:, 2].min()), float(pos[:, 2].max())
 
 
@@ -1782,8 +1792,8 @@ def _apply_finite_hetero_edges(
 
     # Guard: the edge band must not swallow the patch. Span from the assembled
     # patch's atom bounding box (the same extent apply_sheet_edge_types uses).
-    at = read(str(stack.data_path), format="lammps-data")
-    xy = at.get_positions()[:, :2]
+    at = read_lammps_data(stack.data_path)
+    xy = at.positions[:, :2]
     span_x = float(xy[:, 0].max() - xy[:, 0].min())
     span_y = float(xy[:, 1].max() - xy[:, 1].min())
     smaller = min(span_x, span_y)

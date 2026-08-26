@@ -42,6 +42,14 @@ ASE_FREE_MODULES = [
     "src.builders.afm",
     "src.builders.sheetonsheet",
     "src.gui.controllers.elements",
+    # ASE file reads now go through src.interfaces.ase; only Atoms construction,
+    # make_supercell and writes import ASE directly, deferred into their functions.
+    "src.builders.hetero",
+    "src.builders.hetero_afm",
+    "src.builders.hetero_slide",
+    "src.builders.flake_slide",
+    "src.run.simulate",
+    "src.cli",
 ]
 
 

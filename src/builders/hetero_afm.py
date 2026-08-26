@@ -13,8 +13,6 @@ import math
 from pathlib import Path
 
 import numpy as np
-from ase.data import atomic_masses, atomic_numbers
-from ase.io import read
 
 from src.builders import components
 from src.builders.afm import AFMSimulation
@@ -22,6 +20,7 @@ from src.builders.hetero import build_hetero_structure, register_sheet_block
 from src.builders.indent import IndentSimulation
 from src.potentials.manager import PotentialManager
 from src.core.utils.structures import get_model_dimensions
+from src.interfaces.ase import element_mass, read_lammps_data
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +151,7 @@ def assert_sheet_block_matches_data(pm: PotentialManager, data_path, offset: int
     id_to_type = {t.type_id: t for t in pm.types}
     sheet_ids = (pm.types.ids_by_component('sheet_1')
                  + pm.types.ids_by_component('sheet_2'))
-    pm_masses = [atomic_masses[atomic_numbers[id_to_type[tid].element]]
+    pm_masses = [element_mass(id_to_type[tid].element)
                  for tid in sheet_ids]
     data_masses = _read_data_masses(data_path)
 
@@ -272,8 +271,8 @@ class HeteroAFMSimulation(AFMSimulation):
         stack = build_hetero_structure(self.config, self.config.settings, build_dir)
         self._hetero_stack = stack
 
-        atoms = read(str(stack.data_path), format="lammps-data")
-        cell = atoms.get_cell()
+        atoms = read_lammps_data(stack.data_path)
+        cell = atoms.cell
         xy_tilt = float(cell[1, 0])
         if abs(xy_tilt) > 1e-6:
             raise ValueError(

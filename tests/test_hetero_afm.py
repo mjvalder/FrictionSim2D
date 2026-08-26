@@ -109,22 +109,18 @@ def test_hetero_afm_rejects_triclinic_cell(tmp_path, monkeypatch):
     sim = ha.HeteroAFMSimulation(cfg, str(tmp_path))
 
     import numpy as np
+    from src.interfaces.ase import LammpsData
 
-    class _FakeAtoms:
-        def get_cell(self):
-            c = np.eye(3) * 20.0
-            c[1, 0] = 5.0     # nonzero xy tilt -> triclinic
-            return c
-
-        def get_positions(self):
-            return np.zeros((1, 3))
+    cell = np.eye(3) * 20.0
+    cell[1, 0] = 5.0          # nonzero xy tilt -> triclinic
+    fake = LammpsData(cell=cell, positions=np.zeros((1, 3)), numbers=np.array([14]))
 
     class _FakeStack:  # only .data_path is read before the guard
         data_path = tmp_path / "hetero.data"
 
     (tmp_path / "hetero.data").write_text("")
     monkeypatch.setattr(ha, "build_hetero_structure", lambda *a, **k: _FakeStack())
-    monkeypatch.setattr(ha, "read", lambda *a, **k: _FakeAtoms())
+    monkeypatch.setattr(ha, "read_lammps_data", lambda *a, **k: fake)
     with pytest.raises(ValueError, match="triclinic"):
         sim._build_hetero_sheet(build_dir=tmp_path / "build")
 

@@ -5,13 +5,13 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 import numpy as np
-from ase.io import read
 from jinja2 import Environment
 
 from ..core.config import SheetOnSheetSimulationConfig
 from ..core.simulation_base import SimulationBase
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..interfaces.jinja import PackageLoader
+from ..interfaces.ase import read_lammps_data
 from .hetero import (
     _detect_atom_style,
     build_hetero_structure,
@@ -71,7 +71,7 @@ def compute_layer_zbands(data_path, layers) -> List[Dict]:
     for layer in layers:
         key = str(layer.source)
         if key not in native_zrange:
-            zz = read(key, format="lammps-data").get_positions()[:, 2]
+            zz = read_lammps_data(key).positions[:, 2]
             native_zrange[key] = (float(zz.min()), float(zz.max()))
         zmin, zmax = native_zrange[key]
         zlo, zhi = zmin + layer.z - PAD, zmax + layer.z + PAD
@@ -84,7 +84,7 @@ def compute_layer_zbands(data_path, layers) -> List[Dict]:
     # Self-check (fail loud): every atom in the actual assembled data file
     # must fall in exactly one band. Catches any placement/write discrepancy
     # instead of silently mis-grouping.
-    z = read(str(data_path), format="lammps-data").get_positions()[:, 2]
+    z = read_lammps_data(data_path).positions[:, 2]
     for zi in z:
         hits = [b for b in bands if b["zlo"] <= zi <= b["zhi"]]
         if len(hits) != 1:
@@ -264,11 +264,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
         # Box from the assembled hetero.data (template adds the z-vacuum itself
         # via change_box, so zhi is just the topmost atom z).
-        at = read(str(stack.data_path), format="lammps-data")
-        cell = np.array(at.cell)
+        at = read_lammps_data(stack.data_path)
+        cell = at.cell
         xlo, xhi = 0.0, float(cell[0, 0])
         ylo, yhi = 0.0, float(cell[1, 1])
-        zhi = float(at.get_positions()[:, 2].max())
+        zhi = float(at.positions[:, 2].max())
 
         settings = self.config.settings
 
