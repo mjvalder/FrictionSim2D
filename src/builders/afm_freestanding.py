@@ -73,4 +73,8 @@ class FreestandingPESTipSimulation(PESTipSimulation):
         out_dir = self.output_dir_layer[n_layers]
         scan_script = self.render_template("afm_freestanding/pes_scan.lmp", context)
         self.write_file("lammps/slide.in", scan_script, out_dir)
+
+        # Same as PESTipSimulation: overriding write_inputs dropped the
+        # provenance record along with the rest of the parent body.
+        self._write_provenance(n_layers, context, out_dir)
         logger.info("Freestanding tip PES scan written to %s/lammps/", out_dir)

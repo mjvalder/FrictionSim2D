@@ -42,6 +42,10 @@ def test_freestanding_pes_template_fixes_layer1_no_substrate(tmp_path, monkeypat
         "potential_file": "lammps/system.in.settings", "min_style": "cg",
         "minimization_command": "minimize 0.0 1.0e-6 10000 100000",
         "contact_gap": 3.0, "ev_a_to_nn": 16.021766,
+        # write_inputs now also emits provenance.json, which reads obs_ctx.
+        # The real build_render_context always populates this (afm.py:680);
+        # this stub has to supply it or it under-specifies what it stands in for.
+        "obs_ctx": {"contact_cutoff": 5.0},
     }
     monkeypatch.setattr(builder, "build_render_context", lambda n_layers: dict(ctx))
     builder.sheet_unit_cell = {"xlo": 0.0, "xhi": 3.16, "ylo": 0.0, "yhi": 5.47}
@@ -78,6 +82,10 @@ def test_freestanding_md_mode_emits_langevin_and_run(tmp_path, monkeypatch):
         "potential_file": "lammps/system.in.settings", "min_style": "cg",
         "minimization_command": "minimize 0.0 1.0e-6 10000 100000",
         "contact_gap": 3.0, "ev_a_to_nn": 16.021766, "temp": 300.0,
+        # write_inputs now also emits provenance.json, which reads obs_ctx.
+        # The real build_render_context always populates this (afm.py:680);
+        # this stub has to supply it or it under-specifies what it stands in for.
+        "obs_ctx": {"contact_cutoff": 5.0},
     }
     monkeypatch.setattr(builder, "build_render_context", lambda n_layers: dict(ctx))
     builder.sheet_unit_cell = {"xlo": 0.0, "xhi": 3.16, "ylo": 0.0, "yhi": 5.47}

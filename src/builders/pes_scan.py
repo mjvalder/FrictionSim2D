@@ -468,6 +468,13 @@ class PESTipSimulation(AFMSimulation):
         scan_script = self.render_template("afm/pes_scan.lmp", context)
         self.write_file("lammps/slide.in", scan_script, out_dir)
 
+        # A tip PES scan is a build like any other and needs the same audit
+        # record. It was missing only because this method replaces
+        # AFMSimulation.write_inputs, which is where the single call site
+        # lived -- not because a scan has nothing to record. The context is
+        # the one build_render_context already produced above.
+        self._write_provenance(n_layers, context, out_dir)
+
         logger.info("Tip PES scan written to %s/lammps/", out_dir)
 
 

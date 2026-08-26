@@ -101,9 +101,15 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     # pot_ segment consumed NON-capturing so group 3 keeps its legacy meaning
     # (substrate token). A repeated capturing group would capture only the
     # LAST repetition and record pot_... as substrate_material.
+    #: ``+`` is in the material class deliberately: src.run.naming.material_token
+    #: joins a heterostructure's materials with it (``h_MoS2+h_WS2``) and appends
+    #: a ``+flake-<mat>`` suffix. Without it the match started AFTER the ``+``,
+    #: so a hetero run was silently filed under its SECOND constituent and
+    #: pooled with that material's homogeneous data -- misattributed, not
+    #: skipped. tests/test_read_data_hetero_paths.py pins this.
     _PATH_PATTERN_SHEET = re.compile(
-        r'(?:sheetvsheet/)?([\w\d\-_]+)/(\d+x_\d+y)/'
-        r'(?!pot_)([\w\d\-_]+)?/?(?:pot_[^/]+/)?results'
+        r'(?:sheetvsheet/)?([\w\d\-+_]+)/(\d+x_\d+y)/'
+        r'(?!pot_)([\w\d\-+_]+)?/?(?:pot_[^/]+/)?results'
     )
 
     def __init__(self, results_dir: str = 'results_110725_test') -> None:

@@ -858,7 +858,14 @@ class AFMSimulation(SimulationBase):
         except Exception:  # pylint: disable=broad-except
             git_commit, git_dirty = 'unknown', False
 
-        pm = self.pm[n_layers]
+        # .get, not [n_layers]: the per-layer PotentialManager is populated in
+        # build() (line ~99), and the PES-tip and freestanding builders reach
+        # write_inputs by their own route. layer_type_map is already allowed to
+        # be empty -- hetero AFM writes it empty today, since its groups are
+        # sheet_1/sheet_2 rather than layer_N -- so an absent manager costs the
+        # type map, not the whole record. Losing one optional field is better
+        # than losing provenance entirely, which is what happened before.
+        pm = self.pm.get(n_layers)
         layer_type_map = {}
         get_layer = getattr(getattr(pm, 'types', None),
                             'get_layer_group_string', None)
@@ -869,8 +876,11 @@ class AFMSimulation(SimulationBase):
                     layer_type_map[f'layer_{layer + 1}'] = [
                         int(t) for t in ids.split()]
 
-        sub_sha = (sha256_file(self.sub_path)
-                   if self.sub_path and Path(self.sub_path).is_file() else None)
+        # getattr: a freestanding tip PES has no substrate at all, so the
+        # attribute is absent rather than None. No substrate, no realization id.
+        sub_path = getattr(self, 'sub_path', None)
+        sub_sha = (sha256_file(sub_path)
+                   if sub_path and Path(sub_path).is_file() else None)
 
         force = self.config.general.force
         load_requested = (float(force)
