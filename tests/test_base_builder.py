@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from src.core.simulation_base import SimulationBase
+from src.builders.base import SimulationBase
 from src.core.config import AFMSimulationConfig, load_settings
 
 # Mock class to allow instantiation of abstract SimulationBase

@@ -1,13 +1,16 @@
 """Core modules for FrictionSim2D.
 
-Exports are resolved lazily to keep import-time side effects low and avoid
-builder/run/hpc circular imports (importing e.g. ``core.config`` must not pull
-in ``simulation_base`` -> ``hpc`` at import time).
-This package contains the foundational classes and utilities:
-    - Configuration models (Pydantic)
-    - Potential management
-    - Utility functions for file I/O and calculations
-    - Base builder class
+Exports are resolved lazily to keep import-time side effects low and to avoid
+builder/run/hpc circular imports: ``SimulationBase`` now lives in
+``src.builders.base``, and resolving it eagerly here would pull the builders --
+and through them ``src.hpc`` -- into every ``import src.core``.
+
+This package holds the shared contracts and vocabulary that everything else
+imports:
+    - Configuration models (Pydantic) and the .ini read/write pair
+    - ``observables``: what the LAMMPS templates are expected to emit
+    - ``utils/``: path resolution, token formatting, LAMMPS data-file surgery,
+      structure reading -- split by import weight, see tests/test_import_weight.py
 """
 
 from importlib import import_module
@@ -57,7 +60,7 @@ _EXPORT_MAP = {
     "load_settings": (".config", "load_settings"),
     "parse_config": (".config", "parse_config"),
     "PotentialManager": ("..potentials.manager", "PotentialManager"),
-    "SimulationBase": (".simulation_base", "SimulationBase"),
+    "SimulationBase": ("..builders.base", "SimulationBase"),
     "cifread": (".utils.structures", "cifread"),
     "count_atomtypes": (".utils.structures", "count_atomtypes"),
     "lj_params": ("..potentials.utils", "lj_params"),

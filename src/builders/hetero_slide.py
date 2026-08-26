@@ -8,7 +8,7 @@ import numpy as np
 from jinja2 import Environment
 
 from ..core.config import SheetOnSheetSimulationConfig
-from ..core.simulation_base import SimulationBase
+from .base import SimulationBase
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..interfaces.jinja import PackageLoader
 from ..interfaces.ase import read_lammps_data
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 PAD = 1.0  # Å pad above/below each layer's atom z-range
 
 # Same Jinja environment construction as SimulationBase.__init__
-# (src/core/simulation_base.py:80-84): package-resource loader, trimmed blocks.
+# (src/builders/base.py:80-84): package-resource loader, trimmed blocks.
 _ENV = Environment(
     loader=PackageLoader('src.templates'),
     trim_blocks=True,
@@ -118,7 +118,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     Path convention: the SAME as every other builder in the package -- every
     path in the render context, and the ``provenance/potentials/...`` prefix in
     the written ``system.in.settings``, is prefixed with
-    :attr:`~src.core.simulation_base.SimulationBase.relative_run_dir`, i.e. it
+    :attr:`~src.builders.base.SimulationBase.relative_run_dir`, i.e. it
     is relative to the SIMULATION ROOT. That is the directory the generated HPC
     job scripts run LAMMPS from (``cd $PBS_O_WORKDIR``, or the scratch mirror
     of it), so a hetero run's job scripts open the same files a local run does.

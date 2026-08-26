@@ -1,7 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.core.simulation_base import SimulationBase
+from src.builders.base import SimulationBase
 
 
 class _ConcreteSimulation(SimulationBase):
@@ -22,11 +22,11 @@ def test_add_component_files_to_provenance_ignores_missing_resolved_paths(tmp_pa
     sim = _make_simulation(tmp_path)
 
     monkeypatch.setattr(
-        "src.core.simulation_base.get_material_path",
+        "src.builders.base.get_material_path",
         lambda _mat: (_ for _ in ()).throw(FileNotFoundError("missing material")),
     )
     monkeypatch.setattr(
-        "src.core.simulation_base.get_potential_path",
+        "src.builders.base.get_potential_path",
         lambda _pot: (_ for _ in ()).throw(FileNotFoundError("missing potential")),
     )
 
@@ -49,7 +49,7 @@ def test_add_component_files_to_provenance_keeps_existing_explicit_paths(tmp_pat
         return Path(path)
 
     monkeypatch.setattr(sim, "add_to_provenance", _record)
-    monkeypatch.setattr("src.core.simulation_base.get_potential_path", lambda _pot: None)
+    monkeypatch.setattr("src.builders.base.get_potential_path", lambda _pot: None)
 
     component_cfg = SimpleNamespace(mat="MoS2", cif_path=str(cif_path), pot_path=None)
 

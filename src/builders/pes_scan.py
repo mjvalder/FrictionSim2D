@@ -175,7 +175,7 @@ class PESGridMixin:
       by the hetero builder, mirroring the Task-3 AFM-family hook.
 
     **State the mixin may touch**: only ``self.config`` (``.pes``,
-    ``.settings.simulation``) and the :class:`~src.core.simulation_base.SimulationBase`
+    ``.settings.simulation``) and the :class:`~src.builders.base.SimulationBase`
     services ``render_template`` / ``write_file`` / ``output_dir``. It never
     reads ``self.pm``, ``self.sheet_dims``, ``self.structure_paths``,
     ``self.relative_run_dir`` or any hetero stack attribute directly — those

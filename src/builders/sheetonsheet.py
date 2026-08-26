@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Union
 
-from ..core.simulation_base import SimulationBase
+from .base import SimulationBase
 from ..core.config import SheetOnSheetSimulationConfig
 from ..potentials.manager import PotentialManager
 from ..potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
