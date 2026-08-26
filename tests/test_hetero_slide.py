@@ -10,7 +10,7 @@ import pytest
 from ase import Atoms
 from ase.io import read, write
 from src.core.config import SheetOnSheetSimulationConfig, load_settings
-from src.builders.construction.hetero import build_hetero_structure
+from src.builders.construction.hetero_stack import build_hetero_structure
 from src.builders.sheetonsheet.hetero import (
     HeteroSheetOnSheetSimulation,
     compute_layer_zbands,

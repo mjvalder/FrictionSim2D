@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Union
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN
-from ..construction.hetero import detect_inplane_repeat
+from ..construction.hetero_stack import detect_inplane_repeat
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import AFMSimulation
 from .hetero import HeteroAFMSimulation
@@ -172,7 +172,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
           i.e. the smallest lateral displacement that returns the tip to an
           equivalent registry. The hetero analogue is the assembled stack's
           MINIMAL in-plane repeat, measured off the *unreplicated* stack by
-          :func:`~src.builders.construction.hetero.detect_inplane_repeat` and filled here by
+          :func:`~src.builders.construction.hetero_stack.detect_inplane_repeat` and filled here by
           overriding :meth:`_build_sheet_for_layers` (which calls ``super()``,
           dispatching to ``HeteroAFMSimulation``'s override) into the same
           ``xlo``/``xhi``/``ylo``/``yhi`` shape ``_cell_period`` expects.
@@ -231,7 +231,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
         registry. The hetero analogue is the assembled stack's minimal in-plane
         repeat, which is generally a SUB-cell of the coincidence cell (see the
         class docstring and
-        :func:`~src.builders.construction.hetero.detect_inplane_repeat`). Detection runs on
+        :func:`~src.builders.construction.hetero_stack.detect_inplane_repeat`). Detection runs on
         the UNREPLICATED stack: in-plane replication cannot change the repeat
         unit, and the unreplicated file is much the smaller of the two.
         """

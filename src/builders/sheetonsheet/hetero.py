@@ -12,7 +12,7 @@ from ..simulation_base import SimulationBase
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ...interfaces.jinja import PackageLoader
 from ...interfaces.ase import read_lammps_data
-from ..construction.hetero import (
+from ..construction.hetero_stack import (
     _detect_atom_style,
     build_hetero_structure,
     register_hetero_potentials,
@@ -44,7 +44,7 @@ def render_hetero_slide(context: Dict) -> str:
 def compute_layer_zbands(data_path, layers) -> List[Dict]:
     """Compute per-layer z-bands from each layer's KNOWN placement.
 
-    Each layer in ``layers`` (a :class:`~src.builders.construction.hetero.HeteroStackLayer`)
+    Each layer in ``layers`` (a :class:`~src.builders.construction.hetero_stack.HeteroStackLayer`)
     records ``.source`` (the per-material supercell data file it was read
     from) and ``.z`` (the z-shift applied via
     ``read_data ... shift 0 0 z``, see templates/hetero/stack_hetero.lmp).
@@ -103,7 +103,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
     Turns a two-material :class:`SheetOnSheetSimulationConfig` into a runnable
     periodic hetero slide by combining the Phase-B structure builder
-    (:func:`~src.builders.construction.hetero.build_hetero_structure`, which assembles
+    (:func:`~src.builders.construction.hetero_stack.build_hetero_structure`, which assembles
     ``hetero.data`` + ``lammps/system.in.settings`` and stages the potentials)
     with the D1 slide template (``templates/hetero/slide.lmp``).
 

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Union
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN
-from ..construction.hetero import detect_inplane_repeat
+from ..construction.hetero_stack import detect_inplane_repeat
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import SheetOnSheetSimulation
 from .hetero import HeteroSheetOnSheetSimulation
@@ -71,7 +71,7 @@ class PESGridMixin:
       unit cell, filled by ``components.build_sheet(..., unit_cell_out=...)``
       into ``self.sheet_unit_cell``. Hetero: the matched interface's **minimal
       in-plane repeat unit**, measured off the assembled stack by
-      :func:`~src.builders.construction.hetero.detect_inplane_repeat` — which is generally a
+      :func:`~src.builders.construction.hetero_stack.detect_inplane_repeat` — which is generally a
       SUB-cell of the coincidence cell, because each material is tiled to the
       configured footprint before the match runs.
     * :meth:`_scan_n_cells` — the per-surface-cell energy normalization.
@@ -309,7 +309,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
        open.
     3. **Scan period.** The interface's MINIMAL in-plane repeat unit, measured
        off the assembled ``hetero.data`` by
-       :func:`~src.builders.construction.hetero.detect_inplane_repeat`, with the energy
+       :func:`~src.builders.construction.hetero_stack.detect_inplane_repeat`, with the energy
        normalized per repeat unit (``n_cells`` = how many tile the box).
 
        The coincidence cell is *not* that repeat unit in general, and on the
@@ -386,7 +386,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
         (near-)identity matrices on cells that are already an n x m tiling of
         their own primitive — leaving the assembled box a superlattice of the
         actual repeat unit. Measured directly off ``hetero.data`` by
-        :func:`~src.builders.construction.hetero.detect_inplane_repeat` (see its docstring
+        :func:`~src.builders.construction.hetero_stack.detect_inplane_repeat` (see its docstring
         for the tolerance and why detection beats the algebraic route), cached
         because the scan writes up to two grid variants.
         """

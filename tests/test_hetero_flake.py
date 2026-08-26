@@ -81,7 +81,7 @@ def test_corner_types_double_every_bilayer_type_and_find_vertices(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_register_hetero_flake_potentials_corner_groups(tmp_path):
     from src.core.config import load_settings
-    from src.builders.construction.hetero import register_hetero_flake_potentials
+    from src.builders.construction.hetero_stack import register_hetero_flake_potentials
     settings = load_settings()
     hp = register_hetero_flake_potentials(_flake_sheets(settings), settings, tmp_path)
     # disjoint contiguous blocks
@@ -103,7 +103,7 @@ def test_register_hetero_flake_potentials_corner_groups(tmp_path):
 def test_hetero_flake_run0_smoke(tmp_path):
     from src.core.config import load_settings, FlakeConfig
     from src.builders.construction.components import build_hetero_flake_component
-    from src.builders.construction.hetero import register_hetero_flake_potentials
+    from src.builders.construction.hetero_stack import register_hetero_flake_potentials
     settings = load_settings()
     path, _ = build_hetero_flake_component(_flake_sheets(settings), settings,
                                            FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0), tmp_path)

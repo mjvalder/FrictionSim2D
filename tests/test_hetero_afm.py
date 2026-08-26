@@ -70,7 +70,7 @@ def test_replication_factor_meets_two_diameter_rule():
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_replicated_data_has_no_pair_coeffs(tmp_path):
-    from src.builders.construction.hetero import build_hetero_structure
+    from src.builders.construction.hetero_stack import build_hetero_structure
     from src.builders.afm.hetero import replicate_hetero_in_plane
     from src.core.config import SheetOnSheetSimulationConfig
     raw = {

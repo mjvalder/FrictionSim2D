@@ -601,9 +601,9 @@ def build_hetero_flake_component(
     The single-material :func:`build_flake_component` sources its flake from one
     monolayer; this hetero variant instead assembles the two ``flake_sheets``
     materials into a stacked bilayer (the SAME proven Phase-B pipeline
-    :func:`~src.builders.construction.hetero.build_hetero_structure` uses —
-    :func:`~src.builders.construction.hetero.build_matched_supercells` +
-    :func:`~src.builders.construction.hetero.assemble_hetero_stack`), then reuses the existing
+    :func:`~src.builders.construction.hetero_stack.build_hetero_structure` uses —
+    :func:`~src.builders.construction.hetero_stack.build_matched_supercells` +
+    :func:`~src.builders.construction.hetero_stack.assemble_hetero_stack`), then reuses the existing
     :func:`build_flake` to carve the outline and :func:`apply_flake_corner_types`
     to split every bilayer type into interleaved core ``2t-1`` / corner ``2t``
     types. The carved flake therefore carries **both** materials' types
@@ -630,7 +630,7 @@ def build_hetero_flake_component(
     """
     # Local import: hetero.py imports components.py, so importing hetero at
     # module scope would create a circular import.
-    from .hetero import (  # pylint: disable=import-outside-toplevel
+    from .hetero_stack import (  # pylint: disable=import-outside-toplevel
         assemble_hetero_stack,
         build_matched_supercells,
         register_hetero_potentials,
