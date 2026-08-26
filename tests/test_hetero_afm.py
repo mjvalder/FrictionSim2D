@@ -70,7 +70,7 @@ def test_replication_factor_meets_two_diameter_rule():
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_replicated_data_has_no_pair_coeffs(tmp_path):
-    from src.builders.hetero import build_hetero_structure
+    from src.builders.construction.hetero import build_hetero_structure
     from src.builders.hetero_afm import replicate_hetero_in_plane
     from src.core.config import SheetOnSheetSimulationConfig
     raw = {
@@ -319,7 +319,7 @@ def test_hetero_afm_runs_approach_indent_slide(tmp_path):
     #     UNWRAPPED (raw amorphous-block coords span ~90-120 A in both this and the
     #     homogeneous AFM path); LAMMPS wraps them into the box on read_data, so the
     #     BOX height -- not the raw atom span -- is the meaningful thickness check.
-    from src.builders.components import get_model_dimensions as _gmd
+    from src.builders.construction.components import get_model_dimensions as _gmd
     sub_dims = _gmd(run_dir / "build" / "sub.lmp")
     box_z = float(sub_dims["zhi"]) - float(sub_dims["zlo"])
     assert 10.0 <= box_z <= 22.0, \

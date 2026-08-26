@@ -59,9 +59,9 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from jinja2 import Environment
 
-from ..core.config import GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig
-from ..lattice.apply import rotate_layer_to_angle
-from ..lattice.matching import (
+from ...core.config import GlobalSettings, SheetConfig, SheetOnSheetSimulationConfig
+from ...lattice.apply import rotate_layer_to_angle
+from ...lattice.matching import (
     MatchResult,
     _max_strain,
     _relative_rotation_strain,
@@ -69,10 +69,10 @@ from ..lattice.matching import (
     find_commensurate_twist,
     scan_registry_index,
 )
-from ..potentials.manager import PotentialManager
-from ..interfaces.jinja import PackageLoader
+from ...potentials.manager import PotentialManager
+from ...interfaces.jinja import PackageLoader
 from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
-from ..interfaces.ase import element_mass, read_lammps_data
+from ...interfaces.ase import element_mass, read_lammps_data
 
 PathLike = Union[str, Path]
 

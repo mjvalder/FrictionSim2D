@@ -23,7 +23,7 @@ from ase import Atoms
 from ase.io import read, write
 
 from src.builders import components
-from src.builders.hetero import (
+from src.builders.construction.hetero import (
     _detect_atom_style,
     _run_lammps,
     assemble_hetero_stack,
@@ -594,7 +594,7 @@ def test_lattice_match_config_is_threaded_into_build(tmp_path):
 # cheap CLEAN commensurate cell that exercises the identical code paths.
 
 def test_build_twisted_supercells_shares_one_orthorhombic_box(tmp_path):
-    from src.builders.hetero import build_twisted_supercells
+    from src.builders.construction.hetero import build_twisted_supercells
     mono_a = _build_small_monolayer("h-MoS2", MOS2_CIF, MOS2_POT)
     mono_b = _build_small_monolayer("h-WS2", WS2_CIF, WS2_POT)
     ms = build_twisted_supercells(mono_a, mono_b, workdir=tmp_path, twist_angle=21.8,

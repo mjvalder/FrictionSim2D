@@ -16,7 +16,7 @@ from .lammps_data import get_model_dimensions
 from ..core.utils.tokens import format_numeric_token
 from ..potentials.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
-from . import components
+from .construction import components
 
 logger = logging.getLogger(__name__)
 

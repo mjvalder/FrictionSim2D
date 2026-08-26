@@ -38,13 +38,13 @@ ASE_FREE_MODULES = [
     # Deferred at the call site rather than by module split -- these use ASE's
     # object model directly and import it inside the functions that need it.
     "src.potentials.manager",
-    "src.builders.components",
+    "src.builders.construction.components",
     "src.builders.afm",
     "src.builders.sheetonsheet",
     "src.gui.controllers.elements",
     # ASE file reads now go through src.interfaces.ase; only Atoms construction,
     # make_supercell and writes import ASE directly, deferred into their functions.
-    "src.builders.hetero",
+    "src.builders.construction.hetero",
     "src.builders.hetero_afm",
     "src.builders.hetero_slide",
     "src.builders.flake_slide",

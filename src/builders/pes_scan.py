@@ -47,7 +47,7 @@ from ..potentials.manager import PotentialManager
 from ..potentials.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from .afm import AFMSimulation
-from .hetero import detect_inplane_repeat
+from .construction.hetero import detect_inplane_repeat
 from .hetero_afm import HeteroAFMSimulation
 from .hetero_slide import HeteroSheetOnSheetSimulation
 from .sheetonsheet import SheetOnSheetSimulation

@@ -14,9 +14,9 @@ from pathlib import Path
 
 import numpy as np
 
-from src.builders import components
+from src.builders.construction import components
 from src.builders.afm import AFMSimulation
-from src.builders.hetero import build_hetero_structure, register_sheet_block
+from src.builders.construction.hetero import build_hetero_structure, register_sheet_block
 from src.builders.indent import IndentSimulation
 from src.potentials.manager import PotentialManager
 from src.builders.lammps_data import get_model_dimensions
@@ -46,7 +46,7 @@ def replicate_hetero_in_plane(data_path, out_path, nx: int, ny: int, settings) -
     round-tripped so the written file is uniformly ``nocoeff``. Reused by D5 for
     finite-patch sizing.
     """
-    from src.builders.hetero import _run_lammps
+    from src.builders.construction.hetero import _run_lammps
 
     data_path, out_path = Path(data_path), Path(out_path)
     workdir = out_path.parent

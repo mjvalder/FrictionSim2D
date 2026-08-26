@@ -185,7 +185,7 @@ def rotate_layer_to_angle(mono_path: str,
     # Lazy import: the metadata-preserving read/write helpers live in the hetero
     # builder (which imports this module), so import them at call time to avoid a
     # module-load cycle while still reusing exactly one metadata path.
-    from ..builders.hetero import (  # pylint: disable=import-outside-toplevel
+    from ..builders.construction.hetero import (  # pylint: disable=import-outside-toplevel
         _monolayer_to_atoms,
         _read_monolayer,
         _write_supercell,
@@ -232,7 +232,7 @@ def rotate_flake_in_plane(flake_path, angle_deg, out_path=None):
         The output path (a :class:`~pathlib.Path`).
     """
     from pathlib import Path  # pylint: disable=import-outside-toplevel
-    from ..builders.hetero import (  # pylint: disable=import-outside-toplevel
+    from ..builders.construction.hetero import (  # pylint: disable=import-outside-toplevel
         _monolayer_to_atoms,
         _read_monolayer,
         _write_supercell,

@@ -23,8 +23,8 @@ from ..potentials.manager import PotentialManager
 from .base import SimulationBase
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..interfaces.jinja import PackageLoader
-from . import components
-from .hetero import _box_region_cmd, _detect_atom_style, _run_lammps
+from .construction import components
+from .construction.hetero import _box_region_cmd, _detect_atom_style, _run_lammps
 from ..interfaces.ase import read_lammps_data
 
 logger = logging.getLogger(__name__)

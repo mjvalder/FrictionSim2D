@@ -133,8 +133,8 @@ class TestShippedPairSweepExample:
         two of the three runs still failed to build. Only running the matcher
         catches that, so it is worth the few seconds.
         """
-        from src.builders.components import build_monolayer
-        from src.builders.hetero import build_matched_supercells
+        from src.builders.construction.components import build_monolayer
+        from src.builders.construction.hetero import build_matched_supercells
         from src.core.config import SheetConfig
 
         monkeypatch.chdir(self.REPO_ROOT)

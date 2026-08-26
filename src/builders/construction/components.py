@@ -28,22 +28,22 @@ import numpy as np
 
 from jinja2 import Environment
 
-from ..core.config import (
+from ...core.config import (
     GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig, FlakeConfig
 )
-from ..potentials.manager import PotentialManager
-from .lammps_data import (
+from ...potentials.manager import PotentialManager
+from ..lammps_data import (
     atomic2charge, charge2atom, get_model_dimensions,
     get_num_atom_types, shift_atoms_to_z_zero,
 )
-from ..core.utils.paths import get_material_path
-from ..core.utils.structures import cifread
-from ..potentials.utils import (
+from ...core.utils.paths import get_material_path
+from ...core.utils.structures import cifread
+from ...potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )
-from ..interfaces.atomsk import AtomskWrapper
-from ..interfaces.jinja import PackageLoader
-from ..interfaces.lammps import run_lammps_commands
+from ...interfaces.atomsk import AtomskWrapper
+from ...interfaces.jinja import PackageLoader
+from ...interfaces.lammps import run_lammps_commands
 
 logger = logging.getLogger(__name__)
 
@@ -1355,8 +1355,8 @@ def build_matched_crystalline_substrate(
             the least-strain supercell is sheared (non-diagonal) — an orthogonal box
             cannot be tiled by a sheared substrate cell.
     """
-    from ..lattice.matching import match_to_fixed_box
-    from ..lattice.apply import strain_monolayer_to_cell
+    from ...lattice.matching import match_to_fixed_box
+    from ...lattice.apply import strain_monolayer_to_cell
 
     hetero_box = np.asarray(hetero_box, dtype=float)
     build_dir = Path(build_dir)

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from src.builders.components import (
+from src.builders.construction.components import (
     AmorphousNotCachedError,
     amorphous_available,
     get_amorphous_path,

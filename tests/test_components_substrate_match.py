@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from src.core.config import SubstrateConfig
-from src.builders.components import extract_substrate_surface_cell
+from src.builders.construction.components import extract_substrate_surface_cell
 
 MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
@@ -38,7 +38,7 @@ def test_extract_surface_cell_is_2x2_and_one_layer(tmp_path):
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_matched_crystalline_substrate_equals_hetero_box(tmp_path):
     from ase.io import read
-    from src.builders.components import build_matched_crystalline_substrate
+    from src.builders.construction.components import build_matched_crystalline_substrate
     # NB: the plan draft used a 38x44 box, but that is incommensurate with Si's
     # 10.887 A (2x2) surface cell (38/10.887 = 3.49 -> no integer supercell within
     # 2*strain_tol) and would fail loud by design. 33x43 is reachable by a 3x4

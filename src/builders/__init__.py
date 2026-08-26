@@ -24,5 +24,5 @@ def __getattr__(name: str) -> Any:
     if name in ("PESSheetSimulation", "PESTipSimulation"):
         return getattr(import_module(".pes_scan", __name__), name)
     if name == "components":
-        return import_module(".components", __name__)
+        return import_module(".construction.components", __name__)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

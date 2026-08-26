@@ -159,7 +159,7 @@ def _flake_lattice_orientation(atoms):
 def test_rotate_flake_in_plane_twists_lattice_and_keeps_box(tmp_path):
     from ase.io import read
     from src.core.config import FlakeConfig
-    from src.builders.components import build_flake_component
+    from src.builders.construction.components import build_flake_component
     from src.lattice.apply import rotate_flake_in_plane
 
     MAT, POT = "examples/materials", "examples/potentials/sw"

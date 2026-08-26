@@ -26,7 +26,7 @@ from .lammps_data import atomic2molecular
 from ..core.utils.tokens import format_numeric_token
 from ..potentials.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
-from . import components
+from .construction import components
 
 logger = logging.getLogger(__name__)
 
