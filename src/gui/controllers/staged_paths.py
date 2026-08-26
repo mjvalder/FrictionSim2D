@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Union
 
 from ..config_validation import PATH_KEYS
-from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
+from ...core.utils.paths import _find_existing  # noqa: PLC2701
 
 __all__ = ['absolutize_staged_paths']
 

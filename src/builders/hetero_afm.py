@@ -21,7 +21,7 @@ from src.builders.afm import AFMSimulation
 from src.builders.hetero import build_hetero_structure, register_sheet_block
 from src.builders.indent import IndentSimulation
 from src.potentials.manager import PotentialManager
-from src.core.utils import get_model_dimensions
+from src.core.utils.structures import get_model_dimensions
 
 logger = logging.getLogger(__name__)
 

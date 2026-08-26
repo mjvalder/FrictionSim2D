@@ -19,7 +19,7 @@ from jinja2 import Environment, FileSystemLoader
 
 from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader
-from .utils import get_material_path, get_potential_path
+from .utils.paths import get_material_path, get_potential_path
 from ..hpc import HPCScriptGenerator, HPCConfig
 from ..hpc.manifest import JobManifest
 

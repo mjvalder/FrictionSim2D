@@ -12,7 +12,8 @@ from typing import Dict, Optional, Tuple
 from ..core.simulation_base import SimulationBase
 from ..core.config import AFMSimulationConfig
 from ..potentials.manager import PotentialManager
-from ..core.utils import get_model_dimensions, format_numeric_token
+from ..core.utils.structures import get_model_dimensions
+from ..core.utils.tokens import format_numeric_token
 from ..potentials.utils import normalize_potential_type
 from ..data.models import EV_A_TO_NN
 from . import components
@@ -790,7 +791,7 @@ class AFMSimulation(SimulationBase):
         configs); provenance records which route was taken.
         """
         from itertools import product
-        from ..core.utils import cifread
+        from ..core.utils.structures import cifread
         from ..potentials.utils import lj_params
 
         lj_cut = getattr(self.config.settings.potential, 'lj_cutoff', 11.0)

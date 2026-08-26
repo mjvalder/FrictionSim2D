@@ -26,7 +26,7 @@ from src.builders.components import (
     make_amorphous,
 )
 from src.core.config import GlobalSettings
-from src.core.utils import get_model_dimensions
+from src.core.utils.structures import get_model_dimensions
 
 MATERIALS_DIR = Path(__file__).resolve().parents[1] / 'src' / 'data' / 'materials'
 

@@ -8,13 +8,9 @@ import tempfile
 from pathlib import Path
 
 from src.core.config import read_config
-from src.core.utils import (
-    _is_float,
-    get_model_dimensions,
-    atomic2charge,
-    charge2atom,
-    atomic2molecular,
-)
+from src.core.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
+from src.core.utils.structures import get_model_dimensions
+from src.core.utils.tokens import _is_float  # noqa: PLC2701
 from src.potentials.utils import lj_params, get_potential_element_order
 
 

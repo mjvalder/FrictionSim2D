@@ -36,7 +36,7 @@ from ...run.expand import (
     outer_loop_conflict, read_material_entries, read_material_list,
 )
 from ...run.naming import loopability, output_dir_for
-from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
+from ...core.utils.paths import _find_existing  # noqa: PLC2701
 from ..schema.introspect import SectionSpec, describe_model, describe_section
 from ..schema.overrides import override_for_section, overrides_for
 from ..schema.simulation_types import MODES, sections_for

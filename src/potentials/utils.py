@@ -17,12 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from ..core.utils import (  # noqa: PLC2701
-    cifread,
-    count_atomtypes,
-    _find_existing,
-    _normalize_element_symbol,
-)
+from ..core.utils.paths import _find_existing  # noqa: PLC2701
+from ..core.utils.structures import _normalize_element_symbol, cifread, count_atomtypes  # noqa: PLC2701
 
 from . import uff as lj
 

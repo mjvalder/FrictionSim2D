@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Type, Union
 from pydantic import BaseModel, ValidationError
 
 from ..run.placeholders import TEMPLATE_MARKERS, has_template_marker
-from ..core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
+from ..core.utils.paths import _find_existing  # noqa: PLC2701
 
 __all__ = ['ConfigIssue', 'ConfigValidation', 'validate_config', 'preflight_paths']
 

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union, cast
 
 from . import AIIDA_AVAILABLE
-from ..core.utils import format_dimension_token
+from ..core.utils.tokens import format_dimension_token
 
 if TYPE_CHECKING:
     from .data import (

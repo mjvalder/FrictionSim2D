@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..style import CAPTION_SMALL, WARNING
-from ...core.utils import _normalize_element_symbol  # noqa: PLC2701
+from ...core.utils.structures import _normalize_element_symbol  # noqa: PLC2701
 
 __all__ = ['PairOverrideEditor']
 

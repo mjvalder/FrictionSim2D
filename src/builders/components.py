@@ -31,10 +31,9 @@ from ..core.config import (
     GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig, FlakeConfig
 )
 from ..potentials.manager import PotentialManager
-from ..core.utils import (
-    cifread, get_material_path, get_model_dimensions, get_num_atom_types,
-    atomic2charge, charge2atom, shift_atoms_to_z_zero
-)
+from ..core.utils.lammps_data import atomic2charge, charge2atom, shift_atoms_to_z_zero
+from ..core.utils.paths import get_material_path
+from ..core.utils.structures import cifread, get_model_dimensions, get_num_atom_types
 from ..potentials.utils import (
     check_potential_cif_compatibility, get_potential_element_order
 )

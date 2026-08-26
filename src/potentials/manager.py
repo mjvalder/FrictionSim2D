@@ -23,7 +23,7 @@ import shutil
 from ase.data import atomic_masses, atomic_numbers
 
 from ..core.config import ComponentConfig, GlobalSettings
-from ..core.utils import count_atomtypes, cifread
+from ..core.utils.structures import cifread, count_atomtypes
 from .utils import (
     POTENTIALS_REQUIRING_LJ,
     POTENTIALS_WITH_INTERNAL_LJ,

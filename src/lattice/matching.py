@@ -689,7 +689,7 @@ def find_coincidence_lattice_from_cif(
     Returns:
         :class:`MatchResult` or ``None``.
     """
-    from ..core.utils import cifread  # local import to avoid circular dependency
+    from ..core.utils.structures import cifread
 
     def _cell(cif_path, params):
         if cif_path is not None:

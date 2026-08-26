@@ -75,7 +75,7 @@ class TestPlainRelativePaths:
         # And, crucially, resolving the *staged* value against `unrelated`
         # (what search_paths would do once written there) must still work,
         # because it is now absolute.
-        from src.core.utils import _find_existing  # noqa: PLC0415 (local import ok in test)
+        from src.core.utils.paths import _find_existing  # noqa: PLC2701
         assert _find_existing(result['2D']['cif_path'], unrelated) is not None
         assert _find_existing(result['2D']['pot_path'], unrelated) is not None
 
@@ -116,7 +116,7 @@ class TestTemplatedRelativePaths:
         result = absolutize_staged_paths(config, config_dir)
         substituted = result['2D']['cif_path'].replace('{mat}', 'h_MoS2')
 
-        from src.core.utils import _find_existing  # noqa: PLC0415
+        from src.core.utils.paths import _find_existing  # noqa: PLC2701
         assert _find_existing(substituted, unrelated) is not None
 
 
@@ -141,7 +141,7 @@ class TestMaterialsList:
         config = {'2D': {'materials_list': 'materials.txt'}}
         result = absolutize_staged_paths(config, config_dir)
 
-        from src.core.utils import _find_existing  # noqa: PLC0415
+        from src.core.utils.paths import _find_existing  # noqa: PLC2701
         assert _find_existing(result['2D']['materials_list'], unrelated) is not None
 
 
