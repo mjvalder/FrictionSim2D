@@ -106,19 +106,6 @@ class IndentSimulation(AFMSimulation):
         #: n_layers -> derived velocity seed (populated during build()).
         self.indent_seeds: Dict[int, int] = {}
 
-    def _material_id(self) -> str:
-        """Material token used in the job name, seed derivation, and indent_meta.
-
-        Single-material indent: the sheet's material name. Overridden by
-        :class:`~src.builders.hetero_afm.HeteroIndentSimulation` to return the
-        pair token instead, so two hetero pairs sharing material 1 don't
-        collide on job name, derived seed, or the ``indent_meta.json`` manifest
-        key (see :func:`src.run.naming.material_token` for the sibling convention
-        on the raw-dict side). Includes
-        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
-        unmodified) so an indent's ``[flake]`` also keys all three.
-        """
-        return self.config.sheet.mat + self._flake_id_suffix()
 
     def _get_hpc_job_name(self) -> str:
         return f"indent_{self._material_id()}"

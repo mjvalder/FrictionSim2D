@@ -12,6 +12,8 @@ Function Organization:
 5. Main builders (build_tip, build_substrate, build_sheet)
 """
 
+import json
+import random
 import logging
 import shutil
 import tempfile
@@ -1591,7 +1593,14 @@ def make_amorphous(
         lstrip_blocks=True
     )
 
+    # Drawn here, not in the template: a Jinja `| random` leaves the seed only
+    # in the rendered script, so the amorphous block in the materials library
+    # -- shared by every run that uses it -- could never be reproduced. Same
+    # contract as SimulationBase._run_seed.
+    melt_seed = random.randint(1, 900_000_000)
+
     context = {
+        'melt_seed': melt_seed,
         'neighbor_list': settings.simulation.neighbor_list,
         'neigh_modify_command': settings.simulation.neigh_modify_command,
         'base_block': base_block,
@@ -1612,12 +1621,23 @@ def make_amorphous(
     lmp_input_path.write_text(script_content, encoding='utf-8')
 
     if quench.run_local:
-        logger.info("Running melt-quench with %d processors...", quench.n_procs)
-        try:
-            subprocess.run(
-                f"mpiexec -np {quench.n_procs} lmp -in {lmp_input_path}",
-                shell=True, check=True
+        # Serial, deliberately. `mpiexec -np N lmp` did NOT parallelise: `lmp`
+        # links no MPI at all, so every rank singleton-initialises and N
+        # complete, identical melt-quenches run at once -- N x runtime and
+        # N x peak memory for one result, with N ranks writing the same file.
+        # Verified in the `aiida` env: `mpiexec -np 4 lmp` starts 4 instances,
+        # and `lmp_serial` (which does link libmpi) singleton-initialises too,
+        # so swapping the binary does not help. quench.n_procs is therefore
+        # not honoured locally; it still applies to the HPC path below.
+        if quench.n_procs > 1:
+            logger.warning(
+                "quench.n_procs=%d ignored: no working parallel LAMMPS launcher "
+                "in this environment; running the melt-quench serially.",
+                quench.n_procs,
             )
+        logger.info("Running melt-quench (serial)...")
+        try:
+            subprocess.run(f"lmp -in {lmp_input_path}", shell=True, check=True)
         except subprocess.CalledProcessError as e:
             logger.error("Melt-quench LAMMPS run failed: %s", e)
             raise
@@ -1639,8 +1659,25 @@ def make_amorphous(
 
     if base_block.exists():
         base_block.unlink()
-    if lmp_input_path.exists():
-        lmp_input_path.unlink()
+    # The melt-quench script is deliberately NOT deleted: it is the only record
+    # of how this amorphous block was produced, and the output lands in the
+    # packaged materials library where every later run shares it.
+
+    # Record how this block was made, beside the block itself. The materials
+    # library is shared across every run, so the provenance has to travel with
+    # the artefact rather than with the run that happened to create it.
+    meta_path = Path(str(amor_file) + '.json')
+    meta_path.write_text(json.dumps({
+        'material': mat_name,
+        'melt_seed': melt_seed,
+        'melt_temp': quench.melt_temp,
+        'quench_temp': quench.quench_temp,
+        'quench_rate': quench.quench_rate,
+        'timestep': quench.timestep,
+        'quench_nsteps': quench_nsteps,
+        'pot_type': pot_type,
+        'script': str(lmp_input_path),
+    }, indent=2), encoding='utf-8')
 
     logger.info("Created amorphous structure in materials folder: %s", amor_file)
     return amor_file

@@ -197,13 +197,20 @@ _assert_sheet_block_matches_data = assert_sheet_block_matches_data
 def _pair_material_token(config) -> str:
     """The numeric-``[2D-N]``-order ``+``-joined material pair token.
 
-    E.g. ``h-MoS2+h-WS2``. Shared by :class:`HeteroAFMSimulation` and
-    :class:`HeteroIndentSimulation`'s ``_material_id`` overrides — the latter
-    can't just inherit the former's: :class:`~src.builders.indent.IndentSimulation`
-    sits before :class:`HeteroAFMSimulation` in :class:`HeteroIndentSimulation`'s
-    MRO (it needs its own single-material ``_material_id`` for the
-    homogeneous indent path), so :class:`HeteroIndentSimulation` needs its own
-    override too — but both should compute the pair token the same way.
+    E.g. ``h-MoS2+h-WS2``. Used by :class:`HeteroAFMSimulation._material_id`,
+    which :class:`HeteroIndentSimulation` now simply inherits.
+
+    It previously could not: :class:`~src.builders.indent.IndentSimulation`
+    carried a ``_material_id`` byte-identical to the one it inherited from
+    :class:`~src.builders.afm.AFMSimulation`, and that redundant override sat
+    before :class:`HeteroAFMSimulation` in
+    :class:`HeteroIndentSimulation`'s MRO, shadowing the pair token. The fix
+    was to delete the redundant override rather than add a second one to undo
+    it; both classes now resolve correctly by MRO
+    (``IndentSimulation`` -> ``AFMSimulation``,
+    ``HeteroIndentSimulation`` -> ``HeteroAFMSimulation``), which
+    ``tests/test_material_id_mro.py`` pins.
+
     Mirrors :func:`src.run.naming.material_token`'s convention on the raw-dict
     side (that function isn't reusable directly here: the builder only has
     the validated config object, not the raw config mapping).
@@ -640,13 +647,3 @@ class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
       distinct job names, seeds, and manifest keys instead of colliding.
     """
 
-    def _material_id(self) -> str:
-        """Pair token (``h-MoS2+h-WS2``) via the shared :func:`_pair_material_token`
-        helper (see its docstring for why this can't just inherit
-        :meth:`HeteroAFMSimulation._material_id` despite computing the same
-        thing). Also includes
-        :meth:`~src.builders.afm.AFMSimulation._flake_id_suffix` (inherited
-        unmodified) so a hetero indent's ``[flake]`` also keys the job name,
-        derived seed, and ``indent_meta.json``.
-        """
-        return _pair_material_token(self.config) + self._flake_id_suffix()
