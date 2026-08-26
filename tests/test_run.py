@@ -423,7 +423,7 @@ class TestOrderedPairSweeps:
 
     def test_the_primary_may_still_spell_its_marker_mat(
             self, tmp_path: Path) -> None:
-        """`{mat}` and `{mat1}` are the same placeholder (material_templates),
+        """`{mat}` and `{mat1}` are the same placeholder (run.placeholders),
         so a single-material config that later gains a second sheet must not
         have to be rewritten to keep sweeping."""
         listing = self._pair_files(tmp_path)

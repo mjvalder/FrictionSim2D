@@ -30,7 +30,7 @@ from ...core.config import (
 )
 from ...core.config import write_config
 from ..config_validation import ConfigIssue, ConfigValidation, validate_config
-from ...core.material_templates import has_template_marker
+from ...run.placeholders import has_template_marker
 from ...run.expand import (
     ExpansionSummary, count_expansion, expand_config_sweeps,
     outer_loop_conflict, read_material_entries, read_material_list,

@@ -27,7 +27,7 @@ from typing import Any, List, Optional, Set, Tuple
 
 from ase.data import atomic_numbers
 
-from ...core.material_templates import has_template_marker, substitute_materials
+from ...run.placeholders import has_template_marker, substitute_materials
 from ...core.utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 
 __all__ = ['scan_config_elements']

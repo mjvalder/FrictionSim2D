@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...core.material_templates import has_template_marker
+from ...run.placeholders import has_template_marker
 from ..controllers.document import ConfigDocument, DocumentError
 from ..controllers.elements import scan_config_elements
 from ..schema.introspect import FieldKind, FieldSpec, SectionSpec

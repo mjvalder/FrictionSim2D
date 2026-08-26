@@ -4,13 +4,10 @@ This module provides tools for reading, writing, and modifying simulation
 files (e.g., CIF, LAMMPS data), parsing configuration files, and calculating
 physical parameters like Lennard-Jones coefficients.
 """
-import configparser
-import json
 import re
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple, Union, Any, Optional
-import math
+from typing import Dict, List, Union, Any, Optional
 from ase.io import read as ase_read
 
 

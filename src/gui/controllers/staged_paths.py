@@ -50,7 +50,7 @@ _PATH_LIKE_KEYS = frozenset(PATH_KEYS) | {_MATERIALS_LIST_KEY}
 #: Matches a ``{mat}``, ``{mat1}``, ``{mat2}``, ... placeholder left for
 #: ``expand_config_sweeps`` to substitute later. Not anchored to a specific
 #: name -- any future per-sheet placeholder needs no change here -- and
-#: deliberately broader than ``material_templates.TEMPLATE_MARKERS`` (a fixed
+#: deliberately broader than ``run.placeholders.TEMPLATE_MARKERS`` (a fixed
 #: ``('{mat}', '{mat1}', '{mat2}')`` tuple) for the same reason: this module
 #: only needs to know "is this value templated at all", not which specific
 #: marker it holds, so narrowing it to the fixed set would silently stop

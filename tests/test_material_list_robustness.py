@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.material_templates import has_template_marker, substitute_materials
+from src.run.placeholders import has_template_marker, substitute_materials
 from src.run.expand import (
     expand_config_sweeps,
     preflight_materials,

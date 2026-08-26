@@ -1,24 +1,33 @@
-"""Placeholders substituted into a config section during material-sweep
-expansion.
+"""Placeholders substituted into a config section during sweep expansion.
 
 A templated config holds ``{mat}``/``{mat1}``/``{mat2}`` in place of a real
 material name (``cif_path``, ``pot_path``, ``mat`` itself) until
-``expand_config_sweeps`` substitutes it. Two very different callers need to
-agree on exactly what a marker looks like:
+:func:`~src.run.expand.expand_config_sweeps` substitutes it. Markers exist
+only *before* expansion, which is what decides who needs this module:
 
-* ``gui.config_validation.preflight_paths`` must recognise a still-templated path
-  as its own issue kind (``unexpanded_template``), not a missing file -- the
-  file genuinely does not exist yet, but for a reason the user cannot fix by
-  finding a file, unlike a real typo. Missing this distinction for ``{mat1}``/
-  ``{mat2}`` (a literal check for ``{mat}`` alone) turns every heterostructure
-  pair config into a hard validation error that blocks Render and Generate.
-* ``src.run.expand`` substitutes the markers once real material names are
-  known, both for a single-material sweep (``{mat}`` and ``{mat1}`` are
-  equivalent there) and for an ordered pair (``{mat1}`` / ``{mat2}``).
+* :mod:`src.run.expand` does the substituting, and is the only consumer that
+  destroys markers.
+* ``gui.config_validation.preflight_paths`` validates a config the user is
+  still editing -- so it sees markers, and must report a still-templated path
+  as its own issue kind (``unexpanded_template``) rather than a missing file.
+  The file genuinely does not exist yet, but for a reason the user cannot fix
+  by finding a file, unlike a real typo. Missing this distinction for
+  ``{mat1}``/``{mat2}`` (a literal check for ``{mat}`` alone) turns every
+  heterostructure pair config into a hard validation error that blocks Render
+  and Generate.
+* ``src.core.config``'s pydantic validators run strictly *after* expansion and
+  never see a marker. They cannot tell ``{mat}.cif`` from a typo -- both raise
+  the same ``FileNotFoundError`` -- which is correct, because they should
+  never be handed one.
 
-Kept in its own module, not in either of the two, so ``config_validation``
-(imported by GUI validation on every keystroke) does not have to pull in
-``src.run.expand``'s builder imports to get it.
+Kept beside :mod:`src.run.expand` rather than inside it: ``expand`` imports the
+builders, and GUI validation would otherwise pull that whole tree in to read
+three constants. ``src/run/__init__.py`` is deliberately empty, so importing
+this module costs nothing.
+
+Named ``placeholders`` rather than ``templates`` to avoid reading as a second
+``src/templates/``, which holds the Jinja2 LAMMPS and HPC scripts -- an
+unrelated sense of the word.
 """
 
 from __future__ import annotations
