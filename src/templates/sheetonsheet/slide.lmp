@@ -217,14 +217,14 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 # NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
 # exemption: it is the label itself and its cost was already paid campaign-wide.
 {% if channels.window %}
-fix             fc_win all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot {% for i in range(1, n_layers + 1) %}v_comx_L{{ i }} v_comy_L{{ i }} v_comz_L{{ i }} {% endfor %}v_etot v_pe_now v_ke_now file {{ results_file_pattern }}
+fix             fc_win all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot {% for i in range(1, n_layers + 1) %}v_comx_L{{ i }} v_comy_L{{ i }} v_comz_L{{ i }} {% endfor %}v_etot v_pe_now v_ke_now file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
 {% endif %}
 {% if channels.raw %}
-fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file {{ results_file_raw }}
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file {{ results_file_raw }} title1 "# schema=2 lf_units=nN"
 {% endif %}
 {% if not has_internal_lj %}
 {% if channels.peratom %}
-fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file {{ results_file_peratom }}
+fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file {{ results_file_peratom }} title1 "# schema=2 lf_units=nN"
 {% endif %}
 {% endif %}
 

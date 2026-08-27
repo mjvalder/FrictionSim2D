@@ -105,3 +105,37 @@ def test_real_2026_file_cof_unchanged():
     assert abs(df['nf'].mean() - PINNED_NF_MEAN) < 1e-8
     # header path must also have renamed the COM columns (spec review M1)
     assert 'comz' in df.columns and 'v_comz' not in df.columns
+
+
+SHEET_SCHEMA2 = (
+    "# schema=2 lf_units=nN\n"
+    "# TimeStep v_xfrict v_yfrict v_sx v_sy v_fz\n"
+    + "\n".join(f"{i * 1000} 2.0 1.0 0.5 0.25 -10.0" for i in range(5))
+)
+
+
+def test_schema2_file_is_flagged_and_not_rescaled(tmp_path):
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA2)
+    df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_schema'] == 2
+    assert df['lfx'].iloc[0] == 2.0      # already nN, untouched
+
+
+def test_missing_marker_reads_as_schema1(tmp_path):
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA2.replace("# schema=2 lf_units=nN",
+                                       "# Time-averaged data for fix fc_win"))
+    df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_schema'] == 1
+
+
+def test_sheet_window_frame_carries_lfx(tmp_path):
+    # regression: rename_map's 'xfrict' shadowed _SHEET_COLUMN_RENAME's 'lfx',
+    # so read_data's COF guard (needs lfx AND lfy AND nf) never fired and
+    # every sheet run silently produced no COF at all
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA2)
+    df = _reader()._read_dataframe(p, 'sheet')
+    assert 'lfx' in df.columns and 'lfy' in df.columns and 'nf' in df.columns
+    assert 'xfrict' not in df.columns

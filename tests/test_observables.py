@@ -90,3 +90,10 @@ def test_afm_cof_inputs_share_force_units():
     # the sheet's eV/A-over-nN mismatch.
     assert REGISTRY['lfx'].units == REGISTRY['nf'].units == 'nN'
     assert REGISTRY['lfy'].units == 'nN'
+
+
+def test_raw_legacy_block_is_afm_only():
+    # a sheet raw file has no v_fx_spr column; applying the AFM legacy block
+    # to it was inert but wrong
+    assert 'v_fx_spr' not in rename_map('sheetonsheet', 'raw')
+    assert rename_map('afm', 'raw')['v_fx_spr'] == 'raw_lfx'

@@ -135,9 +135,17 @@ _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
 # Sheet friction label: a group/group read by the window fix at Nevery=1, a
 # deliberate exemption from the tier rule (cost already paid campaign-wide).
 # Template-owned, so validate_registry never sees it.
+#
+# rename_to is deliberately None. read_data merges this map OVER
+# _SHEET_COLUMN_RENAME, so declaring 'v_xfrict' here shadowed that map's
+# 'v_xfrict' -> 'lfx' and the frame lost lfx entirely -- silently killing COF
+# for every sheet run (read_data.py's COF guard needs lfx, lfy AND nf).
+# The real fix is to name this channel 'lfx' for the sheet family, which needs
+# the registry to allow one name across disjoint sim_types; until then the
+# parser's own sheet map owns the rename.
 _add(Observable(name='xfrict', sim_types=('sheetonsheet',),
                 group='layer_n', tier='window', stream='results',
-                rename_to='v_xfrict', units='nN'))
+                rename_to=None, units='nN'))
 for _grp in ('tip_all', 'sub_all', '2D_all'):
     _add(Observable(
         name=f'pe_sum_{_grp}', sim_types=('afm', 'indent'),
@@ -215,7 +223,7 @@ def rename_map(sim_type: str, tier: str) -> dict:
             continue
         if ob.tier == tier and ob.rename_to:
             m[ob.rename_to] = ob.name
-    if tier == 'raw':
+    if tier == 'raw' and sim_type in ('afm', 'indent'):
         m.update({'v_fx_spr': 'raw_lfx', 'v_fy_spr': 'raw_lfy',
                   'v_fz_tip': 'raw_nf', 'v_comx_tip': 'raw_tipx',
                   'v_comy_tip': 'raw_tipy', 'v_comz_tip': 'raw_tipz'})

@@ -267,3 +267,18 @@ def test_interlayer_energy_is_not_scaled():
     # c_frict (SCALAR) is an energy in eV and is already correct
     text = _render_sheet_slide(has_internal_lj=False)
     assert 'variable        e_int_il equal c_frict\n' in text
+
+
+def test_sheet_fixes_carry_the_schema_marker():
+    # line 1 distinguishes post-fix (nN) output from pre-fix (eV/A) output.
+    # LAMMPS title1 replaces ONLY line 1; the column header stays on line 2
+    # where read_data reads it.
+    text = _render_sheet_slide(has_internal_lj=False)
+    assert text.count('title1 "# schema=2 lf_units=nN"') == 3  # win, raw, pa
+
+
+def test_hold_fix_has_no_schema_marker():
+    # the hold writes its own hold_*.txt and is not a results-tier file
+    text = _render_sheet_slide(has_internal_lj=False)
+    hold = [ln for ln in text.splitlines() if 'hold_ave' in ln and 'ave/time' in ln]
+    assert hold and 'title1' not in hold[0]

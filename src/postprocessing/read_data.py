@@ -240,6 +240,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         from src.core.observables import rename_map
 
         header_cols: list[str] | None = None
+        header_lines: list[str] = ['', '']
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
                 header_lines = [next(fh, ''), next(fh, '')]
@@ -267,6 +268,12 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             )
             df.rename(columns={**self._SHEET_COLUMN_RENAME, **rmap},
                       inplace=True)
+            # Line 1 carries the output-schema marker. Absent means pre-fix:
+            # the sheet's LJ-branch lateral force is in eV/A while the load it
+            # is divided by is already nN, so its COF is a factor
+            # 1.602176565 too SMALL (docs/notes/2026-08-27-sheet-cof-unit-
+            # correction.md).
+            df.attrs['lf_schema'] = 2 if 'schema=2' in header_lines[0] else 1
             return df
 
         # LEGACY_2026 positional fallback — width must match EXACTLY

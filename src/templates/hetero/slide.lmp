@@ -170,7 +170,7 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 {% endif %}
 
 {% if channels.window %}
-fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file {{ results_file_pattern }}
+fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
 {% endif %}
 
 run             {{ run_steps }}
