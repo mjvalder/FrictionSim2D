@@ -40,6 +40,18 @@ _ENV = Environment(
 )
 
 
+def _with_channels(context: Dict) -> Dict:
+    """Fill in ``channels`` when the caller did not supply it.
+
+    ``OutputSettings.channels`` defaults to all tiers on, so an absent key
+    genuinely means "emit everything" -- this is the default, not a silent
+    fallback. The builders always pass the real setting; this only covers
+    callers that render the template with a partial context.
+    """
+    if "channels" in context:
+        return context
+    return {**context, "channels": {"window": True, "raw": True, "peratom": True}}
+
 def render_flake_slide(context: Dict) -> str:
     """Render ``flake/slide.lmp`` with the given context.
 
@@ -47,7 +59,7 @@ def render_flake_slide(context: Dict) -> str:
     renders the flake-driven slide template without needing a full builder
     instance (used by the render unit tests).
     """
-    return _ENV.get_template("flake/slide.lmp").render(context)
+    return _ENV.get_template("flake/slide.lmp").render(_with_channels(context))
 
 
 def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Dict]:
@@ -334,6 +346,13 @@ class FlakeSlideSimulation(SimulationBase):
             "run_steps": sim.slide_run_steps,
             "min_style": sim.min_style,
             "minimization_command": sim.minimization_command,
+            # settings.output.channels gates each tier"s fix ave/time, the same
+            # way it does for the AFM family. Passed as a plain dict: unlike AFM,
+            # the sheet templates hand-write their varlists rather than taking
+            # them from the observables registry, so only the gate is shared --
+            # routing the varlists through the registry would change which
+            # columns are emitted, which is a separate change with its own risk.
+            "channels": dict(out.channels),
             "results_freq": out.results_frequency,
             "dump_freq": out.dump_frequency.get("slide", 1000),
             "dump_enabled": out.dump.get("slide", False),

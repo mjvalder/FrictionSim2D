@@ -114,6 +114,11 @@ def _render_sheet_slide(has_internal_lj: bool) -> str:
         scan_angle_force=None, temp=300, thermostat_type='langevin',
         drive_method='fix_move', dump_enabled=False,
         seed_sheet_center=12345,
+        # All tiers on: these tests are about the has_internal_lj branch,
+        # not the channel gate. Passed explicitly because the template
+        # requires it -- a missing gate must error, not silently emit
+        # everything, which is how the sheet family went ungated for so long.
+        channels={'window': True, 'raw': True, 'peratom': True},
         xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,  # zhi feeds arithmetic
         num_atom_types=6, data_file='build/sheet.lmp',
         potential_file='system.in.settings', neighbor_list=2.0,

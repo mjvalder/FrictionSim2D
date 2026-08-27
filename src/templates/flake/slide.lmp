@@ -154,7 +154,9 @@ fix             spr flake spring couple virtual {{ driving_spring_ev }} 0.0 0.0 
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 {% endif %}
 
+{% if channels.window %}
 fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_comx_flake v_comy_flake v_comz_flake file {{ results_file_pattern }}
+{% endif %}
 
 run             {{ run_steps }}
 

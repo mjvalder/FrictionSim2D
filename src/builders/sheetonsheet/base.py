@@ -337,6 +337,13 @@ class SheetOnSheetSimulation(SimulationBase):
                 f"{rel_run_dir_str}/results/"
                 f"friction_p${{pressure}}_a${{a}}_s${{speed}}"
             ),
+            # settings.output.channels gates each tier's fix ave/time, the same
+            # way it does for the AFM family. Passed as a plain dict: unlike AFM,
+            # the sheet templates hand-write their varlists rather than taking
+            # them from the observables registry, so only the gate is shared --
+            # routing the varlists through the registry would change which
+            # columns are emitted, which is a separate change with its own risk.
+            'channels': dict(out.channels),
             'results_file_raw': (
                 f"{rel_run_dir_str}/results/"
                 f"raw_p${{pressure}}_a${{a}}_s${{speed}}"
