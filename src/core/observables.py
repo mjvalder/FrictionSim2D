@@ -1,16 +1,15 @@
-"""Single source of truth for every simulation output channel.
+"""The registry of simulation output channels, declared once each.
 
-Two artefacts must never disagree: the LAMMPS variable list a template writes
-into a ``fix ave/time``, and the rename map the parser applies to the resulting
-header. This module generates both — ``builders/afm.py`` reads it for the
-varlists, ``postprocessing/read_data.py`` for the rename maps — so a channel
-added in one place cannot go missing in the other.
+Every channel has two names that must agree: the LAMMPS variable a template
+writes into its ``fix ave/time``, and the name the parser renames that column
+back to. Declaring both here keeps the builders (which read the varlists) and
+``postprocessing/read_data.py`` (which reads the rename maps) from drifting.
 
-Sampling tiers: the ``window`` tier samples every step and block-means over
-1000 (as the 2026 campaign did); ``raw`` takes one instantaneous sample per 100
-steps; ``peratom`` evaluates the expensive per-atom computes once per 1000
-steps. ``compute group/group`` rebuilds a neighbour list per invocation and must
-never run at Nevery=1 — validate_registry() enforces this.
+Sampling tiers, with their ``fix ave/time`` args in ``TIER_ARGS``: ``window``
+samples every step and block-means over 1000 (the 2026 campaign layout),
+``raw`` takes one instantaneous sample per 100 steps, ``peratom`` runs the
+costly per-atom computes once per 1000. ``group/group`` rebuilds a neighbour
+list per call, so ``validate_registry`` bans it from the window tier.
 """
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -28,12 +27,19 @@ TIER_ARGS = {
 
 @dataclass(frozen=True)
 class Observable:
-    """One output channel, declared once.
+    """One output channel.
 
-    ``rename_to`` is the LAMMPS-native column name (e.g. ``v_fz_tip``) that the
-    parser maps back to ``name``. A channel with no ``lammps_compute`` is
-    template-owned: the template emits it (often conditionally), and the
-    registry only needs to know how to parse it back.
+    ``rename_to`` is the native LAMMPS column name (``v_fz_tip``) the parser
+    maps back to ``name``. No ``lammps_compute`` means the template owns the
+    channel and emits it itself, often conditionally; the registry only has to
+    parse it back.
+
+    ``units`` is the physical unit of the emitted column, in LAMMPS ``metal``
+    terms: 'nN', 'eV', 'eV/A', 'A', 'K', 'count'. It is not decorative -- the
+    sheet family shipped a lateral force in eV/A against a normal load in nN
+    for the life of the project, producing a COF a factor 1.602176565 too
+    small, and a coherence test over this field is what catches that class of
+    defect.
     """
     name: str
     sim_types: Tuple[str, ...]
@@ -43,6 +49,7 @@ class Observable:
     lammps_compute: Optional[str] = None
     lammps_variable: Optional[str] = None
     rename_to: Optional[str] = None
+    units: Optional[str] = None
 
 
 REGISTRY: dict = {}
@@ -54,11 +61,9 @@ def _add(ob: Observable) -> None:
     REGISTRY[ob.name] = ob
 
 
-# --- legacy window channels (order preserved: the first nine window columns
-# reproduce the 2026 campaign layout). EVERY entry needs rename_to: real 2026
-# files carry full headers (# TimeStep v_fz_tip ... v_comx v_comy v_comz ...),
-# so the header path is the one that parses them — comx with rename_to=None
-# would leave a v_comx column downstream. ------------------------------------
+# --- legacy window channels: the first nine columns, in the 2026 campaign's
+# order. All nine need rename_to, because real 2026 files carry full headers and
+# a missing one leaves e.g. a v_comx column downstream. -----------------------
 for _name, _native in [
     ('nf', 'v_fz_tip'), ('lfx', 'v_fx_spr'), ('lfy', 'v_fy_spr'),
     ('comx', 'v_comx'), ('comy', 'v_comy'), ('comz', 'v_comz'),
@@ -69,10 +74,11 @@ for _name, _native in [
         sim_types=('afm', 'indent'),
         group='tip_fix' if _name.startswith(('nf', 'lf', 'tip')) else '2D_all',
         tier='window', stream='results',
-        rename_to=_native))
+        rename_to=_native,
+        units='nN' if _name in ('nf', 'lfx', 'lfy') else 'A'))
 
-# --- layer-resolved COM: static bilayer entries for golden tests. Builders
-# inject layer_channels(n_layers) for the material's real layer count. --------
+# --- layer-resolved COM: bilayer entries for the golden tests. Builders inject
+# layer_channels(n_layers) for the material's real layer count. ---------------
 for _lyr in (1, 2):
     for _ax in ('x', 'y', 'z'):
         _add(Observable(
@@ -82,55 +88,56 @@ for _lyr in (1, 2):
             lammps_compute=f'compute COM_L{_lyr} layer_{_lyr} com',
             lammps_variable=(f'variable com{_ax}_L{_lyr} equal '
                              f'c_COM_L{_lyr}[{"xyz".index(_ax) + 1}]'),
-            rename_to=f'v_com{_ax}_L{_lyr}'))
+            rename_to=f'v_com{_ax}_L{_lyr}', units='A'))
 
 # --- energies and temperatures ------------------------------------------------
 _add(Observable(name='etotal', sim_types=('afm', 'sheetonsheet', 'indent'),
                 group='all', tier='window', stream='results',
-                lammps_variable='variable etot equal etotal', rename_to='v_etot'))
+                lammps_variable='variable etot equal etotal',
+                rename_to='v_etot', units='eV'))
 _add(Observable(name='pe', sim_types=('afm', 'sheetonsheet', 'indent'),
                 group='all', tier='window', stream='results',
-                lammps_variable='variable pe_now equal pe', rename_to='v_pe_now'))
+                lammps_variable='variable pe_now equal pe',
+                rename_to='v_pe_now', units='eV'))
 _add(Observable(name='ke', sim_types=('afm', 'sheetonsheet', 'indent'),
                 group='all', tier='window', stream='results',
-                lammps_variable='variable ke_now equal ke', rename_to='v_ke_now'))
-# Cumulative thermostat work: requires `tally yes` on the langevin fixes. A
-# healthy run's thermostat work grows linearly.
+                lammps_variable='variable ke_now equal ke',
+                rename_to='v_ke_now', units='eV'))
+# Cumulative thermostat work; needs `tally yes` on the langevin fixes. Grows
+# linearly in a healthy run.
 _add(Observable(name='w_thermostat_tip', sim_types=('afm', 'indent'),
                 group='tip_thermo', tier='window', stream='results',
                 lammps_variable='variable w_lang_tip equal f_lang_tip',
-                rename_to='v_w_lang_tip'))
+                rename_to='v_w_lang_tip', units='eV'))
 _add(Observable(name='w_thermostat_sub', sim_types=('afm', 'indent'),
                 group='sub_thermo', tier='window', stream='results',
                 lammps_variable='variable w_lang_sub equal f_lang_sub',
-                rename_to='v_w_lang_sub'))
-# The AFM sheet is pure NVE (no setpoint): its 3D temperature is a
-# frictional-heating observable, not a controlled parameter.
+                rename_to='v_w_lang_sub', units='eV'))
+# The AFM sheet is pure NVE, so its 3D temperature measures frictional heating
+# rather than tracking a setpoint.
 _add(Observable(name='temp_sheet_3d', sim_types=('afm', 'indent'),
                 group='2D_all', tier='window', stream='results',
                 lammps_compute='compute T_sheet 2D_all temp',
                 lammps_variable='variable temp_sheet equal c_T_sheet',
-                rename_to='v_temp_sheet'))
-# True tip-sheet interaction energy: tip<->sheet coupling is purely lj/cut, so
-# group/group works under the hybrid pair style (verified).
+                rename_to='v_temp_sheet', units='K'))
+# Tip-sheet coupling is purely lj/cut, so group/group works here even under the
+# hybrid pair style.
 _add(Observable(name='E_int_tip_sheet', sim_types=('afm', 'indent'),
                 group='tip_all', tier='peratom', stream='results',
                 lammps_compute='compute eint tip_all group/group 2D_all pair yes',
                 lammps_variable='variable e_int equal c_eint',
-                rename_to='v_e_int'))
-# Template-owned conditional channel: the compute lives in sheetonsheet's slide
-# template behind the existing has_internal_lj branch with real per-material
-# group names.
+                rename_to='v_e_int', units='eV'))
+# Template-owned: the compute sits in sheetonsheet's slide template, behind its
+# has_internal_lj branch, with real per-material group names.
 _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
                 group='layer_n', tier='peratom', stream='results',
-                rename_to='v_e_int_il'))
-# Sheet friction label: compute frict ... group/group referenced by the window
-# fix at Nevery=1 — a deliberate exemption from the tier rule (the label
-# itself, cost already paid campaign-wide). Template-owned, so
-# validate_registry's group/group rule is not violated.
+                rename_to='v_e_int_il', units='eV'))
+# Sheet friction label: a group/group read by the window fix at Nevery=1, a
+# deliberate exemption from the tier rule (cost already paid campaign-wide).
+# Template-owned, so validate_registry never sees it.
 _add(Observable(name='xfrict', sim_types=('sheetonsheet',),
                 group='layer_n', tier='window', stream='results',
-                rename_to='v_xfrict'))
+                rename_to='v_xfrict', units='nN'))
 for _grp in ('tip_all', 'sub_all', '2D_all'):
     _add(Observable(
         name=f'pe_sum_{_grp}', sim_types=('afm', 'indent'),
@@ -138,7 +145,7 @@ for _grp in ('tip_all', 'sub_all', '2D_all'):
         lammps_compute=(f'compute peat_{_grp} {_grp} pe/atom\n'
                         f'compute pesum_{_grp} {_grp} reduce sum c_peat_{_grp}'),
         lammps_variable=f'variable pe_{_grp} equal c_pesum_{_grp}',
-        rename_to=f'v_pe_{_grp}'))
+        rename_to=f'v_pe_{_grp}', units='eV'))
 
 # --- contact ------------------------------------------------------------------
 _add(Observable(name='n_contact', sim_types=('afm', 'indent'),
@@ -147,39 +154,40 @@ _add(Observable(name='n_contact', sim_types=('afm', 'indent'),
                                 '{contact_cutoff} group tip_all\n'
                                 'compute contacts 2D_all reduce sum c_coordc'),
                 lammps_variable='variable n_contact equal c_contacts',
-                rename_to='v_n_contact'))
-# In-plane virial sums, normalised to a membrane stress resultant (N/m) in
-# post. sigma_zz is deliberately absent: a through-thickness integral of
-# sigma_zz for a slab with traction-free faces is not a stress resultant.
+                rename_to='v_n_contact', units='count'))
+# In-plane virial sums; post normalises them to a membrane stress resultant
+# (N/m). No sigma_zz: for a slab with traction-free faces, its through-thickness
+# integral is not a stress resultant.
 _add(Observable(name='sigma_xx_2d', sim_types=('afm', 'indent'),
                 group='2D_all', tier='peratom', stream='results',
                 lammps_compute=('compute satom 2D_all stress/atom NULL\n'
                                 'compute sxx 2D_all reduce sum c_satom[1]'),
                 lammps_variable='variable sxx_2d equal c_sxx',
-                rename_to='v_sxx_2d'))
+                rename_to='v_sxx_2d', units='eV/A'))
 _add(Observable(name='sigma_yy_2d', sim_types=('afm', 'indent'),
                 group='2D_all', tier='peratom', stream='results',
                 lammps_compute='compute syy 2D_all reduce sum c_satom[2]',
                 lammps_variable='variable syy_2d equal c_syy',
-                rename_to='v_syy_2d'))
-# post-stream channels: derived from retained artefacts, never a LAMMPS column
+                rename_to='v_syy_2d', units='eV/A'))
+# post-stream: derived from retained artefacts, never a LAMMPS column
 _add(Observable(name='deflect_max', sim_types=('afm', 'indent'),
-                group='2D_all', tier='peratom', stream='post'))
+                group='2D_all', tier='peratom', stream='post', units='A'))
 _add(Observable(name='gap_min', sim_types=('afm', 'indent'),
-                group='tip_all', tier='peratom', stream='post'))
+                group='tip_all', tier='peratom', stream='post', units='A'))
 
 # --- raw trace (100 fs instantaneous samples) ---------------------------------
 for _name in ('raw_lfx', 'raw_lfy', 'raw_nf', 'raw_tipx', 'raw_tipy', 'raw_tipz'):
     _add(Observable(
         name=_name,
-        sim_types=('afm',), group='tip_fix', tier='raw', stream='results'))
+        sim_types=('afm',), group='tip_fix', tier='raw', stream='results',
+        units='nN' if _name in ('raw_lfx', 'raw_lfy', 'raw_nf') else 'A'))
 
-# --- punch-through ingredient: min tip z in the SLIDING script -----------------
+# --- punch-through ingredient: min tip z, in the SLIDING script --------------
 _add(Observable(name='tip_min_z', sim_types=('afm',),
                 group='tip_all', tier='window', stream='results',
                 lammps_compute='compute cz_tip_s tip_all reduce min z',
                 lammps_variable='variable tip_min_z equal c_cz_tip_s',
-                rename_to='v_tip_min_z'))
+                rename_to='v_tip_min_z', units='A'))
 
 
 def channels_for(sim_type: str, tier: str) -> list:
@@ -190,16 +198,16 @@ def channels_for(sim_type: str, tier: str) -> list:
 
 
 def expected_columns(sim_type: str, tier: str) -> list:
+    """The names alone, from :func:`channels_for`."""
     return [ob.name for ob in channels_for(sim_type, tier)]
 
 
 def rename_map(sim_type: str, tier: str) -> dict:
-    """Per-tier rename maps.
+    """Native column name -> channel name, for one tier.
 
-    The raw file's header carries the SAME native names (v_fx_spr...) as the
-    window file, but they must map to raw_lfx... only in the raw map. The
-    parser picks the tier from the filename prefix (friction_/fc_ave_ ->
-    window, raw_ -> raw, peratom_ -> peratom).
+    The raw file's header repeats the window file's native names (v_fx_spr...),
+    so those map to raw_lfx... in the raw map only. The parser picks the tier
+    from the filename prefix: friction_/fc_ave_, raw_, peratom_.
     """
     m = {}
     for ob in REGISTRY.values():
@@ -215,10 +223,10 @@ def rename_map(sim_type: str, tier: str) -> dict:
 
 
 def layer_channels(n_layers: int) -> list:
-    """Build-time injection of com{x,y,z}_L{n} for arbitrary layer counts.
+    """com{x,y,z}_L{n} for any layer count, injected at build time.
 
-    The static REGISTRY carries only the bilayer entries (golden tests);
-    builders call this and extend their channel lists per material.
+    REGISTRY holds only the bilayer entries, for the golden tests; builders call
+    this and extend their channel lists per material.
     """
     out = []
     for lyr in range(1, n_layers + 1):
@@ -230,11 +238,12 @@ def layer_channels(n_layers: int) -> list:
                 lammps_compute=f'compute COM_L{lyr} layer_{lyr} com',
                 lammps_variable=(f'variable com{ax}_L{lyr} equal '
                                  f'c_COM_L{lyr}[{"xyz".index(ax) + 1}]'),
-                rename_to=f'v_com{ax}_L{lyr}'))
+                rename_to=f'v_com{ax}_L{lyr}', units='A'))
     return out
 
 
 def validate_registry() -> None:
+    """Raise on a malformed entry, a bare 'tip' group, or window-tier group/group."""
     for name, ob in REGISTRY.items():
         if ob.tier not in TIERS or ob.stream not in STREAMS:
             raise ValueError(f"malformed observable {name}")

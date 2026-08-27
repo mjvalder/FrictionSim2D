@@ -76,3 +76,17 @@ def test_post_stream_channels_have_no_compute():
         if ob.stream == 'post':
             assert ob.lammps_compute is None, ob.name
             assert ob.rename_to is None, ob.name
+
+
+def test_every_results_channel_has_units():
+    for name, ob in REGISTRY.items():
+        if ob.stream == 'results':
+            assert ob.units, f"{name} has no declared units"
+
+
+def test_afm_cof_inputs_share_force_units():
+    # COF = lateral force / normal load: the two must carry the same unit or
+    # the ratio is meaningless. This is the assertion that would have caught
+    # the sheet's eV/A-over-nN mismatch.
+    assert REGISTRY['lfx'].units == REGISTRY['nf'].units == 'nN'
+    assert REGISTRY['lfy'].units == 'nN'
