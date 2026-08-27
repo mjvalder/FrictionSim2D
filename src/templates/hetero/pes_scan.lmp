@@ -1,9 +1,9 @@
 # LAMMPS input script for heterostructure interlayer PES scan
 # Static energy-vs-lateral-position map over the matched interface's MINIMAL
 # in-plane repeat unit -- measured off the assembled stack by
-# src.builders.hetero.detect_inplane_repeat. That is generally a SUB-cell of the
-# assembled box: each material is tiled to the configured x/y footprint before
-# the coincidence match runs, so a near-lattice-matched pair matches with
+# src.builders.construction.hetero_stack.detect_inplane_repeat. That is generally a SUB-cell
+# of the assembled box: each material is tiled to the configured x/y footprint
+# before the coincidence match runs, so a near-lattice-matched pair matches with
 # (near-)identity matrices and the box comes out an n x m superlattice of the
 # repeat unit.
 #   - Bottom layer (layer_1, material 1) frozen.
