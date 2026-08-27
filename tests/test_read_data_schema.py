@@ -139,3 +139,56 @@ def test_sheet_window_frame_carries_lfx(tmp_path):
     df = _reader()._read_dataframe(p, 'sheet')
     assert 'lfx' in df.columns and 'lfy' in df.columns and 'nf' in df.columns
     assert 'xfrict' not in df.columns
+
+
+# v_xfrict != v_sx -> LJ branch: xfrict is compute group/group's force in
+# eV/A and needs correcting to nN.
+SHEET_SCHEMA1_LJ = (
+    "# Time-averaged data for fix fc_win\n"
+    "# TimeStep v_xfrict v_yfrict v_sx v_sy v_fz\n"
+    + "\n".join(f"{i * 1000} 2.0 1.0 0.5 0.25 -10.0" for i in range(5))
+)
+
+# v_xfrict == v_sx -> many-body branch: the template defined xfrict AS v_sx,
+# which was already scaled to nN. Nothing to correct.
+SHEET_SCHEMA1_MB = (
+    "# Time-averaged data for fix fc_win\n"
+    "# TimeStep v_xfrict v_yfrict v_sx v_sy v_fz\n"
+    + "\n".join(f"{i * 1000} 0.5 0.25 0.5 0.25 -10.0" for i in range(5))
+)
+
+
+def test_legacy_lj_file_is_corrected_and_flagged(tmp_path, caplog):
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA1_LJ)
+    with caplog.at_level('WARNING'):
+        df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_schema'] == 1
+    assert df.attrs['lf_corrected'] is True
+    assert df['lfx'].iloc[0] == pytest.approx(2.0 * 1.602176565)
+    assert df['lfy'].iloc[0] == pytest.approx(1.0 * 1.602176565)
+    assert any('1.602176565' in r.getMessage() for r in caplog.records)
+
+
+def test_legacy_many_body_file_is_not_corrected(tmp_path):
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA1_MB)
+    df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_corrected'] is False
+    assert df['lfx'].iloc[0] == 0.5      # already nN, untouched
+
+
+def test_schema2_file_is_never_corrected(tmp_path):
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA2)
+    df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_corrected'] is False
+    assert df['lfx'].iloc[0] == 2.0
+
+
+def test_afm_files_are_never_lf_corrected(tmp_path):
+    # the AFM lateral force is a spring force, scaled at source, always nN
+    p = tmp_path / "friction_f30_a0_s2_layer2.txt"
+    p.write_text(NEW_12)
+    df = _reader()._read_dataframe(p, 'tip')
+    assert df.attrs['lf_corrected'] is False

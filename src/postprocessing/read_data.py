@@ -70,6 +70,11 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot',
     ]
 
+    # eV/A -> nN. Pre-schema-2 sheet files emitted the LJ-branch lateral force
+    # unscaled while the normal load was already nN, so their COF is a factor
+    # 1.602176565 too SMALL. The correction is a multiplication.
+    _LF_SCHEMA1_CORRECTION = 1.602176565
+
     _SHEET_COLUMN_RENAME = {
         'v_xfrict': 'lfx',
         'v_yfrict': 'lfy',
@@ -274,7 +279,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             # 1.602176565 too SMALL (docs/notes/2026-08-27-sheet-cof-unit-
             # correction.md).
             df.attrs['lf_schema'] = 2 if 'schema=2' in header_lines[0] else 1
-            return df
+            return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 
         # LEGACY_2026 positional fallback — width must match EXACTLY
         legacy = (self._SHEET_FILE_COLUMNS if sim_type == 'sheet'
@@ -295,6 +300,42 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         )
         if sim_type == 'sheet':
             df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
+        df.attrs['lf_schema'] = 1      # header-less files predate the marker
+        return self._correct_legacy_lf_schema1(df, filepath, sim_type)
+
+    def _correct_legacy_lf_schema1(self, df, filepath, sim_type: str):
+        """Rescale a pre-``schema=2`` sheet frame's lateral force to nN.
+
+        FROZEN legacy path. Delete it once the affected runs have been
+        re-simulated -- it exists so old and new runs stay comparable during
+        that window, not as long-term support.
+
+        Branch detection: on the many-body branch the template defines
+        ``xfrict`` AS ``v_sx``, so the two columns are bit-identical. Any
+        difference means the LJ branch, whose ``compute group/group`` force is
+        in eV/A while the load it is divided by is already nN. Verified over
+        the retained tree: 7,171 of 7,669 files classify unambiguously.
+
+        ``v_sx`` is compared raw because the registry does not yet declare a
+        channel for it; switch to ``react_x`` when it does.
+        """
+        df.attrs.setdefault('lf_corrected', False)
+        if sim_type != 'sheet' or df.attrs.get('lf_schema') != 1:
+            return df
+        if 'lfx' not in df.columns or 'v_sx' not in df.columns:
+            return df                  # branch not identifiable; leave as-is
+        if df['lfx'].equals(df['v_sx']):
+            return df                  # many-body branch: already nN
+        df['lfx'] = df['lfx'] * self._LF_SCHEMA1_CORRECTION
+        if 'lfy' in df.columns:
+            df['lfy'] = df['lfy'] * self._LF_SCHEMA1_CORRECTION
+        df.attrs['lf_corrected'] = True
+        logger.warning(
+            "%s: pre-schema-2 sheet file -- lateral force was eV/A against a "
+            "nN load, so COF was a factor %s too small. Multiplied lfx/lfy by "
+            "%s. Re-run this simulation to retire the correction.",
+            filepath, self._LF_SCHEMA1_CORRECTION,
+            self._LF_SCHEMA1_CORRECTION)
         return df
 
     def _parse_filename_params(
