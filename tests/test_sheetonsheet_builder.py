@@ -138,8 +138,12 @@ variable        sy equal f_fsbot[2]*1.602176565
 variable        sz equal f_fsbot[3]*1.602176565
 
 compute         frict layer_2 group/group layer_1
-variable        xfrict equal c_frict[1]
-variable        yfrict equal c_frict[2]
+# compute group/group's VECTOR is a force in eV/A; the many-body branch above
+# reports nN. Scale so both branches -- and v_fz, the load this is divided by --
+# are nN. Unscaled here for the life of the project: see
+# docs/notes/2026-08-27-sheet-cof-unit-correction.md.
+variable        xfrict equal c_frict[1]*1.602176565
+variable        yfrict equal c_frict[2]*1.602176565
 # The group/group scalar IS the interlayer interaction energy of the shearing
 # interface (spec §5 F2, conditional on is_sheet_lj) — free alongside frict.
 variable        e_int_il equal c_frict

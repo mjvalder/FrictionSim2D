@@ -126,7 +126,7 @@ def _render_sheet_slide(has_internal_lj: bool) -> str:
         min_style='cg', minimization_command='minimize 1e-6 1e-8 1000 10000',
         timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
         results_file_pattern='results/friction.txt',
-        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602,
+        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565,
         driving_spring_ev=3.0,
     )
 
@@ -245,3 +245,25 @@ def test_seed_channels_are_distinct_and_recorded(tmp_path):
     assert len(set(seeds.values())) == 3, seeds
     # stable within one build (system.in and slide.in must agree)
     assert builder._run_seed('thermal_tip') == seeds['thermal_tip']
+
+
+def test_sheet_lj_branch_lateral_force_is_scaled_to_nN():
+    # compute group/group's VECTOR is a force in eV/A; nf is nN. Dividing one
+    # by the other gave a COF 1.602176565x too SMALL for the whole SW set.
+    text = _render_sheet_slide(has_internal_lj=False)
+    assert 'variable        xfrict equal c_frict[1]*1.602176565' in text
+    assert 'variable        yfrict equal c_frict[2]*1.602176565' in text
+
+
+def test_sheet_many_body_branch_stays_unscaled_at_source():
+    # v_sx is ALREADY nN (f_fsbot[1]*ev_a_to_nn); scaling it again would be a
+    # second bug in the opposite direction
+    text = _render_sheet_slide(has_internal_lj=True)
+    assert 'variable        xfrict equal v_sx\n' in text
+    assert 'variable        yfrict equal v_sy\n' in text
+
+
+def test_interlayer_energy_is_not_scaled():
+    # c_frict (SCALAR) is an energy in eV and is already correct
+    text = _render_sheet_slide(has_internal_lj=False)
+    assert 'variable        e_int_il equal c_frict\n' in text

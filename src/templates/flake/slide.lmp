@@ -124,8 +124,12 @@ variable        xfrict equal v_sx
 variable        yfrict equal v_sy
 {% else %}
 compute         frict flake group/group layer_{{ n_layers }}
-variable        xfrict equal c_frict[1]
-variable        yfrict equal c_frict[2]
+# compute group/group's VECTOR is a force in eV/A; the many-body branch above
+# reports nN. Scale so both branches -- and v_fz, the load this is divided by --
+# are nN. Unscaled here for the life of the project: see
+# docs/notes/2026-08-27-sheet-cof-unit-correction.md.
+variable        xfrict equal c_frict[1]*{{ ev_a_to_nn }}
+variable        yfrict equal c_frict[2]*{{ ev_a_to_nn }}
 {% endif %}
 
 run             10000
