@@ -28,7 +28,6 @@ def mock_settings() -> GlobalSettings:
         geometry=GeometrySettings(
             tip_reduction_factor=2.0,
             rigid_tip=True,
-            tip_base_z=0.0,
             lat_c_default=6.0,
         ),
         thermostat=ThermostatSettings(
@@ -55,7 +54,6 @@ def mock_settings() -> GlobalSettings:
             quench_target_temp=300.0,
             timestep=0.001,
             melt_steps=50000,
-            quench_steps=100000,
             equilibrate_steps=20000,
         ),
         output=OutputSettings(

@@ -84,7 +84,6 @@ Defaults:
 geometry:
   tip_reduction_factor: 2.25
   rigid_tip: false
-  tip_base_z: 55.0
   lat_c_default: 6.0
 ```
 
@@ -148,7 +147,6 @@ quench:
   quench_target_temp: 300.0
   timestep: 0.002
   melt_steps: 50000
-  quench_steps: 100000
   equilibrate_steps: 20000
 ```
 
@@ -240,7 +238,6 @@ database:
     user: ""
     password: ""
     api_key: ""
-  auto_validate: true
   skip_fraction: 0.2
   api_url: http://localhost:8000
   api_host: 0.0.0.0

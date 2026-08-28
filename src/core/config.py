@@ -1,9 +1,6 @@
-"""Pydantic-based configuration models for FrictionSim2D.
+"""Pydantic schemas for every simulation parameter, validated before a build.
 
-This module provides robust, type-safe data schemas for all simulation
-parameters. By leveraging Pydantic, it ensures that all configurations—from
-low-level engine settings to high-level experimental parameters—are validated
-for correctness before a simulation is executed.
+Also holds the ``.ini``/YAML/JSON reader and writer pair that feeds them.
 """
 import configparser
 import json
@@ -14,7 +11,9 @@ import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from .utils.paths import get_material_path, get_potential_path
-from .utils.tokens import _is_float  # noqa: PLC2701
+from .utils.tokens import _is_float
+
+SUPPORTED_WRITE_FORMATS = ('.ini', '.yaml', '.yml', '.json')
 
 # --- Internal Settings ---
 
@@ -22,25 +21,26 @@ class GeometrySettings(BaseModel):
     """Geometry settings for tip and substrate positioning."""
     tip_reduction_factor: float = 2.25
     rigid_tip: bool = False
-    tip_base_z: float = 55.0
     tip_start_clearance: float = Field(
         default=20.0,
         description=(
-            "Vertical clearance (Angstrom) placed above the contact gap so the tip "
-            "starts clear of the surface during equilibration. After equilibration the "
-            "indentation script lowers the tip by a measured amount so its lowest atom "
-            "sits exactly the contact gap above the indented surface."
+            "Extra height (Å) above the contact gap, keeping the tip clear of the "
+            "surface during equilibration; the indentation script then lowers its "
+            "lowest atom onto the measured gap."
         ),
     )
     lat_c_default: float = 6.0
     finite_sheet_edge_width: float = Field(
         default=4.0,
-        description="Edge band width for finite-sheet runs (Angstrom), typically 1-2 atoms.",
+        description="Edge band width (Å) for finite-sheet runs; typically 1-2 atoms.",
     )
     finite_sheet_afm_edge_mode: Literal['none', 'spring'] = 'none'
     finite_sheet_edge_spring_k: float = Field(
         default=10.0,
-        description="Spring constant (eV/Å²) for 'spring' edge mode. Controls how tightly edge atoms are tethered to their initial positions.",
+        description=(
+            "Spring constant (eV/Å²) tethering finite-sheet edge atoms to their "
+            "initial positions, in 'spring' edge mode."
+        ),
     )
     finite_sheet_sheetonsheet_edge_mode: Literal['none', 'rigid'] = 'none'
 
@@ -70,18 +70,17 @@ class SimulationSettings(BaseModel):
     sheet_hold_steps: int = Field(
         default=20000,
         description=(
-            "Constant-pressure compression hold before sheet sliding "
-            "(spec §6.1) — the sheet's penetration analogue. Logs interlayer "
-            "separation at the shearing interface (layer_{n-1}/layer_{n-2})."
+            "Constant-pressure compression hold before sheet sliding, the sheet's "
+            "analogue of tip penetration. Logs interlayer separation at the "
+            "shearing interface (layer_{n-1}/layer_{n-2})."
         ),
     )
     ramp_max_iterations: int = Field(
         default=40,
         description=(
-            "Cap on the post-ramp settle loop in system_init (spec §1.1 "
-            "defect 4). Previously unbounded: a seized or punched-through "
-            "contact could spin indefinitely. On exhaustion the run records "
-            "RAMP_STATUS converged=0 and continues."
+            "Cap on the post-ramp settle loop in system_init, so a seized or "
+            "punched-through contact cannot spin forever. On exhaustion the run "
+            "records RAMP_STATUS converged=0 and continues."
         ),
     )
 
@@ -96,15 +95,14 @@ class QuenchSettings(BaseModel):
     quench_temp: float = Field(default=300.0, alias='quench_target_temp')
     timestep: float = 0.002
     melt_steps: int = 50000
-    quench_steps: int = 100000
     equilibrate_steps: int = 20000
     allow_generate: bool = Field(
         default=True,
         description=(
-            "Whether a missing or too-small amorphous structure may be generated "
-            "by melt-quench. Set False for interactive callers (the GUI preview) "
-            "that must not spend minutes in mpiexec or write into the packaged "
-            "materials directory; make_amorphous then raises instead."
+            "May a missing or undersized amorphous structure be melt-quenched into "
+            "existence? False makes make_amorphous raise instead — for interactive "
+            "callers (the GUI preview) that cannot spend minutes in mpiexec or write "
+            "into the packaged materials directory."
         ),
     )
     model_config = {'validate_by_name': True}
@@ -116,13 +114,15 @@ class OutputSettings(BaseModel):
     dump_frequency: Dict[str, int] = Field(
         default_factory=lambda: {'system_init': 1000, 'slide': 10000})
     results_frequency: int = 1000
-    #: Which observable sampling tiers get a ``fix ave/time``. 'window' is the
-    #: COF source and postprocessing's only ingested tier; 'raw' (100 fs
-    #: instantaneous samples) and 'peratom' (per-atom computes, incl. the
-    #: neighbour-list-rebuilding group/group) cost runtime and disk. Default on
-    #: to preserve existing behaviour; turn off when not analysing them.
     channels: Dict[str, bool] = Field(
-        default_factory=lambda: {'window': True, 'raw': True, 'peratom': True})
+        default_factory=lambda: {'window': True, 'raw': True, 'peratom': True},
+        description=(
+            "Which observable sampling tiers get a fix ave/time. 'window' is the COF "
+            "source and the only tier postprocessing ingests; 'raw' (100 fs samples) "
+            "and 'peratom' (per-atom computes, including the neighbour-list-rebuilding "
+            "group/group) cost runtime and disk. All on by default."
+        ),
+    )
 
 class PotentialSettings(BaseModel):
     """Settings for interatomic potentials."""
@@ -206,7 +206,6 @@ class DatabaseSettings(BaseModel):
             api_key=os.environ.get('FRICTION_DB_API_KEY', ''),
         )
     )
-    auto_validate: bool = True
     skip_fraction: float = 0.2
     api_url: str = os.environ.get('FRICTION_CENTRAL_API_URL', 'http://localhost:8000')
     api_host: str = '0.0.0.0'
@@ -232,9 +231,8 @@ class ComponentConfig(BaseModel):
 
     Attributes:
         mat: Material identifier.
-        pot_type: Potential type (e.g., 'sw', 'tersoff').
-        pot_path: Path to potential file.
-        cif_path: Path to CIF structure file.
+        pot_type: Potential type ('sw', 'tersoff', ...).
+        pot_path, cif_path: Potential and CIF structure files.
     """
     mat: str
     pot_type: str
@@ -244,19 +242,12 @@ class ComponentConfig(BaseModel):
     @field_validator('pot_path', 'cif_path', mode='after')
     @classmethod
     def resolve_path(cls, v: str, info: ValidationInfo) -> str:
-        """Resolve filesystem paths from config values.
+        """Resolve a config path value against the materials/potentials library.
 
-        A ``base_dir`` supplied through the validation context (see
-        ``model_validate(..., context={'base_dir': ...})``) is used to resolve
-        relative paths, so a config that references ``examples/potentials/...``
-        works regardless of the current working directory.
-
-        Args:
-            v: Path value from config.
-            info: Pydantic validation info including field name and context.
-
-        Returns:
-            Resolved absolute path as string.
+        A ``base_dir`` passed through the validation context
+        (``model_validate(..., context={'base_dir': ...})``) resolves relative
+        paths, so ``examples/potentials/...`` works from any working directory.
+        Unresolvable values are returned unchanged.
         """
         if v is None:
             return v
@@ -269,9 +260,6 @@ class ComponentConfig(BaseModel):
             return str(path)
 
         resolver = get_potential_path if info.field_name == 'pot_path' else get_material_path
-        # Call with one argument unless a base_dir was actually supplied: these
-        # helpers are widely monkeypatched with single-argument stubs, and the
-        # extra argument should only appear when the feature is in use.
         resolved = resolver(v) if base_dir is None else resolver(v, base_dir)
 
         return str(resolved) if resolved.exists() else v
@@ -283,18 +271,18 @@ class TipConfig(ComponentConfig):
     dspring: Optional[float] = Field(
         0.0,
         description=(
-            "Explicit viscous damping override (raw value passed to LAMMPS as damp_ev = dspring/0.016). "
-            "Defaults to 0.0 (no damping). Any set value (including 0.0) overrides damping_ratio; set it "
-            "to null/empty to auto-compute the viscous coefficient from damping_ratio instead."
+            "Explicit viscous damping, passed to LAMMPS as damp_ev = dspring/0.016. "
+            "Any set value — including the 0.0 default, i.e. no damping — wins over "
+            "damping_ratio; blank it to fall back to damping_ratio."
         ),
     )
     damping_ratio: Optional[float] = Field(
         0.0,
         description=(
-            "Target damping ratio (zeta) of critical for the spring-driven tip. The viscous coefficient "
-            "is computed in the LAMMPS script from the driving spring constant and the actual tip "
-            "mass/atom count, so it stays at this zeta for any tip size or spring. Used only when "
-            "dspring is None. Defaults to 0.0 (off). Note dspring's default 0.0 already overrides this unless dspring is blanked."
+            "Target damping ratio (zeta) of critical for the spring-driven tip. LAMMPS "
+            "derives the viscous coefficient from the driving spring constant and the "
+            "real tip mass, so the ratio holds for any tip or spring. Read only when "
+            "dspring is blank."
         ),
     )
     tip_x: Optional[float] = Field(
@@ -307,11 +295,11 @@ class TipConfig(ComponentConfig):
     )
     tip_x_offset: float = Field(
         default=0.0,
-        description="AFM tip x-offset applied only when tip_x is not explicitly set.",
+        description="AFM tip x-offset from center applied only when tip_x is not explicitly set.",
     )
     tip_y_offset: float = Field(
         default=0.0,
-        description="AFM tip y-offset applied only when tip_y is not explicitly set.",
+        description="AFM tip y-offset from center applied only when tip_y is not explicitly set.",
     )
 
     @field_validator('amorph', mode='before')
@@ -335,16 +323,15 @@ class SubstrateConfig(ComponentConfig):
     match: bool = Field(
         False,
         description=(
-            "Lattice-match a crystalline substrate onto the fixed hetero box (D2b). "
-            "When true with amorph='c', the substrate surface cell is strained onto "
-            "the periodic hetero box so it tiles the same cell with no seam."
+            "With amorph='c', strain the substrate surface cell onto the fixed hetero "
+            "box (D2b) so it tiles the periodic cell with no seam."
         ),
     )
     match_strain_tol: float = Field(
         default=0.02, ge=0.0, le=1.0,
         description=(
-            "Base strain tolerance for the fixed-reference substrate match; the "
-            "accept bound is 2*match_strain_tol (residual strain beyond it fails loud)."
+            "Base strain tolerance for the fixed-reference substrate match; the accept "
+            "bound is 2× this, and residual strain beyond it fails loud."
         ),
     )
     @field_validator('amorph', mode='before')
@@ -363,20 +350,18 @@ class SheetConfig(ComponentConfig):
     materials_list: Optional[str] = Field(
         default=None,
         description=(
-            "Path to a .txt of material names, one per line. Each becomes a "
-            "separate simulation. Read by expand_config_sweeps before the model "
-            "is built and stripped from the expanded configs; declared here so "
-            "it is a known key rather than a silently tolerated one."
+            "Path to a .txt of material names, one per line, each becoming its own "
+            "simulation. expand_config_sweeps consumes and strips it before the model "
+            "is built; declared here only so it counts as a known key."
         ),
     )
 
 class FlakeConfig(ComponentConfig):
-    """Shaped-flake configuration (a finite patch placed between tip and sheet).
+    """A finite patch of 2D material placed between tip and sheet.
 
-    The flake is cut from a supercell of its own 2D material into a triangle,
-    square or hexagon. During AFM indentation its corner atoms are tethered in
-    the xy-plane (free in z) so the flake keeps its shape; the restraint is
-    released before sliding.
+    The flake is cut from a supercell of its own material into a triangle, square
+    or hexagon. AFM indentation tethers its corner atoms in xy (free in z) to hold
+    that shape, and releases them before sliding.
 
     Attributes:
         shape: Flake outline ('triangle', 'square', 'hexagon').
@@ -385,16 +370,11 @@ class FlakeConfig(ComponentConfig):
         rotation_deg: In-plane rotation of the shape (degrees, CCW).
         x, y: Supercell footprint (Å) to carve the flake from. Defaults to
             roughly twice ``edge_length`` so the shape always fits.
-        corner_radius: Capture radius (Å) around each detected vertex used to
-            select corner atoms.
-        corner_spring_k: Spring constant (eV/Å²) for the xy corner tether
-            applied during indentation.
         center_x, center_y: Optional flake center override (box coords). When
             omitted the flake is centered under the tip.
     """
-    # Material fields are optional on a flake: a hetero flake sources its two
-    # materials from [Flake-1]/[Flake-2] (``flake_sheets``), leaving [Flake] a
-    # pure shape spec. A single-material flake still supplies them directly.
+    # Optional because a hetero flake takes its two materials from
+    # [Flake-1]/[Flake-2] (``flake_sheets``), leaving [Flake] a pure shape spec.
     mat: Optional[str] = None
     pot_type: Optional[str] = None
     pot_path: Optional[str] = None
@@ -419,8 +399,8 @@ class FlakeConfig(ComponentConfig):
     def default_supercell_size(self) -> 'FlakeConfig':
         """Size the carving supercell to comfortably contain the shape."""
         margin = max(2.0 * self.corner_radius, 10.0)
-        # Hexagon edge_length is a circumradius (half-width); triangle/square
-        # edge_length is a full side. Use 2x as a safe footprint either way.
+        # 2x is safe for both readings of edge_length: hexagon circumradius
+        # (half-width) and triangle/square side.
         span = 2.0 * self.edge_length + margin
         if self.x is None:
             self.x = span
@@ -438,27 +418,25 @@ class GeneralConfig(BaseModel):
     scan_angle_force: Optional[Union[float, List[float]]] = Field(
         None,
         description=(
-            "Optional force/pressure selector for applying the scan_angle list. "
-            "Accepts a single value or a list of values. If omitted, all scan "
-            "angles are applied to all force/pressure values."
+            "Which force/pressure values the scan_angle list applies to; one value "
+            "or a list. Omitted: every angle is applied to every force/pressure."
         )
     )
     scan_speed: Optional[Union[float, List[float]]] = 2.0
     outer_loop: Optional[Literal['pressure', 'scan_speed', 'force', 'scan_angle']] = Field(
         None,
         description=(
-            "Parameter expanded as separate LAMMPS slide input files "
-            "(slide_*.in), one per value, instead of a single in-script loop. "
-            "'pressure'/'scan_speed' apply to sheet-on-sheet runs; 'force' "
-            "applies to AFM runs (emits slide_f<load>N.in per load, all sharing "
-            "the single system.in indentation phase). 'scan_angle' applies to "
-            "either family, one script per angle, all sharing the single "
-            "indentation/pre-slide phase. If omitted, single-script behavior "
-            "is used."
+            "Parameter expanded into one slide_*.in per value instead of a single "
+            "in-script loop; omitted gives the single-script behaviour. "
+            "'pressure'/'scan_speed' are sheet-on-sheet, 'force' is AFM "
+            "(slide_f<load>N.in per load), 'scan_angle' works for either. Every "
+            "emitted script shares the one system.in indentation/pre-slide phase."
         )
     )
-    bond_spring: Optional[float] = Field(80.0, description="Spring constant for harmonically bonded sheets")
-    driving_spring: Optional[float] = Field(50, description="Driving spring constant for virtual atom method")
+    bond_spring: Optional[float] = Field(
+        80.0, description="Spring constant for harmonically bonded sheets.")
+    driving_spring: Optional[float] = Field(
+        50, description="Driving spring constant for the virtual-atom method.")
     finite_sheet: bool = Field(
         default=False,
         description="Enable finite-sheet AFM geometry for this run.",
@@ -466,52 +444,41 @@ class GeneralConfig(BaseModel):
     hetero_stacking: Literal['grouped', 'alternating'] = Field(
         default='grouped',
         description=(
-            "Layer ordering for multi-material heterostructure stacks. 'grouped' "
-            "stacks all layers of one material before the next; 'alternating' "
-            "interleaves layers across materials."
+            "Layer ordering in a multi-material stack: 'grouped' finishes one "
+            "material before the next, 'alternating' interleaves them."
         ),
     )
     twist_angle: Optional[float] = Field(
         default=None,
         description=(
-            "Relative twist angle (deg) between the two stacked layers for a D3 "
-            "commensurate-moiré build. When None (default) all twist paths are "
-            "inert and the build is unchanged. The range is restricted to "
-            "0 <= twist_angle < 60, the irreducible wedge for a hexagonal "
-            "lattice (angles outside fold back into it by the 60-deg symmetry). "
-            "A single [2D] material with a twist re-enables matching (a "
-            "same-material moiré); two materials give a twisted heterostructure. "
-            "The ACHIEVED angle is generally the nearest commensurate angle, not "
-            "this target (commensurate angles are discrete)."
+            "Relative twist (deg) between the two stacked layers for a D3 "
+            "commensurate-moiré build; None leaves every twist path inert. Range "
+            "[0, 60), the hexagonal irreducible wedge. One [2D] material gives a "
+            "same-material moiré, two a twisted heterostructure. Commensurate angles "
+            "are discrete, so the ACHIEVED angle is usually the nearest one."
         ),
     )
     twist_angle_tol: float = Field(
         default=2.0,
         description=(
-            "Max |achieved - target| twist angle (deg) accepted by the "
-            "commensurate-moiré search before failing loud."
+            "Max |achieved - target| twist (deg) before the moiré search fails loud."
         ),
     )
     twist_strain_tol: float = Field(
         default=0.02,
         description=(
-            "Max residual per-material strain accepted when closing the twisted "
-            "moiré approximant onto its shared box."
+            "Max residual per-material strain when closing the twisted moiré "
+            "approximant onto its shared box."
         ),
     )
     twist_max_supercell: int = Field(
         default=12,
         description=(
-            "Cap on the moiré supercell repeat along each axis (bounds moiré-cell "
-            "explosion); the search fails loud with the nearest achievable angle "
-            "and its atom-count cost when exceeded."
+            "Cap on the moiré supercell repeat per axis, bounding cell explosion. "
+            "Exceeded, the search fails loud with the nearest achievable angle and "
+            "its atom-count cost."
         ),
     )
-
-    # NOTE: outer_loop='scan_angle' cannot carry scan_angle_force -- but only
-    # for the builders that really split by angle, and this model cannot see
-    # which builder its config routes to. The check therefore lives in
-    # src.run.expand.outer_loop_conflict (routing-aware), not here.
 
     @model_validator(mode='after')
     def _validate_twist_angle(self) -> 'GeneralConfig':
@@ -525,27 +492,16 @@ class GeneralConfig(BaseModel):
 
 
 class PESConfig(BaseModel):
-    """Potential-energy-surface (PES) static lateral-scan parameters.
+    """Static lateral potential-energy-surface scan parameters.
 
-    A PES scan replaces the dynamic sliding run with a cheap, static
-    energy-vs-lateral-position map over one surface unit cell (see
-    ``builders.pes_scan``). It is shared by both PES flavours:
+    A PES scan replaces the dynamic sliding run with a cheap energy-vs-lateral-
+    position map over one surface unit cell. Both flavours share this model, and
+    each one's fields are inert for the other:
 
-        - ``pes_sheet``: a frozen bilayer whose top layer is grid-scanned
-          laterally, relaxing only the out-of-plane coordinate at each point.
-        - ``pes_tip``: the AFM tip is grid-scanned laterally over the sheet
-          while the sheet + substrate relax; the lateral force on the tip is
-          recorded alongside the energy.
-
-    Attributes:
-        grid_n: Number of grid points per lattice vector (N in the N×N scan).
-        grid_n_refine: Optional finer grid for a convergence check. When set,
-            a second scan script at this resolution is also emitted.
-        z_relax: Sheet scan only — relax the top layer's z at each grid point
-            (relaxed PES). When False the layers stay rigid (rigid PES).
-        n_cells_x, n_cells_y: Optional explicit surface-cell tiling factors
-            spanned by the scan. When omitted the full periodic box (one built
-            supercell repeat) is scanned, which the builder normalizes per cell.
+        - ``pes_sheet`` (``builders.sheetonsheet.pes_sheet``) grid-scans a frozen
+          bilayer's top layer, relaxing only its out-of-plane coordinate.
+        - ``pes_tip`` (``builders.afm.pes_tip``) grid-scans the AFM tip over a
+          relaxing sheet + substrate, recording lateral force as well as energy.
     """
     grid_n: int = Field(
         default=12,
@@ -555,112 +511,91 @@ class PESConfig(BaseModel):
     grid_n_refine: Optional[int] = Field(
         default=None,
         ge=2,
-        description="Optional finer grid resolution for a convergence check.",
+        description=(
+            "Finer grid for a convergence check; emits a second scan script at this "
+            "resolution alongside the grid_n one."
+        ),
     )
     z_relax: bool = Field(
         default=True,
-        description="Sheet scan: relax top-layer z at each grid point (relaxed PES).",
+        description=(
+            "Sheet scan only — relax top-layer z at each grid point (relaxed PES). "
+            "False keeps the layers rigid (rigid PES)."
+        ),
     )
     tip_load: Optional[float] = Field(
         default=5.0,
         description=(
-            "Tip scan only — the target grid-mean normal load (nN) for a constant-load "
-            "campaign. The scan itself is constant-height (the tip is held at a gap), "
-            "so the load can only be known from a full scan; the campaign runner "
-            "therefore calibrates each material's fz(gap) curve and picks the gap whose "
-            "grid-mean load lands on this target, then runs the scan there. The gap→load "
-            "calibration (see gap_load_calibration/) showed the bilayer reaches ~2-12 nN "
-            "inside its stable gap window; ~5 nN is the clean default (strong, resolvable "
-            "corrugation for all but the most compliant sheets, which cap at their max "
-            "achievable load). Null/0 → the fixed contact gap (an adhesion descriptor)."
-        ),
-    )
-    tip_load_sweep: Optional[List[float]] = Field(
-        default=None,
-        description=(
-            "Tip scan only — optional diagnostic list of loads (nN) to scan at, each "
-            "emitting its own script/grid (e.g. [2, 5, 10]). Produces the 'descriptor "
-            "predictive value climbs as it leaves the 2 nN pathology' figure; not the "
-            "deployable descriptor (that is the single tip_load). NB currently a load "
-            "series is run as separate campaigns (one tip_load each); per-sim "
-            "multi-grid emission is not yet wired."
+            "Tip scan only — target grid-mean normal load (nN). The scan itself is "
+            "constant-height, so the campaign runner calibrates each material's "
+            "fz(gap) curve and scans at the gap whose grid-mean load hits this target. "
+            "Calibration (scripts/run_pes_tip_bilayer/gap_load_calibration/) put the "
+            "bilayer's stable window at ~2-12 nN, hence the 5 nN default. Null/0 → the "
+            "fixed contact gap, an adhesion descriptor."
         ),
     )
     scan_cells: int = Field(
         default=1,
         ge=1,
         description=(
-            "Tip scan only — number M of surface unit cells (M×M) the lateral scan "
-            "spans, at grid_n points *per cell* (so the emitted grid is M·grid_n square "
-            "over M·a × M·b). M=1 (default) is the standard single-cell scan and changes "
-            "nothing. M>1 is a representativeness diagnostic: on a disordered/amorphous "
-            "backing a single cell is one random patch of a non-periodic PES, and only a "
-            "multi-cell scan can measure the cell-to-cell descriptor spread (the error "
-            "bar) and separate real periodic corrugation from substrate noise. Needs a "
-            "sheet footprint large enough that the tip clears its own periodic image over "
-            "the M-cell travel (the builder warns if not)."
+            "Tip scan only — the scan spans M×M surface unit cells at grid_n points "
+            "*per cell*, so the emitted grid is M·grid_n square over M·a × M·b. M=1 "
+            "(default) changes nothing. M>1 is a representativeness diagnostic: over a "
+            "disordered backing one cell is a random patch of a non-periodic PES, and "
+            "only a multi-cell scan measures the cell-to-cell spread (the error bar) "
+            "and tells real corrugation from substrate noise. Needs a sheet footprint "
+            "wide enough that the tip clears its own periodic image over the M-cell "
+            "travel; the builder warns if not."
         ),
     )
     eval_mode: Literal['minimize', 'md'] = Field(
         default='minimize',
         description=(
             "Tip freestanding scan only — how each grid point is evaluated. "
-            "'minimize' = static energy minimization (0 K, cheapest). 'md' = a short "
-            "NVE + Langevin run of md_steps with the layer_2 thermostat band active, "
-            "time-averaging energy/force (a finite-T PES / potential of mean force)."
+            "'minimize': static energy minimization (0 K, cheapest). 'md': a short "
+            "NVE + Langevin run of md_steps against the layer_2 thermostat band, "
+            "time-averaging energy/force into a finite-T potential of mean force."
         ),
     )
     md_steps: int = Field(
         default=2000,
         ge=1,
-        description="Steps per grid point when eval_mode = 'md' (ignored for 'minimize').",
+        description="Steps per grid point when eval_mode = 'md'; ignored otherwise.",
     )
 
 
 class IndentConfig(BaseModel):
-    """AFM indentation ("indent") parameters — damped hold + pull-off retract.
+    """AFM indentation parameters — damped hold + pull-off retract, no sliding.
 
-    An indent run does the standard AFM build + indentation ramp (``system.in``)
-    to each normal load in ``[general] force``, then (see :mod:`src.builders.afm.indent`,
-    ``POKE_SIM_RECIPE.md``) runs one hold+retract per load without ever sliding:
+    After the usual AFM build and indentation ramp to each load in
+    ``[general] force``, an indent run does one hold+retract per load (see
+    :mod:`src.builders.afm.indent`, and ``ML analysis/docs/POKE_SIM_RECIPE.md``
+    outside this repo):
 
-        1. holds the (rigid, laterally-fixed) tip at the target load for a short
-           *damped* finite-T hold, recording the out-of-plane channels — the
-           thermally-averaged penetration depth (``tip_z − sheet_com_z``) is the
-           vertical-compliance descriptor the lateral PES scan cannot see; then
-        2. tears down the MD fixes and **retracts the rigid tip quasi-statically**
-           (T=0 minimization) in small z-steps — through zero load, past the
-           pull-off instability, to full detachment — giving the force–distance
-           curve for the **pull-off force**, **work of adhesion** and **contact
-           stiffness** (the adhesion descriptors no sliding/hold data holds).
+        1. a short *damped* finite-T hold of the rigid, laterally-fixed tip at
+           the target load. Its thermally-averaged penetration depth
+           (``tip_z − sheet_com_z``) is the vertical-compliance descriptor a
+           lateral PES scan cannot see.
+        2. a quasi-static T=0 retract in small z-steps, through zero load and
+           past the pull-off instability to full detachment. Its force–distance
+           curve gives pull-off force, work of adhesion and contact stiffness.
 
-    The loads come from ``[general] force`` (``{10, 30}`` nN are the deployable
-    2-point anchor; ``{5, 20, 50}`` add the 9-point stiffness ceiling and
-    load-resolved pull-off), the layers from ``[2D] layers`` and the angle is 0 —
-    matching the campaign labels. This one type subsumes the former separate poke
-    (hold-only) and adhesion (retract-only) simulations.
+    Subsumes the former separate poke (hold-only) and adhesion (retract-only)
+    types. Sizing constraints, on top of the field descriptions:
 
-    Attributes:
-        hold_steps: Length of the damped hold at the target load, in steps
-            (10 000 steps = 10 ps at the 1 fs campaign timestep). At the 1 ps
-            (every-1000-step) campaign cadence this yields ~10 samples per
-            condition — penetration is thermally stable over the window.
-        z_step: Retract increment per step, in Å (recipe: 0.1–0.2 Å for a
-            quasi-static curve that resolves the pull-off instability).
-        n_steps: Number of retract steps. ``n_steps × z_step`` is the total
-            retract distance — it must comfortably exceed the adhesive tail so the
-            curve reaches full detachment (default 100 × 0.2 Å = 20 Å).
-        seed: Base velocity seed for the campaign. Each ``(material, layer)``
-            derives its own fresh, reproducible velocity-create seed from this base
-            (recorded in the manifest). **A fresh seed per run is mandatory** —
-            reusing a campaign seed reproduces the campaign contact trajectory and
-            re-imports the same-run optimism the verification excludes. When
-            omitted a fresh base seed is drawn once at build time.
+        - ``z_step`` must resolve the pull-off instability, and
+          ``n_steps × z_step`` must clear the adhesive tail;
+        - **a fresh seed per run is mandatory**: reusing a campaign seed replays
+          the campaign contact trajectory and re-imports the same-run optimism
+          the verification exists to exclude.
     """
     hold_steps: int = Field(
         default=10000,
         ge=1000,
-        description="Damped-hold length in steps at the target load (10 000 = 10 ps).",
+        description=(
+            "Damped-hold length in steps at the target load; 10 000 = 10 ps, ~10 "
+            "samples at the 1 ps campaign cadence, over which penetration is stable."
+        ),
     )
     z_step: float = Field(
         default=0.2,
@@ -670,15 +605,15 @@ class IndentConfig(BaseModel):
     n_steps: int = Field(
         default=100,
         ge=1,
-        description="Number of retract steps (n_steps × z_step = total retract distance).",
+        description="Retract steps; n_steps × z_step is the total distance (20 Å).",
     )
     seed: Optional[int] = Field(
         default=None,
         ge=1,
         description=(
-            "Base velocity seed; per-(material, layer) fresh seeds are derived "
-            "from it and recorded in the manifest. Omit to draw a fresh base "
-            "seed at build time. Never reuse a campaign seed."
+            "Base velocity seed. Each (material, layer) derives its own seed from it, "
+            "recorded in the manifest. Omit to draw a fresh base at build time; never "
+            "reuse a campaign seed."
         ),
     )
 
@@ -692,14 +627,12 @@ class LatticeMatchConfig(BaseModel):
 
 
 def _fold_flake_sheet_sections(folded: Dict[str, Any]) -> Dict[str, Any]:
-    """Fold [Flake-1], [Flake-2], ... sections into ``flake_sheets``.
+    """Fold [Flake-1], [Flake-2], ... into ``flake_sheets``, in numeric order.
 
-    Numbered ``Flake-N`` sections carry the two dedicated hetero-flake
-    materials (mirrors the ``2D-N`` sheet folding). They are collected in
-    numeric order into ``flake_sheets``. When no ``[Flake-N]`` section is
-    present the key is left untouched (defaults to an empty list) so the
-    single-material flake path — a lone ``[Flake]`` shape spec — is unchanged.
-    ``[Flake]`` itself carries the shape spec and is captured separately.
+    These carry the two dedicated hetero-flake materials, mirroring the ``2D-N``
+    sheet folding. With no ``[Flake-N]`` present the key is left alone (an empty
+    list), leaving the single-material path — a lone ``[Flake]`` shape spec —
+    unchanged.
     """
     flake_keys = sorted(
         (k for k in folded if isinstance(k, str) and k.startswith('Flake-')),
@@ -722,20 +655,18 @@ class AFMSimulationConfig(BaseModel):
     sheets: List[SheetConfig] = Field(
         default_factory=list,
         description=(
-            "Per-material sheet stack, folded from [2D-1], [2D-2], ... sections "
-            "(or a single-element list wrapping [2D] when only one material is "
-            "given). Populated by _fold_sheet_sections before validation. Two or "
-            "more entries route `run afm` to the periodic hetero AFM builder (D2)."
+            "Per-material sheet stack, folded from [2D-1], [2D-2], ... by "
+            "_fold_sheet_sections (or [2D] alone, wrapped). Two or more entries route "
+            "`run afm` to the periodic hetero AFM builder (D2)."
         ),
     )
     flake: Optional[FlakeConfig] = Field(default=None, alias='flake')
     flake_sheets: List[SheetConfig] = Field(
         default_factory=list,
         description=(
-            "Dedicated hetero-flake materials, folded from [Flake-1], [Flake-2] "
-            "sections (numeric order). Two entries build a flake carved from a "
-            "matched hetero bilayer (B2); empty leaves the single-material flake "
-            "path unchanged. The [flake]/[Flake] section carries the shape spec."
+            "Dedicated hetero-flake materials, folded from [Flake-1], [Flake-2]. "
+            "Two entries carve the flake from a matched hetero bilayer (B2); empty "
+            "leaves the single-material path alone. [flake] holds the shape spec."
         ),
     )
     pes: Optional[PESConfig] = Field(default=None, alias='pes')
@@ -747,14 +678,12 @@ class AFMSimulationConfig(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _fold_sheet_sections(cls, data: Any) -> Any:
-        """Fold [2D-1], [2D-2], ... sections into ``sheets`` (mirrors SheetOnSheet).
+        """Fold [2D-1], [2D-2], ... into ``sheets``, in numeric order.
 
-        Numbered ``2D-N`` sections are collected in numeric order into the
-        ``sheets`` list. When only a single ``[2D]`` (alias) section is present,
-        it is wrapped as a one-element ``sheets`` list, preserving the
-        homogeneous single-material path. The ``2D``/``sheet`` field stays
-        required: when only numbered sections are given, the first is also
-        mirrored onto ``2D`` so existing single-sheet code paths keep working.
+        A lone ``[2D]`` is wrapped as a one-element list instead, keeping the
+        single-material path intact. ``2D``/``sheet`` stays required either way:
+        given only numbered sections, the first is mirrored onto ``2D`` so
+        single-sheet code paths keep working.
         """
         if not isinstance(data, dict):
             return data
@@ -777,14 +706,37 @@ class AFMSimulationConfig(BaseModel):
         return _fold_flake_sheet_sections(folded)
 
     @model_validator(mode='after')
-    def validate_non_finite_sheet_substrate(self) -> 'AFMSimulationConfig':
-        """Require amorphous substrate for a substrate-backed non-finite-sheet AFM.
+    def validate_flake_material(self) -> 'AFMSimulationConfig':
+        """Require an AFM [flake] to name its own material.
 
-        A freestanding run (no [sub] section, self.sub is None) has no substrate to
-        constrain, so the amorphous requirement does not apply. A lattice-matched
-        crystalline substrate (``amorph == 'c'`` with ``match``) is also permitted:
-        it is strained onto the fixed hetero box so it tiles the periodic cell with
-        no seam (D2b).
+        ``build_flake_component`` and ``PotentialManager.register_component`` both
+        read [flake]'s own mat/cif_path/pot_path/pot_type, neither falls back, and
+        ``[Flake-N]`` does not help (only the flake slide reads ``flake_sheets``).
+        AFM-only, because the sheet-on-sheet flake slide *does* fall back to [2D]
+        via ``FlakeSlideSimulation._filled_flake_config`` — which is why the fields
+        stay optional on the shared ``FlakeConfig``. Unchecked, the config validates
+        and then dies inside ``build_monolayer`` on a ``None`` path.
+        """
+        if self.flake is None:
+            return self
+        missing = [name for name in ('mat', 'cif_path', 'pot_path', 'pot_type')
+                   if getattr(self.flake, name) is None]
+        if missing:
+            raise ValueError(
+                f"AFM [flake] is missing {', '.join(missing)}. The AFM flake is built "
+                "from its own material and has no [2D] fallback (that is a "
+                "sheet-on-sheet flake-slide feature), so mat, cif_path, pot_path and "
+                "pot_type must all be set on [flake]."
+            )
+        return self
+
+    @model_validator(mode='after')
+    def validate_non_finite_sheet_substrate(self) -> 'AFMSimulationConfig':
+        """Require an amorphous substrate under a non-finite AFM sheet.
+
+        Two exemptions: a freestanding run (no [sub]) has nothing to constrain, and
+        a lattice-matched crystalline substrate (``amorph='c'`` with ``match``) is
+        strained to tile the periodic cell seamlessly (D2b).
         """
         if (self.sub is not None and not self.general.finite_sheet
                 and self.sub.amorph != 'a'
@@ -851,19 +803,17 @@ class SheetOnSheetSimulationConfig(BaseModel):
     sheets: List[SheetConfig] = Field(
         default_factory=list,
         description=(
-            "Per-material sheet stack, folded from [2D-1], [2D-2], ... sections "
-            "(or a single-element list wrapping [2D] when only one material is "
-            "given). Populated by _fold_sheet_sections before validation."
+            "Per-material sheet stack, folded from [2D-1], [2D-2], ... by "
+            "_fold_sheet_sections (or [2D] alone, wrapped)."
         ),
     )
     flake: Optional[FlakeConfig] = Field(default=None, alias='Flake')
     flake_sheets: List[SheetConfig] = Field(
         default_factory=list,
         description=(
-            "Dedicated hetero-flake materials, folded from [Flake-1], [Flake-2] "
-            "sections (numeric order). Two entries build a flake carved from a "
-            "matched hetero bilayer (B2); empty leaves the single-material flake "
-            "path unchanged. The [Flake] section carries the shape spec."
+            "Dedicated hetero-flake materials, folded from [Flake-1], [Flake-2]. "
+            "Two entries carve the flake from a matched hetero bilayer (B2); empty "
+            "leaves the single-material path alone. [Flake] holds the shape spec."
         ),
     )
     pes: Optional[PESConfig] = Field(default=None, alias='pes')
@@ -874,15 +824,11 @@ class SheetOnSheetSimulationConfig(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _fold_sheet_sections(cls, data: Any) -> Any:
-        """Fold [2D-1], [2D-2], ... sections into ``sheets``.
+        """Fold [2D-1], [2D-2], ... into ``sheets``, in numeric order.
 
-        Numbered ``2D-N`` sections are collected in numeric order into the
-        ``sheets`` list. When only a single ``[2D]`` (alias) section is
-        present, it is wrapped as a one-element ``sheets`` list, preserving
-        the homogeneous single-material path. The ``2D``/``sheet`` field
-        stays required for backward compatibility: when only numbered
-        sections are given, the first is also mirrored onto ``2D`` so
-        existing single-sheet code paths keep working unchanged.
+        Mirrors :meth:`AFMSimulationConfig._fold_sheet_sections`: a lone ``[2D]``
+        is wrapped as a one-element list, and given only numbered sections the
+        first is mirrored back onto the still-required ``2D`` field.
         """
         if not isinstance(data, dict):
             return data
@@ -907,23 +853,17 @@ class SheetOnSheetSimulationConfig(BaseModel):
 # --- Helper Functions ---
 
 def _global_settings_path() -> Path:
-    """Return the semi-permanent per-user settings path.
-
-    Respects ``$XDG_CONFIG_HOME`` on Linux; falls back to ``~/.config``.
-    """
+    """The per-user settings path, under ``$XDG_CONFIG_HOME`` or ``~/.config``."""
     xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
     base = Path(xdg_config_home) if xdg_config_home else (Path.home() / '.config')
     return base / 'FrictionSim2D' / 'settings.yaml'
 
 
 def _settings_paths_in_precedence_order(settings_file: Optional[Union[str, Path]] = None) -> List[Path]:
-    """Return candidate settings files in descending precedence order.
+    """Candidate settings files, highest precedence first.
 
-    Order:
-      1. Explicit ``settings_file`` argument (user-provided for this run)
-      2. ``~/.config/FrictionSim2D/settings.yaml`` (semi-permanent global)
-
-    If neither is present, hardcoded :class:`GlobalSettings` defaults are used.
+    An explicit ``settings_file`` for this run beats the semi-permanent
+    ``~/.config/FrictionSim2D/settings.yaml``.
     """
     paths: List[Path] = []
 
@@ -935,22 +875,10 @@ def _settings_paths_in_precedence_order(settings_file: Optional[Union[str, Path]
 
 
 def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
-    """Load settings onto hardcoded defaults.
+    """Load the first readable settings file onto the hardcoded defaults.
 
-    Search order (first file found wins):
-      1. Explicit ``settings_file`` argument
-      2. ``~/.config/FrictionSim2D/settings.yaml`` (semi-permanent global)
-
-    If no file is found, the hardcoded Pydantic defaults in
-    :class:`GlobalSettings` are returned unchanged.
-
-    Args:
-        settings_file: Optional path to a settings YAML file for explicit,
-            per-run configuration.
-
-    Returns:
-        :class:`GlobalSettings` populated from the first matching file, or
-        pure defaults if no file exists.
+    Candidates come from :func:`_settings_paths_in_precedence_order`; with none
+    of them present, :class:`GlobalSettings` defaults are returned unchanged.
     """
     for path in _settings_paths_in_precedence_order(settings_file=settings_file):
         try:
@@ -967,10 +895,7 @@ def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSet
 
 
 def settings_origin(settings_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
-    """Return the path of the settings file currently in effect, or ``None``.
-
-    Useful for ``settings show --origin`` to tell the user which file is being used.
-    """
+    """The settings file currently in effect, or ``None`` (for ``settings show --origin``)."""
     for path in _settings_paths_in_precedence_order(settings_file=settings_file):
         if path.is_file():
             return path
@@ -978,22 +903,14 @@ def settings_origin(settings_file: Optional[Union[str, Path]] = None) -> Optiona
 
 
 def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, Any]:
-    """Parses configuration from various sources into a dictionary suitable for Pydantic.
+    """Load a config from any supported source into a dict Pydantic can validate.
 
-    This function acts as a unified entry point for configuration loading. It can
-    handle:
-    1. File paths (str or Path) pointing to .ini, .yaml/.yml, or .json files.
-    2. Dictionaries (e.g., from a CLI arg parser or UI form).
-
-    Args:
-        config_source (Union[str, Path, Dict]): The configuration source.
-
-    Returns:
-        Dict[str, Any]: A standardized dictionary ready for validation.
+    Takes a path to an ``.ini``, ``.yaml``/``.yml`` or ``.json`` file, or an
+    already-built dict (from the CLI or a UI form), which passes through unchanged.
 
     Raises:
         ValueError: If the file extension is not supported.
-        TypeError: If the input type is not supported.
+        TypeError: If the source is neither a path nor a dict.
     """
     if isinstance(config_source, (str, Path)):
         path = Path(config_source)
@@ -1019,40 +936,14 @@ def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, A
     else:
         raise TypeError(f"Unsupported configuration source type: {type(config_source)}")
 
-
-# ---------------------------------------------------------------------------
-# Config file I/O
-# ---------------------------------------------------------------------------
-# Merged in from the former src/core/config_io.py (the writer half) and from
-# src/core/utils.py (read_config, the reader half). Reader and writer are
-# inverses of one another and now live together so the .ini value grammar is
-# documented and maintained in one place.
-#
-# The .ini writer is the inverse of read_config, whose value grammar is
-# implicit and easy to violate:
-#
-# * an empty right-hand side reads back as None, so None must be written as an
-#   empty value, never as the string "None";
-# * list detection is triggered by a trailing "]", so lists are written as JSON;
-# * value.isdigit() decides int-vs-float, so a float must carry a decimal point
-#   or an exponent or it will read back as an int. Note that "-5".isdigit() is
-#   False, so a *negative* integer reads back as a float. That asymmetry is
-#   pre-existing behaviour of the reader; the writer reproduces whatever it was
-#   given and the round-trip test pins it;
-# * everything after a "#" is stripped as an inline comment, so a value
-#   containing "#" cannot survive and is rejected here rather than silently
-#   truncated on the next read.
-
-SUPPORTED_WRITE_FORMATS = ('.ini', '.yaml', '.yml', '.json')
-
 #: Mapping of ``section -> key -> comment`` used to annotate ``.ini`` output.
 CommentMap = Mapping[str, Mapping[str, str]]
-
 
 def format_ini_value(value: Any) -> str:
     """Render a Python value as an ``.ini`` right-hand side.
 
-    Inverse of the value parsing in :func:`src.core.utils.read_config`.
+    The exact inverse of the value grammar documented on :func:`read_config` —
+    change one and you must change the other.
 
     Raises:
         ValueError: If the value contains ``#``, which the reader would strip.
@@ -1061,16 +952,16 @@ def format_ini_value(value: Any) -> str:
         return ''
 
     if isinstance(value, bool):
-        # The reader has no bool rule; these come back as strings and Pydantic
-        # coerces them. 'True'/'False' is what the existing configs use.
+        # The reader has no bool rule: these come back as strings for Pydantic to
+        # coerce, and 'True'/'False' is what the existing configs use.
         return 'True' if value else 'False'
 
     if isinstance(value, (list, tuple)):
         rendered = json.dumps(list(value))
     elif isinstance(value, float):
         rendered = repr(value)
-        # repr() of an integral float already includes '.0'; guard anything odd
-        # (e.g. a float subclass) that would read back as an int.
+        # repr() already gives an integral float its '.0'; this guards oddities
+        # (a float subclass) that would otherwise read back as an int.
         if rendered.isdigit():
             rendered += '.0'
     elif isinstance(value, int):
@@ -1085,14 +976,13 @@ def format_ini_value(value: Any) -> str:
         )
     return rendered
 
-
 def _render_ini(config: Mapping[str, Mapping[str, Any]],
                 comments: Optional[CommentMap] = None,
                 header: Optional[str] = None) -> str:
     """Render a section mapping as ``.ini`` text.
 
-    Written by hand rather than via ``configparser.write`` so that inline
-    comments can be attached and so that ``%`` needs no interpolation escaping.
+    Hand-written rather than ``configparser.write`` so inline comments can be
+    attached and ``%`` needs no interpolation escaping.
     """
     comments = comments or {}
     lines = []
@@ -1115,23 +1005,15 @@ def _render_ini(config: Mapping[str, Mapping[str, Any]],
 
     return "\n".join(lines).rstrip("\n") + "\n"
 
-
 def write_config(config: Mapping[str, Any],
                  path: Union[str, Path],
                  *,
                  comments: Optional[CommentMap] = None,
                  header: Optional[str] = None) -> Path:
-    """Write a config mapping to ``path``, dispatching on the file extension.
+    """Write a config mapping (as ``parse_config`` returns it) to ``path``.
 
-    Args:
-        config: Section mapping, in the shape ``parse_config`` returns.
-        path: Destination. The suffix selects the format.
-        comments: Optional ``section -> key -> comment`` annotations. Applied to
-            ``.ini`` output only; other formats ignore it.
-        header: Optional comment block for the top of an ``.ini`` file.
-
-    Returns:
-        The path written.
+    The suffix picks the format. ``comments`` (``section -> key -> comment``) and
+    ``header`` annotate ``.ini`` output only; the other writers ignore them.
 
     Raises:
         ValueError: If the extension is not supported.
@@ -1155,7 +1037,6 @@ def write_config(config: Mapping[str, Any],
     path.write_text(text, encoding='utf-8')
     return path
 
-
 def _to_plain(value: Any) -> Any:
     """Convert nested mappings to plain dicts for the yaml/json writers."""
     if isinstance(value, Mapping):
@@ -1164,17 +1045,10 @@ def _to_plain(value: Any) -> Any:
         return [_to_plain(v) for v in value]
     return value
 
-
-
-
 def _remove_inline_comments(config: configparser.ConfigParser) -> configparser.ConfigParser:
-    """Remove inline comments from a ConfigParser object.
+    """Strip everything after a ``#`` from every value, in place.
 
-    Args:
-        config: The ConfigParser object to process.
-
-    Returns:
-        The object with inline comments removed.
+    Returns the same object it was given, for chaining.
     """
     for section in config.sections():
         for item in config.items(section):
@@ -1182,18 +1056,24 @@ def _remove_inline_comments(config: configparser.ConfigParser) -> configparser.C
     return config
 
 def read_config(filepath: Union[str, Path]) -> Dict[str, Dict[str, Any]]:
-    """Read a configuration file and return a dictionary with parsed values.
+    """Read an ``.ini`` file into a ``section -> key -> value`` mapping.
 
-    Args:
-        filepath: Path to the configuration file.
+    The value grammar is implicit and easy to violate; :func:`format_ini_value`
+    is its exact inverse:
 
-    Returns:
-        Dictionary containing the parsed configuration parameters.
+    * an empty right-hand side reads back as ``None``, so never write ``"None"``;
+    * a trailing ``]`` is what triggers list detection, so write lists as JSON;
+    * ``isdigit()`` decides int-vs-float, so a float needs a decimal point or an
+      exponent. ``"-5".isdigit()`` is False, so a *negative* integer reads back as
+      a float — long-standing, reproduced by the writer, pinned by the round-trip
+      test;
+    * a ``#`` starts an inline comment, so the writer rejects values holding one
+      rather than let the next read truncate them.
     """
-    # interpolation=None: configparser's default BasicInterpolation raises on a
-    # bare '%' in any value. No config in this project uses '%(name)s'
-    # substitution, so the feature only ever cost us a crash on values a user
-    # could reasonably type.
+
+    # interpolation=None: the default BasicInterpolation raises on a bare '%'.
+    # Nothing here uses '%(name)s' substitution, so the feature bought only
+    # crashes on values a user could reasonably type.
     config = configparser.ConfigParser(interpolation=None)
     config.read(filepath)
     config = _remove_inline_comments(config)

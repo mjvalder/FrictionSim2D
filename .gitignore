@@ -5,7 +5,6 @@ ptest
 scripts
 __pycache__
 results
-run
 settings.yaml
 .vscode
 .pytest_cache

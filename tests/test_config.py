@@ -528,6 +528,48 @@ def test_no_flake_sections_leaves_flake_sheets_empty():
     assert cfg.flake_sheets == []
 
 
+# --- AFM [flake] must carry its own material (no [2D] fallback) ---
+
+def test_afm_flake_missing_material_fields_is_rejected():
+    """An AFM [flake] missing its material fields must fail at config load.
+
+    build_flake_component takes mat/cif/pot straight off [flake], with no [2D]
+    fallback (that is a sheet-on-sheet flake-slide feature). Such a config used to
+    validate and then die inside build_monolayer on a None cif_path.
+    """
+    from src.core.config import AFMSimulationConfig, load_settings
+    from tests.test_hetero_afm import _afm_flake_raw
+    raw = _afm_flake_raw()
+    del raw["flake"]["cif_path"]
+    del raw["flake"]["pot_path"]
+    with pytest.raises(ValueError, match=r"cif_path.*pot_path|pot_path.*cif_path"):
+        AFMSimulationConfig(**raw, settings=load_settings())
+
+
+def test_afm_flake_with_material_fields_still_validates():
+    """The fully-specified AFM flake (examples/afm_flake_config.ini) is untouched."""
+    from src.core.config import AFMSimulationConfig, load_settings
+    from tests.test_hetero_afm import _afm_flake_raw
+    cfg = AFMSimulationConfig(**_afm_flake_raw(), settings=load_settings())
+    assert cfg.flake is not None and cfg.flake.mat == "h-MoS2"
+
+
+def test_sheetonsheet_flake_may_still_omit_its_material():
+    """The AFM-only rule must not leak onto the sheet-on-sheet family.
+
+    Its [Flake] legitimately reuses [2D] via
+    FlakeSlideSimulation._filled_flake_config.
+    """
+    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+    raw = {"general": {"temp": 300, "scan_speed": 1},
+           "2D": {"mat": "h-MoS2", "cif_path": "examples/materials/h-MoS2.cif",
+                  "pot_path": "examples/potentials/sw/MoS2_wen.sw", "pot_type": "sw",
+                  "x": 30.0, "y": 30.0, "layers": [1]},
+           "Flake": {"shape": "hexagon", "edge_length": 5.0}}
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+    assert cfg.flake is not None and cfg.flake.mat is None
+
+
 # --- D3: general.twist_angle + twist tolerances ---
 
 def test_twist_angle_config_defaults_and_range():

@@ -648,11 +648,6 @@ class TestDatabaseSettings:
         ds = DatabaseSettings()
         assert ds.skip_fraction == 0.2
 
-    def test_auto_validate_default(self):
-        from src.core.config import DatabaseSettings
-        ds = DatabaseSettings()
-        assert ds.auto_validate is True
-
 
 class TestSchemaVersion:
     """Basic checks for fixed pre-release schema versioning."""
