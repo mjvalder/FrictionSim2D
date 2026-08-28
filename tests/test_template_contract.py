@@ -317,6 +317,12 @@ def _com_probe_groups(text: str):
     return ctop, cbot
 
 
+def _frict_groups(text: str):
+    """(upper group, lower group) of `compute frict ... group/group ...`."""
+    m = re.search(r'compute\s+frict\s+(\S+)\s+group/group\s+(\S+)', text)
+    return m.group(1), m.group(2)
+
+
 # (n_layers, expected cbot, expected ctop): the stack splits into two sheets of
 # equal thickness, thinner half below for odd n. COM_cbot used to be pinned to
 # layer_2, which only lands on the middle interface at n_layers == 4 -- at the
@@ -432,3 +438,29 @@ def test_hold_fix_never_carries_schema_marker(template):
     for ln in src.splitlines():
         if 'hold_ave' in ln and 'ave/time' in ln:
             assert 'title1' not in ln, template
+
+
+@pytest.mark.parametrize('n_layers,cbot,ctop', MIDDLE_INTERFACE)
+def test_sheet_frict_measures_the_same_interface_the_com_probes_do(
+        n_layers, cbot, ctop):
+    """One interface definition, used by every observable that names it.
+
+    `compute frict` and v_d_shear used layer_{n-1}/layer_{n-2} while the COM
+    probes used the middle pair; they agree only at n_layers 3 and 4, so a
+    5-layer run reported an interlayer gap at one interface and a lateral
+    force at another.
+    """
+    text = _render_sheet_slide(has_internal_lj=False, n_layers=n_layers)
+    assert _frict_groups(text) == (f'layer_{ctop}', f'layer_{cbot}')
+    assert _com_probe_groups(text) == _frict_groups(text)
+    assert (f'variable        d_shear equal '
+            f'v_comz_L{ctop}-v_comz_L{cbot}') in text
+
+
+@pytest.mark.parametrize('n_layers,cbot,ctop',
+                         [r for r in MIDDLE_INTERFACE if r[0] >= 4])
+def test_hetero_frict_measures_the_same_interface_the_com_probes_do(
+        n_layers, cbot, ctop):
+    text = _render_hetero_slide(n_layers)
+    assert _frict_groups(text) == (f'layer_{ctop}', f'layer_{cbot}')
+    assert _com_probe_groups(text) == _frict_groups(text)

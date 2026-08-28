@@ -1,3 +1,9 @@
+{# The sliding contact. The stack splits into two sheets of equal thickness
+   (thinner half below for odd n), so the interface sits at the middle:
+   il_bot = n//2, il_top = n//2 + 1. Everything that names the interface --
+   the COM probes, `compute frict`, v_d_shear -- must use this one pair. #}
+{% set il_bot = n_layers // 2 %}
+{% set il_top = n_layers // 2 + 1 %}
 # LAMMPS Input Script for Sheet-vs-Sheet Sliding
 # {{ n_layers }}-layer model, constraint_mode: {{ constraint_mode }}
 
@@ -104,12 +110,17 @@ variable        comx_top equal c_COM_top[1]
 variable        comy_top equal c_COM_top[2]
 variable        comz_top equal c_COM_top[3]
 
-compute         COM_ctop layer_{{ n_layers - 1 }} com
+compute         COM_ctop layer_{{ il_top }} com
 variable        comx_ctop equal c_COM_ctop[1]
 variable        comy_ctop equal c_COM_ctop[2]
 variable        comz_ctop equal c_COM_ctop[3]
 
-compute         COM_cbot layer_2 com
+# COM_cbot/COM_ctop straddle the MIDDLE interface: cbot = layer_(n//2),
+# ctop = layer_(n//2 + 1), so the stack splits into two sheets of equal
+# thickness (the thinner half below for odd n). cbot was pinned to layer_2,
+# which only lands there at n_layers == 4: at the 3-layer minimum it aliased
+# COM_ctop and the extracted interlayer gap was identically zero.
+compute         COM_cbot layer_{{ il_bot }} com
 variable        comx_cbot equal c_COM_cbot[1]
 variable        comy_cbot equal c_COM_cbot[2]
 variable        comz_cbot equal c_COM_cbot[3]
@@ -155,7 +166,7 @@ variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 variable        xfrict equal v_sx
 variable        yfrict equal v_sy
 {% else %}
-compute         frict layer_{{ n_layers - 1 }} group/group layer_{{ n_layers - 2 }}
+compute         frict layer_{{ il_top }} group/group layer_{{ il_bot }}
 # compute group/group's VECTOR is a force in eV/A; the many-body branch above
 # reports nN. Scale so both branches -- and v_fz, the load this is divided by --
 # are nN. Unscaled here for the life of the project: see
@@ -171,9 +182,9 @@ run             10000
 
 # --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
 # analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
-# SHEARING interface (layer_{{ n_layers - 1 }}/layer_{{ n_layers - 2 }}); the
+# SHEARING interface (layer_{{ il_top }}/layer_{{ il_bot }}); the
 # other gaps are reported alongside. channel_role=diagnostic.
-variable        d_shear equal v_comz_L{{ n_layers - 1 }}-v_comz_L{{ n_layers - 2 }}
+variable        d_shear equal v_comz_L{{ il_top }}-v_comz_L{{ il_bot }}
 {% for i in range(1, n_layers) %}
 variable        gap_L{{ i }}_L{{ i + 1 }} equal v_comz_L{{ i + 1 }}-v_comz_L{{ i }}
 {% endfor %}
@@ -217,7 +228,7 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 # NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
 # exemption: it is the label itself and its cost was already paid campaign-wide.
 {% if channels.window %}
-fix             fc_win all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot {% for i in range(1, n_layers + 1) %}v_comx_L{{ i }} v_comy_L{{ i }} v_comz_L{{ i }} {% endfor %}v_etot v_pe_now v_ke_now file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
+fix             fc_win all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comz_top v_comx_bot v_comy_bot v_comz_bot {% for i in range(1, n_layers + 1) %}v_comx_L{{ i }} v_comy_L{{ i }} v_comz_L{{ i }} {% endfor %}v_etot v_pe_now v_ke_now file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
 {% endif %}
 {% if channels.raw %}
 fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file {{ results_file_raw }} title1 "# schema=2 lf_units=nN"

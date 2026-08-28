@@ -72,7 +72,7 @@ class SimulationSettings(BaseModel):
         description=(
             "Constant-pressure compression hold before sheet sliding, the sheet's "
             "analogue of tip penetration. Logs interlayer separation at the "
-            "shearing interface (layer_{n-1}/layer_{n-2})."
+            "shearing interface (layer_{n//2+1}/layer_{n//2})."
         ),
     )
     ramp_max_iterations: int = Field(

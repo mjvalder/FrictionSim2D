@@ -93,7 +93,12 @@ variable        comx_ctop equal c_COM_ctop[1]
 variable        comy_ctop equal c_COM_ctop[2]
 variable        comz_ctop equal c_COM_ctop[3]
 
-compute         COM_cbot layer_2 com
+# COM_cbot/COM_ctop straddle the MIDDLE interface: cbot = layer_(n//2),
+# ctop = layer_(n//2 + 1), so the stack splits into two sheets of equal
+# thickness (the thinner half below for odd n). cbot was pinned to layer_2,
+# which only lands there at n_layers == 4: at the 3-layer minimum it aliased
+# COM_ctop and the extracted interlayer gap was identically zero.
+compute         COM_cbot layer_1 com
 variable        comx_cbot equal c_COM_cbot[1]
 variable        comy_cbot equal c_COM_cbot[2]
 variable        comz_cbot equal c_COM_cbot[3]
@@ -175,7 +180,7 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 # Three sampling tiers (spec §4). fc_win keeps the legacy 16-column prefix.
 # NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
 # exemption: it is the label itself and its cost was already paid campaign-wide.
-fix             fc_win all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 v_etot v_pe_now v_ke_now file out/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
+fix             fc_win all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comz_top v_comx_bot v_comy_bot v_comz_bot v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 v_etot v_pe_now v_ke_now file out/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
 fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file out/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
 fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file out/results/peratom_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
 
