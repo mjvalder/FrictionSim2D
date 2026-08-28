@@ -37,8 +37,11 @@ def classify_file(path) -> str:
     if len(values) <= max(ix, isx):
         return 'unparseable'
     try:
-        return ('unaffected' if float(values[ix]) == float(values[isx])
-                else 'affected')
+        # Same rule as the reader's correction path, by construction.
+        return ('affected'
+                if DataReader._is_lj_branch(          # noqa: SLF001
+                    [float(values[ix])], [float(values[isx])])
+                else 'unaffected')
     except ValueError:
         return 'unparseable'
 

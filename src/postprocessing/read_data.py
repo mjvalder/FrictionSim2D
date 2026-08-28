@@ -41,7 +41,15 @@ class _NpEncoder(json.JSONEncoder):
         if isinstance(o, np.ndarray):
             return o.tolist()
         if isinstance(o, pd.DataFrame):
-            return {'columns': o.columns.tolist(), 'data': o.values.tolist()}
+            out = {'columns': o.columns.tolist(), 'data': o.values.tolist()}
+            # Carry frame-level provenance -- notably lf_schema/lf_corrected.
+            # Without this a unit-corrected frame serialises identically to a
+            # stale pre-fix export, and since time_series_hash is computed
+            # from (nf, lfx, lfy) the correction changes the hash, so the
+            # dedup-by-hash check cannot recognise the re-ingested run.
+            if o.attrs:
+                out['attrs'] = dict(o.attrs)
+            return out
         return super().default(o)
 
 
@@ -307,6 +315,21 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         df.attrs['lf_schema'] = 1      # header-less files predate the marker
         return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 
+    @staticmethod
+    def _is_lj_branch(lfx, sx) -> bool:
+        """True when a pre-schema-2 sheet frame needs the unit correction.
+
+        On the many-body branch the template defines ``xfrict`` AS ``v_sx``,
+        so LAMMPS writes both columns from one value and they are byte-
+        identical. Any difference means the LJ branch, whose ``compute
+        group/group`` force is in eV/A while the load is already nN.
+
+        Defined once and used by BOTH the reader (whole column) and
+        ``audit_lf_units`` (a one-row sample), so the two cannot drift apart.
+        """
+        import pandas as _pd  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+        return not _pd.Series(list(lfx)).equals(_pd.Series(list(sx)))
+
     @classmethod
     def _parse_lf_schema(cls, line1: str) -> int:
         """Output-schema version from a results file's first line.
@@ -337,30 +360,35 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         channel for it; switch to ``react_x`` when it does.
         """
         if df.attrs.get('lf_corrected'):
-            return df                  # re-entry guard: scaling twice gives
-                                       # 1.602^2, and attrs survive a re-read
+            # Re-entry guard: scaling twice gives 1.602^2. Not reachable from
+            # src/ today (each call site passes a freshly parsed frame, and a
+            # fresh read_csv starts with empty attrs), but the function is
+            # public enough to be called on a frame that already went through.
+            return df
         df.attrs['lf_corrected'] = False
         schema = df.attrs.get('lf_schema', 1)
         if sim_type != 'sheet' or schema != 1:
-            if schema > self._LF_SCHEMA_CURRENT:
+            if schema > self._LF_SCHEMA_CURRENT or schema < 1:
                 logger.warning(
-                    "%s: output schema %s is newer than this reader knows "
-                    "(%s). Lateral force left untouched; upgrade the reader "
-                    "rather than trusting this frame.",
+                    "%s: output schema %s is not one this reader understands "
+                    "(known: 1..%s). Lateral force left untouched; upgrade "
+                    "the reader rather than trusting this frame.",
                     filepath, schema, self._LF_SCHEMA_CURRENT)
             return df
-        if 'lfx' not in df.columns or 'v_sx' not in df.columns:
-            # v_sx is the branch discriminator; raw_/peratom_ tiers do not
-            # carry it. Say so -- this is the one exit that abandons a file
-            # that may well need correcting.
+        if 'lfx' not in df.columns:
+            return df                  # no lateral force to correct at all
+        if 'v_sx' not in df.columns:
+            # There IS a lateral force but no v_sx to identify the branch
+            # with, so it cannot be known whether it needs scaling. This is
+            # the one exit that abandons a possibly-affected file: say so.
             logger.warning(
-                "%s: pre-schema-2 sheet file but the LJ/many-body branch is "
-                "not identifiable (needs both lfx and v_sx). Lateral force "
+                "%s: pre-schema-2 sheet file carries lfx but no v_sx, so the "
+                "LJ/many-body branch cannot be identified. Lateral force "
                 "left AS WRITTEN; if this run used an lj/cut interlayer "
                 "potential its COF is a factor %s too small.",
                 filepath, self._LF_SCHEMA1_CORRECTION)
             return df
-        if df['lfx'].equals(df['v_sx']):
+        if not self._is_lj_branch(df['lfx'], df['v_sx']):
             return df                  # many-body branch: already nN
         df['lfx'] = df['lfx'] * self._LF_SCHEMA1_CORRECTION
         if 'lfy' in df.columns:

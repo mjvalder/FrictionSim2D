@@ -205,7 +205,8 @@ def test_future_schema_is_not_corrected(tmp_path, caplog):
     assert df.attrs['lf_schema'] == 3
     assert df.attrs['lf_corrected'] is False
     assert df['lfx'].iloc[0] == 2.0          # untouched
-    assert any('newer than this reader' in r.getMessage() for r in caplog.records)
+    assert any('not one this reader understands' in r.getMessage()
+               for r in caplog.records)
 
 
 def test_correction_is_idempotent(tmp_path):
@@ -229,4 +230,44 @@ def test_unidentifiable_branch_warns_rather_than_going_quiet(tmp_path, caplog):
     with caplog.at_level('WARNING'):
         df = _reader()._read_dataframe(p, 'sheet')
     assert df.attrs['lf_corrected'] is False
-    assert any('not identifiable' in r.getMessage() for r in caplog.records)
+    assert any('cannot be identified' in r.getMessage()
+               for r in caplog.records)
+
+
+def test_no_lateral_column_is_not_warned_about(tmp_path, caplog):
+    # 251030_results holds 491 files whose header is v_sx v_sy v_sz v_fx...
+    # with no v_xfrict at all. They have no lateral force to correct, so
+    # warning that "its COF is a factor 1.602 too small" was wrong.
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text("# Time-averaged data for fix fc_win\n"
+                 "# TimeStep v_sx v_sy v_sz v_fz\n"
+                 "1000 0.5 0.25 1.0 -10.0\n")
+    with caplog.at_level('WARNING'):
+        df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_corrected'] is False
+    assert not [r for r in caplog.records if '1.602176565' in r.getMessage()]
+
+
+def test_correction_provenance_survives_json_export():
+    # attrs died in _NpEncoder, so a corrected frame serialised identically
+    # to a stale pre-fix export -- and time_series_hash is computed from
+    # (nf, lfx, lfy), so the correction changes it and dedup-by-hash cannot
+    # recognise the re-ingested run.
+    import json
+    import pandas as pd
+    from src.postprocessing.read_data import _NpEncoder
+
+    df = pd.DataFrame({'nf': [1.0], 'lfx': [2.0], 'lfy': [1.0]})
+    df.attrs['lf_schema'] = 1
+    df.attrs['lf_corrected'] = True
+    round_tripped = json.loads(json.dumps(df, cls=_NpEncoder))
+    assert round_tripped['attrs']['lf_corrected'] is True
+    assert round_tripped['attrs']['lf_schema'] == 1
+
+
+def test_ev_a_to_nn_matches_the_corrector_constant():
+    # the templates scale by EV_A_TO_NN; the corrector hard-codes its own
+    # copy. If one is ever changed the other must move with it.
+    from src.data.models import EV_A_TO_NN
+    from src.postprocessing.read_data import DataReader
+    assert DataReader._LF_SCHEMA1_CORRECTION == EV_A_TO_NN
