@@ -192,3 +192,41 @@ def test_afm_files_are_never_lf_corrected(tmp_path):
     p.write_text(NEW_12)
     df = _reader()._read_dataframe(p, 'tip')
     assert df.attrs['lf_corrected'] is False
+
+
+def test_future_schema_is_not_corrected(tmp_path, caplog):
+    # a substring test for 'schema=2' treats every LATER version as schema 1
+    # and silently applies the legacy unit correction to a file that never
+    # needed it. The parity work is queued to land on top of this.
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA2.replace('schema=2', 'schema=3'))
+    with caplog.at_level('WARNING'):
+        df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_schema'] == 3
+    assert df.attrs['lf_corrected'] is False
+    assert df['lfx'].iloc[0] == 2.0          # untouched
+    assert any('newer than this reader' in r.getMessage() for r in caplog.records)
+
+
+def test_correction_is_idempotent(tmp_path):
+    # applying it twice would give 1.602^2; attrs survive a re-read
+    p = tmp_path / "friction_p1.0_a0_s1.txt"
+    p.write_text(SHEET_SCHEMA1_LJ)
+    r = _reader()
+    df = r._read_dataframe(p, 'sheet')
+    once = df['lfx'].iloc[0]
+    again = r._correct_legacy_lf_schema1(df, p, 'sheet')
+    assert again['lfx'].iloc[0] == once
+
+
+def test_unidentifiable_branch_warns_rather_than_going_quiet(tmp_path, caplog):
+    # raw_/peratom_ tiers carry no v_sx, so the branch cannot be determined.
+    # That exit abandons a possibly-affected file and must say so.
+    p = tmp_path / "raw_p1.0_a0_s1.txt"
+    p.write_text("# Time-averaged data for fix fc_raw\n"
+                 "# TimeStep v_xfrict v_yfrict v_fz\n"
+                 "1000 2.0 1.0 -10.0\n")
+    with caplog.at_level('WARNING'):
+        df = _reader()._read_dataframe(p, 'sheet')
+    assert df.attrs['lf_corrected'] is False
+    assert any('not identifiable' in r.getMessage() for r in caplog.records)

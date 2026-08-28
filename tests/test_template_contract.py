@@ -97,7 +97,7 @@ def test_sheet_temp_diagnostic_present(slide_text):
     assert 'compute T_sheet 2D_all temp' in slide_text
 
 
-def _render_sheet_slide(has_internal_lj: bool) -> str:
+def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4) -> str:
     """Render sheetonsheet/slide.lmp directly for the conditional-channel test.
 
     Only the has_internal_lj branch is under test; the non-strict env renders
@@ -108,7 +108,7 @@ def _render_sheet_slide(has_internal_lj: bool) -> str:
     env = Environment(loader=PackageLoader('src.templates'),
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template('sheetonsheet/slide.lmp').render(
-        n_layers=4, has_internal_lj=has_internal_lj,
+        n_layers=n_layers, has_internal_lj=has_internal_lj,
         constraint_mode='none', pot_type='sw' if not has_internal_lj else 'rebomos',
         scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
         scan_angle_force=None, temp=300, thermostat_type='langevin',
@@ -282,3 +282,153 @@ def test_hold_fix_has_no_schema_marker():
     text = _render_sheet_slide(has_internal_lj=False)
     hold = [ln for ln in text.splitlines() if 'hold_ave' in ln and 'ave/time' in ln]
     assert hold and 'title1' not in hold[0]
+
+
+def _render_hetero_slide(n_layers: int) -> str:
+    """Render hetero/slide.lmp, whose layer groups come from z-bands."""
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    return env.get_template('hetero/slide.lmp').render(
+        n_layers=n_layers, has_internal_lj=False,
+        layers=[{'idx': i, 'zlo': 3.0 * (i - 1), 'zhi': 3.0 * i}
+                for i in range(1, n_layers + 1)],
+        constraint_mode='none', pot_type='sw',
+        scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
+        scan_angle_force=None, temp=300, thermostat_type='langevin',
+        drive_method='fix_move', dump_enabled=False, seed_sheet_center=12345,
+        channels={'window': True, 'raw': True, 'peratom': True},
+        xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,
+        num_atom_types=6, data_file='build/hetero.lmp',
+        potential_file='system.in.settings', neighbor_list=2.0,
+        neigh_modify_command='neigh_modify delay 0', atom_style='atomic',
+        min_style='cg', minimization_command='minimize 1e-6 1e-8 1000 10000',
+        timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
+        results_file_pattern='results/friction.txt',
+        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
+    )
+
+
+def _com_probe_groups(text: str):
+    """(ctop group, cbot group)."""
+    ctop = re.search(r'compute\s+COM_ctop\s+(\S+)\s+com', text).group(1)
+    cbot = re.search(r'compute\s+COM_cbot\s+(\S+)\s+com', text).group(1)
+    return ctop, cbot
+
+
+# (n_layers, expected cbot, expected ctop): the stack splits into two sheets of
+# equal thickness, thinner half below for odd n. COM_cbot used to be pinned to
+# layer_2, which only lands on the middle interface at n_layers == 4 -- at the
+# 3-layer minimum it aliased COM_ctop, so the extracted interlayer gap
+# (comz_ctop - comz_cbot, the only z pair that reached the results file) was
+# identically zero.
+MIDDLE_INTERFACE = [(3, 1, 2), (4, 2, 3), (5, 2, 3), (6, 3, 4), (7, 3, 4)]
+
+
+@pytest.mark.parametrize('n_layers,cbot,ctop', MIDDLE_INTERFACE)
+def test_sheet_com_probes_straddle_the_middle_interface(n_layers, cbot, ctop):
+    got = _com_probe_groups(
+        _render_sheet_slide(has_internal_lj=False, n_layers=n_layers))
+    assert got == (f'layer_{ctop}', f'layer_{cbot}')
+
+
+@pytest.mark.parametrize('n_layers,cbot,ctop',
+                         [r for r in MIDDLE_INTERFACE if r[0] >= 4])
+def test_hetero_com_probes_straddle_the_middle_interface(n_layers, cbot, ctop):
+    """Same rule for hetero/slide.lmp (MIN_LAYERS is 4 there)."""
+    got = _com_probe_groups(_render_hetero_slide(n_layers))
+    assert got == (f'layer_{ctop}', f'layer_{cbot}')
+
+
+ALL_FOUR_COM_Z = ['v_comz_bot', 'v_comz_cbot', 'v_comz_ctop', 'v_comz_top']
+
+
+def test_sheet_results_file_carries_all_four_com_probes():
+    """All four COM probes are computed; all four must also be written.
+
+    comz_top and comz_bot were computed and never emitted, so downstream had
+    only the ctop/cbot pair to work with.
+    """
+    text = _render_sheet_slide(has_internal_lj=False, n_layers=3)
+    m = [m for m in FIX_RE.finditer(text) if m.group(1) == 'fc_win'][0]
+    emitted = set(m.group(5).split())
+    assert set(ALL_FOUR_COM_Z) <= emitted
+
+
+def test_hetero_results_file_carries_all_four_com_probes():
+    text = _render_hetero_slide(4)
+    line = [l for l in text.split('\n') if l.startswith('fix') and ' fc_ave ' in l][0]
+    assert set(ALL_FOUR_COM_Z) <= set(line.split())
+
+
+def test_sheet_window_keeps_legacy_sixteen_variable_prefix():
+    """The new columns must be appended, not inserted: the header-less
+    positional fallback in read_data keys off this exact prefix."""
+    from src.postprocessing.read_data import DataReader
+    m = [m for m in FIX_RE.finditer(
+        _render_sheet_slide(has_internal_lj=False, n_layers=3))
+        if m.group(1) == 'fc_win'][0]
+    legacy = DataReader._SHEET_FILE_COLUMNS[1:]  # drop 'time'
+    assert m.group(5).split()[:len(legacy)] == legacy
+
+
+# --- the test that would actually have caught the eV/A-vs-nN defect ---------
+# A registry-level units assertion cannot: the sheet family has no `nf`
+# channel in REGISTRY at all, and its lateral channel is `xfrict`, so a
+# REGISTRY['lfx'].units == REGISTRY['nf'].units check only ever compares two
+# AFM entries. The defect lived in the TEMPLATE, so the template is where it
+# has to be pinned -- for every sheet template, not just the one that was
+# looked at.
+SHEET_SLIDE_TEMPLATES = ('sheetonsheet/slide.lmp',
+                         'hetero/slide.lmp',
+                         'flake/slide.lmp')
+
+
+def _template_source(name: str) -> str:
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    return env.loader.get_source(env, name)[0]
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_lj_branch_lateral_force_scaled_to_nN(template):
+    # compute group/group's VECTOR is a force in eV/A. nf is nN. Unscaled,
+    # COF came out a factor 1.602176565 too SMALL for the entire SW set.
+    src = _template_source(template)
+    assert 'c_frict[1]*{{ ev_a_to_nn }}' in src, template
+    assert 'c_frict[2]*{{ ev_a_to_nn }}' in src, template
+    # and never the bare form
+    assert 'equal c_frict[1]\n' not in src, template
+    assert 'equal c_frict[2]\n' not in src, template
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_interlayer_energy_stays_unscaled(template):
+    # c_frict's SCALAR is an energy in eV and was always correct; scaling it
+    # would be a new bug in the opposite direction.
+    src = _template_source(template)
+    if 'e_int_il' in src:
+        assert 'variable        e_int_il equal c_frict\n' in src, template
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_results_fixes_carry_schema_marker(template):
+    src = _template_source(template)
+    results_fixes = [ln for ln in src.splitlines()
+                     if ln.startswith('fix') and 'ave/time' in ln
+                     and 'hold_ave' not in ln]
+    assert results_fixes, template
+    for ln in results_fixes:
+        assert 'title1 "# schema=2 lf_units=nN"' in ln, f"{template}: {ln[:60]}"
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
+def test_hold_fix_never_carries_schema_marker(template):
+    # the hold writes its own hold_*.txt and is not read by read_data
+    src = _template_source(template)
+    for ln in src.splitlines():
+        if 'hold_ave' in ln and 'ave/time' in ln:
+            assert 'title1' not in ln, template

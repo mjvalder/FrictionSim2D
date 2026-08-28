@@ -13,6 +13,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from src.postprocessing.read_data import DataReader
+
 VERDICTS = ('affected', 'unaffected', 'unparseable')
 
 
@@ -23,8 +25,10 @@ def classify_file(path) -> str:
             head = [next(fh, ''), next(fh, ''), next(fh, '')]
     except OSError:
         return 'unparseable'
-    if 'schema=2' in head[0]:
-        return 'unaffected'                     # post-fix, already nN
+    # Parsed as an integer via the reader's own helper, so the audit and the
+    # corrector cannot drift: any schema >= 2 is post-fix and already nN.
+    if DataReader._parse_lf_schema(head[0]) >= 2:   # noqa: SLF001
+        return 'unaffected'
     cols = head[1].lstrip('#').split()
     if 'v_xfrict' not in cols or 'v_sx' not in cols:
         return 'unparseable'

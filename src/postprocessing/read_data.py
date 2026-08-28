@@ -75,6 +75,10 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     # 1.602176565 too SMALL. The correction is a multiplication.
     _LF_SCHEMA1_CORRECTION = 1.602176565
 
+    # Output-schema version this reader understands. Bump BOTH this and the
+    # templates' title1 together; _parse_lf_schema refuses to guess.
+    _LF_SCHEMA_CURRENT = 2
+
     _SHEET_COLUMN_RENAME = {
         'v_xfrict': 'lfx',
         'v_yfrict': 'lfy',
@@ -278,7 +282,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             # is divided by is already nN, so its COF is a factor
             # 1.602176565 too SMALL (docs/notes/2026-08-27-sheet-cof-unit-
             # correction.md).
-            df.attrs['lf_schema'] = 2 if 'schema=2' in header_lines[0] else 1
+            df.attrs['lf_schema'] = self._parse_lf_schema(header_lines[0])
             return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 
         # LEGACY_2026 positional fallback — width must match EXACTLY
@@ -303,6 +307,19 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         df.attrs['lf_schema'] = 1      # header-less files predate the marker
         return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 
+    @classmethod
+    def _parse_lf_schema(cls, line1: str) -> int:
+        """Output-schema version from a results file's first line.
+
+        Parsed as an INTEGER, not matched as the substring 'schema=2'. A
+        substring test treats every future version as schema 1 and silently
+        applies the legacy unit correction to a file that never needed it --
+        so bumping the marker would corrupt data rather than fail loudly.
+        Absent marker means the file predates the marker entirely: schema 1.
+        """
+        m = re.search(r'schema=(\d+)', line1 or '')
+        return int(m.group(1)) if m else 1
+
     def _correct_legacy_lf_schema1(self, df, filepath, sim_type: str):
         """Rescale a pre-``schema=2`` sheet frame's lateral force to nN.
 
@@ -319,11 +336,30 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         ``v_sx`` is compared raw because the registry does not yet declare a
         channel for it; switch to ``react_x`` when it does.
         """
-        df.attrs.setdefault('lf_corrected', False)
-        if sim_type != 'sheet' or df.attrs.get('lf_schema') != 1:
+        if df.attrs.get('lf_corrected'):
+            return df                  # re-entry guard: scaling twice gives
+                                       # 1.602^2, and attrs survive a re-read
+        df.attrs['lf_corrected'] = False
+        schema = df.attrs.get('lf_schema', 1)
+        if sim_type != 'sheet' or schema != 1:
+            if schema > self._LF_SCHEMA_CURRENT:
+                logger.warning(
+                    "%s: output schema %s is newer than this reader knows "
+                    "(%s). Lateral force left untouched; upgrade the reader "
+                    "rather than trusting this frame.",
+                    filepath, schema, self._LF_SCHEMA_CURRENT)
             return df
         if 'lfx' not in df.columns or 'v_sx' not in df.columns:
-            return df                  # branch not identifiable; leave as-is
+            # v_sx is the branch discriminator; raw_/peratom_ tiers do not
+            # carry it. Say so -- this is the one exit that abandons a file
+            # that may well need correcting.
+            logger.warning(
+                "%s: pre-schema-2 sheet file but the LJ/many-body branch is "
+                "not identifiable (needs both lfx and v_sx). Lateral force "
+                "left AS WRITTEN; if this run used an lj/cut interlayer "
+                "potential its COF is a factor %s too small.",
+                filepath, self._LF_SCHEMA1_CORRECTION)
+            return df
         if df['lfx'].equals(df['v_sx']):
             return df                  # many-body branch: already nN
         df['lfx'] = df['lfx'] * self._LF_SCHEMA1_CORRECTION

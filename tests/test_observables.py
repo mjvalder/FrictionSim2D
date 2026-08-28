@@ -86,10 +86,30 @@ def test_every_results_channel_has_units():
 
 def test_afm_cof_inputs_share_force_units():
     # COF = lateral force / normal load: the two must carry the same unit or
-    # the ratio is meaningless. This is the assertion that would have caught
-    # the sheet's eV/A-over-nN mismatch.
+    # the ratio is meaningless.
+    #
+    # AFM ONLY, deliberately. Both entries are sim_types=('afm','indent');
+    # the sheet family has no 'nf' channel in REGISTRY and its lateral
+    # channel is 'xfrict', so this cannot be widened to the sheet without the
+    # registry work in the parity spec. It therefore could NOT have caught
+    # the sheet eV/A-over-nN defect -- tests/test_template_contract.py's
+    # test_lj_branch_lateral_force_scaled_to_nN is the one that does.
     assert REGISTRY['lfx'].units == REGISTRY['nf'].units == 'nN'
     assert REGISTRY['lfy'].units == 'nN'
+
+
+def test_sheet_lateral_channel_declares_nN():
+    # the sheet's lateral force is 'xfrict', not 'lfx', and there is no sheet
+    # 'nf' to pair it with here. Pinned so the asymmetry is visible rather
+    # than silently assumed away.
+    assert REGISTRY['xfrict'].units == 'nN'
+    assert 'sheetonsheet' in REGISTRY['xfrict'].sim_types
+    channel_names = {o.name for o in channels_for('sheetonsheet', 'window')}
+    assert channel_names
+    assert 'nf' not in channel_names, (
+        'a sheet nf channel now exists -- widen '
+        'test_afm_cof_inputs_share_force_units to cover it'
+    )
 
 
 def test_raw_legacy_block_is_afm_only():

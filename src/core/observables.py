@@ -35,11 +35,17 @@ class Observable:
     parse it back.
 
     ``units`` is the physical unit of the emitted column, in LAMMPS ``metal``
-    terms: 'nN', 'eV', 'eV/A', 'A', 'K', 'count'. It is not decorative -- the
-    sheet family shipped a lateral force in eV/A against a normal load in nN
-    for the life of the project, producing a COF a factor 1.602176565 too
-    small, and a coherence test over this field is what catches that class of
-    defect.
+    terms: 'nN', 'eV', 'eV/A', 'A', 'K', 'count'. The sheet family shipped a
+    lateral force in eV/A against a normal load in nN for the life of the
+    project, producing a COF a factor 1.602176565 too small.
+
+    Note what this field does NOT do: it records a DECLARED unit and nothing
+    verifies it against what a template actually emits. The coherence test
+    over it (``test_afm_cof_inputs_share_force_units``) covers AFM only,
+    because the sheet family has no ``nf`` channel here at all and its
+    lateral channel is ``xfrict`` -- so a registry-level check could not have
+    caught the sheet defect. The test that does is
+    ``test_lj_branch_lateral_force_scaled_to_nN``, over the templates.
     """
     name: str
     sim_types: Tuple[str, ...]
