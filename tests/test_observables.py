@@ -228,3 +228,11 @@ def test_every_parity_exemption_names_a_live_role():
         assert role in live, (
             f"PARITY_EXEMPT[{sim_type!r}, {role!r}] excuses a role no channel "
             f"claims any more -- delete the exemption")
+
+
+def test_opt_in_channels_are_peratom_or_post():
+    # opt_in exists to gate runtime cost; a window-tier channel is cheap by
+    # construction, so marking one opt_in would be meaningless
+    for key, ob in REGISTRY.items():
+        if ob.opt_in:
+            assert ob.tier in ('peratom',) or ob.stream == 'post', key

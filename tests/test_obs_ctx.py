@@ -72,3 +72,21 @@ def test_empty_varlist_suppresses_the_fix():
     ctx = _ctx(extra_filter=lambda ob: ob.tier != 'peratom')
     assert ctx['peratom_varlist'] == ''
     assert ctx['emit_peratom'] is False
+
+
+def test_unknown_optional_channel_fails_the_build():
+    import pytest
+    # a silently-ignored typo means a pilot arm runs without the
+    # instrumentation it was commissioned to measure
+    with pytest.raises(ValueError, match='no such observable'):
+        _ctx(optional_channels=['not_a_channel'])
+
+
+def test_default_build_emits_no_opt_in_channel():
+    from src.core.observables import REGISTRY
+    ctx = _ctx()
+    emitted = set(ctx['window_varlist'].split()) | set(
+        ctx['peratom_varlist'].split())
+    for ob in REGISTRY.values():
+        if ob.opt_in and ob.rename_to:
+            assert ob.rename_to not in emitted, ob.registry_key

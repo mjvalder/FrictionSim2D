@@ -7,9 +7,10 @@ Python, exactly the drift this removes from Jinja.
 Imports only src.core.observables -- never ase, directly or transitively.
 tests/test_import_weight.py pins that.
 """
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
-from ...core.observables import TIER_ARGS, channels_for, layer_channels
+from ...core.observables import (
+    REGISTRY, TIER_ARGS, channels_for, layer_channels)
 
 #: Output-schema marker stamped on every results file. Must stay in step with
 #: DataReader._LF_SCHEMA_CURRENT; _parse_lf_schema reads the integer, so
@@ -28,6 +29,7 @@ def build_obs_ctx(
     results_freq: int,
     layer_groups_available: bool = True,
     extra_filter: Optional[Callable[[object], bool]] = None,
+    optional_channels: Sequence[str] = (),
 ) -> Dict[str, object]:
     """Assemble the observable-registry context for the macro library.
 
@@ -56,6 +58,18 @@ def build_obs_ctx(
     if extra_filter is not None:
         win = [ob for ob in win if extra_filter(ob)]
         pa = [ob for ob in pa if extra_filter(ob)]
+
+    requested = set(optional_channels)
+    known = {ob.name for ob in REGISTRY.values()}
+    unknown = requested - known
+    if unknown:
+        raise ValueError(
+            f"optional_channels: no such observable {sorted(unknown)}; "
+            f"a typo here silently runs a pilot arm without the "
+            f"instrumentation it was commissioned to measure"
+        )
+    win = [ob for ob in win if not ob.opt_in or ob.name in requested]
+    pa = [ob for ob in pa if not ob.opt_in or ob.name in requested]
 
     def native(ob):
         return ob.rename_to or f'v_{ob.name}'

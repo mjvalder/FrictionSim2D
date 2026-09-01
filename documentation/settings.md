@@ -104,6 +104,7 @@ output:
     window: true
     raw: true
     peratom: true
+  optional_channels: []
 ```
 
 ### `output.channels`
@@ -120,6 +121,13 @@ LAMMPS input. All three default to `true`, preserving previous behaviour.
 Turning `peratom` off also drops its `group/group` computes, not just the
 output file. Turn `raw` and `peratom` off when you are not analysing them —
 they cost runtime and disk on every run. See `tests/test_output_channels.py`.
+
+### `output.optional_channels`
+
+Names of opt-in observable channels to enable, beyond the default set.
+Channels declared `opt_in=True` in the registry cost measurable runtime and
+are emitted only when named here. A name that matches no registry channel is
+a build error, not a silent no-op. Empty by default.
 
 ## potential
 

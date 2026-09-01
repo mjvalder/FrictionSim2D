@@ -123,6 +123,15 @@ class OutputSettings(BaseModel):
             "group/group) cost runtime and disk. All on by default."
         ),
     )
+    optional_channels: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of opt-in observable channels to enable, beyond the default "
+            "set. Channels declared opt_in=True in the registry cost measurable "
+            "runtime and are emitted only when named here. A name that matches "
+            "no registry channel is a build error, not a silent no-op."
+        ),
+    )
 
 class PotentialSettings(BaseModel):
     """Settings for interatomic potentials."""

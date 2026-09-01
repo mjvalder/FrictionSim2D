@@ -723,6 +723,7 @@ class AFMSimulation(SimulationBase):
             contact_cutoff=self._contact_cutoff(),
             results_freq=self.config.settings.output.results_frequency,
             layer_groups_available=layer_groups_available,
+            optional_channels=self.config.settings.output.optional_channels,
         )
 
     def _contact_cutoff(self) -> float:

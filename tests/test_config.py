@@ -611,3 +611,8 @@ def test_the_model_does_not_judge_the_angle_split():
 def test_damping_ratio_defaults_to_zero():
     from src.core.config import TipConfig
     assert TipConfig.model_fields['damping_ratio'].default == 0.0
+
+
+def test_optional_channels_defaults_empty():
+    from src.core.config import OutputSettings
+    assert OutputSettings().optional_channels == []

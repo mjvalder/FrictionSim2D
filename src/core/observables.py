@@ -58,6 +58,7 @@ class Observable:
     units: Optional[str] = None
     key: Optional[str] = None          # registry key; defaults to name
     role_key: Optional[str] = None     # family-agnostic semantic identity
+    opt_in: bool = False               # costs runtime; emitted only on request
 
     @property
     def registry_key(self) -> str:
