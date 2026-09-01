@@ -1,7 +1,7 @@
 {#
   Generated consumers of the observable registry (src/core/observables.py).
   Spec §3.2/§4: three sampling tiers —
-    fc_win  ave/time 1 1000 1000   cheap scalars, block means (as the 2026 campaign)
+    fc_win  ave/time 1 1000 Nfreq   cheap scalars, block means; Nfreq is settings.output.results_frequency (1000 by default, as the 2026 campaign)
     fc_raw  ave/time 100 1 100     instantaneous 100 fs samples for slip statistics
     fc_pa   ave/time 1000 1 1000   expensive per-atom computes + group/group
 
@@ -22,7 +22,7 @@
 
 {% macro emit_output_fixes(obs_ctx) %}
 {% if obs_ctx.emit_window %}
-fix             fc_win all ave/time 1 1000 1000 {{ obs_ctx.window_varlist }} file {{ obs_ctx.results_file_pattern }}
+fix             fc_win all ave/time {{ obs_ctx.window_args }} {{ obs_ctx.window_varlist }} file {{ obs_ctx.results_file_pattern }}
 {% endif %}
 {% if obs_ctx.emit_raw %}
 fix             fc_raw all ave/time 100 1 100 {{ obs_ctx.raw_varlist }} file {{ obs_ctx.results_file_raw }}

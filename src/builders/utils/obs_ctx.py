@@ -9,7 +9,7 @@ tests/test_import_weight.py pins that.
 """
 from typing import Callable, Dict, List, Optional
 
-from ...core.observables import channels_for, layer_channels
+from ...core.observables import TIER_ARGS, channels_for, layer_channels
 
 
 def build_obs_ctx(
@@ -20,6 +20,7 @@ def build_obs_ctx(
     use_langevin: bool,
     enabled_tiers: Dict[str, bool],
     contact_cutoff: float,
+    results_freq: int,
     layer_groups_available: bool = True,
     extra_filter: Optional[Callable[[object], bool]] = None,
 ) -> Dict[str, object]:
@@ -68,6 +69,8 @@ def build_obs_ctx(
     return {
         'compute_lines': compute_lines,
         'variable_lines': variable_lines,
+        'window_args': '{} {} {}'.format(
+            TIER_ARGS['window'][0], TIER_ARGS['window'][1], results_freq),
         'emit_window': bool(enabled_tiers.get('window', True)),
         'emit_raw': bool(enabled_tiers.get('raw', True)),
         'emit_peratom': bool(enabled_tiers.get('peratom', True)),

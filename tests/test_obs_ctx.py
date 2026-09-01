@@ -9,6 +9,7 @@ def _ctx(**kw):
         use_langevin=True,
         enabled_tiers={'window': True, 'raw': True, 'peratom': True},
         contact_cutoff=3.5,
+        results_freq=1000,
     )
     base.update(kw)
     return build_obs_ctx(**base)
@@ -42,3 +43,15 @@ def test_computes_are_deduped():
     # would redefine it
     lines = _ctx()['compute_lines']
     assert len(lines) == len(set(lines))
+
+
+def test_window_args_carry_results_freq():
+    # Nevery/Nrepeat come from TIER_ARGS; Nfreq is the user's setting.
+    # AFM silently lost this when it converted to the macro.
+    assert _ctx(results_freq=2000)['window_args'] == '1 1000 2000'
+
+
+def test_window_args_default_matches_tier_args():
+    from src.core.observables import TIER_ARGS
+    every, repeat, freq = TIER_ARGS['window']
+    assert _ctx(results_freq=freq)['window_args'] == f'{every} {repeat} {freq}'

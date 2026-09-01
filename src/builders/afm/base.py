@@ -721,6 +721,7 @@ class AFMSimulation(SimulationBase):
             use_langevin=use_langevin,
             enabled_tiers=dict(self.config.settings.output.channels),
             contact_cutoff=self._contact_cutoff(),
+            results_freq=self.config.settings.output.results_frequency,
             layer_groups_available=layer_groups_available,
         )
 

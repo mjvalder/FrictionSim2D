@@ -464,3 +464,16 @@ def test_hetero_frict_measures_the_same_interface_the_com_probes_do(
     text = _render_hetero_slide(n_layers)
     assert _frict_groups(text) == (f'layer_{ctop}', f'layer_{cbot}')
     assert _com_probe_groups(text) == _frict_groups(text)
+
+
+def test_afm_window_fix_honours_results_frequency():
+    """Regression: the macro hardcoded `1 1000 1000`, so
+    settings.output.results_frequency was computed and discarded for every
+    AFM slide build (afm/base.py passes it; the macro ignored it)."""
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    src = env.loader.get_source(env, 'common/observables.lmp')[0]
+    assert 'ave/time 1 1000 1000' not in src
+    assert 'obs_ctx.window_args' in src
