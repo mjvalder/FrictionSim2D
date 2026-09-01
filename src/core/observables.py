@@ -57,6 +57,7 @@ class Observable:
     rename_to: Optional[str] = None
     units: Optional[str] = None
     key: Optional[str] = None          # registry key; defaults to name
+    role_key: Optional[str] = None     # family-agnostic semantic identity
 
     @property
     def registry_key(self) -> str:
@@ -69,8 +70,23 @@ class Observable:
 
 REGISTRY: dict = {}
 
+#: Results channels that carry no cross-family role worth naming. Distinct
+#: from PARITY_EXEMPT (Task 7): a name here is invisible to the parity tests
+#: entirely, while a PARITY_EXEMPT entry concedes ONE family's absence from a
+#: role other families do carry.
+ROLE_EXEMPT: dict = {
+    'tip_min_z':
+        'punch-through detection is specific to a rigid indenting body',
+}
+
 
 def _add(ob: Observable) -> None:
+    if ob.stream == 'results' and not ob.role_key \
+            and ob.name not in ROLE_EXEMPT:
+        raise ValueError(
+            f"{ob.registry_key}: results channels need a role_key (or an "
+            f"explicit ROLE_EXEMPT entry) so parity is checkable"
+        )
     if ob.registry_key in REGISTRY:
         raise ValueError(f"duplicate observable key {ob.registry_key}")
     for other in REGISTRY.values():
@@ -89,6 +105,12 @@ def _add(ob: Observable) -> None:
 # --- legacy window channels: the first nine columns, in the 2026 campaign's
 # order. All nine need rename_to, because real 2026 files carry full headers and
 # a missing one leaves e.g. a v_comx column downstream. -----------------------
+_LEGACY_ROLE_KEYS = {
+    'nf': 'normal_load',
+    'lfx': 'lateral_force_x', 'lfy': 'lateral_force_y',
+    'comx': 'sheet_com_x', 'comy': 'sheet_com_y', 'comz': 'sheet_com_z',
+    'tipx': 'driven_com_x', 'tipy': 'driven_com_y', 'tipz': 'driven_com_z',
+}
 for _name, _native in [
     ('nf', 'v_fz_tip'), ('lfx', 'v_fx_spr'), ('lfy', 'v_fy_spr'),
     ('comx', 'v_comx'), ('comy', 'v_comy'), ('comz', 'v_comz'),
@@ -100,7 +122,8 @@ for _name, _native in [
         group='tip_fix' if _name.startswith(('nf', 'lf', 'tip')) else '2D_all',
         tier='window', stream='results',
         rename_to=_native,
-        units='nN' if _name in ('nf', 'lfx', 'lfy') else 'A'))
+        units='nN' if _name in ('nf', 'lfx', 'lfy') else 'A',
+        role_key=_LEGACY_ROLE_KEYS[_name]))
 
 # --- layer-resolved COM: bilayer entries for the golden tests. Builders inject
 # layer_channels(n_layers) for the material's real layer count. ---------------
@@ -113,50 +136,59 @@ for _lyr in (1, 2):
             lammps_compute=f'compute COM_L{_lyr} layer_{_lyr} com',
             lammps_variable=(f'variable com{_ax}_L{_lyr} equal '
                              f'c_COM_L{_lyr}[{"xyz".index(_ax) + 1}]'),
-            rename_to=f'v_com{_ax}_L{_lyr}', units='A'))
+            rename_to=f'v_com{_ax}_L{_lyr}', units='A',
+            role_key=f'layer_com_{_ax}_L{_lyr}'))
 
 # --- energies and temperatures ------------------------------------------------
 _add(Observable(name='etotal', sim_types=('afm', 'sheetonsheet', 'indent'),
                 group='all', tier='window', stream='results',
                 lammps_variable='variable etot equal etotal',
-                rename_to='v_etot', units='eV'))
+                rename_to='v_etot', units='eV',
+                role_key='total_energy'))
 _add(Observable(name='pe', sim_types=('afm', 'sheetonsheet', 'indent'),
                 group='all', tier='window', stream='results',
                 lammps_variable='variable pe_now equal pe',
-                rename_to='v_pe_now', units='eV'))
+                rename_to='v_pe_now', units='eV',
+                role_key='potential_energy'))
 _add(Observable(name='ke', sim_types=('afm', 'sheetonsheet', 'indent'),
                 group='all', tier='window', stream='results',
                 lammps_variable='variable ke_now equal ke',
-                rename_to='v_ke_now', units='eV'))
+                rename_to='v_ke_now', units='eV',
+                role_key='kinetic_energy'))
 # Cumulative thermostat work; needs `tally yes` on the langevin fixes. Grows
 # linearly in a healthy run.
 _add(Observable(name='w_thermostat_tip', sim_types=('afm', 'indent'),
                 group='tip_thermo', tier='window', stream='results',
                 lammps_variable='variable w_lang_tip equal f_lang_tip',
-                rename_to='v_w_lang_tip', units='eV'))
+                rename_to='v_w_lang_tip', units='eV',
+                role_key='thermostat_work_driven'))
 _add(Observable(name='w_thermostat_sub', sim_types=('afm', 'indent'),
                 group='sub_thermo', tier='window', stream='results',
                 lammps_variable='variable w_lang_sub equal f_lang_sub',
-                rename_to='v_w_lang_sub', units='eV'))
+                rename_to='v_w_lang_sub', units='eV',
+                role_key='thermostat_work_substrate'))
 # The AFM sheet is pure NVE, so its 3D temperature measures frictional heating
 # rather than tracking a setpoint.
 _add(Observable(name='temp_sheet_3d', sim_types=('afm', 'indent'),
                 group='2D_all', tier='window', stream='results',
                 lammps_compute='compute T_sheet 2D_all temp',
                 lammps_variable='variable temp_sheet equal c_T_sheet',
-                rename_to='v_temp_sheet', units='K'))
+                rename_to='v_temp_sheet', units='K',
+                role_key='group_temperature'))
 # Tip-sheet coupling is purely lj/cut, so group/group works here even under the
 # hybrid pair style.
 _add(Observable(name='E_int_tip_sheet', sim_types=('afm', 'indent'),
                 group='tip_all', tier='peratom', stream='results',
                 lammps_compute='compute eint tip_all group/group 2D_all pair yes',
                 lammps_variable='variable e_int equal c_eint',
-                rename_to='v_e_int', units='eV'))
+                rename_to='v_e_int', units='eV',
+                role_key='tip_sheet_interaction'))
 # Template-owned: the compute sits in sheetonsheet's slide template, behind its
 # has_internal_lj branch, with real per-material group names.
 _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
                 group='layer_n', tier='peratom', stream='results',
-                rename_to='v_e_int_il', units='eV'))
+                rename_to='v_e_int_il', units='eV',
+                role_key='interlayer_interaction'))
 # Sheet friction label: a group/group read by the window fix at Nevery=1, a
 # deliberate exemption from the tier rule (cost already paid campaign-wide).
 # Template-owned, so validate_registry never sees it.
@@ -170,7 +202,13 @@ _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
 # parser's own sheet map owns the rename.
 _add(Observable(name='xfrict', sim_types=('sheetonsheet',),
                 group='layer_n', tier='window', stream='results',
-                rename_to=None, units='nN'))
+                rename_to=None, units='nN',
+                role_key='lateral_force_x'))
+_PE_SUM_ROLE_KEYS = {
+    'tip_all': 'group_pe_sum_driven',
+    'sub_all': 'group_pe_sum_substrate',
+    '2D_all': 'group_pe_sum_membrane',
+}
 for _grp in ('tip_all', 'sub_all', '2D_all'):
     _add(Observable(
         name=f'pe_sum_{_grp}', sim_types=('afm', 'indent'),
@@ -178,7 +216,8 @@ for _grp in ('tip_all', 'sub_all', '2D_all'):
         lammps_compute=(f'compute peat_{_grp} {_grp} pe/atom\n'
                         f'compute pesum_{_grp} {_grp} reduce sum c_peat_{_grp}'),
         lammps_variable=f'variable pe_{_grp} equal c_pesum_{_grp}',
-        rename_to=f'v_pe_{_grp}', units='eV'))
+        rename_to=f'v_pe_{_grp}', units='eV',
+        role_key=_PE_SUM_ROLE_KEYS[_grp]))
 
 # --- contact ------------------------------------------------------------------
 _add(Observable(name='n_contact', sim_types=('afm', 'indent'),
@@ -187,7 +226,8 @@ _add(Observable(name='n_contact', sim_types=('afm', 'indent'),
                                 '{contact_cutoff} group tip_all\n'
                                 'compute contacts 2D_all reduce sum c_coordc'),
                 lammps_variable='variable n_contact equal c_contacts',
-                rename_to='v_n_contact', units='count'))
+                rename_to='v_n_contact', units='count',
+                role_key='contact_count'))
 # In-plane virial sums; post normalises them to a membrane stress resultant
 # (N/m). No sigma_zz: for a slab with traction-free faces, its through-thickness
 # integral is not a stress resultant.
@@ -196,24 +236,35 @@ _add(Observable(name='sigma_xx_2d', sim_types=('afm', 'indent'),
                 lammps_compute=('compute satom 2D_all stress/atom NULL\n'
                                 'compute sxx 2D_all reduce sum c_satom[1]'),
                 lammps_variable='variable sxx_2d equal c_sxx',
-                rename_to='v_sxx_2d', units='eV/A'))
+                rename_to='v_sxx_2d', units='eV/A',
+                role_key='membrane_stress_xx'))
 _add(Observable(name='sigma_yy_2d', sim_types=('afm', 'indent'),
                 group='2D_all', tier='peratom', stream='results',
                 lammps_compute='compute syy 2D_all reduce sum c_satom[2]',
                 lammps_variable='variable syy_2d equal c_syy',
-                rename_to='v_syy_2d', units='eV/A'))
+                rename_to='v_syy_2d', units='eV/A',
+                role_key='membrane_stress_yy'))
 # post-stream: derived from retained artefacts, never a LAMMPS column
 _add(Observable(name='deflect_max', sim_types=('afm', 'indent'),
-                group='2D_all', tier='peratom', stream='post', units='A'))
+                group='2D_all', tier='peratom', stream='post', units='A',
+                role_key='max_deflection'))
 _add(Observable(name='gap_min', sim_types=('afm', 'indent'),
-                group='tip_all', tier='peratom', stream='post', units='A'))
+                group='tip_all', tier='peratom', stream='post', units='A',
+                role_key='min_gap'))
 
 # --- raw trace (100 fs instantaneous samples) ---------------------------------
+_RAW_ROLE_KEYS = {
+    'raw_lfx': 'raw_lateral_force_x', 'raw_lfy': 'raw_lateral_force_y',
+    'raw_nf': 'raw_normal_load',
+    'raw_tipx': 'raw_driven_com_x', 'raw_tipy': 'raw_driven_com_y',
+    'raw_tipz': 'raw_driven_com_z',
+}
 for _name in ('raw_lfx', 'raw_lfy', 'raw_nf', 'raw_tipx', 'raw_tipy', 'raw_tipz'):
     _add(Observable(
         name=_name,
         sim_types=('afm',), group='tip_fix', tier='raw', stream='results',
-        units='nN' if _name in ('raw_lfx', 'raw_lfy', 'raw_nf') else 'A'))
+        units='nN' if _name in ('raw_lfx', 'raw_lfy', 'raw_nf') else 'A',
+        role_key=_RAW_ROLE_KEYS[_name]))
 
 # --- punch-through ingredient: min tip z, in the SLIDING script --------------
 _add(Observable(name='tip_min_z', sim_types=('afm',),
@@ -271,7 +322,8 @@ def layer_channels(n_layers: int) -> list:
                 lammps_compute=f'compute COM_L{lyr} layer_{lyr} com',
                 lammps_variable=(f'variable com{ax}_L{lyr} equal '
                                  f'c_COM_L{lyr}[{"xyz".index(ax) + 1}]'),
-                rename_to=f'v_com{ax}_L{lyr}', units='A'))
+                rename_to=f'v_com{ax}_L{lyr}', units='A',
+                role_key=f'layer_com_{ax}_L{lyr}'))
     return out
 
 

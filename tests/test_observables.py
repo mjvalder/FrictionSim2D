@@ -140,7 +140,49 @@ def test_shared_name_requires_disjoint_sim_types():
     from src.core.observables import Observable, _add
     with pytest.raises(ValueError, match='disjoint'):
         # 'lfx' already exists for ('afm', 'indent'); overlapping sim_types
-        # would emit two identical column headers in one file
+        # would emit two identical column headers in one file. role_key is
+        # set so the disjoint-name check under test is what fires, not the
+        # unrelated Task 6 role_key requirement.
         _add(Observable(name='lfx', key='lfx@bogus', sim_types=('afm',),
                         group='tip_fix', tier='window', stream='results',
-                        units='nN'))
+                        units='nN', role_key='lateral_force_x'))
+
+
+def test_every_results_channel_has_a_role_key():
+    from src.core.observables import ROLE_EXEMPT
+    for key, ob in REGISTRY.items():
+        if ob.stream != 'results':
+            continue
+        assert ob.role_key or ob.name in ROLE_EXEMPT, (
+            f"{key}: results channels need a role_key so the parity contract "
+            f"can see them, or an explicit ROLE_EXEMPT entry"
+        )
+
+
+def test_role_exempt_entries_carry_a_reason():
+    from src.core.observables import ROLE_EXEMPT
+    for name, reason in ROLE_EXEMPT.items():
+        assert reason.strip(), name
+        assert len(reason.split()) >= 4, f"{name}: reason is not prose"
+
+
+def test_role_key_unique_within_a_sim_type():
+    from collections import defaultdict
+    seen = defaultdict(dict)
+    for ob in REGISTRY.values():
+        if not ob.role_key:
+            continue
+        for st in ob.sim_types:
+            prev = seen[st].get(ob.role_key)
+            assert prev is None, (
+                f"{st}: {ob.registry_key} and {prev} both claim role "
+                f"{ob.role_key}")
+            seen[st][ob.role_key] = ob.registry_key
+
+
+def test_add_rejects_a_results_channel_with_no_role():
+    import pytest
+    from src.core.observables import Observable, _add
+    with pytest.raises(ValueError, match='role_key'):
+        _add(Observable(name='rolelesss', sim_types=('afm',), group='2D_all',
+                        tier='window', stream='results', units='A'))
