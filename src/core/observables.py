@@ -56,15 +56,34 @@ class Observable:
     lammps_variable: Optional[str] = None
     rename_to: Optional[str] = None
     units: Optional[str] = None
+    key: Optional[str] = None          # registry key; defaults to name
+
+    @property
+    def registry_key(self) -> str:
+        """Key in REGISTRY. Distinct from `name` only where two families
+        share a name -- `lfx` is native `v_fx_spr` for AFM and `v_xfrict`
+        for the sheet, and both must parse back to the column downstream
+        consumers key on."""
+        return self.key or self.name
 
 
 REGISTRY: dict = {}
 
 
 def _add(ob: Observable) -> None:
-    if ob.name in REGISTRY:
-        raise ValueError(f"duplicate observable {ob.name}")
-    REGISTRY[ob.name] = ob
+    if ob.registry_key in REGISTRY:
+        raise ValueError(f"duplicate observable key {ob.registry_key}")
+    for other in REGISTRY.values():
+        if other.name != ob.name:
+            continue
+        clash = set(other.sim_types) & set(ob.sim_types)
+        if clash:
+            raise ValueError(
+                f"{ob.name}: two observables may share a name only if their "
+                f"sim_types are disjoint; overlaps with "
+                f"{other.registry_key} on {sorted(clash)}"
+            )
+    REGISTRY[ob.registry_key] = ob
 
 
 # --- legacy window channels: the first nine columns, in the 2026 campaign's

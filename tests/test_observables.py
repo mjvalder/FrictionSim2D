@@ -117,3 +117,30 @@ def test_raw_legacy_block_is_afm_only():
     # to it was inert but wrong
     assert 'v_fx_spr' not in rename_map('sheetonsheet', 'raw')
     assert rename_map('afm', 'raw')['v_fx_spr'] == 'raw_lfx'
+
+
+def test_registry_key_defaults_to_name():
+    from src.core.observables import Observable
+    ob = Observable(name='foo', sim_types=('afm',), group='2D_all',
+                    tier='window', stream='results', units='A')
+    assert ob.registry_key == 'foo'
+    assert Observable(name='foo', key='foo@sheet', sim_types=('sheetonsheet',),
+                      group='layer_1', tier='window', stream='results',
+                      units='A').registry_key == 'foo@sheet'
+
+
+def test_existing_lookups_unchanged():
+    # every entry that existed before keeps its key
+    assert REGISTRY['E_int_tip_sheet'].name == 'E_int_tip_sheet'
+    assert REGISTRY['tip_min_z'].tier == 'window'
+
+
+def test_shared_name_requires_disjoint_sim_types():
+    import pytest
+    from src.core.observables import Observable, _add
+    with pytest.raises(ValueError, match='disjoint'):
+        # 'lfx' already exists for ('afm', 'indent'); overlapping sim_types
+        # would emit two identical column headers in one file
+        _add(Observable(name='lfx', key='lfx@bogus', sim_types=('afm',),
+                        group='tip_fix', tier='window', stream='results',
+                        units='nN'))
