@@ -712,71 +712,17 @@ class AFMSimulation(SimulationBase):
                        use_langevin: bool,
                        layer_groups_available: bool = True
                        ) -> Dict[str, object]:
-        """Assemble the observable-registry context for the macro library.
-
-        A single dict passed under the ``obs_ctx`` key — the macros receive it
-        explicitly (the Jinja env has no StrictUndefined, so a missing key
-        would silently render empty; the contract test's varlist assertions
-        are the guard). Thermostat-work channels are filtered out for
-        non-Langevin runs: their f_lang_* references would not exist.
-        """
-        from ...core.observables import channels_for, layer_channels
-
-        static_layer_names = {f'com{ax}_L{lyr}'
-                              for lyr in (1, 2) for ax in ('x', 'y', 'z')}
-        win = [ob for ob in channels_for('afm', 'window')
-               if ob.name not in static_layer_names]
-        if layer_groups_available:
-            win += [ob for ob in layer_channels(n_layers)
-                    if ob.tier == 'window']
-        if not use_langevin:
-            win = [ob for ob in win if not ob.name.startswith('w_thermostat')]
-        pa = [ob for ob in channels_for('afm', 'peratom')
-              if ob.stream == 'results']
-
-        # settings.output.channels gates each tier's fix ave/time. A disabled
-        # peratom tier must also drop its computes -- they are the expensive
-        # ones (compute group/group rebuilds a neighbour list per invocation),
-        # so emitting them for a fix that is never written wastes the run.
-        enabled = self.config.settings.output.channels
-        if not enabled.get('peratom', True):
-            pa = []
-
-        def native(ob):
-            return ob.rename_to or f'v_{ob.name}'
-
-        contact_cutoff = round(self._contact_cutoff(), 4)
-
-        # Dedupe compute lines: sibling channels (comx/comy/comz_L1) share one
-        # compute; emitting it per channel would redefine it. Order-preserving.
-        compute_lines: list = []
-        variable_lines: list = []
-        for ob in [*win, *pa]:
-            if ob.lammps_compute:
-                line = ob.lammps_compute.replace(
-                    '{contact_cutoff}', str(contact_cutoff))
-                if line not in compute_lines:
-                    compute_lines.append(line)
-            if ob.lammps_variable:
-                variable_lines.append(ob.lammps_variable)
-
-        return {
-            'compute_lines': compute_lines,
-            'variable_lines': variable_lines,
-            'emit_window': bool(enabled.get('window', True)),
-            'emit_raw': bool(enabled.get('raw', True)),
-            'emit_peratom': bool(enabled.get('peratom', True)),
-            'window_varlist': ' '.join(native(ob) for ob in win),
-            'raw_varlist': ('v_fx_spr v_fy_spr v_fz_tip '
-                            'v_comx_tip v_comy_tip v_comz_tip'),
-            'peratom_varlist': ' '.join(native(ob) for ob in pa),
-            'contact_cutoff': contact_cutoff,
-            'results_file_pattern': results_file_pattern,
-            'results_file_raw':
-                results_file_pattern.replace('friction_', 'raw_'),
-            'results_file_peratom':
-                results_file_pattern.replace('friction_', 'peratom_'),
-        }
+        """Delegate to the shared builder (src/builders/utils/obs_ctx.py)."""
+        from ..utils.obs_ctx import build_obs_ctx
+        return build_obs_ctx(
+            sim_type='afm',
+            n_layers=n_layers,
+            results_file_pattern=results_file_pattern,
+            use_langevin=use_langevin,
+            enabled_tiers=dict(self.config.settings.output.channels),
+            contact_cutoff=self._contact_cutoff(),
+            layer_groups_available=layer_groups_available,
+        )
 
     def _contact_cutoff(self) -> float:
         """Per-material contact cutoff from the tip-sheet UFF LJ sigma.
