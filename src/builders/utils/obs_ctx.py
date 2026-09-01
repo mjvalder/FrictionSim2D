@@ -71,18 +71,22 @@ def build_obs_ctx(
         if ob.lammps_variable:
             variable_lines.append(ob.lammps_variable)
 
+    window_varlist = ' '.join(native(ob) for ob in win)
+    peratom_varlist = ' '.join(native(ob) for ob in pa)
+    raw_varlist = ('v_fx_spr v_fy_spr v_fz_tip '
+                   'v_comx_tip v_comy_tip v_comz_tip')
+
     return {
         'compute_lines': compute_lines,
         'variable_lines': variable_lines,
         'window_args': '{} {} {}'.format(
             TIER_ARGS['window'][0], TIER_ARGS['window'][1], results_freq),
-        'emit_window': bool(enabled_tiers.get('window', True)),
-        'emit_raw': bool(enabled_tiers.get('raw', True)),
-        'emit_peratom': bool(enabled_tiers.get('peratom', True)),
-        'window_varlist': ' '.join(native(ob) for ob in win),
-        'raw_varlist': ('v_fx_spr v_fy_spr v_fz_tip '
-                        'v_comx_tip v_comy_tip v_comz_tip'),
-        'peratom_varlist': ' '.join(native(ob) for ob in pa),
+        'emit_window': bool(enabled_tiers.get('window', True)) and bool(window_varlist),
+        'emit_raw': bool(enabled_tiers.get('raw', True)) and bool(raw_varlist),
+        'emit_peratom': bool(enabled_tiers.get('peratom', True)) and bool(peratom_varlist),
+        'window_varlist': window_varlist,
+        'raw_varlist': raw_varlist,
+        'peratom_varlist': peratom_varlist,
         'contact_cutoff': cutoff,
         'results_file_pattern': results_file_pattern,
         'results_file_raw':

@@ -63,3 +63,12 @@ def test_title1_carries_schema_units_and_family():
     assert t == '# schema=2 lf_units=nN family=afm'
     # the reader must agree with what the writer stamps
     assert DataReader._parse_lf_schema(t) == DataReader._LF_SCHEMA_CURRENT
+
+
+def test_empty_varlist_suppresses_the_fix():
+    # `fix fc_pa all ave/time 1000 1 1000  file out` is an Illegal fix
+    # ave/time command. A many-body sheet filters out its only peratom
+    # channel, so this is reachable, not hypothetical.
+    ctx = _ctx(extra_filter=lambda ob: ob.tier != 'peratom')
+    assert ctx['peratom_varlist'] == ''
+    assert ctx['emit_peratom'] is False
