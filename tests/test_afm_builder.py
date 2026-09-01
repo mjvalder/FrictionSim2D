@@ -154,9 +154,9 @@ fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 # always is a multiple of 100, so fc_raw defined earlier fires at run 0 and
 # dies on the missing fix. (The legacy fc_ave survived the same layout only
 # because Nrepeat=1000's phase shift never aligns.)
-fix             fc_win all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip v_etot v_pe_now v_ke_now v_w_lang_tip v_w_lang_sub v_temp_sheet v_tip_min_z v_comx_L1 v_comy_L1 v_comz_L1 file out/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt
-fix             fc_raw all ave/time 100 1 100 v_fx_spr v_fy_spr v_fz_tip v_comx_tip v_comy_tip v_comz_tip file out/L1/results/raw_f$(v_find)_a${a}_s${speed}_layer1.txt
-fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all v_pe_2D_all v_n_contact v_sxx_2d v_syy_2d file out/L1/results/peratom_f$(v_find)_a${a}_s${speed}_layer1.txt
+fix             fc_win all ave/time 1 1000 1000 v_fz_tip v_fx_spr v_fy_spr v_comx v_comy v_comz v_comx_tip v_comy_tip v_comz_tip v_etot v_pe_now v_ke_now v_w_lang_tip v_w_lang_sub v_temp_sheet v_tip_min_z v_comx_L1 v_comy_L1 v_comz_L1 file out/L1/results/friction_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=afm"
+fix             fc_raw all ave/time 100 1 100 v_fx_spr v_fy_spr v_fz_tip v_comx_tip v_comy_tip v_comz_tip file out/L1/results/raw_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=afm"
+fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all v_pe_2D_all v_n_contact v_sxx_2d v_syy_2d file out/L1/results/peratom_f$(v_find)_a${a}_s${speed}_layer1.txt title1 "# schema=2 lf_units=nN family=afm"
 
 
 run             500000
