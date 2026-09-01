@@ -186,3 +186,45 @@ def test_add_rejects_a_results_channel_with_no_role():
     with pytest.raises(ValueError, match='role_key'):
         _add(Observable(name='rolelesss', sim_types=('afm',), group='2D_all',
                         tier='window', stream='results', units='A'))
+
+
+def test_channel_by_role_finds_the_family_specific_channel():
+    from src.core.observables import channel_by_role
+    assert channel_by_role('afm', 'normal_load').name == 'nf'
+    assert channel_by_role('afm', 'no_such_role') is None
+
+
+def test_role_parity_between_families():
+    from src.core.observables import (
+        PARITY_PAIRS, PARITY_EXEMPT, channel_by_role)
+    for source, target in PARITY_PAIRS:
+        for ob in REGISTRY.values():
+            if source not in ob.sim_types or ob.stream != 'results':
+                continue
+            if not ob.role_key:
+                continue
+            if (target, ob.role_key) in PARITY_EXEMPT:
+                continue
+            assert channel_by_role(target, ob.role_key) is not None, (
+                f"{ob.registry_key} carries role {ob.role_key} for {source} "
+                f"but {target} has no channel for it and no PARITY_EXEMPT "
+                f"entry"
+            )
+
+
+def test_every_parity_exemption_carries_a_reason():
+    from src.core.observables import PARITY_EXEMPT
+    for (sim_type, role), reason in PARITY_EXEMPT.items():
+        assert reason.strip(), (sim_type, role)
+        assert len(reason.split()) >= 4, f"{sim_type}/{role}: not prose"
+
+
+def test_every_parity_exemption_names_a_live_role():
+    """An exemption must die with the role it excused. A stale entry whose
+    role no longer exists anywhere is noise that outlives its subject."""
+    from src.core.observables import PARITY_EXEMPT
+    live = {ob.role_key for ob in REGISTRY.values() if ob.role_key}
+    for (sim_type, role) in PARITY_EXEMPT:
+        assert role in live, (
+            f"PARITY_EXEMPT[{sim_type!r}, {role!r}] excuses a role no channel "
+            f"claims any more -- delete the exemption")

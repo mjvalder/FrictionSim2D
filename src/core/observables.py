@@ -80,6 +80,48 @@ ROLE_EXEMPT: dict = {
 }
 
 
+#: Ordered family pairs the parity contract checks: every results channel
+#: with a role_key in `source` must have a counterpart in `target`.
+#:
+#: afm -> sheetonsheet: these are the two full families, but only this
+#: direction is live yet. hetero/flake -> sheetonsheet one way only: they are
+#: genuinely reduced variants, and demanding the reverse would need an
+#: exemption table large enough to stop being read. 'indent' inherits AFM's
+#: declarations and is not separately checked.
+#:
+#: `('afm', 'sheetonsheet')` is added in Task 18, once the sheet family
+#: declares every role AFM does. Turning it on earlier would need ~17
+#: exemptions with untrue reasons.
+PARITY_PAIRS = (
+    ('sheetonsheet', 'afm'),
+    ('hetero', 'sheetonsheet'),
+    ('flake', 'sheetonsheet'),
+)
+
+#: (sim_type, role_key) -> why this family cannot or should not carry it.
+#: A reviewed decision with a reason, not a suppression.
+PARITY_EXEMPT: dict = {
+    ('sheetonsheet', 'tip_sheet_interaction'):
+        'no tip body exists in a sheet-on-sheet model',
+    ('sheetonsheet', 'sheet_com_x'):
+        'AFM tracks one sheet COM; the sheet family resolves COM per layer',
+    ('sheetonsheet', 'sheet_com_y'):
+        'AFM tracks one sheet COM; the sheet family resolves COM per layer',
+    ('sheetonsheet', 'sheet_com_z'):
+        'AFM tracks one sheet COM; the sheet family resolves COM per layer',
+    ('sheetonsheet', 'group_pe_sum_driven'):
+        'the driven body is a layer of the stack, covered by group_pe_sum',
+    ('sheetonsheet', 'group_pe_sum_substrate'):
+        'the substrate is a layer of the stack, covered by group_pe_sum',
+    ('sheetonsheet', 'group_pe_sum_membrane'):
+        'the membrane is a layer of the stack, covered by group_pe_sum',
+    ('sheetonsheet', 'thermostat_work_substrate'):
+        'the sheet stack has one thermostatted group, not tip plus substrate',
+    ('afm', 'interlayer_interaction'):
+        'AFM measures the tip-sheet interaction, a different pair of bodies',
+}
+
+
 def _add(ob: Observable) -> None:
     if ob.stream == 'results' and not ob.role_key \
             and ob.name not in ROLE_EXEMPT:
@@ -279,6 +321,18 @@ def channels_for(sim_type: str, tier: str) -> list:
     return [ob for ob in REGISTRY.values()
             if sim_type in ob.sim_types and ob.tier == tier
             and ob.stream == 'results']
+
+
+def channel_by_role(sim_type: str, role_key: str):
+    """The channel serving `role_key` in `sim_type`, or None.
+
+    Consumers that want to be family-agnostic (COF, the DB writer, the ML
+    extractors) can key on roles instead of branching on sim_type.
+    """
+    for ob in REGISTRY.values():
+        if sim_type in ob.sim_types and ob.role_key == role_key:
+            return ob
+    return None
 
 
 def expected_columns(sim_type: str, tier: str) -> list:
