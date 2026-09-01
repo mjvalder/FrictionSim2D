@@ -11,6 +11,11 @@ from typing import Callable, Dict, List, Optional
 
 from ...core.observables import TIER_ARGS, channels_for, layer_channels
 
+#: Output-schema marker stamped on every results file. Must stay in step with
+#: DataReader._LF_SCHEMA_CURRENT; _parse_lf_schema reads the integer, so
+#: adding keys (family=) is not a schema bump.
+_LF_SCHEMA = 2
+
 
 def build_obs_ctx(
     *,
@@ -84,4 +89,5 @@ def build_obs_ctx(
             results_file_pattern.replace('friction_', 'raw_'),
         'results_file_peratom':
             results_file_pattern.replace('friction_', 'peratom_'),
+        'title1': f'# schema={_LF_SCHEMA} lf_units=nN family={sim_type}',
     }

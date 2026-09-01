@@ -55,3 +55,11 @@ def test_window_args_default_matches_tier_args():
     from src.core.observables import TIER_ARGS
     every, repeat, freq = TIER_ARGS['window']
     assert _ctx(results_freq=freq)['window_args'] == f'{every} {repeat} {freq}'
+
+
+def test_title1_carries_schema_units_and_family():
+    from src.postprocessing.read_data import DataReader
+    t = _ctx(sim_type='afm')['title1']
+    assert t == '# schema=2 lf_units=nN family=afm'
+    # the reader must agree with what the writer stamps
+    assert DataReader._parse_lf_schema(t) == DataReader._LF_SCHEMA_CURRENT

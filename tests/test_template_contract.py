@@ -477,3 +477,19 @@ def test_afm_window_fix_honours_results_frequency():
     src = env.loader.get_source(env, 'common/observables.lmp')[0]
     assert 'ave/time 1 1000 1000' not in src
     assert 'obs_ctx.window_args' in src
+
+
+def test_macro_emits_the_schema_marker_on_every_results_fix():
+    """Interlock: a results file with no marker parses as schema 1, which
+    triggers the frozen legacy correction and multiplies correctly-scaled
+    nN data by 1.602176565. The macro had no title1 at all."""
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    src = env.loader.get_source(env, 'common/observables.lmp')[0]
+    fixes = [l for l in src.split('\n')
+             if l.startswith('fix') and 'ave/time' in l]
+    assert len(fixes) == 3, fixes
+    for line in fixes:
+        assert 'title1 "{{ obs_ctx.title1 }}"' in line, line
