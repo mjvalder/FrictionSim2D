@@ -56,9 +56,10 @@ def _with_obs_ctx(context: Dict) -> Dict:
         return context
     from ..afm.base import _CONTACT_CUTOFF_FALLBACK
     from ..utils.obs_ctx import build_obs_ctx
+    n_layers = context['n_layers']
     obs_ctx = build_obs_ctx(
         sim_type='flake',
-        n_layers=context['n_layers'],
+        n_layers=n_layers,
         results_file_pattern=context.get(
             'results_file_pattern', 'results/friction.txt'),
         use_langevin=(context.get('thermostat_type') == 'langevin'),
@@ -66,6 +67,11 @@ def _with_obs_ctx(context: Dict) -> Dict:
         contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
         results_freq=context.get('results_freq', 1000),
         optional_channels=(),
+        # Same rule FlakeSlideSimulation._build_obs_ctx uses below. flake's
+        # sim_types never include n_contact_il, so nothing consumes
+        # {il_bot}/{il_top} here today -- passed anyway so a future channel
+        # that does can never render an unsubstituted placeholder.
+        interface_layers=(n_layers // 2, n_layers // 2 + 1),
     )
     return {**context, "obs_ctx": obs_ctx}
 
@@ -205,12 +211,18 @@ class FlakeSlideSimulation(SimulationBase):
         comment in the template).
         """
         from ..utils.obs_ctx import build_obs_ctx
-        # See SheetOnSheetSimulation._build_obs_ctx: AFM-only
-        # _contact_cutoff() derives its cutoff from self.config.tip.mat, which
-        # no sheet-family builder has, flake included. Pass the same
-        # documented fallback constant -- not a considered value for flake
-        # either; Task 18 replaces this when a real flake contact channel
-        # lands.
+        # {contact_cutoff}'s only consumer in the registry is n_contact_il,
+        # and n_contact_il's sim_types are ('sheetonsheet', 'hetero') --
+        # 'flake' is not among them, so {contact_cutoff} never reaches a
+        # rendered compute here regardless of optional_channels. The
+        # fallback constant is therefore already correct, not a placeholder
+        # awaiting a real derivation. FlakeSlideSimulation extends
+        # SimulationBase, not SheetOnSheetSimulation, so it cannot inherit
+        # SheetOnSheetSimulation._contact_cutoff() even if it wanted to --
+        # that method reads self.config.sheet, which this class does not
+        # have. A real derivation would only be worth adding if a future
+        # task declared a flake-specific channel that consumes
+        # {contact_cutoff}.
         from ..afm.base import _CONTACT_CUTOFF_FALLBACK
         out = self.config.settings.output
         return build_obs_ctx(
@@ -223,6 +235,7 @@ class FlakeSlideSimulation(SimulationBase):
             contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
             results_freq=out.results_frequency,
             optional_channels=out.optional_channels,
+            interface_layers=(n_layers // 2, n_layers // 2 + 1),
         )
 
     def build(self) -> None:

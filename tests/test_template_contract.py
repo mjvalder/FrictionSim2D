@@ -893,3 +893,98 @@ def test_interface_layers_matches_the_template_rule(n_layers, cbot, ctop):
     rendered_pair = (int(bot.split('_')[1]), int(top.split('_')[1]))
     assert rendered_pair == (n_layers // 2, n_layers // 2 + 1)
     assert rendered_pair == (cbot, ctop)
+
+
+# --- Fix round 1: hetero/flake defensive interface_layers wiring ------------
+#
+# Neither hetero nor flake can reach n_contact_il through their real,
+# unmodified code paths: hetero.py's extra_filter drops it UNCONDITIONALLY
+# (not gated on has_internal_lj, unlike sheetonsheet's), and flake's
+# sim_types never include 'flake' at all (see n_contact_il's REGISTRY
+# declaration). So no render of the real, untouched builder classes can be
+# made to leak an unsubstituted {il_bot}/{il_top} today -- that route is
+# foreclosed by a different mechanism than the placeholder-substitution gap
+# this fix closes. The two tests below pin the fix a different way: a
+# source check (fails against the pre-fix source, where interface_layers
+# was passed nowhere in either file, and passes once every build_obs_ctx
+# call site passes it), and a direct build_obs_ctx behavioural check proving
+# the substitution itself is correct for hetero/flake's exact n_layers // 2
+# formula -- so if a future change ever lifts either foreclosure (e.g. a
+# later task makes hetero's extra_filter conditional on has_internal_lj, the
+# way sheetonsheet's already is), the placeholder plumbing this fix added is
+# already correct rather than something that finds out the hard way at
+# LAMMPS parse time.
+
+def test_hetero_and_flake_pass_interface_layers_to_build_obs_ctx():
+    """Every build_obs_ctx call site in hetero.py and flake_slide.py (the
+    module-level _with_obs_ctx helper and the builder class's own
+    _build_obs_ctx) must pass interface_layers=(n_layers // 2, n_layers //
+    2 + 1) -- the same formula sheetonsheet/slide.lmp's own {% set il_bot %}
+    / {% set il_top %} and SheetOnSheetSimulation._build_obs_ctx use. This
+    is a source check rather than a render check because, per the module
+    docstring above, no render of either family's real, unmodified code path
+    can be forced to expose an unsubstituted placeholder -- the exposure
+    this fix forecloses only exists hypothetically, if the *other*, unrelated
+    foreclosure (hetero's unconditional extra_filter / flake's sim_types)
+    is ever lifted by later work.
+    """
+    import inspect
+    from src.builders.sheetonsheet import hetero as hetero_mod
+    from src.builders.sheetonsheet import flake_slide as flake_mod
+
+    needle = 'interface_layers=(n_layers // 2, n_layers // 2 + 1)'
+    for mod in (hetero_mod, flake_mod):
+        src = inspect.getsource(mod)
+        count = src.count(needle)
+        assert count == 2, (
+            f'{mod.__name__}: expected 2 build_obs_ctx call sites passing '
+            f'interface_layers (the module-level _with_obs_ctx helper and '
+            f'the builder class _build_obs_ctx method), found {count}')
+
+
+def test_hetero_and_flake_interface_layers_substitution_is_correct():
+    """Direct build_obs_ctx behavioural proof, bypassing the two independent
+    foreclosures described above (temporarily lifted here) so the
+    placeholder substitution hetero.py/flake_slide.py's fix wires up is
+    actually exercised end to end: call build_obs_ctx with hetero's and
+    flake's exact sim_type/n_layers/interface_layers/optional_channels
+    arguments, with n_contact_il's sim_types monkeypatched to include the
+    family under test and, for hetero, with no extra_filter (mirroring what
+    a future has_internal_lj-conditional filter would allow through). No
+    unsubstituted {il_bot}/{il_top}/{n_layers}/{contact_cutoff} placeholder
+    may appear, and the real layer groups the n_layers // 2 formula names
+    must be the ones substituted in.
+    """
+    import dataclasses
+    from src.builders.utils.obs_ctx import build_obs_ctx
+    from src.core.observables import REGISTRY
+
+    original = REGISTRY['n_contact_il']
+    try:
+        for sim_type in ('hetero', 'flake'):
+            REGISTRY['n_contact_il'] = dataclasses.replace(
+                original, sim_types=(sim_type,))
+            for n_layers in (4, 5, 6):
+                il_bot, il_top = n_layers // 2, n_layers // 2 + 1
+                ctx = build_obs_ctx(
+                    sim_type=sim_type,
+                    n_layers=n_layers,
+                    results_file_pattern='results/friction.txt',
+                    use_langevin=False,
+                    enabled_tiers={'window': True, 'raw': True, 'peratom': True},
+                    contact_cutoff=5.0,
+                    results_freq=1000,
+                    optional_channels=['n_contact_il'],
+                    interface_layers=(il_bot, il_top),
+                )
+                joined = '\n'.join(ctx['compute_lines'])
+                assert 'v_n_contact_il' in ctx['peratom_varlist'], (
+                    sim_type, n_layers)
+                for placeholder in ('{il_bot}', '{il_top}', '{n_layers}',
+                                    '{contact_cutoff}'):
+                    assert placeholder not in joined, (
+                        sim_type, n_layers, placeholder)
+                assert f'layer_{il_bot}' in joined, (sim_type, n_layers)
+                assert f'layer_{il_top}' in joined, (sim_type, n_layers)
+    finally:
+        REGISTRY['n_contact_il'] = original

@@ -49,9 +49,10 @@ def _with_obs_ctx(context: Dict) -> Dict:
     from ..utils.obs_ctx import build_obs_ctx
     interlayer = {'E_int_interlayer', 'n_contact_il'}
     has_internal_lj = context.get('has_internal_lj', True)
+    n_layers = context['n_layers']
     obs_ctx = build_obs_ctx(
         sim_type='hetero',
-        n_layers=context['n_layers'],
+        n_layers=n_layers,
         results_file_pattern=context.get(
             'results_file_pattern', 'results/friction.txt'),
         use_langevin=(context.get('thermostat_type') == 'langevin'),
@@ -59,6 +60,13 @@ def _with_obs_ctx(context: Dict) -> Dict:
         contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
         results_freq=context.get('results_freq', 1000),
         optional_channels=(),
+        # Same rule HeteroSheetOnSheetSimulation._build_obs_ctx uses below,
+        # and the identical formula sheetonsheet/slide.lmp and hetero's own
+        # template compute their {% set il_bot %}/{% set il_top %} from --
+        # keeps n_contact_il's {il_bot}/{il_top} placeholders from ever
+        # reaching a rendered script unsubstituted, even though this class's
+        # extra_filter already strips n_contact_il unconditionally today.
+        interface_layers=(n_layers // 2, n_layers // 2 + 1),
         extra_filter=(
             None if not has_internal_lj
             else lambda ob: ob.name not in interlayer),
@@ -434,12 +442,21 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         here by relaxing this filter.
         """
         from ..utils.obs_ctx import build_obs_ctx
-        # See SheetOnSheetSimulation._build_obs_ctx: AFM-only
-        # _contact_cutoff() derives its cutoff from self.config.tip.mat, which
-        # no sheet-family builder has, hetero included. Pass the same
-        # documented fallback constant -- not a considered value for hetero
-        # either; Task 18 replaces this when a real hetero contact channel
-        # lands.
+        # {contact_cutoff}'s only consumer in the registry is n_contact_il,
+        # and the extra_filter below strips n_contact_il UNCONDITIONALLY
+        # (has_internal_lj is not threaded through here the way
+        # SheetOnSheetSimulation's is -- see the docstring above), so
+        # {contact_cutoff} never reaches a rendered compute regardless of
+        # optional_channels. The fallback constant is therefore already
+        # correct here, not a placeholder awaiting a real derivation.
+        # HeteroSheetOnSheetSimulation extends SimulationBase, not
+        # SheetOnSheetSimulation, so it cannot inherit
+        # SheetOnSheetSimulation._contact_cutoff() even if it wanted to --
+        # that method reads self.config.sheet, which this class does not
+        # have. A real derivation would only be worth adding if a future
+        # task makes this extra_filter conditional on has_internal_lj (as
+        # SheetOnSheetSimulation's already is), making n_contact_il
+        # reachable for some materials.
         from ..afm.base import _CONTACT_CUTOFF_FALLBACK
         interlayer = {'E_int_interlayer', 'n_contact_il'}
         out = self.config.settings.output
@@ -453,6 +470,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
             results_freq=out.results_frequency,
             optional_channels=out.optional_channels,
+            interface_layers=(n_layers // 2, n_layers // 2 + 1),
             extra_filter=lambda ob: ob.name not in interlayer,
         )
 
