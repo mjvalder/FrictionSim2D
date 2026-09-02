@@ -366,7 +366,7 @@ _RAW_RENAME_TO = {
 for _name in ('raw_lfx', 'raw_lfy', 'raw_nf', 'raw_tipx', 'raw_tipy', 'raw_tipz'):
     _add(Observable(
         name=_name,
-        sim_types=('afm',), group='tip_fix', tier='raw', stream='results',
+        sim_types=('afm', 'indent'), group='tip_fix', tier='raw', stream='results',
         rename_to=_RAW_RENAME_TO[_name],
         units='nN' if _name in ('raw_lfx', 'raw_lfy', 'raw_nf') else 'A',
         role_key=_RAW_ROLE_KEYS[_name]))
@@ -416,10 +416,6 @@ def rename_map(sim_type: str, tier: str) -> dict:
             continue
         if ob.tier == tier and ob.rename_to:
             m[ob.rename_to] = ob.name
-    if tier == 'raw' and sim_type in ('afm', 'indent'):
-        m.update({'v_fx_spr': 'raw_lfx', 'v_fy_spr': 'raw_lfy',
-                  'v_fz_tip': 'raw_nf', 'v_comx_tip': 'raw_tipx',
-                  'v_comy_tip': 'raw_tipy', 'v_comz_tip': 'raw_tipz'})
     return m
 
 
