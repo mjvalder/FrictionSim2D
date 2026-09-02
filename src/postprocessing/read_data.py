@@ -316,6 +316,37 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 
     @staticmethod
+    def _branch_column(df):
+        """The reaction-force-x column, under whichever name it parsed to.
+
+        The registry declares `react_x` with rename_to='v_sx', so a
+        header-carrying file renames the native away. Retained files parsed
+        before that declaration, and any file read through a path that skips
+        the rename, still carry 'v_sx'. Both are accepted; neither is
+        guessed at.
+        """
+        for candidate in ('react_x', 'v_sx'):
+            if candidate in df.columns:
+                return df[candidate]
+        return None
+
+    @staticmethod
+    def _lateral_columns(df):
+        """The (x, y) lateral-force column names present in the frame.
+
+        Symmetric with `_branch_column`: the registry renames the sheet's
+        native `v_xfrict`/`v_yfrict` to `lfx`/`lfy` for window/peratom tiers
+        but to `raw_lfx`/`raw_lfy` for the raw tier, so both name pairs must
+        be checked. Returns None when neither is present -- there is no
+        lateral force column to correct at all.
+        """
+        if 'lfx' in df.columns:
+            return ('lfx', 'lfy')
+        if 'raw_lfx' in df.columns:
+            return ('raw_lfx', 'raw_lfy')
+        return None
+
+    @staticmethod
     def _is_lj_branch(lfx, sx) -> bool:
         """True when a pre-schema-2 sheet frame needs the unit correction.
 
@@ -356,8 +387,11 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         in eV/A while the load it is divided by is already nN. Verified over
         the retained tree: 7,171 of 7,669 files classify unambiguously.
 
-        ``v_sx`` is compared raw because the registry does not yet declare a
-        channel for it; switch to ``react_x`` when it does.
+        The discriminator is resolved by ``_branch_column``, which accepts
+        either ``react_x`` (the registry's name, once Task 9 declares it) or
+        ``v_sx`` (its native name, for files parsed before that declaration).
+        The lateral-force column itself is resolved by ``_lateral_columns``,
+        which likewise accepts ``lfx``/``lfy`` or ``raw_lfx``/``raw_lfy``.
         """
         if df.attrs.get('lf_corrected'):
             # Re-entry guard: scaling twice gives 1.602^2. Not reachable from
@@ -375,30 +409,35 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                     "the reader rather than trusting this frame.",
                     filepath, schema, self._LF_SCHEMA_CURRENT)
             return df
-        if 'lfx' not in df.columns:
+        lateral_cols = self._lateral_columns(df)
+        if lateral_cols is None:
             return df                  # no lateral force to correct at all
-        if 'v_sx' not in df.columns:
-            # There IS a lateral force but no v_sx to identify the branch
-            # with, so it cannot be known whether it needs scaling. This is
-            # the one exit that abandons a possibly-affected file: say so.
+        lfx_name, lfy_name = lateral_cols
+        branch = self._branch_column(df)
+        if branch is None:
+            # There IS a lateral force but no react_x/v_sx to identify the
+            # branch with, so it cannot be known whether it needs scaling.
+            # This is the one exit that abandons a possibly-affected file:
+            # say so.
             logger.warning(
-                "%s: pre-schema-2 sheet file carries lfx but no v_sx, so the "
-                "LJ/many-body branch cannot be identified. Lateral force "
-                "left AS WRITTEN; if this run used an lj/cut interlayer "
-                "potential its COF is a factor %s too small.",
-                filepath, self._LF_SCHEMA1_CORRECTION)
+                "%s: pre-schema-2 sheet file carries %s but no reaction-force "
+                "column (react_x/v_sx), so the LJ/many-body branch cannot be "
+                "identified. Lateral force left AS WRITTEN; if this run used "
+                "an lj/cut interlayer potential its COF is a factor %s too "
+                "small.",
+                filepath, lfx_name, self._LF_SCHEMA1_CORRECTION)
             return df
-        if not self._is_lj_branch(df['lfx'], df['v_sx']):
+        if not self._is_lj_branch(df[lfx_name], branch):
             return df                  # many-body branch: already nN
-        df['lfx'] = df['lfx'] * self._LF_SCHEMA1_CORRECTION
-        if 'lfy' in df.columns:
-            df['lfy'] = df['lfy'] * self._LF_SCHEMA1_CORRECTION
+        df[lfx_name] = df[lfx_name] * self._LF_SCHEMA1_CORRECTION
+        if lfy_name in df.columns:
+            df[lfy_name] = df[lfy_name] * self._LF_SCHEMA1_CORRECTION
         df.attrs['lf_corrected'] = True
         logger.warning(
             "%s: pre-schema-2 sheet file -- lateral force was eV/A against a "
-            "nN load, so COF was a factor %s too small. Multiplied lfx/lfy by "
+            "nN load, so COF was a factor %s too small. Multiplied %s/%s by "
             "%s. Re-run this simulation to retire the correction.",
-            filepath, self._LF_SCHEMA1_CORRECTION,
+            filepath, self._LF_SCHEMA1_CORRECTION, lfx_name, lfy_name,
             self._LF_SCHEMA1_CORRECTION)
         return df
 

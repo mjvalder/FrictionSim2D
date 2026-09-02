@@ -271,3 +271,81 @@ def test_ev_a_to_nn_matches_the_corrector_constant():
     from src.data.models import EV_A_TO_NN
     from src.postprocessing.read_data import DataReader
     assert DataReader._LF_SCHEMA1_CORRECTION == EV_A_TO_NN
+
+
+def test_legacy_lj_file_still_corrects_after_react_x_rename(tmp_path):
+    """Declaring react_x with rename_to='v_sx' renames away the column the
+    frozen correction uses to tell the LJ branch from the many-body one.
+    Without this, 7,166 retained files silently lose the x1.602176565
+    correction -- reproduced during the 2026-08-28 review, where lfx reverted
+    from 0.01287 to 0.00803 and lf_corrected flipped True -> False.
+
+    Task 9 (not yet landed) is what will actually rename v_sx to react_x
+    for a real file's header. Until then this is a characterization test:
+    it passes today because v_sx still survives unrenamed, and it must keep
+    passing unchanged once Task 9 lands the react_x declaration."""
+    from src.postprocessing.read_data import DataReader
+    f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
+    # no schema marker => schema 1; lfx != v_sx => LJ branch
+    f.write_text(
+        "# Time-averaged data for fix fc_ave\n"
+        "# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz\n"
+        "1000 1.0 0.5 2.0 1.0 0.0\n"
+    )
+    df = DataReader()._read_dataframe(f, 'sheet')
+    assert df.attrs['lf_schema'] == 1
+    assert df.attrs['lf_corrected'] is True
+    assert df['lfx'].iloc[0] == 1.0 * DataReader._LF_SCHEMA1_CORRECTION
+
+
+def test_many_body_legacy_file_is_left_alone(tmp_path):
+    # on the many-body branch the template defines xfrict AS v_sx, so the two
+    # columns are bit-identical and there is nothing to correct
+    from src.postprocessing.read_data import DataReader
+    f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
+    f.write_text(
+        "# Time-averaged data for fix fc_ave\n"
+        "# TimeStep v_xfrict v_yfrict v_sx v_sy v_sz\n"
+        "1000 2.0 1.0 2.0 1.0 0.0\n"
+    )
+    df = DataReader()._read_dataframe(f, 'sheet')
+    assert df.attrs['lf_corrected'] is False
+    assert df['lfx'].iloc[0] == 2.0
+
+
+def test_audit_reads_native_names_not_renamed_ones():
+    """The audit classifies from raw header tokens, so it is unaffected by
+    the react_x rename. Pinned so a later 'tidy-up' does not route it
+    through _read_dataframe and silently change what it classifies."""
+    import inspect
+    from src.postprocessing import audit_lf_units
+    src = inspect.getsource(audit_lf_units)
+    assert "'v_sx'" in src and '_read_dataframe' not in src
+
+
+def test_raw_tier_unidentifiable_branch_warns_after_react_x_rename(tmp_path, caplog):
+    """After Task 9 lands, a raw-tier sheet file's v_xfrict/v_yfrict rename
+    to raw_lfx/raw_lfy (not lfx/lfy), so the discriminator lookup must also
+    accept raw_lfx/raw_lfy -- otherwise the 'cannot be identified' warning
+    that test_unidentifiable_branch_warns_rather_than_going_quiet pins today
+    silently disappears once raw tier renaming changes.
+
+    No file path can produce a raw_lfx column until Task 9 declares the
+    RAW-tier channel, so this calls _correct_legacy_lf_schema1 directly on a
+    hand-built frame that anticipates that rename."""
+    import pandas as pd
+    from src.postprocessing.read_data import DataReader
+
+    df = pd.DataFrame({
+        'raw_lfx': [2.0],
+        'raw_lfy': [1.0],
+        'nf': [-10.0],
+    })
+    df.attrs['lf_schema'] = 1
+    r = DataReader.__new__(DataReader)
+    with caplog.at_level('WARNING'):
+        out = r._correct_legacy_lf_schema1(df, tmp_path / 'raw_p1.0_a0_s1.txt', 'sheet')
+    assert out.attrs['lf_corrected'] is False
+    assert out['raw_lfx'].iloc[0] == 2.0        # left untouched
+    assert any('cannot be identified' in rec.getMessage()
+               for rec in caplog.records)
