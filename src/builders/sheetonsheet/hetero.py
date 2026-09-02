@@ -48,7 +48,6 @@ def _with_obs_ctx(context: Dict) -> Dict:
     from ..afm.base import _CONTACT_CUTOFF_FALLBACK
     from ..utils.obs_ctx import build_obs_ctx
     interlayer = {'E_int_interlayer', 'n_contact_il'}
-    has_internal_lj = context.get('has_internal_lj', True)
     n_layers = context['n_layers']
     obs_ctx = build_obs_ctx(
         sim_type='hetero',
@@ -64,12 +63,14 @@ def _with_obs_ctx(context: Dict) -> Dict:
         # and the identical formula sheetonsheet/slide.lmp and hetero's own
         # template compute their {% set il_bot %}/{% set il_top %} from --
         # keeps n_contact_il's {il_bot}/{il_top} placeholders from ever
-        # reaching a rendered script unsubstituted, even though this class's
-        # extra_filter already strips n_contact_il unconditionally today.
+        # reaching a rendered script unsubstituted.
         interface_layers=(n_layers // 2, n_layers // 2 + 1),
-        extra_filter=(
-            None if not has_internal_lj
-            else lambda ob: ob.name not in interlayer),
+        # UNCONDITIONAL, mirroring HeteroSheetOnSheetSimulation._build_obs_ctx
+        # below exactly: hetero/slide.lmp's {% else %} (non-many-body) branch
+        # never defines `variable e_int_il equal c_frict`, so a conditional
+        # filter here (has_internal_lj=False keeping the interlayer channels)
+        # could hand fix ave/time a v_e_int_il LAMMPS has no variable for.
+        extra_filter=lambda ob: ob.name not in interlayer,
     )
     return {**context, "obs_ctx": obs_ctx}
 

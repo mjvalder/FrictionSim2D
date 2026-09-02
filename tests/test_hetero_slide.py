@@ -206,6 +206,28 @@ def _minimal_slide_context(layers):
     }
 
 
+def test_render_hetero_slide_has_internal_lj_false_emits_no_v_e_int_il():
+    """The module-level `_with_obs_ctx` fallback must filter the interlayer
+    channels UNCONDITIONALLY, mirroring
+    HeteroSheetOnSheetSimulation._build_obs_ctx exactly. hetero/slide.lmp's
+    `{% else %}` (non-many-body) branch never defines `variable e_int_il
+    equal c_frict` -- only the `{% if has_internal_lj %}` branch's sibling
+    variables exist -- so a conditional filter that let E_int_interlayer
+    through when has_internal_lj=False would hand `fix ave/time` a
+    `v_e_int_il` LAMMPS has no variable for, failing at setup.
+    """
+    layers = [{"idx": i, "zlo": 5.0 * i, "zhi": 5.0 * i + 3.0} for i in range(1, 5)]
+    ctx = _minimal_slide_context(layers)
+    ctx["has_internal_lj"] = False
+    script = render_hetero_slide(ctx)
+
+    assert "v_e_int_il" not in script
+    assert not any(
+        line.startswith("fix ") and " fc_pa " in line
+        for line in script.split("\n")
+    )
+
+
 def test_hetero_slide_defines_layer_groups_by_region():
     layers = [{"idx": i, "zlo": 5.0 * i, "zhi": 5.0 * i + 3.0} for i in range(1, 5)]
     ctx = _minimal_slide_context(layers)
