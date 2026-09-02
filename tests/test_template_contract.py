@@ -357,8 +357,47 @@ def test_hold_fix_has_no_schema_marker():
     assert hold and 'title1' not in hold[0]
 
 
+def _hetero_obs_ctx(n_layers: int) -> dict:
+    """Call build_obs_ctx directly, mirroring
+    HeteroSheetOnSheetSimulation._build_obs_ctx (src/builders/sheetonsheet/hetero.py).
+
+    Unlike `_sheet_obs_ctx`, this takes no `has_internal_lj` parameter: the
+    hetero builder hardcodes `has_internal_lj: True` in its render context
+    (the "hybrid sw -> reaction-force friction proxy" comment on
+    `write_run_scripts`), so `extra_filter` always drops the interlayer
+    channels here too. That leaves the peratom tier empty -- E_int_interlayer
+    is hetero's only peratom channel -- and build_obs_ctx's emptiness gate
+    correctly suppresses fc_pa. That is intentional (task-15 Ruling C): hetero
+    gains the raw tier here, not a populated peratom tier.
+    """
+    from src.builders.utils.obs_ctx import build_obs_ctx
+    interlayer = {'E_int_interlayer', 'n_contact_il'}
+    return build_obs_ctx(
+        sim_type='hetero',
+        n_layers=n_layers,
+        results_file_pattern='results/friction.txt',
+        use_langevin=True,
+        enabled_tiers={'window': True, 'raw': True, 'peratom': True},
+        contact_cutoff=5.0,
+        results_freq=1000,
+        optional_channels=(),
+        extra_filter=lambda ob: ob.name not in interlayer,
+    )
+
+
 def _render_hetero_slide(n_layers: int) -> str:
-    """Render hetero/slide.lmp, whose layer groups come from z-bands."""
+    """Render hetero/slide.lmp, whose layer groups come from z-bands.
+
+    has_internal_lj=False exercises the template's non-many-body `compute
+    frict` branch (needed by the COM-probe/frict-interface tests below,
+    which pin the interface `compute frict` names). `obs_ctx` still comes
+    from `_hetero_obs_ctx`, which always filters the interlayer channels the
+    same way the real builder does (Ruling C) -- so the peratom tier stays
+    empty here regardless of which template branch is under test, sidestepping
+    the fact that hetero's has_internal_lj=False branch (pre-existing,
+    untouched by Task 15, never exercised by the real builder) does not
+    itself define `v_e_int_il` the way sheetonsheet's does.
+    """
     from jinja2 import Environment
     from src.interfaces.jinja import PackageLoader
     env = Environment(loader=PackageLoader('src.templates'),
@@ -371,7 +410,7 @@ def _render_hetero_slide(n_layers: int) -> str:
         scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
         scan_angle_force=None, temp=300, thermostat_type='langevin',
         drive_method='fix_move', dump_enabled=False, seed_sheet_center=12345,
-        channels={'window': True, 'raw': True, 'peratom': True},
+        obs_ctx=_hetero_obs_ctx(n_layers),
         xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,
         num_atom_types=6, data_file='build/hetero.lmp',
         potential_file='system.in.settings', neighbor_list=2.0,
@@ -381,6 +420,34 @@ def _render_hetero_slide(n_layers: int) -> str:
         results_file_pattern='results/friction.txt',
         ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
     )
+
+
+def test_hetero_langevin_fix_tallies():
+    """w_thermostat_center reads f_lang, which only exists with `tally yes`.
+    hetero/slide.lmp had `zero yes` and no tally, so the channel the spec
+    called free is a LAMMPS error here without this one word."""
+    src = _template_source('hetero/slide.lmp')
+    line = [l for l in src.split('\n')
+           if 'fix' in l and 'lang' in l and 'langevin' in l][0]
+    assert 'tally yes' in line
+
+
+def test_hetero_slide_takes_its_varlist_from_the_macro():
+    src = _template_source('hetero/slide.lmp')
+    assert 'emit_output_fixes(obs_ctx)' in src
+    # Unlike sheetonsheet/slide.lmp, hetero has no hold_ave fix to exempt --
+    # every hand-written results-tier fix ave/time is gone.
+    assert 'ave/time' not in src
+
+
+def test_hetero_gains_the_layer_coms_and_energies():
+    ctx = _hetero_obs_ctx(n_layers=4)
+    emitted = set(ctx['window_varlist'].split())
+    assert {'v_comz_L1', 'v_comz_L4', 'v_etot', 'v_pe_now'} <= emitted
+
+
+def test_hetero_results_fix_carries_its_own_family_marker():
+    assert _hetero_obs_ctx(n_layers=4)['title1'].endswith('family=hetero')
 
 
 def _com_probe_groups(text: str):
@@ -423,9 +490,6 @@ def test_hetero_com_probes_straddle_the_middle_interface(n_layers, cbot, ctop):
     assert got == (f'layer_{ctop}', f'layer_{cbot}')
 
 
-ALL_FOUR_COM_Z = ['v_comz_bot', 'v_comz_cbot', 'v_comz_ctop', 'v_comz_top']
-
-
 def test_sheet_results_file_carries_all_four_com_z_probes():
     """comz_top and comz_bot were computed and never emitted. After the
     alias removal the same four numbers arrive as drivez plus the layer
@@ -435,10 +499,16 @@ def test_sheet_results_file_carries_all_four_com_z_probes():
     assert {'v_comz_top', 'v_comz_L3', 'v_comz_L2', 'v_comz_L1'} <= emitted
 
 
-def test_hetero_results_file_carries_all_four_com_probes():
-    text = _render_hetero_slide(4)
-    line = [l for l in text.split('\n') if l.startswith('fix') and ' fc_ave ' in l][0]
-    assert set(ALL_FOUR_COM_Z) <= set(line.split())
+def test_hetero_results_file_carries_all_four_com_z_probes():
+    """comz_top and comz_bot were computed and never emitted (and hetero never
+    emitted comz_ctop/comz_cbot into the results file either, despite
+    computing them). After the alias removal the same four numbers arrive as
+    drivez plus the layer COMs at il_top, il_bot and layer 1 (n_layers=4:
+    il_top=3, il_bot=2) -- same shape as
+    test_sheet_results_file_carries_all_four_com_z_probes."""
+    ctx = _hetero_obs_ctx(n_layers=4)
+    emitted = set(ctx['window_varlist'].split())
+    assert {'v_comz_top', 'v_comz_L3', 'v_comz_L2', 'v_comz_L1'} <= emitted
 
 
 # --- the test that would actually have caught the eV/A-vs-nN defect ---------
@@ -482,19 +552,28 @@ def test_interlayer_energy_stays_unscaled(template):
         assert 'variable        e_int_il equal c_frict\n' in src, template
 
 
-#: Templates already routed through the observables registry (Task 14): their
-#: source has no hand-written `fix ... ave/time` line to grep for any more --
-#: only the macro call -- so the marker must be checked on the RENDERED
-#: output instead. Tasks 15/16 move hetero/flake here one at a time; moving a
-#: template between the two lists below is meant to be a one-line diff.
-SHEET_SLIDE_TEMPLATES_CONVERTED = ('sheetonsheet/slide.lmp',)
-SHEET_SLIDE_TEMPLATES_UNCONVERTED = ('hetero/slide.lmp', 'flake/slide.lmp')
+#: Templates already routed through the observables registry (Task 14/15):
+#: their source has no hand-written `fix ... ave/time` line to grep for any
+#: more -- only the macro call -- so the marker must be checked on the
+#: RENDERED output instead. Task 16 moves flake here too; moving a template
+#: between the two lists below is meant to be a one-line diff.
+SHEET_SLIDE_TEMPLATES_CONVERTED = ('sheetonsheet/slide.lmp', 'hetero/slide.lmp')
+SHEET_SLIDE_TEMPLATES_UNCONVERTED = ('flake/slide.lmp',)
+
+#: One render call per converted template, keyed by name -- each family's
+#: obs_ctx is built differently (has_internal_lj is a per-family fixed value
+#: for hetero, a parameter for sheetonsheet), so a single shared render call
+#: (as when this tuple held one entry) no longer covers every member.
+_CONVERTED_RENDER = {
+    'sheetonsheet/slide.lmp': lambda: _render_sheet_slide(has_internal_lj=False),
+    'hetero/slide.lmp': lambda: _render_hetero_slide(4),
+}
 
 
 @pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES_CONVERTED)
 def test_results_fixes_carry_schema_marker_converted(template):
     family = template.split('/')[0]
-    text = _render_sheet_slide(has_internal_lj=False)
+    text = _CONVERTED_RENDER[template]()
     results_fixes = [ln for ln in text.splitlines()
                      if ln.startswith('fix') and 'ave/time' in ln
                      and 'hold_ave' not in ln]

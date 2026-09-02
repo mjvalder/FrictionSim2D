@@ -550,7 +550,8 @@ def _read_friction_records(friction_path):
     The second comment line names the columns
     (``# TimeStep v_xfrict ... v_comx_top v_comy_top ...``); data rows are the
     non-comment lines. Column order is taken from that header (which mirrors the
-    rendered ``fix fc_ave ... ave/time`` output list), so the parse survives any
+    rendered ``fix fc_win ... ave/time`` output list -- Task 15 renamed the fix
+    from ``fc_ave`` to ``fc_win``), so the parse survives any
     reordering of the emitted variables. ``column_names`` includes the leading
     ``TimeStep`` and is index-aligned with every data row.
     """

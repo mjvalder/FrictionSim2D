@@ -10,13 +10,13 @@ renders the *macro*, proving the macro works rather than that anyone uses it.
 These tests render the real templates instead, which is the only way this class
 of gap shows up.
 
-Task 14 routed `sheetonsheet/slide.lmp` through the observables registry: its
-gate now lives in a real `obs_ctx` (built by `build_obs_ctx`), not a bare
-`channels` dict -- a stubbed `obs_ctx = 0` renders as Jinja Undefined, which
-is falsy, so every tier would silently vanish regardless of the dict below.
-`hetero/slide.lmp` and `flake/slide.lmp` still hand-write their varlists
-(Tasks 15/16 convert them one at a time) and keep the stub-based `channels`
-dict approach.
+Task 14 routed `sheetonsheet/slide.lmp` through the observables registry, and
+Task 15 did the same for `hetero/slide.lmp`: both now have their gate live in
+a real `obs_ctx` (built by `build_obs_ctx`), not a bare `channels` dict -- a
+stubbed `obs_ctx = 0` renders as Jinja Undefined, which is falsy, so every
+tier would silently vanish regardless of the dict below. `flake/slide.lmp`
+still hand-writes its varlist (Task 16 converts it) and keeps the stub-based
+`channels` dict approach.
 """
 import pytest
 from jinja2 import Environment, meta
@@ -84,8 +84,47 @@ def _render_sheetonsheet(**channels) -> str:
     return env.get_template(template).render(ctx)
 
 
+def _render_hetero(**channels) -> str:
+    """Render hetero/slide.lmp with a real obs_ctx driving the gate.
+
+    Mirrors `_render_sheetonsheet` (Task 15 routed hetero/slide.lmp through
+    the observables registry the same way Task 14 did for
+    sheetonsheet/slide.lmp): the template now reads
+    obs_ctx.emit_window/emit_raw/emit_peratom, not a bare channels dict.
+    `has_internal_lj` is pinned True, mirroring
+    HeteroSheetOnSheetSimulation.write_run_scripts (hardcoded there, never a
+    parameter) -- so `extra_filter` always drops the interlayer channels,
+    same as the real builder.
+    """
+    template = 'hetero/slide.lmp'
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    source = env.loader.get_source(env, template)[0]
+    ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
+    ctx['n_layers'] = 4
+    ctx['has_internal_lj'] = True
+    bands = [{'idx': i, 'zlo': 0.0, 'zhi': 1.0} for i in range(1, 5)]
+    for key in ('layers', 'sheet_layers', 'layer_groups'):
+        if key in ctx:
+            ctx[key] = bands
+    enabled_tiers = {'window': True, 'raw': True, 'peratom': True, **channels}
+    interlayer = {'E_int_interlayer', 'n_contact_il'}
+    ctx['obs_ctx'] = build_obs_ctx(
+        sim_type='hetero',
+        n_layers=4,
+        results_file_pattern='results/friction.txt',
+        use_langevin=False,
+        enabled_tiers=enabled_tiers,
+        contact_cutoff=5.0,
+        results_freq=1000,
+        optional_channels=(),
+        extra_filter=lambda ob: ob.name not in interlayer,
+    )
+    return env.get_template(template).render(ctx)
+
+
 ALL_TIERS = "sheetonsheet/slide.lmp"
-WINDOW_ONLY = ["hetero/slide.lmp", "flake/slide.lmp"]
+WINDOW_ONLY = ["flake/slide.lmp"]
 
 
 def test_sheet_emits_every_tier_by_default():
@@ -111,10 +150,45 @@ def test_sheet_window_tier_can_be_disabled():
 
 
 @pytest.mark.parametrize("template", WINDOW_ONLY)
-def test_hetero_and_flake_window_tier_is_gated(template):
-    """Both carry only the window tier, under the name fc_ave."""
+def test_flake_window_tier_is_gated(template):
+    """flake still carries only the window tier, under the name fc_ave
+    (Task 16 has not converted it yet). hetero moved off this stub-based
+    path in Task 15 -- see the hetero-specific tests below, which render a
+    real obs_ctx instead."""
     assert _fix_emitted(_render(template), "fc_ave")
     assert not _fix_emitted(_render(template, window=False), "fc_ave")
+
+
+def test_hetero_emits_window_and_raw_by_default():
+    """Task 15: hetero/slide.lmp gained the raw tier (it never had one before
+    routing through the registry)."""
+    out = _render_hetero()
+    assert _fix_emitted(out, "fc_win")
+    assert _fix_emitted(out, "fc_raw")
+
+
+def test_hetero_window_tier_can_be_disabled():
+    out = _render_hetero(window=False)
+    assert not _fix_emitted(out, "fc_win")
+    assert _fix_emitted(out, "fc_raw")
+
+
+def test_hetero_raw_tier_can_be_disabled():
+    out = _render_hetero(raw=False)
+    assert not _fix_emitted(out, "fc_raw")
+    assert _fix_emitted(out, "fc_win")
+
+
+def test_hetero_peratom_stays_absent_regardless_of_the_channel_setting():
+    """hetero's has_internal_lj is hardcoded True
+    (HeteroSheetOnSheetSimulation.write_run_scripts), so extra_filter always
+    drops its one peratom channel (E_int_interlayer): the peratom varlist is
+    empty and build_obs_ctx's emptiness gate suppresses fc_pa no matter what
+    channels.peratom says. Not a bug -- task-15 brief Ruling C. A real hetero
+    peratom channel is a later opt-in addition, not something this task
+    forces into existence."""
+    assert not _fix_emitted(_render_hetero(), "fc_pa")
+    assert not _fix_emitted(_render_hetero(peratom=True), "fc_pa")
 
 
 def test_the_shared_group_group_compute_survives_disabling_peratom():

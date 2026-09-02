@@ -185,7 +185,7 @@ for _lyr in (1, 2):
     for _ax in ('x', 'y', 'z'):
         _add(Observable(
             name=f'com{_ax}_L{_lyr}',
-            sim_types=('afm', 'sheetonsheet', 'indent'),
+            sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
             group=f'layer_{_lyr}', tier='window', stream='results',
             lammps_compute=f'compute COM_L{_lyr} layer_{_lyr} com',
             lammps_variable=(f'variable com{_ax}_L{_lyr} equal '
@@ -194,17 +194,17 @@ for _lyr in (1, 2):
             role_key=f'layer_com_{_ax}_L{_lyr}'))
 
 # --- energies and temperatures ------------------------------------------------
-_add(Observable(name='etotal', sim_types=('afm', 'sheetonsheet', 'indent'),
+_add(Observable(name='etotal', sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
                 group='all', tier='window', stream='results',
                 lammps_variable='variable etot equal etotal',
                 rename_to='v_etot', units='eV',
                 role_key='total_energy'))
-_add(Observable(name='pe', sim_types=('afm', 'sheetonsheet', 'indent'),
+_add(Observable(name='pe', sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
                 group='all', tier='window', stream='results',
                 lammps_variable='variable pe_now equal pe',
                 rename_to='v_pe_now', units='eV',
                 role_key='potential_energy'))
-_add(Observable(name='ke', sim_types=('afm', 'sheetonsheet', 'indent'),
+_add(Observable(name='ke', sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
                 group='all', tier='window', stream='results',
                 lammps_variable='variable ke_now equal ke',
                 rename_to='v_ke_now', units='eV',
@@ -239,7 +239,7 @@ _add(Observable(name='E_int_tip_sheet', sim_types=('afm', 'indent'),
                 role_key='tip_sheet_interaction'))
 # Template-owned: the compute sits in sheetonsheet's slide template, behind its
 # has_internal_lj branch, with real per-material group names.
-_add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
+_add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet', 'hetero'),
                 group='layer_n', tier='peratom', stream='results',
                 rename_to='v_e_int_il', units='eV',
                 role_key='interlayer_interaction'))
@@ -251,22 +251,22 @@ _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
 # friction label itself, its cost is paid in every production sheet run, and
 # moving it would change the label's averaging. Template-owned (no
 # lammps_compute), so validate_registry's window-tier ban never sees it.
-_add(Observable(name='lfx', key='lfx@sheet', sim_types=('sheetonsheet',),
+_add(Observable(name='lfx', key='lfx@sheet', sim_types=('sheetonsheet', 'hetero'),
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_xfrict', units='nN',
                 role_key='lateral_force_x'))
-_add(Observable(name='lfy', key='lfy@sheet', sim_types=('sheetonsheet',),
+_add(Observable(name='lfy', key='lfy@sheet', sim_types=('sheetonsheet', 'hetero'),
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_yfrict', units='nN',
                 role_key='lateral_force_y'))
-_add(Observable(name='nf', key='nf@sheet', sim_types=('sheetonsheet',),
+_add(Observable(name='nf', key='nf@sheet', sim_types=('sheetonsheet', 'hetero'),
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_fz', units='nN', role_key='normal_load'))
 # nf and drive_fx/drive_fy are inconsistent siblings: all three come from
 # f_force[1..3] on one fix aveforce, but v_fz is named nf because every
 # downstream COF consumer expects it. Back-compatibility beats symmetry.
 for _ax, _native in (('x', 'v_fx'), ('y', 'v_fy')):
-    _add(Observable(name=f'drive_f{_ax}', sim_types=('sheetonsheet',),
+    _add(Observable(name=f'drive_f{_ax}', sim_types=('sheetonsheet', 'hetero'),
                     group='layer_n', tier='window', stream='results',
                     rename_to=_native, units='nN',
                     role_key=f'drive_force_{_ax}'))
@@ -275,7 +275,7 @@ for _ax, _native in (('x', 'v_fx'), ('y', 'v_fy')):
 # with AFM's tipx/tipy/tipz, which is what lets COF and the ML extractors be
 # written once for both families. A known overlap, not an oversight.
 for _ax in ('x', 'y', 'z'):
-    _add(Observable(name=f'drive{_ax}', sim_types=('sheetonsheet',),
+    _add(Observable(name=f'drive{_ax}', sim_types=('sheetonsheet', 'hetero'),
                     group='layer_n', tier='window', stream='results',
                     rename_to=f'v_com{_ax}_top', units='A',
                     role_key=f'driven_com_{_ax}'))
@@ -283,7 +283,7 @@ for _ax in ('x', 'y', 'z'):
 # legacy correction's LJ-branch discriminator -- see Task 11 and
 # read_data._correct_legacy_lf_schema1.
 for _ax in ('x', 'y', 'z'):
-    _add(Observable(name=f'react_{_ax}', sim_types=('sheetonsheet',),
+    _add(Observable(name=f'react_{_ax}', sim_types=('sheetonsheet', 'hetero'),
                     group='layer_1', tier='window', stream='results',
                     rename_to=f'v_s{_ax}', units='nN',
                     role_key=f'reaction_force_{_ax}'))
@@ -297,7 +297,7 @@ for _name, _key, _native, _role, _unit in [
     ('raw_drivex', None, 'v_comx_top', 'raw_driven_com_x', 'A'),
     ('raw_drivey', None, 'v_comy_top', 'raw_driven_com_y', 'A'),
 ]:
-    _add(Observable(name=_name, key=_key, sim_types=('sheetonsheet',),
+    _add(Observable(name=_name, key=_key, sim_types=('sheetonsheet', 'hetero'),
                     group='layer_n', tier='raw', stream='results',
                     rename_to=_native, units=_unit, role_key=_role))
 
@@ -430,7 +430,7 @@ def layer_channels(n_layers: int) -> list:
         for ax in ('x', 'y', 'z'):
             out.append(Observable(
                 name=f'com{ax}_L{lyr}',
-                sim_types=('afm', 'sheetonsheet', 'indent'),
+                sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
                 group=f'layer_{lyr}', tier='window', stream='results',
                 lammps_compute=f'compute COM_L{lyr} layer_{lyr} com',
                 lammps_variable=(f'variable com{ax}_L{lyr} equal '

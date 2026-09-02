@@ -31,17 +31,39 @@ _ENV = Environment(
 )
 
 
-def _with_channels(context: Dict) -> Dict:
-    """Fill in ``channels`` when the caller did not supply it.
+def _with_obs_ctx(context: Dict) -> Dict:
+    """Fill in ``obs_ctx`` when the caller did not supply it.
 
-    ``OutputSettings.channels`` defaults to all tiers on, so an absent key
-    genuinely means "emit everything" -- this is the default, not a silent
-    fallback. The builders always pass the real setting; this only covers
-    callers that render the template with a partial context.
+    Replaces the old ``_with_channels``: the template no longer reads a bare
+    ``channels`` dict, it reads ``obs_ctx`` (built by
+    :func:`src.builders.utils.obs_ctx.build_obs_ctx`). All tiers on is still
+    the default -- ``OutputSettings.channels`` defaults to all tiers on, so
+    an absent key genuinely means "emit everything". The real builder always
+    passes a real obs_ctx (:meth:`HeteroSheetOnSheetSimulation._build_obs_ctx`);
+    this only covers callers -- mostly tests -- that render the template with
+    a partial context.
     """
-    if "channels" in context:
+    if "obs_ctx" in context:
         return context
-    return {**context, "channels": {"window": True, "raw": True, "peratom": True}}
+    from ..afm.base import _CONTACT_CUTOFF_FALLBACK
+    from ..utils.obs_ctx import build_obs_ctx
+    interlayer = {'E_int_interlayer', 'n_contact_il'}
+    has_internal_lj = context.get('has_internal_lj', True)
+    obs_ctx = build_obs_ctx(
+        sim_type='hetero',
+        n_layers=context['n_layers'],
+        results_file_pattern=context.get(
+            'results_file_pattern', 'results/friction.txt'),
+        use_langevin=(context.get('thermostat_type') == 'langevin'),
+        enabled_tiers={"window": True, "raw": True, "peratom": True},
+        contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+        results_freq=context.get('results_freq', 1000),
+        optional_channels=(),
+        extra_filter=(
+            None if not has_internal_lj
+            else lambda ob: ob.name not in interlayer),
+    )
+    return {**context, "obs_ctx": obs_ctx}
 
 def render_hetero_slide(context: Dict) -> str:
     """Render ``hetero/slide.lmp`` with the given context.
@@ -50,7 +72,7 @@ def render_hetero_slide(context: Dict) -> str:
     ``SimulationBase.render_template``, without needing a full builder
     instance.
     """
-    return _ENV.get_template("hetero/slide.lmp").render(_with_channels(context))
+    return _ENV.get_template("hetero/slide.lmp").render(_with_obs_ctx(context))
 
 
 def compute_layer_zbands(data_path, layers) -> List[Dict]:
@@ -395,6 +417,45 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         """
         return self.config.settings.simulation.drive_method == "virtual_atom"
 
+    def _build_obs_ctx(self, n_layers: int,
+                       results_file_pattern: str) -> Dict[str, object]:
+        """Observable context for the hetero family.
+
+        Mirrors :meth:`SheetOnSheetSimulation._build_obs_ctx`. This class
+        always renders the ``has_internal_lj`` branch of the template (the
+        hybrid-sw reaction-force friction proxy -- see the ``has_internal_lj``
+        context key in :meth:`write_run_scripts`), so `extra_filter` always
+        drops the interlayer channels here. That leaves hetero's peratom
+        varlist empty -- ``E_int_interlayer`` is the family's only peratom
+        channel -- and `build_obs_ctx`'s emptiness gate correctly suppresses
+        `fc_pa` as a result. That is the intended outcome of this task: hetero
+        gains the raw tier, not a populated peratom tier. A real hetero
+        peratom channel is a later opt-in addition, not something to force
+        here by relaxing this filter.
+        """
+        from ..utils.obs_ctx import build_obs_ctx
+        # See SheetOnSheetSimulation._build_obs_ctx: AFM-only
+        # _contact_cutoff() derives its cutoff from self.config.tip.mat, which
+        # no sheet-family builder has, hetero included. Pass the same
+        # documented fallback constant -- not a considered value for hetero
+        # either; Task 18 replaces this when a real hetero contact channel
+        # lands.
+        from ..afm.base import _CONTACT_CUTOFF_FALLBACK
+        interlayer = {'E_int_interlayer', 'n_contact_il'}
+        out = self.config.settings.output
+        return build_obs_ctx(
+            sim_type='hetero',
+            n_layers=n_layers,
+            results_file_pattern=results_file_pattern,
+            use_langevin=(
+                self.config.settings.thermostat.type == 'langevin'),
+            enabled_tiers=dict(out.channels),
+            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+            results_freq=out.results_frequency,
+            optional_channels=out.optional_channels,
+            extra_filter=lambda ob: ob.name not in interlayer,
+        )
+
     def write_run_scripts(self) -> None:
         """Render and write the run phase (``lammps/slide.in``): the dynamic slide.
 
@@ -413,6 +474,10 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         sim = settings.simulation
         out = settings.output
         general = self.config.general
+
+        results_file_pattern = self._run_dir_path(
+            "results", "friction_p${pressure}_a${a}_s${speed}"
+        )
 
         # Same key set as SheetOnSheetSimulation.write_inputs' base_context (only
         # the keys the template actually references), with hetero-specific values
@@ -458,19 +523,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "run_steps": sim.slide_run_steps,
             "min_style": sim.min_style,
             "minimization_command": sim.minimization_command,
-            # settings.output.channels gates each tier"s fix ave/time, the same
-            # way it does for the AFM family. Passed as a plain dict: unlike AFM,
-            # the sheet templates hand-write their varlists rather than taking
-            # them from the observables registry, so only the gate is shared --
-            # routing the varlists through the registry would change which
-            # columns are emitted, which is a separate change with its own risk.
-            "channels": dict(out.channels),
             "results_freq": out.results_frequency,
             "dump_freq": out.dump_frequency.get("slide", 1000),
             "dump_enabled": out.dump.get("slide", False),
-            "results_file_pattern": self._run_dir_path(
-                "results", "friction_p${pressure}_a${a}_s${speed}"
-            ),
+            "results_file_pattern": results_file_pattern,
+            "obs_ctx": self._build_obs_ctx(n, results_file_pattern),
             "dump_file_pattern": self._run_dir_path(
                 "visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"
             ),

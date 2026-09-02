@@ -4,6 +4,7 @@
    the COM probes, `compute frict`, v_d_shear -- must use this one pair. #}
 {% set il_bot = n_layers // 2 %}
 {% set il_top = n_layers // 2 + 1 %}
+{% import 'common/observables.lmp' as obs %}
 # LAMMPS Input Script for Sheet-vs-Sheet Sliding
 # {{ n_layers }}-layer model, constraint_mode: {{ constraint_mode }}
 
@@ -79,7 +80,7 @@ velocity        center create {{ temp }} {{ seed_sheet_center }}
 {% if thermostat_type == 'nose-hoover' %}
 fix             nvt_center center nvt temp {{ temp }} {{ temp }} $(100.0*dt)
 {% else %}
-fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center }} zero yes
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center }} zero yes tally yes
 fix             nve_center center nve
 {% endif %}
 
@@ -102,25 +103,14 @@ variable        comx_top equal c_COM_top[1]
 variable        comy_top equal c_COM_top[2]
 variable        comz_top equal c_COM_top[3]
 
-compute         COM_ctop layer_{{ il_top }} com
-variable        comx_ctop equal c_COM_ctop[1]
-variable        comy_ctop equal c_COM_ctop[2]
-variable        comz_ctop equal c_COM_ctop[3]
-
-# COM_cbot/COM_ctop straddle the MIDDLE interface: cbot = layer_(n//2),
-# ctop = layer_(n//2 + 1), so the stack splits into two sheets of equal
-# thickness (the thinner half below for odd n). cbot was pinned to layer_2,
-# which only lands there at n_layers == 4: at the 3-layer minimum it aliased
-# COM_ctop and the extracted interlayer gap was identically zero.
-compute         COM_cbot layer_{{ il_bot }} com
-variable        comx_cbot equal c_COM_cbot[1]
-variable        comy_cbot equal c_COM_cbot[2]
-variable        comz_cbot equal c_COM_cbot[3]
-
-compute         COM_bot layer_1 com
-variable        comx_bot equal c_COM_bot[1]
-variable        comy_bot equal c_COM_bot[2]
-variable        comz_bot equal c_COM_bot[3]
+{# COM_ctop/COM_cbot/COM_bot were exact aliases of layer-resolved COM
+   (com{x,y,z}_L{il_top}, L{il_bot}, L1) and are deleted as duplicates
+   (spec 4.2), same as Task 14's sheetonsheet conversion. The registry's
+   layer_channels(n_layers), plus etotal/pe/ke, now supply everything that
+   block used to compute by hand. Unlike sheetonsheet at the time of its own
+   conversion, hetero never had a separate hand-written per-layer COM_L{i}
+   for-loop to fold in here -- this is a pure alias removal. #}
+{{ obs.emit_observables(obs_ctx) }}
 
 # Apply Uniform Pressure
 # 1 eV/Å³ = {{ ev_a3_to_gpa }} GPa
@@ -180,9 +170,10 @@ fix             spr layer_{{ n_layers }} spring couple virtual {{ driving_spring
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 {% endif %}
 
-{% if channels.window %}
-fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comz_top v_comx_bot v_comy_bot v_comz_bot file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
-{% endif %}
+# Three sampling tiers (spec §4). Column order is registry-driven (Task 15).
+# NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
+# exemption: it is the label itself and its cost was already paid campaign-wide.
+{{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
 
