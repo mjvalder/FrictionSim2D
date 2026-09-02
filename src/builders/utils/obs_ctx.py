@@ -61,7 +61,15 @@ def build_obs_ctx(
         f'{prefix}_L{lyr}' for lyr in (1, 2)
         for prefix in ('pe_sum', 'sigma_xx_2d', 'sigma_yy_2d')
     }
-    generated_layer_channels = layer_channels(n_layers)
+    # Filtered to THIS family: layer_channels() generates com{x,y,z}_L{n}
+    # for every family, but pe_sum_L{n}/sigma_{xx,yy}_2d_L{n} declare
+    # sim_types=('sheetonsheet', 'hetero', 'flake') only. Without this
+    # filter an afm/indent build would splice those sheet-only channels
+    # into its own peratom_varlist, which rename_map('afm', 'peratom')
+    # cannot name.
+    generated_layer_channels = [
+        ob for ob in layer_channels(n_layers) if sim_type in ob.sim_types
+    ]
     win = [ob for ob in channels_for(sim_type, 'window')
            if ob.name not in static_layer_names]
     pa = [ob for ob in channels_for(sim_type, 'peratom')
@@ -84,7 +92,14 @@ def build_obs_ctx(
     # L1/L2 REGISTRY entries (e.g. pe_sum_L3 on a 4-layer stack) -- without
     # this, naming one in optional_channels would fail the unknown-name
     # check below even though build_obs_ctx knows exactly how to emit it.
-    known = ({ob.name for ob in REGISTRY.values()}
+    #
+    # known is scoped to THIS family (sim_type in ob.sim_types), not the
+    # whole REGISTRY: a name that belongs to another family (e.g.
+    # 'n_contact_il' on an afm build) would otherwise be silently accepted
+    # and emit nothing, because it is filtered out of win/pa by
+    # channels_for(sim_type, ...) above -- the exact "typo means no
+    # instrumentation" failure optional_channels exists to foreclose.
+    known = ({ob.name for ob in REGISTRY.values() if sim_type in ob.sim_types}
              | {ob.name for ob in generated_layer_channels})
     unknown = requested - known
     if unknown:

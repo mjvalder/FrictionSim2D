@@ -82,6 +82,38 @@ def test_unknown_optional_channel_fails_the_build():
         _ctx(optional_channels=['not_a_channel'])
 
 
+def test_optional_channel_from_another_family_fails_the_build():
+    import pytest
+    # n_contact_il is a real registry channel, but it belongs to
+    # sheetonsheet/hetero, not afm. Before this was scoped per family it
+    # was ACCEPTED (the name exists somewhere in REGISTRY) and emitted
+    # nothing -- the exact silent no-op optional_channels' docstring
+    # exists to foreclose ("a pilot arm runs without the instrumentation
+    # it was commissioned to measure").
+    with pytest.raises(ValueError, match='no such observable'):
+        _ctx(optional_channels=['n_contact_il'])
+
+
+def test_afm_build_never_emits_a_channel_outside_its_family():
+    # Request every opt-in channel afm is actually allowed to name, then
+    # confirm the emitted varlists never carry a rename_to belonging to a
+    # channel whose sim_types exclude afm. layer_channels() generates
+    # pe_sum_L{n}/sigma_{xx,yy}_2d_L{n} for sheetonsheet/hetero/flake only;
+    # before the generated list was filtered by sim_type, those spliced
+    # into afm's peratom_varlist with no name to give rename_map('afm',
+    # 'peratom') to resolve them by.
+    from src.core.observables import REGISTRY, layer_channels
+    afm_opt_in = [ob.name for ob in REGISTRY.values()
+                  if 'afm' in ob.sim_types and ob.opt_in]
+    ctx = _ctx(n_layers=4, optional_channels=afm_opt_in)
+    emitted = set(ctx['window_varlist'].split()) | set(ctx['peratom_varlist'].split())
+    sheet_only_renames = {
+        ob.rename_to for ob in [*REGISTRY.values(), *layer_channels(4)]
+        if 'afm' not in ob.sim_types and ob.rename_to
+    }
+    assert not (emitted & sheet_only_renames)
+
+
 def test_default_build_emits_no_opt_in_channel():
     from src.core.observables import REGISTRY
     ctx = _ctx()
