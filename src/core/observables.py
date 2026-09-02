@@ -41,10 +41,11 @@ class Observable:
 
     Note what this field does NOT do: it records a DECLARED unit and nothing
     verifies it against what a template actually emits. The coherence test
-    over it (``test_afm_cof_inputs_share_force_units``) covers AFM only,
-    because the sheet family has no ``nf`` channel here at all and its
-    lateral channel is ``xfrict`` -- so a registry-level check could not have
-    caught the sheet defect. The test that does is
+    over it (``test_afm_cof_inputs_share_force_units``) covers AFM only; the
+    sheet family gets its own ``test_sheet_cof_inputs_share_force_units``
+    now that it has ``lfx@sheet``/``nf@sheet`` here. Neither could have
+    caught the original sheet defect, since it was in the TEMPLATE, not the
+    registry -- the test that does is
     ``test_lj_branch_lateral_force_scaled_to_nN``, over the templates.
     """
     name: str
@@ -120,6 +121,16 @@ PARITY_EXEMPT: dict = {
         'the sheet stack has one thermostatted group, not tip plus substrate',
     ('afm', 'interlayer_interaction'):
         'AFM measures the tip-sheet interaction, a different pair of bodies',
+    ('afm', 'drive_force_x'):
+        'the AFM tip is driven by a spring, not a constant applied force',
+    ('afm', 'drive_force_y'):
+        'the AFM tip is driven by a spring, not a constant applied force',
+    ('afm', 'reaction_force_x'):
+        'no fixed bottom layer exists in the AFM model to react against',
+    ('afm', 'reaction_force_y'):
+        'no fixed bottom layer exists in the AFM model to react against',
+    ('afm', 'reaction_force_z'):
+        'no fixed bottom layer exists in the AFM model to react against',
 }
 
 
@@ -232,21 +243,64 @@ _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet',),
                 group='layer_n', tier='peratom', stream='results',
                 rename_to='v_e_int_il', units='eV',
                 role_key='interlayer_interaction'))
-# Sheet friction label: a group/group read by the window fix at Nevery=1, a
-# deliberate exemption from the tier rule (cost already paid campaign-wide).
-# Template-owned, so validate_registry never sees it.
+# --- sheet window channels: every native below is already emitted by
+# sheetonsheet/slide.lmp's fc_win. Declaring them is what lets the registry
+# own the renames -- DataReader._SHEET_COLUMN_RENAME is deleted in Task 10.
 #
-# rename_to is deliberately None. read_data merges this map OVER
-# _SHEET_COLUMN_RENAME, so declaring 'v_xfrict' here shadowed that map's
-# 'v_xfrict' -> 'lfx' and the frame lost lfx entirely -- silently killing COF
-# for every sheet run (read_data.py's COF guard needs lfx, lfy AND nf).
-# The real fix is to name this channel 'lfx' for the sheet family, which needs
-# the registry to allow one name across disjoint sim_types; until then the
-# parser's own sheet map owns the rename.
-_add(Observable(name='xfrict', sim_types=('sheetonsheet',),
+# The lateral channel keeps its group/group compute at Nevery=1: it is the
+# friction label itself, its cost is paid in every production sheet run, and
+# moving it would change the label's averaging. Template-owned (no
+# lammps_compute), so validate_registry's window-tier ban never sees it.
+_add(Observable(name='lfx', key='lfx@sheet', sim_types=('sheetonsheet',),
                 group='layer_n', tier='window', stream='results',
-                rename_to=None, units='nN',
+                rename_to='v_xfrict', units='nN',
                 role_key='lateral_force_x'))
+_add(Observable(name='lfy', key='lfy@sheet', sim_types=('sheetonsheet',),
+                group='layer_n', tier='window', stream='results',
+                rename_to='v_yfrict', units='nN',
+                role_key='lateral_force_y'))
+_add(Observable(name='nf', key='nf@sheet', sim_types=('sheetonsheet',),
+                group='layer_n', tier='window', stream='results',
+                rename_to='v_fz', units='nN', role_key='normal_load'))
+# nf and drive_fx/drive_fy are inconsistent siblings: all three come from
+# f_force[1..3] on one fix aveforce, but v_fz is named nf because every
+# downstream COF consumer expects it. Back-compatibility beats symmetry.
+for _ax, _native in (('x', 'v_fx'), ('y', 'v_fy')):
+    _add(Observable(name=f'drive_f{_ax}', sim_types=('sheetonsheet',),
+                    group='layer_n', tier='window', stream='results',
+                    rename_to=_native, units='nN',
+                    role_key=f'drive_force_{_ax}'))
+# drive{x,y,z} alias the top layer's COM and are therefore redundant with
+# com{x,y,z}_L{n}. Kept because they carry the driven_com_* role that pairs
+# with AFM's tipx/tipy/tipz, which is what lets COF and the ML extractors be
+# written once for both families. A known overlap, not an oversight.
+for _ax in ('x', 'y', 'z'):
+    _add(Observable(name=f'drive{_ax}', sim_types=('sheetonsheet',),
+                    group='layer_n', tier='window', stream='results',
+                    rename_to=f'v_com{_ax}_top', units='A',
+                    role_key=f'driven_com_{_ax}'))
+# Reaction force on the fixed bottom layer. react_x doubles as the frozen
+# legacy correction's LJ-branch discriminator -- see Task 11 and
+# read_data._correct_legacy_lf_schema1.
+for _ax in ('x', 'y', 'z'):
+    _add(Observable(name=f'react_{_ax}', sim_types=('sheetonsheet',),
+                    group='layer_1', tier='window', stream='results',
+                    rename_to=f'v_s{_ax}', units='nN',
+                    role_key=f'reaction_force_{_ax}'))
+
+# --- sheet raw tier: registry-derived, so these drive emission as well as
+# parsing (the AFM raw varlist is still a literal; Task 13 fixes that).
+for _name, _key, _native, _role, _unit in [
+    ('raw_lfx', 'raw_lfx@sheet', 'v_xfrict', 'raw_lateral_force_x', 'nN'),
+    ('raw_lfy', 'raw_lfy@sheet', 'v_yfrict', 'raw_lateral_force_y', 'nN'),
+    ('raw_nf', 'raw_nf@sheet', 'v_fz', 'raw_normal_load', 'nN'),
+    ('raw_drivex', None, 'v_comx_top', 'raw_driven_com_x', 'A'),
+    ('raw_drivey', None, 'v_comy_top', 'raw_driven_com_y', 'A'),
+]:
+    _add(Observable(name=_name, key=_key, sim_types=('sheetonsheet',),
+                    group='layer_n', tier='raw', stream='results',
+                    rename_to=_native, units=_unit, role_key=_role))
+
 _PE_SUM_ROLE_KEYS = {
     'tip_all': 'group_pe_sum_driven',
     'sub_all': 'group_pe_sum_substrate',

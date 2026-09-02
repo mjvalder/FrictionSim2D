@@ -88,28 +88,22 @@ def test_afm_cof_inputs_share_force_units():
     # COF = lateral force / normal load: the two must carry the same unit or
     # the ratio is meaningless.
     #
-    # AFM ONLY, deliberately. Both entries are sim_types=('afm','indent');
-    # the sheet family has no 'nf' channel in REGISTRY and its lateral
-    # channel is 'xfrict', so this cannot be widened to the sheet without the
-    # registry work in the parity spec. It therefore could NOT have caught
-    # the sheet eV/A-over-nN defect -- tests/test_template_contract.py's
+    # AFM ONLY, deliberately. Both entries are sim_types=('afm','indent').
+    # The sheet family now has its own 'lfx@sheet'/'nf@sheet' pair, checked
+    # by test_sheet_cof_inputs_share_force_units below -- this test still
+    # could NOT have caught the sheet eV/A-over-nN defect, since that lived
+    # in the TEMPLATE, not the registry -- tests/test_template_contract.py's
     # test_lj_branch_lateral_force_scaled_to_nN is the one that does.
     assert REGISTRY['lfx'].units == REGISTRY['nf'].units == 'nN'
     assert REGISTRY['lfy'].units == 'nN'
 
 
-def test_sheet_lateral_channel_declares_nN():
-    # the sheet's lateral force is 'xfrict', not 'lfx', and there is no sheet
-    # 'nf' to pair it with here. Pinned so the asymmetry is visible rather
-    # than silently assumed away.
-    assert REGISTRY['xfrict'].units == 'nN'
-    assert 'sheetonsheet' in REGISTRY['xfrict'].sim_types
-    channel_names = {o.name for o in channels_for('sheetonsheet', 'window')}
-    assert channel_names
-    assert 'nf' not in channel_names, (
-        'a sheet nf channel now exists -- widen '
-        'test_afm_cof_inputs_share_force_units to cover it'
-    )
+def test_sheet_cof_inputs_share_force_units():
+    # the widening test_afm_cof_inputs_share_force_units asked for. The sheet
+    # family now HAS an nf channel, so COF's two inputs can be compared for
+    # dimensional coherence here rather than only in the template tests.
+    assert REGISTRY['lfx@sheet'].units == REGISTRY['nf@sheet'].units == 'nN'
+    assert REGISTRY['lfy@sheet'].units == 'nN'
 
 
 def test_raw_legacy_block_is_afm_only():
@@ -117,6 +111,29 @@ def test_raw_legacy_block_is_afm_only():
     # to it was inert but wrong
     assert 'v_fx_spr' not in rename_map('sheetonsheet', 'raw')
     assert rename_map('afm', 'raw')['v_fx_spr'] == 'raw_lfx'
+
+
+def test_sheet_window_map_covers_the_emitted_natives():
+    m = rename_map('sheetonsheet', 'window')
+    assert m['v_xfrict'] == 'lfx'
+    assert m['v_yfrict'] == 'lfy'
+    assert m['v_fz'] == 'nf'
+    assert m['v_sx'] == 'react_x'
+    assert m['v_comz_top'] == 'drivez'
+    assert m['v_fx'] == 'drive_fx'
+
+
+def test_sheet_raw_map_covers_the_emitted_natives():
+    m = rename_map('sheetonsheet', 'raw')
+    assert m['v_xfrict'] == 'raw_lfx'
+    assert m['v_comx_top'] == 'raw_drivex'
+    assert 'v_fx_spr' not in m       # the AFM legacy block stays AFM-only
+
+
+def test_afm_and_sheet_both_have_lfx_under_their_own_key():
+    assert REGISTRY['lfx'].rename_to == 'v_fx_spr'
+    assert REGISTRY['lfx@sheet'].rename_to == 'v_xfrict'
+    assert REGISTRY['lfx@sheet'].name == 'lfx'
 
 
 def test_registry_key_defaults_to_name():
