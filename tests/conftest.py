@@ -1,12 +1,13 @@
 """Pytest fixtures and configuration for FrictionSim2D tests."""
 
+import os
 import pytest
 from pathlib import Path
 from importlib import resources
 from unittest.mock import MagicMock
 
 from src.core.config import (
-    GlobalSettings, 
+    GlobalSettings,
     GeometrySettings,
     ThermostatSettings,
     SimulationSettings,
@@ -19,6 +20,25 @@ from src.core.config import (
     SubstrateConfig,
     SheetConfig,
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_xdg_config_home(tmp_path_factory):
+    """Point ``$XDG_CONFIG_HOME`` at a session temp dir.
+
+    ``load_settings()`` falls back to ``$XDG_CONFIG_HOME/FrictionSim2D/settings.yaml``
+    (``src/core/config.py::_global_settings_path``). Without this the suite would
+    read the developer's real settings file when one exists. Session scope so
+    ``monkeypatch``-based tests can still override per test.
+    """
+    xdg = tmp_path_factory.mktemp("xdg_config_home")
+    previous = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(xdg)
+    yield xdg
+    if previous is None:
+        os.environ.pop("XDG_CONFIG_HOME", None)
+    else:
+        os.environ["XDG_CONFIG_HOME"] = previous
 
 
 @pytest.fixture
