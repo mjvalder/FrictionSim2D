@@ -1,3 +1,4 @@
+{% import 'common/observables.lmp' as obs %}
 # LAMMPS Input Script for Flake-on-Sheet Sliding (D4)
 # A finite flake driven across a {{ n_layers }}-layer substrate sheet by a
 # {{ drive_method }} drive (no tip, no substrate slab). constraint_mode: {{ constraint_mode }}
@@ -87,7 +88,7 @@ velocity        center create {{ temp }} {{ seed_sheet_center }}
 {% if thermostat_type == 'nose-hoover' %}
 fix             nvt_center center nvt temp {{ temp }} {{ temp }} $(100.0*dt)
 {% else %}
-fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center }} zero yes
+fix             lang center langevin {{ temp }} {{ temp }} $(100.0*dt) {{ seed_sheet_center }} zero yes tally yes
 fix             nve_center center nve
 {% endif %}
 
@@ -98,11 +99,20 @@ thermo          {{ thermo }}
 fix             fsbot layer_1 setforce 0.0 0.0 0.0
 velocity        layer_1 set 0.0 0.0 0.0 units box
 
-# Flake COM (the drive observable, logged to the results file).
+# Flake COM (the drive observable, logged to the results file). Template-owned
+# (the registry's drivex@flake/drivey@flake/drivez@flake carry no
+# lammps_compute/lammps_variable of their own -- same pattern as the sheet's
+# own drive{x,y,z}, which alias the top layer's COM the template computes by
+# hand), so this block stays hand-written rather than moving into the macro.
 compute         COM_flake flake com
 variable        comx_flake equal c_COM_flake[1]
 variable        comy_flake equal c_COM_flake[2]
 variable        comz_flake equal c_COM_flake[3]
+
+# The substrate-sheet's layer COMs (registry-driven: layer_channels(n_layers)
+# resolves against the layer_N groups defined above). The flake's own COM is
+# NOT here -- it is drivex/drivey/drivez@flake, computed by hand just above.
+{{ obs.emit_observables(obs_ctx) }}
 
 {% if corner_hold %}
 # Corner-hold: tether the flake corner atoms in xy so the flake stays rigid
@@ -158,9 +168,11 @@ fix             spr flake spring couple virtual {{ driving_spring_ev }} 0.0 0.0 
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 {% endif %}
 
-{% if channels.window %}
-fix             fc_ave all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_comx_flake v_comy_flake v_comz_flake file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
-{% endif %}
+# Single sampling tier (spec §4): flake declares no raw- or peratom-tier
+# channels, so those varlists filter to empty and build_obs_ctx's emptiness
+# gate suppresses fc_raw/fc_pa entirely -- window only, matching what this
+# template emitted before this conversion.
+{{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
 

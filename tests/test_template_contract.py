@@ -552,21 +552,29 @@ def test_interlayer_energy_stays_unscaled(template):
         assert 'variable        e_int_il equal c_frict\n' in src, template
 
 
-#: Templates already routed through the observables registry (Task 14/15):
-#: their source has no hand-written `fix ... ave/time` line to grep for any
-#: more -- only the macro call -- so the marker must be checked on the
-#: RENDERED output instead. Task 16 moves flake here too; moving a template
-#: between the two lists below is meant to be a one-line diff.
-SHEET_SLIDE_TEMPLATES_CONVERTED = ('sheetonsheet/slide.lmp', 'hetero/slide.lmp')
-SHEET_SLIDE_TEMPLATES_UNCONVERTED = ('flake/slide.lmp',)
+#: All three sheet-family templates are now routed through the observables
+#: registry (Task 14 sheetonsheet, Task 15 hetero, Task 16 flake): none of
+#: them has a hand-written `fix ... ave/time` line left to grep for -- only
+#: the macro call -- so the marker must be checked on the RENDERED output
+#: instead. This used to be split into a CONVERTED/UNCONVERTED pair of tuples
+#: (one checked by rendering, the other by scanning source) so that moving a
+#: template between them was a one-line diff; now that every member has
+#: moved, the UNCONVERTED list and its source-scanning test would be
+#: permanently empty and would never run -- dead code asserting nothing, not
+#: a real regression guard -- so both are deleted rather than kept as inert
+#: scaffolding. `SHEET_SLIDE_TEMPLATES_CONVERTED` is kept as an alias of
+#: `SHEET_SLIDE_TEMPLATES` (defined above) so the render-based test below
+#: reads the same regardless of which name the templates are declared under.
+SHEET_SLIDE_TEMPLATES_CONVERTED = SHEET_SLIDE_TEMPLATES
 
-#: One render call per converted template, keyed by name -- each family's
-#: obs_ctx is built differently (has_internal_lj is a per-family fixed value
-#: for hetero, a parameter for sheetonsheet), so a single shared render call
-#: (as when this tuple held one entry) no longer covers every member.
+#: One render call per template, keyed by name -- each family's obs_ctx is
+#: built differently (has_internal_lj is a per-family fixed value for hetero
+#: and flake, a parameter for sheetonsheet), so a single shared render call
+#: does not cover every member.
 _CONVERTED_RENDER = {
     'sheetonsheet/slide.lmp': lambda: _render_sheet_slide(has_internal_lj=False),
     'hetero/slide.lmp': lambda: _render_hetero_slide(4),
+    'flake/slide.lmp': lambda: _render_flake_slide(4),
 }
 
 
@@ -581,17 +589,6 @@ def test_results_fixes_carry_schema_marker_converted(template):
     for ln in results_fixes:
         assert (f'title1 "# schema=2 lf_units=nN family={family}"' in ln
                ), f"{template}: {ln[:60]}"
-
-
-@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES_UNCONVERTED)
-def test_results_fixes_carry_schema_marker_unconverted(template):
-    src = _template_source(template)
-    results_fixes = [ln for ln in src.splitlines()
-                     if ln.startswith('fix') and 'ave/time' in ln
-                     and 'hold_ave' not in ln]
-    assert results_fixes, template
-    for ln in results_fixes:
-        assert 'title1 "# schema=2 lf_units=nN"' in ln, f"{template}: {ln[:60]}"
 
 
 @pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
@@ -627,6 +624,105 @@ def test_hetero_frict_measures_the_same_interface_the_com_probes_do(
     text = _render_hetero_slide(n_layers)
     assert _frict_groups(text) == (f'layer_{ctop}', f'layer_{cbot}')
     assert _com_probe_groups(text) == _frict_groups(text)
+
+
+def _flake_obs_ctx(n_layers: int) -> dict:
+    """Call build_obs_ctx directly, mirroring
+    FlakeSlideSimulation._build_obs_ctx (src/builders/sheetonsheet/flake_slide.py).
+
+    Unlike `_hetero_obs_ctx`, no `extra_filter` is needed: the flake family
+    declares no interlayer/contact channel at all (its friction proxy is the
+    bottom-sheet reaction force `react_{x,y,z}`), so `channels_for('flake',
+    'peratom')` is already empty -- there is nothing for a filter to drop.
+    """
+    from src.builders.utils.obs_ctx import build_obs_ctx
+    return build_obs_ctx(
+        sim_type='flake',
+        n_layers=n_layers,
+        results_file_pattern='results/friction.txt',
+        use_langevin=True,
+        enabled_tiers={'window': True, 'raw': True, 'peratom': True},
+        contact_cutoff=5.0,
+        results_freq=1000,
+        optional_channels=(),
+    )
+
+
+def _render_flake_slide(n_layers: int) -> str:
+    """Render flake/slide.lmp, whose substrate layer groups come from z-bands
+    (like hetero) and whose driven body is the flake, not a sheet layer_N."""
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    return env.get_template('flake/slide.lmp').render(
+        n_layers=n_layers, has_internal_lj=True,
+        sheet_layers=[{'idx': i, 'zlo': 3.0 * (i - 1), 'zhi': 3.0 * i}
+                     for i in range(1, n_layers + 1)],
+        constraint_mode='none', pot_type='sw',
+        scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
+        scan_angle_force=None, temp=300, thermostat_type='langevin',
+        drive_method='fix_move', dump_enabled=False, seed_sheet_center=12345,
+        obs_ctx=_flake_obs_ctx(n_layers),
+        xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,
+        num_atom_types=6, data_file='build/flake_slide.data',
+        potential_file='system.in.settings', neighbor_list=2.0,
+        neigh_modify_command='neigh_modify delay 0', atom_style='atomic',
+        min_style='cg', minimization_command='minimize 1e-6 1e-8 1000 10000',
+        timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
+        results_file_pattern='results/friction.txt',
+        ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
+        bond_spring_ev=3.0, flake_group_types='5 6', flake_corner_types='6',
+        flake_corner_k=10.0, corner_hold=True, virtual_offset=3.16,
+        reserve_virtual_type=False,
+    )
+
+
+def test_flake_langevin_fix_tallies():
+    """w_thermostat_center would read f_lang, which only exists with `tally
+    yes`. flake/slide.lmp had `zero yes` and no tally, same gap Task 15 fixed
+    for hetero."""
+    src = _template_source('flake/slide.lmp')
+    line = [l for l in src.split('\n')
+           if 'fix' in l and 'lang' in l and 'langevin' in l][0]
+    assert 'tally yes' in line
+
+
+def test_flake_slide_takes_its_varlist_from_the_macro():
+    src = _template_source('flake/slide.lmp')
+    assert 'emit_output_fixes(obs_ctx)' in src
+    # flake/slide.lmp has no hold_ave fix to exempt -- every hand-written
+    # results-tier fix ave/time is gone.
+    assert 'ave/time' not in src
+
+
+def test_flake_drive_com_maps_to_the_flake_body():
+    from src.core.observables import rename_map
+    m = rename_map('flake', 'window')
+    assert m['v_comx_flake'] == 'drivex'
+    assert m['v_comz_flake'] == 'drivez'
+    # the sheet's own drive channels must not leak into the flake map: the
+    # flake model has one mobile body, not a driven top layer
+    assert 'v_comx_top' not in m
+
+
+def test_flake_gains_no_energy_or_normal_load_channels():
+    """flake/slide.lmp defines no v_etot/v_pe_now/v_ke_now, no v_fx/v_fy/v_fz
+    (no fix aveforce on a driven layer -- the flake is driven by a spring),
+    and no interlayer/contact channel. Emitting any of these would reference
+    an undefined LAMMPS variable at setup."""
+    ctx = _flake_obs_ctx(n_layers=4)
+    emitted = set(ctx['window_varlist'].split())
+    forbidden = {'v_etot', 'v_pe_now', 'v_ke_now', 'v_fx', 'v_fy', 'v_fz'}
+    assert not (forbidden & emitted)
+    assert ctx['raw_varlist'] == ''
+    assert ctx['peratom_varlist'] == ''
+    assert ctx['emit_raw'] is False
+    assert ctx['emit_peratom'] is False
+
+
+def test_flake_results_fix_carries_its_own_family_marker():
+    assert _flake_obs_ctx(n_layers=4)['title1'].endswith('family=flake')
 
 
 def test_afm_window_fix_honours_results_frequency():

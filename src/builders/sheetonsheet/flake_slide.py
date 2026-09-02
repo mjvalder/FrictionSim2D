@@ -40,17 +40,34 @@ _ENV = Environment(
 )
 
 
-def _with_channels(context: Dict) -> Dict:
-    """Fill in ``channels`` when the caller did not supply it.
+def _with_obs_ctx(context: Dict) -> Dict:
+    """Fill in ``obs_ctx`` when the caller did not supply it.
 
-    ``OutputSettings.channels`` defaults to all tiers on, so an absent key
-    genuinely means "emit everything" -- this is the default, not a silent
-    fallback. The builders always pass the real setting; this only covers
-    callers that render the template with a partial context.
+    Replaces the old ``_with_channels``: the template no longer reads a bare
+    ``channels`` dict, it reads ``obs_ctx`` (built by
+    :func:`src.builders.utils.obs_ctx.build_obs_ctx`). All tiers on is still
+    the default -- ``OutputSettings.channels`` defaults to all tiers on, so
+    an absent key genuinely means "emit everything". The real builder always
+    passes a real obs_ctx (:meth:`FlakeSlideSimulation._build_obs_ctx`); this
+    only covers callers -- mostly tests -- that render the template with a
+    partial context.
     """
-    if "channels" in context:
+    if "obs_ctx" in context:
         return context
-    return {**context, "channels": {"window": True, "raw": True, "peratom": True}}
+    from ..afm.base import _CONTACT_CUTOFF_FALLBACK
+    from ..utils.obs_ctx import build_obs_ctx
+    obs_ctx = build_obs_ctx(
+        sim_type='flake',
+        n_layers=context['n_layers'],
+        results_file_pattern=context.get(
+            'results_file_pattern', 'results/friction.txt'),
+        use_langevin=(context.get('thermostat_type') == 'langevin'),
+        enabled_tiers={"window": True, "raw": True, "peratom": True},
+        contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+        results_freq=context.get('results_freq', 1000),
+        optional_channels=(),
+    )
+    return {**context, "obs_ctx": obs_ctx}
 
 def render_flake_slide(context: Dict) -> str:
     """Render ``flake/slide.lmp`` with the given context.
@@ -59,7 +76,7 @@ def render_flake_slide(context: Dict) -> str:
     renders the flake-driven slide template without needing a full builder
     instance (used by the render unit tests).
     """
-    return _ENV.get_template("flake/slide.lmp").render(_with_channels(context))
+    return _ENV.get_template("flake/slide.lmp").render(_with_obs_ctx(context))
 
 
 def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Dict]:
@@ -162,6 +179,51 @@ class FlakeSlideSimulation(SimulationBase):
         if flake.pot_type is None:
             updates["pot_type"] = sheet.pot_type
         return flake.model_copy(update=updates) if updates else flake
+
+    def _build_obs_ctx(self, n_layers: int,
+                       results_file_pattern: str) -> Dict[str, object]:
+        """Observable context for the flake family.
+
+        Mirrors :meth:`HeteroSheetOnSheetSimulation._build_obs_ctx`. Unlike
+        hetero, ``has_internal_lj`` is not threaded through as a filter here:
+        the flake model declares no interlayer channel at all (its friction
+        proxy is the bottom-sheet reaction force `react_{x,y,z}`, not a
+        group/group interlayer energy), so there is nothing for an
+        ``extra_filter`` to drop -- ``channels_for('flake', 'peratom')`` is
+        already empty. That leaves the peratom tier empty and
+        `build_obs_ctx`'s emptiness gate correctly suppresses `fc_pa`, same
+        outcome as hetero but for a different reason (no channel exists,
+        rather than one being filtered out).
+
+        ``layer_groups_available=True`` (the default): `flake/slide.lmp`
+        defines `group layer_{{ layer.idx }} region reg_layer_{{ layer.idx
+        }}` for every substrate layer, so `layer_channels(n_layers)`'s
+        `compute COM_L{i} layer_{i} com` resolves against a real group. Those
+        layer COMs describe the SUBSTRATE stack -- the flake's own COM is
+        `drivex@flake`/`drivey@flake`/`drivez@flake`, a template-owned
+        channel with no `lammps_compute` of its own (see the "Flake COM"
+        comment in the template).
+        """
+        from ..utils.obs_ctx import build_obs_ctx
+        # See SheetOnSheetSimulation._build_obs_ctx: AFM-only
+        # _contact_cutoff() derives its cutoff from self.config.tip.mat, which
+        # no sheet-family builder has, flake included. Pass the same
+        # documented fallback constant -- not a considered value for flake
+        # either; Task 18 replaces this when a real flake contact channel
+        # lands.
+        from ..afm.base import _CONTACT_CUTOFF_FALLBACK
+        out = self.config.settings.output
+        return build_obs_ctx(
+            sim_type='flake',
+            n_layers=n_layers,
+            results_file_pattern=results_file_pattern,
+            use_langevin=(
+                self.config.settings.thermostat.type == 'langevin'),
+            enabled_tiers=dict(out.channels),
+            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+            results_freq=out.results_frequency,
+            optional_channels=out.optional_channels,
+        )
 
     def build(self) -> None:
         """Assemble the flake-on-sheet system and write ``lammps/slide.in``."""
@@ -308,6 +370,8 @@ class FlakeSlideSimulation(SimulationBase):
         sim = settings.simulation
         out = settings.output
         flake_cfg = self.config.flake
+        results_file_pattern = self._run_dir_path(
+            "results", "friction_p${pressure}_a${a}_s${speed}")
 
         context = {
             "temp": general.temp,
@@ -346,18 +410,11 @@ class FlakeSlideSimulation(SimulationBase):
             "run_steps": sim.slide_run_steps,
             "min_style": sim.min_style,
             "minimization_command": sim.minimization_command,
-            # settings.output.channels gates each tier"s fix ave/time, the same
-            # way it does for the AFM family. Passed as a plain dict: unlike AFM,
-            # the sheet templates hand-write their varlists rather than taking
-            # them from the observables registry, so only the gate is shared --
-            # routing the varlists through the registry would change which
-            # columns are emitted, which is a separate change with its own risk.
-            "channels": dict(out.channels),
             "results_freq": out.results_frequency,
             "dump_freq": out.dump_frequency.get("slide", 1000),
             "dump_enabled": out.dump.get("slide", False),
-            "results_file_pattern": self._run_dir_path(
-                "results", "friction_p${pressure}_a${a}_s${speed}"),
+            "results_file_pattern": results_file_pattern,
+            "obs_ctx": self._build_obs_ctx(n_sheet_layers, results_file_pattern),
             "dump_file_pattern": self._run_dir_path(
                 "visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"),
             "driving_spring_ev": (general.driving_spring or 50.0) / NM_TO_EV_A2,

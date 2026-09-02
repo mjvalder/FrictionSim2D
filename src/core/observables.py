@@ -185,7 +185,7 @@ for _lyr in (1, 2):
     for _ax in ('x', 'y', 'z'):
         _add(Observable(
             name=f'com{_ax}_L{_lyr}',
-            sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
+            sim_types=('afm', 'sheetonsheet', 'indent', 'hetero', 'flake'),
             group=f'layer_{_lyr}', tier='window', stream='results',
             lammps_compute=f'compute COM_L{_lyr} layer_{_lyr} com',
             lammps_variable=(f'variable com{_ax}_L{_lyr} equal '
@@ -251,11 +251,13 @@ _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet', 'hetero'),
 # friction label itself, its cost is paid in every production sheet run, and
 # moving it would change the label's averaging. Template-owned (no
 # lammps_compute), so validate_registry's window-tier ban never sees it.
-_add(Observable(name='lfx', key='lfx@sheet', sim_types=('sheetonsheet', 'hetero'),
+_add(Observable(name='lfx', key='lfx@sheet',
+                sim_types=('sheetonsheet', 'hetero', 'flake'),
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_xfrict', units='nN',
                 role_key='lateral_force_x'))
-_add(Observable(name='lfy', key='lfy@sheet', sim_types=('sheetonsheet', 'hetero'),
+_add(Observable(name='lfy', key='lfy@sheet',
+                sim_types=('sheetonsheet', 'hetero', 'flake'),
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_yfrict', units='nN',
                 role_key='lateral_force_y'))
@@ -279,11 +281,25 @@ for _ax in ('x', 'y', 'z'):
                     group='layer_n', tier='window', stream='results',
                     rename_to=f'v_com{_ax}_top', units='A',
                     role_key=f'driven_com_{_ax}'))
+# The flake model has one mobile body, so the driven COM is the flake's, not
+# a top layer's. Same role_key as the sheet's drive{x,y,z} and AFM's tip*,
+# which is what lets a COF consumer read all three families' driven body
+# through channel_by_role. A distinct `key` is required: the bare name
+# 'drivex' is already taken by the sheet/hetero entry above, and their
+# sim_types are disjoint (flake vs sheetonsheet/hetero) so the name may be
+# reused, but the registry key may not.
+for _ax in ('x', 'y', 'z'):
+    _add(Observable(name=f'drive{_ax}', key=f'drive{_ax}@flake',
+                    sim_types=('flake',), group='flake',
+                    tier='window', stream='results',
+                    rename_to=f'v_com{_ax}_flake', units='A',
+                    role_key=f'driven_com_{_ax}'))
 # Reaction force on the fixed bottom layer. react_x doubles as the frozen
 # legacy correction's LJ-branch discriminator -- see Task 11 and
 # read_data._correct_legacy_lf_schema1.
 for _ax in ('x', 'y', 'z'):
-    _add(Observable(name=f'react_{_ax}', sim_types=('sheetonsheet', 'hetero'),
+    _add(Observable(name=f'react_{_ax}',
+                    sim_types=('sheetonsheet', 'hetero', 'flake'),
                     group='layer_1', tier='window', stream='results',
                     rename_to=f'v_s{_ax}', units='nN',
                     role_key=f'reaction_force_{_ax}'))
@@ -430,7 +446,7 @@ def layer_channels(n_layers: int) -> list:
         for ax in ('x', 'y', 'z'):
             out.append(Observable(
                 name=f'com{ax}_L{lyr}',
-                sim_types=('afm', 'sheetonsheet', 'indent', 'hetero'),
+                sim_types=('afm', 'sheetonsheet', 'indent', 'hetero', 'flake'),
                 group=f'layer_{lyr}', tier='window', stream='results',
                 lammps_compute=f'compute COM_L{lyr} layer_{lyr} com',
                 lammps_variable=(f'variable com{ax}_L{lyr} equal '

@@ -10,13 +10,15 @@ renders the *macro*, proving the macro works rather than that anyone uses it.
 These tests render the real templates instead, which is the only way this class
 of gap shows up.
 
-Task 14 routed `sheetonsheet/slide.lmp` through the observables registry, and
-Task 15 did the same for `hetero/slide.lmp`: both now have their gate live in
-a real `obs_ctx` (built by `build_obs_ctx`), not a bare `channels` dict -- a
-stubbed `obs_ctx = 0` renders as Jinja Undefined, which is falsy, so every
-tier would silently vanish regardless of the dict below. `flake/slide.lmp`
-still hand-writes its varlist (Task 16 converts it) and keeps the stub-based
-`channels` dict approach.
+Task 14 routed `sheetonsheet/slide.lmp` through the observables registry,
+Task 15 did the same for `hetero/slide.lmp`, and Task 16 finished the family
+with `flake/slide.lmp`: all three now have their gate live in a real
+`obs_ctx` (built by `build_obs_ctx`), not a bare `channels` dict -- a stubbed
+`obs_ctx = 0` renders as Jinja Undefined, which is falsy, so every tier would
+silently vanish regardless of a `channels` dict passed alongside it. The
+stub-based `_render`/`channels`-dict path this module used for the
+not-yet-converted templates is gone along with the last template that needed
+it; see `_render_flake` below for the real-`obs_ctx` replacement.
 """
 import pytest
 from jinja2 import Environment, meta
@@ -34,27 +36,6 @@ def _fix_emitted(rendered: str, name: str) -> bool:
     """
     return any(l.startswith(f"fix ") and f" {name} " in l
                for l in rendered.split("\n"))
-
-
-def _render(template: str, **channels) -> str:
-    """Render a template with every variable stubbed except the channel gate.
-
-    Supplying 0 for the whole undeclared-variable set keeps the test about the
-    gate, not about producing a runnable script.
-    """
-    env = Environment(loader=PackageLoader('src.templates'),
-                      trim_blocks=True, lstrip_blocks=True)
-    source = env.loader.get_source(env, template)[0]
-    ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
-    ctx['n_layers'] = 3
-    # Names the templates iterate over rather than interpolate. A scalar stub
-    # raises "'int' object is not iterable" before reaching the gate.
-    bands = [{'idx': i, 'zlo': 0.0, 'zhi': 1.0} for i in (1, 2, 3)]
-    for key in ('layers', 'sheet_layers', 'layer_groups'):
-        if key in ctx:
-            ctx[key] = bands
-    ctx['channels'] = {'window': True, 'raw': True, 'peratom': True, **channels}
-    return env.get_template(template).render(ctx)
 
 
 def _render_sheetonsheet(**channels) -> str:
@@ -123,8 +104,43 @@ def _render_hetero(**channels) -> str:
     return env.get_template(template).render(ctx)
 
 
+def _render_flake(**channels) -> str:
+    """Render flake/slide.lmp with a real obs_ctx driving the gate.
+
+    Mirrors `_render_hetero` (Task 16 routed flake/slide.lmp through the
+    observables registry the same way Tasks 14/15 did for
+    sheetonsheet/hetero): the template now reads
+    obs_ctx.emit_window/emit_raw/emit_peratom, not a bare channels dict.
+    Unlike hetero, no `extra_filter` is needed: flake declares no
+    interlayer/contact channel at all, so `channels_for('flake', 'peratom')`
+    is already empty -- there is nothing for a filter to drop.
+    """
+    template = 'flake/slide.lmp'
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    source = env.loader.get_source(env, template)[0]
+    ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
+    ctx['n_layers'] = 3
+    ctx['has_internal_lj'] = True
+    bands = [{'idx': i, 'zlo': 0.0, 'zhi': 1.0} for i in range(1, 4)]
+    for key in ('layers', 'sheet_layers', 'layer_groups'):
+        if key in ctx:
+            ctx[key] = bands
+    enabled_tiers = {'window': True, 'raw': True, 'peratom': True, **channels}
+    ctx['obs_ctx'] = build_obs_ctx(
+        sim_type='flake',
+        n_layers=3,
+        results_file_pattern='results/friction.txt',
+        use_langevin=False,
+        enabled_tiers=enabled_tiers,
+        contact_cutoff=5.0,
+        results_freq=1000,
+        optional_channels=(),
+    )
+    return env.get_template(template).render(ctx)
+
+
 ALL_TIERS = "sheetonsheet/slide.lmp"
-WINDOW_ONLY = ["flake/slide.lmp"]
 
 
 def test_sheet_emits_every_tier_by_default():
@@ -147,16 +163,6 @@ def test_sheet_tiers_are_independently_disablable(off, gone, kept):
 def test_sheet_window_tier_can_be_disabled():
     out = _render_sheetonsheet(window=False)
     assert not _fix_emitted(out, "fc_win")
-
-
-@pytest.mark.parametrize("template", WINDOW_ONLY)
-def test_flake_window_tier_is_gated(template):
-    """flake still carries only the window tier, under the name fc_ave
-    (Task 16 has not converted it yet). hetero moved off this stub-based
-    path in Task 15 -- see the hetero-specific tests below, which render a
-    real obs_ctx instead."""
-    assert _fix_emitted(_render(template), "fc_ave")
-    assert not _fix_emitted(_render(template, window=False), "fc_ave")
 
 
 def test_hetero_emits_window_and_raw_by_default():
@@ -189,6 +195,31 @@ def test_hetero_peratom_stays_absent_regardless_of_the_channel_setting():
     forces into existence."""
     assert not _fix_emitted(_render_hetero(), "fc_pa")
     assert not _fix_emitted(_render_hetero(peratom=True), "fc_pa")
+
+
+def test_flake_emits_only_the_window_tier_by_default():
+    """flake declares no raw- or peratom-tier channel at all (unlike hetero,
+    which gained the raw tier in Task 15): both varlists are empty regardless
+    of the channel setting, so build_obs_ctx's emptiness gate suppresses
+    fc_raw/fc_pa unconditionally. Not a bug -- task-16 brief: 'that is the
+    correct outcome; do not manufacture a tier to make something appear.'"""
+    out = _render_flake()
+    assert _fix_emitted(out, "fc_win")
+    assert not _fix_emitted(out, "fc_raw")
+    assert not _fix_emitted(out, "fc_pa")
+
+
+def test_flake_window_tier_can_be_disabled():
+    out = _render_flake(window=False)
+    assert not _fix_emitted(out, "fc_win")
+
+
+def test_flake_raw_and_peratom_stay_absent_regardless_of_the_channel_setting():
+    """Turning raw/peratom ON in settings cannot summon a tier flake never
+    declared a channel for."""
+    out = _render_flake(raw=True, peratom=True)
+    assert not _fix_emitted(out, "fc_raw")
+    assert not _fix_emitted(out, "fc_pa")
 
 
 def test_the_shared_group_group_compute_survives_disabling_peratom():
