@@ -597,14 +597,6 @@ class TestColumnMappings:
         for col in ('time', 'nf', 'lfx', 'lfy'):
             assert col in DataReader._AFM_FILE_COLUMNS
 
-    def test_sheet_columns_have_all_template_vars(self):
-        from src.postprocessing.read_data import DataReader
-        # Sheet template outputs 16 variables + timestep = 17 columns.
-        assert len(DataReader._SHEET_FILE_COLUMNS) == 17
-        # Must include the two v_com*_top columns that were previously missing
-        assert 'v_comx_top' in DataReader._SHEET_FILE_COLUMNS
-        assert 'v_comy_top' in DataReader._SHEET_FILE_COLUMNS
-
     def test_sheet_rename_maps_to_canonical_names(self):
         from src.core.observables import rename_map
         rename = rename_map('sheetonsheet', 'window')

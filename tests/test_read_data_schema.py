@@ -356,3 +356,27 @@ def test_registry_is_the_only_sheet_rename_map():
     assert not hasattr(DataReader, '_SHEET_COLUMN_RENAME'), (
         'the registry owns sheet renames now; a second hand-maintained map '
         'is what let rename_map shadow lfx and silently kill sheet COF')
+
+
+def test_headerless_sheet_file_raises(tmp_path):
+    """Surveyed 2026-08-29: of 24,064 candidate results files in the retained
+    tree, zero non-empty files are headerless, and only 5 of 7,171 sheet files
+    match the 17-column list the positional fallback described. Guessing at a
+    headerless sheet file is more dangerous than refusing it."""
+    import pytest
+    from src.postprocessing.read_data import DataReader, SchemaError
+    f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
+    # line 2 must NOT start with '#': _read_dataframe takes the header path
+    # whenever it does, and would happily name the columns after whatever
+    # tokens it found there.
+    f.write_text("# Time-averaged data for fix fc_ave\n"
+                 "1000 1.0 0.5 2.0\n"
+                 "2000 1.1 0.6 2.1\n")
+    with pytest.raises(SchemaError):
+        DataReader()._read_dataframe(f, 'sheet')
+
+
+def test_sheet_positional_list_is_gone():
+    from src.postprocessing.read_data import DataReader
+    assert not hasattr(DataReader, '_SHEET_FILE_COLUMNS')
+    assert DataReader._AFM_FILE_COLUMNS[:3] == ['time', 'nf', 'lfx']

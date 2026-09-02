@@ -368,17 +368,6 @@ def test_hetero_results_file_carries_all_four_com_probes():
     assert set(ALL_FOUR_COM_Z) <= set(line.split())
 
 
-def test_sheet_window_keeps_legacy_sixteen_variable_prefix():
-    """The new columns must be appended, not inserted: the header-less
-    positional fallback in read_data keys off this exact prefix."""
-    from src.postprocessing.read_data import DataReader
-    m = [m for m in FIX_RE.finditer(
-        _render_sheet_slide(has_internal_lj=False, n_layers=3))
-        if m.group(1) == 'fc_win'][0]
-    legacy = DataReader._SHEET_FILE_COLUMNS[1:]  # drop 'time'
-    assert m.group(5).split()[:len(legacy)] == legacy
-
-
 # --- the test that would actually have caught the eV/A-vs-nN defect ---------
 # A registry-level units assertion cannot: the sheet family has no `nf`
 # channel in REGISTRY at all, and its lateral channel is `xfrict`, so a

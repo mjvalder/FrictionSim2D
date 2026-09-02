@@ -69,15 +69,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         'tipx', 'tipy', 'tipz',
     ]
 
-    # Column names matching fix fc_ave output order in sheetonsheet/slide.lmp.
-    # 16 LAMMPS variables + timestep = 17 file columns.
-    _SHEET_FILE_COLUMNS = [
-        'time', 'v_xfrict', 'v_yfrict', 'v_sx', 'v_sy', 'v_sz',
-        'v_fx', 'v_fy', 'v_fz', 'v_comx_top', 'v_comy_top',
-        'v_comx_ctop', 'v_comy_ctop', 'v_comz_ctop',
-        'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot',
-    ]
-
     # eV/A -> nN. Pre-schema-2 sheet files emitted the LJ-branch lateral force
     # unscaled while the normal load was already nN, so their COF is a factor
     # 1.602176565 too SMALL. The correction is a multiplication.
@@ -286,9 +277,17 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             df.attrs['lf_schema'] = self._parse_lf_schema(header_lines[0])
             return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 
-        # LEGACY_2026 positional fallback — width must match EXACTLY
-        legacy = (self._SHEET_FILE_COLUMNS if sim_type == 'sheet'
-                  else self._AFM_FILE_COLUMNS)
+        # LEGACY_2026 positional fallback -- AFM only. The sheet corpus was
+        # surveyed on 2026-08-29: 24,064 candidate results files, zero
+        # non-empty headerless, and only 5 of 7,171 sheet files matching the
+        # 17-column list this branch used to carry. Guessing is worse than
+        # refusing.
+        if sim_type != 'tip':
+            raise SchemaError(
+                f"{filepath}: no column header and no positional schema for "
+                f"sim_type {sim_type!r}"
+            )
+        legacy = self._AFM_FILE_COLUMNS
         try:
             probe = pd.read_csv(
                 filepath, sep=r'\s+', header=None, skiprows=2, nrows=1,
