@@ -33,10 +33,19 @@ def add_plot_derived_columns(df: pd.DataFrame, time_step_fs: float) -> pd.DataFr
     if 'v_xfrict' in df.columns and 'v_yfrict' in df.columns:
         df['lf_as_was'] = np.sqrt(df['v_xfrict']**2 + df['v_yfrict']**2)
 
-    if 'v_sx' in df.columns and 'v_sy' in df.columns:
+    # The registry renames the sheet's native v_sx/v_sy and v_fx/v_fy to
+    # react_x/react_y and drive_fx/drive_fy for retained files, but older
+    # files parsed before that declaration -- or read through a path that
+    # skips the rename -- still carry the native names. Both are accepted,
+    # mirroring DataReader._branch_column / _lateral_columns.
+    if 'react_x' in df.columns and 'react_y' in df.columns:
+        df['lf_sx_sy'] = np.sqrt(df['react_x']**2 + df['react_y']**2)
+    elif 'v_sx' in df.columns and 'v_sy' in df.columns:
         df['lf_sx_sy'] = np.sqrt(df['v_sx']**2 + df['v_sy']**2)
 
-    if 'v_fx' in df.columns and 'v_fy' in df.columns:
+    if 'drive_fx' in df.columns and 'drive_fy' in df.columns:
+        df['lf_fx_fy'] = np.sqrt(df['drive_fx']**2 + df['drive_fy']**2)
+    elif 'v_fx' in df.columns and 'v_fy' in df.columns:
         df['lf_fx_fy'] = np.sqrt(df['v_fx']**2 + df['v_fy']**2)
 
     if 'tipz' in df.columns and 'comz' in df.columns:
