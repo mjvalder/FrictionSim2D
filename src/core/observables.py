@@ -85,19 +85,16 @@ ROLE_EXEMPT: dict = {
 #: Ordered family pairs the parity contract checks: every results channel
 #: with a role_key in `source` must have a counterpart in `target`.
 #:
-#: afm -> sheetonsheet: these are the two full families, but only this
-#: direction is live yet. hetero/flake -> sheetonsheet one way only: they are
+#: sheetonsheet <-> afm: the two full families, checked in both directions.
+#: Every sheet channel with an AFM counterpart now exists, so both readings
+#: of the contract hold honestly, each against its own reasoned
+#: PARITY_EXEMPT entries. hetero/flake -> sheetonsheet one way only: they are
 #: genuinely reduced variants, and demanding the reverse would need an
 #: exemption table large enough to stop being read. 'indent' inherits AFM's
 #: declarations and is not separately checked.
-#:
-#: `('afm', 'sheetonsheet')` is added by the task immediately after the one
-#: that declared the sheet family's opt-in peratom/post channels (n_contact_il,
-#: pe_sum_L{i}, sigma_{xx,yy}_2d_L{i}, gap_min_il, corrugation_max), once its
-#: role_key rename lands too. Turning it on earlier would need ~17 exemptions
-#: with untrue reasons.
 PARITY_PAIRS = (
     ('sheetonsheet', 'afm'),
+    ('afm', 'sheetonsheet'),
     ('hetero', 'sheetonsheet'),
     ('flake', 'sheetonsheet'),
 )
@@ -160,6 +157,26 @@ PARITY_EXEMPT: dict = {
     ('afm', 'membrane_stress_yy_L2'):
         'AFM already covers whole-sheet membrane stress (sigma_yy_2d); the '
         'sheet stack resolves it per layer instead',
+    ('sheetonsheet', 'group_temperature'):
+        'AFM has a single 2D sheet with one temperature to report; the '
+        'sheet stack resolves temperature per body (center, layer_1, the '
+        'top layer) and carries no aggregate equivalent',
+    ('sheetonsheet', 'thermostat_work_tip'):
+        'the sheet has no tip body; its thermostatted group is the stack '
+        'interior, not the driven contact',
+    ('afm', 'thermostat_work_interior'):
+        'the AFM tip is both thermostatted and driven, so its dissipation '
+        'is reported at the contact, not at a separate interior body',
+    ('sheetonsheet', 'membrane_stress_xx'):
+        'AFM sums the in-plane virial over one membrane; the sheet stack '
+        'resolves it per layer (membrane_stress_xx_L{i})',
+    ('sheetonsheet', 'membrane_stress_yy'):
+        'AFM sums the in-plane virial over one membrane; the sheet stack '
+        'resolves it per layer (membrane_stress_yy_L{i})',
+    ('sheetonsheet', 'raw_driven_com_z'):
+        "the sheet's raw fix records only the driven layer's in-plane COM; "
+        'adding v_comz_top to it would be a new column, and the raw tier is '
+        'deliberately free of layer-count-dependent additions',
 }
 
 
@@ -244,7 +261,7 @@ _add(Observable(name='w_thermostat_tip', sim_types=('afm', 'indent'),
                 group='tip_thermo', tier='window', stream='results',
                 lammps_variable='variable w_lang_tip equal f_lang_tip',
                 rename_to='v_w_lang_tip', units='eV',
-                role_key='thermostat_work_driven'))
+                role_key='thermostat_work_tip'))
 _add(Observable(name='w_thermostat_sub', sim_types=('afm', 'indent'),
                 group='sub_thermo', tier='window', stream='results',
                 lammps_variable='variable w_lang_sub equal f_lang_sub',
@@ -262,17 +279,21 @@ _add(Observable(name='temp_sheet_3d', sim_types=('afm', 'indent'),
 # ... tally yes` is already emitted by all three sheet templates, so LAMMPS is
 # already accumulating this scalar and throwing it away. Filtered out on
 # non-Langevin runs by build_obs_ctx's w_thermostat prefix rule -- f_lang
-# does not exist under nose-hoover. role_key is shared with AFM's
-# w_thermostat_tip: a slight misnomer here, since the sheet's thermostatted
-# group is the stack INTERIOR (`center`), not a driven top layer, but the
-# shared role is what lets a role-keyed consumer (COF, the DB writer) read
-# both families' thermostat work through one lookup.
+# does not exist under nose-hoover. role_key is its OWN role
+# (thermostat_work_interior), not AFM's w_thermostat_tip's
+# (thermostat_work_tip): the sheet's thermostatted group is the stack
+# INTERIOR (`center`), while the driven top layer runs undamped `rigid/nve`
+# and is never thermostatted -- unlike AFM, where the tip IS both
+# thermostatted and driven. Sharing one role would let a role-keyed consumer
+# (COF, the DB writer) read both as "dissipation at the driven contact",
+# which is true for AFM and false for the sheet. Each role carries a
+# PARITY_EXEMPT entry against the other family instead.
 _add(Observable(name='w_thermostat_center',
                 sim_types=('sheetonsheet', 'hetero', 'flake'),
                 group='center', tier='window', stream='results',
                 lammps_variable='variable w_lang_center equal f_lang',
                 rename_to='v_w_lang_center', units='eV',
-                role_key='thermostat_work_driven'))
+                role_key='thermostat_work_interior'))
 # Group temperatures for the sheet stack: `center` (thermostatted interior),
 # `layer_1` (the fixed bottom band, `setforce 0 0 0`) and the driven top
 # layer (`rigid/nve`). `center` and `layer_1` are literal group names in all
