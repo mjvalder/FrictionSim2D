@@ -10,14 +10,18 @@ renders the *macro*, proving the macro works rather than that anyone uses it.
 These tests render the real templates instead, which is the only way this class
 of gap shows up.
 
-Note the sheet varlists are still hand-written: routing them through the
-registry would change which columns are emitted (the registry declares 10
-window observables for sheetonsheet; the template emits 19 + 3n), which is a
-separate change with its own risk. Only the gate is shared.
+Task 14 routed `sheetonsheet/slide.lmp` through the observables registry: its
+gate now lives in a real `obs_ctx` (built by `build_obs_ctx`), not a bare
+`channels` dict -- a stubbed `obs_ctx = 0` renders as Jinja Undefined, which
+is falsy, so every tier would silently vanish regardless of the dict below.
+`hetero/slide.lmp` and `flake/slide.lmp` still hand-write their varlists
+(Tasks 15/16 convert them one at a time) and keep the stub-based `channels`
+dict approach.
 """
 import pytest
 from jinja2 import Environment, meta
 
+from src.builders.utils.obs_ctx import build_obs_ctx
 from src.interfaces.jinja import PackageLoader
 
 
@@ -53,12 +57,39 @@ def _render(template: str, **channels) -> str:
     return env.get_template(template).render(ctx)
 
 
+def _render_sheetonsheet(**channels) -> str:
+    """Render sheetonsheet/slide.lmp with a real obs_ctx driving the gate.
+
+    Everything else is stubbed as 0, same as `_render`; only `obs_ctx` needs
+    to be real, since the template now reads `obs_ctx.emit_window` etc.
+    rather than a bare `channels` dict.
+    """
+    template = 'sheetonsheet/slide.lmp'
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    source = env.loader.get_source(env, template)[0]
+    ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
+    ctx['n_layers'] = 3
+    enabled_tiers = {'window': True, 'raw': True, 'peratom': True, **channels}
+    ctx['obs_ctx'] = build_obs_ctx(
+        sim_type='sheetonsheet',
+        n_layers=3,
+        results_file_pattern='results/friction.txt',
+        use_langevin=False,
+        enabled_tiers=enabled_tiers,
+        contact_cutoff=5.0,
+        results_freq=1000,
+        optional_channels=(),
+    )
+    return env.get_template(template).render(ctx)
+
+
 ALL_TIERS = "sheetonsheet/slide.lmp"
 WINDOW_ONLY = ["hetero/slide.lmp", "flake/slide.lmp"]
 
 
 def test_sheet_emits_every_tier_by_default():
-    out = _render(ALL_TIERS)
+    out = _render_sheetonsheet()
     for fix in ("fc_win", "fc_raw", "fc_pa"):
         assert _fix_emitted(out, fix), f"{fix} missing with all channels on"
 
@@ -68,14 +99,14 @@ def test_sheet_emits_every_tier_by_default():
     ("peratom", "fc_pa",  "fc_raw"),
 ])
 def test_sheet_tiers_are_independently_disablable(off, gone, kept):
-    out = _render(ALL_TIERS, **{off: False})
+    out = _render_sheetonsheet(**{off: False})
     assert not _fix_emitted(out, gone), f"channels.{off}=False did not drop {gone}"
     assert _fix_emitted(out, kept), f"disabling {off} also dropped {kept}"
     assert _fix_emitted(out, "fc_win"), "the window tier is the COF source; it must survive"
 
 
 def test_sheet_window_tier_can_be_disabled():
-    out = _render(ALL_TIERS, window=False)
+    out = _render_sheetonsheet(window=False)
     assert not _fix_emitted(out, "fc_win")
 
 
@@ -93,6 +124,6 @@ def test_the_shared_group_group_compute_survives_disabling_peratom():
     dropping it with the peratom tier would break the COF source. AFM can drop
     its peratom computes; the sheet family cannot.
     """
-    out = _render(ALL_TIERS, peratom=False)
+    out = _render_sheetonsheet(peratom=False)
     assert "compute         frict" in out
     assert not _fix_emitted(out, "fc_pa")

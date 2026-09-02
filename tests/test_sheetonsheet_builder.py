@@ -29,7 +29,10 @@ def _normalize_random_seeds(content: str) -> str:
 # Captured from SheetOnSheetSimulation.write_inputs() with outer_loop unset,
 # on the `_make_sheetonsheet_config` fixture config (pressure=1.0), before
 # the scan_angle split was added. Pins that the unset (default) path is
-# byte-identical to today.
+# byte-identical to today. Updated for Task 14: the three fix ave/time lines
+# now come from the observables registry (src/core/observables.py) via
+# emit_output_fixes(obs_ctx) -- column order changed, and COM_ctop/COM_cbot/
+# COM_bot were deleted as exact aliases of the layer-resolved COMs.
 _EXPECTED_SLIDE_UNSET_OUTER_LOOP = """\
 # LAMMPS Input Script for Sheet-vs-Sheet Sliding
 # 3-layer model, constraint_mode: none
@@ -88,44 +91,23 @@ variable        comx_top equal c_COM_top[1]
 variable        comy_top equal c_COM_top[2]
 variable        comz_top equal c_COM_top[3]
 
-compute         COM_ctop layer_2 com
-variable        comx_ctop equal c_COM_ctop[1]
-variable        comy_ctop equal c_COM_ctop[2]
-variable        comz_ctop equal c_COM_ctop[3]
+# --- observable registry channels (spec §3) ---------------------------------
+compute COM_L1 layer_1 com
+compute COM_L2 layer_2 com
+compute COM_L3 layer_3 com
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable comx_L2 equal c_COM_L2[1]
+variable comy_L2 equal c_COM_L2[2]
+variable comz_L2 equal c_COM_L2[3]
+variable comx_L3 equal c_COM_L3[1]
+variable comy_L3 equal c_COM_L3[2]
+variable comz_L3 equal c_COM_L3[3]
 
-# COM_cbot/COM_ctop straddle the MIDDLE interface: cbot = layer_(n//2),
-# ctop = layer_(n//2 + 1), so the stack splits into two sheets of equal
-# thickness (the thinner half below for odd n). cbot was pinned to layer_2,
-# which only lands there at n_layers == 4: at the 3-layer minimum it aliased
-# COM_ctop and the extracted interlayer gap was identically zero.
-compute         COM_cbot layer_1 com
-variable        comx_cbot equal c_COM_cbot[1]
-variable        comy_cbot equal c_COM_cbot[2]
-variable        comz_cbot equal c_COM_cbot[3]
-
-compute         COM_bot layer_1 com
-variable        comx_bot equal c_COM_bot[1]
-variable        comy_bot equal c_COM_bot[2]
-variable        comz_bot equal c_COM_bot[3]
-
-# --- observable registry channels (spec §3): layer-resolved COM for every
-# layer, plus global energies. Lateral layer COMs are the realized-registry
-# observable (spec §12 — registry is measured, not imposed).
-compute         COM_L1 layer_1 com
-variable        comx_L1 equal c_COM_L1[1]
-variable        comy_L1 equal c_COM_L1[2]
-variable        comz_L1 equal c_COM_L1[3]
-compute         COM_L2 layer_2 com
-variable        comx_L2 equal c_COM_L2[1]
-variable        comy_L2 equal c_COM_L2[2]
-variable        comz_L2 equal c_COM_L2[3]
-compute         COM_L3 layer_3 com
-variable        comx_L3 equal c_COM_L3[1]
-variable        comy_L3 equal c_COM_L3[2]
-variable        comz_L3 equal c_COM_L3[3]
-variable        etot equal etotal
-variable        pe_now equal pe
-variable        ke_now equal ke
 
 # Apply Uniform Pressure
 # 1 eV/Å³ = 160.2176565 GPa
@@ -177,12 +159,13 @@ velocity        virtual set 0.0 0.0 0.0
 fix             spr layer_3 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 
-# Three sampling tiers (spec §4). fc_win keeps the legacy 16-column prefix.
+# Three sampling tiers (spec §4). Column order is registry-driven (Task 14).
 # NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
 # exemption: it is the label itself and its cost was already paid campaign-wide.
-fix             fc_win all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comz_top v_comx_bot v_comy_bot v_comz_bot v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 v_etot v_pe_now v_ke_now file out/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
-fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file out/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
-fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file out/results/peratom_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN"
+fix             fc_win all ave/time 1 1000 1000 v_etot v_pe_now v_ke_now v_xfrict v_yfrict v_fz v_fx v_fy v_comx_top v_comy_top v_comz_top v_sx v_sy v_sz v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 file out/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file out/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file out/results/peratom_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+
 
 run             500000
 

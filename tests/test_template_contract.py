@@ -97,7 +97,28 @@ def test_sheet_temp_diagnostic_present(slide_text):
     assert 'compute T_sheet 2D_all temp' in slide_text
 
 
-def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4) -> str:
+def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4) -> dict:
+    """Call build_obs_ctx directly, with the same defaults _render_sheet_slide
+    uses (all tiers on, the documented contact-cutoff fallback)."""
+    from src.builders.utils.obs_ctx import build_obs_ctx
+    interlayer = {'E_int_interlayer', 'n_contact_il'}
+    return build_obs_ctx(
+        sim_type='sheetonsheet',
+        n_layers=n_layers,
+        results_file_pattern='results/friction.txt',
+        use_langevin=True,
+        enabled_tiers={'window': True, 'raw': True, 'peratom': True},
+        contact_cutoff=5.0,
+        results_freq=1000,
+        optional_channels=(),
+        extra_filter=(
+            None if not has_internal_lj
+            else lambda ob: ob.name not in interlayer),
+    )
+
+
+def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
+                        constraint_mode: str = 'none') -> str:
     """Render sheetonsheet/slide.lmp directly for the conditional-channel test.
 
     Only the has_internal_lj branch is under test; the non-strict env renders
@@ -109,16 +130,16 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4) -> str:
                       trim_blocks=True, lstrip_blocks=True)
     return env.get_template('sheetonsheet/slide.lmp').render(
         n_layers=n_layers, has_internal_lj=has_internal_lj,
-        constraint_mode='none', pot_type='sw' if not has_internal_lj else 'rebomos',
+        constraint_mode=constraint_mode, pot_type='sw' if not has_internal_lj else 'rebomos',
         scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
         scan_angle_force=None, temp=300, thermostat_type='langevin',
         drive_method='fix_move', dump_enabled=False,
         seed_sheet_center=12345,
         # All tiers on: these tests are about the has_internal_lj branch,
-        # not the channel gate. Passed explicitly because the template
-        # requires it -- a missing gate must error, not silently emit
-        # everything, which is how the sheet family went ungated for so long.
-        channels={'window': True, 'raw': True, 'peratom': True},
+        # not the channel gate. The tier gate now lives in obs_ctx (built by
+        # build_obs_ctx), not a bare channels dict -- see
+        # tests/test_output_channels_sheet.py for the gate itself.
+        obs_ctx=_sheet_obs_ctx(has_internal_lj, n_layers),
         xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,  # zhi feeds arithmetic
         num_atom_types=6, data_file='build/sheet.lmp',
         potential_file='system.in.settings', neighbor_list=2.0,
@@ -138,6 +159,45 @@ def test_conditional_interlayer_channel():
     assert 'variable        e_int_il equal c_frict' in sw_text
     rb_text = _render_sheet_slide(has_internal_lj=True)
     assert 'e_int_il' not in rb_text
+
+
+def test_sheet_slide_takes_its_varlist_from_the_macro():
+    src = _template_source('sheetonsheet/slide.lmp')
+    assert 'emit_output_fixes(obs_ctx)' in src
+    # hold_ave is exempt: it is NOT a results-tier file (no title1, and it
+    # keeps its own hand-written varlist by design -- see
+    # test_hold_fix_never_carries_schema_marker). Only fc_win/fc_raw/fc_pa
+    # must have vanished from the source in favour of the macro call.
+    results_fix_lines = [ln for ln in src.splitlines()
+                         if ln.startswith('fix') and 'ave/time' in ln
+                         and 'hold_ave' not in ln]
+    assert not results_fix_lines, (
+        f'no hand-written results-tier fix ave/time may remain: {results_fix_lines}')
+
+
+def test_sheet_window_varlist_matches_the_registry():
+    from src.core.observables import channels_for, layer_channels
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
+    emitted = ctx['window_varlist'].split()
+    for ob in channels_for('sheetonsheet', 'window'):
+        if ob.name.startswith('com') and '_L' in ob.name:
+            continue          # the static bilayer pair is replaced per-run
+        assert (ob.rename_to or f'v_{ob.name}') in emitted, ob.registry_key
+    for ob in layer_channels(4):
+        assert ob.rename_to in emitted, ob.name
+
+
+def test_many_body_sheet_drops_the_interlayer_channels():
+    # the template's fallback branch never defines v_e_int_il, so emitting it
+    # would reference an undefined variable
+    ctx = _sheet_obs_ctx(has_internal_lj=True, n_layers=4)
+    assert 'v_e_int_il' not in ctx['peratom_varlist']
+    assert ctx['emit_peratom'] is False      # it was the only peratom channel
+
+
+def test_sheet_results_fix_carries_the_family_marker():
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
+    assert ctx['title1'] == '# schema=2 lf_units=nN family=sheetonsheet'
 
 
 def test_unloaded_reference_lines_in_system_init(tmp_path):
@@ -181,16 +241,28 @@ def test_sheet_hold_logs_shearing_interface():
     assert text.index('fix             hold_ave') > text.index('run             10000')
 
 
+@pytest.mark.parametrize('n_layers', [4, 6])
+def test_atom_bonds_r0_top_names_the_bonded_pair(n_layers):
+    """r0_top must read the pair the harmonic bonds actually connect
+    (layer_{n-1}/layer_n, from `create_bonds many layer_{{ n_layers - 1 }}
+    layer_{{ n_layers }}`), NOT the middle sliding interface (il_top/il_bot).
+
+    The two pairs coincide only at n_layers == 4 (il_top == n_layers - 1
+    there); n_layers == 6 is where a wrong repoint would show up as a
+    silently-different r0_top.
+    """
+    text = _render_sheet_slide(has_internal_lj=False, n_layers=n_layers,
+                               constraint_mode='atom_bonds')
+    assert (f'variable        r0_top equal '
+           f'v_comz_top-v_comz_L{n_layers - 1}') in text
+    assert 'v_comz_ctop' not in text
+
+
 def test_sheet_three_tiers():
+    # Column order is registry-driven (Task 14); the exact varlist is
+    # checked by test_sheet_window_varlist_matches_the_registry instead.
     text = _render_sheet_slide(has_internal_lj=False)
     assert 'fc_win' in text and 'fc_raw' in text and 'fc_pa' in text
-    # fc_win keeps the legacy 16-column prefix
-    win = [l for l in text.splitlines()
-           if 'fc_win' in l and l.strip().startswith('fix')][0]
-    assert win.split('ave/time 1 1000')[1].split()[1:17] == [
-        'v_xfrict', 'v_yfrict', 'v_sx', 'v_sy', 'v_sz', 'v_fx', 'v_fy',
-        'v_fz', 'v_comx_top', 'v_comy_top', 'v_comx_ctop', 'v_comy_ctop',
-        'v_comz_ctop', 'v_comx_cbot', 'v_comy_cbot', 'v_comz_cbot']
 
 
 def test_sheet_peratom_absent_for_internal_lj():
@@ -274,7 +346,8 @@ def test_sheet_fixes_carry_the_schema_marker():
     # LAMMPS title1 replaces ONLY line 1; the column header stays on line 2
     # where read_data reads it.
     text = _render_sheet_slide(has_internal_lj=False)
-    assert text.count('title1 "# schema=2 lf_units=nN"') == 3  # win, raw, pa
+    assert text.count(
+        'title1 "# schema=2 lf_units=nN family=sheetonsheet"') == 3  # win, raw, pa
 
 
 def test_hold_fix_has_no_schema_marker():
@@ -311,10 +384,13 @@ def _render_hetero_slide(n_layers: int) -> str:
 
 
 def _com_probe_groups(text: str):
-    """(ctop group, cbot group)."""
-    ctop = re.search(r'compute\s+COM_ctop\s+(\S+)\s+com', text).group(1)
-    cbot = re.search(r'compute\s+COM_cbot\s+(\S+)\s+com', text).group(1)
-    return ctop, cbot
+    """(upper, lower) groups straddling the sliding interface.
+
+    Read from `compute frict`, which is now the single definition of the
+    interface -- COM_ctop/COM_cbot were deleted as exact aliases of
+    com{x,y,z}_L{il_top}/L{il_bot} (spec 4.2).
+    """
+    return _frict_groups(text)
 
 
 def _frict_groups(text: str):
@@ -350,16 +426,13 @@ def test_hetero_com_probes_straddle_the_middle_interface(n_layers, cbot, ctop):
 ALL_FOUR_COM_Z = ['v_comz_bot', 'v_comz_cbot', 'v_comz_ctop', 'v_comz_top']
 
 
-def test_sheet_results_file_carries_all_four_com_probes():
-    """All four COM probes are computed; all four must also be written.
-
-    comz_top and comz_bot were computed and never emitted, so downstream had
-    only the ctop/cbot pair to work with.
-    """
-    text = _render_sheet_slide(has_internal_lj=False, n_layers=3)
-    m = [m for m in FIX_RE.finditer(text) if m.group(1) == 'fc_win'][0]
-    emitted = set(m.group(5).split())
-    assert set(ALL_FOUR_COM_Z) <= emitted
+def test_sheet_results_file_carries_all_four_com_z_probes():
+    """comz_top and comz_bot were computed and never emitted. After the
+    alias removal the same four numbers arrive as drivez plus the layer
+    COMs at il_top, il_bot and layer 1."""
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
+    emitted = set(ctx['window_varlist'].split())
+    assert {'v_comz_top', 'v_comz_L3', 'v_comz_L2', 'v_comz_L1'} <= emitted
 
 
 def test_hetero_results_file_carries_all_four_com_probes():
@@ -369,12 +442,12 @@ def test_hetero_results_file_carries_all_four_com_probes():
 
 
 # --- the test that would actually have caught the eV/A-vs-nN defect ---------
-# A registry-level units assertion cannot: the sheet family has no `nf`
-# channel in REGISTRY at all, and its lateral channel is `xfrict`, so a
-# REGISTRY['lfx'].units == REGISTRY['nf'].units check only ever compares two
-# AFM entries. The defect lived in the TEMPLATE, so the template is where it
-# has to be pinned -- for every sheet template, not just the one that was
-# looked at.
+# A registry-level units assertion alone would not have: REGISTRY['nf@sheet']
+# and REGISTRY['lfx@sheet'] now exist and agree on 'nN' (see
+# test_sheet_cof_inputs_share_force_units), but the original defect lived in
+# the TEMPLATE emitting an unscaled eV/A value, not in a registry mismatch.
+# So the template is where it has to be pinned -- for every sheet template,
+# not just the one that was looked at.
 SHEET_SLIDE_TEMPLATES = ('sheetonsheet/slide.lmp',
                          'hetero/slide.lmp',
                          'flake/slide.lmp')
@@ -409,8 +482,30 @@ def test_interlayer_energy_stays_unscaled(template):
         assert 'variable        e_int_il equal c_frict\n' in src, template
 
 
-@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES)
-def test_results_fixes_carry_schema_marker(template):
+#: Templates already routed through the observables registry (Task 14): their
+#: source has no hand-written `fix ... ave/time` line to grep for any more --
+#: only the macro call -- so the marker must be checked on the RENDERED
+#: output instead. Tasks 15/16 move hetero/flake here one at a time; moving a
+#: template between the two lists below is meant to be a one-line diff.
+SHEET_SLIDE_TEMPLATES_CONVERTED = ('sheetonsheet/slide.lmp',)
+SHEET_SLIDE_TEMPLATES_UNCONVERTED = ('hetero/slide.lmp', 'flake/slide.lmp')
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES_CONVERTED)
+def test_results_fixes_carry_schema_marker_converted(template):
+    family = template.split('/')[0]
+    text = _render_sheet_slide(has_internal_lj=False)
+    results_fixes = [ln for ln in text.splitlines()
+                     if ln.startswith('fix') and 'ave/time' in ln
+                     and 'hold_ave' not in ln]
+    assert results_fixes, template
+    for ln in results_fixes:
+        assert (f'title1 "# schema=2 lf_units=nN family={family}"' in ln
+               ), f"{template}: {ln[:60]}"
+
+
+@pytest.mark.parametrize('template', SHEET_SLIDE_TEMPLATES_UNCONVERTED)
+def test_results_fixes_carry_schema_marker_unconverted(template):
     src = _template_source(template)
     results_fixes = [ln for ln in src.splitlines()
                      if ln.startswith('fix') and 'ave/time' in ln

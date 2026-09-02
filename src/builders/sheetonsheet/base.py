@@ -254,6 +254,41 @@ class SheetOnSheetSimulation(SimulationBase):
             layer_groups[f'layer_{i}_types'] = self.groups[f'layer_{i}']
         return layer_groups
 
+    def _build_obs_ctx(self, n_layers: int, results_file_pattern: str,
+                       has_internal_lj: bool) -> Dict[str, object]:
+        """Observable context for the sheet family.
+
+        `extra_filter` drops the interlayer channels for a many-body
+        potential: the template's fallback branch defines xfrict as v_sx and
+        never defines v_e_int_il, so the registry cannot decide this on its
+        own -- only the builder knows the potential type.
+        """
+        from ..utils.obs_ctx import build_obs_ctx
+        # AFM-only _contact_cutoff() derives its cutoff from
+        # self.config.tip.mat, which the sheet builders do not have. The
+        # only consumer of a sheet contact cutoff (n_contact_il) is opt_in
+        # and ships disabled, so a real derivation is not needed yet. Pass
+        # the documented fallback constant instead -- Task 18 replaces this
+        # with a real derivation when it declares n_contact_il. Do not treat
+        # this as a considered value.
+        from ..afm.base import _CONTACT_CUTOFF_FALLBACK
+        interlayer = {'E_int_interlayer', 'n_contact_il'}
+        out = self.config.settings.output
+        return build_obs_ctx(
+            sim_type='sheetonsheet',
+            n_layers=n_layers,
+            results_file_pattern=results_file_pattern,
+            use_langevin=(
+                self.config.settings.thermostat.type == 'langevin'),
+            enabled_tiers=dict(out.channels),
+            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+            results_freq=out.results_frequency,
+            optional_channels=out.optional_channels,
+            extra_filter=(
+                None if not has_internal_lj
+                else lambda ob: ob.name not in interlayer),
+        )
+
     def write_inputs(self) -> None:
         """Generate LAMMPS scripts."""
         logger.info("Writing LAMMPS inputs...")
@@ -287,6 +322,12 @@ class SheetOnSheetSimulation(SimulationBase):
 
         if atom_style == 'molecular':
             atomic2molecular(self.structure_paths['sheet'])
+
+        has_internal_lj = not self.pm.is_sheet_lj(pot_type)
+        results_file_pattern = (
+            f"{rel_run_dir_str}/results/"
+            f"friction_p${{pressure}}_a${{a}}_s${{speed}}"
+        )
 
         base_context = {
             'seed_sheet_center': self._run_seed('sheet_center'),
@@ -333,17 +374,9 @@ class SheetOnSheetSimulation(SimulationBase):
             'results_freq': out.results_frequency,
             'dump_freq': out.dump_frequency.get('slide', 1000),
             'dump_enabled': out.dump.get('slide', False),
-            'results_file_pattern': (
-                f"{rel_run_dir_str}/results/"
-                f"friction_p${{pressure}}_a${{a}}_s${{speed}}"
-            ),
-            # settings.output.channels gates each tier's fix ave/time, the same
-            # way it does for the AFM family. Passed as a plain dict: unlike AFM,
-            # the sheet templates hand-write their varlists rather than taking
-            # them from the observables registry, so only the gate is shared --
-            # routing the varlists through the registry would change which
-            # columns are emitted, which is a separate change with its own risk.
-            'channels': dict(out.channels),
+            'results_file_pattern': results_file_pattern,
+            'obs_ctx': self._build_obs_ctx(
+                n_layers, results_file_pattern, has_internal_lj),
             'results_file_raw': (
                 f"{rel_run_dir_str}/results/"
                 f"raw_p${{pressure}}_a${{a}}_s${{speed}}"
@@ -361,7 +394,7 @@ class SheetOnSheetSimulation(SimulationBase):
             'thermostat_type': self.config.settings.thermostat.type,
             'atom_style': atom_style,
             'pot_type': pot_type,
-            'has_internal_lj': not self.pm.is_sheet_lj(pot_type),
+            'has_internal_lj': has_internal_lj,
             'ev_a_to_nn': EV_A_TO_NN,
             'ev_a3_to_gpa': EV_A3_TO_GPA,
         }

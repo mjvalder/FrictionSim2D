@@ -4,6 +4,7 @@
    the COM probes, `compute frict`, v_d_shear -- must use this one pair. #}
 {% set il_bot = n_layers // 2 %}
 {% set il_top = n_layers // 2 + 1 %}
+{% import 'common/observables.lmp' as obs %}
 # LAMMPS Input Script for Sheet-vs-Sheet Sliding
 # {{ n_layers }}-layer model, constraint_mode: {{ constraint_mode }}
 
@@ -110,38 +111,12 @@ variable        comx_top equal c_COM_top[1]
 variable        comy_top equal c_COM_top[2]
 variable        comz_top equal c_COM_top[3]
 
-compute         COM_ctop layer_{{ il_top }} com
-variable        comx_ctop equal c_COM_ctop[1]
-variable        comy_ctop equal c_COM_ctop[2]
-variable        comz_ctop equal c_COM_ctop[3]
-
-# COM_cbot/COM_ctop straddle the MIDDLE interface: cbot = layer_(n//2),
-# ctop = layer_(n//2 + 1), so the stack splits into two sheets of equal
-# thickness (the thinner half below for odd n). cbot was pinned to layer_2,
-# which only lands there at n_layers == 4: at the 3-layer minimum it aliased
-# COM_ctop and the extracted interlayer gap was identically zero.
-compute         COM_cbot layer_{{ il_bot }} com
-variable        comx_cbot equal c_COM_cbot[1]
-variable        comy_cbot equal c_COM_cbot[2]
-variable        comz_cbot equal c_COM_cbot[3]
-
-compute         COM_bot layer_1 com
-variable        comx_bot equal c_COM_bot[1]
-variable        comy_bot equal c_COM_bot[2]
-variable        comz_bot equal c_COM_bot[3]
-
-# --- observable registry channels (spec §3): layer-resolved COM for every
-# layer, plus global energies. Lateral layer COMs are the realized-registry
-# observable (spec §12 — registry is measured, not imposed).
-{% for i in range(1, n_layers + 1) %}
-compute         COM_L{{ i }} layer_{{ i }} com
-variable        comx_L{{ i }} equal c_COM_L{{ i }}[1]
-variable        comy_L{{ i }} equal c_COM_L{{ i }}[2]
-variable        comz_L{{ i }} equal c_COM_L{{ i }}[3]
-{% endfor %}
-variable        etot equal etotal
-variable        pe_now equal pe
-variable        ke_now equal ke
+{# COM_ctop/COM_cbot/COM_bot were exact aliases of layer-resolved COM
+   (com{x,y,z}_L{il_top}, L{il_bot}, L1) and are deleted as duplicates
+   (spec 4.2). The registry's layer_channels(n_layers), plus etotal/pe/ke,
+   now supply everything that block used to compute by hand -- including
+   the per-layer COM_L{i} loop that used to live here. #}
+{{ obs.emit_observables(obs_ctx) }}
 
 # Apply Uniform Pressure
 # 1 eV/Å³ = {{ ev_a3_to_gpa }} GPa
@@ -193,12 +168,16 @@ run             {{ hold_steps }}
 unfix           hold_ave
 
 {% if constraint_mode == 'atom_bonds' %}
-# Recalibrate top bond equilibrium distance after minimization
-thermo_style    custom v_comz_top v_comz_ctop
+# Recalibrate top bond equilibrium distance after minimization. The bonds
+# are created between layer_{{ n_layers - 1 }} and layer_{{ n_layers }}
+# (see `create_bonds` above), so r0_top must read the same pair -- NOT the
+# middle sliding interface (il_top/il_bot), which coincides with it only at
+# n_layers == 4.
+thermo_style    custom v_comz_top v_comz_L{{ n_layers - 1 }}
 run             0
 thermo_style    multi
 
-variable        r0_top equal v_comz_top-v_comz_ctop
+variable        r0_top equal v_comz_top-v_comz_L{{ n_layers - 1 }}
 bond_coeff      1 {{ bond_spring_ev }} ${r0_top}
 {% elif constraint_mode == 'com_spring' %}
 # COM spring tethering top two layers
@@ -224,20 +203,10 @@ fix             spr layer_{{ n_layers }} spring couple virtual {{ driving_spring
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 {% endif %}
 
-# Three sampling tiers (spec §4). fc_win keeps the legacy 16-column prefix.
+# Three sampling tiers (spec §4). Column order is registry-driven (Task 14).
 # NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
 # exemption: it is the label itself and its cost was already paid campaign-wide.
-{% if channels.window %}
-fix             fc_win all ave/time 1 1000 {{ results_freq }} v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comz_top v_comx_bot v_comy_bot v_comz_bot {% for i in range(1, n_layers + 1) %}v_comx_L{{ i }} v_comy_L{{ i }} v_comz_L{{ i }} {% endfor %}v_etot v_pe_now v_ke_now file {{ results_file_pattern }} title1 "# schema=2 lf_units=nN"
-{% endif %}
-{% if channels.raw %}
-fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file {{ results_file_raw }} title1 "# schema=2 lf_units=nN"
-{% endif %}
-{% if not has_internal_lj %}
-{% if channels.peratom %}
-fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file {{ results_file_peratom }} title1 "# schema=2 lf_units=nN"
-{% endif %}
-{% endif %}
+{{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
 
