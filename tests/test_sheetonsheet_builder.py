@@ -32,7 +32,10 @@ def _normalize_random_seeds(content: str) -> str:
 # byte-identical to today. Updated for Task 14: the three fix ave/time lines
 # now come from the observables registry (src/core/observables.py) via
 # emit_output_fixes(obs_ctx) -- column order changed, and COM_ctop/COM_cbot/
-# COM_bot were deleted as exact aliases of the layer-resolved COMs.
+# COM_bot were deleted as exact aliases of the layer-resolved COMs. Updated
+# again for Task 17: three new computes (T_center, T_layer_1, T_Ltop) and
+# four new window variables (w_lang_center, temp_center_3d, temp_L1_3d,
+# temp_Ltop_3d) -- at n_layers=3, T_Ltop names layer_3, the real top layer.
 _EXPECTED_SLIDE_UNSET_OUTER_LOOP = """\
 # LAMMPS Input Script for Sheet-vs-Sheet Sliding
 # 3-layer model, constraint_mode: none
@@ -92,12 +95,19 @@ variable        comy_top equal c_COM_top[2]
 variable        comz_top equal c_COM_top[3]
 
 # --- observable registry channels (spec §3) ---------------------------------
+compute T_center center temp
+compute T_layer_1 layer_1 temp
+compute T_Ltop layer_3 temp
 compute COM_L1 layer_1 com
 compute COM_L2 layer_2 com
 compute COM_L3 layer_3 com
 variable etot equal etotal
 variable pe_now equal pe
 variable ke_now equal ke
+variable w_lang_center equal f_lang
+variable temp_center_3d equal c_T_center
+variable temp_L1_3d equal c_T_layer_1
+variable temp_Ltop_3d equal c_T_Ltop
 variable comx_L1 equal c_COM_L1[1]
 variable comy_L1 equal c_COM_L1[2]
 variable comz_L1 equal c_COM_L1[3]
@@ -162,7 +172,7 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 # Three sampling tiers (spec §4). Column order is registry-driven (Task 14).
 # NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
 # exemption: it is the label itself and its cost was already paid campaign-wide.
-fix             fc_win all ave/time 1 1000 1000 v_etot v_pe_now v_ke_now v_xfrict v_yfrict v_fz v_fx v_fy v_comx_top v_comy_top v_comz_top v_sx v_sy v_sz v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 file out/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+fix             fc_win all ave/time 1 1000 1000 v_etot v_pe_now v_ke_now v_w_lang_center v_temp_center_3d v_temp_L1_3d v_temp_Ltop_3d v_xfrict v_yfrict v_fz v_fx v_fy v_comx_top v_comy_top v_comz_top v_sx v_sy v_sz v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 file out/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
 fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file out/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
 fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file out/results/peratom_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
 

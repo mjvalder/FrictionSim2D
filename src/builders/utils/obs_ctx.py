@@ -75,15 +75,24 @@ def build_obs_ctx(
         return ob.rename_to or f'v_{ob.name}'
 
     cutoff = round(contact_cutoff, 4)
+
+    def _sub(text: str) -> str:
+        # {contact_cutoff}: n_contact's coord/atom cutoff. {n_layers}: the
+        # real top-layer group (layer_4, layer_6, ...) behind the registry
+        # label 'layer_n' -- see temp_Ltop_3d. Applied to both compute and
+        # variable text since a future channel may need either.
+        return (text.replace('{contact_cutoff}', str(cutoff))
+                .replace('{n_layers}', str(n_layers)))
+
     compute_lines: List[str] = []
     variable_lines: List[str] = []
     for ob in [*win, *pa]:
         if ob.lammps_compute:
-            line = ob.lammps_compute.replace('{contact_cutoff}', str(cutoff))
+            line = _sub(ob.lammps_compute)
             if line not in compute_lines:
                 compute_lines.append(line)
         if ob.lammps_variable:
-            variable_lines.append(ob.lammps_variable)
+            variable_lines.append(_sub(ob.lammps_variable))
 
     window_varlist = ' '.join(native(ob) for ob in win)
     peratom_varlist = ' '.join(native(ob) for ob in pa)

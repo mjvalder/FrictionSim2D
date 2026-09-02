@@ -119,6 +119,15 @@ PARITY_EXEMPT: dict = {
         'the membrane is a layer of the stack, covered by group_pe_sum',
     ('sheetonsheet', 'thermostat_work_substrate'):
         'the sheet stack has one thermostatted group, not tip plus substrate',
+    ('afm', 'group_temperature_center'):
+        'AFM has one 2D sheet with one temperature; the sheet stack resolves '
+        'temperature per body (interior, fixed bottom, driven top)',
+    ('afm', 'group_temperature_layer_1'):
+        'AFM has one 2D sheet with one temperature; the sheet stack resolves '
+        'temperature per body (interior, fixed bottom, driven top)',
+    ('afm', 'group_temperature_layer_n'):
+        'AFM has one 2D sheet with one temperature; the sheet stack resolves '
+        'temperature per body (interior, fixed bottom, driven top)',
     ('afm', 'interlayer_interaction'):
         'AFM measures the tip-sheet interaction, a different pair of bodies',
     ('afm', 'drive_force_x'):
@@ -229,6 +238,52 @@ _add(Observable(name='temp_sheet_3d', sim_types=('afm', 'indent'),
                 lammps_variable='variable temp_sheet equal c_T_sheet',
                 rename_to='v_temp_sheet', units='K',
                 role_key='group_temperature'))
+# Cumulative thermostat work for the sheet stack. `fix lang center langevin
+# ... tally yes` is already emitted by all three sheet templates, so LAMMPS is
+# already accumulating this scalar and throwing it away. Filtered out on
+# non-Langevin runs by build_obs_ctx's w_thermostat prefix rule -- f_lang
+# does not exist under nose-hoover. role_key is shared with AFM's
+# w_thermostat_tip: a slight misnomer here, since the sheet's thermostatted
+# group is the stack INTERIOR (`center`), not a driven top layer, but the
+# shared role is what lets a role-keyed consumer (COF, the DB writer) read
+# both families' thermostat work through one lookup.
+_add(Observable(name='w_thermostat_center',
+                sim_types=('sheetonsheet', 'hetero', 'flake'),
+                group='center', tier='window', stream='results',
+                lammps_variable='variable w_lang_center equal f_lang',
+                rename_to='v_w_lang_center', units='eV',
+                role_key='thermostat_work_driven'))
+# Group temperatures for the sheet stack: `center` (thermostatted interior),
+# `layer_1` (the fixed bottom band, `setforce 0 0 0`) and the driven top
+# layer (`rigid/nve`). `center` and `layer_1` are literal group names in all
+# three templates. The top layer is NOT: `layer_n` here is a registry LABEL
+# meaning "the top layer", and the real LAMMPS group is `layer_{n_layers}`
+# (`layer_4`, `layer_6`, ...) -- so temp_Ltop_3d's compute carries a
+# `{n_layers}` placeholder that build_obs_ctx substitutes at render time, the
+# same mechanism n_contact uses for `{contact_cutoff}`. `group='layer_n'`
+# stays a label (validate_registry only rejects the bare string 'tip').
+#
+# Diagnostics with empirically banded ranges, not setpoint checks -- see the
+# task brief. Not filtered by thermostat type: `compute ... temp` works under
+# either langevin or nose-hoover.
+_add(Observable(name='temp_center_3d', sim_types=('sheetonsheet', 'hetero', 'flake'),
+                group='center', tier='window', stream='results',
+                lammps_compute='compute T_center center temp',
+                lammps_variable='variable temp_center_3d equal c_T_center',
+                rename_to='v_temp_center_3d', units='K',
+                role_key='group_temperature_center'))
+_add(Observable(name='temp_L1_3d', sim_types=('sheetonsheet', 'hetero', 'flake'),
+                group='layer_1', tier='window', stream='results',
+                lammps_compute='compute T_layer_1 layer_1 temp',
+                lammps_variable='variable temp_L1_3d equal c_T_layer_1',
+                rename_to='v_temp_L1_3d', units='K',
+                role_key='group_temperature_layer_1'))
+_add(Observable(name='temp_Ltop_3d', sim_types=('sheetonsheet', 'hetero', 'flake'),
+                group='layer_n', tier='window', stream='results',
+                lammps_compute='compute T_Ltop layer_{n_layers} temp',
+                lammps_variable='variable temp_Ltop_3d equal c_T_Ltop',
+                rename_to='v_temp_Ltop_3d', units='K',
+                role_key='group_temperature_layer_n'))
 # Tip-sheet coupling is purely lj/cut, so group/group works here even under the
 # hybrid pair style.
 _add(Observable(name='E_int_tip_sheet', sim_types=('afm', 'indent'),

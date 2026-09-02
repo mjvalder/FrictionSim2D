@@ -97,7 +97,8 @@ def test_sheet_temp_diagnostic_present(slide_text):
     assert 'compute T_sheet 2D_all temp' in slide_text
 
 
-def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4) -> dict:
+def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4,
+                   use_langevin: bool = True) -> dict:
     """Call build_obs_ctx directly, with the same defaults _render_sheet_slide
     uses (all tiers on, the documented contact-cutoff fallback)."""
     from src.builders.utils.obs_ctx import build_obs_ctx
@@ -106,7 +107,7 @@ def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4) -> dict:
         sim_type='sheetonsheet',
         n_layers=n_layers,
         results_file_pattern='results/friction.txt',
-        use_langevin=True,
+        use_langevin=use_langevin,
         enabled_tiers={'window': True, 'raw': True, 'peratom': True},
         contact_cutoff=5.0,
         results_freq=1000,
@@ -752,3 +753,57 @@ def test_macro_emits_the_schema_marker_on_every_results_fix():
     assert len(fixes) == 3, fixes
     for line in fixes:
         assert 'title1 "{{ obs_ctx.title1 }}"' in line, line
+
+
+# --- Task 17: thermostat work and group temperatures ------------------------
+
+def test_thermostat_work_present_under_langevin_absent_otherwise():
+    assert 'v_w_lang_center' in _sheet_obs_ctx(
+        has_internal_lj=False, n_layers=4, use_langevin=True)['window_varlist']
+    assert 'v_w_lang_center' not in _sheet_obs_ctx(
+        has_internal_lj=False, n_layers=4, use_langevin=False)['window_varlist']
+
+
+def test_f_lang_never_referenced_in_the_nvt_branch():
+    # the nose-hoover branch emits `fix nvt_center` with no tally, so f_lang
+    # would not resolve and LAMMPS would error
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4, use_langevin=False)
+    assert 'f_lang' not in ' '.join(ctx['variable_lines'])
+
+
+#: temp_Ltop_3d's compute carries a `{n_layers}` placeholder (like n_contact's
+#: `{contact_cutoff}`) because `layer_n` is a registry LABEL for "the top
+#: layer", not a real LAMMPS group -- the real group is layer_4, layer_6,
+#: etc. Parametrized over two layer counts so layer_4 vs layer_6 is visible,
+#: not just "some digit got substituted".
+@pytest.mark.parametrize('n_layers', [4, 6])
+def test_temp_ltop_names_the_real_top_layer_sheetonsheet(n_layers):
+    text = _render_sheet_slide(has_internal_lj=False, n_layers=n_layers)
+    assert f'compute T_Ltop layer_{n_layers} temp' in text
+    assert 'layer_n' not in text
+
+
+@pytest.mark.parametrize('n_layers', [4, 6])
+def test_temp_ltop_names_the_real_top_layer_hetero(n_layers):
+    text = _render_hetero_slide(n_layers)
+    assert f'compute T_Ltop layer_{n_layers} temp' in text
+    assert 'layer_n' not in text
+
+
+@pytest.mark.parametrize('n_layers', [4, 6])
+def test_temp_ltop_names_the_real_top_layer_flake(n_layers):
+    text = _render_flake_slide(n_layers)
+    assert f'compute T_Ltop layer_{n_layers} temp' in text
+    assert 'layer_n' not in text
+
+
+def test_sheet_group_temperatures_present_regardless_of_thermostat():
+    # compute ... temp works under either langevin or nose-hoover; only
+    # w_thermostat_center is conditional on use_langevin
+    for use_langevin in (True, False):
+        ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4,
+                             use_langevin=use_langevin)
+        emitted = ctx['window_varlist'].split()
+        assert 'v_temp_center_3d' in emitted
+        assert 'v_temp_L1_3d' in emitted
+        assert 'v_temp_Ltop_3d' in emitted
