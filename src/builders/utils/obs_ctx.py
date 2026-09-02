@@ -7,7 +7,7 @@ Python, exactly the drift this removes from Jinja.
 Imports only src.core.observables -- never ase, directly or transitively.
 tests/test_import_weight.py pins that.
 """
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from ...core.observables import (
     REGISTRY, TIER_ARGS, channels_for, layer_channels)
@@ -28,6 +28,7 @@ def build_obs_ctx(
     contact_cutoff: float,
     results_freq: int,
     layer_groups_available: bool = True,
+    interface_layers: Optional[Tuple[int, int]] = None,
     extra_filter: Optional[Callable[[object], bool]] = None,
     optional_channels: Sequence[str] = (),
 ) -> Dict[str, object]:
@@ -41,17 +42,36 @@ def build_obs_ctx(
     ``extra_filter`` drops channels the registry cannot decide about on its
     own -- notably the interlayer channels under a many-body potential, where
     the template's fallback branch never defines their variables.
+
+    ``interface_layers`` is the ``(il_bot, il_top)`` pair the sliding
+    interface sits at, substituted into ``{il_bot}``/``{il_top}`` the same
+    way ``{contact_cutoff}`` and ``{n_layers}`` already are. The sheet
+    builders pass ``(n_layers // 2, n_layers // 2 + 1)`` -- the identical
+    rule ``sheetonsheet/slide.lmp`` uses for its own ``{% set il_bot %}``/
+    ``{% set il_top %}``, so the interface has one definition shared between
+    Python and Jinja rather than two that can drift.
     """
     static_layer_names = {f'com{ax}_L{lyr}'
                           for lyr in (1, 2) for ax in ('x', 'y', 'z')}
+    # The peratom-tier analogue of static_layer_names: pe_sum_L{1,2} and the
+    # sigma_{xx,yy}_2d_L{1,2} static bilayer pairs are swapped out for
+    # layer_channels(n_layers)'s real-layer-count generation, exactly like
+    # the window-tier com{x,y,z}_L{1,2} entries above.
+    static_peratom_layer_names = {
+        f'{prefix}_L{lyr}' for lyr in (1, 2)
+        for prefix in ('pe_sum', 'sigma_xx_2d', 'sigma_yy_2d')
+    }
+    generated_layer_channels = layer_channels(n_layers)
     win = [ob for ob in channels_for(sim_type, 'window')
            if ob.name not in static_layer_names]
+    pa = [ob for ob in channels_for(sim_type, 'peratom')
+          if ob.stream == 'results'
+          and ob.name not in static_peratom_layer_names]
     if layer_groups_available:
-        win += [ob for ob in layer_channels(n_layers) if ob.tier == 'window']
+        win += [ob for ob in generated_layer_channels if ob.tier == 'window']
+        pa += [ob for ob in generated_layer_channels if ob.tier == 'peratom']
     if not use_langevin:
         win = [ob for ob in win if not ob.name.startswith('w_thermostat')]
-    pa = [ob for ob in channels_for(sim_type, 'peratom')
-          if ob.stream == 'results']
 
     if not enabled_tiers.get('peratom', True):
         pa = []
@@ -60,7 +80,12 @@ def build_obs_ctx(
         pa = [ob for ob in pa if extra_filter(ob)]
 
     requested = set(optional_channels)
-    known = {ob.name for ob in REGISTRY.values()}
+    # generated_layer_channels covers real per-layer names beyond the static
+    # L1/L2 REGISTRY entries (e.g. pe_sum_L3 on a 4-layer stack) -- without
+    # this, naming one in optional_channels would fail the unknown-name
+    # check below even though build_obs_ctx knows exactly how to emit it.
+    known = ({ob.name for ob in REGISTRY.values()}
+             | {ob.name for ob in generated_layer_channels})
     unknown = requested - known
     if unknown:
         raise ValueError(
@@ -77,20 +102,34 @@ def build_obs_ctx(
     cutoff = round(contact_cutoff, 4)
 
     def _sub(text: str) -> str:
-        # {contact_cutoff}: n_contact's coord/atom cutoff. {n_layers}: the
-        # real top-layer group (layer_4, layer_6, ...) behind the registry
-        # label 'layer_n' -- see temp_Ltop_3d. Applied to both compute and
-        # variable text since a future channel may need either.
-        return (text.replace('{contact_cutoff}', str(cutoff))
+        # {contact_cutoff}: n_contact/n_contact_il's coord/atom cutoff.
+        # {n_layers}: the real top-layer group (layer_4, layer_6, ...)
+        # behind the registry label 'layer_n' -- see temp_Ltop_3d.
+        # {il_bot}/{il_top}: the real sliding-interface layer groups behind
+        # n_contact_il's compute -- see interface_layers above. Applied to
+        # both compute and variable text since a future channel may need
+        # any of these in either field.
+        text = (text.replace('{contact_cutoff}', str(cutoff))
                 .replace('{n_layers}', str(n_layers)))
+        if interface_layers is not None:
+            il_bot, il_top = interface_layers
+            text = (text.replace('{il_bot}', str(il_bot))
+                    .replace('{il_top}', str(il_top)))
+        return text
 
     compute_lines: List[str] = []
     variable_lines: List[str] = []
     for ob in [*win, *pa]:
         if ob.lammps_compute:
-            line = _sub(ob.lammps_compute)
-            if line not in compute_lines:
-                compute_lines.append(line)
+            text = _sub(ob.lammps_compute)
+            # Split into individual LAMMPS statements (a compute block may
+            # be multiple lines, e.g. n_contact's coord/atom + reduce pair)
+            # so two Observables that share exactly one statement -- the
+            # sigma_{xx,yy}_2d_L{i} pair's `stress/atom` compute -- dedupe
+            # correctly even though their surrounding blocks differ.
+            for stmt in text.split('\n'):
+                if stmt not in compute_lines:
+                    compute_lines.append(stmt)
         if ob.lammps_variable:
             variable_lines.append(_sub(ob.lammps_variable))
 

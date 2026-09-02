@@ -98,9 +98,15 @@ def test_sheet_temp_diagnostic_present(slide_text):
 
 
 def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4,
-                   use_langevin: bool = True) -> dict:
+                   use_langevin: bool = True, optional_channels=()) -> dict:
     """Call build_obs_ctx directly, with the same defaults _render_sheet_slide
-    uses (all tiers on, the documented contact-cutoff fallback)."""
+    uses (all tiers on, the documented contact-cutoff fallback).
+
+    interface_layers is always the (n_layers // 2, n_layers // 2 + 1) pair --
+    the same rule sheetonsheet/slide.lmp's own {% set il_bot %}/{% set
+    il_top %} use (Ruling 3) -- so n_contact_il's placeholders resolve
+    correctly whenever a test opts it in.
+    """
     from src.builders.utils.obs_ctx import build_obs_ctx
     interlayer = {'E_int_interlayer', 'n_contact_il'}
     return build_obs_ctx(
@@ -111,7 +117,8 @@ def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4,
         enabled_tiers={'window': True, 'raw': True, 'peratom': True},
         contact_cutoff=5.0,
         results_freq=1000,
-        optional_channels=(),
+        optional_channels=optional_channels,
+        interface_layers=(n_layers // 2, n_layers // 2 + 1),
         extra_filter=(
             None if not has_internal_lj
             else lambda ob: ob.name not in interlayer),
@@ -184,7 +191,12 @@ def test_sheet_window_varlist_matches_the_registry():
         if ob.name.startswith('com') and '_L' in ob.name:
             continue          # the static bilayer pair is replaced per-run
         assert (ob.rename_to or f'v_{ob.name}') in emitted, ob.registry_key
+    # layer_channels(4) also carries the opt-in peratom-tier per-layer
+    # channels (Task 18) -- only the window-tier com{x,y,z}_L{i} entries
+    # belong in the (always-on) window varlist.
     for ob in layer_channels(4):
+        if ob.tier != 'window':
+            continue
         assert ob.rename_to in emitted, ob.name
 
 
@@ -807,3 +819,77 @@ def test_sheet_group_temperatures_present_regardless_of_thermostat():
         assert 'v_temp_center_3d' in emitted
         assert 'v_temp_L1_3d' in emitted
         assert 'v_temp_Ltop_3d' in emitted
+
+
+# --- Task 18: opt-in per-atom and post channels ------------------------------
+
+def test_opt_in_sheet_channels_are_off_by_default():
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
+    assert 'v_n_contact_il' not in ctx['peratom_varlist']
+
+
+def test_naming_an_opt_in_channel_emits_it():
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4,
+                         optional_channels=['n_contact_il'])
+    assert 'v_n_contact_il' in ctx['peratom_varlist']
+
+
+def test_n_contact_il_names_the_real_sliding_interface():
+    # 4f0ed92 moved the interface to the middle of the stack; layer_{n-1}
+    # against layer_{n-2} coincides with it only at n_layers == 4
+    from src.core.observables import REGISTRY
+    compute = REGISTRY['n_contact_il'].lammps_compute
+    assert '{il_top}' in compute and '{il_bot}' in compute
+
+
+def test_opt_in_channels_default_build_leaves_render_unchanged():
+    """A default build (no optional_channels) must be a no-op: the rendered
+    script is byte-identical to what it emitted before Task 18."""
+    before = _render_sheet_slide(has_internal_lj=False, n_layers=4)
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4)
+    assert 'v_n_contact_il' not in ctx['window_varlist']
+    assert 'v_n_contact_il' not in ctx['peratom_varlist']
+    assert 'v_pe_sum_L' not in ctx['window_varlist']
+    assert 'v_pe_sum_L' not in ctx['peratom_varlist']
+    assert 'v_sigma_xx_2d_L' not in ctx['peratom_varlist']
+    assert 'v_sigma_yy_2d_L' not in ctx['peratom_varlist']
+    # rendering twice with identical inputs must be deterministic
+    after = _render_sheet_slide(has_internal_lj=False, n_layers=4)
+    assert before == after
+
+
+@pytest.mark.parametrize('n_layers,lyr', [(4, 1), (4, 2), (4, 3), (4, 4), (6, 5)])
+def test_pe_sum_and_sigma_layer_channels_named_in_turn(n_layers, lyr):
+    """Each per-layer opt-in channel is independently requestable -- neither
+    sigma_xx_2d_L{i} nor sigma_yy_2d_L{i} may depend on the other having
+    been requested, unlike AFM's always-both-present sigma_xx_2d/sigma_yy_2d
+    pair. lyr=3,4,5 exercise layer_channels(n_layers)'s real-count generation
+    beyond the static REGISTRY L1/L2 pair."""
+    for name in (f'pe_sum_L{lyr}', f'sigma_xx_2d_L{lyr}',
+                f'sigma_yy_2d_L{lyr}'):
+        ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=n_layers,
+                             optional_channels=[name])
+        assert f'v_{name}' in ctx['peratom_varlist'], name
+
+
+def test_sigma_xx_and_sigma_yy_layer_share_the_stress_atom_compute_once():
+    # both requested together must not redefine `compute satom_L{i}`
+    ctx = _sheet_obs_ctx(has_internal_lj=False, n_layers=4,
+                         optional_channels=['sigma_xx_2d_L2', 'sigma_yy_2d_L2'])
+    satom_defs = [l for l in ctx['compute_lines']
+                 if l.startswith('compute satom_L2 ')]
+    assert len(satom_defs) == 1, ctx['compute_lines']
+
+
+@pytest.mark.parametrize('n_layers,cbot,ctop', MIDDLE_INTERFACE)
+def test_interface_layers_matches_the_template_rule(n_layers, cbot, ctop):
+    """Python-side interface_layers=(n_layers // 2, n_layers // 2 + 1)
+    (build_obs_ctx, used by SheetOnSheetSimulation._build_obs_ctx for
+    n_contact_il) must agree with the Jinja-side il_bot/il_top the template
+    computes for itself. Two definitions of one interface that can drift is
+    exactly the defect this branch exists to remove."""
+    text = _render_sheet_slide(has_internal_lj=False, n_layers=n_layers)
+    top, bot = _frict_groups(text)
+    rendered_pair = (int(bot.split('_')[1]), int(top.split('_')[1]))
+    assert rendered_pair == (n_layers // 2, n_layers // 2 + 1)
+    assert rendered_pair == (cbot, ctop)

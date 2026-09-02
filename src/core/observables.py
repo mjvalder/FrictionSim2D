@@ -91,9 +91,11 @@ ROLE_EXEMPT: dict = {
 #: exemption table large enough to stop being read. 'indent' inherits AFM's
 #: declarations and is not separately checked.
 #:
-#: `('afm', 'sheetonsheet')` is added in Task 18, once the sheet family
-#: declares every role AFM does. Turning it on earlier would need ~17
-#: exemptions with untrue reasons.
+#: `('afm', 'sheetonsheet')` is added by the task immediately after the one
+#: that declared the sheet family's opt-in peratom/post channels (n_contact_il,
+#: pe_sum_L{i}, sigma_{xx,yy}_2d_L{i}, gap_min_il, corrugation_max), once its
+#: role_key rename lands too. Turning it on earlier would need ~17 exemptions
+#: with untrue reasons.
 PARITY_PAIRS = (
     ('sheetonsheet', 'afm'),
     ('hetero', 'sheetonsheet'),
@@ -140,6 +142,24 @@ PARITY_EXEMPT: dict = {
         'no fixed bottom layer exists in the AFM model to react against',
     ('afm', 'reaction_force_z'):
         'no fixed bottom layer exists in the AFM model to react against',
+    ('afm', 'group_pe_sum_L1'):
+        'AFM resolves group PE by body (tip/substrate/membrane), not by '
+        'sheet layer; the sheet stack has no equivalent whole-body groups',
+    ('afm', 'group_pe_sum_L2'):
+        'AFM resolves group PE by body (tip/substrate/membrane), not by '
+        'sheet layer; the sheet stack has no equivalent whole-body groups',
+    ('afm', 'membrane_stress_xx_L1'):
+        'AFM already covers whole-sheet membrane stress (sigma_xx_2d); the '
+        'sheet stack resolves it per layer instead',
+    ('afm', 'membrane_stress_xx_L2'):
+        'AFM already covers whole-sheet membrane stress (sigma_xx_2d); the '
+        'sheet stack resolves it per layer instead',
+    ('afm', 'membrane_stress_yy_L1'):
+        'AFM already covers whole-sheet membrane stress (sigma_yy_2d); the '
+        'sheet stack resolves it per layer instead',
+    ('afm', 'membrane_stress_yy_L2'):
+        'AFM already covers whole-sheet membrane stress (sigma_yy_2d); the '
+        'sheet stack resolves it per layer instead',
 }
 
 
@@ -420,6 +440,113 @@ _add(Observable(name='gap_min', sim_types=('afm', 'indent'),
                 group='tip_all', tier='peratom', stream='post', units='A',
                 role_key='min_gap'))
 
+
+def _pe_sum_layer(lyr: int) -> Observable:
+    """Per-layer group PE sum, opt-in. Shared by the static REGISTRY entries
+    (lyr in (1, 2), for the golden tests) and layer_channels() (the real
+    layer count) so the two can never drift apart."""
+    return Observable(
+        name=f'pe_sum_L{lyr}', sim_types=('sheetonsheet', 'hetero', 'flake'),
+        group=f'layer_{lyr}', tier='peratom', stream='results', opt_in=True,
+        lammps_compute=(f'compute peat_L{lyr} layer_{lyr} pe/atom\n'
+                        f'compute pesum_L{lyr} layer_{lyr} reduce sum '
+                        f'c_peat_L{lyr}'),
+        lammps_variable=f'variable pe_sum_L{lyr} equal c_pesum_L{lyr}',
+        rename_to=f'v_pe_sum_L{lyr}', units='eV',
+        role_key=f'group_pe_sum_L{lyr}')
+
+
+def _sigma_xx_layer(lyr: int) -> Observable:
+    """Per-layer in-plane stress sum (xx), opt-in. See _pe_sum_layer."""
+    return Observable(
+        name=f'sigma_xx_2d_L{lyr}',
+        sim_types=('sheetonsheet', 'hetero', 'flake'),
+        group=f'layer_{lyr}', tier='peratom', stream='results', opt_in=True,
+        lammps_compute=(f'compute satom_L{lyr} layer_{lyr} stress/atom NULL\n'
+                        f'compute sxx_L{lyr} layer_{lyr} reduce sum '
+                        f'c_satom_L{lyr}[1]'),
+        lammps_variable=f'variable sigma_xx_2d_L{lyr} equal c_sxx_L{lyr}',
+        rename_to=f'v_sigma_xx_2d_L{lyr}', units='eV/A',
+        role_key=f'membrane_stress_xx_L{lyr}')
+
+
+def _sigma_yy_layer(lyr: int) -> Observable:
+    """Per-layer in-plane stress sum (yy), opt-in. See _pe_sum_layer."""
+    return Observable(
+        name=f'sigma_yy_2d_L{lyr}',
+        sim_types=('sheetonsheet', 'hetero', 'flake'),
+        group=f'layer_{lyr}', tier='peratom', stream='results', opt_in=True,
+        lammps_compute=(f'compute satom_L{lyr} layer_{lyr} stress/atom NULL\n'
+                        f'compute syy_L{lyr} layer_{lyr} reduce sum '
+                        f'c_satom_L{lyr}[2]'),
+        lammps_variable=f'variable sigma_yy_2d_L{lyr} equal c_syy_L{lyr}',
+        rename_to=f'v_sigma_yy_2d_L{lyr}', units='eV/A',
+        role_key=f'membrane_stress_yy_L{lyr}')
+
+
+# --- opt-in sheet peratom/post channels (Task 18) ------------------------------
+# Every channel below ships DISABLED: opt_in=True, gated by
+# settings.output.optional_channels (a default build emits none of them --
+# see test_default_build_emits_no_opt_in_channel). They cost measurable
+# per-atom compute time and stay off until a pilot measures the overhead.
+#
+# No sigma_zz_L{i}: same reasoning as sigma_xx_2d/sigma_yy_2d above -- for a
+# slab with traction-free faces, the through-thickness integral of sigma_zz
+# is not a stress resultant.
+#
+# pe_sum_L{i}/sigma_xx_2d_L{i}/sigma_yy_2d_L{i} follow the existing
+# per-layer convention (com{x,y,z}_L{1,2} below / layer_channels()): static
+# L1/L2 entries here for the golden/registry tests, plus a generator
+# (_pe_sum_layer/_sigma_xx_layer/_sigma_yy_layer) reused by layer_channels()
+# for the real layer count. build_obs_ctx swaps the static pair for the
+# generated ones the same way it already does for com{x,y,z}_L{1,2}.
+_add(_pe_sum_layer(1))
+_add(_pe_sum_layer(2))
+# sigma_xx_2d_L{i} and sigma_yy_2d_L{i} each declare their OWN full copy of
+# the shared `stress/atom` compute (unlike AFM's sigma_xx_2d/sigma_yy_2d
+# pair, where sigma_yy_2d omits it and relies on sigma_xx_2d having already
+# defined c_satom): either may be requested alone via optional_channels, so
+# neither can depend on the other being present. build_obs_ctx dedupes
+# identical LAMMPS statement lines, so requesting both still emits
+# `compute satom_L{i} ...` exactly once.
+_add(_sigma_xx_layer(1))
+_add(_sigma_xx_layer(2))
+_add(_sigma_yy_layer(1))
+_add(_sigma_yy_layer(2))
+
+# n_contact_il: contact count across the real sliding interface (il_top vs
+# il_bot). 4f0ed92 moved the sliding interface to the middle of the stack,
+# so layer_{n-1}/layer_{n-2} no longer names it in general -- the compute
+# below carries {il_top}/{il_bot} placeholders build_obs_ctx substitutes
+# from its interface_layers argument, the same mechanism {contact_cutoff}
+# and {n_layers} already use. Pairs with AFM's n_contact under role
+# 'contact_count', so no PARITY_EXEMPT entry is needed. Where is_sheet_lj()
+# is false there is no interlayer lj/cut sigma to derive a cutoff from, so
+# this channel is unavailable for exactly the materials that also lose
+# E_int_interlayer -- the builder's existing extra_filter already drops
+# both.
+_add(Observable(name='n_contact_il', sim_types=('sheetonsheet', 'hetero'),
+                group='layer_n', tier='peratom', stream='results', opt_in=True,
+                lammps_compute=(
+                    'compute coordil layer_{il_top} coord/atom cutoff '
+                    '{contact_cutoff} group layer_{il_bot}\n'
+                    'compute contactsil layer_{il_top} reduce sum c_coordil'),
+                lammps_variable='variable n_contact_il equal c_contactsil',
+                rename_to='v_n_contact_il', units='count',
+                role_key='contact_count'))
+
+# post-stream: derived in postprocessing from retained artefacts, never a
+# LAMMPS column (test_post_stream_channels_have_no_compute enforces no
+# lammps_compute/rename_to on these). Both pair cleanly with an existing AFM
+# role, so neither needs a PARITY_EXEMPT entry.
+_add(Observable(name='gap_min_il', sim_types=('sheetonsheet', 'hetero', 'flake'),
+                group='layer_n', tier='peratom', stream='post', opt_in=True,
+                units='A', role_key='min_gap'))
+_add(Observable(name='corrugation_max',
+                sim_types=('sheetonsheet', 'hetero', 'flake'),
+                group='layer_n', tier='peratom', stream='post', opt_in=True,
+                units='A', role_key='max_deflection'))
+
 # --- raw trace (100 fs instantaneous samples) ---------------------------------
 _RAW_ROLE_KEYS = {
     'raw_lfx': 'raw_lateral_force_x', 'raw_lfy': 'raw_lateral_force_y',
@@ -491,10 +618,15 @@ def rename_map(sim_type: str, tier: str) -> dict:
 
 
 def layer_channels(n_layers: int) -> list:
-    """com{x,y,z}_L{n} for any layer count, injected at build time.
+    """com{x,y,z}_L{n} (window) plus the opt-in per-layer peratom channels
+    (pe_sum_L{n}, sigma_xx_2d_L{n}, sigma_yy_2d_L{n}), for any layer count,
+    injected at build time.
 
     REGISTRY holds only the bilayer entries, for the golden tests; builders call
-    this and extend their channel lists per material.
+    this and extend their channel lists per material. build_obs_ctx routes the
+    window-tier entries into its window list and the peratom-tier ones into
+    its peratom list, swapping out the corresponding static L1/L2 REGISTRY
+    entries either way -- see its Ruling 1 comment.
     """
     out = []
     for lyr in range(1, n_layers + 1):
@@ -508,6 +640,9 @@ def layer_channels(n_layers: int) -> list:
                                  f'c_COM_L{lyr}[{"xyz".index(ax) + 1}]'),
                 rename_to=f'v_com{ax}_L{lyr}', units='A',
                 role_key=f'layer_com_{ax}_L{lyr}'))
+        out.append(_pe_sum_layer(lyr))
+        out.append(_sigma_xx_layer(lyr))
+        out.append(_sigma_yy_layer(lyr))
     return out
 
 

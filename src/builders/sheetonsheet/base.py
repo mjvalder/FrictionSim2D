@@ -262,16 +262,14 @@ class SheetOnSheetSimulation(SimulationBase):
         potential: the template's fallback branch defines xfrict as v_sx and
         never defines v_e_int_il, so the registry cannot decide this on its
         own -- only the builder knows the potential type.
+
+        `interface_layers` is `(n_layers // 2, n_layers // 2 + 1)` -- the
+        identical rule `sheetonsheet/slide.lmp` uses for its own
+        `{% set il_bot %}`/`{% set il_top %}`, so the sliding interface has
+        one definition shared between Python and Jinja rather than two that
+        can drift (see MIDDLE_INTERFACE in tests/test_template_contract.py).
         """
         from ..utils.obs_ctx import build_obs_ctx
-        # AFM-only _contact_cutoff() derives its cutoff from
-        # self.config.tip.mat, which the sheet builders do not have. The
-        # only consumer of a sheet contact cutoff (n_contact_il) is opt_in
-        # and ships disabled, so a real derivation is not needed yet. Pass
-        # the documented fallback constant instead -- Task 18 replaces this
-        # with a real derivation when it declares n_contact_il. Do not treat
-        # this as a considered value.
-        from ..afm.base import _CONTACT_CUTOFF_FALLBACK
         interlayer = {'E_int_interlayer', 'n_contact_il'}
         out = self.config.settings.output
         return build_obs_ctx(
@@ -281,13 +279,54 @@ class SheetOnSheetSimulation(SimulationBase):
             use_langevin=(
                 self.config.settings.thermostat.type == 'langevin'),
             enabled_tiers=dict(out.channels),
-            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+            contact_cutoff=self._contact_cutoff(),
             results_freq=out.results_frequency,
             optional_channels=out.optional_channels,
+            interface_layers=(n_layers // 2, n_layers // 2 + 1),
             extra_filter=(
                 None if not has_internal_lj
                 else lambda ob: ob.name not in interlayer),
         )
+
+    def _contact_cutoff(self) -> float:
+        """Per-material contact cutoff from the interlayer LJ sigma.
+
+        K_CONTACT * max(sigma_ij) over the sheet's own element pairs -- the
+        same rule as AFM's tip-sheet cutoff (`AFMSimulation._contact_cutoff`,
+        parent spec §5 F3), but reading the INTERLAYER sigma (the sheet
+        against itself, mirroring `PotentialManager.add_interlayer_interaction`'s
+        element product) rather than a tip-sheet one, since sheet builders
+        have no `self.config.tip`. A fixed absolute cutoff would conflate
+        "more atoms in contact" with "larger atoms". Capped below the pair
+        cutoff -- LAMMPS errors if coord/atom's cutoff exceeds it. Falls back
+        to a documented default when the sheet elements cannot be read;
+        provenance records which route was taken.
+
+        Where `is_sheet_lj()` is false there is no interlayer lj/cut sigma to
+        read, so `n_contact_il` is unavailable for exactly the materials that
+        also lose `E_int_interlayer` -- `_build_obs_ctx`'s `extra_filter`
+        already drops both.
+        """
+        from itertools import product
+        from ...core.utils.structures import cifread
+        from ...potentials.utils import lj_params
+        from ..afm.base import K_CONTACT, _CONTACT_CUTOFF_FALLBACK
+
+        lj_cut = getattr(self.config.settings.potential, 'lj_cutoff', 11.0)
+        try:
+            sheet_els = cifread(self.config.sheet.cif_path)['elements']
+            sigma_max = max(lj_params(a, b)[1]
+                            for a, b in product(sheet_els, sheet_els))
+            self._contact_cutoff_source = f'uff_sigma_k{K_CONTACT}'
+            cut = K_CONTACT * sigma_max
+        except Exception:  # pylint: disable=broad-except
+            logger.warning(
+                "Contact cutoff fallback: could not derive UFF sigma for "
+                "sheet '%s'; using %.1f A.",
+                self.config.sheet.mat, _CONTACT_CUTOFF_FALLBACK)
+            self._contact_cutoff_source = 'fallback_default'
+            cut = _CONTACT_CUTOFF_FALLBACK
+        return min(cut, 0.95 * lj_cut)
 
     def write_inputs(self) -> None:
         """Generate LAMMPS scripts."""

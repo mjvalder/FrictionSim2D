@@ -8,8 +8,8 @@
   Emitted ONCE in the setup block: the clear+jump loop structure re-executes
   the whole setup block on every loop iteration, so the computes are
   re-created at runtime. Never insert emissions between a clear and its jump.
-  The builder pre-substitutes {contact_cutoff} and {n_layers} placeholders
-  (build_obs_ctx) and dedupes shared computes.
+  The builder pre-substitutes {contact_cutoff}, {n_layers} and
+  {il_bot}/{il_top} placeholders (build_obs_ctx) and dedupes shared computes.
 #}
 {% macro emit_observables(obs_ctx) %}
 # --- observable registry channels (spec §3) ---------------------------------
