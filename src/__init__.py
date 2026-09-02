@@ -3,6 +3,9 @@
 Provides LAMMPS-based molecular dynamics setup for AFM and sheet-on-sheet
 friction simulations with automatic potential generation.
 """
+# pylint: disable=import-outside-toplevel
+# Deliberate: the __getattr__ registry defers every subpackage import. See CLAUDE.md
+# "Import weight".
 
 from __future__ import annotations
 

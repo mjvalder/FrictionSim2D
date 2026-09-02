@@ -34,3 +34,15 @@ def test_top_level_lazy_exports_resolve():
         if name == "run_with_aiida":
             continue  # gated on _AIIDA_AVAILABLE
         assert getattr(src, name) is not None, f"src.{name} did not resolve"
+
+
+def test_builders_lazy_exports_resolve():
+    """Every name in builders.__all__ resolves through its __getattr__ registry.
+
+    pylint reports these names as undefined-all-variable because the
+    registry is dynamic; this test is what makes that pragma honest.
+    """
+    from src import builders
+
+    for name in builders.__all__:
+        assert getattr(builders, name) is not None, f"src.builders.{name} did not resolve"

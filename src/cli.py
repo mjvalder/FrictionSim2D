@@ -2,6 +2,9 @@
 
 Unified CLI for simulation execution, HPC script generation, and AiiDA integration.
 """
+# pylint: disable=import-outside-toplevel
+# Deliberate: every subcommand imports its dependencies lazily so `FrictionSim2D --help`
+# and compute-node use never pay for ase/aiida/Qt. See CLAUDE.md "Import weight".
 
 import logging
 import sys
