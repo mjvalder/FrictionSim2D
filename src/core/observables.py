@@ -111,11 +111,11 @@ PARITY_EXEMPT: dict = {
     ('sheetonsheet', 'sheet_com_z'):
         'AFM tracks one sheet COM; the sheet family resolves COM per layer',
     ('sheetonsheet', 'group_pe_sum_driven'):
-        'the driven body is a layer of the stack, covered by group_pe_sum',
+        'the driven body is a layer of the stack, covered by group_pe_sum_L{i}',
     ('sheetonsheet', 'group_pe_sum_substrate'):
-        'the substrate is a layer of the stack, covered by group_pe_sum',
+        'the substrate is a layer of the stack, covered by group_pe_sum_L{i}',
     ('sheetonsheet', 'group_pe_sum_membrane'):
-        'the membrane is a layer of the stack, covered by group_pe_sum',
+        'the membrane is a layer of the stack, covered by group_pe_sum_L{i}',
     ('sheetonsheet', 'thermostat_work_substrate'):
         'the sheet stack has one thermostatted group, not tip plus substrate',
     ('afm', 'group_temperature_center'):
