@@ -68,7 +68,7 @@ def test_parse_log_extras(tmp_path):
 
 def test_builder_writes_provenance(tmp_path):
     from src.builders.afm import AFMSimulation
-    from tests.builders.test_afm_builder import (_make_afm_config,
+    from tests.helpers.afm import (_make_afm_config,
                                         _prepare_builder_for_slide_write)
     config = _make_afm_config(tmp_path, layers=[1])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))

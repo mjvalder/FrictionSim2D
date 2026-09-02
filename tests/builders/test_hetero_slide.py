@@ -1,7 +1,6 @@
 """Tests for D1 hetero sheet-on-sheet slide assembly helpers."""
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,8 +18,15 @@ from src.builders.sheetonsheet.hetero import (
 from src.builders.sheetonsheet import SheetOnSheetSimulation
 from src.run.hpc_dispatch import generate_hpc_scripts_for_root
 from src.run.simulate import _select_sheet_builder_cls
+from tests.helpers.hetero import (
+    MAT,
+    POT,
+    _read_friction_records,
+    _referenced_input_paths,
+    _run_lammps_slide,
+    _staged_potential_paths,
+)
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
 
 
@@ -462,29 +468,6 @@ def test_hetero_sheet_job_name_differs_by_full_pair():
 
 # --- HPC job scripts for a hetero run ------------------------------------- #
 
-#: Every path a LAMMPS script opens for reading, as written into the script.
-_READ_PATH_RE = re.compile(r'^(?:read_data|include)\s+(\S+)', re.M)
-
-
-def _referenced_input_paths(script_text):
-    return _READ_PATH_RE.findall(script_text)
-
-
-def _staged_potential_paths(settings_text):
-    """The potential files ``pair_coeff`` lines point at, as written.
-
-    A ``pair_coeff`` line mixes path tokens with pair-style names that also
-    contain a slash (``lj/cut``); only the former carry a file extension.
-    """
-    return [
-        token
-        for line in settings_text.splitlines()
-        if line.strip().startswith('pair_coeff')
-        for token in line.split()
-        if '/' in token and Path(token).suffix
-    ]
-
-
 def test_hetero_run_writes_hpc_scripts_whose_paths_resolve(tmp_path):
     """A hetero run must produce submittable job scripts, not a log warning.
 
@@ -539,58 +522,6 @@ def test_hetero_build_does_not_swallow_hpc_generation_failures(tmp_path):
 # --------------------------------------------------------------------------- #
 # End-to-end smoke: build a real 2+2 MoS2/WS2 hetero slide and RUN it in LAMMPS
 # --------------------------------------------------------------------------- #
-
-def _run_lammps_slide(run_dir, slide_in_name, timeout=180):
-    """Run ``lmp_serial`` on the rendered hetero slide and return
-    ``(completed_process, combined_output)``.
-
-    ``cwd`` MUST be ``run_dir``: every path baked into ``slide.in`` is
-    RUN-DIR-RELATIVE (``hetero.data``, ``lammps/system.in.settings``, the
-    settings' ``provenance/potentials/...`` prefix, ``results/...``), so they
-    only resolve when LAMMPS is launched from the run dir. ``combined_output``
-    is stdout + stderr + the LAMMPS ``log.lammps`` (if written), so callers can
-    grep it for errors / "Lost atoms".
-    """
-    run_dir = Path(run_dir)
-    proc = subprocess.run(
-        ["lmp_serial", "-in", str(run_dir / "lammps" / slide_in_name)],
-        cwd=str(run_dir),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    combined = f"{proc.stdout}\n{proc.stderr}"
-    log = run_dir / "log.lammps"
-    if log.exists():
-        combined += "\n" + log.read_text()
-    return proc, combined
-
-
-def _read_friction_records(friction_path):
-    """Parse a ``fix ave/time`` results file into ``(column_names, rows)``.
-
-    The second comment line names the columns
-    (``# TimeStep v_xfrict ... v_comx_top v_comy_top ...``); data rows are the
-    non-comment lines. Column order is taken from that header (which mirrors the
-    rendered ``fix fc_win ... ave/time`` output list -- Task 15 renamed the fix
-    from ``fc_ave`` to ``fc_win``), so the parse survives any
-    reordering of the emitted variables. ``column_names`` includes the leading
-    ``TimeStep`` and is index-aligned with every data row.
-    """
-    cols = None
-    rows = []
-    for line in Path(friction_path).read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        if s.startswith("#"):
-            toks = s.lstrip("#").split()
-            if toks and toks[0] == "TimeStep":
-                cols = toks
-            continue
-        rows.append([float(x) for x in s.split()])
-    return cols, rows
-
 
 def _twisted_moire_config():
     """A small twisted MoS2/WS2 2+2 moiré slide config.

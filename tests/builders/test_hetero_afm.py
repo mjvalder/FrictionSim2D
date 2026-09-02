@@ -13,23 +13,9 @@ from pathlib import Path
 import pytest
 
 from src.core.config import AFMSimulationConfig, load_settings
+from tests.helpers.hetero import MAT, POT, _afm_flake_raw, _afm_hetero_raw
 
-MAT, POT = "examples/materials", "examples/potentials/sw"
 LMP = shutil.which("lmp_serial")
-
-
-def _afm_hetero_raw():
-    return {
-        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped"},
-        "tip": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
-                "pot_type": "sw", "r": 10.0},
-        "sub": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
-                "pot_type": "sw", "amorph": "a", "thickness": 12.0},
-        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
-                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
-        "2D-2": {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif", "pot_path": f"{POT}/sw_lammps/t-WS2.sw",
-                 "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1]},
-    }
 
 
 def _afm_homogeneous_raw():
@@ -655,28 +641,6 @@ def test_finite_hetero_afm_runs_with_edge_tether(tmp_path):
 
 # --- D3b: incommensurate flake twist on the AFM (tip-on-flake) drive ---
 
-def _afm_flake_raw():
-    """A homogeneous AFM config WITH a [Flake] on a [2D] MoS2 sheet + [sub] + [tip].
-
-    Mirrors ``examples/afm_flake_config.ini`` (a finite MoS2 hexagon between the
-    Si tip and the supported MoS2 sheet on an amorphous-Si substrate), sized with
-    the D2 capstone's runtime-bounding knobs (tip.r=5, temp=1, force=10) so the
-    real-LAMMPS approach+indent settles quickly.
-    """
-    return {
-        "general": {"temp": 1.0, "force": 10.0, "scan_speed": 2.0},
-        "tip": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
-                "pot_type": "sw", "r": 5.0},
-        "sub": {"mat": "Si", "cif_path": f"{MAT}/Si.cif", "pot_path": f"{POT}/Si.sw",
-                "pot_type": "sw", "amorph": "a", "thickness": 12.0},
-        "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
-               "pot_type": "sw", "x": 40.0, "y": 40.0, "layers": [1]},
-        "flake": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif", "pot_path": f"{POT}/MoS2_wen.sw",
-                  "pot_type": "sw", "shape": "hexagon", "edge_length": 10.0,
-                  "corner_radius": 5.0, "corner_spring_k": 9.0},
-    }
-
-
 def _afm_flake_cfg(twist=None):
     raw = _afm_flake_raw()
     if twist is not None:
@@ -692,7 +656,7 @@ def _afm_flake_cfg(twist=None):
 def test_afm_flake_twist_rotates_and_runs(tmp_path):
     from ase.io import read
     from src.builders.afm import AFMSimulation
-    from tests.lattice.test_lattice_apply import _flake_lattice_orientation
+    from tests.helpers.lattice import _flake_lattice_orientation
 
     sim = AFMSimulation(_afm_flake_cfg(twist=18.0), str(tmp_path / "tw"))
     sim.build()

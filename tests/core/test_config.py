@@ -478,7 +478,7 @@ def test_single_2d_section_still_builds_one_element_sheets_list(tmp_path, monkey
 
 def test_crystalline_substrate_with_match_is_allowed():
     from src.core.config import AFMSimulationConfig, load_settings
-    from tests.builders.test_hetero_afm import _afm_hetero_raw
+    from tests.helpers.hetero import _afm_hetero_raw
     raw = _afm_hetero_raw()                       # non-finite-sheet hetero AFM
     raw["sub"]["amorph"] = "c"
     raw["sub"]["match"] = True
@@ -488,7 +488,7 @@ def test_crystalline_substrate_with_match_is_allowed():
 
 def test_crystalline_substrate_without_match_still_rejected():
     from src.core.config import AFMSimulationConfig, load_settings
-    from tests.builders.test_hetero_afm import _afm_hetero_raw
+    from tests.helpers.hetero import _afm_hetero_raw
     raw = _afm_hetero_raw()
     raw["sub"]["amorph"] = "c"                    # crystalline, no match flag
     with pytest.raises(ValueError, match="amorphous"):
@@ -538,7 +538,7 @@ def test_afm_flake_missing_material_fields_is_rejected():
     validate and then die inside build_monolayer on a None cif_path.
     """
     from src.core.config import AFMSimulationConfig, load_settings
-    from tests.builders.test_hetero_afm import _afm_flake_raw
+    from tests.helpers.hetero import _afm_flake_raw
     raw = _afm_flake_raw()
     del raw["flake"]["cif_path"]
     del raw["flake"]["pot_path"]
@@ -549,7 +549,7 @@ def test_afm_flake_missing_material_fields_is_rejected():
 def test_afm_flake_with_material_fields_still_validates():
     """The fully-specified AFM flake (examples/afm_flake_config.ini) is untouched."""
     from src.core.config import AFMSimulationConfig, load_settings
-    from tests.builders.test_hetero_afm import _afm_flake_raw
+    from tests.helpers.hetero import _afm_flake_raw
     cfg = AFMSimulationConfig(**_afm_flake_raw(), settings=load_settings())
     assert cfg.flake is not None and cfg.flake.mat == "h-MoS2"
 

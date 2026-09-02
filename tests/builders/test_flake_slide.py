@@ -13,7 +13,7 @@ import pytest
 from src.core.config import SheetOnSheetSimulationConfig, load_settings
 # Reuse the D1 slide runner + friction-record parser for the e2e smoke, and its
 # path extractors for the sim-root resolution check.
-from tests.builders.test_hetero_slide import (
+from tests.helpers.hetero import (
     _read_friction_records,
     _referenced_input_paths,
     _run_lammps_slide,
@@ -446,7 +446,7 @@ def test_flake_slide_routing_flake_plus_twist_selects_flake_slide():
 def test_flake_slide_twist_rotates_the_flake(tmp_path):
     from ase.io import read
     from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
-    from tests.lattice.test_lattice_apply import _flake_lattice_orientation
+    from tests.helpers.lattice import _flake_lattice_orientation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.general.twist_angle = 20.0
     sim = FlakeSlideSimulation(cfg, str(tmp_path / "tw")); sim.build()
@@ -488,7 +488,7 @@ def test_flake_slide_twisted_runs_and_holds(tmp_path):
 def test_hetero_flake_slide_twist_rotates(tmp_path):
     from ase.io import read
     from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
-    from tests.lattice.test_lattice_apply import _flake_lattice_orientation
+    from tests.helpers.lattice import _flake_lattice_orientation
     cfg = _flake_on_sheet_cfg(hetero_flake=True)      # MoS2/WS2 hetero flake
     cfg.sheet.x = cfg.sheet.y = 30.0                  # room for the ~16 A hetero flake footprint
     cfg.general.twist_angle = 22.0

@@ -5,7 +5,7 @@ import pytest
 
 from src.builders.afm import AFMSimulation
 from src.core.observables import expected_columns
-from tests.builders.test_afm_builder import (
+from tests.helpers.afm import (
     _make_afm_config,
     _prepare_builder_for_slide_write,
 )
