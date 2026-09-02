@@ -87,12 +87,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     # templates' title1 together; _parse_lf_schema refuses to guess.
     _LF_SCHEMA_CURRENT = 2
 
-    _SHEET_COLUMN_RENAME = {
-        'v_xfrict': 'lfx',
-        'v_yfrict': 'lfy',
-        'v_fz': 'nf',
-    }
-
     # Filename patterns (compiled once at class level)
     _FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
     # New AFM tip naming written by the current builder, e.g.
@@ -283,8 +277,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             rmap = rename_map(
                 'sheetonsheet' if sim_type == 'sheet' else 'afm', tier,
             )
-            df.rename(columns={**self._SHEET_COLUMN_RENAME, **rmap},
-                      inplace=True)
+            df.rename(columns=rmap, inplace=True)
             # Line 1 carries the output-schema marker. Absent means pre-fix:
             # the sheet's LJ-branch lateral force is in eV/A while the load it
             # is divided by is already nN, so its COF is a factor
@@ -310,8 +303,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         df = pd.read_csv(
             filepath, sep=r'\s+', header=None, names=legacy, skiprows=2,
         )
-        if sim_type == 'sheet':
-            df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
         df.attrs['lf_schema'] = 1      # header-less files predate the marker
         return self._correct_legacy_lf_schema1(df, filepath, sim_type)
 

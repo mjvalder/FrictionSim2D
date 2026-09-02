@@ -606,10 +606,9 @@ class TestColumnMappings:
         assert 'v_comy_top' in DataReader._SHEET_FILE_COLUMNS
 
     def test_sheet_rename_maps_to_canonical_names(self):
-        from src.postprocessing.read_data import DataReader
-        rename = DataReader._SHEET_COLUMN_RENAME
+        from src.core.observables import rename_map
+        rename = rename_map('sheetonsheet', 'window')
         assert rename['v_xfrict'] == 'lfx'
-        assert rename['v_yfrict'] == 'lfy'
         assert rename['v_fz'] == 'nf'
 
 

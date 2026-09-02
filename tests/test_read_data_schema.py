@@ -349,3 +349,10 @@ def test_raw_tier_unidentifiable_branch_warns_after_react_x_rename(tmp_path, cap
     assert out['raw_lfx'].iloc[0] == 2.0        # left untouched
     assert any('cannot be identified' in rec.getMessage()
                for rec in caplog.records)
+
+
+def test_registry_is_the_only_sheet_rename_map():
+    from src.postprocessing.read_data import DataReader
+    assert not hasattr(DataReader, '_SHEET_COLUMN_RENAME'), (
+        'the registry owns sheet renames now; a second hand-maintained map '
+        'is what let rename_map shadow lfx and silently kill sheet COF')
