@@ -343,7 +343,7 @@ _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet', 'hetero'),
                 role_key='interlayer_interaction'))
 # --- sheet window channels: every native below is already emitted by
 # sheetonsheet/slide.lmp's fc_win. Declaring them is what lets the registry
-# own the renames -- DataReader._SHEET_COLUMN_RENAME is deleted in Task 10.
+# own the renames -- DataReader._SHEET_COLUMN_RENAME was deleted once it did.
 #
 # The lateral channel keeps its group/group compute at Nevery=1: it is the
 # friction label itself, its cost is paid in every production sheet run, and
@@ -403,7 +403,8 @@ for _ax in ('x', 'y', 'z'):
                     role_key=f'reaction_force_{_ax}'))
 
 # --- sheet raw tier: registry-derived, so these drive emission as well as
-# parsing (the AFM raw varlist is still a literal; Task 13 fixes that).
+# parsing (the AFM raw varlist is likewise derived from channels_for('afm',
+# 'raw'), not a hardcoded literal).
 for _name, _key, _native, _role, _unit in [
     ('raw_lfx', 'raw_lfx@sheet', 'v_xfrict', 'raw_lateral_force_x', 'nN'),
     ('raw_lfy', 'raw_lfy@sheet', 'v_yfrict', 'raw_lateral_force_y', 'nN'),

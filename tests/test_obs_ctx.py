@@ -17,10 +17,11 @@ def _ctx(**kw):
 
 def test_returns_the_documented_keys():
     ctx = _ctx()
-    for key in ('compute_lines', 'variable_lines', 'emit_window', 'emit_raw',
-                'emit_peratom', 'window_varlist', 'raw_varlist',
-                'peratom_varlist', 'results_file_pattern',
-                'results_file_raw', 'results_file_peratom'):
+    for key in ('compute_lines', 'variable_lines', 'window_args',
+                'emit_window', 'emit_raw', 'emit_peratom', 'window_varlist',
+                'raw_varlist', 'peratom_varlist', 'contact_cutoff',
+                'results_file_pattern', 'results_file_raw',
+                'results_file_peratom', 'title1'):
         assert key in ctx, key
 
 

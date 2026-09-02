@@ -31,8 +31,8 @@ def _fix_emitted(rendered: str, name: str) -> bool:
     """Whether an actual `fix <name> ...` directive was emitted.
 
     Substring matching is not enough: the tier names also appear in comments
-    ("fc_win keeps the legacy 16-column prefix"), so a naive `in` check passes
-    even when the gate worked.
+    (flake/slide.lmp: "gate suppresses fc_raw/fc_pa entirely"), so a naive
+    `in` check passes even when the gate worked.
     """
     return any(l.startswith(f"fix ") and f" {name} " in l
                for l in rendered.split("\n"))
