@@ -87,8 +87,8 @@ def build_obs_ctx(
 
     window_varlist = ' '.join(native(ob) for ob in win)
     peratom_varlist = ' '.join(native(ob) for ob in pa)
-    raw_varlist = ('v_fx_spr v_fy_spr v_fz_tip '
-                   'v_comx_tip v_comy_tip v_comz_tip')
+    raw = [ob for ob in channels_for(sim_type, 'raw') if ob.stream == 'results']
+    raw_varlist = ' '.join(native(ob) for ob in raw)
 
     return {
         'compute_lines': compute_lines,

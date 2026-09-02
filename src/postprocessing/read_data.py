@@ -225,6 +225,40 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
         return None
 
+    #: Traversal vocabulary ('tip'/'sheet') -> registry sim_type. The file's
+    #: own `family=` marker overrides this when present; every retained file
+    #: predates the marker and takes the fallback.
+    _REGISTRY_SIM_TYPE = {'tip': 'afm', 'sheet': 'sheetonsheet'}
+    _KNOWN_FAMILIES = ('afm', 'indent', 'sheetonsheet', 'hetero', 'flake')
+
+    @classmethod
+    def _registry_sim_type(cls, sim_type: str, header_line1: str) -> str:
+        """Registry sim_type for a results file.
+
+        Prefers the `family=` key the builder stamps into title1: the file
+        states its own provenance, so the parser never has to infer a family
+        from the directory token -- which is ambiguous, because a hetero run
+        WITH a flake carries both the '+' and the '+flake-' markers.
+        """
+        m = re.search(r'family=(\w+)', header_line1 or '')
+        if m:
+            family = m.group(1)
+            if family not in cls._KNOWN_FAMILIES:
+                raise ValueError(
+                    f"unknown family {family!r} in results header; known: "
+                    f"{cls._KNOWN_FAMILIES}")
+            return family
+        return cls._REGISTRY_SIM_TYPE.get(sim_type, 'afm')
+
+    @staticmethod
+    def _is_sheet_family(sim_type: str) -> bool:
+        """True for the traversal vocabulary's sheet side.
+
+        The filename patterns and parameter parsing are shared across the
+        whole sheet family; only rename_map needs the precise family.
+        """
+        return sim_type == 'sheet'
+
     def _read_dataframe(self, filepath: Path, sim_type: str) -> pd.DataFrame:
         """Read a LAMMPS output file and return a labelled DataFrame.
 
@@ -266,8 +300,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             tier = ('raw' if stem.startswith('raw_') else
                     'peratom' if stem.startswith('peratom_') else 'window')
             rmap = rename_map(
-                'sheetonsheet' if sim_type == 'sheet' else 'afm', tier,
-            )
+                self._registry_sim_type(sim_type, header_lines[0]), tier)
             df.rename(columns=rmap, inplace=True)
             # Line 1 carries the output-schema marker. Absent means pre-fix:
             # the sheet's LJ-branch lateral force is in eV/A while the load it

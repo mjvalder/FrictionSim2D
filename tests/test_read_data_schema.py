@@ -380,3 +380,28 @@ def test_sheet_positional_list_is_gone():
     from src.postprocessing.read_data import DataReader
     assert not hasattr(DataReader, '_SHEET_FILE_COLUMNS')
     assert DataReader._AFM_FILE_COLUMNS[:3] == ['time', 'nf', 'lfx']
+
+
+def test_family_marker_wins_over_path_inference(tmp_path):
+    from src.postprocessing.read_data import DataReader
+    f = tmp_path / 'fc_ave_slide_5GPa_0angle_1ms.txt'
+    f.write_text(
+        "# schema=2 lf_units=nN family=hetero\n"
+        "# TimeStep v_xfrict v_yfrict\n"
+        "1000 1.0 0.5\n"
+    )
+    assert DataReader._registry_sim_type('sheet', "# ... family=hetero") == 'hetero'
+
+
+def test_missing_family_marker_falls_back_to_the_traversal_vocabulary():
+    # every one of the 7,171 retained sheet files predates the marker
+    from src.postprocessing.read_data import DataReader
+    assert DataReader._registry_sim_type('sheet', '# schema=2 lf_units=nN') == 'sheetonsheet'
+    assert DataReader._registry_sim_type('tip', '') == 'afm'
+
+
+def test_unknown_family_marker_is_refused():
+    import pytest
+    from src.postprocessing.read_data import DataReader
+    with pytest.raises(ValueError, match='family'):
+        DataReader._registry_sim_type('sheet', '# family=bogus')

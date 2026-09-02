@@ -90,3 +90,13 @@ def test_default_build_emits_no_opt_in_channel():
     for ob in REGISTRY.values():
         if ob.opt_in and ob.rename_to:
             assert ob.rename_to not in emitted, ob.registry_key
+
+
+def test_raw_varlist_comes_from_the_registry():
+    # a hardcoded raw varlist can drift from its declarations on day two --
+    # the exact failure the registry exists to prevent
+    from src.core.observables import channels_for
+    ctx = _ctx(sim_type='afm')
+    expected = [ob.rename_to or f'v_{ob.name}'
+                for ob in channels_for('afm', 'raw')]
+    assert ctx['raw_varlist'].split() == expected
