@@ -174,9 +174,11 @@ PARITY_EXEMPT: dict = {
         'AFM sums the in-plane virial over one membrane; the sheet stack '
         'resolves it per layer (membrane_stress_yy_L{i})',
     ('sheetonsheet', 'raw_driven_com_z'):
-        "the sheet's raw fix records only the driven layer's in-plane COM; "
-        'adding v_comz_top to it would be a new column, and the raw tier is '
-        'deliberately free of layer-count-dependent additions',
+        'the sheet family could carry this role -- v_comz_top already '
+        'exists and raw_drivex/raw_drivey already prove the mechanism -- '
+        'but it is deliberately NOT declared: doing so would widen every '
+        'sheet raw results file by a column, and this conversion is '
+        'specified to add none. A scope decision, not an incapacity.',
 }
 
 
