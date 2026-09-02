@@ -110,6 +110,21 @@ packages = ["src"]
 include = ["src/**"]
 
 [tool.pylint.messages_control]
+# Design-size checks are disabled by decision 2026-09-02 (codebase review, "no
+# restructuring this round"): each one can only be silenced by splitting a
+# function or module. Their hit lists at the time of disabling are recorded
+# in docs/superpowers/reviews/findings.md. duplicate-code and cyclic-import are
+# deliberately NOT here — they are fixed or justified per site in Phase 2.
 disable = [
   "missing-function-docstring",
+  "too-many-locals",                 # no-restructuring decision 2026-09-02
+  "too-many-arguments",              # no-restructuring decision 2026-09-02
+  "too-many-positional-arguments",   # no-restructuring decision 2026-09-02
+  "too-many-branches",               # no-restructuring decision 2026-09-02
+  "too-many-statements",             # no-restructuring decision 2026-09-02
+  "too-many-instance-attributes",    # no-restructuring decision 2026-09-02
+  "too-many-nested-blocks",          # no-restructuring decision 2026-09-02
+  "too-many-return-statements",      # no-restructuring decision 2026-09-02
+  "too-many-public-methods",         # no-restructuring decision 2026-09-02
+  "too-many-lines",                  # no-restructuring decision 2026-09-02
 ]
