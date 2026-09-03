@@ -92,7 +92,7 @@ def _max_strain(cell_ref: np.ndarray, cell_def: np.ndarray) -> float:
     """Return the maximum absolute principal strain deforming *cell_def* → *cell_ref*.
 
     Both cells must have the same number of atoms / area sign so that the
-    deformation gradient F = cell_ref @ inv(cell_def) is meaningful.
+    deformation gradient deform = cell_ref @ inv(cell_def) is meaningful.
 
     Args:
         cell_ref: Target 2×2 cell (rows = vectors).
@@ -102,12 +102,12 @@ def _max_strain(cell_ref: np.ndarray, cell_def: np.ndarray) -> float:
         Max |principal strain - 1|.  Zero means perfect match.
     """
     try:
-        F = cell_ref @ np.linalg.inv(cell_def)
+        deform = cell_ref @ np.linalg.inv(cell_def)
     except np.linalg.LinAlgError:
         return math.inf
-    # Polar decomposition: F = R U.  Eigenvalues of U are stretch ratios.
-    U = F.T @ F
-    eigvals = np.linalg.eigvalsh(U)
+    # Polar decomposition: deform = rot @ unimod.  Eigenvalues of unimod are stretch ratios.
+    unimod = deform.T @ deform
+    eigvals = np.linalg.eigvalsh(unimod)
     # principal strains: λ_i = sqrt(eigenvalue) - 1
     stretches = np.sqrt(np.maximum(eigvals, 0.0))
     return float(np.max(np.abs(stretches - 1.0)))
@@ -257,6 +257,7 @@ def match_to_fixed_box(
     box_area = abs(float(np.linalg.det(box_cell)))
 
     best: Optional[Tuple[np.ndarray, float]] = None
+    best_eps = math.inf
     for matrix in _enumerate_matrices(max_supercell):
         sup = matrix @ other_cell  # type: ignore[operator]
         sup_area = abs(float(np.linalg.det(sup)))
@@ -266,8 +267,9 @@ def match_to_fixed_box(
         if abs(sup_area - box_area) / max(sup_area, box_area) > area_tol:
             continue
         eps = _max_strain(box_cell, sup)
-        if best is None or eps < best[1]:
+        if eps < best_eps:
             best = (matrix.copy(), eps)
+            best_eps = eps
 
     if best is None or best[1] > 2.0 * strain_tol:
         got = ("no supercell within max_supercell/area_tol"
@@ -287,29 +289,29 @@ def match_to_fixed_box(
 def _relative_rotation_strain(sc_a: np.ndarray, sc_b: np.ndarray) -> Tuple[float, float]:
     """Relative rotation (deg) and residual stretch strain between two 2×2 cells.
 
-    Uses the **left** transform ``G = inv(sc_b) @ sc_a`` (``sc_a = sc_b @ G``),
+    Uses the **left** transform ``gram = inv(sc_b) @ sc_a`` (``sc_a = sc_b @ gram``),
     whose singular values (and polar-rotation) are invariant under rotating
     *either* cell (a right/left orthogonal factor). This is the correct frame to
     separate a rigid relative rotation (the twist) from a pure shape mismatch
-    (the residual strain): for ``sc_a = sc_b @ Rᵀ`` (rigid rotation, no strain)
-    ``G = Rᵀ`` exactly, so the strain is 0 and the angle is the twist -- unlike
+    (the residual strain): for ``sc_a = sc_b @ rotᵀ`` (rigid rotation, no strain)
+    ``gram = rotᵀ`` exactly, so the strain is 0 and the angle is the twist -- unlike
     the right transform ``sc_a @ inv(sc_b)``, which reports spurious strain for
     rotated non-orthogonal cells.
 
     Returns:
         ``(angle_deg, max_strain)`` where ``angle_deg`` is the polar-rotation of
-        ``G`` (CCW positive) and ``max_strain`` is ``max|σ_i - 1|`` over ``G``'s
-        singular values. ``(0.0, inf)`` if ``G`` is singular.
+        ``gram`` (CCW positive) and ``max_strain`` is ``max|σ_i - 1|`` over
+        ``gram``'s singular values. ``(0.0, inf)`` if ``gram`` is singular.
     """
     try:
-        G = np.linalg.inv(np.asarray(sc_b, float)) @ np.asarray(sc_a, float)
-        U2 = G.T @ G
-        eigvals, eigvecs = np.linalg.eigh(U2)
+        gram = np.linalg.inv(np.asarray(sc_b, float)) @ np.asarray(sc_a, float)
+        unimod_b = gram.T @ gram
+        eigvals, eigvecs = np.linalg.eigh(unimod_b)
         eigvals = np.maximum(eigvals, 0.0)
         stretches = np.sqrt(eigvals)
-        U = eigvecs @ np.diag(stretches) @ eigvecs.T
-        R = G @ np.linalg.inv(U)
-        angle = math.degrees(math.atan2(R[1, 0], R[0, 0]))
+        unimod = eigvecs @ np.diag(stretches) @ eigvecs.T
+        rot = gram @ np.linalg.inv(unimod)
+        angle = math.degrees(math.atan2(rot[1, 0], rot[0, 0]))
         strain = float(np.max(np.abs(stretches - 1.0)))
         return angle, strain
     except np.linalg.LinAlgError:
@@ -340,11 +342,12 @@ def rotation_angle_between(sc_a: np.ndarray, sc_b: np.ndarray) -> float:
 def _gauss_reduce_2d(cell: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Lagrange–Gauss reduce a 2×2 lattice basis to its two shortest vectors.
 
-    Returns ``(reduced, U)`` where ``reduced`` is a right-handed
+    Returns ``(reduced, unimod)`` where ``reduced`` is a right-handed
     (positive-determinant) reduced basis (rows = the two shortest lattice
-    vectors) and ``U`` is the integer unimodular transform with
-    ``reduced == U @ cell`` (so the reduction can be composed with a supercell
-    matrix to recover the exact integer tiling of the original monolayer).
+    vectors) and ``unimod`` is the integer unimodular transform with
+    ``reduced == unimod @ cell`` (so the reduction can be composed with a
+    supercell matrix to recover the exact integer tiling of the original
+    monolayer).
 
     Two bases of lattices that are rigid rotations of each other reduce to bases
     related by the lattice point group (rotations by multiples of the
@@ -355,33 +358,33 @@ def _gauss_reduce_2d(cell: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     masquerade as large strain.
     """
     v1, v2 = np.asarray(cell, float)[0].copy(), np.asarray(cell, float)[1].copy()
-    U = np.eye(2)
+    unimod = np.eye(2)
     swap = np.array([[0.0, 1.0], [1.0, 0.0]])
     if v1 @ v1 > v2 @ v2:
         v1, v2 = v2.copy(), v1.copy()
-        U = swap @ U
+        unimod = swap @ unimod
     for _ in range(1000):
         m = round((v1 @ v2) / (v1 @ v1))
         v2 = v2 - m * v1
-        U = np.array([[1.0, 0.0], [-m, 1.0]]) @ U
+        unimod = np.array([[1.0, 0.0], [-m, 1.0]]) @ unimod
         if v2 @ v2 >= v1 @ v1:
             break
         v1, v2 = v2.copy(), v1.copy()
-        U = swap @ U
+        unimod = swap @ unimod
     # Canonicalise into a single deterministic representative so that two bases
     # of lattices related by a rotation reduce to bases that are the SAME
     # rotation of each other (otherwise a hexagonal lattice's 60° vs 120°
     # shortest-vector rhombi -- both valid reductions -- read as a spurious
     # shear). Every decision below is rotation-invariant (dot signs, det sign,
-    # lengths), so canonicalize(R·L) = R·canonicalize(L).
+    # lengths), so canonicalize(rot·L) = rot·canonicalize(L).
     if v1 @ v2 < 0.0:            # acute angle between v1 and v2 (pick 60° image)
         v2 = -v2
-        U = np.array([[1.0, 0.0], [0.0, -1.0]]) @ U
+        unimod = np.array([[1.0, 0.0], [0.0, -1.0]]) @ unimod
     reduced = np.array([v1, v2])
     if np.linalg.det(reduced) < 0.0:   # keep right-handed (swap, preserves the
         reduced = reduced[::-1]        # acute angle: dot is symmetric)
-        U = swap @ U
-    return reduced, np.rint(U).astype(int)
+        unimod = swap @ unimod
+    return reduced, np.rint(unimod).astype(int)
 
 
 def rotation_angle_from_match(match: MatchResult) -> float:
@@ -463,9 +466,9 @@ def orthorhombic_wrapper(
     hexagonal rhombus this is the well-known c-rectangular doubling (2 rhombi
     per box).
 
-    Searches integer 2×2 tiling matrices ``T`` with entries in
-    ``[-max_tiling, max_tiling]`` and returns the ``T`` of least positive
-    determinant whose ``T @ rhombic_cell`` has orthogonal rows.
+    Searches integer 2×2 tiling matrices ``tiling`` with entries in
+    ``[-max_tiling, max_tiling]`` and returns the ``tiling`` of least positive
+    determinant whose ``tiling @ rhombic_cell`` has orthogonal rows.
 
     Args:
         rhombic_cell: 2×2 rhombic (or already-orthogonal) cell (row vectors, Å).
@@ -474,13 +477,14 @@ def orthorhombic_wrapper(
     Returns:
         ``(ortho_cell, tiling)`` where ``ortho_cell`` is the orthorhombic box in
         LAMMPS-canonical form (``[[lx, 0], [0, ly]]``, xy tilt 0) and ``tiling``
-        is the integer 2×2 ``T`` (``|det T|`` = rhombi per box, ≥ 1).
+        is the integer 2×2 matrix (``|det tiling|`` = rhombi per box, ≥ 1).
 
     Raises:
         ValueError: If no orthogonalising tiling is found within ``max_tiling``.
     """
     a = np.asarray(rhombic_cell, dtype=float)
     best: Optional[Tuple[float, np.ndarray, np.ndarray]] = None
+    best_det = math.inf
     rng = range(-max_tiling, max_tiling + 1)
     for p in rng:
         for q in rng:
@@ -489,16 +493,17 @@ def orthorhombic_wrapper(
                     det = p * s - q * r
                     if det <= 0:
                         continue
-                    T = np.array([[p, q], [r, s]], dtype=float)
-                    b = T @ a
+                    tiling = np.array([[p, q], [r, s]], dtype=float)
+                    b = tiling @ a
                     n0 = float(np.linalg.norm(b[0]))
                     n1 = float(np.linalg.norm(b[1]))
                     if n0 < 1e-9 or n1 < 1e-9:
                         continue
                     if abs(float(b[0] @ b[1])) > 1e-6 * n0 * n1:
                         continue  # rows not orthogonal
-                    if best is None or det < best[0] - 1e-9:
-                        best = (float(det), T.copy(), b.copy())
+                    if det < best_det - 1e-9:
+                        best = (float(det), tiling.copy(), b.copy())
+                        best_det = det
     if best is None:
         raise ValueError(
             f"orthorhombic_wrapper: no orthogonalising integer tiling (|entries| "
@@ -582,10 +587,14 @@ def find_commensurate_twist(
     # first whose reduced moiré cell actually wraps into an orthorhombic box
     # within the tiling budget -- skipping oblique approximants that would need
     # an exploded (or non-existent) orthogonal super-supercell.
-    candidates: List[Tuple[Tuple[float, int], np.ndarray, np.ndarray, np.ndarray, float, float, int]] = []
+    candidates: List[
+        Tuple[Tuple[float, int], np.ndarray, np.ndarray, np.ndarray, float, float, int]
+    ] = []
     # Nearest *achievable* commensurate angle seen at all (for a helpful raise),
     # tracked independently of angle_tol so we can name it when nothing qualifies.
     nearest = None       # (angle_err, achieved, residual, ncells)
+    nearest_err = math.inf
+    nearest_res = math.inf
 
     for ma, sc_a, area_a in cand_a:
         if area_a < 1.0:
@@ -608,10 +617,10 @@ def find_commensurate_twist(
                 achieved_folded = 60.0 - achieved_folded   # nearest wedge image
             angle_err = abs(achieved_folded - target_angle)
             ncells = int(round(area_a / abs(float(np.linalg.det(cell_a)))))
-            if nearest is None or angle_err < nearest[0] - 1e-9 or (
-                abs(angle_err - nearest[0]) < 1e-9 and residual < nearest[2]
-            ):
+            if (angle_err < nearest_err - 1e-9
+                    or (abs(angle_err - nearest_err) < 1e-9 and residual < nearest_res)):
                 nearest = (angle_err, achieved_folded, residual, ncells)
+                nearest_err, nearest_res = angle_err, residual
             if angle_err > angle_tol or residual > strain_tol:
                 continue
             # Prefer the closest angle; break ties by the smaller moiré cell.
@@ -623,10 +632,11 @@ def find_commensurate_twist(
     candidates.sort(key=lambda c: c[0])
     for _key, matrix_a, matrix_b, achieved, residual, ncells in candidates:
         # Reduce each layer's rhombic moiré supercell, capturing the integer
-        # reduction transform U so the FULL orthorhombic tiling matrix of the
-        # *original* monolayer is S = T @ U @ M (exact integers, no rounding).
+        # reduction transform (unimod) so the FULL orthorhombic tiling matrix of
+        # the *original* monolayer is S = tiling @ unimod @ M (exact integers,
+        # no rounding).
         reduced_a, u_a = _gauss_reduce_2d(matrix_a @ cell_a)
-        reduced_b, u_b = _gauss_reduce_2d(matrix_b @ cell_b)
+        _reduced_b, u_b = _gauss_reduce_2d(matrix_b @ cell_b)
         try:
             ortho_cell, tiling = orthorhombic_wrapper(reduced_a[:2, :2], max_tiling=max_tiling)
         except ValueError:
@@ -689,7 +699,9 @@ def find_coincidence_lattice_from_cif(
     Returns:
         :class:`MatchResult` or ``None``.
     """
-    from ..core.utils.structures import cifread
+    # Lazy import: core.utils.structures pulls in ase.io (~270 ms); only this
+    # CIF entry point needs to pay that cost.
+    from ..core.utils.structures import cifread  # pylint: disable=import-outside-toplevel
 
     def _cell(cif_path, params):
         if cif_path is not None:
@@ -701,7 +713,9 @@ def find_coincidence_lattice_from_cif(
 
     cell_a = _cell(cif_a, lat_a)
     cell_b = _cell(cif_b, lat_b)
-    return find_coincidence_lattice(cell_a, cell_b, strain_tol=strain_tol, max_supercell=max_supercell)
+    return find_coincidence_lattice(
+        cell_a, cell_b, strain_tol=strain_tol, max_supercell=max_supercell
+    )
 
 
 # =============================================================================
@@ -889,4 +903,3 @@ def scan_registry_index(
         shifts_x=sx,
         shifts_y=sy,
     )
-

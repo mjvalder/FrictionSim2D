@@ -3,6 +3,17 @@
 Bridges the pure-math ``lattice_matching`` module to on-disk structures. Kept
 separate so ``lattice_matching`` stays dependency-free (math only).
 """
+# pylint: disable=cyclic-import
+# The lazy imports of src.builders.construction.hetero_stack below (in
+# rotate_layer_to_angle/rotate_flake_in_plane) close a real import cycle with
+# src.builders.construction.{hetero_stack,components}: this module needs their
+# metadata-preserving I/O helpers, and they import this module for lattice
+# matching. The cycle is broken at runtime (both imports are deferred into the
+# function bodies), so it never actually hangs; pylint's cyclic-import check
+# only sees the module graph, not the deferral, and reports it on whichever
+# module pylint analyses first. A line-level pragma on the lazy imports cannot
+# silence it (pylint attributes the message to the first-analysed module, not
+# the import site), so the disable lives here at module scope instead.
 from __future__ import annotations
 
 import numpy as np
@@ -23,9 +34,9 @@ def canonicalize_cell_to_lammps(cell_2x2: np.ndarray) -> tuple[np.ndarray, float
     a2 = np.asarray(cell_2x2[1], float)
     theta = np.arctan2(a1[1], a1[0])
     c, s = np.cos(-theta), np.sin(-theta)
-    R = np.array([[c, -s], [s, c]])
-    b1 = R @ a1
-    b2 = R @ a2
+    rot = np.array([[c, -s], [s, c]])
+    b1 = rot @ a1
+    b2 = rot @ a2
     if b2[1] < 0:                      # keep ly > 0 (right-handed, LAMMPS-valid)
         b2 = np.array([b2[0], -b2[1]])
     canon = np.array([[b1[0], 0.0], [b2[0], b2[1]]])
