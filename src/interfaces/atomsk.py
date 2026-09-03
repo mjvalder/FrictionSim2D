@@ -125,7 +125,7 @@ class AtomskWrapper:
         """Convert structure to orthogonal cell."""
         self.run([str(input_file), "-orthogonal-cell", str(output_file)])
 
-    def duplicate(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def duplicate(
         self,
         input_file: Union[str, Path],
         output_file: Union[str, Path],
@@ -190,4 +190,3 @@ class AtomskWrapper:
             shutil.move(str(temp_output), str(input_path))
         else:
             self.run([str(input_file), "-center", "com", str(output_file)])
-

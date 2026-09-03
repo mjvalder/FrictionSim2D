@@ -31,7 +31,7 @@ defer it into the functions that use it. After this split that is two files:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 
 def read_structure(path: Union[str, Path]) -> Dict[str, Any]:
@@ -49,7 +49,8 @@ def read_structure(path: Union[str, Path]) -> Dict[str, Any]:
         (per-atom chemical symbols, in file order) and ``formula`` (Hill
         notation).
     """
-    from ase.io import read as ase_read  # noqa: PLC0415  (deferred: ~270 ms)
+    from ase.io import read as ase_read  # pylint: disable=import-outside-toplevel
+    # (deferred: ~270 ms)
 
     atoms = ase_read(str(path))
     if isinstance(atoms, list):
@@ -92,8 +93,9 @@ def read_lammps_data(path: Union[str, Path]) -> LammpsData:
     Returns:
         A :class:`LammpsData` holding the cell matrix and atom positions.
     """
-    import numpy as np  # noqa: PLC0415
-    from ase.io import read  # noqa: PLC0415  (deferred: ~355 ms)
+    import numpy as np  # pylint: disable=import-outside-toplevel
+    from ase.io import read  # pylint: disable=import-outside-toplevel
+    # (deferred: ~355 ms)
 
     atoms = read(str(path), format="lammps-data")
     return LammpsData(
@@ -117,6 +119,6 @@ def element_mass(symbol: str) -> float:
     Returns:
         The element's standard atomic mass.
     """
-    from ase.data import atomic_masses, atomic_numbers  # noqa: PLC0415
+    from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
 
     return float(atomic_masses[atomic_numbers[symbol]])
