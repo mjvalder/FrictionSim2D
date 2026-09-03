@@ -11,8 +11,6 @@ from src.lattice.matching import (
     StackingResult,
     cell_from_params,
     find_coincidence_lattice,
-    find_coincidence_lattice_from_cif,
-    generate_supercell_positions,
     scan_registry_index,
     rotation_angle_from_match,
     _max_strain,
@@ -205,50 +203,6 @@ def test_find_coincidence_lattice_skips_degenerate_sub_angstrom_cells():
 
 
 # ---------------------------------------------------------------------------
-# find_coincidence_lattice_from_cif — parameter tuple path
-# ---------------------------------------------------------------------------
-
-class TestFindCoincidenceLatticeFromCif:
-    def test_tuple_input_matches(self):
-        result = find_coincidence_lattice_from_cif(
-            lat_a=(3.18, 3.18, 120.0),
-            lat_b=(3.18, 3.18, 120.0),
-            strain_tol=0.01,
-        )
-        assert result is not None
-        assert result.strain_a < 1e-6
-
-    def test_cif_path_input(self, tmp_path):
-        cif = tmp_path / "test.cif"
-        cif.write_text("""\
-data_test
-_symmetry_space_group_name_H-M   'P 1'
-_cell_length_a   3.18
-_cell_length_b   3.18
-_cell_length_c   15.0
-_cell_angle_alpha   90
-_cell_angle_beta    90
-_cell_angle_gamma   120
-
-loop_
-  _atom_site_type_symbol
-  _atom_site_label
-  _atom_site_fract_x
-  _atom_site_fract_y
-  _atom_site_fract_z
-  Mo Mo1 0.333 0.667 0.5
-""", encoding='utf-8')
-        result = find_coincidence_lattice_from_cif(
-            cif_a=str(cif), cif_b=str(cif), strain_tol=0.01
-        )
-        assert result is not None
-
-    def test_raises_without_input(self):
-        with pytest.raises(ValueError):
-            find_coincidence_lattice_from_cif()
-
-
-# ---------------------------------------------------------------------------
 # LatticeMatchConfig
 # ---------------------------------------------------------------------------
 
@@ -295,34 +249,6 @@ class TestCircleOverlapArea:
         a2 = _circle_overlap_area(1.5, r)
         a3 = _circle_overlap_area(2.5, r)
         assert a1 > a2 > a3
-
-
-# ---------------------------------------------------------------------------
-# generate_supercell_positions
-# ---------------------------------------------------------------------------
-
-class TestGenerateSupercellPositions:
-    def test_identity_matrix_preserves_atoms(self):
-        unit_cell = cell_from_params(3.18, 3.18, 120.0)
-        frac = np.array([[0.0, 0.0], [1/3, 2/3]])
-        matrix = np.eye(2, dtype=int)
-        cart = generate_supercell_positions(frac, unit_cell, matrix)
-        assert cart.shape == (2, 2)
-
-    def test_2x1_supercell_doubles_atoms(self):
-        unit_cell = cell_from_params(3.0, 4.0, 90.0)
-        frac = np.array([[0.0, 0.0], [0.5, 0.5]])
-        matrix = np.array([[2, 0], [0, 1]], dtype=int)
-        cart = generate_supercell_positions(frac, unit_cell, matrix)
-        # det=2 → 2×2=4 atoms
-        assert cart.shape[0] == 4
-
-    def test_singular_matrix_raises(self):
-        unit_cell = cell_from_params(3.0, 4.0, 90.0)
-        frac = np.array([[0.0, 0.0]])
-        matrix = np.zeros((2, 2), dtype=int)
-        with pytest.raises((ValueError, np.linalg.LinAlgError)):
-            generate_supercell_positions(frac, unit_cell, matrix)
 
 
 # ---------------------------------------------------------------------------

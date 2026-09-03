@@ -680,46 +680,6 @@ def find_commensurate_twist(
     )
 
 
-def find_coincidence_lattice_from_cif(
-    cif_a: "str | None" = None,
-    cif_b: "str | None" = None,
-    lat_a: Optional[Tuple[float, float, float]] = None,
-    lat_b: Optional[Tuple[float, float, float]] = None,
-    strain_tol: float = 0.02,
-    max_supercell: int = 10,
-) -> Optional[MatchResult]:
-    """Convenience wrapper that accepts CIF paths or ``(a, b, γ)`` tuples.
-
-    Args:
-        cif_a: Path to CIF file for material A.  Mutually exclusive with ``lat_a``.
-        cif_b: Path to CIF file for material B.  Mutually exclusive with ``lat_b``.
-        lat_a: ``(a, b, gamma_deg)`` tuple for material A.
-        lat_b: ``(a, b, gamma_deg)`` tuple for material B.
-        strain_tol: Forwarded to :func:`find_coincidence_lattice`.
-        max_supercell: Forwarded to :func:`find_coincidence_lattice`.
-
-    Returns:
-        :class:`MatchResult` or ``None``.
-    """
-    # Lazy import: core.utils.structures pulls in ase.io (~270 ms); only this
-    # CIF entry point needs to pay that cost.
-    from ..core.utils.structures import cifread  # pylint: disable=import-outside-toplevel
-
-    def _cell(cif_path, params):
-        if cif_path is not None:
-            data = cifread(cif_path)
-            return cell_from_params(data['lat_a'], data['lat_b'], data['ang_g'])
-        if params is not None:
-            return cell_from_params(*params)
-        raise ValueError("Provide either a CIF path or a (a, b, gamma) tuple.")
-
-    cell_a = _cell(cif_a, lat_a)
-    cell_b = _cell(cif_b, lat_b)
-    return find_coincidence_lattice(
-        cell_a, cell_b, strain_tol=strain_tol, max_supercell=max_supercell
-    )
-
-
 # =============================================================================
 # Hod Registry Index (RI)
 # =============================================================================
@@ -745,47 +705,6 @@ class StackingResult(NamedTuple):
     ri_grid: np.ndarray
     shifts_x: np.ndarray
     shifts_y: np.ndarray
-
-
-def generate_supercell_positions(
-    frac_pos: np.ndarray,
-    unit_cell: np.ndarray,
-    matrix: np.ndarray,
-) -> np.ndarray:
-    """Tile a unit cell into a supercell and return Cartesian atom positions.
-
-    Args:
-        frac_pos: (N, 2) fractional coordinates of atoms in the unit cell.
-        unit_cell: 2×2 row-vector lattice matrix of the unit cell (Å).
-        matrix: 2×2 integer supercell transformation matrix (upper-triangular,
-            as returned by :func:`find_coincidence_lattice`).
-
-    Returns:
-        (M, 2) Cartesian positions (Å) of all atoms in the supercell, where
-        M = N × det(matrix).
-    """
-    m = int(round(abs(np.linalg.det(matrix))))
-    if m < 1:
-        raise ValueError("Supercell matrix has non-positive determinant.")
-
-    matrix_inv = np.linalg.inv(matrix)
-
-    # Enumerate all integer lattice-vector offsets (i, j) within ±n of origin.
-    # A candidate image of atom f in the unit cell is f + (i,j), which maps to
-    # supercell fractional coordinates (f + (i,j)) @ inv(M).
-    n = int(math.ceil(math.sqrt(m))) + 2
-    i_range = np.arange(-n, n + 1)
-    ii, jj = np.meshgrid(i_range, i_range)
-    translations = np.column_stack([ii.ravel(), jj.ravel()])  # (K, 2)
-
-    all_cart: List[np.ndarray] = []
-    for f in frac_pos:
-        images_uc = f + translations                   # (K, 2) unit-cell fractional
-        images_sc = images_uc @ matrix_inv             # (K, 2) supercell fractional
-        mask = np.all((images_sc >= -1e-6) & (images_sc < 1.0 - 1e-6), axis=1)
-        all_cart.append(images_uc[mask] @ unit_cell)  # convert kept images to Å
-
-    return np.vstack(all_cart)
 
 
 def _circle_overlap_area(d: float, r: float) -> float:
