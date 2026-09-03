@@ -4,7 +4,6 @@ import os
 import pytest
 from pathlib import Path
 from importlib import resources
-from unittest.mock import MagicMock
 
 from src.core.config import (
     GlobalSettings,
@@ -15,7 +14,6 @@ from src.core.config import (
     OutputSettings,
     PotentialSettings,
     AiidaSettings,
-    ComponentConfig,
     TipConfig,
     SubstrateConfig,
     SheetConfig,
@@ -96,13 +94,6 @@ def mock_settings() -> GlobalSettings:
 
 
 @pytest.fixture
-def mock_settings_no_langevin(mock_settings) -> GlobalSettings:
-    """GlobalSettings with Nose-Hoover thermostat (no Langevin)."""
-    mock_settings.thermostat.type = 'nose-hoover'
-    return mock_settings
-
-
-@pytest.fixture
 def data_path() -> Path:
     """Returns the path to package data directory."""
     return Path(str(resources.files('src.data')))
@@ -112,18 +103,6 @@ def data_path() -> Path:
 def temp_dir(tmp_path: Path) -> Path:
     """Legacy fixture alias used by older tests."""
     return tmp_path
-
-
-@pytest.fixture
-def package_materials_path() -> Path:
-    """Canonical home of shipped material data (``src/data/materials``).
-
-    This is the only copy that survives installation -- the sdist ships
-    ``src/**`` only -- and it is what ``get_amorphous_path`` resolves via
-    ``importlib.resources``. Use this for ``.lmp`` structures; use
-    ``materials_path`` for the ``.cif`` example library.
-    """
-    return Path(str(resources.files('src.data'))) / 'materials'
 
 
 @pytest.fixture
@@ -198,20 +177,6 @@ def mos2_multilayer_config(materials_path, potentials_path) -> SheetConfig:
     )
 
 
-@pytest.fixture
-def silicene_sheet_config(materials_path, potentials_path) -> SheetConfig:
-    """Silicene sheet configuration using SW potential."""
-    return SheetConfig(
-        mat='silicene',
-        pot_type='sw',
-        pot_path=str(potentials_path / 'sw' / 'sw_lammps' / 'silicene.sw'),
-        cif_path=str(materials_path / 'silicene.cif'),
-        x=50.0,
-        y=50.0,
-        layers=[1],
-    )
-
-
 # =========================================================================
 # Mock CIF Data Fixtures (to avoid file I/O in unit tests)
 # =========================================================================
@@ -237,14 +202,6 @@ def mock_count_atomtypes_si(monkeypatch):
     """Mocks count_atomtypes for Silicon (1 type per element)."""
     def mock_count(*args, **kwargs):
         return {'Si': 1}
-    monkeypatch.setattr('src.potentials.manager.count_atomtypes', mock_count)
-
-
-@pytest.fixture
-def mock_count_atomtypes_mos2(monkeypatch):
-    """Mocks count_atomtypes for MoS2 (SW has 6 types: Mo1-6, S1-6)."""
-    def mock_count(*args, **kwargs):
-        return {'Mo': 6, 'S': 6}
     monkeypatch.setattr('src.potentials.manager.count_atomtypes', mock_count)
 
 
