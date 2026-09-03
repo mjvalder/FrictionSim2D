@@ -14,6 +14,7 @@ Tests verify the core methods work correctly for all use cases.
 
 """
 
+import logging
 import pytest
 import tempfile
 from pathlib import Path
@@ -234,6 +235,32 @@ class TestLJOverrides:
         finally:
             pm_module.cifread = original_cifread
             pm_module.count_atomtypes = original_count
+
+
+class TestOverrideParsing:
+    """Tests for the static pair-key/value parsing helpers behind set_lj_overrides."""
+
+    def test_pair_key_accepts_dash_underscore_space_and_comma(self):
+        for key in ('Mo-S', 'Mo_S', 'Mo S', 'Mo,S'):
+            assert PotentialManager._parse_override_pair(key) == ('Mo', 'S')
+
+    def test_pair_key_with_three_tokens_is_rejected(self):
+        with pytest.raises(ValueError, match='two element symbols'):
+            PotentialManager._parse_override_pair('Mo-S-Se')
+
+    def test_values_from_list(self):
+        assert PotentialManager._parse_override_values('Mo-S', [0.1, 3.2]) == (0.1, 3.2)
+
+    def test_values_from_dict(self):
+        assert PotentialManager._parse_override_values('Mo-S', {'epsilon': '0.1', 'sigma': 3}) == (0.1, 3.0)
+
+    def test_dict_missing_sigma_is_rejected(self):
+        with pytest.raises(ValueError, match="'epsilon' and 'sigma'"):
+            PotentialManager._parse_override_values('Mo-S', {'epsilon': 0.1})
+
+    def test_scalar_is_rejected(self):
+        with pytest.raises(ValueError, match=r'\[epsilon, sigma\]'):
+            PotentialManager._parse_override_values('Mo-S', 0.1)
 
 
 # =========================================================================
@@ -831,6 +858,26 @@ class TestEdgeCases:
     def test_add_self_interaction_before_registration(self, mock_settings):
         """Adding self-interaction before registration should raise error."""
         pm = PotentialManager(mock_settings)
-        
+
         with pytest.raises(ValueError, match="not registered"):
             pm.add_self_interaction('nonexistent')
+
+
+def test_unknown_element_mass_falls_back_to_one_with_a_warning(
+    caplog, mock_settings, si_tip_config
+):
+    """get_masses_string: an element absent from ase.data gets mass 1.0 and a warning."""
+    pm = PotentialManager(mock_settings, use_langevin=False)
+    pm.register_component('tip', si_tip_config)
+    # Inject a type for an element ase.data doesn't know, via the registry's
+    # own public registration method (TypeRegistry.register) rather than
+    # patching a private helper.
+    pm.types.register(component='tip', element='Xx', pot_label='Xx')
+
+    with caplog.at_level(logging.WARNING):
+        out = pm.get_masses_string()
+
+    assert 'mass' in out
+    assert '1.0' in out
+    assert '(unknown)' in out
+    assert "Could not find mass for element 'Xx'" in caplog.text
