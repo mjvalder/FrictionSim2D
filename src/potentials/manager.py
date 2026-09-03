@@ -268,7 +268,9 @@ class PotentialManager:
         """
         self.settings = settings
 
-        self.potentials_dir: Optional[Path] = Path(potentials_dir).resolve() if potentials_dir else None
+        self.potentials_dir: Optional[Path] = (
+            Path(potentials_dir).resolve() if potentials_dir else None
+        )
         self.potentials_prefix = potentials_prefix
 
         if use_langevin is not None:
@@ -405,6 +407,7 @@ class PotentialManager:
             List of LAMMPS commands (pair_style, pair_coeff, mass).
         """
         from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
+        # (deferred: ase)
 
         commands = []
         pot_type = config.pot_type.lower()
@@ -458,7 +461,9 @@ class PotentialManager:
         apply_langevin = self.use_langevin and name in ('tip', 'sub')
 
         if n_layers > 1:
-            self._assign_types(name, elements, pot_counts, n_layers, use_layer_ids=True, regions=regions)
+            self._assign_types(
+                name, elements, pot_counts, n_layers, use_layer_ids=True, regions=regions
+            )
         elif apply_langevin:
             self._assign_types(name, elements, pot_counts, regions=[None, 'fix', 'thermo'])
         else:
@@ -523,8 +528,9 @@ class PotentialManager:
             pot_counts: Dict of atom counts per element.
             n_layers: Number of layers to create types for (default 1).
             use_layer_ids: If True, assign layer IDs to types; if False, layer=None.
-            regions: List of region identifiers for Langevin thermostat (e.g., [None, 'fix', 'thermo']).
-                If None, defaults to [None] (standard single type per element).
+            regions: List of region identifiers for Langevin thermostat
+                (e.g., [None, 'fix', 'thermo']). If None, defaults to [None]
+                (standard single type per element).
         """
         if regions is None:
             regions = [None]
@@ -682,7 +688,9 @@ class PotentialManager:
                 eps_str = self._format_lj_value(epsilon)
                 sig_str = self._format_lj_value(sigma)
                 cmd = f"pair_coeff {types1} {types2} {interaction_type} {eps_str} {sig_str}"
-                self.cross_interaction_commands.append(f"{cmd} # {el1}({comp1_name})-{el2}({comp2_name})")
+                self.cross_interaction_commands.append(
+                    f"{cmd} # {el1}({comp1_name})-{el2}({comp2_name})"
+                )
 
     def add_interlayer_interaction(
         self,
@@ -706,7 +714,9 @@ class PotentialManager:
         elements = comp['elements']
 
         if n_layers < 2:
-            logger.warning("Component '%s' has only 1 layer, skipping interlayer interaction.", component_name)
+            logger.warning(
+                "Component '%s' has only 1 layer, skipping interlayer interaction.", component_name
+            )
             return
 
         if layer_pairs is None:
@@ -719,8 +729,12 @@ class PotentialManager:
                     if low_interaction:
                         epsilon = 1e-100  # Near-zero for ghost interaction
 
-                    types_i = self.types.ids_by_component_layer_element(component_name, layer_i, el1)
-                    types_j = self.types.ids_by_component_layer_element(component_name, layer_j, el2)
+                    types_i = self.types.ids_by_component_layer_element(
+                        component_name, layer_i, el1
+                    )
+                    types_j = self.types.ids_by_component_layer_element(
+                        component_name, layer_j, el2
+                    )
 
                     if not types_i or not types_j:
                         continue
@@ -773,7 +787,9 @@ class PotentialManager:
         n_layers = comp['n_layers']
 
         if n_layers < 2:
-            logger.warning("Component '%s' has only 1 layer, skipping interlayer interactions.", component_name)
+            logger.warning(
+                "Component '%s' has only 1 layer, skipping interlayer interactions.", component_name
+            )
             return
 
         real_pairs = []
@@ -788,10 +804,14 @@ class PotentialManager:
                     ghost_pairs.append((i, j))
 
         if real_pairs:
-            self.add_interlayer_interaction(component_name, layer_pairs=real_pairs, low_interaction=False)
+            self.add_interlayer_interaction(
+                component_name, layer_pairs=real_pairs, low_interaction=False
+            )
 
         if ghost_pairs:
-            self.add_interlayer_interaction(component_name, layer_pairs=ghost_pairs, low_interaction=True)
+            self.add_interlayer_interaction(
+                component_name, layer_pairs=ghost_pairs, low_interaction=True
+            )
 
     def calculate_gap(self, comp1_name: str, comp2_name: str,
                         buffer: float = 0.5) -> float:
@@ -829,6 +849,7 @@ class PotentialManager:
             String with mass commands, one per line.
         """
         from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
+        # (deferred: ase)
 
         element_types: Dict[str, List[int]] = defaultdict(list)
         for atype in self.types:
@@ -923,8 +944,14 @@ class PotentialManager:
                     types_str = ' '.join(map(str, all_types))
                     lines.append(f"group 2D_all type {types_str}")
 
-                core_types = [atype.type_id for atype in self.types if atype.component == name and atype.region is None]
-                edge_types = [atype.type_id for atype in self.types if atype.component == name and atype.region == 'edge']
+                core_types = [
+                    atype.type_id for atype in self.types
+                    if atype.component == name and atype.region is None
+                ]
+                edge_types = [
+                    atype.type_id for atype in self.types
+                    if atype.component == name and atype.region == 'edge'
+                ]
 
                 if core_types:
                     types_str = ' '.join(map(str, core_types))

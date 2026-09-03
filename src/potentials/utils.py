@@ -15,10 +15,11 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
-from ..core.utils.paths import _find_existing  # noqa: PLC2701
-from ..core.utils.structures import _normalize_element_symbol, cifread, count_atomtypes  # noqa: PLC2701
+from ..core.utils.structures import (  # noqa: PLC2701
+    _normalize_element_symbol, cifread, count_atomtypes,
+)
 
 from . import uff as lj
 
@@ -111,7 +112,8 @@ def get_potential_element_order(
 
                     if element_name not in cif_set:
                         raise ValueError(
-                            f"Potential contains element '{element_name}' not in CIF (CIF has {cif_elements})"
+                            f"Potential contains element '{element_name}' not in CIF "
+                            f"(CIF has {cif_elements})"
                         )
 
                     pot_element_counts[element_name] = max(
@@ -220,6 +222,7 @@ class PotentialTypeError(ValueError):
 
 @dataclass(frozen=True)
 class ResolvedPotential:
+    """A sweep entry's potential file with the pair style it resolved to and how."""
     path: str
     pot_type: str
     route: str   # 'explicit' | 'directory' | 'extension'
@@ -242,7 +245,10 @@ class ResolvedPotential:
 # potential type, assuming LJ is required" and proceeds — under a sweep that
 # would silently emit the wrong pair_style for an entire arm.
 def resolve_pot_type(entry: Union[str, dict],
-                     potentials_root: Path) -> ResolvedPotential:
+                     potentials_root: Path) -> ResolvedPotential:  # pylint: disable=unused-argument
+    # potentials_root is accepted for call-site symmetry with the sweep expander; the
+    # directory route deliberately matches any parent segment (spec §13.3), not only
+    # children of the root.
     if isinstance(entry, dict):
         path = entry['path']
         explicit = entry.get('pot_type')
