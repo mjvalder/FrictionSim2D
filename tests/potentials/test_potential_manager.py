@@ -84,31 +84,13 @@ class TestNormalizationGuards:
     def test_register_component_normalizes_potential_usage_key(
         self,
         mock_settings,
-        monkeypatch,
+        si_tip_config,
     ):
         """Mixed-case pot_type should map to a single lowercase usage key."""
-        # Monkeypatch path validation functions in the modules that use them
-        monkeypatch.setattr(
-            'src.core.config.get_potential_path',
-            lambda _path: Path(_path)
-        )
-        monkeypatch.setattr(
-            'src.core.config.get_material_path',
-            lambda _path: Path(_path)
-        )
-        monkeypatch.setattr(
-            'src.potentials.manager.cifread',
-            lambda _path: {'elements': ['Si']}
-        )
-        monkeypatch.setattr(
-            'src.potentials.manager.count_atomtypes',
-            lambda _path, _elements, pot_type=None: {'Si': 1}
-        )
-
         from src.core.config import TipConfig
         config_upper = TipConfig(
-            mat='Si', pot_type='SW', pot_path='/tmp/Si.sw', cif_path='/tmp/Si.cif',
-            r=20.0, amorph='c', dspring=0.1, s=1.0
+            mat=si_tip_config.mat, pot_type='SW', pot_path=si_tip_config.pot_path,
+            cif_path=si_tip_config.cif_path, r=20.0, amorph='c', dspring=0.1, s=1.0
         )
         pm = PotentialManager(mock_settings, use_langevin=False)
         pm.register_component('tip', config_upper)
@@ -119,36 +101,19 @@ class TestNormalizationGuards:
     def test_add_self_interaction_uses_normalized_key_for_indexing(
         self,
         mock_settings,
-        monkeypatch,
+        si_tip_config,
+        si_sub_config,
     ):
         """Potential indexing should stay consistent when pot_type casing differs."""
-        # Monkeypatch path validation functions in the modules that use them
-        monkeypatch.setattr(
-            'src.core.config.get_potential_path',
-            lambda _path: Path(_path)
-        )
-        monkeypatch.setattr(
-            'src.core.config.get_material_path',
-            lambda _path: Path(_path)
-        )
-        monkeypatch.setattr(
-            'src.potentials.manager.cifread',
-            lambda _path: {'elements': ['Si']}
-        )
-        monkeypatch.setattr(
-            'src.potentials.manager.count_atomtypes',
-            lambda _path, _elements, pot_type=None: {'Si': 1}
-        )
-
-        # Create minimal configs without needing real files
+        # Real Si.cif/Si.sw fixtures shared by both configs; only pot_type casing differs.
         from src.core.config import TipConfig, SubstrateConfig
         config_upper = TipConfig(
-            mat='Si', pot_type='SW', pot_path='/tmp/Si.sw', cif_path='/tmp/Si.cif',
-            r=20.0, amorph='c', dspring=0.1, s=1.0
+            mat=si_tip_config.mat, pot_type='SW', pot_path=si_tip_config.pot_path,
+            cif_path=si_tip_config.cif_path, r=20.0, amorph='c', dspring=0.1, s=1.0
         )
         config_lower = SubstrateConfig(
-            mat='Si', pot_type='sw', pot_path='/tmp/Si.sw', cif_path='/tmp/Si.cif',
-            thickness=10.0, amorph='c'
+            mat=si_sub_config.mat, pot_type='sw', pot_path=si_sub_config.pot_path,
+            cif_path=si_sub_config.cif_path, thickness=10.0, amorph='c'
         )
 
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -205,36 +170,19 @@ class TestLJOverrides:
         self, mock_settings, mos2_sheet_config
     ):
         """Interlayer pair_coeff should use override epsilon/sigma for matching pairs."""
-        import src.potentials.manager as pm_module
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.set_lj_overrides({
+            'Mo-Mo': [1.0624, 3.878597],
+            'Mo-S': [0.4124, 3.75114],
+            'S-S': [0.198443, 3.62368],
+        })
+        pm.register_component('sheet', mos2_sheet_config, n_layers=2)
+        pm.add_interlayer_interaction('sheet')
 
-        def mock_cifread(path):
-            return {'elements': ['Mo', 'S']}
-
-        def mock_count(path, elements, pot_type=None):
-            return {el: 1 for el in elements}
-
-        original_cifread = pm_module.cifread
-        original_count = pm_module.count_atomtypes
-        pm_module.cifread = mock_cifread
-        pm_module.count_atomtypes = mock_count
-
-        try:
-            pm = PotentialManager(mock_settings, use_langevin=False)
-            pm.set_lj_overrides({
-                'Mo-Mo': [1.0624, 3.878597],
-                'Mo-S': [0.4124, 3.75114],
-                'S-S': [0.198443, 3.62368],
-            })
-            pm.register_component('sheet', mos2_sheet_config, n_layers=2)
-            pm.add_interlayer_interaction('sheet')
-
-            joined = "\n".join(pm.cross_interaction_commands)
-            assert 'lj/cut 1.0624 3.878597' in joined
-            assert 'lj/cut 0.4124 3.75114' in joined
-            assert 'lj/cut 0.198443 3.62368' in joined
-        finally:
-            pm_module.cifread = original_cifread
-            pm_module.count_atomtypes = original_count
+        joined = "\n".join(pm.cross_interaction_commands)
+        assert 'lj/cut 1.0624 3.878597' in joined
+        assert 'lj/cut 0.4124 3.75114' in joined
+        assert 'lj/cut 0.198443 3.62368' in joined
 
 
 class TestOverrideParsing:
@@ -271,7 +219,7 @@ class TestSingleComponentTip:
     """Tests for standalone tip simulation setup."""
 
     def test_tip_standard_types(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Single Si tip should get 1 atom type."""
         mock_settings.thermostat.type = 'nose-hoover'  # No Langevin
@@ -287,7 +235,7 @@ class TestSingleComponentTip:
         assert len(pm.types) == 1
 
     def test_tip_self_interaction_only(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Single tip should have self-interaction but no cross-interactions."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -299,7 +247,7 @@ class TestSingleComponentTip:
         assert 'tip' in pm.self_interaction_commands[0]
 
     def test_tip_group_string(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Group string should contain all tip types."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -317,7 +265,7 @@ class TestSingleComponentSubstrate:
     """Tests for standalone substrate simulation setup."""
 
     def test_sub_standard_types(
-        self, mock_settings, si_sub_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_sub_config
     ):
         """Single Si substrate should get 1 atom type."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -330,7 +278,7 @@ class TestSingleComponentSubstrate:
         assert len(pm.types) == 1
 
     def test_sub_no_cross_interactions(
-        self, mock_settings, si_sub_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_sub_config
     ):
         """Standalone substrate should have no cross-interactions."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -348,7 +296,7 @@ class TestSingleComponentSheet:
     """Tests for standalone sheet simulation setup."""
 
     def test_sheet_single_layer(
-        self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_sheet_config
     ):
         """Single-layer sheet should get types for each element."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -361,7 +309,7 @@ class TestSingleComponentSheet:
         assert len(pm.types) == 2
 
     def test_sheet_multi_layer_types(
-        self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_sheet_config
     ):
         """Multi-layer sheet should get types per layer."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -372,7 +320,7 @@ class TestSingleComponentSheet:
         assert len(pm.types) == 4
 
     def test_sheet_multi_layer_interlayer_lj(
-        self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_sheet_config
     ):
         """Multi-layer sheet should have interlayer LJ interactions."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -392,7 +340,7 @@ class TestLangevinComponents:
     """Tests for Langevin thermostat region setup."""
 
     def test_tip_langevin_3x_types(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Tip with Langevin should get 3 types per element."""
         pm = PotentialManager(mock_settings, use_langevin=True)  # Enable Langevin
@@ -405,7 +353,7 @@ class TestLangevinComponents:
         assert len(pm.types) == 3
 
     def test_sub_langevin_3x_types(
-        self, mock_settings, si_sub_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_sub_config
     ):
         """Substrate with Langevin should get 3 types per element."""
         pm = PotentialManager(mock_settings, use_langevin=True)
@@ -416,7 +364,7 @@ class TestLangevinComponents:
         assert len(pm.types) == 3
 
     def test_sheet_no_langevin_expansion(
-        self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_sheet_config
     ):
         """Sheets should never get Langevin expansion regardless of PM setting."""
         pm = PotentialManager(mock_settings, use_langevin=True)
@@ -427,7 +375,7 @@ class TestLangevinComponents:
         assert len(pm.types) == 2
 
     def test_langevin_group_definitions(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Langevin types should have proper group definitions (mobile, fix, thermo)."""
         pm = PotentialManager(mock_settings, use_langevin=True)
@@ -450,89 +398,49 @@ class TestAFMSystem:
     """Tests for complete AFM system setup."""
 
     def test_afm_all_components_registered(
-        self, mock_settings, si_tip_config, si_sub_config, mos2_sheet_config,
-        mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config, si_sub_config, mos2_sheet_config
     ):
         """AFM system should register all three components."""
-        # Need to mock both Si and MoS2 cifread
-        import src.potentials.manager as pm_module
-        
-        def mock_cifread(path):
-            if 'MoS2' in str(path) or 'h-Mo' in str(path):
-                return {'elements': ['Mo', 'S']}
-            return {'elements': ['Si']}
-        
-        def mock_count(path, elements, pot_type=None):
-            return {el: 1 for el in elements}
-        
-        original_cifread = pm_module.cifread
-        original_count = pm_module.count_atomtypes
-        pm_module.cifread = mock_cifread
-        pm_module.count_atomtypes = mock_count
-        
-        try:
-            pm = PotentialManager(mock_settings, use_langevin=False)
-            # Register all components
-            pm.register_component('sub', si_sub_config)
-            pm.register_component('tip', si_tip_config)
-            pm.register_component('sheet', mos2_sheet_config, n_layers=1)
-            
-            # Add self-interactions
-            pm.add_self_interaction('sub')
-            pm.add_self_interaction('tip')
-            pm.add_self_interaction('sheet')
-            
-            # Si(sub) + Si(tip) + Mo + S = 4 types
-            assert len(pm.types) == 4
-        finally:
-            pm_module.cifread = original_cifread
-            pm_module.count_atomtypes = original_count
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        # Register all components
+        pm.register_component('sub', si_sub_config)
+        pm.register_component('tip', si_tip_config)
+        pm.register_component('sheet', mos2_sheet_config, n_layers=1)
+
+        # Add self-interactions
+        pm.add_self_interaction('sub')
+        pm.add_self_interaction('tip')
+        pm.add_self_interaction('sheet')
+
+        # Si(sub) + Si(tip) + Mo + S = 4 types
+        assert len(pm.types) == 4
 
     def test_afm_cross_interactions(
         self, mock_settings, si_tip_config, si_sub_config, mos2_sheet_config
     ):
         """AFM system should have cross-interactions between all pairs."""
-        import src.potentials.manager as pm_module
-        
-        def mock_cifread(path):
-            if 'MoS2' in str(path) or 'h-Mo' in str(path):
-                return {'elements': ['Mo', 'S']}
-            return {'elements': ['Si']}
-        
-        def mock_count(path, elements, pot_type=None):
-            return {el: 1 for el in elements}
-        
-        original_cifread = pm_module.cifread
-        original_count = pm_module.count_atomtypes
-        pm_module.cifread = mock_cifread
-        pm_module.count_atomtypes = mock_count
-        
-        try:
-            pm = PotentialManager(mock_settings, use_langevin=False)
-            # Register
-            pm.register_component('sub', si_sub_config)
-            pm.register_component('tip', si_tip_config)
-            pm.register_component('sheet', mos2_sheet_config, n_layers=1)
-            
-            # Self-interactions
-            pm.add_self_interaction('sub')
-            pm.add_self_interaction('tip')
-            pm.add_self_interaction('sheet')
-            
-            # Cross-interactions (like AFMBuilder does)
-            pm.add_cross_interaction('sub', 'tip')
-            pm.add_cross_interaction('sub', 'sheet')
-            pm.add_cross_interaction('tip', 'sheet')
-            
-            # Should have LJ cross-interaction commands
-            assert len(pm.cross_interaction_commands) >= 3
-            
-            # Check all component pairs are covered
-            cross_str = ' '.join(pm.cross_interaction_commands)
-            assert 'lj' in cross_str.lower()
-        finally:
-            pm_module.cifread = original_cifread
-            pm_module.count_atomtypes = original_count
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        # Register
+        pm.register_component('sub', si_sub_config)
+        pm.register_component('tip', si_tip_config)
+        pm.register_component('sheet', mos2_sheet_config, n_layers=1)
+
+        # Self-interactions
+        pm.add_self_interaction('sub')
+        pm.add_self_interaction('tip')
+        pm.add_self_interaction('sheet')
+
+        # Cross-interactions (like AFMBuilder does)
+        pm.add_cross_interaction('sub', 'tip')
+        pm.add_cross_interaction('sub', 'sheet')
+        pm.add_cross_interaction('tip', 'sheet')
+
+        # Should have LJ cross-interaction commands
+        assert len(pm.cross_interaction_commands) >= 3
+
+        # Check all component pairs are covered
+        cross_str = ' '.join(pm.cross_interaction_commands)
+        assert 'lj' in cross_str.lower()
 
 
 # =========================================================================
@@ -543,7 +451,7 @@ class TestSheetOnSheetSystem:
     """Tests for sheet-on-sheet friction simulation setup."""
 
     def test_sheet_on_sheet_4_layers(
-        self, mock_settings, mos2_multilayer_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_multilayer_config
     ):
         """Sheet-on-sheet should create 4 layers with separate types."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -555,7 +463,7 @@ class TestSheetOnSheetSystem:
         assert len(pm.types) == 8
 
     def test_sheet_on_sheet_layer_groups(
-        self, mock_settings, mos2_multilayer_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_multilayer_config
     ):
         """Each layer should have its own group of types."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -569,7 +477,7 @@ class TestSheetOnSheetSystem:
             assert len(layer_types.split()) == 2
 
     def test_sheet_on_sheet_ghost_interactions(
-        self, mock_settings, mos2_multilayer_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_multilayer_config
     ):
         """Non-adjacent layers should get ghost (low epsilon) interactions."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -594,7 +502,7 @@ class TestSheetOnSheetSystem:
         assert len(real_commands) > 0
 
     def test_sheet_on_sheet_layer_groups_string(
-        self, mock_settings, mos2_multilayer_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_multilayer_config
     ):
         """Layer groups string should define all layer groups."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -656,7 +564,7 @@ class TestFileOutput:
     """Tests for LAMMPS file generation."""
 
     def test_write_file_creates_directory(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """write_file should create output directory if needed."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -671,7 +579,7 @@ class TestFileOutput:
             assert output_path.parent.exists()
 
     def test_write_file_contains_masses(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Output file should contain mass commands."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -687,7 +595,7 @@ class TestFileOutput:
             assert 'Si' in content
 
     def test_write_file_pair_style(
-        self, mock_settings, si_tip_config, mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config
     ):
         """Output file should contain pair_style command."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -703,7 +611,7 @@ class TestFileOutput:
             assert 'sw' in content  # Si uses SW potential
 
     def test_write_file_layer_groups_only_for_multilayer(
-        self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_sheet_config
     ):
         """Layer groups should only appear for multi-layer components."""
         # Single layer
@@ -727,7 +635,7 @@ class TestFileOutput:
         assert 'layer_4' in layer_groups
 
     def test_write_file_includes_sheet_edge_groups(
-        self, mock_settings, mos2_sheet_config, mock_cifread_mos2, mock_count_atomtypes_mos2_simple
+        self, mock_settings, mos2_sheet_config
     ):
         """Sheet edge typing should emit core and edge groups."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -751,8 +659,7 @@ class TestGapCalculation:
     """Tests for gap calculation between components."""
 
     def test_calculate_gap_same_elements(
-        self, mock_settings, si_tip_config, si_sub_config, 
-        mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config, si_sub_config
     ):
         """Gap between same elements should use their sigma."""
         pm = PotentialManager(mock_settings, use_langevin=False)
@@ -765,53 +672,19 @@ class TestGapCalculation:
         assert gap > 0.5  # At least the buffer
         assert gap < 10.0  # Reasonable upper bound
 
-    def test_calculate_gap_different_elements(self, mock_settings, tmp_path):
+    def test_calculate_gap_different_elements(
+        self, mock_settings, si_tip_config, mos2_sheet_config
+    ):
         """Gap between different elements should use mixing rules."""
-        import src.potentials.manager as pm_module
-        from src.core.config import SheetConfig, TipConfig
-        
-        def mock_cifread(path):
-            if 'MoS2' in str(path):
-                return {'elements': ['Mo', 'S']}
-            return {'elements': ['Si']}
-        
-        def mock_count(path, elements, pot_type=None):
-            return {el: 1 for el in elements}
-        
-        si_sw = tmp_path / 'Si.sw'
-        mos2_sw = tmp_path / 'MoS2.sw'
-        si_cif = tmp_path / 'Si.cif'
-        mos2_cif = tmp_path / 'MoS2.cif'
-        for p in [si_sw, mos2_sw, si_cif, mos2_cif]:
-            p.write_text('# dummy', encoding='utf-8')
-        
-        tip_config = TipConfig(
-            mat='Si', pot_type='sw', pot_path=str(si_sw),
-            cif_path=str(si_cif), r=20.0, amorph='c', dspring=0.1,
-        )
-        sheet_config = SheetConfig(
-            mat='MoS2', pot_type='sw', pot_path=str(mos2_sw),
-            cif_path=str(mos2_cif), x=50.0, y=50.0, layers=[1]
-        )
-        
-        original_cifread = pm_module.cifread
-        original_count = pm_module.count_atomtypes
-        pm_module.cifread = mock_cifread
-        pm_module.count_atomtypes = mock_count
-        
-        try:
-            pm = PotentialManager(mock_settings, use_langevin=False)
-            pm.register_component('tip', tip_config)
-            pm.register_component('sheet', sheet_config)
-            
-            gap = pm.calculate_gap('tip', 'sheet', buffer=0.5)
-            
-            # Should be positive and reasonable
-            assert gap > 0.5
-            assert gap < 10.0
-        finally:
-            pm_module.cifread = original_cifread
-            pm_module.count_atomtypes = original_count
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('tip', si_tip_config)
+        pm.register_component('sheet', mos2_sheet_config)
+
+        gap = pm.calculate_gap('tip', 'sheet', buffer=0.5)
+
+        # Should be positive and reasonable
+        assert gap > 0.5
+        assert gap < 10.0
 
 
 # =========================================================================
@@ -836,8 +709,7 @@ class TestEdgeCases:
             pm.add_cross_interaction('comp1', 'comp2')
 
     def test_multiple_components_type_ids_sequential(
-        self, mock_settings, si_tip_config, si_sub_config,
-        mock_cifread_si, mock_count_atomtypes_si
+        self, mock_settings, si_tip_config, si_sub_config
     ):
         """Multiple components should get sequential type IDs."""
         pm = PotentialManager(mock_settings, use_langevin=False)

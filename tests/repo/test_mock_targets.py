@@ -94,12 +94,6 @@ KNOWN_VIOLATIONS = {
     "gui/test_gui_document.py": {
         "src.gui.controllers.document.expand_config_sweeps",
     },
-    "potentials/test_potential_manager.py": {
-        "src.core.config.get_material_path",
-        "src.core.config.get_potential_path",
-        "src.potentials.manager.cifread",
-        "src.potentials.manager.count_atomtypes",
-    },
     "run/test_run.py": {
         "src.run.simulate.AFMSimulation",
         "src.run.simulate.AFMSimulationConfig",
