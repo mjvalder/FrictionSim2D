@@ -748,14 +748,16 @@ class AFMSimulationConfig(BaseModel):
         strained to tile the periodic cell seamlessly (D2b).
         """
         sub = self.sub
-        if (sub is not None and not self.general.finite_sheet
-                and sub.amorph != 'a'  # pylint: disable=no-member
-                and not (sub.amorph == 'c' and sub.match)):  # pylint: disable=no-member
-            raise ValueError(
-                "Non-finite-sheet AFM requires an amorphous substrate "
-                "([sub] amorph = a), or a lattice-matched crystalline substrate "
-                "([sub] amorph = c, match = true)."
-            )
+        if sub is not None:
+            amorph = sub.amorph  # pylint: disable=no-member  # pydantic FieldInfo FP
+            match = sub.match  # pylint: disable=no-member  # pydantic FieldInfo FP
+            if (not self.general.finite_sheet and amorph != 'a'
+                    and not (amorph == 'c' and match)):
+                raise ValueError(
+                    "Non-finite-sheet AFM requires an amorphous substrate "
+                    "([sub] amorph = a), or a lattice-matched crystalline substrate "
+                    "([sub] amorph = c, match = true)."
+                )
         return self
 
     @model_validator(mode='after')
@@ -772,17 +774,17 @@ class AFMSimulationConfig(BaseModel):
             )
         sub = self.sub
 
-        if sub.x is None or sub.y is None:  # pylint: disable=no-member
+        if sub.x is None or sub.y is None:  # pylint: disable=no-member  # pydantic FieldInfo FP
             raise ValueError(
                 "Finite-sheet AFM requires substrate x and y to be set in the [sub] section."
             )
 
-        sheet_x_raw = self.sheet.x  # pylint: disable=no-member
-        sheet_y_raw = self.sheet.y  # pylint: disable=no-member
+        sheet_x_raw = self.sheet.x  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sheet_y_raw = self.sheet.y  # pylint: disable=no-member  # pydantic FieldInfo FP
         sheet_x = float(sheet_x_raw[0] if isinstance(sheet_x_raw, list) else sheet_x_raw)
         sheet_y = float(sheet_y_raw[0] if isinstance(sheet_y_raw, list) else sheet_y_raw)
-        sub_x = float(sub.x)  # pylint: disable=no-member
-        sub_y = float(sub.y)  # pylint: disable=no-member
+        sub_x = float(sub.x)  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sub_y = float(sub.y)  # pylint: disable=no-member  # pydantic FieldInfo FP
 
         if sub_x < sheet_x:
             raise ValueError(
