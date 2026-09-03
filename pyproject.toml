@@ -101,7 +101,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short -m 'not lammps'"
 markers = [
     "lammps: executes real LAMMPS runs (skipped when lmp_serial is absent; deselect with -m 'not lammps')",
-    "integration: cross-package artifact-level tests in tests/integration/ (no lmp_serial subprocess; may need the lammps Python module)",
+    "integration: cross-package artifact-level tests in tests/integration/ (a file may also carry lammps; Phase 3 adds the lmp_serial-free ones)",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -111,6 +111,8 @@ packages = ["src"]
 include = ["src/**"]
 
 [tool.pylint.messages_control]
+# Gate command (codebase review): pylint src/cli.py src/__init__.py src/core src/run
+# src/potentials src/lattice src/builders src/interfaces src/hpc
 # Design-size checks are disabled by decision 2026-09-02 (codebase review, "no
 # restructuring this round"): each one can only be silenced by splitting a
 # function or module. Their hit lists at the time of disabling are recorded

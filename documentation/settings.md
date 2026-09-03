@@ -120,7 +120,7 @@ LAMMPS input. All three default to `true`, preserving previous behaviour.
 
 Turning `peratom` off also drops its `group/group` computes, not just the
 output file. Turn `raw` and `peratom` off when you are not analysing them —
-they cost runtime and disk on every run. See `tests/test_output_channels.py`.
+they cost runtime and disk on every run. See `tests/builders/test_output_channels.py`.
 
 ### `output.optional_channels`
 
