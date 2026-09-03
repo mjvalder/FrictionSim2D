@@ -40,46 +40,45 @@ def test_load_default_settings():
     assert settings.geometry.rigid_tip is not None
     assert settings.thermostat.type in ['langevin', 'nose-hoover']
 
-def test_valid_config_creation(tmp_path, monkeypatch):
+def test_valid_config_creation(tmp_path):
     """Test creating a full configuration object."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
-    
+
     config = AFMSimulationConfig(
         general=VALID_GENERAL,
-        tip=VALID_TIP,
-        sub=VALID_SUB,
-        **{'2D': VALID_SHEET},
+        tip={**VALID_TIP, **real_paths},
+        sub={**VALID_SUB, **real_paths},
+        **{'2D': {**VALID_SHEET, **real_paths}},
         settings=settings
     )
     assert config.tip.r == 10.0
     assert config.sheet.mat == 'MoS2'
 
-def test_validation_error(tmp_path, monkeypatch):
+def test_validation_error(tmp_path):
     """Ensure invalid types raise errors."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
     invalid_tip = VALID_TIP.copy()
+    invalid_tip.update(real_paths)
     invalid_tip['r'] = "not_a_number" # Should fail
-    
+
     with pytest.raises(ValidationError):
         AFMSimulationConfig(
             general=VALID_GENERAL,
             tip=invalid_tip,
-            sub=VALID_SUB,
-            **{'2D': VALID_SHEET},
+            sub={**VALID_SUB, **real_paths},
+            **{'2D': {**VALID_SHEET, **real_paths}},
             settings=settings
         )
 
@@ -109,14 +108,12 @@ def test_parse_config_yaml(temp_dir):
     assert data['general']['temp'] == 300
 
 
-def test_sheetonsheet_config_accepts_explicit_scan_angle_list(tmp_path, monkeypatch):
+def test_sheetonsheet_config_accepts_explicit_scan_angle_list(tmp_path):
     """Sheet-on-sheet config should accept explicit numeric angle lists."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
 
     settings = load_settings()
 
@@ -152,24 +149,24 @@ def test_general_config_rejects_invalid_scan_angle_string() -> None:
         GeneralConfig(scan_angle=[0, 90, 'all'])
 
 
-def test_tip_config_allows_explicit_tip_coordinates_with_offsets(tmp_path, monkeypatch) -> None:
+def test_tip_config_allows_explicit_tip_coordinates_with_offsets(tmp_path) -> None:
     """Tip placement fields should belong to [tip] and allow explicit+offset inputs."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
     tip = dict(VALID_TIP)
+    tip.update(real_paths)
     tip.update({"tip_x": 10.0, "tip_y": 5.0, "tip_x_offset": 1.0, "tip_y_offset": -0.5})
 
     cfg = AFMSimulationConfig(
         general=VALID_GENERAL,
         tip=tip,
-        sub=VALID_SUB,
-        **{'2D': VALID_SHEET},
+        sub={**VALID_SUB, **real_paths},
+        **{'2D': {**VALID_SHEET, **real_paths}},
         settings=settings,
     )
     assert cfg.tip.tip_x == 10.0
@@ -178,88 +175,86 @@ def test_tip_config_allows_explicit_tip_coordinates_with_offsets(tmp_path, monke
     assert cfg.tip.tip_y_offset == -0.5
 
 
-def test_finite_sheet_requires_substrate_xy(tmp_path, monkeypatch):
+def test_finite_sheet_requires_substrate_xy(tmp_path):
     """Finite-sheet AFM should require explicit substrate x/y in [sub]."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
     with pytest.raises(ValidationError, match="requires substrate x and y"):
         AFMSimulationConfig(
             general={"temp": 300.0, "finite_sheet": True},
-            tip=VALID_TIP,
-            sub={**VALID_SUB, "amorph": "c"},
-            **{'2D': VALID_SHEET},
+            tip={**VALID_TIP, **real_paths},
+            sub={**VALID_SUB, **real_paths, "amorph": "c"},
+            **{'2D': {**VALID_SHEET, **real_paths}},
             settings=settings,
         )
 
 
-def test_finite_sheet_rejects_substrate_smaller_than_sheet(tmp_path, monkeypatch):
+def test_finite_sheet_rejects_substrate_smaller_than_sheet(tmp_path):
     """Finite-sheet AFM should reject substrate sizes smaller than the sheet."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
     bad_sub = dict(VALID_SUB)
+    bad_sub.update(real_paths)
     bad_sub.update({"x": 40.0, "y": 60.0, "amorph": "c"})
     with pytest.raises(ValidationError, match="cannot be smaller than sheet x"):
         AFMSimulationConfig(
             general={"temp": 300.0, "finite_sheet": True},
-            tip=VALID_TIP,
+            tip={**VALID_TIP, **real_paths},
             sub=bad_sub,
-            **{'2D': VALID_SHEET},
+            **{'2D': {**VALID_SHEET, **real_paths}},
             settings=settings,
         )
 
 
-def test_finite_sheet_rejects_margin_not_above_lj_cutoff(tmp_path, monkeypatch):
+def test_finite_sheet_rejects_margin_not_above_lj_cutoff(tmp_path):
     """Finite-sheet AFM should enforce strict substrate-sheet delta > LJ cutoff."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings().model_copy(deep=True)
     settings.potential.lj_cutoff = 11.0
     bad_sub = dict(VALID_SUB)
+    bad_sub.update(real_paths)
     bad_sub.update({"x": 61.0, "y": 70.0, "amorph": "c"})
     # sheet x is 50, so x-delta is exactly 11.0 -> invalid (must be > cutoff)
     with pytest.raises(ValidationError, match="greater than LJ cutoff"):
         AFMSimulationConfig(
             general={"temp": 300.0, "finite_sheet": True},
-            tip=VALID_TIP,
+            tip={**VALID_TIP, **real_paths},
             sub=bad_sub,
-            **{'2D': VALID_SHEET},
+            **{'2D': {**VALID_SHEET, **real_paths}},
             settings=settings,
         )
 
 
-def test_non_finite_sheet_rejects_crystalline_substrate(tmp_path, monkeypatch):
+def test_non_finite_sheet_rejects_crystalline_substrate(tmp_path):
     """Non-finite-sheet AFM should allow only amorphous substrates."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
     with pytest.raises(ValidationError, match="requires an amorphous substrate"):
         AFMSimulationConfig(
             general={"temp": 300.0, "finite_sheet": False},
-            tip=VALID_TIP,
-            sub={**VALID_SUB, "amorph": "c"},
-            **{'2D': VALID_SHEET},
+            tip={**VALID_TIP, **real_paths},
+            sub={**VALID_SUB, **real_paths, "amorph": "c"},
+            **{'2D': {**VALID_SHEET, **real_paths}},
             settings=settings,
         )
 
@@ -432,14 +427,12 @@ def test_lattice_match_area_tol_is_bounded():
         LatticeMatchConfig(area_tol=2.0)
 
 
-def test_two_material_sections_fold_into_sheets_list(tmp_path, monkeypatch):
+def test_two_material_sections_fold_into_sheets_list(tmp_path):
     """[2D-1]/[2D-2] sections fold into cfg.sheets in numeric order."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
 
     settings = load_settings()
     raw = {
@@ -456,19 +449,18 @@ def test_two_material_sections_fold_into_sheets_list(tmp_path, monkeypatch):
     assert cfg.sheet.mat == "MoS2"
 
 
-def test_single_2d_section_still_builds_one_element_sheets_list(tmp_path, monkeypatch):
+def test_single_2d_section_still_builds_one_element_sheets_list(tmp_path):
     """A lone [2D] section (no [2D-N]) still builds and yields len(sheets) == 1."""
     dummy_pot = tmp_path / "dummy.sw"
     dummy_cif = tmp_path / "dummy.cif"
     dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
     dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
-    monkeypatch.setattr("src.core.config.get_potential_path", lambda _v: dummy_pot)
-    monkeypatch.setattr("src.core.config.get_material_path", lambda _v: dummy_cif)
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
 
     settings = load_settings()
     cfg = SheetOnSheetSimulationConfig(
         general=VALID_GENERAL,
-        **{'2D': VALID_SHEET},
+        **{'2D': {**VALID_SHEET, **real_paths}},
         settings=settings,
     )
     assert len(cfg.sheets) == 1
