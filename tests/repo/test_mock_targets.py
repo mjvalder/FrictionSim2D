@@ -18,14 +18,14 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parents[1]
 
 ALLOWED_TARGET_PREFIXES = (
-    "src.interfaces.lammps",
-    "src.interfaces.atomsk",
+    "src.interfaces.lammps.",
+    "src.interfaces.atomsk.",
     "src.builders.construction.components.make_amorphous",
     "src.builders.construction.components.run_lammps_commands",
     "src.builders.components.run_lammps_commands",   # lazy alias of the line above
     "src.aiida.",
     "src.api.",
-    "src.data.database",
+    "src.data.database.",
 )
 
 # file (relative to tests/) -> targets it patches today that are NOT boundaries.

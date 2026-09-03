@@ -4,7 +4,7 @@ The original channels work wired the gate into `common/observables.lmp` and
 the AFM builder only. The sheet templates hand-write their `fix ave/time`
 lines rather than taking them from the observables registry, so the setting
 silently did nothing for `sheetonsheet`, `hetero` and `flake` runs -- half the
-simulation types. `tests/test_output_channels.py` did not catch it because it
+simulation types. `tests/builders/test_output_channels.py` did not catch it because it
 renders the *macro*, proving the macro works rather than that anyone uses it.
 
 These tests render the real templates instead, which is the only way this class

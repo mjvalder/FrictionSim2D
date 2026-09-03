@@ -132,7 +132,7 @@ class TestOneMaterialSweepStillSubstitutes:
         # needed to keep "h_MoS2" usable if they were here. What's under
         # test is member *selection*, not file resolution -- that end-to-end
         # path (real files, real substitution into cif_path/pot_path) is
-        # covered by `tests/test_gui_controllers_staged_paths.py
+        # covered by `tests/gui/test_gui_controllers_staged_paths.py
         # ::TestPreviewControllerOneMaterialSweepStagesSubstitutedPaths`.
         return {
             '2D': {

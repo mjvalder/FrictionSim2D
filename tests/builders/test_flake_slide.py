@@ -40,7 +40,7 @@ def _settings():
 def _minimal_flake_slide_context():
     """Fill every key ``flake/slide.lmp`` references.
 
-    Mirrors ``tests/test_hetero_slide.py::_minimal_slide_context`` (the D1 slide
+    Mirrors ````tests/builders/test_hetero_slide.py::_minimal_slide_context```` (the D1 slide
     keys), but renames the substrate sheet's per-layer z-bands to ``sheet_layers``
     and adds the flake-drive keys (``flake_group_types``, ``corner_hold``,
     ``flake_corner_types``, ``flake_corner_k``, ``virtual_offset``).

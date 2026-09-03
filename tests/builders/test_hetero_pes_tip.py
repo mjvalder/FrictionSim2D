@@ -1,7 +1,7 @@
 """Tests for hetero (two-material) tip-on-sheet static PES scan.
 
-Config fixture modelled on tests/test_hetero_afm.py's `_afm_hetero_raw()` (tip
-+ sub + [2D-1]/[2D-2]), plus a `[pes]` section per tests/test_pes_scan_builder.py.
+Config fixture modelled on tests/builders/test_hetero_afm.py's `_afm_hetero_raw()` (tip
++ sub + [2D-1]/[2D-2]), plus a `[pes]` section per tests/builders/test_pes_scan_builder.py.
 Covers the MRO/SPLIT_OUTER_LOOPS resolution, routing (including the
 freestanding guard), and a real-LAMMPS build smoke that checks the emitted
 scan script's period is the matched interface's *minimal in-plane repeat* --

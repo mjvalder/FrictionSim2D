@@ -90,7 +90,7 @@ def _one_material_document_dir(tmp_path):
     """Same shape as `document_dir`, but the sweep is narrowed to exactly
     one ticked material -- an ordinary thing for a user to do, and the case
     `_first_sweep_member` used to mishandle (see
-    `tests/test_gui_preview_sweep_member.py::TestOneMaterialSweepStillSubstitutes`)."""
+    `tests/gui/test_gui_preview_sweep_member.py::TestOneMaterialSweepStillSubstitutes`)."""
     directory = tmp_path / 'myruns'
     (directory / 'cif').mkdir(parents=True)
     (directory / 'cif' / 'h_MoS2.cif').write_text('cif contents')

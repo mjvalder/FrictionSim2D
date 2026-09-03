@@ -146,7 +146,7 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
         # All tiers on: these tests are about the has_internal_lj branch,
         # not the channel gate. The tier gate now lives in obs_ctx (built by
         # build_obs_ctx), not a bare channels dict -- see
-        # tests/test_output_channels_sheet.py for the gate itself.
+        # tests/builders/test_output_channels_sheet.py for the gate itself.
         obs_ctx=_sheet_obs_ctx(has_internal_lj, n_layers),
         xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,  # zhi feeds arithmetic
         num_atom_types=6, data_file='build/sheet.lmp',

@@ -92,7 +92,7 @@ def test_afm_cof_inputs_share_force_units():
     # The sheet family now has its own 'lfx@sheet'/'nf@sheet' pair, checked
     # by test_sheet_cof_inputs_share_force_units below -- this test still
     # could NOT have caught the sheet eV/A-over-nN defect, since that lived
-    # in the TEMPLATE, not the registry -- tests/test_template_contract.py's
+    # in the TEMPLATE, not the registry -- tests/builders/test_template_contract.py's
     # test_lj_branch_lateral_force_scaled_to_nN is the one that does.
     assert REGISTRY['lfx'].units == REGISTRY['nf'].units == 'nN'
     assert REGISTRY['lfy'].units == 'nN'

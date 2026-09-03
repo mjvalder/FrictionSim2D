@@ -1,6 +1,6 @@
 """Tests for hetero (two-material) AFM indentation (hold + retract, no slide).
 
-Config fixture modelled on tests/test_hetero_afm.py's `_afm_hetero_raw()`
+Config fixture modelled on tests/builders/test_hetero_afm.py's `_afm_hetero_raw()`
 (tip + sub + [2D-1]/[2D-2]) — NOT test_hetero_slide.py, which has no tip or
 substrate. Covers the MRO/SPLIT_OUTER_LOOPS resolution the class docstring
 records, routing (including the finite_sheet guard), and a real-LAMMPS build

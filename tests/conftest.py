@@ -28,8 +28,8 @@ def isolated_xdg_config_home(tmp_path_factory):
 
     ``load_settings()`` falls back to ``$XDG_CONFIG_HOME/FrictionSim2D/settings.yaml``
     (``src/core/config.py::_global_settings_path``). Without this the suite would
-    read the developer's real settings file when one exists. Session scope so
-    ``monkeypatch``-based tests can still override per test.
+    read the developer's real settings file when one exists. Session scope: one temp
+    dir for the whole run; per-test monkeypatch of the variable still works on top.
     """
     xdg = tmp_path_factory.mktemp("xdg_config_home")
     previous = os.environ.get("XDG_CONFIG_HOME")

@@ -1,9 +1,9 @@
 """Tests for the hetero (two-material) sheet-on-sheet static PES scan.
 
-Config fixtures mirror ``tests/test_hetero_slide.py``'s ``_hetero_2p2_config``
+Config fixtures mirror ``tests/builders/test_hetero_slide.py``'s ``_hetero_2p2_config``
 (two ``[2D-N]`` sections, ``sw`` potentials) but with one layer per material
 (the 1+1 PES bilayer: frozen bottom + laterally scanned top) plus a ``[pes]``
-section as in ``tests/test_pes_scan_builder.py``.
+section as in ``tests/builders/test_pes_scan_builder.py``.
 
 Covers the MRO/``SPLIT_OUTER_LOOPS`` resolution, routing, the relaxed layer
 gate (and that the *dynamic* hetero slide keeps its own 4-layer gate), and a
@@ -270,7 +270,7 @@ def test_hetero_pes_sheet_build_emits_scan_over_interface_repeat(tmp_path):
     # configured footprint BEFORE the match runs, so this near-lattice-matched
     # pair matches with (near-)identity matrices on already-tiled cells and the
     # box comes out a 4x2 superlattice of the true repeat. Same value pinned
-    # independently in tests/test_hetero_pes_tip.py for the same pair.
+    # independently in tests/builders/test_hetero_pes_tip.py for the same pair.
     EXPECTED_LX, EXPECTED_LY = 3.18500625, 5.516592573245964
     assert period_x == pytest.approx(EXPECTED_LX, rel=1e-6)
     assert period_y == pytest.approx(EXPECTED_LY, rel=1e-6)
@@ -331,7 +331,7 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     # The matched supercell must exceed the hetero cross-LJ cutoff
     # (``pair_style hybrid ... lj/cut 11.0``) or ``comm_style tiled`` aborts with
     # "Communication cutoff ... cannot exceed periodic box length" -- same
-    # constraint as the dynamic hetero slide e2e (tests/test_hetero_slide.py):
+    # constraint as the dynamic hetero slide e2e (tests/builders/test_hetero_slide.py):
     # a 12 A target gives an ~11.03 A edge (too tight), 14 A gives ~12.7 A.
     for key in ("2D-1", "2D-2"):
         raw[key]["x"] = raw[key]["y"] = 14.0

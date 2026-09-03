@@ -1,7 +1,7 @@
 """End-to-end LAMMPS smoke suite for the instrumentation.
 
 Builds a REAL homogeneous h-MoS2 AFM run (the empirically tuned minimal
-config from tests/test_hetero_afm.py: r=5 tip, 1 K, single 10 nN load) and
+config from tests/builders/test_hetero_afm.py: r=5 tip, 1 K, single 10 nN load) and
 executes system.in + the slide script under lmp_serial, then asserts: all
 three result tiers parse with registry names, the pe/atom partition
 reconciles with global pe, RAMP_STATUS and the hold file exist, and the
@@ -17,7 +17,7 @@ import pytest
 
 from src.core.config import AFMSimulationConfig, load_settings
 
-pytestmark = pytest.mark.lammps
+pytestmark = [pytest.mark.lammps, pytest.mark.integration]
 
 LMP = shutil.which("lmp_serial")
 MAT, POT = "examples/materials", "examples/potentials/sw"

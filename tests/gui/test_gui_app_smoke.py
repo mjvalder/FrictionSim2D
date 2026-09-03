@@ -49,7 +49,7 @@ def _workspace(tmp_path):
 def two_component_system():
     """A minimal 4-atom assembled system -- enough to make the viewport treat
     a system as "shown" without needing a real render. Mirrors the fixture of
-    the same name in tests/test_gui_viewport.py (Task 4); redefined locally
+    the same name in tests/gui/test_gui_viewport.py (Task 4); redefined locally
     per the Task 12 brief rather than importing across test modules."""
     return AssembledSystem(
         positions=np.array([[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]),
@@ -268,7 +268,7 @@ class TestMainWindow:
         leaving a half-written tree behind. The panel has to show it here,
         before Generate is ever pressed. The mirror case (a model whose
         builder never splits, where the pair is inert and must NOT be
-        reported) is pinned in tests/test_gui_document.py."""
+        reported) is pinned in tests/gui/test_gui_document.py."""
         window.document = ConfigDocument.from_file(
             EXAMPLES / 'afm_flake_config.ini', 'afm')
         window.form.document = window.document

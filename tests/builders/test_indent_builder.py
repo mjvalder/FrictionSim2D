@@ -134,7 +134,7 @@ def test_indent_outer_loop_scan_angle_does_not_split(tmp_path: Path):
     """Dropping 'scan_angle' must actually prevent the split at runtime.
 
     Mirrors test_afm_outer_loop_scan_angle_splits_slide_per_angle in
-    tests/test_afm_builder.py, which exercises the True (splitting) side of
+    tests/builders/test_afm_builder.py, which exercises the True (splitting) side of
     the same flag for AFMSimulation. Here, with the identical outer_loop +
     multi-angle config, IndentSimulation must keep the single slide.in.
     """

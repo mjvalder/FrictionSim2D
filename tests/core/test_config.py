@@ -600,7 +600,7 @@ def test_the_model_does_not_judge_the_angle_split():
     """outer_loop='scan_angle' + scan_angle_force is a conflict only for the
     builders that really split by angle, which this model cannot see. The
     check is routing-aware and lives in src.run.expand.outer_loop_conflict (pinned
-    by tests/test_run.py::TestAngleSplitWithAForceGate); GeneralConfig must
+    by tests/run/test_run.py::TestAngleSplitWithAForceGate); GeneralConfig must
     keep accepting the combination so the builders that honour the gate
     in-script (indent, hetero, flake) still build."""
     g = GeneralConfig(temp=300, outer_loop='scan_angle',

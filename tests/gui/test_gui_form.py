@@ -87,7 +87,7 @@ class TestLoopabilityHints:
         `layers` and `force` precisely so the hint would be the only text, and
         `[2D] materials_list` -- the one override entry that does have both --
         is never introspected as a real field (it is set programmatically, see
-        `tests/test_gui_material_list.py`), so it never reaches `_bubbles` at
+        `tests/gui/test_gui_material_list.py`), so it never reaches `_bubbles` at
         all. A field with only one of the two cannot distinguish append from
         substitute, so this synthesises one: give `[general] temp` (loopability
         'sweep') a temporary hand-written help text and drive it through the
