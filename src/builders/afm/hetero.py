@@ -209,7 +209,7 @@ def _pair_material_token(config) -> str:
     it; both classes now resolve correctly by MRO
     (``IndentSimulation`` -> ``AFMSimulation``,
     ``HeteroIndentSimulation`` -> ``HeteroAFMSimulation``), which
-    ``tests/test_material_id_mro.py`` pins.
+    ``tests/builders/test_material_id_mro.py`` pins.
 
     Mirrors :func:`src.run.naming.material_token`'s convention on the raw-dict
     side (that function isn't reusable directly here: the builder only has

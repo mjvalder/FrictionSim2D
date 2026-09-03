@@ -604,7 +604,7 @@ def detect_inplane_repeat(
     (identity match on pre-tiled cells, a genuine non-diagonal Zur-McGill match,
     or a twisted moiré), where the algebraic route — the per-monolayer tile
     count times ``det(matrix)`` — is only straightforward for a diagonal match.
-    ``tests/test_hetero_pes_sheet.py`` cross-checks the two on the fixture.
+    ``tests/builders/test_hetero_pes_sheet.py`` cross-checks the two on the fixture.
 
     Only axis-aligned candidates are tested. That is deliberate, not a
     limitation: the scan grid steps along +x/+y, and the homogeneous PES path

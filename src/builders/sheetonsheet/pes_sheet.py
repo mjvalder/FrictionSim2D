@@ -335,7 +335,7 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
     ``SPLIT_OUTER_LOOPS`` resolves to ``frozenset()`` from
     :class:`PESGridMixin` (which precedes the hetero builder in MRO); both
     candidates are ``frozenset()`` anyway, and the static scan never reads
-    ``outer_loop``. Pinned by ``tests/test_hetero_pes_sheet.py``.
+    ``outer_loop``. Pinned by ``tests/builders/test_hetero_pes_sheet.py``.
     """
 
     #: Exactly one layer per material: frozen bottom + scanned top.

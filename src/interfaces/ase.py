@@ -24,7 +24,7 @@ defer it into the functions that use it. After this split that is two files:
    That ``__init__`` imports its adapters eagerly, and ``src.core.config`` --
    which 66 modules import -- imports ``src.interfaces``. Registering this
    module there would push ASE onto essentially the whole package and undo
-   the reason it was split out. ``tests/test_import_weight.py`` pins this.
+   the reason it was split out. ``tests/repo/test_import_weight.py`` pins this.
 
    Import it as ``from ..interfaces.ase import read_structure``.
 """

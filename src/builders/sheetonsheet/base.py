@@ -267,7 +267,7 @@ class SheetOnSheetSimulation(SimulationBase):
         identical rule `sheetonsheet/slide.lmp` uses for its own
         `{% set il_bot %}`/`{% set il_top %}`, so the sliding interface has
         one definition shared between Python and Jinja rather than two that
-        can drift (see MIDDLE_INTERFACE in tests/test_template_contract.py).
+        can drift (see MIDDLE_INTERFACE in tests/builders/test_template_contract.py).
         """
         from ..utils.obs_ctx import build_obs_ctx
         interlayer = {'E_int_interlayer', 'n_contact_il'}

@@ -147,7 +147,7 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
     job-name token are added here.
 
     **Step-1 state-contract audit** (verified by printing/asserting in
-    ``tests/test_hetero_pes_tip.py``, not inferred):
+    ``tests/builders/test_hetero_pes_tip.py``, not inferred):
 
     - MRO: ``HeteroPESTipSimulation -> PESTipSimulation -> HeteroAFMSimulation
       -> AFMSimulation -> SimulationBase -> ABC -> object``.

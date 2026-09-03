@@ -5,7 +5,7 @@ share one implementation. A fourth hand-rolled copy would recreate, in
 Python, exactly the drift this removes from Jinja.
 
 Imports only src.core.observables -- never ase, directly or transitively.
-tests/test_import_weight.py pins that.
+tests/repo/test_import_weight.py pins that.
 """
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 

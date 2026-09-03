@@ -99,7 +99,7 @@ def read_material_entries(path: Union[str, Path],
     blank lines, surrounding whitespace, ``#`` comments (whole-line or
     trailing) all handled. A comma-separated line is still multiple single
     materials (``'MoS2, WS2'`` -> ``('MoS2',), ('WS2',)``) -- that behaviour
-    is pinned by ``tests/test_material_list_robustness.py`` and predates
+    is pinned by ``tests/run/test_material_list_robustness.py`` and predates
     heterostructure pairs, so it is untouched here. A ``'+'`` line is new: it
     names one ORDERED pair for a two-sheet sweep (``'h-MoS2 + h-WS2'`` ->
     ``('h-MoS2', 'h-WS2')``) -- order is never normalised, since sheet 1 and

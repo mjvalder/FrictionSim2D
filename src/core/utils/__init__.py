@@ -12,6 +12,6 @@ Import the submodule you need:
     from ..core.utils.paths import get_material_path
     from ..core.utils.tokens import format_dimension_token
 
-``tests/test_import_weight.py`` fails if this file stops being empty in a way
+``tests/repo/test_import_weight.py`` fails if this file stops being empty in a way
 that pulls ASE into the light modules.
 """

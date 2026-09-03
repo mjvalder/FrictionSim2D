@@ -8,7 +8,7 @@ from importlib import import_module
 from typing import Any
 
 # pylint: disable=undefined-all-variable
-# resolved by __getattr__; pinned by tests/test_import_surface.py
+# resolved by __getattr__; pinned by tests/repo/test_import_surface.py
 __all__ = [
     "AFMSimulation",
     "SheetOnSheetSimulation",
