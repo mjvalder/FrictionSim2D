@@ -18,6 +18,7 @@ from src.lattice.matching import (
     _max_strain,
     _enumerate_matrices,
     _circle_overlap_area,
+    _relative_rotation_strain,
 )
 
 
@@ -108,6 +109,13 @@ class TestEnumerateMatrices:
         assert n5 > n3
 
 
+def test_enumerate_matrices_never_exceeds_n_squared_area():
+    """Exercises the early-exit `if a * c > n * n: break` (finding 7)."""
+    n = 3
+    dets = [int(round(np.linalg.det(mat))) for mat in _enumerate_matrices(n)]
+    assert dets and max(dets) <= n * n and min(dets) >= 1
+
+
 # ---------------------------------------------------------------------------
 # find_coincidence_lattice — identical cells
 # ---------------------------------------------------------------------------
@@ -187,6 +195,13 @@ class TestFindCoincidenceLatticePairs:
         assert result.matrix_b.shape == (2, 2)
         assert result.supercell_a.shape == (2, 2)
         assert result.supercell_b.shape == (2, 2)
+
+
+def test_find_coincidence_lattice_skips_degenerate_sub_angstrom_cells():
+    """A sub-Å² cell area (finding 8's `area < 1.0` guard) rules out every
+    candidate regardless of tolerance, so no match is ever found."""
+    tiny = np.array([[0.1, 0.0], [0.0, 0.1]])
+    assert find_coincidence_lattice(tiny, np.eye(2) * 3.0, max_supercell=2) is None
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +385,19 @@ class TestScanRegistryIndex:
         assert result.shifts_x.shape == result.ri_grid.shape
         assert result.shifts_y.shape == result.ri_grid.shape
 
+    def test_all_zero_grid_is_returned_unscaled(self):
+        """raw_max == 0 must not divide by zero and must return a valid,
+        un-normalised (all-zero) grid (finding 11). atomic_radius=0.0 makes
+        every pairwise disk-overlap zero regardless of the atoms' positions,
+        so this reaches the `raw_max <= 0.0` fallback (matching.py's
+        `scan_registry_index`) without needing artificially separated atoms."""
+        cart, cell = _graphene_positions()
+        result = scan_registry_index(cart, cart, cell, n_grid=4, atomic_radius=0.0)
+        assert result.ri_grid.shape == (4, 4)
+        assert np.all(result.ri_grid == 0.0)
+        assert not np.isnan(result.ri_grid).any()
+        assert result.aa_ri == 0.0 and result.ab_ri == 0.0
+
 
 # ---------------------------------------------------------------------------
 # rotation_angle_from_match
@@ -500,3 +528,10 @@ def test_rotation_angle_between_matches_from_match():
     match = MatchResult(matrix_a=np.eye(2, dtype=int), matrix_b=np.eye(2, dtype=int),
                         supercell_a=A, supercell_b=B, strain_a=0.0, strain_b=0.0, area=1.0)
     assert abs(rotation_angle_between(A, B) - rotation_angle_from_match(match)) < 1e-9
+
+
+def test_relative_rotation_strain_singular_supercell_returns_zero_angle_inf_strain():
+    """A degenerate (zero-area) sc_a makes the polar stretch tensor singular,
+    so the LinAlgError fallback (finding 9) fires: (0.0, inf)."""
+    angle, strain = _relative_rotation_strain(np.zeros((2, 2)), np.eye(2))
+    assert angle == 0.0 and math.isinf(strain)
