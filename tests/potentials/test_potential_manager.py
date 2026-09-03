@@ -501,21 +501,6 @@ class TestSheetOnSheetSystem:
         assert len(ghost_commands) > 0
         assert len(real_commands) > 0
 
-    def test_sheet_on_sheet_layer_groups_string(
-        self, mock_settings, mos2_multilayer_config
-    ):
-        """Layer groups string should define all layer groups."""
-        pm = PotentialManager(mock_settings, use_langevin=False)
-        pm.register_component('sheet', mos2_multilayer_config, n_layers=4)
-        pm.add_self_interaction('sheet')
-        
-        layer_groups = pm.get_layer_groups_string()
-        
-        assert 'layer_1' in layer_groups
-        assert 'layer_2' in layer_groups
-        assert 'layer_3' in layer_groups
-        assert 'layer_4' in layer_groups
-
 
 # =========================================================================
 # get_single_component_commands Tests (for amorphisation)
@@ -609,30 +594,6 @@ class TestFileOutput:
             content = output_path.read_text()
             assert 'pair_style' in content
             assert 'sw' in content  # Si uses SW potential
-
-    def test_write_file_layer_groups_only_for_multilayer(
-        self, mock_settings, mos2_sheet_config
-    ):
-        """Layer groups should only appear for multi-layer components."""
-        # Single layer
-        pm = PotentialManager(mock_settings, use_langevin=False)
-        pm.register_component('sheet', mos2_sheet_config, n_layers=1)
-        pm.add_self_interaction('sheet')
-        
-        layer_groups = pm.get_layer_groups_string()
-        # Monolayers now emit layer_1 = the whole sheet (spec §5 F1): the
-        # registry's comx_L1... channels reference layer_1 unconditionally,
-        # and a monolayer's comz_L1 must equal comz exactly.
-        assert layer_groups.startswith('group layer_1 type ')
-
-        # Multi-layer
-        pm2 = PotentialManager(mock_settings, use_langevin=False)
-        pm2.register_component('sheet', mos2_sheet_config, n_layers=4)
-        pm2.add_self_interaction('sheet')
-        
-        layer_groups = pm2.get_layer_groups_string()
-        assert 'layer_1' in layer_groups
-        assert 'layer_4' in layer_groups
 
     def test_write_file_includes_sheet_edge_groups(
         self, mock_settings, mos2_sheet_config

@@ -228,11 +228,6 @@ class TypeRegistry:
         all_ids = self.ids_by_component_layer(component, layer)
         return " ".join(map(str, all_ids))
 
-    def get_region_group_string(self, component: str, region: Optional[str]) -> str:
-        """Return type IDs for a specific region of a component."""
-        all_ids = self.ids_by_component_region(component, region)
-        return " ".join(map(str, all_ids))
-
 class PotentialManager:
     """Manages potential assignments, type mapping, and pair_coeff generation.
 
@@ -879,36 +874,6 @@ class PotentialManager:
                 except (KeyError, IndexError):
                     logger.warning("Could not find mass for element '%s', using 1.0", element)
                     lines.append(f"mass {type_range} 1.0 #{element} (unknown)")
-
-        return "\n".join(lines)
-
-    def get_layer_groups_string(self) -> str:
-        """Generate LAMMPS group commands for the sheet's layer groups.
-
-        Emitted for EVERY layer count, including monolayers: the observable
-        registry's layer-resolved COM channels (comx_L1, ...) reference
-        ``layer_1`` unconditionally, so a monolayer must still define it
-        (spec §5 F1; a monolayer's comz_L1 must equal comz exactly).
-
-        Returns:
-            String with group commands like:
-                group layer_1 type 1 2 9 10
-                group layer_2 type 3 4 11 12
-        """
-        lines = []
-        for comp in self.components.values():
-            name = comp['name']
-            n_layers = comp['n_layers']
-
-            for layer in range(n_layers):
-                types = self.types.get_layer_group_string(name, layer)
-                if not types and n_layers == 1:
-                    # monolayer whose types carry no per-layer tag: layer_1
-                    # is the whole component
-                    all_ids = self.types.ids_by_component(name)
-                    types = ' '.join(map(str, all_ids))
-                if types:
-                    lines.append(f"group layer_{layer+1} type {types}")
 
         return "\n".join(lines)
 
