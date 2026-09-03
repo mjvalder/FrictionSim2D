@@ -8,12 +8,13 @@ byte-wise: inline comments are not preserved.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from src.core.config import parse_config
-from src.core.config import format_ini_value, write_config
+from src.core.config import format_ini_value, load_settings, read_config, write_config
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
 EXAMPLE_CONFIGS = sorted(EXAMPLES_DIR.glob('*.ini'))
@@ -114,9 +115,46 @@ def test_unsupported_extension_raises(tmp_path):
         write_config({}, tmp_path / 'c.toml')
 
 
-def test_load_settings_malformed_yaml_warns_and_falls_back_to_defaults(tmp_path, caplog):
-    from src.core.config import load_settings
+def test_parse_config_rejects_an_unknown_extension(tmp_path):
+    f = tmp_path / 'c.toml'; f.write_text('x = 1')
+    with pytest.raises(ValueError, match='Unsupported configuration file format'):
+        parse_config(f)
 
+
+def test_parse_config_rejects_a_non_path_non_dict_source():
+    with pytest.raises(TypeError, match='Unsupported configuration source type'):
+        parse_config(42)
+
+
+def test_parse_config_reads_json(tmp_path):
+    f = tmp_path / 'c.json'; f.write_text(json.dumps({'general': {'temp': 300}}))
+    assert parse_config(f)['general']['temp'] == 300
+
+
+def test_read_config_parses_bracketed_lists_of_ints_and_floats(tmp_path):
+    """read_config's own docstring: "a trailing `]` is what triggers list
+    detection" -- an unbracketed comma list (the brief's original
+    `layers = 1, 2, 3`) stays a plain string, confirmed by running it; adapted
+    to the bracketed form the reader (and format_ini_value, its exact inverse)
+    actually requires."""
+    f = tmp_path / 'c.ini'; f.write_text('[2D]\nlayers = [1, 2, 3]\nx = [1.5, 2.5]\nmat = h-MoS2\n')
+    cfg = read_config(f)
+    assert cfg['2D']['layers'] == [1, 2, 3]
+    assert cfg['2D']['x'] == [1.5, 2.5]
+    assert cfg['2D']['mat'] == 'h-MoS2'
+
+
+class _Float(float):
+    """A float subclass whose repr lacks the '.0' — the guard at format_ini_value."""
+    def __repr__(self):
+        return '3'
+
+
+def test_format_ini_value_keeps_a_float_subclass_a_float():
+    assert format_ini_value(_Float(3.0)) == '3.0'
+
+
+def test_load_settings_malformed_yaml_warns_and_falls_back_to_defaults(tmp_path, caplog):
     bad = tmp_path / 'settings.yaml'
     bad.write_text('thermostat: [unclosed')
     with caplog.at_level('WARNING'):

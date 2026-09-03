@@ -16,6 +16,7 @@ from src.core.config import (
     load_settings,
     settings_origin,
 )
+from tests.helpers.afm import _make_afm_config
 
 # Sample data
 VALID_TIP = {
@@ -637,3 +638,31 @@ def test_optional_channels_list_passes_through():
     from src.core.config import OutputSettings
     assert OutputSettings(optional_channels=['raw_pe', 'raw_fz']).optional_channels == \
         ['raw_pe', 'raw_fz']
+
+
+def _finite(tmp_path, sub_x, sub_y, sheet=(100.0, 100.0)):
+    cfg = _make_afm_config(tmp_path, layers=[1])
+    raw = cfg.model_dump()
+    raw['general']['finite_sheet'] = True
+    raw['sub']['x'], raw['sub']['y'] = sub_x, sub_y
+    # model_dump() emits the field name 'sheet', but AFMSimulationConfig has no
+    # populate_by_name and only accepts its alias '2D' at construction time.
+    sheet_dict = raw.pop('sheet')
+    sheet_dict['x'], sheet_dict['y'] = sheet
+    raw['2D'] = sheet_dict
+    return raw
+
+
+def test_finite_sheet_substrate_smaller_than_sheet_in_y_is_rejected(tmp_path):
+    with pytest.raises(ValidationError, match='substrate y'):
+        AFMSimulationConfig(**_finite(tmp_path, 160.0, 90.0))
+
+
+def test_finite_sheet_margin_must_exceed_lj_cutoff_in_x(tmp_path):
+    with pytest.raises(ValidationError, match=r'substrate_x - sheet_x'):
+        AFMSimulationConfig(**_finite(tmp_path, 105.0, 160.0))
+
+
+def test_finite_sheet_margin_must_exceed_lj_cutoff_in_y(tmp_path):
+    with pytest.raises(ValidationError, match=r'substrate_y - sheet_y'):
+        AFMSimulationConfig(**_finite(tmp_path, 160.0, 105.0))

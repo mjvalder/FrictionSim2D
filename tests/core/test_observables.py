@@ -253,3 +253,44 @@ def test_opt_in_channels_are_peratom_or_post():
     for key, ob in REGISTRY.items():
         if ob.opt_in:
             assert ob.tier in ('peratom',) or ob.stream == 'post', key
+
+
+import pytest
+
+from src.core import observables as obs
+
+
+def _ob(**kw):
+    base = dict(name='t_x', sim_types=('afm',), group='sheet', tier='window', stream='results',
+                role_key='rk', key='t_x')
+    base.update(kw)
+    return obs.Observable(**base)
+
+
+def test_add_rejects_a_results_channel_without_role_key(monkeypatch):
+    monkeypatch.setattr(obs, 'REGISTRY', dict(obs.REGISTRY))
+    with pytest.raises(ValueError, match='role_key'):
+        obs._add(_ob(role_key=None, name='t_norole', key='t_norole'))
+
+
+def test_add_rejects_a_duplicate_key(monkeypatch):
+    monkeypatch.setattr(obs, 'REGISTRY', dict(obs.REGISTRY))
+    existing = next(iter(obs.REGISTRY))
+    with pytest.raises(ValueError, match='duplicate observable key'):
+        obs._add(_ob(key=existing, name=existing))
+
+
+def test_validate_registry_rejects_a_bare_tip_group(monkeypatch):
+    reg = dict(obs.REGISTRY)
+    reg['t_tip'] = _ob(name='t_tip', key='t_tip', group='tip')
+    monkeypatch.setattr(obs, 'REGISTRY', reg)
+    with pytest.raises(ValueError, match="bare 'tip' group"):
+        obs.validate_registry()
+
+
+def test_validate_registry_rejects_group_group_at_window_tier(monkeypatch):
+    reg = dict(obs.REGISTRY)
+    reg['t_gg'] = _ob(name='t_gg', key='t_gg', lammps_compute='group/group sheet tip')
+    monkeypatch.setattr(obs, 'REGISTRY', reg)
+    with pytest.raises(ValueError, match='group/group'):
+        obs.validate_registry()
