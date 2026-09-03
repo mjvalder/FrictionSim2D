@@ -7,7 +7,7 @@ The only module here that reaches ASE, through
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ...interfaces.ase import read_structure
 
@@ -94,10 +94,6 @@ def count_atomtypes(
                 if element_name in elem_type:
                     elem_type[element_name] = max(elem_type[element_name], element_number)
     return elem_type
-
-
-
-
 
 
 def _normalize_element_symbol(value: str) -> str:

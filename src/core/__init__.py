@@ -75,7 +75,9 @@ _EXPORT_MAP = {
     "charge2atom": ("..builders.utils.lammps_data", "charge2atom"),
     "atomic2molecular": ("..builders.utils.lammps_data", "atomic2molecular"),
     "get_potential_element_order": ("..potentials.utils", "get_potential_element_order"),
-    "check_potential_cif_compatibility": ("..potentials.utils", "check_potential_cif_compatibility"),
+    "check_potential_cif_compatibility": (
+        "..potentials.utils", "check_potential_cif_compatibility"
+    ),
     "expand_config_sweeps": ("..run.expand", "expand_config_sweeps"),
     "collect_hpc_simulation_paths": ("..run.hpc_dispatch", "collect_hpc_simulation_paths"),
     "generate_hpc_scripts_for_root": ("..run.hpc_dispatch", "generate_hpc_scripts_for_root"),

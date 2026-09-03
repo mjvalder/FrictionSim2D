@@ -492,7 +492,7 @@ class GeneralConfig(BaseModel):
     @model_validator(mode='after')
     def _validate_twist_angle(self) -> 'GeneralConfig':
         """Restrict twist_angle to the hexagonal irreducible wedge [0, 60)."""
-        if self.twist_angle is not None and not (0.0 <= self.twist_angle < 60.0):
+        if self.twist_angle is not None and not 0.0 <= self.twist_angle < 60.0:
             raise ValueError(
                 f"general.twist_angle must be in [0, 60) deg (the hexagonal "
                 f"irreducible wedge); got {self.twist_angle}."
@@ -747,9 +747,10 @@ class AFMSimulationConfig(BaseModel):
         a lattice-matched crystalline substrate (``amorph='c'`` with ``match``) is
         strained to tile the periodic cell seamlessly (D2b).
         """
-        if (self.sub is not None and not self.general.finite_sheet
-                and self.sub.amorph != 'a'
-                and not (self.sub.amorph == 'c' and self.sub.match)):
+        sub = self.sub
+        if (sub is not None and not self.general.finite_sheet
+                and sub.amorph != 'a'  # pylint: disable=no-member
+                and not (sub.amorph == 'c' and sub.match)):  # pylint: disable=no-member
             raise ValueError(
                 "Non-finite-sheet AFM requires an amorphous substrate "
                 "([sub] amorph = a), or a lattice-matched crystalline substrate "
@@ -769,16 +770,19 @@ class AFMSimulationConfig(BaseModel):
                 "on a substrate. For a substrate-free scan, use the freestanding tip "
                 "PES (omit [sub]) with finite_sheet = false."
             )
+        sub = self.sub
 
-        if self.sub.x is None or self.sub.y is None:
+        if sub.x is None or sub.y is None:  # pylint: disable=no-member
             raise ValueError(
                 "Finite-sheet AFM requires substrate x and y to be set in the [sub] section."
             )
 
-        sheet_x = float(self.sheet.x[0] if isinstance(self.sheet.x, list) else self.sheet.x)
-        sheet_y = float(self.sheet.y[0] if isinstance(self.sheet.y, list) else self.sheet.y)
-        sub_x = float(self.sub.x)
-        sub_y = float(self.sub.y)
+        sheet_x_raw = self.sheet.x  # pylint: disable=no-member
+        sheet_y_raw = self.sheet.y  # pylint: disable=no-member
+        sheet_x = float(sheet_x_raw[0] if isinstance(sheet_x_raw, list) else sheet_x_raw)
+        sheet_y = float(sheet_y_raw[0] if isinstance(sheet_y_raw, list) else sheet_y_raw)
+        sub_x = float(sub.x)  # pylint: disable=no-member
+        sub_y = float(sub.y)  # pylint: disable=no-member
 
         if sub_x < sheet_x:
             raise ValueError(
@@ -868,7 +872,9 @@ def _global_settings_path() -> Path:
     return base / 'FrictionSim2D' / 'settings.yaml'
 
 
-def _settings_paths_in_precedence_order(settings_file: Optional[Union[str, Path]] = None) -> List[Path]:
+def _settings_paths_in_precedence_order(
+    settings_file: Optional[Union[str, Path]] = None,
+) -> List[Path]:
     """Candidate settings files, highest precedence first.
 
     An explicit ``settings_file`` for this run beats the semi-permanent
@@ -937,7 +943,10 @@ def parse_config(config_source: Union[str, Path, Dict[str, Any]]) -> Dict[str, A
                 return json.load(f)
 
         else:
-            raise ValueError(f"Unsupported configuration file format: {ext}. Supported formats: .ini, .yaml, .yml, .json")
+            raise ValueError(
+                f"Unsupported configuration file format: {ext}. "
+                "Supported formats: .ini, .yaml, .yml, .json"
+            )
 
     elif isinstance(config_source, dict):
         return config_source
