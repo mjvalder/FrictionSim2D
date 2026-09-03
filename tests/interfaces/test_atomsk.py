@@ -38,7 +38,6 @@ def test_create_slab():
             assert "-duplicate" in args
 
 
-import os
 import subprocess
 from pathlib import Path
 

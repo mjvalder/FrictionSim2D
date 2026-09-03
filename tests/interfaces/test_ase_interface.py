@@ -23,12 +23,16 @@ def test_element_mass_unknown_symbol_raises_key_error():
         ase_iface.element_mass('Xx')
 
 
-def test_importing_the_adapter_does_not_import_ase_io():
-    for m in [m for m in sys.modules if m == 'ase.io' or m.startswith('ase.io.')]:
-        del sys.modules[m]
+def test_importing_the_adapter_does_not_import_ase_io(monkeypatch):
     import importlib
-    importlib.reload(ase_iface)
-    assert 'ase.io' not in sys.modules
+    stale = [m for m in sys.modules if m == 'ase.io' or m.startswith('ase.io.')]
+    for m in stale:
+        monkeypatch.delitem(sys.modules, m, raising=False)
+    try:
+        importlib.reload(ase_iface)
+        assert 'ase.io' not in sys.modules
+    finally:
+        importlib.import_module('ase.io')
 
 
 def test_read_lammps_data_returns_cell_and_positions(tmp_path):
