@@ -177,42 +177,6 @@ def mos2_multilayer_config(materials_path, potentials_path) -> SheetConfig:
     )
 
 
-# =========================================================================
-# Mock CIF Data Fixtures (to avoid file I/O in unit tests)
-# =========================================================================
-
-@pytest.fixture
-def mock_cifread_si(monkeypatch):
-    """Mocks cifread to return Silicon data."""
-    def mock_cif(*args, **kwargs):
-        return {'elements': ['Si']}
-    monkeypatch.setattr('src.potentials.manager.cifread', mock_cif)
-
-
-@pytest.fixture
-def mock_cifread_mos2(monkeypatch):
-    """Mocks cifread to return MoS2 data."""
-    def mock_cif(*args, **kwargs):
-        return {'elements': ['Mo', 'S']}
-    monkeypatch.setattr('src.potentials.manager.cifread', mock_cif)
-
-
-@pytest.fixture
-def mock_count_atomtypes_si(monkeypatch):
-    """Mocks count_atomtypes for Silicon (1 type per element)."""
-    def mock_count(*args, **kwargs):
-        return {'Si': 1}
-    monkeypatch.setattr('src.potentials.manager.count_atomtypes', mock_count)
-
-
-@pytest.fixture
-def mock_count_atomtypes_mos2_simple(monkeypatch):
-    """Mocks count_atomtypes for MoS2 with simple 1 type per element."""
-    def mock_count(*args, **kwargs):
-        return {'Mo': 1, 'S': 1}
-    monkeypatch.setattr('src.potentials.manager.count_atomtypes', mock_count)
-
-
 def pytest_collection_modifyitems(config, items):  # noqa: ARG001
     """Tag every ``lmp_serial``-guarded test with the ``lammps`` marker.
 

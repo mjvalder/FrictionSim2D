@@ -611,6 +611,22 @@ class TestFileOutput:
             assert 'group 2D_core type' in content
             assert 'group 2D_edge type' in content
 
+    def test_get_component_groups_string_emits_layer_1_for_monolayer(
+        self, mock_settings, mos2_sheet_config
+    ):
+        """A monolayer sheet must still define layer_1 (spec section 5 F1):
+        the observable registry's comx_L1/comz_L1 channels reference layer_1
+        unconditionally, and a monolayer's comz_L1 must equal comz exactly.
+        Types carry no per-layer tag for a monolayer, so this only passes if
+        get_component_groups_string()'s type-less fallback actually runs."""
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', mos2_sheet_config, n_layers=1)
+        pm.add_self_interaction('sheet')
+
+        groups = pm.get_component_groups_string()
+
+        assert 'group layer_1 type ' in groups
+
 
 # =========================================================================
 # Gap Calculation Tests
