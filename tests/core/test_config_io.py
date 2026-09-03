@@ -112,3 +112,14 @@ def test_yaml_and_json_round_trip(tmp_path):
 def test_unsupported_extension_raises(tmp_path):
     with pytest.raises(ValueError, match='Unsupported'):
         write_config({}, tmp_path / 'c.toml')
+
+
+def test_load_settings_malformed_yaml_warns_and_falls_back_to_defaults(tmp_path, caplog):
+    from src.core.config import load_settings
+
+    bad = tmp_path / 'settings.yaml'
+    bad.write_text('thermostat: [unclosed')
+    with caplog.at_level('WARNING'):
+        result = load_settings(settings_file=bad)
+    assert result.simulation.timestep == load_settings().simulation.timestep
+    assert str(bad) in caplog.text

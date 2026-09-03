@@ -4,6 +4,7 @@ Also holds the ``.ini``/YAML/JSON reader and writer pair that feeds them.
 """
 import configparser
 import json
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any, Literal, Mapping, cast
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 
 from .utils.paths import get_material_path, get_potential_path
 from .utils.tokens import _is_float
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_WRITE_FORMATS = ('.ini', '.yaml', '.yml', '.json')
 
@@ -132,6 +135,22 @@ class OutputSettings(BaseModel):
             "no registry channel is a build error, not a silent no-op."
         ),
     )
+
+    @field_validator('optional_channels', mode='before')
+    @classmethod
+    def _coerce_optional_channels(cls, v: Any) -> Any:
+        """Accept ``None``, an empty string, or a comma/whitespace-separated
+        string (as a hand-edited ``.ini`` or an emptied GUI field produces),
+        in addition to a real list/tuple, which passes through unchanged."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            if not v.strip():
+                return []
+            return [tok for tok in (t.strip() for t in v.replace(',', ' ').split()) if tok]
+        if isinstance(v, (list, tuple)):
+            return v
+        return v
 
 class PotentialSettings(BaseModel):
     """Settings for interatomic potentials."""
@@ -905,7 +924,8 @@ def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSet
                 data = yaml.safe_load(f) or {}
             if data:
                 return cast(GlobalSettings, GlobalSettings.model_validate(data))
-        except (FileNotFoundError, OSError, yaml.YAMLError):
+        except (FileNotFoundError, OSError, yaml.YAMLError) as exc:
+            logger.warning("skipping settings file %s: %s", path, exc)
             continue
 
     return cast(GlobalSettings, GlobalSettings())

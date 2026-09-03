@@ -616,3 +616,24 @@ def test_damping_ratio_defaults_to_zero():
 def test_optional_channels_defaults_empty():
     from src.core.config import OutputSettings
     assert OutputSettings().optional_channels == []
+
+
+def test_optional_channels_accepts_comma_separated_string():
+    from src.core.config import OutputSettings
+    assert OutputSettings(optional_channels='a, b').optional_channels == ['a', 'b']
+
+
+def test_optional_channels_none_becomes_empty_list():
+    from src.core.config import OutputSettings
+    assert OutputSettings(optional_channels=None).optional_channels == []
+
+
+def test_optional_channels_empty_string_becomes_empty_list():
+    from src.core.config import OutputSettings
+    assert OutputSettings(optional_channels='').optional_channels == []
+
+
+def test_optional_channels_list_passes_through():
+    from src.core.config import OutputSettings
+    assert OutputSettings(optional_channels=['raw_pe', 'raw_fz']).optional_channels == \
+        ['raw_pe', 'raw_fz']
