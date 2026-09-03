@@ -105,9 +105,11 @@ def _max_strain(cell_ref: np.ndarray, cell_def: np.ndarray) -> float:
         deform = cell_ref @ np.linalg.inv(cell_def)
     except np.linalg.LinAlgError:
         return math.inf
-    # Polar decomposition: deform = rot @ unimod.  Eigenvalues of unimod are stretch ratios.
-    unimod = deform.T @ deform
-    eigvals = np.linalg.eigvalsh(unimod)
+    # Polar decomposition: deform = rot @ stretch.  cauchy_green = deform.T @ deform
+    # is the right Cauchy-Green tensor (FᵀF); its eigenvalues are *squared* stretch
+    # ratios -- take the square root below to get the stretches.
+    cauchy_green = deform.T @ deform
+    eigvals = np.linalg.eigvalsh(cauchy_green)
     # principal strains: λ_i = sqrt(eigenvalue) - 1
     stretches = np.sqrt(np.maximum(eigvals, 0.0))
     return float(np.max(np.abs(stretches - 1.0)))
@@ -305,12 +307,12 @@ def _relative_rotation_strain(sc_a: np.ndarray, sc_b: np.ndarray) -> Tuple[float
     """
     try:
         gram = np.linalg.inv(np.asarray(sc_b, float)) @ np.asarray(sc_a, float)
-        unimod_b = gram.T @ gram
-        eigvals, eigvecs = np.linalg.eigh(unimod_b)
+        cauchy_green_b = gram.T @ gram
+        eigvals, eigvecs = np.linalg.eigh(cauchy_green_b)
         eigvals = np.maximum(eigvals, 0.0)
         stretches = np.sqrt(eigvals)
-        unimod = eigvecs @ np.diag(stretches) @ eigvecs.T
-        rot = gram @ np.linalg.inv(unimod)
+        stretch = eigvecs @ np.diag(stretches) @ eigvecs.T
+        rot = gram @ np.linalg.inv(stretch)
         angle = math.degrees(math.atan2(rot[1, 0], rot[0, 0]))
         strain = float(np.max(np.abs(stretches - 1.0)))
         return angle, strain
@@ -493,8 +495,8 @@ def orthorhombic_wrapper(
                     det = p * s - q * r
                     if det <= 0:
                         continue
-                    tiling = np.array([[p, q], [r, s]], dtype=float)
-                    b = tiling @ a
+                    candidate_tiling = np.array([[p, q], [r, s]], dtype=float)
+                    b = candidate_tiling @ a
                     n0 = float(np.linalg.norm(b[0]))
                     n1 = float(np.linalg.norm(b[1]))
                     if n0 < 1e-9 or n1 < 1e-9:
@@ -502,7 +504,7 @@ def orthorhombic_wrapper(
                     if abs(float(b[0] @ b[1])) > 1e-6 * n0 * n1:
                         continue  # rows not orthogonal
                     if det < best_det - 1e-9:
-                        best = (float(det), tiling.copy(), b.copy())
+                        best = (float(det), candidate_tiling.copy(), b.copy())
                         best_det = det
     if best is None:
         raise ValueError(
