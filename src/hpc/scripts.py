@@ -4,8 +4,6 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
-import shutil
-import json
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -617,65 +615,3 @@ class HPCScriptGenerator:
         submit_path.write_text('\n'.join(lines))
         submit_path.chmod(0o755)
         return submit_path
-
-
-def create_hpc_package(simulation_dir: Path, output_dir: Path,
-                        scheduler: Literal['pbs', 'slurm'] = 'pbs',
-                        config: Optional[HPCConfig] = None) -> Path:
-    """Package simulations for HPC transfer.
-    
-    Creates self-contained directory with simulations, scripts, and metadata
-    ready for transfer to HPC cluster.
-    
-    Args:
-        simulation_dir: Directory containing FrictionSim2D outputs.
-        output_dir: Directory to create package in.
-        scheduler: HPC scheduler type.
-        config: HPC configuration (uses defaults if None).
-        
-    Returns:
-        Path to created package directory.
-        
-    Raises:
-        ValueError: If no simulations found.
-    """
-    simulation_dir = Path(simulation_dir)
-    output_dir = Path(output_dir)
-    package_dir = output_dir / "friction2d_package"
-    package_dir.mkdir(parents=True, exist_ok=True)
-
-    simulation_paths = [
-        str(d.parent.relative_to(simulation_dir))
-        for d in simulation_dir.rglob('lammps') if d.is_dir()
-    ]
-    if not simulation_paths:
-        raise ValueError(f"No simulations found in {simulation_dir}")
-
-    shutil.copytree(simulation_dir, package_dir / 'simulations',
-                    ignore=shutil.ignore_patterns('*.lammpstrj'))
-
-    # base_dir '../simulations' means logs resolve under the simulations tree;
-    # create it so the scheduler can open its log files at job start.
-    (package_dir / 'simulations' / 'logs').mkdir(parents=True, exist_ok=True)
-
-    generator = HPCScriptGenerator(config)
-    generator.generate_scripts(simulation_paths, package_dir / 'hpc',
-                                scheduler=scheduler, base_dir='../simulations')
-
-    info = {'n_simulations': len(simulation_paths), 'scheduler': scheduler,
-            'created_from': str(simulation_dir)}
-    (package_dir / 'package_info.json').write_text(json.dumps(info, indent=2))
-
-    monitor = 'qstat' if scheduler == 'pbs' else 'squeue'
-    readme = f"""# FrictionSim2D HPC Package
-
-{len(simulation_paths)} simulations for {scheduler.upper()}
-
-## Usage
-1. Transfer to HPC: `rsync -avz friction2d_package/ <hpc>:~/`
-2. Submit jobs: `cd hpc && bash submit_all.txt`
-3. Monitor: `{monitor} -u $USER`
-4. Download results: `rsync -avz <hpc>:~/friction2d_package/simulations/*/results ./`
-"""
-    (package_dir / 'README.md').write_text(readme)
-    return package_dir
