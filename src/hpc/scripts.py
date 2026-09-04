@@ -158,11 +158,11 @@ class HPCConfig:
             'use_tmpdir': self.use_tmpdir,
             'lammps_scripts': self.lammps_scripts,
             'select_multi': (
-                f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:"
+                f"{self.nodes}:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:"
                 f"mpiprocs={self.cpus_per_node}"
             ),
             'select_single': (
-                f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:"
+                f"{self.nodes}:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:"
                 f"mpiprocs={self.cpus_per_node}"
             ),
             'ntasks_per_node': self.cpus_per_node,

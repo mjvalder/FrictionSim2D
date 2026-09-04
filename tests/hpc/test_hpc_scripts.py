@@ -52,10 +52,9 @@ def test_generated_script_carries_the_requested_modules(tmp_path):
 
 
 def test_walltime_and_cpu_resources_reach_the_pbs_script(tmp_path):
-    """PBS's `select=` line encodes cpus_per_node/memory_gb but never `nodes`
-    (the templates never reference `{{ nodes }}` in the PBS variants -- only
-    SLURM does). Documented here rather than asserting a `select=N:` node
-    count the template does not produce."""
+    """PBS's `select=` line encodes cpus_per_node/memory_gb and, since the
+    node-count fix, `nodes` too (see test_pbs_select_line_honours_node_count
+    and test_pbs_select_line_is_unchanged_for_the_single_node_default)."""
     generator = HPCScriptGenerator(_config(walltime_hours=8, num_cpus=16, memory_gb=64))
     generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
 
@@ -63,6 +62,26 @@ def test_walltime_and_cpu_resources_reach_the_pbs_script(tmp_path):
     assert "walltime=8:00:00" in text
     assert "ncpus=16" in text
     assert "mem=64gb" in text
+
+
+def test_pbs_select_line_honours_node_count(tmp_path):
+    """A multi-node PBS config must put the real node count in `select=`,
+    not the hardcoded `1` that silently dropped `num_nodes` before this fix."""
+    generator = HPCScriptGenerator(_config(num_nodes=4, num_cpus=16, memory_gb=64))
+    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+
+    text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
+    assert "select=4:ncpus=16:mem=64gb:mpiprocs=16" in text
+
+
+def test_pbs_select_line_is_unchanged_for_the_single_node_default(tmp_path):
+    """Compatibility check: with the default num_nodes=1, the `select=` line
+    must render byte-identical to what it produced before the fix."""
+    generator = HPCScriptGenerator(_config())
+    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+
+    text = (tmp_path / "hpc" / "run.pbs").read_text(encoding="utf-8")
+    assert "select=1:ncpus=32:mem=62gb:mpiprocs=32" in text
 
 
 def test_node_count_reaches_the_slurm_script(tmp_path):
