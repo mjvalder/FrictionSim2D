@@ -49,6 +49,8 @@ logger = logging.getLogger(__name__)
 
 
 def _create_lammps_instance():
+    # Lazy: the lammps python bindings are an optional, heavy dependency;
+    # import only when a caller actually needs to drive LAMMPS in-process.
     from lammps import lammps  # pylint: disable=import-outside-toplevel
 
     return lammps(cmdargs=["-log", "none", "-screen", "none", "-nocite"])
@@ -709,6 +711,7 @@ def _write_cif_as_lammps_atomic(
         output_path: Output LAMMPS data path.
         specorder: Optional element order for deterministic type assignment.
     """
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase import io as ase_io  # pylint: disable=import-outside-toplevel
     from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
 
@@ -740,7 +743,6 @@ def _write_cif_as_lammps_atomic(
     masses_block += "\n"
 
     content = output_path.read_text(encoding='utf-8')
-    import re  # pylint: disable=import-outside-toplevel
     # Insert the Masses block immediately before the "Atoms" section header
     content = re.sub(
         r'(Atoms\s)',
@@ -763,7 +765,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
         input_path: Input LAMMPS data path.
         output_path: Orthogonalized output path.
     """
-    import re as _re  # pylint: disable=import-outside-toplevel
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase import io as ase_io  # pylint: disable=import-outside-toplevel
     from ase.build import make_supercell as _make_supercell  # pylint: disable=import-outside-toplevel
 
@@ -772,7 +774,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
 
     # Check whether the box is already orthogonal (no xy xz yz line with non-zero values)
     content = input_path.read_text(encoding='utf-8')
-    tilt_match = _re.search(
+    tilt_match = re.search(
         r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+'
         r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+'
         r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+xy xz yz',
@@ -804,6 +806,7 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
     # element*; the real masses/elements are restored afterward. Writing via
     # ase_io.write keeps the box in LAMMPS restricted-triclinic orientation.
     # The non-tilt LAMMPS change_box path above already preserves types.
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase import Atoms as _Atoms  # pylint: disable=import-outside-toplevel
     from ase.data import chemical_symbols as _csym  # pylint: disable=import-outside-toplevel
 
@@ -991,8 +994,6 @@ def _restore_masses_section(path: Path, masses: Dict[int, tuple]) -> None:
         path: LAMMPS data file (modified in-place).
         masses: mapping type-id -> (mass, element).
     """
-    import re as _re  # pylint: disable=import-outside-toplevel
-
     lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
     out = []
     skip_masses = False
@@ -1017,7 +1018,7 @@ def _restore_masses_section(path: Path, masses: Dict[int, tuple]) -> None:
     block += "\n"
 
     text = ''.join(out)
-    text = _re.sub(r'(^|\n)(Atoms)', r'\1' + block + r'\2', text, count=1)
+    text = re.sub(r'(^|\n)(Atoms)', r'\1' + block + r'\2', text, count=1)
     path.write_text(text, encoding='utf-8')
 
 
@@ -1037,6 +1038,7 @@ def _assign_pot_types_by_order(path: Path, order: List[str],
         order: Element order from the potential (e.g. ['Pt', 'Se']).
         counts: Sublattice-type count per element (e.g. {'Pt': 1, 'Se': 2}).
     """
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase.data import atomic_masses as _am, atomic_numbers as _an  # pylint: disable=import-outside-toplevel
 
     cell, atoms, masses = _parse_lammps_cell_atoms_masses(path.read_text(encoding='utf-8'))
@@ -1301,6 +1303,7 @@ def extract_substrate_surface_cell(
     # Slice the topmost atomic layer -> a one-layer surface data file. The
     # coincidence search only needs the surface termination (single layer), not
     # the full z-repeat, as its representative atom set.
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase import io as ase_io  # pylint: disable=import-outside-toplevel
 
     atoms = ase_io.read(str(prim_cell), format="lammps-data")
@@ -1355,8 +1358,9 @@ def build_matched_crystalline_substrate(
             the least-strain supercell is sheared (non-diagonal) — an orthogonal box
             cannot be tiled by a sheared substrate cell.
     """
-    from ...lattice.matching import match_to_fixed_box
-    from ...lattice.apply import strain_monolayer_to_cell
+    # Lazy: deliberate, breaks the builders<->lattice import cycle.
+    from ...lattice.matching import match_to_fixed_box  # pylint: disable=import-outside-toplevel
+    from ...lattice.apply import strain_monolayer_to_cell  # pylint: disable=import-outside-toplevel
 
     hetero_box = np.asarray(hetero_box, dtype=float)
     build_dir = Path(build_dir)
@@ -1771,7 +1775,10 @@ def stack_multilayer_sheet(
         initial_guess = lat_c
 
     layers_for_setup = 2 if calculate_lat_c else n_layers
-    pot_file = Path(tempfile.gettempdir()) / f"sheet_{layers_for_setup}_{uuid.uuid4().hex[:8]}.in.settings"
+    pot_file = (
+        Path(tempfile.gettempdir())
+        / f"sheet_{layers_for_setup}_{uuid.uuid4().hex[:8]}.in.settings"
+    )
 
     pm = PotentialManager(settings)
     regions = [None, 'edge'] if edge_mode != 'none' else None
@@ -1822,7 +1829,9 @@ def stack_multilayer_sheet(
         'pot_type': config.pot_type.lower(),
         'calculate_lat_c': calculate_lat_c,
         'min_style': settings.simulation.min_style if calculate_lat_c else None,
-        'minimization_command': settings.simulation.minimization_command if calculate_lat_c else None,
+        'minimization_command': (
+            settings.simulation.minimization_command if calculate_lat_c else None
+        ),
         'timestep': settings.simulation.timestep if calculate_lat_c else None,
         'output_path': output_path
     }

@@ -60,10 +60,11 @@ now says so where a reader looks first.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from jinja2 import Environment
@@ -82,6 +83,9 @@ from ...potentials.manager import PotentialManager
 from ...interfaces.jinja import PackageLoader
 from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
 from ...interfaces.ase import element_mass, read_lammps_data
+
+if TYPE_CHECKING:                      # ase.io costs ~270 ms; annotations only
+    from ase import Atoms
 
 PathLike = Union[str, Path]
 
@@ -288,7 +292,8 @@ def register_hetero_potentials(
             ``provenance/potentials`` -- correct when ``workdir`` IS that
             directory. A builder whose scripts run from a shared simulation
             root passes its own sim-root-relative prefix (see
-            :meth:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation._potentials_prefix`).
+            :meth:`src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation._potentials_prefix`
+            ).
 
     Returns:
         :class:`HeteroPotentials` exposing the configured manager, the written
@@ -346,9 +351,9 @@ def register_hetero_potentials(
         pm.add_self_interaction(name)
 
     # 3. UFF-mixed lj/cut cross-terms for every material pair at the interface.
-    for i in range(len(component_names)):
+    for i, name_i in enumerate(component_names):
         for j in range(i + 1, len(component_names)):
-            pm.add_cross_interaction(component_names[i], component_names[j])
+            pm.add_cross_interaction(name_i, component_names[j])
 
     settings_path = workdir / "lammps" / "system.in.settings"
     pm.write_file(settings_path)
@@ -448,9 +453,9 @@ def register_hetero_flake_potentials(
         pm.add_self_interaction(name)
 
     # 3. UFF-mixed lj/cut cross-terms between the two flake materials.
-    for i in range(len(component_names)):
+    for i, name_i in enumerate(component_names):
         for j in range(i + 1, len(component_names)):
-            pm.add_cross_interaction(component_names[i], component_names[j])
+            pm.add_cross_interaction(name_i, component_names[j])
 
     settings_path = workdir / "lammps" / "system.in.settings"
     pm.write_file(settings_path)
@@ -640,17 +645,15 @@ def detect_inplane_repeat(
     pos = np.asarray(atoms.positions, dtype=float)
     species = np.asarray(atoms.numbers)
 
-    counts = []
-    for axis, length in ((0, lx), (1, ly)):
+    def _axis_repeat_count(axis: int, length: float) -> int:
         n_cap = min(int(max_repeats), max(1, int(length // min_repeat)))
-        found = 1
         for n in range(n_cap, 1, -1):
             if _is_inplane_translation(pos, species, lx, ly, axis, length / n, tol):
-                found = n
-                break
-        counts.append(found)
+                return n
+        return 1
 
-    nx, ny = counts
+    nx = _axis_repeat_count(0, lx)
+    ny = _axis_repeat_count(1, ly)
     return (lx / nx, ly / ny), (nx, ny)
 
 
@@ -751,6 +754,7 @@ def _monolayer_to_atoms(mono: Dict[str, object]) -> Atoms:
     that happen to share a real element. Per-atom charges are attached when the
     source used ``atom_style charge``.
     """
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase import Atoms  # pylint: disable=import-outside-toplevel
     from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
 
@@ -775,6 +779,7 @@ def _restore_masses_section(path: Path, masses: Dict[int, Tuple[float, str]], n_
     the placeholder element's standard mass for any type absent from the source
     Masses section (should not happen for build_monolayer output).
     """
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
 
     if n_types < 1:
@@ -790,7 +795,6 @@ def _restore_masses_section(path: Path, masses: Dict[int, Tuple[float, str]], n_
     block += "\n"
 
     text = path.read_text(encoding="utf-8")
-    import re  # local import: only needed here
 
     # Insert immediately before the Atoms section header.
     new_text, count = re.subn(r"(^|\n)(Atoms)", r"\1" + block + r"\2", text, count=1)
@@ -815,7 +819,7 @@ def _write_supercell(
     Returns:
         The written in-plane 2x2 cell (LAMMPS-canonical), read back from disk.
     """
-    from ase import Atoms  # pylint: disable=import-outside-toplevel
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
     from ase.io import read, write  # pylint: disable=import-outside-toplevel
 
@@ -877,6 +881,7 @@ def build_matched_supercells(
             commensurate at this match -- fail loud rather than silently emit an
             incommensurate "matched" stack).
     """
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase.build import make_supercell  # pylint: disable=import-outside-toplevel
 
     workdir = Path(workdir)
@@ -1027,6 +1032,7 @@ def build_twisted_supercells(
             nearest achievable angle), or if a per-material strain onto the
             emitted box exceeds ``strain_tol``.
     """
+    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
     from ase.build import make_supercell  # pylint: disable=import-outside-toplevel
 
     workdir = Path(workdir)
@@ -1207,6 +1213,7 @@ def _run_lammps(workdir: Path, script_path: Path) -> str:
         cwd=str(workdir),
         capture_output=True,
         text=True,
+        check=False,  # returncode is inspected explicitly below
     )
     if result.returncode != 0:
         tail_out = "\n".join(result.stdout.splitlines()[-30:])
@@ -1696,7 +1703,11 @@ def build_hetero_structure(
         # config through; when unset, build_matched_supercells' defaults apply.
         lm = config.lattice_match
         match_kwargs = (
-            dict(strain_tol=lm.strain_tol, max_supercell=lm.max_supercell, area_tol=lm.area_tol)
+            {
+                "strain_tol": lm.strain_tol,
+                "max_supercell": lm.max_supercell,
+                "area_tol": lm.area_tol,
+            }
             if lm is not None
             else {}
         )

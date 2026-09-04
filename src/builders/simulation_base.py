@@ -456,7 +456,9 @@ class SimulationBase(ABC):
                 'job_name': job_name,
             })
 
-            template_name = 'pbs_array.j2' if hpc_config.scheduler_type == 'pbs' else 'slurm_array.j2'
+            template_name = (
+                'pbs_array.j2' if hpc_config.scheduler_type == 'pbs' else 'slurm_array.j2'
+            )
             template = jinja_env.get_template(template_name)
             script_content = template.render(context)
 
