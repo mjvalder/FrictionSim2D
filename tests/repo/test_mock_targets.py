@@ -57,31 +57,18 @@ KNOWN_VIOLATIONS = {
         "src.builders.components.build_tip",
     },
     "builders/test_builders.py": {
-        "src.builders.afm.AFMSimulation._calculate_z_positions",
-        "src.builders.afm.AFMSimulation._generate_hpc_scripts",
-        "src.builders.afm.AFMSimulation._generate_potentials",
-        "src.builders.afm.AFMSimulation._init_provenance",
-        "src.builders.afm.AFMSimulation.write_inputs",
-        "src.builders.afm.base.get_model_dimensions",
-        "src.builders.components._create_base_slab",
+        # Phase 2c test-weak repair (docs/superpowers/reviews/
+        # builders-construction.md (c)): every test now builds real
+        # structures via real CIF/potential fixtures and mocks only the
+        # genuine boundaries (run_lammps_commands, make_amorphous -- both
+        # ALLOWED_TARGET_PREFIXES) plus these four native helpers, kept
+        # patched with `wraps=` (the real function still executes; only
+        # call-count is observed) as a regression guard that the native
+        # pipeline -- not Atomsk -- is what ran.
         "src.builders.components._duplicate_lammps_data",
         "src.builders.components._orthogonalize_lammps_data",
         "src.builders.components._write_cif_as_lammps_atomic",
-        "src.builders.components.apply_langevin_regions",
         "src.builders.components.apply_sheet_edge_types",
-        "src.builders.components.build_monolayer",
-        "src.builders.components.build_sheet",
-        "src.builders.components.build_substrate",
-        "src.builders.components.build_tip",
-        "src.builders.components.charge2atom",
-        "src.builders.components.check_potential_cif_compatibility",
-        "src.builders.components.cifread",
-        "src.builders.components.get_material_path",
-        "src.builders.components.get_model_dimensions",
-        "src.builders.components.get_num_atom_types",
-        "src.builders.components.get_potential_element_order",
-        "src.builders.components.shift_atoms_to_z_zero",
-        "src.builders.components.shutil.copy",
         "src.builders.components.stack_multilayer_sheet",
     },
     "builders/test_pes_scan_builder.py": {

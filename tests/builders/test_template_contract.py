@@ -229,8 +229,12 @@ def test_settle_loop_is_capped(tmp_path):
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
     _prepare_builder_for_slide_write(builder, tmp_path)
     text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
-    # guards the silent-empty-render failure (env has no StrictUndefined)
-    assert 'variable        ramp_iter loop 40' in text
+    # Guards the silent-empty-render failure (env has no StrictUndefined): read
+    # the cap from the settings the builder actually used rather than pinning
+    # the literal, so retuning ramp_max_iterations doesn't fail this test for
+    # an unrelated reason.
+    ramp_max_iterations = config.settings.simulation.ramp_max_iterations
+    assert f'variable        ramp_iter loop {ramp_max_iterations}' in text
     assert 'RAMP_STATUS' in text
     assert 'variable        ramp_iter delete' in text   # cap resets per load
 
