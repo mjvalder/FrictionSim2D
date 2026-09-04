@@ -76,8 +76,12 @@ def test_a_tree_with_no_lammps_directory_exits_non_zero(runner, tmp_path):
 
     assert result.exit_code != 0
     assert "No simulation directories found" in result.output
-    # hpc/ is created up front (before discovery); it must stay empty.
-    assert list((empty_root / "hpc").iterdir()) == []
+    # hpc/ is created up front (before discovery), so it exists-and-is-empty
+    # today; the right fix is moving that mkdir after the refusal checks, at
+    # which point hpc/ would never be created here at all. Tolerate both so
+    # this test doesn't block that fix.
+    hpc_dir = empty_root / "hpc"
+    assert not hpc_dir.exists() or list(hpc_dir.iterdir()) == []
 
 
 def test_output_dir_option_is_honoured(runner, tmp_path):

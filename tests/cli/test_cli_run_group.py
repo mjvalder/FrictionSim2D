@@ -20,13 +20,19 @@ def runner():
 
 
 @pytest.fixture
-def captured(monkeypatch):
-    """Replace the builder entry point; keep what the CLI passed it."""
+def captured(monkeypatch, tmp_path):
+    """Replace the builder entry point; keep what the CLI passed it.
+
+    Every current test passes ``--output-dir``, so ``output_root`` is always
+    set -- but the fallback must not default to ``.`` (the repo cwd): a
+    future test omitting ``--output-dir`` would otherwise mkdir into the
+    real working tree. Default to a tmp_path-derived directory instead.
+    """
     calls = []
 
     def fake_run_simulations(config_file, model, **kwargs):
         calls.append({"config_file": config_file, "model": model, **kwargs})
-        root = Path(kwargs.get("output_root") or ".") / "simulation_test"
+        root = Path(kwargs.get("output_root") or tmp_path) / "simulation_test"
         root.mkdir(parents=True, exist_ok=True)
         return ([], root, [], None)
 

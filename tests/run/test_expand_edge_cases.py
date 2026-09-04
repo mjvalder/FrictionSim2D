@@ -106,7 +106,7 @@ def test_a_sweep_with_all_identical_values_collides() -> None:
     member, and since general.temp is exactly what output_dir_for keys the
     K{temp} segment on, two identical temps collide on the SAME directory --
     the second build would silently overwrite the first, the same class of
-    bug as R-3 (naming.md's LOOPABILITY invariant), but from a different
+    bug as R-3 (run.md's LOOPABILITY invariant), but from a different
     cause (a repeated value, not a misclassified parameter) and NOT covered
     by this task's fix. Flagged here rather than silently pinned: this is a
     real, separate gap for a future task, not a deliberate design choice.

@@ -310,13 +310,18 @@ def test_scan_angle_force_list_is_an_in_file_loop_not_a_sweep() -> None:
 
 
 def test_scan_angle_force_still_only_one_directory_via_output_dir_for() -> None:
-    """Same fixture, asserted the way the reading pass reproduced the bug:
-    on the produced directory names, not on expand_config_sweeps's return
-    shape alone (100% line coverage on expand_config_sweeps is exactly how
-    this went unnoticed -- see docs/superpowers/reviews/run.md)."""
+    """Same fixture, additionally asserted on the produced directory names,
+    not on expand_config_sweeps's return shape alone (100% line coverage on
+    expand_config_sweeps is exactly how this went unnoticed -- see
+    docs/superpowers/reviews/run.md). ``len(dirs) == 1`` alone does NOT
+    discriminate pre-fix from post-fix code: pre-fix, expand_config_sweeps
+    wrongly fanned out into 2 configs that then collided on the same
+    directory name, so ``dirs`` was still a 1-element set. The
+    ``len(expanded) == 1`` assertion is what actually fails pre-fix."""
     base_config = _minimal_sheet_base_config(scan_angle_force=[10.0, 30.0])
 
     expanded = expand_config_sweeps(base_config)
+    assert len(expanded) == 1
     dirs = {output_dir_for(conf, 'sheetonsheet') for conf in expanded}
 
     assert len(dirs) == 1
