@@ -985,3 +985,40 @@ def test_requested_prefix_reaches_the_written_settings(tmp_path, finite, edge_wi
     # that contains the run directory.
     for path in paths:
         assert (tmp_path / "provenance" / "potentials" / Path(path).name).is_file()
+
+
+def test_finite_hetero_with_prefix_keeps_edge_types(tmp_path):
+    """Regression guard: a finite hetero build (``finite_sheet_edge_width`` >
+    0) combined with a caller-supplied ``potentials_prefix`` must keep the
+    doubled core/edge spine that ``_apply_finite_hetero_edges`` wrote.
+
+    ``build_hetero_structure`` re-registers the spine a second time, with the
+    caller's prefix, ONLY when ``_apply_finite_hetero_edges`` reports it did
+    NOT already re-register (``edged`` falsy) -- the plain re-registration a
+    real no-op leaves behind does not know about edge regions, so it would
+    silently drop the per-material edge groups and the doubled type count.
+    ``_apply_finite_hetero_edges`` is annotated ``-> bool`` and documented to
+    return True on the success path, but before this fix it fell off the end
+    (implicit ``None``) instead, so the guard's ``not edged`` fired even on
+    the edge-typed success path and clobbered the just-written edge spine.
+    """
+    cfg = _finite_hetero_cfg(tmp_path)
+    assert cfg.settings.geometry.finite_sheet_edge_width > 0
+    prefix = "sheetonsheet/h-MoS2+h-WS2/run/provenance/potentials"
+
+    stack = build_hetero_structure(
+        cfg, cfg.settings, workdir=tmp_path, potentials_prefix=prefix
+    )
+
+    settings_text = Path(stack.settings_path).read_text(encoding="utf-8")
+    # The edge groups register_hetero_potentials(..., regions=[None, 'edge'])
+    # plus _apply_finite_hetero_edges' own appended lines write -- a plain
+    # re-registration (no regions) never emits any of these.
+    assert "group sheet_1_edge" in settings_text
+    assert "group sheet_2_edge" in settings_text
+    assert "group 2D_edge union sheet_1_edge sheet_2_edge" in settings_text
+    # The prefix must ALSO have reached this same file (the other half of the
+    # contract this build exercises).
+    paths = _pair_coeff_potential_paths(stack.settings_path)
+    assert paths
+    assert all(p.startswith(prefix + "/") for p in paths), paths

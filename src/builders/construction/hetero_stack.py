@@ -1797,7 +1797,7 @@ def _apply_finite_hetero_edges(
     """
     edge_width = float(settings.geometry.finite_sheet_edge_width)
     if edge_width <= 0:
-        return
+        return False
 
     # Guard: the edge band must not swallow the patch. Span from the assembled
     # patch's atom bounding box (the same extent apply_sheet_edge_types uses).
@@ -1848,3 +1848,5 @@ def _apply_finite_hetero_edges(
     )
     with open(stack.settings_path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(group_lines) + "\n")
+
+    return True
