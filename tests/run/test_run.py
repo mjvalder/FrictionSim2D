@@ -380,6 +380,70 @@ class TestLoopabilityDrivesSweepExclusion:
         assert LAMMPS_LOOP_PARAMS == in_file_keys
 
 
+class TestUnclassifiedGeneralListRaises:
+    """R-3/finding 17's other half: a list-valued ``[general]`` key that
+    naming.LOOPABILITY does not classify 'sweep' must raise, not silently
+    expand into configs that collide on the same output directory (the
+    'scalar' and unclassified cases behave identically -- see the shared
+    error text below). Adding the key to LOOPABILITY as 'sweep' is the
+    deliberate way to allow sweeping it."""
+
+    def test_unclassified_key_raises_naming_the_key(self):
+        """A key LOOPABILITY has never heard of -- the general fix, not the
+        reviewer's specific twist_angle example."""
+        base_config = _minimal_sheet_base_config(bond_spring=[5.0, 10.0])
+
+        with pytest.raises(ValueError, match=r"\[general\] bond_spring"):
+            expand_config_sweeps(base_config)
+
+    def test_twist_angle_list_raises(self):
+        """The reviewer's own example (run.md finding 17): twist_angle is a
+        real config field (src/core/config.py) with no LOOPABILITY entry, so
+        a list value must be refused rather than silently building
+        twist_angle=[0,15,30] into a single overwritten directory."""
+        base_config = _minimal_sheet_base_config(twist_angle=[0, 15, 30])
+
+        with pytest.raises(ValueError, match=r"\[general\] twist_angle"):
+            expand_config_sweeps(base_config)
+
+    def test_scalar_classified_key_also_raises(self, monkeypatch):
+        """LOOPABILITY's 'scalar' class ('a list here is not supported') has
+        no 'general' member today, so this pins it by adding one temporarily.
+        Before the fix, expand.py's loop only ever checked
+        ``key not in LAMMPS_LOOP_PARAMS`` and never consulted LOOPABILITY at
+        all, so an explicit 'scalar' classification was silently ignored
+        exactly like an unclassified key -- this is the reviewer's other
+        named gap."""
+        monkeypatch.setitem(LOOPABILITY, ('general', 'bond_spring'), 'scalar')
+        base_config = _minimal_sheet_base_config(bond_spring=[5.0, 10.0])
+
+        with pytest.raises(
+                ValueError,
+                match=r"\[general\] bond_spring.*\(got 'scalar'\)") as exc_info:
+            expand_config_sweeps(base_config)
+
+        # Same message shape as the unclassified case (below): loopability()
+        # can't tell "explicitly classified 'scalar'" apart from "missing
+        # from LOOPABILITY entirely" -- both default to 'scalar' -- so the
+        # fix deliberately does not try to distinguish them and raises the
+        # same "(got 'scalar')" text for either.
+        assert "(got 'scalar')" in str(exc_info.value)
+
+    def test_unclassified_key_message_has_the_same_shape_as_scalar(self):
+        """Companion to the 'scalar' test above: with no LOOPABILITY entry at
+        all (bond_spring, unpatched), the message is identical in shape --
+        `loopability()` defaults an unlisted key to 'scalar' itself, so the
+        two cases are indistinguishable at the raise site by design."""
+        base_config = _minimal_sheet_base_config(bond_spring=[5.0, 10.0])
+
+        with pytest.raises(
+                ValueError,
+                match=r"\[general\] bond_spring.*\(got 'scalar'\)") as exc_info:
+            expand_config_sweeps(base_config)
+
+        assert "(got 'scalar')" in str(exc_info.value)
+
+
 class TestOrderedPairSweeps:
     """A materials_list of ordered pairs ('mat1 + mat2') drives both the
     primary sheet and '2D-2' -- one heterostructure combination per line,

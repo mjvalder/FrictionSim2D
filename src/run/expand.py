@@ -39,6 +39,7 @@ from .naming import (
     LAMMPS_LOOP_PARAMS,
     SHEET_LIKE_MODELS,
     _numbered_sheet_keys,
+    loopability,
     primary_sheet,
 )
 
@@ -577,8 +578,33 @@ def expand_config_sweeps(base_config: Dict[str, Any],
 
     if 'general' in base_config:
         for key, val in base_config['general'].items():
-            if isinstance(val, list) and key not in LAMMPS_LOOP_PARAMS:
-                sweep_params[('general', key)] = val
+            if not isinstance(val, list) or key in LAMMPS_LOOP_PARAMS:
+                continue
+            kind = loopability('general', key)
+            if kind != 'sweep':
+                # naming.LOOPABILITY is the sole authority on which keys may
+                # be swept -- it (via output_dir_for) is what keeps expanded
+                # configs from colliding on the same directory. A key it
+                # marks 'scalar', or does not mention at all (loopability()
+                # defaults to 'scalar' either way -- the two are
+                # indistinguishable here by design), must not silently fall
+                # through to a sweep: every value would build to the
+                # identical output directory and overwrite the last build,
+                # the same bug class as R-3/finding 17
+                # (docs/superpowers/reviews/run.md). Classify the key in
+                # LOOPABILITY (as 'sweep' if it should change the output
+                # directory, or 'in_file' if a LAMMPS script already loops
+                # over it) before sweeping it.
+                raise ValueError(
+                    f"[general] {key} is a list, but naming.LOOPABILITY does "
+                    f"not classify it as sweepable (got {kind!r}). Add "
+                    f"('general', {key!r}) to LOOPABILITY -- 'sweep' if it "
+                    "should expand into one output directory per value, or "
+                    "'in_file' if a LAMMPS script already loops over it -- "
+                    "before sweeping it; otherwise every value builds to the "
+                    "same output directory and silently overwrites the last."
+                )
+            sweep_params[('general', key)] = val
 
     # Potential sweep (spec §13): a pot_path LIST on the primary sheet sweeps
     # into separate runs, one directory per member (pot_ token appended by
