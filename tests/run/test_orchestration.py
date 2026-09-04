@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from src.run.artifacts import (
-    available_layers,
     discover_preview_target,
     find_assembly_script,
     generate_package,
@@ -55,12 +54,6 @@ def test_generation_succeeds(name, model, script, layers, generated):
     assert result.ok, result.render()
     assert result.created
     assert result.failures == []
-
-
-@pytest.mark.parametrize('name,model,script,layers', CASES, ids=[c[0] for c in CASES])
-def test_available_layers(name, model, script, layers, generated):
-    result = generated[name]
-    assert available_layers(result.created[0]) == layers
 
 
 @pytest.mark.parametrize('name,model,script,layers', CASES, ids=[c[0] for c in CASES])

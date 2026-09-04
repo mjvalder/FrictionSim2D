@@ -226,8 +226,3 @@ def _layer_levels(run_dir: Path) -> Dict[int, Path]:
         if match and child.is_dir():
             levels[int(match.group(1))] = child
     return levels
-
-
-def available_layers(run_dir: Path) -> List[int]:
-    """Sheet layer counts built under ``run_dir``, ascending."""
-    return sorted(_layer_levels(run_dir))
