@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from src.cli import cli
 from src.core.config import GlobalSettings
+from src.run.hpc_dispatch import collect_hpc_simulation_paths
 
 
 @pytest.fixture
@@ -91,3 +92,41 @@ def test_output_dir_option_is_honoured(runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert (out_dir / "run.pbs").exists()
     assert not (sim_root / "hpc").exists()
+
+
+def test_discovery_agrees_with_collect_hpc_simulation_paths_for_suffixed_scripts(
+        runner, tmp_path):
+    """C2-1 equivalence check.
+
+    ``hpc_generate`` used to re-implement simulation discovery inline with a
+    private ``script_exists`` that special-cased only ``slide.in`` (matching
+    ``slide_*.in``), never ``system.in`` -- so a directory containing only a
+    suffixed system script (e.g. ``system_30nN.in``, the naming a
+    per-condition system-phase sweep would use, mirroring slide's existing
+    per-load suffixes) was invisible to the CLI even though
+    ``run.hpc_dispatch.collect_hpc_simulation_paths`` (used by every other
+    caller: ``run --hpc-scripts``, ``aiida rebuild --hpc-scripts``) already
+    finds it via ``*system*.in``. This must find both directories, matching
+    ``collect_hpc_simulation_paths`` exactly -- it fails against the
+    pre-refactor CLI, which only ever found the slide one.
+    """
+    sim_root = tmp_path / "sim_root"
+
+    system_dir = sim_root / "afm" / "mat_system" / "L1" / "lammps"
+    system_dir.mkdir(parents=True)
+    (system_dir / "system_30nN.in").write_text("# lammps\n", encoding="utf-8")
+
+    slide_dir = sim_root / "afm" / "mat_slide" / "L1" / "lammps"
+    slide_dir.mkdir(parents=True)
+    (slide_dir / "slide_p1gpa.in").write_text("# lammps\n", encoding="utf-8")
+
+    settings_file = _settings_file_with_modules(tmp_path)
+
+    expected = collect_hpc_simulation_paths(sim_root)
+    assert len(expected) == 2, expected  # sanity: both dirs are real candidates
+
+    result = runner.invoke(cli, ["hpc", "generate", str(sim_root),
+                                 "--settings-file", str(settings_file)])
+
+    assert result.exit_code == 0, result.output
+    assert f"Found {len(expected)} simulations" in result.output

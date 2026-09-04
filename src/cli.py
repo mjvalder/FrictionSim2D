@@ -14,8 +14,11 @@ from typing import List, Optional, NoReturn
 import click
 
 from .core.config import load_settings, settings_origin, _global_settings_path
-from .run.hpc_dispatch import _build_hpc_manifest_entries, dispatch_hpc_generation
-from .run.naming import layer_aware_path_sort_key
+from .run.hpc_dispatch import (
+    _build_hpc_manifest_entries,
+    collect_hpc_simulation_paths,
+    dispatch_hpc_generation,
+)
 from .run.simulate import run_simulations
 
 logging.basicConfig(
@@ -444,28 +447,8 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     settings.hpc.scheduler_type = scheduler  # CLI --scheduler overrides the settings default
     hpc_config = HPCConfig.from_settings(settings.hpc)
 
-    simulation_paths = []
     script_names = hpc_config.lammps_scripts or ['system.in', 'slide.in']
-
-    def script_exists(lammps_dir: Path, script_name: str) -> bool:
-        if '*' in script_name or '?' in script_name:
-            return any(lammps_dir.glob(script_name))
-        if script_name == 'slide.in':
-            return (
-                (lammps_dir / 'slide.in').exists()
-                or any(lammps_dir.glob('slide_*.in'))
-            )
-        return (lammps_dir / script_name).exists()
-
-    for lammps_dir in sim_dir.rglob('lammps'):
-        if not lammps_dir.is_dir():
-            continue
-        if not any(script_exists(lammps_dir, script) for script in script_names):
-            continue
-        rel_path = lammps_dir.parent.relative_to(sim_dir)
-        simulation_paths.append(str(rel_path))
-
-    simulation_paths = sorted(set(simulation_paths), key=layer_aware_path_sort_key)
+    simulation_paths = collect_hpc_simulation_paths(sim_dir, lammps_scripts=script_names)
 
     if not simulation_paths:
         click.echo("❌ No simulation directories found", err=True)
