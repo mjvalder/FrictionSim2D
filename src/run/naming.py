@@ -59,7 +59,17 @@ LOOPABILITY: Dict[Tuple[str, str], str] = {
 
 
 #: Keys the LAMMPS scripts loop over internally; excluded from sweep expansion.
-LAMMPS_LOOP_PARAMS = frozenset({'force', 'scan_angle', 'pressure', 'scan_speed'})
+#: Derived from :data:`LOOPABILITY`'s ``'in_file'`` entries under ``'general'``
+#: rather than listed again by hand, so this set and ``LOOPABILITY`` cannot
+#: drift apart the way they did when ``scan_angle_force`` was added to
+#: ``LOOPABILITY`` but not here: a list-valued ``scan_angle_force`` was
+#: silently swept into separate configs that all built to the identical
+#: output directory (``output_dir_for`` never looks at it) and overwrote each
+#: other. See :func:`~src.run.expand.expand_config_sweeps`, the sole consumer.
+LAMMPS_LOOP_PARAMS = frozenset(
+    key for (section, key), kind in LOOPABILITY.items()
+    if section == 'general' and kind == 'in_file'
+)
 
 
 #: A heterostructure config splits the sheet into ``[2D-1]``/``[2D-2]`` instead

@@ -36,6 +36,7 @@ from .placeholders import (
 from ..core.utils.paths import _find_existing  # noqa: PLC2701
 from .naming import (
     AFM_LIKE_MODELS,
+    LAMMPS_LOOP_PARAMS,
     SHEET_LIKE_MODELS,
     _numbered_sheet_keys,
     primary_sheet,
@@ -574,11 +575,9 @@ def expand_config_sweeps(base_config: Dict[str, Any],
         if entries:
             sweep_params[(primary_key, '_material_expand')] = entries
 
-    lammps_loop_params = {'force', 'scan_angle', 'pressure', 'scan_speed'}
-
     if 'general' in base_config:
         for key, val in base_config['general'].items():
-            if isinstance(val, list) and key not in lammps_loop_params:
+            if isinstance(val, list) and key not in LAMMPS_LOOP_PARAMS:
                 sweep_params[('general', key)] = val
 
     # Potential sweep (spec §13): a pot_path LIST on the primary sheet sweeps

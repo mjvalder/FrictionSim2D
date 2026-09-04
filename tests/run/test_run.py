@@ -7,7 +7,7 @@ import pytest
 from src.core.config import load_settings as real_load_settings
 from src.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps, resolve_lj_override_file
 from src.run.hpc_dispatch import _build_hpc_manifest_entries, collect_hpc_simulation_paths
-from src.run.naming import output_dir_for
+from src.run.naming import LAMMPS_LOOP_PARAMS, LOOPABILITY, output_dir_for
 from src.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -254,6 +254,108 @@ def test_expand_config_sweeps_expands_general_non_lammps_lists() -> None:
     assert temps == [300.0, 350.0]
     for conf in expanded:
         assert conf["general"]["scan_speed"] == [1.0, 2.0]
+
+
+def _minimal_sheet_base_config(**general_overrides) -> dict:
+    config = {
+        "general": {"temp": 300.0, **general_overrides},
+        "2D": {
+            "mat": "h-MoS2",
+            "pot_type": "sw",
+            "pot_path": "dummy.sw",
+            "cif_path": "dummy.cif",
+            "x": 20.0,
+            "y": 20.0,
+            "layers": [2],
+        },
+    }
+    return config
+
+
+def test_scan_angle_force_list_is_an_in_file_loop_not_a_sweep() -> None:
+    """R-3 regression: scan_angle_force is 'in_file' in naming.LOOPABILITY --
+    it must never be swept, or two configs differing only in scan_angle_force
+    build to the byte-identical output directory (output_dir_for never looks
+    at it) and silently overwrite each other. Before the fix, expand.py's own
+    separately-maintained exclusion set omitted scan_angle_force, so a
+    list-valued one WAS swept into two colliding configs."""
+    base_config = _minimal_sheet_base_config(scan_angle_force=[10.0, 30.0])
+
+    expanded = expand_config_sweeps(base_config)
+
+    assert len(expanded) == 1
+    assert expanded[0]["general"]["scan_angle_force"] == [10.0, 30.0]
+
+
+def test_scan_angle_force_still_only_one_directory_via_output_dir_for() -> None:
+    """Same fixture, asserted the way the reading pass reproduced the bug:
+    on the produced directory names, not on expand_config_sweeps's return
+    shape alone (100% line coverage on expand_config_sweeps is exactly how
+    this went unnoticed -- see docs/superpowers/reviews/run.md)."""
+    base_config = _minimal_sheet_base_config(scan_angle_force=[10.0, 30.0])
+
+    expanded = expand_config_sweeps(base_config)
+    dirs = {output_dir_for(conf, 'sheetonsheet') for conf in expanded}
+
+    assert len(dirs) == 1
+
+
+class TestLoopabilityDrivesSweepExclusion:
+    """Pins the invariant behind the fix itself, not just the one regression
+    case: for every ``[general]`` key naming.LOOPABILITY classifies,
+    expand_config_sweeps's treatment of a list value must agree with that
+    classification -- 'in_file' never fans out into distinct (or worse,
+    colliding) directories, 'sweep' always fans out into as many distinct
+    directories as values given.
+
+    Parametrized straight off naming.LOOPABILITY/expand.py's own
+    LAMMPS_LOOP_PARAMS import rather than a hand-copied list of key names, so
+    a future key added to one but not the other reintroduces this exact bug
+    class and is caught here automatically, not just in production.
+    """
+
+    _GENERAL_KINDS = {
+        key: kind for (section, key), kind in LOOPABILITY.items()
+        if section == 'general'
+    }
+
+    @pytest.mark.parametrize('key,kind', sorted(_GENERAL_KINDS.items()))
+    def test_general_key_expansion_matches_its_loopability(self, key, kind):
+        assert kind in ('in_file', 'sweep'), (
+            f"general.{key} has an unhandled LOOPABILITY kind {kind!r}; this "
+            "test only knows how to check 'in_file' and 'sweep'."
+        )
+        base_config = _minimal_sheet_base_config(**{key: [1.0, 2.0]})
+
+        expanded = expand_config_sweeps(base_config)
+
+        if kind == 'in_file':
+            assert len(expanded) == 1, (
+                f"general.{key} is classified 'in_file' in LOOPABILITY but a "
+                f"list value was swept into {len(expanded)} configs -- add it "
+                "to naming.LAMMPS_LOOP_PARAMS's derivation (or fix the "
+                "classification if it should really be a sweep)."
+            )
+            assert expanded[0]["general"][key] == [1.0, 2.0]
+        else:  # 'sweep'
+            assert len(expanded) == 2, (
+                f"general.{key} is classified 'sweep' in LOOPABILITY but a "
+                f"2-value list produced {len(expanded)} config(s)."
+            )
+            dirs = {output_dir_for(conf, 'sheetonsheet') for conf in expanded}
+            assert len(dirs) == 2, (
+                f"general.{key} is classified 'sweep' but its two expanded "
+                "configs share an output directory -- output_dir_for must "
+                "change with it, or it silently overwrites (R-3's bug class)."
+            )
+
+    def test_every_in_file_key_is_excluded_from_sweep_expansion(self):
+        """The set expand.py actually uses must equal LOOPABILITY's in_file
+        keys under 'general' exactly -- not a superset or subset -- so a
+        future LOOPABILITY edit and expand.py's import can never drift."""
+        in_file_keys = {key for key, kind in self._GENERAL_KINDS.items()
+                        if kind == 'in_file'}
+        assert LAMMPS_LOOP_PARAMS == in_file_keys
 
 
 class TestOrderedPairSweeps:
