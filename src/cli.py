@@ -52,7 +52,8 @@ def _ensure_hpc_settings(hpc_settings) -> None:
     if not getattr(hpc_settings, 'scheduler_type', None):
         hpc_settings.scheduler_type = 'pbs'
 
-    if getattr(hpc_settings, 'use_tmpdir', False) and not getattr(hpc_settings, 'scratch_dir', None):
+    if (getattr(hpc_settings, 'use_tmpdir', False)
+            and not getattr(hpc_settings, 'scratch_dir', None)):
         hpc_settings.scratch_dir = "$TMPDIR"
 
 
@@ -82,7 +83,10 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
         click.echo(f"\n📦 Registering {len(created_simulations)} simulations in AiiDA...")
         _register_simulations_aiida(created_simulations, Path(config_file))
 
-    click.echo(f"\n✅ Generation complete: {len(created_simulations)}/{len(configs_to_run)} successful")
+    click.echo(
+        f"\n✅ Generation complete: {len(created_simulations)}/"
+        f"{len(configs_to_run)} successful"
+    )
     click.echo(f"📂 Output directory: {simulation_root.absolute()}")
 
 # =============================================================================
@@ -151,7 +155,8 @@ def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir
         FrictionSim2D run.sheetonsheet sheet_config.ini -o ./sheet_output
     """
     _run_simulation(
-        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
+        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc,
+        settings_file=settings_file
     )
 
 
@@ -529,7 +534,7 @@ def aiida_preflight():
 def aiida_status():
     """Check AiiDA installation and profile status."""
     click.echo("✅ AiiDA is installed")
-    
+
     try:
         from aiida.manage.configuration import load_profile  # type: ignore[import-untyped]
         profile = load_profile()
@@ -710,7 +715,8 @@ def aiida_dump(set_label: str, output_dir: str, profile: Optional[str]):
               help='Generate HPC job-submission scripts after rebuilding')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_rebuild(set_label: str, output_dir: Optional[str], hpc_scripts: bool, profile: Optional[str]):
+def aiida_rebuild(set_label: str, output_dir: Optional[str], hpc_scripts: bool,
+                   profile: Optional[str]):
     """Rebuild LAMMPS input files for a set from its AiiDA provenance.
 
     Reads every FrictionProvenanceData node for the set, exports the stored
@@ -803,7 +809,8 @@ def aiida_clear(profile: Optional[str]):
 @click.option('--material', '-m', help='Filter by material')
 @click.option('--layers', '-l', type=int, help='Filter by layer count')
 @click.option('--force', '-f', type=float, help='Filter by applied force')
-@click.option('--set', '-s', 'set_label', default=None, help='Filter by simulation set label (e.g. "251113-afm")')
+@click.option('--set', '-s', 'set_label', default=None,
+              help='Filter by simulation set label (e.g. "251113-afm")')
 @click.option('--format', 'output_format', type=click.Choice(['table', 'csv', 'json']),
               default='table', help='Output format')
 @click.option('--output', '-o', type=click.Path(), help='Save to file')
@@ -822,7 +829,7 @@ def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[
     from .aiida.query import Friction2DDB
 
     load_aiida_profile(profile)
-    
+
     db = Friction2DDB()
 
     if set_label:
@@ -872,7 +879,7 @@ def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[
             else:
                 import json
                 click.echo(json.dumps(results.query_params, indent=2))
-                
+
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA query failed")
         _raise_abort(f"❌ Query failed: {exc}", exc)
@@ -1179,7 +1186,8 @@ def postprocess_plot(plot_config: str, output_dir: str,
 @click.option('--data-dir', '-d', type=click.Path(path_type=Path), default='data',
               help='Directory for the per-material descriptor CSVs (pes_scan_{sheet,tip}.csv).')
 @click.option('--grid-dir', type=click.Path(path_type=Path), default=None,
-              help='Optional directory for tidied per-material grids (<grid-dir>/{sheet,tip}/<material>.csv).')
+              help='Optional directory for tidied per-material grids '
+                   '(<grid-dir>/{sheet,tip}/<material>.csv).')
 @click.option('--kind', type=click.Choice(['sheet', 'tip', 'both']), default='both',
               help='Which PES scans to reduce.')
 def postprocess_pes_scan(run_root: Path, data_dir: Path, grid_dir: Optional[Path], kind: str):
@@ -1324,11 +1332,26 @@ def _iter_reader_rows(reader):
                                     load_val = float(load_key[1:])
                                     for angle_key, df in angle_data.items():
                                         angle = int(angle_key.replace('a', ''))
-                                        nf_arr = df['nf'].values if 'nf' in df.columns else np.array([])
-                                        lfx_arr = df['lfx'].values if 'lfx' in df.columns else np.array([])
-                                        lfy_arr = df['lfy'].values if 'lfy' in df.columns else np.array([])
-                                        stats = compute_friction_stats(nf_arr, lfx_arr, lfy_arr) if nf_arr.size > 0 else {}
-                                        yield material, layers, speed, is_pressure, load_val, angle, len(df), stats
+                                        nf_arr = (
+                                            df['nf'].values if 'nf' in df.columns
+                                            else np.array([])
+                                        )
+                                        lfx_arr = (
+                                            df['lfx'].values if 'lfx' in df.columns
+                                            else np.array([])
+                                        )
+                                        lfy_arr = (
+                                            df['lfy'].values if 'lfy' in df.columns
+                                            else np.array([])
+                                        )
+                                        stats = (
+                                            compute_friction_stats(nf_arr, lfx_arr, lfy_arr)
+                                            if nf_arr.size > 0 else {}
+                                        )
+                                        yield (
+                                            material, layers, speed, is_pressure,
+                                            load_val, angle, len(df), stats
+                                        )
 
 
 @db_group.command('upload')
@@ -1363,7 +1386,9 @@ def db_upload(
     db = _make_db(host, port, dbname, user, password, profile=profile)
     n_published = 0
     n_rejected = 0
-    for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
+    for (
+        material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats
+    ) in _iter_reader_rows(reader):
         try:
             sim_type = 'sheetonsheet' if is_pressure else 'afm'
             row_id = db.upload_result(
@@ -1586,7 +1611,9 @@ def db_stage(
     reader = DataReader(results_dir=str(results_dir))
     n_published = 0
     n_rejected = 0
-    for material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats in _iter_reader_rows(reader):
+    for (
+        material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats
+    ) in _iter_reader_rows(reader):
         try:
             sim_type = 'sheetonsheet' if is_pressure else 'afm'
             row_id = db.upload_result(
@@ -1700,7 +1727,6 @@ def db_setup(
     """
     import os as os_module  # noqa: PLC0415
     import yaml  # noqa: PLC0415
-    from pathlib import Path as PathlibPath  # noqa: PLC0415
 
     if not name:
         name = os_module.environ.get('USER', os_module.environ.get('USERNAME', 'user'))
@@ -1715,7 +1741,7 @@ def db_setup(
     click.echo(f"✅ API key generated: {raw_key}")
 
     click.echo("💾 Storing API key in settings...")
-    settings_dir = PathlibPath.home() / ".config" / "FrictionSim2D"
+    settings_dir = Path.home() / ".config" / "FrictionSim2D"
     settings_file = settings_dir / "settings.yaml"
     settings_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1741,8 +1767,14 @@ def db_setup(
     click.echo(f"✅ API key saved to {settings_file}")
     click.echo()
     click.echo("📋 Next steps:")
-    click.echo(f"   1. You can now upload results: FrictionSim2D db upload <dir> --uploader {name} --profile {profile}")
-    click.echo(f"   2. Or stage for review: FrictionSim2D db stage <dir> --uploader {name} --profile {profile}")
+    click.echo(
+        f"   1. You can now upload results: FrictionSim2D db upload <dir> "
+        f"--uploader {name} --profile {profile}"
+    )
+    click.echo(
+        f"   2. Or stage for review: FrictionSim2D db stage <dir> --uploader "
+        f"{name} --profile {profile}"
+    )
     click.echo()
     click.echo("⚠️  Your API key is stored in settings.yaml. Keep it secure!")
 
