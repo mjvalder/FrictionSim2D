@@ -806,7 +806,10 @@ def _orthogonalize_lammps_data(input_path: Path, output_path: Path) -> None:
     # element*; the real masses/elements are restored afterward. Writing via
     # ase_io.write keeps the box in LAMMPS restricted-triclinic orientation.
     # The non-tilt LAMMPS change_box path above already preserves types.
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
+    # Lazy: this same function already imported ase.io/ase.build at its
+    # top (unconditionally, before the orthogonal/triclinic branch), which
+    # pays the ase package-init cost; Atoms/chemical_symbols add nothing
+    # further here.
     from ase import Atoms as _Atoms  # pylint: disable=import-outside-toplevel
     from ase.data import chemical_symbols as _csym  # pylint: disable=import-outside-toplevel
 
@@ -1038,7 +1041,8 @@ def _assign_pot_types_by_order(path: Path, order: List[str],
         order: Element order from the potential (e.g. ['Pt', 'Se']).
         counts: Sublattice-type count per element (e.g. {'Pt': 1, 'Se': 2}).
     """
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
+    # Lazy: ase.data costs ~70-90 ms (measured with python -X importtime);
+    # deferred so this module stays cheap to import.
     from ase.data import atomic_masses as _am, atomic_numbers as _an  # pylint: disable=import-outside-toplevel
 
     cell, atoms, masses = _parse_lammps_cell_atoms_masses(path.read_text(encoding='utf-8'))

@@ -291,9 +291,11 @@ def register_hetero_potentials(
             is run from. Default ``None`` keeps the run-dir-relative
             ``provenance/potentials`` -- correct when ``workdir`` IS that
             directory. A builder whose scripts run from a shared simulation
-            root passes its own sim-root-relative prefix (see
-            :meth:`src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation._potentials_prefix`
-            ).
+            root passes its own sim-root-relative prefix.
+
+    Note:
+        A builder with its own sim-root-relative prefix is
+        :meth:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation._potentials_prefix`.
 
     Returns:
         :class:`HeteroPotentials` exposing the configured manager, the written
@@ -754,7 +756,9 @@ def _monolayer_to_atoms(mono: Dict[str, object]) -> Atoms:
     that happen to share a real element. Per-atom charges are attached when the
     source used ``atom_style charge``.
     """
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
+    # Lazy: ase + ase.data cost ~70-80 ms combined (measured with python
+    # -X importtime; chemical_symbols reuses the same ase package init as
+    # Atoms); deferred so this module stays cheap to import.
     from ase import Atoms  # pylint: disable=import-outside-toplevel
     from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
 
@@ -779,7 +783,8 @@ def _restore_masses_section(path: Path, masses: Dict[int, Tuple[float, str]], n_
     the placeholder element's standard mass for any type absent from the source
     Masses section (should not happen for build_monolayer output).
     """
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
+    # Lazy: ase.data costs ~70-90 ms (measured with python -X importtime);
+    # deferred so this module stays cheap to import.
     from ase.data import chemical_symbols  # pylint: disable=import-outside-toplevel
 
     if n_types < 1:
@@ -881,7 +886,8 @@ def build_matched_supercells(
             commensurate at this match -- fail loud rather than silently emit an
             incommensurate "matched" stack).
     """
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
+    # Lazy: ase.build costs ~290-300 ms (measured with python -X importtime);
+    # deferred so this module stays cheap to import.
     from ase.build import make_supercell  # pylint: disable=import-outside-toplevel
 
     workdir = Path(workdir)
@@ -1032,7 +1038,8 @@ def build_twisted_supercells(
             nearest achievable angle), or if a per-material strain onto the
             emitted box exceeds ``strain_tol``.
     """
-    # Lazy: ase.io costs ~270 ms; deferred so this module stays cheap to import.
+    # Lazy: ase.build costs ~290-300 ms (measured with python -X importtime);
+    # deferred so this module stays cheap to import.
     from ase.build import make_supercell  # pylint: disable=import-outside-toplevel
 
     workdir = Path(workdir)
