@@ -68,6 +68,37 @@ def test_strain_preserves_charges_and_atom_style(tmp_path):
     assert np.allclose(sorted(got_charges), sorted(charges), atol=1e-9)
 
 
+def _write_hex_monolayer(path, a=3.16):
+    # one atom, hexagonal cell a1=(a,0), a2=(-a/2, a*sqrt(3)/2) -- a1 is already
+    # along +x (LAMMPS-canonical) but a2 gives the cell a nonzero xy tilt.
+    a2 = np.array([-a / 2, a * np.sqrt(3) / 2])
+    cell = [[a, 0, 0], [a2[0], a2[1], 0], [0, 0, 20]]
+    write(str(path), Atoms("C", positions=[(0, 0, 10)], cell=cell, pbc=[True, True, False]),
+          format="lammps-data")
+
+
+def test_strain_hex_cell_with_xy_tilt_preserves_z_and_returns_strain(tmp_path):
+    src = tmp_path / "hex.data"
+    out = tmp_path / "hex_s.data"
+    _write_hex_monolayer(src, a=3.16)
+    # Target: the same hex shape scaled +3% (a1 along x, a2 tilted). It is
+    # already LAMMPS-canonical (target[0][1] == 0.0) -- no canonicalisation
+    # helper needed -- and target[1][0] != 0 alone is what drives
+    # strain_monolayer_to_cell's triclinic (needs_xy_clause) branch.
+    a = 3.16 * 1.03
+    target = np.array([[a, 0.0], [-a / 2, a * np.sqrt(3) / 2]])
+    strain = strain_monolayer_to_cell(str(src), str(out), target)
+
+    got = read(str(out), format="lammps-data")
+    got_cell = np.array(got.cell)
+    assert abs(got_cell[2, 2] - 20.0) < 1e-6                # z untouched
+    assert 0.02 < strain < 0.04                              # ~3%
+    # The xy tilt clause was actually exercised (not skipped as a no-op):
+    # the written box carries the target's nonzero xy tilt.
+    assert abs(got_cell[1, 0]) > 1e-6
+    assert np.allclose(got_cell[:2, :2], target, atol=1e-6)  # box now equals the tilted target
+
+
 # --- D3: rotate_layer_to_angle (ASE rotate-in-cell + canonicalise) ---
 
 def _build_mos2_monolayer():
