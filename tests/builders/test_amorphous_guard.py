@@ -21,7 +21,6 @@ import pytest
 
 from src.builders.construction.components import (
     AmorphousNotCachedError,
-    amorphous_available,
     get_amorphous_path,
     make_amorphous,
 )
@@ -44,32 +43,6 @@ def _cached_extent(mat: str) -> tuple:
     return (dims['xhi'] - dims['xlo'],
             dims['yhi'] - dims['ylo'],
             dims['zhi'] - dims['zlo'])
-
-
-class TestAmorphousAvailable:
-
-    def test_cached_material_within_its_box_is_available(self):
-        x, y, z = _cached_extent(CACHED_MATERIAL)
-        ok, reason = amorphous_available(CACHED_MATERIAL, x / 2, y / 2, z / 2)
-        assert ok, reason
-
-    def test_exact_fit_is_available(self):
-        x, y, z = _cached_extent(CACHED_MATERIAL)
-        ok, reason = amorphous_available(CACHED_MATERIAL, x, y, z)
-        assert ok, reason
-
-    def test_request_larger_than_the_cache_is_not_available(self):
-        """The trap: the file exists, so a bare path lookup says yes."""
-        x, y, z = _cached_extent(CACHED_MATERIAL)
-        assert get_amorphous_path(CACHED_MATERIAL) is not None
-        ok, reason = amorphous_available(CACHED_MATERIAL, x * 2, y, z)
-        assert not ok
-        assert 'too small' in reason
-
-    def test_unknown_material_is_not_available(self):
-        ok, reason = amorphous_available('NotAMaterial', 10, 10, 10)
-        assert not ok
-        assert 'no cached amorphous' in reason
 
 
 class TestMakeAmorphousRefusesToGenerate:

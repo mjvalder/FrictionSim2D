@@ -494,24 +494,3 @@ class SimulationBase(ABC):
         if material and hasattr(material, 'mat'):
             return f"friction_{material.mat}"
         return "friction2d"
-
-    def _collect_simulation_paths(self) -> List[str]:
-        """Collect all simulation directory paths relative to HPC base.
-        
-        Override this method for custom simulation directory structures.
-        Default implementation looks for directories with lammps/ subdirectory.
-        
-        Returns:
-            List of relative paths to simulation directories
-        """
-        base_dir = self.base_output_dir if self.base_output_dir is not None else self.output_dir
-
-        paths = []
-        for item in base_dir.iterdir():
-            if item.is_dir():
-                lammps_dir = item / 'lammps'
-                if lammps_dir.exists() and (lammps_dir / 'system.in').exists():
-                    rel_path = item.relative_to(base_dir)
-                    paths.append(str(rel_path))
-
-        return sorted(paths)

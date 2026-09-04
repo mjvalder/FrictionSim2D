@@ -1474,25 +1474,6 @@ def _cached_amorphous(mat_name: str,
     )
 
 
-def amorphous_available(mat_name: str,
-                        target_x: float,
-                        target_y: float,
-                        target_z: float) -> Tuple[bool, str]:
-    """Whether :func:`make_amorphous` would return the cache without generating.
-
-    A bare ``get_amorphous_path`` hit is *not* sufficient: the cached box is
-    also compared against the requested dimensions, and a structure that is too
-    small triggers a fresh melt-quench. Callers that must not pay that cost --
-    or must not write to the package data directory -- should check this first
-    and pass ``allow_generate=False`` as the actual guarantee.
-
-    Returns:
-        ``(True, '')`` when a usable cache exists, else ``(False, reason)``.
-    """
-    path, reason = _cached_amorphous(mat_name, target_x, target_y, target_z)
-    return (path is not None), (reason or '')
-
-
 def make_amorphous(
     mat_name: str,
     cif_path: Path,
