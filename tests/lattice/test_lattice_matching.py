@@ -107,11 +107,23 @@ class TestEnumerateMatrices:
         assert n5 > n3
 
 
-def test_enumerate_matrices_never_exceeds_n_squared_area():
-    """Exercises the early-exit `if a * c > n * n: break` (finding 7)."""
+def test_enumerate_matrices_n3_exact_determinant_multiset():
+    """Pins the exact set of determinants produced for n=3 and their shape.
+
+    `_enumerate_matrices` iterates a, c in [1, n], so det = a*c ranges over
+    [1, n^2] by construction -- a test that only checks that bound can never
+    fail. This instead pins the concrete determinant multiset for n=3 (a
+    real change to the a/c ranges or the `det = a * c` computation would
+    change it) and that every yielded matrix stays upper-triangular with a
+    positive determinant.
+    """
     n = 3
-    dets = [int(round(np.linalg.det(mat))) for mat in _enumerate_matrices(n)]
-    assert dets and max(dets) <= n * n and min(dets) >= 1
+    mats = list(_enumerate_matrices(n))
+    dets = [int(round(np.linalg.det(mat))) for mat in mats]
+    assert sorted(set(dets)) == [1, 2, 3, 4, 6, 9]
+    for mat in mats:
+        assert mat[1, 0] == 0, f"Not upper-triangular: {mat}"
+        assert np.linalg.det(mat) > 0
 
 
 # ---------------------------------------------------------------------------

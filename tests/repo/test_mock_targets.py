@@ -26,10 +26,6 @@ ALLOWED_TARGET_PREFIXES = (
     "src.aiida.",
     "src.api.",
     "src.data.database.",
-    # The settings-file boundary itself (not a cheap path-resolution helper):
-    # patched by 7 tests in core/test_config.py to point load_settings() at a
-    # tmp_path fixture file instead of the real ~/.config/FrictionSim2D one.
-    "src.core.config._global_settings_path",
 )
 
 # file (relative to tests/) -> targets it patches today that are NOT boundaries.

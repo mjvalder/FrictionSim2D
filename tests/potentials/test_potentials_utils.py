@@ -65,8 +65,10 @@ class TestLjParams:
         """Test that mixing rule is applied correctly (geometric mean for epsilon)."""
         eps_c_h, _ = lj_params('C', 'H')
         eps_c_c, _ = lj_params('C', 'C')
-        # epsilon should be between the two pure element values
-        assert eps_c_c >= eps_c_h or eps_c_h >= eps_c_c
+        eps_h_h, _ = lj_params('H', 'H')
+        # Geometric mean of two distinct positive values sits strictly between
+        # them, so the mixed epsilon must lie between the two like-pair values.
+        assert min(eps_c_c, eps_h_h) < eps_c_h < max(eps_c_c, eps_h_h)
 
 
 class TestPotentialElementOrder:

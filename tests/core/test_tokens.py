@@ -13,6 +13,7 @@ def test_format_numeric_token_is_filename_safe(value, token):
 
 @pytest.mark.parametrize('value, token', [
     (100.0, '100'), ('100', '100'), (1.5, '1.5'), ('12.50', '12.5'),
+    (1000000.0, '1000000'),
 ])
 def test_format_dimension_token_drops_integral_decimals(value, token):
     assert format_dimension_token(value) == token

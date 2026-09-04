@@ -332,7 +332,7 @@ def _write_settings(path: Path, timestep: float) -> None:
 
 def test_defaults_used_when_no_file_exists(tmp_path, monkeypatch):
     """load_settings returns hardcoded defaults when no settings file exists."""
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: tmp_path / 'nonexistent.yaml')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
     settings = load_settings()
     assert isinstance(settings, GlobalSettings)
     # Default timestep is 0.001 as defined in SimulationSettings
@@ -341,9 +341,9 @@ def test_defaults_used_when_no_file_exists(tmp_path, monkeypatch):
 
 def test_global_settings_used_when_no_explicit_file(tmp_path, monkeypatch):
     """load_settings picks up the global settings file when no explicit file is given."""
-    global_path = tmp_path / 'global' / 'settings.yaml'
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    global_path = tmp_path / 'FrictionSim2D' / 'settings.yaml'
     _write_settings(global_path, timestep=0.005)
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: global_path)
 
     settings = load_settings()
     assert settings.simulation.timestep == 0.005
@@ -351,13 +351,12 @@ def test_global_settings_used_when_no_explicit_file(tmp_path, monkeypatch):
 
 def test_explicit_file_takes_precedence_over_global(tmp_path, monkeypatch):
     """Explicit settings_file argument overrides the global settings file."""
-    global_path = tmp_path / 'global' / 'settings.yaml'
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    global_path = tmp_path / 'FrictionSim2D' / 'settings.yaml'
     _write_settings(global_path, timestep=0.005)
 
     explicit_path = tmp_path / 'explicit' / 'settings.yaml'
     _write_settings(explicit_path, timestep=0.002)
-
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: global_path)
 
     settings = load_settings(settings_file=explicit_path)
     assert settings.simulation.timestep == 0.002
@@ -368,9 +367,10 @@ def test_env_var_is_not_honoured(tmp_path, monkeypatch):
     env_path = tmp_path / 'env' / 'settings.yaml'
     _write_settings(env_path, timestep=0.007)
 
-    # Set the env var but point the global path to a non-existent file
+    # Set the env var but point the global path (via XDG_CONFIG_HOME) at an
+    # isolated, empty directory with no settings file in it.
     monkeypatch.setenv('FRICTIONSIM2D_SETTINGS_FILE', str(env_path))
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: tmp_path / 'nonexistent.yaml')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
 
     # Should fall back to hardcoded defaults, NOT pick up the env var file
     settings = load_settings()
@@ -379,28 +379,27 @@ def test_env_var_is_not_honoured(tmp_path, monkeypatch):
 
 def test_settings_origin_none_when_no_file(tmp_path, monkeypatch):
     """settings_origin returns None when no settings file exists."""
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: tmp_path / 'nonexistent.yaml')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
     assert settings_origin() is None
 
 
 def test_settings_origin_returns_global_path(tmp_path, monkeypatch):
     """settings_origin returns the global path when it exists and no explicit file given."""
-    global_path = tmp_path / 'global' / 'settings.yaml'
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    global_path = tmp_path / 'FrictionSim2D' / 'settings.yaml'
     _write_settings(global_path, timestep=0.005)
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: global_path)
 
     assert settings_origin() == global_path
 
 
 def test_settings_origin_returns_explicit_path(tmp_path, monkeypatch):
     """settings_origin returns the explicit path when one is provided."""
-    global_path = tmp_path / 'global' / 'settings.yaml'
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    global_path = tmp_path / 'FrictionSim2D' / 'settings.yaml'
     _write_settings(global_path, timestep=0.005)
 
     explicit_path = tmp_path / 'explicit' / 'settings.yaml'
     _write_settings(explicit_path, timestep=0.002)
-
-    monkeypatch.setattr('src.core.config._global_settings_path', lambda: global_path)
 
     assert settings_origin(settings_file=explicit_path) == explicit_path
 
