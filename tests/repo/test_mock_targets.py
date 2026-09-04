@@ -92,11 +92,7 @@ KNOWN_VIOLATIONS = {
     },
     "run/test_run.py": {
         "src.run.simulate.AFMSimulation",
-        "src.run.simulate.AFMSimulationConfig",
         "src.run.simulate.SheetOnSheetSimulation",
-        "src.run.simulate.SheetOnSheetSimulationConfig",
-        "src.run.simulate.expand_config_sweeps",
-        "src.run.simulate.generate_hpc_scripts_for_root",
         "src.run.simulate.load_settings",
         "src.run.simulate.parse_config",
     },

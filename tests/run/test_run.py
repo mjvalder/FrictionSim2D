@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.config import load_settings as real_load_settings
+from src.core.config import AFMSimulationConfig, load_settings as real_load_settings
 from src.run.expand import _validate_runtime_sweep_ordering, expand_config_sweeps, resolve_lj_override_file
 from src.run.hpc_dispatch import _build_hpc_manifest_entries, collect_hpc_simulation_paths
 from src.run.naming import LAMMPS_LOOP_PARAMS, LOOPABILITY, output_dir_for
@@ -12,6 +12,28 @@ from src.run.simulate import run_simulations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
+
+
+def _minimal_afm_raw_dict(tmp_path: Path) -> dict:
+    """A real AFM config dict, minimal but valid: it round-trips through the
+    real ``AFMSimulationConfig``. ``ComponentConfig.resolve_path`` accepts a
+    path unchanged only when it already exists on disk -- otherwise it goes
+    looking in the materials/potentials library and raises when it isn't
+    there -- so this writes real (empty) cif/pot files under ``tmp_path``
+    rather than naming files that don't exist anywhere."""
+    (tmp_path / 'dummy.cif').write_text('', encoding='utf-8')
+    (tmp_path / 'dummy.sw').write_text('', encoding='utf-8')
+    cif_path = str(tmp_path / 'dummy.cif')
+    pot_path = str(tmp_path / 'dummy.sw')
+    return {
+        "general": {"temp": 300.0},
+        "2D": {"mat": "MoS2", "pot_type": "sw", "pot_path": pot_path,
+               "cif_path": cif_path, "x": 20.0, "y": 20.0, "layers": [2]},
+        "tip": {"mat": "Si", "pot_type": "sw", "pot_path": pot_path,
+                "cif_path": cif_path, "amorph": "c", "r": 25},
+        "sub": {"mat": "Si", "pot_type": "sw", "pot_path": pot_path,
+                "cif_path": cif_path, "amorph": "a", "thickness": 12.0},
+    }
 
 
 def test_output_dir_for_matches_run_layout() -> None:
@@ -741,54 +763,52 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """run_simulations should instantiate AFM builder and call HPC generation."""
+    """run_simulations should instantiate the AFM builder with a real,
+    validated config and drive real HPC generation over what it wrote.
+
+    ``AFMSimulation``/``parse_config``/``load_settings`` are the genuine
+    boundaries here -- this is a routing/orchestration test, not a geometry
+    build -- but ``expand_config_sweeps``, ``AFMSimulationConfig`` and
+    ``generate_hpc_scripts_for_root`` are cheap in-process code and now run
+    for real: the fake builder writes the placeholder LAMMPS scripts a real
+    builder would, so the real HPC dispatch has real files to discover.
+    """
     config_file = tmp_path / "config.ini"
     config_file.write_text("[dummy]\n", encoding="utf-8")
 
-    base_dict = {
-        "general": {"temp": 300.0},
-        "2D": {"mat": "MoS2", "x": 20.0, "y": 20.0},
-        "tip": {"mat": "Si", "amorph": "c", "r": 25},
-        "sub": {"mat": "Si", "amorph": "a"},
-    }
+    base_dict = _minimal_afm_raw_dict(tmp_path)
 
     settings = real_load_settings()
     settings.hpc.lammps_scripts = ["slide.in"]
+    settings.hpc.modules = ["lammps", "openmpi"]
 
     monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
     monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
-    monkeypatch.setattr("src.run.simulate.expand_config_sweeps", lambda _c: [dict(base_dict)])
 
-    class FakeConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            self.sub = kwargs.get('sub')
-
-        def model_dump_json(self, indent=2):
-            return "{}"
-
-    calls = {"build": 0, "base": 0, "hpc": 0}
+    calls = {"build": 0, "base": 0}
     seen_output_dirs: list[Path] = []
+    seen_configs: list = []
 
     class FakeAFMBuilder:
-        def __init__(self, _config, _output_dir, config_path=None):
-            seen_output_dirs.append(Path(_output_dir))
+        def __init__(self, config, output_dir, config_path=None):
+            seen_output_dirs.append(Path(output_dir))
+            seen_configs.append(config)
             self.config_path = config_path
+            self._output_dir = Path(output_dir)
 
         def set_base_output_dir(self, _root):
             calls["base"] += 1
 
         def build(self):
             calls["build"] += 1
+            lammps_dir = self._output_dir / "lammps"
+            lammps_dir.mkdir(parents=True, exist_ok=True)
+            (lammps_dir / "system.in").write_text("", encoding="utf-8")
+            (lammps_dir / "slide.in").write_text("", encoding="utf-8")
 
-    monkeypatch.setattr("src.run.simulate.AFMSimulationConfig", FakeConfig)
     monkeypatch.setattr("src.run.simulate.AFMSimulation", FakeAFMBuilder)
-    monkeypatch.setattr(
-        "src.run.simulate.generate_hpc_scripts_for_root",
-        lambda _root, _settings: calls.__setitem__("hpc", calls["hpc"] + 1),
-    )
 
-    created, root, _configs, returned_settings = run_simulations(
+    created, root, configs, returned_settings = run_simulations(
         config_file=str(config_file),
         model="afm",
         output_root=tmp_path,
@@ -797,41 +817,55 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     )
 
     assert len(created) == 1
+    assert len(configs) == 1   # real expand_config_sweeps: no list values here to sweep
     assert root == tmp_path / "sim_run"
-    assert calls == {"build": 1, "base": 1, "hpc": 1}
-    assert seen_output_dirs[0].as_posix().endswith("afm/MoS2/20x_20y/sub_aSi_tip_Si_r25/K300")
-    assert returned_settings.hpc.lammps_scripts == ["system.in", "slide.in"]
+    assert calls == {"build": 1, "base": 1}
+    assert seen_output_dirs[0].as_posix().endswith(
+        "afm/MoS2/20x_20y/sub_aSi_tip_Si_r25/K300/pot_sw_dummy")
+
+    # The object the builder actually received is the real, validated config,
+    # not a stand-in -- so a routing bug that skipped validation would fail here.
+    assert isinstance(seen_configs[0], AFMSimulationConfig)
+    assert seen_configs[0].sheet.mat == "MoS2"
+
+    # generate_hpc_scripts_for_root ran unmocked over the files build() wrote:
+    # a real combined system+slide script for our one simulation directory.
+    # (The default-adjustment of settings.hpc.lammps_scripts to
+    # ["system.in", "slide.in"] is covered on its own, before this real
+    # generation call overwrites it with the manifest sentinel -- see
+    # test_run_simulations_afm_upgrades_slide_only_defaults below.)
+    hpc_dir = root / "hpc"
+    assert (hpc_dir / "manifest_combined.txt").read_text(encoding="utf-8").strip() == \
+        seen_output_dirs[0].relative_to(root).as_posix()
+    assert (hpc_dir / "run.pbs").exists()
+    assert returned_settings.hpc.lammps_scripts == ["__MANIFEST_PATH__"]
 
 
-def test_run_simulations_sheetonsheet_adjusts_default_scripts(
+def test_run_simulations_afm_upgrades_slide_only_defaults(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """Sheet-on-sheet mode should default to slide-only script set."""
+    """AFM-like models need both phases; a slide-only default is upgraded to
+    system.in + slide.in before any config is built.
+
+    Isolated from HPC generation (``generate_hpc`` defaults to False here) so
+    the assertion is on the router's own adjustment, not on what a real
+    ``generate_hpc_scripts_for_root`` run rewrites it to afterwards (see the
+    dispatch test above).
+    """
     config_file = tmp_path / "config.ini"
     config_file.write_text("[dummy]\n", encoding="utf-8")
 
-    base_dict = {
-        "general": {"temp": 300.0},
-        "2D": {"mat": "MoS2", "x": 20.0, "y": 20.0},
-    }
+    base_dict = _minimal_afm_raw_dict(tmp_path)
 
     settings = real_load_settings()
-    settings.hpc.lammps_scripts = ["system.in", "slide.in"]
+    settings.hpc.lammps_scripts = ["slide.in"]
 
     monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
     monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
-    monkeypatch.setattr("src.run.simulate.expand_config_sweeps", lambda _c: [dict(base_dict)])
 
-    class FakeConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        def model_dump_json(self, indent=2):
-            return "{}"
-
-    class FakeSheetBuilder:
-        def __init__(self, _config, _output_dir, config_path=None):
+    class FakeAFMBuilder:
+        def __init__(self, config, output_dir, config_path=None):
             self.config_path = config_path
 
         def set_base_output_dir(self, _root):
@@ -840,55 +874,104 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
         def build(self):
             pass
 
-    monkeypatch.setattr("src.run.simulate.SheetOnSheetSimulationConfig", FakeConfig)
-    monkeypatch.setattr("src.run.simulate.SheetOnSheetSimulation", FakeSheetBuilder)
+    monkeypatch.setattr("src.run.simulate.AFMSimulation", FakeAFMBuilder)
 
     _created, _root, _configs, returned_settings = run_simulations(
+        config_file=str(config_file),
+        model="afm",
+        output_root=tmp_path,
+        simulation_root_name="sim_run",
+    )
+
+    assert returned_settings.hpc.lammps_scripts == ["system.in", "slide.in"]
+
+
+def test_run_simulations_sheetonsheet_adjusts_default_scripts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Sheet-on-sheet mode should default to slide-only script set.
+
+    ``SheetOnSheetSimulation``/``parse_config``/``load_settings`` stay mocked
+    (this is a routing test); the config dict is real and validates through
+    the real ``SheetOnSheetSimulationConfig``, and ``expand_config_sweeps``
+    runs unmocked.
+    """
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[dummy]\n", encoding="utf-8")
+
+    (tmp_path / 'dummy.cif').write_text('', encoding='utf-8')
+    (tmp_path / 'dummy.sw').write_text('', encoding='utf-8')
+    base_dict = {
+        "general": {"temp": 300.0},
+        "2D": {"mat": "MoS2", "pot_type": "sw", "pot_path": str(tmp_path / 'dummy.sw'),
+               "cif_path": str(tmp_path / 'dummy.cif'), "x": 20.0, "y": 20.0, "layers": [2]},
+    }
+
+    settings = real_load_settings()
+    settings.hpc.lammps_scripts = ["system.in", "slide.in"]
+
+    monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
+    monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
+
+    seen_configs: list = []
+
+    class FakeSheetBuilder:
+        def __init__(self, config, _output_dir, config_path=None):
+            seen_configs.append(config)
+            self.config_path = config_path
+
+        def set_base_output_dir(self, _root):
+            pass
+
+        def build(self):
+            pass
+
+    monkeypatch.setattr("src.run.simulate.SheetOnSheetSimulation", FakeSheetBuilder)
+
+    _created, _root, configs, returned_settings = run_simulations(
         config_file=str(config_file),
         model="sheetonsheet",
         output_root=tmp_path,
         simulation_root_name="sim_run",
     )
 
+    assert len(configs) == 1   # real expand_config_sweeps: no list values here to sweep
     assert returned_settings.hpc.lammps_scripts == ["slide.in"]
+
+    from src.core.config import SheetOnSheetSimulationConfig
+    assert isinstance(seen_configs[0], SheetOnSheetSimulationConfig)
+    assert seen_configs[0].sheet.mat == "MoS2"
 
 
 def test_run_simulations_continues_after_build_failure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """A failed build should be logged and subsequent configs should still run."""
+    """A failed build should be logged and subsequent configs should still run.
+
+    The two configs come from a real ``general.temp`` sweep (a real,
+    LOOPABILITY-'sweep' list value) through the real ``expand_config_sweeps``,
+    not a mocked stand-in returning two copies of the same dict -- so this
+    also confirms the two builds really are for two distinct configs.
+    """
     config_file = tmp_path / "config.ini"
     config_file.write_text("[dummy]\n", encoding="utf-8")
 
-    base_dict = {
-        "general": {"temp": 300.0},
-        "2D": {"mat": "MoS2", "x": 20.0, "y": 20.0},
-        "tip": {"mat": "Si", "amorph": "c", "r": 25},
-        "sub": {"mat": "Si", "amorph": "a"},
-    }
+    base_dict = _minimal_afm_raw_dict(tmp_path)
+    base_dict["general"]["temp"] = [300.0, 350.0]
 
     settings = real_load_settings()
     monkeypatch.setattr("src.run.simulate.parse_config", lambda _p: base_dict)
     monkeypatch.setattr("src.run.simulate.load_settings", lambda **_kwargs: settings)
-    monkeypatch.setattr(
-        "src.run.simulate.expand_config_sweeps",
-        lambda _c: [dict(base_dict), dict(base_dict)],
-    )
-
-    class FakeConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            self.sub = kwargs.get('sub')
-
-        def model_dump_json(self, indent=2):
-            return "{}"
 
     call_counter = {"builds": 0}
+    seen_temps: list[float] = []
 
     class FlakyAFMBuilder:
-        def __init__(self, _config, _output_dir, config_path=None):
+        def __init__(self, config, _output_dir, config_path=None):
             self.config_path = config_path
+            seen_temps.append(config.general.temp)
 
         def set_base_output_dir(self, _root):
             pass
@@ -898,16 +981,17 @@ def test_run_simulations_continues_after_build_failure(
             if call_counter["builds"] == 1:
                 raise RuntimeError("boom")
 
-    monkeypatch.setattr("src.run.simulate.AFMSimulationConfig", FakeConfig)
     monkeypatch.setattr("src.run.simulate.AFMSimulation", FlakyAFMBuilder)
 
-    created, _root, _configs, _returned_settings = run_simulations(
+    created, _root, configs, _returned_settings = run_simulations(
         config_file=str(config_file),
         model="afm",
         output_root=tmp_path,
         simulation_root_name="sim_run",
     )
 
+    assert len(configs) == 2         # real expand_config_sweeps: temp is a real sweep
+    assert seen_temps == [300.0, 350.0]
     assert call_counter["builds"] == 2
     assert len(created) == 1
 
