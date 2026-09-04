@@ -60,6 +60,14 @@ class NoHeteroBuilderError(ValueError):
     """
 
 
+# pylint: disable=import-outside-toplevel
+# The hetero/finite/PES builder classes below (src.builders.afm.hetero,
+# src.builders.afm.pes_tip, src.builders.sheetonsheet.pes_sheet,
+# src.builders.sheetonsheet.flake_slide) are imported lazily in both selector
+# functions because they are needed only by the hetero/twist/flake/PES
+# branches -- most configs route to the plain builders already imported
+# at module level above, so a homogeneous single-material run never pays
+# for them.
 def _select_afm_builder_cls(model, config_obj):
     """Pick the builder class, routing substrate-free configs to freestanding.
 
@@ -149,6 +157,7 @@ def _select_sheet_builder_cls(model, config_obj):
     if is_hetero:
         return HeteroSheetOnSheetSimulation
     return SheetOnSheetSimulation
+# pylint: enable=import-outside-toplevel
 
 
 def run_simulations(

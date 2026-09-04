@@ -245,7 +245,8 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     pot_segment = None
     pot_path = sheet.get('pot_path')
     if pot_path:
-        from ..potentials.utils import pot_dir_token
+        from ..potentials.utils import pot_dir_token  # pylint: disable=import-outside-toplevel
+        # deferred: potentials.utils imports the UFF table; only pot_path-bearing configs pay for it
         pot_segment = pot_dir_token(sheet.get('pot_type', 'sw'), pot_path)
 
     top_dir = model  # 'afm' | 'sheetonsheet' | 'pes_tip' | 'pes_sheet'

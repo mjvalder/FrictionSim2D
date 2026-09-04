@@ -14,10 +14,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
-from .naming import AFM_LIKE_MODELS
-from .expand import count_expansion
 from .simulate import run_simulations
 
 logger = logging.getLogger(__name__)

@@ -4,6 +4,19 @@ Split out of src/core/run.py. Turns one raw config into the list of configs a
 sweep expands to, validates the material/template surface before any build
 runs, and predicts how many builds and run scripts a config will produce.
 """
+# pylint: disable=cyclic-import
+# The lazy import of src.run.simulate below (in _builder_cls_for_count) closes
+# a real import cycle with src.run.simulate: this module needs its two
+# builder-class selectors to predict which builder a config would route to,
+# and simulate.py imports this module (expand_config_sweeps,
+# _validate_runtime_sweep_ordering, outer_loop_conflict) to expand a config
+# before routing it. The cycle is broken at runtime (the import is deferred
+# into the function body), so it never actually hangs; pylint's cyclic-import
+# check only sees the module graph, not the deferral, and reports it on
+# whichever module pylint analyses first. A line-level pragma on the lazy
+# import cannot silence it (pylint attributes the message to the
+# first-analysed module, not the import site), so the disable lives here at
+# module scope instead.
 from dataclasses import dataclass, field as dataclass_field
 import itertools
 import logging
@@ -11,16 +24,10 @@ import re
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..core.config import (
-    AFMSimulationConfig,
-    SheetOnSheetSimulationConfig,
-    load_settings,
-    parse_config,
-)
 from .placeholders import (
     TEMPLATE_MARKERS,
     has_template_marker,
@@ -29,12 +36,8 @@ from .placeholders import (
 from ..core.utils.paths import _find_existing  # noqa: PLC2701
 from .naming import (
     AFM_LIKE_MODELS,
-    LAMMPS_LOOP_PARAMS,
-    LOOPABILITY,
     SHEET_LIKE_MODELS,
     _numbered_sheet_keys,
-    loopability,
-    loopability_section,
     primary_sheet,
 )
 
@@ -595,7 +598,8 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     "flake configs (spec §13.2): a pot_path list needs a "
                     "single homogeneous 2D material"
                 )
-            from ..potentials.utils import resolve_pot_type
+            from ..potentials.utils import resolve_pot_type  # pylint: disable=import-outside-toplevel
+            # deferred: potentials.utils imports the UFF table; only sweeps that use it pay for it
             root = Path(base_dir) if base_dir else Path('.')
             resolved = [resolve_pot_type(entry, root) for entry in pot_val]
             sweep_params[(primary_key, '_pot_expand')] = resolved
@@ -724,7 +728,10 @@ def _builder_cls_for_count(config: Dict[str, Any], model: str) -> Optional[type]
     # module-level import here would close the loop. The selectors are the
     # runner's, not the counter's -- the counter merely asks them what the
     # runner would have chosen.
-    from .simulate import _select_afm_builder_cls, _select_sheet_builder_cls
+    from .simulate import (  # pylint: disable=import-outside-toplevel
+        _select_afm_builder_cls,
+        _select_sheet_builder_cls,
+    )
 
     view = _routing_view(config, model)
     try:

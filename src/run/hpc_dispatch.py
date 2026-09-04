@@ -6,7 +6,7 @@ decides when and over which directories to call it.
 """
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 from ..hpc import HPCScriptGenerator, HPCConfig
 from .naming import layer_aware_path_sort_key
@@ -125,7 +125,8 @@ def dispatch_hpc_generation(
 
     Returns whatever the chosen generator method returns.
     """
-    from ..hpc.manifest import JobManifest
+    from ..hpc.manifest import JobManifest  # pylint: disable=import-outside-toplevel
+    # deferred: hpc.manifest is only needed by this combined-job path, not every dispatch call
 
     manifest = JobManifest.from_simulation_directory(simulation_root)
     if manifest.has_system_jobs():
