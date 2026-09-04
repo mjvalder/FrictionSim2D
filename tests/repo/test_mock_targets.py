@@ -26,6 +26,18 @@ ALLOWED_TARGET_PREFIXES = (
     "src.aiida.",
     "src.api.",
     "src.data.database.",
+    # run_simulations builds real geometry -- a genuine expensive boundary.
+    # src.cli imports the name at module level (`from .run.simulate import
+    # run_simulations`), so src.cli.run_simulations is the name the CLI
+    # itself resolves at call time; both spellings name the exact same
+    # function object, not two different things to maintain. Contrast this
+    # with _global_settings_path (Phase 2a): that is a cheap pure function
+    # with an env-var alternative, and widening the allowlist for it was
+    # refused -- this entry is narrow (two fully-qualified names, not a
+    # prefix over a whole module) and only covers a function that is
+    # actually expensive to run for real.
+    "src.cli.run_simulations",
+    "src.run.simulate.run_simulations",
 )
 
 # file (relative to tests/) -> targets it patches today that are NOT boundaries.
@@ -86,14 +98,6 @@ KNOWN_VIOLATIONS = {
     "builders/test_simulation_base.py": {
         "src.builders.simulation_base.get_material_path",
         "src.builders.simulation_base.get_potential_path",
-    },
-    "cli/test_cli_run_group.py": {
-        # run_simulations is imported by name into src.cli at module level, so
-        # src.cli.run_simulations is the name the CLI actually resolves at
-        # call time -- patching src.run.simulate.run_simulations would leave
-        # it untouched. It builds real geometry, a legitimate expensive
-        # boundary for tests whose job is to check option plumbing.
-        "src.cli.run_simulations",
     },
     "gui/test_gui_document.py": {
         "src.gui.controllers.document.expand_config_sweeps",

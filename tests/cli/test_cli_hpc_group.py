@@ -130,3 +130,31 @@ def test_discovery_agrees_with_collect_hpc_simulation_paths_for_suffixed_scripts
 
     assert result.exit_code == 0, result.output
     assert f"Found {len(expected)} simulations" in result.output
+
+
+def test_missing_modules_is_blocked_before_anything_is_written(runner, tmp_path):
+    """cli.md finding 2 (fix, user-approved).
+
+    On the common AFM path (1:1 system.in/slide.in per simulation directory)
+    ``dispatch_hpc_generation`` calls ``generate_combined_scripts``, which
+    never reaches ``HPCScriptGenerator._validate_config`` -- so with no HPC
+    modules configured, ``hpc generate`` used to exit 0 and write a
+    ``run.pbs`` containing ``module purge`` and no ``module load`` line: a
+    job script that only fails once submitted to the cluster.
+    ``hpc_generation_blocker`` (the same precondition
+    ``generate_hpc_scripts_for_root`` already enforces for the GUI/
+    ``run --hpc-scripts`` path) must gate this before any script or manifest
+    file is written.
+    """
+    sim_root = tmp_path / "sim_root"
+    lammps = sim_root / "afm" / "mat0" / "L1" / "lammps"
+    lammps.mkdir(parents=True)
+    (lammps / "system.in").write_text("# lammps\n", encoding="utf-8")
+    (lammps / "slide.in").write_text("# lammps\n", encoding="utf-8")
+
+    # No --settings-file: default GlobalSettings() leaves hpc.modules unset.
+    result = runner.invoke(cli, ["hpc", "generate", str(sim_root)])
+
+    assert result.exit_code != 0
+    assert "'Modules'" in result.output
+    assert not (sim_root / "hpc" / "run.pbs").exists()

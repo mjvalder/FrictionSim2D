@@ -18,6 +18,7 @@ from .run.hpc_dispatch import (
     _build_hpc_manifest_entries,
     collect_hpc_simulation_paths,
     dispatch_hpc_generation,
+    hpc_generation_blocker,
 )
 from .run.simulate import run_simulations
 
@@ -452,6 +453,11 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
 
     if not simulation_paths:
         click.echo("❌ No simulation directories found", err=True)
+        raise click.Abort()
+
+    blocker = hpc_generation_blocker(settings)
+    if blocker is not None:
+        click.echo(f"❌ {blocker}", err=True)
         raise click.Abort()
 
     click.echo(f"📋 Found {len(simulation_paths)} simulations")
