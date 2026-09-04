@@ -394,7 +394,12 @@ class JobManifest:
             rel_path = sim_path.relative_to(sim_dir)
             path_str = rel_path.as_posix()
             parts = rel_path.parts
-            material = parts[1] if len(parts) >= 2 and parts[0] in ('afm', 'sheetonsheet', 'pes_sheet', 'pes_tip') else (parts[0] if parts else "")
+            material = (
+                parts[1]
+                if len(parts) >= 2
+                and parts[0] in ('afm', 'sheetonsheet', 'pes_sheet', 'pes_tip')
+                else (parts[0] if parts else "")
+            )
             layer_match = layer_pattern.search(path_str)
             layers = int(layer_match.group(1)) if layer_match else 1
             sim_directories.append({
@@ -470,5 +475,3 @@ class JobManifest:
         return (f"<JobManifest: {self.name} "
                 f"({self.n_jobs} jobs, {self.n_completed} completed, "
                 f"{self.n_failed} failed)>")
-
-

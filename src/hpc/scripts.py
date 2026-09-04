@@ -159,8 +159,14 @@ class HPCConfig:
             'lmp_flags': self.lmp_flags,
             'use_tmpdir': self.use_tmpdir,
             'lammps_scripts': self.lammps_scripts,
-            'select_multi': f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:mpiprocs={self.cpus_per_node}",
-            'select_single': f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:mpiprocs={self.cpus_per_node}",
+            'select_multi': (
+                f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:"
+                f"mpiprocs={self.cpus_per_node}"
+            ),
+            'select_single': (
+                f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:"
+                f"mpiprocs={self.cpus_per_node}"
+            ),
             'ntasks_per_node': self.cpus_per_node,
             'cpus_per_task': 1,
             'mem': f"{self.memory_gb}G",
@@ -566,7 +572,11 @@ class HPCScriptGenerator:
                     'echo "System job ID: $SYSTEM_JOB_ID"',
                     '',
                     'echo "Submitting slide jobs (waiting for system jobs)..."',
-                    f'SLIDE_JOB_ID=$(sbatch --parsable --dependency=afterok:$SYSTEM_JOB_ID hpc/{scripts["slide"][0].name})',
+                    (
+                        f'SLIDE_JOB_ID=$(sbatch --parsable '
+                        f'--dependency=afterok:$SYSTEM_JOB_ID '
+                        f'hpc/{scripts["slide"][0].name})'
+                    ),
                     'echo "Slide job ID: $SLIDE_JOB_ID"',
                     '',
                     'echo "Monitor with: squeue -u $USER"',
@@ -578,7 +588,11 @@ class HPCScriptGenerator:
                     'echo "System job ID: $SYSTEM_JOB_ID"',
                     '',
                     'echo "Submitting slide jobs (waiting for system jobs)..."',
-                    f'SLIDE_JOB_ID=$({submit_cmd} -W depend=afterok:$SYSTEM_JOB_ID hpc/{scripts["slide"][0].name})',
+                    (
+                        f'SLIDE_JOB_ID=$({submit_cmd} '
+                        f'-W depend=afterok:$SYSTEM_JOB_ID '
+                        f'hpc/{scripts["slide"][0].name})'
+                    ),
                     'echo "Slide job ID: $SLIDE_JOB_ID"',
                     '',
                     'echo "Monitor with: qstat -u $USER"',
