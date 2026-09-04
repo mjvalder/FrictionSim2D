@@ -7,6 +7,7 @@ produce sensible help text, without requiring LAMMPS, AiiDA, or a database.
 import json
 
 import pytest
+import yaml
 from click.testing import CliRunner
 from src.cli import cli
 
@@ -87,6 +88,76 @@ def test_settings_init_help(runner):
     assert result.exit_code == 0
     assert '--global' in result.output
     assert '--force' in result.output
+
+
+# ---------------------------------------------------------------------------
+# settings group: init/reset behaviour (test-gap; cli.md findings 4-5)
+# ---------------------------------------------------------------------------
+
+def test_settings_init_writes_a_file_at_the_configured_location(runner, tmp_path, monkeypatch):
+    """`--global` targets $XDG_CONFIG_HOME/FrictionSim2D/settings.yaml -- the
+    conftest autouse fixture already redirects that variable for the whole
+    session; monkeypatch layers a fresh, test-local value on top of it."""
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+
+    result = runner.invoke(cli, ['settings', 'init', '--global'])
+
+    assert result.exit_code == 0, result.output
+    target = tmp_path / 'FrictionSim2D' / 'settings.yaml'
+    assert target.exists()
+    written = yaml.safe_load(target.read_text(encoding='utf-8'))
+    assert written['hpc']['scheduler_type'] == 'pbs'
+
+
+def test_settings_init_again_without_force_refuses(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    target = tmp_path / 'FrictionSim2D' / 'settings.yaml'
+
+    first = runner.invoke(cli, ['settings', 'init', '--global'])
+    assert first.exit_code == 0, first.output
+    written_at_first = target.read_text(encoding='utf-8')
+
+    second = runner.invoke(cli, ['settings', 'init', '--global'])
+
+    assert second.exit_code != 0
+    assert target.read_text(encoding='utf-8') == written_at_first
+
+
+def test_settings_init_force_overwrites_without_prompting(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+
+    runner.invoke(cli, ['settings', 'init', '--global'])
+    result = runner.invoke(cli, ['settings', 'init', '--global', '--force'])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_settings_reset_restores_defaults(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    target = tmp_path / 'FrictionSim2D' / 'settings.yaml'
+
+    runner.invoke(cli, ['settings', 'init', '--global'])
+    assert target.exists()
+
+    result = runner.invoke(cli, ['settings', 'reset', '--global', '--yes'])
+
+    assert result.exit_code == 0, result.output
+    assert not target.exists()
+
+
+def test_settings_show_origin_names_the_file_actually_loaded(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    target = tmp_path / 'FrictionSim2D' / 'settings.yaml'
+
+    no_file_yet = runner.invoke(cli, ['settings', 'show', '--origin'])
+    assert no_file_yet.exit_code == 0
+    assert 'hardcoded defaults' in no_file_yet.output
+
+    runner.invoke(cli, ['settings', 'init', '--global'])
+
+    result = runner.invoke(cli, ['settings', 'show', '--origin'])
+    assert result.exit_code == 0
+    assert str(target) in result.output
 
 
 # ---------------------------------------------------------------------------

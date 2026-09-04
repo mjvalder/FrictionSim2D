@@ -87,6 +87,14 @@ KNOWN_VIOLATIONS = {
         "src.builders.simulation_base.get_material_path",
         "src.builders.simulation_base.get_potential_path",
     },
+    "cli/test_cli_run_group.py": {
+        # run_simulations is imported by name into src.cli at module level, so
+        # src.cli.run_simulations is the name the CLI actually resolves at
+        # call time -- patching src.run.simulate.run_simulations would leave
+        # it untouched. It builds real geometry, a legitimate expensive
+        # boundary for tests whose job is to check option plumbing.
+        "src.cli.run_simulations",
+    },
     "gui/test_gui_document.py": {
         "src.gui.controllers.document.expand_config_sweeps",
     },
