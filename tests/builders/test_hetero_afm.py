@@ -22,6 +22,11 @@ def _afm_homogeneous_raw():
     raw = _afm_hetero_raw()
     del raw["2D-2"]
     raw["2D"] = raw.pop("2D-1")
+    # Dropping to one sheet leaves validate_tip_sheet_footprint in play (no
+    # longer exempted by the hetero >=2-sheets path): _afm_hetero_raw's 12x12
+    # cell relies on hetero replication to clear the tip.r=10.0 floor, which
+    # a single homogeneous sheet no longer gets, so widen it here.
+    raw["2D"]["x"] = raw["2D"]["y"] = 50.0
     return raw
 
 

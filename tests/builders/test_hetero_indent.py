@@ -75,6 +75,9 @@ def test_routing_keeps_homogeneous_indent_for_single_material():
     raw = _indent_hetero_raw()
     del raw["2D-2"]
     raw["2D"] = raw.pop("2D-1")
+    # Single-sheet drops the hetero (>=2-sheet) exemption from
+    # validate_tip_sheet_footprint, so widen past the tip.r=10.0 floor.
+    raw["2D"]["x"] = raw["2D"]["y"] = 50.0
     cfg = AFMSimulationConfig(**raw, settings=load_settings())
     assert _select_afm_builder_cls("indent", cfg) is IndentSimulation
 

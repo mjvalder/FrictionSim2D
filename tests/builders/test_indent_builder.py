@@ -20,8 +20,10 @@ def _afm_cfg(tmp_path: Path, force, indent=None):
     payload = {
         "general": {"temp": 300.0, "force": force, "scan_angle": 0,
                     "scan_speed": 2.0, "finite_sheet": False},
+        # 100x100 sits exactly at validate_tip_sheet_footprint's 2x-tip-diameter
+        # floor for the r=25.0 tip below (4 * r == 100.0).
         "2D": {"mat": "h-MoS2", "pot_type": "sw", "pot_path": str(pot),
-               "cif_path": str(cif), "x": 60.0, "y": 60.0, "layers": [1, 2]},
+               "cif_path": str(cif), "x": 100.0, "y": 100.0, "layers": [1, 2]},
         "tip": {"mat": "Si", "pot_type": "sw", "pot_path": str(pot),
                 "cif_path": str(cif), "r": 25.0, "amorph": "c"},
         "sub": {"mat": "Si", "pot_type": "sw", "pot_path": str(pot),

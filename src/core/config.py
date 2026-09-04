@@ -830,6 +830,42 @@ class AFMSimulationConfig(BaseModel):
 
         return self
 
+    @model_validator(mode='after')
+    def validate_tip_sheet_footprint(self) -> 'AFMSimulationConfig':
+        """Reject a periodic AFM sheet too small for the tip diameter.
+
+        The periodic in-plane footprint must be >= 2x the tip diameter
+        (``4 * tip.r``) in each direction, else the tip interacts with its own
+        periodic image and the recorded forces are corrupted (the
+        afm-tip-box-sizing rule; same ``4 * tip_r`` requirement
+        :func:`~src.builders.afm.hetero.compute_replication_factors` enforces
+        by replicating the coincidence cell). Two exemptions: a hetero stack
+        (two or more ``[2D-N]`` materials) replicates instead of building at
+        its native size, so it is checked there, not here; a PES scan
+        (``[pes]`` present) moves the tip only within one surface unit cell
+        and already carries its own scan-aware footprint warning
+        (``_warn_if_footprint_too_small``).
+        """
+        if len(self.sheets) >= 2 or self.pes is not None:
+            return self
+
+        tip_r = float(self.tip.r)  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sheet_x_raw = self.sheet.x  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sheet_y_raw = self.sheet.y  # pylint: disable=no-member  # pydantic FieldInfo FP
+        sheet_x = float(sheet_x_raw[0] if isinstance(sheet_x_raw, list) else sheet_x_raw)
+        sheet_y = float(sheet_y_raw[0] if isinstance(sheet_y_raw, list) else sheet_y_raw)
+        min_footprint = 4.0 * tip_r
+
+        if sheet_x < min_footprint or sheet_y < min_footprint:
+            raise ValueError(
+                f"AFM sheet footprint ({sheet_x} x {sheet_y}) is smaller than 2x the tip "
+                f"diameter ({min_footprint}, from [tip] r={tip_r}): the tip would interact "
+                "with its own periodic image, corrupting the recorded forces. Enlarge [2D] "
+                "x/y, shrink [tip] r, or add a second [2D-N] material to route to the hetero "
+                "builder (which replicates the cell automatically)."
+            )
+        return self
+
 class SheetOnSheetSimulationConfig(BaseModel):
     """Master configuration object for a Sheet-on-Sheet simulation run."""
     general: GeneralConfig

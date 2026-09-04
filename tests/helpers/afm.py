@@ -46,8 +46,10 @@ def _make_afm_config(tmp_path: Path, layers: list[int]) -> AFMSimulationConfig:
                 "pot_type": "sw",
                 "pot_path": str(pot_path),
                 "cif_path": str(cif_path),
-                "x": 20.0,
-                "y": 20.0,
+                # 90x90 clears validate_tip_sheet_footprint's 2x-tip-diameter
+                # floor (4 * r == 80.0 for the r=20.0 tip below) with margin.
+                "x": 90.0,
+                "y": 90.0,
                 "layers": layers,
             },
             "lj_override": {},

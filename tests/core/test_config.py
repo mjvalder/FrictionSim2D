@@ -259,6 +259,73 @@ def test_non_finite_sheet_rejects_crystalline_substrate(tmp_path):
         )
 
 
+# --- D-1: AFM sheet footprint vs. tip diameter (afm-tip-box-sizing rule) ---
+
+def test_tip_sheet_footprint_rejects_undersized_sheet(tmp_path):
+    """A periodic AFM sheet smaller than 2x the tip diameter must be refused,
+    naming both the footprint and the required minimum in the message."""
+    dummy_pot = tmp_path / "dummy.sw"
+    dummy_cif = tmp_path / "dummy.cif"
+    dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
+    dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
+
+    settings = load_settings()
+    small_sheet = {**VALID_SHEET, **real_paths, "x": 30.0, "y": 30.0}
+    with pytest.raises(ValidationError, match=r"30\.0 x 30\.0.*40\.0"):
+        AFMSimulationConfig(
+            general=VALID_GENERAL,
+            tip={**VALID_TIP, **real_paths},  # r = 10.0 -> needs footprint >= 40.0
+            sub={**VALID_SUB, **real_paths},
+            **{'2D': small_sheet},
+            settings=settings,
+        )
+
+
+def test_tip_sheet_footprint_accepts_exact_two_diameter_boundary(tmp_path):
+    """A sheet sized to exactly 2x the tip diameter (the documented floor) passes."""
+    dummy_pot = tmp_path / "dummy.sw"
+    dummy_cif = tmp_path / "dummy.cif"
+    dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
+    dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
+
+    settings = load_settings()
+    boundary_sheet = {**VALID_SHEET, **real_paths, "x": 40.0, "y": 40.0}
+    cfg = AFMSimulationConfig(
+        general=VALID_GENERAL,
+        tip={**VALID_TIP, **real_paths},  # r = 10.0 -> floor is exactly 40.0
+        sub={**VALID_SUB, **real_paths},
+        **{'2D': boundary_sheet},
+        settings=settings,
+    )
+    assert cfg.sheet.x == 40.0 and cfg.sheet.y == 40.0
+
+
+def test_tip_sheet_footprint_hetero_path_is_unaffected(tmp_path):
+    """A hetero (>=2 [2D-N]) config is exempt: it replicates to clear the
+    tip-diameter floor instead of being checked against its native size."""
+    dummy_pot = tmp_path / "dummy.sw"
+    dummy_cif = tmp_path / "dummy.cif"
+    dummy_pot.write_text("# dummy potential\n", encoding="utf-8")
+    dummy_cif.write_text("# dummy cif\n", encoding="utf-8")
+    real_paths = {'pot_path': str(dummy_pot), 'cif_path': str(dummy_cif)}
+
+    settings = load_settings()
+    # Each material's own cell (12x12) is far smaller than the r=10.0 tip's
+    # 40.0 floor; only HeteroAFMSimulation's in-plane replication clears it,
+    # so the config itself must not raise.
+    small_sheet = {**VALID_SHEET, **real_paths, "x": 12.0, "y": 12.0}
+    cfg = AFMSimulationConfig(
+        general=VALID_GENERAL,
+        tip={**VALID_TIP, **real_paths},
+        sub={**VALID_SUB, **real_paths},
+        **{'2D-1': small_sheet, '2D-2': {**small_sheet, "mat": "WS2"}},
+        settings=settings,
+    )
+    assert len(cfg.sheets) == 2
+
+
 # ---------------------------------------------------------------------------
 # PES eval-mode and optional substrate tests
 # ---------------------------------------------------------------------------
@@ -268,8 +335,10 @@ def _afm_dict(tmp_path, include_sub=True, sub_amorph="a", finite_sheet=False, pe
     cif = tmp_path / "d.cif"; cif.write_text("# cif", encoding="utf-8")
     d = {
         "general": {"temp": 300.0, "force": [2.0], "scan_speed": 2.0, "finite_sheet": finite_sheet},
+        # 100x100 sits exactly at validate_tip_sheet_footprint's 2x-tip-diameter
+        # floor for the r=25.0 tip below (4 * r == 100.0).
         "2D": {"mat": "h-MoS2", "pot_type": "sw", "pot_path": str(pot),
-               "cif_path": str(cif), "x": 60.0, "y": 60.0, "layers": [4]},
+               "cif_path": str(cif), "x": 100.0, "y": 100.0, "layers": [4]},
         "tip": {"mat": "Si", "pot_type": "sw", "pot_path": str(pot),
                 "cif_path": str(cif), "r": 25.0, "amorph": "c"},
         "settings": load_settings().model_dump(),
