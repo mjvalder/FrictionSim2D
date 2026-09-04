@@ -116,7 +116,7 @@ def _max_strain(cell_ref: np.ndarray, cell_def: np.ndarray) -> float:
 
 
 def _enumerate_matrices(n: int):
-    """Yield all 2×2 integer matrices with determinant in [1, n] and |entries| <= n.
+    """Yield all 2×2 integer matrices with determinant in [1, n^2] and |entries| <= n.
 
     Only upper-triangular forms are generated to avoid counting rotationally
     equivalent supercells multiple times (Hermite Normal Form subset).
@@ -291,28 +291,30 @@ def match_to_fixed_box(
 def _relative_rotation_strain(sc_a: np.ndarray, sc_b: np.ndarray) -> Tuple[float, float]:
     """Relative rotation (deg) and residual stretch strain between two 2×2 cells.
 
-    Uses the **left** transform ``gram = inv(sc_b) @ sc_a`` (``sc_a = sc_b @ gram``),
-    whose singular values (and polar-rotation) are invariant under rotating
-    *either* cell (a right/left orthogonal factor). This is the correct frame to
-    separate a rigid relative rotation (the twist) from a pure shape mismatch
-    (the residual strain): for ``sc_a = sc_b @ rotᵀ`` (rigid rotation, no strain)
-    ``gram = rotᵀ`` exactly, so the strain is 0 and the angle is the twist -- unlike
-    the right transform ``sc_a @ inv(sc_b)``, which reports spurious strain for
-    rotated non-orthogonal cells.
+    Uses the **left** transform ``rel_transform = inv(sc_b) @ sc_a``
+    (``sc_a = sc_b @ rel_transform``), whose singular values (and polar-rotation)
+    are invariant under rotating *either* cell (a right/left orthogonal factor).
+    This is the correct frame to separate a rigid relative rotation (the twist)
+    from a pure shape mismatch (the residual strain): for ``sc_a = sc_b @ rotᵀ``
+    (rigid rotation, no strain) ``rel_transform = rotᵀ`` exactly, so the strain
+    is 0 and the angle is the twist -- unlike the right transform
+    ``sc_a @ inv(sc_b)``, which reports spurious strain for rotated
+    non-orthogonal cells.
 
     Returns:
         ``(angle_deg, max_strain)`` where ``angle_deg`` is the polar-rotation of
-        ``gram`` (CCW positive) and ``max_strain`` is ``max|σ_i - 1|`` over
-        ``gram``'s singular values. ``(0.0, inf)`` if ``gram`` is singular.
+        ``rel_transform`` (CCW positive) and ``max_strain`` is ``max|σ_i - 1|``
+        over ``rel_transform``'s singular values. ``(0.0, inf)`` if
+        ``rel_transform`` is singular.
     """
     try:
-        gram = np.linalg.inv(np.asarray(sc_b, float)) @ np.asarray(sc_a, float)
-        cauchy_green_b = gram.T @ gram
+        rel_transform = np.linalg.inv(np.asarray(sc_b, float)) @ np.asarray(sc_a, float)
+        cauchy_green_b = rel_transform.T @ rel_transform
         eigvals, eigvecs = np.linalg.eigh(cauchy_green_b)
         eigvals = np.maximum(eigvals, 0.0)
         stretches = np.sqrt(eigvals)
         stretch = eigvecs @ np.diag(stretches) @ eigvecs.T
-        rot = gram @ np.linalg.inv(stretch)
+        rot = rel_transform @ np.linalg.inv(stretch)
         angle = math.degrees(math.atan2(rot[1, 0], rot[0, 0]))
         strain = float(np.max(np.abs(stretches - 1.0)))
         return angle, strain

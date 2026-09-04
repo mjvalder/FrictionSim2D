@@ -94,6 +94,8 @@ def read_lammps_data(path: Union[str, Path]) -> LammpsData:
         A :class:`LammpsData` holding the cell matrix and atom positions.
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
+    # (grouped with the ase.io import below so this module stays free of
+    # third-party imports at module scope -- see module docstring)
     from ase.io import read  # pylint: disable=import-outside-toplevel
     # (deferred: ~355 ms)
 
@@ -120,5 +122,6 @@ def element_mass(symbol: str) -> float:
         The element's standard atomic mass.
     """
     from ase.data import atomic_masses, atomic_numbers  # pylint: disable=import-outside-toplevel
+    # (deferred: ~74 ms)
 
     return float(atomic_masses[atomic_numbers[symbol]])
