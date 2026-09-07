@@ -30,7 +30,7 @@ def _minimal_afm_raw_dict(tmp_path: Path) -> dict:
         "2D": {"mat": "MoS2", "pot_type": "sw", "pot_path": pot_path,
                "cif_path": cif_path, "x": 20.0, "y": 20.0, "layers": [2]},
         "tip": {"mat": "Si", "pot_type": "sw", "pot_path": pot_path,
-                "cif_path": cif_path, "amorph": "c", "r": 25},
+                "cif_path": cif_path, "amorph": "c", "r": 5},
         "sub": {"mat": "Si", "pot_type": "sw", "pot_path": pot_path,
                 "cif_path": cif_path, "amorph": "a", "thickness": 12.0},
     }
@@ -890,7 +890,7 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     assert root == tmp_path / "sim_run"
     assert calls == {"build": 1, "base": 1}
     assert seen_output_dirs[0].as_posix().endswith(
-        "afm/MoS2/20x_20y/sub_aSi_tip_Si_r25/K300/pot_sw_dummy")
+        "afm/MoS2/20x_20y/sub_aSi_tip_Si_r5/K300/pot_sw_dummy")
 
     # The object the builder actually received is the real, validated config,
     # not a stand-in -- so a routing bug that skipped validation would fail here.

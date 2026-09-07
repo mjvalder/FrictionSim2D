@@ -1008,7 +1008,7 @@ class TestExpansionOutputDirs:
         preview = document.expansion_output_dirs()
         assert preview.error is None
         assert len(preview.dirs) == document.expansion().configs == 1
-        assert str(preview.dirs[0]) == 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300/pot_sw_MoS2_wen'
+        assert str(preview.dirs[0]) == 'indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r15/K300/pot_sw_MoS2_wen'
 
     def test_a_sweep_gives_one_distinct_dir_per_member(self, monkeypatch):
         monkeypatch.chdir(REPO_ROOT)
