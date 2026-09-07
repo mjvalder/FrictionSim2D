@@ -839,12 +839,21 @@ class AFMSimulationConfig(BaseModel):
         periodic image and the recorded forces are corrupted (the
         afm-tip-box-sizing rule; same ``4 * tip_r`` requirement
         :func:`~src.builders.afm.hetero.compute_replication_factors` enforces
-        by replicating the coincidence cell). Two exemptions: a hetero stack
+        by replicating the coincidence cell). Three exemptions: a hetero stack
         (two or more ``[2D-N]`` materials) replicates instead of building at
         its native size, so it is checked there, not here; a PES scan
         (``[pes]`` present) moves the tip only within one surface unit cell
         and already carries its own scan-aware footprint warning
-        (``_warn_if_footprint_too_small``).
+        (``_warn_if_footprint_too_small``); an indent run (``[indent]``
+        present) only presses the tip down rather than sliding it across the
+        sheet, so the swept-path argument for 2x does not apply -- it gets a
+        looser 1.5x-diameter margin (``3 * tip.r``) instead. ``self.indent``
+        is a proxy for "this is an indent run", not a first-class model tag
+        (the CLI's model string never reaches this config object) -- same
+        precedent as the ``self.pes is not None`` PES exemption above. It
+        under-covers an indent run that omits ``[indent]`` entirely (falling
+        back to the builder's own defaults), which would still be held to the
+        stricter 2x margin.
         """
         if len(self.sheets) >= 2 or self.pes is not None:
             return self
@@ -854,15 +863,18 @@ class AFMSimulationConfig(BaseModel):
         sheet_y_raw = self.sheet.y  # pylint: disable=no-member  # pydantic FieldInfo FP
         sheet_x = float(sheet_x_raw[0] if isinstance(sheet_x_raw, list) else sheet_x_raw)
         sheet_y = float(sheet_y_raw[0] if isinstance(sheet_y_raw, list) else sheet_y_raw)
-        min_footprint = 4.0 * tip_r
+        is_indent = self.indent is not None
+        margin_factor = 3.0 if is_indent else 4.0
+        min_footprint = margin_factor * tip_r
 
         if sheet_x < min_footprint or sheet_y < min_footprint:
+            margin_label = "1.5x" if is_indent else "2x"
             raise ValueError(
-                f"AFM sheet footprint ({sheet_x} x {sheet_y}) is smaller than 2x the tip "
-                f"diameter ({min_footprint}, from [tip] r={tip_r}): the tip would interact "
-                "with its own periodic image, corrupting the recorded forces. Enlarge [2D] "
-                "x/y, shrink [tip] r, or add a second [2D-N] material to route to the hetero "
-                "builder (which replicates the cell automatically)."
+                f"AFM sheet footprint ({sheet_x} x {sheet_y}) is smaller than {margin_label} "
+                f"the tip diameter ({min_footprint}, from [tip] r={tip_r}): the tip would "
+                "interact with its own periodic image, corrupting the recorded forces. "
+                "Enlarge [2D] x/y, shrink [tip] r, or add a second [2D-N] material to route "
+                "to the hetero builder (which replicates the cell automatically)."
             )
         return self
 
