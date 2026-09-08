@@ -1,0 +1,141 @@
+"""Post-run provenance enrichment (spec §5 F5, review builders-afm.md AFM-3 / finding 5).
+
+``AFMSimulation._write_provenance`` (build time) has always documented that
+``RAMP_STATUS``/``UNLOADED_REF``/``lammps_version`` are "enriched post-run via
+provenance.parse_log_extras", but nothing in ``src/`` ever called it -- a run
+whose settle loop never converges (see ``afm/system_init.lmp``'s capped
+``ramp_iter`` loop) produced no signal anywhere a user would see, only a
+buried ``# RAMP_STATUS converged=0 ...`` log line nothing read back.
+``AFMSimulation.enrich_provenance_post_run`` is the reusable home for that
+call: it reads the provenance.json a build already wrote, merges
+``parse_log_extras(log_path)``'s fields into it, and rewrites it in place.
+
+These tests assert on the written provenance.json content directly (not a
+mock) for both a converged and a non-converged log, per the review's
+instruction.
+"""
+import json
+import logging
+from pathlib import Path
+
+from src.builders.afm import AFMSimulation
+from tests.helpers.afm import _make_afm_config, _seed_builder_state
+
+
+def _builder(tmp_path: Path) -> AFMSimulation:
+    cfg = _make_afm_config(tmp_path, layers=[1])
+    return AFMSimulation(cfg, str(tmp_path / "out"))
+
+
+def _built_layer_dir(builder: AFMSimulation, tmp_path: Path) -> Path:
+    """Seed builder state, write real inputs (incl. provenance.json), return L1."""
+    layer_dir = _seed_builder_state(builder, tmp_path)
+    builder.write_inputs(1)
+    return layer_dir
+
+
+def _write_log(tmp_path: Path, name: str, text: str) -> Path:
+    log_path = tmp_path / name
+    log_path.write_text(text, encoding="utf-8")
+    return log_path
+
+
+def test_enrich_converged_true_updates_provenance(tmp_path):
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "LAMMPS (2 Aug 2023 - Update 3)\n"
+        "# RAMP_STATUS converged=1 r=0.042 iterations=17\n"
+        "# UNLOADED_REF layer=1 z=15.5\n",
+    )
+
+    result = builder.enrich_provenance_post_run(layer_dir, log_path)
+    assert result == layer_dir / "provenance.json"
+
+    data = json.loads(result.read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is True
+    assert data["ramp_r"] == 0.042
+    assert data["ramp_iterations"] == 17
+    assert data["unloaded_reference_z"] == {"layer_1": 15.5}
+    assert data["lammps_version"] == "2 Aug 2023 - Update 3"
+
+
+def test_enrich_converged_false_updates_provenance_and_warns(tmp_path, caplog):
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "# RAMP_STATUS converged=0 r=1.62 iterations=100\n",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = builder.enrich_provenance_post_run(layer_dir, log_path)
+
+    data = json.loads(result.read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is False
+    assert data["ramp_r"] == 1.62
+    assert data["ramp_iterations"] == 100
+    assert any("did not converge" in rec.message for rec in caplog.records)
+
+
+def test_enrich_keeps_last_ramp_status_line(tmp_path):
+    # multiple RAMP_STATUS lines (one per load) -- parse_log_extras keeps
+    # the last, matching write order; the enrichment must carry that through.
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "# RAMP_STATUS converged=0 r=0.9 iterations=100\n"
+        "# RAMP_STATUS converged=1 r=0.01 iterations=8\n",
+    )
+
+    result = builder.enrich_provenance_post_run(layer_dir, log_path)
+    data = json.loads(result.read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is True
+    assert data["ramp_iterations"] == 8
+
+
+def test_enrich_missing_log_returns_none_and_warns(tmp_path, caplog):
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+    before = (layer_dir / "provenance.json").read_text(encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        result = builder.enrich_provenance_post_run(
+            layer_dir, tmp_path / "no_such_log.lammps")
+
+    assert result is None
+    assert (layer_dir / "provenance.json").read_text(encoding="utf-8") == before
+    assert any("No log at" in rec.message for rec in caplog.records)
+
+
+def test_enrich_missing_provenance_returns_none_and_warns(tmp_path, caplog):
+    builder = _builder(tmp_path)
+    empty_dir = tmp_path / "no_provenance_here"
+    empty_dir.mkdir()
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "# RAMP_STATUS converged=1 r=0.01 iterations=3\n",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = builder.enrich_provenance_post_run(empty_dir, log_path)
+
+    assert result is None
+    assert any("No provenance.json" in rec.message for rec in caplog.records)
+
+
+def test_enrich_no_matching_lines_leaves_provenance_unchanged(tmp_path):
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+    before = (layer_dir / "provenance.json").read_text(encoding="utf-8")
+
+    log_path = _write_log(tmp_path, "log_system.lammps", "nothing interesting here\n")
+
+    result = builder.enrich_provenance_post_run(layer_dir, log_path)
+    assert result == layer_dir / "provenance.json"
+    assert result.read_text(encoding="utf-8") == before

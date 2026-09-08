@@ -922,6 +922,70 @@ class AFMSimulation(SimulationBase):
         )
         write_provenance(output_root, record)
 
+    def enrich_provenance_post_run(self, output_root: Path,
+                                   log_path: Path) -> Optional[Path]:
+        """Enrich a build-time provenance.json with post-run log fields.
+
+        Call this after the real LAMMPS run: it parses ``log_path`` (the
+        system.in log -- the source of the ``RAMP_STATUS``/``UNLOADED_REF``
+        lines the settle-loop template already emits, see
+        ``templates/afm/system_init.lmp``) via ``provenance.parse_log_extras``
+        and merges the result into the ``provenance.json`` that
+        :meth:`_write_provenance` wrote at build time, updating
+        ``ramp_converged``/``ramp_r``/``ramp_iterations``,
+        ``unloaded_reference_z`` and ``lammps_version`` in place.
+
+        This is the reusable home :meth:`_write_provenance`'s own docstring
+        already promised ("enriched post-run via provenance.parse_log_extras")
+        but that nothing in this repo called: the build (``write_inputs``,
+        above) always runs before LAMMPS does, so it cannot see the log
+        itself, and this package builds inputs only -- no code path in
+        ``src/builders/afm`` or ``src/run`` ever executes LAMMPS (HPC
+        execution is a plain bash script with no Python callback back into
+        this repo; the AiiDA CalcJob/parser path is a separate, out-of-scope
+        package). Whatever *does* run the real LAMMPS job -- today that is
+        only ``tests/integration/test_smoke_lammps.py`` -- is expected to
+        call this once the log exists.
+
+        Returns the provenance.json path, or ``None`` if either the record
+        or the log is missing (logged, not raised: a run's real output
+        should not be hidden behind a missing enrichment input).
+        """
+        # pylint: disable-next=import-outside-toplevel
+        from ...data.provenance import (ProvenanceRecord, parse_log_extras,
+                                       write_provenance)
+
+        output_root = Path(output_root)
+        log_path = Path(log_path)
+        prov_path = output_root / 'provenance.json'
+        if not prov_path.is_file():
+            logger.warning("No provenance.json in %s to enrich.", output_root)
+            return None
+        if not log_path.is_file():
+            logger.warning("No log at %s to enrich provenance from.", log_path)
+            return None
+
+        record = ProvenanceRecord.model_validate_json(
+            prov_path.read_text(encoding='utf-8'))
+        updates = parse_log_extras(log_path)
+        if not updates:
+            logger.warning(
+                "No RAMP_STATUS/UNLOADED_REF/LAMMPS-version lines found in "
+                "%s; provenance.json left unenriched.", log_path)
+            return prov_path
+
+        record = record.model_copy(update=updates)
+        if record.ramp_converged is False:
+            logger.warning(
+                "Settle loop did not converge for %s (r=%s after %s "
+                "iterations) -- tip z was still oscillating past the "
+                "iteration budget when it hit ramp_max_iterations. See "
+                "provenance.json's ramp_r/ramp_iterations.",
+                output_root, record.ramp_r, record.ramp_iterations)
+
+        write_provenance(output_root, record)
+        return prov_path
+
     def _write_slide_scripts(self, context: Dict, output_root: Path) -> None:
         """Write the slide phase script(s).
 
