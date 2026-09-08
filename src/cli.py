@@ -549,7 +549,10 @@ def _enrich_one_run(sim_dir: Path, log_path: Optional[Path],
         return 'skipped', (f"no readable provenance.json, or no log at "
                            f"{log_path}")
     if result.read_text(encoding='utf-8', errors='ignore') == before:
-        return 'unchanged', f"no settle-loop lines in {log_path.name}"
+        # Byte-identity, not "the log was empty": a real LAMMPS log always
+        # carries at least the version banner, so the usual way to land here
+        # is a repeat pass over a tree already swept.
+        return 'unchanged', f"already up to date with {log_path.name}"
     return 'enriched', f"from {log_path.name}"
 
 

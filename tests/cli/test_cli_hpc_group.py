@@ -288,6 +288,11 @@ def test_re_reading_the_same_log_reports_unchanged(runner, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "unchanged" in result.output
+    # The reason must not claim the log was empty: this one demonstrably holds
+    # a RAMP_STATUS line, and saying otherwise is how a user concludes the
+    # settle loop never ran.
+    assert "no settle-loop lines" not in result.output
+    assert "already up to date" in result.output
     assert (run_dir / "provenance.json").read_text(encoding="utf-8") == enriched
 
 
