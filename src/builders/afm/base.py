@@ -5,16 +5,20 @@ simulation. It coordinates the construction of the Tip, Substrate, and Sheet,
 generates the necessary potentials, and writes the LAMMPS input scripts.
 """
 
+import hashlib
 import logging
+import subprocess
+from itertools import product
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from ..simulation_base import SimulationBase
 from ...core.config import AFMSimulationConfig
+from ...core.utils.structures import cifread
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import get_model_dimensions
 from ...core.utils.tokens import format_numeric_token
-from ...potentials.utils import normalize_potential_type
+from ...potentials.utils import normalize_potential_type, lj_params
 from ...data.models import EV_A_TO_NN
 from ..construction import components
 
@@ -176,11 +180,16 @@ class AFMSimulation(SimulationBase):
         """Get AFM-specific job name."""
         return f"afm_{self._material_id()}"
 
+    # pylint: disable-next=unused-argument
     def _velocity_seed(self, n_layers: int) -> Optional[int]:
         """Explicit ``velocity create`` seed for system.in.
 
         The indent builder overrides this with its own recorded per-(material,
         layer) seed manifest.
+
+        ``n_layers`` is unused here but required to keep this signature
+        polymorphic with :meth:`IndentSimulation._velocity_seed`, which does
+        use it, and with the ``self._velocity_seed(n_layers)`` call site.
         """
         return self._run_seed('velocity')
 
@@ -233,7 +242,16 @@ class AFMSimulation(SimulationBase):
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is None:
             return
-        from ...lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
+        # Lazy: twist_angle is normally None, so most builds never take this
+        # branch. Importing lattice.apply here (~4.7ms measured with numpy
+        # already loaded, via `python -X importtime`) avoids paying that cost
+        # on every build for a rarely-used feature. (The pre-existing
+        # "avoid cycle" framing did not hold up under test -- promoting this
+        # import to module scope imports and runs cleanly with no cycle;
+        # the real hetero_stack<->lattice.apply cycle documented in
+        # lattice/apply.py does not involve this module.)
+        # pylint: disable-next=import-outside-toplevel
+        from ...lattice.apply import rotate_flake_in_plane
         rotate_flake_in_plane(self.flake_path, float(twist))
         logger.info("Twisted AFM flake by %.3f deg (D3b)", float(twist))
 
@@ -243,7 +261,8 @@ class AFMSimulation(SimulationBase):
         Sheet is built separately for each layer count.
         
         Returns:
-            Tuple of (tip_path, tip_radius, sub_path); sub_path is None when config.sub is None (freestanding).
+            Tuple of (tip_path, tip_radius, sub_path); sub_path is None when
+            config.sub is None (freestanding).
         """
         tip_path, tip_radius = components.build_tip(
             self.config.tip, build_dir, self.config.settings
@@ -446,7 +465,12 @@ class AFMSimulation(SimulationBase):
             n_sheet_layers > 1 and
             pm.is_sheet_lj(self.config.sheet.pot_type)
         )
-        sheet_edge_regions = [None, 'edge'] if self.config.general.finite_sheet and self.config.settings.geometry.finite_sheet_afm_edge_mode != 'none' else None
+        sheet_edge_regions = (
+            [None, 'edge']
+            if self.config.general.finite_sheet
+            and self.config.settings.geometry.finite_sheet_afm_edge_mode != 'none'
+            else None
+        )
         pm.register_component(
             'sheet',
             self.config.sheet,
@@ -501,7 +525,9 @@ class AFMSimulation(SimulationBase):
         if sheet_needs_layer_types:
             for layer in range(n_sheet_layers):
                 layer_key = f'sheet_l{layer+1}_types'
-                self.groups[n_sheet_layers][layer_key] = pm.types.get_layer_group_string('sheet', layer)
+                self.groups[n_sheet_layers][layer_key] = pm.types.get_layer_group_string(
+                    'sheet', layer
+                )
 
         return pm
 
@@ -549,8 +575,12 @@ class AFMSimulation(SimulationBase):
         ylo, yhi = box_dims['ylo'], box_dims['yhi']
         zhi_box = z_positions['tip'] + 50.0
 
-        default_tip_x = ((self.sheet_dims['xlo'] + self.sheet_dims['xhi']) / 2.0) + sheet_offset['x']
-        default_tip_y = ((self.sheet_dims['ylo'] + self.sheet_dims['yhi']) / 2.0) + sheet_offset['y']
+        default_tip_x = (
+            (self.sheet_dims['xlo'] + self.sheet_dims['xhi']) / 2.0
+        ) + sheet_offset['x']
+        default_tip_y = (
+            (self.sheet_dims['ylo'] + self.sheet_dims['yhi']) / 2.0
+        ) + sheet_offset['y']
         if self.config.tip.tip_x is not None:
             tip_x = float(self.config.tip.tip_x)
         else:
@@ -611,10 +641,16 @@ class AFMSimulation(SimulationBase):
             'yhi': yhi,
             'zhi_box': zhi_box,
             'potential_file': f"{self.relative_run_dir_layer[n_layers]}/lammps/system.in.settings",
-            'sub_file': f"{self.relative_run_dir}/build/{sub_path.name}" if sub_path is not None else None,
+            'sub_file': (
+                f"{self.relative_run_dir}/build/{sub_path.name}"
+                if sub_path is not None else None
+            ),
             'tip_file': f"{self.relative_run_dir}/build/{tip_path.name}",
             'sheet_file': f"{self.relative_run_dir}/build/{sheet_path.name}",
-            'path_sub': f"{self.relative_run_dir}/build/{sub_path.name}" if sub_path is not None else None,
+            'path_sub': (
+                f"{self.relative_run_dir}/build/{sub_path.name}"
+                if sub_path is not None else None
+            ),
             'path_tip': f"{self.relative_run_dir}/build/{tip_path.name}",
             'path_sheet': f"{self.relative_run_dir}/build/{sheet_path.name}",
             'tip_x': tip_x,
@@ -712,7 +748,19 @@ class AFMSimulation(SimulationBase):
                        use_langevin: bool,
                        layer_groups_available: bool = True
                        ) -> Dict[str, object]:
-        """Delegate to the shared builder (src/builders/utils/obs_ctx.py)."""
+        """Delegate to the shared builder (src/builders/utils/obs_ctx.py).
+
+        Lazy: this class is reachable at CLI-startup time through `.run.simulate
+        -> .builders.afm.pes_tip -> .base` (imported by `src.cli` at module
+        level, so every invocation -- including `--help` and subcommands that
+        never build -- pays this module's own import). ``build_obs_ctx``
+        transitively imports ``core.observables``, which is not otherwise
+        loaded on that path (measured with `python -X importtime`: ~172us
+        self / ~15.7ms cumulative for `src.builders.utils.obs_ctx`), so
+        deferring it to the one call site that needs it (during an actual
+        build) keeps that cost off the no-build paths.
+        """
+        # pylint: disable-next=import-outside-toplevel
         from ..utils.obs_ctx import build_obs_ctx
         return build_obs_ctx(
             sim_type='afm',
@@ -738,16 +786,17 @@ class AFMSimulation(SimulationBase):
         default when the sheet elements cannot be read (dummy-CIF test
         configs); provenance records which route was taken.
         """
-        from itertools import product
-        from ...core.utils.structures import cifread
-        from ...potentials.utils import lj_params
-
         lj_cut = getattr(self.config.settings.potential, 'lj_cutoff', 11.0)
         try:
             sheet_els = cifread(self.config.sheet.cif_path)['elements']
             tip_els = [self.config.tip.mat]
             sigma_max = max(lj_params(a, b)[1]
                             for a, b in product(tip_els, sheet_els))
+            # Not declared in __init__: _write_provenance reads this via
+            # getattr(self, '_contact_cutoff_source', 'unknown') specifically
+            # to distinguish "never computed" from any real value, so an
+            # __init__-assigned None/'' would collapse that distinction.
+            # pylint: disable-next=attribute-defined-outside-init
             self._contact_cutoff_source = f'uff_sigma_k{K_CONTACT}'
             cut = K_CONTACT * sigma_max
         except Exception:  # pylint: disable=broad-except
@@ -755,6 +804,8 @@ class AFMSimulation(SimulationBase):
                 "Contact cutoff fallback: could not derive UFF sigma for "
                 "sheet '%s'; using %.1f A.",
                 self.config.sheet.mat, _CONTACT_CUTOFF_FALLBACK)
+            # See the getattr-distinguishes-absence note above.
+            # pylint: disable-next=attribute-defined-outside-init
             self._contact_cutoff_source = 'fallback_default'
             cut = _CONTACT_CUTOFF_FALLBACK
         return min(cut, 0.95 * lj_cut)
@@ -789,19 +840,26 @@ class AFMSimulation(SimulationBase):
         enriched post-run via provenance.parse_log_extras. A failure here
         fails the build — provenance is not optional.
         """
-        import hashlib
-        import subprocess
+        # Lazy: src/data/ is excluded from this package's pylint gate (see
+        # CLAUDE.md's `pylint src/cli.py ... src/builders src/interfaces
+        # src/hpc` command list -- src/data is not in it and is linted ad
+        # hoc), so this method defers the cross-boundary import to the one
+        # call site that needs it rather than making it a hard module-level
+        # dependency of the gated builders package on an unlinted one.
+        # pylint: disable-next=import-outside-toplevel
         from ...data.provenance import (ProvenanceRecord, sha256_file,
                                        write_provenance)
 
         try:
+            # check=False: git absence/failure must not abort the build --
+            # caught below and recorded as 'unknown'/clean, not raised.
             git_commit = subprocess.run(
                 ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
-                cwd=Path(__file__).parent, timeout=10,
+                cwd=Path(__file__).parent, timeout=10, check=False,
             ).stdout.strip() or 'unknown'
             git_dirty = bool(subprocess.run(
                 ['git', 'status', '--porcelain'], capture_output=True,
-                text=True, cwd=Path(__file__).parent, timeout=10,
+                text=True, cwd=Path(__file__).parent, timeout=10, check=False,
             ).stdout.strip())
         except Exception:  # pylint: disable=broad-except
             git_commit, git_dirty = 'unknown', False

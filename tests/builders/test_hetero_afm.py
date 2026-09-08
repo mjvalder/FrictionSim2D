@@ -74,7 +74,7 @@ def test_replicated_data_has_no_pair_coeffs(tmp_path):
     cfg = SheetOnSheetSimulationConfig(**raw, settings=load_settings())
     stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
     out = tmp_path / "hetero_rep.data"
-    replicate_hetero_in_plane(stack.data_path, out, 2, 2, cfg.settings)
+    replicate_hetero_in_plane(stack.data_path, out, 2, 2)
     text = out.read_text()
     assert "Pair Coeffs" not in text          # written nocoeff
     assert "Atoms" in text

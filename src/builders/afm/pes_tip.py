@@ -5,10 +5,7 @@ Split out of the former ``builders/pes_scan.py``. The sheet-family scan lives in
 in ``builders/pes_common.py``.
 """
 import logging
-from typing import Dict, List, Optional, Union
 
-from ...potentials.manager import PotentialManager
-from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN
 from ..construction.hetero_stack import detect_inplane_repeat
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period

@@ -16,7 +16,9 @@ import numpy as np
 
 from src.builders.construction import components
 from src.builders.afm import AFMSimulation
-from src.builders.construction.hetero_stack import build_hetero_structure, register_sheet_block
+from src.builders.construction.hetero_stack import (
+    build_hetero_structure, register_sheet_block, _run_lammps,
+)
 from src.builders.afm.indent import IndentSimulation
 from src.potentials.manager import PotentialManager
 from src.builders.utils.lammps_data import get_model_dimensions
@@ -37,7 +39,7 @@ def compute_replication_factors(lx: float, ly: float, tip_r: float) -> tuple[int
     return nx, ny
 
 
-def replicate_hetero_in_plane(data_path, out_path, nx: int, ny: int, settings) -> Path:
+def replicate_hetero_in_plane(data_path, out_path, nx: int, ny: int) -> Path:
     """Replicate the coincidence cell ``nx*ny`` in-plane; write ``nocoeff``.
 
     Runs a tiny headless LAMMPS script (``read_data`` -> ``replicate nx ny 1`` ->
@@ -46,8 +48,6 @@ def replicate_hetero_in_plane(data_path, out_path, nx: int, ny: int, settings) -
     round-tripped so the written file is uniformly ``nocoeff``. Reused by D5 for
     finite-patch sizing.
     """
-    from src.builders.construction.hetero_stack import _run_lammps
-
     data_path, out_path = Path(data_path), Path(out_path)
     workdir = out_path.parent
     workdir.mkdir(parents=True, exist_ok=True)
@@ -67,7 +67,7 @@ def replicate_hetero_in_plane(data_path, out_path, nx: int, ny: int, settings) -
 def _read_data_masses(data_path) -> list[float]:
     """Return the ``Masses`` section values of a LAMMPS data file, in type order."""
     masses: dict[int, float] = {}
-    lines = Path(data_path).read_text().splitlines()
+    lines = Path(data_path).read_text(encoding='utf-8').splitlines()
     in_masses = False
     for line in lines:
         stripped = line.split("#", 1)[0].strip()
@@ -99,7 +99,7 @@ def _read_settings_masses(settings_path) -> list[float]:
     layout guard can compare element identity even for the edge-typed file.
     """
     masses: dict[int, float] = {}
-    for line in Path(settings_path).read_text().splitlines():
+    for line in Path(settings_path).read_text(encoding='utf-8').splitlines():
         stripped = line.split("#", 1)[0].strip()
         if not stripped.startswith("mass"):
             continue
@@ -236,6 +236,19 @@ class HeteroAFMSimulation(AFMSimulation):
     #: Run-phase template — unchanged from AFMSimulation; explicit for clarity.
     SLIDE_TEMPLATE = "afm/slide.lmp"
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Hetero build products/caches, populated by _build_hetero_sheet()
+        # during build() -- see that method's docstring for what each holds.
+        # Always read back only after build() has run, so a None default
+        # here is behaviour-neutral (nothing distinguishes "not yet built"
+        # from a stored None).
+        self._hetero_stack = None
+        self._hetero_coincidence_cell = None
+        self._hetero_rep_path = None
+        self._hetero_rep_box = None
+        self._hetero_replication = None
+
     def _material_id(self) -> str:
         """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
         in the numeric ``[2D-N]`` order the config fold already preserves,
@@ -293,7 +306,7 @@ class HeteroAFMSimulation(AFMSimulation):
         nx, ny = compute_replication_factors(lx_cell, ly_cell, self.config.tip.r)
 
         rep = build_dir / "hetero_rep.data"
-        replicate_hetero_in_plane(stack.data_path, rep, nx, ny, self.config.settings)
+        replicate_hetero_in_plane(stack.data_path, rep, nx, ny)
 
         dims = get_model_dimensions(rep)
         lx = float(dims["xhi"]) - float(dims["xlo"])
@@ -479,9 +492,9 @@ class HeteroAFMSimulation(AFMSimulation):
                 pm.add_cross_interaction('sub', name)
             pm.add_cross_interaction('tip', name)
         # every distinct material pair at the interface
-        for i in range(len(sheet_names)):
-            for j in range(i + 1, len(sheet_names)):
-                pm.add_cross_interaction(sheet_names[i], sheet_names[j])
+        for i, name_i in enumerate(sheet_names):
+            for name_j in sheet_names[i + 1:]:
+                pm.add_cross_interaction(name_i, name_j)
 
         settings_path = self.output_dir_layer[n_sheet_layers] / "lammps" / "system.in.settings"
         pm.write_file(settings_path)
@@ -539,6 +552,10 @@ class FiniteHeteroAFMSimulation(HeteroAFMSimulation):
         # kept single-sourced through register_sheet_block so they cannot diverge.
         self._sheet_regions = [None, 'edge']
         self._finite = True
+        # Recorded by _generate_potentials() during build() -- see its
+        # docstring. Nothing reads this before build() runs, so a None
+        # default here is behaviour-neutral.
+        self._pm = None
 
     def _generate_potentials(self, n_sheet_layers):
         """D2 sub/tip/sheet_1/sheet_2 registration, exposing the single PM.
@@ -646,4 +663,3 @@ class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
       sharing material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-BN``) get
       distinct job names, seeds, and manifest keys instead of colliding.
     """
-
