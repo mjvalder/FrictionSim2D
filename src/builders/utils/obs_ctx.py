@@ -156,8 +156,7 @@ def build_obs_ctx(
     return {
         'compute_lines': compute_lines,
         'variable_lines': variable_lines,
-        'window_args': '{} {} {}'.format(
-            TIER_ARGS['window'][0], TIER_ARGS['window'][1], results_freq),
+        'window_args': f"{TIER_ARGS['window'][0]} {TIER_ARGS['window'][1]} {results_freq}",
         'emit_window': bool(enabled_tiers.get('window', True)) and bool(window_varlist),
         'emit_raw': bool(enabled_tiers.get('raw', True)) and bool(raw_varlist),
         'emit_peratom': bool(enabled_tiers.get('peratom', True)) and bool(peratom_varlist),

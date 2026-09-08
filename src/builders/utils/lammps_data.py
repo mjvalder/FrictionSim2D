@@ -7,9 +7,8 @@ filed under core/utils/structures.py next to cifread -- they read LAMMPS data
 files, not structure files, and use no ASE.
 """
 import logging
-import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from ...core.utils.tokens import _is_int_token  # noqa: PLC2701
 
