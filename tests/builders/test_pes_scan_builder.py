@@ -1,5 +1,6 @@
 """Tests for the static PES-scan builders (src/builders/pes_scan.py)."""
 
+import math
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,23 @@ def test_cell_period_and_tile_count():
 def test_cell_period_missing_raises():
     with pytest.raises(ValueError, match="unit-cell"):
         _cell_period({}, "x")
+
+
+def test_cell_period_pinned_to_a_real_hexagonal_cell():
+    # h-MoS2's own lattice constant (examples/materials/h-MoS2.cif), orthogonalized
+    # the way this codebase's own hex-to-orthogonal conversions scale y by sqrt(3)
+    # (src/builders/construction/components.py:156,220,225-226). Pins _cell_period's
+    # arithmetic against a physically real cell rather than an arbitrary synthetic one.
+    a = 3.1840664646845926
+    unit_cell = {"xlo": 0.0, "xhi": a, "ylo": 0.0, "yhi": a * math.sqrt(3)}
+    assert _cell_period(unit_cell, "x") == pytest.approx(a)
+    assert _cell_period(unit_cell, "y") == pytest.approx(a * math.sqrt(3))
+
+
+def test_cell_period_rejects_a_non_positive_period():
+    unit_cell = {"xlo": 5.0, "xhi": 5.0}
+    with pytest.raises(ValueError, match="Non-positive"):
+        _cell_period(unit_cell, "x")
 
 
 # --- PESSheetSimulation ----------------------------------------------------

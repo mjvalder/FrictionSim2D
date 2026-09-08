@@ -9,6 +9,8 @@ from pathlib import Path
 
 from src.builders.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
 from src.builders.utils.lammps_data import get_model_dimensions
+from src.builders.utils.lammps_data import (
+    _is_lammps_section_header, get_num_atom_types, shift_atoms_to_z_zero)
 
 
 class TestGetModelDimensions:
@@ -195,4 +197,184 @@ Velocities
 
         assert "Atoms # molecular" in content
         assert "1 0 1 0.0 0.0 0.0 1 -1 2" in content
+        path.unlink()
+
+
+class TestIsLammpsSectionHeader:
+    """Direct branch coverage for the section-header/data-line classifier.
+
+    Exercised only indirectly by the conversion tests above (whose fixtures
+    never hit the empty-line or comment-line branches), so covered here
+    directly instead.
+    """
+
+    def test_empty_string_is_not_a_header(self):
+        assert _is_lammps_section_header('') is False
+
+    def test_comment_line_is_not_a_header(self):
+        assert _is_lammps_section_header('# a comment') is False
+
+    def test_digit_leading_line_is_not_a_header(self):
+        assert _is_lammps_section_header('1 1 0.0 0.0 0.0') is False
+
+    def test_signed_or_decimal_leading_line_is_not_a_header(self):
+        assert _is_lammps_section_header('-1.5 2 3') is False
+        assert _is_lammps_section_header('+1.5 2 3') is False
+        assert _is_lammps_section_header('.5 2 3') is False
+
+    def test_letter_leading_line_is_a_header(self):
+        assert _is_lammps_section_header('Velocities') is True
+
+
+class TestMalformedAtomLinesArePreserved:
+    """A too-short Atoms line can't be converted, so it is left untouched.
+
+    _to_charge/_to_atomic/_to_molecular all return None for a line with too
+    few fields; _convert_atoms_style then writes the raw line back verbatim
+    instead of the transformed one. None of the existing fixtures exercise
+    this -- every atom line in them has enough fields to convert.
+    """
+
+    def test_atomic2charge_preserves_a_short_line(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 2 atoms
+
+Atoms # atomic
+
+1 1 0.0
+2 2 1.0 1.0 1.0
+""")
+            path = Path(f.name)
+        atomic2charge(path)
+        content = path.read_text(encoding='utf-8')
+        assert "1 1 0.0\n" in content  # too short to convert: unchanged
+        assert "2 2 0.0 1.0 1.0 1.0" in content  # well-formed: converted
+        path.unlink()
+
+    def test_charge2atom_preserves_a_short_line(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 2 atoms
+
+Atoms # charge
+
+1 1 -0.1
+2 2 0.2 1.0 1.0 1.0
+""")
+            path = Path(f.name)
+        charge2atom(path)
+        content = path.read_text(encoding='utf-8')
+        assert "1 1 -0.1\n" in content
+        assert "2 2 1.0 1.0 1.0" in content
+        path.unlink()
+
+    def test_atomic2molecular_preserves_a_short_line(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 2 atoms
+
+Atoms # atomic
+
+1 1 0.0
+2 2 1.0 1.0 1.0
+""")
+            path = Path(f.name)
+        atomic2molecular(path)
+        content = path.read_text(encoding='utf-8')
+        assert "1 1 0.0\n" in content
+        assert "2 0 2 1.0 1.0 1.0" in content
+        path.unlink()
+
+
+class TestShiftAtomsToZZero:
+    """Cover the two early-exit branches and both unparsable-z guards."""
+
+    def test_no_atom_lines_is_a_no_op(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 0 atoms
+
+Atoms
+
+""")
+            path = Path(f.name)
+        before = path.read_text(encoding='utf-8')
+        shift_atoms_to_z_zero(path)
+        after = path.read_text(encoding='utf-8')
+        assert after == before  # z_values empty -> early return
+        path.unlink()
+
+    def test_already_at_zero_is_a_no_op(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 2 atoms
+
+Atoms
+
+1 1 0.0 0.0 0.0
+2 2 1.0 1.0 0.0
+""")
+            path = Path(f.name)
+        before = path.read_text(encoding='utf-8')
+        shift_atoms_to_z_zero(path)
+        after = path.read_text(encoding='utf-8')
+        assert after == before  # z_min already 0 -> early return
+        path.unlink()
+
+    def test_unparsable_z_is_skipped_in_both_passes(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 2 atoms
+
+      0.0      10.0  zlo zhi
+
+Atoms
+
+1 1 0.0 0.0 abc
+2 2 1.0 1.0 5.0
+""")
+            path = Path(f.name)
+        shift_atoms_to_z_zero(path)
+        content = path.read_text(encoding='utf-8')
+        assert "1 1 0.0 0.0 abc" in content  # unparsable z: left untouched
+        assert "2  2  1.0  1.0  0.000000000000000" in content  # shifted to 0
+        path.unlink()
+
+
+class TestGetModelDimensionsMalformedLine:
+
+    def test_unparsable_dimension_line_logs_a_warning_and_leaves_it_none(self, caplog):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 1 atoms
+ abc def xlo xhi
+ 0.0 10.0 ylo yhi
+ 0.0 10.0 zlo zhi
+
+Atoms
+
+1 1 0.0 0.0 0.0
+""")
+            path = Path(f.name)
+        dims = get_model_dimensions(path)
+        assert dims['xlo'] is None
+        assert dims['ylo'] == 0.0
+        assert "Failed to parse dimension line" in caplog.text
+        path.unlink()
+
+
+class TestGetNumAtomTypes:
+
+    def test_defaults_to_one_when_no_header_present(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.lmp', delete=False) as f:
+            f.write("""LAMMPS data file
+ 1 atoms
+
+Atoms
+
+1 1 0.0 0.0 0.0
+""")
+            path = Path(f.name)
+        assert get_num_atom_types(path) == 1
         path.unlink()
