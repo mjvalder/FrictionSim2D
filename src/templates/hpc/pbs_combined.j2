@@ -55,8 +55,13 @@ fi
 # immediately before the crash -- and until this runs that log exists only in
 # scratch.
 save_run_log() {
+    # Best-effort: losing a log must never fail a run that finished. It must
+    # not pass in silence either -- a full disk or a permissions problem here
+    # loses exactly the log the enrichment step and any post-mortem need, and
+    # the only trace would have been a provenance.json that stayed empty.
     mkdir -p "$PBS_O_WORKDIR/${SIM_PATH}/lammps"
-    cp "$1" "$PBS_O_WORKDIR/${SIM_PATH}/lammps/" 2>/dev/null || true
+    cp "$1" "$PBS_O_WORKDIR/${SIM_PATH}/lammps/" \
+        || echo "warning: could not save run log '$1' to $PBS_O_WORKDIR/${SIM_PATH}/lammps/" >&2
 }
 {% else %}
 # No scratch: the log is already being written in its final place.

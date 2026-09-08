@@ -261,7 +261,12 @@ def test_the_log_rescue_helper_copies_out_of_scratch_only_under_tmpdir(
     scratch = _render_all(tmp_path / "scratch", use_tmpdir=True)[(scheduler, shape)]
 
     assert f'mkdir -p "{workdir}/${{SIM_PATH}}/lammps"' in scratch
-    assert f'cp "$1" "{workdir}/${{SIM_PATH}}/lammps/" 2>/dev/null || true' in scratch
+    assert f'cp "$1" "{workdir}/${{SIM_PATH}}/lammps/" \\' in scratch
+    # The rescue is best-effort but not silent: a failed copy says so instead of
+    # leaving an empty provenance.json as the only trace (behaviour pinned by
+    # test_an_unwritable_log_destination_warns_without_failing_the_job below).
+    assert (f'|| echo "warning: could not save run log \'$1\' to '
+            f'{workdir}/${{SIM_PATH}}/lammps/" >&2') in scratch
     assert "save_run_log() { :; }" in plain
     assert "save_run_log() { :; }" not in scratch
 
@@ -320,12 +325,14 @@ _STUB_FAILS_ON_SLIDE = _STUB_HEAD + 'case "$*" in *slide.in*) exit 1;; esac\nexi
 
 
 def _run_rendered(base: Path, scheduler: str, shape: str, use_tmpdir: bool,
-                  stub: str):
+                  stub: str, before_run=None):
     """Render a job script into a fake submit dir and execute it.
 
     Returns (CompletedProcess, sorted run*.log names left in the workdir).
     `mpi_command` is emptied so only `lmp` needs stubbing, and `module` is
-    stubbed to a no-op since no module system exists here.
+    stubbed to a no-op since no module system exists here. `before_run` is
+    called with `base` after everything is staged and before the script runs,
+    for tests that need to break the workdir first.
     """
     workdir = base / "submit_root"
     lammps = workdir / _SIM_REL / "lammps"
@@ -353,6 +360,9 @@ def _run_rendered(base: Path, scheduler: str, shape: str, use_tmpdir: bool,
     (stub_bin / "module").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
     for name in ("lmp", "module"):
         (stub_bin / name).chmod(0o755)
+
+    if before_run is not None:
+        before_run(base)
 
     env = dict(os.environ, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}")
     env["PBS_O_WORKDIR" if scheduler == "pbs" else "SLURM_SUBMIT_DIR"] = str(workdir)
@@ -413,6 +423,46 @@ def test_a_combined_phase_two_failure_preserves_both_phase_logs(
 
     assert proc.returncode != 0
     assert logs == ["run_slide.log", "run_system.log"], logs
+
+
+@pytest.mark.parametrize("scheduler, shape", [
+    (scheduler, shape) for scheduler in ("pbs", "slurm")
+    for shape in ("array", "combined")])
+def test_an_unwritable_log_destination_warns_without_failing_the_job(
+        tmp_path, scheduler, shape):
+    """The rescue's two halves, proven by running the script with the run's
+    `lammps/` directory made unwritable: it names the log it could not save,
+    and it still does not fail a run that otherwise finished.
+
+    Silence is the bad outcome the warning exists to prevent -- the log the
+    enrichment step reads is gone, and the only symptom would be a
+    provenance.json that never gained its RAMP_STATUS fields.
+
+    `use_tmpdir` only: without scratch the helper is `{ :; }` and copies
+    nothing. Note the scratch copy is made with `rsync -a`, so the read-only
+    mode travels with it and the log cannot be written at either end -- which
+    is what a permissions problem on a real cluster looks like too.
+    """
+    _require_execution_tools()
+    if os.geteuid() == 0:
+        pytest.skip("root ignores the directory mode this test relies on")
+
+    sealed = tmp_path / "submit_root" / _SIM_REL / "lammps"
+    proc, logs = _run_rendered(tmp_path, scheduler, shape, True, _STUB_SUCCEEDS,
+                               before_run=lambda _base: sealed.chmod(0o500))
+    sealed.chmod(0o755)          # so tmp_path cleanup can remove it
+
+    output = proc.stdout + proc.stderr
+    warnings = [line for line in output.splitlines()
+                if "warning: could not save run log" in line]
+    assert warnings, output
+    assert any("run_system.log" in line for line in warnings), warnings
+    # Still a successful job: the rescue never changes the exit status.
+    assert proc.returncode == 0, output
+    assert "Simulation completed successfully" in proc.stdout
+    # The rescue really did fail -- otherwise the warning would be about a copy
+    # that actually worked.
+    assert logs == [], logs
 
 
 @pytest.mark.parametrize("scheduler, shape, use_tmpdir", _EXECUTION_MATRIX)
