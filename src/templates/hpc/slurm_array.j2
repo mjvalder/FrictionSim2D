@@ -69,8 +69,15 @@ cd $SCRATCH
 cd $SLURM_SUBMIT_DIR
 {% endif %}
 
-{{ mpi_command }} lmp {{ lmp_flags }} -in ${SCRIPT_PATH}
-if [ $? -ne 0 ]; then
+# Tee stdout to a per-run log next to the input script: lmp_flags is "-l none",
+# so LAMMPS writes no log of its own, and the settle loop's RAMP_STATUS /
+# UNLOADED_REF lines would otherwise reach only the scheduler's spool file --
+# which this job cannot read back to enrich provenance.json below.
+# LMP_STATUS captures ${PIPESTATUS[0]} because $? is now tee's status, which is
+# 0 even when LAMMPS died: testing it would turn every failure into a success.
+{{ mpi_command }} lmp {{ lmp_flags }} -in ${SCRIPT_PATH} | tee ${SIM_PATH}/lammps/run.log
+LMP_STATUS=${PIPESTATUS[0]}
+if [ ${LMP_STATUS} -ne 0 ]; then
     echo "Error: LAMMPS failed on ${SCRIPT_PATH}"
     exit 1
 fi
@@ -80,6 +87,20 @@ mkdir -p "$SLURM_SUBMIT_DIR/${SIM_PATH}"
 cp -r ${SIM_PATH}/results ${SIM_PATH}/visuals ${SIM_PATH}/data "$SLURM_SUBMIT_DIR/${SIM_PATH}/"
 # Persist indentation load states so a dependent slide phase (AFM) can read them.
 cp ${SIM_PATH}/load_*.data "$SLURM_SUBMIT_DIR/${SIM_PATH}/" 2>/dev/null || true
+# The run log is written in scratch too; without this copy-back the
+# RAMP_STATUS lines die with the scratch directory.
+mkdir -p "$SLURM_SUBMIT_DIR/${SIM_PATH}/lammps"
+cp ${SIM_PATH}/lammps/run.log "$SLURM_SUBMIT_DIR/${SIM_PATH}/lammps/" 2>/dev/null || true
 {% endif %}
+
+# Fold the settle loop's RAMP_STATUS/UNLOADED_REF lines into this run's
+# provenance.json, against the final (workdir) copy rather than the scratch one.
+# Guarded by `command -v` and `|| true` deliberately: a compute node without
+# FrictionSim2D installed, or a run with no settle loop at all, must still
+# finish green -- provenance enrichment is a nicety, never a reason to report a
+# completed simulation as failed.
+if command -v FrictionSim2D >/dev/null 2>&1; then
+    FrictionSim2D hpc enrich-provenance "$SLURM_SUBMIT_DIR/${SIM_PATH}" "$SLURM_SUBMIT_DIR/${SIM_PATH}/lammps/run.log" || true
+fi
 
 echo "Simulation completed successfully: ${SIM_PATH}"
