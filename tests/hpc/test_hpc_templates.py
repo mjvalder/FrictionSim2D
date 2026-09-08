@@ -100,9 +100,12 @@ _TEE_TARGETS = {
 #: The second argument of the enrichment call, per shape.
 _ENRICH_LOG_ARG = {
     # Each task enriches from its own log: the system task's holds RAMP_STATUS
-    # and drives the real merge, the slide task's holds none and leaves the
-    # record untouched (see test_a_slide_phase_log_does_not_undo... in
-    # tests/cli/test_cli_hpc_group.py, which proves the no-op is harmless).
+    # and records the settle result. The slide task's call is not inert -- its
+    # log's LAMMPS banner still rewrites the record's lammps_version -- but it
+    # cannot disturb the ramp fields, since the merge only touches keys the log
+    # supplied. See
+    # test_a_slide_phase_log_cannot_disturb_the_system_phase_s_settle_result
+    # in tests/cli/test_cli_hpc_group.py.
     "array": '"{workdir}/${{LOG_PATH}}"',
     # One task, two logs -- enrich from the system one, the only RAMP_STATUS
     # source.

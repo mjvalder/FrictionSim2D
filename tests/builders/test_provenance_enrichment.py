@@ -134,7 +134,19 @@ def test_enrich_missing_provenance_returns_none_and_warns(tmp_path, caplog):
     assert any("No provenance.json" in rec.message for rec in caplog.records)
 
 
-def test_enrich_no_matching_lines_leaves_provenance_unchanged(tmp_path):
+def test_a_log_with_no_recognisable_lines_leaves_provenance_untouched(tmp_path):
+    """The early-return branch: `parse_log_extras` found nothing at all, so the
+    record is not rewritten.
+
+    This is a defensive branch, not a shape production produces: every real
+    LAMMPS run opens with a `LAMMPS (<version>)` banner, which alone is enough
+    to return an update. A slide-phase log therefore *does* rewrite the record
+    (with a version) -- what protects the system phase's settle result is the
+    merge only touching keys the log supplied, not this branch. See the test
+    below, and
+    test_a_slide_phase_log_cannot_disturb_the_system_phase_s_settle_result
+    in tests/cli/test_cli_hpc_group.py.
+    """
     builder = _builder(tmp_path)
     layer_dir = _built_layer_dir(builder, tmp_path)
     before = (layer_dir / "provenance.json").read_text(encoding="utf-8")
@@ -187,3 +199,38 @@ def test_enrich_provenance_missing_required_fields_returns_none(tmp_path):
     )
 
     assert enrich_provenance_post_run(layer_dir, log_path) is None
+
+
+def test_a_realistic_slide_log_rewrites_only_the_version(tmp_path):
+    """Companion to the branch test above, with a production-shaped log.
+
+    A slide phase prints the version banner like every other run, so this does
+    reach `write_provenance` -- and must still leave the system phase's fields
+    exactly as they were.
+    """
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+
+    system_log = _write_log(
+        tmp_path, "log_system.lammps",
+        "LAMMPS (2 Aug 2023 - Update 3)\n"
+        "# UNLOADED_REF layer=1 z=15.5\n"
+        "# RAMP_STATUS converged=0 r=1.62 iterations=100\n")
+    enrich_provenance_post_run(layer_dir, system_log)
+    settled = json.loads(
+        (layer_dir / "provenance.json").read_text(encoding="utf-8"))
+
+    slide_log = _write_log(
+        tmp_path, "log_slide.lammps",
+        "LAMMPS (21 Nov 2023)\n"
+        "Step Temp E_pair\n     0   300   -1.5\n"
+        "Total wall time: 0:12:34\n")
+    result = enrich_provenance_post_run(layer_dir, slide_log)
+
+    assert result == layer_dir / "provenance.json"
+    after = json.loads(result.read_text(encoding="utf-8"))
+    for field in ("ramp_converged", "ramp_r", "ramp_iterations",
+                  "unloaded_reference_z"):
+        assert after[field] == settled[field], field
+    # The one field a later log does take over, documented as accepted.
+    assert after["lammps_version"] == "21 Nov 2023"

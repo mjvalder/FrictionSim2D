@@ -62,6 +62,17 @@ def enrich_provenance_post_run(output_root: Path,
     whole ``AFMSimulationConfig`` (re-parsing the .ini and settings.yaml) just
     to reach it.
 
+    Calling this repeatedly, with different logs from the same run, is safe:
+    the merge is a ``model_copy(update=...)``, so a log only ever sets the keys
+    it actually supplied and no earlier field is dropped. That matters because
+    a slide-phase log is *not* inert -- every real LAMMPS run opens with a
+    ``LAMMPS (<version>)`` banner, so passing one still rewrites the record
+    with a ``lammps_version``; what it cannot do is disturb the ramp fields the
+    system phase wrote. One known consequence: when the two phases ran against
+    different LAMMPS builds, the last log passed wins the ``lammps_version``
+    field. That is accepted -- both phases belong to the same run, and a single
+    version string cannot describe a mixed pair anyway.
+
     Returns the provenance.json path, or ``None`` if the record or the log is
     missing, or the record on disk is unreadable (logged, not raised: a run's
     real output must never be hidden behind a failed enrichment).

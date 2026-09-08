@@ -173,6 +173,18 @@ def test_missing_modules_is_blocked_before_anything_is_written(runner, tmp_path)
 # call once LAMMPS has finished. Asserts on the JSON on disk, not on a mock.
 # ---------------------------------------------------------------------------
 
+#: Every real LAMMPS run opens with a `LAMMPS (<version>)` banner, so a
+#: fixture without one cannot occur in production -- and leaving it out is what
+#: made a slide-phase log look inert when it is not: the banner alone is enough
+#: for parse_log_extras to return an update and rewrite the record.
+_CONVERGED_LOG = ("LAMMPS (2 Aug 2023 - Update 3)\n"
+                  "# UNLOADED_REF layer=1 z=15.5\n"
+                  "# RAMP_STATUS converged=1 r=0.042 iterations=17\n")
+_SLIDE_LOG = ("LAMMPS (2 Aug 2023 - Update 3)\n"
+              "Step Temp E_pair\n     0   300   -1.5\n"
+              "Total wall time: 0:12:34\n")
+
+
 def _run_dir_with_provenance(tmp_path: Path) -> Path:
     """A minimal but real simulation dir: provenance.json + lammps/."""
     from src.data.provenance import ProvenanceRecord, write_provenance
@@ -256,46 +268,91 @@ def test_enrich_provenance_exits_zero_when_the_run_dir_does_not_exist(runner, tm
     assert result.output.startswith("skipped ")
 
 
-def test_enrich_provenance_says_so_when_the_log_holds_no_settle_lines(runner, tmp_path):
+def test_re_reading_the_same_log_reports_unchanged(runner, tmp_path):
+    """The 'unchanged' outcome is what a repeat pass over an already-swept tree
+    produces: the same log yields the same values, so the record's bytes do not
+    move. (A log with no recognisable lines at all would also land here, but
+    that is not a shape a real run produces -- every run prints its version.)
+    """
     run_dir = _run_dir_with_provenance(tmp_path)
-    log_path = run_dir / "lammps" / "run.log"
-    log_path.write_text("Total wall time: 0:00:01\n", encoding="utf-8")
-    before = (run_dir / "provenance.json").read_text(encoding="utf-8")
+    log_path = run_dir / "lammps" / "run_system.log"
+    log_path.write_text(_CONVERGED_LOG, encoding="utf-8")
+
+    first = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                str(run_dir), str(log_path)])
+    assert first.output.startswith("enriched "), first.output
+    enriched = (run_dir / "provenance.json").read_text(encoding="utf-8")
 
     result = runner.invoke(cli, ["hpc", "enrich-provenance",
                                  str(run_dir), str(log_path)])
 
     assert result.exit_code == 0, result.output
     assert "unchanged" in result.output
-    assert (run_dir / "provenance.json").read_text(encoding="utf-8") == before
+    assert (run_dir / "provenance.json").read_text(encoding="utf-8") == enriched
 
 
-def test_a_slide_phase_log_does_not_undo_an_already_enriched_record(runner, tmp_path):
+def test_a_slide_phase_log_cannot_disturb_the_system_phase_s_settle_result(
+        runner, tmp_path):
     """The two-phase array workflow calls this once per task, each with its own
-    log: the system task's log carries RAMP_STATUS and does the real merge, and
-    the slide task -- which runs afterwards, on the same simulation directory --
-    is handed a slide log with no settle-loop lines. That second call must be a
-    no-op on the record, not a reset of the fields the first one wrote."""
+    log: the system task records the settle result, then the slide task -- same
+    simulation directory, later -- is handed a slide log.
+
+    That second call is *not* a no-op. Every real LAMMPS run opens with a
+    `LAMMPS (<version>)` banner, so parse_log_extras returns a
+    `lammps_version` update and the record is rewritten. What it cannot do is
+    lose anything: the merge is a `model_copy(update=...)`, which only touches
+    the keys the log supplied. This uses two different LAMMPS versions so the
+    rewrite is visible, and pins the documented consequence -- the later log
+    wins `lammps_version` -- alongside the property that matters, that the
+    ramp fields survive it untouched.
+    """
     run_dir = _run_dir_with_provenance(tmp_path)
     system_log = run_dir / "lammps" / "run_system.log"
-    system_log.write_text("# RAMP_STATUS converged=0 r=1.62 iterations=100\n",
+    system_log.write_text("LAMMPS (2 Aug 2023 - Update 3)\n"
+                          "# UNLOADED_REF layer=1 z=15.5\n"
+                          "# RAMP_STATUS converged=0 r=1.62 iterations=100\n",
                           encoding="utf-8")
     slide_log = run_dir / "lammps" / "run_slide.log"
-    slide_log.write_text("Step Temp E_pair\n     0   300   -1.5\n"
+    slide_log.write_text("LAMMPS (21 Nov 2023)\n"
+                         "Step Temp E_pair\n     0   300   -1.5\n"
                          "Total wall time: 0:12:34\n", encoding="utf-8")
 
     first = runner.invoke(cli, ["hpc", "enrich-provenance",
                                 str(run_dir), str(system_log)])
     assert first.exit_code == 0, first.output
-    enriched = (run_dir / "provenance.json").read_text(encoding="utf-8")
-    assert json.loads(enriched)["ramp_converged"] is False
+    settled = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
+    assert settled["ramp_converged"] is False
 
     second = runner.invoke(cli, ["hpc", "enrich-provenance",
                                  str(run_dir), str(slide_log)])
 
     assert second.exit_code == 0, second.output
-    assert "unchanged" in second.output
-    assert (run_dir / "provenance.json").read_text(encoding="utf-8") == enriched
+    after = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
+    # The settle result -- the whole reason this command exists -- is intact.
+    for field in ("ramp_converged", "ramp_r", "ramp_iterations",
+                  "unloaded_reference_z"):
+        assert after[field] == settled[field], field
+    # ...and the record really was rewritten, rather than left alone.
+    assert after["lammps_version"] == "21 Nov 2023"
+    assert second.output.startswith("enriched ")
+
+
+def test_a_fresh_record_is_enriched_even_by_a_slide_only_log(runner, tmp_path):
+    """A run whose only log is a slide log still gains its LAMMPS version, and
+    still gains no settle fields -- nothing is invented from a log that never
+    printed RAMP_STATUS."""
+    run_dir = _run_dir_with_provenance(tmp_path)
+    slide_log = run_dir / "lammps" / "run_slide.log"
+    slide_log.write_text(_SLIDE_LOG, encoding="utf-8")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(run_dir), str(slide_log)])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
+    assert data["lammps_version"] == "2 Aug 2023 - Update 3"
+    assert data["ramp_converged"] is None
+    assert data["ramp_iterations"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -303,12 +360,6 @@ def test_a_slide_phase_log_does_not_undo_an_already_enriched_record(runner, tmp_
 # is not installed on the cluster, so the job script's guarded call is a no-op
 # and the merge happens here, over a whole rsynced-back tree, in one command.
 # ---------------------------------------------------------------------------
-
-_CONVERGED_LOG = ("LAMMPS (2 Aug 2023 - Update 3)\n"
-                  "# UNLOADED_REF layer=1 z=15.5\n"
-                  "# RAMP_STATUS converged=1 r=0.042 iterations=17\n")
-_SLIDE_LOG = "Step Temp E_pair\n     0   300   -1.5\nTotal wall time: 0:12:34\n"
-
 
 def _run_dir(root: Path, rel: str, *, provenance: bool = True,
              logs: Optional[dict] = None) -> Path:
@@ -347,33 +398,55 @@ def _mixed_tree(tmp_path: Path) -> tuple:
     return root, good, slide_only, no_record
 
 
-def test_recursive_sweep_enriches_every_run_it_can_and_tallies_the_rest(
+def _outcomes(output: str) -> dict:
+    """Parse the sweep's per-directory lines into {relative path: outcome}."""
+    parsed = {}
+    for line in output.splitlines():
+        head, sep, _ = line.partition(":")
+        outcome, _, path = head.partition(" ")
+        if sep and outcome in ("enriched", "unchanged", "skipped") and path:
+            parsed[path] = outcome
+    return parsed
+
+
+def test_recursive_sweep_enriches_every_run_it_can_and_reports_the_rest(
         runner, tmp_path):
+    """The realistic mix: a run with a system log, a run whose only log is a
+    slide log, and a run with no provenance.json at all.
+
+    The slide-only run is 'enriched' rather than 'unchanged' -- its record had
+    no lammps_version and the log's banner supplies one. What it must *not*
+    gain is a settle result invented out of a log that never printed one.
+    """
     root, good, slide_only, no_record = _mixed_tree(tmp_path)
 
     result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root)])
 
     assert result.exit_code == 0, result.output
 
-    # The run with a system log gets the real merge...
+    # The run with a system log gets the settle result.
     data = json.loads((good / "provenance.json").read_text(encoding="utf-8"))
     assert data["ramp_converged"] is True
     assert data["ramp_iterations"] == 17
     assert data["unloaded_reference_z"] == {"layer_1": 15.5}
 
-    # ...the slide-only run keeps its record untouched...
+    # The slide-only run gains its version and nothing it cannot know.
     slide_data = json.loads(
         (slide_only / "provenance.json").read_text(encoding="utf-8"))
+    assert slide_data["lammps_version"] == "2 Aug 2023 - Update 3"
     assert slide_data["ramp_converged"] is None
+    assert slide_data["ramp_iterations"] is None
+    assert slide_data["unloaded_reference_z"] is None
 
-    # ...and the run with no record is skipped, not crashed on.
+    # The run with no record is skipped, not crashed on.
     assert not (no_record / "provenance.json").exists()
 
-    assert "1 enriched, 1 unchanged, 1 skipped." in result.output
-    # One line per run directory, keyed by its path relative to the root.
-    assert "afm/h_MoS2/L1" in result.output
-    assert "afm/h_MoS2/L2" in result.output
-    assert "afm/t_CoTe2/L1" in result.output
+    assert _outcomes(result.output) == {
+        "afm/h_MoS2/L1": "enriched",
+        "afm/h_MoS2/L2": "enriched",
+        "afm/t_CoTe2/L1": "skipped",
+    }
+    assert "2 enriched, 0 unchanged, 1 skipped." in result.output
 
 
 def test_recursive_sweep_is_idempotent(runner, tmp_path):

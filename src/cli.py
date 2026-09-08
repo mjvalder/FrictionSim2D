@@ -500,9 +500,13 @@ def _resolve_run_log(sim_dir: Path) -> Tuple[Optional[Path], str]:
 
     Prefers ``lammps/run_system.log``: ``system*.in`` is the only phase that
     prints RAMP_STATUS, and that is the name the job scripts derive for it.
-    Falls back to a lone ``run*.log`` -- which covers a directory whose slide
-    phase is the only one that ran, and the fixed ``run.log`` an earlier
-    revision of the array templates wrote. Refuses to guess between several.
+    Falls back to a lone ``run*.log`` whatever it is called, because an
+    unambiguous directory needs no naming convention to be usable -- a
+    slide-only run, a log saved by hand, a future template that names its
+    phases differently. It is a tolerance, not a compatibility shim: no
+    released layout uses another name. Several logs with no ``run_system.log``
+    among them is the one case worth refusing, since picking the wrong one
+    would quietly record the wrong run's settle result.
 
     Returns ``(log_path, '')`` or ``(None, reason)``.
     """

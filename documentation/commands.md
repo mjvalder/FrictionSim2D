@@ -165,21 +165,35 @@ That prints one line per run directory and a closing tally:
 
 ```
 enriched afm/h_MoS2/L1: from run_system.log
-unchanged afm/h_MoS2/L2: no settle-loop lines in run_slide.log
+enriched afm/h_MoS2/L2: from run_slide.log
 skipped afm/t_CoTe2/L1: no run log in .../lammps
-1 enriched, 1 unchanged, 1 skipped.
+2 enriched, 0 unchanged, 1 skipped.
 ```
 
+A run whose only log is a slide log still reports `enriched`: every LAMMPS run
+opens with a `LAMMPS (<version>)` banner, so the record gains a
+`lammps_version` even when no settle-loop line is present. It gains nothing
+else — the merge only writes fields the log actually supplied, so a slide log
+can never invent, or overwrite, a settle result. `unchanged` is what a repeat
+pass over an already-swept tree reports.
+
 Run directories are found with the same discovery helper `hpc generate` uses,
-so the two commands always agree on what counts as a run. Re-running the sweep
-is safe: it re-reads the same logs and writes the same values.
+but the sweep is deliberately broader: `hpc generate` filters by the script
+names configured in `settings.yaml`, while the sweep accepts any directory with
+a `lammps/` holding an `.in` file. That is the right breadth after a run —
+directories the generator would have filtered out simply report `skipped`, at
+no cost. Re-running the sweep is safe: it re-reads the same logs and writes the
+same values.
 
 **Single-run mode.** `SIM_DIR` is the directory holding `provenance.json` (the
 parent of `lammps/`). `LOG_PATH` is optional — omitted, it defaults to
 `SIM_DIR/lammps/run_system.log`, falling back to the sole `run*.log` when that
 name is absent. Several logs with none named `run_system.log` are reported and
-skipped rather than guessed at. Pointing it at a slide log is harmless: no
-settle-loop lines, so the record is left exactly as it was.
+skipped rather than guessed at. Pointing it at a slide log is harmless: it can
+only re-record `lammps_version`, never touch the settle fields. (If the two
+phases ran against different LAMMPS builds, the last log passed wins that one
+field; both phases belong to the same run, so this is accepted rather than
+worked around.)
 
 The job scripts name each log after its input script (`run_system.log`,
 `run_slide.log`, and one per split for per-load/per-angle slide scripts), so
