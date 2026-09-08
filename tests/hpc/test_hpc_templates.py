@@ -81,12 +81,40 @@ def test_every_hpc_template_is_rendered_by_the_script_generator(tmp_path):
 # module-level `enrich_provenance_post_run`.
 # ---------------------------------------------------------------------------
 
-#: (template, per-run log name, the log the enrichment call must be given).
-_LOG_NAMES = {
-    "array": ("run.log", "run.log"),
-    # Only system.in emits RAMP_STATUS, so the combined script enriches from
-    # the system phase's log even though it writes two.
-    "combined": ("run_system.log", "run_system.log"),
+#: Per-shape expectations for the run log.
+#:
+#: The array template renders *both* phases of the two-phase workflow
+#: (`generate_two_phase_scripts` runs it once per manifest), and both tasks
+#: share one SIM_PATH -- so its log name is derived from the input script at
+#: run time (run_system.log / run_slide.log) rather than fixed, and the tee,
+#: the scratch copy-back and the enrichment argument all go through the same
+#: ${LOG_PATH} variable. The combined template runs both phases in one task and
+#: can name its two logs statically.
+_TEE_TARGETS = {
+    "array": ['| tee "${LOG_PATH}"'],
+    "combined": ['| tee ${LAMMPS_SIM_PATH}/lammps/run_system.log',
+                 '| tee ${LAMMPS_SIM_PATH}/lammps/run_slide.log'],
+}
+
+#: The second argument of the enrichment call, per shape.
+_ENRICH_LOG_ARG = {
+    # Each task enriches from its own log: the system task's holds RAMP_STATUS
+    # and drives the real merge, the slide task's holds none and leaves the
+    # record untouched (see test_a_slide_phase_log_does_not_undo... in
+    # tests/cli/test_cli_hpc_group.py, which proves the no-op is harmless).
+    "array": '"{workdir}/${{LOG_PATH}}"',
+    # One task, two logs -- enrich from the system one, the only RAMP_STATUS
+    # source.
+    "combined": '"{workdir}/${{SIM_PATH}}/lammps/run_system.log"',
+}
+
+#: The scratch copy-back line(s), per shape.
+_COPY_BACK = {
+    "array": ['cp "${{LOG_PATH}}" "{workdir}/${{SIM_PATH}}/lammps/" 2>/dev/null || true'],
+    "combined": ['cp ${{LAMMPS_SIM_PATH}}/lammps/run_system.log '
+                 '"{workdir}/${{SIM_PATH}}/lammps/" 2>/dev/null || true',
+                 'cp ${{LAMMPS_SIM_PATH}}/lammps/run_slide.log '
+                 '"{workdir}/${{SIM_PATH}}/lammps/" 2>/dev/null || true'],
 }
 
 
@@ -117,17 +145,55 @@ def _render_all(tmp_path, use_tmpdir=False):
 @pytest.mark.parametrize("shape", ["array", "combined"])
 def test_every_template_tees_lammps_stdout_to_a_per_run_log(tmp_path, scheduler, shape):
     text = _render_all(tmp_path)[(scheduler, shape)]
-    log_name, _ = _LOG_NAMES[shape]
 
     lammps_lines = [ln for ln in text.splitlines()
                     if " lmp " in ln and "-in " in ln]
     assert lammps_lines, text
     for line in lammps_lines:
         assert "| tee " in line, line
-    assert f"/lammps/{log_name}" in text
-    if shape == "combined":
-        # Two phases, two logs -- the slide one must not clobber the system one.
-        assert "/lammps/run_slide.log" in text
+    for target in _TEE_TARGETS[shape]:
+        assert target in text, (target, text)
+    # Never a fixed run.log: in the two-phase array workflow the slide task
+    # would overwrite the system task's log, which is the one with RAMP_STATUS.
+    assert "/lammps/run.log" not in text
+
+
+def test_the_two_phase_array_tasks_derive_two_different_log_names(tmp_path):
+    """Run the template's own derivation line under bash, once per phase, to
+    prove the two-phase workflow's two array tasks -- which share a SIM_PATH --
+    end up with different logs instead of clobbering one run.log."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available")
+
+    text = _render_all(tmp_path)[("pbs", "array")]
+    derivation = next(ln for ln in text.splitlines() if ln.startswith("LOG_PATH="))
+
+    names = []
+    for script in ("afm/mat0/L1/lammps/system.in", "afm/mat0/L1/lammps/slide.in"):
+        snippet = (f'SCRIPT_PATH="{script}"\n'
+                   'SCRIPT_DIR=$(dirname "$SCRIPT_PATH")\n'
+                   f'{derivation}\n'
+                   'echo "$LOG_PATH"\n')
+        proc = subprocess.run([bash, "-c", snippet], capture_output=True, text=True,
+                              check=False)
+        assert proc.returncode == 0, proc.stderr
+        names.append(proc.stdout.strip())
+
+    assert names == ["afm/mat0/L1/lammps/run_system.log",
+                     "afm/mat0/L1/lammps/run_slide.log"]
+
+
+def test_the_array_template_derives_its_log_name_from_the_input_script(tmp_path):
+    """`generate_two_phase_scripts` renders *_array.j2 twice -- once against
+    manifest_system.txt, once against manifest_slide.txt -- and both arrays
+    resolve to the same SIM_PATH. The log name therefore has to come from
+    $SCRIPT_PATH at run time, or the second array clobbers the first's log."""
+    for scheduler in ("pbs", "slurm"):
+        text = _render_all(tmp_path / scheduler)[(scheduler, "array")]
+        assert 'LOG_PATH="${SCRIPT_DIR}/run_$(basename "$SCRIPT_PATH" .in).log"' in text
+        # Derived once, then reused everywhere the log is named.
+        assert text.count("${LOG_PATH}") >= 2
 
 
 @pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
@@ -156,10 +222,10 @@ def test_every_template_tests_pipestatus_not_dollar_question(tmp_path, scheduler
 def test_every_template_calls_enrich_provenance_against_the_workdir_copy(
         tmp_path, scheduler, workdir, shape):
     text = _render_all(tmp_path)[(scheduler, shape)]
-    _, enrich_log = _LOG_NAMES[shape]
+    log_arg = _ENRICH_LOG_ARG[shape].format(workdir=workdir)
 
     expected = (f'FrictionSim2D hpc enrich-provenance "{workdir}/${{SIM_PATH}}" '
-                f'"{workdir}/${{SIM_PATH}}/lammps/{enrich_log}" || true')
+                f'{log_arg} || true')
     assert expected in text, text
     # Guarded and non-fatal: a node without the package must still finish green.
     assert "if command -v FrictionSim2D >/dev/null 2>&1; then" in text
@@ -175,12 +241,12 @@ def test_tmpdir_variant_copies_the_run_log_back_out_of_scratch(
     deleted with the scratch directory, taking the RAMP_STATUS lines with it."""
     plain = _render_all(tmp_path / "plain", use_tmpdir=False)[(scheduler, shape)]
     scratch = _render_all(tmp_path / "scratch", use_tmpdir=True)[(scheduler, shape)]
-    log_name, _ = _LOG_NAMES[shape]
 
     assert f'mkdir -p "{workdir}/${{SIM_PATH}}/lammps"' in scratch
-    assert f'{log_name} "{workdir}/${{SIM_PATH}}/lammps/" 2>/dev/null || true' in scratch
+    for line in _COPY_BACK[shape]:
+        assert line.format(workdir=workdir) in scratch, line
     # The copy-back is inside `{% if use_tmpdir %}`: absent without it.
-    assert "/lammps/\" 2>/dev/null" not in plain
+    assert '/lammps/" 2>/dev/null' not in plain
 
 
 @pytest.mark.parametrize("use_tmpdir", [False, True])

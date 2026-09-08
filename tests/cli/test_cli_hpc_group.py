@@ -267,3 +267,31 @@ def test_enrich_provenance_says_so_when_the_log_holds_no_settle_lines(runner, tm
     assert result.exit_code == 0, result.output
     assert "unchanged" in result.output
     assert (run_dir / "provenance.json").read_text(encoding="utf-8") == before
+
+
+def test_a_slide_phase_log_does_not_undo_an_already_enriched_record(runner, tmp_path):
+    """The two-phase array workflow calls this once per task, each with its own
+    log: the system task's log carries RAMP_STATUS and does the real merge, and
+    the slide task -- which runs afterwards, on the same simulation directory --
+    is handed a slide log with no settle-loop lines. That second call must be a
+    no-op on the record, not a reset of the fields the first one wrote."""
+    run_dir = _run_dir_with_provenance(tmp_path)
+    system_log = run_dir / "lammps" / "run_system.log"
+    system_log.write_text("# RAMP_STATUS converged=0 r=1.62 iterations=100\n",
+                          encoding="utf-8")
+    slide_log = run_dir / "lammps" / "run_slide.log"
+    slide_log.write_text("Step Temp E_pair\n     0   300   -1.5\n"
+                         "Total wall time: 0:12:34\n", encoding="utf-8")
+
+    first = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                str(run_dir), str(system_log)])
+    assert first.exit_code == 0, first.output
+    enriched = (run_dir / "provenance.json").read_text(encoding="utf-8")
+    assert json.loads(enriched)["ramp_converged"] is False
+
+    second = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(run_dir), str(slide_log)])
+
+    assert second.exit_code == 0, second.output
+    assert "unchanged" in second.output
+    assert (run_dir / "provenance.json").read_text(encoding="utf-8") == enriched

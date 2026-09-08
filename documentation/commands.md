@@ -139,8 +139,11 @@ loop's `# RAMP_STATUS converged=... r=... iterations=...` and
 plus `lammps_version`.
 
 `SIM_DIR` is the directory holding `provenance.json` (the parent of `lammps/`);
-`LOG_PATH` is the stdout log of the `system.in` phase — `lammps/run.log` for
-array jobs, `lammps/run_system.log` for combined ones.
+`LOG_PATH` is the stdout log of the `system.in` phase, which the job scripts
+write as `lammps/run_system.log` (they name each log after its input script, so
+a slide phase writes `lammps/run_slide.log` beside it). Pointing this at a
+slide log is harmless — it holds no settle-loop lines, so the record is left
+exactly as it was.
 
 The generated job scripts call this themselves after every run, so it rarely
 needs to be typed by hand; run it manually to backfill a tree that predates
