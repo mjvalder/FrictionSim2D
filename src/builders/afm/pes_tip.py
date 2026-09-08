@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 
 PES_TIP_CONTACT_GAP = 3.5
 
-PES_LOAD_GAP_BRACKET = (2.5, 3.75)
-
 
 class PESTipSimulation(AFMSimulation):
     """Tip-on-sheet (AFM) surface PES scan (rigid tip, static lateral grid).
