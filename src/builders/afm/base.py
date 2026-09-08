@@ -15,6 +15,7 @@ from typing import Dict, Optional, Tuple
 from ..simulation_base import SimulationBase
 from ...core.config import AFMSimulationConfig
 from ...core.utils.structures import cifread
+from ...lattice.apply import rotate_flake_in_plane
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import get_model_dimensions
 from ...core.utils.tokens import format_numeric_token
@@ -242,16 +243,6 @@ class AFMSimulation(SimulationBase):
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is None:
             return
-        # Lazy: twist_angle is normally None, so most builds never take this
-        # branch. Importing lattice.apply here (~4.7ms measured with numpy
-        # already loaded, via `python -X importtime`) avoids paying that cost
-        # on every build for a rarely-used feature. (The pre-existing
-        # "avoid cycle" framing did not hold up under test -- promoting this
-        # import to module scope imports and runs cleanly with no cycle;
-        # the real hetero_stack<->lattice.apply cycle documented in
-        # lattice/apply.py does not involve this module.)
-        # pylint: disable-next=import-outside-toplevel
-        from ...lattice.apply import rotate_flake_in_plane
         rotate_flake_in_plane(self.flake_path, float(twist))
         logger.info("Twisted AFM flake by %.3f deg (D3b)", float(twist))
 
@@ -748,18 +739,17 @@ class AFMSimulation(SimulationBase):
                        use_langevin: bool,
                        layer_groups_available: bool = True
                        ) -> Dict[str, object]:
-        """Delegate to the shared builder (src/builders/utils/obs_ctx.py).
-
-        Lazy: this class is reachable at CLI-startup time through `.run.simulate
-        -> .builders.afm.pes_tip -> .base` (imported by `src.cli` at module
-        level, so every invocation -- including `--help` and subcommands that
-        never build -- pays this module's own import). ``build_obs_ctx``
-        transitively imports ``core.observables``, which is not otherwise
-        loaded on that path (measured with `python -X importtime`: ~172us
-        self / ~15.7ms cumulative for `src.builders.utils.obs_ctx`), so
-        deferring it to the one call site that needs it (during an actual
-        build) keeps that cost off the no-build paths.
-        """
+        """Delegate to the shared builder (src/builders/utils/obs_ctx.py)."""
+        # Lazy: this class is reachable at CLI-startup time through
+        # `.run.simulate -> .builders.afm.pes_tip -> .base` (imported by
+        # `src.cli` at module level, so every invocation -- including
+        # `--help` and subcommands that never build -- pays this module's
+        # own import). `build_obs_ctx` transitively imports
+        # `core.observables`, which is not otherwise loaded on that path
+        # (measured with `python -X importtime`: ~172us self / ~15.7ms
+        # cumulative for `src.builders.utils.obs_ctx`), so deferring it to
+        # the one call site that needs it (during an actual build) keeps
+        # that cost off the no-build paths.
         # pylint: disable-next=import-outside-toplevel
         from ..utils.obs_ctx import build_obs_ctx
         return build_obs_ctx(
@@ -840,12 +830,22 @@ class AFMSimulation(SimulationBase):
         enriched post-run via provenance.parse_log_extras. A failure here
         fails the build — provenance is not optional.
         """
-        # Lazy: src/data/ is excluded from this package's pylint gate (see
-        # CLAUDE.md's `pylint src/cli.py ... src/builders src/interfaces
-        # src/hpc` command list -- src/data is not in it and is linted ad
-        # hoc), so this method defers the cross-boundary import to the one
-        # call site that needs it rather than making it a hard module-level
-        # dependency of the gated builders package on an unlinted one.
+        # Lazy: measured marginal cost of `from ...data.provenance import ...`
+        # after `import src.cli` (so lattice/potentials/etc. are already
+        # loaded, matching the real CLI-startup path) at ~15-23ms across
+        # repeated runs, all attributable to `src.data.provenance` itself (one
+        # new module -- pydantic's model-class construction cost, not further
+        # imports; `python -X importtime` shows self == cumulative for it).
+        # This method runs on every real build (called at the end of every
+        # write_inputs()), same as _build_obs_ctx above, so this only pays for
+        # code paths that instantiate a builder and build without going
+        # through write_inputs -- e.g. `--help` and other non-build
+        # subcommands. (`src/data/` also sits outside this package's pylint
+        # gate -- see CLAUDE.md's `pylint src/cli.py ... src/builders
+        # src/interfaces src/hpc` command list -- but that alone isn't the
+        # reason to keep this lazy: base.py already imports `data.models` at
+        # module scope, so a hard dependency on `src/data/` already exists
+        # here regardless.)
         # pylint: disable-next=import-outside-toplevel
         from ...data.provenance import (ProvenanceRecord, sha256_file,
                                        write_provenance)
