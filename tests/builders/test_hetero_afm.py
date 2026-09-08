@@ -508,6 +508,38 @@ def test_layout_guard_trips_on_equal_count_region_permutation(tmp_path):
         assert_sheet_block_matches_data(pm, data, offset=0)
 
 
+def test_layout_guard_trips_on_type_count_mismatch(tmp_path):
+    # builders-afm.md finding 7: only the third (element-wise permutation)
+    # branch had a dedicated negative test. The simpler count-mismatch guard
+    # that precedes it (data file missing a whole sheet type) was untested.
+    from src.builders.afm.hetero import assert_sheet_block_matches_data
+    pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
+                                    ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
+    data = _write_data_with_masses(
+        tmp_path / "short.data",
+        masses=[("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
+                ("WS2", "W", 183.8, None)])   # one type short of the PM's 4
+    with pytest.raises(ValueError, match="layout mismatch"):
+        assert_sheet_block_matches_data(pm, data, offset=0)
+
+
+def test_layout_guard_trips_on_block_offset_mismatch(tmp_path):
+    # finding 7: the block-offset guard (sheet block must start at
+    # offset + 1, i.e. right after sub+tip) was also untested. Equal counts,
+    # matching masses in order -- only the wrong starting offset trips it.
+    from src.builders.afm.hetero import assert_sheet_block_matches_data
+    pm = _fake_pm_with_sheet_block([("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
+                                    ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
+    data = _write_data_with_masses(
+        tmp_path / "offset.data",
+        masses=[("MoS2", "Mo", 95.9, None), ("MoS2", "S", 32.1, "edge"),
+                ("WS2", "W", 183.8, None), ("WS2", "S", 32.1, "edge")])
+    # pm's sheet block actually starts at type 1 (fresh TypeRegistry); demand
+    # offset=3 (expected start type 4) so the check fails on the offset alone.
+    with pytest.raises(ValueError, match="block starts at type"):
+        assert_sheet_block_matches_data(pm, data, offset=3)
+
+
 # --- D5 Task 2: finite-edge context flags + 2D_edge group wiring ---
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")

@@ -1,7 +1,11 @@
 """Tests for AFMSimulation builder layer sweep behavior."""
 
+import json
+import logging
 import re
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -174,45 +178,6 @@ def test_afm_builder_supports_layer_sweep(tmp_path: Path) -> None:
     assert config.sheet.layers == [1, 2, 3]
 
 
-def test_afm_builder_layer_specific_paths(tmp_path: Path, monkeypatch) -> None:
-    """AFM should create L{n} directories for each layer count."""
-    # Mock out actual file operations to avoid needing real files
-    monkeypatch.setattr(
-        "src.builders.components.build_sheet",
-        lambda *args, **kwargs: (tmp_path / "sheet.lmp", {"xlo": 0, "xhi": 100, "ylo": 0, "yhi": 100, "zhi": 15}, 3.0)
-    )
-    monkeypatch.setattr(
-        "src.builders.components.build_tip",
-        lambda *args, **kwargs: (tmp_path / "tip.lmp", 20.0)
-    )
-    monkeypatch.setattr(
-        "src.builders.components.build_substrate",
-        lambda *args, **kwargs: tmp_path / "sub.lmp"
-    )
-    monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._create_directories",
-        lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._init_provenance",
-        lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation.write_inputs",
-        lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._generate_hpc_scripts",
-        lambda *args, **kwargs: None
-    )
-
-    config = _make_afm_config(tmp_path, layers=[2, 3])
-    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
-
-    # Verify internal layer storage before build
-    assert builder.config.sheet.layers == [2, 3]
-
-
 def test_normalize_potential_type_consistency() -> None:
     """Potential type normalization should be consistent across builders."""
     test_cases = [
@@ -228,13 +193,23 @@ def test_normalize_potential_type_consistency() -> None:
 
 
 def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> None:
-    """Build should execute per-layer orchestration for all requested layers."""
+    """Build should execute per-layer orchestration for all requested layers,
+    and actually create an L{n} directory tree per layer on disk.
+
+    builders-afm.md test-weak repair: this test (and the since-removed
+    test_afm_builder_layer_specific_paths, whose claim -- "AFM should create
+    L{n} directories for each layer count" -- it never actually checked; it
+    never called build() at all) used to mock every AFMSimulation internal
+    and assert only call order/counts. _create_directories is real here
+    (removed from tests/repo/test_mock_targets.py's KNOWN_VIOLATIONS for this
+    file accordingly) so the L{n} directory claim is now verified against the
+    real filesystem, not inferred from a mock having been called.
+    """
     config = _make_afm_config(tmp_path, layers=[2, 4])
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
 
     called = {
         "build_sheet_layers": [],
-        "create_dirs": [],
         "build_components": 0,
         "generate_potentials": [],
         "z_positions": [],
@@ -255,10 +230,6 @@ def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(
         "src.builders.afm.AFMSimulation._get_substrate_box_dims",
         lambda _self: {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zlo": -5.0, "zhi": 0.0},
-    )
-    monkeypatch.setattr(
-        "src.builders.afm.AFMSimulation._create_directories",
-        lambda _self, out_dir=None: called["create_dirs"].append(out_dir),
     )
 
     def mock_build_components(_self, _build_dir):
@@ -293,6 +264,16 @@ def test_afm_build_orchestrates_per_layer_steps(tmp_path: Path, monkeypatch) -> 
     assert called["hpc"] == 1
     assert sorted(builder.output_dir_layer.keys()) == [2, 4]
 
+    # Real _create_directories output: an L{n} dir with the standard
+    # subdirectory layout for each requested layer count, not just the dict
+    # key write-up-front _create_directories itself doesn't produce.
+    for n in (2, 4):
+        layer_dir = builder.output_dir_layer[n]
+        assert layer_dir == tmp_path / "out" / f"L{n}"
+        assert layer_dir.is_dir()
+        for sub in ("visuals", "results", "lammps", "data"):
+            assert (layer_dir / sub).is_dir(), f"L{n}/{sub} missing"
+
 
 def test_afm_finite_sheet_computes_box_and_center_offsets(tmp_path: Path) -> None:
     """Finite-sheet mode should use substrate x/y as box and center the sheet."""
@@ -326,8 +307,32 @@ def test_afm_finite_sheet_computes_box_and_center_offsets(tmp_path: Path) -> Non
     assert offsets == {"x": 30.0, "y": 20.0}
 
 
-def test_afm_finite_sheet_validates_final_substrate_dims(tmp_path: Path) -> None:
-    """Final substrate dims from .lmp should be validated, not only requested config dims."""
+@pytest.mark.parametrize(
+    "box_xhi, box_yhi, match",
+    [
+        # sub_x (90) < sheet_x (100) -- checked before y or either margin.
+        pytest.param(90.0, 140.0, "smaller than sheet x", id="sub_x_too_small"),
+        # sub_x (140) clears sheet_x; sub_y (90) < sheet_y (100).
+        pytest.param(140.0, 90.0, "smaller than sheet y", id="sub_y_too_small"),
+        # both spans clear the sheet; margin_x (10) <= lj_cutoff (11).
+        pytest.param(110.0, 140.0,
+                     "Final built substrate x-span delta must be greater than LJ cutoff",
+                     id="margin_x_too_small"),
+        # margin_x (12) clears lj_cutoff; margin_y (10) <= lj_cutoff (11).
+        pytest.param(112.0, 110.0,
+                     "Final built substrate y-span delta must be greater than LJ cutoff",
+                     id="margin_y_too_small"),
+    ],
+)
+def test_afm_finite_sheet_validates_final_substrate_dims(
+    tmp_path: Path, box_xhi: float, box_yhi: float, match: str
+) -> None:
+    """Final substrate dims from .lmp should be validated, not only requested config dims.
+
+    Parametrized over all four raise branches (builders-afm.md finding 2):
+    previously only the margin_x case was exercised, leaving sub_x < sheet_x,
+    sub_y < sheet_y and margin_y <= lj_cutoff untested.
+    """
     config = _make_afm_config(tmp_path, layers=[1])
     config.general.finite_sheet = True
     config.sub.x = 160.0
@@ -346,15 +351,65 @@ def test_afm_finite_sheet_validates_final_substrate_dims(tmp_path: Path) -> None
     # Simulate post-build substrate dimensions read from sub.lmp.
     builder.box_dims = {
         "xlo": 0.0,
-        "xhi": 110.0,
+        "xhi": box_xhi,
         "ylo": 0.0,
-        "yhi": 110.0,
+        "yhi": box_yhi,
         "zlo": -5.0,
         "zhi": 0.0,
     }
 
-    with pytest.raises(ValueError, match="Final built substrate x-span delta must be greater than LJ cutoff"):
+    with pytest.raises(ValueError, match=match):
         builder._validate_final_substrate_dims()
+
+
+def _builder_with_pm_types(tmp_path: Path, types) -> AFMSimulation:
+    config = _make_afm_config(tmp_path, layers=[2])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    builder.pm[2] = SimpleNamespace(types=types)
+    return builder
+
+
+def test_layer_groups_available_false_when_types_missing_methods(tmp_path: Path) -> None:
+    """builders-afm.md finding 3: the not-callable fail-safe guard.
+
+    A types stand-in missing get_layer_group_string/ids_by_component (an
+    "exotic builder" or a thinner test stub) must fail safe to False rather
+    than raise an AttributeError deep inside write_inputs.
+    """
+    builder = _builder_with_pm_types(tmp_path, SimpleNamespace())
+    assert builder._layer_groups_available(2) is False
+
+
+def test_layer_groups_available_false_when_no_sheet_ids(tmp_path: Path) -> None:
+    """finding 3: ids_by_component('sheet') returning nothing fails safe."""
+    class _Types:
+        def get_layer_group_string(self, component, layer):
+            return '3'
+
+        def ids_by_component(self, component):
+            return []
+
+    builder = _builder_with_pm_types(tmp_path, _Types())
+    assert builder._layer_groups_available(2) is False
+
+
+def test_layer_groups_available_false_on_exception(tmp_path: Path) -> None:
+    """finding 3: the broad-except catch-all fails safe rather than propagating.
+
+    A regression that makes get_layer_group_string raise for the ordinary
+    homogeneous AFM path must not crash write_inputs -- it silently disables
+    the zref block and layer-resolved COM channels instead, which is the
+    contract this test pins.
+    """
+    class _Types:
+        def get_layer_group_string(self, component, layer):
+            raise RuntimeError("boom")
+
+        def ids_by_component(self, component):
+            return [3]
+
+    builder = _builder_with_pm_types(tmp_path, _Types())
+    assert builder._layer_groups_available(2) is False
 
 
 def test_afm_scan_angle_list_with_force_gate(tmp_path: Path) -> None:
@@ -540,6 +595,39 @@ def test_afm_explicit_tip_x_ignores_tip_x_offset(tmp_path: Path) -> None:
     system_script = (layer_dir / "system.in").read_text(encoding="utf-8")
 
     assert "shift 33.0" in system_script
+
+
+def test_write_provenance_git_failure_falls_back_loudly(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    """builders-afm.md finding 4: the git rev-parse/status except was silent.
+
+    An environment where git is absent or the repo is a detached copy (a
+    plausible HPC-node scenario) must still produce a complete
+    provenance.json (git_commit='unknown', git_dirty=False) -- but must now
+    also log why, instead of a provenance record silently missing its two
+    identity fields with zero trace in the log.
+    """
+    def _raise(*_args, **_kwargs):
+        raise FileNotFoundError("git: command not found")
+
+    # Object-form (mirrors tests/interfaces/test_atomsk.py's identical
+    # subprocess-boundary pattern): patches the same `subprocess` module
+    # object base.py's `import subprocess` resolves at call time.
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+
+    with caplog.at_level(logging.WARNING):
+        slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    layer_dir = slide_path.parent.parent  # lammps/slide.in -> L1
+
+    provenance = json.loads((layer_dir / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["git_commit"] == "unknown"
+    assert provenance["git_dirty"] is False
+    assert any("git" in rec.message.lower() and "provenance" in rec.message.lower()
+               for rec in caplog.records)
 
 
 def test_afm_explicit_tip_y_ignores_tip_y_offset(tmp_path: Path) -> None:

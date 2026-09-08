@@ -861,7 +861,11 @@ class AFMSimulation(SimulationBase):
                 ['git', 'status', '--porcelain'], capture_output=True,
                 text=True, cwd=Path(__file__).parent, timeout=10, check=False,
             ).stdout.strip())
-        except Exception:  # pylint: disable=broad-except
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(
+                "Could not read git identity for provenance (git absent or "
+                "not a repo?): %s. Recording git_commit='unknown', "
+                "git_dirty=False.", exc)
             git_commit, git_dirty = 'unknown', False
 
         # .get, not [n_layers]: the per-layer PotentialManager is populated in

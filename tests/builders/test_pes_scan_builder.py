@@ -1,5 +1,6 @@
 """Tests for the static PES-scan builders (src/builders/pes_scan.py)."""
 
+import logging
 import math
 from pathlib import Path
 
@@ -172,3 +173,61 @@ def test_pes_tip_z_relax_from_config(tmp_path: Path):
 def test_pes_tip_hpc_job_name(tmp_path: Path):
     builder = PESTipSimulation(_afm_cfg(tmp_path, force=[2.0]), output_dir=str(tmp_path / "o"))
     assert builder._get_hpc_job_name() == "pes_tip_h-MoS2"
+
+
+# --- _warn_if_footprint_too_small (multi-cell scan periodic-image guard) ---
+# Review builders-afm.md finding 1: no test ever set [pes] scan_cells > 1, so
+# neither branch of this method's m > 1 body (the tip-image overlap check
+# `_warn_if_footprint_too_small` guards) was ever exercised. No real build is
+# needed -- box_dims and config.tip.r are plain attributes -- so a bare
+# PESTipSimulation with them set directly is enough to call the method
+# directly, mirroring tests/helpers/afm.py's seed-state pattern.
+
+def _pes_tip_builder(tmp_path: Path, tip_r: float = 2.0) -> PESTipSimulation:
+    cfg = _afm_cfg(tmp_path, force=[2.0])
+    cfg.pes.scan_cells = 2
+    cfg.tip.r = tip_r
+    return PESTipSimulation(cfg, output_dir=str(tmp_path / "o"))
+
+
+def test_warn_if_footprint_too_small_noop_when_m_is_one(tmp_path, caplog):
+    """The m <= 1 (default scan_cells) guard must short-circuit before any
+    box math, even for a box far too small to ever pass the check."""
+    builder = _pes_tip_builder(tmp_path)
+    builder.box_dims = {"xlo": 0.0, "xhi": 1.0, "ylo": 0.0, "yhi": 1.0}
+    with caplog.at_level(logging.WARNING):
+        builder._warn_if_footprint_too_small(1, 5.0, 5.0)
+    assert not caplog.records
+
+
+def test_warn_if_footprint_too_small_warns_on_undersized_box(tmp_path, caplog):
+    # r=2.0, m=2, period=5.0: need_x = 2*2 + 2*5 + 12 = 26; a 20x20 box is
+    # short of that on both axes -> the tip could reach its periodic image.
+    builder = _pes_tip_builder(tmp_path, tip_r=2.0)
+    builder.box_dims = {"xlo": 0.0, "xhi": 20.0, "ylo": 0.0, "yhi": 20.0}
+    with caplog.at_level(logging.WARNING):
+        builder._warn_if_footprint_too_small(2, 5.0, 5.0)
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].message
+    assert "may overlap the tip's periodic image" in msg
+    assert "scan_cells=2" in msg
+
+
+def test_warn_if_footprint_too_small_silent_on_large_enough_box(tmp_path, caplog):
+    # Same geometry as above but a box comfortably past the 26x26 need.
+    builder = _pes_tip_builder(tmp_path, tip_r=2.0)
+    builder.box_dims = {"xlo": 0.0, "xhi": 200.0, "ylo": 0.0, "yhi": 200.0}
+    with caplog.at_level(logging.WARNING):
+        builder._warn_if_footprint_too_small(2, 5.0, 5.0)
+    assert not caplog.records
+
+
+def test_warn_if_footprint_too_small_swallows_missing_box_dims(tmp_path, caplog):
+    # box_dims never populated (e.g. called before _get_substrate_box_dims) --
+    # the try/except (AttributeError, KeyError, TypeError) guard must return
+    # quietly rather than raising or warning off a KeyError.
+    builder = _pes_tip_builder(tmp_path)
+    builder.box_dims = {}
+    with caplog.at_level(logging.WARNING):
+        builder._warn_if_footprint_too_small(2, 5.0, 5.0)
+    assert not caplog.records

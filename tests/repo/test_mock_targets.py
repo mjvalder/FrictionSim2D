@@ -44,17 +44,20 @@ ALLOWED_TARGET_PREFIXES = (
 # Ratchet: entries may only be removed.
 KNOWN_VIOLATIONS = {
     "builders/test_afm_builder.py": {
+        # Phase 2c test-weak repair (builders-afm.md (c)): the since-removed
+        # test_afm_builder_layer_specific_paths never called build() at all
+        # (its mocks were dead code) and test_afm_build_orchestrates_per_
+        # layer_steps no longer mocks _create_directories -- it now asserts
+        # the real L{n} directory tree on disk instead. build_tip/
+        # build_substrate were only patched by the removed test.
         "src.builders.afm.AFMSimulation._build_components",
         "src.builders.afm.AFMSimulation._calculate_z_positions",
-        "src.builders.afm.AFMSimulation._create_directories",
         "src.builders.afm.AFMSimulation._generate_hpc_scripts",
         "src.builders.afm.AFMSimulation._generate_potentials",
         "src.builders.afm.AFMSimulation._get_substrate_box_dims",
         "src.builders.afm.AFMSimulation._init_provenance",
         "src.builders.afm.AFMSimulation.write_inputs",
         "src.builders.components.build_sheet",
-        "src.builders.components.build_substrate",
-        "src.builders.components.build_tip",
     },
     "builders/test_builders.py": {
         # Phase 2c test-weak repair (docs/superpowers/reviews/
