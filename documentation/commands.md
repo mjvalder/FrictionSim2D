@@ -126,6 +126,27 @@ Options:
 - `-s, --scheduler {pbs|slurm}` (default: `pbs`)
 - `-o, --output-dir TEXT` (default: `SIMULATION_DIR/hpc`)
 
+### hpc enrich-provenance
+
+```bash
+FrictionSim2D hpc enrich-provenance SIM_DIR LOG_PATH
+```
+
+Folds a finished run's LAMMPS log into its `provenance.json`: the AFM settle
+loop's `# RAMP_STATUS converged=... r=... iterations=...` and
+`# UNLOADED_REF layer=... z=...` lines become the record's
+`ramp_converged`/`ramp_r`/`ramp_iterations` and `unloaded_reference_z` fields,
+plus `lammps_version`.
+
+`SIM_DIR` is the directory holding `provenance.json` (the parent of `lammps/`);
+`LOG_PATH` is the stdout log of the `system.in` phase — `lammps/run.log` for
+array jobs, `lammps/run_system.log` for combined ones.
+
+The generated job scripts call this themselves after every run, so it rarely
+needs to be typed by hand; run it manually to backfill a tree that predates
+that wiring. It always exits 0 — a missing log, a missing or unreadable
+record, or a log with no settle-loop lines are reported and ignored.
+
 ## aiida
 
 > AiiDA commands require `aiida-core`. Install with `pip install -e .[aiida]`.

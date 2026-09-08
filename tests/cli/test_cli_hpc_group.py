@@ -2,8 +2,11 @@
 
 `hpc generate` writes files rather than calling one obvious expensive
 boundary, so these tests assert on the files it produces and on
-`result.output` -- never on a mock (tests/README.md).
+`result.output` -- never on a mock (tests/README.md). The same holds for
+`hpc enrich-provenance` (bottom of this file), whose whole job is to rewrite
+a provenance.json on disk.
 """
+import json
 from pathlib import Path
 
 import pytest
@@ -162,3 +165,105 @@ def test_missing_modules_is_blocked_before_anything_is_written(runner, tmp_path)
     assert result.exit_code != 0
     assert "'Modules'" in result.output
     assert not (sim_root / "hpc" / "run.pbs").exists()
+
+
+# ---------------------------------------------------------------------------
+# `hpc enrich-provenance` -- the shell entry point the generated job scripts
+# call once LAMMPS has finished. Asserts on the JSON on disk, not on a mock.
+# ---------------------------------------------------------------------------
+
+def _run_dir_with_provenance(tmp_path: Path) -> Path:
+    """A minimal but real simulation dir: provenance.json + lammps/."""
+    from src.data.provenance import ProvenanceRecord, write_provenance
+
+    run_dir = tmp_path / "afm" / "h_MoS2" / "L1"
+    (run_dir / "lammps").mkdir(parents=True)
+    write_provenance(run_dir, ProvenanceRecord(
+        seed_thermal_tip=1, seed_thermal_sub=2, seed_velocity=3,
+        substrate_realization_id=None, damping_ratio=0.1, damp_ev=None,
+        git_commit="abc123", git_dirty=False, config_hash="deadbeef",
+        layer_type_map={"layer_1": [1, 2]}, contact_cutoff=5.0,
+        cutoff_source="uff_sigma_k1.5", thermostat_scheme="nvt_system",
+        load_requested=10.0,
+    ))
+    return run_dir
+
+
+def test_enrich_provenance_writes_the_settle_loop_fields_into_the_json(runner, tmp_path):
+    run_dir = _run_dir_with_provenance(tmp_path)
+    log_path = run_dir / "lammps" / "run.log"
+    log_path.write_text(
+        "LAMMPS (2 Aug 2023 - Update 3)\n"
+        "# UNLOADED_REF layer=1 z=15.5\n"
+        "# RAMP_STATUS converged=1 r=0.042 iterations=17\n",
+        encoding="utf-8")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(run_dir), str(log_path)])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is True
+    assert data["ramp_r"] == 0.042
+    assert data["ramp_iterations"] == 17
+    assert data["unloaded_reference_z"] == {"layer_1": 15.5}
+    assert data["lammps_version"] == "2 Aug 2023 - Update 3"
+    assert "enriched" in result.output
+
+
+def test_enrich_provenance_reports_a_non_converged_settle_loop(runner, tmp_path):
+    """The whole point of the command: converged=0 must survive into the
+    record, where a later analysis can see it."""
+    run_dir = _run_dir_with_provenance(tmp_path)
+    log_path = run_dir / "lammps" / "run.log"
+    log_path.write_text("# RAMP_STATUS converged=0 r=1.62 iterations=100\n",
+                        encoding="utf-8")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(run_dir), str(log_path)])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is False
+    assert data["ramp_iterations"] == 100
+
+
+def test_enrich_provenance_exits_zero_when_the_log_is_missing(runner, tmp_path):
+    """A completed simulation must never be reported as failed because the
+    provenance nicety had nothing to read -- the job script calls this
+    unconditionally after every run, including runs with no settle loop."""
+    run_dir = _run_dir_with_provenance(tmp_path)
+    before = (run_dir / "provenance.json").read_text(encoding="utf-8")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(run_dir), str(run_dir / "lammps" / "run.log")])
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None
+    assert "Traceback" not in result.output
+    assert "not enriched" in result.output
+    assert (run_dir / "provenance.json").read_text(encoding="utf-8") == before
+
+
+def test_enrich_provenance_exits_zero_when_the_run_dir_does_not_exist(runner, tmp_path):
+    result = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(tmp_path / "nope"),
+                                 str(tmp_path / "nope" / "run.log")])
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None
+    assert "not enriched" in result.output
+
+
+def test_enrich_provenance_says_so_when_the_log_holds_no_settle_lines(runner, tmp_path):
+    run_dir = _run_dir_with_provenance(tmp_path)
+    log_path = run_dir / "lammps" / "run.log"
+    log_path.write_text("Total wall time: 0:00:01\n", encoding="utf-8")
+    before = (run_dir / "provenance.json").read_text(encoding="utf-8")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance",
+                                 str(run_dir), str(log_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "unchanged" in result.output
+    assert (run_dir / "provenance.json").read_text(encoding="utf-8") == before

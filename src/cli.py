@@ -494,6 +494,54 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     click.echo("   2. Transfer to HPC cluster")
     click.echo(f"   3. Follow {submit_file}")
 
+
+@hpc_group.command('enrich-provenance')
+@click.argument('sim_dir', type=click.Path(path_type=Path))
+@click.argument('log_path', type=click.Path(path_type=Path))
+def hpc_enrich_provenance(sim_dir: Path, log_path: Path):
+    """Fold a finished run's LAMMPS log into its provenance.json.
+
+    SIM_DIR is the simulation directory holding provenance.json (the parent of
+    lammps/); LOG_PATH is the stdout log of the system.in phase, where the AFM
+    settle loop prints its `# RAMP_STATUS converged=... r=... iterations=...`
+    and `# UNLOADED_REF layer=... z=...` lines.
+
+    This lives in the `hpc` group, not `postprocess`, on purpose: the generated
+    job scripts call it on a compute node, so its import path must not reach
+    the optional plotting/DB extras that `postprocess` pulls in.
+
+    Always exits 0. A missing log, a missing or unreadable provenance.json, or
+    a log with no settle-loop lines are all reported and shrugged off -- a
+    completed simulation must never be reported as failed over a provenance
+    nicety.
+
+    Example:
+        FrictionSim2D hpc enrich-provenance ./afm/h_MoS2/L1 \
+./afm/h_MoS2/L1/lammps/run.log
+    """
+    # Lazy, like every other subcommand's imports here: keeps `--help` and the
+    # unrelated groups off this module's (ASE-bearing) import path.
+    from .builders.afm.base import enrich_provenance_post_run
+
+    record_path = Path(sim_dir) / 'provenance.json'
+    # Snapshot rather than trust the return value: the function returns the
+    # record path both when it merged fields and when the log held none, and
+    # only the on-disk bytes distinguish those for the operator reading the
+    # job log.
+    before = (record_path.read_text(encoding='utf-8', errors='ignore')
+              if record_path.is_file() else None)
+
+    result = enrich_provenance_post_run(sim_dir, log_path)
+    if result is None:
+        click.echo(f"Provenance not enriched for {sim_dir}: no readable "
+                   f"provenance.json, or no log at {log_path}.")
+        return
+    after = result.read_text(encoding='utf-8', errors='ignore')
+    if after == before:
+        click.echo(f"Provenance unchanged: no settle-loop lines in {log_path}.")
+        return
+    click.echo(f"Provenance enriched from {log_path}: {result}")
+
 # =============================================================================
 # AIIDA COMMANDS (Optional)
 # =============================================================================
