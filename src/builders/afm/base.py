@@ -31,6 +31,84 @@ K_CONTACT = 1.5
 _CONTACT_CUTOFF_FALLBACK = 5.0  # Angstrom; used only when the CIF is unreadable
 
 
+def enrich_provenance_post_run(output_root: Path,
+                               log_path: Path) -> Optional[Path]:
+    """Enrich a build-time provenance.json with post-run log fields.
+
+    The build-time counterpart is :meth:`AFMSimulation._write_provenance`
+    below, whose docstring has always promised that
+    ``RAMP_STATUS``/``UNLOADED_REF``/``lammps_version`` are "enriched post-run
+    via provenance.parse_log_extras". This is where that happens: it parses
+    ``log_path`` (the system.in log -- the source of the
+    ``RAMP_STATUS``/``UNLOADED_REF`` lines the settle-loop template already
+    emits, see ``templates/afm/system_init.lmp``) via
+    ``provenance.parse_log_extras`` and merges the result into the
+    ``provenance.json`` that ``_write_provenance`` wrote at build time,
+    updating ``ramp_converged``/``ramp_r``/``ramp_iterations``,
+    ``unloaded_reference_z`` and ``lammps_version`` in place.
+
+    A build always runs before LAMMPS does, so no builder can see the log
+    itself; the caller is therefore the *job*, not the builder. The generated
+    HPC job scripts (``templates/hpc/{pbs,slurm}_{array,combined}.j2``) invoke
+    this once the run finishes, through the shell entry point
+    ``FrictionSim2D hpc enrich-provenance SIM_DIR LOG_PATH`` (see
+    ``cli.hpc_enrich_provenance``). That is also why this is a module-level
+    function rather than a method: its body never needed ``self``, and a shell
+    caller would otherwise have to rebuild a whole ``AFMSimulationConfig``
+    (re-parsing the .ini and settings.yaml) just to reach it.
+
+    Returns the provenance.json path, or ``None`` if the record or the log is
+    missing, or the record on disk is unreadable (logged, not raised: a run's
+    real output must never be hidden behind a failed enrichment).
+    """
+    # pylint: disable-next=import-outside-toplevel
+    from ...data.provenance import (ProvenanceRecord, parse_log_extras,
+                                    write_provenance)
+
+    output_root = Path(output_root)
+    log_path = Path(log_path)
+    prov_path = output_root / 'provenance.json'
+    if not prov_path.is_file():
+        logger.warning("No provenance.json in %s to enrich.", output_root)
+        return None
+    if not log_path.is_file():
+        logger.warning("No log at %s to enrich provenance from.", log_path)
+        return None
+
+    try:
+        record = ProvenanceRecord.model_validate_json(
+            prov_path.read_text(encoding='utf-8'))
+    # ValidationError (a ValueError subclass) covers both a truncated/invalid
+    # JSON body and a well-formed document missing required fields; OSError
+    # covers an unreadable/undecodable file. A killed job leaving a half-written
+    # provenance.json is exactly the case this function exists to report on, so
+    # it must not be the one case that raises.
+    except (ValueError, OSError) as exc:
+        logger.warning(
+            "Could not read provenance.json at %s (%s); leaving it "
+            "unenriched.", prov_path, exc)
+        return None
+
+    updates = parse_log_extras(log_path)
+    if not updates:
+        logger.warning(
+            "No RAMP_STATUS/UNLOADED_REF/LAMMPS-version lines found in "
+            "%s; provenance.json left unenriched.", log_path)
+        return prov_path
+
+    record = record.model_copy(update=updates)
+    if record.ramp_converged is False:
+        logger.warning(
+            "Settle loop did not converge for %s (r=%s after %s "
+            "iterations) -- tip z was still oscillating past the "
+            "iteration budget when it hit ramp_max_iterations. See "
+            "provenance.json's ramp_r/ramp_iterations.",
+            output_root, record.ramp_r, record.ramp_iterations)
+
+    write_provenance(output_root, record)
+    return prov_path
+
+
 class AFMSimulation(SimulationBase):
     """Builder for AFM simulations (Tip + Sheet + Substrate).
 
@@ -827,8 +905,10 @@ class AFMSimulation(SimulationBase):
         """Emit provenance.json for this layer configuration (spec §5 F5).
 
         Build-time fields only; RAMP_STATUS/UNLOADED_REF/lammps_version are
-        enriched post-run via provenance.parse_log_extras. A failure here
-        fails the build — provenance is not optional.
+        enriched post-run via provenance.parse_log_extras — see the
+        module-level :func:`enrich_provenance_post_run` above, which the
+        generated HPC job scripts call once LAMMPS has finished. A failure
+        here fails the build — provenance is not optional.
         """
         # Lazy: measured marginal cost of `from ...data.provenance import ...`
         # after `import src.cli` (so lattice/potentials/etc. are already
@@ -925,70 +1005,6 @@ class AFMSimulation(SimulationBase):
                 if Path(self.config.sheet.pot_path).is_file() else None),
         )
         write_provenance(output_root, record)
-
-    def enrich_provenance_post_run(self, output_root: Path,
-                                   log_path: Path) -> Optional[Path]:
-        """Enrich a build-time provenance.json with post-run log fields.
-
-        Call this after the real LAMMPS run: it parses ``log_path`` (the
-        system.in log -- the source of the ``RAMP_STATUS``/``UNLOADED_REF``
-        lines the settle-loop template already emits, see
-        ``templates/afm/system_init.lmp``) via ``provenance.parse_log_extras``
-        and merges the result into the ``provenance.json`` that
-        :meth:`_write_provenance` wrote at build time, updating
-        ``ramp_converged``/``ramp_r``/``ramp_iterations``,
-        ``unloaded_reference_z`` and ``lammps_version`` in place.
-
-        This is the reusable home :meth:`_write_provenance`'s own docstring
-        already promised ("enriched post-run via provenance.parse_log_extras")
-        but that nothing in this repo called: the build (``write_inputs``,
-        above) always runs before LAMMPS does, so it cannot see the log
-        itself, and this package builds inputs only -- no code path in
-        ``src/builders/afm`` or ``src/run`` ever executes LAMMPS (HPC
-        execution is a plain bash script with no Python callback back into
-        this repo; the AiiDA CalcJob/parser path is a separate, out-of-scope
-        package). Whatever *does* run the real LAMMPS job -- today that is
-        only ``tests/integration/test_smoke_lammps.py`` -- is expected to
-        call this once the log exists.
-
-        Returns the provenance.json path, or ``None`` if either the record
-        or the log is missing (logged, not raised: a run's real output
-        should not be hidden behind a missing enrichment input).
-        """
-        # pylint: disable-next=import-outside-toplevel
-        from ...data.provenance import (ProvenanceRecord, parse_log_extras,
-                                       write_provenance)
-
-        output_root = Path(output_root)
-        log_path = Path(log_path)
-        prov_path = output_root / 'provenance.json'
-        if not prov_path.is_file():
-            logger.warning("No provenance.json in %s to enrich.", output_root)
-            return None
-        if not log_path.is_file():
-            logger.warning("No log at %s to enrich provenance from.", log_path)
-            return None
-
-        record = ProvenanceRecord.model_validate_json(
-            prov_path.read_text(encoding='utf-8'))
-        updates = parse_log_extras(log_path)
-        if not updates:
-            logger.warning(
-                "No RAMP_STATUS/UNLOADED_REF/LAMMPS-version lines found in "
-                "%s; provenance.json left unenriched.", log_path)
-            return prov_path
-
-        record = record.model_copy(update=updates)
-        if record.ramp_converged is False:
-            logger.warning(
-                "Settle loop did not converge for %s (r=%s after %s "
-                "iterations) -- tip z was still oscillating past the "
-                "iteration budget when it hit ramp_max_iterations. See "
-                "provenance.json's ramp_r/ramp_iterations.",
-                output_root, record.ramp_r, record.ramp_iterations)
-
-        write_provenance(output_root, record)
-        return prov_path
 
     def _write_slide_scripts(self, context: Dict, output_root: Path) -> None:
         """Write the slide phase script(s).
