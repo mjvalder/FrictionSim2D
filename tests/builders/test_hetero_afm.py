@@ -716,6 +716,199 @@ def test_afm_flake_twist_rotates_and_runs(tmp_path):
     loads = list((tmp_path / "tw" / "L1" / "data").glob("load_*N.data"))
     assert loads and all(p.stat().st_size > 0 for p in loads), \
         f"no non-empty load_*N.data written by the twisted-flake indent: {loads}"
+# --- Finding 8: a [flake] on the HETERO AFM drive (hetero.py's own copy of the
+#     flake build + twist block, previously unreached by any test) ---
+#
+# HeteroAFMSimulation._build_components is a full override of
+# AFMSimulation._build_components (see its docstring: the base builds the
+# substrate inline, so the tip / flake / langevin blocks are re-expressed rather
+# than hooked). That makes the flake build+twist a SECOND copy of the same code
+# -- decision row AFM-2, pair 1 -- and until these tests no test built any hetero
+# AFM variant with a [flake] section at all, so only the base.py copy was ever
+# exercised (test_afm_flake_twist_rotates_and_runs, above, uses the plain
+# single-material AFMSimulation).
+
+
+def _hetero_flake_raw(twist=None, with_sub=True):
+    """The previously-untested combination: a two-material [2D-1]/[2D-2] hetero
+    AFM config that ALSO carries a [flake] section.
+
+    Composed from the two halves that already exist -- _afm_hetero_raw's sheet
+    pair and _afm_flake_raw's hexagonal MoS2 flake -- so the flake here is the
+    identical section the homogeneous D3b flake tests use.
+    """
+    raw = _afm_hetero_raw()
+    raw["flake"] = dict(_afm_flake_raw()["flake"])
+    if twist is not None:
+        raw["general"]["twist_angle"] = twist
+    if not with_sub:
+        del raw["sub"]
+    return raw
+
+
+def _atom_type_histogram(data_path):
+    """``{atom type: count}`` read straight out of a LAMMPS data file."""
+    lines = Path(data_path).read_text().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.strip().startswith("Atoms"))
+    hist = {}
+    for line in lines[start + 1:]:
+        fields = line.split()
+        if len(fields) >= 5:
+            hist[int(fields[1])] = hist.get(int(fields[1]), 0) + 1
+    return hist
+
+
+def _build_hetero_flake_components(out_dir, monkeypatch, twist=None):
+    """Run ``HeteroAFMSimulation._build_components`` with a flake configured.
+
+    Only the flake branch is under test, so the two components that are NOT --
+    the LAMMPS-backed tip build and the amorphous substrate -- are taken out of
+    the way: ``components.build_tip`` is stubbed (patched on the module object
+    hetero.py itself calls through) and ``[sub]`` is dropped, which also takes
+    the langevin block with it. ``build_flake_component`` and
+    ``_maybe_twist_flake`` then run for real, needing no LAMMPS, so this test
+    runs in the fast suite.
+    """
+    from src.builders.construction import components
+    from src.builders.afm.hetero import HeteroAFMSimulation
+
+    def _stub_tip(tip_cfg, build_dir, settings):        # noqa: ARG001
+        build_dir = Path(build_dir)
+        build_dir.mkdir(parents=True, exist_ok=True)
+        path = build_dir / "tip.lmp"
+        path.write_text("LAMMPS data\n\n0 atoms\n0 atom types\n")
+        return path, float(tip_cfg.r)
+
+    monkeypatch.setattr(components, "build_tip", _stub_tip)
+
+    cfg = AFMSimulationConfig(**_hetero_flake_raw(twist=twist, with_sub=False),
+                              settings=load_settings())
+    # nose-hoover so the langevin region surgery (which would run against the
+    # stub tip file) is skipped; it is not what this test covers.
+    cfg.settings.thermostat.type = 'nose-hoover'
+    sim = HeteroAFMSimulation(cfg, str(out_dir))
+    built = sim._build_components(Path(out_dir) / "build")
+    return sim, built
+
+
+def test_hetero_afm_build_components_builds_the_flake(tmp_path, monkeypatch):
+    """The hetero builder's flake branch produces a real, corner-typed flake file.
+
+    Asserts on the artifact the branch writes -- the carved MoS2 hexagon and its
+    interleaved core/corner type split -- not on a call-happened spy, so removing
+    the ``if self.config.flake is not None`` branch from hetero.py fails it.
+    """
+    from ase.io import read
+    from src.builders.utils.lammps_data import get_model_dimensions
+
+    sim, (_tip_path, tip_radius, sub_path) = _build_hetero_flake_components(
+        tmp_path, monkeypatch)
+
+    # This really is the hetero builder's path (two folded sheets), not base's.
+    assert len(sim.config.sheets) == 2
+    assert sub_path is None and tip_radius == 10.0
+
+    assert sim.flake_path is not None, \
+        "hetero _build_components did not build the configured [flake]"
+    assert sim.flake_path.exists()
+    assert sim.flake_path.name == "flake_h-MoS2_hexagon.data"
+
+    # flake_dims is the built file's own box -- the numbers _calculate_z_positions
+    # and build_render_context later read back off it -- not a config echo.
+    dims = get_model_dimensions(sim.flake_path)
+    assert set(sim.flake_dims) >= {'xlo', 'xhi', 'ylo', 'yhi', 'zlo', 'zhi'}
+    for key in ('xlo', 'xhi', 'ylo', 'yhi', 'zlo', 'zhi'):
+        assert sim.flake_dims[key] == pytest.approx(float(dims[key]))
+
+    # A hexagon really was carved out of the MoS2 monolayer, and
+    # apply_flake_corner_types split every element into an interleaved
+    # core (2t-1) / corner (2t) pair -- the layout PotentialManager's
+    # regions=[None, 'corner'] registration is numbered against.
+    atoms = read(str(sim.flake_path), format="lammps-data")
+    assert len(atoms) > 0
+    hist = _atom_type_histogram(sim.flake_path)
+    assert sorted(hist) == [1, 2, 3, 4], f"expected 2 elements x core/corner: {hist}"
+    assert hist[2] > 0 and hist[4] > 0, f"no atoms typed as flake corners: {hist}"
+    assert sum(hist.values()) == len(atoms)
+
+
+def test_hetero_afm_build_components_twists_the_flake(tmp_path, monkeypatch):
+    """``_maybe_twist_flake`` fires on the hetero copy of the branch too.
+
+    Twisted vs untwisted builds of the same config: the flake's LATTICE is
+    rotated by the requested angle while its box is untouched (an atoms-only
+    twist -- the flake is finite, so this is a genuine relative twist against
+    the hetero stack below it).
+    """
+    import numpy as np
+    from ase.io import read
+    from tests.helpers.lattice import _flake_lattice_orientation
+
+    sim_tw, _ = _build_hetero_flake_components(tmp_path / "tw", monkeypatch, twist=18.0)
+    sim_nt, _ = _build_hetero_flake_components(tmp_path / "nt", monkeypatch)
+
+    a_tw = read(str(sim_tw.flake_path), format="lammps-data")
+    a_nt = read(str(sim_nt.flake_path), format="lammps-data")
+
+    assert len(a_tw) == len(a_nt)                                    # atoms conserved
+    assert np.allclose(np.array(a_tw.cell), np.array(a_nt.cell), atol=1e-6)  # box fixed
+
+    rel = (_flake_lattice_orientation(a_tw) - _flake_lattice_orientation(a_nt)) % 60.0
+    assert abs(min(rel, 60.0 - rel) - 18.0) < 1.0
+
+
+@pytest.mark.xfail(
+    raises=KeyError, strict=True,
+    reason="hetero AFM + [flake] is only half-wired: HeteroAFMSimulation builds "
+           "the flake component (and this test proves the rest of the pipeline is "
+           "ready for it) but its _generate_potentials never registers a 'flake' "
+           "component and its _calculate_z_positions never places one, so "
+           "AFMSimulation.build_render_context dies on z_positions['flake']. "
+           "Delete this xfail once hetero.py wires both.",
+)
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
+    """End-to-end counterpart of the two build-only tests above: a REAL hetero
+    stack with a finite MoS2 flake pressed onto it by the tip, built and run.
+
+    A new smoke rather than a [flake] bolted onto
+    ``test_hetero_afm_runs_approach_indent_slide``: that one is the D2 capstone
+    (replication, sheet_1/sheet_2 pair_coeff, 2D_all groups, substrate box) and
+    adding a flake would both change what a failure there means and -- while the
+    combination stays unwired -- take the whole D2 smoke down with it.
+
+    Sized exactly like the D2 capstone (tip.r = 5 -> 2x2 replication above the
+    LJ-cutoff floor, temp = 1 K so the indent settle loop converges,
+    tip_reduction_factor = 0.7 so the langevin thermo band is populated).
+    """
+    from src.builders.afm.hetero import HeteroAFMSimulation
+    raw = _hetero_flake_raw()
+    raw["general"]["force"] = 10.0
+    raw["general"]["temp"] = 1.0
+    raw["tip"]["r"] = 5.0
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]
+    cfg.settings.geometry.tip_reduction_factor = 0.7
+    cfg.settings.simulation.slide_run_steps = 200
+
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()                     # currently raises KeyError('flake')
+
+    run_dir = Path(tmp_path)
+    # The flake is read into the system and corner-restrained by the templates.
+    init = run_dir / "L1" / "lammps" / "system.in"
+    init_text = init.read_text()
+    assert sim.flake_path.name in init_text
+    assert "group           flake_corner type" in init_text
+
+    proc, out = _run_lammps_afm(run_dir, init)
+    assert proc.returncode == 0, f"system.in exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out, f"atoms lost with a flake on the hetero stack:\n{out[-3000:]}"
+    assert "pair coeffs are not set" not in out.lower(), \
+        f"incomplete pair_coeff with a flake registered:\n{out[-3000:]}"
+    loads = list((run_dir / "L1" / "data").glob("load_*N.data"))
+    assert loads and all(p.stat().st_size > 0 for p in loads), \
+        f"no non-empty load_*N.data written by the hetero-flake indent: {loads}"
 
 
 # --- Fix round 2: provenance must record every sheet's files, not just sheet 1 ---
