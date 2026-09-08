@@ -58,13 +58,21 @@ def test_cell_period_missing_raises():
         _cell_period({}, "x")
 
 
-def test_cell_period_pinned_to_a_real_hexagonal_cell():
-    # h-MoS2's own lattice constant (examples/materials/h-MoS2.cif), orthogonalized
-    # the way this codebase's own hex-to-orthogonal conversions scale y by sqrt(3)
-    # (src/builders/construction/components.py:156,220,225-226). Pins _cell_period's
-    # arithmetic against a physically real cell rather than an arbitrary synthetic one.
+def test_cell_period_subtracts_lo_not_just_hi():
+    # A zero-origin cell (xlo/ylo == 0.0) can't distinguish `hi - lo` from a
+    # buggy `hi`-only implementation, since they'd return the same number --
+    # the flaw in an earlier version of this test. Both bounds are non-zero
+    # here so the subtraction is actually exercised. The period values
+    # themselves are h-MoS2's own lattice constant (examples/materials/
+    # h-MoS2.cif, a=3.1840664646845926) orthogonalized the way this
+    # codebase's own hex-to-orthogonal conversions scale y by sqrt(3)
+    # (src/builders/construction/components.py:156,220,225-226) -- real
+    # numbers, but the origin offset, not the numbers' realism, is what
+    # makes the assertion discriminate a correct implementation from a
+    # wrong one.
     a = 3.1840664646845926
-    unit_cell = {"xlo": 0.0, "xhi": a, "ylo": 0.0, "yhi": a * math.sqrt(3)}
+    unit_cell = {"xlo": -a / 2, "xhi": a / 2,
+                 "ylo": 2.5, "yhi": 2.5 + a * math.sqrt(3)}
     assert _cell_period(unit_cell, "x") == pytest.approx(a)
     assert _cell_period(unit_cell, "y") == pytest.approx(a * math.sqrt(3))
 
