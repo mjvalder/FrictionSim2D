@@ -48,14 +48,19 @@ def enrich_provenance_post_run(output_root: Path,
     ``unloaded_reference_z`` and ``lammps_version`` in place.
 
     A build always runs before LAMMPS does, so no builder can see the log
-    itself; the caller is therefore the *job*, not the builder. The generated
-    HPC job scripts (``templates/hpc/{pbs,slurm}_{array,combined}.j2``) invoke
-    this once the run finishes, through the shell entry point
-    ``FrictionSim2D hpc enrich-provenance SIM_DIR LOG_PATH`` (see
-    ``cli.hpc_enrich_provenance``). That is also why this is a module-level
-    function rather than a method: its body never needed ``self``, and a shell
-    caller would otherwise have to rebuild a whole ``AFMSimulationConfig``
-    (re-parsing the .ini and settings.yaml) just to reach it.
+    itself; the caller is therefore whatever runs *after* the job, and it
+    reaches this through the shell entry point ``FrictionSim2D hpc
+    enrich-provenance`` (see ``cli.hpc_enrich_provenance``). Today that is the
+    local post-transfer sweep -- ``hpc enrich-provenance -r <tree>`` over the
+    results rsynced back from the cluster, since FrictionSim2D is not installed
+    there. The generated job scripts
+    (``templates/hpc/{pbs,slurm}_{array,combined}.j2``) also carry the call,
+    guarded by ``command -v``, so a cluster-side install would start enriching
+    in-job with no workflow change. Either way the caller is a shell line,
+    which is why this is a module-level function rather than a method: its body
+    never needed ``self``, and a shell caller would otherwise have to rebuild a
+    whole ``AFMSimulationConfig`` (re-parsing the .ini and settings.yaml) just
+    to reach it.
 
     Returns the provenance.json path, or ``None`` if the record or the log is
     missing, or the record on disk is unreadable (logged, not raised: a run's

@@ -10,7 +10,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, NoReturn
+from typing import List, Optional, NoReturn, Tuple
 import click
 
 from .core.config import load_settings, settings_origin, _global_settings_path
@@ -495,52 +495,137 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     click.echo(f"   3. Follow {submit_file}")
 
 
+def _resolve_run_log(sim_dir: Path) -> Tuple[Optional[Path], str]:
+    """Pick the log to enrich from when the caller named only a run directory.
+
+    Prefers ``lammps/run_system.log``: ``system*.in`` is the only phase that
+    prints RAMP_STATUS, and that is the name the job scripts derive for it.
+    Falls back to a lone ``run*.log`` -- which covers a directory whose slide
+    phase is the only one that ran, and the fixed ``run.log`` an earlier
+    revision of the array templates wrote. Refuses to guess between several.
+
+    Returns ``(log_path, '')`` or ``(None, reason)``.
+    """
+    lammps_dir = Path(sim_dir) / 'lammps'
+    preferred = lammps_dir / 'run_system.log'
+    if preferred.is_file():
+        return preferred, ''
+    candidates = sorted(p for p in lammps_dir.glob('run*.log') if p.is_file())
+    if len(candidates) == 1:
+        return candidates[0], ''
+    if not candidates:
+        return None, f"no run log in {lammps_dir}"
+    names = ', '.join(p.name for p in candidates)
+    return None, (f"{len(candidates)} run logs and none named run_system.log "
+                  f"({names}) -- name one explicitly")
+
+
+def _enrich_one_run(sim_dir: Path, log_path: Optional[Path],
+                    enrich) -> Tuple[str, str]:
+    """Enrich one run directory. Returns (outcome, detail).
+
+    ``outcome`` is one of 'enriched', 'unchanged', 'skipped'. Nothing raises:
+    every failure becomes a 'skipped' with a reason, because the caller must
+    never report a completed simulation as failed over a provenance nicety.
+    """
+    if log_path is None:
+        log_path, why = _resolve_run_log(sim_dir)
+        if log_path is None:
+            return 'skipped', why
+
+    record_path = Path(sim_dir) / 'provenance.json'
+    # Snapshot rather than trust the return value: the function returns the
+    # record path both when it merged fields and when the log held none, and
+    # only the on-disk bytes distinguish those.
+    before = (record_path.read_text(encoding='utf-8', errors='ignore')
+              if record_path.is_file() else None)
+
+    result = enrich(sim_dir, log_path)
+    if result is None:
+        return 'skipped', (f"no readable provenance.json, or no log at "
+                           f"{log_path}")
+    if result.read_text(encoding='utf-8', errors='ignore') == before:
+        return 'unchanged', f"no settle-loop lines in {log_path.name}"
+    return 'enriched', f"from {log_path.name}"
+
+
 @hpc_group.command('enrich-provenance')
 @click.argument('sim_dir', type=click.Path(path_type=Path))
-@click.argument('log_path', type=click.Path(path_type=Path))
-def hpc_enrich_provenance(sim_dir: Path, log_path: Path):
-    """Fold a finished run's LAMMPS log into its provenance.json.
+@click.argument('log_path', type=click.Path(path_type=Path), required=False)
+@click.option('--recursive', '-r', is_flag=True,
+              help='Treat SIM_DIR as a tree root and enrich every run beneath it.')
+def hpc_enrich_provenance(sim_dir: Path, log_path: Optional[Path],
+                          recursive: bool):
+    """Fold finished runs' LAMMPS logs into their provenance.json.
 
-    SIM_DIR is the simulation directory holding provenance.json (the parent of
-    lammps/); LOG_PATH is the stdout log of the system.in phase, where the AFM
-    settle loop prints its `# RAMP_STATUS converged=... r=... iterations=...`
-    and `# UNLOADED_REF layer=... z=...` lines.
+    The AFM settle loop prints `# RAMP_STATUS converged=... r=... iterations=...`
+    and `# UNLOADED_REF layer=... z=...`; this reads them back into the record
+    the build wrote, along with the LAMMPS version.
 
-    This lives in the `hpc` group, not `postprocess`, on purpose: the generated
-    job scripts call it on a compute node, so its import path must not reach
-    the optional plotting/DB extras that `postprocess` pulls in.
+    \b
+    Two modes:
+      single    SIM_DIR is one run directory (the parent of lammps/). LOG_PATH
+                is optional -- omitted, it defaults to
+                SIM_DIR/lammps/run_system.log, or to the sole run*.log if that
+                name is absent. Several logs with no run_system.log among them
+                are reported and skipped rather than guessed at.
+      -r        SIM_DIR is a tree root; every run directory beneath it is
+                enriched, one line each plus a final tally. This is the normal
+                way to use it: the simulations are built locally, LAMMPS runs
+                on the cluster, and the results (with the run logs) are rsynced
+                back here, where the whole tree is swept in one go.
 
-    Always exits 0. A missing log, a missing or unreadable provenance.json, or
-    a log with no settle-loop lines are all reported and shrugged off -- a
-    completed simulation must never be reported as failed over a provenance
-    nicety.
+    This lives in the `hpc` group, not `postprocess`, on purpose: a cluster-side
+    install would call it from the job script on a compute node, so its import
+    path must not reach the optional plotting/DB extras `postprocess` pulls in.
 
-    Example:
-        FrictionSim2D hpc enrich-provenance ./afm/h_MoS2/L1 \
-./afm/h_MoS2/L1/lammps/run.log
+    Always exits 0 on missing data. A missing log, a missing or unreadable
+    provenance.json, a log with no settle-loop lines, and a tree with no runs
+    in it are all reported and shrugged off -- a completed simulation must never
+    be reported as failed over a provenance nicety.
+
+    \b
+    Examples:
+      FrictionSim2D hpc enrich-provenance -r ./simulation_20260908_101500
+      FrictionSim2D hpc enrich-provenance ./afm/h_MoS2/L1
     """
     # Lazy, like every other subcommand's imports here: keeps `--help` and the
     # unrelated groups off this module's (ASE-bearing) import path.
     from .builders.afm.base import enrich_provenance_post_run
 
-    record_path = Path(sim_dir) / 'provenance.json'
-    # Snapshot rather than trust the return value: the function returns the
-    # record path both when it merged fields and when the log held none, and
-    # only the on-disk bytes distinguish those for the operator reading the
-    # job log.
-    before = (record_path.read_text(encoding='utf-8', errors='ignore')
-              if record_path.is_file() else None)
+    if recursive and log_path is not None:
+        raise click.UsageError(
+            "--recursive sweeps a whole tree and resolves each run's log "
+            "itself; it cannot also take a single LOG_PATH.")
 
-    result = enrich_provenance_post_run(sim_dir, log_path)
-    if result is None:
-        click.echo(f"Provenance not enriched for {sim_dir}: no readable "
-                   f"provenance.json, or no log at {log_path}.")
+    if not recursive:
+        outcome, detail = _enrich_one_run(sim_dir, log_path,
+                                          enrich_provenance_post_run)
+        click.echo(f"{outcome} {sim_dir}: {detail}")
         return
-    after = result.read_text(encoding='utf-8', errors='ignore')
-    if after == before:
-        click.echo(f"Provenance unchanged: no settle-loop lines in {log_path}.")
+
+    # Reuse the shared discovery helper (the same one `hpc generate` and
+    # `run --hpc-scripts` use) rather than a second bespoke walk -- a
+    # divergent copy is exactly what the C2-1 refactor removed. Passing an
+    # empty script list takes its "any directory with a lammps/*.in" branch,
+    # which is what a post-run sweep wants: every run directory, whatever its
+    # scripts were named.
+    rel_paths = (collect_hpc_simulation_paths(sim_dir, lammps_scripts=[])
+                 if sim_dir.is_dir() else [])
+    if not rel_paths:
+        click.echo(f"No simulation directories under {sim_dir}; "
+                   f"nothing to enrich.")
         return
-    click.echo(f"Provenance enriched from {log_path}: {result}")
+
+    tally = {'enriched': 0, 'unchanged': 0, 'skipped': 0}
+    for rel in rel_paths:
+        outcome, detail = _enrich_one_run(sim_dir / rel, None,
+                                          enrich_provenance_post_run)
+        tally[outcome] += 1
+        click.echo(f"{outcome} {rel}: {detail}")
+    click.echo(f"{tally['enriched']} enriched, {tally['unchanged']} unchanged, "
+               f"{tally['skipped']} skipped.")
+
 
 # =============================================================================
 # AIIDA COMMANDS (Optional)

@@ -160,3 +160,32 @@ def test_combined_script_runs_system_then_slide_for_both_schedulers(tmp_path, sc
     assert "system.in" in text
     assert "slide.in" in text
     assert (tmp_path / "hpc" / "submit_jobs.sh").exists()
+
+
+@pytest.mark.parametrize("kind", ["array", "combined", "two_phase"])
+def test_the_download_hint_brings_the_run_logs_home(tmp_path, kind):
+    """The rsync-down line in the submission helper is what the user actually
+    copies. It used to pull only results/ and visuals/, which would have left
+    every run log -- the sole on-disk home of the settle loop's RAMP_STATUS
+    lines -- stranded on the cluster, with nothing for
+    `hpc enrich-provenance -r` to read on this side.
+    """
+    generator = HPCScriptGenerator(_config())
+    out_dir = tmp_path / "hpc"
+    if kind == "array":
+        generator.generate_pbs_scripts(["mat0/L1"], out_dir)
+        helper = out_dir / "submit_all.txt"
+    elif kind == "combined":
+        generator.generate_combined_scripts(_combined_manifest(), out_dir)
+        helper = out_dir / "submit_jobs.sh"
+    else:
+        generator.generate_two_phase_scripts(_combined_manifest(), out_dir)
+        helper = out_dir / "submit_jobs.sh"
+
+    text = helper.read_text(encoding="utf-8")
+    download = [ln for ln in text.splitlines() if "rsync -avzhP" in ln]
+    assert download, text
+    for line in download:
+        assert '--include="run*.log"' in line, line
+        # Still ahead of the catch-all exclude, or the include never applies.
+        assert line.index('--include="run*.log"') < line.index('--exclude="*"'), line

@@ -108,6 +108,15 @@ cp "${LOG_PATH}" "$SLURM_SUBMIT_DIR/${SIM_PATH}/lammps/" 2>/dev/null || true
 # FrictionSim2D installed, or a run with no settle loop at all, must still
 # finish green -- provenance enrichment is a nicety, never a reason to report a
 # completed simulation as failed.
+#
+# Today the guard is expected to fail: FrictionSim2D is not installed on the
+# cluster. Simulations are built on the workstation, only LAMMPS runs here, and
+# the results -- including the run logs teed above, which is what makes any of
+# this recoverable -- are rsynced back, where
+# `FrictionSim2D hpc enrich-provenance -r <tree>` sweeps the whole tree. That
+# local sweep is the working path. This line stays because it costs nothing
+# now and starts running by itself the day the package is installed in a
+# cluster-side conda env, with no change to anyone's workflow.
 if command -v FrictionSim2D >/dev/null 2>&1; then
     FrictionSim2D hpc enrich-provenance "$SLURM_SUBMIT_DIR/${SIM_PATH}" "$SLURM_SUBMIT_DIR/${LOG_PATH}" || true
 fi

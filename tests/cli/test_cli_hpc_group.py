@@ -8,6 +8,7 @@ a provenance.json on disk.
 """
 import json
 from pathlib import Path
+from typing import Optional
 
 import pytest
 import yaml
@@ -241,7 +242,7 @@ def test_enrich_provenance_exits_zero_when_the_log_is_missing(runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert result.exception is None
     assert "Traceback" not in result.output
-    assert "not enriched" in result.output
+    assert result.output.startswith("skipped ")
     assert (run_dir / "provenance.json").read_text(encoding="utf-8") == before
 
 
@@ -252,7 +253,7 @@ def test_enrich_provenance_exits_zero_when_the_run_dir_does_not_exist(runner, tm
 
     assert result.exit_code == 0, result.output
     assert result.exception is None
-    assert "not enriched" in result.output
+    assert result.output.startswith("skipped ")
 
 
 def test_enrich_provenance_says_so_when_the_log_holds_no_settle_lines(runner, tmp_path):
@@ -295,3 +296,171 @@ def test_a_slide_phase_log_does_not_undo_an_already_enriched_record(runner, tmp_
     assert second.exit_code == 0, second.output
     assert "unchanged" in second.output
     assert (run_dir / "provenance.json").read_text(encoding="utf-8") == enriched
+
+
+# ---------------------------------------------------------------------------
+# The local post-transfer sweep. This is the working path today: FrictionSim2D
+# is not installed on the cluster, so the job script's guarded call is a no-op
+# and the merge happens here, over a whole rsynced-back tree, in one command.
+# ---------------------------------------------------------------------------
+
+_CONVERGED_LOG = ("LAMMPS (2 Aug 2023 - Update 3)\n"
+                  "# UNLOADED_REF layer=1 z=15.5\n"
+                  "# RAMP_STATUS converged=1 r=0.042 iterations=17\n")
+_SLIDE_LOG = "Step Temp E_pair\n     0   300   -1.5\nTotal wall time: 0:12:34\n"
+
+
+def _run_dir(root: Path, rel: str, *, provenance: bool = True,
+             logs: Optional[dict] = None) -> Path:
+    """One run directory inside a tree, shaped like a real one.
+
+    `lammps/*.in` is what `collect_hpc_simulation_paths` keys on, so every run
+    dir gets one -- the inputs stay on this side of the transfer anyway, since
+    the tree is built locally and only results come back.
+    """
+    from src.data.provenance import ProvenanceRecord, write_provenance
+
+    run = root / rel
+    (run / "lammps").mkdir(parents=True)
+    (run / "lammps" / "system.in").write_text("# lammps\n", encoding="utf-8")
+    for name, text in (logs or {}).items():
+        (run / "lammps" / name).write_text(text, encoding="utf-8")
+    if provenance:
+        write_provenance(run, ProvenanceRecord(
+            seed_thermal_tip=1, seed_thermal_sub=2, seed_velocity=3,
+            substrate_realization_id=None, damping_ratio=0.1, damp_ev=None,
+            git_commit="abc123", git_dirty=False, config_hash="deadbeef",
+            layer_type_map={"layer_1": [1, 2]}, contact_cutoff=5.0,
+            cutoff_source="uff_sigma_k1.5", thermostat_scheme="nvt_system",
+            load_requested=10.0,
+        ))
+    return run
+
+
+def _mixed_tree(tmp_path: Path) -> tuple:
+    """A rsynced-back tree with one of each outcome."""
+    root = tmp_path / "simulation_20260908_101500"
+    good = _run_dir(root, "afm/h_MoS2/L1", logs={"run_system.log": _CONVERGED_LOG})
+    slide_only = _run_dir(root, "afm/h_MoS2/L2", logs={"run_slide.log": _SLIDE_LOG})
+    no_record = _run_dir(root, "afm/t_CoTe2/L1", provenance=False,
+                         logs={"run_system.log": _CONVERGED_LOG})
+    return root, good, slide_only, no_record
+
+
+def test_recursive_sweep_enriches_every_run_it_can_and_tallies_the_rest(
+        runner, tmp_path):
+    root, good, slide_only, no_record = _mixed_tree(tmp_path)
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root)])
+
+    assert result.exit_code == 0, result.output
+
+    # The run with a system log gets the real merge...
+    data = json.loads((good / "provenance.json").read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is True
+    assert data["ramp_iterations"] == 17
+    assert data["unloaded_reference_z"] == {"layer_1": 15.5}
+
+    # ...the slide-only run keeps its record untouched...
+    slide_data = json.loads(
+        (slide_only / "provenance.json").read_text(encoding="utf-8"))
+    assert slide_data["ramp_converged"] is None
+
+    # ...and the run with no record is skipped, not crashed on.
+    assert not (no_record / "provenance.json").exists()
+
+    assert "1 enriched, 1 unchanged, 1 skipped." in result.output
+    # One line per run directory, keyed by its path relative to the root.
+    assert "afm/h_MoS2/L1" in result.output
+    assert "afm/h_MoS2/L2" in result.output
+    assert "afm/t_CoTe2/L1" in result.output
+
+
+def test_recursive_sweep_is_idempotent(runner, tmp_path):
+    """Re-running over an already-swept tree must not undo anything: the
+    second pass re-reads the same logs and writes the same values."""
+    root, good, _, _ = _mixed_tree(tmp_path)
+
+    runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root)])
+    after_first = (good / "provenance.json").read_text(encoding="utf-8")
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root)])
+
+    assert result.exit_code == 0, result.output
+    assert (good / "provenance.json").read_text(encoding="utf-8") == after_first
+
+
+def test_recursive_sweep_over_a_tree_with_no_runs_exits_zero(runner, tmp_path):
+    """Not an error: pointing this at the wrong directory, or at a tree whose
+    jobs have not run yet, must not look like a failure."""
+    empty = tmp_path / "nothing_here"
+    (empty / "notes").mkdir(parents=True)
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(empty)])
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None
+    assert "nothing to enrich" in result.output
+
+
+def test_recursive_sweep_rejects_a_log_path(runner, tmp_path):
+    """-r resolves each run's own log; a single LOG_PATH cannot mean anything
+    across a tree, so it is a usage error rather than a silently ignored arg."""
+    root, _, _, _ = _mixed_tree(tmp_path)
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root),
+                                 str(root / "afm/h_MoS2/L1/lammps/run_system.log")])
+
+    assert result.exit_code != 0
+    assert "cannot also take a single LOG_PATH" in result.output
+
+
+def test_log_path_defaults_to_run_system_log(runner, tmp_path):
+    """system*.in is the only phase that prints RAMP_STATUS, so run_system.log
+    wins even when other run logs sit beside it."""
+    run = _run_dir(tmp_path, "L1", logs={"run_system.log": _CONVERGED_LOG,
+                                         "run_slide.log": _SLIDE_LOG})
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", str(run)])
+
+    assert result.exit_code == 0, result.output
+    assert "run_system.log" in result.output
+    data = json.loads((run / "provenance.json").read_text(encoding="utf-8"))
+    assert data["ramp_iterations"] == 17
+
+
+def test_log_path_falls_back_to_a_sole_run_log(runner, tmp_path):
+    """A directory whose only log is not called run_system.log is unambiguous,
+    so use it -- covers a slide-only run and the fixed `run.log` an earlier
+    revision of the array templates wrote."""
+    run = _run_dir(tmp_path, "L1", logs={"run.log": _CONVERGED_LOG})
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", str(run)])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads((run / "provenance.json").read_text(encoding="utf-8"))
+    assert data["ramp_converged"] is True
+
+
+def test_several_logs_with_no_run_system_log_are_skipped_not_guessed(
+        runner, tmp_path):
+    run = _run_dir(tmp_path, "L1", logs={"run_slide_f10N.log": _CONVERGED_LOG,
+                                         "run_slide_f20N.log": _SLIDE_LOG})
+    before = (run / "provenance.json").read_text(encoding="utf-8")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", str(run)])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("skipped ")
+    assert "none named run_system.log" in result.output
+    assert "run_slide_f10N.log" in result.output and "run_slide_f20N.log" in result.output
+    assert (run / "provenance.json").read_text(encoding="utf-8") == before
+
+
+def test_no_log_at_all_is_skipped_with_a_reason(runner, tmp_path):
+    run = _run_dir(tmp_path, "L1")
+
+    result = runner.invoke(cli, ["hpc", "enrich-provenance", str(run)])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("skipped ")
+    assert "no run log in" in result.output

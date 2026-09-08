@@ -343,8 +343,11 @@ class HPCScriptGenerator:
             f'# rsync -rvltoD {sim_root.name} {rsync_target}',
             '',
             '# Optional: download results from HPC',
+            # run*.log too: the settle loop's RAMP_STATUS lines live only in
+            # those, and `hpc enrich-provenance -r` needs them on this side.
             f'# rsync -avzhP --include="*/" --include="results/***"'
-            f' --include="visuals/***" --exclude="*" {rsync_target}{sim_root.name} ./',
+            f' --include="visuals/***" --include="run*.log"'
+            f' --exclude="*" {rsync_target}{sim_root.name} ./',
             '',
             f'cd {sim_root}',
             '',
@@ -438,8 +441,11 @@ class HPCScriptGenerator:
             f'# Monitor with: {"qstat" if scheduler == "pbs" else "squeue"} -u $USER',
             '',
             '# Optional: download results after completion',
+            # run*.log too: the settle loop's RAMP_STATUS lines live only in
+            # those, and `hpc enrich-provenance -r` needs them on this side.
             f'# rsync -avzhP --include="*/" --include="results/***"'
-            f' --include="visuals/***" --exclude="*" {rsync_target}{sim_root.name} ./',
+            f' --include="visuals/***" --include="run*.log"'
+            f' --exclude="*" {rsync_target}{sim_root.name} ./',
         ]
         submit_path = output_dir / 'submit_jobs.sh'
         submit_path.write_text('\n'.join(lines))
@@ -607,8 +613,11 @@ class HPCScriptGenerator:
         lines.extend([
             '',
             '# Optional: download results after completion',
+            # run*.log too: the settle loop's RAMP_STATUS lines live only in
+            # those, and `hpc enrich-provenance -r` needs them on this side.
             f'# rsync -avzhP --include="*/" --include="results/***"'
-            f' --include="visuals/***" --exclude="*" {rsync_target}{sim_root.name} ./',
+            f' --include="visuals/***" --include="run*.log"'
+            f' --exclude="*" {rsync_target}{sim_root.name} ./',
         ])
 
         submit_path = output_dir / 'submit_jobs.sh'

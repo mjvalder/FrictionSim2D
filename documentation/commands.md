@@ -129,26 +129,71 @@ Options:
 ### hpc enrich-provenance
 
 ```bash
-FrictionSim2D hpc enrich-provenance SIM_DIR LOG_PATH
+FrictionSim2D hpc enrich-provenance -r ROOT          # sweep a whole tree
+FrictionSim2D hpc enrich-provenance SIM_DIR [LOG_PATH]   # one run
 ```
+
+Options:
+
+- `-r, --recursive` — treat the argument as a tree root and enrich every run
+  beneath it
 
 Folds a finished run's LAMMPS log into its `provenance.json`: the AFM settle
 loop's `# RAMP_STATUS converged=... r=... iterations=...` and
 `# UNLOADED_REF layer=... z=...` lines become the record's
 `ramp_converged`/`ramp_r`/`ramp_iterations` and `unloaded_reference_z` fields,
-plus `lammps_version`.
+plus `lammps_version`. Without this step a tip that never settled leaves no
+trace anywhere you would look.
 
-`SIM_DIR` is the directory holding `provenance.json` (the parent of `lammps/`);
-`LOG_PATH` is the stdout log of the `system.in` phase, which the job scripts
-write as `lammps/run_system.log` (they name each log after its input script, so
-a slide phase writes `lammps/run_slide.log` beside it). Pointing this at a
-slide log is harmless — it holds no settle-loop lines, so the record is left
-exactly as it was.
+**The recursive sweep is the expected workflow today.** Simulations are built
+on the workstation, transferred to the cluster, and run there; `FrictionSim2D`
+itself is *not* installed on the cluster, so the guarded call the generated job
+scripts carry never fires. The merge therefore happens here, after the results
+come back:
 
-The generated job scripts call this themselves after every run, so it rarely
-needs to be typed by hand; run it manually to backfill a tree that predates
-that wiring. It always exits 0 — a missing log, a missing or unreadable
-record, or a log with no settle-loop lines are reported and ignored.
+```bash
+# 1. results back from the cluster (the submit helper's own download line --
+#    it includes run*.log, which is where RAMP_STATUS lives)
+rsync -avzhP --include="*/" --include="results/***" --include="visuals/***" \
+      --include="run*.log" --exclude="*" HPC_HOST:HPC_HOME/simulation_20260908_101500 ./
+
+# 2. one sweep over the whole tree
+FrictionSim2D hpc enrich-provenance -r ./simulation_20260908_101500
+```
+
+That prints one line per run directory and a closing tally:
+
+```
+enriched afm/h_MoS2/L1: from run_system.log
+unchanged afm/h_MoS2/L2: no settle-loop lines in run_slide.log
+skipped afm/t_CoTe2/L1: no run log in .../lammps
+1 enriched, 1 unchanged, 1 skipped.
+```
+
+Run directories are found with the same discovery helper `hpc generate` uses,
+so the two commands always agree on what counts as a run. Re-running the sweep
+is safe: it re-reads the same logs and writes the same values.
+
+**Single-run mode.** `SIM_DIR` is the directory holding `provenance.json` (the
+parent of `lammps/`). `LOG_PATH` is optional — omitted, it defaults to
+`SIM_DIR/lammps/run_system.log`, falling back to the sole `run*.log` when that
+name is absent. Several logs with none named `run_system.log` are reported and
+skipped rather than guessed at. Pointing it at a slide log is harmless: no
+settle-loop lines, so the record is left exactly as it was.
+
+The job scripts name each log after its input script (`run_system.log`,
+`run_slide.log`, and one per split for per-load/per-angle slide scripts), so
+the system phase's log is never overwritten by a later phase.
+
+It always exits 0 on missing data — a missing log, a missing or unreadable
+record, a log with no settle-loop lines, and a tree with no runs in it are all
+reported and ignored. A completed simulation is never reported as failed over
+a provenance nicety. (Passing `-r` together with a `LOG_PATH` is a usage error,
+since one log cannot describe a whole tree.)
+
+If `FrictionSim2D` is later installed in a conda env on the cluster, the job
+scripts' own call starts working by itself and this step becomes optional; the
+templates already carry it, guarded by `command -v`.
 
 ## aiida
 
