@@ -367,12 +367,17 @@ def test_a_fresh_record_is_enriched_even_by_a_slide_only_log(runner, tmp_path):
 # ---------------------------------------------------------------------------
 
 def _run_dir(root: Path, rel: str, *, provenance: bool = True,
-             logs: Optional[dict] = None) -> Path:
+             logs: Optional[dict] = None,
+             record_extras: Optional[dict] = None) -> Path:
     """One run directory inside a tree, shaped like a real one.
 
     `lammps/*.in` is what `collect_hpc_simulation_paths` keys on, so every run
     dir gets one -- the inputs stay on this side of the transfer anyway, since
     the tree is built locally and only results come back.
+
+    `record_extras` seeds the post-run fields (`ramp_*`, `unloaded_reference_z`,
+    `lammps_version`) so a run can start out ALREADY enriched, which is what a
+    second sweep over a two-phase tree actually meets.
     """
     from src.data.provenance import ProvenanceRecord, write_provenance
 
@@ -388,9 +393,20 @@ def _run_dir(root: Path, rel: str, *, provenance: bool = True,
             git_commit="abc123", git_dirty=False, config_hash="deadbeef",
             layer_type_map={"layer_1": [1, 2]}, contact_cutoff=5.0,
             cutoff_source="uff_sigma_k1.5", thermostat_scheme="nvt_system",
-            load_requested=10.0,
+            load_requested=10.0, **(record_extras or {}),
         ))
     return run
+
+
+#: A record that has already been enriched by its own system phase, carrying an
+#: older LAMMPS banner so a later slide log's version update is visible.
+_SETTLED_FIELDS = {
+    "lammps_version": "29 Sep 2021 - Update 2",
+    "ramp_converged": True,
+    "ramp_r": 0.031,
+    "ramp_iterations": 12,
+    "unloaded_reference_z": {"layer_1": 14.25},
+}
 
 
 def _mixed_tree(tmp_path: Path) -> tuple:
@@ -398,9 +414,11 @@ def _mixed_tree(tmp_path: Path) -> tuple:
     root = tmp_path / "simulation_20260908_101500"
     good = _run_dir(root, "afm/h_MoS2/L1", logs={"run_system.log": _CONVERGED_LOG})
     slide_only = _run_dir(root, "afm/h_MoS2/L2", logs={"run_slide.log": _SLIDE_LOG})
+    settled = _run_dir(root, "afm/h_WS2/L1", logs={"run_slide.log": _SLIDE_LOG},
+                       record_extras=_SETTLED_FIELDS)
     no_record = _run_dir(root, "afm/t_CoTe2/L1", provenance=False,
                          logs={"run_system.log": _CONVERGED_LOG})
-    return root, good, slide_only, no_record
+    return root, good, slide_only, settled, no_record
 
 
 def _outcomes(output: str) -> dict:
@@ -417,13 +435,20 @@ def _outcomes(output: str) -> dict:
 def test_recursive_sweep_enriches_every_run_it_can_and_reports_the_rest(
         runner, tmp_path):
     """The realistic mix: a run with a system log, a run whose only log is a
-    slide log, and a run with no provenance.json at all.
+    slide log, a run already enriched by its own system phase, and a run with
+    no provenance.json at all.
 
     The slide-only run is 'enriched' rather than 'unchanged' -- its record had
     no lammps_version and the log's banner supplies one. What it must *not*
     gain is a settle result invented out of a log that never printed one.
+
+    That run alone cannot guard the merge, though: it starts from a fresh
+    record, so `ramp_* is None` afterwards holds whether the merge keeps the
+    fields the log did not mention or rebuilds the record and nulls them. The
+    already-settled run is the one that tells those apart -- its settle result
+    predates this sweep and must survive a slide log that never mentions it.
     """
-    root, good, slide_only, no_record = _mixed_tree(tmp_path)
+    root, good, slide_only, settled, no_record = _mixed_tree(tmp_path)
 
     result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root)])
 
@@ -443,21 +468,33 @@ def test_recursive_sweep_enriches_every_run_it_can_and_reports_the_rest(
     assert slide_data["ramp_iterations"] is None
     assert slide_data["unloaded_reference_z"] is None
 
+    # The already-settled run keeps every post-run field the slide log is
+    # silent about, and takes only what that log actually supplies (the newer
+    # banner wins lammps_version -- the documented last-log-wins consequence).
+    settled_data = json.loads(
+        (settled / "provenance.json").read_text(encoding="utf-8"))
+    assert settled_data["ramp_converged"] is True
+    assert settled_data["ramp_r"] == 0.031
+    assert settled_data["ramp_iterations"] == 12
+    assert settled_data["unloaded_reference_z"] == {"layer_1": 14.25}
+    assert settled_data["lammps_version"] == "2 Aug 2023 - Update 3"
+
     # The run with no record is skipped, not crashed on.
     assert not (no_record / "provenance.json").exists()
 
     assert _outcomes(result.output) == {
         "afm/h_MoS2/L1": "enriched",
         "afm/h_MoS2/L2": "enriched",
+        "afm/h_WS2/L1": "enriched",
         "afm/t_CoTe2/L1": "skipped",
     }
-    assert "2 enriched, 0 unchanged, 1 skipped." in result.output
+    assert "3 enriched, 0 unchanged, 1 skipped." in result.output
 
 
 def test_recursive_sweep_is_idempotent(runner, tmp_path):
     """Re-running over an already-swept tree must not undo anything: the
     second pass re-reads the same logs and writes the same values."""
-    root, good, _, _ = _mixed_tree(tmp_path)
+    root, good, _, _, _ = _mixed_tree(tmp_path)
 
     runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root)])
     after_first = (good / "provenance.json").read_text(encoding="utf-8")
@@ -483,7 +520,7 @@ def test_recursive_sweep_over_a_tree_with_no_runs_exits_zero(runner, tmp_path):
 def test_recursive_sweep_rejects_a_log_path(runner, tmp_path):
     """-r resolves each run's own log; a single LOG_PATH cannot mean anything
     across a tree, so it is a usage error rather than a silently ignored arg."""
-    root, _, _, _ = _mixed_tree(tmp_path)
+    root, _, _, _, _ = _mixed_tree(tmp_path)
 
     result = runner.invoke(cli, ["hpc", "enrich-provenance", "-r", str(root),
                                  str(root / "afm/h_MoS2/L1/lammps/run_system.log")])
