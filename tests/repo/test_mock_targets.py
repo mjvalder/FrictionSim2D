@@ -77,14 +77,6 @@ KNOWN_VIOLATIONS = {
     "builders/test_pes_scan_builder.py": {
         "src.builders.sheetonsheet.SheetOnSheetSimulation.build",
     },
-    "builders/test_sheetonsheet_builder.py": {
-        "src.builders.components.build_sheet",
-        "src.builders.sheetonsheet.SheetOnSheetSimulation._create_directories",
-        "src.builders.sheetonsheet.SheetOnSheetSimulation._generate_hpc_scripts",
-        "src.builders.sheetonsheet.SheetOnSheetSimulation._generate_potentials",
-        "src.builders.sheetonsheet.SheetOnSheetSimulation._init_provenance",
-        "src.builders.sheetonsheet.SheetOnSheetSimulation.write_inputs",
-    },
     "builders/test_simulation_base.py": {
         "src.builders.simulation_base.get_material_path",
         "src.builders.simulation_base.get_potential_path",

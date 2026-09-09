@@ -555,3 +555,72 @@ def test_flake_slide_paths_resolve_from_the_simulation_root(tmp_path):
     for path in staged:
         assert (root / path).is_file(), (
             f"staged potential {path} does not resolve from {root}")
+
+
+# --- the flake-footprint guard (builders-sheetonsheet.md finding 12) ---------
+#
+# `_assemble_flake_on_sheet` refuses a flake wider than the periodic substrate
+# box. It is the ONLY footprint guard the flake path has and it was untested.
+# It is also the near-miss neighbour of the flake PBC self-interaction gap filed
+# in specs/TO-DO/future-works.md (recorded, not fixed, 2026-09-09): this guard
+# catches a flake wider than the box, and says nothing about one that fits with
+# less than lj/cut clearance to its own periodic image. A reader who finds this
+# raise could reasonably assume PBC is handled. It is not.
+#
+# No LAMMPS: the raise precedes _run_lammps, and `pm` is only read after it.
+
+def _write_slab(path, xs, cell_xy):
+    """A minimal LAMMPS data file: one atom per x, at z=0, in a cell_xy box."""
+    import numpy as np
+    from ase import Atoms
+    from ase.io import write
+
+    cell = np.array([[cell_xy[0], 0.0, 0.0], [0.0, cell_xy[1], 0.0], [0.0, 0.0, 50.0]])
+    atoms = Atoms(symbols=["H"] * len(xs),
+                  positions=[[x, 1.0, 0.0] for x in xs], cell=cell, pbc=True)
+    write(str(path), atoms, format="lammps-data", atom_style="atomic")
+    return path
+
+
+def _assemble(tmp_path, flake_xs, sheet_cell=(10.0, 10.0)):
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+
+    sim = FlakeSlideSimulation(_flake_on_sheet_cfg(), str(tmp_path))
+    return sim._assemble_flake_on_sheet(
+        sheet_path=_write_slab(tmp_path / "sheet.lmp", [1.0, 2.0], sheet_cell),
+        flake_path=_write_slab(tmp_path / "flake.lmp", flake_xs, sheet_cell),
+        n_sheet_types=1, pm=None,
+        settings_path=tmp_path / "system.in.settings",
+        bottom_flake_component="flake",
+    )
+
+
+def test_assemble_refuses_a_flake_wider_than_the_substrate_box(tmp_path):
+    """A 12 A flake span in a 10 A periodic box must be refused, not wrapped.
+
+    The message has to carry both footprints -- the user's next move is to pick
+    a bigger [2D] x/y or a smaller edge_length, and neither number is guessable
+    from "does not fit".
+    """
+    with pytest.raises(ValueError, match="does not fit") as exc:
+        _assemble(tmp_path, flake_xs=[0.0, 12.0])
+
+    message = str(exc.value)
+    assert "12.0" in message          # the flake span
+    assert "10.0" in message          # the box it has to fit inside
+    assert "edge_length" in message
+
+
+def test_assemble_refuses_a_flake_that_exactly_spans_the_box(tmp_path):
+    """The comparison is `>=`, not `>`: a flake exactly as wide as the box has
+    zero clearance to its own periodic image, so it is refused too."""
+    with pytest.raises(ValueError, match="does not fit"):
+        _assemble(tmp_path, flake_xs=[0.0, 10.0])
+
+
+def test_assemble_accepts_a_flake_that_fits_and_reaches_the_lammps_call(tmp_path):
+    """The guard must not over-fire. A narrow flake passes it and the method
+    proceeds -- to `pm.calculate_gap`, which is `None` here, so an AttributeError
+    is exactly the evidence that the footprint check let it through."""
+    with pytest.raises(AttributeError):
+        _assemble(tmp_path, flake_xs=[1.0, 3.0])

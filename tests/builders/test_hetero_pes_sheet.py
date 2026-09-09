@@ -354,3 +354,53 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     energies = [float(r.split(",")[2]) for r in rows[1:]]
     # A real, non-degenerate corrugation was mapped (not all grid points equal).
     assert max(energies) - min(energies) > 1e-6
+
+
+# --- _guard_scannable_cell (builders-sheetonsheet.md finding 7) ---------------
+#
+# All three raises were uncovered. The triclinic one is the one that matters:
+# it is the only thing stopping an axis-aligned (dx, dy) grid from being stepped
+# over a tilted cell, where the grid points are not lattice translations and the
+# resulting PES is silently meaningless. No build and no LAMMPS is needed --
+# the two attributes the guard reads are plain ones set in __init__.
+
+def _guarded_builder(tmp_path, *, cell, tilt=0.0):
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+
+    sim = HeteroPESSheetSimulation(_hetero_pes_config(), str(tmp_path))
+    sim._hetero_coincidence_cell = cell
+    sim._hetero_cell_xy_tilt = tilt
+    return sim
+
+
+def test_guard_scannable_cell_accepts_an_orthogonal_positive_cell(tmp_path):
+    """The guard must not over-fire on the shape every shipped fixture has."""
+    _guarded_builder(tmp_path, cell=(12.74, 11.03)).\
+        _guard_scannable_cell()          # no raise
+
+
+def test_guard_scannable_cell_refuses_a_triclinic_cell(tmp_path):
+    """A tilted cell cannot be stepped by an axis-aligned grid.
+
+    The message must name the measured tilt, since the whole point is telling
+    the user which pair they picked is unscannable.
+    """
+    sim = _guarded_builder(tmp_path, cell=(12.74, 11.03), tilt=6.37)
+    with pytest.raises(ValueError, match="triclinic") as exc:
+        sim._guard_scannable_cell()
+    assert "6.37" in str(exc.value)
+
+
+def test_guard_scannable_cell_refuses_a_non_positive_cell(tmp_path):
+    sim = _guarded_builder(tmp_path, cell=(0.0, 11.03))
+    with pytest.raises(ValueError, match="Non-positive"):
+        sim._guard_scannable_cell()
+
+
+def test_guard_scannable_cell_refuses_a_write_before_build(tmp_path):
+    """`_hetero_coincidence_cell` is populated by the stack assembly in build(),
+    so calling the run-phase seam first must say so rather than raising a bare
+    TypeError while unpacking None."""
+    sim = _guarded_builder(tmp_path, cell=None)
+    with pytest.raises(ValueError, match="cannot be called before it"):
+        sim._guard_scannable_cell()

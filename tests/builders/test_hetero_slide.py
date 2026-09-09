@@ -675,3 +675,59 @@ def test_hetero_slide_runs_and_drives_top_layer(tmp_path):
         f"top-layer COM barely moved (dx={dx:.3f}, dy={dy:.3f}, |d|={disp:.3f} A); "
         f"virtual_atom drive appears dead"
     )
+
+
+# --- compute_layer_zbands's fail-loud self-check (finding 10) ----------------
+
+def test_layer_zbands_raises_when_the_data_file_disagrees_with_the_placement(tmp_path):
+    """The self-check that makes a silent mis-grouping impossible, tested.
+
+    `compute_layer_zbands` derives its bands from each layer's KNOWN placement
+    (`.source` native z-range + `.z` shift) and then verifies every atom in the
+    ASSEMBLED file falls in exactly one band. Its docstring calls that "a
+    self-check that makes a silent mis-grouping impossible -- it fails loud
+    instead"; nothing tripped it. Here the assembled file carries a stray atom
+    at z=40 that no layer accounts for, which is exactly the placement/write
+    discrepancy the check exists to catch.
+    """
+    src_a = _write_zcol_atoms(tmp_path / "a.lmp", [0.0])
+    src_b = _write_zcol_atoms(tmp_path / "b.lmp", [0.0])
+    layers = [SimpleNamespace(source=src_a, z=0.0), SimpleNamespace(source=src_b, z=10.0)]
+    # The assembled file has a third atom at z=40 -- in NO band.
+    data_path = _write_zcol_atoms(tmp_path / "assembled.lmp", [0.0, 10.0, 40.0])
+
+    with pytest.raises(ValueError, match=r"falls in 0 bands") as exc:
+        compute_layer_zbands(data_path, layers)
+    assert "40.0" in str(exc.value)          # names the offending atom
+
+
+def test_layer_zbands_raises_when_two_bands_overlap_an_atom(tmp_path):
+    """The other half of the same check: an atom in MORE than one band.
+
+    Two layers placed 0.5 A apart have bands that overlap once PAD=1.0 is added
+    on each side, so every atom lands in both -- a mis-grouping that a
+    "contiguous and non-overlapping" assertion would not notice.
+    """
+    src = _write_zcol_atoms(tmp_path / "s.lmp", [0.0])
+    layers = [SimpleNamespace(source=src, z=0.0), SimpleNamespace(source=src, z=0.5)]
+    data_path = _write_zcol_atoms(tmp_path / "assembled.lmp", [0.0, 0.5])
+
+    with pytest.raises(ValueError, match=r"falls in 2 bands"):
+        compute_layer_zbands(data_path, layers)
+
+
+# --- the hetero layer-count contract (finding 11) ----------------------------
+
+def test_hetero_n_layers_raises_for_multiple_layer_values():
+    """The hetero counterpart of `test_n_layers_raises_for_multiple_layer_values`.
+
+    The homogeneous builder has had this guard tested since it was written; the
+    hetero one sums `int(sheet.layers[0])` across materials and so must reject a
+    layer SWEEP the same way rather than silently using each list's first value.
+    """
+    cfg = _hetero_2p2_config()
+    cfg.sheets[0].layers = [2, 3]
+    sim = HeteroSheetOnSheetSimulation(cfg, "unused")
+
+    with pytest.raises(ValueError, match="exactly one value in each material"):
+        _ = sim.n_layers
