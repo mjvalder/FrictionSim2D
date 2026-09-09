@@ -5,7 +5,8 @@ from typing import List, Dict, Optional
 
 from ...core.config import SheetOnSheetSimulationConfig
 from ..simulation_base import SimulationBase
-from .base import sheet_obs_ctx
+from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
+                   write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ...interfaces.ase import read_lammps_data
 from ..construction.hetero_stack import (
@@ -485,6 +486,17 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
         script = self.render_template("hetero/slide.lmp", context)
         self.write_file("lammps/slide.in", script)
+
+        # cutoff_source is stated here rather than read off the instance: this
+        # class never calls SheetOnSheetSimulation._contact_cutoff (it cannot --
+        # see _build_obs_ctx), so _contact_cutoff_source is genuinely absent and
+        # sheet_obs_ctx's documented fallback is what the script uses.
+        write_sheet_provenance(
+            self,
+            contact_cutoff=context["obs_ctx"]["contact_cutoff"],
+            cutoff_source="fallback_default",
+            thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
+        )
         logger.info("Wrote hetero slide script to %s/lammps/slide.in", self.output_dir)
 
     def _record_twist_manifest(self, stack, twist_angle_target) -> None:

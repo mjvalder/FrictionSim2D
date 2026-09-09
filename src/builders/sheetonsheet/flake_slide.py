@@ -20,7 +20,8 @@ import numpy as np
 from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
 from ..simulation_base import SimulationBase
-from .base import sheet_obs_ctx
+from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
+                   write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
 from ..construction.hetero_stack import _box_region_cmd, _detect_atom_style, _run_lammps
@@ -402,6 +403,16 @@ class FlakeSlideSimulation(SimulationBase):
 
         script = self.render_template("flake/slide.lmp", context)
         self.write_file("lammps/slide.in", script)
+
+        # See the note on the hetero builder's call: this class does not have
+        # SheetOnSheetSimulation._contact_cutoff either, so the fallback is what
+        # its obs_ctx used and what the script carries.
+        write_sheet_provenance(
+            self,
+            contact_cutoff=context["obs_ctx"]["contact_cutoff"],
+            cutoff_source="fallback_default",
+            thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
+        )
         logger.info("Wrote flake slide script to %s/lammps/slide.in", self.output_dir)
 
         self._generate_hpc_scripts()

@@ -7,7 +7,6 @@ generates the necessary potentials, and writes the LAMMPS input scripts.
 
 import hashlib
 import logging
-import subprocess
 from itertools import product
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -946,23 +945,10 @@ class AFMSimulation(SimulationBase):
         from ...data.provenance import (ProvenanceRecord, sha256_file,
                                        write_provenance)
 
-        try:
-            # check=False: git absence/failure must not abort the build --
-            # caught below and recorded as 'unknown'/clean, not raised.
-            git_commit = subprocess.run(
-                ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
-                cwd=Path(__file__).parent, timeout=10, check=False,
-            ).stdout.strip() or 'unknown'
-            git_dirty = bool(subprocess.run(
-                ['git', 'status', '--porcelain'], capture_output=True,
-                text=True, cwd=Path(__file__).parent, timeout=10, check=False,
-            ).stdout.strip())
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.warning(
-                "Could not read git identity for provenance (git absent or "
-                "not a repo?): %s. Recording git_commit='unknown', "
-                "git_dirty=False.", exc)
-            git_commit, git_dirty = 'unknown', False
+        # Shared with the sheet family's write_sheet_provenance, so both
+        # record build identity identically; git absence is recorded, never
+        # raised (see SimulationBase._git_identity).
+        git_commit, git_dirty = self._git_identity()
 
         # .get, not [n_layers]: the per-layer PotentialManager is populated in
         # build() (line ~99), and the PES-tip and freestanding builders reach

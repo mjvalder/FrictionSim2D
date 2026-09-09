@@ -7,6 +7,7 @@ required by all specific simulation types (AFM, Sheet-on-Sheet, etc.).
 import os
 import logging
 import random
+import subprocess
 from abc import ABC
 from pathlib import Path
 from typing import Any, Dict, List, Union, Optional
@@ -64,6 +65,36 @@ class SimulationBase(ABC):
     #: (``src.run.expand._run_scripts_per_build``) reads it off the builder class
     #: the config routes to, so the predicted and generated counts cannot drift.
     SPLIT_OUTER_LOOPS: frozenset = frozenset()
+
+    @staticmethod
+    def _git_identity() -> "tuple[str, bool]":
+        """``(commit, dirty)`` for a provenance record. Never raises.
+
+        Shared by :meth:`~src.builders.afm.base.AFMSimulation._write_provenance`
+        and :func:`~src.builders.sheetonsheet.base.write_sheet_provenance` so
+        the two families record build identity the same way.
+
+        ``check=False`` throughout: git being absent, or the tree not being a
+        repo, must not abort a build. That case is recorded as
+        ``('unknown', False)`` -- a provenance record saying "I could not tell"
+        is worth more than a failed build.
+        """
+        try:
+            commit = subprocess.run(
+                ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                cwd=Path(__file__).parent, timeout=10, check=False,
+            ).stdout.strip() or 'unknown'
+            dirty = bool(subprocess.run(
+                ['git', 'status', '--porcelain'], capture_output=True,
+                text=True, cwd=Path(__file__).parent, timeout=10, check=False,
+            ).stdout.strip())
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(
+                "Could not read git identity for provenance (git absent or "
+                "not a repo?): %s. Recording git_commit='unknown', "
+                "git_dirty=False.", exc)
+            return 'unknown', False
+        return commit, dirty
 
     def _run_seed(self, channel: str) -> int:
         """A fresh random seed for one RNG channel, drawn once per build.

@@ -35,6 +35,161 @@ logger = logging.getLogger(__name__)
 MIN_LAYERS = 3
 
 
+#: Recorded as ``cutoff_source`` when the run has no contact cutoff to record.
+#: A static PES scan computes no ``coord/atom`` coordination at all, but
+#: ``ProvenanceRecord.contact_cutoff`` is a required float, so it gets 0.0 and
+#: this source says the number means nothing rather than inventing a plausible
+#: one.
+CUTOFF_NOT_APPLICABLE = 'not_applicable_static_scan'
+
+
+def sheet_thermostat_scheme(settings) -> str:
+    """What actually thermostats a dynamic sheet run, for the provenance record.
+
+    The sheet templates thermostat the ``center`` group -- layers 2..N-1, the
+    mobile middle of the stack -- and leave layer 1 fixed and layer N rigid.
+    Either ``fix lang center langevin`` plus ``fix nve_center center nve``, or
+    ``fix nvt_center center nvt`` (``sheetonsheet/slide.lmp``, and the same
+    pair in the hetero and flake templates). AFM's equivalent string names its
+    own arrangement (`langevin_y_tip_sub_nve_sheet`), so these must not be
+    confused when both families' records are read together.
+    """
+    if settings.thermostat.type == 'langevin':
+        return 'langevin_center_nve'
+    return f'{settings.thermostat.type}_center'
+
+
+def sheet_layer_type_map(builder) -> Dict[str, List[int]]:
+    """``{'layer_1': [7, 8], ...}`` from a builder's atom-type layer groups.
+
+    Empty for a family whose layers are not atom-type groups. The hetero and
+    flake builders partition by z-band region (``compute_layer_zbands``), so
+    there are no per-layer type ids to record and ``{}`` is the honest answer --
+    the same thing hetero AFM writes, and why
+    :class:`~src.data.provenance.ProvenanceRecord` allows the map to be empty.
+    """
+    groups = getattr(builder, 'groups', None)
+    if not isinstance(groups, dict):
+        return {}
+    out: Dict[str, List[int]] = {}
+    for name, types in groups.items():
+        if not (isinstance(name, str) and name.startswith('layer_')):
+            continue
+        if not isinstance(types, str):
+            continue
+        ids = [int(tok) for tok in types.split() if tok.isdigit()]
+        if ids:
+            out[name] = ids
+    return out
+
+
+def write_sheet_provenance(builder, *, contact_cutoff: float,
+                           cutoff_source: str, thermostat_scheme: str,
+                           output_root: Optional[Path] = None) -> Path:
+    """Write ``provenance.json`` for one sheet-family run.
+
+    The sheet family's counterpart to
+    :meth:`~src.builders.afm.base.AFMSimulation._write_provenance`, and a
+    module-level function for the same reason :func:`sheet_obs_ctx` is one:
+    :class:`SheetOnSheetSimulation`, ``HeteroSheetOnSheetSimulation`` and
+    ``FlakeSlideSimulation`` are *siblings* under
+    :class:`~src.builders.simulation_base.SimulationBase`, not a class and its
+    subclasses, so there is no shared method to put this on.
+
+    Until this existed, **no sheet-on-sheet, hetero, flake or PES-sheet run
+    wrote a provenance record at all** while every AFM run did:
+    ``ProvenanceRecord.seed_sheet_center`` ("sheet runs only") had no writer,
+    ``SheetOnSheetSimulation._contact_cutoff`` set a ``_contact_cutoff_source``
+    nothing read, and ``hpc enrich-provenance`` reported ``skipped`` for every
+    sheet run it swept.
+
+    Four fields differ in meaning from an AFM record, and the differences are
+    the reason this is not simply AFM's method moved up:
+
+    * **Load is a pressure.** A sheet run is driven at constant normal
+      *pressure* (GPa), not a tip load (nN), so ``pressure_requested`` carries
+      it and ``load_requested`` stays ``None``. Both are optional in the schema.
+      A *list* of pressures records ``None``, not the first element: the list is
+      an in-script loop, so one run covers every value and no single number is
+      "the" requested pressure. AFM records a force list the same way.
+    * **The seeds are different channels.** Only ``sheet_center`` is drawn -- it
+      thermostats the mobile middle layers -- so ``seed_thermal_tip``,
+      ``seed_thermal_sub`` and ``seed_velocity`` are ``None``. There is no tip
+      and no separate velocity channel.
+    * **There is no substrate realization.** ``substrate_realization_id``
+      identifies the cached amorphous slab every AFM run shares; a sheet stack
+      has none.
+    * **Only the primary sheet's potential is recorded.** ``ProvenanceRecord``
+      has one ``pot_path``/``pot_type``/``pot_file_sha256`` triple, and a hetero
+      run has two or more materials. ``config.sheet`` is ``[2D]``, mirrored from
+      ``[2D-1]`` for a numbered-only config, so this is the *first* material of
+      the stack, not the only one. Recording the rest needs a schema change
+      (``src/data/`` is out of this review's scope); the material pair itself is
+      already in the output directory name and the run manifest.
+
+    Args:
+        builder: the builder instance; its ``config``, ``_seeds``,
+            ``output_dir`` and git identity are read.
+        contact_cutoff: the cutoff the emitted script actually uses -- passed
+            in rather than recomputed, so the record cannot disagree with the
+            script. Hetero and flake pass ``sheet_obs_ctx``'s documented
+            fallback because that is what their ``obs_ctx`` used.
+        cutoff_source: how that number was arrived at, e.g.
+            ``'uff_sigma_k2.0'``, ``'fallback_default'`` or
+            :data:`CUTOFF_NOT_APPLICABLE`.
+        thermostat_scheme: what actually thermostats the run, e.g.
+            ``'langevin_center_nve'``.
+        output_root: directory to write into; defaults to the builder's own
+            run directory.
+
+    Returns:
+        The path written.
+    """
+    # Deferred for the same reason AFM defers it: `src.data.provenance` costs
+    # ~15-23 ms (pydantic model construction) and only an actual build should
+    # pay it -- `--help` and every non-build subcommand instantiate nothing.
+    # pylint: disable-next=import-outside-toplevel
+    from ...data.provenance import (ProvenanceRecord, sha256_file,
+                                    write_provenance)
+    import hashlib  # pylint: disable=import-outside-toplevel
+
+    config = builder.config
+    git_commit, git_dirty = builder._git_identity()  # pylint: disable=protected-access
+
+    pressure = getattr(config.general, 'pressure', None)
+    pressure_requested = (float(pressure)
+                          if isinstance(pressure, (int, float)) else None)
+
+    sheet = config.sheet
+    pot_path = Path(str(sheet.pot_path))
+
+    record = ProvenanceRecord(
+        seed_thermal_tip=None,
+        seed_thermal_sub=None,
+        seed_velocity=None,
+        seed_sheet_center=builder._seeds.get('sheet_center'),  # pylint: disable=protected-access
+        substrate_realization_id=None,
+        damping_ratio=None,
+        damp_ev=None,
+        git_commit=git_commit,
+        git_dirty=git_dirty,
+        config_hash=hashlib.sha256(
+            config.model_dump_json().encode()).hexdigest(),
+        layer_type_map=sheet_layer_type_map(builder),
+        contact_cutoff=contact_cutoff,
+        cutoff_source=cutoff_source,
+        thermostat_scheme=thermostat_scheme,
+        run_role='label',
+        load_requested=None,
+        pressure_requested=pressure_requested,
+        pot_path=str(sheet.pot_path),
+        pot_type=sheet.pot_type,
+        pot_resolution_route=getattr(sheet, 'pot_resolution_route', None),
+        pot_file_sha256=(sha256_file(pot_path) if pot_path.is_file() else None),
+    )
+    return write_provenance(output_root or builder.output_dir, record)
+
+
 def sheet_obs_ctx(settings, *, sim_type: str, n_layers: int,
                   results_file_pattern: str,
                   contact_cutoff: Optional[float] = None,
@@ -435,11 +590,8 @@ class SheetOnSheetSimulation(SimulationBase):
             # (see the note there): assigning only on the route actually taken
             # is what lets a reader tell "never computed" from a real value
             # via getattr(self, '_contact_cutoff_source', 'unknown'), which an
-            # __init__-assigned None/'' would collapse. NOTE: unlike AFM's,
-            # this attribute has no reader in the sheet family today -- the
-            # docstring's "provenance records which route was taken" is true
-            # of AFM's _write_provenance, and SheetOnSheetSimulation has none.
-            # Kept in step with the twin method rather than diverging.
+            # __init__-assigned None/'' would collapse. write_inputs reads it
+            # exactly that way when it writes the provenance record.
             # pylint: disable-next=attribute-defined-outside-init
             self._contact_cutoff_source = f'uff_sigma_k{K_CONTACT}'
             cut = K_CONTACT * sigma_max
@@ -448,7 +600,10 @@ class SheetOnSheetSimulation(SimulationBase):
                 "Contact cutoff fallback: could not derive UFF sigma for "
                 "sheet '%s'; using %.1f A.",
                 self.config.sheet.mat, _CONTACT_CUTOFF_FALLBACK)
-            # See the getattr-distinguishes-absence note above.
+            # See the getattr-distinguishes-absence note above. This is the
+            # same string the hetero and flake builders pass literally: they
+            # never reach this method, but their obs_ctx takes sheet_obs_ctx's
+            # documented fallback, which is the same number for the same reason.
             # pylint: disable-next=attribute-defined-outside-init
             self._contact_cutoff_source = 'fallback_default'
             cut = _CONTACT_CUTOFF_FALLBACK
@@ -563,6 +718,18 @@ class SheetOnSheetSimulation(SimulationBase):
             'ev_a_to_nn': EV_A_TO_NN,
             'ev_a3_to_gpa': EV_A3_TO_GPA,
         }
+
+        # Before the branching below, not after: write_inputs has four exits
+        # (per-angle split, single script, per-pressure split, per-speed split)
+        # and the record belongs to the build, not to any one of them.
+        write_sheet_provenance(
+            self,
+            contact_cutoff=base_context['obs_ctx']['contact_cutoff'],
+            # Set by _contact_cutoff, which _build_obs_ctx called just above.
+            # 'unknown' would mean it never ran, which cannot happen here.
+            cutoff_source=getattr(self, '_contact_cutoff_source', 'unknown'),
+            thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
+        )
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)
         # A builder splits only by what it declares in SPLIT_OUTER_LOOPS;

@@ -14,7 +14,8 @@ from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ..construction.hetero_stack import detect_inplane_repeat
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
-from .base import SheetOnSheetSimulation
+from .base import (CUTOFF_NOT_APPLICABLE, SheetOnSheetSimulation,
+                   write_sheet_provenance)
 from .hetero import HeteroSheetOnSheetSimulation
 
 logger = logging.getLogger(__name__)
@@ -270,6 +271,22 @@ class PESGridMixin:
             context['results_csv'] = self._scan_results_path(csv_name)
             script = self.render_template(template, context)
             self.write_file(script_name, script)
+
+        # One record per build, not per grid variant: slide.in and
+        # slide_refine.in are two resolutions of the same scan, in the same run
+        # directory, from the same config.
+        #
+        # A static scan has no thermostat and no contact cutoff -- it minimises
+        # at each grid point and computes no coordination -- but
+        # ProvenanceRecord requires a float for contact_cutoff, so it gets 0.0
+        # and a source that says the number is meaningless rather than a
+        # plausible-looking one a reader would trust.
+        write_sheet_provenance(
+            self,
+            contact_cutoff=0.0,
+            cutoff_source=CUTOFF_NOT_APPLICABLE,
+            thermostat_scheme='none_static_scan',
+        )
 
         logger.info(
             "Sheet PES scan written to %s/lammps/ (grid periods %.3f×%.3f Å, %d cells)",
