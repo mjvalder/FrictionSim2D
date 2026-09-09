@@ -71,15 +71,30 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
             click.echo("   conda install -c conda-forge aiida-core", err=True)
             raise click.Abort()
 
-    created_simulations, simulation_root, configs_to_run, _ = run_simulations(
-        config_file=config_file,
-        model=model,
-        settings_file=settings_file,
-        output_root=Path(output_dir),
-        ensure_hpc_settings=_ensure_hpc_settings,
-        use_aiida=use_aiida,
-        generate_hpc=generate_hpc,
-    )
+    try:
+        created_simulations, simulation_root, configs_to_run, _ = run_simulations(
+            config_file=config_file,
+            model=model,
+            settings_file=settings_file,
+            output_root=Path(output_dir),
+            ensure_hpc_settings=_ensure_hpc_settings,
+            use_aiida=use_aiida,
+            generate_hpc=generate_hpc,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        # A rejected config is a user error, not a crash: expansion refusals
+        # (`run/expand.py`), the runtime sweep-ordering check, and pydantic's
+        # ValidationError (a ValueError subclass) all land here, and every one
+        # of them already carries a message naming what to change. Without this
+        # the user got a bare traceback and no CLI output at all, while
+        # `hpc generate` right below reports its own refusals properly. The
+        # catch stays narrow -- an unexpected error still surfaces its
+        # traceback -- and the exception is logged so nothing is lost.
+        # debug, not exception: the message is echoed below, and logging the
+        # traceback at ERROR would print the very thing this replaces.
+        logger.debug("Simulation generation rejected the config", exc_info=True)
+        click.echo(f"❌ {exc}", err=True)
+        raise click.Abort() from exc
 
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
 
