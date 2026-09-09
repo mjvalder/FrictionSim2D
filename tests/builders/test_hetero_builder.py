@@ -15,6 +15,7 @@ Covers:
 * Fail-loud behavior when no low-strain coincidence exists.
 """
 import re
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,14 @@ from src.builders.construction.hetero_stack import (
 )
 from src.core.config import SheetConfig, SheetOnSheetSimulationConfig, load_settings
 from src.lattice.matching import find_coincidence_lattice
+
+#: Several tests below reach real LAMMPS through build_hetero_structure's
+#: interface minimisation rather than by calling lmp_serial directly, so they
+#: carry the same skipif guard the explicit-LAMMPS tests do -- conftest.py
+#: derives the `lammps` marker from that guard, and without it they sat in the
+#: FAST tier and hard-failed on any machine without LAMMPS on PATH.
+LMP = shutil.which("lmp_serial")
+
 
 MOS2_CIF = "examples/materials/h-MoS2.cif"
 WS2_CIF = "examples/materials/h-WS2.cif"
@@ -381,6 +390,7 @@ def _wrap_vec_mod_cell(vec, cell_2x2):
     return frac @ np.asarray(cell_2x2, dtype=float)
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_hetero_stack_is_periodic_and_complete(tmp_path):
     """Assemble two matched supercells into ONE periodic LAMMPS cell and verify
     the built geometry: correct atom count, a physical (ordered, non-overlapping,
@@ -524,6 +534,7 @@ print           "RESULT_NATOMS ${{na}}"
     return energy
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_end_to_end_structure_assembles_in_lammps(tmp_path):
     """Capstone: the single ``build_hetero_structure`` entrypoint ties Tasks 3-5
     together and yields a ``hetero.data`` + ``system.in.settings`` that assemble
@@ -608,6 +619,7 @@ def test_build_twisted_supercells_shares_one_orthorhombic_box(tmp_path):
     assert abs(ca[1, 0]) < 1e-3 * abs(ca[0, 0])                                # orthorhombic
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_same_material_twist_synthesises_two_sheets(tmp_path):
     raw = {  # a SINGLE [2D] material + twist -> same-material moiré
         "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped",
@@ -657,6 +669,7 @@ def _read_hetero_masses_and_counts(data_path):
     return type_mass, type_count
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_same_material_twist_masses_preserve_metal(tmp_path):
     """The same-material twist path must keep MoS2's stoichiometry AND masses.
 
@@ -791,10 +804,6 @@ def test_register_hetero_potentials_no_regions_unchanged(tmp_path):
     assert hp.pm.types.ids_by_component_region("sheet_1", "edge") == []
     assert hp.pm.types.ids_by_component_region("sheet_2", "edge") == []
 
-
-import shutil  # noqa: E402  (B3 real-LAMMPS tests below)
-
-LMP = shutil.which("lmp_serial")
 
 
 def _finite_hetero_cfg(tmp_path, layers=None):
@@ -949,6 +958,7 @@ def _pair_coeff_potential_paths(settings_path):
     ]
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_default_prefix_is_run_dir_relative(tmp_path):
     """Unchanged for callers that run LAMMPS from the run directory itself."""
     cfg = _two_material_config()
@@ -958,6 +968,7 @@ def test_default_prefix_is_run_dir_relative(tmp_path):
     assert all(p.startswith("provenance/potentials/") for p in paths), paths
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 @pytest.mark.parametrize("edge_width", [1.5, 0.0])
 @pytest.mark.parametrize("finite", [False, True])
 def test_requested_prefix_reaches_the_written_settings(tmp_path, finite, edge_width):
@@ -987,6 +998,7 @@ def test_requested_prefix_reaches_the_written_settings(tmp_path, finite, edge_wi
         assert (tmp_path / "provenance" / "potentials" / Path(path).name).is_file()
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_finite_hetero_with_prefix_keeps_edge_types(tmp_path):
     """Regression guard: a finite hetero build (``finite_sheet_edge_width`` >
     0) combined with a caller-supplied ``potentials_prefix`` must keep the

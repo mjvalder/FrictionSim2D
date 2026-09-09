@@ -63,6 +63,7 @@ def _hetero_1p1_config():
     return SheetOnSheetSimulationConfig(**raw, settings=_settings())
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_layer_zbands_partition_all_atoms(tmp_path):
     cfg = _hetero_2p2_config()
     stack = build_hetero_structure(cfg, cfg.settings, workdir=tmp_path)
@@ -338,6 +339,7 @@ def test_builder_requires_four_layers(tmp_path):
         sim.build()
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_builder_writes_slide_in_referencing_hetero_stack(tmp_path):
     cfg = _hetero_2p2_config()
     sim = HeteroSheetOnSheetSimulation(cfg, str(tmp_path))
@@ -376,6 +378,7 @@ def _real_atom_types(data_path):
     return types
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_virtual_atom_drive_reserves_dedicated_nonreal_type(tmp_path):
     """Regression for the D1 CRITICAL bug: the default ``virtual_atom`` hetero
     drive reused ``num_atom_types = total_real_types`` for
@@ -435,6 +438,7 @@ def test_virtual_atom_drive_reserves_dedicated_nonreal_type(tmp_path):
     assert "Virtual atom" in settings_text  # mass N 1.0 #Virtual atom
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_non_virtual_drive_reserves_no_virtual_type(tmp_path):
     """Guard the other drives: a ``fix_move`` (non-virtual) hetero slide must
     NOT reserve a virtual type -- no ``extra/atom/types``, no virtual
@@ -541,6 +545,7 @@ def test_hetero_sheet_job_name_differs_by_full_pair():
 
 # --- HPC job scripts for a hetero run ------------------------------------- #
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_hetero_run_writes_hpc_scripts_whose_paths_resolve(tmp_path):
     """A hetero run must produce submittable job scripts, not a log warning.
 
@@ -577,6 +582,7 @@ def test_hetero_run_writes_hpc_scripts_whose_paths_resolve(tmp_path):
             f"staged potential {path} does not resolve from {root}")
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
 def test_hetero_build_does_not_swallow_hpc_generation_failures(tmp_path):
     """``hpc.modules`` unset is a real, reportable precondition.
 
