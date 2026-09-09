@@ -16,13 +16,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
-from jinja2 import Environment
 
 from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
 from ..simulation_base import SimulationBase
+from .base import sheet_obs_ctx
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
-from ...interfaces.jinja import PackageLoader
 from ..construction import components
 from ..construction.hetero_stack import _box_region_cmd, _detect_atom_style, _run_lammps
 from ...interfaces.ase import read_lammps_data
@@ -30,77 +29,6 @@ from ...interfaces.ase import read_lammps_data
 logger = logging.getLogger(__name__)
 
 PAD = 1.0  # Å pad above/below each sheet layer's atom z-range (mirrors hetero_slide.PAD)
-
-# Same Jinja environment construction as SimulationBase.__init__ and
-# hetero_slide.render_hetero_slide: package-resource loader, trimmed blocks.
-_ENV = Environment(
-    loader=PackageLoader('src.templates'),
-    trim_blocks=True,
-    lstrip_blocks=True,
-)
-
-
-def _with_obs_ctx(context: Dict) -> Dict:
-    """Fill in ``obs_ctx`` when the caller did not supply it.
-
-    Replaces the old ``_with_channels``: the template no longer reads a bare
-    ``channels`` dict, it reads ``obs_ctx`` (built by
-    :func:`src.builders.utils.obs_ctx.build_obs_ctx`). All tiers on is still
-    the default -- ``OutputSettings.channels`` defaults to all tiers on, so
-    an absent key genuinely means "emit everything". The real builder always
-    passes a real obs_ctx (:meth:`FlakeSlideSimulation._build_obs_ctx`); this
-    only covers callers -- mostly tests -- that render the template with a
-    partial context.
-    """
-    if "obs_ctx" in context:
-        return context
-    # Both deferred, for two different reasons -- the pair repeats in
-    # FlakeSlideSimulation._build_obs_ctx below, which points back here.
-    #
-    # `afm.base`: the sheet family does not name the AFM builder module at
-    # import time for the one constant it borrows. NOT a cycle (nothing under
-    # `src/builders/afm/` imports `sheetonsheet`) and NOT import weight
-    # (~0.5 ms once `src.builders.sheetonsheet` is loaded, measured with
-    # `python -X importtime`) -- neither is claimed.
-    #
-    # `obs_ctx`: import weight. `build_obs_ctx` pulls in
-    # `src.core.observables` (~11 ms, measured the same way). This module is
-    # itself imported lazily -- by `src.run.simulate._select_sheet_builder_cls`
-    # only when a `[Flake]` section is present, and by tests that render the
-    # template directly -- so importing it must not drag the registry in
-    # before a context is actually built.
-    # pylint: disable=import-outside-toplevel
-    from ..afm.base import _CONTACT_CUTOFF_FALLBACK
-    from ..utils.obs_ctx import build_obs_ctx
-    # pylint: enable=import-outside-toplevel
-    n_layers = context['n_layers']
-    obs_ctx = build_obs_ctx(
-        sim_type='flake',
-        n_layers=n_layers,
-        results_file_pattern=context.get(
-            'results_file_pattern', 'results/friction.txt'),
-        use_langevin=(context.get('thermostat_type') == 'langevin'),
-        enabled_tiers={"window": True, "raw": True, "peratom": True},
-        contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
-        results_freq=context.get('results_freq', 1000),
-        optional_channels=(),
-        # Same rule FlakeSlideSimulation._build_obs_ctx uses below. flake's
-        # sim_types never include n_contact_il, so nothing consumes
-        # {il_bot}/{il_top} here today -- passed anyway so a future channel
-        # that does can never render an unsubstituted placeholder.
-        interface_layers=(n_layers // 2, n_layers // 2 + 1),
-    )
-    return {**context, "obs_ctx": obs_ctx}
-
-def render_flake_slide(context: Dict) -> str:
-    """Render ``flake/slide.lmp`` with the given context.
-
-    Thin module-level helper mirroring :func:`hetero_slide.render_hetero_slide`:
-    renders the flake-driven slide template without needing a full builder
-    instance (used by the render unit tests).
-    """
-    return _ENV.get_template("flake/slide.lmp").render(_with_obs_ctx(context))
-
 
 def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Dict]:
     """Split a stacked substrate sheet's atoms into ``n_layers`` z-region bands.
@@ -227,37 +155,21 @@ class FlakeSlideSimulation(SimulationBase):
         channel with no `lammps_compute` of its own (see the "Flake COM"
         comment in the template).
         """
-        # Deferred for import weight -- see the reason block in _with_obs_ctx.
-        # pylint: disable-next=import-outside-toplevel
-        from ..utils.obs_ctx import build_obs_ctx
-        # {contact_cutoff}'s only consumer in the registry is n_contact_il,
-        # and n_contact_il's sim_types are ('sheetonsheet', 'hetero') --
-        # 'flake' is not among them, so {contact_cutoff} never reaches a
-        # rendered compute here regardless of optional_channels. The
-        # fallback constant is therefore already correct, not a placeholder
-        # awaiting a real derivation. FlakeSlideSimulation extends
-        # SimulationBase, not SheetOnSheetSimulation, so it cannot inherit
+        # `contact_cutoff` is left to sheet_obs_ctx's fallback default: its
+        # only consumer in the registry is n_contact_il, whose sim_types are
+        # ('sheetonsheet', 'hetero') -- 'flake' is not among them, so it never
+        # reaches a rendered compute here regardless of optional_channels. Not
+        # a placeholder awaiting a real derivation: this class extends
+        # SimulationBase, not SheetOnSheetSimulation, so it could not inherit
         # SheetOnSheetSimulation._contact_cutoff() even if it wanted to --
-        # that method reads self.config.sheet, which this class does not
-        # have. A real derivation would only be worth adding if a future
-        # task declared a flake-specific channel that consumes
-        # {contact_cutoff}.
-        # Kept out of module scope for the cross-family reason in
-        # _with_obs_ctx (not a cycle, not import weight).
-        # pylint: disable-next=import-outside-toplevel
-        from ..afm.base import _CONTACT_CUTOFF_FALLBACK
-        out = self.config.settings.output
-        return build_obs_ctx(
+        # that method reads self.config.sheet, which this class does not have.
+        # A real derivation would only be worth adding if a future task
+        # declared a flake-specific channel that consumes it.
+        return sheet_obs_ctx(
+            self.config.settings,
             sim_type='flake',
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
-            use_langevin=(
-                self.config.settings.thermostat.type == 'langevin'),
-            enabled_tiers=dict(out.channels),
-            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
-            results_freq=out.results_frequency,
-            optional_channels=out.optional_channels,
-            interface_layers=(n_layers // 2, n_layers // 2 + 1),
         )
 
     def build(self) -> None:
@@ -535,18 +447,12 @@ class FlakeSlideSimulation(SimulationBase):
         both are logged as the same value so downstream (postprocessing/AiiDA)
         can read the realised twist straight from provenance.
         """
-        import json  # pylint: disable=import-outside-toplevel
-        manifest_path = self.output_dir / "provenance" / "manifest.json"
-        if manifest_path.exists():
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        else:
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"version": "1.0", "files": []}
+        data = self._load_or_init_manifest()
         data["twist"] = {
             "twist_angle_target_deg": twist_angle_applied,
             "twist_angle_applied_deg": twist_angle_applied,
         }
-        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        manifest_path = self._write_manifest(data)
         logger.info(
             "Flake twist applied %.3f deg (finite flake: achieved == requested; "
             "recorded in %s)", twist_angle_applied, manifest_path,

@@ -246,6 +246,40 @@ class SimulationBase(ABC):
 
         return dest_path
 
+    def _load_or_init_manifest(self) -> Dict[str, Any]:
+        """Read ``provenance/manifest.json``, or start a fresh one.
+
+        Shared by :meth:`_update_provenance_manifest` and by the two
+        ``_record_twist_manifest`` methods that add a ``twist`` block to the
+        same file (``sheetonsheet.hetero.HeteroSheetOnSheetSimulation`` and
+        ``sheetonsheet.flake_slide.FlakeSlideSimulation``), which had grown
+        their own copy of this read-or-init -- one of the ``duplicate-code``
+        blocks the Phase 2c review tabulated.
+
+        The copies had also DIVERGED: both wrote ``{'version': '1.0',
+        'files': []}`` where this method writes a ``created`` timestamp too, so
+        a manifest first created by the twist path permanently lacked it.
+        Harmless in itself (only ``files`` is ever read back) but exactly the
+        kind of silent schema drift a third copy invites, and the reason to
+        collapse them rather than pragma the duplication away.
+        """
+        manifest_path = self.output_dir / 'provenance' / 'manifest.json'
+        if manifest_path.exists():
+            return json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        return {
+            'version': '1.0',
+            'created': datetime.now().isoformat(),
+            'files': [],
+        }
+
+    def _write_manifest(self, manifest_data: Dict[str, Any]) -> Path:
+        """Write ``provenance/manifest.json``, stamping ``last_updated``."""
+        manifest_path = self.output_dir / 'provenance' / 'manifest.json'
+        manifest_data['last_updated'] = datetime.now().isoformat()
+        manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding='utf-8')
+        return manifest_path
+
     def _update_provenance_manifest(self, original_path: Path, category: str,
                                         component: Optional[str], stored_path: Path) -> None:
         """Update the provenance manifest with file metadata.
@@ -272,16 +306,7 @@ class SimulationBase(ABC):
             ]
         }
         """
-        manifest_path = self.output_dir / 'provenance' / 'manifest.json'
-
-        if manifest_path.exists():
-            manifest_data = json.loads(manifest_path.read_text(encoding='utf-8'))
-        else:
-            manifest_data = {
-                'version': '1.0',
-                'created': datetime.now().isoformat(),
-                'files': []
-            }
+        manifest_data = self._load_or_init_manifest()
 
         original_path_resolved = str(original_path.resolve())
         checksum = hashlib.sha256(original_path.read_bytes()).hexdigest()
@@ -326,9 +351,7 @@ class SimulationBase(ABC):
                 'added_at': datetime.now().isoformat()
             })
 
-        manifest_data['last_updated'] = datetime.now().isoformat()
-
-        manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding='utf-8')
+        manifest_path = self._write_manifest(manifest_data)
         logger.debug("Updated provenance manifest: %s", manifest_path)
 
     def _add_component_files_to_provenance(self, component_name: str, config: Any) -> None:

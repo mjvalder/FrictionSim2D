@@ -35,6 +35,88 @@ logger = logging.getLogger(__name__)
 MIN_LAYERS = 3
 
 
+def sheet_obs_ctx(settings, *, sim_type: str, n_layers: int,
+                  results_file_pattern: str,
+                  contact_cutoff: Optional[float] = None,
+                  extra_filter=None) -> Dict[str, object]:
+    """Build the observable context shared by every sheet-family builder.
+
+    The three ``_build_obs_ctx`` methods in this package -- this module's,
+    :meth:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation._build_obs_ctx`
+    and
+    :meth:`~src.builders.sheetonsheet.flake_slide.FlakeSlideSimulation._build_obs_ctx`
+    -- called :func:`~src.builders.utils.obs_ctx.build_obs_ctx` with the same
+    seven arguments and differed only in ``sim_type``, ``contact_cutoff`` and
+    ``extra_filter``, which pylint reported as three overlapping
+    ``duplicate-code`` blocks. Those three ARE the per-family decisions, so
+    they stay at the call sites where a reader can see them; everything the
+    families agree on lives here.
+
+    ``interface_layers`` is ``(n_layers // 2, n_layers // 2 + 1)`` -- the
+    identical rule ``sheetonsheet/slide.lmp``, ``hetero/slide.lmp`` and
+    ``flake/slide.lmp`` use for their own ``{% set il_bot %}``/
+    ``{% set il_top %}``, so the sliding interface has ONE definition shared
+    between Python and Jinja rather than two that can drift (see
+    MIDDLE_INTERFACE in tests/builders/test_template_contract.py).
+
+    Args:
+        settings: the run's :class:`~src.core.config.GlobalSettings`; the
+            thermostat type and the whole output block are read from it.
+        sim_type: the observable registry's family key -- ``'sheetonsheet'``,
+            ``'hetero'`` or ``'flake'``. Selects which channels exist at all.
+        n_layers: layer count, used for the layer-resolved channels and the
+            interface rule above.
+        results_file_pattern: the window tier's output path pattern; the raw
+            and peratom patterns are derived from it by ``build_obs_ctx``.
+        contact_cutoff: ``coord/atom``'s cutoff for ``n_contact_il``. ``None``
+            (the default) means the documented fallback -- correct for both
+            hetero and flake, whose ``extra_filter``/registry entries strip
+            ``n_contact_il`` before it can consume the value, and neither of
+            which can inherit :meth:`SheetOnSheetSimulation._contact_cutoff`
+            anyway (they extend ``SimulationBase``, and that method reads
+            ``self.config.sheet``, which they do not have). The homogeneous
+            builder passes its real derivation.
+        extra_filter: an optional predicate dropping channels the family's
+            template cannot support. ``None`` keeps every registered channel.
+    """
+    # Both deferred, for two different reasons, stated once here rather than
+    # repeated at each call site:
+    #
+    # `obs_ctx`: import weight. `src.cli` imports `src.run.simulate`, which
+    # imports this module at module scope, so every CLI invocation --
+    # `--help` included -- pays this module's imports. `build_obs_ctx` pulls
+    # in `src.core.observables` (~11 ms cumulative after `import src.cli`,
+    # measured with `python -X importtime`), which nothing else on that path
+    # loads, so only an actual build should pay it.
+    #
+    # `afm.base`: keeping the sheet family from naming the AFM builder module
+    # at import time for the one constant it borrows. NOT a cycle (nothing
+    # under `src/builders/afm/` imports `sheetonsheet`) and NOT import weight
+    # (~0.5 ms once `src.builders.sheetonsheet` is loaded, measured the same
+    # way) -- neither is claimed. It is also read only on the default path,
+    # so the homogeneous builder never triggers it.
+    # pylint: disable=import-outside-toplevel
+    from ..utils.obs_ctx import build_obs_ctx
+    if contact_cutoff is None:
+        from ..afm.base import _CONTACT_CUTOFF_FALLBACK
+        contact_cutoff = _CONTACT_CUTOFF_FALLBACK
+    # pylint: enable=import-outside-toplevel
+
+    out = settings.output
+    return build_obs_ctx(
+        sim_type=sim_type,
+        n_layers=n_layers,
+        results_file_pattern=results_file_pattern,
+        use_langevin=(settings.thermostat.type == 'langevin'),
+        enabled_tiers=dict(out.channels),
+        contact_cutoff=contact_cutoff,
+        results_freq=out.results_frequency,
+        optional_channels=out.optional_channels,
+        interface_layers=(n_layers // 2, n_layers // 2 + 1),
+        extra_filter=extra_filter,
+    )
+
+
 class SheetOnSheetSimulation(SimulationBase):
     """Builder for homogeneous sheet-on-sheet friction simulations.
 
@@ -193,13 +275,6 @@ class SheetOnSheetSimulation(SimulationBase):
         """
         return f"sheet_{self._material_id()}"
 
-    def _collect_simulation_paths(self) -> List[str]:
-        """Sheet-on-sheet has single simulation directory."""
-        lammps_dir = self.output_dir / 'lammps'
-        if lammps_dir.exists():
-            return ['.']
-        return []
-
     def _init_provenance(self) -> None:
         """Initialize provenance folder and collect input files."""
         prov_dir = self.output_dir / 'provenance'
@@ -303,30 +378,13 @@ class SheetOnSheetSimulation(SimulationBase):
         one definition shared between Python and Jinja rather than two that
         can drift (see MIDDLE_INTERFACE in tests/builders/test_template_contract.py).
         """
-        # Deferred for import weight, not for a cycle: `src.cli` imports
-        # `src.run.simulate`, which imports this module at module scope, so
-        # every CLI invocation -- `--help` included -- pays this module's own
-        # imports. `build_obs_ctx` pulls in `src.core.observables`, which
-        # nothing else on that path loads (measured with `python -X
-        # importtime`: ~11 ms cumulative for `src.builders.utils.obs_ctx`
-        # after `import src.cli`), so the one call site that needs it pays it,
-        # during an actual build. Same treatment as
-        # `AFMSimulation._build_obs_ctx`.
-        # pylint: disable-next=import-outside-toplevel
-        from ..utils.obs_ctx import build_obs_ctx
         interlayer = {'E_int_interlayer', 'n_contact_il'}
-        out = self.config.settings.output
-        return build_obs_ctx(
+        return sheet_obs_ctx(
+            self.config.settings,
             sim_type='sheetonsheet',
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
-            use_langevin=(
-                self.config.settings.thermostat.type == 'langevin'),
-            enabled_tiers=dict(out.channels),
             contact_cutoff=self._contact_cutoff(),
-            results_freq=out.results_frequency,
-            optional_channels=out.optional_channels,
-            interface_layers=(n_layers // 2, n_layers // 2 + 1),
             extra_filter=(
                 None if not has_internal_lj
                 else lambda ob: ob.name not in interlayer),

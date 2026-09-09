@@ -96,13 +96,48 @@ def _minimal_flake_slide_context():
     }
 
 
-def test_flake_slide_drives_flake_group_not_layer():
-    from src.builders.sheetonsheet.flake_slide import render_flake_slide
+def _render_flake_slide_for_test(context):
+    """Render flake/slide.lmp from a partial context, filling obs_ctx.
 
+    Replaces the production `render_flake_slide` + `_with_obs_ctx` pair, which
+    had no caller outside these tests and was removed (decision row B4-1).
+    Mirrors `FlakeSlideSimulation._build_obs_ctx`: sim_type 'flake', the
+    fallback contact cutoff, and NO extra_filter -- flake declares no
+    interlayer channel at all, so unlike hetero there is nothing to drop.
+
+    Same shape as `tests/builders/test_template_contract.py`'s own
+    `_render_flake_slide`, which has always built its obs_ctx this way.
+    """
+    from jinja2 import Environment
+
+    from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
+    from src.builders.utils.obs_ctx import build_obs_ctx
+    from src.interfaces.jinja import PackageLoader
+
+    if "obs_ctx" not in context:
+        n_layers = context["n_layers"]
+        context = {**context, "obs_ctx": build_obs_ctx(
+            sim_type="flake",
+            n_layers=n_layers,
+            results_file_pattern=context.get(
+                "results_file_pattern", "results/friction.txt"),
+            use_langevin=(context.get("thermostat_type") == "langevin"),
+            enabled_tiers={"window": True, "raw": True, "peratom": True},
+            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+            results_freq=context.get("results_freq", 1000),
+            optional_channels=(),
+            interface_layers=(n_layers // 2, n_layers // 2 + 1),
+        )}
+    env = Environment(loader=PackageLoader("src.templates"),
+                      trim_blocks=True, lstrip_blocks=True)
+    return env.get_template("flake/slide.lmp").render(context)
+
+
+def test_flake_slide_drives_flake_group_not_layer():
     ctx = _minimal_flake_slide_context()
     ctx["drive_method"] = "virtual_atom"
     ctx["corner_hold"] = True
-    script = render_flake_slide(ctx)
+    script = _render_flake_slide_for_test(ctx)
 
     # Drive remapped to the flake group (not a sheet layer_N). The template
     # keeps LAMMPS' aligned columns (``fix`` padded), so match whitespace-tolerantly.
@@ -121,10 +156,8 @@ def test_flake_slide_drives_flake_group_not_layer():
 
 
 def test_flake_slide_defines_sheet_layer_groups_and_flake_group():
-    from src.builders.sheetonsheet.flake_slide import render_flake_slide
-
     ctx = _minimal_flake_slide_context()
-    script = render_flake_slide(ctx)
+    script = _render_flake_slide_for_test(ctx)
 
     # Substrate-sheet layer groups defined by region.
     assert "group           layer_1 region reg_layer_1" in script
@@ -141,11 +174,9 @@ def test_flake_slide_defines_sheet_layer_groups_and_flake_group():
 
 
 def test_flake_slide_corner_hold_can_be_disabled():
-    from src.builders.sheetonsheet.flake_slide import render_flake_slide
-
     ctx = _minimal_flake_slide_context()
     ctx["corner_hold"] = False
-    script = render_flake_slide(ctx)
+    script = _render_flake_slide_for_test(ctx)
     assert "corner_hold" not in script
 
 

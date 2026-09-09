@@ -319,18 +319,6 @@ def test_sheetonsheet_rejects_internal_lj_with_constraints(tmp_path: Path) -> No
     assert not (tmp_path / "out" / "lammps" / "slide.in").exists()
 
 
-def test_sheetonsheet_collect_simulation_paths(tmp_path: Path) -> None:
-    """Collect path should report a single simulation when lammps dir exists."""
-    config = _make_sheetonsheet_config(tmp_path, layers=[3])
-    out_dir = tmp_path / "out"
-    builder = SheetOnSheetSimulation(config, output_dir=str(out_dir))
-
-    assert builder._collect_simulation_paths() == []
-
-    (out_dir / "lammps").mkdir(parents=True, exist_ok=True)
-    assert builder._collect_simulation_paths() == ["."]
-
-
 def _seed_builder_state(builder: SheetOnSheetSimulation, tmp_path: Path) -> Path:
     """Seed builder state so write_inputs can render slide.in in isolation.
 

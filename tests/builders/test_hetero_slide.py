@@ -13,7 +13,6 @@ from src.builders.construction.hetero_stack import build_hetero_structure
 from src.builders.sheetonsheet.hetero import (
     HeteroSheetOnSheetSimulation,
     compute_layer_zbands,
-    render_hetero_slide,
 )
 from src.builders.sheetonsheet import SheetOnSheetSimulation
 from src.run.hpc_dispatch import generate_hpc_scripts_for_root
@@ -212,32 +211,106 @@ def _minimal_slide_context(layers):
     }
 
 
-def test_render_hetero_slide_has_internal_lj_false_emits_no_v_e_int_il():
-    """The module-level `_with_obs_ctx` fallback must filter the interlayer
-    channels UNCONDITIONALLY, mirroring
-    HeteroSheetOnSheetSimulation._build_obs_ctx exactly. hetero/slide.lmp's
-    `{% else %}` (non-many-body) branch never defines `variable e_int_il
-    equal c_frict` -- only the `{% if has_internal_lj %}` branch's sibling
-    variables exist -- so a conditional filter that let E_int_interlayer
-    through when has_internal_lj=False would hand `fix ave/time` a
-    `v_e_int_il` LAMMPS has no variable for, failing at setup.
+def _render_hetero_slide_for_test(context):
+    """Render hetero/slide.lmp from a partial context, filling obs_ctx.
+
+    Replaces the production `render_hetero_slide` + `_with_obs_ctx` pair, which
+    had no caller outside these tests and was removed (decision row B4-1). The
+    obs_ctx built here mirrors `HeteroSheetOnSheetSimulation._build_obs_ctx`:
+    sim_type 'hetero', the fallback contact cutoff, and the interlayer filter
+    applied UNCONDITIONALLY -- that last point is the property
+    `test_hetero_build_obs_ctx_filters_the_interlayer_channels_unconditionally`
+    pins against the real builder, so this stays a faithful stand-in rather
+    than a second definition that could drift unnoticed.
+
+    Same shape as `tests/builders/test_template_contract.py`'s own
+    `_render_hetero_slide`, which has always built its obs_ctx this way.
+    """
+    from jinja2 import Environment
+
+    from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
+    from src.builders.utils.obs_ctx import build_obs_ctx
+    from src.interfaces.jinja import PackageLoader
+
+    if "obs_ctx" not in context:
+        interlayer = {"E_int_interlayer", "n_contact_il"}
+        n_layers = context["n_layers"]
+        context = {**context, "obs_ctx": build_obs_ctx(
+            sim_type="hetero",
+            n_layers=n_layers,
+            results_file_pattern=context.get(
+                "results_file_pattern", "results/friction.txt"),
+            use_langevin=(context.get("thermostat_type") == "langevin"),
+            enabled_tiers={"window": True, "raw": True, "peratom": True},
+            contact_cutoff=_CONTACT_CUTOFF_FALLBACK,
+            results_freq=context.get("results_freq", 1000),
+            optional_channels=(),
+            interface_layers=(n_layers // 2, n_layers // 2 + 1),
+            extra_filter=lambda ob: ob.name not in interlayer,
+        )}
+    env = Environment(loader=PackageLoader("src.templates"),
+                      trim_blocks=True, lstrip_blocks=True)
+    return env.get_template("hetero/slide.lmp").render(context)
+
+
+def test_hetero_build_obs_ctx_filters_the_interlayer_channels_unconditionally():
+    """The builder's own obs_ctx must drop the interlayer channels ALWAYS.
+
+    hetero/slide.lmp's `{% else %}` (non-many-body) branch never defines
+    `variable e_int_il equal c_frict` -- only the `{% if has_internal_lj %}`
+    branch's sibling variables exist -- so a filter that let E_int_interlayer
+    through would hand `fix ave/time` a `v_e_int_il` LAMMPS has no variable
+    for, failing at setup.
+
+    Asserted against `HeteroSheetOnSheetSimulation._build_obs_ctx` directly
+    rather than through the module-level `render_hetero_slide` helper this test
+    used to go through (removed as unused -- decision row B4-1). That is the
+    stronger form: the builder method is the only obs_ctx production ever
+    builds, and `has_internal_lj` is hardcoded True in `write_run_scripts`, so
+    the filter's unconditionality cannot be observed by varying an argument --
+    only by reading what the method returns.
+    """
+    cfg = _hetero_2p2_config()
+    sim = HeteroSheetOnSheetSimulation(cfg, "unused")
+
+    obs_ctx = sim._build_obs_ctx(4, "results/friction.txt")
+
+    # `build_obs_ctx` returns a plain dict of rendered LAMMPS text, so assert on
+    # the emitted names. E_int_interlayer's native name is v_e_int_il (the token
+    # the sheet baseline pins in its fc_pa line); n_contact_il's is v_n_contact_il.
+    emitted = " ".join(str(value) for value in obs_ctx.values())
+    assert "e_int_il" not in emitted
+    assert "n_contact_il" not in emitted
+    # The peratom tier's ONLY channel is E_int_interlayer, so filtering it
+    # empties the tier and build_obs_ctx's emptiness gate must suppress fc_pa.
+    assert obs_ctx["peratom_varlist"] == ""
+    assert not obs_ctx["emit_peratom"]
+
+
+def test_hetero_slide_renders_no_v_e_int_il_for_either_template_branch():
+    """The same property at the template level, both branches.
+
+    Complements the obs_ctx test above: that one pins what the builder
+    produces, this one pins that neither rendered branch can reference a
+    variable the template never defined.
     """
     layers = [{"idx": i, "zlo": 5.0 * i, "zhi": 5.0 * i + 3.0} for i in range(1, 5)]
-    ctx = _minimal_slide_context(layers)
-    ctx["has_internal_lj"] = False
-    script = render_hetero_slide(ctx)
+    for has_internal_lj in (False, True):
+        ctx = _minimal_slide_context(layers)
+        ctx["has_internal_lj"] = has_internal_lj
+        script = _render_hetero_slide_for_test(ctx)
 
-    assert "v_e_int_il" not in script
-    assert not any(
-        line.startswith("fix ") and " fc_pa " in line
-        for line in script.split("\n")
-    )
+        assert "v_e_int_il" not in script, f"has_internal_lj={has_internal_lj}"
+        assert not any(
+            line.startswith("fix ") and " fc_pa " in line
+            for line in script.split("\n")
+        ), f"has_internal_lj={has_internal_lj}"
 
 
 def test_hetero_slide_defines_layer_groups_by_region():
     layers = [{"idx": i, "zlo": 5.0 * i, "zhi": 5.0 * i + 3.0} for i in range(1, 5)]
     ctx = _minimal_slide_context(layers)
-    script = render_hetero_slide(ctx)
+    script = _render_hetero_slide_for_test(ctx)
 
     # Layer groups defined by region, NOT by `group layer_N type` (hetero
     # layers share atom types, so type-based groups are impossible).

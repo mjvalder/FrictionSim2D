@@ -919,31 +919,52 @@ def test_interface_layers_matches_the_template_rule(n_layers, cbot, ctop):
 # already correct rather than something that finds out the hard way at
 # LAMMPS parse time.
 
-def test_hetero_and_flake_pass_interface_layers_to_build_obs_ctx():
-    """Every build_obs_ctx call site in hetero.py and flake_slide.py (the
-    module-level _with_obs_ctx helper and the builder class's own
-    _build_obs_ctx) must pass interface_layers=(n_layers // 2, n_layers //
-    2 + 1) -- the same formula sheetonsheet/slide.lmp's own {% set il_bot %}
-    / {% set il_top %} and SheetOnSheetSimulation._build_obs_ctx use. This
-    is a source check rather than a render check because, per the module
-    docstring above, no render of either family's real, unmodified code path
-    can be forced to expose an unsubstituted placeholder -- the exposure
-    this fix forecloses only exists hypothetically, if the *other*, unrelated
-    foreclosure (hetero's unconditional extra_filter / flake's sim_types)
-    is ever lifted by later work.
+def test_every_sheet_family_obs_ctx_goes_through_the_one_interface_layers_rule():
+    """The interface-layer formula must have exactly ONE definition in Python.
+
+    Originally this asserted the literal
+    `interface_layers=(n_layers // 2, n_layers // 2 + 1)` appeared twice in
+    each of hetero.py and flake_slide.py -- once in the module-level
+    `_with_obs_ctx` helper and once in the builder's `_build_obs_ctx`. Four
+    such call sites existed across the sheet family and each had to remember
+    the formula independently.
+
+    They were collapsed into `sheetonsheet.base.sheet_obs_ctx`, so the check
+    is now the stronger property the old one approximated: the formula is
+    written once, and NO sheet-family module reaches `build_obs_ctx` directly,
+    which is what makes bypassing it impossible rather than merely unlikely.
+    Same rule `sheetonsheet/slide.lmp`, `hetero/slide.lmp` and
+    `flake/slide.lmp` compute their own `{% set il_bot %}`/`{% set il_top %}`
+    from -- see MIDDLE_INTERFACE above.
     """
     import inspect
-    from src.builders.sheetonsheet import hetero as hetero_mod
+    import re
+
+    from src.builders.sheetonsheet import base as base_mod
     from src.builders.sheetonsheet import flake_slide as flake_mod
+    from src.builders.sheetonsheet import hetero as hetero_mod
 
     needle = 'interface_layers=(n_layers // 2, n_layers // 2 + 1)'
-    for mod in (hetero_mod, flake_mod):
+    assert inspect.getsource(base_mod.sheet_obs_ctx).count(needle) == 1
+
+    # No sheet-family module may call build_obs_ctx itself: sheet_obs_ctx is
+    # the only door, so the formula above governs every sheet obs_ctx built.
+    # The lookbehind matters -- a bare substring also matches the builders'
+    # own `_build_obs_ctx` methods, which are the callers, not the call.
+    call = re.compile(r'(?<![\w.])build_obs_ctx\(')
+    for mod in (base_mod, hetero_mod, flake_mod):
         src = inspect.getsource(mod)
-        count = src.count(needle)
-        assert count == 2, (
-            f'{mod.__name__}: expected 2 build_obs_ctx call sites passing '
-            f'interface_layers (the module-level _with_obs_ctx helper and '
-            f'the builder class _build_obs_ctx method), found {count}')
+        direct = len(call.findall(src))
+        expected = 1 if mod is base_mod else 0     # base_mod's is the one inside sheet_obs_ctx
+        assert direct == expected, (
+            f'{mod.__name__}: {direct} direct build_obs_ctx( call(s), expected '
+            f'{expected} -- every sheet-family obs_ctx must go through '
+            f'sheetonsheet.base.sheet_obs_ctx so the interface_layers rule '
+            f'cannot be bypassed')
+
+    # And every builder that builds one does go through it.
+    for mod in (hetero_mod, flake_mod):
+        assert 'sheet_obs_ctx(' in inspect.getsource(mod), mod.__name__
 
 
 def test_hetero_and_flake_interface_layers_substitution_is_correct():
