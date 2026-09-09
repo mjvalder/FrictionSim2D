@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional
 
-import numpy as np
 from jinja2 import Environment
 
 from ...core.config import SheetOnSheetSimulationConfig
@@ -45,8 +44,24 @@ def _with_obs_ctx(context: Dict) -> Dict:
     """
     if "obs_ctx" in context:
         return context
+    # Both deferred, for two different reasons -- the pair repeats in
+    # HeteroSheetOnSheetSimulation._build_obs_ctx below, which points back here.
+    #
+    # `afm.base`: the sheet family does not name the AFM builder module at
+    # import time for the one constant it borrows. NOT a cycle (nothing under
+    # `src/builders/afm/` imports `sheetonsheet`) and NOT import weight
+    # (~0.5 ms once `src.builders.sheetonsheet` is loaded, measured with
+    # `python -X importtime`) -- neither is claimed.
+    #
+    # `obs_ctx`: import weight. `src.cli` imports `src.run.simulate`, which
+    # imports this module at module scope, so every CLI invocation -- `--help`
+    # included -- pays this module's imports. `build_obs_ctx` pulls in
+    # `src.core.observables` (~11 ms cumulative after `import src.cli`,
+    # measured the same way), which nothing else on that path loads.
+    # pylint: disable=import-outside-toplevel
     from ..afm.base import _CONTACT_CUTOFF_FALLBACK
     from ..utils.obs_ctx import build_obs_ctx
+    # pylint: enable=import-outside-toplevel
     interlayer = {'E_int_interlayer', 'n_contact_il'}
     n_layers = context['n_layers']
     obs_ctx = build_obs_ctx(
@@ -442,6 +457,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         peratom channel is a later opt-in addition, not something to force
         here by relaxing this filter.
         """
+        # Deferred for import weight -- see the reason block in _with_obs_ctx.
+        # pylint: disable-next=import-outside-toplevel
         from ..utils.obs_ctx import build_obs_ctx
         # {contact_cutoff}'s only consumer in the registry is n_contact_il,
         # and the extra_filter below strips n_contact_il UNCONDITIONALLY
@@ -458,6 +475,9 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # task makes this extra_filter conditional on has_internal_lj (as
         # SheetOnSheetSimulation's already is), making n_contact_il
         # reachable for some materials.
+        # Kept out of module scope for the cross-family reason in
+        # _with_obs_ctx (not a cycle, not import weight).
+        # pylint: disable-next=import-outside-toplevel
         from ..afm.base import _CONTACT_CUTOFF_FALLBACK
         interlayer = {'E_int_interlayer', 'n_contact_il'}
         out = self.config.settings.output

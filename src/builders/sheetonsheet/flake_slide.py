@@ -54,8 +54,25 @@ def _with_obs_ctx(context: Dict) -> Dict:
     """
     if "obs_ctx" in context:
         return context
+    # Both deferred, for two different reasons -- the pair repeats in
+    # FlakeSlideSimulation._build_obs_ctx below, which points back here.
+    #
+    # `afm.base`: the sheet family does not name the AFM builder module at
+    # import time for the one constant it borrows. NOT a cycle (nothing under
+    # `src/builders/afm/` imports `sheetonsheet`) and NOT import weight
+    # (~0.5 ms once `src.builders.sheetonsheet` is loaded, measured with
+    # `python -X importtime`) -- neither is claimed.
+    #
+    # `obs_ctx`: import weight. `build_obs_ctx` pulls in
+    # `src.core.observables` (~11 ms, measured the same way). This module is
+    # itself imported lazily -- by `src.run.simulate._select_sheet_builder_cls`
+    # only when a `[Flake]` section is present, and by tests that render the
+    # template directly -- so importing it must not drag the registry in
+    # before a context is actually built.
+    # pylint: disable=import-outside-toplevel
     from ..afm.base import _CONTACT_CUTOFF_FALLBACK
     from ..utils.obs_ctx import build_obs_ctx
+    # pylint: enable=import-outside-toplevel
     n_layers = context['n_layers']
     obs_ctx = build_obs_ctx(
         sim_type='flake',
@@ -210,6 +227,8 @@ class FlakeSlideSimulation(SimulationBase):
         channel with no `lammps_compute` of its own (see the "Flake COM"
         comment in the template).
         """
+        # Deferred for import weight -- see the reason block in _with_obs_ctx.
+        # pylint: disable-next=import-outside-toplevel
         from ..utils.obs_ctx import build_obs_ctx
         # {contact_cutoff}'s only consumer in the registry is n_contact_il,
         # and n_contact_il's sim_types are ('sheetonsheet', 'hetero') --
@@ -223,6 +242,9 @@ class FlakeSlideSimulation(SimulationBase):
         # have. A real derivation would only be worth adding if a future
         # task declared a flake-specific channel that consumes
         # {contact_cutoff}.
+        # Kept out of module scope for the cross-family reason in
+        # _with_obs_ctx (not a cycle, not import weight).
+        # pylint: disable-next=import-outside-toplevel
         from ..afm.base import _CONTACT_CUTOFF_FALLBACK
         out = self.config.settings.output
         return build_obs_ctx(
@@ -298,7 +320,15 @@ class FlakeSlideSimulation(SimulationBase):
         #     None -> the D4 flake path stays byte-identical.
         twist = getattr(self.config.general, "twist_angle", None)
         if twist is not None:
-            from ...lattice.apply import rotate_flake_in_plane  # lazy: avoid cycle
+            # Deferred because this whole branch is optional: only a config
+            # with `twist_angle` set ever needs the lattice package (~1.7 ms
+            # for `src.lattice.apply` + `src.lattice.matching`, measured with
+            # `python -X importtime`). The comment this replaces said "avoid
+            # cycle", which is not the reason: `src/lattice/` imports nothing
+            # from `src/builders/`, and `src.builders.afm.base` imports this
+            # very function at module scope.
+            # pylint: disable-next=import-outside-toplevel
+            from ...lattice.apply import rotate_flake_in_plane
             rotate_flake_in_plane(flake_path, float(twist))   # in-place twist, box unchanged
             self._record_twist_manifest(float(twist))
             logger.info("Twisted flake by %.3f deg (D3b incommensurate)", float(twist))
@@ -332,9 +362,9 @@ class FlakeSlideSimulation(SimulationBase):
                 pm.add_self_interaction(name)
             for name in flake_names:
                 pm.add_cross_interaction("sheet", name)
-            for i in range(len(flake_names)):
+            for i, name_i in enumerate(flake_names):
                 for j in range(i + 1, len(flake_names)):
-                    pm.add_cross_interaction(flake_names[i], flake_names[j])
+                    pm.add_cross_interaction(name_i, flake_names[j])
             pm.write_file(settings_path)
             return pm
 

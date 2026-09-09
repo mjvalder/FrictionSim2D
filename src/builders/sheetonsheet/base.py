@@ -36,6 +36,41 @@ MIN_LAYERS = 3
 
 
 class SheetOnSheetSimulation(SimulationBase):
+    """Builder for homogeneous sheet-on-sheet friction simulations.
+
+    Builds one N-layer stack of a SINGLE 2D material (N >= ``MIN_LAYERS``)
+    and slides its top layer over the rest:
+
+        - Layer 1: fixed bottom layer
+        - Layers 2 to N-1: mobile, Langevin-thermostatted
+        - Layer N: rigid top layer, driven (virtual atom by default)
+
+    :meth:`build` creates the run-directory tree, seeds ``provenance/``,
+    writes the stacked structure to ``build/`` via
+    :func:`src.builders.construction.components.build_sheet`, writes the pair
+    coefficients to ``lammps/system.in.settings`` through
+    :class:`~src.potentials.manager.PotentialManager`, renders
+    ``sheetonsheet/slide.lmp`` into ``lammps/slide.in`` (or into one script
+    per outer-loop value, see :meth:`write_inputs`), and finally emits the
+    HPC job scripts.
+
+    Differences from :class:`~src.builders.afm.AFMSimulation`, which shares
+    :class:`~src.builders.simulation_base.SimulationBase`:
+
+    * There is no tip and no substrate. Both sliding bodies are layers of the
+      same material, so the contact cutoff is derived from the INTERLAYER LJ
+      sigma rather than a tip-sheet one (:meth:`_contact_cutoff`), and there
+      is no ``self.config.tip`` to read.
+    * Layers are selected by ATOM TYPE (``layer_N`` groups written by the
+      potential manager), not by z-band region -- that is why the
+      heterostructure variant needs its own templates.
+    * Loading is a normal PRESSURE on the top layer, so the run phase splits
+      per pressure / scan speed / scan angle (``SPLIT_OUTER_LOOPS``) where
+      AFM splits per normal load.
+    * Interlayer bonding is configurable (``constraint_mode``:
+      ``atom_bonds`` / ``com_spring`` / ``none``), which has no AFM analogue.
+    """
+
     #: Minimum number of layers this builder accepts. Subclasses (e.g. the
     #: static PES bilayer scan) may lower it.
     MIN_LAYERS: int = MIN_LAYERS
@@ -43,13 +78,6 @@ class SheetOnSheetSimulation(SimulationBase):
     #: The sheet-on-sheet run phase splits per pressure, per scan speed and per
     #: scan angle (see write_inputs); there is no normal load to split by.
     SPLIT_OUTER_LOOPS = frozenset({'pressure', 'scan_speed', 'scan_angle'})
-    """Builder for Sheet-on-Sheet friction simulations.
-
-    Creates an N-layer stack of the same 2D material:
-        - Layer 1: Fixed bottom layer
-        - Layers 2 to N-1: Mobile (Langevin thermostat)
-        - Layer N: Driven top layer (rigid body)
-    """
 
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
@@ -205,8 +233,14 @@ class SheetOnSheetSimulation(SimulationBase):
         )
         pm.set_lj_overrides(self.config.lj_override)
 
-        sheet_edge_regions = [None, 'edge'] if self.config.settings.geometry.finite_sheet_sheetonsheet_edge_mode != 'none' else None
-        pm.register_component('sheet', self.config.sheet, n_layers=n_layers, regions=sheet_edge_regions)
+        edge_mode = (
+            self.config.settings.geometry.finite_sheet_sheetonsheet_edge_mode
+        )
+        sheet_edge_regions = [None, 'edge'] if edge_mode != 'none' else None
+        pm.register_component(
+            'sheet', self.config.sheet, n_layers=n_layers,
+            regions=sheet_edge_regions,
+        )
 
         self._register_drive_atom(pm)
 
@@ -269,6 +303,16 @@ class SheetOnSheetSimulation(SimulationBase):
         one definition shared between Python and Jinja rather than two that
         can drift (see MIDDLE_INTERFACE in tests/builders/test_template_contract.py).
         """
+        # Deferred for import weight, not for a cycle: `src.cli` imports
+        # `src.run.simulate`, which imports this module at module scope, so
+        # every CLI invocation -- `--help` included -- pays this module's own
+        # imports. `build_obs_ctx` pulls in `src.core.observables`, which
+        # nothing else on that path loads (measured with `python -X
+        # importtime`: ~11 ms cumulative for `src.builders.utils.obs_ctx`
+        # after `import src.cli`), so the one call site that needs it pays it,
+        # during an actual build. Same treatment as
+        # `AFMSimulation._build_obs_ctx`.
+        # pylint: disable-next=import-outside-toplevel
         from ..utils.obs_ctx import build_obs_ctx
         interlayer = {'E_int_interlayer', 'n_contact_il'}
         out = self.config.settings.output
@@ -307,16 +351,38 @@ class SheetOnSheetSimulation(SimulationBase):
         also lose `E_int_interlayer` -- `_build_obs_ctx`'s `extra_filter`
         already drops both.
         """
+        # Deferred as one block so the sheet family does not name the AFM
+        # builder module at import time: the two constants below are the only
+        # thing it borrows from `afm.base`, and they are read once per build.
+        # Neither of the two usual reasons applies, and neither is claimed
+        # here -- nothing under `src/builders/afm/` imports `sheetonsheet`, so
+        # this is not breaking a cycle, and importing `afm.base` once
+        # `src.builders.sheetonsheet` is loaded costs ~0.5 ms (measured with
+        # `python -X importtime`), so it is not import weight either. The
+        # other three ride along in the same block; `potentials.utils` is
+        # already a module-scope import of this file.
+        # pylint: disable=import-outside-toplevel
         from itertools import product
         from ...core.utils.structures import cifread
         from ...potentials.utils import lj_params
         from ..afm.base import K_CONTACT, _CONTACT_CUTOFF_FALLBACK
+        # pylint: enable=import-outside-toplevel
 
         lj_cut = getattr(self.config.settings.potential, 'lj_cutoff', 11.0)
         try:
             sheet_els = cifread(self.config.sheet.cif_path)['elements']
             sigma_max = max(lj_params(a, b)[1]
                             for a, b in product(sheet_els, sheet_els))
+            # Not declared in __init__, mirroring AFMSimulation._contact_cutoff
+            # (see the note there): assigning only on the route actually taken
+            # is what lets a reader tell "never computed" from a real value
+            # via getattr(self, '_contact_cutoff_source', 'unknown'), which an
+            # __init__-assigned None/'' would collapse. NOTE: unlike AFM's,
+            # this attribute has no reader in the sheet family today -- the
+            # docstring's "provenance records which route was taken" is true
+            # of AFM's _write_provenance, and SheetOnSheetSimulation has none.
+            # Kept in step with the twin method rather than diverging.
+            # pylint: disable-next=attribute-defined-outside-init
             self._contact_cutoff_source = f'uff_sigma_k{K_CONTACT}'
             cut = K_CONTACT * sigma_max
         except Exception:  # pylint: disable=broad-except
@@ -324,6 +390,8 @@ class SheetOnSheetSimulation(SimulationBase):
                 "Contact cutoff fallback: could not derive UFF sigma for "
                 "sheet '%s'; using %.1f A.",
                 self.config.sheet.mat, _CONTACT_CUTOFF_FALLBACK)
+            # See the getattr-distinguishes-absence note above.
+            # pylint: disable-next=attribute-defined-outside-init
             self._contact_cutoff_source = 'fallback_default'
             cut = _CONTACT_CUTOFF_FALLBACK
         return min(cut, 0.95 * lj_cut)

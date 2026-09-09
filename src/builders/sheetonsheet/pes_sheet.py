@@ -8,11 +8,10 @@ Split out of the former ``builders/pes_scan.py``. The tip scan lives in
 scans use it -- the tip scan never did.
 """
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List
 
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
-from ...data.models import EV_A_TO_NN
 from ..construction.hetero_stack import detect_inplane_repeat
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import SheetOnSheetSimulation
@@ -340,6 +339,12 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
 
     #: Exactly one layer per material: frozen bottom + scanned top.
     MIN_LAYERS: int = PES_SHEET_LAYERS
+
+    #: Memo for :meth:`_interface_repeat` (the scan writes up to two grid
+    #: variants and must not re-measure the stack for each). Declared here
+    #: rather than in an ``__init__``: this class defines none, and ``None``
+    #: is exactly the "not measured yet" sentinel the reader tests for.
+    _interface_repeat_cache = None
 
     def build(self) -> None:
         self._require_pes_bilayer(self.n_layers)
