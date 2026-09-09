@@ -112,6 +112,60 @@ class PESGridMixin:
     #: A bilayer is enough (and cheapest) for a static PES.
     MIN_LAYERS: int = PES_SHEET_LAYERS
 
+    #: The two sheet scan templates, named in the refusal below so the claim is
+    #: checkable rather than asserted: both read ONE pre-assembled data file.
+    _SCAN_TEMPLATES_WITHOUT_A_FLAKE = (
+        "sheetonsheet/pes_scan.lmp, hetero/pes_scan.lmp"
+    )
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Refuse a ``[Flake]`` config before anything is built.
+
+        The sheet-family counterpart of
+        :meth:`~src.builders.afm.pes_tip.PESTipSimulation.__init__`'s guard, and
+        the same defect one model over: ``src/run/simulate.py`` routes on
+        ``model == 'pes_sheet'`` BEFORE it reaches the ``[Flake]`` check, which
+        is guarded on ``model == 'sheetonsheet'`` and so never sees a pes-sheet
+        config. The identical config therefore builds a flake slide under
+        ``run sheetonsheet`` and a flakeless bilayer scan under
+        ``run pes-sheet``.
+
+        It is dropped even EARLIER than on the tip path, and that makes it
+        harder to notice rather than easier: neither
+        :class:`~src.builders.sheetonsheet.SheetOnSheetSimulation` nor this
+        module has a single ``flake`` reference, so nothing is built, nothing is
+        staged into the potential block, and no unread artefact is left in the
+        tree. The scan simply reports the corrugation of the plain bilayer.
+
+        Refusing rather than wiring, for the reason the tip path settled on:
+        both scan templates read one pre-assembled ``{{ data_file }}``, so
+        supporting a flake means answering what a flake ON a statically scanned
+        bilayer even means -- unvalidated physics. Adding a flake block to the
+        templates would move the silence, not remove it.
+
+        Defined on the mixin so one definition covers both concrete classes:
+        :class:`PESGridMixin` precedes ``SheetOnSheetSimulation`` and
+        ``HeteroSheetOnSheetSimulation`` in their MROs (pinned by
+        ``test_hetero_pes_sheet.py::test_hetero_pes_sheet_mro_and_split_outer_loops``),
+        so ``super().__init__`` continues to whichever base the concrete class
+        has. It fires the moment ``run/simulate.py`` selects the builder --
+        before any directory, structure, LAMMPS call or rendered script exists.
+        """
+        super().__init__(*args, **kwargs)
+        if getattr(self.config, 'flake', None) is not None or getattr(
+                self.config, 'flake_sheets', None):
+            raise ValueError(
+                f"{type(self).__name__} cannot run a config with a [Flake] "
+                f"section: the sheet PES scan templates "
+                f"({self._SCAN_TEMPLATES_WITHOUT_A_FLAKE}) read a single "
+                "pre-assembled bilayer, and no sheet-family builder reads a "
+                "flake at all -- the flake would be dropped without trace and "
+                "the scan would silently report the corrugation of the plain "
+                "bilayer instead. Remove the [Flake] section from this "
+                "pes-sheet config, or drive the flake with `run sheetonsheet`, "
+                "whose builder does read it."
+            )
+
     # ---------------------------------------------------------------- hooks --
 
     def _scan_template(self) -> str:

@@ -404,3 +404,99 @@ def test_guard_scannable_cell_refuses_a_write_before_build(tmp_path):
     sim = _guarded_builder(tmp_path, cell=None)
     with pytest.raises(ValueError, match="cannot be called before it"):
         sim._guard_scannable_cell()
+
+
+# --------------------------------------------------------------------------- #
+# A [Flake] on a pes-sheet config is refused, not silently dropped
+# (builders-sheetonsheet.md B4-6). src/run/simulate.py routes on
+# model == 'pes_sheet' BEFORE the [Flake] check, which is guarded on
+# model == 'sheetonsheet' -- so the same config builds a flake slide one way and
+# a flakeless bilayer scan the other. Neither sheet scan template reads a flake
+# and no sheet builder has a single flake reference, so the drop left no trace
+# at all: the scan just reported the plain bilayer's corrugation.
+# --------------------------------------------------------------------------- #
+
+def _pes_sheet_cfg_with_flake(*, hetero: bool = False, numbered: bool = False):
+    raw = _hetero_pes_raw() if hetero else {
+        "general": {"temp": 300, "scan_speed": 1},
+        "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+               "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+               "x": 12.0, "y": 12.0, "layers": [2]},
+        "pes": {"grid_n": 4},
+    }
+    raw = dict(raw)
+    if numbered:
+        raw["Flake-1"] = {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+                          "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+                          "x": 12.0, "y": 12.0, "layers": [1]}
+        raw["Flake-2"] = {"mat": "h-WS2", "cif_path": f"{MAT}/h-WS2.cif",
+                          "pot_path": f"{POT}/sw_lammps/t-WS2.sw", "pot_type": "sw",
+                          "x": 12.0, "y": 12.0, "layers": [1]}
+    else:
+        raw["Flake"] = {"shape": "hexagon", "edge_length": 5.0,
+                        "corner_radius": 3.5, "corner_spring_k": 10.0}
+    return SheetOnSheetSimulationConfig(**raw, settings=load_settings())
+
+
+@pytest.mark.parametrize("hetero", [False, True])
+def test_pes_sheet_refuses_a_flake_config(hetero, tmp_path):
+    """The refusal fires at construction, on BOTH concrete classes.
+
+    One definition on PESGridMixin covers them because the mixin precedes each
+    base in MRO order -- the property `test_hetero_pes_sheet_mro_and_split_
+    outer_loops` already pins.
+    """
+    from src.builders.sheetonsheet.pes_sheet import (
+        HeteroPESSheetSimulation, PESSheetSimulation,
+    )
+
+    cls = HeteroPESSheetSimulation if hetero else PESSheetSimulation
+    with pytest.raises(ValueError) as exc:
+        cls(_pes_sheet_cfg_with_flake(hetero=hetero), str(tmp_path))
+
+    message = str(exc.value)
+    assert "[Flake]" in message
+    assert cls.__name__ in message
+    assert "pes_scan.lmp" in message          # names the templates it checked
+    assert "plain bilayer" in message         # names the consequence
+    assert not any(tmp_path.iterdir())        # nothing was built first
+
+
+def test_pes_sheet_refuses_a_numbered_hetero_flake_too(tmp_path):
+    """`[Flake-1]`/`[Flake-2]` carries no `flake` key, so a guard that only
+    tested `config.flake` would let the hetero flake through the same hole."""
+    from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation
+
+    cfg = _pes_sheet_cfg_with_flake(numbered=True)
+    assert cfg.flake is None and len(cfg.flake_sheets) == 2   # the shape that would slip
+    with pytest.raises(ValueError, match=r"\[Flake\]"):
+        PESSheetSimulation(cfg, str(tmp_path))
+
+
+def test_pes_sheet_without_a_flake_still_constructs(tmp_path):
+    """The guard must not over-fire: every shipped pes-sheet config is flakeless."""
+    from src.builders.sheetonsheet.pes_sheet import (
+        HeteroPESSheetSimulation, PESSheetSimulation,
+    )
+
+    PESSheetSimulation(_single_material_pes_config(), str(tmp_path))
+    HeteroPESSheetSimulation(_hetero_pes_config(), str(tmp_path))
+
+
+def test_the_same_config_no_longer_routes_two_different_ways(tmp_path):
+    """The defect stated as one assertion.
+
+    Before the guard, this exact config selected FlakeSlideSimulation under
+    `run sheetonsheet` and a flakeless PESSheetSimulation under `run pes-sheet`.
+    The flake path is unchanged; the scan path now refuses instead of building
+    the wrong thing.
+    """
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from src.run.simulate import _select_sheet_builder_cls
+
+    cfg = _pes_sheet_cfg_with_flake()
+
+    assert _select_sheet_builder_cls("sheetonsheet", cfg) is FlakeSlideSimulation
+    scan_cls = _select_sheet_builder_cls("pes_sheet", cfg)
+    with pytest.raises(ValueError, match="silently report"):
+        scan_cls(cfg, str(tmp_path))
