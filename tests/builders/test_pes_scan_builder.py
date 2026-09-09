@@ -11,6 +11,7 @@ from src.builders.utils.pes_common import _cell_period
 from src.builders.sheetonsheet.pes_sheet import PESSheetSimulation, _tile_count
 from src.core.config import (
     AFMSimulationConfig,
+    FlakeConfig,
     SheetOnSheetSimulationConfig,
     load_settings,
 )
@@ -173,6 +174,65 @@ def test_pes_tip_z_relax_from_config(tmp_path: Path):
 def test_pes_tip_hpc_job_name(tmp_path: Path):
     builder = PESTipSimulation(_afm_cfg(tmp_path, force=[2.0]), output_dir=str(tmp_path / "o"))
     assert builder._get_hpc_job_name() == "pes_tip_h-MoS2"
+
+
+# --- A [flake] on a PES-tip config is refused, not silently dropped ---------
+#
+# afm/pes_scan.lmp (and afm_freestanding/pes_scan.lmp) have only sub/tip/sheet
+# read_data lines -- no flake block. The AFM build in front of them is the full
+# one, so a [flake] config used to size create_box for the flake's atom types
+# and write their masses/pair_coeff into system.in.settings while the flake's
+# atoms were never read in: the scan succeeded and reported the corrugation of
+# the BARE surface. PESTipSimulation.__init__ now refuses instead.
+
+
+def _afm_cfg_with_flake(tmp_path: Path):
+    cfg = _afm_cfg(tmp_path, force=[2.0])
+    pot = tmp_path / "d.sw"
+    cif = tmp_path / "d.cif"
+    cfg.flake = FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=5.0,
+                            mat="h-MoS2", cif_path=str(cif), pot_path=str(pot),
+                            pot_type="sw")
+    return cfg
+
+
+def test_pes_tip_refuses_a_flake_config(tmp_path: Path):
+    """The refusal fires at construction -- before any directory, structure or
+    rendered script exists -- and names the section, the builder and why."""
+    with pytest.raises(ValueError) as exc:
+        PESTipSimulation(_afm_cfg_with_flake(tmp_path), output_dir=str(tmp_path / "o"))
+
+    message = str(exc.value)
+    assert "[flake]" in message
+    assert "PESTipSimulation" in message
+    assert "afm/pes_scan.lmp" in message
+    assert "bare surface" in message
+
+
+def test_pes_tip_without_a_flake_still_renders_the_whole_scan(tmp_path: Path):
+    """The refusal must not over-fire: a flakeless PES-tip config still builds
+    its scan, with all three read_data lines and no flake anywhere in it.
+
+    Rendered through the REAL afm/pes_scan.lmp off seeded builder state (the
+    tests/helpers/afm.py pattern), so this fails if the guard were to reject a
+    flakeless config or perturb the render path -- not merely if a constructor
+    call raised.
+    """
+    from tests.helpers.afm import _seed_builder_state
+
+    builder = PESTipSimulation(_afm_cfg(tmp_path, force=[2.0]),
+                               output_dir=str(tmp_path / "o"))
+    layer_dir = _seed_builder_state(builder, tmp_path)
+    builder.sheet_unit_cell = {"xlo": 0.0, "xhi": 3.16, "ylo": 0.0, "yhi": 5.47}
+    builder.box_dims = {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0}
+
+    builder.write_inputs(1)
+
+    scan = (layer_dir / "lammps" / "slide.in").read_text(encoding="utf-8")
+    assert scan.count("read_data") == 3          # sub + tip + sheet, as always
+    assert "group sub" in scan and "group tip" in scan and "group 2D" in scan
+    assert "flake" not in scan.lower()
+    assert "PES" in scan
 
 
 # --- _warn_if_footprint_too_small (multi-cell scan periodic-image guard) ---

@@ -30,6 +30,49 @@ class PESTipSimulation(AFMSimulation):
     #: self-contained scan script and never reads outer_loop -- nothing splits.
     SPLIT_OUTER_LOOPS = frozenset()
 
+    #: The scan templates this family renders, named in the refusal below so the
+    #: message points at the file a reader can check the claim against.
+    _SCAN_TEMPLATES_WITHOUT_A_FLAKE = "afm/pes_scan.lmp, afm_freestanding/pes_scan.lmp"
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Refuse a ``[flake]`` config before anything is built.
+
+        Neither static tip-scan template reads a flake: ``afm/pes_scan.lmp`` and
+        ``afm_freestanding/pes_scan.lmp`` have only sub/tip/sheet ``read_data``
+        lines. The AFM build in front of them, however, is the full one -- it
+        builds the flake component, registers its atom types and writes its
+        masses and ``pair_coeff`` into ``system.in.settings`` -- so a
+        ``[flake]`` config renders a scan whose box is sized for the flake's
+        types and whose potential block stages them, while the flake's atoms are
+        never read in. The scan then succeeds and reports the corrugation of the
+        BARE surface: a silent wrong result, not a crash.
+
+        Refusing rather than wiring is deliberate. A flake dragged under a
+        rastered rigid tip is a physics question nobody has validated here, and
+        the honest options are to answer it or to say no; inventing a flake
+        block in the scan template would just move the silence.
+
+        Raised in ``__init__`` so it fires the moment ``run/simulate.py``
+        selects this builder -- before any directory, structure, LAMMPS call or
+        rendered script exists -- and so one definition covers every subclass
+        (:class:`HeteroPESTipSimulation`,
+        :class:`~src.builders.afm.freestanding.FreestandingPESTipSimulation`),
+        both of which resolve ``PESTipSimulation`` first in MRO order.
+        """
+        super().__init__(*args, **kwargs)
+        if getattr(self.config, 'flake', None) is not None:
+            raise ValueError(
+                f"{type(self).__name__} cannot run a config with a [flake] "
+                "section: the static tip PES scan templates "
+                f"({self._SCAN_TEMPLATES_WITHOUT_A_FLAKE}) read only the "
+                "substrate, tip and sheet. The flake would still be built and "
+                "its atom types staged into the potential block, but its atoms "
+                "would never enter the system -- the scan would silently "
+                "measure the bare surface instead. Remove the [flake] section "
+                "from this PES-tip config, or drive the flake with `run afm` / "
+                "`run indent`, whose templates do read it."
+            )
+
     def _get_hpc_job_name(self) -> str:
         return f"pes_tip_{self.config.sheet.mat}"
 

@@ -21,6 +21,29 @@ def _free_cfg(tmp_path, layers=(4,), eval_mode="minimize"):
     })
 
 
+def test_freestanding_pes_tip_refuses_a_flake_config(tmp_path):
+    """afm_freestanding/pes_scan.lmp reads only tip + sheet -- no flake block --
+    so a [flake] here would be built and typed but never enter the system.
+    Inherited from PESTipSimulation.__init__; this pins that the freestanding
+    subclass really is covered by that one definition."""
+    from src.core.config import FlakeConfig
+
+    cfg = _free_cfg(tmp_path)
+    pot = tmp_path / "d.sw"
+    cif = tmp_path / "d.cif"
+    cfg.flake = FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=5.0,
+                            mat="h-MoS2", cif_path=str(cif), pot_path=str(pot),
+                            pot_type="sw")
+
+    with pytest.raises(ValueError) as exc:
+        FreestandingPESTipSimulation(cfg, output_dir=str(tmp_path / "o"))
+
+    message = str(exc.value)
+    assert "[flake]" in message
+    assert "FreestandingPESTipSimulation" in message
+    assert "afm_freestanding/pes_scan.lmp" in message
+
+
 def test_freestanding_hpc_job_name(tmp_path):
     builder = FreestandingPESTipSimulation(_free_cfg(tmp_path), output_dir=str(tmp_path / "o"))
     assert builder._get_hpc_job_name() == "pes_tip_free_h-MoS2"

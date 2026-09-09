@@ -34,6 +34,43 @@ def _pes_tip_hetero_raw():
     }
 
 
+# --- A [flake] on a hetero PES-tip config is refused, not silently dropped ---
+#
+# Regression guard for the hetero-AFM flake wiring: once HeteroAFMSimulation
+# learned to register and place a flake, this builder -- which inherits that
+# build but renders afm/pes_scan.lmp, a template with no flake read_data line --
+# stopped crashing and started emitting a create_box sized for the flake's atom
+# types, with their masses and pair_coeff staged, and the flake's atoms never
+# read in. That is a PES scan of the bare stack that looks entirely successful.
+
+
+def test_hetero_pes_tip_refuses_a_flake_config(tmp_path):
+    """Refused at construction, with a message a user can act on."""
+    from src.builders.afm.pes_tip import HeteroPESTipSimulation
+    raw = _pes_tip_hetero_raw()
+    raw["flake"] = {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+                    "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+                    "shape": "hexagon", "edge_length": 6.0, "corner_radius": 2.5}
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+
+    with pytest.raises(ValueError) as exc:
+        HeteroPESTipSimulation(cfg, str(tmp_path))
+
+    message = str(exc.value)
+    assert "[flake]" in message
+    assert "HeteroPESTipSimulation" in message      # names itself, not the base
+    assert "bare surface" in message
+
+
+def test_hetero_pes_tip_without_a_flake_is_constructed_as_before(tmp_path):
+    """The refusal must not over-fire on the configs this builder exists for."""
+    from src.builders.afm.pes_tip import HeteroPESTipSimulation
+    cfg = AFMSimulationConfig(**_pes_tip_hetero_raw(), settings=load_settings())
+    sim = HeteroPESTipSimulation(cfg, str(tmp_path))
+    assert sim.config.flake is None
+    assert sim._get_hpc_job_name() == "pes_tip_h-MoS2+h-WS2"
+
+
 # --- MRO / SPLIT_OUTER_LOOPS resolution (Step 1) -----------------------------
 
 def test_hetero_pes_tip_mro_and_split_outer_loops():
