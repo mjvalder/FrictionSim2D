@@ -132,11 +132,12 @@ include = ["src/**"]
 # reported either. Re-check by running the gate with
 # --enable=duplicate-code and diffing against the 13 blocks below.
 #
-# The 13 surviving blocks (2026-09-09, after Task 11's extractions took
-# duplicate-code from 18 to 13; ranges drift, the symbols do not):
+# The 12 surviving blocks (2026-09-09; Task 11's extractions took
+# duplicate-code from 18 to 13, then the AFM-2 scan-setup extraction to 12.
+# Ranges drift, the symbols do not):
 #
-#   RULED "leave" — Task 10 decision row B4-2, see
-#   docs/superpowers/reviews/builders-sheetonsheet.md (b):
+#   RULED "leave" -- Task 10 decision row B4-2 and the follow-up ruling of
+#   2026-09-09; see docs/superpowers/reviews/builders-sheetonsheet.md (b):
 #     1. sheetonsheet.flake_slide FlakeSlideSimulation.build's render context
 #        <-> sheetonsheet.hetero HeteroSheetOnSheetSimulation.write_run_scripts'.
 #        ~20 shared keys, but they diverge at constraint_mode /
@@ -150,45 +151,57 @@ include = ["src/**"]
 #     3. afm.base <-> sheetonsheet.base: five render-context keys that are all
 #        straight `sim.<attr>` reads (timestep, thermo, neighbor_list,
 #        neigh_modify_command, run_steps).
+#     4. construction.hetero_stack._detect_atom_style <-> lattice.apply's copy.
+#        LEFT for a hard import-direction reason: builders imports lattice, so
+#        lattice cannot import builders back, and builders/utils/lammps_data.py
+#        -- the natural home -- is under builders/. A shared home would have to
+#        be core/, and core/utils/ is deliberately kept free of LAMMPS-data
+#        readers (see that module's own docstring: "every consumer is a
+#        builder"). Ten lines of header parsing is not worth inverting that.
+#     5. sheetonsheet.base SheetOnSheetSimulation._to_list <->
+#        run.expand._as_float_list. Same shape of reason: run/simulate.py
+#        imports builders, so builders cannot import run, and a shared home
+#        would have to be core/ for a five-line scalar-or-list normalizer.
+#        SURFACED by Task 11's deletion of the dead THIRD copy
+#        (utils.pes_common._as_float_list, decision row U-1) -- with that gone,
+#        pylint pairs the two live ones.
 #
-#   DEFERRED BY DESIGN — decided after the queued sheet-provenance task:
-#     4. afm.base AFMSimulation._contact_cutoff <-> sheetonsheet.base
+#   DEFERRED BY DESIGN -- decided after the queued sheet-provenance task:
+#     6. afm.base AFMSimulation._contact_cutoff <-> sheetonsheet.base
 #        SheetOnSheetSimulation._contact_cutoff. Extractable as
 #        contact_cutoff_from_elements(...) -> (value, source), but the `source`
 #        half is exactly what decision row B4-5 is about (the sheet family
 #        writes no provenance.json today, so nothing reads it). Extract once
 #        that lands, not before.
 #
-#   OPEN — docs/superpowers/reviews/builders-afm.md decision row AFM-2, never
-#   ruled on; per-block proposals are in that file:
-#     5-8.  afm.base <-> afm.hetero, four blocks inside _build_components
-#           (tip/flake build opening, the tip and sub langevin-region
-#           applications).
-#     9-10. afm.base <-> afm.hetero, two blocks inside _generate_potentials
-#           (PotentialManager construction; flake + virtual-atom registration).
-#     11.   afm.base <-> afm.hetero, _calculate_z_positions' flake branch.
-#           NOTE: this one was CREATED deliberately by 515ffad, which mirrored
-#           the base's flake branch into the hetero override to fix a
-#           KeyError('flake'); it is a "leave, with that reason" candidate.
-#     12.   afm.freestanding <-> afm.pes_tip, write_inputs' PES scan setup.
-#           The most clearly avoidable of the AFM set: FreestandingPESTipSimulation
-#           already subclasses PESTipSimulation.
+#   RULED "leave" -- builders-afm.md decision row AFM-2, ruled 2026-09-09.
+#   All six are afm.base <-> afm.hetero, and all six are the same situation:
+#   HeteroAFMSimulation must override rather than extend, because the base
+#   builds the substrate inline and the hetero potential spine has
+#   sheet_1/sheet_2 where the base has a single 'sheet'. hetero.py's own class
+#   docstring already states this ("_build_components is fully overridden (not
+#   extended) because the base builds the substrate inline ... re-expressed here
+#   rather than by adding a hook to afm.py"). Extraction would mean new hooks in
+#   afm/base.py, the file the D2 capstone covers and that 515ffad and 7de895c
+#   both changed this session.
+#     7-9.   three blocks inside _build_components (the tip/flake build opening,
+#            and the tip and sub langevin-region applications).
+#     10-11. two blocks inside _generate_potentials (PotentialManager
+#            construction; flake + virtual-atom registration).
+#     12.    _calculate_z_positions' flake branch -- created DELIBERATELY by
+#            515ffad, which mirrored the base's flake branch into the hetero
+#            override to fix a KeyError('flake'). Removing this duplication
+#            would undo that fix.
 #
-#   OPEN — no decision row in any package review yet:
-#     13. construction.hetero_stack._detect_atom_style <-> lattice.apply's copy.
-#         A third home is needed (builders/utils/lammps_data.py is the natural
-#         one): lattice.apply importing from construction would reintroduce the
-#         very cycle components.py's pragma is about.
-#     14. sheetonsheet.base SheetOnSheetSimulation._to_list <->
-#         run.expand._as_float_list. SURFACED by Task 11's deletion of the dead
-#         third copy (utils.pes_common._as_float_list, decision row U-1): with
-#         that gone, pylint pairs the two live ones. Not extractable as things
-#         stand — run/simulate.py imports builders, so builders cannot import
-#         run, and a shared home would have to be core/ for a five-line
-#         scalar-or-list normalizer.
+#   CLOSED since this entry was first written:
+#     afm.freestanding <-> afm.pes_tip, write_inputs' PES scan setup --
+#     extracted to PESTipSimulation._pes_scan_context (2026-09-09). Both
+#     rendered scans proved byte-identical before and after
+#     (afm/pes_scan.lmp sha256 ed0b29e0..., 4935 B; afm_freestanding/pes_scan.lmp
+#     sha256 0ab958e2..., 2959 B).
 disable = [
   "missing-function-docstring",
-  "duplicate-code",                  # 13 blocks, all named in the comment above
+  "duplicate-code",                  # 12 blocks, all named in the comment above
 
   "too-many-locals",                 # no-restructuring decision 2026-09-02
   "too-many-arguments",              # no-restructuring decision 2026-09-02

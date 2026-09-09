@@ -10,8 +10,6 @@ substrate-optional path in :class:`~src.builders.afm.AFMSimulation`.
 
 import logging
 
-from ...data.models import EV_A_TO_NN
-from ..utils.pes_common import PES_MINIMIZE_COMMAND, _cell_period
 from .pes_tip import PESTipSimulation, PES_TIP_CONTACT_GAP
 
 logger = logging.getLogger(__name__)
@@ -53,25 +51,14 @@ class FreestandingPESTipSimulation(PESTipSimulation):
 
         self._log_resolved_config(n_layers)
 
-        context = self.build_render_context(n_layers)
-        rel_layer = str(self.relative_run_dir_layer[n_layers])
-        m = self._scan_cells()
-        period_x = _cell_period(self.sheet_unit_cell, "x")
-        period_y = _cell_period(self.sheet_unit_cell, "y")
-        self._warn_if_footprint_too_small(m, period_x, period_y)
+        # Shared setup from PESTipSimulation._pes_scan_context; only the two
+        # keys this family adds (and its own template) differ.
+        context, out_dir = self._pes_scan_context(n_layers)
         context.update({
-            'grid_n': self._grid_n() * m,
-            'period_x': period_x * m,
-            'period_y': period_y * m,
-            'contact_gap': PES_TIP_CONTACT_GAP,
-            'results_csv': f"{rel_layer}/results/pes_scan.csv",
-            'ev_a_to_nn': EV_A_TO_NN,
-            'minimization_command': PES_MINIMIZE_COMMAND,
             'eval_mode': self._eval_mode(),
             'md_steps': self._md_steps(),
         })
 
-        out_dir = self.output_dir_layer[n_layers]
         scan_script = self.render_template("afm_freestanding/pes_scan.lmp", context)
         self.write_file("lammps/slide.in", scan_script, out_dir)
 

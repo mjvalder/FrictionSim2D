@@ -115,6 +115,48 @@ class PESTipSimulation(AFMSimulation):
                 m, box_x, box_y, need_x, need_y, 2.0 * r, m, cutoff,
             )
 
+    def _pes_scan_context(self, n_layers: int):
+        """The render context and output dir every tip PES scan shares.
+
+        Extracted from this class's and
+        :class:`~src.builders.afm.freestanding.FreestandingPESTipSimulation`'s
+        ``write_inputs``, which had copy-pasted the whole setup even though the
+        latter already subclasses this one -- one of the ``duplicate-code``
+        blocks ``docs/superpowers/reviews/builders-afm.md``'s decision row
+        AFM-2 tabulated, and the one it called the most clearly avoidable.
+
+        Only the keys BOTH scans set live here. The two genuinely differ
+        afterwards, and those differences stay at the call sites: the plain tip
+        scan adds ``z_relax``; the freestanding one adds ``eval_mode`` and
+        ``md_steps`` and renders a different template. Adding either family's
+        extra key here would change the other's rendered script.
+
+        Returns ``(context, out_dir)``.
+        """
+        context = self.build_render_context(n_layers)
+        rel_layer = str(self.relative_run_dir_layer[n_layers])
+        m = self._scan_cells()
+        period_x = _cell_period(self.sheet_unit_cell, "x")
+        period_y = _cell_period(self.sheet_unit_cell, "y")
+        self._warn_if_footprint_too_small(m, period_x, period_y)
+        context.update({
+            # M×M unit cells at grid_n points *per cell*: multiply both the scanned
+            # extent and the grid resolution by M (M=1 → unchanged single-cell scan).
+            'grid_n': self._grid_n() * m,
+            'period_x': period_x * m,
+            'period_y': period_y * m,
+            # Contact gap (Å). The constant-load campaign runner overrides this per
+            # material by patching the rendered script's approach line to the gap that
+            # lands the grid-mean load on target (see gap_load_calibration/).
+            'contact_gap': PES_TIP_CONTACT_GAP,
+            'results_csv': f"{rel_layer}/results/pes_scan.csv",
+            'ev_a_to_nn': EV_A_TO_NN,
+            # Force-converged minimize so per-point energies/forces are clean; the
+            # sliding default's relative energy tol is too coarse for the PES.
+            'minimization_command': PES_MINIMIZE_COMMAND,
+        })
+        return context, self.output_dir_layer[n_layers]
+
     def write_inputs(self, n_layers: int) -> None:
         """Render the self-contained static tip PES scan (single ``slide.in``).
 
@@ -134,31 +176,9 @@ class PESTipSimulation(AFMSimulation):
         """
         logger.info("Writing tip PES scan inputs...")
 
-        context = self.build_render_context(n_layers)
-        rel_layer = str(self.relative_run_dir_layer[n_layers])
-        m = self._scan_cells()
-        period_x = _cell_period(self.sheet_unit_cell, "x")
-        period_y = _cell_period(self.sheet_unit_cell, "y")
-        self._warn_if_footprint_too_small(m, period_x, period_y)
-        context.update({
-            # M×M unit cells at grid_n points *per cell*: multiply both the scanned
-            # extent and the grid resolution by M (M=1 → unchanged single-cell scan).
-            'grid_n': self._grid_n() * m,
-            'period_x': period_x * m,
-            'period_y': period_y * m,
-            'z_relax': self._z_relax(),
-            # Contact gap (Å). The constant-load campaign runner overrides this per
-            # material by patching the rendered script's approach line to the gap that
-            # lands the grid-mean load on target (see gap_load_calibration/).
-            'contact_gap': PES_TIP_CONTACT_GAP,
-            'results_csv': f"{rel_layer}/results/pes_scan.csv",
-            'ev_a_to_nn': EV_A_TO_NN,
-            # Force-converged minimize so per-point energies/forces are clean; the
-            # sliding default's relative energy tol is too coarse for the PES.
-            'minimization_command': PES_MINIMIZE_COMMAND,
-        })
+        context, out_dir = self._pes_scan_context(n_layers)
+        context['z_relax'] = self._z_relax()
 
-        out_dir = self.output_dir_layer[n_layers]
         scan_script = self.render_template("afm/pes_scan.lmp", context)
         self.write_file("lammps/slide.in", scan_script, out_dir)
 
