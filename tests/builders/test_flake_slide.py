@@ -624,3 +624,96 @@ def test_assemble_accepts_a_flake_that_fits_and_reaches_the_lammps_call(tmp_path
     is exactly the evidence that the footprint check let it through."""
     with pytest.raises(AttributeError):
         _assemble(tmp_path, flake_xs=[1.0, 3.0])
+
+
+# --------------------------------------------------------------------------- #
+# A [Flake-N] count other than 2 is refused, not silently dropped
+# (builders-sheetonsheet.md B4-7).
+#
+# `_fold_flake_sheet_sections` caps nothing, and the hetero-flake branch is
+# selected by `len(flake_sheets) == 2` -- so 1 or 3+ sections fell through to
+# the single-material path and every [Flake-N] was ignored, while
+# `material_token` named all of them in the output directory. The run built one
+# thing and was filed under the name of another. `_get_hpc_job_name`'s docstring
+# claim to "mirror that helper's rule exactly, so the two stay in lockstep" was
+# false for every count but 2.
+#
+# `build_hetero_flake_component` DOES raise "exactly two materials ... got N" --
+# the `== 2` test meant it was never reached.
+# --------------------------------------------------------------------------- #
+
+def _flake_n_raw(n: int):
+    raw = _flake_slide_raw()
+    for i in range(1, n + 1):
+        raw[f"Flake-{i}"] = {
+            "mat": "h-WS2" if i == 2 else "h-MoS2",
+            "cif_path": f"{MAT}/h-WS2.cif" if i == 2 else f"{MAT}/h-MoS2.cif",
+            "pot_path": f"{POT}/sw_lammps/t-WS2.sw" if i == 2 else f"{POT}/MoS2_wen.sw",
+            "pot_type": "sw", "x": 12.0, "y": 12.0, "layers": [1],
+        }
+    return raw
+
+
+@pytest.mark.parametrize("n_sections", [1, 3])
+def test_flake_slide_refuses_a_flake_section_count_other_than_two(n_sections, tmp_path):
+    """1 or 3+ [Flake-N] sections must raise rather than build the wrong flake."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+
+    cfg = SheetOnSheetSimulationConfig(**_flake_n_raw(n_sections), settings=_settings())
+    assert len(cfg.flake_sheets) == n_sections      # the config layer caps nothing
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+
+    with pytest.raises(ValueError, match="exactly two materials") as exc:
+        sim.build()
+    assert f"{n_sections} [Flake-N]" in str(exc.value)
+
+
+@pytest.mark.parametrize("n_sections", [1, 3])
+def test_the_refused_counts_are_the_ones_the_directory_name_disagreed_with(n_sections):
+    """The defect stated as one assertion, independent of the builder.
+
+    `material_token` names every [Flake-N] material; the build ignored them all
+    for any count but 2. This pins WHY those counts are refused -- if a future
+    change made the builder honour them, this test says the directory name was
+    already right and only the builder was wrong.
+    """
+    from src.run.naming import material_token
+
+    named = material_token(_flake_n_raw(n_sections), "sheetonsheet")
+    plain = material_token(_flake_slide_raw(), "sheetonsheet")
+
+    assert named != plain                       # the directory reflects [Flake-N]
+    assert named.count("+") >= n_sections       # ...every one of them
+
+
+def test_flake_slide_still_accepts_the_two_section_hetero_flake(tmp_path):
+    """The guard must not over-fire on the shape it exists to protect.
+
+    Stops at the guard rather than running the whole build (which needs LAMMPS):
+    reaching the substrate-layer check below it proves the flake-count check let
+    a 2-section config through.
+    """
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+
+    cfg = SheetOnSheetSimulationConfig(**_flake_n_raw(2), settings=_settings())
+    cfg.sheet.layers = [1]
+    cfg.sheets[0].layers = [1]
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+
+    with pytest.raises(ValueError, match=r"[Aa]t least 2"):   # NOT the flake-count one
+        sim.build()
+
+
+def test_flake_slide_still_accepts_a_single_material_flake(tmp_path):
+    """A plain [Flake] with no [Flake-N] at all -- the common case -- is
+    unaffected: flake_sheets is empty, which the guard allows."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    assert cfg.flake_sheets == []
+    cfg.sheet.layers = [1]
+    cfg.sheets[0].layers = [1]
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+
+    with pytest.raises(ValueError, match=r"[Aa]t least 2"):
+        sim.build()

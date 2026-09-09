@@ -270,6 +270,21 @@ class FlakeSlideSimulation(SimulationBase):
             )
         if self.config.flake is None:
             raise ValueError("FlakeSlideSimulation requires a [Flake] section.")
+        n_flake_sections = len(self.config.flake_sheets)
+        if n_flake_sections not in (0, 2):
+            raise ValueError(
+                "A hetero flake is carved from exactly two materials (a "
+                f"bilayer); this config has {n_flake_sections} [Flake-N] "
+                "section(s). Before this check any other count was neither an "
+                "error nor built: the hetero-flake branch below is selected by "
+                "`len(flake_sheets) == 2`, so 1 or 3+ fell through to the "
+                "single-material path and EVERY [Flake-N] section was ignored "
+                "-- while src.run.naming.material_token still named all of "
+                "them in the output directory, so the run built one thing and "
+                "was filed under the name of another. Use exactly [Flake-1] "
+                "and [Flake-2] for a hetero flake, or drop them for a "
+                "single-material [Flake]."
+            )
 
         settings = self.config.settings
         sheet_cfg = self.config.sheet
