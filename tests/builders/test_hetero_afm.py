@@ -716,6 +716,81 @@ def test_afm_flake_twist_rotates_and_runs(tmp_path):
     loads = list((tmp_path / "tw" / "L1" / "data").glob("load_*N.data"))
     assert loads and all(p.stat().st_size > 0 for p in loads), \
         f"no non-empty load_*N.data written by the twisted-flake indent: {loads}"
+# --- The hetero stack must land the intended gap above the substrate ---------
+#
+# `read_data ... shift` translates a file's ATOMS, and hetero_rep.data's atoms
+# do not start at z=0: assemble_hetero_stack pads ~7.5 A below them. Shifting by
+# `sub_thickness + gap_sub_sheet` alone therefore put the stack that far too
+# high -- a measured 12.23 A above the substrate's top atom against an intended
+# 4.665 A, outside `lj/cut 11.0`, so every hetero run started with the stack
+# seeing no substrate and dropped ~11 A during relaxation. This pins the
+# contract against a real data file, not against the builder's own bookkeeping.
+
+
+def _padded_stack_data(path, *, bottom, top, box_lo, box_hi):
+    """A minimal LAMMPS data file whose atoms sit `bottom`..`top` inside a box
+    padded below and above them -- the shape hetero_rep.data really has."""
+    path.write_text(
+        "Synthetic padded stack\n\n2 atoms\n1 atom types\n\n"
+        f"0.0 20.0 xlo xhi\n0.0 20.0 ylo yhi\n{box_lo} {box_hi} zlo zhi\n\n"
+        "Masses\n\n1 95.95\n\n"
+        f"Atoms # atomic\n\n1 1 0.0 0.0 {bottom}\n2 1 1.0 1.0 {top}\n",
+        encoding="utf-8")
+    return path
+
+
+def test_hetero_stack_lands_the_intended_gap_above_the_substrate(tmp_path):
+    """z_positions['sheet'] is a SHIFT, so it must carry the stack's own bottom
+    offset out: shift + (file's lowest atom z) == sub.thickness + gap_sub_sheet.
+
+    Driven through the real ``_measure_stack_atom_extent`` on a real file and
+    the real ``_calculate_z_positions`` against a real PotentialManager (the one
+    that supplies the gap), so nothing here restates the arithmetic under test.
+    """
+    from src.builders.afm.hetero import HeteroAFMSimulation
+    from src.builders.construction.hetero_stack import register_sheet_block
+    from src.potentials.manager import PotentialManager
+
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+
+    # The gap the placement is supposed to realise, from the same PM the
+    # builder uses -- not a hardcoded 4.665.
+    pm = PotentialManager(cfg.settings)
+    pm.register_component('sub', cfg.sub)
+    pm.register_component('tip', cfg.tip)
+    sheet_names = register_sheet_block(pm, cfg.sheets)
+    gap_sub_sheet = max(pm.calculate_gap('sub', n, buffer=0.5) for n in sheet_names)
+    sim.pm[1] = pm
+
+    rep = _padded_stack_data(tmp_path / "hetero_rep.data",
+                             bottom=7.5, top=18.6, box_lo=-2.5, box_hi=28.6)
+    sim._hetero_rep_path = rep
+    sim._hetero_rep_box = (20.0, 20.0, 31.1)
+    bottom, top = sim._measure_stack_atom_extent(rep)
+    assert (bottom, top) == pytest.approx((7.5, 18.6))     # the padding is real
+    sim._hetero_stack_atom_bottom, sim._hetero_stack_atom_top = bottom, top
+
+    sim._calculate_z_positions(1, tip_radius=5.0)
+
+    shift = sim.z_positions[1]["sheet"]
+    assert shift + bottom == pytest.approx(cfg.sub.thickness + gap_sub_sheet)
+    # i.e. the shift is NOT the intended height itself -- that was the bug.
+    assert shift == pytest.approx(cfg.sub.thickness + gap_sub_sheet - bottom)
+    # and the tip still starts above the stack's real top.
+    assert sim.z_positions[1]["tip"] > shift + top
+
+
+def test_hetero_z_placement_refuses_to_guess_the_stack_offset(tmp_path):
+    """Without the measurement the old silent-7.5-A-error is the only thing
+    that could be produced, so the placement refuses rather than assuming 0."""
+    from src.builders.afm.hetero import HeteroAFMSimulation
+    cfg = AFMSimulationConfig(**_afm_hetero_raw(), settings=load_settings())
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    with pytest.raises(ValueError, match="_build_hetero_sheet must run"):
+        sim._calculate_z_positions(1, tip_radius=5.0)
+
+
 # --- Finding 8: a [flake] on the HETERO AFM drive (hetero.py's own copy of the
 #     flake build + twist block, previously unreached by any test) ---
 #
@@ -881,6 +956,18 @@ def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
     image separation clears the cutoff in both directions. Nothing validates
     this: the AFM tip/sheet footprint rule has no flake counterpart, so an
     oversized flake on a small hetero cell builds silently.
+
+    Measured caveat, recorded so it is not rediscovered as a surprise: this
+    flake SHEDS ATOMS under the indent. Two runs lost 1 and 2 of its 30 atoms
+    respectively (they end up 40-95 A up, inside the box, so LAMMPS reports no
+    lost atoms and the job succeeds). That is the config, not the builder --
+    10 nN, inherited from the D2 capstone where it presses on a full periodic
+    sheet, is ~100 GPa over a 30-atom flake's contact area. The assertions
+    below deliberately gate on the WIRING being healthy (the flake is read in,
+    typed, corner-restrained, and the run completes writing its load state);
+    a flake that survives its load is a config question -- a gentler force or
+    a bigger flake on a bigger cell -- and needs the missing footprint
+    validator to be posed properly.
     """
     from src.builders.afm.hetero import HeteroAFMSimulation
     raw = _hetero_flake_raw()

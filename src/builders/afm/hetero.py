@@ -255,6 +255,7 @@ class HeteroAFMSimulation(AFMSimulation):
         self._hetero_rep_box = None
         self._hetero_replication = None
         self._hetero_stack_atom_top = None
+        self._hetero_stack_atom_bottom = None
 
     def _material_id(self) -> str:
         """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
@@ -276,6 +277,17 @@ class HeteroAFMSimulation(AFMSimulation):
 
     #: Per-material sheet region split; None here, D5 (finite) sets [None, 'edge'].
     _sheet_regions = None
+
+    @staticmethod
+    def _measure_stack_atom_extent(data_path):
+        """``(lowest atom z, highest atom z)`` in the data file's own frame.
+
+        Separate from :meth:`_build_hetero_sheet` so the placement contract can
+        be tested against a real (if synthetic) data file without assembling a
+        heterostructure first.
+        """
+        z = read_lammps_data(data_path).positions[:, 2]
+        return float(z.min()), float(z.max())
 
     def _build_hetero_sheet(self, build_dir):
         """Build the hetero stack, guard orthogonality, replicate in-plane.
@@ -323,17 +335,16 @@ class HeteroAFMSimulation(AFMSimulation):
         self._hetero_rep_path = rep
         self._hetero_rep_box = (lx, ly, z_extent)
         self._hetero_replication = (nx, ny)
-        if self.config.flake is not None:
-            # The BOX height above is not the stack: assemble_hetero_stack pads
-            # hetero_rep.data generously in z (measured ~7.5 A below the lowest
-            # atom and ~12.5 A above the highest), and `read_data ... shift`
-            # translates the atoms by z_positions['sheet'], so the stack's real
-            # top ends up ~12.5 A below sheet_z + z_extent. The tip does not care
-            # -- system_init.lmp live-measures the surface and lowers it -- but a
-            # flake is placed statically and would float clear of the surface it
-            # is meant to sit on. Measure the atoms.
-            self._hetero_stack_atom_top = float(
-                read_lammps_data(rep).positions[:, 2].max())
+        # The BOX is not the stack: assemble_hetero_stack pads hetero_rep.data
+        # generously in z (measured ~7.5 A below the lowest atom and ~12.5 A
+        # above the highest). `read_data ... shift` translates the file's atoms
+        # by z_positions['sheet'], so BOTH ends of that padding matter -- the
+        # bottom offset to land the stack the intended gap above the substrate
+        # (:meth:`_calculate_z_positions`), the top to place a flake on the real
+        # surface. One read, both ends; the file is small and this runs once per
+        # build.
+        self._hetero_stack_atom_bottom, self._hetero_stack_atom_top = (
+            self._measure_stack_atom_extent(rep))
         # The replicated hetero stack is the "sheet": expose its box as sheet_dims
         # (xlo/xhi/... keys, matching the homogeneous path) so the inherited
         # substrate build sizes/places the amorphous slab to this footprint, and
@@ -443,6 +454,13 @@ class HeteroAFMSimulation(AFMSimulation):
         live-measures ``2D_all`` and lowers the tip to ``contact_gap``, so a
         slightly-high start is safe.
         """
+        if self._hetero_stack_atom_bottom is None:
+            raise ValueError(
+                "Hetero z-placement needs the assembled stack's measured atom "
+                "extent; _build_hetero_sheet must run before "
+                "_calculate_z_positions."
+            )
+
         pm = self.pm[n_layers]
         sheet_names = [n for n in ('sheet_1', 'sheet_2') if n in pm.components]
 
@@ -450,8 +468,20 @@ class HeteroAFMSimulation(AFMSimulation):
         gap_sub_sheet = max(pm.calculate_gap('sub', s, buffer=0.5) for s in sheet_names)
         sub_thickness = self.config.sub.thickness
         self.z_positions[n_layers]['sub'] = 0.0
-        sheet_base_z = sub_thickness + gap_sub_sheet
-        self.z_positions[n_layers]['sheet'] = sheet_base_z
+        # Where the stack's LOWEST ATOM should end up -- the same contract the
+        # homogeneous path gets for free, because a built monolayer's atoms
+        # start at z ~ 0 in its own file.
+        stack_bottom_z = sub_thickness + gap_sub_sheet
+        # hetero_rep.data's atoms do NOT start at 0: assemble_hetero_stack pads
+        # ~7.5 A below them. Shifting by stack_bottom_z alone therefore lands the
+        # stack that far too high -- measured 12.23 A above the substrate's top
+        # atom against an intended 4.665 A, i.e. outside `lj/cut 11.0`, so the
+        # stack began every run seeing no substrate at all and fell ~11 A during
+        # relaxation. Subtract the file's own bottom offset so the shift places
+        # the atoms, not the padding.
+        sheet_shift_z = stack_bottom_z - self._hetero_stack_atom_bottom
+        self.z_positions[n_layers]['sheet'] = sheet_shift_z
+        sheet_base_z = sheet_shift_z          # every term below is a shift-frame z
 
         z_extent = self._hetero_rep_box[2]        # full assembled-stack thickness
         gap_sheet_tip = max(pm.calculate_gap(s, 'tip', buffer=0.5) for s in sheet_names)
@@ -502,9 +532,12 @@ class HeteroAFMSimulation(AFMSimulation):
         self.z_positions[n_layers]['tip'] = tip_z
         self.z_positions[n_layers]['tip_contact_gap'] = contact_gap
         logger.info(
-            "Hetero z-placement: sub-sheet gap %.2fA, stack z-extent %.2fA, "
-            "sheet-tip gap %.2fA -> tip start z %.2fA.",
-            gap_sub_sheet, z_extent, gap_sheet_tip, tip_z,
+            "Hetero z-placement: sub-sheet gap %.2fA -> stack bottom atom at "
+            "%.2fA (read_data shift %.2fA, stripping the file's %.2fA bottom "
+            "padding), stack z-extent %.2fA, sheet-tip gap %.2fA -> tip start z "
+            "%.2fA.",
+            gap_sub_sheet, stack_bottom_z, sheet_shift_z,
+            self._hetero_stack_atom_bottom, z_extent, gap_sheet_tip, tip_z,
         )
 
     def _generate_potentials(self, n_sheet_layers):
