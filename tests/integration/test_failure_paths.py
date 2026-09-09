@@ -101,36 +101,19 @@ def test_a_missing_potential_file_is_refused_by_name(tmp_path):
                       r'not_a_real_potential\.sw.*not found')
 
 
-def test_an_unknown_potential_type_is_accepted_and_reaches_the_pair_style(tmp_path):
-    """KNOWN GAP, pinned deliberately -- not an assertion that this is right.
-
-    The same value is validated on one route and not the other.
-    `resolve_pot_type` (potentials/utils.py) rejects an unknown explicit
-    `pot_type` outright on the potential-SWEEP route, with the reason spelled
-    out above it: assuming LJ "would silently emit the wrong pair_style for an
-    entire arm". The plain `[section] pot_type = X` route never reaches that
-    check -- it goes through `PotentialManager.is_sheet_lj`, which logs a
-    warning and guesses.
-
-    So the build succeeds, the tree looks correct, and the string lands verbatim
-    in `pair_style hybrid sw sw sw unobtainium lj/cut 11.0`. LAMMPS rejects it
-    with "Unknown pair style" -- after the job is queued and started. The `sw`
-    index numbering is left wrong by it too (sw 1, sw 2, unobtainium, sw 3).
-
-    Whether to make the plain route as strict as the sweep route is a user
-    decision (Phase 3, findings.md); until it is taken, this test pins what
-    actually happens so the change is visible when someone makes it.
+def test_an_unknown_potential_type_is_refused_by_name(tmp_path):
+    """It used to be accepted, and landed verbatim in
+    `pair_style hybrid sw sw sw unobtainium lj/cut 11.0` -- the build succeeded,
+    the tree looked correct, and LAMMPS rejected the run with "Unknown pair
+    style" after the job had been transferred, queued and started. The same
+    value was already rejected on the potential-SWEEP route
+    (`resolve_pot_type`); the plain `[section] pot_type` route reached
+    `PotentialManager.is_sheet_lj`, which warned and guessed. Both routes now
+    use the one `KNOWN_TYPES` gate.
     """
     config = _edited(tmp_path, AFM_BASE, '2D', 'pot_type', 'unobtainium')
-    out = tmp_path / 'out'
-    result = _generate(config, out)
-    assert result.ok, result.render()
-
-    settings = sorted(Path(result.created[0]).rglob('lammps/system.in.settings'))
-    assert settings
-    text = settings[0].read_text(encoding='utf-8')
-    assert 'unobtainium' in text, text[:500]
-    assert re.search(r'^pair_style .*\bunobtainium\b', text, re.M), text[:500]
+    _expect_rejection(config, tmp_path / 'out',
+                      r"'unobtainium' is not a known LAMMPS pair style")
 
 
 def test_a_footprint_smaller_than_twice_the_tip_diameter_is_refused(tmp_path):

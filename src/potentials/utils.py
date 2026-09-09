@@ -244,6 +244,38 @@ class ResolvedPotential:
 # because the legacy fallback is not an error: ``is_sheet_lj`` logs "Unknown
 # potential type, assuming LJ is required" and proceeds — under a sweep that
 # would silently emit the wrong pair_style for an entire arm.
+def validate_pot_type(value: str, *, source: str) -> str:
+    """Return ``value`` normalised, or raise if it is not a known LAMMPS style.
+
+    The same :data:`KNOWN_TYPES` gate :func:`resolve_pot_type` applies to a sweep
+    entry, exposed for the plain ``[section] pot_type`` route. Until 2026-09-09
+    only the sweep route was checked, so an unknown style on the plain route
+    reached ``PotentialManager.is_sheet_lj``, which logged a warning, guessed
+    "LJ required", and let the string through into
+    ``pair_style hybrid sw sw sw <typo> lj/cut 11.0``. The build succeeded and
+    LAMMPS rejected the run with "Unknown pair style" -- after the job had been
+    transferred, queued and started.
+
+    Args:
+        value: The raw ``pot_type`` as written in the config.
+        source: What to name in the error, e.g. ``"[2D] pot_type"``.
+
+    Returns:
+        The normalised (stripped, lowercased) type.
+
+    Raises:
+        PotentialTypeError: If it is not in :data:`KNOWN_TYPES`.
+    """
+    normalised = value.strip().lower()
+    if normalised not in KNOWN_TYPES:
+        raise PotentialTypeError(
+            f"{source} '{value}' is not a known LAMMPS pair style "
+            f"(known: {sorted(KNOWN_TYPES)}). It would be written straight into "
+            f"pair_style and the run would fail at LAMMPS start-up."
+        )
+    return normalised
+
+
 def resolve_pot_type(entry: Union[str, dict],
                      potentials_root: Path) -> ResolvedPotential:  # pylint: disable=unused-argument
     # potentials_root is accepted for call-site symmetry with the sweep expander; the

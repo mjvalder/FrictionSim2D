@@ -267,6 +267,17 @@ class ComponentConfig(BaseModel):
     pot_path: str
     cif_path: str
 
+    @field_validator('pot_type', mode='after')
+    @classmethod
+    def check_pot_type(cls, v: str, info: ValidationInfo) -> str:
+        """Refuse a pair style LAMMPS will not recognise.
+
+        Deferred import: `potentials -> core` is the one-way direction, so
+        `core` may not import `potentials` at module level.
+        """
+        from ..potentials.utils import validate_pot_type  # pylint: disable=import-outside-toplevel,cyclic-import
+        return validate_pot_type(v, source=f'{info.field_name}')
+
     @field_validator('pot_path', 'cif_path', mode='after')
     @classmethod
     def resolve_path(cls, v: str, info: ValidationInfo) -> str:
