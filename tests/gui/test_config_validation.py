@@ -29,14 +29,19 @@ AFM_EXAMPLES = {
 }
 
 #: Configs that construct cleanly from the repo root.
+#:
+#: `afm_config.ini` and `sheet_config.ini` moved here from UNRESOLVABLE_EXAMPLES
+#: in `8129508`: both used to point their cif_path/pot_path outside the repo
+#: (`run/cif/{mat}.cif`, `../tribo_2D/...`) and neither could build at all, which
+#: is why the GUI listed them as unresolvable. They are now self-contained.
 BUILDABLE_EXAMPLES = [
-    'afm_flake_config.ini', 'afm_freestanding_pes_config.ini',
+    'afm_config.ini', 'afm_flake_config.ini', 'afm_freestanding_pes_config.ini',
     'indent_config.ini', 'pes_sheet_config.ini', 'pes_tip_config.ini',
+    'sheet_config.ini',
 ]
 
 #: Configs that cannot construct: a missing file, or an unexpanded {mat}.
 UNRESOLVABLE_EXAMPLES = [
-    'afm_config.ini', 'sheet_config.ini',
     'indent_campaign.ini', 'afm_freestanding_pes_campaign.ini',
     # Pair sweep: {mat1}/{mat2} must report as unexpanded_template, NOT as
     # missing_file -- the latter is a hard error that would block the GUI's
@@ -81,12 +86,22 @@ def test_unresolvable_examples_report_issues_instead_of_raising(name, monkeypatc
 
 
 def test_missing_potential_is_located_on_the_right_field(monkeypatch):
+    """The issue must name the [tip] pot_path field, not just the file.
+
+    Built by breaking one field of a config that otherwise validates, rather
+    than by reading a shipped example that happens to be broken -- this used to
+    use `afm_config.ini`, whose potential paths pointed outside the repo until
+    `8129508` made it self-contained.
+    """
     monkeypatch.chdir(REPO_ROOT)
-    result = validate_config(_raw('afm_config.ini'), AFMSimulationConfig)
+    raw = _raw('afm_flake_config.ini')
+    raw['tip']['pot_path'] = 'examples/potentials/sw/not_a_real_potential.sw'
+
+    result = validate_config(raw, AFMSimulationConfig)
     assert not result.ok
     tip_issues = result.issues_for('tip', 'pot_path')
     assert tip_issues, result.render()
-    assert 'Si.sw' in tip_issues[0].message
+    assert 'not_a_real_potential.sw' in tip_issues[0].message
 
 
 def test_unexpanded_template_is_reported_as_its_own_kind(monkeypatch):
