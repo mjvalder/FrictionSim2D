@@ -26,10 +26,12 @@ from src.builders.sheetonsheet.base import (
     SheetOnSheetSimulation,
     sheet_layer_type_map,
 )
+from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
 from src.data.provenance import ProvenanceRecord
 from tests.builders.test_sheetonsheet_builder import (
     _make_sheetonsheet_config,
     _prepare_builder_for_slide_write,
+    _real_material_config,
 )
 
 LMP = shutil.which("lmp_serial")
@@ -135,9 +137,14 @@ def test_a_nose_hoover_run_records_nvt_not_langevin(tmp_path):
 
 def test_the_recorded_cutoff_is_the_one_the_script_computes_with(tmp_path):
     """Opt `n_contact_il` in so the cutoff actually reaches a `coord/atom`
-    line, then require the record to carry that same number. Passing the value
-    in rather than recomputing it is what makes this hold."""
-    config = _make_sheetonsheet_config(tmp_path, layers=[3])
+    line, then require the record to carry that same number.
+
+    On the REAL h-MoS2 CIF, so `_contact_cutoff` takes its UFF-sigma route and
+    lands well away from `_CONTACT_CUTOFF_FALLBACK`. With the dummy CIF the two
+    coincide at 5.0 and a record that ignored the script entirely would still
+    pass -- checked by mutation, which is how this fixture got chosen.
+    """
+    config = _real_material_config()
     config.settings.output.optional_channels = ["n_contact_il"]
     builder = SheetOnSheetSimulation(config, str(tmp_path / "out"))
     slide = _prepare_builder_for_slide_write(builder, tmp_path).read_text(
@@ -146,6 +153,10 @@ def test_the_recorded_cutoff_is_the_one_the_script_computes_with(tmp_path):
     cutoffs = re.findall(r"coord/atom\s+cutoff\s+([\d.]+)", slide)
     assert cutoffs, [l for l in slide.splitlines() if "coord/atom" in l]
     record = _record(builder.output_dir)
+    assert record.cutoff_source.startswith("uff_sigma"), record.cutoff_source
+    assert record.contact_cutoff != _CONTACT_CUTOFF_FALLBACK, (
+        "fixture must not coincide with the fallback, or the assertion below "
+        "cannot tell a real derivation from a hardcoded constant")
     assert len(set(cutoffs)) == 1, cutoffs
     assert float(cutoffs[0]) == pytest.approx(record.contact_cutoff)
 
