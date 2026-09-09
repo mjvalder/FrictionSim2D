@@ -116,10 +116,80 @@ include = ["src/**"]
 # Design-size checks are disabled by decision 2026-09-02 (codebase review, "no
 # restructuring this round"): each one can only be silenced by splitting a
 # function or module. Their hit lists at the time of disabling are recorded
-# in docs/superpowers/reviews/findings.md. duplicate-code and cyclic-import are
-# deliberately NOT here — they are fixed or justified per site in Phase 2.
+# in docs/superpowers/reviews/findings.md. cyclic-import is deliberately NOT
+# here — the one surviving cycle is justified at its site with a module-level
+# pragma (src/builders/construction/components.py, mirroring src/lattice/apply.py
+# and src/run/expand.py).
+#
+# duplicate-code IS here, as the spec's end-of-Phase-2 treatment: every
+# surviving block is named below, so the gate reaches 0 without hiding what it
+# covers. A per-site pragma is not an option — pylint reports R0801 against an
+# unrelated module (src/hpc/manifest.py:1 in this tree), so a disable in ONE
+# file of a pair never fires; it only works in BOTH, which would mean pragmas
+# in ~11 files, i.e. most of src/builders, and no clearer than this list.
+#
+# COST, stated plainly: this is repo-wide, so a NEW duplication will not be
+# reported either. Re-check by running the gate with
+# --enable=duplicate-code and diffing against the 13 blocks below.
+#
+# The 13 surviving blocks (2026-09-09, after Task 11's extractions took
+# duplicate-code from 18 to 13; ranges drift, the symbols do not):
+#
+#   RULED "leave" — Task 10 decision row B4-2, see
+#   docs/superpowers/reviews/builders-sheetonsheet.md (b):
+#     1. sheetonsheet.flake_slide FlakeSlideSimulation.build's render context
+#        <-> sheetonsheet.hetero HeteroSheetOnSheetSimulation.write_run_scripts'.
+#        ~20 shared keys, but they diverge at constraint_mode /
+#        reserve_virtual_type / ngroups / num_atom_types / lat_c, and reading
+#        the two side by side is how the documented `pressures`-None bug stays
+#        fixed in both.
+#     2. construction.hetero_stack <-> sheetonsheet.flake_slide: the header of
+#        the LAMMPS assembly script f-string (clear/units/atom_style/boundary/
+#        region/create_box). Literal LAMMPS input; hoisting half a small
+#        template into a helper buys nothing.
+#     3. afm.base <-> sheetonsheet.base: five render-context keys that are all
+#        straight `sim.<attr>` reads (timestep, thermo, neighbor_list,
+#        neigh_modify_command, run_steps).
+#
+#   DEFERRED BY DESIGN — decided after the queued sheet-provenance task:
+#     4. afm.base AFMSimulation._contact_cutoff <-> sheetonsheet.base
+#        SheetOnSheetSimulation._contact_cutoff. Extractable as
+#        contact_cutoff_from_elements(...) -> (value, source), but the `source`
+#        half is exactly what decision row B4-5 is about (the sheet family
+#        writes no provenance.json today, so nothing reads it). Extract once
+#        that lands, not before.
+#
+#   OPEN — docs/superpowers/reviews/builders-afm.md decision row AFM-2, never
+#   ruled on; per-block proposals are in that file:
+#     5-8.  afm.base <-> afm.hetero, four blocks inside _build_components
+#           (tip/flake build opening, the tip and sub langevin-region
+#           applications).
+#     9-10. afm.base <-> afm.hetero, two blocks inside _generate_potentials
+#           (PotentialManager construction; flake + virtual-atom registration).
+#     11.   afm.base <-> afm.hetero, _calculate_z_positions' flake branch.
+#           NOTE: this one was CREATED deliberately by 515ffad, which mirrored
+#           the base's flake branch into the hetero override to fix a
+#           KeyError('flake'); it is a "leave, with that reason" candidate.
+#     12.   afm.freestanding <-> afm.pes_tip, write_inputs' PES scan setup.
+#           The most clearly avoidable of the AFM set: FreestandingPESTipSimulation
+#           already subclasses PESTipSimulation.
+#
+#   OPEN — no decision row in any package review yet:
+#     13. construction.hetero_stack._detect_atom_style <-> lattice.apply's copy.
+#         A third home is needed (builders/utils/lammps_data.py is the natural
+#         one): lattice.apply importing from construction would reintroduce the
+#         very cycle components.py's pragma is about.
+#     14. sheetonsheet.base SheetOnSheetSimulation._to_list <->
+#         run.expand._as_float_list. SURFACED by Task 11's deletion of the dead
+#         third copy (utils.pes_common._as_float_list, decision row U-1): with
+#         that gone, pylint pairs the two live ones. Not extractable as things
+#         stand — run/simulate.py imports builders, so builders cannot import
+#         run, and a shared home would have to be core/ for a five-line
+#         scalar-or-list normalizer.
 disable = [
   "missing-function-docstring",
+  "duplicate-code",                  # 13 blocks, all named in the comment above
+
   "too-many-locals",                 # no-restructuring decision 2026-09-02
   "too-many-arguments",              # no-restructuring decision 2026-09-02
   "too-many-positional-arguments",   # no-restructuring decision 2026-09-02

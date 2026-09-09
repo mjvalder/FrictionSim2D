@@ -11,6 +11,22 @@ Function Organization:
 4. Sheet stacking helpers (stack_multilayer_sheet)
 5. Main builders (build_tip, build_substrate, build_sheet)
 """
+# pylint: disable=cyclic-import
+# The lazy import of src.builders.construction.hetero_stack below (in
+# build_hetero_flake_component) closes a real import cycle: hetero_stack
+# imports this module at module scope for apply_sheet_edge_types /
+# build_monolayer / calculate_layer_shifts, and this module needs its
+# matched-supercell assembly for a hetero flake. The cycle is broken at
+# runtime -- that one import is deferred into the function body -- so it never
+# actually hangs; pylint's cyclic-import check reports the import GRAPH and
+# cannot see the deferral, which makes the message a false positive here.
+# Same treatment and same reasoning as src/lattice/apply.py:6 and
+# src/run/expand.py:7, which closed three of the four R0401 recorded in
+# docs/superpowers/reviews/findings.md.
+#
+# CAVEAT (carried from checkpoints.md L-4): this disable is MODULE-scoped, not
+# line-scoped, so pylint can no longer catch a NEW cycle introduced by a future
+# import added to this file. Any import added here needs a manual cycle check.
 
 import json
 import random
@@ -630,8 +646,11 @@ def build_hetero_flake_component(
     Raises:
         ValueError: If ``flake_sheets`` does not hold exactly two materials.
     """
-    # Local import: hetero.py imports components.py, so importing hetero at
-    # module scope would create a circular import.
+    # Local import: hetero_stack.py imports this module at module scope, so
+    # importing it back at module scope here would create a circular import.
+    # (The comment this replaces named "hetero.py", a module that has not
+    # existed since the builders split -- see the module-level
+    # disable=cyclic-import at the top of this file for the full reasoning.)
     from .hetero_stack import (  # pylint: disable=import-outside-toplevel
         assemble_hetero_stack,
         build_matched_supercells,
