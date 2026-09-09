@@ -227,6 +227,12 @@ class HeteroAFMSimulation(AFMSimulation):
     registration (``sheet`` -> ``sheet_1`` + ``sheet_2`` + cross-interaction +
     ``2D``/``2D_all`` union groups). The AFM templates are reused unchanged.
 
+    An optional ``[flake]`` rides on top of the stack: the overrides register it
+    after every sheet (so ``build_render_context``'s ``offset_flake`` still names
+    the right type block) and place it on the stack's *measured* atom top rather
+    than on the padded box height ``_hetero_rep_box[2]``, which sits ~12.5 A
+    higher — see :meth:`_calculate_z_positions`.
+
     ``_material_id`` is overridden (not just ``_get_hpc_job_name``) so the pair
     token also reaches :class:`FiniteHeteroAFMSimulation` for free through
     inheritance, and any future material-keyed metadata added to the AFM base
@@ -248,6 +254,7 @@ class HeteroAFMSimulation(AFMSimulation):
         self._hetero_rep_path = None
         self._hetero_rep_box = None
         self._hetero_replication = None
+        self._hetero_stack_atom_top = None
 
     def _material_id(self) -> str:
         """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
@@ -316,6 +323,17 @@ class HeteroAFMSimulation(AFMSimulation):
         self._hetero_rep_path = rep
         self._hetero_rep_box = (lx, ly, z_extent)
         self._hetero_replication = (nx, ny)
+        if self.config.flake is not None:
+            # The BOX height above is not the stack: assemble_hetero_stack pads
+            # hetero_rep.data generously in z (measured ~7.5 A below the lowest
+            # atom and ~12.5 A above the highest), and `read_data ... shift`
+            # translates the atoms by z_positions['sheet'], so the stack's real
+            # top ends up ~12.5 A below sheet_z + z_extent. The tip does not care
+            # -- system_init.lmp live-measures the surface and lowers it -- but a
+            # flake is placed statically and would float clear of the surface it
+            # is meant to sit on. Measure the atoms.
+            self._hetero_stack_atom_top = float(
+                read_lammps_data(rep).positions[:, 2].max())
         # The replicated hetero stack is the "sheet": expose its box as sheet_dims
         # (xlo/xhi/... keys, matching the homogeneous path) so the inherited
         # substrate build sizes/places the amorphous slab to this footprint, and
@@ -439,9 +457,50 @@ class HeteroAFMSimulation(AFMSimulation):
         gap_sheet_tip = max(pm.calculate_gap(s, 'tip', buffer=0.5) for s in sheet_names)
         start_clearance = self.config.settings.geometry.tip_start_clearance
         tip_z = sheet_base_z + z_extent + gap_sheet_tip + tip_radius + start_clearance
+        contact_gap = gap_sheet_tip
+
+        if self.config.flake is not None:
+            # Mirrors AFMSimulation._calculate_z_positions' flake branch, with the
+            # hetero PM's per-material gaps -- and with the flake placed on the
+            # stack's real ATOM top (_hetero_stack_atom_top), not on sheet_base_z +
+            # z_extent. That box-height expression is ~12.5 A above the topmost
+            # atom (see _build_hetero_sheet): fine for the tip, which is live-
+            # lowered onto the measured surface, but a statically placed flake
+            # would hang in vacuum interacting with nothing.
+            if self._hetero_stack_atom_top is None:
+                raise ValueError(
+                    "Flake placement needs the hetero stack's measured atom top; "
+                    "_build_hetero_sheet must run before _calculate_z_positions."
+                )
+            stack_top_z = sheet_base_z + self._hetero_stack_atom_top
+            gap_sheet_flake = max(pm.calculate_gap(s, 'flake', buffer=0.5)
+                                  for s in sheet_names)
+            gap_flake_tip = pm.calculate_gap('flake', 'tip', buffer=0.5)
+            flake_z = stack_top_z + gap_sheet_flake
+            self.z_positions[n_layers]['flake'] = flake_z
+            # Physical flake thickness (strip the +-1 A z-padding build_flake adds).
+            flake_thickness = max(
+                0.0,
+                (self.flake_dims.get('zhi', 0.0) - self.flake_dims.get('zlo', 0.0)) - 2.0,
+            )
+            contact_gap = gap_flake_tip
+            # Never START the tip lower than the no-flake formula would: that
+            # height is the validated one and the approach only ever lowers the
+            # tip, so max() keeps a flake from bringing the tip in closer than a
+            # bare hetero run does.
+            tip_z = max(
+                tip_z,
+                flake_z + flake_thickness + gap_flake_tip + tip_radius + start_clearance,
+            )
+            logger.info(
+                "Hetero z-placement with flake: stack atom top %.2fA, sheet-flake "
+                "gap %.2fA -> flake z %.2fA; flake-tip gap %.2fA -> tip start z "
+                "%.2fA.",
+                stack_top_z, gap_sheet_flake, flake_z, gap_flake_tip, tip_z,
+            )
 
         self.z_positions[n_layers]['tip'] = tip_z
-        self.z_positions[n_layers]['tip_contact_gap'] = gap_sheet_tip
+        self.z_positions[n_layers]['tip_contact_gap'] = contact_gap
         logger.info(
             "Hetero z-placement: sub-sheet gap %.2fA, stack z-extent %.2fA, "
             "sheet-tip gap %.2fA -> tip start z %.2fA.",
@@ -476,6 +535,17 @@ class HeteroAFMSimulation(AFMSimulation):
         sheet_names = register_sheet_block(pm, self.config.sheets,
                                            regions=self._sheet_regions)
 
+        # The flake goes AFTER every sheet, exactly as the homogeneous path puts
+        # it after `sheet`. build_render_context tells read_data to offset the
+        # flake file's types by `offset_2d + sheet_natypes` (sub + tip + every
+        # sheet type), so a flake registered anywhere else would silently number
+        # the flake's atoms onto another component's types -- wrong results, not
+        # a crash. regions=[None, 'corner'] interleaves core/corner types to match
+        # the split components.apply_flake_corner_types wrote into the data file.
+        flake_cfg = self.config.flake
+        if flake_cfg is not None:
+            pm.register_component('flake', flake_cfg, regions=[None, 'corner'])
+
         if self.config.settings.simulation.drive_method == 'virtual_atom':
             pm.register_virtual_atom()
 
@@ -496,6 +566,14 @@ class HeteroAFMSimulation(AFMSimulation):
             for name_j in sheet_names[i + 1:]:
                 pm.add_cross_interaction(name_i, name_j)
 
+        if flake_cfg is not None:
+            pm.add_self_interaction('flake')
+            if self.config.sub is not None:
+                pm.add_cross_interaction('sub', 'flake')
+            pm.add_cross_interaction('tip', 'flake')
+            for name in sheet_names:
+                pm.add_cross_interaction(name, 'flake')
+
         settings_path = self.output_dir_layer[n_sheet_layers] / "lammps" / "system.in.settings"
         pm.write_file(settings_path)
         # 2D_all union of the per-material *_all groups get_component_groups_string
@@ -514,8 +592,15 @@ class HeteroAFMSimulation(AFMSimulation):
             self.groups[n_sheet_layers]['sub_types'] = pm.types.get_group_string('sub')
         self.groups[n_sheet_layers]['tip_types'] = pm.types.get_group_string('tip')
         self.groups[n_sheet_layers]['sheet_types'] = ' '.join(map(str, sheet_ids))
+        if flake_cfg is not None:
+            self.groups[n_sheet_layers]['flake_types'] = (
+                pm.types.get_group_string('flake'))
+            corner_ids = pm.types.ids_by_component_region('flake', 'corner')
+            self.groups[n_sheet_layers]['flake_corner_types'] = (
+                ' '.join(map(str, corner_ids)))
 
-        # Belt-and-suspenders: element-for-element layout guard vs the data file.
+        # Belt-and-suspenders: element-for-element layout guard vs the data file
+        # (the sheet block only -- a flake registered after it cannot move it).
         offset = len(pm.types.ids_by_component('sub')) + len(pm.types.ids_by_component('tip'))
         _assert_sheet_block_matches_data(pm, self._hetero_rep_path, offset)
 
@@ -642,18 +727,26 @@ class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
       ``AFMSimulation.build_render_context``. That base method reads
       ``self.pm[n]``, ``self.box_dims``, ``self.sheet_offset``, ``self.lat_c``,
       ``self.z_positions[n]`` (keys ``sub``/``sheet``/``tip``/
-      ``tip_contact_gap``), ``self.groups[n]`` (keys ``sub_types``/
-      ``tip_types``/``sheet_types``, plus flake keys when a flake is
+      ``tip_contact_gap``, plus ``flake`` when a flake is configured),
+      ``self.groups[n]`` (keys ``sub_types``/``tip_types``/``sheet_types``,
+      plus ``flake_types``/``flake_corner_types`` when a flake is
       configured), ``self.sheet_paths[n]``, ``self.tip_path``,
       ``self.sub_path``, ``self.sheet_dims``, and
       ``self.config.sheet.pot_type`` (for the reaxff/atom_style check — safe:
       ``config.sheet`` is always the first sheet, mirrored by
       ``_fold_sheet_sections`` even in the hetero case). Every one of these is
-      already populated by ``HeteroAFMSimulation``'s overridden
+      populated by ``HeteroAFMSimulation``'s overridden
       ``_build_hetero_sheet`` / ``_build_components`` / ``_generate_potentials``
       / ``_calculate_z_positions`` (the same attributes, same shapes, that
       :class:`HeteroAFMSimulation`'s own docstring documents) — so no
       additional override is needed for the build/render path itself.
+
+      This bullet asserted the flake keys were already supplied long before
+      they were: until the flake was wired into ``HeteroAFMSimulation``'s
+      ``_generate_potentials`` and ``_calculate_z_positions``, a hetero AFM
+      (or hetero indent) config carrying a ``[flake]`` section built the flake
+      component and then died in ``build_render_context`` on
+      ``z_positions['flake']``. Verified by execution now, not by reading.
     - The one contract MRO does *not* satisfy for free: ``IndentSimulation``
       keys the job name (``_get_hpc_job_name``), the ``derive_seed`` input
       (``_velocity_seed``), and ``indent_meta.json``'s ``"material"`` field

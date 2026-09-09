@@ -857,15 +857,6 @@ def test_hetero_afm_build_components_twists_the_flake(tmp_path, monkeypatch):
     assert abs(min(rel, 60.0 - rel) - 18.0) < 1.0
 
 
-@pytest.mark.xfail(
-    raises=KeyError, strict=True,
-    reason="hetero AFM + [flake] is only half-wired: HeteroAFMSimulation builds "
-           "the flake component (and this test proves the rest of the pipeline is "
-           "ready for it) but its _generate_potentials never registers a 'flake' "
-           "component and its _calculate_z_positions never places one, so "
-           "AFMSimulation.build_render_context dies on z_positions['flake']. "
-           "Delete this xfail once hetero.py wires both.",
-)
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
     """End-to-end counterpart of the two build-only tests above: a REAL hetero
@@ -879,13 +870,25 @@ def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
 
     Sized exactly like the D2 capstone (tip.r = 5 -> 2x2 replication above the
     LJ-cutoff floor, temp = 1 K so the indent settle loop converges,
-    tip_reduction_factor = 0.7 so the langevin thermo band is populated).
+    tip_reduction_factor = 0.7 so the langevin thermo band is populated), with
+    one addition: the flake is shrunk to edge_length 6.
+
+    That is a hard constraint, not a tidy-up. The 2x2 replicated cell is only
+    ~25.5 x 22.1 A, and the [flake] section the two tests above share carves a
+    hexagon spanning ~19 x 16 A -- which would leave the flake ~6 A from its own
+    periodic image, well inside `pair_style ... lj/cut 11.0`. edge_length 6
+    spans ~9.6 x 8.3 A (30 atoms, all four core/corner types populated), so the
+    image separation clears the cutoff in both directions. Nothing validates
+    this: the AFM tip/sheet footprint rule has no flake counterpart, so an
+    oversized flake on a small hetero cell builds silently.
     """
     from src.builders.afm.hetero import HeteroAFMSimulation
     raw = _hetero_flake_raw()
     raw["general"]["force"] = 10.0
     raw["general"]["temp"] = 1.0
     raw["tip"]["r"] = 5.0
+    raw["flake"]["edge_length"] = 6.0
+    raw["flake"]["corner_radius"] = 2.5
     cfg = AFMSimulationConfig(**raw, settings=load_settings())
     cfg.settings.hpc.modules = ["lammps"]
     cfg.settings.geometry.tip_reduction_factor = 0.7
@@ -900,6 +903,32 @@ def test_hetero_afm_with_a_flake_builds_and_runs(tmp_path):
     init_text = init.read_text()
     assert sim.flake_path.name in init_text
     assert "group           flake_corner type" in init_text
+
+    # The flake's types are registered AFTER both sheets, so read_data's
+    # `offset` lands the flake file's 4 types exactly on the PM's flake block.
+    # Checked against the emitted settings file, not against the builder's own
+    # bookkeeping -- a wrong offset here is silent wrong results, not a crash.
+    settings_text = (run_dir / "L1" / "lammps" / "system.in.settings").read_text()
+    flake_ids = sim.groups[1]["flake_types"].split()
+    assert f"group flake_all type {' '.join(flake_ids)}" in settings_text
+    offset_flake = len(sim.groups[1]["sub_types"].split()) \
+        + len(sim.groups[1]["tip_types"].split()) \
+        + len(sim.groups[1]["sheet_types"].split())
+    assert f"group flake offset {offset_flake} 0 0 0 0" in init_text
+    assert [int(i) for i in flake_ids] == list(
+        range(offset_flake + 1, offset_flake + 1 + len(flake_ids)))
+
+    # And it is placed ON the stack, not above the padded box: the flake's
+    # lowest atom must sit within a bond-length-ish gap of the stack's highest.
+    from src.interfaces.ase import read_lammps_data
+    sheet_z = sim.z_positions[1]["sheet"]
+    stack_top = read_lammps_data(sim._hetero_rep_path).positions[:, 2].max() + sheet_z
+    flake_bottom = (read_lammps_data(sim.flake_path).positions[:, 2].min()
+                    + sim.z_positions[1]["flake"])
+    gap = flake_bottom - stack_top
+    assert 2.0 < gap < 7.0, (
+        f"flake sits {gap:.2f} A above the stack -- the padded box height "
+        f"(~12.5 A too high) leaked back into the placement" )
 
     proc, out = _run_lammps_afm(run_dir, init)
     assert proc.returncode == 0, f"system.in exited {proc.returncode}:\n{out[-3000:]}"
