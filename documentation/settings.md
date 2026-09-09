@@ -6,11 +6,28 @@ Settings are global to a run and loaded through `load_settings()` in `src/core/c
 
 ## Where settings come from
 
-Current runtime behavior:
+`load_settings()` takes the **first readable** of these, and nothing else:
 
-- Settings model defaults are defined in code.
-- A package settings file may be created/read at `src/data/settings/settings.yaml`.
-- `FrictionSim2D settings init` creates a local `settings.yaml` template in the current directory for editing convenience.
+1. An explicit path, passed as `--settings-file` to `run`, `hpc generate` and
+   `settings show`.
+2. `$XDG_CONFIG_HOME/FrictionSim2D/settings.yaml` — in practice
+   `~/.config/FrictionSim2D/settings.yaml`.
+
+With neither present, the `GlobalSettings` defaults defined in code are used unchanged.
+
+**A `settings.yaml` in your project root or working directory is not read.** This is the
+one thing to know about this file, because `FrictionSim2D settings init` (without
+`--global`) writes exactly such a file — deliberately, as a per-run template you then
+pass with `--settings-file`. It has no effect on its own.
+
+```bash
+FrictionSim2D settings init            # -> ./settings.yaml, for use with --settings-file
+FrictionSim2D settings init --global   # -> ~/.config/FrictionSim2D/settings.yaml, machine-wide
+FrictionSim2D settings show --origin   # which file is actually in effect
+```
+
+Use `--global` for machine-level values (HPC host, queue names, database credentials) and
+a per-run file for anything that belongs to one campaign.
 
 For reproducibility, keep a copy of the exact settings file used in your simulation root.
 
