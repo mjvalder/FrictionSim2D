@@ -66,8 +66,11 @@ def one_material_copy(name: str, dest: Path) -> Path:
     return out
 
 
-def build(name: str, model: str, root: Path):
+def build(name: str, model: str, root: Path, **overrides):
     """Generate one example into ``root`` and return the ``GenerationResult``.
+
+    ``overrides`` are passed straight through to ``generate_package`` (e.g.
+    ``settings_file=``); the defaults below are what the tier wants everywhere.
 
     ``os.chdir`` to the repo root is required, not cosmetic: the example configs
     spell ``cif_path``/``pot_path`` relative to it, the same way
@@ -84,6 +87,7 @@ def build(name: str, model: str, root: Path):
             generate_hpc=False,
             allow_generate_amorphous=False,
             simulation_root_name='sim',
+            **overrides,
         )
     finally:
         os.chdir(cwd)
