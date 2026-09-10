@@ -346,6 +346,8 @@ class PlotSummaryMixin(PlotterMixinBase):
         slope_decimals = plot_config.get('slope_decimals', 5)
         slope_fit_constraint = plot_config.get('slope_fit_constraint', 'none')
 
+        clip_fit_to_data = plot_config.get('clip_fit_to_data', False)
+
         marker_by_potential = plot_config.get('marker_by_potential_type', False)
         potential_markers = plot_config.get('potential_markers', {
             'reaxff': 's',
@@ -353,13 +355,23 @@ class PlotSummaryMixin(PlotterMixinBase):
             'sw': '^',
         })
 
-        def classify_potential(name: str) -> str:
+        def classify_potential(name: str) -> tuple[str, ...]:
+            """Marker-lookup keys for a series, most specific first.
+
+            Machine-learned potentials return their own family key followed
+            by the shared ``'mlip'`` key, so a config can either mark each
+            one individually or give them all one symbol.
+            """
             lowered = str(name).lower()
             if 'reaxff' in lowered:
-                return 'reaxff'
+                return ('reaxff',)
             if 'rebomos' in lowered:
-                return 'rebomos'
-            return 'sw'
+                return ('rebomos',)
+            if 'deepmd' in lowered or 'dpa' in lowered:
+                return ('deepmd', 'mlip')
+            if any(k in lowered for k in ('mace', 'nequip', 'allegro', 'chgnet')):
+                return ('mace', 'mlip')
+            return ('sw',)
 
         filters = self._apply_default_filters(df, plot_config, x_col)
         df = self._apply_filters(df, filters)
@@ -418,7 +430,19 @@ class PlotSummaryMixin(PlotterMixinBase):
         label_prefix = plot_config.get('label_prefix', '')
         label_suffix = plot_config.get('label_suffix', '')
 
-        for group_name, group in (df.groupby(group_col) if not external_only else []):
+        if external_only:
+            groups = []
+        elif plot_by == 'dataset_label':
+            # Iterate in the order declared in the config 'datasets' list
+            # (groupby would sort alphabetically); unlisted labels follow.
+            present = list(df['dataset_label'].unique())
+            ordered_ds = [d for d in (datasets or []) if d in present]
+            ordered_ds += [d for d in present if d not in ordered_ds]
+            groups = [(d, df[df['dataset_label'] == d]) for d in ordered_ds]
+        else:
+            groups = df.groupby(group_col)
+
+        for group_name, group in groups:
             if plot_by == 'material_type':
                 group_name_str = str(group_name)
                 label = self.type_display_names.get(group_name_str, group_name_str)
@@ -449,8 +473,12 @@ class PlotSummaryMixin(PlotterMixinBase):
 
             marker_style = None
             if marker_by_potential:
-                marker_style = potential_markers.get(
-                    classify_potential(label),
+                marker_style = next(
+                    (
+                        potential_markers[key]
+                        for key in classify_potential(label)
+                        if key in potential_markers
+                    ),
                     self.settings["markers"]["style"],
                 )
 
@@ -538,6 +566,7 @@ class PlotSummaryMixin(PlotterMixinBase):
                 fit_constraint=fit_constraint,
                 custom_color=series_color,
                 extend_fit_to_origin=extend_fit_to_origin,
+                clip_fit_to_data=clip_fit_to_data,
             )
 
             logger.debug("Plotted %s (%d points)", group_name, len(group))

@@ -4,7 +4,7 @@ visuals
 ptest
 scripts
 __pycache__
-results
+results*
 settings.yaml
 .vscode
 .pytest_cache
@@ -14,3 +14,5 @@ AGENTS.md
 CLAUDE.md
 log.lammps
 .conda/
+.superpowers/
+.stfolder/
