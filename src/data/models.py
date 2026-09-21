@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import enum
 import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -174,6 +175,167 @@ def compute_time_series_hash(
     for arr in (nf, lfx, lfy):
         h.update(np.asarray(arr, dtype=np.float64).tobytes())
     return h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# RunSummary: the one summary function on the store path (spec §3 F5)
+# ---------------------------------------------------------------------------
+
+_PES_FAMILIES = ('pes_tip', 'pes_sheet')
+_PES_KIND = {'pes_tip': 'tip', 'pes_sheet': 'sheet'}
+
+#: The three roles a slide summary needs, in `compute_friction_stats` order.
+_SLIDE_ROLES = ('normal_load', 'lateral_force_x', 'lateral_force_y')
+
+#: Where the driven body went. Resolved family-agnostically like the forces --
+#: AFM's tipx/tipy/tipz and the sheet family's own channels both carry these roles.
+_DRIVEN_ROLES = ('driven_com_x', 'driven_com_y', 'driven_com_z')
+
+#: The ten friction statistics, in `compute_friction_stats` order.
+_STAT_NAMES = ('mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
+               'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy')
+
+
+def _finite(value):
+    """`value` if it is a finite float, else None.
+
+    Two reasons, both load-bearing. (1) AiiDA refuses to store nan/inf:
+    `aiida.orm.implementation.utils.clean_value`, which `Node.store()` calls,
+    raises `ValidationError: nan and inf/-inf can not be serialized to the
+    database`. `detect_slips` returns `float('nan')` for fewer than two events,
+    for a series shorter than three samples and for a flat trace
+    (`slip_analysis.py:53,57,63`), and `retract_features` sets
+    `contact_stiffness = nan` when the curve does not begin loaded
+    (`indent.py:292,295`) -- so a superlubric slide or an indent that started
+    detached would abort the store of that whole run. (2) `None` round-trips
+    through JSON and JSONB as null, which is what "not measurable here" means.
+    """
+    import math  # pylint: disable=import-outside-toplevel
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    return number if math.isfinite(number) else None
+
+
+@dataclass
+class RunSummary:
+    """Every number the local store and the central DB keep for one load point.
+
+    The ten friction statistics are exactly `compute_friction_stats`' output,
+    or `None` when this load point has no COF to report -- an empty frame, a
+    family whose role columns do not resolve, or a PES grid. `None`, not `0.0`:
+    a zero here is indistinguishable from real superlubricity on a COF-vs-load
+    plot, `validation._VALID_RANGES['mean_cof'] = (0.0, 5.0)` accepts it as
+    valid so staging would publish it, and AiiDA attributes are immutable while
+    `results_exist` hash-skips on re-import, so the wrong number would be
+    permanent.
+
+    `extras` carries the family-specific scalars (PES descriptors, indent
+    retract features, slip counts). Every value in it passes through `_finite`.
+    """
+    mean_cof: Optional[float] = None
+    std_cof: Optional[float] = None
+    mean_lf: Optional[float] = None
+    std_lf: Optional[float] = None
+    mean_nf: Optional[float] = None
+    std_nf: Optional[float] = None
+    mean_lfx: Optional[float] = None
+    std_lfx: Optional[float] = None
+    mean_lfy: Optional[float] = None
+    std_lfy: Optional[float] = None
+    skip_fraction: float = 0.2
+    ntimesteps: int = 0
+    time_series_hash: str = ''
+    is_complete: bool = True
+    extras: Dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """The fourteen scalars with `extras` merged in at the top level."""
+        out = {k: v for k, v in self.__dict__.items() if k != 'extras'}
+        out.update(self.extras)
+        return out
+
+
+def _role_column(df, family: str, role_key: str) -> Optional[str]:
+    """The column serving `role_key` for `family`, if the frame carries it."""
+    from ..core.observables import channel_by_role  # pylint: disable=import-outside-toplevel
+
+    channel = channel_by_role(family, role_key)
+    if channel is not None and channel.name in df.columns:
+        return channel.name
+    return None
+
+
+def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
+                  skip_fraction: float = 0.2) -> RunSummary:
+    """Reduce one load point's frames to the store's summary row.
+
+    The single COF computation on the store path: `FrictionResultsData`,
+    `db upload` and the API all read this, so a number can never differ
+    between them. `compute_friction_stats` stays the kernel.
+    """
+    window = frames_by_tier.get('window')
+    if window is None or len(window) == 0:
+        # every stat stays None: there is no COF here, and 0.0 would be a lie
+        return RunSummary(skip_fraction=skip_fraction, is_complete=False)
+
+    summary = RunSummary(skip_fraction=skip_fraction, ntimesteps=int(len(window)))
+
+    if family in _PES_FAMILIES:
+        from ..postprocessing.pes_scan import grid_descriptors  # pylint: disable=import-outside-toplevel
+        # A PES grid has no COF at all -- the ten stats stay None, and
+        # is_complete stays True because the grid IS this family's complete
+        # result. Consumers filter on `mean_cof is not None`, not is_complete.
+        summary.extras.update(
+            {k: _finite(v) for k, v in
+             grid_descriptors(window, _PES_KIND[family]).items()})
+        summary.time_series_hash = compute_time_series_hash(
+            window['energy_eV'].to_numpy(dtype=float), np.zeros(1), np.zeros(1))
+        return summary
+
+    cols = [_role_column(window, family, role) for role in _SLIDE_ROLES]
+    if all(cols):
+        nf, lfx, lfy = (window[c].to_numpy(dtype=float) for c in cols)
+        for key, val in compute_friction_stats(nf, lfx, lfy, skip_fraction).items():
+            setattr(summary, key, _finite(val))
+        summary.time_series_hash = compute_time_series_hash(nf, lfx, lfy)
+    else:
+        # the role columns did not resolve: no stats, and say so
+        summary.is_complete = False
+
+    dx_col, dy_col, dz_col = (_role_column(window, family, role)
+                              for role in _DRIVEN_ROLES)
+    if dx_col and dy_col:
+        drv_x = window[dx_col].to_numpy(dtype=float)
+        drv_y = window[dy_col].to_numpy(dtype=float)
+        summary.extras['slide_distance'] = float(
+            np.sum(np.hypot(np.diff(drv_x), np.diff(drv_y))))
+    if dz_col:
+        drv_z = window[dz_col].to_numpy(dtype=float)
+        summary.extras['driven_com_z_mean'] = float(np.mean(drv_z))
+        summary.extras['driven_com_z_drift'] = float(drv_z[-1] - drv_z[0])
+
+    retract = frames_by_tier.get('retract')
+    if family == 'indent' and retract is not None and len(retract):
+        from ..postprocessing.indent import retract_features  # pylint: disable=import-outside-toplevel
+        summary.extras.update(
+            {k: _finite(v) for k, v in retract_features(retract).items()})
+
+    raw = frames_by_tier.get('raw')
+    if raw is not None and 'raw_lfx' in getattr(raw, 'columns', ()):
+        from ..postprocessing.slip_analysis import detect_slips  # pylint: disable=import-outside-toplevel
+        slips = detect_slips(raw, channel='raw_lfx')
+        summary.extras['slip_n_events'] = float(slips.n_events)
+        summary.extras['slip_mean_amplitude'] = _finite(
+            np.mean(slips.amplitudes) if slips.amplitudes else 0.0)
+        # nan for <2 events, size<3 or a flat trace -- becomes None, not a
+        # ValidationError at Node.store()
+        summary.extras['slip_asymmetry'] = _finite(slips.asymmetry)
+
+    return summary
 
 
 # ---------------------------------------------------------------------------
