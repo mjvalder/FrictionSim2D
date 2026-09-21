@@ -71,6 +71,24 @@ def test_scheduler_flag_picks_the_slurm_script(runner, tmp_path):
     assert not (sim_root / "hpc" / "run.pbs").exists()
 
 
+def test_preflight_flag_writes_the_preflight_pair(runner, tmp_path):
+    sim_root = _sim_tree(tmp_path)
+    settings_file = _settings_file_with_modules(tmp_path)
+
+    plain = runner.invoke(cli, ["hpc", "generate", str(sim_root),
+                                "--settings-file", str(settings_file)])
+    assert plain.exit_code == 0, plain.output
+    assert not (sim_root / "hpc" / "preflight.sh").exists()
+
+    result = runner.invoke(cli, ["hpc", "generate", str(sim_root),
+                                 "--settings-file", str(settings_file), "--preflight"])
+
+    assert result.exit_code == 0, result.output
+    assert (sim_root / "hpc" / "preflight.sh").is_file()
+    assert (sim_root / "hpc" / "preflight.pbs").is_file()
+    assert "qsub hpc/preflight.pbs" in result.output
+
+
 def test_a_tree_with_no_lammps_directory_exits_non_zero(runner, tmp_path):
     empty_root = tmp_path / "empty_root"
     empty_root.mkdir()

@@ -135,6 +135,14 @@ def test_empty_modules_list_is_rejected(tmp_path):
         generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
 
 
+def test_a_conda_env_stands_in_for_modules(tmp_path):
+    generator = HPCScriptGenerator(_config(modules=[], conda_env="$HOME/envs/lammps"))
+    generator.generate_pbs_scripts(["mat0/L1"], tmp_path / "hpc")
+
+    assert 'CONDA_ENV="$HOME/envs/lammps"' in (tmp_path / "hpc" / "run.pbs").read_text(
+        encoding="utf-8")
+
+
 def test_use_tmpdir_without_scratch_dir_is_rejected(tmp_path):
     generator = HPCScriptGenerator(_config(use_tmpdir=True, scratch_dir=None))
     with pytest.raises(ValueError, match="scratch_dir"):

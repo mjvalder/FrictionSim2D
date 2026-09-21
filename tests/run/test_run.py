@@ -904,7 +904,8 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     # generation call overwrites it with the manifest sentinel -- see
     # test_run_simulations_afm_upgrades_slide_only_defaults below.)
     hpc_dir = root / "hpc"
-    assert (hpc_dir / "manifest_combined.txt").read_text(encoding="utf-8").strip() == \
+    # PBS lines are <case>TAB<simulation directory>.
+    assert (hpc_dir / "manifest_combined.txt").read_text(encoding="utf-8").strip().split("\t")[-1] == \
         seen_output_dirs[0].relative_to(root).as_posix()
     assert (hpc_dir / "run.pbs").exists()
     assert returned_settings.hpc.lammps_scripts == ["__MANIFEST_PATH__"]

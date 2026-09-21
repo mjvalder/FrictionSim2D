@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --job-name={{ job_name }}
+#SBATCH --nodes={{ nodes }}
+#SBATCH --ntasks-per-node={{ ntasks_per_node }}
+#SBATCH --cpus-per-task={{ cpus_per_task }}
+#SBATCH --time={{ walltime }}
+{% if array_size > 1 %}
+#SBATCH --array=1-{{ array_size }}
+#SBATCH --output={{ directive_log_dir }}/{{ job_name }}_%a_out.txt
+#SBATCH --error={{ directive_log_dir }}/{{ job_name }}_%a_err.txt
+{% else %}
+#SBATCH --output={{ directive_log_dir }}/{{ job_name }}_out.txt
+#SBATCH --error={{ directive_log_dir }}/{{ job_name }}_err.txt
+{% endif %}
+{% if partition %}
+#SBATCH --partition={{ partition }}
+{% endif %}
+{% if account %}
+#SBATCH --account={{ account }}
+{% endif %}
+{% if mem %}
+#SBATCH --mem={{ mem }}
+{% endif %}

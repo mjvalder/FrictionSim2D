@@ -1,0 +1,177 @@
+#!/bin/bash
+# Preflight for {{ job_name }}. Checks only -- runs no simulation.
+#
+#   bash hpc/preflight.sh -- from the simulation root: path and deck checks
+#   {{ submit_cmd }} hpc/{{ preflight_job }} -- on a compute node: module, LAMMPS and scratch checks too
+
+WORKDIR="${{ workdir_var }}"
+[ -n "$WORKDIR" ] || WORKDIR="$(dirname "$0")/.."
+cd "$WORKDIR" || exit 1
+export {{ workdir_var }}="$PWD"
+
+pass=0; fail=0; warn=0
+ok()   { printf '  [ ok ] %s\n' "$*"; pass=$((pass+1)); }
+bad()  { printf '  [FAIL] %s\n' "$*"; fail=$((fail+1)); }
+note() { printf '  [warn] %s\n' "$*"; warn=$((warn+1)); }
+hdr()  { printf '\n== %s ==\n' "$*"; }
+
+STYLES=$(mktemp)
+trap 'rm -f "$STYLES"' EXIT
+
+# --- 1. environment ---------------------------------------------------------
+hdr "environment"
+{% if modules %}
+if type module >/dev/null 2>&1; then
+    module purge
+{% for mod in modules %}
+    if module load {{ mod }}; then ok "module load {{ mod }}"; else bad "module load {{ mod }} failed"; fi
+{% endfor %}
+else
+    bad "no 'module' command here -- run on the cluster ({{ submit_cmd }} hpc/{{ preflight_job }})"
+fi
+{% endif %}
+{% if conda_env %}
+CONDA_ENV="{{ conda_env }}"
+if [ -d "$CONDA_ENV" ]; then ok "conda prefix $CONDA_ENV"; else bad "no conda prefix at $CONDA_ENV"; fi
+export PATH="$CONDA_ENV/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
+{% endif %}
+export OMP_NUM_THREADS=1
+{% if mpi_command %}
+MPI={{ mpi_command.split()[0] }}
+if command -v "$MPI" >/dev/null 2>&1; then ok "$MPI is $(command -v "$MPI")"; else bad "$MPI not on PATH"; fi
+{% endif %}
+
+# --- 2. LAMMPS binary (-h only) ---------------------------------------------
+hdr "lammps"
+LMPH=""
+if ! command -v lmp >/dev/null 2>&1; then
+    bad "no lmp on PATH"
+elif LMPH=$(lmp -h 2>&1); then
+    ok "lmp -h returned 0: $(command -v lmp)"
+    ver=$(grep -m1 -oE '[0-9]{1,2} [A-Z][a-z]{2} [0-9]{4}' <<<"$LMPH")
+    if [ -n "$ver" ]; then ok "LAMMPS version $ver"; else note "could not read the LAMMPS version"; fi
+else
+    bad "lmp -h failed -- the binary does not start:"
+    head -5 <<<"$LMPH" | sed 's/^/         /'
+    LMPH=""
+fi
+
+# --- 3. directories ---------------------------------------------------------
+hdr "directories"
+LOG_DIR="{{ log_dir }}"
+if [ -d "$LOG_DIR" ] && [ -w "$LOG_DIR" ]; then
+    ok "log dir $LOG_DIR"
+else
+    bad "log dir $LOG_DIR missing or unwritable -- the scheduler opens it before the job starts"
+fi
+{% if use_tmpdir %}
+SCRATCH_BASE="{{ scratch_dir }}"
+if [ -z "$SCRATCH_BASE" ]; then
+    note "scratch dir '{{ scratch_dir }}' is empty here (set only inside a job?)"
+elif probe=$(mktemp -d "$SCRATCH_BASE/preflight_XXXXXX" 2>/dev/null); then
+    ok "scratch writable: $SCRATCH_BASE"
+    rm -rf "$probe"
+else
+    bad "cannot write to scratch $SCRATCH_BASE"
+fi
+{% endif %}
+
+# --- 4. jobs: array ranges, decks and every file they read ------------------
+hdr "jobs"
+
+check_deck() {  # prints one deck's problems; nothing when clean
+    local deck=$1 sim cmd p d
+    local -a files
+    [ -f "$deck" ] || { echo " missing"; return; }
+    sim=$(dirname "$(dirname "$deck")")
+    files=("$deck")
+    while read -r cmd p; do
+        case $p in *'$'*) continue ;; esac   # written by an earlier phase, e.g. load_$(v_find)N.data
+        if [ ! -e "$p" ]; then
+            echo " $p"
+        elif [ "$cmd" = include ]; then
+            files+=("$p")
+        fi
+    done < <(awk '$1=="read_data" || $1=="include" {print $1, $2}' "$deck")
+    for p in $(awk '$1=="pair_coeff" {for (i=4; i<=NF; i++) print $i}' "${files[@]}"); do
+        case $p in */*.*) [ -e "$p" ] || echo " $p" ;; esac
+    done
+    awk '$1=="pair_style" {print "main", $2
+                           if ($2 ~ /^hybrid/) for (i=3; i<=NF; i++) if ($i ~ /^[a-z]/) print "sub", $i}' \
+        "${files[@]}" >>"$STYLES"
+    [ -w "$sim/lammps" ] || echo " $sim/lammps (unwritable)"
+    for d in results visuals data; do
+        [ -d "$sim/$d" ] || echo " $sim/$d (missing; results are copied back into it)"
+    done
+}
+
+check_job() {  # <job script> <manifest> [deck per simulation directory...]
+    local script=$1 manifest=$2 n want case_dir entry deck p problems nbad=0 ndecks=0
+    local -a decks
+    shift 2
+    [ -f "hpc/$script" ] || { bad "hpc/$script missing"; return; }
+    [ -s "hpc/$manifest" ] || { bad "hpc/$manifest missing or empty"; return; }
+    n=$(grep -c . "hpc/$manifest")
+    want=$(sed -n '{{ array_range_sed }}' "hpc/$script")
+    want=${want:-1}
+    if [ "$n" -eq "$want" ]; then
+        ok "$script: array 1-$want matches $manifest"
+    else
+        bad "$script: array 1-$want but $manifest has $n entries"
+    fi
+    while IFS=$'\t' read -r case_dir entry || [ -n "$case_dir" ]; do
+        [ -n "$case_dir" ] || continue
+        if [ -z "$entry" ]; then
+            bad "$manifest: '$case_dir' is not <case>TAB<path>"; nbad=$((nbad+1)); continue
+        fi
+        case $entry in
+            "$case_dir"|"$case_dir"/*) ;;
+            *) bad "$manifest: $entry is not inside its case $case_dir"; nbad=$((nbad+1)) ;;
+        esac
+        if [ $# -eq 0 ]; then
+            decks=("$entry")
+        else
+            decks=()
+            for p in "$@"; do decks+=("$entry/lammps/$p"); done
+        fi
+        for deck in "${decks[@]}"; do
+            ndecks=$((ndecks+1))
+            problems=$(check_deck "$deck")
+            [ -z "$problems" ] || { bad "$deck:$problems"; nbad=$((nbad+1)); }
+        done
+    done <"hpc/$manifest"
+    [ "$nbad" -eq 0 ] && ok "$script: all $ndecks decks and the files they read resolve"
+}
+
+{% for job in jobs %}
+check_job {{ job.script }} {{ job.manifest }}{% for phase in job.phases %} {{ phase }}{% endfor %}
+
+{% endfor %}
+
+# --- 5. styles the decks use ------------------------------------------------
+hdr "styles"
+if [ -z "$LMPH" ]; then
+    note "skipped -- no working lmp"
+elif [ ! -s "$STYLES" ]; then
+    note "no pair_style found in the decks"
+else
+    TOKENS=$(tr -s '[:space:]' '\n' <<<"$LMPH")
+    while read -r kind style; do
+        if grep -qxF "$style" <<<"$TOKENS"; then
+            ok "pair_style $style"
+        elif [ "$kind" = main ]; then
+            bad "pair_style $style is not in this LAMMPS build"
+        else
+            note "'$style' on a hybrid pair_style line is not in lmp -h (a keyword, or a missing style)"
+        fi
+    done < <(sort -u "$STYLES")
+fi
+
+# --- summary ----------------------------------------------------------------
+printf '\n== summary ==\n  %d ok, %d warn, %d FAIL\n' "$pass" "$warn" "$fail"
+if [ "$fail" -eq 0 ]; then
+    echo "  ready to submit"
+    exit 0
+fi
+exit 1

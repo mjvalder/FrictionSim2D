@@ -100,7 +100,12 @@ def test_hpc_generate_runs_on_a_tree_the_run_command_just_wrote(
                    manifest.read_text(encoding='utf-8').splitlines() if line.strip()]
         assert entries, manifest.name
         for entry in entries:
-            assert (root / entry).exists(), (manifest.name, entry)
+            # Every manifest line is "<case dir>\t<deck or simulation dir>";
+            # both halves name real paths in the tree.
+            case, _, path = entry.partition('\t')
+            assert path, (manifest.name, entry)
+            for part in (case, path):
+                assert (root / part).exists(), (manifest.name, part)
 
 
 def test_the_scheduler_option_reaches_the_generated_script(

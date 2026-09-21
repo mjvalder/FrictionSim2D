@@ -1,0 +1,19 @@
+#!/bin/bash
+#PBS -l select={{ select_single }}
+#PBS -l walltime=00:10:00
+#PBS -N {{ job_name }}_preflight
+#PBS -j oe
+{% if queue %}
+#PBS -q {{ queue }}
+{% endif %}
+{% if account %}
+#PBS -A {{ account }}
+{% endif %}
+
+# Runs hpc/preflight.sh on the node type the real jobs land on. Runs no simulation.
+#
+#   qsub hpc/preflight.pbs      (from the simulation root)
+
+cd "$PBS_O_WORKDIR" || exit 1
+echo "node: $(hostname)   cwd: $PWD"
+bash hpc/preflight.sh

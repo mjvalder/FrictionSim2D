@@ -441,18 +441,26 @@ _SETTINGS: Dict[str, SectionOverride] = {
                 help='Where the simulation tree will live on the cluster.',
             ),
             'mpi_command': FieldOverride(label='MPI launcher', order=13),
+            'conda_env': FieldOverride(
+                label='Conda environment', order=14,
+                help='Conda prefix put on PATH before running, e.g. $HOME/envs/lammps.',
+            ),
             'use_tmpdir': FieldOverride(
-                label='Run in scratch', order=14,
+                label='Run in scratch', order=15,
                 help='Copy the run into node-local scratch and back afterwards.',
             ),
             'scratch_dir': FieldOverride(
-                label='Scratch directory', order=15,
+                label='Scratch directory', order=16,
                 enable_if=('use_tmpdir', ENABLED),
                 enable_hint='Enable "Run in scratch" to set this.',
             ),
             'lammps_scripts': FieldOverride(
-                label='Scripts to submit', order=16,
+                label='Scripts to submit', order=17,
                 help='Which generated run scripts get job entries.',
+            ),
+            'preflight': FieldOverride(
+                label='Write preflight check', order=18,
+                help='Also write hpc/preflight.sh and preflight.pbs (PBS only).',
             ),
         },
     ),

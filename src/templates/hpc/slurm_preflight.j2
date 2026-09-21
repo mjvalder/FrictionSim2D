@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH --job-name={{ job_name }}_preflight
+#SBATCH --nodes={{ nodes }}
+#SBATCH --ntasks-per-node={{ ntasks_per_node }}
+#SBATCH --cpus-per-task={{ cpus_per_task }}
+#SBATCH --time=00:10:00
+#SBATCH --output={{ directive_log_dir }}/{{ job_name }}_preflight.txt
+{% if partition %}
+#SBATCH --partition={{ partition }}
+{% endif %}
+{% if account %}
+#SBATCH --account={{ account }}
+{% endif %}
+{% if mem %}
+#SBATCH --mem={{ mem }}
+{% endif %}
+
+# Runs hpc/preflight.sh on the node type the real jobs land on. Runs no simulation.
+#
+#   sbatch hpc/preflight.slurm   (from the simulation root)
+
+cd "$SLURM_SUBMIT_DIR" || exit 1
+echo "node: $(hostname)   cwd: $PWD"
+bash hpc/preflight.sh

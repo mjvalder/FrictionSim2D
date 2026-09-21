@@ -4,7 +4,6 @@ This module provides the abstract base class `SimulationBase`, which defines
 the common interface and utility methods (template rendering, directory setup)
 required by all specific simulation types (AFM, Sheet-on-Sheet, etc.).
 """
-import os
 import logging
 import random
 import subprocess
@@ -16,7 +15,7 @@ import json
 from datetime import datetime
 import hashlib
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment
 
 from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader
@@ -458,8 +457,9 @@ class SimulationBase(ABC):
             job_name=job_name
         )
 
-        if not hpc_config.modules:
-            raise ValueError("HPC modules list is empty; set hpc.modules in settings.")
+        if not hpc_config.modules and not hpc_config.conda_env:
+            raise ValueError(
+                "HPC modules list is empty; set hpc.modules or hpc.conda_env in settings.")
         if hpc_config.use_tmpdir and not hpc_config.scratch_dir:
             raise ValueError("HPC scratch_dir is required when use_tmpdir is true.")
 
@@ -482,44 +482,18 @@ class SimulationBase(ABC):
                 manifest=manifest,
                 output_dir=hpc_dir,
                 scheduler=self.config.settings.hpc.scheduler_type,
-                base_dir=base_dir
+                base_dir=base_dir,
+                simulation_root=sim_root,
             )
             n_scripts = len(scripts['system']) + len(scripts['slide'])
             logger.info("Generated %d HPC scripts (system + slide) in %s", n_scripts, hpc_dir)
         else:
             logger.info("No system jobs detected - using single-phase submission")
-            slide_manifest_path = hpc_dir / 'manifest_slide.txt'
-            manifest.save_script_list(slide_manifest_path)
-
-            slide_manifest_rel = f"{base_dir}/hpc/manifest_slide.txt"
-
-            templates_dir = Path(os.path.dirname(__file__)).parent / 'templates' / 'hpc'
-            jinja_env = Environment(
-                loader=FileSystemLoader(templates_dir),
-                trim_blocks=True,
-                lstrip_blocks=True
-            )
-
-            context = hpc_config.to_dict()
-            context.update({
-                'array_size': manifest.n_jobs,
-                'manifest_file': slide_manifest_rel,
-                'manifest_filename': 'manifest_slide.txt',
-                'base_dir': base_dir,
-                'log_dir': hpc_config.log_dir or f"{base_dir}/logs",
-                'job_name': job_name,
-            })
-
-            template_name = (
-                'pbs_array.j2' if hpc_config.scheduler_type == 'pbs' else 'slurm_array.j2'
-            )
-            template = jinja_env.get_template(template_name)
-            script_content = template.render(context)
-
-            script_name = 'run.pbs' if hpc_config.scheduler_type == 'pbs' else 'run.sh'
-            script_path = hpc_dir / script_name
-            script_path.write_text(script_content, encoding='utf-8')
-
+            decks = [f"{j.simulation_path}/lammps/{j.lammps_script or 'slide.in'}"
+                     for j in manifest.jobs]
+            generator.generate_scripts(decks, hpc_dir,
+                                       scheduler=hpc_config.scheduler_type,
+                                       base_dir=base_dir, simulation_root=sim_root)
             logger.info("Generated HPC script in %s", hpc_dir)
 
     def _get_hpc_output_dir(self) -> Path:

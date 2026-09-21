@@ -47,6 +47,8 @@ IDS = [f"{name}-{scheduler}" for name, _m, _s, scheduler in CASES]
 _ARRAY_RANGE_RE = re.compile(r'^#(?:PBS -J|SBATCH --array=)\s*1-(\d+)\s*$', re.M)
 _MANIFEST_REF_RE = re.compile(r'\$(?:PBS_O_WORKDIR|SLURM_SUBMIT_DIR)/(hpc/\S+\.txt)')
 _PHASE_RE = re.compile(r'-in\s+\$\{LAMMPS_SIM_PATH\}/(\S+\.in)')
+#: PBS: `-in "$SIM/lammps/system.in"`.
+_PBS_PHASE_RE = re.compile(r'-in\s+"\$SIM/(lammps/\w+\.in)"')
 
 
 @pytest.fixture(scope='module', name='hpc_tree')
@@ -80,9 +82,14 @@ def _manifests(root: Path) -> List[Path]:
     return sorted((root / 'hpc').glob('manifest*.txt'))
 
 
-def _entries(manifest: Path) -> List[str]:
+def _lines(manifest: Path) -> List[str]:
     return [line for line in manifest.read_text(encoding='utf-8').splitlines()
             if line.strip()]
+
+
+def _entries(manifest: Path) -> List[str]:
+    """The path each line names. PBS lines are ``<case>\\t<path>``."""
+    return [line.split('\t')[-1] for line in _lines(manifest)]
 
 
 def _job_scripts(root: Path) -> List[Path]:
@@ -117,7 +124,7 @@ def _scripts_a_job_will_run(root: Path) -> set:
     will_run = set()
     for script in _job_scripts(root):
         text = script.read_text(encoding='utf-8')
-        phases = _PHASE_RE.findall(text)
+        phases = _PHASE_RE.findall(text) + _PBS_PHASE_RE.findall(text)
         for ref in _MANIFEST_REF_RE.findall(text):
             entries = _entries(root / ref)
             if _manifest_entries_are_scripts(entries):
@@ -147,6 +154,13 @@ def test_the_manifest_names_only_files_the_builder_wrote(
             assert (target.is_file() if is_script else target.is_dir()), (
                 f"{manifest.name} names '{entry}', which the builder did not "
                 f"write under {root}")
+    if scheduler == 'pbs':
+        # The case a PBS job copies to scratch must hold the run and what it reads.
+        for manifest in manifests:
+            for line in _lines(manifest):
+                case, entry = line.split('\t')
+                assert entry.startswith(case + '/') or entry == case, line
+                assert (root / case / 'provenance').is_dir() or (root / case / 'build').is_dir(), line
 
 
 @pytest.mark.parametrize('name,model,shape,scheduler', CASES, ids=IDS)

@@ -182,8 +182,12 @@ class HPCSettings(BaseModel):
     walltime_hours: int = 20
     max_array_size: int = 300
     modules: Optional[List[str]] = Field(default_factory=lambda: None)
+    # Conda prefix whose bin/ and lib/ the job puts on PATH (e.g. $HOME/envs/lammps).
+    conda_env: Optional[str] = None
     mpi_command: str = "mpirun"
     use_tmpdir: bool = True
+    # Also write hpc/preflight.sh + the scheduler's submit wrapper.
+    preflight: bool = False
     lammps_scripts: List[str] = Field(default_factory=lambda: [
         'system.in',
         'slide.in'

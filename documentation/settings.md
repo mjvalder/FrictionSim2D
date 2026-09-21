@@ -197,10 +197,27 @@ hpc:
   walltime_hours: 20
   max_array_size: 300
   modules: null
+  conda_env: null        # e.g. $HOME/envs/lammps -- its bin/ and lib/ go on PATH
   mpi_command: mpirun
   use_tmpdir: true
+  preflight: false       # also write hpc/preflight.sh + its submit wrapper
   lammps_scripts: [system.in, slide.in]
 ```
+
+Job-script generation needs `modules`, `conda_env`, or both.
+
+Job scripts -- PBS and SLURM alike -- load the environment, copy the simulation
+to `scratch_dir` when `use_tmpdir` is on, run LAMMPS with
+`-log lammps/run_<deck>.log`, copy `results/`, `visuals/`, `data/` and the run
+logs back, and remove scratch. Use `queue` for PBS and `partition` for SLURM;
+the other is ignored.
+
+With `preflight` (or `hpc generate --preflight`) you also get a check-only
+`preflight.sh` (run locally: `bash hpc/preflight.sh`) and a submit wrapper that
+runs it on a compute node -- `preflight.pbs` (`qsub hpc/preflight.pbs`) or
+`preflight.slurm` (`sbatch hpc/preflight.slurm`), from the simulation root.
+Both verify modules/conda, `lmp -h`, array ranges vs manifests, every deck and
+the files it reads, pair styles, and log/scratch directories.
 
 For sheet-on-sheet runs, script ordering is adjusted automatically to slide scripts only when needed.
 

@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -l select={{ select_single }}
+#PBS -l walltime={{ walltime }}
+#PBS -N {{ job_name }}
+{% if array_size > 1 %}
+#PBS -J 1-{{ array_size }}
+#PBS -o {{ log_dir }}/{{ job_name }}_^array_index^_out.txt
+#PBS -e {{ log_dir }}/{{ job_name }}_^array_index^_err.txt
+{% else %}
+#PBS -o {{ log_dir }}/{{ job_name }}_out.txt
+#PBS -e {{ log_dir }}/{{ job_name }}_err.txt
+{% endif %}
+{% if queue %}
+#PBS -q {{ queue }}
+{% endif %}
+{% if account %}
+#PBS -A {{ account }}
+{% endif %}

@@ -441,8 +441,11 @@ def hpc_group():
               help='HPC scheduler type')
 @click.option('--output-dir', '-o', default=None,
               help='Output directory for scripts (default: simulation_dir/hpc)')
+@click.option('--preflight', is_flag=True, default=False,
+              help='Also write preflight.sh + its submit wrapper '
+                   '(or set hpc.preflight in settings)')
 def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
-                 scheduler: str, output_dir: Optional[str]):
+                 scheduler: str, output_dir: Optional[str], preflight: bool):
     """Generate HPC submission scripts for existing simulations.
     
     Scans simulation directory and creates PBS or SLURM job scripts.
@@ -486,6 +489,7 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
 
     generator = HPCScriptGenerator(hpc_config)
     base_dir = '$PBS_O_WORKDIR' if scheduler == 'pbs' else '$SLURM_SUBMIT_DIR'
+    preflight = preflight or hpc_config.preflight
     result = dispatch_hpc_generation(
         generator,
         sim_dir,
@@ -493,6 +497,7 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
         scheduler,
         base_dir,
         manifest_entries,
+        preflight=preflight,
     )
 
     if isinstance(result, dict):
@@ -507,7 +512,14 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     click.echo("\n📝 Next steps:")
     click.echo(f"   1. Review scripts in {out_dir}")
     click.echo("   2. Transfer to HPC cluster")
-    click.echo(f"   3. Follow {submit_file}")
+    if preflight:
+        submit_cmd = 'qsub' if scheduler == 'pbs' else 'sbatch'
+        wrapper = f"preflight.{'pbs' if scheduler == 'pbs' else 'slurm'}"
+        click.echo(f"   3. From the simulation root: "
+                   f"{submit_cmd} {out_dir.name}/{wrapper}")
+        click.echo(f"   4. Follow {submit_file}")
+    else:
+        click.echo(f"   3. Follow {submit_file}")
 
 
 def _resolve_run_log(sim_dir: Path) -> Tuple[Optional[Path], str]:

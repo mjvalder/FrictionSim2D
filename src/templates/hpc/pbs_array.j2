@@ -1,141 +1,38 @@
-#!/bin/bash
-#PBS -l select={{ select_multi if array_size > 1 else select_single }}
-#PBS -l walltime={{ walltime }}
-{% if array_size > 1 %}
-#PBS -J 1-{{ array_size }}
-#PBS -o {{ log_dir }}/{{ job_name }}_^array_index^_out.txt
-#PBS -e {{ log_dir }}/{{ job_name }}_^array_index^_err.txt
-{% else %}
-#PBS -o {{ log_dir }}/{{ job_name }}_out.txt
-#PBS -e {{ log_dir }}/{{ job_name }}_err.txt
-{% endif %}
-#PBS -N {{ job_name }}
-{% if queue %}
-#PBS -q {{ queue }}
-{% endif %}
-{% if account %}
-#PBS -A {{ account }}
-{% endif %}
+{% include '_pbs_header.j2' %}
 
-module purge
-{% for mod in modules %}
-module load {{ mod }}
-{% endfor %}
+{% include '_environment.j2' %}
 
-{% if array_size > 1 %}
-TASK_ID=${PBS_ARRAY_INDEX}
-{% else %}
-TASK_ID=1
-{% endif %}
 
-SCRIPT_PATH=$(sed -n "${TASK_ID}p" $PBS_O_WORKDIR/hpc/{{ manifest_filename }})
-SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-SIM_PATH=$(dirname "$SCRIPT_DIR")
-
-if [ -z "$SCRIPT_PATH" ]; then
-    echo "Error: No script path for index ${TASK_ID}"
-    exit 1
-fi
-
+# Deck for this task
+LINE=$(sed -n "{% if array_size > 1 %}${PBS_ARRAY_INDEX}{% else %}1{% endif %}p" "$PBS_O_WORKDIR/hpc/{{ manifest_filename }}")
+CASE=${LINE%%$'\t'*}
+DECK=${LINE#*$'\t'}
+SIM=$(dirname "$(dirname "$DECK")")
+TAG=$(basename "$DECK" .in)
 {% if use_tmpdir %}
-# Rescue a run log out of scratch, which is deleted when the task ends. Called
-# on the failure path *before* `exit 1` as well as after a successful run: a
-# crashed job is exactly the one whose log matters most -- a non-converged ramp
-# immediately before the crash -- and until this runs that log exists only in
-# scratch.
-save_run_log() {
-    # Best-effort: losing a log must never fail a run that finished. It must
-    # not pass in silence either -- a full disk or a permissions problem here
-    # loses exactly the log the enrichment step and any post-mortem need, and
-    # the only trace would have been a provenance.json that stayed empty.
-    mkdir -p "$PBS_O_WORKDIR/${SIM_PATH}/lammps"
-    cp "$1" "$PBS_O_WORKDIR/${SIM_PATH}/lammps/" \
-        || echo "warning: could not save run log '$1' to $PBS_O_WORKDIR/${SIM_PATH}/lammps/" >&2
-}
+
+SRC="$PBS_O_WORKDIR"
+SCRATCH="{{ scratch_dir }}/{{ job_name }}_${PBS_JOBID}"
+
+# Copy simulation to scratch
+mkdir -p "$SCRATCH/$CASE"
+cp -a "$SRC/$CASE/." "$SCRATCH/$CASE/"
+cd "$SCRATCH"
 {% else %}
-# No scratch: the log is already being written in its final place.
-save_run_log() { :; }
+
+cd "$PBS_O_WORKDIR"
 {% endif %}
 
+# Run
+{{ mpi_command }} lmp -in "$DECK" -log "$SIM/lammps/run_$TAG.log"
 {% if use_tmpdir %}
-SIM_ROOT=$(basename "$PBS_O_WORKDIR")
-# Per-task scratch root keeps concurrent array tasks isolated from each other.
-SCRATCH={{ scratch_dir }}/${SIM_ROOT}/task_${TASK_ID}
 
-# Shared inputs (build/, provenance/potentials/) live at the simulation's
-# config level, which may be an ancestor of SIM_PATH (e.g. AFM layer dirs share
-# one provenance/ folder). Walk up to find it and copy that whole subtree so
-# every relative path the LAMMPS script references resolves under SCRATCH.
-COPY_ROOT="$SIM_PATH"
-search="$SIM_PATH"
-while [ "$search" != "." ] && [ "$search" != "/" ]; do
-    if [ -d "$PBS_O_WORKDIR/$search/provenance" ] || [ -d "$PBS_O_WORKDIR/$search/build" ]; then
-        COPY_ROOT="$search"
-        break
-    fi
-    search=$(dirname "$search")
-done
+# Copy results back
+cp -a "$SIM/results/." "$SRC/$SIM/results/"
+cp -a "$SIM/visuals/." "$SRC/$SIM/visuals/"
+cp -a "$SIM/data/." "$SRC/$SIM/data/"
+cp "$SIM"/lammps/run_*.log "$SRC/$SIM/lammps/"
 
-mkdir -p "$SCRATCH/$COPY_ROOT"
-rsync -av --exclude='*.lammpstrj' --exclude='results/' --exclude='visuals/' "$PBS_O_WORKDIR/$COPY_ROOT/" "$SCRATCH/$COPY_ROOT/"
-mkdir -p "$SCRATCH/${SIM_PATH}/results" "$SCRATCH/${SIM_PATH}/visuals" "$SCRATCH/${SIM_PATH}/data"
-cd $SCRATCH
-{% else %}
-cd $PBS_O_WORKDIR
+# Remove scratch
+rm -rf "$SCRATCH"
 {% endif %}
-
-# Tee stdout to a per-run log next to the input script: lmp_flags is "-l none",
-# so LAMMPS writes no log of its own, and the settle loop's RAMP_STATUS /
-# UNLOADED_REF lines would otherwise reach only the scheduler's spool file --
-# which this job cannot read back to enrich provenance.json below.
-# The name is derived from the input script (run_system.log, run_slide.log)
-# rather than fixed: this same template renders both phases of the two-phase
-# workflow, whose tasks share one SIM_PATH, so a fixed run.log would have the
-# slide task overwrite the system task's log -- the one holding RAMP_STATUS.
-LOG_PATH="${SCRIPT_DIR}/run_$(basename "$SCRIPT_PATH" .in).log"
-# LMP_STATUS captures ${PIPESTATUS[0]} because $? is now tee's status, which is
-# 0 even when LAMMPS died: testing it would turn every failure into a success.
-{{ mpi_command }} lmp {{ lmp_flags }} -in ${SCRIPT_PATH} | tee "${LOG_PATH}"
-LMP_STATUS=${PIPESTATUS[0]}
-if [ ${LMP_STATUS} -ne 0 ]; then
-    save_run_log "${LOG_PATH}"
-    echo "Error: LAMMPS failed on ${SCRIPT_PATH}"
-    exit 1
-fi
-save_run_log "${LOG_PATH}"
-
-{% if use_tmpdir %}
-mkdir -p "$PBS_O_WORKDIR/${SIM_PATH}"
-cp -r ${SIM_PATH}/results ${SIM_PATH}/visuals ${SIM_PATH}/data "$PBS_O_WORKDIR/${SIM_PATH}/"
-# Persist indentation load states so a dependent slide phase (AFM) can read them.
-cp ${SIM_PATH}/load_*.data "$PBS_O_WORKDIR/${SIM_PATH}/" 2>/dev/null || true
-{% endif %}
-
-# Fold the settle loop's RAMP_STATUS/UNLOADED_REF lines into this run's
-# provenance.json, against the final (workdir) copy rather than the scratch one.
-# Each task enriches from its own log. Only system*.in prints RAMP_STATUS, so
-# in the two-phase workflow the system task is the one that records the settle
-# result. The slide task's call is NOT a no-op -- every real LAMMPS run opens
-# with a `LAMMPS (<version>)` banner, so it still rewrites the record with a
-# lammps_version -- but it cannot lose anything: the merge is a
-# model_copy(update=...), which only touches the keys the log actually
-# supplied, so the ramp fields the system task wrote survive untouched. That is
-# why handing every task its own log is safe.
-# Guarded by `command -v` and `|| true` deliberately: a compute node without
-# FrictionSim2D installed, or a run with no settle loop at all, must still
-# finish green -- provenance enrichment is a nicety, never a reason to report a
-# completed simulation as failed.
-#
-# Today the guard is expected to fail: FrictionSim2D is not installed on the
-# cluster. Simulations are built on the workstation, only LAMMPS runs here, and
-# the results -- including the run logs teed above, which is what makes any of
-# this recoverable -- are rsynced back, where
-# `FrictionSim2D hpc enrich-provenance -r <tree>` sweeps the whole tree. That
-# local sweep is the working path. This line stays because it costs nothing
-# now and starts running by itself the day the package is installed in a
-# cluster-side conda env, with no change to anyone's workflow.
-if command -v FrictionSim2D >/dev/null 2>&1; then
-    FrictionSim2D hpc enrich-provenance "$PBS_O_WORKDIR/${SIM_PATH}" "$PBS_O_WORKDIR/${LOG_PATH}" || true
-fi
-
-echo "Simulation completed successfully: ${SIM_PATH}"

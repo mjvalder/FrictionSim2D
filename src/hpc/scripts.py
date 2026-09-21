@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Literal, Optional
 
 from jinja2 import Environment, FileSystemLoader
@@ -12,10 +12,45 @@ from ..core.config import GlobalSettings
 
 TEMPLATES_DIR = Path(__file__).parent.parent / 'templates' / 'hpc'
 
+#: What preflight.sh needs to know about the scheduler it is checking: the
+#: variable holding the submit directory, how the job script spells its array
+#: range, and the wrapper that runs the checks on a compute node.
+_PREFLIGHT_DIALECT = {
+    'pbs': {
+        'submit_cmd': 'qsub',
+        'workdir_var': 'PBS_O_WORKDIR',
+        'preflight_job': 'preflight.pbs',
+        'array_range_sed': r's/^#PBS -J 1-\([0-9][0-9]*\)$/\1/p',
+    },
+    'slurm': {
+        'submit_cmd': 'sbatch',
+        'workdir_var': 'SLURM_SUBMIT_DIR',
+        'preflight_job': 'preflight.slurm',
+        'array_range_sed': r's/^#SBATCH --array=1-\([0-9][0-9]*\)$/\1/p',
+    },
+}
+
 
 def _default_hpc_settings():
     """Return default validated HPC settings from GlobalSettings."""
     return GlobalSettings().hpc
+
+
+def _case_dir(simulation_root: Path, path: str) -> str:
+    """The directory a PBS job copies to scratch for ``path`` (a simulation
+    directory or a deck inside its ``lammps/``): the nearest ancestor holding
+    ``provenance/`` or ``build/``, which is everything the decks read. Falls
+    back to the simulation directory itself."""
+    sim = PurePosixPath(path)
+    if sim.suffix == '.in':
+        sim = sim.parent.parent
+    for candidate in (sim, *sim.parents):
+        if str(candidate) == '.':
+            break
+        if any((simulation_root / candidate / name).is_dir()
+               for name in ('provenance', 'build')):
+            return str(candidate)
+    return str(sim)
 
 
 @dataclass
@@ -114,6 +149,14 @@ class HPCConfig:
         return list(self.hpc_settings.modules or [])
 
     @property
+    def conda_env(self) -> Optional[str]:
+        return getattr(self.hpc_settings, 'conda_env', None) or None
+
+    @property
+    def preflight(self) -> bool:
+        return bool(getattr(self.hpc_settings, 'preflight', False))
+
+    @property
     def mpi_command(self) -> str:
         return self.hpc_settings.mpi_command
 
@@ -153,6 +196,7 @@ class HPCConfig:
             'log_dir': self.log_dir,
             'scratch_dir': self.scratch_dir,
             'modules': self.modules,
+            'conda_env': self.conda_env,
             'mpi_command': self.mpi_command,
             'lmp_flags': self.lmp_flags,
             'use_tmpdir': self.use_tmpdir,
@@ -169,6 +213,20 @@ class HPCConfig:
             'cpus_per_task': 1,
             'mem': f"{self.memory_gb}G",
         }
+
+
+def _directive_log_dir(log_dir: str) -> str:
+    """``log_dir`` as an ``#SBATCH --output`` path.
+
+    SLURM does not expand shell variables in its directives -- a literal
+    ``$SLURM_SUBMIT_DIR/logs/x.txt`` is taken as a directory called
+    ``$SLURM_SUBMIT_DIR``, and the job is rejected before it starts. sbatch
+    resolves relative output paths against the submit directory anyway, so
+    dropping the prefix is exactly equivalent. (PBS expands ``$PBS_O_WORKDIR``
+    in ``-o``, which is why the PBS header can use it verbatim.)
+    """
+    prefix = '$SLURM_SUBMIT_DIR/'
+    return log_dir[len(prefix):] if log_dir.startswith(prefix) else log_dir
 
 
 class HPCScriptGenerator:
@@ -190,15 +248,35 @@ class HPCScriptGenerator:
             trim_blocks=True,
             lstrip_blocks=True
         )
+        # One entry per job script written, for generate_preflight to check.
+        self._jobs: List[Dict[str, Any]] = []
+        self._log_dir: Optional[str] = None
+
+    @staticmethod
+    def _manifest_lines(paths: List[str], simulation_root: Path) -> List[str]:
+        """Every manifest line is ``<case>\\t<path>``, for PBS and SLURM alike,
+        so the job script reads what to copy to scratch instead of deriving it."""
+        return [f"{_case_dir(simulation_root, p)}\t{p}" for p in paths]
+
+    def _write_job_list(self, path: Path, jobs: list,
+                        simulation_root: Path) -> None:
+        decks = [f"{j.simulation_path}/lammps/{j.lammps_script or 'slide.in'}" for j in jobs]
+        path.write_text('\n'.join(self._manifest_lines(decks, simulation_root)) + '\n',
+                        encoding='utf-8')
+
+    def _record_job(self, script: str, manifest: str, scheduler: str,
+                    phases: Optional[List[str]] = None) -> None:
+        self._jobs.append({'script': script, 'manifest': manifest,
+                           'scheduler': scheduler, 'phases': phases or []})
 
     def _validate_config(self):
         """Validate required config fields.
-        
+
         Raises:
             ValueError: If required fields are missing.
         """
-        if not self.config.modules:
-            raise ValueError("HPC modules list is empty.")
+        if not self.config.modules and not self.config.conda_env:
+            raise ValueError("HPC modules list is empty and no conda_env is set.")
         if self.config.use_tmpdir and not self.config.scratch_dir:
             raise ValueError("HPC scratch_dir required when use_tmpdir is true.")
 
@@ -216,6 +294,12 @@ class HPCScriptGenerator:
         if self.config.hpc_home:
             return self.config.hpc_home.rstrip('/') + '/logs'
         return f"{base_dir}/logs"
+
+    def _log_context(self, base_dir: str) -> Dict[str, str]:
+        """The two log-directory forms a template needs: the shell path the job
+        body uses, and the scheduler-directive path the header uses."""
+        log_dir = self._resolve_log_dir(base_dir)
+        return {'log_dir': log_dir, 'directive_log_dir': _directive_log_dir(log_dir)}
 
     def _ensure_local_log_dir(self, output_dir: Path) -> None:
         """Create the job log directory locally so it exists after transfer.
@@ -236,20 +320,23 @@ class HPCScriptGenerator:
             (sim_root / log_dir).mkdir(parents=True, exist_ok=True)
 
     def _generate_array_scripts(self, simulation_paths: List[str], output_dir: Path,
-                                base_dir: str, scheduler: Literal['pbs', 'slurm']) -> List[Path]:
+                                base_dir: str, scheduler: Literal['pbs', 'slurm'],
+                                simulation_root: Optional[Path] = None) -> List[Path]:
         """Generate array job scripts with automatic chunking.
-        
+
         Args:
             simulation_paths: List of relative simulation paths.
             output_dir: Directory to write scripts.
             base_dir: Base directory variable for HPC.
             scheduler: Scheduler type.
-            
+            simulation_root: Tree the paths are relative to (default: output_dir's parent).
+
         Returns:
             List of generated script paths.
         """
         self._validate_config()
         output_dir = Path(output_dir)
+        simulation_root = Path(simulation_root) if simulation_root else output_dir.parent
         output_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_local_log_dir(output_dir)
 
@@ -266,7 +353,8 @@ class HPCScriptGenerator:
             chunk = simulation_paths[start_idx:end_idx]
 
             manifest_name = f"manifest_{i+1}.txt"
-            (output_dir / manifest_name).write_text('\n'.join(chunk))
+            (output_dir / manifest_name).write_text(
+                '\n'.join(self._manifest_lines(chunk, simulation_root)))
 
             context = self.config.to_dict()
             context.update({
@@ -274,7 +362,7 @@ class HPCScriptGenerator:
                 'manifest_file': f"{base_dir}/{output_dir.name}/{manifest_name}",
                 'manifest_filename': manifest_name,
                 'base_dir': base_dir,
-                'log_dir': self._resolve_log_dir(base_dir),
+                **self._log_context(base_dir),
             })
             if n_scripts > 1:
                 context['job_name'] = f"{self.config.job_name}_{i+1}"
@@ -283,12 +371,15 @@ class HPCScriptGenerator:
             script_path = output_dir / script_name
             script_path.write_text(template.render(context))
             scripts.append(script_path)
+            self._record_job(script_name, manifest_name, scheduler)
+            self._log_dir = context['log_dir']
 
         self._write_master_script(output_dir, scripts, scheduler)
         return scripts
 
     def generate_pbs_scripts(self, simulation_paths: List[str], output_dir: Path,
-                            base_dir: str = "$PBS_O_WORKDIR") -> List[Path]:
+                            base_dir: str = "$PBS_O_WORKDIR",
+                            simulation_root: Optional[Path] = None) -> List[Path]:
         """Generate PBS array job scripts.
         
         Args:
@@ -300,11 +391,12 @@ class HPCScriptGenerator:
             List of generated script paths.
         """
         return self._generate_array_scripts(
-            simulation_paths, output_dir, base_dir, 'pbs'
+            simulation_paths, output_dir, base_dir, 'pbs', simulation_root
         )
 
     def generate_slurm_scripts(self, simulation_paths: List[str], output_dir: Path,
-                                base_dir: str = "$SLURM_SUBMIT_DIR") -> List[Path]:
+                                base_dir: str = "$SLURM_SUBMIT_DIR",
+                                simulation_root: Optional[Path] = None) -> List[Path]:
         """Generate SLURM array job scripts.
         
         Args:
@@ -316,7 +408,7 @@ class HPCScriptGenerator:
             List of generated script paths.
         """
         return self._generate_array_scripts(
-            simulation_paths, output_dir, base_dir, 'slurm'
+            simulation_paths, output_dir, base_dir, 'slurm', simulation_root
         )
 
     def _write_master_script(self, output_dir: Path, scripts: List[Path],
@@ -359,7 +451,8 @@ class HPCScriptGenerator:
 
     def generate_combined_scripts(self, manifest: 'JobManifest', output_dir: Path,
                                    scheduler: Literal['pbs', 'slurm'] = 'pbs',
-                                   base_dir: Optional[str] = None) -> List[Path]:
+                                   base_dir: Optional[str] = None,
+                                   simulation_root: Optional[Path] = None) -> List[Path]:
         """Generate a single combined system+slide script for AFM simulations.
 
         Each array task runs system.in then slide.in sequentially within the
@@ -388,8 +481,10 @@ class HPCScriptGenerator:
             seen.setdefault(j.simulation_path, None)
         sim_dirs = list(seen.keys())
 
+        simulation_root = Path(simulation_root) if simulation_root else output_dir.parent
         manifest_name = 'manifest_combined.txt'
-        (output_dir / manifest_name).write_text('\n'.join(sim_dirs) + '\n', encoding='utf-8')
+        lines = self._manifest_lines(sim_dirs, simulation_root)
+        (output_dir / manifest_name).write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
         template_name = f"{scheduler}_combined.j2"
         template = self.jinja_env.get_template(template_name)
@@ -401,14 +496,51 @@ class HPCScriptGenerator:
             'manifest_file': f"{base_dir}/hpc/{manifest_name}",
             'manifest_filename': manifest_name,
             'base_dir': base_dir,
-            'log_dir': self._resolve_log_dir(base_dir),
+            **self._log_context(base_dir),
         })
 
         script_path = output_dir / f"run{script_ext}"
         script_path.write_text(template.render(context))
+        self._record_job(script_path.name, manifest_name, scheduler,
+                         phases=['system.in', 'slide.in'])
+        self._log_dir = context['log_dir']
 
         self._write_combined_submission(output_dir, script_path, scheduler)
         return [script_path]
+
+    def generate_preflight(self, output_dir: Path) -> List[Path]:
+        """Write preflight.sh and its submit wrapper for the jobs generated so far.
+
+        Checks only, no simulation: modules or conda environment load, ``lmp``
+        starts, each array range matches its manifest, every deck and the files
+        it reads resolve, the pair styles exist in the build, and the log and
+        scratch directories are writable.
+
+        Raises:
+            ValueError: If no job scripts were generated yet, or they mix
+                schedulers.
+        """
+        if not self._jobs:
+            raise ValueError("Generate the job scripts before their preflight check.")
+        schedulers = {job['scheduler'] for job in self._jobs}
+        if len(schedulers) > 1:
+            raise ValueError(f"Cannot preflight a mix of schedulers: {sorted(schedulers)}.")
+        scheduler = schedulers.pop()
+        output_dir = Path(output_dir)
+        context = self.config.to_dict()
+        context.update({'jobs': self._jobs, 'log_dir': self._log_dir,
+                        'directive_log_dir': _directive_log_dir(self._log_dir or ''),
+                        **_PREFLIGHT_DIALECT[scheduler]})
+        written = []
+        for template_name, file_name in (
+                ('preflight_sh.j2', 'preflight.sh'),
+                (f'{scheduler}_preflight.j2', _PREFLIGHT_DIALECT[scheduler]['preflight_job'])):
+            path = output_dir / file_name
+            path.write_text(self.jinja_env.get_template(template_name).render(context),
+                            encoding='utf-8')
+            written.append(path)
+        written[0].chmod(0o755)
+        return written
 
     def _write_combined_submission(self, output_dir: Path, script: Path,
                                     scheduler: Literal['pbs', 'slurm']) -> Path:
@@ -477,7 +609,9 @@ class HPCScriptGenerator:
 
     def generate_two_phase_scripts(self, manifest: 'JobManifest', output_dir: Path,
                                     scheduler: Literal['pbs', 'slurm'] = 'pbs',
-                                    base_dir: Optional[str] = None) -> Dict[str, List[Path]]:
+                                    base_dir: Optional[str] = None,
+                                    simulation_root: Optional[Path] = None
+                                    ) -> Dict[str, List[Path]]:
         """Generate separate system and slide job scripts with dependencies.
         
         Creates two array jobs: system initialization and slide simulations.
@@ -498,6 +632,7 @@ class HPCScriptGenerator:
 
         base_dir = base_dir or ('$PBS_O_WORKDIR' if scheduler == 'pbs' else '$SLURM_SUBMIT_DIR')
 
+        simulation_root = Path(simulation_root) if simulation_root else output_dir.parent
         system_jobs = manifest.get_system_jobs()
         slide_jobs = manifest.get_slide_jobs()
         result = {'system': [], 'slide': []}
@@ -506,34 +641,40 @@ class HPCScriptGenerator:
         script_ext = '.pbs' if scheduler == 'pbs' else '.sh'
 
         if system_jobs:
-            manifest.save_script_list(output_dir / 'manifest_system.txt', system_jobs)
+            self._write_job_list(output_dir / 'manifest_system.txt', system_jobs,
+                                 simulation_root)
             context = self.config.to_dict()
             context.update({
                 'array_size': len(system_jobs),
                 'manifest_file': f"{base_dir}/hpc/manifest_system.txt",
                 'manifest_filename': 'manifest_system.txt',
                 'base_dir': base_dir,
-                'log_dir': self._resolve_log_dir(base_dir),
+                **self._log_context(base_dir),
                 'job_name': f"{self.config.job_name}_system",
             })
             script_path = output_dir / f"run_system{script_ext}"
             script_path.write_text(template.render(context))
             result['system'].append(script_path)
+            self._record_job(script_path.name, 'manifest_system.txt', scheduler)
+            self._log_dir = context['log_dir']
 
         if slide_jobs:
-            manifest.save_script_list(output_dir / 'manifest_slide.txt', slide_jobs)
+            self._write_job_list(output_dir / 'manifest_slide.txt', slide_jobs,
+                                 simulation_root)
             context = self.config.to_dict()
             context.update({
                 'array_size': len(slide_jobs),
                 'manifest_file': f"{base_dir}/hpc/manifest_slide.txt",
                 'manifest_filename': 'manifest_slide.txt',
                 'base_dir': base_dir,
-                'log_dir': self._resolve_log_dir(base_dir),
+                **self._log_context(base_dir),
                 'job_name': f"{self.config.job_name}_slide",
             })
             script_path = output_dir / f"run_slide{script_ext}"
             script_path.write_text(template.render(context))
             result['slide'].append(script_path)
+            self._record_job(script_path.name, 'manifest_slide.txt', scheduler)
+            self._log_dir = context['log_dir']
 
         self._write_two_phase_submission(output_dir, result, scheduler,
                                             has_system=len(system_jobs) > 0)

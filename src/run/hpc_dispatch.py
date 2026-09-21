@@ -113,6 +113,7 @@ def dispatch_hpc_generation(
     scheduler: str,
     base_dir: str,
     manifest_entries: List[str],
+    preflight: bool = False,
 ):
     """Generate HPC scripts, choosing combined, two-phase, or single-phase layout.
 
@@ -122,6 +123,10 @@ def dispatch_hpc_generation(
     no PBS dependency needed. When counts differ (unusual) we fall back to two
     dependent array jobs. Sheet-on-sheet simulations have only slide scripts
     and use a single array job.
+
+    With ``preflight`` it also writes ``preflight.sh`` and its scheduler's
+    submit wrapper (``preflight.pbs`` / ``preflight.slurm``) next to the job
+    scripts.
 
     Returns whatever the chosen generator method returns.
     """
@@ -136,19 +141,28 @@ def dispatch_hpc_generation(
             logger.info(
                 "System+slide jobs detected (1:1) — generating combined HPC script."
             )
-            return generator.generate_combined_scripts(
-                manifest, output_dir, scheduler=scheduler, base_dir=base_dir
+            result = generator.generate_combined_scripts(
+                manifest, output_dir, scheduler=scheduler, base_dir=base_dir,
+                simulation_root=simulation_root,
             )
-        logger.info("System/slide counts differ — generating two-phase HPC scripts.")
-        return generator.generate_two_phase_scripts(
-            manifest, output_dir, scheduler=scheduler, base_dir=base_dir
+        else:
+            logger.info("System/slide counts differ — generating two-phase HPC scripts.")
+            result = generator.generate_two_phase_scripts(
+                manifest, output_dir, scheduler=scheduler, base_dir=base_dir,
+                simulation_root=simulation_root,
+            )
+    else:
+        result = generator.generate_scripts(
+            simulation_paths=manifest_entries,
+            output_dir=output_dir,
+            scheduler=scheduler,
+            base_dir=base_dir,
+            simulation_root=simulation_root,
         )
-    return generator.generate_scripts(
-        simulation_paths=manifest_entries,
-        output_dir=output_dir,
-        scheduler=scheduler,
-        base_dir=base_dir,
-    )
+
+    if preflight:
+        generator.generate_preflight(output_dir)
+    return result
 
 
 def hpc_generation_blocker(settings) -> Optional[str]:
@@ -159,13 +173,15 @@ def hpc_generation_blocker(settings) -> Optional[str]:
     lets a caller say so up front instead of appearing to succeed while
     producing no scripts.
     """
-    if not getattr(settings.hpc, 'modules', None):
+    if (not getattr(settings.hpc, 'modules', None)
+            and not getattr(settings.hpc, 'conda_env', None)):
         return (
-            "The HPC 'Modules' setting is empty. It is the only one that gates "
-            "job-script generation: scheduler, nodes, CPUs and walltime are all "
-            "written into the scripts but none of them substitute for it. "
-            "Set it to the environment modules your cluster loads before "
-            "running, e.g. 'lammps, openmpi'."
+            "The HPC 'Modules' and 'Conda environment' settings are both empty. "
+            "One of them gates job-script generation: scheduler, nodes, CPUs and "
+            "walltime are all written into the scripts but none of them substitute "
+            "for saying where LAMMPS comes from. Set the environment modules your cluster loads "
+            "before running, e.g. 'lammps, openmpi', or the conda prefix holding "
+            "lmp, e.g. '$HOME/envs/lammps'."
         )
     return None
 
@@ -217,5 +233,6 @@ def generate_hpc_scripts_for_root(simulation_root: Path, settings) -> Optional[s
         hpc_config.scheduler_type,
         base_dir,
         manifest_entries,
+        preflight=hpc_config.preflight,
     )
     return None

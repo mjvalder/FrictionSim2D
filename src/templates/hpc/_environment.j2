@@ -1,0 +1,16 @@
+{% if modules %}
+# Modules
+module purge
+{% for mod in modules %}
+module load {{ mod }}
+{% endfor %}
+
+{% endif %}
+{% if conda_env %}
+# Conda environment
+CONDA_ENV="{{ conda_env }}"
+export PATH="$CONDA_ENV/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
+
+{% endif %}
+export OMP_NUM_THREADS=1

@@ -10,6 +10,11 @@ are exercised. `generate_two_phase_scripts` reuses the *_array.j2 templates
 already covered here, so it needs no separate rendering for template
 liveness (its own dependency-submission logic is out of scope per the task's
 Phase 2c deferral).
+
+Both schedulers render the same minimal shape -- environment, copy to scratch,
+`lmp -log`, copy back -- so the execution and preflight sections at the bottom
+run over both. The one real difference is that SLURM does not expand shell
+variables in `#SBATCH` directives, which is pinned separately.
 """
 import os
 import shutil
@@ -40,91 +45,57 @@ def _combined_manifest(sim_path: str = "afm/mat0/L1") -> JobManifest:
     return manifest
 
 
+#: Which rendered file proves each template was reached, as
+#: {template: (scheduler, shape, rendered file name)}. The shapes are rendered
+#: below; `preflight_sh.j2` is scheduler-neutral (its dialect comes from
+#: `_PREFLIGHT_DIALECT`) and is covered through the PBS render.
+_RENDERED_BY = {
+    "pbs_array.j2": ("pbs", "array", "run.pbs"),
+    "pbs_combined.j2": ("pbs", "combined", "run.pbs"),
+    "pbs_preflight.j2": ("pbs", "combined", "preflight.pbs"),
+    "slurm_array.j2": ("slurm", "array", "run.sh"),
+    "slurm_combined.j2": ("slurm", "combined", "run.sh"),
+    "slurm_preflight.j2": ("slurm", "combined", "preflight.slurm"),
+    "preflight_sh.j2": ("pbs", "combined", "preflight.sh"),
+}
+
+
 def test_every_hpc_template_is_rendered_by_the_script_generator(tmp_path):
-    texts = {}
-    for scheduler in ("pbs", "slurm"):
-        script_ext = ".pbs" if scheduler == "pbs" else ".sh"
-        generator = HPCScriptGenerator(_config())
-
-        array_dir = tmp_path / scheduler / "array"
-        generator.generate_scripts(["mat0/L1"], array_dir, scheduler=scheduler)
-        texts[(scheduler, "array")] = (array_dir / f"run{script_ext}").read_text(encoding="utf-8")
-
-        combined_dir = tmp_path / scheduler / "combined"
-        generator.generate_combined_scripts(_combined_manifest(), combined_dir, scheduler=scheduler)
-        texts[(scheduler, "combined")] = (combined_dir / f"run{script_ext}").read_text(encoding="utf-8")
-
-    on_disk = {p.name for p in TEMPLATE_DIR.glob("*.j2")}
+    # Partials (leading underscore) are reached through {% include %}.
+    on_disk = {q.name for q in TEMPLATE_DIR.glob("*.j2") if not q.name.startswith("_")}
     assert on_disk, f"no templates found under {TEMPLATE_DIR}"
+    assert on_disk == set(_RENDERED_BY), (
+        "a template is not rendered by any test, or _RENDERED_BY names one that "
+        f"no longer exists: {on_disk ^ set(_RENDERED_BY)}")
 
-    for template in on_disk:
-        scheduler, _, shape = template.replace(".j2", "").partition("_")
-        assert (scheduler, shape) in texts, (
-            f"{template}: no test renders scheduler={scheduler!r} shape={shape!r}")
-        text = texts[(scheduler, shape)]
-        if shape == "combined":
+    written = {}
+    for scheduler in ("pbs", "slurm"):
+        for shape in ("array", "combined"):
+            generator = HPCScriptGenerator(_config())
+            out = tmp_path / scheduler / shape
+            if shape == "array":
+                generator.generate_scripts(["mat0/L1"], out, scheduler=scheduler)
+            else:
+                generator.generate_combined_scripts(_combined_manifest(), out,
+                                                    scheduler=scheduler)
+                generator.generate_preflight(out)
+            for path in out.iterdir():
+                written[(scheduler, shape, path.name)] = path.read_text(encoding="utf-8")
+
+    for template, key in _RENDERED_BY.items():
+        assert key in written, f"{template}: nothing rendered {key}"
+        text = written[key]
+        assert "{%" not in text and "{{" not in text, template
+        if key[1] == "combined" and template.endswith(("array.j2", "combined.j2")):
             # Combined scripts hardcode the two-phase filenames rather than
             # reading them from a manifest file.
             assert "system.in" in text and "slide.in" in text, template
-        else:
+        elif key[1] == "array":
             # Array scripts resolve their per-task path from a manifest file.
             assert "sed -n" in text, template
 
 
-# ---------------------------------------------------------------------------
-# Post-run provenance enrichment (review A-1).
-#
-# `lmp_flags` defaults to "-l none", so LAMMPS writes no log of its own and the
-# settle loop's `# RAMP_STATUS ...` lines reach only the scheduler's spool
-# file, which the running job cannot read. Every template therefore has to tee
-# stdout to a per-run log and hand that log to
-# `FrictionSim2D hpc enrich-provenance` -- see src/builders/afm/base.py's
-# module-level `enrich_provenance_post_run`.
-# ---------------------------------------------------------------------------
-
-#: Per-shape expectations for the run log.
-#:
-#: The array template renders *both* phases of the two-phase workflow
-#: (`generate_two_phase_scripts` runs it once per manifest), and both tasks
-#: share one SIM_PATH -- so its log name is derived from the input script at
-#: run time (run_system.log / run_slide.log) rather than fixed, and the tee,
-#: the scratch copy-back and the enrichment argument all go through the same
-#: ${LOG_PATH} variable. The combined template runs both phases in one task and
-#: can name its two logs statically.
-_TEE_TARGETS = {
-    "array": ['| tee "${LOG_PATH}"'],
-    "combined": ['| tee ${LAMMPS_SIM_PATH}/lammps/run_system.log',
-                 '| tee ${LAMMPS_SIM_PATH}/lammps/run_slide.log'],
-}
-
-#: The second argument of the enrichment call, per shape.
-_ENRICH_LOG_ARG = {
-    # Each task enriches from its own log: the system task's holds RAMP_STATUS
-    # and records the settle result. The slide task's call is not inert -- its
-    # log's LAMMPS banner still rewrites the record's lammps_version -- but it
-    # cannot disturb the ramp fields, since the merge only touches keys the log
-    # supplied. See
-    # test_a_slide_phase_log_cannot_disturb_the_system_phase_s_settle_result
-    # in tests/cli/test_cli_hpc_group.py.
-    "array": '"{workdir}/${{LOG_PATH}}"',
-    # One task, two logs -- enrich from the system one, the only RAMP_STATUS
-    # source.
-    "combined": '"{workdir}/${{SIM_PATH}}/lammps/run_system.log"',
-}
-
-#: The log-rescue calls each shape must make. `save_run_log` is a shell
-#: function the templates define once: a real copy under use_tmpdir, a no-op
-#: without it (the log is already in its final place). Calling it on the
-#: failure path as well as the success path is what keeps a crashed run's log,
-#: and that behaviour is pinned by execution further down, not here.
-_RESCUE_CALLS = {
-    "array": ['save_run_log "${LOG_PATH}"'],
-    "combined": ['save_run_log "${LAMMPS_SIM_PATH}/lammps/run_system.log"',
-                 'save_run_log "${LAMMPS_SIM_PATH}/lammps/run_slide.log"'],
-}
-
-
-def _render_all(tmp_path, use_tmpdir=False):
+def _render_all(tmp_path, use_tmpdir=False, **settings):
     """Render every scheduler x shape combination; returns {(sch, shape): text}."""
     texts = {}
     for scheduler in ("pbs", "slurm"):
@@ -132,6 +103,8 @@ def _render_all(tmp_path, use_tmpdir=False):
         config = _config()
         config.hpc_settings.use_tmpdir = use_tmpdir
         config.hpc_settings.scratch_dir = "/scratch"
+        for key, value in settings.items():
+            setattr(config.hpc_settings, key, value)
         generator = HPCScriptGenerator(config)
 
         array_dir = tmp_path / f"{scheduler}_{use_tmpdir}" / "array"
@@ -147,141 +120,10 @@ def _render_all(tmp_path, use_tmpdir=False):
     return texts
 
 
-@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
-@pytest.mark.parametrize("shape", ["array", "combined"])
-def test_every_template_tees_lammps_stdout_to_a_per_run_log(tmp_path, scheduler, shape):
-    text = _render_all(tmp_path)[(scheduler, shape)]
-
-    lammps_lines = [ln for ln in text.splitlines()
-                    if " lmp " in ln and "-in " in ln]
-    assert lammps_lines, text
-    for line in lammps_lines:
-        assert "| tee " in line, line
-    for target in _TEE_TARGETS[shape]:
-        assert target in text, (target, text)
-    # Never a fixed run.log: in the two-phase array workflow the slide task
-    # would overwrite the system task's log, which is the one with RAMP_STATUS.
-    assert "/lammps/run.log" not in text
-
-
-def test_the_two_phase_array_tasks_derive_two_different_log_names(tmp_path):
-    """Run the template's own derivation line under bash, once per phase, to
-    prove the two-phase workflow's two array tasks -- which share a SIM_PATH --
-    end up with different logs instead of clobbering one run.log."""
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("bash not available")
-
-    text = _render_all(tmp_path)[("pbs", "array")]
-    derivation = next(ln for ln in text.splitlines() if ln.startswith("LOG_PATH="))
-
-    names = []
-    for script in ("afm/mat0/L1/lammps/system.in", "afm/mat0/L1/lammps/slide.in"):
-        snippet = (f'SCRIPT_PATH="{script}"\n'
-                   'SCRIPT_DIR=$(dirname "$SCRIPT_PATH")\n'
-                   f'{derivation}\n'
-                   'echo "$LOG_PATH"\n')
-        proc = subprocess.run([bash, "-c", snippet], capture_output=True, text=True,
-                              check=False)
-        assert proc.returncode == 0, proc.stderr
-        names.append(proc.stdout.strip())
-
-    assert names == ["afm/mat0/L1/lammps/run_system.log",
-                     "afm/mat0/L1/lammps/run_slide.log"]
-
-
-def test_the_array_template_derives_its_log_name_from_the_input_script(tmp_path):
-    """`generate_two_phase_scripts` renders *_array.j2 twice -- once against
-    manifest_system.txt, once against manifest_slide.txt -- and both arrays
-    resolve to the same SIM_PATH. The log name therefore has to come from
-    $SCRIPT_PATH at run time, or the second array clobbers the first's log."""
-    for scheduler in ("pbs", "slurm"):
-        text = _render_all(tmp_path / scheduler)[(scheduler, "array")]
-        assert 'LOG_PATH="${SCRIPT_DIR}/run_$(basename "$SCRIPT_PATH" .in).log"' in text
-        # Derived once, then reused everywhere the log is named.
-        assert text.count("${LOG_PATH}") >= 2
-
-
-@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
-@pytest.mark.parametrize("shape", ["array", "combined"])
-def test_every_template_tests_pipestatus_not_dollar_question(tmp_path, scheduler, shape):
-    """With a pipe in front of it, `$?` is tee's status -- always 0 -- so the
-    old `if [ $? -ne 0 ]` guards would have reported every LAMMPS crash as a
-    successful run."""
-    text = _render_all(tmp_path)[(scheduler, shape)]
-
-    assert "if [ $? -ne 0 ]" not in text
-    lines = text.splitlines()
-    lammps_idx = [i for i, ln in enumerate(lines) if " lmp " in ln and "-in " in ln]
-    assert lammps_idx, text
-    for i in lammps_idx:
-        # The status must be captured on the line immediately after the
-        # pipeline: anything in between (even an echo) resets PIPESTATUS.
-        assert "${PIPESTATUS[0]}" in lines[i + 1], lines[i:i + 2]
-        status_var = lines[i + 1].split("=", 1)[0].strip()
-        assert f"if [ ${{{status_var}}} -ne 0 ]; then" in text
-
-
-@pytest.mark.parametrize("scheduler, workdir", [
-    ("pbs", "$PBS_O_WORKDIR"), ("slurm", "$SLURM_SUBMIT_DIR")])
-@pytest.mark.parametrize("shape", ["array", "combined"])
-def test_every_template_calls_enrich_provenance_against_the_workdir_copy(
-        tmp_path, scheduler, workdir, shape):
-    """Asserts the properties, not the exact rendered string: the command is
-    invoked, its run-directory argument is workdir-rooted (not the scratch
-    copy, which is gone by then), its log argument is the derived path, and it
-    cannot fail the job. Reformatting the line must not break this."""
-    text = _render_all(tmp_path)[(scheduler, shape)]
-
-    call = [ln for ln in text.splitlines()
-            if "hpc enrich-provenance" in ln and not ln.lstrip().startswith("#")]
-    assert len(call) == 1, call
-    line = call[0]
-
-    run_arg = f'"{workdir}/${{SIM_PATH}}"'
-    log_arg = _ENRICH_LOG_ARG[shape].format(workdir=workdir)
-    assert run_arg in line, line
-    assert log_arg in line, line
-    assert line.index(run_arg) < line.index(log_arg), line
-    # Non-fatal, and skipped entirely where the package is not installed.
-    assert line.rstrip().endswith("|| true"), line
-    assert "if command -v FrictionSim2D >/dev/null 2>&1; then" in text
-
-
-@pytest.mark.parametrize("scheduler, workdir", [
-    ("pbs", "$PBS_O_WORKDIR"), ("slurm", "$SLURM_SUBMIT_DIR")])
-@pytest.mark.parametrize("shape", ["array", "combined"])
-def test_the_log_rescue_helper_copies_out_of_scratch_only_under_tmpdir(
-        tmp_path, scheduler, workdir, shape):
-    """Under use_tmpdir the job runs in scratch, which is deleted when the task
-    ends, and the end-of-script copy-back keeps only results/ visuals/ data/
-    and load_*.data -- so the log needs its own rescue. Without scratch it is
-    already in its final place and the helper is a no-op."""
-    plain = _render_all(tmp_path / "plain", use_tmpdir=False)[(scheduler, shape)]
-    scratch = _render_all(tmp_path / "scratch", use_tmpdir=True)[(scheduler, shape)]
-
-    assert f'mkdir -p "{workdir}/${{SIM_PATH}}/lammps"' in scratch
-    assert f'cp "$1" "{workdir}/${{SIM_PATH}}/lammps/" \\' in scratch
-    # The rescue is best-effort but not silent: a failed copy says so instead of
-    # leaving an empty provenance.json as the only trace (behaviour pinned by
-    # test_an_unwritable_log_destination_warns_without_failing_the_job below).
-    assert (f'|| echo "warning: could not save run log \'$1\' to '
-            f'{workdir}/${{SIM_PATH}}/lammps/" >&2') in scratch
-    assert "save_run_log() { :; }" in plain
-    assert "save_run_log() { :; }" not in scratch
-
-    for call in _RESCUE_CALLS[shape]:
-        assert call in plain, call
-        assert call in scratch, call
-
-
 @pytest.mark.parametrize("use_tmpdir", [False, True])
 @pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
 @pytest.mark.parametrize("shape", ["array", "combined"])
 def test_rendered_scripts_are_valid_bash(tmp_path, use_tmpdir, scheduler, shape):
-    """`${PIPESTATUS[0]}` is a bashism and the templates declare `#!/bin/bash`;
-    parse the rendered script to prove the added lines are syntactically sound
-    in both the scratch and no-scratch shapes."""
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash not available")
@@ -295,187 +137,383 @@ def test_rendered_scripts_are_valid_bash(tmp_path, use_tmpdir, scheduler, shape)
     assert proc.returncode == 0, proc.stderr
 
 
-# ---------------------------------------------------------------------------
-# Execution tests: render a script, put a stub `lmp` on PATH, run it for real.
-#
-# Everything above asserts on rendered text, which cannot tell whether the
-# script *behaves*. Two properties need execution to pin down:
-#   * a failing LAMMPS run must still fail the job (the `${PIPESTATUS[0]}`
-#     capture -- a future edit back to a bare `$?` would test tee's status and
-#     silently report every crash as a success), and
-#   * a failing run must still leave its log in the workdir, which under
-#     use_tmpdir means rescuing it before `exit 1` rather than in the
-#     end-of-script copy-back that a failure never reaches. A crashed job is
-#     the one whose log matters most: a non-converged ramp right before the
-#     crash is exactly what you would want to read afterwards.
-# ---------------------------------------------------------------------------
-
 _SIM_REL = "afm/mat0/L1"
 
-_STUB_HEAD = ('#!/bin/bash\n'
-              'echo "LAMMPS (2 Aug 2023 - Update 3)"\n'
-              'echo "# RAMP_STATUS converged=0 r=1.62 iterations=100"\n')
-#: A stub `lmp` that dies, like a real crash, after printing its banner.
-_STUB_FAILS = _STUB_HEAD + 'exit 1\n'
-#: A stub `lmp` that succeeds -- proves the harness is not trivially red.
-_STUB_SUCCEEDS = _STUB_HEAD + 'exit 0\n'
-#: Succeeds for system.in, dies for slide.in: the combined script's second
-#: failure path, which exits before the end-of-script copy-back.
-_STUB_FAILS_ON_SLIDE = _STUB_HEAD + 'case "$*" in *slide.in*) exit 1;; esac\nexit 0\n'
+
+def _stub_bin(base: Path, lmp: str) -> Path:
+    stub_bin = base / "bin"
+    stub_bin.mkdir()
+    (stub_bin / "lmp").write_text(lmp, encoding="utf-8")
+    (stub_bin / "module").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    for name in ("lmp", "module"):
+        (stub_bin / name).chmod(0o755)
+    return stub_bin
 
 
-def _run_rendered(base: Path, scheduler: str, shape: str, use_tmpdir: bool,
-                  stub: str, before_run=None):
-    """Render a job script into a fake submit dir and execute it.
+# ---------------------------------------------------------------------------
+# Minimal job scripts, PBS and SLURM alike.
+#
+# Environment (modules and/or a conda prefix), copy to scratch if enabled,
+# `lmp -in <deck> -log <deck dir>/run_<deck>.log`, copy results/visuals/data
+# and the run logs back -- also after a failure -- and remove scratch. Nothing
+# else: no tee, no in-job provenance enrichment (`hpc enrich-provenance -r`
+# runs on the workstation over the rsynced logs).
+# ---------------------------------------------------------------------------
 
-    Returns (CompletedProcess, sorted run*.log names left in the workdir).
-    `mpi_command` is emptied so only `lmp` needs stubbing, and `module` is
-    stubbed to a no-op since no module system exists here. `before_run` is
-    called with `base` after everything is staged and before the script runs,
-    for tests that need to break the workdir first.
-    """
+#: A stub `lmp` that behaves like LAMMPS where these scripts can see it: it
+#: needs its deck relative to the cwd (exit 3 otherwise), writes the `-log`
+#: file itself, and leaves a results file. `FAIL_ON` makes it die after that.
+_PBS_STUB = r'''#!/bin/bash
+[ "$1" = -h ] && { printf 'Large-scale Atomic/Molecular Massively Parallel Simulator - 2 Aug 2023\n\n* Pair styles:\n  sw   lj/cut   hybrid/overlay\n'; exit 0; }
+while [ $# -gt 0 ]; do
+    case $1 in -in) deck=$2; shift ;; -log) log=$2; shift ;; esac
+    shift
+done
+[ -f "$deck" ] || { echo "stub lmp: no deck $deck in $PWD" >&2; exit 3; }
+for p in $(awk '$1=="read_data" && $2 !~ /\$/ {print $2}' "$deck"); do
+    [ -e "$p" ] || { echo "stub lmp: no $p in $PWD" >&2; exit 4; }
+done
+echo "LAMMPS (2 Aug 2023)" >"$log"
+sim=$(dirname "$(dirname "$deck")")
+echo done >"$sim/results/$(basename "$deck" .in).txt"
+case "$deck" in *"${FAIL_ON:-never}"*) exit 1 ;; esac
+exit 0
+'''
+
+
+#: What running a rendered job script by hand needs, per scheduler: the file
+#: name the generator gives it, the environment variable naming the submit
+#: directory, the one holding the job id the scratch path is built from, the
+#: array index to clear, and the preflight submit wrapper's name.
+_DIALECT = {
+    "pbs": {"script": "run.pbs", "workdir_var": "PBS_O_WORKDIR",
+            "jobid_var": "PBS_JOBID", "index_var": "PBS_ARRAY_INDEX",
+            "preflight_job": "preflight.pbs"},
+    "slurm": {"script": "run.sh", "workdir_var": "SLURM_SUBMIT_DIR",
+              "jobid_var": "SLURM_JOB_ID", "index_var": "SLURM_ARRAY_TASK_ID",
+              "preflight_job": "preflight.slurm"},
+}
+
+
+def _job_tree(base: Path, sim_rel: str = _SIM_REL) -> Path:
     workdir = base / "submit_root"
-    lammps = workdir / _SIM_REL / "lammps"
+    lammps = workdir / sim_rel / "lammps"
     lammps.mkdir(parents=True)
     for script in ("system.in", "slide.in"):
         (lammps / script).write_text("# lammps\n", encoding="utf-8")
+    for name in ("results", "visuals", "data"):   # the builder writes these
+        (workdir / sim_rel / name).mkdir()
+    return workdir
 
+
+def _run_job(base: Path, workdir: Path, scheduler: str, shape: str, use_tmpdir: bool,
+             sim_rel: str = _SIM_REL, fail_on: str = "", **settings):
     config = _config()
     config.hpc_settings.mpi_command = ""
     config.hpc_settings.use_tmpdir = use_tmpdir
     config.hpc_settings.scratch_dir = str(base / "scratch")
+    for key, value in settings.items():
+        setattr(config.hpc_settings, key, value)
     generator = HPCScriptGenerator(config)
-    ext = ".pbs" if scheduler == "pbs" else ".sh"
     if shape == "array":
-        # The array manifest holds *script* paths; SIM_PATH is dirname twice.
-        generator.generate_scripts([f"{_SIM_REL}/lammps/system.in"],
+        generator.generate_scripts([f"{sim_rel}/lammps/system.in"],
                                    workdir / "hpc", scheduler=scheduler)
     else:
-        generator.generate_combined_scripts(_combined_manifest(_SIM_REL),
+        generator.generate_combined_scripts(_combined_manifest(sim_rel),
                                             workdir / "hpc", scheduler=scheduler)
-
-    stub_bin = base / "bin"
-    stub_bin.mkdir()
-    (stub_bin / "lmp").write_text(stub, encoding="utf-8")
-    (stub_bin / "module").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
-    for name in ("lmp", "module"):
-        (stub_bin / name).chmod(0o755)
-
-    if before_run is not None:
-        before_run(base)
-
-    env = dict(os.environ, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}")
-    env["PBS_O_WORKDIR" if scheduler == "pbs" else "SLURM_SUBMIT_DIR"] = str(workdir)
-    proc = subprocess.run(["bash", str(workdir / "hpc" / f"run{ext}")],
-                          env=env, capture_output=True, text=True,
-                          cwd=str(base), check=False)
-    logs = sorted(p.name for p in (workdir / _SIM_REL / "lammps").glob("run*.log"))
-    return proc, logs
+    (base / "scratch").mkdir(exist_ok=True)
+    stub_bin = _stub_bin(base, _PBS_STUB)
+    dialect = _DIALECT[scheduler]
+    env = dict(os.environ, PATH=f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+               FAIL_ON=fail_on)
+    env[dialect["workdir_var"]] = str(workdir)
+    env[dialect["jobid_var"]] = "42"
+    env.pop(dialect["index_var"], None)
+    return subprocess.run(["bash", str(workdir / "hpc" / dialect["script"])], env=env,
+                          capture_output=True, text=True, cwd=str(base), check=False)
 
 
-def _require_execution_tools():
-    for tool in ("bash", "rsync"):
-        if shutil.which(tool) is None:
-            pytest.skip(f"{tool} not available")
+def _require_bash():
+    if shutil.which("bash") is None:
+        pytest.skip("bash not available")
 
 
-_EXECUTION_MATRIX = [(scheduler, shape, use_tmpdir)
-                     for scheduler in ("pbs", "slurm")
-                     for shape in ("array", "combined")
-                     for use_tmpdir in (False, True)]
+@pytest.mark.parametrize("use_tmpdir", [False, True])
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+@pytest.mark.parametrize("shape", ["array", "combined"])
+def test_job_scripts_carry_no_troubleshooting_machinery(tmp_path, scheduler, shape, use_tmpdir):
+    text = _render_all(tmp_path, use_tmpdir=use_tmpdir)[("pbs", shape)]
+
+    for gone in ("tee", "PIPESTATUS", "save_run_log", "enrich-provenance",
+                 "rsync", "-l none", "STATUS", "RUN_ROOT", "while ", "exit"):
+        assert gone not in text, (gone, text)
+    assert '-log "$SIM/lammps/run_' in text
+    assert "CASE=${LINE%%$'\\t'*}" in text
+    assert ("cp -a" in text) == use_tmpdir
+    assert ('rm -rf "$SCRATCH"' in text) == use_tmpdir
 
 
-@pytest.mark.parametrize("scheduler, shape, use_tmpdir", _EXECUTION_MATRIX)
-def test_a_failing_lammps_run_fails_the_job(tmp_path, scheduler, shape, use_tmpdir):
-    """The `${PIPESTATUS[0]}` capture, proven by running it: with `| tee` in
-    front of the old `$?` check the script would exit 0 on a dead LAMMPS."""
-    _require_execution_tools()
-    proc, _ = _run_rendered(tmp_path, scheduler, shape, use_tmpdir, _STUB_FAILS)
+def test_the_environment_block_follows_the_settings(tmp_path):
+    modules_only = _render_all(tmp_path / "m", modules=["LAMMPS/2024"])[("pbs", "array")]
+    conda_only = _render_all(tmp_path / "c", modules=None,
+                             conda_env="$HOME/envs/mlip")[("pbs", "array")]
 
-    assert proc.returncode != 0, proc.stdout + proc.stderr
-    assert "Error:" in proc.stdout
+    assert "module purge" in modules_only
+    assert "module load LAMMPS/2024" in modules_only
+    assert "CONDA_ENV" not in modules_only
+
+    assert "module" not in conda_only
+    assert 'CONDA_ENV="$HOME/envs/mlip"' in conda_only
+    assert 'export PATH="$CONDA_ENV/bin:$PATH"' in conda_only
+    assert 'export LD_LIBRARY_PATH="$CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"' in conda_only
 
 
-@pytest.mark.parametrize("scheduler, shape, use_tmpdir", _EXECUTION_MATRIX)
-def test_a_failed_run_still_leaves_its_log_in_the_workdir(
-        tmp_path, scheduler, shape, use_tmpdir):
-    """`exit 1` fires before the end-of-script copy-back, so under use_tmpdir
-    the log died with the scratch directory until `save_run_log` was called on
-    the failure path too. Without that call this fails only for
-    use_tmpdir=True -- which is the shape the cluster actually runs."""
-    _require_execution_tools()
-    proc, logs = _run_rendered(tmp_path, scheduler, shape, use_tmpdir, _STUB_FAILS)
+@pytest.mark.parametrize("use_tmpdir", [False, True])
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+@pytest.mark.parametrize("shape", ["array", "combined"])
+def test_a_successful_run_brings_results_and_logs_home(tmp_path, scheduler, shape, use_tmpdir):
+    _require_bash()
+    workdir = _job_tree(tmp_path)
+    proc = _run_job(tmp_path, workdir, scheduler, shape, use_tmpdir)
 
-    assert proc.returncode != 0
-    assert logs == ["run_system.log"], logs
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    sim = workdir / _SIM_REL
+    phases = ["system"] if shape == "array" else ["slide", "system"]
+    assert sorted(p.name for p in (sim / "lammps").glob("run_*.log")) == [
+        f"run_{p}.log" for p in phases]
+    assert sorted(p.name for p in (sim / "results").iterdir()) == [f"{p}.txt" for p in phases]
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+@pytest.mark.parametrize("use_tmpdir", [False, True])
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+@pytest.mark.parametrize("shape", ["array", "combined"])
+def test_a_failed_run_still_brings_its_log_home(tmp_path, scheduler, shape, use_tmpdir):
+    _require_bash()
+    workdir = _job_tree(tmp_path)
+    _run_job(tmp_path, workdir, scheduler, shape, use_tmpdir, fail_on="system.in")
+
+    # Only the system log: `&&` keeps slide.in from starting without load states.
+    assert [p.name for p in (workdir / _SIM_REL / "lammps").glob("run_*.log")] == [
+        "run_system.log"]
+    assert list((tmp_path / "scratch").iterdir()) == []
 
 
 @pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
-@pytest.mark.parametrize("use_tmpdir", [False, True])
-def test_a_combined_phase_two_failure_preserves_both_phase_logs(
-        tmp_path, scheduler, use_tmpdir):
-    """The combined script has two failure paths. A slide-phase crash must not
-    take the *system* phase's log with it -- that is the one holding
-    RAMP_STATUS, and it is still only in scratch when phase 2 dies."""
-    _require_execution_tools()
-    proc, logs = _run_rendered(tmp_path, scheduler, "combined", use_tmpdir,
-                               _STUB_FAILS_ON_SLIDE)
+def test_a_slide_failure_keeps_both_phase_logs(tmp_path, scheduler):
+    _require_bash()
+    workdir = _job_tree(tmp_path)
+    _run_job(tmp_path, workdir, scheduler, "combined", True, fail_on="slide.in")
 
-    assert proc.returncode != 0
-    assert logs == ["run_slide.log", "run_system.log"], logs
-
-
-@pytest.mark.parametrize("scheduler, shape", [
-    (scheduler, shape) for scheduler in ("pbs", "slurm")
-    for shape in ("array", "combined")])
-def test_an_unwritable_log_destination_warns_without_failing_the_job(
-        tmp_path, scheduler, shape):
-    """The rescue's two halves, proven by running the script with the run's
-    `lammps/` directory made unwritable: it names the log it could not save,
-    and it still does not fail a run that otherwise finished.
-
-    Silence is the bad outcome the warning exists to prevent -- the log the
-    enrichment step reads is gone, and the only symptom would be a
-    provenance.json that never gained its RAMP_STATUS fields.
-
-    `use_tmpdir` only: without scratch the helper is `{ :; }` and copies
-    nothing. Note the scratch copy is made with `rsync -a`, so the read-only
-    mode travels with it and the log cannot be written at either end -- which
-    is what a permissions problem on a real cluster looks like too.
-    """
-    _require_execution_tools()
-    if os.geteuid() == 0:
-        pytest.skip("root ignores the directory mode this test relies on")
-
-    sealed = tmp_path / "submit_root" / _SIM_REL / "lammps"
-    proc, logs = _run_rendered(tmp_path, scheduler, shape, True, _STUB_SUCCEEDS,
-                               before_run=lambda _base: sealed.chmod(0o500))
-    sealed.chmod(0o755)          # so tmp_path cleanup can remove it
-
-    output = proc.stdout + proc.stderr
-    warnings = [line for line in output.splitlines()
-                if "warning: could not save run log" in line]
-    assert warnings, output
-    assert any("run_system.log" in line for line in warnings), warnings
-    # Still a successful job: the rescue never changes the exit status.
-    assert proc.returncode == 0, output
-    assert "Simulation completed successfully" in proc.stdout
-    # The rescue really did fail -- otherwise the warning would be about a copy
-    # that actually worked.
-    assert logs == [], logs
-
-
-@pytest.mark.parametrize("scheduler, shape, use_tmpdir", _EXECUTION_MATRIX)
-def test_a_successful_run_exits_zero_and_keeps_its_logs(
-        tmp_path, scheduler, shape, use_tmpdir):
-    """Control for the two tests above: the harness is not trivially red, and
-    the added rescue/enrichment lines do not break a green run."""
-    _require_execution_tools()
-    expected = ["run_system.log"] if shape == "array" else [
+    assert sorted(p.name for p in (workdir / _SIM_REL / "lammps").glob("run_*.log")) == [
         "run_slide.log", "run_system.log"]
-    proc, logs = _run_rendered(tmp_path, scheduler, shape, use_tmpdir,
-                               _STUB_SUCCEEDS)
+
+
+@pytest.mark.parametrize("shape", ["array", "combined"])
+def test_the_manifest_names_the_case_directory_to_copy(tmp_path, shape):
+    """The case is the nearest ancestor holding provenance/ or build/; without
+    one it is the simulation directory itself."""
+    workdir = _job_tree(tmp_path)
+    _job_tree(tmp_path / "other", "afm/mat1/L1")
+    (workdir / "afm" / "mat0" / "build").mkdir()
+    generator = HPCScriptGenerator(_config())
+    if shape == "array":
+        generator.generate_scripts([f"{_SIM_REL}/lammps/slide.in"], workdir / "hpc")
+        manifest, expected = "manifest_1.txt", f"afm/mat0\t{_SIM_REL}/lammps/slide.in"
+    else:
+        generator.generate_combined_scripts(_combined_manifest(), workdir / "hpc")
+        manifest, expected = "manifest_combined.txt", f"afm/mat0\t{_SIM_REL}"
+    assert (workdir / "hpc" / manifest).read_text(encoding="utf-8").strip() == expected
+
+    bare = HPCScriptGenerator(_config())
+    bare.generate_combined_scripts(_combined_manifest("afm/mat1/L1"),
+                                   tmp_path / "other" / "submit_root" / "hpc")
+    assert (tmp_path / "other" / "submit_root" / "hpc" / "manifest_combined.txt").read_text(
+        encoding="utf-8").strip() == "afm/mat1/L1\tafm/mat1/L1"
+
+
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+def test_the_scratch_copy_takes_the_nearest_provenance_ancestor(tmp_path, scheduler):
+    _require_bash()
+    workdir = _job_tree(tmp_path)
+    shared = workdir / "afm" / "mat0" / "provenance"
+    shared.mkdir()
+    (shared / "pot.sw").write_text("x\n", encoding="utf-8")
+    # The stub exits 4 unless the shared file made it to scratch.
+    deck = workdir / _SIM_REL / "lammps" / "system.in"
+    deck.write_text("read_data afm/mat0/provenance/pot.sw\n", encoding="utf-8")
+    proc = _run_job(tmp_path, workdir, scheduler, "array", True)
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert logs == expected, logs
-    assert "Simulation completed successfully" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+
+def _preflight_tree(base: Path, *, potential_present=True) -> Path:
+    """A combined AFM tree whose decks read real files, plus a conda prefix
+    holding the stub lmp."""
+    workdir = _job_tree(base)
+    sim = workdir / _SIM_REL
+    (sim / "data" / "sheet.data").write_text("x\n", encoding="utf-8")
+    pot = sim / "lammps" / "MoS.sw"
+    if potential_present:
+        pot.write_text("x\n", encoding="utf-8")
+    (sim / "lammps" / "system.in.settings").write_text(
+        f"pair_style sw\npair_coeff * * {_SIM_REL}/lammps/MoS.sw Mo S\n", encoding="utf-8")
+    (sim / "lammps" / "system.in").write_text(
+        f"read_data {_SIM_REL}/data/sheet.data\ninclude {_SIM_REL}/lammps/system.in.settings\n",
+        encoding="utf-8")
+    (sim / "lammps" / "slide.in").write_text(
+        f"read_data {_SIM_REL}/data/load_$(v_find)N.data\n"
+        f"include {_SIM_REL}/lammps/system.in.settings\n", encoding="utf-8")
+    conda = base / "conda"
+    (conda / "bin").mkdir(parents=True)
+    (conda / "bin" / "lmp").write_text(_PBS_STUB, encoding="utf-8")
+    (conda / "bin" / "lmp").chmod(0o755)
+    return workdir
+
+
+def _write_preflight(base: Path, workdir: Path, scheduler: str = "pbs"):
+    config = _config()
+    config.hpc_settings.modules = None
+    config.hpc_settings.conda_env = str(base / "conda")
+    config.hpc_settings.mpi_command = ""
+    config.hpc_settings.use_tmpdir = True
+    config.hpc_settings.scratch_dir = str(base / "scratch")
+    (base / "scratch").mkdir(exist_ok=True)
+    generator = HPCScriptGenerator(config)
+    generator.generate_combined_scripts(_combined_manifest(), workdir / "hpc",
+                                        scheduler=scheduler)
+    return generator.generate_preflight(workdir / "hpc")
+
+
+def _run_preflight(workdir: Path):
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("PBS_", "SLURM_"))}
+    return subprocess.run(["bash", str(workdir / "hpc" / "preflight.sh")], env=env,
+                          capture_output=True, text=True, cwd="/", check=False)
+
+
+@pytest.mark.parametrize("scheduler, directives", [
+    ("pbs", ["#PBS -l select=1:ncpus=32:mem=62gb:mpiprocs=32",
+             "#PBS -N friction2d_preflight"]),
+    ("slurm", ["#SBATCH --job-name=friction2d_preflight",
+               "#SBATCH --ntasks-per-node=32",
+               "#SBATCH --time=00:10:00"]),
+])
+def test_preflight_writes_a_check_script_and_its_submit_wrapper(
+        tmp_path, scheduler, directives):
+    workdir = _preflight_tree(tmp_path)
+    sh, wrapper = _write_preflight(tmp_path, workdir, scheduler)
+
+    assert sh.name == "preflight.sh" and os.access(sh, os.X_OK)
+    assert wrapper.name == _DIALECT[scheduler]["preflight_job"]
+    text = wrapper.read_text(encoding="utf-8")
+    for directive in directives:
+        assert directive in text, text
+    assert "bash hpc/preflight.sh" in text
+    assert "lmp -in" not in sh.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("script", ["run.sh", "preflight.slurm"])
+def test_no_sbatch_directive_carries_a_shell_variable(tmp_path, script):
+    """SLURM does not expand shell variables in #SBATCH directives -- a literal
+    $SLURM_SUBMIT_DIR in --output is taken as a directory name and the job is
+    rejected before it starts. Relative paths resolve against the submit
+    directory, which is what the job wanted anyway. (PBS *does* expand
+    $PBS_O_WORKDIR in -o, which is why only SLURM needs this.)"""
+    workdir = _preflight_tree(tmp_path)
+    _write_preflight(tmp_path, workdir, "slurm")
+
+    directives = [ln for ln in (workdir / "hpc" / script).read_text(
+        encoding="utf-8").splitlines() if ln.startswith("#SBATCH")]
+    assert directives
+    assert not [ln for ln in directives if "$" in ln], directives
+    assert any(ln.startswith("#SBATCH --output=logs/") for ln in directives), directives
+
+
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+def test_preflight_passes_on_a_complete_tree(tmp_path, scheduler):
+    _require_bash()
+    workdir = _preflight_tree(tmp_path)
+    _write_preflight(tmp_path, workdir, scheduler)
+
+    proc = _run_preflight(workdir)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "[FAIL]" not in proc.stdout
+    assert (f"{_DIALECT[scheduler]['script']}: array 1-1 matches manifest_combined.txt"
+            in proc.stdout)
+    assert "all 2 decks and the files they read resolve" in proc.stdout
+    assert "pair_style sw" in proc.stdout
+    assert "LAMMPS version 2 Aug 2023" in proc.stdout
+
+
+def test_preflight_names_a_missing_potential_file(tmp_path):
+    _require_bash()
+    workdir = _preflight_tree(tmp_path, potential_present=False)
+    _write_preflight(tmp_path, workdir)
+
+    proc = _run_preflight(workdir)
+
+    assert proc.returncode == 1, proc.stdout
+    assert any("[FAIL]" in ln and "MoS.sw" in ln for ln in proc.stdout.splitlines()), proc.stdout
+
+
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+def test_preflight_catches_an_array_range_that_disagrees_with_its_manifest(
+        tmp_path, scheduler):
+    _require_bash()
+    workdir = _preflight_tree(tmp_path)
+    _write_preflight(tmp_path, workdir, scheduler)
+    manifest = workdir / "hpc" / "manifest_combined.txt"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + f"{_SIM_REL}\n",
+                        encoding="utf-8")
+
+    proc = _run_preflight(workdir)
+
+    assert proc.returncode == 1
+    assert "array 1-1 but manifest_combined.txt has 2 entries" in proc.stdout
+
+
+def test_preflight_fails_a_pair_style_the_build_lacks(tmp_path):
+    _require_bash()
+    workdir = _preflight_tree(tmp_path)
+    settings = workdir / _SIM_REL / "lammps" / "system.in.settings"
+    settings.write_text(settings.read_text(encoding="utf-8").replace(
+        "pair_style sw", "pair_style rebomos"), encoding="utf-8")
+    _write_preflight(tmp_path, workdir)
+
+    proc = _run_preflight(workdir)
+
+    assert proc.returncode == 1
+    assert "pair_style rebomos is not in this LAMMPS build" in proc.stdout
+
+
+@pytest.mark.parametrize("scheduler", ["pbs", "slurm"])
+@pytest.mark.parametrize("modules", [["lammps"], None])
+def test_rendered_preflight_is_valid_bash(tmp_path, modules, scheduler):
+    _require_bash()
+    config = _config()
+    config.hpc_settings.modules = modules
+    config.hpc_settings.conda_env = None if modules else "$HOME/envs/x"
+    generator = HPCScriptGenerator(config)
+    generator.generate_combined_scripts(_combined_manifest(), tmp_path / "hpc",
+                                        scheduler=scheduler)
+    for path in generator.generate_preflight(tmp_path / "hpc"):
+        proc = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True,
+                              check=False)
+        assert proc.returncode == 0, (path.name, proc.stderr)
+
+
+def test_preflight_refuses_before_any_job_script_or_across_schedulers(tmp_path):
+    generator = HPCScriptGenerator(_config())
+    with pytest.raises(ValueError, match="before"):
+        generator.generate_preflight(tmp_path)
+    generator.generate_combined_scripts(_combined_manifest(), tmp_path / "hpc",
+                                        scheduler="slurm")
+    generator.generate_scripts(["mat0/L1"], tmp_path / "hpc", scheduler="pbs")
+    with pytest.raises(ValueError, match="mix of schedulers"):
+        generator.generate_preflight(tmp_path / "hpc")
