@@ -49,7 +49,7 @@ def test_output_dir_for_matches_run_layout() -> None:
 
     path = output_dir_for(run_dict, 'afm')
 
-    assert str(path) == 'afm/h_MoS2/100x_100y/sub_aSi_tip_aSi_r25/K300'
+    assert str(path) == 'afm/h_MoS2/100x_100y/sub_amorph-Si_tip_amorph-Si_r25/K300'
 
 
 def test_output_dir_for_sheet_like_model_has_no_tip_or_sub_segment() -> None:
@@ -890,7 +890,7 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
     assert root == tmp_path / "sim_run"
     assert calls == {"build": 1, "base": 1}
     assert seen_output_dirs[0].as_posix().endswith(
-        "afm/MoS2/20x_20y/sub_aSi_tip_Si_r5/K300/pot_sw_dummy")
+        "afm/MoS2/20x_20y/sub_amorph-Si_tip_Si_r5/K300/pot_sw_dummy")
 
     # The object the builder actually received is the real, validated config,
     # not a stand-in -- so a routing bug that skipped validation would fail here.

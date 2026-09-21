@@ -18,14 +18,14 @@ def _write_run(root, rel, family, prov_at_parent=False):
 
 
 def test_finds_every_run_sorted_by_rel_path(tmp_path):
-    _write_run(tmp_path, 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2',
+    _write_run(tmp_path, 'afm/h-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/L2',
                'afm', prov_at_parent=True)
     _write_run(tmp_path, 'sheetonsheet/h-MoS2+h-WS2/100x_100y/K300', 'hetero')
 
     found = discover_runs(tmp_path)
 
     assert [loc.tokens.rel_path for loc in found] == [
-        'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2',
+        'afm/h-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/L2',
         'sheetonsheet/h-MoS2+h-WS2/100x_100y/K300',
     ]
     assert all(isinstance(loc, RunLocator) for loc in found)
@@ -42,7 +42,7 @@ def test_family_comes_from_provenance_not_the_path(tmp_path):
 
 def test_afm_provenance_dir_resolves_one_level_up(tmp_path):
     run_dir = _write_run(
-        tmp_path, 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2',
+        tmp_path, 'afm/h-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/L2',
         'afm', prov_at_parent=True)
 
     loc, = discover_runs(tmp_path)

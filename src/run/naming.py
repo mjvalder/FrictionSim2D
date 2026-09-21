@@ -274,8 +274,8 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
         sub_mat = run_dict.get('sub', {}).get('mat', 'Si')
         sub_amorph = run_dict.get('sub', {}).get('amorph', 'a')
 
-        sub_str = f"{sub_amorph}{sub_mat}" if sub_amorph == 'a' else sub_mat
-        tip_str = f"{tip_amorph}{tip_mat}" if tip_amorph == 'a' else tip_mat
+        sub_str = f"amorph-{sub_mat}" if sub_amorph == 'a' else sub_mat
+        tip_str = f"amorph-{tip_mat}" if tip_amorph == 'a' else tip_mat
 
         base = (
             Path(top_dir) / mat / size_token /
@@ -303,8 +303,11 @@ class RunTokens:
     ``family`` cannot be read from the path (a hetero run lives under
     ``sheetonsheet/``), so :func:`parse_run_path` sets it to ``model`` and
     :func:`src.run.tree.discover_runs` replaces it from ``provenance.json``.
-    ``substrate`` keeps the raw token (``'aSi'``); ``tip_material`` likewise
-    (``'Si'``, or ``'aSi'`` for an amorphous tip).
+    ``substrate`` and ``tip_material`` are the bare material name with any
+    amorphous marker stripped (``'Si'``, never ``'amorph-Si'``/``'aSi'``);
+    ``substrate_amorphous`` carries the substrate's flag separately (see
+    :func:`_split_amorph_token`). There is no ``tip_amorphous`` -- nothing
+    downstream needs the tip's amorphous flag as a standalone field.
     """
     model: str
     family: str
@@ -322,28 +325,34 @@ class RunTokens:
     rel_path: str
 
 
-_PREFIXED_MATERIAL_RE = re.compile(r'^[a-z][-_]')
+_LEGACY_AMORPH_RE = re.compile(r'^a(?P<mat>[A-Z].*)$')
+_AMORPH_PREFIX = 'amorph-'
 
 
-def _is_amorphous_token(token: str) -> bool:
-    """``'aSi'`` and ``'ah-MoS2'``/``'ah_MoS2'`` are amorphous, ``'Si'`` and
-    plain ``'h-MoS2'``/``'h_MoS2'`` are not.
+def _split_amorph_token(token: str) -> Tuple[str, bool]:
+    """Split a substrate/tip token into ``(material, is_amorphous)``.
 
-    ``output_dir_for`` prefixes a literal lowercase ``'a'`` when
-    ``amorph == 'a'``, so the marker is a leading ``'a'`` followed by either
-    the material's own capitalised first letter (``'aSi'``) or, for a
-    material whose name already carries its own structure prefix (``h_``,
-    ``t_``, ``b_``, ``p_`` -- see the domain conventions), that prefix's
-    lowercase letter and separator (``'ah-MoS2'``). Requiring the separator
-    is what keeps a plain crystalline material name that merely starts with
-    a lowercase letter and no ``-``/``_`` from being misread as an ``'a'``
-    prefix plus that name -- there is no such material name in practice, but
-    the join would otherwise be ambiguous either way.
+    ``output_dir_for`` writes the literal prefix ``'amorph-'`` when
+    ``amorph == 'a'`` (2026-09-21 user decision, Task 3b) -- an unambiguous
+    encoding that needs no heuristic, so ``'amorph-Si'`` -> ``('Si', True)``
+    and ``'h-MoS2'``/``'h_MoS2'`` (materials that carry their own structure
+    prefix -- see the domain conventions) -> unchanged, ``False``.
+
+    Legacy read: trees on disk from before Task 3b instead wrote a bare
+    leading ``'a'`` followed by the material's own capitalised first letter
+    (``'aSi'`` -> ``('Si', True)``). That legacy shape is recognised ONLY
+    when the remainder starts with an uppercase letter -- the ``'^[a-z][-_]'``
+    heuristic Task 3 added to also catch prefixed 2D names (``'ah-MoS2'``)
+    was guesswork and is gone: ``'ah-MoS2'`` is now just a crystalline
+    material literally named that (no such material exists; that is
+    accepted).
     """
-    if len(token) < 2 or token[0] != 'a':
-        return False
-    rest = token[1:]
-    return rest[0].isupper() or bool(_PREFIXED_MATERIAL_RE.match(rest))
+    if token.startswith(_AMORPH_PREFIX):
+        return token[len(_AMORPH_PREFIX):], True
+    legacy = _LEGACY_AMORPH_RE.match(token)
+    if legacy:
+        return legacy.group('mat'), True
+    return token, False
 
 
 def _split_materials(token: str) -> Tuple[Tuple[str, ...], Optional[str]]:
@@ -361,7 +370,10 @@ def parse_run_path(rel_path: str) -> RunTokens:
     The exact inverse of :func:`output_dir_for`, plus the optional trailing
     ``L{n}`` level the AFM-family builders add. Raises ``ValueError`` on
     anything it cannot account for -- silently returning partial tokens is
-    how the old duplicated parser mis-filed hetero runs.
+    how the old duplicated parser mis-filed hetero runs. A substrate or tip
+    token is amorphous iff it starts with ``'amorph-'``, or (legacy trees,
+    see :func:`_split_amorph_token`) is a bare ``'a'`` + capitalised letter;
+    either way the token's material is the remainder.
     """
     text = str(rel_path).replace('\\', '/').strip('/')
     parts = PurePosixPath(text).parts
@@ -387,9 +399,8 @@ def parse_run_path(rel_path: str) -> RunTokens:
         if subtip is None:
             raise ValueError(
                 f"unparseable sub/tip token {parts[idx]!r} in {rel_path!r}")
-        substrate = subtip.group('sub')
-        substrate_amorphous = _is_amorphous_token(substrate)
-        tip_material = subtip.group('tip')
+        substrate, substrate_amorphous = _split_amorph_token(subtip.group('sub'))
+        tip_material, _tip_amorphous = _split_amorph_token(subtip.group('tip'))
         tip_radius = float(subtip.group('r'))
         idx += 1
 

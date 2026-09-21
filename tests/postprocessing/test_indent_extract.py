@@ -94,7 +94,7 @@ def _write_hold(dir_: Path, load: int, layer: int, tipz: float, comz: float):
 
 
 def _make_run(root: Path, seed=20260710, hold_steps=10000, z_step=0.2, n_steps=100):
-    base = root / "indent" / "h-MoS2" / "60x_60y" / "sub_aSi_tip_Si_r25" / "K300"
+    base = root / "indent" / "h-MoS2" / "60x_60y" / "sub_amorph-Si_tip_Si_r25" / "K300"
     for layer in (1, 2):
         results = base / f"L{layer}" / "results"
         # Penetration (hold) files, one per load.
@@ -141,7 +141,7 @@ def test_run_writes_penetration_json(tmp_path: Path):
     assert "output_indent_f30_s20260710.json" in written
 
     payload = json.loads((out / "output_indent_f10_s20260710.json").read_text())
-    leaf = (payload["results"]["h_MoS2"]["aSi"]["Si"]["r25"]
+    leaf = (payload["results"]["h_MoS2"]["amorph-Si"]["Si"]["r25"]
             ["l1"]["s2"]["f10.0"]["a0"])
     assert "columns" in leaf and "data" in leaf
     for col in ("nf", "comz", "tipz"):

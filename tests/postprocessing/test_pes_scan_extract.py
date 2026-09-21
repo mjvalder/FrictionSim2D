@@ -88,7 +88,7 @@ def _write_grid(root: Path, rel_run: str) -> Path:
 def test_discover_and_run(tmp_path: Path):
     _write_grid(tmp_path, "pes_sheet/h-MoS2/30x_30y/K0")
     _write_grid(tmp_path, "pes_sheet/h-WS2/30x_30y/K0")
-    _write_grid(tmp_path, "pes_tip/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300/L1")
+    _write_grid(tmp_path, "pes_tip/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r25/K300/L1")
 
     sheet = pes_scan.discover_grids(tmp_path, "sheet")
     assert {m for m, _ in sheet} == {"h_MoS2", "h_WS2"}

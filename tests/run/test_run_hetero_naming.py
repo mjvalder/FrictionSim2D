@@ -44,7 +44,7 @@ def test_output_dir_for_single_material_is_byte_identical_to_today():
 
     path = output_dir_for(run_dict, 'afm')
 
-    assert str(path) == 'afm/h_MoS2/100x_100y/sub_aSi_tip_aSi_r25/K300'
+    assert str(path) == 'afm/h_MoS2/100x_100y/sub_amorph-Si_tip_amorph-Si_r25/K300'
 
 
 def test_output_dir_for_hetero_distinguishes_second_material():

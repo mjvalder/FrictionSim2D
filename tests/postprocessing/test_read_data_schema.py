@@ -75,8 +75,23 @@ def test_headerless_wrong_width_raises_not_shifts(tmp_path):
 
 def test_tip_path_regex_survives_pot_segment():
     m = DataReader._PATH_PATTERN_TIP.search(
-        "afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-MoS2/results")
+        "afm/h-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_h-MoS2/results")
     assert m
+
+
+def test_tip_path_regex_matches_amorph_dash_token():
+    """src.run.naming.output_dir_for (Task 3b) writes 'amorph-<mat>' for an
+    amorphous substrate/tip -- the hyphen must survive the \\w-only groups."""
+    m = DataReader._PATH_PATTERN_TIP.search(
+        "afm/h-MoS2/100x_100y/sub_amorph-Si_tip_amorph-Si_r25/K300/results")
+    assert m and m.group(2) == 'amorph-Si' and m.group(3) == 'amorph-Si'
+
+
+def test_tip_path_regex_legacy_a_prefixed_token_still_matches():
+    """Pre-3b trees on disk wrote a bare 'aSi'; still readable."""
+    m = DataReader._PATH_PATTERN_TIP.search(
+        "afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/results")
+    assert m and m.group(2) == 'aSi'
 
 
 def test_sheet_path_regex_survives_pot_segment():

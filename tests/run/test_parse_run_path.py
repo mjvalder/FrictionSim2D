@@ -63,38 +63,74 @@ def test_hetero_and_flake_materials_split():
     assert tokens.flake_material == 'h-WSe2'
 
 
-@pytest.mark.parametrize('mat, amorph, expected_amorphous', [
-    ('h-MoS2', 'a', True),
-    ('h-MoS2', 'c', False),
-    ('h_MoS2', 'a', True),
-    ('h_MoS2', 'c', False),
-])
-def test_prefixed_substrate_material_amorphous_roundtrip(mat, amorph, expected_amorphous):
-    """A substrate material carrying its own structure prefix (h-/h_) must
-    not be misread: only the leading 'a' output_dir_for adds for
-    amorph == 'a' marks it amorphous, never the material name's own 'h'."""
+@pytest.mark.parametrize('mat', ['Si', 'h-MoS2', 'h_MoS2'])
+@pytest.mark.parametrize('amorph', ['a', 'c'])
+def test_substrate_amorphous_roundtrip(mat, amorph):
+    """amorph == 'a' encodes as the literal 'amorph-<mat>' prefix regardless
+    of whether the material itself carries its own structure prefix (h-/h_)
+    -- there is no letter-case or prefix heuristic to fool."""
     cfg = _cfg(sub={'mat': mat, 'amorph': amorph})
     rel = output_dir_for(cfg, 'afm').as_posix()
 
     tokens = parse_run_path(rel)
 
     assert tokens.rel_path == rel
-    assert tokens.substrate_amorphous is expected_amorphous
+    assert tokens.substrate == mat
+    assert tokens.substrate_amorphous is (amorph == 'a')
+
+
+@pytest.mark.parametrize('mat', ['Si', 'h-MoS2', 'h_MoS2'])
+@pytest.mark.parametrize('amorph', ['a', 'c'])
+def test_tip_amorphous_roundtrip(mat, amorph):
+    """The tip position uses the same 'amorph-<mat>' encoding as substrate."""
+    cfg = _cfg(tip={'mat': mat, 'amorph': amorph, 'r': 25})
+    rel = output_dir_for(cfg, 'afm').as_posix()
+
+    tokens = parse_run_path(rel)
+
+    assert tokens.rel_path == rel
+    assert tokens.tip_material == mat
 
 
 def test_amorphous_substrate_and_tip_tokens():
-    tokens = parse_run_path('afm/h-MoS2/100x_100y/sub_aSi_tip_aSi_r25/K300/L2')
+    tokens = parse_run_path(
+        'afm/h-MoS2/100x_100y/sub_amorph-Si_tip_amorph-Si_r25/K300/L2')
 
-    assert tokens.substrate == 'aSi'
+    assert tokens.substrate == 'Si'
     assert tokens.substrate_amorphous is True
-    assert tokens.tip_material == 'aSi'
+    assert tokens.tip_material == 'Si'
     assert tokens.tip_radius == 25.0
     assert tokens.layers == 2
 
 
+def test_legacy_a_prefixed_substrate_and_tip_tokens_still_parse():
+    """Pre-3b trees on disk wrote a bare leading 'a' + the material's own
+    capitalised first letter ('aSi'), not the 'amorph-' prefix. Reading
+    those existing runs must keep working even though output_dir_for no
+    longer writes that shape."""
+    tokens = parse_run_path(
+        'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300')
+
+    assert tokens.substrate == 'Si'
+    assert tokens.substrate_amorphous is True
+    assert tokens.tip_material == 'Si'
+
+
+def test_legacy_a_prefixed_token_requires_uppercase_remainder():
+    """'ah-MoS2' is no longer read as an amorphous 'h-MoS2' -- the
+    '^[a-z][-_]' heuristic that used to special-case prefixed 2D material
+    names is gone. It is just a crystalline material literally named
+    'ah-MoS2' (no such material exists; that is accepted)."""
+    tokens = parse_run_path(
+        'afm/h-MoS2/100x_100y/sub_ah-MoS2_tip_Si_r25/K300')
+
+    assert tokens.substrate == 'ah-MoS2'
+    assert tokens.substrate_amorphous is False
+
+
 def test_pot_segment_is_captured_whole():
     tokens = parse_run_path(
-        'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_MoS/L1')
+        'afm/h-MoS2/100x_100y/sub_amorph-Si_tip_Si_r25/K300/pot_sw_MoS/L1')
 
     assert tokens.pot_token == 'pot_sw_MoS'
 

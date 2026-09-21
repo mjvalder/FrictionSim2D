@@ -101,7 +101,10 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     )
 
     # Path patterns (compiled once at class level)
-    _PATH_PATTERN_TIP = re.compile(r'(\d+x_\d+y)/sub_(\w+)_tip_(\w+)_(r\d+)')
+    # [\w-] (not \w alone) so the amorphous-substrate/tip token survives:
+    # src.run.naming.output_dir_for writes 'amorph-<mat>' (Task 3b), and a
+    # material's own structure prefix can also carry a hyphen (h-MoS2).
+    _PATH_PATTERN_TIP = re.compile(r'(\d+x_\d+y)/sub_([\w-]+)_tip_([\w-]+)_(r\d+)')
     # pot_ segment consumed NON-capturing so group 3 keeps its legacy meaning
     # (substrate token). A repeated capturing group would capture only the
     # LAST repetition and record pot_... as substrate_material.

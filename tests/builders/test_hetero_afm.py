@@ -1095,8 +1095,8 @@ def test_output_dir_differs_when_only_afm_flake_material_differs():
     assert dir_a != dir_b
     assert material_token(raw_a, "afm") != material_token(raw_b, "afm")
     # Pin the exact collision the reviewer constructed against 72109b7.
-    assert str(dir_a) == "afm/h-MoS2+flake-h-MoS2/40x_40y/sub_aSi_tip_Si_r5/K1/pot_sw_MoS2_wen"
-    assert str(dir_b) == "afm/h-MoS2+flake-h-WS2/40x_40y/sub_aSi_tip_Si_r5/K1/pot_sw_MoS2_wen"
+    assert str(dir_a) == "afm/h-MoS2+flake-h-MoS2/40x_40y/sub_amorph-Si_tip_Si_r5/K1/pot_sw_MoS2_wen"
+    assert str(dir_b) == "afm/h-MoS2+flake-h-WS2/40x_40y/sub_amorph-Si_tip_Si_r5/K1/pot_sw_MoS2_wen"
 
 
 def test_hpc_job_name_differs_when_only_afm_flake_material_differs():
@@ -1126,7 +1126,7 @@ def test_output_dir_and_job_name_unaffected_by_absent_afm_flake_section():
 
     raw = _afm_flake_raw()
     del raw["flake"]
-    assert str(output_dir_for(raw, "afm")) == "afm/h-MoS2/40x_40y/sub_aSi_tip_Si_r5/K1/pot_sw_MoS2_wen"
+    assert str(output_dir_for(raw, "afm")) == "afm/h-MoS2/40x_40y/sub_amorph-Si_tip_Si_r5/K1/pot_sw_MoS2_wen"
 
     cfg = AFMSimulationConfig(**raw, settings=load_settings())
     sim = AFMSimulation(cfg, "out")

@@ -47,7 +47,7 @@ def _indent_context(**overrides):
         "neigh_modify_command": "neigh_modify every 1 delay 0 check yes",
         "timestep": 0.001,
         "thermo": 1000,
-        "output_dir": "indent/h-MoS2/60x_60y/sub_aSi_tip_Si_r25/K300/L1/data",
+        "output_dir": "indent/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r25/K300/L1/data",
         "potential_file": "indent/.../lammps/system.in.settings",
         "sheet_types": "5 6",
         "finite_sheet_enabled": False,
