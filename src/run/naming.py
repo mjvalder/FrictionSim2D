@@ -21,6 +21,12 @@ AFM_LIKE_MODELS = frozenset({'afm', 'pes_tip', 'indent'})
 #: Simulation models sharing the sheet-on-sheet stack (single slide.in run).
 SHEET_LIKE_MODELS = frozenset({'sheetonsheet', 'pes_sheet'})
 
+#: The CLI / top-directory axis: `run <model>` and `<root>/<model>/...`.
+#: Every entry is also a family (see `core.observables.FAMILIES`), but the
+#: reverse does not hold -- 'hetero' and 'flake' are schemas, never top
+#: directories.
+MODELS: Tuple[str, ...] = ('afm', 'indent', 'pes_tip', 'sheetonsheet', 'pes_sheet')
+
 
 def layer_aware_path_sort_key(path_str: str) -> Tuple[Tuple[int, Union[int, str]], ...]:
     """Sort paths naturally for layer segments like L1, L2, L10."""

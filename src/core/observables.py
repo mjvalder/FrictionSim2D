@@ -17,6 +17,15 @@ from typing import Optional, Tuple
 TIERS = ('window', 'raw', 'peratom')
 STREAMS = ('results', 'post')
 
+#: Every schema a results file can follow. The ONE vocabulary: node types,
+#: `read_data._KNOWN_FAMILIES` and `hpc/manifest.py` all import this rather
+#: than repeating a subset of it. Distinct from `run.naming.MODELS`, which is
+#: the CLI / top-directory axis: a run has both a `model` (where it lives) and
+#: a `family` (what schema its files follow).
+FAMILIES: Tuple[str, ...] = (
+    'afm', 'indent', 'sheetonsheet', 'hetero', 'flake', 'pes_tip', 'pes_sheet',
+)
+
 # fix ave/time argument triples (Nevery, Nrepeat, Nfreq), validated against LAMMPS
 TIER_ARGS = {
     'window': (1, 1000, 1000),

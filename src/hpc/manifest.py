@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 
+from ..core.observables import FAMILIES
+
 
 class JobStatus(Enum):
     """Simulation job lifecycle states."""
@@ -123,6 +125,12 @@ class JobManifest:
     jobs: List[JobEntry] = field(default_factory=list)
     scheduler: str = "pbs"
     package_directory: Optional[str] = None
+
+    #: Top-directory vocabulary for `from_simulation_directory`'s material
+    #: parse. An alias of `core.observables.FAMILIES` -- see the constraint
+    #: in that module's docstring on why `hpc/` imports FAMILIES rather than
+    #: `run.naming.MODELS` (importing `run` here would close a cycle).
+    _TOP_DIRS = FAMILIES
 
     def __post_init__(self):
         if self.jobs is None:
@@ -396,8 +404,7 @@ class JobManifest:
             parts = rel_path.parts
             material = (
                 parts[1]
-                if len(parts) >= 2
-                and parts[0] in ('afm', 'sheetonsheet', 'pes_sheet', 'pes_tip')
+                if len(parts) >= 2 and parts[0] in cls._TOP_DIRS
                 else (parts[0] if parts else "")
             )
             layer_match = layer_pattern.search(path_str)

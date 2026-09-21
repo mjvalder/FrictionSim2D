@@ -17,6 +17,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.core.observables import FAMILIES
+
 logger = logging.getLogger(__name__)
 
 
@@ -229,7 +231,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     #: own `family=` marker overrides this when present; every retained file
     #: predates the marker and takes the fallback.
     _REGISTRY_SIM_TYPE = {'tip': 'afm', 'sheet': 'sheetonsheet'}
-    _KNOWN_FAMILIES = ('afm', 'indent', 'sheetonsheet', 'hetero', 'flake')
+    _KNOWN_FAMILIES = FAMILIES
 
     @classmethod
     def _registry_sim_type(cls, sim_type: str, header_line1: str) -> str:
