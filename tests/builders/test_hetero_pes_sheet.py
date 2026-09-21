@@ -349,9 +349,10 @@ def test_hetero_pes_sheet_scan_runs_in_lammps(tmp_path):
     assert "Lost atoms" not in out, out[-3000:]
 
     rows = (tmp_path / "results" / "pes_scan.csv").read_text().strip().splitlines()
-    assert rows[0] == "dx,dy,energy_eV"
-    assert len(rows) == 1 + 3 * 3                      # grid_n x grid_n points
-    energies = [float(r.split(",")[2]) for r in rows[1:]]
+    assert rows[0] == "# family=pes_sheet"
+    assert rows[1] == "dx,dy,energy_eV"
+    assert len(rows) == 2 + 3 * 3                      # marker + header + grid_n^2
+    energies = [float(r.split(",")[2]) for r in rows[2:]]
     # A real, non-degenerate corrugation was mapped (not all grid points equal).
     assert max(energies) - min(energies) > 1e-6
 

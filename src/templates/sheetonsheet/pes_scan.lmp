@@ -54,7 +54,8 @@ variable        dystep equal v_Ly/v_Ny
 variable        pe_cell equal pe/v_ncell
 
 # CSV: dx, dy in Angstrom (top-layer displacement); energy_eV per surface cell.
-print           "dx,dy,energy_eV" file {{ results_csv }} screen no
+print           "# family=pes_sheet" file {{ results_csv }} screen no
+print           "dx,dy,energy_eV" append {{ results_csv }} screen no
 
 # We only ever move the top layer by the delta from the previous grid point to
 # the current one, so the xy positions stay exactly on the grid (z relaxation

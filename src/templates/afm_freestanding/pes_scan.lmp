@@ -65,7 +65,8 @@ variable        Ly     equal {{ period_y }}
 variable        dxstep equal v_Lx/v_Nx
 variable        dystep equal v_Ly/v_Ny
 
-print           "x,y,energy_eV,fx,fy,fz" file {{ results_csv }} screen no
+print           "# family=pes_tip" file {{ results_csv }} screen no
+print           "x,y,energy_eV,fx,fy,fz" append {{ results_csv }} screen no
 
 variable        prev_dx equal 0.0
 variable        prev_dy equal 0.0

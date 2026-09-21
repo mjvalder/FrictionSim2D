@@ -79,7 +79,8 @@ variable        dystep equal v_Ly/v_Ny
 
 # CSV: x, y in Angstrom (tip displacement); energy_eV total; fx, fy, fz in nN
 # (fz = normal load carried at the fixed contact gap).
-print           "x,y,energy_eV,fx,fy,fz" file {{ results_csv }} screen no
+print           "# family=pes_tip" file {{ results_csv }} screen no
+print           "x,y,energy_eV,fx,fy,fz" append {{ results_csv }} screen no
 
 # Move the tip only by the delta from the previous grid point to the current one.
 variable        prev_dx equal 0.0

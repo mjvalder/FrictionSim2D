@@ -168,7 +168,7 @@ def extract_all(run_root: Path, kind: str,
     rows: List[Dict[str, float]] = []
     for mat, csv_path in discover_grids(run_root, kind):
         try:
-            df = pd.read_csv(csv_path)
+            df = pd.read_csv(csv_path, comment='#')
         except (OSError, pd.errors.ParserError) as exc:
             logger.warning("Skipping unreadable PES grid %s: %s", csv_path, exc)
             continue
