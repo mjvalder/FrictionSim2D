@@ -361,3 +361,26 @@ def test_unknown_tier_raises(aiida_profile_clean, tmp_path):
 
     with pytest.raises(KeyError, match='peratom'):
         node.frame('peratom')
+
+
+import importlib  # noqa: E402
+
+
+def test_provenance_node_type_is_gone():
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module('src.aiida.data.provenance')
+
+    import src.aiida.data as data_pkg
+    assert not hasattr(data_pkg, 'FrictionProvenanceData')
+    assert data_pkg.__all__ == ['FrictionSimulationData',
+                                'FrictionSimulationSetData',
+                                'FrictionResultsData',
+                                'TIER_KEYS']
+
+
+def test_entry_point_is_deregistered():
+    from importlib.metadata import entry_points
+    names = {ep.name for ep in entry_points(group='aiida.data')}
+    assert 'friction2d.provenance' not in names
+    assert {'friction2d.simulation', 'friction2d.simulation_set',
+            'friction2d.results'} <= names

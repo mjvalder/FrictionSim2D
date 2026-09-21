@@ -163,11 +163,9 @@ class Friction2DDB:
         from .data import (  # pylint: disable=import-outside-toplevel
             FrictionSimulationData,
             FrictionResultsData,
-            FrictionProvenanceData,
         )
         self._simulation_data_cls = FrictionSimulationData
         self._results_data_cls = FrictionResultsData
-        self._provenance_data_cls = FrictionProvenanceData
         from .data import FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
         self._simulation_set_cls = FrictionSimulationSetData
 
@@ -572,10 +570,6 @@ class Friction2DDB:
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        prov = simulation.get_provenance()
-        if prov:
-            prov.export_to_directory(output_dir)
 
         info = {
             'simulation_uuid': str(simulation.uuid),

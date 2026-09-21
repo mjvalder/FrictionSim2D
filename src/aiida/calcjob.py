@@ -47,8 +47,6 @@ class LammpsFrictionCalcJob(CalcJob):
                    help='LAMMPS executable code node.')
         spec.input('simulation_dir', valid_type=orm.FolderData,
                    help='FolderData with the simulation directory contents.')
-        spec.input('provenance', valid_type=orm.Data, required=False,
-                   help='FrictionProvenanceData node for provenance tracking.')
         spec.input('simulation_node', valid_type=orm.Data, required=False,
                    help='FrictionSimulationData node for status tracking.')
         spec.input('parameters', valid_type=orm.Dict, required=False,

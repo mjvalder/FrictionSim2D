@@ -22,7 +22,6 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'FrictionSimulationData': (f'{__name__}.data', 'FrictionSimulationData'),
     'FrictionSimulationSetData': (f'{__name__}.data', 'FrictionSimulationSetData'),
     'FrictionResultsData': (f'{__name__}.data', 'FrictionResultsData'),
-    'FrictionProvenanceData': (f'{__name__}.data', 'FrictionProvenanceData'),
     'Friction2DDB': (f'{__name__}.query', 'Friction2DDB'),
     'register_simulation_batch': (f'{__name__}.integration', 'register_simulation_batch'),
     'register_single_simulation': (f'{__name__}.integration', 'register_single_simulation'),
