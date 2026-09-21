@@ -9,7 +9,8 @@ need them, so they live in the leaf module and the runner imports them from
 here -- not the other way round, which would be a cycle.
 """
 import re
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ..core.utils.tokens import format_dimension_token
@@ -285,3 +286,135 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
 
     base = Path(top_dir) / mat / size_token / f"K{int(temp)}"
     return base / pot_segment if pot_segment else base
+
+
+_SIZE_RE = re.compile(r'^(?P<x>-?[\d.]+(?:[eE][+-]?\d+)?)x_'
+                      r'(?P<y>-?[\d.]+(?:[eE][+-]?\d+)?)y$')
+_SUBTIP_RE = re.compile(r'^sub_(?P<sub>.+?)_tip_(?P<tip>.+?)_r(?P<r>\d+)$')
+_TEMP_RE = re.compile(r'^K(?P<t>-?\d+)$')
+_LAYER_RE = re.compile(r'^L(?P<n>\d+)$')
+_FLAKE_SEP = '+flake-'
+
+
+@dataclass(frozen=True)
+class RunTokens:
+    """Everything :func:`output_dir_for` encoded into a run's directory path.
+
+    ``family`` cannot be read from the path (a hetero run lives under
+    ``sheetonsheet/``), so :func:`parse_run_path` sets it to ``model`` and
+    :func:`src.run.tree.discover_runs` replaces it from ``provenance.json``.
+    ``substrate`` keeps the raw token (``'aSi'``); ``tip_material`` likewise
+    (``'Si'``, or ``'aSi'`` for an amorphous tip).
+    """
+    model: str
+    family: str
+    materials: Tuple[str, ...]
+    flake_material: Optional[str]
+    size_x: float
+    size_y: float
+    substrate: Optional[str]
+    substrate_amorphous: Optional[bool]
+    tip_material: Optional[str]
+    tip_radius: Optional[float]
+    temperature: float
+    layers: Optional[int]
+    pot_token: Optional[str]
+    rel_path: str
+
+
+def _is_amorphous_token(token: str) -> bool:
+    """``'aSi'`` is amorphous, ``'Si'`` is not.
+
+    ``output_dir_for`` prefixes a literal lowercase ``'a'`` when
+    ``amorph == 'a'``, so the marker is a leading ``'a'`` followed by the
+    material's own (capitalised) first letter.
+    """
+    return len(token) > 1 and token[0] == 'a' and token[1].isupper()
+
+
+def _split_materials(token: str) -> Tuple[Tuple[str, ...], Optional[str]]:
+    """``'h-MoS2+h-WS2+flake-h-WSe2'`` -> ``(('h-MoS2', 'h-WS2'), 'h-WSe2')``."""
+    flake = None
+    base = token
+    if _FLAKE_SEP in token:
+        base, flake = token.split(_FLAKE_SEP, 1)
+    return tuple(base.split('+')), flake
+
+
+def parse_run_path(rel_path: str) -> RunTokens:
+    """Parse a run directory path (relative to the simulation root).
+
+    The exact inverse of :func:`output_dir_for`, plus the optional trailing
+    ``L{n}`` level the AFM-family builders add. Raises ``ValueError`` on
+    anything it cannot account for -- silently returning partial tokens is
+    how the old duplicated parser mis-filed hetero runs.
+    """
+    text = str(rel_path).replace('\\', '/').strip('/')
+    parts = PurePosixPath(text).parts
+    if len(parts) < 4:
+        raise ValueError(f"not a run path (too short): {rel_path!r}")
+
+    model = parts[0]
+    if model not in MODELS:
+        raise ValueError(f"unknown model {model!r} in {rel_path!r}; known: {MODELS}")
+
+    materials, flake_material = _split_materials(parts[1])
+
+    size = _SIZE_RE.fullmatch(parts[2])
+    if size is None:
+        raise ValueError(f"unparseable size token {parts[2]!r} in {rel_path!r}")
+
+    idx = 3
+    substrate = tip_material = None
+    substrate_amorphous: Optional[bool] = None
+    tip_radius: Optional[float] = None
+    if model in AFM_LIKE_MODELS:
+        subtip = _SUBTIP_RE.fullmatch(parts[idx])
+        if subtip is None:
+            raise ValueError(
+                f"unparseable sub/tip token {parts[idx]!r} in {rel_path!r}")
+        substrate = subtip.group('sub')
+        substrate_amorphous = _is_amorphous_token(substrate)
+        tip_material = subtip.group('tip')
+        tip_radius = float(subtip.group('r'))
+        idx += 1
+
+    if idx >= len(parts):
+        raise ValueError(f"no K<temp> level in {rel_path!r}")
+    temp = _TEMP_RE.fullmatch(parts[idx])
+    if temp is None:
+        raise ValueError(f"unparseable temperature token {parts[idx]!r} in {rel_path!r}")
+    idx += 1
+
+    pot_token = None
+    if idx < len(parts) and parts[idx].startswith('pot_'):
+        pot_token = parts[idx]
+        idx += 1
+
+    layers = None
+    if idx < len(parts):
+        layer = _LAYER_RE.fullmatch(parts[idx])
+        if layer is None:
+            raise ValueError(f"unexpected path level {parts[idx]!r} in {rel_path!r}")
+        layers = int(layer.group('n'))
+        idx += 1
+
+    if idx != len(parts):
+        raise ValueError(f"trailing path levels {parts[idx:]} in {rel_path!r}")
+
+    return RunTokens(
+        model=model,
+        family=model,
+        materials=materials,
+        flake_material=flake_material,
+        size_x=float(size.group('x')),
+        size_y=float(size.group('y')),
+        substrate=substrate,
+        substrate_amorphous=substrate_amorphous,
+        tip_material=tip_material,
+        tip_radius=tip_radius,
+        temperature=float(temp.group('t')),
+        layers=layers,
+        pot_token=pot_token,
+        rel_path=text,
+    )
