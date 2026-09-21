@@ -1,164 +1,97 @@
-"""AiiDA Data node for friction simulation metadata.
+"""AiiDA Data node for one friction simulation run (spec §4.1).
 
-Central queryable node that links configuration, provenance, and results.
-Each node represents a single simulation run (one specific combination
-of material, force, angle, layers, etc.).
+Every `RunTokens` field (Tasks 3-4) is a queryable attribute; the whole
+`ProvenanceRecord` (Task 5) is the `provenance` attribute (a dict); the run's
+own inputs and provenance files live in the node repository. Mutable state
+(`status`, `imported_at`, `job_id`) lives in EXTRAS, because a stored AiiDA
+attribute cannot be changed.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from aiida.orm import Data, load_node
-from aiida.common.exceptions import NotExistent
+from aiida.orm import Data
 
-if TYPE_CHECKING:
-    from .provenance import FrictionProvenanceData
-    from .results import FrictionResultsData
+
+def _sanitize(obj: Any) -> Any:
+    """Recursively replace float nan/inf with None so AiiDA can store the value.
+
+    This is `src.aiida.integration._sanitize_for_aiida`, moved here as a
+    module-level function. `integration.py` keeps its own copy until Task 27
+    deletes its half -- it does NOT import this one.
+    """
+    import math  # pylint: disable=import-outside-toplevel
+
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
 
 
 class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
-    """AiiDA Data node representing a friction simulation.
+    """One run: one `provenance.json`.
 
-    Stores all simulation metadata in queryable attributes and links to
-    associated provenance and result nodes via UUID references.
-
-    Attributes:
-        simulation_type: ``'afm'`` or ``'sheetonsheet'``.
-        material: 2D sheet material name (e.g. ``'h-MoS2'``).
-        substrate_material: Substrate material name.
-        tip_material: Tip material name (AFM only).
-        layers: Number of 2D material layers.
-        force: Applied normal force (nN).
-        scan_angle: Scan angle (degrees).
-        scan_speed: Scan speed (m/s).
-        temperature: Temperature (K).
-        status: One of ``STATUSES``.
+    Every `RunTokens` field is a queryable attribute; the whole
+    `ProvenanceRecord` is the `provenance` attribute (a dict); the run's own
+    inputs and provenance files live in the node repository. Mutable state
+    (`status`, `imported_at`, `job_id`) lives in EXTRAS, because a stored
+    AiiDA attribute cannot be changed.
     """
 
-    SIMULATION_TYPES = ('afm', 'sheetonsheet')
-    STATUSES = (
-        'prepared', 'submitted', 'running',
-        'completed', 'failed', 'imported',
-    )
+    STATUSES = ('prepared', 'submitted', 'running',
+                'completed', 'failed', 'imported')
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    # -- Core properties ------------------------------------------------------
+    _TOKEN_ATTRS = ('model', 'family', 'materials', 'flake_material',
+                    'size_x', 'size_y', 'substrate', 'substrate_amorphous',
+                    'tip_material', 'tip_radius', 'temperature', 'layers',
+                    'pot_token', 'rel_path')
 
     @property
-    def simulation_type(self) -> str:
-        """Simulation type (``'afm'`` or ``'sheetonsheet'``)."""
-        return self.base.attributes.get('simulation_type', '')
+    def model(self) -> str:
+        return self.base.attributes.get('model', '')
 
-    @simulation_type.setter
-    def simulation_type(self, value: str):
-        if value not in self.SIMULATION_TYPES:
-            raise ValueError(f"simulation_type must be one of {self.SIMULATION_TYPES}")
-        self.base.attributes.set('simulation_type', value)
-
-    @property
-    def material(self) -> str:
-        """2D sheet material (e.g. ``'h-MoS2'``, ``'graphene'``)."""
-        return self.base.attributes.get('material', '')
-
-    @material.setter
-    def material(self, value: str):
-        self.base.attributes.set('material', value)
-        self.base.attributes.set('material_normalized', value.replace('-', '_').lower())
+    @model.setter
+    def model(self, value: str):
+        from ...run.naming import MODELS  # pylint: disable=import-outside-toplevel
+        if value not in MODELS:
+            raise ValueError(f"model must be one of {MODELS}, got {value!r}")
+        self.base.attributes.set('model', str(value))
 
     @property
-    def substrate_material(self) -> str:
-        """Substrate material (e.g. ``'Si'``, ``'aSi'``)."""
-        return self.base.attributes.get('substrate_material', '')
+    def family(self) -> str:
+        return self.base.attributes.get('family', '')
 
-    @substrate_material.setter
-    def substrate_material(self, value: str):
-        self.base.attributes.set('substrate_material', value)
-
-    @property
-    def substrate_amorphous(self) -> bool:
-        """Whether the substrate is amorphous."""
-        return self.base.attributes.get('substrate_amorphous', False)
-
-    @substrate_amorphous.setter
-    def substrate_amorphous(self, value: bool):
-        self.base.attributes.set('substrate_amorphous', value)
+    @family.setter
+    def family(self, value: str):
+        from ...core.observables import FAMILIES  # pylint: disable=import-outside-toplevel
+        if value not in FAMILIES:
+            raise ValueError(f"family must be one of {FAMILIES}, got {value!r}")
+        self.base.attributes.set('family', str(value))
 
     @property
-    def tip_material(self) -> str:
-        """Tip material (AFM simulations only)."""
-        return self.base.attributes.get('tip_material', '')
+    def materials(self) -> List[str]:
+        return self.base.attributes.get('materials', [])
 
-    @tip_material.setter
-    def tip_material(self, value: str):
-        self.base.attributes.set('tip_material', value)
-
-    @property
-    def tip_radius(self) -> float:
-        """Tip radius in Angstroms (AFM only)."""
-        return self.base.attributes.get('tip_radius', 0.0)
-
-    @tip_radius.setter
-    def tip_radius(self, value: float):
-        self.base.attributes.set('tip_radius', float(value))
+    @materials.setter
+    def materials(self, value):
+        self.base.attributes.set('materials', [str(m) for m in value])
 
     @property
-    def layers(self) -> int:
-        """Number of 2D material layers."""
-        return self.base.attributes.get('layers', 1)
+    def flake_material(self) -> Optional[str]:
+        return self.base.attributes.get('flake_material')
 
-    @layers.setter
-    def layers(self, value: int):
-        self.base.attributes.set('layers', int(value))
-
-    @property
-    def force(self) -> float:
-        """Applied normal force in nN."""
-        return self.base.attributes.get('force', 0.0)
-
-    @force.setter
-    def force(self, value: float):
-        self.base.attributes.set('force', float(value))
-
-    @property
-    def pressure(self) -> Optional[float]:
-        """Applied pressure in GPa (alternative to force)."""
-        return self.base.attributes.get('pressure')
-
-    @pressure.setter
-    def pressure(self, value: Optional[float]):
-        self.base.attributes.set('pressure', float(value) if value is not None else None)
-
-    @property
-    def scan_angle(self) -> float:
-        """Scan angle in degrees."""
-        return self.base.attributes.get('scan_angle', 0.0)
-
-    @scan_angle.setter
-    def scan_angle(self, value: float):
-        self.base.attributes.set('scan_angle', float(value))
-
-    @property
-    def scan_speed(self) -> float:
-        """Scan speed in m/s."""
-        return self.base.attributes.get('scan_speed', 2.0)
-
-    @scan_speed.setter
-    def scan_speed(self, value: float):
-        self.base.attributes.set('scan_speed', float(value))
-
-    @property
-    def temperature(self) -> float:
-        """Temperature in Kelvin."""
-        return self.base.attributes.get('temperature', 300.0)
-
-    @temperature.setter
-    def temperature(self, value: float):
-        self.base.attributes.set('temperature', float(value))
+    @flake_material.setter
+    def flake_material(self, value: Optional[str]):
+        self.base.attributes.set('flake_material',
+                                 None if value is None else str(value))
 
     @property
     def size_x(self) -> float:
-        """Sheet size in x-direction (Angstroms)."""
         return self.base.attributes.get('size_x', 0.0)
 
     @size_x.setter
@@ -167,7 +100,6 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def size_y(self) -> float:
-        """Sheet size in y-direction (Angstroms)."""
         return self.base.attributes.get('size_y', 0.0)
 
     @size_y.setter
@@ -175,189 +107,224 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
         self.base.attributes.set('size_y', float(value))
 
     @property
-    def stack_type(self) -> str:
-        """Stacking type (``'AA'`` or ``'AB'``)."""
-        return self.base.attributes.get('stack_type', 'AA')
+    def substrate(self) -> Optional[str]:
+        return self.base.attributes.get('substrate')
 
-    @stack_type.setter
-    def stack_type(self, value: str):
-        self.base.attributes.set('stack_type', value)
-
-    @property
-    def potential_type(self) -> str:
-        """Interatomic potential type (e.g. ``'sw'``, ``'tersoff'``)."""
-        return self.base.attributes.get('potential_type', '')
-
-    @potential_type.setter
-    def potential_type(self, value: str):
-        self.base.attributes.set('potential_type', value)
-
-    # -- Status and tracking --------------------------------------------------
+    @substrate.setter
+    def substrate(self, value: Optional[str]):
+        self.base.attributes.set('substrate', None if value is None else str(value))
 
     @property
-    def status(self) -> str:
-        """Current simulation status."""
-        return self.base.attributes.get('status', 'prepared')
+    def substrate_amorphous(self) -> Optional[bool]:
+        return self.base.attributes.get('substrate_amorphous')
 
-    @status.setter
-    def status(self, value: str):
-        if value not in self.STATUSES:
-            raise ValueError(f"status must be one of {self.STATUSES}")
-        self.base.attributes.set('status', value)
+    @substrate_amorphous.setter
+    def substrate_amorphous(self, value: Optional[bool]):
+        self.base.attributes.set('substrate_amorphous',
+                                 None if value is None else bool(value))
 
     @property
-    def simulation_path(self) -> str:
-        """Relative path to the simulation directory."""
-        return self.base.attributes.get('simulation_path', '')
+    def tip_material(self) -> Optional[str]:
+        return self.base.attributes.get('tip_material')
 
-    @simulation_path.setter
-    def simulation_path(self, value: str):
-        self.base.attributes.set('simulation_path', value)
-
-    @property
-    def job_id(self) -> Optional[str]:
-        """HPC job ID if submitted."""
-        return self.base.attributes.get('job_id')
-
-    @job_id.setter
-    def job_id(self, value: Optional[str]):
-        self.base.attributes.set('job_id', value)
-
-    # -- Linked nodes (stored as UUIDs) ---------------------------------------
+    @tip_material.setter
+    def tip_material(self, value: Optional[str]):
+        self.base.attributes.set('tip_material', None if value is None else str(value))
 
     @property
-    def results_uuid(self) -> Optional[str]:
-        """UUID of the linked ``FrictionResultsData`` node."""
-        return self.base.attributes.get('results_uuid')
+    def tip_radius(self) -> Optional[float]:
+        return self.base.attributes.get('tip_radius')
 
-    @results_uuid.setter
-    def results_uuid(self, value: str):
-        self.base.attributes.set('results_uuid', value)
-
-    @property
-    def provenance_uuid(self) -> Optional[str]:
-        """UUID of the linked ``FrictionProvenanceData`` node."""
-        return self.base.attributes.get('provenance_uuid')
-
-    @provenance_uuid.setter
-    def provenance_uuid(self, value: str):
-        self.base.attributes.set('provenance_uuid', value)
+    @tip_radius.setter
+    def tip_radius(self, value: Optional[float]):
+        self.base.attributes.set('tip_radius',
+                                 None if value is None else float(value))
 
     @property
-    def set_uuid(self) -> Optional[str]:
-        """UUID of the parent ``FrictionSimulationSetData`` node."""
-        return self.base.attributes.get('set_uuid')
+    def temperature(self) -> float:
+        return self.base.attributes.get('temperature', 300.0)
+
+    @temperature.setter
+    def temperature(self, value: float):
+        self.base.attributes.set('temperature', float(value))
+
+    @property
+    def layers(self) -> Optional[int]:
+        return self.base.attributes.get('layers')
+
+    @layers.setter
+    def layers(self, value: Optional[int]):
+        self.base.attributes.set('layers', None if value is None else int(value))
+
+    @property
+    def pot_token(self) -> Optional[str]:
+        return self.base.attributes.get('pot_token')
+
+    @pot_token.setter
+    def pot_token(self, value: Optional[str]):
+        self.base.attributes.set('pot_token', None if value is None else str(value))
+
+    @property
+    def rel_path(self) -> str:
+        return self.base.attributes.get('rel_path', '')
+
+    @rel_path.setter
+    def rel_path(self, value: str):
+        self.base.attributes.set('rel_path', str(value))
+
+    @property
+    def set_label(self) -> str:
+        return self.base.attributes.get('set_label', '')
+
+    @set_label.setter
+    def set_label(self, value: str):
+        self.base.attributes.set('set_label', str(value))
+
+    @property
+    def provenance(self) -> Dict[str, Any]:
+        return self.base.attributes.get('provenance', {})
+
+    @provenance.setter
+    def provenance(self, value: Dict[str, Any]):
+        self.base.attributes.set('provenance', dict(value))
+
+    @property
+    def set_uuid(self) -> str:
+        return self.base.attributes.get('set_uuid', '')
 
     @set_uuid.setter
     def set_uuid(self, value: str):
         self.base.attributes.set('set_uuid', str(value))
 
-    # -- Convenience methods --------------------------------------------------
+    @property
+    def oversize_files(self) -> List[Dict[str, Any]]:
+        """Files `add_run_files` recorded by sha256 instead of storing."""
+        return self.base.attributes.get('oversize_files', [])
 
-    def get_results(self) -> Optional['FrictionResultsData']:
-        """Load and return the linked results node."""
-        if self.results_uuid:
-            try:
-                node = load_node(self.results_uuid)
-                return node  # type: ignore[return-value]
-            except NotExistent:
-                return None
-        return None
+    # --- mutable state: EXTRAS, because stored attributes are immutable -----
 
-    def get_provenance(self) -> Optional['FrictionProvenanceData']:
-        """Load and return the linked provenance node."""
-        if self.provenance_uuid:
-            try:
-                node = load_node(self.provenance_uuid)
-                return node  # type: ignore[return-value]
-            except NotExistent:
-                return None
-        return None
+    @property
+    def status(self) -> str:
+        return self.base.extras.get('status', 'prepared')
 
-    def set_from_config(  # pylint: disable=too-many-branches
-            self, config: Dict[str, Any],
-            simulation_type: str = 'afm') -> None:
-        """Populate attributes from a parsed configuration dictionary.
+    @status.setter
+    def status(self, value: str):
+        if value not in self.STATUSES:
+            raise ValueError(f"status must be one of {self.STATUSES}")
+        from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
+        self.base.extras.set('status', value)
+        self.base.extras.set('imported_at',
+                             datetime.now(timezone.utc).isoformat())
 
-        Args:
-            config: Parsed ``config.json`` data (matches Pydantic model output).
-            simulation_type: ``'afm'`` or ``'sheetonsheet'``.
+    @property
+    def imported_at(self) -> str:
+        """When `status` was last set. Empty until the first status write."""
+        return self.base.extras.get('imported_at', '')
+
+    @property
+    def job_id(self) -> Optional[str]:
+        """Scheduler/CalcJob id, written by `submit.submit_simulation`."""
+        return self.base.extras.get('job_id')
+
+    @job_id.setter
+    def job_id(self, value):
+        self.base.extras.set('job_id', None if value is None else str(value))
+
+    # --- population / staging -------------------------------------------
+
+    def set_from_locator(self, locator, set_uuid: str, set_label: str = '') -> None:
+        """Populate every attribute from a `RunLocator` and its provenance.
+
+        `set_label` is stored alongside `set_uuid` so a queried run can name its
+        set without a second lookup (the query API and `db upload` both need it).
         """
-        self.simulation_type = simulation_type
+        from ...data.provenance import read_provenance  # pylint: disable=import-outside-toplevel
 
-        # General parameters — skip list-valued fields (those belong on the
-        # simulation set node) and None values.
-        if 'general' in config:
-            gen = config['general']
-            for key, attr in [('temp', 'temperature'), ('scan_speed', 'scan_speed')]:
-                val = gen.get(key)
-                if val is not None and not isinstance(val, list):
-                    setattr(self, attr, val)
+        tokens = locator.tokens
+        self.set_label = str(set_label)
+        self.model = tokens.model
+        self.family = tokens.family
+        self.materials = list(tokens.materials)
+        self.flake_material = tokens.flake_material
+        self.size_x = float(tokens.size_x)
+        self.size_y = float(tokens.size_y)
+        self.substrate = tokens.substrate
+        self.substrate_amorphous = tokens.substrate_amorphous
+        self.tip_material = tokens.tip_material
+        self.tip_radius = tokens.tip_radius
+        self.temperature = float(tokens.temperature)
+        self.layers = tokens.layers
+        self.pot_token = tokens.pot_token
+        self.rel_path = tokens.rel_path
+        self.set_uuid = str(set_uuid)
+        record = read_provenance(locator.provenance_file,
+                                 family=tokens.family, model=tokens.model,
+                                 material_name=tokens.materials[0])
+        self.provenance = _sanitize(record.model_dump())
 
-        # 2D sheet parameters
-        sheet_key = '2D' if '2D' in config else 'sheet'
-        if sheet_key in config:
-            sheet = config[sheet_key]
-            for key, attr in [('mat', 'material'), ('x', 'size_x'), ('y', 'size_y'),
-                              ('stack_type', 'stack_type'),
-                              ('pot_type', 'potential_type')]:
-                if key in sheet and sheet[key] is not None:
-                    setattr(self, attr, sheet[key])
-            # layers may be stored as a list (one value per material in a batch)
-            if 'layers' in sheet and sheet['layers'] is not None:
-                layers_val = sheet['layers']
-                if isinstance(layers_val, list):
-                    layers_val = layers_val[0] if layers_val else 1
-                self.layers = layers_val
+    def add_run_files(self, locator, max_mb: int = 20) -> List[str]:
+        """Stage `provenance.json`, `provenance/**`, `lammps/*.in` and
+        `lammps/system.in.settings` into the repository.
 
-        # Substrate
-        if 'sub' in config:
-            sub = config['sub']
-            if 'mat' in sub:
-                self.substrate_material = sub['mat']
-            if 'amorph' in sub:
-                self.substrate_amorphous = sub['amorph'] == 'a'
+        A file larger than `max_mb` is not stored; its POSIX path and sha256
+        are appended to the `oversize_files` attribute instead, so the record
+        still says exactly which file was used.
+        """
+        from ...data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
 
-        # Tip (AFM only)
-        if 'tip' in config:
-            tip = config['tip']
-            if 'mat' in tip:
-                self.tip_material = tip['mat']
-            if 'r' in tip:
-                self.tip_radius = tip['r']
-            if 's' in tip:
-                self.scan_speed = tip['s']
+        limit = max_mb * 1024 * 1024
+        candidates: List[Tuple[Path, str]] = [
+            (locator.provenance_file, 'provenance.json')]
+        if locator.provenance_dir.is_dir():
+            candidates += [(p, 'provenance/' + p.relative_to(
+                locator.provenance_dir).as_posix())
+                for p in sorted(locator.provenance_dir.rglob('*')) if p.is_file()]
+        if locator.lammps_dir.is_dir():
+            candidates += [(p, 'lammps/' + p.name)
+                           for p in sorted(locator.lammps_dir.glob('*.in'))]
+            settings_in = locator.lammps_dir / 'system.in.settings'
+            if settings_in.is_file():
+                candidates.append((settings_in, 'lammps/system.in.settings'))
 
-    # -- Serialisation --------------------------------------------------------
+        stored: List[str] = []
+        oversize: List[Dict[str, Any]] = []
+        for path, name in candidates:
+            if path.stat().st_size > limit:
+                oversize.append({'path': name, 'size': path.stat().st_size,
+                                 'sha256': sha256_file(path),
+                                 'source': str(path)})
+                continue
+            self.base.repository.put_object_from_file(str(path), name)
+            stored.append(name)
+        self.base.attributes.set('oversize_files', oversize)
+        return sorted(stored)
+
+    def tokens(self):
+        """Rebuild the `RunTokens` this node was created from."""
+        from ...run.naming import RunTokens  # pylint: disable=import-outside-toplevel
+        return RunTokens(
+            model=self.model, family=self.family,
+            materials=tuple(self.materials), flake_material=self.flake_material,
+            size_x=self.size_x, size_y=self.size_y, substrate=self.substrate,
+            substrate_amorphous=self.substrate_amorphous,
+            tip_material=self.tip_material, tip_radius=self.tip_radius,
+            temperature=self.temperature, layers=self.layers,
+            pot_token=self.pot_token, rel_path=self.rel_path)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Export simulation metadata as a plain dictionary."""
-        return {
-            'uuid': str(self.uuid),
-            'pk': self.pk,
-            'simulation_type': self.simulation_type,
-            'material': self.material,
-            'substrate_material': self.substrate_material,
-            'substrate_amorphous': self.substrate_amorphous,
-            'tip_material': self.tip_material,
-            'tip_radius': self.tip_radius,
-            'layers': self.layers,
-            'force': self.force,
-            'pressure': self.pressure,
-            'scan_angle': self.scan_angle,
-            'scan_speed': self.scan_speed,
-            'temperature': self.temperature,
-            'size_x': self.size_x,
-            'size_y': self.size_y,
-            'stack_type': self.stack_type,
-            'potential_type': self.potential_type,
-            'status': self.status,
-            'simulation_path': self.simulation_path,
-        }
+        """Every attribute plus the three mutable extras, flat.
+
+        `status`, `imported_at` and `job_id` are EXTRAS, not attributes, but
+        they belong in this dict: it is what `QueryResult.to_dataframe` builds
+        each row from, and the GUI's run table has an "imported" column with no
+        other source for it on a local row. `oversize_files` is NOT in it -- it
+        is diagnostic, not a table column.
+        """
+        out = {'uuid': str(self.uuid), 'pk': self.pk, 'set_uuid': self.set_uuid,
+               'set_label': self.set_label, 'status': self.status,
+               'imported_at': self.imported_at, 'job_id': self.job_id}
+        out.update({k: getattr(self, k) for k in self._TOKEN_ATTRS})
+        return out
 
     def __repr__(self) -> str:
-        return (
-            f"<FrictionSimulationData: {self.material} "
-            f"L{self.layers} F{self.force}nN A{self.scan_angle}° "
-            f"({self.status})>"
-        )
+        return f"<FrictionSimulationData: {self.family} {self.rel_path}>"
