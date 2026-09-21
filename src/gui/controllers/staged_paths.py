@@ -61,7 +61,9 @@ _TEMPLATE_TOKEN = re.compile(r'\{[^{}]+\}')
 def _resolve_plain(value: str, base_dir: Optional[Union[str, Path]]) -> str:
     """Resolve a value that carries no template placeholder."""
     found = _find_existing(value, base_dir)
-    return str(found) if found is not None else value
+    # resolve(): a match against the cwd comes back relative, and the build
+    # subprocess runs from a different directory.
+    return str(found.resolve()) if found is not None else value
 
 
 def _resolve_templated(value: str, base_dir: Optional[Union[str, Path]]) -> str:
@@ -86,7 +88,7 @@ def _resolve_templated(value: str, base_dir: Optional[Union[str, Path]]) -> str:
     found_dir = _find_existing(str(directory), base_dir)
     if found_dir is None or not found_dir.is_dir():
         return value
-    return str(found_dir / basename)
+    return str(found_dir.resolve() / basename)
 
 
 def _resolve_value(value: str, base_dir: Optional[Union[str, Path]]) -> str:

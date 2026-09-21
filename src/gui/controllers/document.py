@@ -189,6 +189,11 @@ class ConfigDocument:
     #: outside the GUI (e.g. in CLI/test use of this class), which is exactly
     #: when there is no workspace to fall back to.
     workspace_dir: Optional[Path] = None
+    #: What an unsaved document's relative paths resolve against (see
+    #: `base_dir`). Without it they resolved against the process's cwd --
+    #: wherever the GUI happened to be launched -- so no relative path ever
+    #: validated and a sweep over relative folders listed nothing.
+    workspace_root: Optional[Path] = None
     dirty: bool = False
     #: `unexpanded_template` issues held back by the most recent validate().
     #: Not an error when a material sweep is configured -- expansion
@@ -590,8 +595,11 @@ class ConfigDocument:
 
     @property
     def base_dir(self) -> Optional[Path]:
-        """Directory that relative paths in this config resolve against."""
-        return self.source_path.parent if self.source_path else None
+        """Directory that relative paths in this config resolve against: the
+        config's own directory once saved, else the workspace root."""
+        if self.source_path:
+            return self.source_path.parent
+        return Path(self.workspace_root) if self.workspace_root else None
 
     def validate(self, settings=None) -> ConfigValidation:
         """Validate against the real pydantic model.
@@ -1106,6 +1114,7 @@ class ConfigDocument:
         target = Path(path) if path is not None else self.source_path
         if target is None:
             raise DocumentError("No path to save to.")
+        self._rebase_relative_paths(target.parent)
 
         written = write_config(
             self.normalised_values(), target,
@@ -1115,3 +1124,40 @@ class ConfigDocument:
         self.source_path = written
         self.dirty = False
         return written
+
+    def _rebase_relative_paths(self, new_base: Path) -> None:
+        """Keep relative paths pointing at the same files when `base_dir` moves.
+
+        A relative path means "relative to `base_dir`", so saving into a
+        different directory than the one they were typed against would
+        silently repoint them. Each one that resolves is rewritten relative to
+        `new_base` when both sit inside the workspace (the layout travels
+        together), and absolute otherwise. Unresolvable values are left alone
+        so validation still reports them.
+
+        Only for a never-saved document, whose paths were typed against the
+        workspace root. A loaded config keeps its text verbatim on Save As --
+        the round trip writes back what it read (see `TestRoundTrip`).
+        """
+        if self.source_path is not None:
+            return
+        old_base = self.base_dir
+        if old_base is None or Path(old_base).resolve() == Path(new_base).resolve():
+            return
+        from .staged_paths import absolutize_staged_paths  # noqa: PLC0415
+
+        resolved = absolutize_staged_paths(self.values, old_base)
+        root = Path(self.workspace_root).resolve() if self.workspace_root else None
+        new_base = Path(new_base).resolve()
+        for section, values in resolved.items():
+            if not isinstance(values, dict):
+                continue
+            for key, value in values.items():
+                before = self.values[section].get(key)
+                if value == before or not Path(value).is_absolute():
+                    continue
+                absolute = Path(value).resolve()
+                if root is not None and new_base.is_relative_to(root) \
+                        and absolute.is_relative_to(root):
+                    value = os.path.relpath(absolute, new_base)
+                self.values[section][key] = str(value)

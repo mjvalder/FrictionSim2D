@@ -1181,3 +1181,60 @@ class TestMaterialListTarget:
         target = document.write_material_names(['h-MoS2'])
 
         assert target == tmp_path / 'run_materials.txt'
+
+
+class TestUnsavedPathsResolveAgainstTheWorkspace:
+    """An unsaved config's relative paths mean the workspace, not the cwd.
+
+    With no `source_path` there was no `base_dir`, so `cif/x.cif` was looked up
+    against whatever directory the GUI was launched from: every relative path
+    failed validation, and a sweep over relative folders listed nothing.
+    """
+
+    @pytest.fixture(name='workspace')
+    def _workspace(self, tmp_path, monkeypatch):
+        root = tmp_path / 'ws'
+        (root / 'cif').mkdir(parents=True)
+        (root / 'cif' / 'h-MoS2.cif').write_text('', encoding='utf-8')
+        monkeypatch.chdir(tmp_path)  # launched from somewhere else
+        return root
+
+    def test_base_dir_falls_back_to_the_workspace_root(self, workspace):
+        document = ConfigDocument.blank('afm')
+        document.workspace_root = workspace
+        assert document.base_dir == workspace
+
+    def test_a_saved_config_still_resolves_beside_itself(self, workspace, tmp_path):
+        document = ConfigDocument.blank('afm')
+        document.workspace_root = workspace
+        document.source_path = tmp_path / 'elsewhere' / 'a.ini'
+        assert document.base_dir == tmp_path / 'elsewhere'
+
+    def test_relative_cif_path_is_found(self, workspace):
+        document = ConfigDocument.blank('afm')
+        document.workspace_root = workspace
+        document.set('2D', 'cif_path', 'cif/h-MoS2.cif')
+        issues = document.validate().issues
+        assert not [i for i in issues
+                    if i.section == '2D' and i.kind == 'missing_file'], issues
+
+    def test_saving_outside_the_workspace_keeps_paths_resolving(self, workspace, tmp_path):
+        document = ConfigDocument.blank('afm')
+        document.workspace_root = workspace
+        document.set('2D', 'cif_path', 'cif/h-MoS2.cif')
+        document.set('2D', 'pot_path', 'cif/{mat}.sw')
+        target = tmp_path / 'far' / 'away' / 'deeper' / 'still' / 'more' / 'a.ini'
+        document.save(target)
+        assert (Path(document.get('2D', 'cif_path')) if Path(
+            document.get('2D', 'cif_path')).is_absolute() else
+            target.parent / document.get('2D', 'cif_path')).exists()
+        assert document.get('2D', 'pot_path') == str(workspace / 'cif' / '{mat}.sw')
+        reread = parse_config(target)
+        assert reread['2D']['cif_path'] == document.get('2D', 'cif_path')
+
+    def test_saving_inside_the_workspace_stays_relative(self, workspace):
+        document = ConfigDocument.blank('afm')
+        document.workspace_root = workspace
+        document.set('2D', 'cif_path', 'cif/h-MoS2.cif')
+        document.save(workspace / 'configs' / 'a.ini')
+        assert document.get('2D', 'cif_path') == '../cif/h-MoS2.cif'

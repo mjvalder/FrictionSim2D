@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         # see ConfigDocument.write_material_names' docstring for why it
         # refuses to fall back to the process's cwd.
         self.document.workspace_dir = workspace.configs_dir
+        self.document.workspace_root = workspace.root
         # A workspace settings.yaml is used when present, but only because it
         # is passed explicitly; nothing picks it up from the directory itself.
         workspace_settings = workspace.settings_path
@@ -805,6 +806,7 @@ class MainWindow(QMainWindow):
         # never actually consults this -- set for consistency with __init__
         # and _choose_workspace rather than because this document needs it.
         self.document.workspace_dir = self.workspace.configs_dir
+        self.document.workspace_root = self.workspace.root
         self.form.document = self.document
         self.form.rebuild()
         self._validate()
@@ -853,6 +855,7 @@ class MainWindow(QMainWindow):
         # it correct regardless, so switching workspaces before ever saving
         # does not leave the old workspace's directory behind.
         self.document.workspace_dir = self.workspace.configs_dir
+        self.document.workspace_root = self.workspace.root
         self._update_workspace_label()
         self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
 

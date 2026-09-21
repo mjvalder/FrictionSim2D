@@ -224,3 +224,29 @@ class TestInputIsNotMutated:
 
         assert Path(result['2D']['cif_path']).is_absolute()
         assert Path(result['sub']['cif_path']).is_absolute()
+
+
+class TestLaunchedFromTheConfigDirectory:
+    """The GUI started from the config's own directory.
+
+    `search_paths` tries a name against the cwd first, so there `Si.sw` is
+    "found" as the relative `Si.sw` -- and staged unchanged. The build
+    subprocess runs from elsewhere and cannot find it.
+    """
+
+    def test_plain_value_found_via_cwd_is_staged_absolute(self, tmp_path, monkeypatch):
+        config_dir = _make_material_dirs(tmp_path)
+        (config_dir / 'Si.sw').write_text('pot contents')
+        monkeypatch.chdir(config_dir)
+
+        result = absolutize_staged_paths({'tip': {'pot_path': 'Si.sw'}}, config_dir)
+
+        assert result['tip']['pot_path'] == str((config_dir / 'Si.sw').resolve())
+
+    def test_templated_value_found_via_cwd_is_staged_absolute(self, tmp_path, monkeypatch):
+        config_dir = _make_material_dirs(tmp_path)
+        monkeypatch.chdir(config_dir)
+
+        result = absolutize_staged_paths({'2D': {'cif_path': 'cif/{mat}.cif'}}, config_dir)
+
+        assert result['2D']['cif_path'] == str((config_dir / 'cif').resolve() / '{mat}.cif')

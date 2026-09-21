@@ -244,6 +244,14 @@ class PreviewRequest:
             self.single_member(), self.model, self.layer, self.referenced_files)
 
 
+def _cached_success(result_file: Path) -> bool:
+    """Whether a cached preview result exists and records a successful build."""
+    try:
+        return bool(json.loads(result_file.read_text(encoding='utf-8')).get('ok'))
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return False
+
+
 class PreviewController(QObject):
     """Builds a preview and reports the result."""
 
@@ -292,10 +300,14 @@ class PreviewController(QObject):
         if self.current_label:
             self.progress.emit(self.current_label)
 
-        if result_file.exists():
+        if _cached_success(result_file):
             self.progress.emit('reusing cached preview')
             self._deliver(result_file)
             return
+        # A failure is never reused: its cause can lie outside the cache key
+        # (a path staged wrongly, a potential file added since), so replaying
+        # it would outlive the fix.
+        result_file.unlink(missing_ok=True)
 
         directory.mkdir(parents=True, exist_ok=True)
         # The config is about to be written into the preview cache directory,
