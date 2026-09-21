@@ -6,7 +6,7 @@ friction simulation data according to FAIR principles.
 
 from .simulation import FrictionSimulationData
 from .simulation_set import FrictionSimulationSetData
-from .results import FrictionResultsData
+from .results import FrictionResultsData, TIER_KEYS
 from .provenance import FrictionProvenanceData
 
 __all__ = [
@@ -14,4 +14,5 @@ __all__ = [
     'FrictionSimulationSetData',
     'FrictionResultsData',
     'FrictionProvenanceData',
+    'TIER_KEYS',
 ]

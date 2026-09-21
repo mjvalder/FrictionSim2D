@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.core.observables import FAMILIES
+from src.core.observables import FAMILIES, layer_channels, rename_map
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,216 @@ class SchemaError(ValueError):
     unknown template revision, and parsing it positionally would shift every
     value.
     """
+
+
+#: Families whose results files follow the sheet-on-sheet schema. The legacy
+#: lateral-force correction applies only to these -- the AFM stack never wrote
+#: an eV/A lateral force.
+SHEET_FAMILIES = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
+#: Families on the AFM stack. Only these have a positional LEGACY_2026 fallback.
+AFM_FAMILIES = ('afm', 'indent', 'pes_tip')
+
+#: eV/A -> nN. Moved out of DataReader; the class keeps an alias.
+LF_SCHEMA1_CORRECTION = 1.602176565
+#: Output-schema version this reader understands.
+LF_SCHEMA_CURRENT = 2
+#: Column names matching `fix fc_ave` output order in afm/slide.lmp.
+AFM_FILE_COLUMNS = [
+    'time', 'nf', 'lfx', 'lfy', 'comx', 'comy', 'comz',
+    'tipx', 'tipy', 'tipz',
+]
+
+
+def parse_lf_schema(line1: str) -> int:
+    """Output-schema version from a results file's first line.
+
+    Parsed as an INTEGER, not matched as the substring 'schema=2'. A
+    substring test treats every future version as schema 1 and silently
+    applies the legacy unit correction to a file that never needed it --
+    so bumping the marker would corrupt data rather than fail loudly.
+    Absent marker means the file predates the marker entirely: schema 1.
+    """
+    m = re.search(r'schema=(\d+)', line1 or '')
+    return int(m.group(1)) if m else 1
+
+
+def branch_column(df):
+    """The reaction-force-x column, under whichever name it parsed to.
+
+    The registry declares `react_x` with rename_to='v_sx', so a
+    header-carrying file renames the native away. Retained files parsed
+    before that declaration, and any file read through a path that skips
+    the rename, still carry 'v_sx'. Both are accepted; neither is
+    guessed at.
+    """
+    for candidate in ('react_x', 'v_sx'):
+        if candidate in df.columns:
+            return df[candidate]
+    return None
+
+
+def lateral_columns(df):
+    """The (x, y) lateral-force column names present in the frame.
+
+    Symmetric with `branch_column`: the registry renames the sheet's
+    native `v_xfrict`/`v_yfrict` to `lfx`/`lfy` for window/peratom tiers
+    but to `raw_lfx`/`raw_lfy` for the raw tier, so both name pairs must
+    be checked. Returns None when neither is present -- there is no
+    lateral force column to correct at all.
+    """
+    if 'lfx' in df.columns:
+        return ('lfx', 'lfy')
+    if 'raw_lfx' in df.columns:
+        return ('raw_lfx', 'raw_lfy')
+    return None
+
+
+def is_lj_branch(lfx, sx) -> bool:
+    """True when a pre-schema-2 sheet frame needs the unit correction.
+
+    On the many-body branch the template defines ``xfrict`` AS ``v_sx``,
+    so LAMMPS writes both columns from one value and they are byte-
+    identical. Any difference means the LJ branch, whose ``compute
+    group/group`` force is in eV/A while the load is already nN.
+
+    Defined once and used by BOTH the reader (whole column) and
+    ``audit_lf_units`` (a one-row sample), so the two cannot drift apart.
+    """
+    return not pd.Series(list(lfx)).equals(pd.Series(list(sx)))
+
+
+def correct_legacy_lf_schema1(df, filepath, family: str):
+    """Rescale a pre-``schema=2`` sheet frame's lateral force to nN.
+
+    FROZEN legacy path, moved verbatim from
+    `DataReader._correct_legacy_lf_schema1`. The ONLY change is the
+    vocabulary: the old `if sim_type != 'sheet'` becomes
+    `if family not in SHEET_FAMILIES`, so a hetero or flake file is corrected
+    too -- under the old traversal vocabulary they arrived as `'sheet'` and
+    were, which is the behaviour being preserved, not extended.
+    """
+    if df.attrs.get('lf_corrected'):
+        # Re-entry guard: scaling twice gives 1.602^2.
+        return df
+    df.attrs['lf_corrected'] = False
+    schema = df.attrs.get('lf_schema', 1)
+    if family not in SHEET_FAMILIES or schema != 1:
+        if schema > LF_SCHEMA_CURRENT or schema < 1:
+            logger.warning(
+                "%s: output schema %s is not one this reader understands "
+                "(known: 1..%s). Lateral force left untouched; upgrade "
+                "the reader rather than trusting this frame.",
+                filepath, schema, LF_SCHEMA_CURRENT)
+        return df
+    cols = lateral_columns(df)
+    if cols is None:
+        return df                       # no lateral force to correct at all
+    lfx_name, lfy_name = cols
+    branch = branch_column(df)
+    if branch is None:
+        logger.warning(
+            "%s: pre-schema-2 sheet file carries %s but no reaction-force "
+            "column (react_x/v_sx), so the LJ/many-body branch cannot be "
+            "identified. Lateral force left AS WRITTEN; if this run used "
+            "an lj/cut interlayer potential its COF is a factor %s too "
+            "small.", filepath, lfx_name, LF_SCHEMA1_CORRECTION)
+        return df
+    if not is_lj_branch(df[lfx_name], branch):
+        return df                       # many-body branch: already nN
+    df[lfx_name] = df[lfx_name] * LF_SCHEMA1_CORRECTION
+    if lfy_name in df.columns:
+        df[lfy_name] = df[lfy_name] * LF_SCHEMA1_CORRECTION
+    df.attrs['lf_corrected'] = True
+    logger.warning(
+        "%s: pre-schema-2 sheet file -- lateral force was eV/A against a "
+        "nN load, so COF was a factor %s too small. Multiplied %s/%s by "
+        "%s. Re-run this simulation to retire the correction.",
+        filepath, LF_SCHEMA1_CORRECTION, lfx_name, lfy_name,
+        LF_SCHEMA1_CORRECTION)
+    return df
+
+
+def _tier_of(filename: str) -> str:
+    """`friction_`/`fc_ave_` -> window, `raw_` -> raw, `peratom_` -> peratom."""
+    return ('raw' if filename.startswith('raw_')
+            else 'peratom' if filename.startswith('peratom_')
+            else 'window')
+
+
+def _rename_for(family: str, tier: str, n_layers: int) -> dict:
+    """`rename_map` extended with this run's real layer count.
+
+    REGISTRY only declares the bilayer `com{x,y,z}_L1/L2`, so a four-layer
+    run's native `v_comx_L3` would keep its native name and the store and the
+    reader would disagree about a column that exists in both.
+    """
+    rmap = dict(rename_map(family, tier))
+    for observable in layer_channels(n_layers):
+        if observable.tier == tier and observable.rename_to:
+            rmap[observable.rename_to] = observable.name
+    return rmap
+
+
+def read_results_file(filepath: Path, family: str,
+                      n_layers: int = 2) -> pd.DataFrame:
+    """Parse one LAMMPS results file into a labelled DataFrame.
+
+    Header-first: the `# TimeStep v_...` line names the native columns and the
+    observable registry's per-tier rename map turns them into channel names.
+    The tier comes from the filename prefix. `n_layers` extends the rename map
+    to this run's real layer count. Raises `SchemaError` when a header-less
+    file's width does not match `AFM_FILE_COLUMNS`.
+
+    Sets `df.attrs['lf_schema']` and applies `correct_legacy_lf_schema1`, so a
+    frame that comes out of here is directly comparable with one the DataReader
+    produced from the same bytes -- which is what lets the store and the reader
+    share one parser instead of drifting.
+    """
+    if family not in FAMILIES:
+        raise ValueError(f"unknown family {family!r}; known: {FAMILIES}")
+
+    header_lines: list = ['', '']
+    header_cols: list | None = None
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
+            header_lines = [next(fh, ''), next(fh, '')]
+        if len(header_lines) > 1 and header_lines[1].startswith('#'):
+            tokens = header_lines[1].lstrip('#').strip().split()
+            if tokens:
+                header_cols = ['time' if tok == 'TimeStep' else tok
+                               for tok in tokens]
+    except OSError:
+        pass
+
+    tier = _tier_of(Path(filepath).name)
+
+    if header_cols:
+        df = pd.read_csv(filepath, sep=r'\s+', header=None, names=header_cols,
+                         skiprows=2)
+        df.rename(columns=_rename_for(family, tier, n_layers), inplace=True)
+        df.attrs['lf_schema'] = parse_lf_schema(header_lines[0])
+        return correct_legacy_lf_schema1(df, filepath, family)
+
+    # LEGACY_2026 positional fallback -- AFM stack only. The sheet corpus was
+    # surveyed on 2026-08-29: zero non-empty headerless files. Guessing is
+    # worse than refusing.
+    if family not in AFM_FAMILIES:
+        raise SchemaError(
+            f"{filepath}: no column header and no positional schema for "
+            f"family {family!r}")
+    try:
+        probe = pd.read_csv(filepath, sep=r'\s+', header=None, skiprows=2,
+                            nrows=1)
+    except pd.errors.EmptyDataError as exc:
+        raise SchemaError(f"{filepath}: no data rows") from exc
+    if probe.shape[1] != len(AFM_FILE_COLUMNS):
+        raise SchemaError(
+            f"{filepath}: {probe.shape[1]} columns, LEGACY_2026 expects "
+            f"{len(AFM_FILE_COLUMNS)} and no header is present")
+    df = pd.read_csv(filepath, sep=r'\s+', header=None,
+                     names=AFM_FILE_COLUMNS, skiprows=2)
+    df.attrs['lf_schema'] = 1          # header-less files predate the marker
+    return correct_legacy_lf_schema1(df, filepath, family)
 
 
 class _NpEncoder(json.JSONEncoder):
@@ -64,21 +274,16 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     stores it in a structured format.
     """
 
-    # Column names matching fix fc_ave output order in afm/slide.lmp.
-    # 9 LAMMPS variables + timestep = 10 file columns.
-    _AFM_FILE_COLUMNS = [
-        'time', 'nf', 'lfx', 'lfy', 'comx', 'comy', 'comz',
-        'tipx', 'tipy', 'tipz',
-    ]
-
-    # eV/A -> nN. Pre-schema-2 sheet files emitted the LJ-branch lateral force
-    # unscaled while the normal load was already nN, so their COF is a factor
-    # 1.602176565 too SMALL. The correction is a multiplication.
-    _LF_SCHEMA1_CORRECTION = 1.602176565
-
-    # Output-schema version this reader understands. Bump BOTH this and the
-    # templates' title1 together; _parse_lf_schema refuses to guess.
-    _LF_SCHEMA_CURRENT = 2
+    # Aliases: the module-level definitions above are the source of truth.
+    # Kept because audit_lf_units.py:30,42 and eight existing assertions reach
+    # these through the class, and there is no reason to churn them.
+    _LF_SCHEMA1_CORRECTION = LF_SCHEMA1_CORRECTION
+    _LF_SCHEMA_CURRENT = LF_SCHEMA_CURRENT
+    _AFM_FILE_COLUMNS = AFM_FILE_COLUMNS
+    _parse_lf_schema = staticmethod(parse_lf_schema)
+    _branch_column = staticmethod(branch_column)
+    _lateral_columns = staticmethod(lateral_columns)
+    _is_lj_branch = staticmethod(is_lj_branch)
 
     # Filename patterns (compiled once at class level)
     _FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
@@ -264,210 +469,32 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         """
         return sim_type == 'sheet'
 
-    def _read_dataframe(self, filepath: Path, sim_type: str) -> pd.DataFrame:
-        """Read a LAMMPS output file and return a labelled DataFrame.
+    def _correct_legacy_lf_schema1(self, df, filepath, sim_type: str):
+        """Delegate, mapping the traversal vocabulary onto the family one.
 
-        Header-first for BOTH sim types: real campaign files carry the
-        ``# TimeStep v_x v_y ...`` line LAMMPS writes, and the observable
-        registry owns the native-name -> column-name map (per tier, chosen by
-        filename prefix). The positional ``LEGACY_2026`` lists survive only as
-        a strict fallback for header-less files: the width must match exactly,
-        otherwise :class:`SchemaError` is raised. The old behaviour —
-        ``pd.read_csv(names=...)`` with too few names — silently promoted the
-        extra columns to an index AND shifted every value one column left,
-        while keeping ``df.shape[1]`` equal to the expected count so the guard
-        could never fire (spec §1.1 defect 1).
+        Existing callers (and `tests/postprocessing/test_read_data_schema.py`)
+        pass `'sheet'`/`'tip'`; `correct_legacy_lf_schema1` takes a family.
         """
-        from src.core.observables import rename_map
+        family = 'sheetonsheet' if sim_type == 'sheet' else 'afm'
+        return correct_legacy_lf_schema1(df, filepath, family)
 
-        header_cols: list[str] | None = None
-        header_lines: list[str] = ['', '']
+    def _read_dataframe(self, filepath: Path, sim_type: str,
+                        n_layers: int = 2) -> pd.DataFrame:
+        """Delegate to the module-level parser.
+
+        The caller passes the traversal vocabulary (`'tip'`/`'sheet'`), so the
+        family is resolved here first -- `_registry_sim_type` prefers the
+        file's own `family=` header and falls back to `_REGISTRY_SIM_TYPE`.
+        """
+        header = ''
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
-                header_lines = [next(fh, ''), next(fh, '')]
-            if len(header_lines) > 1 and header_lines[1].startswith('#'):
-                tokens = header_lines[1].lstrip('#').strip().split()
-                if tokens:
-                    header_cols = [
-                        'time' if t == 'TimeStep' else t for t in tokens
-                    ]
+                header = next(fh, '')
         except OSError:
             pass
-
-        if header_cols:
-            df = pd.read_csv(
-                filepath, sep=r'\s+', header=None, names=header_cols,
-                skiprows=2,
-            )
-            # tier from filename prefix: friction_/fc_ave_ -> window,
-            # raw_ -> raw, peratom_ -> peratom (per-tier rename maps)
-            stem = filepath.name
-            tier = ('raw' if stem.startswith('raw_') else
-                    'peratom' if stem.startswith('peratom_') else 'window')
-            rmap = rename_map(
-                self._registry_sim_type(sim_type, header_lines[0]), tier)
-            df.rename(columns=rmap, inplace=True)
-            # Line 1 carries the output-schema marker. Absent means pre-fix:
-            # the sheet's LJ-branch lateral force is in eV/A while the load it
-            # is divided by is already nN, so its COF is a factor
-            # 1.602176565 too SMALL (docs/notes/2026-08-27-sheet-cof-unit-
-            # correction.md).
-            df.attrs['lf_schema'] = self._parse_lf_schema(header_lines[0])
-            return self._correct_legacy_lf_schema1(df, filepath, sim_type)
-
-        # LEGACY_2026 positional fallback -- AFM only. The sheet corpus was
-        # surveyed on 2026-08-29: 24,064 candidate results files, zero
-        # non-empty headerless, and only 5 of 7,171 sheet files matching the
-        # 17-column list this branch used to carry. Guessing is worse than
-        # refusing.
-        if sim_type != 'tip':
-            raise SchemaError(
-                f"{filepath}: no column header and no positional schema for "
-                f"sim_type {sim_type!r}"
-            )
-        legacy = self._AFM_FILE_COLUMNS
-        try:
-            probe = pd.read_csv(
-                filepath, sep=r'\s+', header=None, skiprows=2, nrows=1,
-            )
-        except pd.errors.EmptyDataError as exc:
-            raise SchemaError(f"{filepath}: no data rows") from exc
-        if probe.shape[1] != len(legacy):
-            raise SchemaError(
-                f"{filepath}: {probe.shape[1]} columns, LEGACY_2026 expects "
-                f"{len(legacy)} and no header is present"
-            )
-        df = pd.read_csv(
-            filepath, sep=r'\s+', header=None, names=legacy, skiprows=2,
-        )
-        df.attrs['lf_schema'] = 1      # header-less files predate the marker
-        return self._correct_legacy_lf_schema1(df, filepath, sim_type)
-
-    @staticmethod
-    def _branch_column(df):
-        """The reaction-force-x column, under whichever name it parsed to.
-
-        The registry declares `react_x` with rename_to='v_sx', so a
-        header-carrying file renames the native away. Retained files parsed
-        before that declaration, and any file read through a path that skips
-        the rename, still carry 'v_sx'. Both are accepted; neither is
-        guessed at.
-        """
-        for candidate in ('react_x', 'v_sx'):
-            if candidate in df.columns:
-                return df[candidate]
-        return None
-
-    @staticmethod
-    def _lateral_columns(df):
-        """The (x, y) lateral-force column names present in the frame.
-
-        Symmetric with `_branch_column`: the registry renames the sheet's
-        native `v_xfrict`/`v_yfrict` to `lfx`/`lfy` for window/peratom tiers
-        but to `raw_lfx`/`raw_lfy` for the raw tier, so both name pairs must
-        be checked. Returns None when neither is present -- there is no
-        lateral force column to correct at all.
-        """
-        if 'lfx' in df.columns:
-            return ('lfx', 'lfy')
-        if 'raw_lfx' in df.columns:
-            return ('raw_lfx', 'raw_lfy')
-        return None
-
-    @staticmethod
-    def _is_lj_branch(lfx, sx) -> bool:
-        """True when a pre-schema-2 sheet frame needs the unit correction.
-
-        On the many-body branch the template defines ``xfrict`` AS ``v_sx``,
-        so LAMMPS writes both columns from one value and they are byte-
-        identical. Any difference means the LJ branch, whose ``compute
-        group/group`` force is in eV/A while the load is already nN.
-
-        Defined once and used by BOTH the reader (whole column) and
-        ``audit_lf_units`` (a one-row sample), so the two cannot drift apart.
-        """
-        import pandas as _pd  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
-        return not _pd.Series(list(lfx)).equals(_pd.Series(list(sx)))
-
-    @classmethod
-    def _parse_lf_schema(cls, line1: str) -> int:
-        """Output-schema version from a results file's first line.
-
-        Parsed as an INTEGER, not matched as the substring 'schema=2'. A
-        substring test treats every future version as schema 1 and silently
-        applies the legacy unit correction to a file that never needed it --
-        so bumping the marker would corrupt data rather than fail loudly.
-        Absent marker means the file predates the marker entirely: schema 1.
-        """
-        m = re.search(r'schema=(\d+)', line1 or '')
-        return int(m.group(1)) if m else 1
-
-    def _correct_legacy_lf_schema1(self, df, filepath, sim_type: str):
-        """Rescale a pre-``schema=2`` sheet frame's lateral force to nN.
-
-        FROZEN legacy path. Delete it once the affected runs have been
-        re-simulated -- it exists so old and new runs stay comparable during
-        that window, not as long-term support.
-
-        Branch detection: on the many-body branch the template defines
-        ``xfrict`` AS ``v_sx``, so the two columns are bit-identical. Any
-        difference means the LJ branch, whose ``compute group/group`` force is
-        in eV/A while the load it is divided by is already nN. Verified over
-        the retained tree: 7,171 of 7,669 files classify unambiguously.
-
-        The discriminator is resolved by ``_branch_column``, which accepts
-        either ``react_x`` (the registry's name, once Task 9 declares it) or
-        ``v_sx`` (its native name, for files parsed before that declaration).
-        The lateral-force column itself is resolved by ``_lateral_columns``,
-        which likewise accepts ``lfx``/``lfy`` or ``raw_lfx``/``raw_lfy``.
-        """
-        if df.attrs.get('lf_corrected'):
-            # Re-entry guard: scaling twice gives 1.602^2. Not reachable from
-            # src/ today (each call site passes a freshly parsed frame, and a
-            # fresh read_csv starts with empty attrs), but the function is
-            # public enough to be called on a frame that already went through.
-            return df
-        df.attrs['lf_corrected'] = False
-        schema = df.attrs.get('lf_schema', 1)
-        if sim_type != 'sheet' or schema != 1:
-            if schema > self._LF_SCHEMA_CURRENT or schema < 1:
-                logger.warning(
-                    "%s: output schema %s is not one this reader understands "
-                    "(known: 1..%s). Lateral force left untouched; upgrade "
-                    "the reader rather than trusting this frame.",
-                    filepath, schema, self._LF_SCHEMA_CURRENT)
-            return df
-        lateral_cols = self._lateral_columns(df)
-        if lateral_cols is None:
-            return df                  # no lateral force to correct at all
-        lfx_name, lfy_name = lateral_cols
-        branch = self._branch_column(df)
-        if branch is None:
-            # There IS a lateral force but no react_x/v_sx to identify the
-            # branch with, so it cannot be known whether it needs scaling.
-            # This is the one exit that abandons a possibly-affected file:
-            # say so.
-            logger.warning(
-                "%s: pre-schema-2 sheet file carries %s but no reaction-force "
-                "column (react_x/v_sx), so the LJ/many-body branch cannot be "
-                "identified. Lateral force left AS WRITTEN; if this run used "
-                "an lj/cut interlayer potential its COF is a factor %s too "
-                "small.",
-                filepath, lfx_name, self._LF_SCHEMA1_CORRECTION)
-            return df
-        if not self._is_lj_branch(df[lfx_name], branch):
-            return df                  # many-body branch: already nN
-        df[lfx_name] = df[lfx_name] * self._LF_SCHEMA1_CORRECTION
-        if lfy_name in df.columns:
-            df[lfy_name] = df[lfy_name] * self._LF_SCHEMA1_CORRECTION
-        df.attrs['lf_corrected'] = True
-        logger.warning(
-            "%s: pre-schema-2 sheet file -- lateral force was eV/A against a "
-            "nN load, so COF was a factor %s too small. Multiplied %s/%s by "
-            "%s. Re-run this simulation to retire the correction.",
-            filepath, self._LF_SCHEMA1_CORRECTION, lfx_name, lfy_name,
-            self._LF_SCHEMA1_CORRECTION)
-        return df
+        return read_results_file(filepath,
+                                 self._registry_sim_type(sim_type, header),
+                                 n_layers=n_layers)
 
     def _parse_filename_params(
         self,

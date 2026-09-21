@@ -1,145 +1,75 @@
-"""AiiDA Data node for friction simulation results.
+"""AiiDA Data node for one load point's results (spec §4.1).
 
-Stores processed time-series output from LAMMPS friction simulations
-(normal force, lateral force, coefficient of friction, etc.) together
-with summary statistics for efficient database querying.
+`FrictionResultsData` stores its results files VERBATIM in the node
+repository and re-parses them on demand with `read_data.read_results_file`;
+only summary scalars from `RunSummary` are attributes. Time series are NEVER
+attributes -- 13k JSONB blobs on SQLite is what this replaces.
 """
 
-import json
-from typing import Any, Dict, List, Optional, Union
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 from aiida.orm import Data  # pyright: ignore[reportMissingImports]
-from ...data.models import ResultRecord, compute_friction_stats, compute_time_series_hash
+
+#: The three sampling tiers that become stored tier files. `src/aiida/ingest.py`
+#: imports this rather than declaring its own, so `POINT_KEYS = TIER_KEYS +
+#: ('retract',)` there and the loop here cannot disagree about what a tier is.
+TIER_KEYS = ('window', 'raw', 'peratom')
 
 
 class FrictionResultsData(Data):
-    """AiiDA Data node storing friction simulation results.
+    """One load point: `(load, angle, speed)` for a slide family, one grid for
+    a PES scan, one load for an indent.
 
-    Stores:
-        - Time-series data (nf, lfx, lfy, lateral_force, cof, positions, …)
-        - Summary statistics (mean, std, min, max for key fields)
-        - Metadata for linking back to the simulation
-
-    Time-series values are stored as lists (PostgreSQL-compatible).
-    Summary statistics are direct attributes for efficient querying.
+    The original results files are stored verbatim in the node repository and
+    re-parsed on demand with `read_data.read_results_file`; only summary
+    scalars are attributes. Time series are NEVER attributes -- 13k JSONB
+    blobs on SQLite is what this replaces.
     """
 
-    STANDARD_FIELDS = [
-        'time', 'nf', 'lfx', 'lfy', 'lateral_force', 'cof',
-        'comx', 'comy', 'comz', 'tipx', 'tipy', 'tipz',
-    ]
-    _SUMMARY_FIELDS = ('nf', 'lfx', 'lfy', 'lateral_force', 'cof')
+    _IDENTITY = ('family', 'load_kind', 'load', 'angle', 'speed', 'layers',
+                 'tiers', 'ntimesteps', 'is_complete', 'content_sha256',
+                 'run_uuid', 'set_uuid')
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    #: filename prefixes per key. 'indent_' is the retract curve, NOT the window
+    #: tier -- filing it under 'window' would make frame('window') return the
+    #: force-distance curve for every indent run.
+    _TIER_PREFIX = {'window': ('friction_', 'fc_ave_', 'pes_scan'),
+                    'raw': ('raw_',), 'peratom': ('peratom_',),
+                    'retract': ('indent_',)}
 
-    # -- Time-series storage --------------------------------------------------
+    # `family` is the one validated setter -- it imports the vocabulary rather
+    # than repeating a subset of it.
+    @property
+    def family(self) -> str:
+        return self.base.attributes.get('family', '')
+
+    @family.setter
+    def family(self, value: str):
+        from ...core.observables import FAMILIES  # pylint: disable=import-outside-toplevel
+        if value not in FAMILIES:
+            raise ValueError(f"family must be one of {FAMILIES}, got {value!r}")
+        self.base.attributes.set('family', str(value))
 
     @property
-    def time_series(self) -> Dict[str, List[float]]:
-        """Full time-series data as ``{field_name: [values…]}``."""
-        return self.base.attributes.get('time_series', {})
+    def load_kind(self) -> str:
+        return self.base.attributes.get('load_kind', '')
 
-    @time_series.setter
-    def time_series(self, value: Dict[str, Union[List[float], Any]]):
-        serialisable = {}
-        for key, val in value.items():
-            arr = np.asarray(val)
-            serialisable[key] = arr.tolist()
-        self.base.attributes.set('time_series', serialisable)
-
-        # Auto-update metadata
-        if serialisable:
-            lengths = [len(v) for v in serialisable.values()]
-            if lengths:
-                self.ntimesteps = lengths[0]
-                self.field_names = list(serialisable.keys())
-
-        self._calculate_summary_statistics()
+    @load_kind.setter
+    def load_kind(self, value: str):
+        self.base.attributes.set('load_kind', str(value))
 
     @property
-    def time(self) -> List[float]:
-        """Time values for the time series."""
-        return self.time_series.get('time', [])
+    def load(self) -> float:
+        return self.base.attributes.get('load', 0.0)
 
-    @property
-    def ntimesteps(self) -> int:
-        """Number of timesteps in the data."""
-        return self.base.attributes.get('ntimesteps', 0)
-
-    @ntimesteps.setter
-    def ntimesteps(self, value: int):
-        self.base.attributes.set('ntimesteps', int(value))
-
-    @property
-    def field_names(self) -> List[str]:
-        """List of field names present in the data."""
-        return self.base.attributes.get('fields', [])
-
-    @field_names.setter
-    def field_names(self, value: List[str]):
-        self.base.attributes.set('fields', list(value))
-
-    # -- Simulation identification --------------------------------------------
-
-    @property
-    def simulation_type(self) -> str:
-        """Simulation type: ``'afm'`` or ``'sheetonsheet'``."""
-        return self.base.attributes.get('simulation_type', '')
-
-    @simulation_type.setter
-    def simulation_type(self, value: str):
-        self.base.attributes.set('simulation_type', str(value))
-
-    @property
-    def simulation_uuid(self) -> str:
-        """UUID of the parent ``FrictionSimulationData`` node."""
-        return self.base.attributes.get('simulation_uuid', '')
-
-    @simulation_uuid.setter
-    def simulation_uuid(self, value: str):
-        self.base.attributes.set('simulation_uuid', str(value))
-
-    @property
-    def set_uuid(self) -> str:
-        """UUID of the parent ``FrictionSimulationSetData`` node."""
-        return self.base.attributes.get('set_uuid', '')
-
-    @set_uuid.setter
-    def set_uuid(self, value: str):
-        self.base.attributes.set('set_uuid', str(value))
-
-    @property
-    def material(self) -> str:
-        """Material this result is for."""
-        return self.base.attributes.get('material', '')
-
-    @material.setter
-    def material(self, value: str):
-        self.base.attributes.set('material', value)
-
-    @property
-    def layers(self) -> int:
-        """Number of layers."""
-        return self.base.attributes.get('layers', 1)
-
-    @layers.setter
-    def layers(self, value: int):
-        self.base.attributes.set('layers', int(value))
-
-    @property
-    def force(self) -> float:
-        """Applied force in nN."""
-        return self.base.attributes.get('force', 0.0)
-
-    @force.setter
-    def force(self, value: float):
-        self.base.attributes.set('force', float(value))
+    @load.setter
+    def load(self, value: float):
+        self.base.attributes.set('load', float(value))
 
     @property
     def angle(self) -> float:
-        """Scan angle in degrees."""
         return self.base.attributes.get('angle', 0.0)
 
     @angle.setter
@@ -148,310 +78,264 @@ class FrictionResultsData(Data):
 
     @property
     def speed(self) -> float:
-        """Scan speed in m/s."""
-        return self.base.attributes.get('speed', 2.0)
+        return self.base.attributes.get('speed', 0.0)
 
     @speed.setter
     def speed(self, value: float):
         self.base.attributes.set('speed', float(value))
 
     @property
-    def size(self) -> str:
-        """Size identifier (e.g. ``'100x100'``)."""
-        return self.base.attributes.get('size', '')
+    def layers(self) -> Optional[int]:
+        return self.base.attributes.get('layers', None)
 
-    @size.setter
-    def size(self, value: str):
-        self.base.attributes.set('size', value)
+    @layers.setter
+    def layers(self, value: Optional[int]):
+        self.base.attributes.set('layers', None if value is None else int(value))
+
+    @property
+    def tiers(self) -> List[str]:
+        return self.base.attributes.get('tiers', [])
+
+    @tiers.setter
+    def tiers(self, value):
+        self.base.attributes.set('tiers', [str(x) for x in value])
+
+    @property
+    def ntimesteps(self) -> int:
+        return self.base.attributes.get('ntimesteps', 0)
+
+    @ntimesteps.setter
+    def ntimesteps(self, value: int):
+        self.base.attributes.set('ntimesteps', int(value))
 
     @property
     def is_complete(self) -> bool:
-        """Whether this result represents a complete simulation."""
         return self.base.attributes.get('is_complete', True)
 
     @is_complete.setter
     def is_complete(self, value: bool):
         self.base.attributes.set('is_complete', bool(value))
 
-    # -- Summary statistics (read-only, auto-calculated) ----------------------
+    @property
+    def content_sha256(self) -> str:
+        return self.base.attributes.get('content_sha256', '')
+
+    @content_sha256.setter
+    def content_sha256(self, value: str):
+        self.base.attributes.set('content_sha256', str(value))
 
     @property
-    def mean_nf(self) -> float:
-        """Mean normal force."""
-        return self.base.attributes.get('mean_nf', 0.0)
+    def run_uuid(self) -> str:
+        return self.base.attributes.get('run_uuid', '')
+
+    @run_uuid.setter
+    def run_uuid(self, value: str):
+        self.base.attributes.set('run_uuid', str(value))
 
     @property
-    def mean_lfx(self) -> float:
-        """Mean lateral force (x-direction)."""
-        return self.base.attributes.get('mean_lfx', 0.0)
+    def set_uuid(self) -> str:
+        return self.base.attributes.get('set_uuid', '')
 
-    @property
-    def mean_lfy(self) -> float:
-        """Mean lateral force (y-direction)."""
-        return self.base.attributes.get('mean_lfy', 0.0)
+    @set_uuid.setter
+    def set_uuid(self, value: str):
+        self.base.attributes.set('set_uuid', str(value))
 
-    @property
-    def mean_lateral_force(self) -> float:
-        """Mean magnitude of lateral force."""
-        return self.base.attributes.get('mean_lateral_force', 0.0)
+    # -- Files -----------------------------------------------------------
 
-    @property
-    def mean_cof(self) -> float:
-        """Mean coefficient of friction."""
-        return self.base.attributes.get('mean_cof', 0.0)
+    @staticmethod
+    def _run_relative_name(path: Path) -> str:
+        """`<parent-dir-name>/<filename>`.
 
-    @property
-    def std_cof(self) -> float:
-        """Standard deviation of coefficient of friction."""
-        return self.base.attributes.get('std_cof', 0.0)
-
-    @property
-    def friction_coefficient(self) -> float:
-        """Friction coefficient (alias for ``mean_cof``)."""
-        return self.mean_cof
-
-    def _calculate_summary_statistics(self):
-        """Compute and store summary statistics from the current time-series.
-
-        Uses :func:`~src.data.models.compute_friction_stats` as the canonical
-        source for COF and force statistics (ratio-of-means, 20 % transient
-        skip). Min/max values are still computed on the full series.
+        R18: every tier and auxiliary file this node stores lives one level
+        below the run root (`results/`, `data/`, `lammps/`), so keeping that
+        one path component is what lets a future export (Task 17) write a
+        member back to the exact run-relative path it came from, instead of
+        guessing which subdirectory it belongs in from a bare basename.
         """
-        ts = self.time_series
-        if not ts:
-            return
+        path = Path(path)
+        return f'{path.parent.name}/{path.name}'
 
-        # ------------------------------------------------------------------
-        # Canonical friction stats (with transient skip)
-        # ------------------------------------------------------------------
-        if all(k in ts for k in ('nf', 'lfx', 'lfy')):
-            stats = compute_friction_stats(
-                np.asarray(ts['nf']),
-                np.asarray(ts['lfx']),
-                np.asarray(ts['lfy']),
-            )
-            for key, val in stats.items():
-                self.base.attributes.set(key, val)
-            self.base.attributes.set('friction_coefficient', stats['mean_cof'])
+    def add_result_files(self, paths: Dict[str, Path],
+                         aux: Sequence[Path] = (), max_mb: int = 20,
+                         content_sha256: str = '') -> None:
+        """Store the tier files verbatim, plus logs and hold/final artefacts.
 
-        # ------------------------------------------------------------------
-        # Per-field min/max on the full series (no skip)
-        # ------------------------------------------------------------------
-        for field in self._SUMMARY_FIELDS:
-            if field in ts:
-                arr = np.asarray(ts[field])
-                self.base.attributes.set(f'min_{field}', float(np.min(arr)))
-                self.base.attributes.set(f'max_{field}', float(np.max(arr)))
+        Each file is stored under its path relative to the run root
+        (`results/friction_...txt`, `data/hold_...txt`, `lammps/run_...log`),
+        not by bare basename (R18) -- so a future export can write it back to
+        the exact run-relative location it came from.
 
-    def get_summary_statistics(self, skip_fraction: float = 0.2) -> Dict[str, Any]:
-        """Get summary statistics for all fields.
-
-        Args:
-            skip_fraction: Fraction of initial data to skip (transient).
-
-        Returns:
-            Nested dict ``{field: {mean, std}}`` plus ``friction_coefficient``.
+        `content_sha256`, when given, is passed IN, not recomputed: `LoadPoint`
+        (Task 15) already hashes every entry of `point.tiers` including
+        `'retract'`, and recomputing here over `TIER_KEYS` alone would give a
+        different digest whenever an indent retract curve existed, so
+        `results_exist` would never match and every re-import of an indent run
+        would create duplicates -- the exact opposite of the spec's "second
+        ingest creates zero nodes". When no hash is passed (standalone/test
+        callers), one is computed here over the stored tier files so the
+        attribute is never empty on a stored node.
         """
-        stats: Dict[str, Any] = {}
-        for field in self.field_names:
-            if field == 'time':
+        import hashlib  # pylint: disable=import-outside-toplevel
+
+        limit = max_mb * 1024 * 1024
+        tiers: List[str] = []
+        hasher = None if content_sha256 else hashlib.sha256()
+        for tier in TIER_KEYS:
+            path = paths.get(tier)
+            if path is None:
                 continue
-            try:
-                stats[field] = {
-                    'mean': self.compute_mean(field, skip_fraction),
-                    'std': self.compute_std(field, skip_fraction),
-                }
-            except KeyError:
-                pass
+            path = Path(path)
+            self.base.repository.put_object_from_file(
+                str(path), self._run_relative_name(path))
+            tiers.append(tier)
+            if hasher is not None:
+                hasher.update(path.read_bytes())
+        for extra in aux:
+            extra = Path(extra)
+            if extra.is_file() and extra.stat().st_size <= limit:
+                self.base.repository.put_object_from_file(
+                    str(extra), self._run_relative_name(extra))
+        self.tiers = tiers
+        self.content_sha256 = content_sha256 or (
+            hasher.hexdigest() if hasher is not None else '')
 
-        try:
-            stats['friction_coefficient'] = self.get_friction_coefficient(skip_fraction)
-        except KeyError:
-            pass
+    def set_summary(self, summary) -> None:
+        """Write every `RunSummary` scalar as a queryable attribute."""
+        for key, val in summary.as_dict().items():
+            self.base.attributes.set(key, val)
+        self.ntimesteps = int(summary.ntimesteps)
+        self.is_complete = bool(summary.is_complete)
 
-        return stats
+    def frame(self, tier: str):
+        """Re-parse the stored file for `tier` with the reader's own parser.
 
-    # -- Array access ---------------------------------------------------------
+        A `.csv` member (a PES grid, an indent retract curve) is a plain comma
+        table with a `# family=` first line, not a LAMMPS `ave/time` file, so it
+        goes through `pd.read_csv(comment='#')`; everything else goes through
+        `read_data.read_results_file`, the same parser the DataReader uses.
 
-    def get_array(self, field: str) -> np.ndarray:
-        """Get a field as a NumPy array.
-
-        Args:
-            field: Field name (e.g. ``'nf'``, ``'lfx'``).
-
-        Returns:
-            1-D NumPy array of values.
-
-        Raises:
-            KeyError: If the field does not exist.
+        Files are stored under a run-relative path (R18), so the repository is
+        walked recursively and matched on the BASENAME's prefix, not the
+        top-level object name.
         """
-        if field not in self.time_series:
-            raise KeyError(f"Field '{field}' not found. Available: {self.field_names}")
-        return np.asarray(self.time_series[field])
+        import pandas as pd  # pylint: disable=import-outside-toplevel
 
-    def get_normal_force(self) -> np.ndarray:
-        """Get normal force time series."""
-        return self.get_array('nf')
+        from ...postprocessing.read_data import read_results_file  # pylint: disable=import-outside-toplevel
 
-    def get_lateral_force_x(self) -> np.ndarray:
-        """Get lateral force (x-direction) time series."""
-        return self.get_array('lfx')
+        prefixes = self._TIER_PREFIX[tier]
+        names = sorted(
+            (dirpath / fname).as_posix()
+            for dirpath, _dirs, files in self.base.repository.walk()
+            for fname in files)
+        for name in names:
+            basename = Path(name).name
+            if not basename.startswith(prefixes):
+                continue
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / basename
+                with self.base.repository.open(name, 'rb') as src:
+                    out.write_bytes(src.read())
+                if out.suffix == '.csv':
+                    return pd.read_csv(out, comment='#')
+                # `layers` is already an attribute of this node; without it a
+                # four-layer run's v_comx_L3 stays native here and is renamed by
+                # the DataReader, so store and reader would disagree about a
+                # column present in both. 2 is REGISTRY's declared bilayer set.
+                return read_results_file(out, self.family,
+                                         n_layers=self.layers or 2)
+        raise KeyError(f"no {tier!r} file stored on {self.uuid}")
 
-    def get_lateral_force_y(self) -> np.ndarray:
-        """Get lateral force (y-direction) time series."""
-        return self.get_array('lfy')
+    def frames_by_tier(self) -> Dict[str, Any]:
+        return {tier: self.frame(tier) for tier in self.tiers}
 
-    def get_lateral_force_magnitude(self) -> np.ndarray:
-        """Get magnitude of lateral force (computed from lfx, lfy)."""
-        return np.sqrt(self.get_lateral_force_x() ** 2
-                       + self.get_lateral_force_y() ** 2)
+    #: Attribute keys that are NOT part of the summary, so everything else the
+    #: results node carries goes into `extras`. An allowlist was tried and
+    #: silently dropped `slide_distance`, `driven_com_z_mean`,
+    #: `driven_com_z_drift`, `n_points`, `z_span` and `work_of_adhesion_nnA` --
+    #: including the three driven-COM values Task 8 describes as the only ones
+    #: that separate a real slide from a stalled one. A denylist cannot lose a
+    #: future extra by omission; an allowlist always can.
+    _NOT_EXTRAS = frozenset(_IDENTITY) | frozenset((
+        'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
+        'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy', 'time_series_hash',
+    ))
 
-    # -- Statistical methods --------------------------------------------------
-
-    def compute_mean(self, field: str, skip_fraction: float = 0.2) -> float:
-        """Compute mean of a field, skipping the initial transient.
-
-        Args:
-            field: Field name.
-            skip_fraction: Fraction of initial data to skip (default 20 %).
-
-        Returns:
-            Mean value after skipping transient.
+    def to_record(self, run_node, set_node, *, uploader=None, contact=None):
+        """Convert to the central DB's `ResultRecord` (Task 29 defines the
+        schema-3 fields `to_record` populates here -- `extras`, `run_uuid`,
+        etc. Not exercised by any test until then).
         """
-        data = self.get_array(field)
-        skip_n = int(len(data) * skip_fraction)
-        return float(np.mean(data[skip_n:]))
+        from ...data.models import ResultRecord  # pylint: disable=import-outside-toplevel
 
-    def compute_std(self, field: str, skip_fraction: float = 0.2) -> float:
-        """Compute standard deviation of a field.
-
-        Args:
-            field: Field name.
-            skip_fraction: Fraction of initial data to skip (default 20 %).
-
-        Returns:
-            Standard deviation after skipping transient.
-        """
-        data = self.get_array(field)
-        skip_n = int(len(data) * skip_fraction)
-        return float(np.std(data[skip_n:]))
-
-    def get_friction_coefficient(self, skip_fraction: float = 0.2) -> float:
-        """Calculate friction coefficient μ using the canonical formula.
-
-        Delegates to :func:`~src.data.models.compute_friction_stats`
-        (ratio-of-means: ``mean(F_L) / mean(F_N)``).
-
-        Args:
-            skip_fraction: Fraction of initial data to skip.
-
-        Returns:
-            Mean friction coefficient.
-        """
-        stats = compute_friction_stats(
-            self.get_array('nf'),
-            self.get_array('lfx'),
-            self.get_array('lfy'),
-            skip_fraction=skip_fraction,
+        prov = run_node.provenance or {}
+        sheets = [m for m in prov.get('materials', []) if m.get('role') == 'sheet']
+        primary = sheets[0] if sheets else {}
+        attrs = self.base.attributes
+        return ResultRecord(
+            uploader=uploader, contact=contact,
+            run_uuid=str(run_node.uuid), result_uuid=str(self.uuid),
+            set_label=set_node.label, source_host=set_node.source_host,
+            model=run_node.model, family=self.family,
+            materials=list(run_node.materials),
+            material=run_node.materials[0] if run_node.materials else '',
+            # No builder records a stacking type on a run, so this stays None
+            # and `materials` + `extras['twist_angle']` are the hetero
+            # discriminators. Stated here rather than left to be discovered.
+            stack_type=None, layers=run_node.layers,
+            size_x=run_node.size_x, size_y=run_node.size_y,
+            temperature=run_node.temperature,
+            tip_material=run_node.tip_material, tip_radius=run_node.tip_radius,
+            substrate_material=run_node.substrate,
+            substrate_amorphous=run_node.substrate_amorphous,
+            potential_type=primary.get('pot_type'),
+            potential_name=run_node.pot_token,
+            pot_sha256=primary.get('pot_file_sha256'),
+            git_commit=prov.get('git_commit'),
+            force_nN=self.load if self.load_kind == 'force' else None,
+            pressure_gpa=self.load if self.load_kind == 'pressure' else None,
+            scan_angle=self.angle, scan_speed=self.speed,
+            **{k: attrs.get(k) for k in (
+                'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
+                'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy')},
+            ntimesteps=self.ntimesteps,
+            time_series_hash=attrs.get('time_series_hash'),
+            is_complete=self.is_complete,
+            extras=self._extras_for_record(run_node, prov, sheets),
         )
-        return stats['mean_cof']
 
-    # -- Factory methods ------------------------------------------------------
+    def _extras_for_record(  # pylint: disable=unused-argument
+            self, run_node, prov, sheets) -> Dict[str, Any]:
+        """Everything that has no column of its own, plus three provenance keys.
 
-    @classmethod
-    def from_dataframe(cls, df, metadata: Optional[Dict[str, Any]] = None) -> 'FrictionResultsData':
-        """Create from a pandas DataFrame.
+        - every non-identity, non-stat attribute (PES descriptors, indent
+          retract features, slip counts, the driven-COM values);
+        - `skip_fraction`, so two uploaders with different `settings.database.
+          skip_fraction` do not put non-comparable COFs into one table with no
+          marker. Attributes are immutable and `results_exist` skips on
+          re-ingest, so an unmarked row could never be repaired;
+        - `twist_angle` and `potentials`, which are what make a heterostructure
+          findable centrally. `potential_type`/`pot_sha256` carry the PRIMARY
+          sheet only (they are single-valued columns), so without
+          `potentials` a two-material stack loses its second potential -- the
+          very single-triple defect the spec's problem table opens with. Two
+          hetero runs at 0 deg and 21.8 deg differ in `twist_angle` and in
+          nothing else the schema records (`scan_angle` is the slide
+          direction, not the stacking twist).
 
-        Args:
-            df: DataFrame with columns for each field.
-            metadata: Optional dict with keys ``material``, ``layers``,
-                ``force``, ``angle``, ``speed``, ``size``.
-
-        Returns:
-            A new (unstored) ``FrictionResultsData`` instance.
+        `run_node` is unused today -- kept in the signature Task 29 will grow
+        into, in case a run-level extra is ever needed alongside the
+        provenance-derived ones.
         """
-        node = cls()
-        time_series = {col: df[col].tolist() for col in df.columns}
-        node.time_series = time_series
-
-        if metadata:
-            for attr in ('material', 'layers', 'force', 'angle', 'speed', 'size'):
-                if attr in metadata:
-                    setattr(node, attr, metadata[attr])
-
-        return node
-
-    def to_result_record(self) -> 'ResultRecord':
-        """Convert this node to a canonical :class:`ResultRecord`.
-
-        Returns:
-            A :class:`~src.data.models.ResultRecord` populated from this
-            node's attributes and time-series statistics.
-        """
-        ts = self.time_series
-        kwargs: Dict[str, Any] = {
-            'material': self.material,
-            'layers': self.layers,
-            'force_nN': self.force if self.force else None,
-            'scan_angle': self.angle if self.angle else None,
-            'scan_speed': self.speed if self.speed else None,
-            'ntimesteps': self.ntimesteps,
-            'is_complete': self.is_complete,
-            'metadata': {'aiida_uuid': str(self.uuid)},
-        }
-
-        if all(k in ts for k in ('nf', 'lfx', 'lfy')):
-            nf = np.asarray(ts['nf'])
-            lfx = np.asarray(ts['lfx'])
-            lfy = np.asarray(ts['lfy'])
-            kwargs.update(compute_friction_stats(nf, lfx, lfy))
-            kwargs['time_series_hash'] = compute_time_series_hash(nf, lfx, lfy)
-
-        return ResultRecord(**kwargs)
-
-    @classmethod
-    def from_json(cls, json_data: Union[str, Dict]) -> 'FrictionResultsData':
-        """Create from JSON data (as exported by ``DataReader``).
-
-        Args:
-            json_data: JSON string or parsed dict.
-
-        Returns:
-            A new (unstored) ``FrictionResultsData`` instance.
-        """
-        if isinstance(json_data, str):
-            data = json.loads(json_data)
-        else:
-            data = json_data
-
-        node = cls()
-
-        if 'metadata' in data and 'time_series' in data['metadata']:
-            node.time_series = {'time': data['metadata']['time_series']}
-
-        return node
-
-    # -- Serialisation --------------------------------------------------------
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Export all data as a dictionary."""
-        return {
-            'uuid': str(self.uuid),
-            'material': self.material,
-            'layers': self.layers,
-            'force': self.force,
-            'angle': self.angle,
-            'speed': self.speed,
-            'size': self.size,
-            'ntimesteps': self.ntimesteps,
-            'fields': self.field_names,
-            'is_complete': self.is_complete,
-            'time_series': self.time_series,
-        }
+        attrs = self.base.attributes
+        extras = {k: attrs.get(k) for k in attrs.all
+                  if k not in self._NOT_EXTRAS}
+        extras['twist_angle'] = prov.get('twist_angle')
+        extras['potentials'] = [
+            {'name': m.get('name'), 'pot_type': m.get('pot_type'),
+             'pot_file_sha256': m.get('pot_file_sha256')}
+            for m in sheets]
+        return extras
 
     def __repr__(self) -> str:
-        return (
-            f"<FrictionResultsData: {self.material} "
-            f"L{self.layers} F{self.force}nN A{self.angle}° "
-            f"({self.ntimesteps} steps)>"
-        )
+        return (f"<FrictionResultsData: {self.family} {self.load_kind}="
+                f"{self.load} a{self.angle} s{self.speed} ({self.ntimesteps})>")
