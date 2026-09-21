@@ -1,272 +1,182 @@
 """AiiDA Data node representing a batch (set) of friction simulations.
 
 A simulation set corresponds to one ``simulation_XXXXXXXX`` output folder
-produced by a single invocation of ``FrictionSim2D run``.  It stores the
-configuration parameters that are **shared** across every material in the
-batch (temperature, pressure/force schedule, scan angles, spring constants,
-simulation settings) together with a mandatory human-readable label.
+produced by a single invocation of ``FrictionSim2D run``. It carries the
+shared identity of that campaign -- its label, model, the tree it was built
+from, and its materials -- as queryable attributes; ``settings.yaml`` and the
+run ``.ini`` live in the node repository instead.
 
-Every ``FrictionSimulationData``, ``FrictionProvenanceData``, and
-``FrictionResultsData`` node in the same batch carries a ``set_uuid``
-attribute pointing back to this node, which makes set-level queries
-trivial without duplicating the shared information.
+Every ``FrictionSimulationData`` and ``FrictionResultsData`` node in the same
+batch carries a ``set_uuid`` attribute pointing back to this node -- runs
+point up, this node never points down (there is no ``run_uuids`` property).
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List
 
 from aiida.orm import Data
 
 
 class FrictionSimulationSetData(Data):
-    """AiiDA Data node grouping all simulations in one run.
+    """One `simulation_*` root: the shared identity of a campaign.
 
-    Attributes:
-        label: Required human-readable identifier (e.g. ``'251125-sheetonsheet'``).
-        simulation_type: ``'afm'`` or ``'sheetonsheet'``.
-        description: Optional free-text description.
-        run_folder: Name of the ``simulation_XXXXXXXX`` directory.
-        batch_path: Absolute path to the simulation folder at import time.
-        temperature: Simulation temperature in K.
-        pressures: Applied pressures in GPa (sheet-on-sheet).
-        forces: Applied forces in nN (AFM).
-        scan_angles: Scan angles in degrees.
-        scan_speed: Lateral scan speed in m/s.
-        bond_spring: Bond spring constant (eV/Å² or equivalent).
-        driving_spring: Driving spring constant.
-        simulation_settings: Full ``settings`` block from ``config.json``.
-        materials_list: Alphabetically sorted list of all material names.
-        n_materials: Number of materials in the set.
+    Attributes are the queryable half; `settings.yaml` and the run `.ini` live
+    in the node repository. There is no SIMULATION_TYPES tuple any more -- the
+    vocabulary is `src.core.observables.FAMILIES` and `run.naming.MODELS`.
     """
 
-    SIMULATION_TYPES = ('afm', 'sheetonsheet')
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    # -- Required identifiers -------------------------------------------------
+    _ATTRS = ('label', 'model', 'source_root', 'created', 'git_commit',
+              'git_dirty', 'materials', 'n_runs', 'source_host')
 
     @property
     def label(self) -> str:
-        """Human-readable label for this simulation set (required)."""
         return self.base.attributes.get('label', '')
 
     @label.setter
     def label(self, value: str):
-        if not value or not str(value).strip():
+        cleaned = str(value or '').strip()
+        if not cleaned:
             raise ValueError("label is required and cannot be empty")
-        cleaned = str(value).strip()
-        # Store in attributes for QueryBuilder filtering (only before storing).
         if not self.is_stored:
             self.base.attributes.set('label', cleaned)
-        # Always sync to the native db_dbnode.label column (mutable even when
-        # stored) so it is visible in DBeaver and ``verdi node list``.
         from aiida.orm import Node as _Node  # pylint: disable=import-outside-toplevel
         _Node.label.fset(self, cleaned)
 
+    # Seven more attributes follow the same two-line getter/setter shape, one
+    # pair each, with the coercion and default given in this table:
+    #
+    #   name          type        default   setter stores
+    #   ------------- ----------- --------- --------------------------------------
+    #   model         str         ''        str(value)
+    #   source_root   str         ''        str(value)   (absolute, resolved)
+    #   created       str         ''        str(value)          (ISO-8601 UTC)
+    #   git_commit    str         ''        str(value)
+    #   git_dirty     bool        False     bool(value)
+    #   materials     List[str]   []        sorted(set(str(m) for m in value))
+    #   n_runs        int         0         int(value)
+    #   source_host   str         ''        str(value)
+    #
+    # written out, that shape is:
     @property
-    def simulation_type(self) -> str:
-        """Simulation type: ``'afm'`` or ``'sheetonsheet'`` (required)."""
-        return self.base.attributes.get('simulation_type', '')
+    def model(self) -> str:
+        return self.base.attributes.get('model', '')
 
-    @simulation_type.setter
-    def simulation_type(self, value: str):
-        if value not in self.SIMULATION_TYPES:
-            raise ValueError(
-                f"simulation_type must be one of {self.SIMULATION_TYPES}"
-            )
-        self.base.attributes.set('simulation_type', value)
-
-    # -- Optional descriptors -------------------------------------------------
-
-    @property
-    def description(self) -> str:
-        """Optional free-text description."""
-        return self.base.attributes.get('description', '')
-
-    @description.setter
-    def description(self, value: str):
-        text = str(value)
-        if not self.is_stored:
-            self.base.attributes.set('description', text)
-        from aiida.orm import Node as _Node  # pylint: disable=import-outside-toplevel
-        _Node.description.fset(self, text)
-
-    @property
-    def run_folder(self) -> str:
-        """Name of the ``simulation_XXXXXXXX`` directory."""
-        return self.base.attributes.get('run_folder', '')
-
-    @run_folder.setter
-    def run_folder(self, value: str):
-        self.base.attributes.set('run_folder', str(value))
+    @model.setter
+    def model(self, value: str):
+        # The vocabulary comes from run.naming, not a private tuple here: that
+        # is exactly the drift SIMULATION_TYPES = ('afm', 'sheetonsheet') caused.
+        from ...run.naming import MODELS  # pylint: disable=import-outside-toplevel
+        if value not in MODELS:
+            raise ValueError(f"model must be one of {MODELS}, got {value!r}")
+        self.base.attributes.set('model', str(value))
 
     @property
-    def batch_path(self) -> str:
-        """Absolute path to the simulation folder at import time."""
-        return self.base.attributes.get('batch_path', '')
+    def source_root(self) -> str:
+        return self.base.attributes.get('source_root', '')
 
-    @batch_path.setter
-    def batch_path(self, value: str):
-        self.base.attributes.set('batch_path', str(value))
-
-    # -- Shared simulation parameters -----------------------------------------
+    @source_root.setter
+    def source_root(self, value: str):
+        self.base.attributes.set('source_root', str(value))
 
     @property
-    def temperature(self) -> float:
-        """Simulation temperature in Kelvin."""
-        return self.base.attributes.get('temperature', 300.0)
+    def created(self) -> str:
+        return self.base.attributes.get('created', '')
 
-    @temperature.setter
-    def temperature(self, value: float):
-        self.base.attributes.set('temperature', float(value))
-
-    @property
-    def pressures(self) -> List[float]:
-        """Applied pressures in GPa (sheet-on-sheet simulations)."""
-        return self.base.attributes.get('pressures', [])
-
-    @pressures.setter
-    def pressures(self, value: List[float]):
-        self.base.attributes.set('pressures', [float(p) for p in value])
+    @created.setter
+    def created(self, value: str):
+        self.base.attributes.set('created', str(value))
 
     @property
-    def forces(self) -> List[float]:
-        """Applied forces in nN (AFM simulations)."""
-        return self.base.attributes.get('forces', [])
+    def git_commit(self) -> str:
+        return self.base.attributes.get('git_commit', '')
 
-    @forces.setter
-    def forces(self, value: List[float]):
-        self.base.attributes.set('forces', [float(f) for f in value])
-
-    @property
-    def scan_angles(self) -> List[float]:
-        """Scan angles in degrees."""
-        return self.base.attributes.get('scan_angles', [])
-
-    @scan_angles.setter
-    def scan_angles(self, value: List[float]):
-        self.base.attributes.set('scan_angles', [float(a) for a in value])
+    @git_commit.setter
+    def git_commit(self, value: str):
+        self.base.attributes.set('git_commit', str(value))
 
     @property
-    def scan_speed(self) -> float:
-        """Lateral scan speed in m/s."""
-        return self.base.attributes.get('scan_speed', 1.0)
+    def git_dirty(self) -> bool:
+        return self.base.attributes.get('git_dirty', False)
 
-    @scan_speed.setter
-    def scan_speed(self, value: float):
-        self.base.attributes.set('scan_speed', float(value))
-
-    @property
-    def bond_spring(self) -> Optional[float]:
-        """Bond spring constant."""
-        return self.base.attributes.get('bond_spring')
-
-    @bond_spring.setter
-    def bond_spring(self, value: float):
-        self.base.attributes.set('bond_spring', float(value))
+    @git_dirty.setter
+    def git_dirty(self, value: bool):
+        self.base.attributes.set('git_dirty', bool(value))
 
     @property
-    def driving_spring(self) -> Optional[float]:
-        """Driving spring constant."""
-        return self.base.attributes.get('driving_spring')
+    def materials(self) -> List[str]:
+        return self.base.attributes.get('materials', [])
 
-    @driving_spring.setter
-    def driving_spring(self, value: float):
-        self.base.attributes.set('driving_spring', float(value))
-
-    @property
-    def simulation_settings(self) -> Dict[str, Any]:
-        """Full ``settings`` block from ``config.json``."""
-        return self.base.attributes.get('simulation_settings', {})
-
-    @simulation_settings.setter
-    def simulation_settings(self, value: Dict[str, Any]):
-        self.base.attributes.set('simulation_settings', value)
-
-    # -- Materials bookkeeping ------------------------------------------------
+    @materials.setter
+    def materials(self, value: List[str]):
+        self.base.attributes.set('materials', sorted(set(str(m) for m in value)))
 
     @property
-    def materials_list(self) -> List[str]:
-        """Alphabetically sorted list of all material names in the set."""
-        return self.base.attributes.get('materials_list', [])
+    def n_runs(self) -> int:
+        return self.base.attributes.get('n_runs', 0)
 
-    @materials_list.setter
-    def materials_list(self, value: List[str]):
-        sorted_mats = sorted(set(str(m) for m in value))
-        self.base.attributes.set('materials_list', sorted_mats)
-        self.base.attributes.set('n_materials', len(sorted_mats))
+    @n_runs.setter
+    def n_runs(self, value: int):
+        self.base.attributes.set('n_runs', int(value))
 
     @property
-    def n_materials(self) -> int:
-        """Number of materials in the set."""
-        return self.base.attributes.get('n_materials', 0)
+    def source_host(self) -> str:
+        return self.base.attributes.get('source_host', '')
+
+    @source_host.setter
+    def source_host(self, value: str):
+        self.base.attributes.set('source_host', str(value))
 
     # -- Factory / population -------------------------------------------------
 
-    def set_from_config(self, config: Dict[str, Any]) -> None:
-        """Populate shared attributes from a parsed ``config.json`` dict.
+    def set_from_root(self, root: Path, label: str) -> None:
+        """Populate from a built simulation root and stage its settings.yaml."""
+        import socket  # pylint: disable=import-outside-toplevel
+        from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
 
-        Only the ``general`` and ``settings`` sections are read here; the
-        material-specific sections (``sheet``, ``tip``, ``sub``) are handled
-        by :class:`~src.aiida.data.simulation.FrictionSimulationData`.
+        from ...run.tree import discover_runs  # pylint: disable=import-outside-toplevel
+        from ...data.provenance import read_provenance  # pylint: disable=import-outside-toplevel
 
-        Args:
-            config: Parsed ``config.json`` (or ``config.ini``-derived) dict.
-        """
-        gen = config.get('general', {})
+        root = Path(root)
+        locators = discover_runs(root)
+        if not locators:
+            raise ValueError(f"no runs found under {root}")
 
-        if gen.get('temp') is not None:
-            self.temperature = gen['temp']
+        self.label = label
+        self.model = locators[0].tokens.model
+        # the tree this set was built from; `find_or_create_set` refuses a
+        # second, different tree under the same label
+        self.source_root = str(Path(root).resolve())
+        self.created = datetime.now(timezone.utc).isoformat()
+        self.source_host = socket.gethostname()
+        self.n_runs = len(locators)
+        self.materials = sorted({m for loc in locators
+                                 for m in loc.tokens.materials})
 
-        raw_p = gen.get('pressure')
-        if raw_p is not None:
-            self.pressures = raw_p if isinstance(raw_p, list) else [raw_p]
+        first = read_provenance(locators[0].provenance_file,
+                                family=locators[0].tokens.family,
+                                model=locators[0].tokens.model)
+        self.git_commit = first.git_commit
+        self.git_dirty = bool(first.git_dirty)
 
-        raw_f = gen.get('force')
-        if raw_f is not None:
-            self.forces = raw_f if isinstance(raw_f, list) else [raw_f]
+        settings = root / 'settings.yaml'
+        if not settings.is_file():
+            settings = locators[0].provenance_dir / 'settings.yaml'
+        if settings.is_file():
+            self.add_file(settings, 'settings.yaml')
 
-        raw_a = gen.get('scan_angle')
-        if raw_a is not None:
-            self.scan_angles = raw_a if isinstance(raw_a, list) else [raw_a]
-
-        if gen.get('scan_speed') is not None:
-            self.scan_speed = gen['scan_speed']
-        if gen.get('bond_spring') is not None:
-            self.bond_spring = gen['bond_spring']
-        if gen.get('driving_spring') is not None:
-            self.driving_spring = gen['driving_spring']
-
-        if 'settings' in config:
-            self.simulation_settings = config['settings']
+    def add_file(self, path: Path, name: str) -> None:
+        """Stage one file into the node repository under `name`."""
+        self.base.repository.put_object_from_file(str(Path(path)), name)
 
     # -- Serialisation --------------------------------------------------------
 
     def to_dict(self) -> Dict[str, Any]:
-        """Export metadata as a plain dictionary."""
-        return {
-            'uuid': str(self.uuid),
-            'pk': self.pk,
-            'label': self.label,
-            'simulation_type': self.simulation_type,
-            'description': self.description,
-            'run_folder': self.run_folder,
-            'batch_path': self.batch_path,
-            'temperature': self.temperature,
-            'pressures': self.pressures,
-            'forces': self.forces,
-            'scan_angles': self.scan_angles,
-            'scan_speed': self.scan_speed,
-            'bond_spring': self.bond_spring,
-            'driving_spring': self.driving_spring,
-            'n_materials': self.n_materials,
-            'materials_list': self.materials_list,
-        }
+        out = {'uuid': str(self.uuid), 'pk': self.pk}
+        out.update({key: getattr(self, key) for key in self._ATTRS})
+        return out
 
     def __repr__(self) -> str:
-        return (
-            f"<FrictionSimulationSetData: '{self.label}' "
-            f"{self.simulation_type} ({self.n_materials} materials)>"
-        )
+        return (f"<FrictionSimulationSetData: '{self.label}' "
+                f"{self.model} ({self.n_runs} runs)>")
