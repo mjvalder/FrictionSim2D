@@ -80,6 +80,8 @@ class IndentSimulation(AFMSimulation):
     10-column hold file and a force–distance CSV per ``(material, layer, load)``.
     """
 
+    FAMILY = 'indent'
+
     #: Swap the sliding run for the hold+retract; the build + system.in are reused.
     SLIDE_TEMPLATE = "afm/indent.lmp"
 

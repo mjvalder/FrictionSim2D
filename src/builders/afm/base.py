@@ -129,6 +129,8 @@ class AFMSimulation(SimulationBase):
     builds common components once and iterates over layer counts.
     """
 
+    FAMILY = 'afm'
+
     #: Run-phase (post-indentation) LAMMPS template. Subclasses swap this to
     #: reuse the identical build + system.in indentation with a different
     #: production run (e.g. the indent hold+retract replaces the slide).
@@ -844,7 +846,7 @@ class AFMSimulation(SimulationBase):
         # pylint: disable-next=import-outside-toplevel
         from ..utils.obs_ctx import build_obs_ctx
         return build_obs_ctx(
-            sim_type='afm',
+            sim_type=self.FAMILY,
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
             use_langevin=use_langevin,
@@ -940,8 +942,8 @@ class AFMSimulation(SimulationBase):
         # module scope, so a hard dependency on `src/data/` already exists
         # here regardless.)
         # pylint: disable-next=import-outside-toplevel
-        from ...data.provenance import (ProvenanceRecord, sha256_file,
-                                       write_provenance)
+        from ...data.provenance import (ProvenanceRecord, material_provenance,
+                                       sha256_file, write_provenance)
 
         # Shared with the sheet family's write_sheet_provenance, so both
         # record build identity identically; git absence is recorded, never
@@ -976,10 +978,27 @@ class AFMSimulation(SimulationBase):
         load_requested = (float(force)
                           if isinstance(force, (int, float)) else None)
 
+        # Every material of the built system (spec §3 F3): the sheet stack
+        # (one entry per [2D-N], or the single [2D] wrapped), any hetero-flake
+        # materials, the plain [flake] shape spec IF it carries its own
+        # mat/pot (a single-material flake left unfilled here has none to
+        # record -- see FlakeSlideSimulation._filled_flake_config for the sheet
+        # family's equivalent gap), the tip, and the substrate if present.
+        sheets = list(self.config.sheets) or [self.config.sheet]
+        materials = [material_provenance(s, 'sheet') for s in sheets]
+        materials += [material_provenance(fs, 'flake')
+                     for fs in self.config.flake_sheets]
+        flake = self.config.flake
+        if flake is not None and getattr(flake, 'mat', None):
+            materials.append(material_provenance(flake, 'flake'))
+        materials.append(material_provenance(self.config.tip, 'tip'))
+        if self.config.sub is not None:
+            materials.append(material_provenance(self.config.sub, 'substrate'))
+
         record = ProvenanceRecord(
-            family='afm',
-            model='afm',
-            materials=[],
+            family=self.FAMILY,
+            model=self.model,
+            materials=materials,
             seed_thermal_tip=context.get('seed_thermal_tip'),
             seed_thermal_sub=context.get('seed_thermal_sub'),
             seed_velocity=context.get('velocity_seed'),
@@ -999,6 +1018,7 @@ class AFMSimulation(SimulationBase):
                 f"{self.config.settings.thermostat.type}_system"),
             run_role='label',
             load_requested=load_requested,
+            twist_angle=getattr(self.config.general, 'twist_angle', None),
         )
         write_provenance(output_root, record)
 

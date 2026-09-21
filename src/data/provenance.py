@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -107,6 +107,31 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+def material_provenance(component: Any, role: str) -> MaterialProvenance:
+    """One :class:`MaterialProvenance` from a component config.
+
+    The single construction site for the ``pot_path``/``pot_type``/
+    ``pot_resolution_route``/``pot_file_sha256`` quadruple -- including the
+    ``sha256_file`` existence guard -- shared by every builder family (Task 6,
+    spec §3 F3) instead of each family re-deriving it. ``component`` is any
+    ``ComponentConfig``-shaped object (``SheetConfig``, ``TipConfig``,
+    ``SubstrateConfig``, ``FlakeConfig``, ...) with at least a ``mat``
+    attribute; a component with no ``pot_path`` (e.g. an unfilled ``[Flake]``
+    shape spec) records every ``pot_*`` field as ``None`` rather than raising.
+    """
+    pot = getattr(component, 'pot_path', None)
+    pot_path = Path(str(pot)) if pot else None
+    return MaterialProvenance(
+        name=str(getattr(component, 'mat', '') or ''),
+        role=role,
+        pot_path=str(pot) if pot else None,
+        pot_type=getattr(component, 'pot_type', None),
+        pot_resolution_route=getattr(component, 'pot_resolution_route', None),
+        pot_file_sha256=(sha256_file(pot_path)
+                         if pot_path and pot_path.is_file() else None),
+    )
 
 
 def write_provenance(run_dir: Path, record: ProvenanceRecord) -> Path:

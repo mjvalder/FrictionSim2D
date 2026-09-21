@@ -239,6 +239,13 @@ class HeteroAFMSimulation(AFMSimulation):
     picks it up automatically rather than needing its own override.
     """
 
+    #: 'afm', not 'hetero': `family` names the results-file SCHEMA (spec §3
+    #: F1), and a hetero AFM run's files are still the AFM schema (v_fz,
+    #: v_xfrict, ...) -- 'hetero' in the observables registry is the SHEET
+    #: family's stack (v_comx_top, react_*, ...). Unchanged from
+    #: AFMSimulation; explicit for clarity, same as SLIDE_TEMPLATE below.
+    FAMILY = 'afm'
+
     #: Run-phase template — unchanged from AFMSimulation; explicit for clarity.
     SLIDE_TEMPLATE = "afm/slide.lmp"
 
@@ -663,6 +670,10 @@ class FiniteHeteroAFMSimulation(HeteroAFMSimulation):
     the hetero ``2D_edge`` group.
     """
 
+    #: 'afm', not 'hetero' -- see HeteroAFMSimulation.FAMILY. Inherited from
+    #: it already; explicit for the same clarity reason.
+    FAMILY = 'afm'
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Split each material's sheet types into core (None) + edge -> the same
@@ -789,3 +800,5 @@ class HeteroIndentSimulation(IndentSimulation, HeteroAFMSimulation):
       sharing material 1 (e.g. ``h-MoS2+h-WS2`` vs ``h-MoS2+h-BN``) get
       distinct job names, seeds, and manifest keys instead of colliding.
     """
+
+    FAMILY = 'indent'

@@ -313,6 +313,8 @@ class PESSheetSimulation(PESGridMixin, SheetOnSheetSimulation):
     unit cell as the scan period).
     """
 
+    FAMILY = 'pes_sheet'
+
     def build(self) -> None:
         self._require_pes_bilayer(self.n_layers)
         # A static PES has no interlayer bonds/springs — just the real LJ that
@@ -407,6 +409,11 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
     candidates are ``frozenset()`` anyway, and the static scan never reads
     ``outer_loop``. Pinned by ``tests/builders/test_hetero_pes_sheet.py``.
     """
+
+    #: 'pes_sheet', not 'hetero' -- same reasoning as ``PESSheetSimulation``:
+    #: this class's results files follow the PES-scan schema, not the dynamic
+    #: hetero slide's, regardless of the hetero geometry underneath.
+    FAMILY = 'pes_sheet'
 
     #: Exactly one layer per material: frozen bottom + scanned top.
     MIN_LAYERS: int = PES_SHEET_LAYERS

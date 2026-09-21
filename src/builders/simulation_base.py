@@ -65,6 +65,28 @@ class SimulationBase(ABC):
     #: the config routes to, so the predicted and generated counts cannot drift.
     SPLIT_OUTER_LOOPS: frozenset = frozenset()
 
+    #: The results-file schema this builder emits, one of
+    #: :data:`src.core.observables.FAMILIES`. It is what `build_obs_ctx` is
+    #: called with (`sim_type=`) and what goes into `provenance.json`.
+    FAMILY: str = 'afm'
+
+    def set_model(self, model: str) -> None:
+        """Record which `run <model>` produced this build.
+
+        `FAMILY` is a property of the builder class -- the schema its results
+        files follow; `model` is the CLI/top-directory axis and only the
+        runner knows it. The two can diverge: a sheet-on-sheet config with two
+        materials routes `model='sheetonsheet'` to
+        `HeteroSheetOnSheetSimulation`, whose `FAMILY` is `'hetero'`.
+        `run_simulations` calls this right after construction; `model` falls
+        back to `FAMILY` when it has not.
+        """
+        self._model = model
+
+    @property
+    def model(self) -> str:
+        return getattr(self, '_model', '') or self.FAMILY
+
     @staticmethod
     def _git_identity() -> "tuple[str, bool]":
         """``(commit, dirty)`` for a provenance record. Never raises.
@@ -131,6 +153,10 @@ class SimulationBase(ABC):
         self.config_path = Path(config_path).resolve() if config_path else None
         self.base_output_dir: Optional[Path] = None
         self._seeds: Dict[str, int] = {}
+        #: Set by :meth:`set_model`; '' (falsy) means "not set yet", so the
+        #: `model` property's fallback to `FAMILY` stays well-defined for a
+        #: builder built directly (no `run_simulations` in front of it).
+        self._model: str = ''
         try:
             self.atomsk: Optional[AtomskWrapper] = AtomskWrapper()
         except RuntimeError:

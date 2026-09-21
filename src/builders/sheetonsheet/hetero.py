@@ -109,6 +109,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     absolute paths that resolve from any working directory.
     """
 
+    FAMILY = 'hetero'
+
     #: A dynamic hetero slide needs a fixed bottom, a thermostatted middle and a
     #: driven top across TWO materials -> at least 2 + 2 layers.
     MIN_LAYERS: int = 4
@@ -395,7 +397,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         interlayer = {'E_int_interlayer', 'n_contact_il'}
         return sheet_obs_ctx(
             self.config.settings,
-            sim_type='hetero',
+            sim_type=self.FAMILY,
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
             extra_filter=lambda ob: ob.name not in interlayer,

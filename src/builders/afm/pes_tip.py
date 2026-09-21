@@ -26,6 +26,8 @@ class PESTipSimulation(AFMSimulation):
     total energy and the lateral force on the tip.
     """
 
+    FAMILY = 'pes_tip'
+
     #: write_inputs below replaces the AFM run phase with a single
     #: self-contained scan script and never reads outer_loop -- nothing splits.
     SPLIT_OUTER_LOOPS = frozenset()
@@ -279,6 +281,8 @@ class HeteroPESTipSimulation(PESTipSimulation, HeteroAFMSimulation):
       reusing the Task-3 hook built for exactly this, rather than duplicating
       its pair-token logic.
     """
+
+    FAMILY = 'pes_tip'
 
     def _build_sheet_for_layers(self, build_dir, n_layers):
         """Populate ``sheet_unit_cell`` with the hetero surface's MINIMAL repeat.

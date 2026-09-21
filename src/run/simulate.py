@@ -242,6 +242,11 @@ def run_simulations(
 
         prov_dir = output_dir / 'provenance'
         prov_dir.mkdir(parents=True, exist_ok=True)
+        # The rebuild path needs the settings the run was built with; nothing
+        # wrote them before, so `aiida rebuild` silently used the defaults.
+        import yaml  # pylint: disable=import-outside-toplevel
+        (prov_dir / 'settings.yaml').write_text(
+            yaml.safe_dump(defaults.model_dump(), sort_keys=False), encoding='utf-8')
 
         try:
             if model in AFM_LIKE_MODELS:
@@ -250,12 +255,14 @@ def run_simulations(
                 config_json_path.write_text(config_obj.model_dump_json(indent=2), encoding='utf-8')
                 builder_cls = _select_afm_builder_cls(model, config_obj)
                 builder = builder_cls(config_obj, output_dir, config_path=str(config_json_path))
+                builder.set_model(model)
             else:
                 config_obj = SheetOnSheetSimulationConfig(**run_dict)
                 config_json_path = prov_dir / 'config.json'
                 config_json_path.write_text(config_obj.model_dump_json(indent=2), encoding='utf-8')
                 builder_cls = _select_sheet_builder_cls(model, config_obj)
                 builder = builder_cls(config_obj, output_dir, config_path=str(config_json_path))
+                builder.set_model(model)
 
             builder.set_base_output_dir(simulation_root)
             builder.build()

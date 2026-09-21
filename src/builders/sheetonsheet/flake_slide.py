@@ -86,6 +86,8 @@ class FlakeSlideSimulation(SimulationBase):
     is launched with ``cwd = output_dir``.
     """
 
+    FAMILY = 'flake'
+
     #: A flake slide needs a fixed bottom band + at least one thermostatted
     #: interior band -> the substrate sheet must have >= 2 layers.
     MIN_SHEET_LAYERS: int = 2
@@ -168,7 +170,7 @@ class FlakeSlideSimulation(SimulationBase):
         # declared a flake-specific channel that consumes it.
         return sheet_obs_ctx(
             self.config.settings,
-            sim_type='flake',
+            sim_type=self.FAMILY,
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
         )

@@ -119,12 +119,17 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     * **There is no substrate realization.** ``substrate_realization_id``
       identifies the cached amorphous slab every AFM run shares; a sheet stack
       has none.
-    * **``materials`` is still a placeholder here.** Schema 2.0 replaced the
-      single ``pot_path``/``pot_type``/``pot_file_sha256`` triple with a
-      ``materials`` list that can hold one entry per component of a hetero
-      stack, but this function still writes it empty (``family``/``model`` are
-      literals too) -- filling it in with the real per-material potentials is
-      the next task's job, not this one's.
+
+    ``family``/``model`` are read off ``builder`` (``builder.FAMILY``,
+    ``builder.model``) rather than hardcoded, so this one function serves
+    every sheet-family builder without knowing which concrete class called
+    it -- ``SheetOnSheetSimulation`` (``'sheetonsheet'``),
+    ``HeteroSheetOnSheetSimulation`` (``'hetero'``), ``FlakeSlideSimulation``
+    (``'flake'``) and the PES-sheet pair (``'pes_sheet'``). ``materials`` is
+    built the same way for all of them from ``builder.config``'s sheet stack,
+    hetero-flake materials and (if filled) plain ``[Flake]`` shape spec --
+    :func:`~src.data.provenance.material_provenance` is the single
+    construction site for each entry's ``pot_*`` quadruple.
 
     Args:
         builder: the builder instance; its ``config``, ``_seeds``,
@@ -148,7 +153,8 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     # ~15-23 ms (pydantic model construction) and only an actual build should
     # pay it -- `--help` and every non-build subcommand instantiate nothing.
     # pylint: disable-next=import-outside-toplevel
-    from ...data.provenance import ProvenanceRecord, write_provenance
+    from ...data.provenance import (ProvenanceRecord, material_provenance,
+                                   write_provenance)
     import hashlib  # pylint: disable=import-outside-toplevel
 
     config = builder.config
@@ -158,10 +164,24 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     pressure_requested = (float(pressure)
                           if isinstance(pressure, (int, float)) else None)
 
+    # Every material of the built system (spec §3 F3), same shape as the AFM
+    # family's equivalent in AFMSimulation._write_provenance: the sheet stack,
+    # any hetero-flake materials, and a plain [Flake] shape spec IF it carries
+    # its own mat/pot (a single-material flake that reuses [2D]'s potential --
+    # see FlakeSlideSimulation._filled_flake_config -- has none of its own to
+    # record here).
+    sheets = list(getattr(config, 'sheets', None) or [config.sheet])
+    materials = [material_provenance(s, 'sheet') for s in sheets]
+    materials += [material_provenance(fs, 'flake')
+                 for fs in getattr(config, 'flake_sheets', [])]
+    flake = getattr(config, 'flake', None)
+    if flake is not None and getattr(flake, 'mat', None):
+        materials.append(material_provenance(flake, 'flake'))
+
     record = ProvenanceRecord(
-        family='sheetonsheet',
-        model='sheetonsheet',
-        materials=[],
+        family=builder.FAMILY,
+        model=builder.model,
+        materials=materials,
         seed_thermal_tip=None,
         seed_thermal_sub=None,
         seed_velocity=None,
@@ -180,6 +200,7 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
         run_role='label',
         load_requested=None,
         pressure_requested=pressure_requested,
+        twist_angle=getattr(config.general, 'twist_angle', None),
     )
     return write_provenance(output_root or builder.output_dir, record)
 
@@ -301,6 +322,8 @@ class SheetOnSheetSimulation(SimulationBase):
     * Interlayer bonding is configurable (``constraint_mode``:
       ``atom_bonds`` / ``com_spring`` / ``none``), which has no AFM analogue.
     """
+
+    FAMILY = 'sheetonsheet'
 
     #: Minimum number of layers this builder accepts. Subclasses (e.g. the
     #: static PES bilayer scan) may lower it.
@@ -530,7 +553,7 @@ class SheetOnSheetSimulation(SimulationBase):
         interlayer = {'E_int_interlayer', 'n_contact_il'}
         return sheet_obs_ctx(
             self.config.settings,
-            sim_type='sheetonsheet',
+            sim_type=self.FAMILY,
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
             contact_cutoff=self._contact_cutoff(),

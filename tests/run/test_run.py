@@ -865,6 +865,9 @@ def test_run_simulations_dispatches_afm_and_generates_hpc(
             self.config_path = config_path
             self._output_dir = Path(output_dir)
 
+        def set_model(self, _model):
+            pass
+
         def set_base_output_dir(self, _root):
             calls["base"] += 1
 
@@ -938,6 +941,9 @@ def test_run_simulations_afm_upgrades_slide_only_defaults(
         def __init__(self, config, output_dir, config_path=None):
             self.config_path = config_path
 
+        def set_model(self, _model):
+            pass
+
         def set_base_output_dir(self, _root):
             pass
 
@@ -991,6 +997,9 @@ def test_run_simulations_sheetonsheet_adjusts_default_scripts(
             seen_configs.append(config)
             self.config_path = config_path
 
+        def set_model(self, _model):
+            pass
+
         def set_base_output_dir(self, _root):
             pass
 
@@ -1042,6 +1051,9 @@ def test_run_simulations_continues_after_build_failure(
         def __init__(self, config, _output_dir, config_path=None):
             self.config_path = config_path
             seen_temps.append(config.general.temp)
+
+        def set_model(self, _model):
+            pass
 
         def set_base_output_dir(self, _root):
             pass
