@@ -25,6 +25,7 @@ from src.builders.sheetonsheet.base import (
     CUTOFF_NOT_APPLICABLE,
     SheetOnSheetSimulation,
     sheet_layer_type_map,
+    write_sheet_provenance,
 )
 from src.builders.afm.base import _CONTACT_CUTOFF_FALLBACK
 from src.data.provenance import ProvenanceRecord
@@ -177,6 +178,71 @@ def test_a_sheet_record_carries_no_tip_or_substrate_fields(tmp_path):
     assert record.seed_thermal_sub is None
     assert record.seed_velocity is None
     assert record.substrate_realization_id is None
+
+
+# --------------------------------------------------------------------------
+# materials (Task 6, spec §3 F3): every sheet, flake, tip and substrate
+# --------------------------------------------------------------------------
+
+def test_the_homogeneous_sheet_is_recorded_with_role_sheet(tmp_path):
+    _run_dir, _slide, builder = _build_homogeneous(tmp_path)
+    record = _record(builder.output_dir)
+    roles = [m.role for m in record.materials]
+    assert roles == ["sheet"]
+    sheet = record.materials[0]
+    assert sheet.name == builder.config.sheet.mat
+    assert sheet.pot_type == builder.config.sheet.pot_type
+    assert sheet.pot_file_sha256 is not None
+
+
+def test_a_single_material_flake_still_gets_a_flake_role_material(tmp_path):
+    """A `[Flake]` with no material of its own reuses `[2D]`'s potential
+    (``FlakeSlideSimulation._filled_flake_config``); the record must not drop
+    the flake from `materials` just because the RAW config carries no `mat` --
+    the exact gap a review of this task found and this test pins.
+
+    LAMMPS-free: constructing the builder and calling
+    :func:`write_sheet_provenance` directly needs no geometry build, unlike
+    :meth:`FlakeSlideSimulation.build`.
+    """
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from tests.builders.test_flake_slide import _flake_on_sheet_cfg
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    assert cfg.flake.mat is None, "fixture must be the unfilled single-material flake"
+
+    builder = FlakeSlideSimulation(cfg, str(tmp_path / "out"))
+    write_sheet_provenance(builder, contact_cutoff=0.0,
+                           cutoff_source="test", thermostat_scheme="test")
+
+    record = _record(builder.output_dir)
+    flake_entries = [m for m in record.materials if m.role == "flake"]
+    assert len(flake_entries) == 1, record.materials
+    flake_material = flake_entries[0]
+    assert flake_material.name == cfg.sheet.mat
+    assert flake_material.pot_type == cfg.sheet.pot_type
+    assert flake_material.pot_file_sha256 is not None
+
+
+def test_a_hetero_flake_is_recorded_with_its_own_material(tmp_path):
+    """A [Flake-1]/[Flake-2] hetero flake already carries its own mat/pot, so
+    `_filled_flake_config` is a no-op here -- the plain `config.flake` (still
+    unfilled, a pure shape spec) must not be recorded a SECOND time on top of
+    the two real `flake_sheets` entries."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from tests.builders.test_flake_slide import _flake_on_sheet_cfg
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=True)
+    assert cfg.flake.mat is None, "the [Flake] shape spec itself names no material"
+
+    builder = FlakeSlideSimulation(cfg, str(tmp_path / "out"))
+    write_sheet_provenance(builder, contact_cutoff=0.0,
+                           cutoff_source="test", thermostat_scheme="test")
+
+    record = _record(builder.output_dir)
+    flake_entries = [m for m in record.materials if m.role == "flake"]
+    assert {m.name for m in flake_entries} == {fs.mat for fs in cfg.flake_sheets}
+    assert len(flake_entries) == len(cfg.flake_sheets)
 
 
 # --------------------------------------------------------------------------

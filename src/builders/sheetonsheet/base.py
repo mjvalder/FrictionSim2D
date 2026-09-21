@@ -164,17 +164,29 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     pressure_requested = (float(pressure)
                           if isinstance(pressure, (int, float)) else None)
 
-    # Every material of the built system (spec §3 F3), same shape as the AFM
-    # family's equivalent in AFMSimulation._write_provenance: the sheet stack,
-    # any hetero-flake materials, and a plain [Flake] shape spec IF it carries
-    # its own mat/pot (a single-material flake that reuses [2D]'s potential --
-    # see FlakeSlideSimulation._filled_flake_config -- has none of its own to
-    # record here).
+    # Every material of the built system (spec §3 F3: "covering every sheet,
+    # the flake, tip and substrate"), same shape as the AFM family's
+    # equivalent in AFMSimulation._write_provenance: the sheet stack, any
+    # hetero-flake materials, and the plain [Flake] shape spec.
+    #
+    # A SINGLE-material flake reuses [2D]'s mat/pot and so has none of its own
+    # in the raw config -- only FlakeSlideSimulation._filled_flake_config
+    # fills that in (from the SUBSTRATE sheet), which is why it is called here
+    # rather than silently dropping the flake from the record. It must only be
+    # called for that single-material case, though: `FlakeSlideSimulation
+    # .build()` itself gates it on `len(flake_sheets) != 2` (a hetero flake
+    # bypasses `_filled_flake_config` entirely and builds straight from
+    # `flake_sheets`, already recorded above) -- calling it unconditionally
+    # would fill the still-bare `config.flake` from the substrate sheet and
+    # record a spurious THIRD 'flake' entry alongside the two real ones.
     sheets = list(getattr(config, 'sheets', None) or [config.sheet])
     materials = [material_provenance(s, 'sheet') for s in sheets]
-    materials += [material_provenance(fs, 'flake')
-                 for fs in getattr(config, 'flake_sheets', [])]
+    flake_sheets = list(getattr(config, 'flake_sheets', None) or [])
+    materials += [material_provenance(fs, 'flake') for fs in flake_sheets]
     flake = getattr(config, 'flake', None)
+    filled_flake_config = getattr(builder, '_filled_flake_config', None)
+    if flake is not None and len(flake_sheets) != 2 and callable(filled_flake_config):
+        flake = filled_flake_config()  # pylint: disable=protected-access
     if flake is not None and getattr(flake, 'mat', None):
         materials.append(material_provenance(flake, 'flake'))
 

@@ -980,10 +980,13 @@ class AFMSimulation(SimulationBase):
 
         # Every material of the built system (spec §3 F3): the sheet stack
         # (one entry per [2D-N], or the single [2D] wrapped), any hetero-flake
-        # materials, the plain [flake] shape spec IF it carries its own
-        # mat/pot (a single-material flake left unfilled here has none to
-        # record -- see FlakeSlideSimulation._filled_flake_config for the sheet
-        # family's equivalent gap), the tip, and the substrate if present.
+        # materials, the plain [flake] shape spec if present, the tip, and the
+        # substrate if present. Unlike the sheet family's [Flake] (whose
+        # mat/pot may be left unset to fall back to [2D] --
+        # FlakeSlideSimulation._filled_flake_config), an AFM [flake] has no
+        # such fallback: AFMSimulationConfig.validate_flake_material requires
+        # mat/cif_path/pot_path/pot_type to all be set together, so
+        # `flake.mat` is never None here once `flake is not None`.
         sheets = list(self.config.sheets) or [self.config.sheet]
         materials = [material_provenance(s, 'sheet') for s in sheets]
         materials += [material_provenance(fs, 'flake')

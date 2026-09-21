@@ -41,14 +41,24 @@ def test_every_builder_declares_a_known_family(cls, family):
 
 
 def test_obs_ctx_is_built_from_the_class_family(monkeypatch):
-    """A hetero AFM run must stamp its OWN family ('afm'), not any literal."""
+    """An indent run must stamp its OWN family ('indent'), not AFM's literal.
+
+    Regression guard for the pre-Task-6 code, which hardcoded
+    `sim_type='afm'` in `AFMSimulation._build_obs_ctx` regardless of which
+    subclass called it -- so `IndentSimulation` (inherits `_build_obs_ctx`
+    unchanged) silently stamped `family=afm` into its own results header
+    instead of `'indent'`. `HeteroAFMSimulation` cannot catch this: under R3
+    its FAMILY is `'afm'` too, the same as the old hardcoded literal, so a
+    test built on it would pass against the un-fixed code just as well as the
+    fixed one (confirmed: it did, in the RED run for this task).
+    """
     import src.builders.utils.obs_ctx as obs_mod
 
     seen = {}
     monkeypatch.setattr(obs_mod, 'build_obs_ctx',
                         lambda **kw: seen.update(kw) or {'title1': ''})
 
-    builder = HeteroAFMSimulation.__new__(HeteroAFMSimulation)
+    builder = IndentSimulation.__new__(IndentSimulation)
     monkeypatch.setattr(type(builder), '_contact_cutoff', lambda self: 4.8)
     monkeypatch.setattr(
         type(builder), 'config',
@@ -59,7 +69,7 @@ def test_obs_ctx_is_built_from_the_class_family(monkeypatch):
 
     builder._build_obs_ctx(2, 'friction_x.txt', use_langevin=True)
 
-    assert seen['sim_type'] == 'afm'
+    assert seen['sim_type'] == 'indent'
 
 
 def test_model_defaults_to_family_until_the_runner_sets_it():
