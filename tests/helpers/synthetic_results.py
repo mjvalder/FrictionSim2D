@@ -29,6 +29,12 @@ PES_GRID_CSV = {
         '0,0,-1.0\n1,0,-0.5\n0,1,-0.6\n1,1,-0.2\n'),
 }
 
+#: The two families that write ONE grid CSV rather than tiered friction files
+#: -- see `write_pes_grid`. Neither has any `Observable` registered for it
+#: (`rename_map(family, tier)` is `{}` for every tier), so `write_results`
+#: refuses them instead of silently emitting a degenerate `friction_*.txt`.
+_PES_FAMILIES = ('pes_tip', 'pes_sheet')
+
 
 def _header(family: str, tier: str) -> tuple[str, list[str], list[str]]:
     """`(title1, native names, channel names)` for one (family, tier)."""
@@ -52,6 +58,24 @@ def load_kind_for(model: str) -> str:
     return 'force' if model in ('afm', 'indent', 'pes_tip') else 'pressure'
 
 
+def write_pes_grid(run_dir: Path, family: str) -> Path:
+    """Write the one `results/pes_scan.csv` grid a PES-family run produces.
+
+    A real PES scan is a single grid evaluation, not tiered friction files:
+    `src/templates/afm/pes_scan.lmp` and `src/templates/sheetonsheet/pes_scan.lmp`
+    both `print` the `# family=...` line then the header then one row per grid
+    point into exactly this file. `src.postprocessing.pes_scan.discover_grids`
+    globs for `results/pes_scan.csv` by name.
+    """
+    if family not in _PES_FAMILIES:
+        raise ValueError(f"write_pes_grid is for {_PES_FAMILIES}, got {family!r}")
+    results_dir = run_dir / 'results'
+    results_dir.mkdir(parents=True, exist_ok=True)
+    path = results_dir / 'pes_scan.csv'
+    path.write_text(PES_GRID_CSV[family], encoding='utf-8')
+    return path
+
+
 def write_results(run_dir: Path, family: str, *, load_kind: str = 'force',
                   loads: Sequence[float] = (30.0,),
                   angles: Sequence[float] = (0.0,),
@@ -62,7 +86,17 @@ def write_results(run_dir: Path, family: str, *, load_kind: str = 'force',
 
     Separate from `make_run` so a tree built by `generate_package` can be filled
     with synthetic results without its real `provenance.json` being overwritten.
+
+    Refuses a PES family: `rename_map(family, tier)` is `{}` for both of them
+    (no `Observable` lists them), so building tiered files here would silently
+    write a degenerate `friction_*.txt` (a bare `# TimeStep ` header, no
+    columns) instead of failing loudly. Use `write_pes_grid` for those.
     """
+    if family in _PES_FAMILIES:
+        raise ValueError(
+            f"write_results builds tiered friction_*/raw_*/peratom_* files; "
+            f"{family!r} runs write a single results/pes_scan.csv grid instead "
+            "-- call write_pes_grid (make_run does this for you)")
     results_dir = run_dir / 'results'
     results_dir.mkdir(parents=True, exist_ok=True)
     written: List[Path] = []
@@ -114,7 +148,10 @@ def make_run(root: Path, rel_path: str, family: str, *,
                        'pot_file_sha256': 'ab' * 32}],
     }), encoding='utf-8')
 
-    write_results(run_dir, family, load_kind=load_kind_for(model), loads=loads,
-                  angles=angles, speeds=speeds, tiers=tiers, layers=layers, n=n)
+    if family in _PES_FAMILIES:
+        write_pes_grid(run_dir, family)
+    else:
+        write_results(run_dir, family, load_kind=load_kind_for(model), loads=loads,
+                      angles=angles, speeds=speeds, tiers=tiers, layers=layers, n=n)
     (run_dir / 'results').mkdir(parents=True, exist_ok=True)
     return run_dir
