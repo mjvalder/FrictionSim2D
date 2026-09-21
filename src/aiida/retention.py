@@ -12,7 +12,7 @@ deliberately excluded: spec U3 keeps visual files on disk for verification only.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 __all__ = ['RETAINED_GLOBS', 'RETRIEVE_LIST', 'retained_paths',
            'retrieve_patterns']
@@ -32,8 +32,12 @@ RETAINED_GLOBS: Tuple[str, ...] = (
     '*.out',
 )
 
-#: REMOTE retention, evaluated by AiiDA's transport. Three differences from the
-#: local list, each forced:
+#: REMOTE retention, evaluated by AiiDA's transport via
+#: `aiida.engine.daemon.execmanager.retrieve_files_from_list`. Verified against
+#: that function directly (real `LocalTransport`, no daemon/profile needed --
+#: see `test_real_retrieval_preserves_the_tree`), because reasoning about it
+#: from the docstring alone is exactly how the first version of this list
+#: shipped broken:
 #:   1. `(remote, local, depth)` tuples, not plain strings. A plain string is
 #:      flattened to its basename (`execmanager.py:703-712`
 #:      `local_names = [os.path.split(rem)[1]]`), so `results/friction_*.txt`
@@ -41,27 +45,46 @@ RETAINED_GLOBS: Tuple[str, ...] = (
 #:      and the parser would find nothing.
 #:   2. No `**`: the transport's glob is fnmatch-style and does not recurse, so
 #:      every provenance level is named explicitly.
-#:   3. `depth=0` with an explicit local directory, so the retrieved tree is the
-#:      run directory's own shape and `ingest_retrieved` can walk it unchanged.
+#:   3. Every WILDCARD entry uses `local='.'` with `depth=None`. With
+#:      `depth=None`, execmanager builds each match's local name from
+#:      `rel_rem` -- the match's path *relative to the remote run root* -- so
+#:      the retrieved tree reproduces the run directory's own shape, and
+#:      `execmanager` pre-creates each needed subdirectory first (the
+#:      `depth is None or depth > 1` branch). A fixed `depth=0` local dir per
+#:      category (e.g. `('results/*', 'results', 0)`) looks equivalent but
+#:      collapses EVERY match from that one pattern onto the SAME local name --
+#:      two files under `results/` would collide, last-writer-wins, onto a
+#:      single flat file literally named `results`.
+#:   4. The two genuinely LITERAL (non-wildcard) entries -- `provenance.json`
+#:      and `lammps/system.in.settings` -- cannot use `depth=None`: execmanager
+#:      compares it with `depth > 0` in the non-wildcard branch and raises
+#:      `TypeError`. They use `depth` = the pattern's own path-segment count
+#:      instead (1 and 2), which reproduces the exact same
+#:      whole-path-relative-to-root effect that `None` gives a wildcard, and
+#:      still triggers directory pre-creation once `depth > 1`
+#:      (`lammps/system.in.settings`). `depth=0` for a nested literal path
+#:      (e.g. `lammps/system.in.settings` with `local='.'`) instead drops the
+#:      `lammps/` prefix and writes the bare basename to the retrieved root --
+#:      confirmed with a real `LocalTransport` run before this fix.
 #:
 #: `lammps/run_*.log` covers the per-deck HPC job logs (see
 #: `src/templates/hpc/_environment.j2` / `pbs_array.j2`, which write
 #: `<run>/lammps/run_<deck>.log` and copy them back alongside results/,
 #: visuals/ and data/); `log*.lammps` above stays for local (non-HPC) runs.
-RETRIEVE_LIST: Tuple[Tuple[str, str, int], ...] = (
-    ('provenance.json', '.', 0),
-    ('provenance/*', 'provenance', 0),
-    ('provenance/cif/*', 'provenance/cif', 0),
-    ('provenance/potentials/*', 'provenance/potentials', 0),
-    ('lammps/*.in', 'lammps', 0),
-    ('lammps/system.in.settings', 'lammps', 0),
-    ('lammps/run_*.log', 'lammps', 0),
-    ('results/*', 'results', 0),
-    ('data/hold_*.txt', 'data', 0),
-    ('data/final_*.data', 'data', 0),
-    ('data/load_*.data', 'data', 0),
-    ('log*.lammps', '.', 0),
-    ('*.out', '.', 0),
+RETRIEVE_LIST: Tuple[Tuple[str, str, Optional[int]], ...] = (
+    ('provenance.json', '.', 1),
+    ('provenance/*', '.', None),
+    ('provenance/cif/*', '.', None),
+    ('provenance/potentials/*', '.', None),
+    ('lammps/*.in', '.', None),
+    ('lammps/system.in.settings', '.', 2),
+    ('lammps/run_*.log', '.', None),
+    ('results/*', '.', None),
+    ('data/hold_*.txt', '.', None),
+    ('data/final_*.data', '.', None),
+    ('data/load_*.data', '.', None),
+    ('log*.lammps', '.', None),
+    ('*.out', '.', None),
 )
 
 
@@ -76,7 +99,7 @@ def retained_paths(run_dir: Path) -> List[Path]:
     return sorted(found)
 
 
-def retrieve_patterns(prefix: str = '') -> List[Tuple[str, str, int]]:
+def retrieve_patterns(prefix: str = '') -> List[Tuple[str, str, Optional[int]]]:
     """`RETRIEVE_LIST`, optionally under a remote working-directory prefix.
 
     Only the REMOTE half of each tuple is prefixed: the local half is where the
