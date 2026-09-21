@@ -199,3 +199,43 @@ def test_mutable_state_lives_in_extras(aiida_profile_clean, tmp_path):
     assert exported['job_id'] == '4321'
     with pytest.raises(ValueError, match='status must be one of'):
         node.status = 'nonsense'
+
+
+def test_optional_attributes_default_to_none_before_set_from_locator(aiida_profile_clean):
+    # base.attributes.get raises AttributeError when the key is absent and no
+    # default is passed -- fix round 1: a bare, never-populated node must
+    # still return the brief's documented default (None) for every Optional
+    # token field, not raise.
+    node = FrictionSimulationData()
+
+    assert node.flake_material is None
+    assert node.substrate is None
+    assert node.substrate_amorphous is None
+    assert node.tip_material is None
+    assert node.tip_radius is None
+    assert node.layers is None
+    assert node.pot_token is None
+    assert node.job_id is None
+
+
+def test_add_run_files_stages_provenance_one_level_above_afm_layer(
+        aiida_profile_clean, tmp_path):
+    # AFM-family runs write provenance.json into the per-layer L{n} directory
+    # while provenance/ (config.json, settings.yaml, ...) lives one level up
+    # (see RunLocator.provenance_dir / provenance_dir_for) -- exercise
+    # add_run_files against a real RunLocator built over that shape, not just
+    # the sheet-family layout every other add_run_files test uses.
+    _root, loc = _one_run(
+        tmp_path, 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2', 'afm')
+    assert loc.provenance_dir == loc.run_dir.parent / 'provenance'
+    assert (loc.provenance_dir / 'config.json').is_file()
+
+    node = FrictionSimulationData()
+    node.set_from_locator(loc, set_uuid='s')
+    node.add_run_files(loc)
+    node.store()
+
+    names = _walk(node)
+    assert 'provenance/config.json' in names
+    assert 'provenance/settings.yaml' in names
+    assert 'provenance.json' in _walk(node)

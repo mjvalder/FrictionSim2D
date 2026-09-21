@@ -83,7 +83,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def flake_material(self) -> Optional[str]:
-        return self.base.attributes.get('flake_material')
+        return self.base.attributes.get('flake_material', None)
 
     @flake_material.setter
     def flake_material(self, value: Optional[str]):
@@ -108,7 +108,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def substrate(self) -> Optional[str]:
-        return self.base.attributes.get('substrate')
+        return self.base.attributes.get('substrate', None)
 
     @substrate.setter
     def substrate(self, value: Optional[str]):
@@ -116,7 +116,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def substrate_amorphous(self) -> Optional[bool]:
-        return self.base.attributes.get('substrate_amorphous')
+        return self.base.attributes.get('substrate_amorphous', None)
 
     @substrate_amorphous.setter
     def substrate_amorphous(self, value: Optional[bool]):
@@ -125,7 +125,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def tip_material(self) -> Optional[str]:
-        return self.base.attributes.get('tip_material')
+        return self.base.attributes.get('tip_material', None)
 
     @tip_material.setter
     def tip_material(self, value: Optional[str]):
@@ -133,7 +133,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def tip_radius(self) -> Optional[float]:
-        return self.base.attributes.get('tip_radius')
+        return self.base.attributes.get('tip_radius', None)
 
     @tip_radius.setter
     def tip_radius(self, value: Optional[float]):
@@ -150,7 +150,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def layers(self) -> Optional[int]:
-        return self.base.attributes.get('layers')
+        return self.base.attributes.get('layers', None)
 
     @layers.setter
     def layers(self, value: Optional[int]):
@@ -158,7 +158,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
     @property
     def pot_token(self) -> Optional[str]:
-        return self.base.attributes.get('pot_token')
+        return self.base.attributes.get('pot_token', None)
 
     @pot_token.setter
     def pot_token(self, value: Optional[str]):
@@ -224,7 +224,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
     @property
     def job_id(self) -> Optional[str]:
         """Scheduler/CalcJob id, written by `submit.submit_simulation`."""
-        return self.base.extras.get('job_id')
+        return self.base.extras.get('job_id', None)
 
     @job_id.setter
     def job_id(self, value):
