@@ -66,6 +66,29 @@ def test_missing_driven_columns_add_no_extras():
     assert 'driven_com_z_mean' not in out.extras
 
 
+def test_nan_in_driven_com_channel_becomes_none_not_nan():
+    """Fix round 1: slide_distance/driven_com_z_mean/driven_com_z_drift are
+    derived with plain float() sums/means, so a single NaN sample in a
+    driven-com channel (a dropped frame, a bad LAMMPS write) propagates
+    through np.mean/np.sum/np.hypot into extras -- and AiiDA's clean_value
+    would reject the whole run's store on it, same as the other extras this
+    module already guards with _finite."""
+    df = _window()
+    df['tipx'] = np.linspace(0.0, 20.0, len(df))
+    df['tipy'] = np.zeros(len(df))
+    df.loc[5, 'tipy'] = np.nan
+    df['tipz'] = np.linspace(3.0, 3.4, len(df))
+    df.loc[len(df) - 1, 'tipz'] = np.nan
+
+    out = summarise_run({'window': df}, 'afm')
+
+    assert out.extras['slide_distance'] is None
+    assert out.extras['driven_com_z_mean'] is None
+    assert out.extras['driven_com_z_drift'] is None
+    assert all(v is None or math.isfinite(v)
+               for v in out.extras.values() if isinstance(v, float))
+
+
 def test_sheet_family_resolves_its_own_channel_names():
     """R29: sheetonsheet resolves nf/lfx/lfy under the SAME column names as
     afm (both are literally 'nf'/'lfx'/'lfy' in the registry, only their

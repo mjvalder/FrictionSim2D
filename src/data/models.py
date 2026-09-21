@@ -191,10 +191,6 @@ _SLIDE_ROLES = ('normal_load', 'lateral_force_x', 'lateral_force_y')
 #: AFM's tipx/tipy/tipz and the sheet family's own channels both carry these roles.
 _DRIVEN_ROLES = ('driven_com_x', 'driven_com_y', 'driven_com_z')
 
-#: The ten friction statistics, in `compute_friction_stats` order.
-_STAT_NAMES = ('mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
-               'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy')
-
 
 def _finite(value):
     """`value` if it is a finite float, else None.
@@ -311,12 +307,12 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
     if dx_col and dy_col:
         drv_x = window[dx_col].to_numpy(dtype=float)
         drv_y = window[dy_col].to_numpy(dtype=float)
-        summary.extras['slide_distance'] = float(
+        summary.extras['slide_distance'] = _finite(
             np.sum(np.hypot(np.diff(drv_x), np.diff(drv_y))))
     if dz_col:
         drv_z = window[dz_col].to_numpy(dtype=float)
-        summary.extras['driven_com_z_mean'] = float(np.mean(drv_z))
-        summary.extras['driven_com_z_drift'] = float(drv_z[-1] - drv_z[0])
+        summary.extras['driven_com_z_mean'] = _finite(np.mean(drv_z))
+        summary.extras['driven_com_z_drift'] = _finite(drv_z[-1] - drv_z[0])
 
     retract = frames_by_tier.get('retract')
     if family == 'indent' and retract is not None and len(retract):
