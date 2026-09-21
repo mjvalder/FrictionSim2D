@@ -63,6 +63,25 @@ def test_hetero_and_flake_materials_split():
     assert tokens.flake_material == 'h-WSe2'
 
 
+@pytest.mark.parametrize('mat, amorph, expected_amorphous', [
+    ('h-MoS2', 'a', True),
+    ('h-MoS2', 'c', False),
+    ('h_MoS2', 'a', True),
+    ('h_MoS2', 'c', False),
+])
+def test_prefixed_substrate_material_amorphous_roundtrip(mat, amorph, expected_amorphous):
+    """A substrate material carrying its own structure prefix (h-/h_) must
+    not be misread: only the leading 'a' output_dir_for adds for
+    amorph == 'a' marks it amorphous, never the material name's own 'h'."""
+    cfg = _cfg(sub={'mat': mat, 'amorph': amorph})
+    rel = output_dir_for(cfg, 'afm').as_posix()
+
+    tokens = parse_run_path(rel)
+
+    assert tokens.rel_path == rel
+    assert tokens.substrate_amorphous is expected_amorphous
+
+
 def test_amorphous_substrate_and_tip_tokens():
     tokens = parse_run_path('afm/h-MoS2/100x_100y/sub_aSi_tip_aSi_r25/K300/L2')
 

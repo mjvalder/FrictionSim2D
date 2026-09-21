@@ -322,14 +322,28 @@ class RunTokens:
     rel_path: str
 
 
+_PREFIXED_MATERIAL_RE = re.compile(r'^[a-z][-_]')
+
+
 def _is_amorphous_token(token: str) -> bool:
-    """``'aSi'`` is amorphous, ``'Si'`` is not.
+    """``'aSi'`` and ``'ah-MoS2'``/``'ah_MoS2'`` are amorphous, ``'Si'`` and
+    plain ``'h-MoS2'``/``'h_MoS2'`` are not.
 
     ``output_dir_for`` prefixes a literal lowercase ``'a'`` when
-    ``amorph == 'a'``, so the marker is a leading ``'a'`` followed by the
-    material's own (capitalised) first letter.
+    ``amorph == 'a'``, so the marker is a leading ``'a'`` followed by either
+    the material's own capitalised first letter (``'aSi'``) or, for a
+    material whose name already carries its own structure prefix (``h_``,
+    ``t_``, ``b_``, ``p_`` -- see the domain conventions), that prefix's
+    lowercase letter and separator (``'ah-MoS2'``). Requiring the separator
+    is what keeps a plain crystalline material name that merely starts with
+    a lowercase letter and no ``-``/``_`` from being misread as an ``'a'``
+    prefix plus that name -- there is no such material name in practice, but
+    the join would otherwise be ambiguous either way.
     """
-    return len(token) > 1 and token[0] == 'a' and token[1].isupper()
+    if len(token) < 2 or token[0] != 'a':
+        return False
+    rest = token[1:]
+    return rest[0].isupper() or bool(_PREFIXED_MATERIAL_RE.match(rest))
 
 
 def _split_materials(token: str) -> Tuple[Tuple[str, ...], Optional[str]]:
