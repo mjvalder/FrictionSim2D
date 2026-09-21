@@ -119,13 +119,12 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     * **There is no substrate realization.** ``substrate_realization_id``
       identifies the cached amorphous slab every AFM run shares; a sheet stack
       has none.
-    * **Only the primary sheet's potential is recorded.** ``ProvenanceRecord``
-      has one ``pot_path``/``pot_type``/``pot_file_sha256`` triple, and a hetero
-      run has two or more materials. ``config.sheet`` is ``[2D]``, mirrored from
-      ``[2D-1]`` for a numbered-only config, so this is the *first* material of
-      the stack, not the only one. Recording the rest needs a schema change
-      (``src/data/`` is out of this review's scope); the material pair itself is
-      already in the output directory name and the run manifest.
+    * **``materials`` is still a placeholder here.** Schema 2.0 replaced the
+      single ``pot_path``/``pot_type``/``pot_file_sha256`` triple with a
+      ``materials`` list that can hold one entry per component of a hetero
+      stack, but this function still writes it empty (``family``/``model`` are
+      literals too) -- filling it in with the real per-material potentials is
+      the next task's job, not this one's.
 
     Args:
         builder: the builder instance; its ``config``, ``_seeds``,
@@ -149,8 +148,7 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     # ~15-23 ms (pydantic model construction) and only an actual build should
     # pay it -- `--help` and every non-build subcommand instantiate nothing.
     # pylint: disable-next=import-outside-toplevel
-    from ...data.provenance import (ProvenanceRecord, sha256_file,
-                                    write_provenance)
+    from ...data.provenance import ProvenanceRecord, write_provenance
     import hashlib  # pylint: disable=import-outside-toplevel
 
     config = builder.config
@@ -160,10 +158,10 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     pressure_requested = (float(pressure)
                           if isinstance(pressure, (int, float)) else None)
 
-    sheet = config.sheet
-    pot_path = Path(str(sheet.pot_path))
-
     record = ProvenanceRecord(
+        family='sheetonsheet',
+        model='sheetonsheet',
+        materials=[],
         seed_thermal_tip=None,
         seed_thermal_sub=None,
         seed_velocity=None,
@@ -182,10 +180,6 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
         run_role='label',
         load_requested=None,
         pressure_requested=pressure_requested,
-        pot_path=str(sheet.pot_path),
-        pot_type=sheet.pot_type,
-        pot_resolution_route=getattr(sheet, 'pot_resolution_route', None),
-        pot_file_sha256=(sha256_file(pot_path) if pot_path.is_file() else None),
     )
     return write_provenance(output_root or builder.output_dir, record)
 

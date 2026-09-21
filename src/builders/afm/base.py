@@ -77,8 +77,7 @@ def enrich_provenance_post_run(output_root: Path,
     real output must never be hidden behind a failed enrichment).
     """
     # pylint: disable-next=import-outside-toplevel
-    from ...data.provenance import (ProvenanceRecord, parse_log_extras,
-                                    write_provenance)
+    from ...data.provenance import parse_log_extras, read_provenance, write_provenance
 
     output_root = Path(output_root)
     log_path = Path(log_path)
@@ -91,8 +90,7 @@ def enrich_provenance_post_run(output_root: Path,
         return None
 
     try:
-        record = ProvenanceRecord.model_validate_json(
-            prov_path.read_text(encoding='utf-8'))
+        record = read_provenance(prov_path)
     # ValidationError (a ValueError subclass) covers both a truncated/invalid
     # JSON body and a well-formed document missing required fields; OSError
     # covers an unreadable/undecodable file. A killed job leaving a half-written
@@ -979,6 +977,9 @@ class AFMSimulation(SimulationBase):
                           if isinstance(force, (int, float)) else None)
 
         record = ProvenanceRecord(
+            family='afm',
+            model='afm',
+            materials=[],
             seed_thermal_tip=context.get('seed_thermal_tip'),
             seed_thermal_sub=context.get('seed_thermal_sub'),
             seed_velocity=context.get('velocity_seed'),
@@ -998,13 +999,6 @@ class AFMSimulation(SimulationBase):
                 f"{self.config.settings.thermostat.type}_system"),
             run_role='label',
             load_requested=load_requested,
-            pot_path=str(self.config.sheet.pot_path),
-            pot_type=self.config.sheet.pot_type,
-            pot_resolution_route=getattr(
-                self.config.sheet, 'pot_resolution_route', None),
-            pot_file_sha256=(
-                sha256_file(Path(self.config.sheet.pot_path))
-                if Path(self.config.sheet.pot_path).is_file() else None),
         )
         write_provenance(output_root, record)
 

@@ -210,6 +210,7 @@ def _run_dir_with_provenance(tmp_path: Path) -> Path:
     run_dir = tmp_path / "afm" / "h_MoS2" / "L1"
     (run_dir / "lammps").mkdir(parents=True)
     write_provenance(run_dir, ProvenanceRecord(
+        family='afm', model='afm',
         seed_thermal_tip=1, seed_thermal_sub=2, seed_velocity=3,
         substrate_realization_id=None, damping_ratio=0.1, damp_ev=None,
         git_commit="abc123", git_dirty=False, config_hash="deadbeef",
@@ -406,6 +407,7 @@ def _run_dir(root: Path, rel: str, *, provenance: bool = True,
         (run / "lammps" / name).write_text(text, encoding="utf-8")
     if provenance:
         write_provenance(run, ProvenanceRecord(
+            family='afm', model='afm',
             seed_thermal_tip=1, seed_thermal_sub=2, seed_velocity=3,
             substrate_realization_id=None, damping_ratio=0.1, damp_ev=None,
             git_commit="abc123", git_dirty=False, config_hash="deadbeef",

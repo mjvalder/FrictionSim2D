@@ -6,22 +6,54 @@ required field fails the *build*, not the analysis: the record is a Pydantic
 model and builders must construct it completely.
 """
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
-PROVENANCE_SCHEMA_VERSION = '1.0.0'
+PROVENANCE_SCHEMA_VERSION = '2.0.0'
+
+#: Which part of the built system a MaterialProvenance entry describes.
+MATERIAL_ROLES = ('sheet', 'flake', 'tip', 'substrate')
 
 _RAMP_RE = re.compile(
     r'# RAMP_STATUS converged=(\d) r=([\d.eE+-]+) iterations=(\d+)')
 _ZREF_RE = re.compile(r'# UNLOADED_REF layer=(\d+) z=([\d.eE+-]+)')
 
 
+class MaterialProvenance(BaseModel):
+    """One material of the built system and the potential it was given.
+
+    A hetero run has two or more 'sheet' entries; the flake, tip and substrate
+    each get one. Replaces the single pot_path/pot_type/pot_file_sha256 triple
+    of schema 1.x, which silently recorded only the primary sheet.
+    """
+    name: str
+    role: str
+    pot_path: Optional[str] = None
+    pot_type: Optional[str] = None
+    pot_resolution_route: Optional[str] = None
+    pot_file_sha256: Optional[str] = None
+
+
 class ProvenanceRecord(BaseModel):
     """Everything needed to reproduce and audit one run (spec §5 F5)."""
     schema_version: str = PROVENANCE_SCHEMA_VERSION
+
+    # what this run is (spec section 3 F1: model = where it lives, family = its schema)
+    family: str
+    model: str
+
+    # every material of the built system, replacing the single pot_* triple
+    materials: List[MaterialProvenance] = []
+
+    # the stacking twist, not the slide direction. The only thing that
+    # distinguishes two otherwise-identical hetero runs, and nothing recorded
+    # it before: `scan_angle` is where the slide goes, `twist_angle` is how the
+    # stack was built.
+    twist_angle: Optional[float] = None
 
     # seeds — drawn in the builder (not in the template) so they land here
     seed_thermal_tip: Optional[int]
@@ -50,12 +82,6 @@ class ProvenanceRecord(BaseModel):
     cutoff_source: str
     thermostat_scheme: str
     tip_group_sizes: Optional[Dict[str, int]] = None
-
-    # potential sweep (spec §13)
-    pot_path: Optional[str] = None
-    pot_type: Optional[str] = None
-    pot_resolution_route: Optional[str] = None
-    pot_file_sha256: Optional[str] = None
 
     # run identity / roles
     run_role: Literal['label', 'probe', 'both_forbidden'] = 'label'
@@ -89,6 +115,27 @@ def write_provenance(run_dir: Path, record: ProvenanceRecord) -> Path:
     out = run_dir / 'provenance.json'
     out.write_text(record.model_dump_json(indent=2), encoding='utf-8')
     return out
+
+
+def read_provenance(path: Path, *, family: str = 'afm', model: str = 'afm',
+                    material_name: str = '') -> ProvenanceRecord:
+    """Read a provenance.json, upgrading a schema-1.x file in memory.
+
+    A 1.x file predates ``family``/``model``/``materials``: the keyword
+    arguments supply the first two (``src.run.tree.discover_runs`` passes the
+    run's tokens) and the single ``pot_*`` triple becomes one ``'sheet'``-role
+    :class:`MaterialProvenance` named ``material_name``. A 2.x file ignores all
+    three. The file on disk is never rewritten.
+    """
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    if str(data.get('schema_version', '1.0.0')).startswith('1.'):
+        pot = {k: data.pop(k, None) for k in
+               ('pot_path', 'pot_type', 'pot_resolution_route', 'pot_file_sha256')}
+        data['schema_version'] = PROVENANCE_SCHEMA_VERSION
+        data.setdefault('family', family)
+        data.setdefault('model', model)
+        data['materials'] = [MaterialProvenance(name=material_name, role='sheet', **pot)]
+    return ProvenanceRecord(**data)
 
 
 def parse_log_extras(log_path: Path) -> dict:
