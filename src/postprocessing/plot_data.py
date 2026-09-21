@@ -1,5 +1,5 @@
 """Thin Plotter facade composed from dedicated plotting mixins."""
-# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-instance-attributes,too-many-ancestors
 # pylint: disable=too-many-arguments,too-many-positional-arguments
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from .plot_ranking import PlotRankingMixin
 from .plot_style import DEFAULT_SETTINGS
 from .plot_stick_slip import PlotStickSlipMixin
 from .plot_summary import PlotSummaryMixin
+from .plot_taxonomy import PlotTaxonomyMixin
 from .plot_timeseries import PlotTimeseriesMixin
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class Plotter(
     PlotStickSlipMixin,
     PlotCorrelationMixin,
     PlotRankingMixin,
+    PlotTaxonomyMixin,
 ):
     """Generate plots from friction simulation data."""
 
@@ -88,6 +90,10 @@ class Plotter(
             'rank_friction': self.rank_friction,
             'correlation': self._generate_correlation_plots,
             'cof_histogram': self._generate_cof_histogram,
+            'taxonomy_signature_heatmap': self._generate_taxonomy_signature_heatmap,
+            'taxonomy_prevalence': self._generate_taxonomy_prevalence,
+            'taxonomy_exemplar': self._generate_taxonomy_exemplar,
+            'taxonomy_regime_map': self._generate_taxonomy_regime_map,
         }
 
         if plot_type in dispatch:
