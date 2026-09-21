@@ -5,6 +5,7 @@ assertions need setters that only land in Tasks 10/11
 (`FrictionSimulationData`/`FrictionResultsData`); this task keeps only the
 set-node half plus the plain vocabulary imports (controller ruling R10).
 """
+import importlib
 import pytest
 
 pytest.importorskip('aiida')
@@ -361,9 +362,6 @@ def test_unknown_tier_raises(aiida_profile_clean, tmp_path):
 
     with pytest.raises(KeyError, match='peratom'):
         node.frame('peratom')
-
-
-import importlib  # noqa: E402
 
 
 def test_provenance_node_type_is_gone():

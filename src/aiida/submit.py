@@ -221,7 +221,6 @@ def submit_simulation(
     sim_dir: Path,
     code_label: Any,
     sim_node: Any = None,
-    prov_node: Any = None,
     options: Optional[Dict[str, Any]] = None,
     parameters: Optional[Dict[str, Any]] = None,
 ) -> orm.ProcessNode:
@@ -231,7 +230,6 @@ def submit_simulation(
         sim_dir: Path to the simulation directory.
         code_label: AiiDA code label (e.g. ``'lammps@hpc'``) or Code node.
         sim_node: Optional ``FrictionSimulationData`` for tracking.
-        prov_node: Optional ``FrictionProvenanceData`` for provenance.
         options: Optional dict overriding resource/walltime settings.
         parameters: Optional dict with LAMMPS runtime parameters.
 
@@ -248,8 +246,6 @@ def submit_simulation(
 
     if sim_node:
         builder.simulation_node = sim_node
-    if prov_node:
-        builder.provenance = prov_node
 
     merged_params = dict(parameters or {})
     merged_params.setdefault('local_sim_dir', str(sim_dir))
@@ -300,16 +296,13 @@ def submit_batch(
             uuid = register_single_simulation(sim_dir, config_path)
 
         sim_node = None
-        prov_node = None
         if uuid:
             sim_node = orm.load_node(uuid)
-            if sim_node.provenance_uuid:
-                prov_node = orm.load_node(sim_node.provenance_uuid)
 
         try:
             proc = submit_simulation(
                 sim_dir, code_label,
-                sim_node=sim_node, prov_node=prov_node,
+                sim_node=sim_node,
                 options=options,
                 parameters=parameters,
             )
@@ -591,11 +584,10 @@ def _parse_walltime(walltime_str: str) -> int:
         if len(parts) == 3:
             hours, minutes, seconds = map(int, parts)
             return hours * 3600 + minutes * 60 + seconds
-        elif len(parts) == 2:
+        if len(parts) == 2:
             hours, minutes = map(int, parts)
             return hours * 3600 + minutes * 60
-        else:
-            raise ValueError(f"Invalid walltime format: {walltime_str}")
+        raise ValueError(f"Invalid walltime format: {walltime_str}")
     return int(float(walltime_str) * 3600)
 
 

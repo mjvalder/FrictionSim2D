@@ -718,8 +718,8 @@ def aiida_import(simulation_folder: str, label: Optional[str], description: str,
     supplied.
 
     Creates one ``FrictionSimulationSetData`` node (shared config), one
-    ``FrictionProvenanceData`` + one ``FrictionSimulationData`` per material,
-    and one ``FrictionResultsData`` per load/angle combination.
+    ``FrictionSimulationData`` per material, and one ``FrictionResultsData``
+    per load/angle combination.
 
     Example:
         FrictionSim2D aiida import ./simulation_20260421_173546 --label "251125-sheetonsheet"
@@ -875,7 +875,7 @@ def aiida_rebuild(set_label: str, output_dir: Optional[str], hpc_scripts: bool,
                    profile: Optional[str]):
     """Rebuild LAMMPS input files for a set from its AiiDA provenance.
 
-    Reads every FrictionProvenanceData node for the set, exports the stored
+    Reads every FrictionSimulationData node for the set, exports the stored
     CIF and potential files, and reruns the builder to produce a complete
     simulation directory tree.  This validates that the stored provenance is
     sufficient to reproduce the original simulation inputs.
