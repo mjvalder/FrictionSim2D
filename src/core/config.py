@@ -203,6 +203,7 @@ class AiidaSettings(BaseModel):
     create_provenance: bool = True
     auto_import_results: bool = False
     hpc_mode: Literal['local', 'remote', 'offline'] = 'offline'
+    max_stored_file_mb: int = 20
 
     # AiiDA remote computer configuration (optional, only for 'aiida setup')
     computer_label: Optional[str] = 'localhost'
