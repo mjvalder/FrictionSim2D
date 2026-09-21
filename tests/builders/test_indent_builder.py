@@ -11,6 +11,7 @@ from src.builders.afm.indent import (
     IndentSimulation,
     derive_seed,
 )
+from src.builders.utils.obs_ctx import build_obs_ctx
 from src.core.config import AFMSimulationConfig, load_settings
 
 
@@ -75,6 +76,20 @@ def _indent_context(**overrides):
         "n_steps": 100,
     }
     ctx.update(overrides)
+    if "obs_ctx" not in ctx:
+        # Built the same way IndentSimulation._build_obs_ctx does (via
+        # AFMSimulation, sim_type=self.FAMILY == 'indent'): afm/indent.lmp
+        # now renders through emit_observables/emit_output_fixes, which
+        # need a real obs_ctx dict in the render context (R12).
+        ctx["obs_ctx"] = build_obs_ctx(
+            sim_type="indent",
+            n_layers=1,
+            results_file_pattern=ctx["results_file_pattern"],
+            use_langevin=(ctx["thermostat_type"] == "langevin"),
+            enabled_tiers={"window": True, "raw": True, "peratom": True},
+            contact_cutoff=5.0,
+            results_freq=ctx["results_freq"],
+        )
     return ctx
 
 
@@ -234,7 +249,8 @@ def test_indent_tears_down_md_fixes_before_retract(tmp_path: Path):
     script = builder.render_template("afm/indent.lmp", _indent_context())
     # The langevin thermostat + aveforce + viscous + rigid fixes must be removed so
     # the minimization sees only conservative forces (else it corrupts the pull-off).
-    for unfixed in ("unfix           fc_ave", "unfix           forcetip",
+    for unfixed in ("unfix           fc_win", "unfix           fc_raw",
+                    "unfix           fc_pa", "unfix           forcetip",
                     "unfix           lang_tip", "unfix           lang_sub",
                     "unfix           nve_all", "unfix           tip_f"):
         assert unfixed in script
