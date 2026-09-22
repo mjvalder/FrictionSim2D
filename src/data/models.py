@@ -266,12 +266,18 @@ def _role_column(df, family: str, role_key: str) -> Optional[str]:
 
 
 def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
-                  skip_fraction: float = 0.2) -> RunSummary:
+                  skip_fraction: float = 0.2,
+                  post: Optional[Dict[str, float]] = None) -> RunSummary:
     """Reduce one load point's frames to the store's summary row.
 
     The single COF computation on the store path: `FrictionResultsData`,
     `db upload` and the API all read this, so a number can never differ
     between them. `compute_friction_stats` stays the kernel.
+
+    `post` carries the post-stream channels (P6), which are derived from
+    the retained final state rather than emitted by LAMMPS and so arrive
+    from the caller. Keyword-only and defaulted, so every existing call
+    site is unaffected.
     """
     window = frames_by_tier.get('window')
     if window is None or len(window) == 0:
@@ -323,13 +329,19 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
     raw = frames_by_tier.get('raw')
     if raw is not None and 'raw_lfx' in getattr(raw, 'columns', ()):
         from ..postprocessing.slip_analysis import detect_slips  # pylint: disable=import-outside-toplevel
-        slips = detect_slips(raw, channel='raw_lfx')
-        summary.extras['slip_n_events'] = float(slips.n_events)
-        summary.extras['slip_mean_amplitude'] = _finite(
-            np.mean(slips.amplitudes) if slips.amplitudes else 0.0)
-        # nan for <2 events, size<3 or a flat trace -- becomes None, not a
-        # ValidationError at Node.store()
-        summary.extras['slip_asymmetry'] = _finite(slips.asymmetry)
+        # Through `_finite`: slip_mean_interval_samples is nan for <2 events,
+        # size<3 or a flat trace, and AiiDA's clean_value raises on nan, which
+        # would abort Node.store() rather than record a missing number.
+        summary.extras.update(
+            {k: _finite(v)
+             for k, v in detect_slips(raw, channel='raw_lfx').summary().items()})
+
+    # P6: the post-stream channels are derived from the retained final
+    # state rather than emitted by LAMMPS, so they arrive from the caller.
+    # They go into extras like every other family-specific scalar, which
+    # is what carries them to the store and the central DB.
+    if post:
+        summary.extras.update({k: float(v) for k, v in post.items()})
 
     return summary
 
