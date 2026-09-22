@@ -378,7 +378,7 @@ class FrictionDB:
         """Insert one row, validated through :class:`ResultRecord` first."""
         return self.upload_record(ResultRecord(**fields))
 
-    def upload_record(self, record: Any, uploader: Optional[str] = None) -> int:
+    def upload_record(self, record: Any, uploader: Optional[str] = None) -> Optional[int]:
         """Upload a :class:`~src.data.models.ResultRecord` to the database.
 
         This is the **preferred upload method** — it guarantees all
@@ -389,7 +389,13 @@ class FrictionDB:
             uploader: Override the uploader field (if not set on the record).
 
         Returns:
-            Database row ``id`` of the inserted record.
+            Database row ``id`` of the inserted record, or ``None`` if a row
+            with the same ``time_series_hash`` already exists. The `simulations`
+            table's ``time_series_hash`` column is ``UNIQUE``, so this is a
+            genuine, expected outcome (the same result uploaded twice, e.g. a
+            retried `db upload`) -- ``ON CONFLICT ... DO NOTHING`` turns it into
+            a `None` return, a clear counted outcome for callers, rather than
+            a raw driver ``IntegrityError`` reaching them as a crash.
         """
         from psycopg2.extras import Json  # pylint: disable=import-outside-toplevel
 
@@ -400,11 +406,20 @@ class FrictionDB:
         values = [Json(data[c]) if c in self._JSONB_COLUMNS else data[c]
                   for c in columns]
         sql = (f"INSERT INTO simulations ({', '.join(columns)}) "
-               f"VALUES ({', '.join(['%s'] * len(columns))}) RETURNING id;")
+               f"VALUES ({', '.join(['%s'] * len(columns))}) "
+               "ON CONFLICT (time_series_hash) DO NOTHING RETURNING id;")
         with self._cursor(commit=True) as cur:
             cur.execute(sql, values)
-            row_id = int(cur.fetchone()[0])
+            row = cur.fetchone()
 
+        if row is None:
+            logger.info(
+                "Skipped duplicate upload for %s (time_series_hash already present)",
+                data.get('material'),
+            )
+            return None
+
+        row_id = int(row[0])
         logger.info(
             "Uploaded result for %s (id=%d, COF=%s, status=%s)",
             data.get('material'), row_id, data.get('mean_cof'),

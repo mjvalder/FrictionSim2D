@@ -140,7 +140,7 @@ FrictionSim2D postprocess plot plot_config.json --output-dir plots
 
 ```bash
 FrictionSim2D db init
-FrictionSim2D db upload ./simulation_output/simulation_YYYYMMDD_HHMMSS --uploader my_name
+FrictionSim2D db upload 260421-afm --uploader my_name --contact me@example.org
 FrictionSim2D db query --material h-MoS2 --limit 20
 ```
 

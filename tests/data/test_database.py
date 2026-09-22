@@ -69,7 +69,8 @@ _PSYCOPG2_STUB, _PSYCOPG2_EXTRAS_STUB = _make_psycopg2_stub()
 class _FakeCursor:
     """Minimal cursor that satisfies FrictionDB's usage pattern."""
 
-    def __init__(self, rows=None, returning_id=1, existing_columns=None):
+    def __init__(self, rows=None, returning_id=1, existing_columns=None,
+                 duplicate=False):
         self._rows_queue: list = list(rows or [])
         self._returning_id = returning_id
         self.rowcount = 0
@@ -78,11 +79,14 @@ class _FakeCursor:
         #: fresh install). A list simulates an existing table with exactly
         #: these columns, for `init_schema`'s pre-v3 detection.
         self._existing_columns = existing_columns
+        #: Simulates `ON CONFLICT (time_series_hash) DO NOTHING` matching an
+        #: existing row: the INSERT executes but returns no row.
+        self._duplicate = duplicate
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
         if "RETURNING id" in sql:
-            self._rows_queue = [(self._returning_id,)]
+            self._rows_queue = [] if self._duplicate else [(self._returning_id,)]
         elif "COUNT(*)" in sql and "GROUP BY" not in sql:
             self._rows_queue = [(4,)]
         elif "AVG(" in sql:
@@ -230,6 +234,42 @@ class TestFrictionDBUpload:
         """Only mandatory field 'material' is required."""
         row_id = db.upload_result(material="silicene")
         assert isinstance(row_id, int)
+
+    def test_upload_uses_on_conflict_do_nothing(self, db):
+        """The INSERT itself must be conflict-safe, not just its caller."""
+        db.upload_result(material="h-MoS2", time_series_hash="abc123")
+        with db._cursor() as cur:
+            sql, _params = cur.executed[-1]
+        assert "ON CONFLICT" in sql
+        assert "DO NOTHING" in sql
+
+    def test_duplicate_time_series_hash_returns_none(self):
+        """A repeat upload of the same result is a clean `None`, not a crash.
+
+        `time_series_hash` is `UNIQUE`; `ON CONFLICT ... DO NOTHING` makes the
+        INSERT a no-op and `RETURNING id` yields no row. Real code (a raw
+        `psycopg2.errors.IntegrityError` on a naive INSERT) never reaches
+        `upload_record`'s caller at all.
+        """
+        from src.data.database import FrictionDB
+
+        with patch("src.data.database.FrictionDB._ensure_schema"):
+            instance = FrictionDB(auto_create=False)
+
+        fake_cursor = _FakeCursor(duplicate=True)
+
+        @contextmanager
+        def _mock_cursor(commit=False):
+            yield fake_cursor
+
+        instance._cursor = _mock_cursor  # type: ignore[method-assign]
+
+        row_id = instance.upload_result(
+            material="h-MoS2", family="afm", model="afm",
+            time_series_hash="dupe-hash",
+        )
+
+        assert row_id is None
 
 
 class TestFrictionDBQuery:

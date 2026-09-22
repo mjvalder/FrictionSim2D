@@ -1416,104 +1416,106 @@ def _add_db_options(func):
     return func
 
 
-def _iter_reader_rows(reader):
-    """Yield one result row per simulation from a DataReader, with statistics."""
-    import numpy as np  # noqa: PLC0415
-    from .data.models import compute_friction_stats  # noqa: PLC0415
-    for material, size_data in reader.full_data_nested.items():
-        for _size_key, substrate_data in size_data.items():
-            for _sub, tip_data in substrate_data.items():
-                for _tip_mat, radius_data in tip_data.items():
-                    for _radius, layer_data in radius_data.items():
-                        for layer_key, speed_data in layer_data.items():
-                            layers = int(layer_key.replace('l', ''))
-                            for speed_key, force_data in speed_data.items():
-                                speed = int(speed_key.replace('s', ''))
-                                for load_key, angle_data in force_data.items():
-                                    is_pressure = load_key.startswith('p')
-                                    load_val = float(load_key[1:])
-                                    for angle_key, df in angle_data.items():
-                                        angle = int(angle_key.replace('a', ''))
-                                        nf_arr = (
-                                            df['nf'].values if 'nf' in df.columns
-                                            else np.array([])
-                                        )
-                                        lfx_arr = (
-                                            df['lfx'].values if 'lfx' in df.columns
-                                            else np.array([])
-                                        )
-                                        lfy_arr = (
-                                            df['lfy'].values if 'lfy' in df.columns
-                                            else np.array([])
-                                        )
-                                        stats = (
-                                            compute_friction_stats(nf_arr, lfx_arr, lfy_arr)
-                                            if nf_arr.size > 0 else {}
-                                        )
-                                        yield (
-                                            material, layers, speed, is_pressure,
-                                            load_val, angle, len(df), stats
-                                        )
+def _run_by_uuid(runs):
+    """Map ``str(run.uuid) -> run`` for every run that carries a uuid.
+
+    A `Friction2DDB.query()` result's `runs` and `results` are aligned by
+    `run_uuid`, not index-parallel (see `QueryResult.to_dataframe`'s identical
+    pattern in `src/aiida/query.py`).
+    """
+    return {str(run.uuid): run for run in runs if hasattr(run, 'uuid')}
+
+
+def _run_node_for(result, run_by_uuid):
+    run_uuid = getattr(result, 'run_uuid', None)
+    return run_by_uuid.get(str(run_uuid)) if run_uuid is not None else None
+
+
+def _upload_query_results(db, found, set_node, *, uploader, contact):
+    """Upload every result in a `QueryResult`, returning (published, rejected,
+    skipped) counts. `skipped` counts rows `upload_record` reports as an
+    already-present `time_series_hash` (U4 dedup) -- a clean, counted outcome,
+    never a crash.
+    """
+    run_by_uuid = _run_by_uuid(found.runs)
+    n_published = n_rejected = n_skipped = 0
+    for result in found.results:
+        run_node = _run_node_for(result, run_by_uuid)
+        record = result.to_record(run_node, set_node, uploader=uploader, contact=contact)
+        try:
+            row_id = db.upload_record(record, uploader=uploader)
+            if row_id is None:
+                n_skipped += 1
+                continue
+            validation = db.validate_staged(row_id)
+            if validation.is_valid and db.publish(row_id):
+                n_published += 1
+            else:
+                n_rejected += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            n_rejected += 1
+            logger.warning("Skipped %s: %s", record.run_uuid, exc)
+    return n_published, n_rejected, n_skipped
 
 
 @db_group.command('upload')
-@click.argument('results_dir', type=click.Path(exists=True))
+@click.argument('set_label')
 @click.option('--uploader', '-n', default=None,
               help='Your name or identifier (stored with each row).')
+@click.option('--contact', default=None,
+              help='How a reader can reach you for the full data (spec U4).')
+@click.option('--aiida-profile', 'profile', default=None,
+              help='AiiDA profile holding the set (default: settings.aiida.profile).')
+@click.option('--dry-run', is_flag=True,
+              help='Report what would be uploaded; connect to nothing.')
 @_add_db_options
 def db_upload(
-    results_dir: str,
+    set_label: str,
     uploader: Optional[str],
+    contact: Optional[str],
+    profile: Optional[str],
+    dry_run: bool,
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
     user: Optional[str],
     password: Optional[str],
 ):
-    """Upload simulation results from RESULTS_DIR to the shared database.
+    """Upload one stored simulation set to the central summary database.
 
-    Scans RESULTS_DIR for completed simulation outputs and uploads each
-    result (mean COF, forces, conditions) to the community PostgreSQL
-    database.
+    SET_LABEL is an existing AiiDA simulation-set label. Reads the LOCAL AiiDA
+    store only: every central row carries a run UUID and the host that produced
+    it, so a reader can contact the owner for the full data (there is no
+    automated fetch).
+
+    The AiiDA profile is spelled ``--aiida-profile`` here, not ``--profile``,
+    because in the ``db`` group ``--profile`` used to mean the *database*
+    profile that Task 31 removed; reusing the spelling would silently change
+    its meaning.
 
     Example:
-        FrictionSim2D db upload ./simulation_output/afm_run_1/results \\
-            --uploader alice
+        FrictionSim2D db upload 260421-afm -n matteo --contact m@example.org
     """
-    from .postprocessing.read_data import DataReader  # noqa: PLC0415
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .aiida.export import resolve_set  # noqa: PLC0415
+    from .aiida.query import Friction2DDB  # noqa: PLC0415
 
-    click.echo(f"📂 Reading results from {results_dir} ...")
-    reader = DataReader(results_dir=str(results_dir))
+    load_aiida_profile(profile)
+    set_node = resolve_set(set_label)
+    found = Friction2DDB().query(set_label=set_label)
+
+    if dry_run:
+        click.echo(f"Would upload {len(found.results)} row(s) for set "
+                   f"{set_label!r}.")
+        return
+
     db = _make_db(host, port, dbname, user, password)
-    n_published = 0
-    n_rejected = 0
-    for (
-        material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats
-    ) in _iter_reader_rows(reader):
-        try:
-            sim_type = 'sheetonsheet' if is_pressure else 'afm'
-            row_id = db.upload_result(
-                material=material.replace('_', '-'),
-                simulation_type=sim_type,
-                layers=layers,
-                force_nN=None if is_pressure else load_val,
-                pressure_gpa=load_val if is_pressure else None,
-                scan_angle=float(angle),
-                scan_speed=float(speed),
-                uploader=uploader,
-                ntimesteps=ntimesteps,
-                **stats,  # type: ignore[arg-type]
-            )
-            vr = db.validate_staged(row_id)
-            if vr.is_valid and db.publish(row_id):
-                n_published += 1
-            else:
-                n_rejected += 1
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.warning("Skipped row (%s, l%d, a%d): %s", material, layers, angle, exc)
+    n_published, n_rejected, n_skipped = _upload_query_results(
+        db, found, set_node, uploader=uploader, contact=contact)
 
     click.echo(
-        f"✅ Processed results: published={n_published}, rejected={n_rejected}."
+        f"✅ published={n_published}, rejected={n_rejected}, "
+        f"skipped={n_skipped} (already in central DB)."
     )
 
 
@@ -1677,29 +1679,35 @@ def db_create_key(
 
 
 @db_group.command('stage')
-@click.argument('results_dir', type=click.Path(exists=True))
+@click.argument('set_label')
 @click.option('--uploader', '-n', required=True,
               help='Your name or identifier.')
+@click.option('--contact', default=None,
+              help='How a reader can reach you for the full data (spec U4).')
 @click.option('--api-key', default=None, envvar='FRICTION_DB_API_KEY',
               help='API key for write access.')
+@click.option('--aiida-profile', 'profile', default=None,
+              help='AiiDA profile holding the set (default: settings.aiida.profile).')
 @_add_db_options
 def db_stage(
-    results_dir: str,
+    set_label: str,
     uploader: str,
+    contact: Optional[str],
     api_key: Optional[str],
+    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
     user: Optional[str],
     password: Optional[str],
 ):
-    """Stage simulation results and apply automatic validation.
+    """Stage one stored simulation set and apply automatic validation.
 
-    Results are uploaded with status='staged', validated, and automatically
-    published when they pass validation.
+    Rows are uploaded with status='staged', validated, and published when they
+    pass. SET_LABEL is an existing AiiDA simulation-set label.
 
     Example:\n
-        FrictionSim2D db stage ./results --uploader alice --api-key <key>
+        FrictionSim2D db stage 260421-afm --uploader alice --api-key <key>
     """
     db = _make_db(host, port, dbname, user, password)
 
@@ -1709,39 +1717,23 @@ def db_stage(
             raise click.ClickException("Invalid or revoked API key.")
         click.echo(f"Authenticated as: {verified_user}")
 
-    from .postprocessing.read_data import DataReader  # noqa: PLC0415
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .aiida.export import resolve_set  # noqa: PLC0415
+    from .aiida.query import Friction2DDB  # noqa: PLC0415
 
-    click.echo(f"📂 Reading results from {results_dir} ...")
-    reader = DataReader(results_dir=str(results_dir))
-    n_published = 0
-    n_rejected = 0
-    for (
-        material, layers, speed, is_pressure, load_val, angle, ntimesteps, stats
-    ) in _iter_reader_rows(reader):
-        try:
-            sim_type = 'sheetonsheet' if is_pressure else 'afm'
-            row_id = db.upload_result(
-                material=material.replace('_', '-'),
-                simulation_type=sim_type,
-                layers=layers,
-                force_nN=None if is_pressure else load_val,
-                pressure_gpa=load_val if is_pressure else None,
-                scan_angle=float(angle),
-                scan_speed=float(speed),
-                uploader=uploader,
-                ntimesteps=ntimesteps,
-                **stats,  # type: ignore[arg-type]
-            )
-            vr = db.validate_staged(row_id)
-            if vr.is_valid and db.publish(row_id):
-                n_published += 1
-            else:
-                n_rejected += 1
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.warning("Skipped row (%s, l%d, a%d): %s", material, layers, angle, exc)
+    load_aiida_profile(profile)
+    set_node = resolve_set(set_label)
+    found = Friction2DDB().query(set_label=set_label)
+
+    # `contact` is the whole of U4: a central row carries a pointer and an
+    # owner, and there is no automated fetch. Staging without it produces
+    # rows the GUI reports as "no owner contact".
+    n_published, n_rejected, n_skipped = _upload_query_results(
+        db, found, set_node, uploader=uploader, contact=contact)
 
     click.echo(
-        f"✅ Processed staged results: published={n_published}, rejected={n_rejected}."
+        f"✅ Processed staged results: published={n_published}, "
+        f"rejected={n_rejected}, skipped={n_skipped} (already in central DB)."
     )
 
 

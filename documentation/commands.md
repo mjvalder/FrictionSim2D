@@ -486,20 +486,25 @@ FrictionSim2D db create-key --name NAME [DB OPTIONS]
 
 ### db upload
 
-Upload simulation results to the shared database:
+Upload one stored AiiDA simulation set to the shared central database. Reads the
+LOCAL AiiDA store only (spec U4) — SET_LABEL must already exist there:
 
 ```bash
-FrictionSim2D db upload RESULTS_DIR [--uploader NAME] [DB OPTIONS]
+FrictionSim2D db upload SET_LABEL [--uploader NAME] [--contact EMAIL] \
+    [--aiida-profile PROFILE] [--dry-run] [DB OPTIONS]
 ```
 
-Each row is validated automatically; valid rows are published.
+Each row carries a run UUID and the host that produced it, so a reader can
+contact the owner for the full time-series data — there is no automated
+fetch. Each row is validated automatically; valid rows are published.
 
 ### db stage
 
 Upload with an API key; rows are validated and published or rejected automatically:
 
 ```bash
-FrictionSim2D db stage RESULTS_DIR --uploader NAME [--api-key KEY] [DB OPTIONS]
+FrictionSim2D db stage SET_LABEL --uploader NAME [--contact EMAIL] \
+    [--api-key KEY] [--aiida-profile PROFILE] [DB OPTIONS]
 ```
 
 ### db query

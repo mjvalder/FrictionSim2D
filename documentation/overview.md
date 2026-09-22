@@ -40,8 +40,9 @@ registration, submission, and import workflows.
 4. Run the LAMMPS jobs locally or on a cluster.
 5. Import completed results into the local AiiDA database — full timeseries plus
    provenance: `FrictionSim2D aiida import`.
-6. Optionally upload summary statistics to the shared central database:
-   `FrictionSim2D db upload --profile central`.
+6. Optionally upload summary statistics to the shared central database, reading
+   the local AiiDA store directly by set label:
+   `FrictionSim2D db upload SET_LABEL --uploader NAME --contact EMAIL`.
 
 ## Quick start
 
