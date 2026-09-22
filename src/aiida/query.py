@@ -418,9 +418,16 @@ class Friction2DDB:
         for (node,) in qb.all():
             if is_superseded(node):
                 continue
-            (forces if node.load_kind == 'force' else pressures).add(node.load)
-            angles.add(node.angle)
-            speeds.add(node.speed)
+            # A PES grid's `load_kind` is 'none' and its load/angle/speed are
+            # placeholder zeros, not conditions anyone ran at: they must not
+            # show up as a 0 GPa pressure (or a 0 deg / 0 speed) option.
+            if node.load_kind == 'force':
+                forces.add(node.load)
+            elif node.load_kind == 'pressure':
+                pressures.add(node.load)
+            if node.load_kind in ('force', 'pressure'):
+                angles.add(node.angle)
+                speeds.add(node.speed)
             if node.family:
                 families.add(node.family)
 

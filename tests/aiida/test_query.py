@@ -325,3 +325,20 @@ def test_removed_helpers_are_gone():
                  'query_by_material', 'compare_materials', 'find_similar',
                  'get_provenance', 'get_set_results'):
         assert not hasattr(Friction2DDB, name), name
+
+
+def test_a_pes_grid_adds_no_ghost_conditions(aiida_profile_clean, tmp_path):
+    """m4: a PES point is load_kind='none' with placeholder zeros; it used to
+    land in `pressures` as 0.0 (and as a 0 deg / 0 speed option)."""
+    root = tmp_path / 'simulation_pes'
+    make_run(root, AFM, 'afm', loads=(10.0,), speeds=(2.0,), angles=(30.0,))
+    make_run(root, 'pes_sheet/h-MoS2/100x_100y/K300', 'pes_sheet')
+    ingest_root(root, label='pes-cond')
+
+    conditions = Friction2DDB().get_available_conditions()
+
+    assert conditions['forces'] == [10.0]
+    assert conditions['pressures'] == []
+    assert conditions['angles'] == [30.0]
+    assert conditions['speeds'] == [2.0]
+    assert 'pes_sheet' in conditions['families']
