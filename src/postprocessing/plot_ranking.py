@@ -7,10 +7,50 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 from .plot_mixin_base import PlotterMixinBase
 
 logger = logging.getLogger(__name__)
+
+
+RANKING_SCHEMA = 1
+
+#: Every key a ranking entry carries, in order. Present in BOTH modes, with
+#: `None` where the mode has no value for one, so no reader has to branch on
+#: which mode produced the file.
+RANKING_ENTRY_KEYS = ('material', 'rank', 'metric', 'mean_value', 'n_points',
+                      'min_force', 'max_force', 'fit_slope_stderr',
+                      'fit_r_squared', 'fit_rmse')
+
+
+def _entry(**values) -> dict:
+    """One ranking entry with every key present."""
+    return {key: values.get(key) for key in RANKING_ENTRY_KEYS}
+
+
+def _document(mode: str, metric: str, rank_order: str, size: str,
+              layer, groups: list) -> dict:
+    """The one ranking document both modes write.
+
+    `aggregate_over_force_range` used to write
+    `{ranking_mode, rank_order, average_f10_to_f50: [...]}` while the
+    per-force mode wrote a bare `{f30.0: [...]}`. `plot_correlation` read
+    every top-level key as a force and died on `float('anking_mode')`.
+    """
+    return {'schema': RANKING_SCHEMA, 'ranking_mode': mode, 'metric': metric,
+            'rank_order': rank_order, 'size': size, 'layer': layer,
+            'groups': groups}
+
+
+def read_ranking(path) -> dict:
+    """Read a ranking document, refusing anything that is not one."""
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    if not isinstance(data, dict) or data.get('schema') != RANKING_SCHEMA:
+        found = data.get('schema') if isinstance(data, dict) else None
+        raise ValueError(
+            f"{path}: not a ranking document (schema {found!r})")
+    return data
 
 
 class PlotRankingMixin(PlotterMixinBase):
@@ -102,17 +142,14 @@ class PlotRankingMixin(PlotterMixinBase):
                     ).reset_index(drop=True)
                     ranked['rank'] = ranked.index + 1
 
-                    materials = []
-                    for _, row in ranked.iterrows():
-                        materials.append({
-                            'material': row['id'],
-                            'rank': int(row['rank']),
-                            'metric': metric,
-                            'mean_value': float(row['mean_value']),
-                            'n_points': int(row['n_points']),
-                            'min_force': float(row['min_force']),
-                            'max_force': float(row['max_force']),
-                        })
+                    materials = [
+                        _entry(material=row['id'], rank=int(row['rank']),
+                               metric=metric,
+                               mean_value=float(row['mean_value']),
+                               n_points=int(row['n_points']),
+                               min_force=float(row['min_force']),
+                               max_force=float(row['max_force']))
+                        for _, row in ranked.iterrows()]
 
                     if force_range and len(force_range) == 2:
                         range_key = (
@@ -122,13 +159,12 @@ class PlotRankingMixin(PlotterMixinBase):
                     else:
                         range_key = "average_over_available_forces"
 
-                    output_data = {
-                        'ranking_mode': 'average_over_force_range',
-                        'rank_order': (
-                            'ascending' if ascending else 'descending'
-                        ),
-                        range_key: materials,
-                    }
+                    output_data = _document(
+                        'average_over_force_range', metric,
+                        'ascending' if ascending else 'descending', size,
+                        layer,
+                        [{'key': range_key, 'force': None,
+                          'materials': materials}])
 
                     if plot_config.get('filename'):
                         filename = plot_config['filename']
@@ -170,7 +206,7 @@ class PlotRankingMixin(PlotterMixinBase):
                     )
                     fits[mat_id] = fit
 
-                ranks_by_force = {}
+                groups = []
                 for f, f_group in group.groupby('force'):
                     ranked = f_group.sort_values(
                         metric, ascending=ascending,
@@ -179,21 +215,21 @@ class PlotRankingMixin(PlotterMixinBase):
 
                     materials = []
                     for _, row in ranked.iterrows():
-                        record = {
-                            'material': row['id'],
-                            'rank': row['rank'],
-                            'metric': metric,
-                            'mean_value': row[metric],
-                        }
-                        if fits.get(row['id']):
-                            record.update({
-                                'fit_slope_stderr': fits[row['id']]['slope_stderr'],
-                                'fit_r_squared': fits[row['id']]['r_squared'],
-                                'fit_rmse': fits[row['id']]['rmse'],
-                            })
-                        materials.append(record)
+                        fit = fits.get(row['id']) or {}
+                        materials.append(_entry(
+                            material=row['id'], rank=int(row['rank']),
+                            metric=metric, mean_value=float(row[metric]),
+                            fit_slope_stderr=fit.get('slope_stderr'),
+                            fit_r_squared=fit.get('r_squared'),
+                            fit_rmse=fit.get('rmse')))
 
-                    ranks_by_force[f"f{f}"] = materials
+                    groups.append({'key': f'f{f}', 'force': float(f),
+                                   'materials': materials})
+
+                output_data = _document(
+                    'per_force', metric,
+                    'ascending' if ascending else 'descending', size, layer,
+                    groups)
 
                 if plot_config.get('filename'):
                     filename = plot_config['filename']
@@ -205,7 +241,7 @@ class PlotRankingMixin(PlotterMixinBase):
 
                 output_path = self.output_dir / filename
                 with open(output_path, 'w', encoding='utf-8') as f:
-                    json.dump(ranks_by_force, f, indent=4)
+                    json.dump(output_data, f, indent=4)
                 logger.info("Exported ranking to %s", output_path)
 
     # =====================================================================

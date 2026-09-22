@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 import pandas as pd
 
 from .plot_mixin_base import PlotterMixinBase
+from .plot_ranking import read_ranking
 
 logger = logging.getLogger(__name__)
 
@@ -35,23 +35,24 @@ class PlotCorrelationMixin(PlotterMixinBase):
 
         all_ranks = []
         for f_path in ranking_files:
-            size_match = re.search(
-                r'friction_ranking_(.+)\.json', f_path.name,
-            )
-            if not size_match:
+            try:
+                data = read_ranking(f_path)
+            except (ValueError, json.JSONDecodeError, OSError) as exc:
+                logger.warning("Skipping %s: %s", f_path.name, exc)
                 continue
-            size = size_match.group(1)
-
-            with open(f_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                for force_key, material_list in data.items():
-                    force = float(force_key[1:])
-                    for rank, material_data in enumerate(material_list, 1):
-                        all_ranks.append({
-                            'size': size, 'force': force,
-                            'material': material_data['material'],
-                            'rank': rank,
-                        })
+            size = data['size'] or f_path.stem
+            for group in data['groups']:
+                # An aggregated ranking has no force of its own; it is one
+                # ordering over a whole range, so it correlates by size only.
+                force = group['force']
+                for entry in group['materials']:
+                    all_ranks.append({
+                        'size': size,
+                        'force': force if force is not None else float('nan'),
+                        'material': entry['material'],
+                        'rank': entry['rank'],
+                        'ranking_mode': data['ranking_mode'],
+                    })
 
         if not all_ranks:
             logger.error("Could not parse ranking data.")
@@ -86,6 +87,11 @@ class PlotCorrelationMixin(PlotterMixinBase):
                 'filename', f'rank_corr_by_size_f{force}.png',
             )
         else:
+            # An aggregated ranking is one ordering over a whole force range,
+            # so its rows carry force = NaN. Correlating ranks ACROSS forces
+            # has nothing to say about them, and a NaN pivot column would
+            # survive `dropna` only by emptying the frame.
+            rank_df = rank_df[rank_df['force'].notna()]
             for size, group in rank_df.groupby('size'):
                 pivot_df = group.pivot_table(
                     index='material', columns='force',

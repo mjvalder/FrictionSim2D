@@ -517,3 +517,83 @@ def test_load_db_labels_calls_the_api_client(monkeypatch, tmp_path):
     assert seen['family'] == 'hetero'
     assert seen['layers'] == 2
     assert 'profile' not in seen
+
+
+def test_both_ranking_modes_write_the_same_shape(tmp_path):
+    """`aggregate_over_force_range` wrote {ranking_mode, rank_order,
+    average_f10_to_f50}; the per-force mode wrote a bare {f30.0: [...]}.
+    `correlation` read every top-level key as a force and crashed on
+    float('anking_mode')."""
+    from src.postprocessing.plot_ranking import read_ranking
+
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0, 50.0))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'rank_friction', 'rank_by': 'cof',
+                           'filter_size': '100x100y',
+                           'filename': 'friction_ranking_per_force.json'})
+    plotter.generate_plot({'plot_type': 'rank_friction', 'rank_by': 'cof',
+                           'filter_size': '100x100y',
+                           'aggregate_over_force_range': True,
+                           'force_range': [10.0, 50.0],
+                           'filename': 'friction_ranking_avg.json'})
+
+    per_force = read_ranking(out / 'friction_ranking_per_force.json')
+    aggregated = read_ranking(out / 'friction_ranking_avg.json')
+
+    assert set(per_force) == set(aggregated)
+    assert per_force['schema'] == aggregated['schema'] == 1
+    assert per_force['ranking_mode'] == 'per_force'
+    assert aggregated['ranking_mode'] == 'average_over_force_range'
+    assert per_force['metric'] == aggregated['metric'] == 'cof'
+    assert len(aggregated['groups']) == 1
+    assert aggregated['groups'][0]['key'] == 'average_f10_to_f50'
+    assert aggregated['groups'][0]['force'] is None
+    assert {g['force'] for g in per_force['groups']} == {10.0, 30.0, 50.0}
+
+
+def test_every_material_entry_has_every_key(tmp_path):
+    from src.postprocessing.plot_ranking import read_ranking
+
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+    plotter.generate_plot({'plot_type': 'rank_friction', 'rank_by': 'cof',
+                           'filter_size': '100x100y',
+                           'filename': 'r.json'})
+
+    entry = read_ranking(out / 'r.json')['groups'][0]['materials'][0]
+
+    assert set(entry) == {'material', 'rank', 'metric', 'mean_value',
+                          'n_points', 'min_force', 'max_force',
+                          'fit_slope_stderr', 'fit_r_squared', 'fit_rmse'}
+
+
+def test_correlation_reads_an_aggregated_ranking(tmp_path):
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0, 50.0))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+    plotter.generate_plot({'plot_type': 'rank_friction', 'rank_by': 'cof',
+                           'filter_size': '100x100y',
+                           'aggregate_over_force_range': True,
+                           'filename': 'friction_ranking_100x100y.json'})
+
+    plotter.generate_plot({'plot_type': 'correlation', 'correlate_by': 'force',
+                           'filename': 'corr.png'})
+
+    assert not any('anking_mode' in str(w) for w in plotter.written)
+
+
+def test_correlation_ignores_a_file_that_is_not_a_ranking(tmp_path):
+    out = tmp_path / 'out'
+    out.mkdir(parents=True)
+    (out / 'friction_ranking_bogus.json').write_text('{"nonsense": 1}',
+                                                     encoding='utf-8')
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'correlation', 'correlate_by': 'force',
+                           'filename': 'corr.png'})
+
+    assert not (out / 'corr.png').exists()   # nothing to correlate, no crash
