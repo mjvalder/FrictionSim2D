@@ -776,10 +776,10 @@ def aiida_list_sets(profile: Optional[str], output_format: str):
         FrictionSim2D aiida list-sets
         FrictionSim2D aiida list-sets --format json
     """
-    from .aiida.integration import list_simulation_sets
+    from .aiida.integration import list_simulation_sets  # noqa: PLC0415
 
     try:
-        rows = list_simulation_sets(aiida_profile=profile)
+        rows = list_simulation_sets(profile=profile)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Failed to list simulation sets")
         _raise_abort(f"❌ List failed: {exc}", exc)
@@ -794,14 +794,12 @@ def aiida_list_sets(profile: Optional[str], output_format: str):
         return
 
     if output_format == 'csv':
-        import csv
-        import io
-        keys = [
-            'label', 'simulation_type', 'n_materials', 'n_simulations',
-            'n_results', 'run_folder', 'ctime', 'uuid', 'pk',
-        ]
+        import csv  # noqa: PLC0415
+        import io  # noqa: PLC0415
+        keys = ['label', 'model', 'created', 'n_runs', 'n_results',
+                'materials', 'git_commit', 'source_host', 'uuid', 'pk']
         buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=keys)
+        writer = csv.DictWriter(buffer, fieldnames=keys, extrasaction='ignore')
         writer.writeheader()
         writer.writerows(rows)
         click.echo(buffer.getvalue().rstrip())
@@ -809,11 +807,11 @@ def aiida_list_sets(profile: Optional[str], output_format: str):
 
     headers = [
         ('Label', 'label'),
-        ('Type', 'simulation_type'),
-        ('Materials', 'n_materials'),
-        ('Sims', 'n_simulations'),
+        ('Model', 'model'),
+        ('Runs', 'n_runs'),
         ('Results', 'n_results'),
-        ('Run folder', 'run_folder'),
+        ('Materials', 'materials'),
+        ('Host', 'source_host'),
         ('UUID', 'uuid'),
     ]
     widths = []
@@ -900,17 +898,17 @@ def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
 def aiida_delete(set_label: str, profile: Optional[str]):
     """Delete a single simulation set and all its linked nodes.
 
-    SET_LABEL is the label (or UUID) of the set to delete. All linked
-    SimulationData, ResultsData, and ProvenanceData nodes are also removed.
+    SET_LABEL is the label of the set to delete. All linked SimulationData
+    and ResultsData nodes, and the set's own Group, are also removed.
 
     Example:
         FrictionSim2D aiida delete 260312-force_rebomos
     """
-    from .aiida.integration import delete_simulation_set
+    from .aiida.integration import delete_simulation_set  # noqa: PLC0415
 
     click.echo(f"🗑️  Deleting simulation set '{set_label}'…")
     try:
-        n = delete_simulation_set(label_or_uuid=set_label, aiida_profile=profile)
+        n = delete_simulation_set(set_label, profile=profile)
         click.echo(f"✅ Deleted {n} nodes for set '{set_label}'.")
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Delete failed")
@@ -926,17 +924,17 @@ def aiida_delete(set_label: str, profile: Optional[str]):
 def aiida_clear(profile: Optional[str]):
     """Delete all FrictionSim2D nodes from the AiiDA database.
 
-    This removes every SimulationSet, Simulation, Provenance, and Results
-    node.  The action is irreversible.
+    This removes every SimulationSet, Simulation, and Results node in the
+    profile. The action is irreversible.
 
     Example:
         FrictionSim2D aiida clear
     """
-    from .aiida.integration import clear_all_nodes
+    from .aiida.integration import clear_all_nodes  # noqa: PLC0415
 
     click.echo("🗑️  Deleting all FrictionSim2D nodes…")
     try:
-        n = clear_all_nodes(aiida_profile=profile)
+        n = clear_all_nodes(profile=profile)
         click.echo(f"✅ Deleted {n} nodes.")
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Clear failed")
@@ -971,8 +969,8 @@ def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[
     db = Friction2DDB()
 
     if set_label:
-        from .aiida.integration import list_simulation_sets
-        sets = list_simulation_sets(aiida_profile=profile)
+        from .aiida.integration import list_simulation_sets  # noqa: PLC0415
+        sets = list_simulation_sets(profile=profile)
         matched = [s for s in sets if s['label'] == set_label]
         if not matched:
             available = [s['label'] for s in sets]

@@ -49,3 +49,41 @@ def test_aiida_setup_has_no_remote_options():
     # `aiida setup` CREATES a profile; every other command LOADS one.
     assert '--create-profile' in out
     assert '--profile ' not in out
+
+
+GONE = [
+    'register_simulation_batch', 'register_single_simulation',
+    'import_results_to_aiida', 'import_simulation_set', 'dump_results_to_json',
+    'rebuild_simulation_set', 'export_archive', 'import_archive',
+    '_detect_simulation_type', '_find_material_provenance_dirs',
+    '_rebuild_single_material', '_patch_config_paths', '_resolve_set_node',
+    '_load_manifest', '_update_manifest_entry',
+]
+KEPT = ['list_simulation_sets', 'delete_simulation_set', 'clear_all_nodes']
+
+
+@pytest.mark.parametrize('name', GONE)
+def test_superseded_function_is_gone(name):
+    import src.aiida.integration as integ
+    assert not hasattr(integ, name), name
+
+
+@pytest.mark.parametrize('name', KEPT)
+def test_surviving_function_is_kept(name):
+    import src.aiida.integration as integ
+    assert callable(getattr(integ, name))
+
+
+def test_lazy_exports_point_at_the_new_modules():
+    import src.aiida as aiida_pkg
+
+    exports = aiida_pkg._LAZY_EXPORTS
+    assert exports['ingest_root'][0].endswith('.ingest')
+    assert exports['export_results'][0].endswith('.export')
+    assert exports['export_archive'][0].endswith('.export')
+    assert exports['import_archive'][0].endswith('.export')
+    for dead in ('register_simulation_batch', 'register_single_simulation',
+                 'import_results_to_aiida', 'import_simulation_set',
+                 'dump_results_to_json', 'rebuild_simulation_set',
+                 'FrictionProvenanceData', 'FrictionWorkChain'):
+        assert dead not in exports

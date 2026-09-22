@@ -691,3 +691,74 @@ def test_importing_ingest_does_not_require_aiida():
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert 'OK' in result.stdout
+
+
+def test_list_sets_reports_the_new_shape(aiida_profile_clean, tmp_path):
+    from src.aiida.integration import list_simulation_sets
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='listed')
+
+    rows = list_simulation_sets()
+
+    assert len(rows) == 1
+    assert rows[0]['label'] == 'listed'
+    assert rows[0]['model'] == 'afm'
+    assert rows[0]['n_runs'] == 1
+    assert rows[0]['n_results'] == 1
+    assert rows[0]['materials'] == ['h-MoS2']
+
+
+def test_delete_removes_the_whole_group(aiida_profile_clean, tmp_path):
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData, FrictionSimulationData
+    from src.aiida.integration import delete_simulation_set
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='doomed')
+
+    n_deleted = delete_simulation_set('doomed')
+
+    assert n_deleted >= 3
+    assert QueryBuilder().append(FrictionSimulationData).count() == 0
+    assert QueryBuilder().append(FrictionResultsData).count() == 0
+
+
+def test_find_run_by_rel_path_scopes_to_the_matching_source_root(aiida_profile_clean,
+                                                                  tmp_path):
+    """Two sets sharing a rel_path (R27 ruling): an unscoped lookup on
+    `rel_path` alone would return an arbitrary one of the two runs. Scoping
+    to the set whose `source_root` matches the given `root` must return the
+    run that actually belongs to that tree.
+    """
+    from src.aiida.ingest import find_run_by_rel_path
+
+    root_a = tmp_path / 'simulation_a'
+    root_b = tmp_path / 'simulation_b'
+    make_run(root_a, REL, 'afm', loads=(30.0,))
+    make_run(root_b, REL, 'afm', loads=(30.0,))
+
+    ingest_root(root_a, label='set-a')
+    ingest_root(root_b, label='set-b')
+
+    node_a = find_run_by_rel_path(root_a / REL, root_a)
+    node_b = find_run_by_rel_path(root_b / REL, root_b)
+
+    assert node_a is not None
+    assert node_b is not None
+    assert node_a.uuid != node_b.uuid
+    assert node_a.set_label == 'set-a'
+    assert node_b.set_label == 'set-b'
+
+
+def test_find_run_by_rel_path_returns_none_for_an_uningested_root(aiida_profile_clean,
+                                                                   tmp_path):
+    from src.aiida.ingest import find_run_by_rel_path
+
+    root = tmp_path / 'simulation_untracked'
+    make_run(root, REL, 'afm', loads=(30.0,))
+
+    assert find_run_by_rel_path(root / REL, root) is None

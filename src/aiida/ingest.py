@@ -165,6 +165,41 @@ def find_or_create_run(set_node, locator) -> Tuple[object, bool]:
     return node, True
 
 
+def find_run_by_rel_path(run_dir: Path, root: Path) -> Optional[object]:
+    """The stored run node for a built directory, or None.
+
+    `submit_batch` used to CREATE a node per directory at submit time; the
+    nodes now exist already (`run --aiida` -> `ingest_root`), so submitting
+    looks one up. Returning None is not an error: a directory submitted
+    without `--aiida` simply has no node to track against.
+
+    Scoped to the set(s) whose `source_root` is `root`: `rel_path` alone is
+    not unique across sets (two different trees can each have a run at, say,
+    `K300/afm_.../layer1`), so an unscoped lookup would return an arbitrary
+    node instead of the one that actually belongs to this tree.
+    """
+    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
+
+    from .data import FrictionSimulationData, FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
+
+    root = Path(root).resolve()
+    rel = Path(run_dir).resolve().relative_to(root).as_posix()
+
+    set_qb = QueryBuilder()
+    set_qb.append(FrictionSimulationSetData,
+                  filters={'attributes.source_root': str(root)})
+    set_uuids = [str(node.uuid) for node in set_qb.all(flat=True)]
+    if not set_uuids:
+        return None
+
+    qb = QueryBuilder()
+    qb.append(FrictionSimulationData, filters={
+        'attributes.rel_path': rel,
+        'attributes.set_uuid': {'in': set_uuids},
+    })
+    return qb.first(flat=True)
+
+
 def find_results(run_node, point) -> Optional[object]:
     """The stored results node for this run at `point`'s CONDITIONS, if any.
 

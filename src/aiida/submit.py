@@ -134,7 +134,7 @@ def run_with_aiida(
         processes = submit_batch(
             simulation_dirs=simulation_dirs,
             code_label=code,
-            config_path=Path(config_file),
+            root_dir=root_dir,
             options=options,
             parameters=parameters,
             daemon=daemon,
@@ -226,7 +226,7 @@ def smart_submit(
         processes = submit_batch(
             simulation_dirs=simulation_dirs,
             code_label=code,
-            config_path=None,
+            root_dir=Path(simulation_dir),
             options=options,
             parameters=parameters,
             daemon=daemon,
@@ -296,7 +296,7 @@ def submit_simulation(
 def submit_batch(
     simulation_dirs: list,
     code_label: Any,
-    config_path: Optional[Path] = None,
+    root_dir: Optional[Path] = None,
     options: Optional[Dict[str, Any]] = None,
     parameters: Optional[Dict[str, Any]] = None,
     daemon: bool = False,
@@ -306,7 +306,11 @@ def submit_batch(
     Args:
         simulation_dirs: List of simulation directories.
         code_label: AiiDA code label or Code node.
-        config_path: Original config file path (for registration).
+        root_dir: The simulation root `simulation_dirs` are relative to. When
+            given, each directory's already-stored `FrictionSimulationData`
+            (from `run --aiida` -> `ingest_root`) is looked up and passed
+            through for tracking. `None` means submit untracked -- a
+            directory built without `--aiida` simply has no node to find.
         options: Optional dict overriding resource/walltime settings.
         parameters: Optional dict with LAMMPS runtime parameters.
         daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
@@ -315,19 +319,15 @@ def submit_batch(
     Returns:
         List of submitted ``ProcessNode`` instances.
     """
-    from .integration import register_single_simulation  # pylint: disable=import-outside-toplevel
+    from .ingest import find_run_by_rel_path  # pylint: disable=import-outside-toplevel
 
     processes = []
     for sim_dir in simulation_dirs:
         sim_dir = Path(sim_dir)
 
-        uuid = None
-        if config_path:
-            uuid = register_single_simulation(sim_dir, config_path)
-
         sim_node = None
-        if uuid:
-            sim_node = orm.load_node(uuid)
+        if root_dir:
+            sim_node = find_run_by_rel_path(sim_dir, root_dir)
 
         try:
             proc = submit_simulation(
