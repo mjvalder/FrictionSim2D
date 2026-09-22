@@ -43,15 +43,21 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
 __all__ = ['AIIDA_AVAILABLE', 'load_aiida_profile']
 
 
-def load_aiida_profile(profile_name=None):
+def load_aiida_profile(profile=None):
     """Load an AiiDA profile, required before using any AiiDA functionality.
 
     Should be called once at application startup (e.g. from the CLI) before
     any AiiDA nodes are created or queried.
 
+    ``profile=None`` means "the configured one": `settings.aiida.profile` if it
+    is set, otherwise AiiDA's own default. That is the only reader of the
+    `AiidaSettings.profile` field, and it is why every command's `--profile`
+    can be omitted on a machine whose settings.yaml already names one.
+
     Args:
-        profile_name: Name of the AiiDA profile to load. If ``None``,
-            the default profile is loaded.
+        profile: Name of the AiiDA profile to load. If ``None``, the
+            profile configured in `settings.yaml` is used, falling back to
+            AiiDA's own default profile if that is not set either.
 
     Returns:
         The loaded ``aiida.manage.configuration.Profile`` instance.
@@ -66,7 +72,13 @@ def load_aiida_profile(profile_name=None):
         )
     if LOAD_PROFILE is None:
         raise RuntimeError("AiiDA profile loader is unavailable")
-    return LOAD_PROFILE(profile_name)
+    if profile is None:
+        try:
+            from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
+            profile = load_settings().aiida.profile or None
+        except (OSError, ValueError, AttributeError):
+            profile = None
+    return LOAD_PROFILE(profile)
 
 
 def __getattr__(name: str) -> Any:

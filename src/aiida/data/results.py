@@ -139,28 +139,25 @@ class FrictionResultsData(Data):
 
     # -- Files -----------------------------------------------------------
 
-    @staticmethod
-    def _run_relative_name(path: Path) -> str:
-        """`<parent-dir-name>/<filename>`.
+    @property
+    def oversize_files(self) -> List[Dict[str, Any]]:
+        """Aux files `add_result_files` recorded by sha256 instead of storing."""
+        return self.base.attributes.get('oversize_files', [])
 
-        R18: every tier and auxiliary file this node stores lives one level
-        below the run root (`results/`, `data/`, `lammps/`), so keeping that
-        one path component is what lets a future export (Task 17) write a
-        member back to the exact run-relative path it came from, instead of
-        guessing which subdirectory it belongs in from a bare basename.
-        """
-        path = Path(path)
-        return f'{path.parent.name}/{path.name}'
-
-    def add_result_files(self, paths: Dict[str, Path],
+    def add_result_files(self, paths: Dict[str, Path], *, run_dir: Path,
                          aux: Sequence[Path] = (), max_mb: int = 20,
                          content_sha256: str = '') -> None:
         """Store the tier files verbatim, plus logs and hold/final artefacts.
 
-        Each file is stored under its path relative to the run root
-        (`results/friction_...txt`, `data/hold_...txt`, `lammps/run_...log`),
-        not by bare basename (R18) -- so a future export can write it back to
-        the exact run-relative location it came from.
+        Each file is stored under its path relative to `run_dir`
+        (`results/friction_...txt`, `data/hold_...txt`, `lammps/run_...log`,
+        or a bare `log_slide.lammps` sitting directly in the run root), not by
+        a `parent-dir-name/basename` guess (R18) -- so a future export can
+        write it back to the exact run-relative location it came from. The
+        earlier guess broke for any aux file that is a direct child of
+        `run_dir` (the slide logs `_aux_files` globs for): its "parent name"
+        was the run's own leaf directory, not a real subdirectory, so it was
+        stored one level too deep.
 
         `content_sha256`, when given, is passed IN, not recomputed: `LoadPoint`
         (Task 15) already hashes every entry of `point.tiers` including
@@ -171,7 +168,17 @@ class FrictionResultsData(Data):
         ingest creates zero nodes". When no hash is passed (standalone/test
         callers), one is computed here with `content_hash` over the stored
         tier files so the attribute is never empty on a stored node.
+
+        An `aux` file over `max_mb` is not stored; its run-relative path,
+        size and sha256 are appended to the `oversize_files` attribute instead
+        (mirrors `FrictionSimulationData.add_run_files`), so the record still
+        says exactly which file was skipped. Tier files are always stored --
+        they are the load point's defining data, not a rides-along extra, and
+        skipping one would make `frame(tier)` unable to re-parse it.
         """
+        from ...data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
+
+        run_dir = Path(run_dir)
         limit = max_mb * 1024 * 1024
         tiers: List[str] = []
         tier_paths: List[Path] = []
@@ -181,14 +188,22 @@ class FrictionResultsData(Data):
                 continue
             path = Path(path)
             self.base.repository.put_object_from_file(
-                str(path), self._run_relative_name(path))
+                str(path), path.relative_to(run_dir).as_posix())
             tiers.append(tier)
             tier_paths.append(path)
+        oversize: List[Dict[str, Any]] = []
         for extra in aux:
             extra = Path(extra)
-            if extra.is_file() and extra.stat().st_size <= limit:
-                self.base.repository.put_object_from_file(
-                    str(extra), self._run_relative_name(extra))
+            if not extra.is_file():
+                continue
+            name = extra.relative_to(run_dir).as_posix()
+            if extra.stat().st_size > limit:
+                oversize.append({'path': name, 'size': extra.stat().st_size,
+                                 'sha256': sha256_file(extra),
+                                 'source': str(extra)})
+                continue
+            self.base.repository.put_object_from_file(str(extra), name)
+        self.base.attributes.set('oversize_files', oversize)
         self.tiers = tiers
         self.content_sha256 = content_sha256 or content_hash(tier_paths)
 
@@ -251,6 +266,7 @@ class FrictionResultsData(Data):
     _NOT_EXTRAS = frozenset(_IDENTITY) | frozenset((
         'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
         'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy', 'time_series_hash',
+        'oversize_files',
     ))
 
     def to_record(self, run_node, set_node, *, uploader=None, contact=None):

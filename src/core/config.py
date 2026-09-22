@@ -204,6 +204,13 @@ class AiidaSettings(BaseModel):
     auto_import_results: bool = False
     hpc_mode: Literal['local', 'remote', 'offline'] = 'offline'
     max_stored_file_mb: int = 20
+    #: The profile every profile-taking function falls back to when its own
+    #: `profile: Optional[str] = None` argument is omitted (`ingest_root`,
+    #: `export_results`, `rebuild_set`, `export_archive`, `import_archive`,
+    #: `list_simulation_sets`, `delete_simulation_set`, `clear_all_nodes`, and
+    #: the CLI commands built on them). `None` here means "AiiDA's own
+    #: default profile".
+    profile: Optional[str] = None
 
     # AiiDA remote computer configuration (optional, only for 'aiida setup')
     computer_label: Optional[str] = 'localhost'

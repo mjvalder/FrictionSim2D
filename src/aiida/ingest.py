@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..postprocessing.read_data import (
     FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
@@ -347,3 +347,223 @@ def load_points(locator) -> List[LoadPoint]:
             tiers=ordered, aux=aux,
             content_sha256=content_hash(ordered.values())))
     return points
+
+
+@dataclass
+class IngestReport:
+    """What one ingest did, run by run and point by point.
+
+    `aiida import` (Task 20) prints `render()` and exits non-zero when
+    `ok()` is False; it adds its OWN non-zero exit on `empty_runs` /
+    `unparseable` (R8) -- `ok()` here stays failures-only, because an
+    all-empty tree (a run directory `run --aiida` has just created, with no
+    results written yet) must be able to ingest successfully.
+
+    Every list is `field(default_factory=list)`, never a bare `[]` default --
+    a mutable default shared across every `IngestReport` instance is exactly
+    the bug dataclasses exist to prevent.
+    """
+    label: str
+    set_uuid: str = ''
+    created_runs: List[str] = field(default_factory=list)
+    created_results: List[str] = field(default_factory=list)
+    skipped_results: List[str] = field(default_factory=list)
+    superseded_results: List[str] = field(default_factory=list)
+    incomplete_results: List[str] = field(default_factory=list)
+    empty_runs: List[str] = field(default_factory=list)
+    unparseable: List[str] = field(default_factory=list)
+    failures: List[Tuple[str, str]] = field(default_factory=list)
+    dry_run: bool = False
+
+    def ok(self) -> bool:
+        return not self.failures
+
+    def render(self) -> str:
+        head = f"{'DRY RUN: ' if self.dry_run else ''}set {self.label!r}"
+        if self.set_uuid:
+            head += f" ({self.set_uuid})"
+        lines = [
+            head,
+            f"  runs created:        {len(self.created_runs)}",
+            f"  results created:     {len(self.created_results)}",
+            f"  results skipped:     {len(self.skipped_results)}",
+            f"  results superseded:  {len(self.superseded_results)}",
+            f"  results incomplete:  {len(self.incomplete_results)}",
+            f"  empty runs:          {len(self.empty_runs)}",
+            f"  unparseable runs:    {len(self.unparseable)}",
+        ]
+        for rel, message in self.failures:
+            lines.append(f"  FAILED {rel}: {message}")
+        return '\n'.join(lines)
+
+
+def _point_key(rel_path: str, point: LoadPoint) -> str:
+    return (f"{rel_path}#{point.load_kind}{point.load:g}"
+            f"_a{point.angle:g}_s{point.speed:g}")
+
+
+def _frames_for(point: LoadPoint) -> Dict[str, Any]:
+    """The frames `summarise_run` consumes for one load point.
+
+    A `.csv` member (a PES grid, the indent retract curve) is a plain comma
+    table with a `# family=` first line, not a LAMMPS `ave/time` file, so it
+    is read with `pd.read_csv(comment='#')`; everything else goes through
+    `read_data.read_results_file`, the same parser the DataReader uses.
+    """
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+
+    from ..postprocessing.read_data import read_results_file  # pylint: disable=import-outside-toplevel
+
+    frames: Dict[str, Any] = {}
+    for tier in TIER_KEYS:
+        path = point.tiers.get(tier)
+        if path is None:
+            continue
+        frames[tier] = (pd.read_csv(path, comment='#') if path.suffix == '.csv'
+                        else read_results_file(path, point.family,
+                                               n_layers=point.layers or 2))
+    retract = point.tiers.get('retract')
+    if retract is not None:
+        frames['retract'] = pd.read_csv(retract, comment='#')
+    return frames
+
+
+def create_results(run_node, point: LoadPoint, run_dir: Path, *,
+                   skip_fraction: float = 0.2):
+    """Store one load point as a `FrictionResultsData` and return it.
+
+    `run_dir` is the run's own root directory (`locator.run_dir`): every path
+    in `point.tiers`/`point.aux` lives under it, and `add_result_files` needs
+    it to compute each stored member's run-relative path (R18).
+    """
+    from ..data.models import summarise_run  # pylint: disable=import-outside-toplevel
+
+    from .data import FrictionResultsData  # pylint: disable=import-outside-toplevel
+
+    node = FrictionResultsData()
+    node.family = point.family
+    node.load_kind = point.load_kind
+    node.load = float(point.load)
+    node.angle = float(point.angle)
+    node.speed = float(point.speed)
+    node.layers = point.layers
+    node.run_uuid = str(run_node.uuid)
+    node.set_uuid = str(run_node.set_uuid)
+
+    # The 'retract' entry of `point.tiers` is not a sampling tier -- it rides
+    # to `add_result_files` as an aux file (R11c), alongside every other aux
+    # file the point carries (logs, hold/final artefacts, pes_scan_refine).
+    tiers = {t: p for t, p in point.tiers.items() if t in TIER_KEYS}
+    retract = point.tiers.get('retract')
+    aux = point.aux + ((retract,) if retract is not None else ())
+    node.add_result_files(tiers, run_dir=run_dir, aux=aux,
+                          max_mb=_max_stored_file_mb(),
+                          content_sha256=point.content_sha256)
+    node.set_summary(summarise_run(_frames_for(point), point.family,
+                                   skip_fraction=skip_fraction))
+    node.store()
+    _group_for(run_node.set_label or run_node.set_uuid).add_nodes([node])
+    return node
+
+
+def ingest_run(locator, set_node, report: IngestReport, *,
+               skip_fraction: float = 0.2) -> None:
+    """Ingest one run into `set_node`, recording the outcome in `report`.
+
+    One `try` per LOAD POINT, not one per run. With the try around the whole
+    loop, a single truncated file at load 3 of 20 aborted loads 4-20, named
+    none of them in the report, and on re-ingest hash-skipped 1-2 and raised
+    again on 3 -- 4-20 were unreachable until the user found the bad file by
+    hand. That is the remote-manual mode's normal failure (a PBS array where
+    some jobs hit walltime), so it must degrade per point.
+    """
+    rel = locator.tokens.rel_path
+    try:
+        points = load_points(locator)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Could not enumerate load points for %s", rel)
+        report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
+        return
+
+    if not points:
+        # A run directory with no results at all -- e.g. `run --aiida` has
+        # just created it and the job has not finished yet. Not a failure
+        # (R8): the caller decides whether an empty tree is acceptable.
+        report.empty_runs.append(rel)
+
+    if report.dry_run:
+        report.created_runs.append(rel)
+        report.created_results.extend(_point_key(rel, p) for p in points)
+        return
+
+    try:
+        run_node, created = find_or_create_run(set_node, locator)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Could not create the run node for %s", rel)
+        report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
+        return
+    if created:
+        report.created_runs.append(rel)
+
+    for point in points:
+        key = _point_key(rel, point)
+        try:
+            if results_exist(run_node, point):
+                report.skipped_results.append(key)
+                continue
+            stale = find_results(run_node, point)
+            node = create_results(run_node, point, locator.run_dir,
+                                  skip_fraction=skip_fraction)
+            if stale is not None:
+                supersede(stale, run_node)
+                report.superseded_results.append(key)
+            else:
+                report.created_results.append(key)
+            if not node.is_complete:
+                report.incomplete_results.append(key)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Ingest failed for %s", key)
+            report.failures.append((key, f"{type(exc).__name__}: {exc}"))
+
+
+def ingest_root(root: Path, label: Optional[str] = None,
+                profile: Optional[str] = None, *,
+                dry_run: bool = False) -> IngestReport:
+    """Ingest every run under `root`. Idempotent: re-running adds only new or
+    changed load points, and creates nothing at all when nothing changed.
+
+    `profile` is loaded via `load_aiida_profile` before anything touches the
+    store -- and not at all in `dry_run` mode, so a plan can be produced on a
+    machine with no AiiDA profile configured at all.
+    """
+    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
+    from ..run.tree import discover_runs, unparseable_runs  # pylint: disable=import-outside-toplevel
+
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+
+    root = Path(root)
+    label = label or root.name
+    report = IngestReport(label=label, dry_run=dry_run)
+    report.unparseable = unparseable_runs(root)
+
+    locators = discover_runs(root)
+    if not locators:
+        report.failures.append((str(root), 'no provenance.json found'))
+        return report
+
+    if not dry_run:
+        load_aiida_profile(profile)
+
+    settings = load_settings()
+    # `settings.database.skip_fraction` predates this plan; read it
+    # defensively in case a future rework (Task 31) ever makes it optional.
+    skip_fraction = getattr(settings.database, 'skip_fraction', 0.2)
+
+    set_node = None
+    if not dry_run:
+        set_node = find_or_create_set(root, label)
+        report.set_uuid = str(set_node.uuid)
+
+    for locator in locators:
+        ingest_run(locator, set_node, report, skip_fraction=skip_fraction)
+    return report

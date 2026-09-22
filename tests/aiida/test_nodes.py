@@ -269,7 +269,7 @@ def test_results_node_stores_files_and_summary(aiida_profile_clean, tmp_path):
     node.layers = 2
     node.run_uuid = 'run-1'
     node.set_uuid = 'set-1'
-    node.add_result_files({'window': window, 'raw': raw}, aux=())
+    node.add_result_files({'window': window, 'raw': raw}, run_dir=run_dir, aux=())
     node.set_summary(summarise_run(
         {'window': read_results_file(window, 'afm'),
          'raw': read_results_file(raw, 'afm')}, 'afm'))
@@ -296,7 +296,7 @@ def test_frame_reparses_the_stored_file(aiida_profile_clean, tmp_path):
 
     node = FrictionResultsData()
     node.family = 'sheetonsheet'
-    node.add_result_files({'window': window}, aux=())
+    node.add_result_files({'window': window}, run_dir=run_dir, aux=())
     node.store()
 
     df = node.frame('window')

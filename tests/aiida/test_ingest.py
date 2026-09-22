@@ -11,8 +11,8 @@ from dataclasses import dataclass, replace  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 from src.aiida.ingest import (  # noqa: E402
-    LoadPoint, find_or_create_run, find_or_create_set, group_label,
-    load_points, results_exist,
+    IngestReport, LoadPoint, create_results, find_or_create_run,
+    find_or_create_set, group_label, ingest_root, load_points, results_exist,
 )
 from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import PES_GRID_CSV, make_run  # noqa: E402
@@ -390,6 +390,238 @@ def test_a_tier_collision_is_warned_not_silently_overwritten(
     assert original.name in caplog.text
     assert dup.name in caplog.text
     assert point.tiers['window'].name in {original.name, dup.name}
+
+
+def _walk(node):
+    out = []
+    for dirpath, _dirs, files in node.base.repository.walk():
+        out.extend((dirpath / f).as_posix() for f in files)
+    return out
+
+
+def test_ingest_creates_set_run_and_results(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'simulation_20260910_120000'
+    make_run(root, REL, 'afm', loads=(10.0, 30.0), tiers=('window', 'raw'))
+
+    report = ingest_root(root)
+
+    assert isinstance(report, IngestReport)
+    assert report.ok() is True
+    assert report.label == 'simulation_20260910_120000'
+    assert report.set_uuid
+    assert report.created_runs == [REL]
+    assert len(report.created_results) == 2
+    assert report.skipped_results == []
+    assert report.failures == []
+
+
+def test_second_ingest_creates_nothing(aiida_profile_clean, tmp_path):
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(10.0, 30.0))
+    ingest_root(root, label='rerun')
+    before = QueryBuilder().append(FrictionResultsData).count()
+
+    second = ingest_root(root, label='rerun')
+
+    assert QueryBuilder().append(FrictionResultsData).count() == before
+    assert second.created_runs == []
+    assert second.created_results == []
+    assert len(second.skipped_results) == 2
+
+
+def test_an_indent_run_is_idempotent_too(aiida_profile_clean, tmp_path):
+    """The retract curve is in the hash, so re-ingest must still skip."""
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+
+    rel = 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1'
+    root = tmp_path / 'simulation_i'
+    run_dir = make_run(root, rel, 'indent', loads=(30.0,))
+    (run_dir / 'results' / 'indent_f30N_l1.csv').write_text(
+        'step,z_tip,fz_tip,fx_tip,fy_tip,pe\n0,0,5.0,0,0,-1\n1,1,-2.0,0,0,-1\n',
+        encoding='utf-8')
+    ingest_root(root, label='ind')
+    before = QueryBuilder().append(FrictionResultsData).count()
+
+    second = ingest_root(root, label='ind')
+
+    assert QueryBuilder().append(FrictionResultsData).count() == before
+    assert second.created_results == []
+    assert len(second.skipped_results) == 1
+
+
+def test_a_changed_load_point_supersedes_rather_than_duplicating(
+        aiida_profile_clean, tmp_path):
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+
+    root = tmp_path / 'simulation_s'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='sup')
+    target = next((run_dir / 'results').glob('friction_f30*.txt'))
+    target.write_text(target.read_text(encoding='utf-8') + '99000 30.0 9.9 0.0\n',
+                      encoding='utf-8')
+
+    second = ingest_root(root, label='sup')
+
+    assert len(second.superseded_results) == 1
+    assert second.created_results == []
+    nodes = QueryBuilder().append(FrictionResultsData).all(flat=True)
+    assert len(nodes) == 2
+    assert sum(1 for n in nodes if n.base.extras.get('superseded', False)) == 1
+
+
+def test_new_load_points_attach_to_the_existing_run(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, REL, 'afm', loads=(10.0,))
+    ingest_root(root, label='grow')
+    make_run(root, REL, 'afm', loads=(30.0,))
+
+    report = ingest_root(root, label='grow')
+
+    assert report.created_runs == []
+    assert len(report.created_results) == 1
+    assert run_dir.is_dir()
+
+
+def test_results_carry_the_summary_and_the_pointers(aiida_profile_clean, tmp_path):
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(30.0,), tiers=('window', 'raw'))
+    report = ingest_root(root, label='sum')
+
+    node = QueryBuilder().append(FrictionResultsData).first(flat=True)
+
+    assert node.set_uuid == report.set_uuid
+    assert node.run_uuid
+    assert node.load == 30.0
+    assert node.load_kind == 'force'
+    assert node.base.attributes.get('mean_cof') is not None
+    assert node.base.attributes.get('slip_n_events') is not None
+
+
+def test_dry_run_creates_no_nodes(aiida_profile_clean, tmp_path):
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionSimulationSetData
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm')
+
+    report = ingest_root(root, label='plan', dry_run=True)
+
+    assert report.dry_run is True
+    assert report.created_runs == [REL]
+    assert QueryBuilder().append(FrictionSimulationSetData).count() == 0
+    assert 'DRY RUN' in report.render()
+
+
+def test_profile_falls_back_to_settings(monkeypatch, tmp_path):
+    import src.aiida as aiida_pkg
+
+    settings_file = tmp_path / 'settings.yaml'
+    settings_file.write_text('aiida:\n  profile: friction2d\n', encoding='utf-8')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    (tmp_path / 'FrictionSim2D').mkdir()
+    (tmp_path / 'FrictionSim2D' / 'settings.yaml').write_text(
+        'aiida:\n  profile: friction2d\n', encoding='utf-8')
+    seen = []
+    monkeypatch.setattr(aiida_pkg, 'LOAD_PROFILE', lambda name: seen.append(name))
+
+    aiida_pkg.load_aiida_profile(None)
+    aiida_pkg.load_aiida_profile('explicit')
+
+    assert seen == ['friction2d', 'explicit']
+
+
+def test_a_broken_run_is_reported_not_raised(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'simulation_x'
+    good = REL
+    bad = 'afm/h-WS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1'
+    make_run(root, good, 'afm')
+    make_run(root, bad, 'afm')
+    (root / bad / 'results' / 'friction_f30_a0_s2_layer1.txt').write_text(
+        '', encoding='utf-8')
+
+    report = ingest_root(root, label='mixed')
+
+    assert good in report.created_runs
+    assert report.ok() is False
+    # R14: a per-point failure is keyed 'rel#force30_a0_s2', not the bare rel
+    assert report.failures and report.failures[0][0].startswith(bad)
+    assert 'FAILED' in report.render()
+
+
+def test_aux_files_are_stored_under_run_relative_names(aiida_profile_clean, tmp_path):
+    """R18/T11 carry-over: `add_result_files`'s old `parent.name/name` guess
+    put a direct child of the run root (the slide log) one level too deep,
+    filed under the run's own leaf directory name instead of the run root."""
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    (run_dir / 'log_slide.lammps').write_text('LAMMPS (1 Jan 2026)\n', encoding='utf-8')
+    (run_dir / 'data').mkdir(exist_ok=True)
+    (run_dir / 'data' / 'final_f30.data').write_text('x', encoding='utf-8')
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    set_node = find_or_create_set(root, 'aux')
+    run_node, _ = find_or_create_run(set_node, loc)
+
+    node = create_results(run_node, point, loc.run_dir)
+
+    names = set(_walk(node))
+    assert 'log_slide.lammps' in names
+    assert 'data/final_f30.data' in names
+    assert any(n.startswith('results/friction_') for n in names)
+
+
+def test_an_over_cap_aux_file_is_recorded_not_stored(
+        aiida_profile_clean, tmp_path, monkeypatch):
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    (run_dir / 'data').mkdir(exist_ok=True)
+    big = run_dir / 'data' / 'final_f30.data'
+    big.write_bytes(b'x' * (2 * 1024 * 1024))
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    set_node = find_or_create_set(root, 'cap')
+    run_node, _ = find_or_create_run(set_node, loc)
+    monkeypatch.setattr('src.aiida.ingest._max_stored_file_mb', lambda: 1)
+
+    node = create_results(run_node, point, loc.run_dir)
+
+    assert 'data/final_f30.data' not in _walk(node)
+    skipped = node.oversize_files
+    assert skipped[0]['path'] == 'data/final_f30.data'
+    assert skipped[0]['size'] == 2 * 1024 * 1024
+    assert len(skipped[0]['sha256']) == 64
+
+
+def test_frame_retract_finds_the_stored_indent_csv(aiida_profile_clean, tmp_path):
+    rel = 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1'
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, rel, 'indent', loads=(30.0,))
+    (run_dir / 'results' / 'indent_f30N_l1.csv').write_text(
+        'step,z_tip,fz_tip,fx_tip,fy_tip,pe\n0,0,5.0,0,0,-1\n1,1,-2.0,0,0,-1\n',
+        encoding='utf-8')
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    set_node = find_or_create_set(root, 'retract')
+    run_node, _ = find_or_create_run(set_node, loc)
+
+    node = create_results(run_node, point, loc.run_dir)
+
+    df = node.frame('retract')
+    assert list(df.columns) == ['step', 'z_tip', 'fz_tip', 'fx_tip', 'fy_tip', 'pe']
+    assert len(df) == 2
 
 
 def test_importing_ingest_does_not_require_aiida():
