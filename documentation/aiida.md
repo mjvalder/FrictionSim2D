@@ -12,7 +12,7 @@ Every simulation set is three kinds of node:
 
 | node | one per | holds |
 |---|---|---|
-| `FrictionSimulationSetData` | one `simulation_*` root (or `--label`) | `settings.yaml`, the `.ini` config, and attributes `label`, `model`, `created`, `git_commit`, `git_dirty`, `materials[]`, `n_runs`, `source_host` |
+| `FrictionSimulationSetData` | one `simulation_*` root (or `--label`) | `settings.yaml`, the `.ini` config, and attributes `label`, `model`, `source_root`, `created`, `git_commit`, `git_dirty`, `materials[]`, `n_runs`, `source_host` |
 | `FrictionSimulationData` | one run (one `provenance.json` — an `L{n}` layer directory for AFM-like families, or a run directory for sheet-like families) | the run's LAMMPS inputs and provenance files, plus every `RunTokens` field as an attribute (`model`, `family`, `materials[]`, `size_x/y`, `substrate`, `tip_material`, `temperature`, `layers`, `pot_token`, `rel_path`, ...) and the full provenance record under `provenance` |
 | `FrictionResultsData` | one load point (`(load, angle, speed)` for slide families; one grid for a PES scan; one load for indent) | the original result files verbatim (`friction_*`, `raw_*`, `peratom_*`, `pes_scan*.csv`, `indent_*.csv`, logs, final/hold data), plus summary attributes (`family`, `load_kind`, `load`, `angle`, `speed`, `layers`, `tiers[]`, mean/COF statistics, `run_uuid`, `set_uuid`) |
 

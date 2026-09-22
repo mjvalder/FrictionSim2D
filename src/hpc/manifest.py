@@ -108,8 +108,6 @@ class JobManifest:
         last_updated: ISO timestamp of last modification.
         config_file: Path to source config file.
         source_directory: Path to simulation root directory.
-        config_node_uuid: AiiDA config node UUID.
-        provenance_node_uuid: AiiDA provenance node UUID.
         jobs: List of job entries.
         scheduler: HPC scheduler type ('pbs' or 'slurm').
         package_directory: Path to HPC package if exported.
@@ -119,8 +117,6 @@ class JobManifest:
     last_updated: str = field(default_factory=lambda: datetime.now().isoformat())
     config_file: Optional[str] = None
     source_directory: Optional[str] = None
-    config_node_uuid: Optional[str] = None
-    provenance_node_uuid: Optional[str] = None
     jobs: List[JobEntry] = field(default_factory=list)
     scheduler: str = "pbs"
     package_directory: Optional[str] = None
@@ -230,8 +226,6 @@ class JobManifest:
             'last_updated': self.last_updated,
             'config_file': self.config_file,
             'source_directory': self.source_directory,
-            'config_node_uuid': self.config_node_uuid,
-            'provenance_node_uuid': self.provenance_node_uuid,
             'scheduler': self.scheduler,
             'package_directory': self.package_directory,
             'jobs': [job.to_dict() for job in self.jobs],

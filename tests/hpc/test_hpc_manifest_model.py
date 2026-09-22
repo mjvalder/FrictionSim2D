@@ -6,8 +6,12 @@ status methods marked dead in hpc.md (b) H-1..H-6 (get_jobs_by_status,
 get_jobs_by_material, update_job_status, mark_all_submitted,
 mark_completed_from_results, get_summary), `JobEntry.update_status`, and the
 AiiDA-uuid fields were deleted outright (spec Sec 4.3, Task 26) -- they had no
-non-test caller, so the status they tracked was already fiction. `test_status_half_is_gone`
-pins their absence.
+non-test caller, so the status they tracked was already fiction. Task 26 only
+deleted the two per-job fields (`JobEntry.simulation_node_uuid`/
+`results_node_uuid`); the two manifest-level fields
+(`JobManifest.config_node_uuid`/`provenance_node_uuid`) were missed and are
+deleted in the Task 34 review fix round. `test_status_half_is_gone` pins the
+absence of all four.
 """
 import json
 from pathlib import Path
@@ -97,9 +101,10 @@ def test_save_then_load_round_trips_the_full_manifest(tmp_path):
 
 def test_load_tolerates_legacy_uuid_fields_and_round_trips_without_them(tmp_path):
     """A manifest.json written before the status-half deletion (Task 26) has
-    simulation_node_uuid/results_node_uuid on every job entry; this one also
-    carries a bogus removed manifest-level key, to exercise the same tolerance
-    at both levels.
+    simulation_node_uuid/results_node_uuid on every job entry, and one written
+    before the review fix round has config_node_uuid/provenance_node_uuid at
+    the manifest level; this one also carries a bogus removed manifest-level
+    key, to exercise the same tolerance at both levels and both eras.
     """
     legacy = {
         "name": "legacy-manifest",
@@ -107,8 +112,8 @@ def test_load_tolerates_legacy_uuid_fields_and_round_trips_without_them(tmp_path
         "last_updated": "2026-01-01T00:00:00",
         "config_file": None,
         "source_directory": "sim_root",
-        "config_node_uuid": None,
-        "provenance_node_uuid": None,
+        "config_node_uuid": "config-uuid-1",
+        "provenance_node_uuid": "provenance-uuid-1",
         "scheduler": "pbs",
         "package_directory": None,
         "some_removed_manifest_key": "unused",
@@ -142,6 +147,8 @@ def test_load_tolerates_legacy_uuid_fields_and_round_trips_without_them(tmp_path
     assert not hasattr(manifest.jobs[0], "simulation_node_uuid")
     assert not hasattr(manifest.jobs[0], "results_node_uuid")
     assert not hasattr(manifest, "some_removed_manifest_key")
+    assert not hasattr(manifest, "config_node_uuid")
+    assert not hasattr(manifest, "provenance_node_uuid")
 
     resaved_path = tmp_path / "resaved_manifest.json"
     manifest.save(resaved_path)
@@ -149,6 +156,8 @@ def test_load_tolerates_legacy_uuid_fields_and_round_trips_without_them(tmp_path
     assert "simulation_node_uuid" not in resaved_data["jobs"][0]
     assert "results_node_uuid" not in resaved_data["jobs"][0]
     assert "some_removed_manifest_key" not in resaved_data
+    assert "config_node_uuid" not in resaved_data
+    assert "provenance_node_uuid" not in resaved_data
 
 
 def test_status_half_is_gone():
@@ -160,3 +169,5 @@ def test_status_half_is_gone():
     assert not hasattr(_JobEntry, 'update_status')
     assert 'simulation_node_uuid' not in _JobEntry.__dataclass_fields__
     assert 'results_node_uuid' not in _JobEntry.__dataclass_fields__
+    assert 'config_node_uuid' not in _JobManifest.__dataclass_fields__
+    assert 'provenance_node_uuid' not in _JobManifest.__dataclass_fields__
