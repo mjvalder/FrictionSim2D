@@ -132,7 +132,17 @@ def _hetero_config(model: str) -> dict:
             'pot_path': str(POTENTIALS / 'sw_lammps' / 'h-WS2.sw'),
             'pot_type': 'sw', 'x': 12.0, 'y': 12.0, 'layers': [2],
         },
-        'general': {'temp': 300, 'scan_speed': 1, 'hetero_stacking': 'grouped'},
+        # `pressure` is required for every `sheetonsheet` slide (plain or
+        # hetero; `src.builders.sheetonsheet.base.SheetOnSheetSimulation.
+        # REQUIRES_PRESSURE`) -- `run_simulations` refuses a config with none
+        # before building anything (`src.run.expand.missing_pressure`). It is
+        # set unconditionally here rather than only for `model == 'sheetonsheet'`
+        # because it is harmless noise for the other four modes: the AFM family
+        # loads via `[general] force`, not `pressure`, and `PESGridMixin`
+        # (pes_sheet, pes_tip) sets `REQUIRES_PRESSURE = False` and never reads
+        # the key at all.
+        'general': {'temp': 300, 'scan_speed': 1, 'hetero_stacking': 'grouped',
+                    'pressure': 1.0},
     }
     if model in AFM_FAMILY:
         # The AFM family stacks the hetero sheet on a substrate under a tip;
