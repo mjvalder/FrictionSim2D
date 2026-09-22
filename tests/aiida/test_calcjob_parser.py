@@ -279,7 +279,7 @@ def test_add_results_to_group_is_a_noop_for_no_nodes(aiida_profile_clean):
 
 
 def _make_calc_node(process_type='aiida.calculations:friction2d.lammps',
-                    simulation_node=None):
+                    simulation_node=None, parameters=None):
     """A stored, bare `CalcJobNode` for `LammpsFrictionCalcJob`, wired with
     whatever inputs/outputs the caller attaches -- no live `Process`, `Runner`
     or broker needed, exactly like aiida-core's own plugin test suites build
@@ -293,6 +293,9 @@ def _make_calc_node(process_type='aiida.calculations:friction2d.lammps',
     if simulation_node is not None:
         node.base.links.add_incoming(simulation_node, link_type=LinkType.INPUT_CALC,
                                      link_label='simulation_node')
+    if parameters is not None:
+        node.base.links.add_incoming(parameters, link_type=LinkType.INPUT_CALC,
+                                     link_label='parameters')
     node.store()
     return node
 
@@ -575,3 +578,28 @@ def test_group_results_from_node_safely_swallows_failures(aiida_profile_clean,
     monkeypatch.setattr(ingest_mod, 'add_results_to_group', _boom)
 
     calcjob_mod._group_results_from_node_safely(calc_node)  # must not raise
+
+
+def test_parser_copies_results_home_even_without_simulation_node(
+        aiida_profile_clean, tmp_path):
+    """C1.5: an untracked run (no `simulation_node`) still RAN; its results
+    must reach the local tree for a later `aiida import`, not be stranded in
+    the retrieved folder behind exit 321. Prefixed layout, so the copy must
+    see nested repository paths, not just the top-level names."""
+    from aiida.orm import Dict  # pylint: disable=import-outside-toplevel
+    from src.aiida.calcjob import LammpsFrictionCalcJob, LammpsFrictionParser  # pylint: disable=import-outside-toplevel
+
+    run_dir = make_run(tmp_path / 'sim', REL, 'afm', loads=(30.0,))
+    retrieved_dir = tmp_path / 'retrieved'
+    _retrieved_folder(run_dir, retrieved_dir / REL)
+    local = tmp_path / 'local_run'
+
+    params = Dict({'local_sim_dir': str(local)}).store()
+    calc_node = _make_calc_node(simulation_node=None, parameters=params)
+    _attach_retrieved(calc_node, retrieved_dir)
+
+    exit_code = LammpsFrictionParser(calc_node).parse()
+
+    assert exit_code.status == LammpsFrictionCalcJob.exit_codes.ERROR_NO_SIMULATION_NODE.status
+    copied = sorted(p.name for p in (local / 'results').iterdir())
+    assert copied == sorted(p.name for p in (run_dir / 'results').iterdir())

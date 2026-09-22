@@ -1147,7 +1147,9 @@ def aiida_package(simulation_dir: str, output: Optional[str]):
 @click.option('--daemon', is_flag=True, default=False,
               help='Submit to the AiiDA daemon (needs RabbitMQ). '
                    'Default: run in-process, which needs no broker.')
-def aiida_submit(
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_submit(  # pylint: disable=too-many-arguments
     simulation_dir: str,
     settings_file: Optional[Path],
     code: Optional[str],
@@ -1160,9 +1162,13 @@ def aiida_submit(
     project: Optional[str],
     dry_run: bool,
     daemon: bool,
+    profile: Optional[str],
 ):
-    """Submit simulations to AiiDA with smart defaults and prompting.
+    """Run (or, with --daemon, submit) simulations as AiiDA CalcJobs.
 
+    SIMULATION_DIR is a simulation_* root or any directory inside one; every
+    run at or below it is submitted. Register the tree first (``run --aiida``
+    or ``aiida import``) so results are stored against its run nodes.
     Automatically detects codes, uses settings.yaml defaults,
     and prompts for essential missing values. Manual overrides are supported.
 
@@ -1205,12 +1211,16 @@ def aiida_submit(
             scripts=scripts,
             dry_run=dry_run,
             daemon=daemon,
+            profile=profile,
             **overrides,
         )
 
-        if not dry_run and processes:
-            click.echo(f"\n✅ Successfully submitted {len(processes)} job(s)")
+        if not dry_run and processes and not daemon and not all(
+                p.is_finished_ok for p in processes):
+            raise SystemExit(1)
 
+    except click.ClickException:
+        raise
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA submit failed")
         _raise_abort(f"❌ Submission failed: {exc}", exc)

@@ -92,7 +92,11 @@ workflows above, never a live `core.ssh` transport.
 **Submission is broker-less by default.** `FrictionSim2D aiida submit` runs
 each simulation in-process with `aiida.engine.run` — no RabbitMQ required.
 Pass `--daemon` to submit to the AiiDA daemon instead (`aiida.engine.submit`),
-which does need a running broker.
+which does need a running broker. `aiida submit` takes `--profile` like every
+other command, accepts the simulation root or any directory inside it, and
+finds each run's node by its `rel_path` under that root -- so register the
+tree first (`run --aiida`, or `aiida import`). The Python API
+`run_with_aiida(...)` registers the fresh tree itself before submitting.
 
 ## 4. One-time setup
 

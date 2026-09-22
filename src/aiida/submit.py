@@ -70,6 +70,7 @@ def run_with_aiida(
     auto_setup: bool = True,
     profile: Optional[str] = None,
     daemon: bool = False,
+    label: Optional[str] = None,
     **resource_overrides,
 ) -> Tuple[List[Path], Path, Optional[List]]:
     """Run FrictionSim2D simulation with automatic AiiDA setup and submission.
@@ -89,6 +90,7 @@ def run_with_aiida(
         profile: AiiDA profile name to load (default: current profile).
         daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
             Default runs in-process via ``aiida.engine.run``, no broker needed.
+        label: Set label for the fresh tree (default: the root directory name).
         **resource_overrides: Manual resource overrides (machines, mpiprocs,
             walltime_hours, queue, account, memory_mb, etc.).
 
@@ -110,18 +112,29 @@ def run_with_aiida(
     )
     logger.info("Generated %d simulation(s) in %s", len(simulation_dirs), root_dir)
 
+    # Same as `run --aiida`: register the fresh tree (set + run nodes, no
+    # results yet) so every CalcJob below finds its `simulation_node`.
+    # Without it the parser has no run to attach results to (exit 321).
+    from .ingest import ingest_root  # pylint: disable=import-outside-toplevel
+    report = ingest_root(root_dir, label=label, profile=profile)
+    if not report.ok():
+        raise RuntimeError(
+            f"Registering {root_dir} in AiiDA failed:\n{report.render()}")
+
     if not auto_submit:
         logger.info("auto_submit=False, skipping submission")
         return simulation_dirs, root_dir, None
 
+    run_dirs = _run_dirs_under(root_dir)
+
     code = _get_code(code_label, interactive=False, settings_file=settings_file)
     options, parameters = _build_resources(settings=settings, **resource_overrides)
 
-    logger.info("Submitting %d simulation(s) to AiiDA", len(simulation_dirs))
+    logger.info("Submitting %d run(s) to AiiDA", len(run_dirs))
     if use_array:
         process = submit_array(
             simulation_root=root_dir,
-            simulation_dirs=simulation_dirs,
+            simulation_dirs=run_dirs,
             code_label=code,
             options=options,
             parameters=parameters,
@@ -132,7 +145,7 @@ def run_with_aiida(
         logger.info("Submitted array job with PK=%d", process.pk)
     else:
         processes = submit_batch(
-            simulation_dirs=simulation_dirs,
+            simulation_dirs=run_dirs,
             code_label=code,
             root_dir=root_dir,
             options=options,
@@ -157,36 +170,66 @@ def smart_submit(
     scripts: Optional[str] = None,
     dry_run: bool = False,
     daemon: bool = False,
+    profile: Optional[str] = None,
     **manual_overrides,
 ) -> List[orm.ProcessNode]:
     """Smart CLI submission with auto-detection and interactive prompting.
 
+    `simulation_dir` is a `simulation_*` root, or any directory inside one (a
+    model directory, a single run): the root is found by walking up to the
+    nearest directory that holds `<model>/.../provenance.json`, and only the
+    runs at or below `simulation_dir` are submitted. Each run is submitted
+    with that root as `root_dir`, so its `FrictionSimulationData` (created by
+    `run --aiida` or `aiida import`) is found and passed as
+    `simulation_node` -- without it the parser cannot store results.
+
     Args:
-        simulation_dir: Path to simulation directory or root.
+        simulation_dir: A simulation root, or a directory inside one.
         code_label: AiiDA code label (auto-detects if ``None``).
         use_array: Submit as array job.
         scripts: Comma-separated LAMMPS script names.
         dry_run: Preview only, don't submit.
         daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
             Default runs in-process via ``aiida.engine.run``, no broker needed.
+        profile: AiiDA profile to load (default: the configured one).
         **manual_overrides: Resource overrides (machines, mpiprocs, walltime, etc.).
 
     Returns:
-        List of submitted ``ProcessNode`` instances (empty if dry_run).
+        List of ``ProcessNode`` instances (empty if dry_run or cancelled).
     """
     import click  # pylint: disable=import-outside-toplevel
 
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+    from .ingest import find_run_by_rel_path  # pylint: disable=import-outside-toplevel
+
+    try:
+        load_aiida_profile(profile)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise click.ClickException(
+            f"Could not load AiiDA profile {profile or '(default)'}: {exc}") from exc
+
     settings: GlobalSettings = load_settings(settings_file=settings_file)
+
+    try:
+        root = find_simulation_root(simulation_dir)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    simulation_dirs = _run_dirs_under(root, within=simulation_dir)
+    if not simulation_dirs:
+        raise click.ClickException(
+            f"No simulation runs found in {simulation_dir}"
+        )
+    click.echo(f"Found {len(simulation_dirs)} run(s) under {root}")
+
+    untracked = [d for d in simulation_dirs if find_run_by_rel_path(d, root) is None]
+    if untracked:
+        click.echo(
+            f"WARNING: {len(untracked)} run(s) are not registered in AiiDA; their "
+            f"results will be copied back into the tree but NOT stored. Register "
+            f"them first with: FrictionSim2D aiida import {root}")
 
     code = _get_code(code_label, interactive=True, settings_file=settings_file)
     click.echo(f"Using code: {code.full_label}")
-
-    simulation_dirs = _find_lammps_dirs(simulation_dir)
-    if not simulation_dirs:
-        raise click.ClickException(
-            f"No simulation directories found in {simulation_dir}"
-        )
-    click.echo(f"Found {len(simulation_dirs)} simulation(s)")
 
     options, parameters = _build_resources(
         settings=settings, scripts=scripts, **manual_overrides,
@@ -209,10 +252,10 @@ def smart_submit(
         click.echo("Submission cancelled")
         return []
 
-    click.echo("\nSubmitting jobs...")
+    click.echo("\nSubmitting jobs..." if daemon else "\nRunning jobs in-process...")
     if use_array:
         process = submit_array(
-            simulation_root=simulation_dir,
+            simulation_root=root,
             simulation_dirs=simulation_dirs,
             code_label=code,
             options=options,
@@ -221,20 +264,45 @@ def smart_submit(
             daemon=daemon,
         )
         processes = [process]
-        click.echo(f"Submitted array job (PK={process.pk})")
     else:
         processes = submit_batch(
             simulation_dirs=simulation_dirs,
             code_label=code,
-            root_dir=Path(simulation_dir),
+            root_dir=root,
             options=options,
             parameters=parameters,
             daemon=daemon,
         )
-        pks = [p.pk for p in processes]
-        click.echo(f"Submitted {len(processes)} jobs (PKs={pks[0]}-{pks[-1]})")
 
+    if not processes:
+        raise click.ClickException(
+            f"None of the {len(simulation_dirs)} run(s) could be submitted; "
+            "see the log for each failure.")
+    click.echo(describe_processes(processes, daemon=daemon,
+                                  n_requested=len(simulation_dirs)))
     return processes
+
+
+def describe_processes(processes: list, daemon: bool, n_requested: int) -> str:
+    """One summary line per submission outcome.
+
+    With the daemon the processes are only queued, so "Submitted" is true.
+    In-process (`aiida.engine.run`, the default) they have already FINISHED
+    by the time this is called, so saying "submitted" would hide a failed
+    calculation behind a success message: report each exit status instead.
+    """
+    pks = [p.pk for p in processes]
+    skipped = n_requested - len(processes) if n_requested > len(processes) else 0
+    tail = f" ({skipped} could not be submitted)" if skipped else ''
+    if daemon:
+        return f"Submitted {len(processes)} job(s) (PKs={pks}){tail}"
+    failed = [p for p in processes if not getattr(p, 'is_finished_ok', False)]
+    lines = [f"Ran {len(processes)} job(s): {len(processes) - len(failed)} "
+             f"finished ok, {len(failed)} failed{tail}"]
+    for proc in failed:
+        lines.append(f"  PK {proc.pk}: exit status {getattr(proc, 'exit_status', None)} "
+                     f"{getattr(proc, 'exit_message', '') or ''}".rstrip())
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -418,24 +486,17 @@ def submit_array(
 # ---------------------------------------------------------------------------
 
 def _ensure_profile_loaded(profile: Optional[str] = None) -> None:
-    """Ensure an AiiDA profile is loaded."""
-    from aiida.manage.configuration import get_profile, load_profile  # pylint: disable=import-outside-toplevel
+    """Load `profile` the same way every other command does.
+
+    Delegates to `load_aiida_profile` so an omitted `profile` resolves to
+    `settings.aiida.profile` here too -- the `ingest_root` call that follows
+    in `run_with_aiida` resolves it that way, and two different resolutions
+    would try to switch profiles mid-call.
+    """
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
     try:
-        current = get_profile()
-        if current:
-            logger.debug("AiiDA profile '%s' already loaded", current.name)
-            return
-    except Exception:  # pylint: disable=broad-except
-        pass
-
-    try:
-        if profile:
-            load_profile(profile)
-            logger.info("Loaded AiiDA profile '%s'", profile)
-        else:
-            load_profile()
-            logger.info("Loaded default AiiDA profile")
+        load_aiida_profile(profile)
     except Exception as exc:
         raise RuntimeError(
             "Failed to load AiiDA profile. Run 'FrictionSim2D aiida setup' first."
@@ -607,26 +668,40 @@ def _build_resources(
     return options, parameters
 
 
-def _find_lammps_dirs(simulation_dir: Path) -> List[Path]:
-    """Find all simulation directories (containing ``lammps/`` subdirectory).
+def find_simulation_root(path: Union[str, Path]) -> Path:
+    """The `simulation_*` root `path` is, or lies inside.
 
-    Args:
-        simulation_dir: Root directory to search.
+    Walks up from `path` (inclusive) to the nearest directory that holds a
+    `<model>/` child with at least one discoverable run -- the same
+    `discover_runs` walk `aiida import` uses, so submission and ingest agree
+    on what a run is and on the root its `rel_path` is relative to.
 
-    Returns:
-        Sorted list of simulation directories.
+    Raises:
+        ValueError: When no such directory exists at or above `path`.
     """
-    simulation_dir = Path(simulation_dir)
+    from ..run.naming import MODELS  # pylint: disable=import-outside-toplevel
+    from ..run.tree import discover_runs  # pylint: disable=import-outside-toplevel
 
-    if (simulation_dir / 'lammps').exists():
-        return [simulation_dir]
+    path = Path(path).resolve()
+    for candidate in (path, *path.parents):
+        if any((candidate / model).is_dir() for model in MODELS) \
+                and discover_runs(candidate):
+            return candidate
+    raise ValueError(
+        f"{path} is not inside a simulation tree: no <model>/.../provenance.json "
+        "found at or above it.")
 
-    sim_dirs = []
-    for subdir in simulation_dir.iterdir():
-        if subdir.is_dir() and (subdir / 'lammps').exists():
-            sim_dirs.append(subdir)
 
-    return sorted(sim_dirs, key=lambda p: layer_aware_path_sort_key(p.name))
+def _run_dirs_under(root: Union[str, Path],
+                    within: Optional[Union[str, Path]] = None) -> List[Path]:
+    """Every run directory `discover_runs(root)` finds, optionally restricted
+    to those at or below `within`, in `rel_path` order."""
+    from ..run.tree import discover_runs  # pylint: disable=import-outside-toplevel
+
+    root = Path(root).resolve()
+    limit = Path(within).resolve() if within is not None else root
+    return [loc.run_dir for loc in discover_runs(root)
+            if loc.run_dir == limit or limit in loc.run_dir.parents]
 
 
 def _parse_walltime(walltime_str: str) -> int:

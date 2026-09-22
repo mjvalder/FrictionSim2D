@@ -383,7 +383,21 @@ FrictionSim2D aiida package SIMULATION_DIR [-o OUTPUT]
 FrictionSim2D aiida submit SIMULATION_DIR [OPTIONS]
 ```
 
+`SIMULATION_DIR` is a `simulation_*` root or any directory inside one (a model
+directory, a single run). The root is found by walking up to the nearest
+directory with `<model>/.../provenance.json` under it, and every run at or
+below `SIMULATION_DIR` is submitted. Register the tree first (`run --aiida` or
+`aiida import`): a run with no run node still runs and its results are copied
+back into the tree, but nothing is stored until you `aiida import` it.
+
+In-process mode (the default) reports `Ran N job(s): K finished ok, M failed`
+with each failed job's exit status, and exits 1 if any failed. With `--daemon`
+the jobs are only queued and the command reports `Submitted`.
+
 Options:
+
+- `--profile TEXT` — AiiDA profile to load (default: `settings.aiida.profile`,
+  then AiiDA's default profile)
 
 - `--settings-file PATH`
 - `-c, --code TEXT` (auto-detects if not specified, falling back to `settings.aiida.lammps_code_label`)

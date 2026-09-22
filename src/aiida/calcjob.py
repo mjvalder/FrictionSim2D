@@ -323,36 +323,38 @@ class LammpsFrictionParser(Parser):
         UNSTORED nodes so the engine can attach them to this calculation with
         real provenance links -- `ingest_retrieved` returns exactly those.
 
-        `simulation_node` is checked BEFORE the scratch copy: without it
-        there is no `rel_path` to locate the run by (in the unprefixed case,
-        `locator_for` would happily but wrongly treat the raw retrieved
-        folder's root as the run itself) and no run to attach results to
-        either, so there is nothing useful the rest of this method could do.
+        The retrieved files are copied back into the local run directory
+        (`parameters.local_sim_dir`) and the log/stdout outputs attached
+        BEFORE `simulation_node` is checked: a run submitted untracked still
+        ran, and its results must land in the tree for a later `aiida import`
+        instead of being stranded in the retrieved folder. Only the ingest
+        itself needs `simulation_node` -- without it there is no `rel_path` to
+        locate the run by and no run node to attach results to.
         """
         retrieved = self.retrieved
         if retrieved is None:
             return self.exit_codes.ERROR_NO_RESULTS
 
+        repo = retrieved.base.repository
+        top_names = repo.list_object_names()
+        all_names = [(root / name).as_posix()
+                     for root, _dirs, files in repo.walk() for name in files]
+
+        self._store_log(repo, 'log.lammps' in top_names)
+        self._store_stdout(repo, [n for n in all_names if n.endswith('.out')])
+        self._copy_local(repo, all_names)
+
         run_node = getattr(self.node.inputs, 'simulation_node', None)
         if run_node is None:
             return self.exit_codes.ERROR_NO_SIMULATION_NODE
 
-        repo = retrieved.base.repository
-        names = repo.list_object_names()
-
         with TemporaryDirectory() as tmp:
             tmp_root = Path(tmp)
-            for root, _dirs, files in repo.walk():
-                for name in files:
-                    rel = (root / name).as_posix()
-                    out = tmp_root / rel
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    with repo.open(rel, 'rb') as src:
-                        out.write_bytes(src.read())
-
-            self._store_log(repo, 'log.lammps' in names)
-            self._store_stdout(repo, [n for n in names if n.endswith('.out')])
-            self._copy_local(repo, names)
+            for rel in all_names:
+                out = tmp_root / rel
+                out.parent.mkdir(parents=True, exist_ok=True)
+                with repo.open(rel, 'rb') as src:
+                    out.write_bytes(src.read())
 
             run_dir = _run_dir_in_retrieved(tmp_root, run_node)
             from .ingest import ingest_retrieved  # pylint: disable=import-outside-toplevel
