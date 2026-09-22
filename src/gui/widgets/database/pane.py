@@ -271,11 +271,21 @@ class DatabasePane(QWidget):
         return self._source
 
     def set_source(self, source: str) -> None:
+        """Select `source` -- unless its button is disabled (D11).
+
+        `QRadioButton.setChecked` succeeds on a disabled button; without this
+        check, a caller (`_restore_database_state`, a stray test) could put
+        the pane on a source with no working backend or no central database
+        configured, and every action gated on `self._source` -- Search,
+        Refresh, Check connection -- would fire against it anyway with no
+        button ever having been clickable to get there.
+        """
         if source not in SOURCES or source == self._source:
             return
         button = self._source_buttons.button(SOURCES.index(source))
-        if button is not None:
-            button.setChecked(True)
+        if button is None or not button.isEnabled():
+            return
+        button.setChecked(True)
 
     def set_source_enabled(self, source: str, enabled: bool,
                            reason: str = '') -> None:

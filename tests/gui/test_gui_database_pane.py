@@ -675,6 +675,11 @@ class TestWorkspaceMemory:
         assert window.workspace.state['db_filters']['family'] == 'afm'
 
     def test_switching_source_is_recorded_immediately(self, window):
+        # D11 disables central by default; configure it first so the switch
+        # this test is actually about (not D11) has somewhere to land.
+        window.settings.database.api_url = 'https://db.example.org'
+        window._apply_database_availability()
+
         window.database_pane.set_source('central')
 
         assert window.workspace.state['db_source'] == 'central'
@@ -716,6 +721,11 @@ class TestWorkspaceMemory:
 
     def test_changing_workspace_re_points_the_controller_and_restores(
             self, window, tmp_path, monkeypatch):
+        import src.gui.app as app_module
+        # D11 disables central by default; this test is about restoring the
+        # remembered source on a workspace switch, not about D11, so pretend
+        # central is configured.
+        monkeypatch.setattr(app_module, 'central_configured', lambda s: True)
         other = Workspace.open(tmp_path / 'other')
         other.remember('db_source', 'central')
         monkeypatch.setattr(RecentWorkspaces, 'add', lambda self, root: [])
@@ -833,3 +843,79 @@ class TestNotConfigured:
         window._apply_database_availability()
 
         assert window.database_pane._source_buttons.button(1).isEnabled()
+
+
+class TestDisabledSourceIsNeverReachable:
+    """Regression: a disabled-but-selected 'central' fired real central
+    requests, because `set_source` did not consult the button's enabled
+    state. `_restore_database_state` could put the pane on a source that
+    D11 had just disabled (not installed, or not configured), and every
+    action gated on `self._source` -- Search, Refresh, Check connection --
+    would then target it anyway with no button ever having been clickable
+    to get there. Fixed in `DatabasePane.set_source`; these drive it through
+    `MainWindow`, not a bare pane, because the bug was in how a *window*
+    restores a remembered source, not in the pane in isolation."""
+
+    def test_a_missing_backend_beats_a_remembered_central_source(
+            self, qt_app, tmp_path, monkeypatch):
+        del qt_app
+        import src.gui.widgets.database.pane as pane_module
+        from src.gui.app import MainWindow
+        # The probe, not `missing_backend` itself: `missing_backend` is one
+        # function object shared by the pane's own construction-time check
+        # and the window's `_apply_database_availability` -- patching the
+        # probe it calls affects both call sites the way a real missing
+        # package would, rather than only whichever one imported the name.
+        monkeypatch.setattr(pane_module, 'find_spec',
+                            lambda name: None if name == 'httpx' else object())
+        workspace = Workspace.open(tmp_path / 'ws')
+        workspace.remember('db_source', 'central')
+
+        window = MainWindow(workspace)
+        try:
+            assert window.database_pane.source == 'local'
+            # The fallback is on-screen only: the remembered choice on disk
+            # survives it untouched.
+            assert window.workspace.state['db_source'] == 'central'
+
+            seen = []
+            monkeypatch.setattr(window.database, 'start', seen.append)
+            window.database_pane.search_button.click()
+
+            assert seen and seen[0].source == 'local'
+        finally:
+            window.document.dirty = False
+            window.settings_document.dirty = False
+            window.close()
+
+    def test_an_unconfigured_central_beats_a_remembered_central_source_on_switch(
+            self, window, tmp_path, monkeypatch):
+        other = Workspace.open(tmp_path / 'other')
+        other.remember('db_source', 'central')
+        monkeypatch.setattr(RecentWorkspaces, 'add', lambda self, root: [])
+        monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
+                            lambda *args, **kwargs: str(other.root))
+
+        window._choose_workspace()
+
+        assert window.database_pane.source == 'local'
+        assert window.workspace.state['db_source'] == 'central'
+
+        seen = []
+        monkeypatch.setattr(window.database, 'start', seen.append)
+        window.database_pane.search_button.click()
+
+        assert seen and seen[0].source == 'local'
+
+    def test_set_source_refuses_a_disabled_button(self, window):
+        # Simulate a stray call (a future regression, a test) reaching
+        # `set_source('central')` directly while D11 has it disabled: it
+        # must not select it, and must not be able to write it to disk
+        # either, since no signal fires for a selection that never happened.
+        window.workspace.remember('db_source', 'central')
+        assert not window.database_pane._source_buttons.button(1).isEnabled()
+
+        window.database_pane.set_source('central')
+
+        assert window.database_pane.source == 'local'
+        assert window.workspace.state['db_source'] == 'central'

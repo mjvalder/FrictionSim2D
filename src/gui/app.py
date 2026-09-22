@@ -197,7 +197,6 @@ class MainWindow(QMainWindow):
         query happens only when the user presses Search or Refresh."""
         self.database_pane = DatabasePane(self)
         self._restore_database_state()
-        self._apply_database_availability()
         return self.database_pane
 
     def _build_header(self) -> QWidget:
@@ -424,6 +423,21 @@ class MainWindow(QMainWindow):
         clobbering the new workspace's saved filters with the old workspace's.
         The `_restoring_db_state` guard blocks that write outright; the
         snapshot means correctness never depends on the two agreeing.
+
+        Availability (D11) is re-applied *before* `set_source`, under the same
+        guard, for both directions: a remembered source that is not usable
+        here must not get selected (`set_source` refuses a disabled button on
+        its own, but only if the button was already disabled -- checking here
+        first is what disables it in time), and a remembered source that has
+        become usable again (a workspace switch onto settings where central
+        is configured) must be re-enabled before `set_source` gets a chance to
+        select it. Guarded so a resulting handover -- disabling the source
+        this workspace remembered hands the pane to the other one -- writes
+        nothing back to disk; only the on-screen selection falls back. This
+        is also what re-checks availability on a workspace switch
+        (`_choose_workspace` only calls this method) without a second,
+        unguarded call that could write the fallback to the new workspace's
+        state.
         """
         state = self.workspace.state
         source = state.get('db_source')
@@ -431,6 +445,7 @@ class MainWindow(QMainWindow):
         dest = state.get('db_dest')
         self._restoring_db_state = True
         try:
+            self._apply_database_availability()
             if source in SOURCES:
                 self.database_pane.set_source(source)
             if isinstance(filters, dict):
