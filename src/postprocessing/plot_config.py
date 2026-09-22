@@ -311,6 +311,21 @@ class PlotDocument(DatasetsHeader):
     """A whole `postprocess plot` document."""
     plots: List[AnyPlot] = Field(default_factory=list)
 
+    @model_validator(mode='after')
+    def _needs_a_dataset(self):
+        """A document with no `data_dirs` can draw nothing.
+
+        On `DatasetsHeader` this would be wrong -- the GUI's dataset picker
+        starts empty and is edited into shape -- but a document handed to
+        `postprocess plot` has to name at least one place to read from, and
+        saying so at load beats rendering nothing and exiting 0.
+        """
+        if not self.data_dirs:
+            raise ValueError(
+                "data_dirs is empty: a plot document must name at least one "
+                "dataset directory (or db:// URI)")
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Style settings (Q4)

@@ -1234,6 +1234,21 @@ def postprocess_group():
     """Read, analyse and plot simulation results."""
 
 
+def _merge_settings(base: dict, overlay: dict) -> None:
+    """Merge `overlay` into `base`; a list REPLACES, never extends.
+
+    The same rule as `PlotCommonMixin._deep_merge_dict`, repeated here rather
+    than imported so `--validate` never has to import the plot stack (and
+    matplotlib with it).
+    """
+    for key, value in overlay.items():
+        if (key in base and isinstance(base[key], dict)
+                and isinstance(value, dict)):
+            _merge_settings(base[key], value)
+        else:
+            base[key] = value
+
+
 @postprocess_group.command('read')
 @click.argument('results_dir', type=click.Path(exists=True))
 @click.option('--export', 'do_export', is_flag=True,
@@ -1265,52 +1280,106 @@ def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float):
 
 
 @postprocess_group.command('plot')
-@click.argument('plot_config', type=click.Path(exists=True))
+@click.argument('plot_config', required=False, type=click.Path(exists=True))
 @click.option('--output-dir', '-o', default='plots',
               help='Output directory for plots.')
 @click.option('--settings', type=click.Path(exists=True),
-              help='Plot settings JSON file.')
-def postprocess_plot(plot_config: str, output_dir: str,
-                     settings: Optional[str]):
-    """Generate plots from processed simulation data."""
+              help='Plot settings JSON, merged over --preset.')
+@click.option('--preset', default=None,
+              help="Shipped settings preset (currently: 'publication').")
+@click.option('--validate', is_flag=True,
+              help='Validate the document against the plot schema and exit.')
+@click.option('--schema', 'show_schema', is_flag=True,
+              help='Print the plot schema as Markdown and exit.')
+@click.option('--init', 'init_path', type=click.Path(), default=None,
+              help='Write a valid starter plot document to this path and exit.')
+@click.option('--data-dir', 'init_data_dirs', multiple=True,
+              type=click.Path(exists=True),
+              help='With --init: a dataset directory to reference (repeatable).')
+def postprocess_plot(plot_config, output_dir, settings, preset, validate,
+                     show_schema, init_path, init_data_dirs):
+    """Generate plots from processed simulation data.
+
+    PLOT_CONFIG is a plot document (see documentation/postprocessing.md).
+    """
+    import copy  # noqa: PLC0415
     import json  # noqa: PLC0415
+
+    from .postprocessing.plot_config import (load_plot_document,  # noqa: PLC0415
+                                             schema_markdown)
+
+    if show_schema:
+        click.echo(schema_markdown())
+        return
+
+    if init_path:
+        from .postprocessing.plot_config import (PlotDocument,  # noqa: PLC0415
+                                                 SummaryPlot)
+
+        dirs = [str(Path(d).resolve()) for d in init_data_dirs] or ['./my_run']
+        document = PlotDocument(
+            data_dirs=dirs,
+            labels=[Path(d).name for d in dirs],
+            plots=[
+                # plot_type is passed explicitly so exclude_unset keeps it:
+                # the Literal default would be dropped from the dump, and the
+                # written document would then fail its own discriminator.
+                SummaryPlot(plot_type='summary', x_axis='force', y_axis='lf',
+                            filename='lf_vs_load.png', add_linear_fit=True),
+                SummaryPlot(plot_type='summary', x_axis='force', y_axis='cof',
+                            filename='cof_vs_load.png'),
+            ])
+        target = Path(init_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            document.model_dump_json(indent=2, exclude_unset=True),
+            encoding='utf-8')
+        click.echo(f"✅ {target}")
+        click.echo(f"Edit it, then: FrictionSim2D postprocess plot {target} "
+                   f"--preset publication")
+        return
+
+    if not plot_config:
+        raise click.UsageError(
+            "PLOT_CONFIG is required. Start one with "
+            "`postprocess plot --init plots.json --data-dir <run>`, "
+            "or print the schema with --schema.")
+
+    try:
+        document = load_plot_document(Path(plot_config))
+    except Exception as exc:  # pylint: disable=broad-except
+        raise click.ClickException(str(exc)) from exc
+
+    from .postprocessing.plot_style import DEFAULT_SETTINGS  # noqa: PLC0415
+    from .postprocessing.presets import load_preset  # noqa: PLC0415
+
+    plot_settings = copy.deepcopy(DEFAULT_SETTINGS)
+    if preset:
+        try:
+            _merge_settings(plot_settings, load_preset(preset))
+        except KeyError as exc:
+            raise click.ClickException(str(exc)) from exc
+    if settings:
+        with open(settings, 'r', encoding='utf-8') as fh:
+            _merge_settings(plot_settings, json.load(fh))
+
+    if validate:
+        click.echo(f"OK: {len(document.plots)} plot(s), "
+                   f"{len(document.data_dirs)} dataset(s).")
+        return
+
     from .postprocessing import Plotter  # noqa: PLC0415
 
-    with open(plot_config, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-
-    plot_settings = None
-    if settings:
-        with open(settings, 'r', encoding='utf-8') as f:
-            plot_settings = json.load(f)
-
-    data_dirs = config.get('data_dirs', [])
-    labels = config.get('labels', [])
-    plots = config.get('plots', [])
-    dataset_display_labels = config.get('dataset_display_labels', {})
-    series_color_map = config.get('series_color_map', {})
-
-    if not data_dirs or not labels or not plots:
-        raise click.Abort(
-            "'data_dirs', 'labels', and 'plots' must be defined in config."
-        )
-
-    if len(data_dirs) != len(labels):
-        raise click.Abort(
-            "Number of 'data_dirs' must match number of 'labels'."
-        )
-
     plotter = Plotter(
-        data_dirs,
-        labels,
-        output_dir,
-        plot_settings,
-        dataset_display_labels=dataset_display_labels,
-        series_color_map=series_color_map,
+        document.data_dirs, document.labels, output_dir, plot_settings,
+        dataset_display_labels=document.dataset_display_labels,
+        series_color_map=document.series_color_map,
     )
-    for plot_cfg in plots:
-        plotter.generate_plot(plot_cfg)
-    click.echo("All plots generated.")
+    for spec in document.plots:
+        plotter.generate_plot(spec)
+    for path in plotter.written:
+        click.echo(f"✅ {path}")
+    click.echo(f"{len(plotter.written)} file(s) written.")
 
 
 @postprocess_group.command('pes-scan')
