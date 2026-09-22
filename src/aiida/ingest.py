@@ -86,12 +86,14 @@ class SetRootMismatch(ValueError):
     """
 
 
-def find_or_create_set(root: Path, label: str):
-    """The set node for `label`, created from `root` if it does not exist.
+def _find_set(root: Path, label: str):
+    """The set node for `label`, if it already exists; `None` otherwise.
 
-    Raises :class:`SetRootMismatch` when `label` already names a set built from
-    a different `source_root`. Re-ingesting the SAME tree under the same label
-    is the idempotent path and is allowed.
+    Read-only -- never creates a node or a Group. Still raises
+    :class:`SetRootMismatch` when the existing set was built from a different
+    `source_root`, exactly like `find_or_create_set`: a dry run must surface
+    the same conflict a real ingest would, not silently classify every run
+    under the mismatched label as "would create".
     """
     from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
 
@@ -101,24 +103,38 @@ def find_or_create_set(root: Path, label: str):
     qb = QueryBuilder()
     qb.append(FrictionSimulationSetData, filters={'attributes.label': label})
     existing = qb.first(flat=True)
+    if existing is not None and existing.source_root and existing.source_root != str(root):
+        raise SetRootMismatch(
+            f"set {label!r} was ingested from {existing.source_root!r}; "
+            f"{str(root)!r} is a different tree. Pass --label to give this "
+            f"tree its own set, or delete the old one with "
+            f"`FrictionSim2D aiida delete {label}`.")
+    return existing
+
+
+def find_or_create_set(root: Path, label: str):
+    """The set node for `label`, created from `root` if it does not exist.
+
+    Raises :class:`SetRootMismatch` when `label` already names a set built from
+    a different `source_root`. Re-ingesting the SAME tree under the same label
+    is the idempotent path and is allowed.
+    """
+    existing = _find_set(root, label)
     if existing is not None:
-        if existing.source_root and existing.source_root != str(root):
-            raise SetRootMismatch(
-                f"set {label!r} was ingested from {existing.source_root!r}; "
-                f"{str(root)!r} is a different tree. Pass --label to give this "
-                f"tree its own set, or delete the old one with "
-                f"`FrictionSim2D aiida delete {label}`.")
         return existing
 
+    from .data import FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
+
     node = FrictionSimulationSetData()
-    node.set_from_root(root, label)
+    node.set_from_root(Path(root).resolve(), label)
     node.store()
     _group_for(label).add_nodes([node])
     return node
 
 
-def find_or_create_run(set_node, locator) -> Tuple[object, bool]:
-    """The run node for `(set_uuid, rel_path)`; `(node, created)`."""
+def _find_run(set_node, locator) -> Optional[object]:
+    """The run node for `(set_uuid, rel_path)`, if it already exists; `None`
+    otherwise. Read-only -- never creates a node."""
     from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
 
     from .data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
@@ -128,9 +144,16 @@ def find_or_create_run(set_node, locator) -> Tuple[object, bool]:
         'attributes.set_uuid': str(set_node.uuid),
         'attributes.rel_path': locator.tokens.rel_path,
     })
-    existing = qb.first(flat=True)
+    return qb.first(flat=True)
+
+
+def find_or_create_run(set_node, locator) -> Tuple[object, bool]:
+    """The run node for `(set_uuid, rel_path)`; `(node, created)`."""
+    existing = _find_run(set_node, locator)
     if existing is not None:
         return existing, False
+
+    from .data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
 
     node = FrictionSimulationData()
     node.set_from_locator(locator, set_uuid=str(set_node.uuid),
@@ -159,6 +182,12 @@ def find_results(run_node, point) -> Optional[object]:
     Superseded nodes (R9) are excluded the same way: a stale node must never
     be returned again, or a re-ingest would compare against it, or supersede
     it a second time.
+
+    Candidates are ordered newest-first (`ctime desc`): if a create-then-
+    supersede pair was ever interrupted between the two (a crash, a killed
+    process) and more than one non-superseded node exists for the same
+    conditions, the newest one is the one a subsequent ingest should compare
+    against and, if still stale, supersede -- not an arbitrary DB-order pick.
     """
     from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
 
@@ -175,6 +204,7 @@ def find_results(run_node, point) -> Optional[object]:
         filters['attributes.layers'] = point.layers
     qb = QueryBuilder()
     qb.append(FrictionResultsData, filters=filters)
+    qb.order_by({FrictionResultsData: [{'ctime': 'desc'}]})
     for node in qb.all(flat=True):
         if node.layers != point.layers:
             continue
@@ -466,6 +496,40 @@ def create_results(run_node, point: LoadPoint, run_dir: Path, *,
     return node
 
 
+def _plan_run(rel: str, set_node, locator, points: List[LoadPoint],
+             report: IngestReport) -> None:
+    """Classify one run's points for a dry run, using READ-ONLY queries only.
+
+    No node and no Group is ever created here. `set_node` is `None` when no
+    set named `label` exists yet in the store (a brand-new import): every run
+    and point under it is then "would create", because there is nothing to
+    compare against. When a set DOES exist, a run/point that is not found in
+    it is likewise "would create" -- but one that IS found is classified
+    exactly as a real ingest would (`results_exist` / `find_results`), never
+    unconditionally reported as "created". Getting this wrong is what made a
+    dry run after a real ingest still claim N new results instead of N
+    skipped.
+    """
+    run_node = _find_run(set_node, locator) if set_node is not None else None
+    if run_node is None:
+        report.created_runs.append(rel)
+        report.created_results.extend(_point_key(rel, p) for p in points)
+        return
+
+    for point in points:
+        key = _point_key(rel, point)
+        try:
+            if results_exist(run_node, point):
+                report.skipped_results.append(key)
+            elif find_results(run_node, point) is not None:
+                report.superseded_results.append(key)
+            else:
+                report.created_results.append(key)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Dry-run classification failed for %s", key)
+            report.failures.append((key, f"{type(exc).__name__}: {exc}"))
+
+
 def ingest_run(locator, set_node, report: IngestReport, *,
                skip_fraction: float = 0.2) -> None:
     """Ingest one run into `set_node`, recording the outcome in `report`.
@@ -492,8 +556,11 @@ def ingest_run(locator, set_node, report: IngestReport, *,
         report.empty_runs.append(rel)
 
     if report.dry_run:
-        report.created_runs.append(rel)
-        report.created_results.extend(_point_key(rel, p) for p in points)
+        try:
+            _plan_run(rel, set_node, locator, points, report)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Could not look up the run node for %s", rel)
+            report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
         return
 
     try:
@@ -533,8 +600,13 @@ def ingest_root(root: Path, label: Optional[str] = None,
     changed load points, and creates nothing at all when nothing changed.
 
     `profile` is loaded via `load_aiida_profile` before anything touches the
-    store -- and not at all in `dry_run` mode, so a plan can be produced on a
-    machine with no AiiDA profile configured at all.
+    store. `dry_run` still loads it: a plan must classify each run/point
+    against what is ALREADY in the store (existing set found by label, run
+    found by `(set_uuid, rel_path)`, `results_exist`/`find_results` per
+    point), read-only and via `_find_set`/`_find_run` rather than
+    `find_or_create_*` -- nothing is stored and no Group is created, but a
+    dry run after a real ingest must report "0 created, N skipped", not
+    silently re-claim everything as new.
     """
     from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
     from ..run.tree import discover_runs, unparseable_runs  # pylint: disable=import-outside-toplevel
@@ -551,17 +623,18 @@ def ingest_root(root: Path, label: Optional[str] = None,
         report.failures.append((str(root), 'no provenance.json found'))
         return report
 
-    if not dry_run:
-        load_aiida_profile(profile)
+    load_aiida_profile(profile)
 
     settings = load_settings()
     # `settings.database.skip_fraction` predates this plan; read it
     # defensively in case a future rework (Task 31) ever makes it optional.
     skip_fraction = getattr(settings.database, 'skip_fraction', 0.2)
 
-    set_node = None
-    if not dry_run:
+    if dry_run:
+        set_node = _find_set(root, label)
+    else:
         set_node = find_or_create_set(root, label)
+    if set_node is not None:
         report.set_uuid = str(set_node.uuid)
 
     for locator in locators:

@@ -362,8 +362,8 @@ def test_aiida_import_archive_loads_profile(runner, monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_load_aiida_profile(profile_name=None):
-        calls.append(('load_profile', profile_name))
+    def fake_load_aiida_profile(profile=None):
+        calls.append(('load_profile', profile))
 
     def fake_import_archive(path):
         calls.append(('import_archive', str(path)))

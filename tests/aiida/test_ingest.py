@@ -510,7 +510,7 @@ def test_results_carry_the_summary_and_the_pointers(aiida_profile_clean, tmp_pat
 
 
 def test_dry_run_creates_no_nodes(aiida_profile_clean, tmp_path):
-    from aiida.orm import QueryBuilder
+    from aiida.orm import Group, QueryBuilder
 
     from src.aiida.data import FrictionSimulationSetData
 
@@ -522,14 +522,48 @@ def test_dry_run_creates_no_nodes(aiida_profile_clean, tmp_path):
     assert report.dry_run is True
     assert report.created_runs == [REL]
     assert QueryBuilder().append(FrictionSimulationSetData).count() == 0
+    # R(fix-1c): a fresh store must come out of a dry run with no Group
+    # either -- only `find_or_create_*` ever call `_group_for`, and the dry
+    # path must never reach them.
+    assert QueryBuilder().append(Group).count() == 0
     assert 'DRY RUN' in report.render()
+
+
+def test_dry_run_after_a_real_ingest_reports_nothing_new(aiida_profile_clean, tmp_path):
+    """R(fix-1a): a dry run must classify against what is ALREADY stored, not
+    unconditionally claim every point as new."""
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(10.0, 30.0))
+    ingest_root(root, label='plan2')
+
+    report = ingest_root(root, label='plan2', dry_run=True)
+
+    assert report.created_runs == []
+    assert report.created_results == []
+    assert len(report.skipped_results) == 2
+    assert report.superseded_results == []
+
+
+def test_dry_run_reports_a_changed_point_as_superseded(aiida_profile_clean, tmp_path):
+    """R(fix-1b): a point whose bytes changed since the last real ingest is
+    planned as a supersession, not a fresh "created" or a false "skipped"."""
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='plan3')
+    target = next((run_dir / 'results').glob('friction_f30*.txt'))
+    target.write_text(target.read_text(encoding='utf-8') + '99000 30.0 9.9 0.0\n',
+                      encoding='utf-8')
+
+    report = ingest_root(root, label='plan3', dry_run=True)
+
+    assert report.superseded_results == [f'{REL}#force30_a0_s2']
+    assert report.created_results == []
+    assert report.skipped_results == []
 
 
 def test_profile_falls_back_to_settings(monkeypatch, tmp_path):
     import src.aiida as aiida_pkg
 
-    settings_file = tmp_path / 'settings.yaml'
-    settings_file.write_text('aiida:\n  profile: friction2d\n', encoding='utf-8')
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
     (tmp_path / 'FrictionSim2D').mkdir()
     (tmp_path / 'FrictionSim2D' / 'settings.yaml').write_text(
