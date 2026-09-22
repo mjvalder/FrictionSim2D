@@ -720,3 +720,24 @@ class TestWorkspaceMemory:
 
         assert window.database.workspace.root == other.root
         assert window.database_pane.source == 'central'
+
+    def test_switching_workspace_does_not_clobber_the_new_workspaces_filters(
+            self, window, tmp_path, monkeypatch):
+        """Regression: restoring a source different from the pane's current
+        one used to fire source_changed -> _remember_database_state, which
+        wrote the OLD workspace's still-on-screen filters into the shared
+        state dict before db_filters was even read back out of it -- so the
+        new workspace's saved filters were clobbered both on screen and on
+        disk before the user touched anything."""
+        other = Workspace.open(tmp_path / 'other')
+        other.remember('db_source', 'central')
+        other.remember('db_filters', dict(EMPTY_FILTERS, family='hetero'))
+        monkeypatch.setattr(RecentWorkspaces, 'add', lambda self, root: [])
+        monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
+                            lambda *args, **kwargs: str(other.root))
+
+        window._choose_workspace()
+
+        assert window.database_pane.filters.value()['family'] == 'hetero'
+        reloaded = Workspace.open(other.root)
+        assert reloaded.state['db_filters']['family'] == 'hetero'

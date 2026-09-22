@@ -146,6 +146,10 @@ class MainWindow(QMainWindow):
         # stale rather than leaving the viewport showing a superseded system
         # with no indication anything changed.
         self._render_snapshot: Optional[dict] = None
+        # Set around _restore_database_state so the pane's own signals
+        # (source_changed) don't loop back into _remember_database_state
+        # while a workspace's saved state is still being applied.
+        self._restoring_db_state = False
 
         self.setWindowTitle(f"{APP_NAME} — Simulation Builder")
         self.resize(1500, 950)
@@ -405,19 +409,37 @@ class MainWindow(QMainWindow):
             self.database_pane.message(f"Cancelled the {kind} request.", 'warn')
 
     def _restore_database_state(self) -> None:
-        """Put back the source, filters and destination this workspace last used."""
+        """Put back the source, filters and destination this workspace last used.
+
+        Snapshot all three values before touching the pane: `set_source` below
+        can emit `source_changed`, which is wired to `_remember_database_state`
+        (so a live source toggle is recorded even without a query). Since
+        `self.workspace.state` is the same dict object read here and written
+        there, applying `set_source` first and only then reading back
+        `db_filters` would read whatever `_remember_database_state` had just
+        written from the pane's still-stale, pre-switch filters -- silently
+        clobbering the new workspace's saved filters with the old workspace's.
+        The `_restoring_db_state` guard blocks that write outright; the
+        snapshot means correctness never depends on the two agreeing.
+        """
         state = self.workspace.state
         source = state.get('db_source')
-        if source in SOURCES:
-            self.database_pane.set_source(source)
         filters = state.get('db_filters')
-        if isinstance(filters, dict):
-            self.database_pane.filters.set_value(filters)
         dest = state.get('db_dest')
-        if isinstance(dest, str):
-            self.database_pane.last_dest = dest
+        self._restoring_db_state = True
+        try:
+            if source in SOURCES:
+                self.database_pane.set_source(source)
+            if isinstance(filters, dict):
+                self.database_pane.filters.set_value(filters)
+            if isinstance(dest, str):
+                self.database_pane.last_dest = dest
+        finally:
+            self._restoring_db_state = False
 
     def _remember_database_state(self) -> None:
+        if self._restoring_db_state:
+            return
         self.workspace.remember('db_source', self.database_pane.source)
         self.workspace.remember('db_filters', self.database_pane.filters.value())
 
