@@ -220,3 +220,397 @@ def test_the_plots_scratch_directory_survives_preview_pruning(tmp_path):
     assert (plots / 'abc').is_dir()
     assert plots not in removed
     assert len(removed) == 8
+
+
+from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtGui import QColor, QPixmap  # noqa: E402
+from PySide6.QtWidgets import (QComboBox, QLabel, QListWidget,  # noqa: E402
+                               QPushButton, QScrollArea)
+
+from src.gui.widgets.plots import PlotsPane, discover_datasets  # noqa: E402
+from src.postprocessing.plot_config import PLOT_TYPES  # noqa: E402
+
+
+class _StubController(QObject):
+    """A PlotController that answers immediately, without a subprocess.
+
+    Spec section 3 asks for the worker stubbed at the boundary. Task 30's
+    tests are the one place that boundary is exercised for real -- they ARE
+    the protocol seam, and stubbing there would test the stub. Everything in
+    this class is about what the PANE does with an answer, so it gets one
+    synchronously and the suite spends no interpreter starts here.
+
+    Signals match `PlotController`'s, name for name and payload for payload.
+    """
+
+    started = Signal()
+    progress = Signal(str)
+    finished = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal()
+    warned = Signal(list)
+
+    def __init__(self, tmp_path, parent=None):
+        super().__init__(parent)
+        self.requests = []
+        self.mode = 'ok'                  # 'ok' | 'fail' | 'empty'
+        self.warnings = []
+        self.running = False
+        self._dir = tmp_path / 'figures'
+        self._dir.mkdir(parents=True, exist_ok=True)
+        # A real, loadable PNG made with Qt alone -- no matplotlib in this
+        # process either, so the test cannot mask a G4 regression.
+        pixmap = QPixmap(8, 8)
+        pixmap.fill(QColor('white'))
+        self.png = self._dir / 'lf.png'
+        pixmap.save(str(self.png))
+        self.vectors = [self._dir / 'lf.pdf', self._dir / 'lf.svg', self.png]
+        for path in self.vectors[:2]:
+            path.write_bytes(b'%PDF-stub')
+
+    def start(self, request):
+        from src.gui.controllers.plots import PlotFigure
+
+        self.requests.append(request)
+        self.started.emit()
+        self.progress.emit('plot 1/1: summary')
+        if self.mode == 'fail':
+            self.failed.emit(
+                'PlotDataError: ds: no output_full_*.json under /nope')
+            return
+        if self.warnings:
+            self.warned.emit(list(self.warnings))
+        if self.mode == 'empty':
+            self.finished.emit([])
+            return
+        files = self.vectors if request.settings is None else [self.png]
+        index = (request.plot_indices or [0])[0]
+        self.finished.emit(
+            [PlotFigure(index=index, plot_type='summary', files=list(files))])
+
+    def cancel(self):
+        self.cancelled.emit()
+
+
+class TestPlotsPane:
+
+    @pytest.fixture(name='stub')
+    def _stub(self, tmp_path):
+        return _StubController(tmp_path)
+
+    @pytest.fixture(name='pane')
+    def _pane(self, qt_app, workspace, document, stub):
+        del qt_app
+        pane = PlotsPane(workspace, controller=stub)
+        pane.set_document(document)
+        yield pane
+        pane.close()
+
+    def test_the_widgets_are_the_declared_ones(self, pane):
+        assert isinstance(pane.dataset_list, QListWidget)
+        assert isinstance(pane.plot_list, QListWidget)
+        assert isinstance(pane.type_combo, QComboBox)
+        assert isinstance(pane.preset_combo, QComboBox)
+        assert isinstance(pane.preview_label, QLabel)
+        assert isinstance(pane.render_button, QPushButton)
+        assert pane.preview_label.parent() is not None
+
+    def test_the_preview_is_a_scrolled_label_not_a_canvas(self, pane):
+        """G4: no live matplotlib canvas anywhere in the widget tree."""
+        scrolls = pane.findChildren(QScrollArea)
+
+        assert scrolls, 'the preview must live in a scroll area'
+        assert any(s.widget() is pane.preview_label for s in scrolls)
+        assert not [w for w in pane.findChildren(QLabel)
+                    if type(w).__name__.endswith('Canvas')]
+
+    def test_the_type_combo_offers_every_plot_type(self, pane):
+        offered = [pane.type_combo.itemText(i)
+                   for i in range(pane.type_combo.count())]
+
+        assert offered == list(PLOT_TYPES)
+
+    def test_the_preset_combo_offers_none_plus_the_shipped_presets(self, pane):
+        from src.postprocessing.presets import PRESETS
+
+        offered = [pane.preset_combo.itemText(i)
+                   for i in range(pane.preset_combo.count())]
+
+        assert offered == ['(none)'] + list(PRESETS)
+
+    def test_discover_datasets_finds_workspace_and_exported_sets(
+            self, workspace, tmp_path):
+        """G1: a dataset is a directory with outputs/output_full_*.json --
+        either a package under the workspace root, or a set pulled out of the
+        local store by `aiida export-results --output-dir
+        <workspace>/.preview/_datasets/<label>`."""
+        del tmp_path
+        for parent in (workspace.root, workspace.preview_dir / '_datasets'):
+            outputs = (parent / 'ds_a' / 'outputs'
+                       if parent is workspace.root
+                       else parent / 'set_b' / 'outputs')
+            outputs.mkdir(parents=True)
+            (outputs / 'output_full_100x100y.json').write_text(
+                '{}', encoding='utf-8')
+        (workspace.root / 'not_a_dataset').mkdir()
+        (workspace.root / 'empty_outputs' / 'outputs').mkdir(parents=True)
+
+        found = [d.name for d in discover_datasets(workspace)]
+
+        assert 'ds_a' in found
+        assert 'set_b' in found
+        assert 'not_a_dataset' not in found
+        assert 'empty_outputs' not in found
+
+    def test_add_and_remove_a_dataset(self, pane, workspace):
+        outputs = workspace.root / 'ds_a' / 'outputs'
+        outputs.mkdir(parents=True)
+        (outputs / 'output_full_100x100y.json').write_text(
+            '{}', encoding='utf-8')
+        pane.refresh_available_datasets()
+        before = pane.dataset_list.count()
+
+        pane.available_list.setCurrentRow(
+            [pane.available_list.item(i).text()
+             for i in range(pane.available_list.count())].index('ds_a'))
+        pane.add_selected_dataset()
+
+        assert pane.dataset_list.count() == before + 1
+        assert 'ds_a' in pane.document().labels
+        assert str(workspace.root / 'ds_a') in pane.document().data_dirs
+
+        pane.dataset_list.setCurrentRow(before)
+        pane.remove_selected_dataset()
+
+        assert pane.dataset_list.count() == before
+        assert 'ds_a' not in pane.document().labels
+
+    def test_adding_the_same_dataset_twice_is_refused_quietly(self, pane,
+                                                              workspace):
+        outputs = workspace.root / 'ds_a' / 'outputs'
+        outputs.mkdir(parents=True)
+        (outputs / 'output_full_100x100y.json').write_text(
+            '{}', encoding='utf-8')
+        pane.refresh_available_datasets()
+        row = [pane.available_list.item(i).text()
+               for i in range(pane.available_list.count())].index('ds_a')
+        pane.available_list.setCurrentRow(row)
+        pane.add_selected_dataset()
+        count = pane.dataset_list.count()
+
+        pane.add_selected_dataset()
+
+        assert pane.dataset_list.count() == count
+        assert 'already in the document' in pane.status_label.text()
+        assert QApplication.activeModalWidget() is None
+
+    def test_open_save_and_save_as_round_trip(self, pane, tmp_path,
+                                              monkeypatch):
+        """G3, and the thing that makes the tab usable at all: a document
+        built here has to be keepable. The dialogs are patched -- an
+        unpatched modal blocks this suite forever."""
+        from PySide6.QtWidgets import QFileDialog
+
+        from src.postprocessing.plot_config import load_plot_document
+
+        target = tmp_path / 'kept.json'
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName',
+                            staticmethod(lambda *a, **k: (str(target), '')))
+        pane.add_plot('correlation')
+
+        pane.save_as()
+
+        assert target.is_file()
+        assert pane.current_path == target
+        assert len(load_plot_document(target).plots) == 2
+        assert 'Saved kept.json' in pane.status_label.text()
+
+        pane.add_plot('rank_friction')
+        pane.save()                                  # no dialog this time
+        assert len(load_plot_document(target).plots) == 3
+
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName',
+                            staticmethod(lambda *a, **k: (str(target), '')))
+        pane.add_plot('timeseries')
+        pane.open_document()
+
+        assert len(pane.document().plots) == 3
+        assert QApplication.activeModalWidget() is None
+
+    def test_a_cancelled_dialog_changes_nothing(self, pane, monkeypatch):
+        from PySide6.QtWidgets import QFileDialog
+
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName',
+                            staticmethod(lambda *a, **k: ('', '')))
+        before = len(pane.document().plots)
+
+        pane.save_as()
+
+        assert pane.current_path is None
+        assert len(pane.document().plots) == before
+
+    def test_an_unopenable_document_reports_in_the_status_label(
+            self, pane, tmp_path, monkeypatch):
+        from PySide6.QtWidgets import QFileDialog
+
+        bad = tmp_path / 'bad.json'
+        bad.write_text('{"plots": [{"plot_type": "wobble"}]}', encoding='utf-8')
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName',
+                            staticmethod(lambda *a, **k: (str(bad), '')))
+
+        pane.open_document()
+
+        assert 'Could not open bad.json' in pane.status_label.text()
+        assert QApplication.activeModalWidget() is None
+
+    def test_document_changed_reaches_the_status_label(self, pane):
+        """The signal was emitted and connected to nothing."""
+        pane.add_plot('summary')
+
+        assert 'plot(s)' in pane.status_label.text()
+
+    def test_render_previews_only_the_selected_plot(self, pane, stub):
+        """A ten-plot document renders ten figures to display figures[0]."""
+        pane.add_plot('summary')
+        pane.plot_list.setCurrentRow(1)
+
+        pane.render()
+
+        assert stub.requests[-1].plot_indices == [1]
+
+    def test_export_renders_every_plot(self, pane, stub):
+        pane.add_plot('summary')
+        pane.plot_list.setCurrentRow(1)
+
+        pane.export()
+
+        assert stub.requests[-1].plot_indices is None
+
+    def test_the_export_button_exists(self, pane):
+        assert isinstance(pane.export_button, QPushButton)
+        assert isinstance(pane.add_dataset_button, QPushButton)
+        assert isinstance(pane.available_list, QListWidget)
+        assert isinstance(pane.open_button, QPushButton)
+        assert isinstance(pane.save_button, QPushButton)
+        assert isinstance(pane.save_as_button, QPushButton)
+
+    def test_the_lists_reflect_the_document(self, pane):
+        assert pane.dataset_list.count() == 1
+        assert pane.dataset_list.item(0).text() == 'ds'
+        assert pane.plot_list.count() == 1
+        assert 'summary' in pane.plot_list.item(0).text()
+
+    def test_selecting_a_plot_rebuilds_the_form_over_its_model(self, pane):
+        pane.add_plot('stick_slip_analysis')
+        pane.plot_list.setCurrentRow(1)
+
+        assert pane.form.document.plot_type == 'stick_slip_analysis'
+        assert 'stick_slip_analysis' in pane.form.sections
+
+    def test_editing_the_form_reaches_the_document(self, pane):
+        from src.gui.controllers.plot_document import COMMON_SECTION
+
+        pane.plot_list.setCurrentRow(0)
+        pane.form.document.set(COMMON_SECTION, 'filter_layer', 2)
+        pane._commit_current_plot()  # pylint: disable=protected-access
+
+        assert pane.document().plots[0].filter_layer == 2
+
+    def test_add_and_remove_a_plot(self, pane):
+        pane.add_plot('correlation')
+        assert pane.plot_list.count() == 2
+        assert pane.document().plots[1].plot_type == 'correlation'
+
+        pane.plot_list.setCurrentRow(1)
+        pane.remove_selected_plot()
+
+        assert pane.plot_list.count() == 1
+        assert len(pane.document().plots) == 1
+
+    def test_changing_the_type_keeps_the_common_fields(self, pane):
+        from src.gui.controllers.plot_document import COMMON_SECTION
+
+        pane.plot_list.setCurrentRow(0)
+        pane.form.document.set(COMMON_SECTION, 'filter_size', '100x100y')
+        pane.type_combo.setCurrentText('timeseries')
+
+        assert pane.document().plots[0].plot_type == 'timeseries'
+        assert pane.document().plots[0].filter_size == '100x100y'
+
+    def test_save_and_load_round_trip_the_same_json(self, pane, tmp_path):
+        """G3: the GUI reads and writes exactly what `postprocess plot` reads."""
+        from src.postprocessing.plot_config import load_plot_document
+
+        path = pane.save_document(tmp_path / 'plots.json')
+
+        assert path.is_file()
+        reloaded = load_plot_document(path)
+        assert reloaded.model_dump(exclude_unset=True) == \
+            pane.document().model_dump(exclude_unset=True)
+
+        pane.add_plot('correlation')
+        pane.load_document(path)
+        assert len(pane.document().plots) == 1
+
+    def test_render_shows_the_png_and_never_opens_a_modal(self, pane):
+        """An unpatched modal in this directory blocks the suite forever."""
+        pane.render()
+
+        # QLabel.pixmap() returns a NULL QPixmap, never None, so isNull() is
+        # the only assertion here that means anything.
+        assert not pane.preview_label.pixmap().isNull()
+        assert 'lf.png' in pane.status_label.text()
+        assert QApplication.activeModalWidget() is None
+        assert pane.render_button.isEnabled()
+
+    def test_the_preview_asks_for_png_and_the_export_does_not(self, pane, stub):
+        """G2: Export uses the preset's OWN formats. The PNG override on
+        `render` is a preview concern -- a QLabel cannot show a PDF -- and
+        applying it to an export would silently defeat
+        `publication`'s pdf/svg/png."""
+        pane.preset_combo.setCurrentText('publication')
+
+        pane.render()
+        pane.export()
+
+        assert stub.requests[0].settings == {'export': {'formats': ['png']}}
+        assert stub.requests[0].preset == 'publication'
+        assert stub.requests[1].settings is None
+        assert stub.requests[1].preset == 'publication'
+
+    def test_export_reports_the_formats_it_wrote(self, pane):
+        pane.preset_combo.setCurrentText('publication')
+
+        pane.export()
+
+        text = pane.status_label.text()
+        assert 'Exported 3 file(s)' in text
+        assert 'pdf' in text and 'svg' in text and 'png' in text
+        assert pane.export_button.isEnabled()
+
+    def test_a_failed_render_reports_in_the_status_label(self, pane, stub):
+        stub.mode = 'fail'
+
+        pane.render()
+
+        assert 'failed' in pane.status_label.text().lower()
+        assert 'no output_full' in pane.status_label.text()
+        assert QApplication.activeModalWidget() is None
+        assert pane.render_button.isEnabled()
+        assert pane.export_button.isEnabled()
+
+    def test_a_render_that_produces_nothing_says_so(self, pane, stub):
+        stub.mode = 'empty'
+
+        pane.render()
+
+        assert 'Nothing was rendered' in pane.status_label.text()
+
+    def test_warnings_are_shown_beside_the_figures(self, pane, stub):
+        stub.warnings = [
+            'plot 2: PlotDataError: filter_size nope matched nothing']
+
+        pane.render()
+
+        assert 'warning' in pane.status_label.text().lower()
+        assert 'plot 2' in pane.status_label.text()

@@ -81,3 +81,34 @@ def test_main_raises_a_helpful_error_when_dependencies_are_missing(monkeypatch):
         gui.main()
     assert "PySide6" in str(excinfo.value)
     assert "pip install -e '.[gui]'" in str(excinfo.value)
+
+
+def test_importing_gui_does_not_import_matplotlib():
+    """The Plots tab renders through a subprocess (G4). If importing
+    `src.gui` pulled matplotlib in, the GUI process would install a second Qt
+    backend beside ovito's -- which is the whole reason there is a worker."""
+    result = _run(
+        "import sys\n"
+        "import src.gui\n"
+        "print('LEAKED:' + ('matplotlib' if 'matplotlib' in sys.modules else ''))\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split("LEAKED:")[1].strip() == ""
+
+
+def test_the_plots_widgets_pull_qt_but_never_matplotlib():
+    """`src.gui.widgets.plots` is a QWidget package, so PySide6 is expected
+    and asserting otherwise would be asserting it cannot exist. What must NOT
+    arrive is matplotlib: the pane shows a PNG the worker produced, and every
+    `postprocessing` import in it is deferred into a method precisely so a
+    refactor cannot reach `plot_data` (which does import matplotlib)."""
+    result = _run(
+        "import sys\n"
+        "import src.gui.widgets.plots\n"
+        "assert 'PySide6' in sys.modules, 'a QWidget package without Qt?'\n"
+        "print('LEAKED:' + ','.join(\n"
+        "    m for m in ('matplotlib', 'ovito') if m in sys.modules))\n"
+    )
+    assert result.returncode == 0, result.stderr
+    leaked = result.stdout.split("LEAKED:")[1].strip()
+    assert leaked == "", f"src.gui.widgets.plots pulled in {leaked}"

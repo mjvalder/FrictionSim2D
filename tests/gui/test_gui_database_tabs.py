@@ -39,10 +39,10 @@ def _window(qt_app, tmp_path):
     window.close()
 
 
-def test_the_window_has_exactly_two_top_level_tabs(window):
+def test_the_window_has_three_top_level_tabs(window):
     assert isinstance(window.top_tabs, QTabWidget)
     labels = [window.top_tabs.tabText(i) for i in range(window.top_tabs.count())]
-    assert labels == ['Builder', 'Database']
+    assert labels == ['Builder', 'Database', 'Plots']
 
 
 def test_the_builder_tab_still_holds_the_form_and_the_viewport(window):

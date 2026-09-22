@@ -167,6 +167,8 @@ class MainWindow(QMainWindow):
         self.top_tabs.addTab(self._build_builder_tab(), 'Builder')
         self.database_page = self._build_database_tab()
         self.top_tabs.addTab(self.database_page, 'Database')
+        self.plots_page = self._build_plots_tab()
+        self.top_tabs.addTab(self.plots_page, 'Plots')
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -198,6 +200,18 @@ class MainWindow(QMainWindow):
         self.database_pane = DatabasePane(self)
         self._restore_database_state()
         return self.database_pane
+
+    def _build_plots_tab(self) -> QWidget:
+        """The Plots tab: a plot document editor over the same form machinery.
+
+        Imported here rather than at module level so `import src.gui.app`
+        does not pull the plot widgets -- and, through them, one refactor
+        away, matplotlib -- into the process ovito's Qt backend owns.
+        """
+        from .widgets.plots import PlotsPane  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+        self.plots_pane = PlotsPane(self.workspace, self)
+        return self.plots_pane
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)

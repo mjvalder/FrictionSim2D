@@ -327,21 +327,6 @@ class PlotDocument(DatasetsHeader):
     """A whole `postprocess plot` document."""
     plots: List[AnyPlot] = Field(default_factory=list)
 
-    @model_validator(mode='after')
-    def _needs_a_dataset(self):
-        """A document with no `data_dirs` can draw nothing.
-
-        On `DatasetsHeader` this would be wrong -- the GUI's dataset picker
-        starts empty and is edited into shape -- but a document handed to
-        `postprocess plot` has to name at least one place to read from, and
-        saying so at load beats rendering nothing and exiting 0.
-        """
-        if not self.data_dirs:
-            raise ValueError(
-                "data_dirs is empty: a plot document must name at least one "
-                "dataset directory (or db:// URI)")
-        return self
-
 
 # ---------------------------------------------------------------------------
 # Style settings (Q4)
@@ -475,9 +460,21 @@ class PlotSettings(BaseModel):
 
 
 def load_plot_document(path: Path) -> PlotDocument:
-    """Read and validate one plot document."""
-    return PlotDocument.model_validate(
+    """Read and validate one plot document.
+
+    The empty-`data_dirs` check lives here rather than on the model: a
+    document being EDITED is legitimately incomplete -- the GUI's Plots tab
+    starts with no datasets and the user adds them -- while one being LOADED
+    to render has to name somewhere to read from. Without the check,
+    `{"plots": []}` validated and rendered nothing while exiting 0.
+    """
+    document = PlotDocument.model_validate(
         json.loads(Path(path).read_text(encoding='utf-8')))
+    if not document.data_dirs:
+        raise ValueError(
+            f"{path}: data_dirs is empty -- a plot document must name at "
+            f"least one dataset directory (or db:// URI)")
+    return document
 
 
 def _model_rows(model) -> List[str]:
