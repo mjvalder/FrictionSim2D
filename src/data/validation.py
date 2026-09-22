@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .models import ResultRecord
 
@@ -32,9 +32,15 @@ _VALID_RANGES: Dict[str, tuple] = {
 }
 
 _REQUIRED_FIELDS = ['material', 'family', 'model']
-#: A row must carry SOMETHING measured. A PES grid has no COF but has
-#: descriptors in `extras`, so either satisfies this.
-_REQUIRED_RESULT_FIELDS = ['mean_cof', 'extras']
+
+#: `to_record` (`src/aiida/data/results.py::_extras_for_record`) unconditionally
+#: writes these into every row's `extras`: `skip_fraction` from `RunSummary`,
+#: `twist_angle` and `potentials` for hetero findability. None of the three is
+#: a measurement -- an extras dict containing only these is indistinguishable
+#: from an empty one, so a bare truthiness check on `extras` (a non-empty dict
+#: is always truthy, even `{'twist_angle': None}`) can never fail for a real
+#: row, COF or not. Treat them as bookkeeping, not evidence of a result.
+_BOOKKEEPING_EXTRAS_KEYS = frozenset({'skip_fraction', 'twist_angle', 'potentials'})
 
 #: The load column each family is expected to use, for the consistency warning.
 #: Families absent from this map (the PES scans) carry neither.
@@ -87,6 +93,20 @@ class ValidationResult:
 # ---------------------------------------------------------------------------
 
 
+def _has_measured_extra(extras: Any) -> bool:
+    """True if `extras` carries at least one value beyond the bookkeeping keys.
+
+    `mean_cof == 0.0` is a real, in-range value (`is not None`) and must not
+    route through here -- see `validate_completeness`'s caller, which checks
+    `mean_cof is not None` directly and only falls back to this for the extras
+    half of the "carries something measured" requirement.
+    """
+    if not isinstance(extras, dict):
+        return False
+    return any(v is not None for k, v in extras.items()
+               if k not in _BOOKKEEPING_EXTRAS_KEYS)
+
+
 def validate_completeness(record: ResultRecord) -> ValidationResult:
     """Check the record carries an identity and something measured."""
     result = ValidationResult()
@@ -96,12 +116,14 @@ def validate_completeness(record: ResultRecord) -> ValidationResult:
         if val is None or (isinstance(val, str) and not val.strip()):
             result.add_error(f"Required field '{field_name}' is missing or empty")
 
-    has_any_result = any(
-        getattr(record, f, None) for f in _REQUIRED_RESULT_FIELDS
-    )
-    if not has_any_result:
+    # A row has a result if it has a COF (0.0 counts -- that is a real value,
+    # not a missing one; validate_ranges flags exact 0.0 as a warning
+    # separately) OR at least one extras value that isn't pure bookkeeping (a
+    # PES grid's descriptors, an indent's retract features, ...).
+    if record.mean_cof is None and not _has_measured_extra(record.extras):
         result.add_error(
-            f"At least one result field required: {_REQUIRED_RESULT_FIELDS}"
+            "At least one result field required: mean_cof or a non-bookkeeping "
+            "extras value"
         )
 
     # `is_complete=False` means summarise_run could not compute a COF. Storing

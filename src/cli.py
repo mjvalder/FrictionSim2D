@@ -1547,7 +1547,8 @@ def db_upload(
 @db_group.command('query')
 @click.option('--material', '-m', default=None, help='Filter by material name.')
 @click.option('--type', 'sim_type', default=None,
-              help='Filter by simulation type (afm or sheetonsheet).')
+              help='Filter by family (afm, indent, sheetonsheet, hetero, '
+                   'flake, pes_tip, or pes_sheet).')
 @click.option('--layers', '-l', type=int, default=None,
               help='Filter by number of layers.')
 @click.option('--uploader', '-n', default=None, help='Filter by uploader name.')

@@ -19,14 +19,31 @@ import pytest
 # Build a minimal psycopg2 stub for tests that exercise FrictionDB internals
 # ---------------------------------------------------------------------------
 
+class _JsonMarker:
+    """Stand-in for `psycopg2.extras.Json`: wraps a value, doesn't adapt it.
+
+    A real assertion that a JSONB column went through `Json(...)` needs a type
+    to check `isinstance` against -- a passthrough lambda returns the bare
+    dict, which is indistinguishable from a column that was never wrapped at
+    all.
+    """
+
+    def __init__(self, value):
+        self.value = value
+
+    def __eq__(self, other):
+        return isinstance(other, _JsonMarker) and other.value == self.value
+
+    def __repr__(self):
+        return f"_JsonMarker({self.value!r})"
+
+
 def _make_psycopg2_stub():
     """Return a minimal psycopg2 stub module, plus its `extras` submodule.
 
     `upload_record` does `from psycopg2.extras import Json` -- without a
     registered `psycopg2.extras` module in `sys.modules` that import raises
     ImportError in every upload test, not just the ones carrying `extras`.
-    `Json` is a passthrough here: the fake cursor only cares that a dict
-    reaches it, not that it went through the real adapter.
     """
     stub = ModuleType("psycopg2")
 
@@ -37,7 +54,7 @@ def _make_psycopg2_stub():
     stub.connect = MagicMock()
 
     extras_stub = ModuleType("psycopg2.extras")
-    extras_stub.Json = lambda value: value  # type: ignore[attr-defined]
+    extras_stub.Json = _JsonMarker  # type: ignore[attr-defined]
     stub.extras = extras_stub  # type: ignore[attr-defined]
     return stub, extras_stub
 
@@ -52,11 +69,15 @@ _PSYCOPG2_STUB, _PSYCOPG2_EXTRAS_STUB = _make_psycopg2_stub()
 class _FakeCursor:
     """Minimal cursor that satisfies FrictionDB's usage pattern."""
 
-    def __init__(self, rows=None, returning_id=1):
+    def __init__(self, rows=None, returning_id=1, existing_columns=None):
         self._rows_queue: list = list(rows or [])
         self._returning_id = returning_id
         self.rowcount = 0
         self.executed: list = []
+        #: `None` means `simulations` doesn't exist yet (the default -- a
+        #: fresh install). A list simulates an existing table with exactly
+        #: these columns, for `init_schema`'s pre-v3 detection.
+        self._existing_columns = existing_columns
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
@@ -70,6 +91,11 @@ class _FakeCursor:
             self._rows_queue = [("h-MoS2", 3), ("h-WS2", 1)]
         elif "GROUP BY family" in sql:
             self._rows_queue = [("afm", 4)]
+        elif "to_regclass" in sql:
+            self._rows_queue = ([("simulations",)] if self._existing_columns
+                               is not None else [(None,)])
+        elif "information_schema.columns" in sql:
+            self._rows_queue = [(c,) for c in (self._existing_columns or [])]
         elif "ON CONFLICT" in sql:
             pass  # schema_version upsert
         elif "time_series_hash" in sql and "SELECT" in sql:
@@ -673,14 +699,14 @@ class TestDbFromProfile:
 # Task 30: schema-3 init/upload/query
 # ===========================================================================
 
-def _recording_db():
+def _recording_db(existing_columns=None):
     """A `FrictionDB` whose fake cursor records every executed statement."""
     from src.data.database import FrictionDB
 
     with patch("src.data.database.FrictionDB._ensure_schema"):
         instance = FrictionDB(host="localhost", port=5432, dbname="test_db",
                               user="test", password="test", auto_create=False)
-    cursor = _FakeCursor()
+    cursor = _FakeCursor(existing_columns=existing_columns)
 
     @contextmanager
     def _mock_cursor(commit=False):
@@ -698,6 +724,54 @@ def test_init_schema_drop_recreates():
     executed = ' '.join(sql for sql, _params in cursor.executed)
     assert 'DROP TABLE IF EXISTS simulations' in executed
     assert 'CREATE TABLE IF NOT EXISTS simulations' in executed
+
+
+def test_init_schema_refuses_an_existing_schema2_table():
+    """Without --drop, a pre-v3 table must be left alone, not silently
+    stamped as schema_version=3 -- see the docstring on
+    `FrictionDB.init_schema` for why that would be worse than doing nothing.
+    """
+    db, cursor = _recording_db(
+        existing_columns=['id', 'uploaded_at', 'uploader', 'material',
+                          'simulation_type', 'layers', 'metadata'])
+
+    with pytest.raises(RuntimeError, match='db init --drop'):
+        db.init_schema(drop=False)
+
+    executed = [sql for sql, _params in cursor.executed]
+    assert not any('INSERT INTO schema_version' in sql for sql in executed)
+    assert not any(sql.strip().startswith('CREATE TABLE IF NOT EXISTS simulations')
+                   for sql in executed)
+
+
+def test_init_schema_proceeds_when_no_table_exists_yet():
+    """A fresh install has no `simulations` table -- that is NOT pre-v3."""
+    db, cursor = _recording_db(existing_columns=None)
+
+    db.init_schema(drop=False)
+
+    executed = ' '.join(sql for sql, _params in cursor.executed)
+    assert 'CREATE TABLE IF NOT EXISTS simulations' in executed
+    assert 'INSERT INTO schema_version' in executed
+
+
+def test_extras_reach_the_cursor_wrapped_in_json():
+    """`upload_record` must wrap `extras` in `psycopg2.extras.Json` before it
+    reaches the cursor -- a bare dict makes the real driver raise
+    `ProgrammingError: can't adapt type 'dict'`. Assert the actual TYPE, not
+    just that a dict-shaped value made it through: a passthrough would look
+    identical to a real dict at that point.
+    """
+    db, cursor = _recording_db()
+
+    db.upload_result(material="h-MoS2", family="afm", model="afm",
+                     extras={"foo": "bar"})
+
+    sql, params = cursor.executed[-1]
+    columns = sql.split('(', 1)[1].split(')', 1)[0].split(', ')
+    value = params[columns.index('extras')]
+    assert isinstance(value, _JsonMarker)
+    assert value.value == {"foo": "bar"}
 
 
 def test_query_filters_on_family_and_set():

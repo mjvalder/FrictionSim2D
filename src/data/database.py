@@ -329,16 +329,49 @@ class FrictionDB:
 
     # -- Schema ----------------------------------------------------------------
 
+    @staticmethod
+    def _existing_table_is_pre_v3(cur) -> bool:
+        """True if `simulations` already exists and predates schema 3.
+
+        A fresh install has no such table yet -- `to_regclass` returns NULL --
+        and that is NOT pre-v3, it is "nothing to migrate". Only a table that
+        exists AND lacks the `family` column (added in schema 3) is pre-v3;
+        checking the column itself is robust even if a `schema_version` row
+        was never written (an old table on a DB nobody ran `db init` against
+        again since).
+        """
+        cur.execute("SELECT to_regclass('simulations');")
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            return False
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'simulations';"
+        )
+        columns = {r[0] for r in cur.fetchall()}
+        return 'family' not in columns
+
     def init_schema(self, drop: bool = False) -> None:
         """Create the schema; `drop=True` recreates `simulations` from scratch.
 
         `db init --drop` is the supported upgrade path (spec U6): there is no
         migration from schema 2 and the central DB is not deployed yet.
+        Without `--drop`, an existing schema-2 table is left untouched and
+        this raises -- silently stamping `schema_version = 3` next to a table
+        that is still schema 2 would make every later `_ensure_schema()` call
+        (every `FrictionDB()` construction with the default `auto_create=True`)
+        believe the schema is current when it is not.
         """
         with self._cursor(commit=True) as cur:
             cur.execute(_CREATE_SCHEMA_VERSION_SQL)
             if drop:
                 cur.execute(_DROP_TABLE_SQL)
+            elif self._existing_table_is_pre_v3(cur):
+                raise RuntimeError(
+                    "schema-2 'simulations' table found; there is no "
+                    "in-place migration to schema 3 -- run "
+                    "`FrictionSim2D db init --drop` (this drops the table)."
+                )
             cur.execute(_CREATE_TABLE_SQL)
             cur.execute(_CREATE_API_KEYS_SQL)
 

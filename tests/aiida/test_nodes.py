@@ -421,6 +421,45 @@ def test_to_record_keeps_every_extra(aiida_profile_clean, tmp_path):
         {'name': 'h-MoS2', 'pot_type': 'sw', 'pot_file_sha256': 'ab' * 32}]
 
 
+def test_to_record_carries_a_pressure_load(aiida_profile_clean, tmp_path):
+    """A sheet-family run's load is `pressure_gpa`, not `force_nN` -- the two
+    are mutually exclusive on `ResultRecord` (`_check_force_or_pressure`), so
+    getting this backwards for an entire family would make every one of its
+    uploads raise instead of just recording the wrong number.
+    """
+    root = tmp_path / 'sim2'
+    run_dir = make_run(root, 'sheetonsheet/h-MoS2/100x_100y/K300', 'sheetonsheet')
+    loc = discover_runs(root)[0]
+
+    run_node = FrictionSimulationData()
+    run_node.set_from_locator(loc, set_uuid='set-2')
+    run_node.store()
+
+    set_node = FrictionSimulationSetData()
+    set_node.set_from_root(root, label='260910-sheet')
+    set_node.store()
+
+    window = next((run_dir / 'results').glob('friction_p*.txt'))
+
+    results_node = FrictionResultsData()
+    results_node.family = 'sheetonsheet'
+    results_node.load_kind = 'pressure'
+    results_node.load = 1.5
+    results_node.angle = 0.0
+    results_node.speed = 2.0
+    results_node.run_uuid = str(run_node.uuid)
+    results_node.set_uuid = str(set_node.uuid)
+    results_node.add_result_files({'window': window}, run_dir=run_dir, aux=())
+    results_node.set_summary(summarise_run(
+        {'window': read_results_file(window, 'sheetonsheet')}, 'sheetonsheet'))
+    results_node.store()
+
+    record = results_node.to_record(run_node, set_node)
+
+    assert record.pressure_gpa == pytest.approx(1.5)
+    assert record.force_nN is None
+
+
 def test_unknown_tier_raises(aiida_profile_clean, tmp_path):
     node = FrictionResultsData()
     node.family = 'afm'

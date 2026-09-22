@@ -26,6 +26,12 @@ def test_every_family_is_accepted(family):
     if family in ('pes_tip', 'pes_sheet'):
         record = _record(family=family, model=model, mean_cof=None,
                          force_nN=None, extras={'pes_barrier_U': 0.4})
+    elif family in ('sheetonsheet', 'hetero', 'flake'):
+        # These are the pressure-loaded families (_LOAD_COLUMN_BY_FAMILY);
+        # `_record`'s base sets force_nN, which is the AFM-side load and
+        # would never actually appear on one of these rows.
+        record = _record(family=family, model=model,
+                         force_nN=None, pressure_gpa=1.0)
     else:
         record = _record(family=family, model=model)
 
@@ -47,9 +53,17 @@ def test_an_unknown_family_or_model_is_refused():
 
 
 def test_a_pes_row_is_complete_without_a_cof():
-    """A grid has no COF; requiring one would reject every PES row."""
+    """A grid has no COF; requiring one would reject every PES row.
+
+    Extras shaped like real `to_record` output: the bookkeeping keys
+    (`skip_fraction`, `twist_angle`, `potentials`) are always present
+    alongside the real descriptor (`pes_barrier_U`).
+    """
     record = _record(family='pes_sheet', model='pes_sheet', mean_cof=None,
-                     force_nN=None, extras={'pes_barrier_U': 0.4})
+                     force_nN=None, extras={
+                         'pes_barrier_U': 0.4, 'skip_fraction': 0.2,
+                         'twist_angle': None, 'potentials': [],
+                     })
 
     assert validate_completeness(record).is_valid
 
@@ -60,6 +74,39 @@ def test_a_row_with_neither_cof_nor_extras_is_incomplete():
     result = validate_completeness(record)
 
     assert not result.is_valid
+    assert 'mean_cof' in ' '.join(result.errors)
+
+
+def test_bookkeeping_only_extras_with_no_cof_is_incomplete():
+    """`to_record` ALWAYS writes skip_fraction/twist_angle/potentials, so a
+    real row's `extras` is never an empty dict even when nothing was
+    measured -- a bare truthiness check on `extras` could never fail. Exercise
+    exactly that shape, not the synthetic `extras={}` above.
+    """
+    record = _record(mean_cof=None, extras={
+        'skip_fraction': 0.2, 'twist_angle': None, 'potentials': [],
+    })
+
+    result = validate_completeness(record)
+
+    assert not result.is_valid
+    assert 'mean_cof' in ' '.join(result.errors)
+
+
+def test_a_realistic_flake_row_without_a_cof_is_refused():
+    """A flake run whose role columns never resolved: summarise_run sets
+    is_complete=False and mean_cof stays None, but extras still carries the
+    bookkeeping keys to_record always writes -- neither should let it pass.
+    """
+    record = _record(family='flake', model='sheetonsheet', mean_cof=None,
+                     force_nN=None, pressure_gpa=1.0, is_complete=False,
+                     extras={'skip_fraction': 0.2, 'twist_angle': None,
+                             'potentials': []})
+
+    result = validate_completeness(record)
+
+    assert not result.is_valid
+    assert 'is_complete' in ' '.join(result.errors)
     assert 'mean_cof' in ' '.join(result.errors)
 
 
