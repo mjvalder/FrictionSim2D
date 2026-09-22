@@ -166,6 +166,31 @@ def _tier_of(filename: str) -> str:
             else 'window')
 
 
+#: Filename patterns (moved out of `DataReader`; the class below keeps
+#: aliases, same as `parse_lf_schema`/`LF_SCHEMA1_CORRECTION` above). This is
+#: the ONE parser for slide-results filenames (R29/U7): `src.aiida.ingest.
+#: load_points` imports these rather than re-implementing them, so grouping
+#: can never accept a filename the DataReader itself would refuse.
+FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
+# New AFM tip naming written by the current builder, e.g.
+# ``friction_f30_a0.0_s2_layer2.txt``. Groups match FILE_PATTERN_TIP:
+# (load, angle, speed, layer). Load is always a force (nN) for tip sims.
+# The angle is signed: LAMMPS substitutes the scan angle verbatim into
+# results_file_pattern, so a -15 deg scan writes friction_f5_a-15_s1_...
+# An unsigned pattern skips those files in silence -- the run simply
+# disappears from every analysis.
+FILE_PATTERN_TIP_ALT = re.compile(
+    r'friction_f(\d+\.?\d*)_a(-?\d+\.?\d*)_s(\d+\.?\d*)_layer(\d+)'
+)
+FILE_PATTERN_SHEET = re.compile(
+    r'fc_ave_slide_(\d+\.?\d*)(GPa|nN)_(\d+\.?\d*)angle_(\d+\.?\d*)ms'
+)
+# Signed angle, as in FILE_PATTERN_TIP_ALT above.
+FILE_PATTERN_SHEET_ALT = re.compile(
+    r'friction_p(\d+\.?\d*)_a(-?\d+\.?\d*)_s(\d+\.?\d*)'
+)
+
+
 def _rename_for(family: str, tier: str, n_layers: int) -> dict:
     """`rename_map` extended with this run's real layer count.
 
@@ -284,26 +309,10 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     _branch_column = staticmethod(branch_column)
     _lateral_columns = staticmethod(lateral_columns)
     _is_lj_branch = staticmethod(is_lj_branch)
-
-    # Filename patterns (compiled once at class level)
-    _FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
-    # New AFM tip naming written by the current builder, e.g.
-    # ``friction_f30_a0.0_s2_layer2.txt``. Groups match _FILE_PATTERN_TIP:
-    # (load, angle, speed, layer). Load is always a force (nN) for tip sims.
-    # The angle is signed: LAMMPS substitutes the scan angle verbatim into
-    # results_file_pattern, so a -15 deg scan writes friction_f5_a-15_s1_...
-    # An unsigned pattern skips those files in silence -- the run simply
-    # disappears from every analysis.
-    _FILE_PATTERN_TIP_ALT = re.compile(
-        r'friction_f(\d+\.?\d*)_a(-?\d+\.?\d*)_s(\d+\.?\d*)_layer(\d+)'
-    )
-    _FILE_PATTERN_SHEET = re.compile(
-        r'fc_ave_slide_(\d+\.?\d*)(GPa|nN)_(\d+\.?\d*)angle_(\d+\.?\d*)ms'
-    )
-    # Signed angle, as in _FILE_PATTERN_TIP_ALT above.
-    _FILE_PATTERN_SHEET_ALT = re.compile(
-        r'friction_p(\d+\.?\d*)_a(-?\d+\.?\d*)_s(\d+\.?\d*)'
-    )
+    _FILE_PATTERN_TIP = FILE_PATTERN_TIP
+    _FILE_PATTERN_TIP_ALT = FILE_PATTERN_TIP_ALT
+    _FILE_PATTERN_SHEET = FILE_PATTERN_SHEET
+    _FILE_PATTERN_SHEET_ALT = FILE_PATTERN_SHEET_ALT
 
     # Path patterns (compiled once at class level)
     # [\w-] (not \w alone) so the amorphous-substrate/tip token survives:

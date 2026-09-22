@@ -12,12 +12,36 @@ links for free; import does not pretend to. That is a deliberate choice
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from ..postprocessing.read_data import (
+    FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
+    FILE_PATTERN_TIP_ALT, _tier_of,
+)
+from ..run.naming import AFM_LIKE_MODELS
+from .data.results import TIER_KEYS, _content_hash
 
 logger = logging.getLogger(__name__)
 
 GROUP_PREFIX = 'friction2d'
+
+#: Every key `LoadPoint.tiers` may hold. `'retract'` is the indent family's
+#: force-distance curve -- not a sampling tier, but it belongs to the same
+#: load point and must be hashed with it, so it rides in the same dict.
+#: `FrictionResultsData.add_result_files` (Task 11) iterates `TIER_KEYS` only,
+#: so a `'retract'` entry is stored via `aux`; Task 16's `create_results`
+#: splits `point.tiers` on exactly that tuple.
+POINT_KEYS = TIER_KEYS + ('retract',)
+
+#: `indent_f30N_l1.csv` -- the retract force-distance curve. Not a DataReader
+#: pattern (the DataReader never reads retract curves), so it is not lifted
+#: from anywhere.
+_INDENT_RE = re.compile(r'^indent_f(?P<load>\d+\.?\d*)N_l(?P<layers>\d+)\.csv$')
+_PES_GLOB = 'pes_scan*.csv'
+_PES_FAMILIES = ('pes_tip', 'pes_sheet')
 
 
 def group_label(label: str) -> str:
@@ -174,3 +198,131 @@ def supersede(existing, run_node) -> None:  # pylint: disable=unused-argument
     existing.base.extras.set('superseded', True)
     existing.base.extras.set('superseded_at',
                              datetime.now(timezone.utc).isoformat())
+
+
+@dataclass(frozen=True)
+class LoadPoint:
+    """One results row of the store: everything that shares a load condition.
+
+    `tiers` is keyed by :data:`POINT_KEYS`; `create_results` stores the
+    :data:`TIER_KEYS` entries as tier files and `'retract'` as an aux file.
+    """
+    family: str
+    load_kind: str
+    load: float
+    angle: float
+    speed: float
+    layers: Optional[int]
+    tiers: Dict[str, Path]
+    aux: Tuple[Path, ...]
+    content_sha256: str
+
+
+def _aux_files(locator) -> Tuple[Path, ...]:
+    """Logs and hold/final artefacts that ride along with every point of a run.
+
+    Returned as absolute paths under the run root (not basenames), per R30:
+    Task 16 stores them via `path.relative_to(run_dir)`, which needs the full
+    path to compute.
+    """
+    out = sorted(locator.run_dir.glob('log*.lammps'))
+    out += sorted(locator.lammps_dir.glob('run_*.log'))
+    if locator.data_dir.is_dir():
+        out += sorted(locator.data_dir.glob('hold_*.txt'))
+        out += sorted(locator.data_dir.glob('final_*.data'))
+    return tuple(out)
+
+
+def _match_point(name: str, model: str):
+    """`(load_kind, load, angle, speed, layers)` parsed from a results
+    filename, or `None` when `name` matches none of DataReader's patterns.
+
+    Reuses DataReader's own filename patterns (module level in
+    `src.postprocessing.read_data`; R29/U7 "one parser") so a file this
+    grouping accepts is never one the DataReader itself would skip.
+    `raw_`/`peratom_` share the new-format grammar with `friction_` apart
+    from the prefix, so they are matched by substituting the `friction_`
+    prefix DataReader's ALT patterns expect before testing them; the legacy
+    `fc_ave_slide_*` form never had raw/peratom tiers, so it is only tried
+    for the window tier.
+    """
+    tier = _tier_of(name)
+    probe = name
+    if tier == 'raw':
+        probe = 'friction_' + name[len('raw_'):]
+    elif tier == 'peratom':
+        probe = 'friction_' + name[len('peratom_'):]
+
+    is_tip = model in AFM_LIKE_MODELS
+
+    match = (FILE_PATTERN_TIP_ALT if is_tip else FILE_PATTERN_SHEET_ALT).match(probe)
+    if match is not None:
+        if is_tip:
+            load, angle, speed, layers = match.groups()
+            return 'force', float(load), float(angle), float(speed), int(layers)
+        load, angle, speed = match.groups()
+        return 'pressure', float(load), float(angle), float(speed), None
+
+    if tier != 'window':
+        return None
+    match = (FILE_PATTERN_TIP if is_tip else FILE_PATTERN_SHEET).match(probe)
+    if match is None:
+        return None
+    if is_tip:
+        load, angle, speed, layers = match.groups()
+        return 'force', float(load), float(angle), float(speed), int(layers)
+    load, unit, angle, speed = match.groups()
+    return ('pressure' if unit == 'GPa' else 'force',
+            float(load), float(angle), float(speed), None)
+
+
+def load_points(locator) -> List[LoadPoint]:
+    """Group a run's results files into load points.
+
+    The ONLY family-aware function in this module: a table keyed on
+    `src.core.observables.FAMILIES`. Everything else -- set, run, results,
+    retention, export -- is family-agnostic.
+    """
+    family = locator.tokens.family
+    if not locator.results_dir.is_dir():
+        return []
+    aux = _aux_files(locator)
+
+    if family in _PES_FAMILIES:
+        return [
+            LoadPoint(family=family, load_kind='none', load=0.0, angle=0.0,
+                      speed=0.0, layers=locator.tokens.layers,
+                      tiers={'window': csv}, aux=aux,
+                      content_sha256=_content_hash([csv]))
+            for csv in sorted(locator.results_dir.glob(_PES_GLOB))
+        ]
+
+    model = locator.tokens.model
+    grouped: Dict[Tuple[str, float, float, float, Optional[int]], Dict[str, Path]] = {}
+    for path in sorted(locator.results_dir.iterdir()):
+        matched = _match_point(path.name, model)
+        if matched is None:
+            continue
+        kind, load, angle, speed, layers = matched
+        grouped.setdefault((kind, load, angle, speed, layers), {})[
+            _tier_of(path.name)] = path
+
+    if family == 'indent':
+        for path in sorted(locator.results_dir.glob('indent_f*N_l*.csv')):
+            match = _INDENT_RE.match(path.name)
+            if match is None:
+                continue
+            load = float(match.group('load'))
+            for key, tiers in grouped.items():
+                if key[1] == load:
+                    tiers['retract'] = path
+
+    points = []
+    for (kind, load, angle, speed, layers), tiers in sorted(grouped.items()):
+        ordered = {t: tiers[t] for t in POINT_KEYS if t in tiers}
+        points.append(LoadPoint(
+            family=family, load_kind=kind, load=load, angle=angle, speed=speed,
+            layers=layers if layers is not None else locator.tokens.layers,
+            tiers=ordered, aux=aux,
+            content_sha256=_content_hash(ordered.values())))
+    return points
