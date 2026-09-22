@@ -83,6 +83,17 @@ that file), never goes through the first one, but still cannot carry a
 credential into a node, an archive or an export bundle. Every other file is
 stored verbatim.
 
+The same gate covers a run's OTHER path into the store: `src.aiida.calcjob.
+_stage_sim_dir` (behind `prepare_simulation_folder`/`prepare_simulation_root`,
+which `submit.py` uses to build a CalcJob's `simulation_dir` input for the
+**local**/**hpc-direct** run modes) stages `provenance/**` into a `FolderData`
+that becomes a real, stored CalcJob input -- and `aiida.tools.archive.
+create_archive`'s default traversal rules follow a results node BACKWARD
+through the calculation that created it to that calculation's own inputs, so
+this `FolderData` can reach an archive even when `export_archive` names only
+the set/run/results nodes of a group, never the `FolderData` or the
+`CalcJobNode` itself.
+
 ## 2. Idempotent import
 
 ```bash

@@ -22,25 +22,36 @@ import yaml
 
 from ...core.config import redact_secrets_mapping
 
-#: Repository-relative names that are always a settings/config document,
-#: regardless of where they sit.
+#: Basenames that are always a settings/config document, wherever in the
+#: repository they sit.
 _ALWAYS_DOCUMENT = ('settings.yaml', 'config.json')
 
 
 def is_settings_or_config_document(name: str) -> bool:
     """True when `name` (a POSIX, repository-relative path) names a
-    settings/config document: `settings.yaml`, `config.json`, or any
-    `*.yaml`/`*.yml`/`*.json` filed under a `provenance/` prefix.
+    settings/config document: `settings.yaml`, `config.json` (by basename,
+    at ANY depth), or any other `*.yaml`/`*.yml`/`*.json` with a
+    `provenance` path component.
 
-    `provenance.json` (no `provenance/` prefix -- it sits at the run's own
-    root) is deliberately NOT one of these: `src.data.provenance.
-    ProvenanceRecord` carries no credential field, so redacting it would only
-    cost `FrictionSimulationData.refresh_provenance`'s stored-vs-on-disk sha
-    comparison its idempotency for no safety gain.
+    Matched by basename rather than a strict `provenance/` prefix because
+    `name` is not always run-relative: `FrictionSimulationData.add_run_files`
+    stages `provenance/settings.yaml` (prefix), but `src.aiida.calcjob.
+    _stage_sim_dir` (a CalcJob's `simulation_dir` input, built from a whole
+    simulation ROOT via `prepare_simulation_root`) can stage the very same
+    file several directories deep, e.g. `afm/h-MoS2/.../K300/provenance/
+    settings.yaml` -- `provenance` a middle component, not the first.
+
+    `provenance.json` (a `provenance` SIBLING, not a component under it -- it
+    sits at the run's own root) is deliberately NOT one of these:
+    `src.data.provenance.ProvenanceRecord` carries no credential field, so
+    redacting it would only cost `FrictionSimulationData.refresh_provenance`'s
+    stored-vs-on-disk sha comparison its idempotency for no safety gain.
     """
-    if name in _ALWAYS_DOCUMENT:
+    segments = name.split('/')
+    basename = segments[-1]
+    if basename in _ALWAYS_DOCUMENT:
         return True
-    return name.startswith('provenance/') and name.endswith(('.yaml', '.yml', '.json'))
+    return 'provenance' in segments[:-1] and basename.endswith(('.yaml', '.yml', '.json'))
 
 
 def sanitize_document_bytes(data: bytes, name: str) -> bytes:

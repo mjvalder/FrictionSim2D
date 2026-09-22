@@ -79,6 +79,17 @@ def _assert_no_secrets(text: str, path) -> None:
         assert secret not in text, f"{secret!r} leaked into {path}"
 
 
+def _assert_node_has_no_secrets(node) -> None:
+    """Walk every repository file of `node` and assert none of `_SECRETS`
+    occurs anywhere."""
+    for dirpath, _dirs, files in node.base.repository.walk():
+        for fname in files:
+            rel = (dirpath / fname).as_posix()
+            content = node.base.repository.get_object_content(rel, mode='rb')
+            _assert_no_secrets(content.decode('utf-8', errors='replace'),
+                              f'{node.__class__.__name__}:{rel}')
+
+
 def _assert_group_has_no_secrets(label: str) -> None:
     """Walk every repository file of every node in `friction2d/<label>` and
     assert none of `_SECRETS` occurs anywhere -- the store-wide guard."""
@@ -87,12 +98,7 @@ def _assert_group_has_no_secrets(label: str) -> None:
     group = Group.collection.get(label=group_label(label))
     assert len(group.nodes) > 0
     for node in group.nodes:
-        for dirpath, _dirs, files in node.base.repository.walk():
-            for fname in files:
-                rel = (dirpath / fname).as_posix()
-                content = node.base.repository.get_object_content(rel, mode='rb')
-                _assert_no_secrets(content.decode('utf-8', errors='replace'),
-                                  f'{node.__class__.__name__}:{rel}')
+        _assert_node_has_no_secrets(node)
 
 
 def test_set_from_root_strips_credentials_from_a_root_settings_file(
@@ -246,3 +252,83 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
 
     assert seen['config_obj'].settings.database.password == ''
     assert seen['config_obj'].settings.database.api_key == ''
+
+
+def test_calcjob_folder_data_staging_strips_credentials(aiida_profile_clean, tmp_path):
+    """`prepare_simulation_folder`/`_stage_sim_dir` -- used by
+    `submit_simulation`/`submit_array` to build a CalcJob's `simulation_dir`
+    input -- stage `provenance/**` the same way `FrictionSimulationData.
+    add_run_files` does: a pre-redaction tree's credentials must not survive
+    THIS staging path either. The LAMMPS input file it also stages must stay
+    byte-identical -- only settings/config documents are sanitised.
+    """
+    from src.aiida.calcjob import prepare_simulation_folder  # pylint: disable=import-outside-toplevel
+
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, REL, 'afm')
+    _write_secret_provenance(root, REL, database=FLAT_DATABASE)
+    original_system_in = (run_dir / 'lammps' / 'system.in').read_bytes()
+
+    folder = prepare_simulation_folder(run_dir)
+
+    _assert_node_has_no_secrets(folder)
+    stored_config = folder.base.repository.get_object_content(
+        'provenance/config.json', mode='r')
+    assert json.loads(stored_config)['settings']['database']['host'] == \
+        FLAT_DATABASE['host']
+    assert folder.base.repository.get_object_content(
+        'lammps/system.in', mode='rb') == original_system_in
+
+
+def test_archive_export_of_a_calcjobs_input_folder_carries_no_secret(
+        aiida_profile_clean, tmp_path):
+    """`aiida.tools.archive.create_archive`'s default traversal rules follow
+    a results-like node BACKWARD through the calculation that created it to
+    that calculation's own inputs -- so `export_archive`, which names only
+    the set/run/results nodes of a group, can still pull a CalcJob's
+    `simulation_dir` `FolderData` into the archive via that traversal even
+    though it never names the `FolderData` or the `CalcJobNode` itself. Built
+    the way aiida-core's own plugin test suites build a bare `CalcJobNode`
+    (no live Process/Runner/broker needed) -- mirrors `tests/aiida/
+    test_calcjob_parser.py`'s `_make_calc_node`, since actually running the
+    CalcJob through the engine needs a daemon/broker this suite does not have.
+    """
+    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
+    from aiida.orm import CalcJobNode, FolderData, Int, QueryBuilder  # pylint: disable=import-outside-toplevel
+    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
+
+    from src.aiida.calcjob import prepare_simulation_folder  # pylint: disable=import-outside-toplevel
+
+    root = tmp_path / 'simulation_x'
+    run_dir = make_run(root, REL, 'afm')
+    _write_secret_provenance(root, REL, database=FLAT_DATABASE)
+
+    sim_dir_folder = prepare_simulation_folder(run_dir)
+    sim_dir_folder.store()
+
+    calc = CalcJobNode(process_type='aiida.calculations:friction2d.lammps')
+    calc.set_option('resources', {'num_machines': 1})
+    calc.base.links.add_incoming(sim_dir_folder, link_type=LinkType.INPUT_CALC,
+                                 link_label='simulation_dir')
+    calc.store()
+
+    output = Int(1)
+    output.base.links.add_incoming(calc, link_type=LinkType.CREATE, link_label='result')
+    output.store()
+    calc.seal()  # create_archive refuses an unsealed ProcessNode; must
+                 # outlive every outgoing link, which a sealed node refuses
+
+    archive_path = tmp_path / 'calcjob_archive.aiida'
+    create_archive([output], filename=archive_path)
+
+    aiida_profile_clean.reset_storage()
+    n_new = import_archive(archive_path)
+    assert n_new > 0
+
+    folders = QueryBuilder().append(FolderData).all(flat=True)
+    assert folders, (
+        "the archive's default traversal rules did not pull the CalcJob's "
+        "simulation_dir input in alongside its output -- this test no longer "
+        "exercises the risk it is meant to guard")
+    for folder in folders:
+        _assert_node_has_no_secrets(folder)

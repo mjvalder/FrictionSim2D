@@ -529,7 +529,20 @@ def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
     (`prepare_simulation_folder`, one `sim_dir`) or to discard
     (`prepare_simulation_root`, several `sim_dir`s already keyed relative to
     the true sim root -- see that function's own comment).
+
+    A settings/config document among `provenance/**` -- a pre-redaction
+    tree's `provenance/settings.yaml`/`provenance/config.json` -- is
+    sanitised before it is staged (`redact.stage_file`, the same choke point
+    `FrictionSimulationData.add_run_files` goes through): this `FolderData`
+    becomes a real `CalcJobNode` input, and `aiida.tools.archive.
+    create_archive`'s default traversal rules follow a results node's
+    provenance BACKWARD through the calculation that created it to its
+    inputs, so an unsanitised copy here would reach an archive even though
+    `export_archive` never names this node directly. Every other staged file
+    (LAMMPS inputs, CIFs, potentials) is stored verbatim, unchanged.
     """
+    from .data.redact import stage_file  # pylint: disable=import-outside-toplevel
+
     shared_subdirs = set()
     for subdir in _SIM_SUBDIRS:
         sub_path = sim_dir / subdir
@@ -547,9 +560,7 @@ def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
             except ValueError:
                 rel = file_path.relative_to(sim_dir.parent)
                 shared_subdirs.add(subdir)
-            folder_data.base.repository.put_object_from_file(
-                str(file_path), str(rel),
-            )
+            stage_file(folder_data.base.repository, file_path, str(rel))
     return shared_subdirs
 
 
