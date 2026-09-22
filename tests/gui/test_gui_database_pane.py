@@ -919,3 +919,26 @@ class TestDisabledSourceIsNeverReachable:
 
         assert window.database_pane.source == 'local'
         assert window.workspace.state['db_source'] == 'central'
+
+
+class TestMessageLevels:
+
+    def test_an_error_message_uses_the_error_token(self, pane):
+        from src.gui.style import STATUS_ERROR
+
+        pane.message('boom', 'error')
+
+        assert pane.messages.styleSheet() == STATUS_ERROR
+
+    def test_a_warning_message_uses_the_warn_token(self, pane):
+        from src.gui.style import STATUS_WARN
+
+        pane.message('careful', 'warn')
+
+        assert pane.messages.styleSheet() == STATUS_WARN
+
+    def test_an_info_message_clears_the_colour(self, pane):
+        pane.message('boom', 'error')
+        pane.message('fine')
+
+        assert pane.messages.styleSheet() == ''

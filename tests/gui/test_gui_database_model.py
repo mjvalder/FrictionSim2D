@@ -206,3 +206,69 @@ class TestResultSortProxyModel:
 
     def test_an_empty_filter_accepts_every_row(self, proxy):
         assert proxy.filterAcceptsRow(0, QModelIndex()) is True
+
+
+class TestStatusColour:
+    """No inline hex anywhere: the three tokens live in style.py."""
+
+    def test_status_level_maps_the_stored_vocabulary(self):
+        from src.gui.widgets.database.model import status_level
+
+        assert status_level({'status': 'completed'}) == 'ok'
+        assert status_level({'status': 'published'}) == 'ok'
+        assert status_level({'status': 'running'}) == 'warn'
+        assert status_level({'status': 'staged'}) == 'warn'
+        assert status_level({'status': 'failed'}) == 'error'
+        assert status_level({'status': 'rejected'}) == 'error'
+
+    def test_imported_the_only_local_status_is_ok(self):
+        from src.gui.widgets.database.model import status_level
+
+        assert status_level({'status': 'imported'}) == 'ok'
+
+    def test_an_incomplete_run_without_a_status_still_warns(self):
+        from src.gui.widgets.database.model import status_level
+
+        assert status_level({'is_complete': False}) == 'warn'
+        assert status_level({'is_complete': True}) == 'ok'
+        assert status_level({}) == 'ok'
+
+    def test_an_incomplete_local_import_warns_despite_its_ok_status(self):
+        # N6: 'imported' + is_complete False -> 'warn', not the 'ok' the
+        # status word alone would give.
+        from src.gui.widgets.database.model import status_level
+
+        assert status_level({'status': 'imported', 'is_complete': False}) == 'warn'
+
+    def test_an_incomplete_published_row_warns_despite_its_ok_status(self):
+        # N6: 'published' + is_complete False -> 'warn', same reasoning for
+        # the central source's shape.
+        from src.gui.widgets.database.model import status_level
+
+        assert status_level({'status': 'published', 'is_complete': False}) == 'warn'
+
+    def test_an_incomplete_failed_run_stays_an_error(self):
+        # N6: error outranks incomplete -- demoting a failed run to 'warn'
+        # would hide the more serious fact.
+        from src.gui.widgets.database.model import status_level
+
+        assert status_level({'status': 'failed', 'is_complete': False}) == 'error'
+
+    def test_the_row_is_painted_with_the_style_token(self, qt_app):
+        del qt_app
+        from PySide6.QtGui import QColor
+        from src.gui.style import STATUS_ERROR_COLOR
+
+        model = ResultTableModel()
+        model.set_records([dict(RECORDS[0], status='failed')])
+
+        brush = model.data(model.index(0, 0), Qt.ForegroundRole)
+
+        assert brush.color() == QColor(STATUS_ERROR_COLOR)
+
+    def test_an_ok_row_is_left_to_the_palette(self, qt_app):
+        del qt_app
+        model = ResultTableModel()
+        model.set_records([dict(RECORDS[0], status='completed')])
+
+        assert model.data(model.index(0, 0), Qt.ForegroundRole) is None

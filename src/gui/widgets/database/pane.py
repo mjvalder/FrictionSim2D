@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...diagnostics import Check
+from ...style import STATUS_ERROR, STATUS_WARN
 from .detail import DetailPanel, format_bytes
 from .filters import FilterBar
 from .model import ResultSortProxyModel, ResultTableModel
@@ -70,6 +71,9 @@ INSTALL_HINTS: Dict[str, str] = {
     'local': "pip install -e '.[aiida]'",
     'central': "pip install -e '.[api]'",
 }
+
+#: `message`'s level -> stylesheet. 'info' clears back to the palette.
+_MESSAGE_STYLES = {'warn': STATUS_WARN, 'error': STATUS_ERROR, 'info': ''}
 
 
 def missing_backend(source: str) -> List[str]:
@@ -371,7 +375,7 @@ class DatabasePane(QWidget):
 
     def message(self, text: str, level: str = 'info') -> None:
         """The pane's one error surface. `level` is 'info', 'warn' or 'error'."""
-        del level  # Task 15 colours the panel by level
+        self.messages.setStyleSheet(_MESSAGE_STYLES.get(level, ''))
         self.messages.setPlainText(text)
 
     def set_busy(self, busy: bool) -> None:

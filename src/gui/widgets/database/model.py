@@ -14,10 +14,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QObject, Qt,
                              QSortFilterProxyModel)
+from PySide6.QtGui import QBrush, QColor
+
+from ...style import STATUS_ERROR_COLOR, STATUS_OK_COLOR, STATUS_WARN_COLOR
 
 __all__ = ['CURATED_COLUMNS', 'Column', 'LOAD_UNITS', 'ResultSortProxyModel',
-           'ResultTableModel', 'SORT_ROLE', 'columns_for_record',
-           'display_value', 'join_list', 'record_value', 'sort_value']
+           'ResultTableModel', 'SORT_ROLE', 'STATUS_LEVELS', 'columns_for_record',
+           'display_value', 'join_list', 'record_value', 'sort_value',
+           'status_level']
 
 #: The role a view sorts on: the raw value, not the formatted text. '30.00 nN'
 #: and '9.00 nN' sort the wrong way round as strings.
@@ -31,6 +35,42 @@ LOAD_UNITS: Dict[str, str] = {'force': 'nN', 'pressure': 'GPa'}
 #: Shown where a record has no value at all -- 'None' reads like a stored
 #: string, and an empty cell reads like a bug.
 MISSING = '—'
+
+#: Every status either store stores, and how alarming it is. `prepared` and
+#: `staged` are warnings rather than errors: nothing is wrong, but the row is
+#: not a finished result either.
+STATUS_LEVELS: Dict[str, str] = {
+    'completed': 'ok', 'published': 'ok', 'imported': 'ok',
+    'prepared': 'warn', 'submitted': 'warn', 'running': 'warn', 'staged': 'warn',
+    'failed': 'error', 'rejected': 'error',
+}
+
+_LEVEL_COLORS = {'warn': STATUS_WARN_COLOR, 'error': STATUS_ERROR_COLOR,
+                 'ok': STATUS_OK_COLOR}
+
+
+def status_level(record: Dict[str, Any]) -> str:
+    """'ok', 'warn' or 'error' for one row.
+
+    A run with no status at all is judged by `is_complete`: an interrupted
+    run that still wrote a results file is the case worth colouring.
+
+    Every real row carries a status ('imported' for local runs, 'staged' or
+    'published' for central), so that no-status fallback is for the
+    theoretical case only. When a status IS present but the record is also
+    explicitly marked incomplete (`is_complete is False`), that still has to
+    surface -- a 'published' row that is incomplete is a warning, not a clean
+    'ok'. Checked before the vocabulary lookup, not instead of it, so 'error'
+    still outranks 'incomplete': a 'failed' run that is also incomplete stays
+    an error, since failure is the more serious fact and demoting it to
+    'warn' would hide it.
+    """
+    status = str(record.get('status') or '').lower()
+    incomplete = record.get('is_complete') is False
+    if status:
+        level = STATUS_LEVELS.get(status, 'warn')
+        return 'warn' if incomplete and level != 'error' else level
+    return 'warn' if incomplete else 'ok'
 
 
 @dataclass(frozen=True)
@@ -239,6 +279,11 @@ class ResultTableModel(QAbstractTableModel):
         if role == Qt.TextAlignmentRole:
             return int(Qt.AlignRight | Qt.AlignVCenter) if column.align_right \
                 else int(Qt.AlignLeft | Qt.AlignVCenter)
+        if role == Qt.ForegroundRole:
+            level = status_level(record)
+            # 'ok' is left to the palette: painting every good row green
+            # would make the colour meaningless and fight both themes.
+            return QBrush(QColor(_LEVEL_COLORS[level])) if level != 'ok' else None
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):  # noqa: N802
