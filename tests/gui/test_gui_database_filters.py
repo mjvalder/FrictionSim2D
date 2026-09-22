@@ -178,3 +178,17 @@ def test_clear_returns_the_bar_to_empty(bar):
 
     assert bar.value() == EMPTY_FILTERS
     assert bar.text() == ''
+
+
+def test_no_two_grid_widgets_share_a_cell(bar):
+    """A row-2 regression: a widened search box once overlapped the T (K)
+    controls that sit at columns 4-6 of the same row. Any two widgets
+    claiming the same cell would silently clip one of them."""
+    grid = bar.layout()
+    covered = set()
+    for i in range(grid.count()):
+        row, column, row_span, col_span = grid.getItemPosition(i)
+        cells = {(r, c) for r in range(row, row + row_span)
+                 for c in range(column, column + col_span)}
+        assert covered.isdisjoint(cells), f"grid item {i} overlaps an earlier one"
+        covered |= cells

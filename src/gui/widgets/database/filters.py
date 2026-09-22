@@ -127,14 +127,15 @@ class FilterBar(QWidget):
         self.search.setPlaceholderText(
             'Narrows the rows already fetched -- does not re-query')
         self.search.returnPressed.connect(self.submitted.emit)
-        # Spans through column 6 -- where the Completeness combo (N1: removed,
-        # there is no such filter) used to sit at column 7 -- so the Clear
-        # button below still lines up with the load/temperature controls'
-        # right edge instead of leaving a hole in the grid.
-        grid.addWidget(self.search, 2, 1, 1, 6)
+        grid.addWidget(self.search, 2, 1, 1, 2)
 
         self.clear_button = QPushButton('Clear', self)
         self.clear_button.clicked.connect(self.clear)
+        # Column 7, not the brief's column 3: row 2 columns 4-6 are the T (K)
+        # controls, and column 7 is exactly the cell the Completeness combo
+        # (N1: removed, there is no such filter) used to occupy -- putting
+        # Clear there closes that gap without overlapping the T (K) controls
+        # a wider search span would have covered.
         grid.addWidget(self.clear_button, 2, 7)
 
         note = QLabel('Filters run against the store; Find runs in the table.', self)
