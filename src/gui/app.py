@@ -149,21 +149,46 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------- ui
 
     def _build_ui(self) -> None:
+        self.top_tabs = QTabWidget(self)
+        self.top_tabs.addTab(self._build_builder_tab(), 'Builder')
+        self.database_page = self._build_database_tab()
+        self.top_tabs.addTab(self.database_page, 'Database')
+
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.addWidget(self.top_tabs, 1)
+        self.setCentralWidget(container)
+
+        self.setStatusBar(QStatusBar(self))
+        self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
+
+    def _build_builder_tab(self) -> QWidget:
+        """Everything that existed before D1, unchanged, inside one tab."""
         splitter = QSplitter(Qt.Horizontal, self)
         splitter.addWidget(self._build_left())
         splitter.addWidget(self._build_right())
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 5)
 
-        container = QWidget(self)
-        layout = QVBoxLayout(container)
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
         layout.addWidget(self._build_header())
         layout.addWidget(splitter, 1)
         layout.addLayout(self._build_actions())
-        self.setCentralWidget(container)
+        self.builder_page = page
+        return page
 
-        self.setStatusBar(QStatusBar(self))
-        self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
+    def _build_database_tab(self) -> QWidget:
+        """The database pane. Task 8 puts `DatabasePane` here; until then the
+        tab is an empty page, so D1 lands and is reviewable on its own."""
+        page = QWidget(self)
+        page.setObjectName('database_page')
+        layout = QVBoxLayout(page)
+        label = QLabel('The database pane is not built yet.', page)
+        label.setStyleSheet(CAPTION)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return page
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)
