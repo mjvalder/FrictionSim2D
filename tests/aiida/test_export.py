@@ -65,6 +65,114 @@ def test_unknown_label_raises(aiida_profile_clean, tmp_path):
         export_results('nope', tmp_path / 'out')
 
 
+def test_superseded_results_are_excluded_from_export(aiida_profile_clean, tmp_path):
+    """A re-ingested load point supersedes its old node (Task 16); the two
+    share the same run-relative file name, so export must only ever write
+    back the CURRENT one, never the stale one it replaced.
+
+    Asserts `_results_of` returns exactly one node directly (not just the
+    end-to-end byte comparison below): a QueryBuilder with no `order_by`
+    happens to return the new node last on this backend today, so the
+    dump-order "last write wins" would pass the byte check by coincidence --
+    the direct count is what actually pins the fix down.
+    """
+    from src.aiida.export import _results_of, resolve_set  # pylint: disable=protected-access
+    from src.aiida.ingest import find_or_create_run
+    from tests.helpers.synthetic_results import write_results
+
+    root = tmp_path / 'simulation_super'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='rt5')
+
+    name = 'friction_f30_a0_s2_layer2.txt'
+    old_bytes = (root / REL / 'results' / name).read_bytes()
+
+    # Same load point (force=30, angle=0, speed=2, layer=2), different bytes
+    # -- a re-run, not a duplicate.
+    write_results(root / REL, 'afm', load_kind='force', loads=(30.0,),
+                  layers=2, n=99)
+    new_bytes = (root / REL / 'results' / name).read_bytes()
+    assert new_bytes != old_bytes
+
+    report = ingest_root(root, label='rt5')
+    assert report.superseded_results
+
+    set_node = resolve_set('rt5')
+    loc, = discover_runs(root)
+    run_node, created = find_or_create_run(set_node, loc)
+    assert not created  # already exists from the ingest above
+
+    results = _results_of(run_node)
+    assert len(results) == 1
+    assert not results[0].base.extras.get('superseded', False)
+
+    export_results('rt5', tmp_path / 'out')
+
+    assert (tmp_path / 'out' / REL / 'results' / name).read_bytes() == new_bytes
+
+
+def test_oversize_run_files_are_logged_not_silently_dropped(
+        aiida_profile_clean, tmp_path, caplog):
+    """A file over `max_mb` is never stored (Task 16 R11c); export must say
+    so rather than silently produce a tree missing it."""
+    from src.aiida.data import FrictionSimulationData
+    from src.aiida.ingest import find_or_create_set
+
+    root = tmp_path / 'simulation_over'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    loc, = discover_runs(root)
+    set_node = find_or_create_set(root, 'rt-over')
+
+    node = FrictionSimulationData()
+    node.set_from_locator(loc, set_uuid=str(set_node.uuid), set_label=set_node.label)
+    node.add_run_files(loc, max_mb=0)  # forces every candidate file "oversize"
+    node.store()
+
+    with caplog.at_level('WARNING', logger='src.aiida.export'):
+        export_results('rt-over', tmp_path / 'out')
+
+    assert not (tmp_path / 'out' / REL / 'provenance.json').exists()
+    assert any('provenance.json' in message for message in caplog.messages)
+
+
+def test_oversize_result_aux_files_are_logged_not_silently_dropped(
+        aiida_profile_clean, tmp_path, caplog):
+    """Same as above, for a `FrictionResultsData` aux file (tier files are
+    always stored regardless of size -- only an aux file, like a hold/final
+    artefact, is ever recorded as oversize)."""
+    from src.aiida.data import FrictionResultsData
+    from src.aiida.ingest import find_or_create_run, find_or_create_set
+
+    root = tmp_path / 'simulation_over2'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    (root / REL / 'data').mkdir(exist_ok=True)
+    (root / REL / 'data' / 'final_f30.data').write_text('x' * 10, encoding='utf-8')
+    loc, = discover_runs(root)
+    set_node = find_or_create_set(root, 'rt-over2')
+    run_node, _created = find_or_create_run(set_node, loc)
+
+    tier_path = root / REL / 'results' / 'friction_f30_a0_s2_layer2.txt'
+    aux_path = root / REL / 'data' / 'final_f30.data'
+    node = FrictionResultsData()
+    node.family = 'afm'
+    node.load_kind = 'force'
+    node.load = 30.0
+    node.angle = 0.0
+    node.speed = 2.0
+    node.layers = 2
+    node.run_uuid = str(run_node.uuid)
+    node.set_uuid = str(run_node.set_uuid)
+    node.add_result_files({'window': tier_path}, run_dir=loc.run_dir,
+                          aux=(aux_path,), max_mb=0, content_sha256='deadbeef')
+    node.store()
+
+    with caplog.at_level('WARNING', logger='src.aiida.export'):
+        export_results('rt-over2', tmp_path / 'out')
+
+    assert not (tmp_path / 'out' / REL / 'data' / 'final_f30.data').exists()
+    assert any('final_f30.data' in message for message in caplog.messages)
+
+
 def test_sheet_like_provenance_stays_at_the_run_level(aiida_profile_clean, tmp_path):
     """A sheet-like run has no shared per-layer provenance -- unlike AFM,
     `provenance/` lives right next to `provenance.json`, inside the run

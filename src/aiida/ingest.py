@@ -22,7 +22,7 @@ from ..postprocessing.read_data import (
     FILE_PATTERN_TIP_ALT, tier_of,
 )
 from ..run.naming import AFM_LIKE_MODELS
-from .data_keys import TIER_KEYS, content_hash
+from .data_keys import TIER_KEYS, content_hash, is_superseded
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ def find_results(run_node, point) -> Optional[object]:
     for node in qb.all(flat=True):
         if node.layers != point.layers:
             continue
-        if node.base.extras.get('superseded', False):
+        if is_superseded(node):
             continue
         return node
     return None
