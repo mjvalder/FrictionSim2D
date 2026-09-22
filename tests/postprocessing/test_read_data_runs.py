@@ -7,6 +7,8 @@ and one of the two arms vanished without a warning.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from src.postprocessing.read_data import (DataReader, LoadPoint, RunFrames,
@@ -151,3 +153,91 @@ def test_an_empty_root_is_not_an_exception(tmp_path):
     reader = DataReader(results_dir=str(tmp_path))
 
     assert reader.runs == []
+
+
+def test_all_three_tiers_are_read(tmp_path):
+    """The old file selection anchored on friction_/fc_ave_, so raw_ and
+    peratom_ files were never opened and the tier branch was unreachable."""
+    make_family_run(tmp_path, 'afm', tiers=('window', 'raw', 'peratom'))
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    run, = reader.runs
+    assert set(run.tiers) == {'window', 'raw', 'peratom'}
+    assert set(run.source_files) == {'window', 'raw', 'peratom'}
+    assert run.source_files['raw'].name.startswith('raw_')
+    assert 'raw_lfx' in run.tiers['raw'].columns
+    assert 'lfx' not in run.tiers['raw'].columns
+
+
+def test_a_tier_absent_on_disk_is_simply_absent(tmp_path):
+    make_family_run(tmp_path, 'sheetonsheet', tiers=('window',))
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    run, = reader.runs
+    assert set(run.tiers) == {'window'}
+    assert run.window is run.tiers['window']
+
+
+def test_time_is_kept_in_every_tier(tmp_path):
+    make_family_run(tmp_path, 'afm', tiers=('window', 'raw'))
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    run, = reader.runs
+    assert 'time' in run.tiers['window'].columns
+    assert 'time' in run.tiers['raw'].columns
+
+
+def test_a_sheet_run_takes_its_layer_count_from_provenance(tmp_path):
+    """`output_dir_for` emits no L{n} for a sheet-like model, so
+    `tokens.layers` is None and `or 2` would silently cap every sheet run at
+    two layers -- the exact defect P3 exists to fix, missed in the family that
+    needs it most."""
+    run_dir = make_family_run(tmp_path, 'sheetonsheet')
+    prov = run_dir / 'provenance.json'
+    record = json.loads(prov.read_text(encoding='utf-8'))
+    record['layer_type_map'] = {f'layer_{i}': [i] for i in range(1, 5)}
+    prov.write_text(json.dumps(record), encoding='utf-8')
+
+    run, = DataReader(results_dir=str(tmp_path)).runs
+
+    assert run.tokens.layers is None      # nothing in the path says so
+    assert run.n_layers == 4              # provenance does
+
+
+def test_an_empty_layer_type_map_falls_back_to_two(tmp_path):
+    """hetero and flake partition by z-band and honestly write `{}`."""
+    run_dir = make_family_run(tmp_path, 'hetero', material='h-MoS2',
+                              second_material='h-WS2')
+    prov = run_dir / 'provenance.json'
+    record = json.loads(prov.read_text(encoding='utf-8'))
+    record['layer_type_map'] = {}
+    prov.write_text(json.dumps(record), encoding='utf-8')
+
+    run, = DataReader(results_dir=str(tmp_path)).runs
+
+    assert run.n_layers == 2
+
+
+def test_a_five_layer_run_names_its_layer_columns(tmp_path):
+    """rename_map(family, tier) defaulted to the bilayer map, so a 5-layer
+    run's L3..L5 columns reached the frame as v_comz_L3 and were invisible to
+    every consumer that keys on channel names."""
+    run_dir = make_family_run(tmp_path, 'afm', layers=5)
+    natives = ['v_fz_tip', 'v_fx_spr', 'v_fy_spr', 'v_comz_L5']
+    path = run_dir / 'results' / 'friction_f30_a0_s2_layer5.txt'
+    path.write_text(
+        '# schema=2 lf_units=nN family=afm\n'
+        '# TimeStep ' + ' '.join(natives) + '\n'
+        + '\n'.join(f'{(i + 1) * 1000} 30.0 3.0 0.0 {6.5 + i * 0.1:g}'
+                    for i in range(10)) + '\n',
+        encoding='utf-8')
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    run, = reader.runs
+    assert run.n_layers == 5
+    assert 'comz_L5' in run.window.columns
+    assert 'v_comz_L5' not in run.window.columns

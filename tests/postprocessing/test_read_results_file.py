@@ -135,3 +135,23 @@ def test_the_reader_delegates_to_it(tmp_path, monkeypatch):
     DataReader.__new__(DataReader)._read_dataframe(path, 'tip')
 
     assert seen == [(path, 'afm')]
+
+
+def test_layer_columns_are_named_for_the_requested_layer_count(tmp_path):
+    """The third parameter is positional-or-keyword, and the map it builds is
+    `rename_map`'s own -- not a second copy kept in this module."""
+    from src.core.observables import rename_map
+
+    natives = ['v_fz', 'v_xfrict', 'v_yfrict', 'v_comz_L5']
+    path = tmp_path / 'friction_p1_a0_s2.txt'
+    path.write_text(
+        '# schema=2 lf_units=nN family=sheetonsheet\n'
+        '# TimeStep ' + ' '.join(natives) + '\n'
+        '1000 1.0 2.0 0.0 6.5\n', encoding='utf-8')
+
+    two = read_results_file(path, 'sheetonsheet')
+    five = read_results_file(path, 'sheetonsheet', 5)
+
+    assert 'v_comz_L5' in two.columns
+    assert 'comz_L5' in five.columns
+    assert rename_map('sheetonsheet', 'window', 5)['v_comz_L5'] == 'comz_L5'

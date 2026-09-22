@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.core.observables import FAMILIES, layer_channels, rename_map
+from src.core.observables import FAMILIES, rename_map
 
 logger = logging.getLogger(__name__)
 
@@ -198,28 +198,17 @@ FILE_PATTERN_SHEET_ALT = re.compile(
 )
 
 
-def _rename_for(family: str, tier: str, n_layers: int) -> dict:
-    """`rename_map` extended with this run's real layer count.
-
-    REGISTRY only declares the bilayer `com{x,y,z}_L1/L2`, so a four-layer
-    run's native `v_comx_L3` would keep its native name and the store and the
-    reader would disagree about a column that exists in both.
-    """
-    rmap = dict(rename_map(family, tier))
-    for observable in layer_channels(n_layers):
-        if observable.tier == tier and observable.rename_to:
-            rmap[observable.rename_to] = observable.name
-    return rmap
-
-
 def read_results_file(filepath: Path, family: str,
                       n_layers: int = 2) -> pd.DataFrame:
     """Parse one LAMMPS results file into a labelled DataFrame.
 
     Header-first: the `# TimeStep v_...` line names the native columns and the
     observable registry's per-tier rename map turns them into channel names.
-    The tier comes from the filename prefix. `n_layers` extends the rename map
-    to this run's real layer count. Raises `SchemaError` when a header-less
+    The tier comes from the filename prefix. `n_layers` names the per-layer
+    columns (`v_comz_L5` -> `comz_L5`); it defaults to 2 -- the pair REGISTRY
+    carries -- so callers that do not know the layer count (the AiiDA store
+    re-parsing a stored file) behave exactly as before. The map is
+    `rename_map`'s own, never a second copy kept here. Raises `SchemaError` when a header-less
     file's width does not match `AFM_FILE_COLUMNS`.
 
     Sets `df.attrs['lf_schema']` and applies `correct_legacy_lf_schema1`, so a
@@ -248,7 +237,7 @@ def read_results_file(filepath: Path, family: str,
     if header_cols:
         df = pd.read_csv(filepath, sep=r'\s+', header=None, names=header_cols,
                          skiprows=2)
-        df.rename(columns=_rename_for(family, tier, n_layers), inplace=True)
+        df.rename(columns=rename_map(family, tier, n_layers), inplace=True)
         df.attrs['lf_schema'] = parse_lf_schema(header_lines[0])
         return correct_legacy_lf_schema1(df, filepath, family)
 
@@ -568,7 +557,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                         # `FrictionResultsData.frame` does for a stored `.csv`.
                         frames[tier] = (
                             pd.read_csv(path, comment='#') if path.suffix == '.csv'
-                            else read_results_file(path, family))
+                            else read_results_file(path, family, n_layers))
                         sources[tier] = path
                     except (SchemaError, ValueError, OSError,
                             pd.errors.EmptyDataError) as exc:
