@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 
 import pytest
 
@@ -261,3 +262,38 @@ def test_central_detail_carries_the_owner_contact(fake_client):
 
     assert result['result']['attributes']['contact'] == 'someone@example.org'
     assert result['result']['attributes']['source_host'] == 'cluster-a'
+
+
+def test_summary_csv_writes_the_visible_rows_in_column_order(tmp_path):
+    result = db_worker.dispatch({
+        'kind': 'export', 'source': 'local', 'what': 'summary_csv',
+        'dest': str(tmp_path / 'out'),
+        'records': [{'family': 'afm', 'materials': ['h-MoS2'], 'mean_cof': 0.07,
+                     'extras': {'gap_min': 3.1}, 'layers': None}],
+        'columns': ['family', 'materials', 'mean_cof', 'extras', 'layers']})
+
+    assert result['ok'] is True
+    assert result['what'] == 'summary_csv'
+    written = Path(result['files'][0]).read_text(encoding='utf-8').splitlines()
+    assert written[0] == 'family,materials,mean_cof,extras,layers'
+    assert written[1] == 'afm,h-MoS2,0.07,"{""gap_min"": 3.1}",'
+    assert result['bytes'] > 0
+
+
+def test_summary_csv_is_the_only_export_the_central_source_allows(tmp_path):
+    result = db_worker.dispatch({
+        'kind': 'export', 'source': 'central', 'what': 'results',
+        'dest': str(tmp_path / 'out'), 'selection': []})
+
+    assert result['ok'] is False
+    assert "'results'" in result['error']
+
+
+def test_an_unknown_export_kind_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(db_worker, '_load_profile', lambda request: None)
+
+    result = db_worker.dispatch({'kind': 'export', 'source': 'local',
+                                 'what': 'everything', 'dest': str(tmp_path)})
+
+    assert result['ok'] is False
+    assert 'everything' in result['error']

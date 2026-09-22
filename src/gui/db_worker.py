@@ -305,9 +305,139 @@ def _detail(request: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+#: What a download can be. All four map to a function the AiiDA rework
+#: already defines -- nothing about the store's layout is reimplemented here.
+EXPORT_KINDS = ('results', 'provenance', 'summary_csv', 'run_tree')
+
+
+def _csv_value(value: Any) -> Any:
+    """A cell a CSV reader gets back unchanged."""
+    if isinstance(value, (list, tuple)):
+        return '+'.join(str(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    return '' if value is None else value
+
+
+def _export_response(request: Dict[str, Any], dest, files: List[Any],
+                     warnings: Any = ()) -> Dict[str, Any]:
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
+    paths = sorted({Path(p) for p in files})
+    return {
+        'ok': True, 'kind': 'export', 'what': request['what'], 'dest': str(dest),
+        'files': [str(p) for p in paths],
+        'bytes': sum(p.stat().st_size for p in paths if p.is_file()),
+        'warnings': list(warnings),
+    }
+
+
+def _export_summary_csv(request: Dict[str, Any], dest) -> Dict[str, Any]:
+    """The rows on screen, exactly as the table shows them."""
+    import csv  # pylint: disable=import-outside-toplevel
+    records = request.get('records') or []
+    columns = request.get('columns') or (list(records[0]) if records else [])
+    target = dest / 'summary.csv'
+    with target.open('w', encoding='utf-8', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction='ignore')
+        writer.writeheader()
+        for record in records:
+            writer.writerow({c: _csv_value(record.get(c)) for c in columns})
+    return _export_response(request, dest, [target])
+
+
+def _export_result_files(request: Dict[str, Any], dest) -> Dict[str, Any]:
+    """The verbatim stored tier files and logs, under <dest>/<rel_path>/."""
+    from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
+    written: List[Any] = []
+    warnings: List[str] = []
+    for item in request.get('selection') or []:
+        run = load_node(uuid=item['run_uuid'])
+        target = dest / run.rel_path
+        target.mkdir(parents=True, exist_ok=True)
+        _emit('progress', message=f"copying {run.rel_path}")
+        load_node(uuid=item['result_uuid']).base.repository.copy_tree(target)
+        copied = [p for p in target.rglob('*') if p.is_file()]
+        if not copied:
+            # A file over `settings.aiida.max_stored_file_mb` is recorded by
+            # hash instead of stored, so a run can be in the store and have
+            # nothing to hand back. Silence here reads as a failed download.
+            warnings.append(f"{run.rel_path}: nothing stored (files over the "
+                            f"size limit are recorded by hash)")
+        written += copied
+    return _export_response(request, dest, written, warnings)
+
+
+def _export_provenance(request: Dict[str, Any], dest) -> Dict[str, Any]:
+    """provenance.json, config.json, settings.yaml, cif and potentials.
+
+    One bundle per selected run and nothing else -- deliberately not
+    `Friction2DDB.export_for_reproduction`, which exports the run's whole set
+    tree and would turn "download the provenance of this row" into a
+    multi-gigabyte copy of every run beside it.
+    """
+    from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
+    from ..aiida.export import (  # pylint: disable=import-outside-toplevel
+        export_provenance_bundle)
+    written: List[Any] = []
+    for item in request.get('selection') or []:
+        run = load_node(uuid=item['run_uuid'])
+        _emit('progress', message=f"provenance for {run.rel_path}")
+        written += list(export_provenance_bundle(run, dest / run.rel_path))
+    return _export_response(request, dest, written)
+
+
+def _export_run_tree(request: Dict[str, Any], dest) -> Dict[str, Any]:
+    """A tree `postprocess read` can read, optionally with lammps/ rebuilt."""
+    from ..aiida.export import (  # pylint: disable=import-outside-toplevel
+        export_results, rebuild_set)
+    labels = sorted({item.get('set_label') for item in (request.get('selection') or [])
+                     if item.get('set_label')})
+    written: List[Any] = []
+    warnings: List[str] = []
+    for label in labels:
+        _emit('progress', message=f"exporting set {label}")
+        written += list(export_results(label, dest / label,
+                                       profile=request.get('profile')))
+        # The unit of this download is the SET, not the selected row -- the
+        # response says so, because the destination will hold runs the user
+        # never selected.
+        warnings.append(f"set {label!r} was exported in full, not only the "
+                        f"selected rows")
+        if request.get('rebuild'):
+            _emit('progress', message=f"rebuilding lammps/ for {label}")
+            files, _root = rebuild_set(label, dest / label,
+                                       profile=request.get('profile'))
+            written += list(files)
+    return _export_response(request, dest, written, warnings)
+
+
+def _export(request: Dict[str, Any]) -> Dict[str, Any]:
+    """One download. Raises; `main` turns that into the error shape."""
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
+    what = request.get('what')
+    if what not in EXPORT_KINDS:
+        raise ValueError(f"unknown export kind: {what!r}")
+    dest = Path(request['dest']).expanduser()
+    dest.mkdir(parents=True, exist_ok=True)
+
+    if what == 'summary_csv':
+        return _export_summary_csv(request, dest)
+    if request.get('source') == 'central':
+        raise ValueError(
+            f"the central database holds summaries only: it cannot export {what!r}")
+
+    _load_profile(request)
+    if what == 'results':
+        return _export_result_files(request, dest)
+    if what == 'provenance':
+        return _export_provenance(request, dest)
+    return _export_run_tree(request, dest)
+
+
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     'list': _list,
     'detail': _detail,
+    'export': _export,
 }
 
 
