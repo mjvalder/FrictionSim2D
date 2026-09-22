@@ -315,9 +315,16 @@ def _attach_retrieved(calc_node, files_root):
 
 
 def test_parser_parse_from_node_unprefixed(aiida_profile_clean, tmp_path):
-    """`Parser.parse_from_node` end to end, no `sim_prefix`: the layout
-    `prepare_for_submission` builds for a sheet-on-sheet-style run whose own
-    directory already is the remote work directory.
+    """`Parser.parse_from_node` end to end on an UNPREFIXED retrieved layout.
+
+    With `simulation_node` given, `_sim_prefix_for` always returns its
+    `rel_path`, so `prepare_for_submission` always retrieves prefixed now --
+    an unprefixed retrieval is the `_run_dir_in_retrieved` FALLBACK path, not
+    a real production case (there is no submission shape left that produces
+    it while still supplying `simulation_node`). Kept as a regression test
+    for that fallback; `test_parser_parse_from_node_prefixed` and
+    `test_real_retrieval_from_staged_folder_data` below are the shapes an
+    actual submission with `simulation_node` set produces.
     """
     from src.aiida.calcjob import LammpsFrictionParser  # pylint: disable=import-outside-toplevel
     from src.aiida.data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
@@ -363,6 +370,93 @@ def test_parser_parse_from_node_prefixed(aiida_profile_clean, tmp_path):
     retrieved_dir = tmp_path / 'retrieved'
     _retrieved_folder(run_dir, retrieved_dir / REL)
     assert (retrieved_dir / REL / 'results').is_dir()
+
+    calc_node = _make_calc_node(simulation_node=run_node)
+    _attach_retrieved(calc_node, retrieved_dir)
+
+    result, calcfunc_node = LammpsFrictionParser.parse_from_node(calc_node)
+
+    assert not calcfunc_node.exit_status
+    assert result['results']['point_0'].load == 30.0
+
+
+@pytest.mark.aiida
+def test_real_retrieval_from_staged_folder_data(aiida_profile_clean, tmp_path):
+    """The fix-round-2 regression: `prepare_simulation_folder` -- the REAL
+    production staging function, not a hand-built retrieved tree -- never
+    stages a bare `provenance.json` (`_stage_sim_dir` only walks
+    `_SIM_SUBDIRS`, and `provenance.json` is a loose file directly in the run
+    directory, not inside any of them). `_run_dir_in_retrieved` used to key
+    off `provenance.json` existing under the prefix, so a run staged and
+    retrieved exactly the way production does it always fell back to
+    `tmp_root` and came up with zero results (`ERROR_NO_LOAD_POINTS`) even
+    though `<rel_path>/results/...` was sitting right there in the retrieved
+    folder. Every earlier prefixed test in this file used `_retrieved_folder`
+    (built from `RETRIEVE_LIST`, which DOES pick up `make_run`'s synthetic
+    `provenance.json`) and could not have caught this.
+
+    Goes through the full real chain: `prepare_simulation_folder(run_dir)`
+    (staging) -> copy its repository onto disk under `REL` (what
+    `_stage_files_into_sandbox`'s prefix duplication puts on the remote host)
+    -> real `execmanager.retrieve_files_from_list` + `LocalTransport` with
+    `retrieve_patterns(REL)` -> pack the retrieved directory into a stored
+    `FolderData` -> `LammpsFrictionParser.parse_from_node`.
+    """
+    import asyncio
+
+    from aiida.engine.daemon.execmanager import retrieve_files_from_list
+    from aiida.transports.plugins.local import LocalTransport
+    from src.aiida.calcjob import LammpsFrictionParser, prepare_simulation_folder  # pylint: disable=import-outside-toplevel
+    from src.aiida.data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
+    from src.aiida.retention import retrieve_patterns  # pylint: disable=import-outside-toplevel
+    from src.run.tree import discover_runs  # pylint: disable=import-outside-toplevel
+
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    loc, = discover_runs(root)
+    run_node = FrictionSimulationData()
+    run_node.set_from_locator(loc, set_uuid='set-1')
+    run_node.store()
+
+    # Real production staging: exactly what `prepare_for_submission` would
+    # put in `inputs.simulation_dir`. No `provenance.json` in here.
+    staged = prepare_simulation_folder(run_dir)
+    assert 'provenance.json' not in staged.base.repository.list_object_names()
+
+    # What `_stage_files_into_sandbox` puts on the remote host under a
+    # prefix: the staged repository's own tree, copied verbatim under `REL`.
+    remote_root = tmp_path / 'remote'
+    for obj_path, _dirs, files in staged.base.repository.walk():
+        for file_name in files:
+            rel = (obj_path / file_name).as_posix()
+            out = remote_root / REL / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with staged.base.repository.open(rel, 'rb') as src:
+                out.write_bytes(src.read())
+    assert not (remote_root / REL / 'provenance.json').exists()
+    assert (remote_root / REL / 'results').is_dir()
+
+    retrieved_dir = tmp_path / 'retrieved'
+    retrieved_dir.mkdir()
+
+    class _FakeCalculation:  # only what retrieve_files_from_list touches
+        pk = 1
+
+        @staticmethod
+        def get_remote_workdir():
+            return str(remote_root)
+
+    transport = LocalTransport()
+    transport.open()
+    try:
+        asyncio.run(retrieve_files_from_list(
+            _FakeCalculation(), transport, str(retrieved_dir),
+            retrieve_patterns(REL)))
+    finally:
+        transport.close()
+
+    assert (retrieved_dir / REL / 'results').is_dir()
+    assert not (retrieved_dir / REL / 'provenance.json').exists()
 
     calc_node = _make_calc_node(simulation_node=run_node)
     _attach_retrieved(calc_node, retrieved_dir)
@@ -436,3 +530,48 @@ def test_group_results_from_node_is_a_noop_without_simulation_node(
     calc_node = _make_calc_node(simulation_node=None)
 
     _group_results_from_node(calc_node)  # must not raise
+
+
+def test_group_results_from_node_safely_swallows_failures(aiida_profile_clean,
+                                                           tmp_path, monkeypatch):
+    """R2 (fix round 2): a `Group` write failure inside the `on_terminated`
+    hook must never propagate -- plumpy's `transition_failed` would flip an
+    otherwise-successful, already-parsed CalcJob to EXCEPTED over what is, at
+    worst, bookkeeping the results into a `Group` for `export_archive`.
+    """
+    import src.aiida.calcjob as calcjob_mod
+    import src.aiida.ingest as ingest_mod
+    from aiida.common.links import LinkType
+    from src.aiida.data import FrictionResultsData, FrictionSimulationData
+    from src.run.tree import discover_runs
+
+    root = tmp_path / 'sim'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    loc, = discover_runs(root)
+    run_node = FrictionSimulationData()
+    run_node.set_from_locator(loc, set_uuid='set-1', set_label='my-set')
+    run_node.store()
+
+    calc_node = _make_calc_node(simulation_node=run_node)
+    result_node = FrictionResultsData()
+    result_node.family = 'afm'
+    result_node.load_kind = 'force'
+    result_node.load = 30.0
+    result_node.angle = 0.0
+    result_node.speed = 2.0
+    result_node.run_uuid = str(run_node.uuid)
+    result_node.set_uuid = str(run_node.uuid)
+    result_node.store()
+    result_node.base.links.add_incoming(calc_node, link_type=LinkType.CREATE,
+                                        link_label='results__point_0')
+
+    def _boom(_label, _nodes):
+        raise RuntimeError('synthetic Group failure')
+
+    # `_group_results_from_node` imports `add_results_to_group` from
+    # `src.aiida.ingest` locally on each call, so that is what must be
+    # patched -- patching `calcjob_mod.add_results_to_group` would patch an
+    # attribute `calcjob.py` never defines.
+    monkeypatch.setattr(ingest_mod, 'add_results_to_group', _boom)
+
+    calcjob_mod._group_results_from_node_safely(calc_node)  # must not raise

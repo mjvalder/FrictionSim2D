@@ -129,7 +129,7 @@ class LammpsFrictionCalcJob(CalcJob):
         run once there is a finished node with real output links to read.
         """
         super().on_terminated()
-        _group_results_from_node(self.node)
+        _group_results_from_node_safely(self.node)
 
 
 def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
@@ -174,17 +174,50 @@ def _run_dir_in_retrieved(tmp_root: Path, run_node) -> Path:
     """Where the run's own directory landed inside the rebuilt retrieved tree.
 
     `prepare_for_submission` nests the ENTIRE retrieval under
-    `run_node.rel_path` whenever `simulation_node` was given (`_sim_prefix_for`)
-    -- `results/`, `provenance.json` and everything else then sit at
-    `tmp_root/<rel_path>/`, not at `tmp_root` itself. Falls back to `tmp_root`
-    for a run retrieved unprefixed (nothing to nest under, e.g. a
-    sheet-on-sheet run whose own directory already IS the remote work
-    directory and had no `/build/`-style read_data line to (mis)detect).
+    `run_node.rel_path` whenever `simulation_node` is given (`_sim_prefix_for`
+    -- which is every real submission that can be ingested at all, since the
+    parser itself requires `simulation_node`) -- `results/`, `data/` and
+    everything else then sit at `tmp_root/<rel_path>/`, not at `tmp_root`
+    itself. Falls back to `tmp_root` only for a run retrieved unprefixed
+    (nothing to nest under -- a caller that never gave `simulation_node` at
+    submission time either, so `_sim_prefix_for` fell back to
+    `_detect_sim_prefix` and found nothing).
+
+    NOT keyed on `provenance.json`: `prepare_simulation_folder`/`_stage_sim_dir`
+    only walks `_SIM_SUBDIRS` (`lammps`, `data`, `results`, `provenance`, ...)
+    under the run directory, and `provenance.json` is a bare FILE sitting
+    directly in the run directory, not inside any of those -- it is never
+    staged into `simulation_dir` at all, so a real prefixed retrieval never
+    has one to check for. Checking for the directory itself is enough: the
+    only thing that could put `tmp_root/<rel_path>` there is
+    `prepare_for_submission` having prefixed everything under it.
     """
     prefixed = tmp_root / run_node.rel_path
-    if (prefixed / 'provenance.json').is_file():
+    if prefixed.is_dir():
         return prefixed
     return tmp_root
+
+
+def _group_results_from_node_safely(node) -> None:
+    """`_group_results_from_node`, but never lets a failure escape.
+
+    Filing a finished run's results into its set `Group` is bookkeeping on
+    top of an already-successful calculation -- plumpy's `transition_failed`
+    turns an exception raised from `on_terminated` into an EXCEPTED state for
+    a calculation that otherwise finished (and parsed) correctly, which would
+    misrepresent good results as failed over what is, at worst, a `Group`
+    write hiccup. The results stay fully queryable by `run_uuid`/`set_uuid`
+    either way (`create_results`'s own import path already tolerates the
+    equivalent per-point failure, R3 of this task's first fix round); only
+    `export_archive`'s group-based listing would miss this run, which is a
+    much smaller problem than relabelling a finished calculation as failed.
+    """
+    try:
+        _group_results_from_node(node)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception(
+            "Could not file %s's results into its set group; the "
+            "calculation itself finished successfully.", node.pk)
 
 
 def _group_results_from_node(node) -> None:
