@@ -339,8 +339,10 @@ def test_aiida_query_help(runner):
 def test_aiida_export_help(runner):
     result = runner.invoke(cli, ['aiida', 'export', '--help'])
     assert result.exit_code == 0
+    assert 'SET_LABEL' in result.output
     assert '--output' in result.output
-    assert '--material' in result.output
+    assert '--profile' in result.output
+    assert '--material' not in result.output
 
 
 def test_aiida_import_archive_help(runner):
@@ -355,21 +357,16 @@ def test_aiida_import_archive_loads_profile(runner, monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_load_aiida_profile(profile=None):
-        calls.append(('load_profile', profile))
-
-    def fake_import_archive(path):
+    def fake_import_archive(path, profile=None):
         calls.append(('import_archive', str(path)))
         return 0
 
-    monkeypatch.setattr('src.aiida.load_aiida_profile', fake_load_aiida_profile)
-    monkeypatch.setattr('src.aiida.integration.import_archive', fake_import_archive)
+    monkeypatch.setattr('src.aiida.export.import_archive', fake_import_archive)
 
     result = runner.invoke(cli, ['aiida', 'import-archive', str(archive)])
 
     assert result.exit_code == 0
     assert calls == [
-        ('load_profile', None),
         ('import_archive', str(archive)),
     ]
 

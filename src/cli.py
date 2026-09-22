@@ -1084,56 +1084,52 @@ def aiida_setup(profile: Optional[str], lammps_path: Optional[str],
 
 
 @aiida_group.command('export')
-@click.option('--output', '-o', type=click.Path(), default='friction2d.aiida',
-              help='Output archive path')
-@click.option('--material', '-m', default=None,
-              help='Export only simulations for a given material')
-def aiida_export(output: str, material: Optional[str]):
-    """Export AiiDA database to a portable archive file.
+@click.argument('set_label')
+@click.option('--output', '-o', type=click.Path(path_type=Path),
+              default='friction2d.aiida', help='Output archive path')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_export(set_label: str, output: Path, profile: Optional[str]):
+    """Export one simulation set (set + runs + results) to a .aiida archive.
 
-    The archive can be transferred to another machine and imported
-    with ``FrictionSim2D aiida import-archive``.
+    The archive can be transferred to another machine and imported with
+    ``FrictionSim2D aiida import-archive``.
 
-    Example::
-
-        FrictionSim2D aiida export -o results.aiida
-        FrictionSim2D aiida export -m h-MoS2
+    Example:
+        FrictionSim2D aiida export 260421-afm -o ~/transfer/260421-afm.aiida
     """
-    from .aiida.integration import export_archive
+    from .aiida.export import export_archive  # noqa: PLC0415
 
-    click.echo(f"📦 Exporting archive to {output} ...")
+    click.echo(f"📦 Exporting set {set_label!r} to {output} ...")
     try:
-        export_archive(Path(output), materials=[material] if material else None)
-        click.echo(f"✅ Archive saved: {output}")
+        path = export_archive(set_label, output, profile=profile)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA export failed")
         _raise_abort(f"❌ Export failed: {exc}", exc)
+    click.echo(f"✅ Archive written: {path.absolute()}")
 
 
 @aiida_group.command('import-archive')
-@click.argument('archive_path', type=click.Path(exists=True))
-def aiida_import_archive(archive_path: str):
-    """Import an AiiDA archive into the current profile.
+@click.argument('archive_path', type=click.Path(exists=True, path_type=Path))
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: settings.aiida.profile)')
+def aiida_import_archive(archive_path: Path, profile: Optional[str]):
+    """Import a .aiida archive into the current profile.
 
-    Use this to set up a mirror database on a local workstation from
-    results exported on an HPC cluster.
+    Use this to mirror an hpc-direct store on a local workstation.
 
-    Example::
-
-        FrictionSim2D aiida import-archive results.aiida
+    Example:
+        FrictionSim2D aiida import-archive ~/transfer/260421-afm.aiida
     """
-    from .aiida import load_aiida_profile
-    from .aiida.integration import import_archive
-
-    load_aiida_profile()
+    from .aiida.export import import_archive  # noqa: PLC0415
 
     click.echo(f"📥 Importing archive: {archive_path} ...")
     try:
-        import_archive(Path(archive_path))
-        click.echo("✅ Archive imported successfully")
+        n_new = import_archive(archive_path, profile=profile)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA import-archive failed")
         _raise_abort(f"❌ Import failed: {exc}", exc)
+    click.echo(f"✅ Imported {n_new} new node(s)")
 
 
 @aiida_group.command('package')

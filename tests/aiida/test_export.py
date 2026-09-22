@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip('aiida')
 pytestmark = pytest.mark.aiida
 
-from src.aiida.export import export_results, rebuild_set  # noqa: E402
+from src.aiida.export import export_archive, export_results, import_archive, rebuild_set  # noqa: E402
 from src.aiida.ingest import ingest_root  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import make_run  # noqa: E402
@@ -539,3 +539,51 @@ def test_rebuild_round_trips_a_real_build_through_the_router(aiida_profile_clean
                            for p in rebuilt_loc.lammps_dir.glob('*.in')}
         assert orig_scripts, f"{orig_loc.lammps_dir} had no *.in scripts to compare"
         assert orig_scripts == rebuilt_scripts, f"{rel_path}: rebuilt *.in differs"
+
+
+def test_archive_round_trip_keeps_the_set_and_its_group(aiida_profile_clean, tmp_path):
+    """R19: an archive of the set's nodes alone creates no `friction2d/<label>`
+    group on import, so the imported set would be invisible to
+    `resolve_set`/`export`/`delete` -- breaking the hpc-direct mode (spec
+    §4.3). `export_archive` must archive the GROUP too, and the same
+    set/run/results query run before export must return the same result
+    after a round trip through a clean profile.
+    """
+    from aiida.orm import Group, QueryBuilder
+
+    from src.aiida.data import (FrictionResultsData, FrictionSimulationData,
+                                FrictionSimulationSetData)
+    from src.aiida.ingest import group_label
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='arch')
+
+    archive = export_archive('arch', tmp_path / 'arch.aiida')
+    assert archive.is_file()
+
+    aiida_profile_clean.reset_storage()
+    from aiida.orm import Node
+    assert QueryBuilder().append(Node).count() == 0
+
+    n_new = import_archive(archive)
+
+    assert n_new >= 3
+    assert QueryBuilder().append(FrictionSimulationSetData).count() == 1
+    assert QueryBuilder().append(FrictionSimulationData).count() == 1
+    assert QueryBuilder().append(FrictionResultsData).count() == 1
+    set_node = QueryBuilder().append(FrictionSimulationSetData).first(flat=True)
+    assert set_node.label == 'arch'
+
+    group = Group.collection.get(label=group_label('arch'))
+    group_node_uuids = {node.uuid for node in group.nodes}
+    assert set_node.uuid in group_node_uuids
+    run_node = QueryBuilder().append(FrictionSimulationData).first(flat=True)
+    results_node = QueryBuilder().append(FrictionResultsData).first(flat=True)
+    assert run_node.uuid in group_node_uuids
+    assert results_node.uuid in group_node_uuids
+
+
+def test_archive_of_an_unknown_label_raises(aiida_profile_clean, tmp_path):
+    with pytest.raises(LookupError, match='no simulation set'):
+        export_archive('nope', tmp_path / 'x.aiida')

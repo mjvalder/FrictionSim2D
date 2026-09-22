@@ -15,9 +15,14 @@ so importing it costs nothing on a machine without AiiDA and does not weaken
 the "import this module without aiida-core installed" contract the deferred
 imports below exist for.
 
-`export_provenance_bundle` and `export_archive`/`import_archive` belong to
-later tasks in this plan and are added to this module then, not pre-declared
-as empty names now.
+`export_archive` hands `aiida.tools.archive.create_archive` every node of
+`Group('friction2d/<label>')` -- the group itself included, so the archive's
+import re-creates it and the set stays visible to `resolve_set`/`delete`/
+`export`/`rebuild` on the far side (spec §4.2, R19). `import_archive` is its
+inverse.
+
+`export_provenance_bundle` belongs to a later task in this plan and is added
+to this module then, not pre-declared as an empty name now.
 """
 from __future__ import annotations
 
@@ -37,7 +42,7 @@ from ..run.tree import provenance_dir_for
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['export_results', 'resolve_set', 'rebuild_set']
+__all__ = ['export_results', 'resolve_set', 'rebuild_set', 'export_archive', 'import_archive']
 
 
 def _load_profile(profile: Optional[str]) -> None:
@@ -398,3 +403,52 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
             created.extend(result.created)
 
     return created, dest
+
+
+def export_archive(label: str, output_path: Path, *,
+                   profile: Optional[str] = None) -> Path:
+    """Archive every node of `friction2d/<label>`, the group itself included.
+
+    An archive of the set's nodes alone (`FrictionSimulationSetData` + its
+    runs + their results) creates no `friction2d/<label>` group on import
+    (R19): the group has to be one of the archived entities for
+    `aiida.tools.archive.import_archive` to re-create it, and without that
+    group the imported set would be invisible to `resolve_set`/`delete`/
+    `export`/`rebuild` -- breaking the hpc-direct mode (spec §4.3) an
+    export/import round trip exists to support. Archiving the GROUP (not
+    just its nodes) is exactly what closes that gap.
+    """
+    from aiida.orm import Group  # pylint: disable=import-outside-toplevel
+    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
+
+    from .ingest import group_label  # pylint: disable=import-outside-toplevel
+
+    _load_profile(profile)
+    resolve_set(label)                       # raises LookupError on an unknown label
+    group = Group.collection.get(label=group_label(label))
+    output_path = Path(output_path)
+    create_archive([group, *group.nodes], filename=output_path)
+    logger.info("Exported group %r (%d nodes) to %s", group.label,
+               len(group.nodes), output_path)
+    return output_path
+
+
+def import_archive(archive_path: Path, *, profile: Optional[str] = None) -> int:
+    """Import an archive into the current profile; returns the new-node count.
+
+    `aiida.tools.archive.import_archive` returns the primary key of the
+    import group it creates (or `None`), not a summary object with a
+    `new_nodes` count -- reading a `new_nodes` attribute off that return
+    value is always 0. The profile's node count is compared across the call
+    instead.
+    """
+    from aiida.orm import Node, QueryBuilder  # pylint: disable=import-outside-toplevel
+    from aiida.tools.archive import import_archive as _import  # pylint: disable=import-outside-toplevel
+
+    _load_profile(profile)
+    before = QueryBuilder().append(Node).count()
+    _import(Path(archive_path))
+    after = QueryBuilder().append(Node).count()
+    n_new = after - before
+    logger.info("Imported %d new node(s) from %s", n_new, archive_path)
+    return n_new
