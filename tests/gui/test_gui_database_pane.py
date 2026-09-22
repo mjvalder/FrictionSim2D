@@ -8,6 +8,7 @@ subprocesses and modals.
 
 from __future__ import annotations
 
+import csv
 import os
 from pathlib import Path
 
@@ -145,6 +146,56 @@ class TestPaneLayout:
         assert seen == [1]
 
 
+class TestSourceSwitchClearsTheRows:
+    """A row belongs to the store it came from.
+
+    The two stores identify a row differently -- local by the run/result
+    uuids, central by an integer `id` -- and every action reads the *current*
+    source. Left on screen across a switch, one click on a stale row asks the
+    central API for `result_id: None` (the worker does `int(...)`) or hands a
+    central uuid to `load_node`, and Summary CSV exports the local rows as if
+    they were the central store's.
+    """
+
+    def test_switching_source_empties_the_table_and_the_detail(self, pane):
+        pane.set_set_sizes({'s1': 37})
+        pane.table.selectRow(0)
+        pane.show_detail({'run': {'uuid': '1a2b', 'node_type': '',
+                                  'attributes': {'layers': 2}},
+                          'result': {'uuid': '9f8e', 'node_type': '',
+                                     'attributes': {}},
+                          'files': [], 'total_bytes': 4096})
+
+        pane.set_source('central')
+
+        assert pane.model.rowCount() == 0
+        assert pane.visible_records() == []
+        assert pane.selected_records() == []
+        assert pane.detail.rows() == []
+        assert pane.set_sizes == {}
+        assert pane.last_detail_bytes is None
+
+    def test_no_detail_is_requested_for_the_selection_it_drops(self, pane):
+        pane.table.selectRow(0)
+        seen = []
+        pane.detail_requested.connect(lambda source, payload: seen.append(payload))
+
+        pane.set_source('central')
+
+        assert seen == []
+
+    def test_the_summary_csv_of_a_switched_source_exports_nothing_stale(
+            self, pane, tmp_path, monkeypatch):
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        seen = []
+        pane.export_requested.connect(lambda source, payload: seen.append(payload))
+
+        pane.set_source('central')
+        pane.download_buttons['summary_csv'].click()
+
+        assert seen[0]['records'] == []
+
+
 class TestDownloads:
     """Four downloads, one dialog. The dialog is overridden here -- an
     unpatched QFileDialog would block the run forever."""
@@ -261,8 +312,43 @@ class TestDownloads:
         ready.download_buttons['summary_csv'].click()
 
         payload = seen[0]
-        assert payload['records'] == RECORDS
         assert payload['columns'][:3] == ['set_label', 'family', 'materials']
+        # One row per visible record, carrying exactly the columns shown.
+        assert [r['family'] for r in payload['records']] == ['afm', 'hetero']
+        assert [r['load'] for r in payload['records']] == [30.0, 10.0]
+        assert set(payload['records'][0]) == set(payload['columns'])
+
+    def test_summary_csv_exports_the_central_fallback_columns(
+            self, pane, tmp_path, monkeypatch):
+        """The Summary CSV promises the visible rows "with the columns shown"
+        (D6), and what Load/Angle/Speed show for a central row comes from
+        `force_nN`, `scan_angle` and `scan_speed` -- the columns' fallbacks.
+        The worker writes `record[key]` and knows nothing of them, so an
+        unresolved payload exported three blank columns the table had filled.
+        """
+        from src.gui import db_worker
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        pane.set_source('central')
+        pane.set_records([{'id': 41, 'set_label': 's1', 'family': 'afm',
+                           'material': 'h-MoS2', 'force_nN': 30.0,
+                           'scan_angle': 15.0, 'scan_speed': 5.0,
+                           'status': 'published'}])
+        seen = []
+        pane.export_requested.connect(lambda source, payload: seen.append(payload))
+
+        pane.download_buttons['summary_csv'].click()
+        result = db_worker.dispatch({
+            'kind': 'export', 'source': 'central', 'what': 'summary_csv',
+            'dest': str(tmp_path / 'dl'), 'records': seen[0]['records'],
+            'columns': seen[0]['columns']})
+
+        assert result['ok'] is True
+        with open(result['files'][0], encoding='utf-8', newline='') as handle:
+            row = next(csv.DictReader(handle))
+        assert row['load'] == '30.0'
+        assert row['angle'] == '15.0'
+        assert row['speed'] == '5.0'
+        assert row['materials'] == 'h-MoS2'
 
     def test_summary_csv_does_not_need_a_selection(self, pane, tmp_path, monkeypatch):
         monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
@@ -384,7 +470,8 @@ class TestExportReachesTheController:
 
     def test_a_download_becomes_an_export_request(self, window, tmp_path, monkeypatch):
         calls = []
-        monkeypatch.setattr(window.database, 'start', calls.append)
+        monkeypatch.setattr(window.database, 'start',
+                            lambda request, **kwargs: calls.append(request))
         pane = window.database_pane
         pane.set_records(RECORDS)
         monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
@@ -474,6 +561,26 @@ class TestWindowWiring:
         assert window.database_pane.filters.material.count() == 2
         assert '2 of 2' in window.database_pane.messages.toPlainText()
 
+    def test_a_cached_list_says_so_rather_than_quoting_a_stale_timing(self, window):
+        """`elapsed_s` comes off the result file with the rest of it: a
+        replayed answer would otherwise report the original query's timing as
+        if the store had just been read."""
+        window._on_db_finished('list', {
+            'ok': True, 'kind': 'list', 'source': 'local', 'records': RECORDS,
+            'facets': {}, 'total_count': 2, 'returned': 2, 'elapsed_s': 0.4,
+            'warnings': [], 'cached': True})
+
+        text = window.database_pane.messages.toPlainText()
+        assert '2 of 2 results in 0.4 s (cached — Refresh to re-query)' in text
+
+    def test_a_fresh_list_carries_no_cache_marker(self, window):
+        window._on_db_finished('list', {
+            'ok': True, 'kind': 'list', 'source': 'local', 'records': RECORDS,
+            'facets': {}, 'total_count': 2, 'returned': 2, 'elapsed_s': 0.4,
+            'warnings': [], 'cached': False})
+
+        assert 'cached' not in window.database_pane.messages.toPlainText()
+
     def test_a_truncated_central_list_reports_the_limit_not_a_bogus_total(self, window):
         """`total_count` is None whenever the central client's own `limit`
         cut the rows short (see `_list` in db_worker.py) -- the message must
@@ -508,7 +615,8 @@ class TestWindowWiring:
         `detail` request fires on every row selection, so an export could be
         killed mid-copy by a stray click."""
         started = []
-        monkeypatch.setattr(window.database, 'start', started.append)
+        monkeypatch.setattr(window.database, 'start',
+                            lambda request, **kwargs: started.append(request))
         monkeypatch.setattr(type(window.database), 'current_kind',
                             property(lambda self: 'export'))
 
@@ -694,7 +802,7 @@ class TestWorkspaceMemory:
     """Nothing new on disk: the workspace's existing key/value state."""
 
     def test_a_query_records_the_source_and_the_filters(self, window, monkeypatch):
-        monkeypatch.setattr(window.database, 'start', lambda request: None)
+        monkeypatch.setattr(window.database, 'start', lambda request, **kwargs: None)
         window.database_pane.filters.family.addItem('afm')
         window.database_pane.filters.family.setCurrentText('afm')
 
@@ -714,7 +822,7 @@ class TestWorkspaceMemory:
         assert window.workspace.state['db_source'] == 'central'
 
     def test_a_download_records_its_destination(self, window, tmp_path, monkeypatch):
-        monkeypatch.setattr(window.database, 'start', lambda request: None)
+        monkeypatch.setattr(window.database, 'start', lambda request, **kwargs: None)
         pane = window.database_pane
         pane.set_records(RECORDS)
         monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
@@ -873,6 +981,29 @@ class TestNotConfigured:
 
         assert window.database_pane._source_buttons.button(1).isEnabled()
 
+    def test_configuring_it_also_clears_the_stale_note(self, window):
+        """The note is an instruction to go and configure something. Once
+        that is done it is not just out of date, it is wrong."""
+        window.settings.database.api_url = ''
+        window._apply_database_availability()
+        assert 'not configured' in window.database_pane.messages.toPlainText()
+
+        window.settings.database.api_url = 'https://db.example.org'
+        window._apply_database_availability()
+
+        assert window.database_pane.messages.toPlainText() == ''
+
+    def test_re_enabling_an_enabled_source_leaves_the_panel_alone(self, window):
+        """`_apply_database_availability` runs on every Settings apply: an
+        unconditional clear would wipe the query result out of the panel."""
+        window.settings.database.api_url = 'https://db.example.org'
+        window._apply_database_availability()
+        window.database_pane.message('2 of 2 results in 0.4 s')
+
+        window._apply_database_availability()
+
+        assert '2 of 2 results' in window.database_pane.messages.toPlainText()
+
 
 class TestAvailabilityChangeDoesNotClobberMemory:
     """Regression: `_apply_settings` calls `_apply_database_availability()`
@@ -939,7 +1070,9 @@ class TestDisabledSourceIsNeverReachable:
             assert window.workspace.state['db_source'] == 'central'
 
             seen = []
-            monkeypatch.setattr(window.database, 'start', seen.append)
+            monkeypatch.setattr(
+                window.database, 'start',
+                lambda request, **kwargs: seen.append(request))
             window.database_pane.search_button.click()
 
             assert seen and seen[0].source == 'local'
@@ -962,7 +1095,8 @@ class TestDisabledSourceIsNeverReachable:
         assert window.workspace.state['db_source'] == 'central'
 
         seen = []
-        monkeypatch.setattr(window.database, 'start', seen.append)
+        monkeypatch.setattr(window.database, 'start',
+                            lambda request, **kwargs: seen.append(request))
         window.database_pane.search_button.click()
 
         assert seen and seen[0].source == 'local'

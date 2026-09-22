@@ -34,7 +34,7 @@ from ...diagnostics import Check
 from ...style import STATUS_ERROR, STATUS_WARN
 from .detail import DetailPanel, format_bytes
 from .filters import FilterBar
-from .model import ResultSortProxyModel, ResultTableModel
+from .model import ResultSortProxyModel, ResultTableModel, record_value
 
 __all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS',
           'BACKEND_MODULES', 'INSTALL_HINTS', 'missing_backend',
@@ -307,13 +307,19 @@ class DatabasePane(QWidget):
             button.setEnabled(enabled)
             button.setToolTip(reason)
 
-        if enabled:
-            self._notes.pop(source, None)
-        elif reason:
+        cleared = self._notes.pop(source, None) if enabled else None
+        if not enabled and reason:
             self._notes[source] = reason
         if self._notes:
             self.message('\n'.join(self._notes[s] for s in SOURCES
                                    if s in self._notes), 'warn')
+        elif cleared:
+            # The last standing note just went away: leaving it on screen
+            # would keep telling the user to configure something they have
+            # already configured. Only when this call is what removed it --
+            # re-enabling an already-enabled source must not wipe a query
+            # result out of the panel.
+            self.message('')
 
         if not enabled and self._source == source:
             other = next((s for s in SOURCES if s != source), None)
@@ -354,8 +360,22 @@ class DatabasePane(QWidget):
         if not checked or source == self._source:
             return
         self._source = source
+        # The rows on screen belong to the store we just left, and every
+        # action reads `self._source`: clicking one would ask the new store
+        # for the old store's row -- a central `result_id` of None (the worker
+        # does `int(...)`) or a central uuid handed to `load_node`. The
+        # Summary CSV would export the old store's rows under the new one's
+        # name. Nothing survives a source change.
+        self.clear_results()
         self.source_changed.emit(source)
         self._apply_source_actions()
+
+    def clear_results(self) -> None:
+        """Drop the rows, the detail and everything measured from them."""
+        self.model.set_records([])
+        self.detail.clear()
+        self.set_sizes = {}
+        self.last_detail_bytes = None
 
     def set_records(self, records: Sequence[Dict[str, Any]]) -> None:
         self.model.set_records(records)
@@ -412,6 +432,22 @@ class DatabasePane(QWidget):
         return [self.model.record_at(self.proxy.mapToSource(
             self.proxy.index(row, 0)).row()) for row in range(self.proxy.rowCount())]
 
+    def exported_rows(self) -> List[Dict[str, Any]]:
+        """The visible rows reduced to the columns shown, values resolved.
+
+        The Summary CSV promises "the rows currently visible, with the columns
+        shown" (D6), and what a column shows is `record_value` -- key first,
+        then the column's fallbacks. The worker only ever sees `record[key]`,
+        so a central row, whose load/angle/speed live under `force_nN`,
+        `scan_angle` and `scan_speed`, exported three blank columns that the
+        table on screen had filled. Resolving here rather than in the worker
+        keeps the fallback vocabulary in the one module that defines it, and
+        leaves the worker's list/dict cell formatting where it is.
+        """
+        columns = self.model.columns
+        return [{c.key: record_value(record, c) for c in columns}
+                for record in self.visible_records()]
+
     # ---------------------------------------------------------------- modal
 
     def _ask_directory(self, remember: bool = True) -> Optional[Path]:
@@ -462,7 +498,7 @@ class DatabasePane(QWidget):
             'rebuild': bool(self.rebuild_box.isChecked()),
         }
         if what == 'summary_csv':
-            payload['records'] = self.visible_records()
+            payload['records'] = self.exported_rows()
             payload['columns'] = [c.key for c in self.model.columns]
         self.export_requested.emit(self._source, payload)
 

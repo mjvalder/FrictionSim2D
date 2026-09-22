@@ -398,10 +398,7 @@ class MainWindow(QMainWindow):
         # at start time, so a settings edit takes effect without a restart.
         self.database.settings = self.settings
         request = DatabaseRequest(kind=kind, source=source, payload=payload)
-        if use_cache:
-            self.database.start(request)
-        else:
-            self.database.start(request, use_cache=False)
+        self.database.start(request, use_cache=use_cache)
 
     def _on_db_cancel(self) -> None:
         if not self.database.running:
@@ -566,6 +563,11 @@ class MainWindow(QMainWindow):
                 lines = [f"{returned} results (limit {limit}) in {elapsed} s"]
             else:
                 lines = [f"{returned} of {total} results in {elapsed} s"]
+            if result.get('cached'):
+                # `elapsed_s` belongs to the query this result was first
+                # fetched by, not to what just happened -- without saying so,
+                # a replay of a week-old answer reads as a fresh one.
+                lines[0] += ' (cached — Refresh to re-query)'
             warnings = result.get('warnings') or []
             lines += [f"note: {w}" for w in warnings]
             self.database_pane.message('\n'.join(lines),
