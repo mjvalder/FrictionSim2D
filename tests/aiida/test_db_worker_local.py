@@ -111,3 +111,21 @@ def test_export_run_tree_rebuilds_a_readable_tree(aiida_profile_clean, tmp_path)
 
     assert result['ok'] is True
     assert (dest / 'w1' / AFM / 'provenance.json').is_file()
+
+
+def test_import_ingests_a_run_directory(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'simulation_new'
+    make_run(root, AFM, 'afm', loads=(30.0,), tiers=('window',))
+
+    result = db_worker.dispatch({'kind': 'import', 'source': 'local',
+                                 'root': str(root), 'label': 'imported',
+                                 'dry_run': False})
+
+    assert result['ok'] is True
+    assert result['ingest_ok'] is True
+    assert result['created_runs'] == [AFM]
+    assert result['label'] == 'imported'
+
+    listed = db_worker.dispatch({'kind': 'list', 'source': 'local',
+                                 'filters': {'set_label': 'imported'}})
+    assert listed['returned'] == 1

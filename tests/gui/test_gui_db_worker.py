@@ -297,3 +297,54 @@ def test_an_unknown_export_kind_is_refused(tmp_path, monkeypatch):
 
     assert result['ok'] is False
     assert 'everything' in result['error']
+
+
+def test_import_is_refused_against_the_central_database(tmp_path):
+    result = db_worker.dispatch({'kind': 'import', 'source': 'central',
+                                 'root': str(tmp_path), 'label': 'x'})
+
+    assert result['ok'] is False
+    assert 'read-only' in result['error']
+
+
+def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
+                                                                    monkeypatch):
+    class FakeReport:
+        # `incomplete_results` is the real `IngestReport` field name -- using
+        # anything else here would let `_import` read the wrong attribute
+        # and still pass, since a fake object with no such attribute would
+        # raise AttributeError and get caught, but a fake with the WRONG
+        # name attached instead would silently return the wrong value.
+        label = 'x'
+        set_uuid = '77aa'
+        created_runs = ['afm/a']
+        created_results = []
+        skipped_results = []
+        incomplete_results = ['afm/a#force30_a0_s2']
+        empty_runs = ['afm/c']
+        unparseable = ['afm/d']
+        failures = [('afm/b', 'no results file')]
+        dry_run = False
+
+        def ok(self):
+            return False
+
+        def render(self):
+            return 'ingested 1 run, 0 results (1 failure)'
+
+    monkeypatch.setattr(db_worker, '_load_profile', lambda request: None)
+    monkeypatch.setattr(db_worker, '_ingest_root',
+                        lambda *args, **kwargs: FakeReport())
+
+    result = db_worker.dispatch({'kind': 'import', 'source': 'local',
+                                 'root': str(tmp_path), 'label': 'x',
+                                 'dry_run': False})
+
+    assert result['ok'] is True, 'the request ran; the ingest is what failed'
+    assert result['ingest_ok'] is False
+    assert result['failures'] == [['afm/b', 'no results file']]
+    assert result['incomplete'] == ['afm/a#force30_a0_s2']
+    assert result['empty_runs'] == ['afm/c']
+    assert result['unparseable'] == ['afm/d']
+    assert result['report'] == 'ingested 1 run, 0 results (1 failure)'
+    assert result['set_uuid'] == '77aa'

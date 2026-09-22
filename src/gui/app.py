@@ -357,6 +357,7 @@ class MainWindow(QMainWindow):
         pane.refresh_requested.connect(self._on_db_refresh)
         pane.detail_requested.connect(self._on_db_detail)
         pane.export_requested.connect(self._on_db_export)
+        pane.import_requested.connect(self._on_db_import)
         pane.check_requested.connect(self._on_db_check)
         pane.cancel_requested.connect(self._on_db_cancel)
 
@@ -409,6 +410,9 @@ class MainWindow(QMainWindow):
     def _on_db_export(self, source: str, payload: dict) -> None:
         self._start_db('export', source, payload)
 
+    def _on_db_import(self, source: str, payload: dict) -> None:
+        self._start_db('import', source, payload)
+
     def _on_db_check(self, source: str) -> None:
         self._start_db('check', source, {})
 
@@ -459,6 +463,26 @@ class MainWindow(QMainWindow):
             lines += [f"note: {w}" for w in warnings]
             self.database_pane.message('\n'.join(lines),
                                        'warn' if warnings else 'info')
+        elif kind == 'import':
+            lines = [result.get('report', '')]
+            for label, key in (('incomplete', 'incomplete'),
+                               ('with no results at all', 'empty_runs')):
+                entries = result.get(key) or []
+                if entries:
+                    lines.append(f"{len(entries)} run(s) {label}: "
+                                 + ', '.join(entries[:5])
+                                 + (' …' if len(entries) > 5 else ''))
+            unparseable = result.get('unparseable') or []
+            if unparseable:
+                lines.append(f"{len(unparseable)} path(s) unparseable: "
+                             + ', '.join(unparseable[:5])
+                             + (' …' if len(unparseable) > 5 else ''))
+            quiet = not (result.get('incomplete') or result.get('empty_runs')
+                        or unparseable)
+            self.database_pane.message(
+                '\n'.join(line for line in lines if line),
+                'info' if result.get('ingest_ok') and quiet else
+                ('warn' if result.get('ingest_ok') else 'error'))
 
     # -------------------------------------------------------------- helpers
 

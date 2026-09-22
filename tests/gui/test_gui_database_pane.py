@@ -529,3 +529,108 @@ class TestWindowWiring:
         window.close()
 
         assert cancelled == [True]
+
+
+class TestImport:
+    """D7: the one write action the pane offers besides downloads."""
+
+    def test_import_asks_for_a_directory_and_names_the_set_after_it(
+            self, pane, tmp_path, monkeypatch):
+        chosen = tmp_path / 'simulation_20260901_120000'
+        chosen.mkdir()
+        monkeypatch.setattr(pane, '_ask_directory', lambda remember=True: chosen)
+        seen = []
+        pane.import_requested.connect(lambda source, payload: seen.append((source, payload)))
+
+        pane.import_button.click()
+
+        assert seen == [('local', {'root': str(chosen),
+                                   'label': 'simulation_20260901_120000',
+                                   'dry_run': False})]
+
+    def test_import_does_not_remember_the_chosen_directory_as_last_dest(
+            self, pane, tmp_path, monkeypatch):
+        """C15: a run directory picked to ingest must not become the next
+        download destination."""
+        chosen = tmp_path / 'simulation_20260901_120000'
+        chosen.mkdir()
+        seen_remember = []
+
+        def fake_ask_directory(remember=True):
+            seen_remember.append(remember)
+            return chosen
+
+        monkeypatch.setattr(pane, '_ask_directory', fake_ask_directory)
+        pane.last_dest = None
+
+        pane.import_button.click()
+
+        assert seen_remember == [False]
+        assert pane.last_dest is None
+
+    def test_a_cancelled_dialog_imports_nothing(self, pane, monkeypatch):
+        monkeypatch.setattr(pane, '_ask_directory', lambda remember=True: None)
+        seen = []
+        pane.import_requested.connect(lambda *args: seen.append(args))
+
+        pane.import_button.click()
+
+        assert seen == []
+
+    def test_import_is_disabled_for_the_central_source(self, pane):
+        pane.set_source('central')
+
+        assert not pane.import_button.isEnabled()
+
+    def test_a_finished_import_shows_the_report(self, window):
+        window._on_db_finished('import', {
+            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
+            'set_uuid': '77aa', 'created_runs': ['afm/a'], 'created_results': [],
+            'skipped_results': [], 'incomplete': [], 'empty_runs': [],
+            'unparseable': [], 'failures': [], 'dry_run': False,
+            'report': "set 'x' (77aa)\n  runs created:    1"})
+
+        assert 'runs created' in window.database_pane.messages.toPlainText()
+
+    def test_incomplete_and_empty_runs_are_reported_not_buried(self, window):
+        window._on_db_finished('import', {
+            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
+            'set_uuid': '77aa', 'created_runs': ['afm/a'],
+            'created_results': ['afm/a#force30_a0_s2'], 'skipped_results': [],
+            'incomplete': ['afm/a#force30_a0_s2'], 'empty_runs': ['afm/c'],
+            'unparseable': [], 'failures': [], 'dry_run': False,
+            'report': "set 'x' (77aa)"})
+
+        text = window.database_pane.messages.toPlainText()
+        assert '1 run(s) incomplete' in text
+        assert '1 run(s) with no results at all' in text
+
+    def test_unparseable_paths_are_reported_not_buried(self, window):
+        """N8: `aiida import` exits non-zero on `unparseable`; the pane must
+        not bury it either."""
+        window._on_db_finished('import', {
+            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
+            'set_uuid': '77aa', 'created_runs': [], 'created_results': [],
+            'skipped_results': [], 'incomplete': [], 'empty_runs': [],
+            'unparseable': ['afm/broken'], 'failures': [], 'dry_run': False,
+            'report': "set 'x' (77aa)"})
+
+        text = window.database_pane.messages.toPlainText()
+        assert '1 path(s) unparseable' in text
+        assert 'afm/broken' in text
+
+    def test_unparseable_makes_a_clean_ingest_not_quiet(self, window, monkeypatch):
+        """N8: the quiet/level logic must treat `unparseable` as not-quiet,
+        even when `ingest_ok` is True and nothing else is amiss."""
+        levels = []
+        monkeypatch.setattr(window.database_pane, 'message',
+                            lambda text, level='info': levels.append(level))
+
+        window._on_db_finished('import', {
+            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
+            'set_uuid': '77aa', 'created_runs': [], 'created_results': [],
+            'skipped_results': [], 'incomplete': [], 'empty_runs': [],
+            'unparseable': ['afm/broken'], 'failures': [], 'dry_run': False,
+            'report': "set 'x' (77aa)"})
+
+        assert levels == ['warn']

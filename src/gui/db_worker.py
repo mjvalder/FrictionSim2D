@@ -434,10 +434,55 @@ def _export(request: Dict[str, Any]) -> Dict[str, Any]:
     return _export_run_tree(request, dest)
 
 
+def _ingest_root(root, label, profile, dry_run):
+    """Indirection so a test can replace the ingest without a live store."""
+    from ..aiida.ingest import ingest_root  # pylint: disable=import-outside-toplevel
+    return ingest_root(root, label=label, profile=profile, dry_run=dry_run)
+
+
+def _import(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Ingest a run directory into the local store.
+
+    The one write action the pane offers: it is the step a remote-manual user
+    does on every return trip. `ok` says the ingest ran; `ingest_ok` says it
+    ran clean -- a report with failures is still a report worth reading.
+    """
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
+    if request.get('source') == 'central':
+        raise ValueError('import writes to the local store; '
+                         'the central database is read-only from this pane')
+
+    _load_profile(request)
+    root = Path(request['root']).expanduser()
+    _emit('progress', message=f"ingesting {root}")
+    report = _ingest_root(root, request.get('label') or None,
+                          request.get('profile'), bool(request.get('dry_run')))
+    return {
+        'ok': True, 'kind': 'import', 'ingest_ok': bool(report.ok()),
+        'label': report.label, 'set_uuid': report.set_uuid,
+        'created_runs': list(report.created_runs),
+        'created_results': list(report.created_results),
+        'skipped_results': list(report.skipped_results),
+        # Ingested but truncated, and directories with no results at all:
+        # neither is a failure, and both are things the user wants to see
+        # before trusting the numbers that just arrived.
+        'incomplete': list(report.incomplete_results),
+        'empty_runs': list(report.empty_runs),
+        # A run whose `provenance.json` could not even be parsed -- distinct
+        # from `empty_runs` (parsed fine, just no results yet). `aiida import`
+        # exits non-zero on this (N8); the pane must not bury it either.
+        'unparseable': list(report.unparseable),
+        'failures': [list(f) for f in report.failures],
+        'dry_run': bool(report.dry_run),
+        'report': report.render(),
+    }
+
+
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     'list': _list,
     'detail': _detail,
     'export': _export,
+    'import': _import,
 }
 
 

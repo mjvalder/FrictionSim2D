@@ -196,6 +196,12 @@ class DatabasePane(QWidget):
         self.copy_contact_button.clicked.connect(self._copy_contact)
         row.addWidget(self.copy_contact_button)
 
+        self.import_button = QPushButton('Import run directory…', self)
+        self.import_button.setToolTip(
+            'Ingest a simulation directory into the local store')
+        self.import_button.clicked.connect(self._request_import)
+        row.addWidget(self.import_button)
+
         self._apply_source_actions()
         return row
 
@@ -209,6 +215,7 @@ class DatabasePane(QWidget):
                 button.setEnabled(local)
         self.rebuild_box.setEnabled(local)
         self.copy_contact_button.setEnabled(not local)
+        self.import_button.setEnabled(local)
 
     # ---------------------------------------------------------------- state
 
@@ -287,14 +294,20 @@ class DatabasePane(QWidget):
 
     # ---------------------------------------------------------------- modal
 
-    def _ask_directory(self) -> Optional[Path]:
-        """Where a download goes. The only modal this package opens: tests
-        override this method rather than trying to click a real dialog."""
+    def _ask_directory(self, remember: bool = True) -> Optional[Path]:
+        """Where a download -- or an import source -- comes from. The only
+        modal this package opens: tests override this method rather than
+        trying to click a real dialog.
+
+        `remember=False` (the import path) leaves `last_dest` alone: a run
+        directory picked to ingest is not where the next download should
+        land (C15)."""
         chosen = QFileDialog.getExistingDirectory(
             self, 'Choose a destination', self.last_dest or str(Path.home()))
         if not chosen:
             return None
-        self.last_dest = chosen
+        if remember:
+            self.last_dest = chosen
         return Path(chosen)
 
     # ---------------------------------------------------------------- export
@@ -360,6 +373,14 @@ class DatabasePane(QWidget):
                 + '\n\nAny size shown is extrapolated from the last run you '
                   'inspected and is a rough figure.\n\nA destination chooser '
                   'opens next -- cancel it to back out.')
+
+    def _request_import(self) -> None:
+        """The one write action (D7). Delete and submit stay in the CLI."""
+        root = self._ask_directory(remember=False)
+        if root is None:
+            return
+        self.import_requested.emit(
+            self._source, {'root': str(root), 'label': root.name, 'dry_run': False})
 
     def _copy_contact(self) -> None:
         """Put the selected rows' owner contacts on the clipboard (D6).
