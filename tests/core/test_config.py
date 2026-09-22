@@ -757,3 +757,17 @@ def test_flake_pot_type_invalid_still_raises():
     pair style must still be refused."""
     with pytest.raises(ValidationError, match='not a known LAMMPS pair style'):
         FlakeConfig(edge_length=20.0, pot_type='not-a-real-potential')
+
+
+def test_aiida_settings_is_five_fields():
+    from src.core.config import AiidaSettings
+
+    assert set(AiidaSettings.model_fields) == {
+        'enabled', 'profile', 'lammps_code_label', 'computer_label',
+        'max_stored_file_mb'}
+    defaults = AiidaSettings()
+    assert defaults.enabled is False
+    assert defaults.profile is None
+    assert defaults.lammps_code_label == 'lammps@localhost'
+    assert defaults.computer_label == 'localhost'
+    assert defaults.max_stored_file_mb == 20

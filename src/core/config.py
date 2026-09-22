@@ -195,31 +195,25 @@ class HPCSettings(BaseModel):
 
 
 class AiidaSettings(BaseModel):
-    """AiiDA-specific workflow settings."""
+    """AiiDA workflow settings.
+
+    Five fields, all reachable. The SSH-connected HPC mode is gone (spec U5):
+    the HPC blocks direct connections, so the supported modes are local,
+    remote-manual (rsync out, `aiida import` on return) and hpc-direct (AiiDA in
+    the HPC conda env, archive brought home).
+    """
     enabled: bool = False
-    lammps_code_label: str = 'lammps@my_hpc'
-    postprocess_code_label: str = 'python@my_hpc'
-    postprocess_script_path: str = ''
-    create_provenance: bool = True
-    auto_import_results: bool = False
-    hpc_mode: Literal['local', 'remote', 'offline'] = 'offline'
-    max_stored_file_mb: int = 20
     #: The profile every profile-taking function falls back to when its own
     #: `profile: Optional[str] = None` argument is omitted (`ingest_root`,
     #: `export_results`, `rebuild_set`, `export_archive`, `import_archive`,
     #: `list_simulation_sets`, `delete_simulation_set`, `clear_all_nodes`, and
     #: the CLI commands built on them). `None` here means "AiiDA's own
-    #: default profile".
+    #: default profile". New in schema 3 -- it used to be a CLI flag only.
     profile: Optional[str] = None
-
-    # AiiDA remote computer configuration (optional, only for 'aiida setup')
-    computer_label: Optional[str] = 'localhost'
-    transport: Literal['local', 'ssh'] = 'local'
-    hostname: Optional[str] = None
-    workdir: Optional[str] = None
-    username: Optional[str] = None
-    ssh_port: int = 22
-    key_filename: Optional[str] = None
+    lammps_code_label: str = 'lammps@localhost'
+    computer_label: str = 'localhost'
+    #: Files larger than this are recorded by sha256 + path instead of stored.
+    max_stored_file_mb: int = 20
 
 
 class DatabaseProfileSettings(BaseModel):

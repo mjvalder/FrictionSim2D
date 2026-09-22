@@ -12,140 +12,12 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from ..core.config import HPCSettings, AiidaSettings
-
 if TYPE_CHECKING:
     from aiida import orm
 
 logger = logging.getLogger(__name__)
 
 _LOOKUP_EXCEPTIONS = (LookupError, ValueError, RuntimeError)
-
-
-_SCHEDULER_MAP = {
-    'pbs': 'core.pbspro',
-    'pbspro': 'core.pbspro',
-    'slurm': 'core.slurm',
-}
-
-_TRANSPORT_MAP = {
-    'ssh': 'core.ssh',
-    'local': 'core.local',
-}
-
-
-def _ensure_rabbitmq_installed() -> bool:
-    """Install rabbitmq-server via conda if not already available.
-
-    Returns:
-        ``True`` if rabbitmqctl is available after the call.
-    """
-    if shutil.which('rabbitmqctl'):
-        return True
-
-    conda_exe = shutil.which('conda')
-    if not conda_exe:
-        logger.error(
-            "rabbitmqctl not found and conda is not available to install it. "
-            "Install manually: conda install -c conda-forge rabbitmq-server"
-        )
-        return False
-
-    logger.info("rabbitmqctl not found — installing rabbitmq-server via conda ...")
-    result = subprocess.run(
-        [conda_exe, 'install', '-c', 'conda-forge', 'rabbitmq-server', '-y'],
-        capture_output=False,  # show progress to user
-        check=False,
-    )
-    if result.returncode != 0:
-        logger.error("conda install rabbitmq-server failed")
-        return False
-
-    if not shutil.which('rabbitmqctl'):
-        logger.error(
-            "rabbitmqctl still not found after install. "
-            "Try: conda install -c conda-forge rabbitmq-server"
-        )
-        return False
-
-    logger.info("rabbitmq-server installed successfully")
-    return True
-
-
-def _patch_rabbitmq_consumer_timeout(timeout_ms: int = 36_000_000) -> None:
-    """Write consumer_timeout to the RabbitMQ config for this conda env.
-
-    Newer RabbitMQ versions (>=3.8.15 / v4.x) ship with a default consumer
-    timeout of 30 minutes, which causes long-running AiiDA workflows to crash.
-    Patches ``$CONDA_PREFIX/etc/rabbitmq/rabbitmq.conf`` to a safe value
-    (default 10 hours). Must be called before starting rabbitmq-server.
-
-    Args:
-        timeout_ms: Consumer timeout in milliseconds.
-    """
-    import os  # pylint: disable=import-outside-toplevel
-    import re  # pylint: disable=import-outside-toplevel
-
-    conda_prefix = os.environ.get('CONDA_PREFIX')
-    if conda_prefix:
-        conf_dir = Path(conda_prefix) / 'etc' / 'rabbitmq'
-    else:
-        conf_dir = Path.home() / '.config' / 'rabbitmq'
-
-    conf_file = conf_dir / 'rabbitmq.conf'
-    conf_dir.mkdir(parents=True, exist_ok=True)
-
-    entry = f'consumer_timeout = {timeout_ms}'
-
-    if conf_file.exists():
-        text = conf_file.read_text()
-        if re.search(r'^\s*consumer_timeout\s*=', text, re.MULTILINE):
-            text = re.sub(r'^\s*consumer_timeout\s*=.*$', entry, text, flags=re.MULTILINE)
-        else:
-            text += f'\n{entry}\n'
-        conf_file.write_text(text)
-    else:
-        conf_file.write_text(f'# FrictionSim2D AiiDA RabbitMQ settings\n{entry}\n')
-
-    logger.info("RabbitMQ consumer_timeout set to %d ms in %s", timeout_ms, conf_file)
-
-
-def start_rabbitmq() -> bool:
-    """Start the RabbitMQ broker in detached mode.
-
-    AiiDA requires RabbitMQ for daemon communication. rabbitmq-server is
-    installed automatically via conda if not already present.
-
-    Returns:
-        ``True`` if RabbitMQ is already running or was started successfully.
-    """
-    if not _ensure_rabbitmq_installed():
-        return False
-
-    # Patch consumer_timeout before starting — prevents workflow crashes with
-    # newer RabbitMQ versions (>=3.8.15) which default to a 30-min timeout.
-    _patch_rabbitmq_consumer_timeout()
-
-    # Check if already running
-    probe = subprocess.run(
-        ['rabbitmqctl', 'status'],
-        capture_output=True, text=True, check=False,
-    )
-    if probe.returncode == 0:
-        logger.info("RabbitMQ is already running")
-        return True
-
-    logger.info("Starting RabbitMQ broker ...")
-    result = subprocess.run(
-        ['rabbitmq-server', '-detached'],
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode == 0:
-        logger.info("RabbitMQ started in detached mode")
-        return True
-
-    logger.error("Failed to start RabbitMQ: %s", result.stderr)
-    return False
 
 
 def setup_profile(
@@ -301,58 +173,6 @@ def setup_lammps_code(
 
     logger.info("Registered code '%s' → %s", full_label, executable)
     return code
-
-
-def setup_computer_from_hpc_settings(
-    hpc_settings: 'HPCSettings',
-    aiida_settings: 'AiidaSettings',
-) -> 'orm.Computer':
-    """Register an AiiDA computer from settings.
-
-    Args:
-        hpc_settings: HPCSettings from GlobalSettings.hpc
-        aiida_settings: AiidaSettings from GlobalSettings.aiida
-
-    Returns:
-        Configured AiiDA Computer instance
-    """
-    from aiida import orm  # pylint: disable=import-outside-toplevel
-
-    label = aiida_settings.computer_label or 'hpc'
-    scheduler = hpc_settings.scheduler_type
-    transport = aiida_settings.transport
-
-    scheduler_type = _SCHEDULER_MAP.get(scheduler, scheduler) or 'core.pbspro'
-    transport_type = _TRANSPORT_MAP.get(transport, transport) or 'core.local'
-
-    try:
-        computer = orm.Computer.collection.get(label=label)
-        logger.info("Computer '%s' already exists (PK=%d)", label, computer.pk)
-        return computer
-    except _LOOKUP_EXCEPTIONS:
-        pass
-
-    computer = orm.Computer(
-        label=label,
-        hostname=aiida_settings.hostname or 'localhost',
-        description=f"HPC computer ({scheduler})",
-        transport_type=transport_type,
-        scheduler_type=scheduler_type,
-        workdir=aiida_settings.workdir or str(Path.home() / 'aiida_workdir'),
-    )
-    computer.store()
-
-    if transport_type == 'core.ssh':
-        computer.configure(
-            username=aiida_settings.username or '',
-            port=aiida_settings.ssh_port,
-            key_filename=aiida_settings.key_filename or '',
-            safe_interval=30.0
-        )
-
-    computer.set_default_mpiprocs_per_machine(hpc_settings.num_cpus)
-    logger.info("Registered computer '%s' (PK=%d)", label, computer.pk)
-    return computer
 
 
 def _find_lammps_executable() -> str:

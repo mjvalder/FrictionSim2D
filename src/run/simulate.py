@@ -194,7 +194,6 @@ def run_simulations(
 
     if use_aiida:
         defaults.aiida.enabled = True
-        defaults.aiida.create_provenance = True
 
     # Carried on the settings rather than threaded through every builder: the
     # builders already pass `settings` down to make_amorphous.
