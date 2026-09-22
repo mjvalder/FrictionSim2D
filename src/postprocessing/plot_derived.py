@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Dict, Optional
+
 import numpy as np
 import pandas as pd
 
@@ -69,3 +71,97 @@ def add_plot_derived_columns(df: pd.DataFrame, time_step_fs: float) -> pd.DataFr
         df['tipspeed'] = tipspeed_series.replace([np.inf, -np.inf], 0).fillna(0)
 
     return df
+
+
+def linear_fit(x_data, y_data, x_range: Optional[list] = None,
+               constraint: str = 'first_point') -> Optional[Dict[str, float]]:
+    """Constrained linear regression; ``None`` when there is nothing to fit.
+
+    Moved verbatim out of ``PlotCommonMixin._calculate_linear_fit`` so a
+    non-Plotter caller (``cof_slope``, the plot worker) can use it without
+    instantiating the whole mixin stack. ``constraint`` is 'first_point'
+    (default, the line passes through the first point), 'origin' or 'none'.
+    """
+    if len(x_data) < 2:
+        return None
+
+    mask = ~(np.isnan(x_data) | np.isnan(y_data))
+    x_clean = np.array(x_data)[mask]
+    y_clean = np.array(y_data)[mask]
+
+    if x_range is not None and len(x_range) == 2:
+        range_mask = (x_clean >= x_range[0]) & (x_clean <= x_range[1])
+        x_clean, y_clean = x_clean[range_mask], y_clean[range_mask]
+
+    if len(x_clean) < 2:
+        return None
+
+    x_origin = 0.0
+    if constraint == 'origin':
+        denom = np.sum(x_clean**2)
+        if denom == 0:
+            return None
+        slope = np.sum(x_clean * y_clean) / denom
+        intercept = 0.0
+        x_shifted = x_clean
+    elif constraint == 'none':
+        slope, intercept = np.polyfit(x_clean, y_clean, 1)
+        x_shifted = x_clean - np.mean(x_clean)
+    else:
+        x_origin, y_origin = x_clean[0], y_clean[0]
+        x_shifted = x_clean - x_origin
+        y_shifted = y_clean - y_origin
+
+        denom = np.sum(x_shifted**2)
+        if denom == 0:
+            return None
+
+        slope = np.sum(x_shifted * y_shifted) / denom
+        intercept = y_origin - slope * x_origin
+
+    y_pred = slope * x_clean + intercept
+    residuals = y_clean - y_pred
+    rmse = np.sqrt(np.mean(residuals**2))
+
+    ss_res = np.sum(residuals**2)
+    ss_tot = np.sum((y_clean - np.mean(y_clean))**2)
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+    n = len(x_clean)
+    if n > 1:
+        mse = ss_res / (n - 1)
+        slope_stderr = np.sqrt(mse / np.sum(x_shifted**2))
+    else:
+        slope_stderr = 0
+
+    if constraint == 'first_point':
+        se_intercept = slope_stderr * np.abs(x_origin)
+    else:
+        se_intercept = 0
+
+    return {
+        'slope': slope,
+        'intercept': intercept,
+        'slope_stderr': slope_stderr,
+        'intercept_stderr': se_intercept,
+        'r_squared': r_squared,
+        'rmse': rmse,
+    }
+
+
+def cof_slope(nf, lf, *, x_range: Optional[list] = None,
+              constraint: str = 'first_point') -> Dict[str, float]:
+    """The regression slope of lateral force against normal load.
+
+    A DIFFERENT quantity from the COF, which is ``mean(LF)/mean(NF)`` and comes
+    from ``summarise_run`` alone. Both are legitimate; calling them by the same
+    name is what put three definitions on one plot. Returns NaN for all three
+    keys when the fit cannot be made.
+    """
+    fit = linear_fit(nf, lf, x_range, constraint)
+    if fit is None:
+        return {'cof_slope': float('nan'), 'cof_slope_stderr': float('nan'),
+                'cof_slope_r2': float('nan')}
+    return {'cof_slope': float(fit['slope']),
+            'cof_slope_stderr': float(fit['slope_stderr']),
+            'cof_slope_r2': float(fit['r_squared'])}

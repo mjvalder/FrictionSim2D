@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.postprocessing.plot_derived import add_plot_derived_columns
 
@@ -68,3 +71,63 @@ def test_lf_sx_sy_and_lf_fx_fy_from_native_names_still_works() -> None:
 
     assert out['lf_sx_sy'].tolist() == [5.0, 0.0]
     assert out['lf_fx_fy'].tolist() == [1.0, 10.0]
+
+
+def test_linear_fit_recovers_a_known_slope():
+    from src.postprocessing.plot_derived import linear_fit
+
+    x = np.array([0.0, 10.0, 20.0, 30.0])
+    y = 0.2 * x + 1.0
+
+    fit = linear_fit(x, y, constraint='none')
+
+    assert fit['slope'] == pytest.approx(0.2)
+    assert fit['intercept'] == pytest.approx(1.0)
+    assert fit['r_squared'] == pytest.approx(1.0)
+    assert set(fit) == {'slope', 'intercept', 'slope_stderr',
+                        'intercept_stderr', 'r_squared', 'rmse'}
+
+
+def test_linear_fit_refuses_a_single_point():
+    from src.postprocessing.plot_derived import linear_fit
+
+    assert linear_fit(np.array([1.0]), np.array([1.0])) is None
+
+
+def test_cof_slope_is_named_for_what_it_is():
+    """The regression slope of LF vs NF is NOT the COF -- the COF is
+    mean(LF)/mean(NF) from summarise_run. Plotting the slope under the label
+    'COF' put two different quantities on one axis."""
+    from src.postprocessing.plot_derived import cof_slope
+
+    nf = np.array([0.0, 10.0, 20.0, 30.0])
+    lf = 0.15 * nf
+
+    out = cof_slope(nf, lf, constraint='none')
+
+    assert set(out) == {'cof_slope', 'cof_slope_stderr', 'cof_slope_r2'}
+    assert out['cof_slope'] == pytest.approx(0.15)
+    assert out['cof_slope_r2'] == pytest.approx(1.0)
+
+
+def test_cof_slope_of_an_unfittable_series_is_nan():
+    from src.postprocessing.plot_derived import cof_slope
+
+    out = cof_slope(np.array([1.0]), np.array([1.0]))
+
+    assert math.isnan(out['cof_slope'])
+    assert math.isnan(out['cof_slope_stderr'])
+    assert math.isnan(out['cof_slope_r2'])
+
+
+def test_the_mixin_still_delegates_with_its_old_signature(tmp_path):
+    from src.postprocessing.plot_data import Plotter
+    from src.postprocessing.plot_derived import linear_fit
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    x = np.array([0.0, 10.0, 20.0])
+    y = 0.3 * x
+
+    fit = plotter._calculate_linear_fit(x, y, None, 'none')  # pylint: disable=protected-access
+
+    assert fit == linear_fit(x, y, None, 'none')
