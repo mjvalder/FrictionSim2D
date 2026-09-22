@@ -1,14 +1,32 @@
 """Job manifest for offline HPC workflow tracking."""
 
 import json
+import logging
 import re
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, fields, asdict
 
 from ..core.observables import FAMILIES
+
+logger = logging.getLogger(__name__)
+
+
+def _known_fields(data_cls: type, data: Dict[str, Any], kind: str) -> Dict[str, Any]:
+    """Drop dict keys that are not fields of *data_cls*, logging what's dropped.
+
+    Tolerates a manifest.json written by an older version of the dataclass --
+    e.g. the AiiDA-uuid fields and status methods dropped from ``JobEntry`` --
+    so an existing file still loads instead of raising ``TypeError`` on the
+    unexpected keyword.
+    """
+    known = {f.name for f in fields(data_cls)}
+    legacy_keys = data.keys() - known
+    if legacy_keys:
+        logger.debug("Dropping legacy %s keys: %s", kind, sorted(legacy_keys))
+    return {k: v for k, v in data.items() if k in known}
 
 
 class JobStatus(Enum):
@@ -64,14 +82,16 @@ class JobEntry:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'JobEntry':
         """Create JobEntry from dictionary.
-        
+
+        Tolerates legacy keys no longer in the dataclass (see `_known_fields`).
+
         Args:
             data: Dictionary with job entry fields.
-            
+
         Returns:
             New JobEntry instance.
         """
-        return cls(**data)
+        return cls(**_known_fields(cls, data, 'JobEntry'))
 
 
 @dataclass
@@ -221,16 +241,18 @@ class JobManifest:
     @classmethod
     def load(cls, filepath: Path) -> 'JobManifest':
         """Load manifest from JSON file.
-        
+
+        Tolerates legacy keys no longer in the dataclass (see `_known_fields`).
+
         Args:
             filepath: Path to manifest file.
-            
+
         Returns:
             Loaded JobManifest instance.
         """
         data = json.loads(Path(filepath).read_text(encoding='utf-8'))
         jobs = [JobEntry.from_dict(j) for j in data.pop('jobs', [])]
-        manifest = cls(**data)
+        manifest = cls(**_known_fields(cls, data, 'JobManifest'))
         manifest.jobs = jobs
         return manifest
 
