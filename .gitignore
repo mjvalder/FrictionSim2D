@@ -5,6 +5,8 @@ ptest
 scripts
 __pycache__
 results*
+# ...but the postprocessing tests' synthetic-tree builder is source, not output.
+!tests/helpers/results_tree.py
 settings.yaml
 .vscode
 .pytest_cache
