@@ -67,6 +67,11 @@ written by `run/simulate.py` next to it. This is what makes `aiida rebuild`
 possible without a live `--settings-file`: the exact settings a run was
 generated under travel with it.
 
+Both files' `database.password`/`database.api_key` are stripped before they
+ever reach the AiiDA store, at write time and again when the file is staged
+into a node repository (see [aiida.md](aiida.md#credentials-never-enter-the-store));
+every other field, including `database.host`, travels intact.
+
 ## Reading old provenance: `read_provenance`
 
 `read_provenance(path, *, family='afm', model='afm', material_name='')` reads

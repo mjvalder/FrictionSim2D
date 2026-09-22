@@ -309,6 +309,11 @@ database:
 every run tree (`provenance/settings.yaml` and the `settings` block of
 `provenance/config.json`): those files are stored in the AiiDA repository and
 travel in archives and export bundles. The other `database` fields are kept.
+This happens twice: once when the tree is written (`redact_secrets`), and
+again -- independently -- the moment any settings/config document is staged
+into the AiiDA store (see [aiida.md](aiida.md#credentials-never-enter-the-store)),
+so a tree built before the first gate existed, or a hand-edited settings file
+with credentials still in it, cannot leak them either.
 
 The old profile switch that picked between a `local`/`central` nested pair,
 and the `api_host`/`api_port` fields, are gone — there is only ever one

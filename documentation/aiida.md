@@ -67,6 +67,22 @@ retained file (including a `results/*` file no load point claims) rides along
 on each load point. Anything over `aiida.max_stored_file_mb` is recorded by
 path, size and sha256 instead of stored.
 
+### Credentials never enter the store
+
+Every settings/config document staged into a node repository -- `settings.yaml`,
+`config.json`, and any `*.yaml`/`*.json` under `provenance/` -- is sanitised
+first: `src.core.config.redact_secrets_mapping` blanks `database.password`/
+`database.api_key` (the flat shape, and the pre-Task-31 nested `database.
+local.*`/`database.central.*` shape) before the file is written to the
+repository, whether the document already had them stripped at write time
+(`redact_secrets`, see [settings.md](settings.md#database)) or not. This is
+the second, independent gate: a tree built before write-time redaction
+existed, or a root `settings.yaml` a user wrote by hand with `settings init`
+run in the simulation root (`FrictionSimulationSetData.set_from_root` stages
+that file), never goes through the first one, but still cannot carry a
+credential into a node, an archive or an export bundle. Every other file is
+stored verbatim.
+
 ## 2. Idempotent import
 
 ```bash

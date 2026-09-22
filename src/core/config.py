@@ -262,6 +262,63 @@ def redact_secrets(settings: GlobalSettings) -> GlobalSettings:
     return safe
 
 
+#: `DatabaseSettings.local`/`.central` -- the pre-Task-31 nested shape's two
+#: profile sub-keys, each a `DatabaseProfileSettings`-shaped mapping with its
+#: own `password`/`api_key`. `active_profile` names no credential itself and
+#: is left alone.
+_LEGACY_DB_PROFILE_KEYS = ('local', 'central')
+
+
+def _redact_database_mapping(database: Dict[str, Any]) -> Dict[str, Any]:
+    """Blank credential values on one raw ``database``-shaped mapping.
+
+    Handles the flat v3 shape (`password`/`api_key` at this level) and the
+    legacy nested shape (the same two fields one level down, under `local`/
+    `central`) in one pass -- a mapping can carry either or, transiently,
+    both. Key order is preserved.
+    """
+    redacted = dict(database)
+    for name in SECRET_DATABASE_FIELDS:
+        if name in redacted:
+            redacted[name] = ''
+    for profile_key in _LEGACY_DB_PROFILE_KEYS:
+        profile = redacted.get(profile_key)
+        if isinstance(profile, dict):
+            redacted[profile_key] = _redact_database_mapping(profile)
+    return redacted
+
+
+def redact_secrets_mapping(data: Any) -> Any:
+    """A copy of a raw settings/config mapping with credentials blanked.
+
+    Unlike :func:`redact_secrets`, this works on a plain ``dict`` as loaded
+    from YAML/JSON -- e.g. `provenance/settings.yaml`, or `provenance/
+    config.json`'s embedded `run_dict['settings']` -- not a validated
+    :class:`GlobalSettings`, so it tolerates documents `GlobalSettings.
+    model_validate` would partially reject: the legacy `database.active_
+    profile`/`local`/`central` shape (see :data:`_LEGACY_DB_PROFILE_KEYS`)
+    as well as the current flat one.
+
+    Recurses into a top-level ``settings`` key so one call sanitises a whole
+    `config.json` document (whose `database` block lives at `settings.
+    database`, not at the document's own top level) exactly as it would a
+    bare `settings.yaml`. Non-dict input is returned unchanged; a dict is
+    always shallow-copied (mutating neither the input nor, by extension, any
+    caller's on-disk bytes) even when it holds neither key. Key order is
+    preserved throughout.
+    """
+    if not isinstance(data, dict):
+        return data
+    redacted = dict(data)
+    database = redacted.get('database')
+    if isinstance(database, dict):
+        redacted['database'] = _redact_database_mapping(database)
+    settings = redacted.get('settings')
+    if isinstance(settings, dict):
+        redacted['settings'] = redact_secrets_mapping(settings)
+    return redacted
+
+
 # --- User Input Settings (From .ini files) ---
 
 class ComponentConfig(BaseModel):

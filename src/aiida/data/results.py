@@ -175,8 +175,15 @@ class FrictionResultsData(Data):
         says exactly which file was skipped. Tier files are always stored --
         they are the load point's defining data, not a rides-along extra, and
         skipping one would make `frame(tier)` unable to re-parse it.
+
+        Every store goes through `redact.stage_file`: a results node holds no
+        settings/config document today, but routing through the same choke
+        point as `FrictionSimulationSetData.add_file`/`FrictionSimulationData.
+        add_run_files` means one that ever did (a future aux file) would still
+        be sanitised, not stored verbatim by omission.
         """
         from ...data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
+        from .redact import stage_file  # pylint: disable=import-outside-toplevel
 
         run_dir = Path(run_dir)
         limit = max_mb * 1024 * 1024
@@ -189,7 +196,7 @@ class FrictionResultsData(Data):
                 continue
             path = Path(path)
             name = path.relative_to(run_dir).as_posix()
-            self.base.repository.put_object_from_file(str(path), name)
+            stage_file(self.base.repository, path, name)
             tiers.append(tier)
             tier_paths.append(path)
             tier_files[tier] = name
@@ -204,7 +211,7 @@ class FrictionResultsData(Data):
                                  'sha256': sha256_file(extra),
                                  'source': str(extra)})
                 continue
-            self.base.repository.put_object_from_file(str(extra), name)
+            stage_file(self.base.repository, extra, name)
         self.base.attributes.set('oversize_files', oversize)
         # Which stored member IS each tier: aux may carry other `results/*`
         # files (anything no load point claimed), so `frame` must not guess

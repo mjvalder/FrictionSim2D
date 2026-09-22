@@ -346,9 +346,14 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
 
         A file larger than `max_mb` is not stored; its POSIX path and sha256
         are appended to the `oversize_files` attribute instead, so the record
-        still says exactly which file was used.
+        still says exactly which file was used. Every stored file goes
+        through `redact.stage_file`, so a settings/config document among
+        `provenance/**` (a pre-redaction tree's `provenance/settings.yaml`,
+        `provenance/config.json`) is sanitised before it reaches the
+        repository, regardless of what write-time redaction did upstream.
         """
         from ...data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
+        from .redact import stage_file  # pylint: disable=import-outside-toplevel
 
         limit = max_mb * 1024 * 1024
         candidates: List[Tuple[Path, str]] = [
@@ -372,7 +377,7 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
                                  'sha256': sha256_file(path),
                                  'source': str(path)})
                 continue
-            self.base.repository.put_object_from_file(str(path), name)
+            stage_file(self.base.repository, path, name)
             stored.append(name)
         self.base.attributes.set('oversize_files', oversize)
         return sorted(stored)

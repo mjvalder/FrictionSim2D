@@ -167,8 +167,14 @@ class FrictionSimulationSetData(Data):
             self.add_file(settings, 'settings.yaml')
 
     def add_file(self, path: Path, name: str) -> None:
-        """Stage one file into the node repository under `name`."""
-        self.base.repository.put_object_from_file(str(Path(path)), name)
+        """Stage one file into the node repository under `name`.
+
+        Goes through `redact.stage_file`, the one choke point that keeps a
+        credential out of every friction2d node repository: a settings/config
+        document is sanitised first, everything else stored verbatim.
+        """
+        from .redact import stage_file  # pylint: disable=import-outside-toplevel
+        stage_file(self.base.repository, Path(path), name)
 
     # -- Serialisation --------------------------------------------------------
 
