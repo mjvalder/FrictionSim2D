@@ -73,7 +73,7 @@ for label in 251113-afm 251125-sheetonsheet \
              260227-rebomos 260227-sevik_mos2 \
              260227-sw_lammps 260227-tmd \
              260312-force_rebomos 260312-force_sevik; do
-    FrictionSim2D aiida dump "$label" --output-dir \[your directory\]/\${label}
+    FrictionSim2D aiida export-results "$label" \[your directory\]/\${label}
 done
 ```
 

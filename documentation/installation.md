@@ -62,11 +62,20 @@ FrictionSim2D aiida status
 FrictionSim2D aiida setup
 ```
 
-If your workflows target a remote machine, configure the `aiida` section in settings and use:
+There is no SSH-connected remote-submission mode — the HPC blocks direct
+inbound AiiDA connections. Two workflows cover a remote cluster instead:
 
-```bash
-FrictionSim2D aiida setup --use-remote
-```
+- **remote-manual**: generate locally, `rsync` the tree out, submit the
+  generated PBS/Slurm scripts on the cluster by hand, `rsync` the results
+  back, then ingest with a plain `FrictionSim2D aiida import` — nothing
+  AiiDA-specific ever runs on the cluster. See
+  [hpc_jobs.md](hpc_jobs.md#getting-results-back-into-aiida-remote-manual).
+- **hpc-direct**: install and run `FrictionSim2D aiida setup` *inside the
+  HPC's own conda environment*, ingest there, then `FrictionSim2D aiida
+  export <label>` to build a portable archive and bring it home with
+  `FrictionSim2D aiida import-archive` on your workstation.
+
+See [aiida.md](aiida.md) for both in full.
 
 ## Database and API setup (optional)
 

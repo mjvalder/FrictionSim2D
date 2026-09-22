@@ -213,13 +213,32 @@ templates already carry it, guarded by `command -v`.
 
 > AiiDA commands require `aiida-core`. Install with `pip install -e .[aiida]`.
 
+`run <model> ... --aiida --label LABEL` registers the simulation set and its
+run nodes at generation time (before any results exist); a later
+`aiida import` on the finished tree attaches results to those same nodes.
+See [aiida.md](aiida.md) for the node model and run modes.
+
 ### aiida status
 
 ```bash
 FrictionSim2D aiida status
 ```
 
+### aiida preflight
+
+Verify profile, database and entry points before generating a campaign; tells
+apart "no profile initialised here" (fine on a generation-only machine) from
+"profile broken". Exits 0 only when both are healthy:
+
+```bash
+FrictionSim2D aiida preflight
+```
+
 ### aiida setup
+
+Creates the AiiDA profile, the `localhost` computer, and the LAMMPS code.
+Localhost only — run this inside the HPC's own conda environment for
+hpc-direct mode.
 
 ```bash
 FrictionSim2D aiida setup [OPTIONS]
@@ -227,15 +246,15 @@ FrictionSim2D aiida setup [OPTIONS]
 
 Options:
 
-- `-p, --profile TEXT`
-- `--lammps-path PATH`
-- `--use-remote` — configure a remote HPC computer using `settings.yaml`
-- `--hpc-config PATH` *(deprecated — use `--use-remote` instead)*
-- `--settings-file PATH`
+- `-p, --create-profile TEXT` — name of the profile to **create** (default:
+  `friction2d`). Every other `aiida` command spells `--profile`, which
+  **loads** an existing one.
+- `--lammps-path PATH` — explicit path to the LAMMPS executable
 
 ### aiida import
 
-Import a `simulation_XXXXXXXX` directory as a new simulation set:
+Ingest a `simulation_XXXXXXXX` directory as a new (or updated) simulation set.
+Idempotent — re-importing adds only new or changed load points:
 
 ```bash
 FrictionSim2D aiida import SIMULATION_FOLDER [OPTIONS]
@@ -243,9 +262,13 @@ FrictionSim2D aiida import SIMULATION_FOLDER [OPTIONS]
 
 Options:
 
-- `-l, --label TEXT` — required label (prompted if omitted)
-- `-d, --description TEXT`
+- `-l, --label TEXT` — label for the set (default: the folder name)
 - `--profile TEXT`
+- `--dry-run` — print what would be ingested; create nothing
+
+Exit code: non-zero if any run failed. A real (non-dry-run) import also exits
+non-zero if any run was left empty or could not be parsed; a `--dry-run`
+preview of a fresh, pre-HPC tree is legitimately all-empty and exits 0.
 
 ### aiida list-sets
 
@@ -258,24 +281,20 @@ Options:
 - `--profile TEXT`
 - `--format {table|json|csv}` (default: `table`)
 
-### aiida dump
+### aiida export-results
 
-Export time-series data from an AiiDA set to `output_full_*.json` files, ready for `postprocess plot`:
+Write a stored set back out as an ordinary simulation tree — the finished
+outputs, ready for `postprocess read`/the GUI download unchanged:
 
 ```bash
-FrictionSim2D aiida dump SET_LABEL --output-dir OUTPUT_DIR [OPTIONS]
+FrictionSim2D aiida export-results SET_LABEL OUTPUT_DIR [--profile TEXT]
 ```
-
-Options:
-
-- `-o, --output-dir PATH` *(required)*
-- `--profile TEXT`
-
-Output layout: `OUTPUT_DIR/outputs/output_full_<size>.json`
 
 ### aiida rebuild
 
-Reconstruct a full simulation directory tree from AiiDA provenance data alone:
+Regenerate a set's LAMMPS *inputs* from the store: exports each run's stored
+`config.json` and the set's `settings.yaml`, then reruns the real builder
+router — the same one `FrictionSim2D run` uses:
 
 ```bash
 FrictionSim2D aiida rebuild SET_LABEL [OPTIONS]
@@ -295,49 +314,59 @@ FrictionSim2D aiida query [OPTIONS]
 
 Options:
 
-- `-m, --material TEXT`
+- `-m, --material TEXT` — repeatable; a matching run must contain **all** given materials
+- `--family TEXT` (e.g. `afm`, `hetero`)
+- `--model TEXT` (e.g. `afm`, `sheetonsheet`)
+- `--set-label TEXT`
+- `--potential TEXT`
 - `-l, --layers INTEGER`
-- `-f, --force FLOAT`
-- `-s, --set TEXT` — filter by simulation set label
+- `--force-min FLOAT` / `--force-max FLOAT`
+- `--pressure-min FLOAT` / `--pressure-max FLOAT`
+- `--angle-min FLOAT` / `--angle-max FLOAT`
+- `--speed-min FLOAT` / `--speed-max FLOAT`
+- `--temperature-min FLOAT` / `--temperature-max FLOAT`
+- `--limit INTEGER`
+- `--order-by TEXT` (prefix `-` for descending)
 - `--format {table|csv|json}` (default: `table`)
 - `-o, --output PATH`
 - `--profile TEXT`
+
+Any other `RunTokens` filter is Python-API only (`src/aiida/query.py`), not
+exposed as a CLI option.
 
 ### aiida delete
 
 Delete a single simulation set and all linked nodes (irreversible):
 
 ```bash
-FrictionSim2D aiida delete SET_LABEL [--profile TEXT]
+FrictionSim2D aiida delete SET_LABEL [--profile TEXT] [--yes]
 ```
 
 ### aiida clear
 
-Delete **all** FrictionSim2D nodes from the database (irreversible):
+Delete **all** FrictionSim2D nodes from the profile (irreversible):
 
 ```bash
-FrictionSim2D aiida clear [--profile TEXT]
+FrictionSim2D aiida clear [--profile TEXT] [--yes]
 ```
 
 ### aiida export
 
-Export nodes to a portable AiiDA archive file:
+Archive one simulation set (set + runs + results — the whole
+`friction2d/<label>` group) to a portable `.aiida` file:
 
 ```bash
-FrictionSim2D aiida export [OPTIONS]
+FrictionSim2D aiida export SET_LABEL [-o OUTPUT] [--profile TEXT]
 ```
-
-Options:
-
-- `-o, --output PATH` (default: `friction2d.aiida`)
-- `-m, --material TEXT`
 
 ### aiida import-archive
 
-Import a previously exported AiiDA archive into the current profile:
+Import a previously exported `.aiida` archive into the current profile.
+Creates no extra `friction2d/<label>` group of its own — the group, if any,
+came across inside the archive:
 
 ```bash
-FrictionSim2D aiida import-archive ARCHIVE_PATH
+FrictionSim2D aiida import-archive ARCHIVE_PATH [--profile TEXT]
 ```
 
 ### aiida package
@@ -357,15 +386,17 @@ FrictionSim2D aiida submit SIMULATION_DIR [OPTIONS]
 Options:
 
 - `--settings-file PATH`
-- `-c, --code TEXT`
+- `-c, --code TEXT` (auto-detects if not specified, falling back to `settings.aiida.lammps_code_label`)
 - `--scripts TEXT` (comma-separated list)
-- `--array`
+- `--array` — submit a single array job for all simulations
 - `--machines INTEGER`
 - `--mpiprocs INTEGER`
-- `--walltime TEXT` (`HH:MM:SS` or integer seconds)
+- `--walltime TEXT` (`HH:MM:SS` or hours)
 - `--queue TEXT`
 - `--project TEXT`
-- `--dry-run`
+- `--dry-run` — preview configuration without submitting
+- `--daemon` — submit to the AiiDA daemon (needs RabbitMQ). Default: run
+  in-process with `aiida.engine.run`, which needs no broker.
 
 ## postprocess
 
@@ -440,19 +471,31 @@ See [indent.md](indent.md).
 
 ## db
 
-The `db` command group manages the **central (remote) PostgreSQL database** — the shared summary-statistics store.
-It is **not** the local AiiDA database; for full provenance and time-series access, use the `aiida` command group.
+The `db` command group manages the **central PostgreSQL database** — one
+shared summary-statistics store (schema 3). It is **not** the local AiiDA
+store; for full provenance and time-series access, use the `aiida` command
+group. There is now a single central database, so there is no `--profile`
+option on this group at all — the connection is `settings.database` plus the
+`--host`/`--port`/`--dbname`/`--user`/`--password` overrides below.
 
-> **Two-database architecture**
-> - `FrictionSim2D aiida ...` → local AiiDA database (full time-series, complete provenance)
-> - `FrictionSim2D db ...` → central remote PostgreSQL (summary statistics: mean COF, forces, conditions)
+Where an `aiida`-holding set label is needed (`db upload`, `db stage`), the
+option is spelled `--aiida-profile`, never `--profile`: in this group
+`--profile` used to mean the *database* profile that no longer exists, so
+reusing the spelling would silently change its meaning.
 
-All `db` commands accept a common set of connection options. Pass `--profile central` to target the shared remote DB; `--profile local` targets a local instance.
+**Two library entry points, reconciled.** The `db` CLI group always talks
+straight PostgreSQL (`_make_db`/`psycopg2`, `src/cli.py`) — that path is only
+meant to run on the machine hosting the database. `src.data.get_client()`
+(the library entry point everything else should use) defaults to
+`mode='api'`, an HTTP client against the REST API; `mode='direct'` is the
+same psycopg2 path. The `--api-key` on `db stage` (and the key `db
+create-key` generates) does not gate read or write access by itself —
+Postgres role permissions do that — it records which contributor a row came
+from.
 
 **Common DB options** (available on every `db` subcommand):
 
 ```text
---profile TEXT        Profile from settings.yaml ('local' or 'central')
 --host TEXT           $FRICTION_DB_HOST
 --port INTEGER        $FRICTION_DB_PORT
 --dbname TEXT         $FRICTION_DB_NAME
@@ -470,15 +513,20 @@ FrictionSim2D db setup [--name NAME] [DB OPTIONS]
 
 ### db init
 
-Initialize or verify the database schema (safe to re-run):
+Create (or verify) the central schema. Safe to re-run without `--drop` —
+existing tables/columns are left untouched. An existing schema-2 table
+without `--drop` refuses with a clear message rather than silently stamping
+`schema_version = 3` over data that has not actually been migrated: there is
+no in-place migration to schema 3, so `--drop` (which recreates
+`simulations` from scratch) is the only supported upgrade path.
 
 ```bash
-FrictionSim2D db init [DB OPTIONS]
+FrictionSim2D db init [--drop] [DB OPTIONS]
 ```
 
 ### db create-key
 
-Generate a new API key for write access:
+Generate a new API key for write access (printed once — store it; it can only be revoked, not retrieved again):
 
 ```bash
 FrictionSim2D db create-key --name NAME [DB OPTIONS]
@@ -486,24 +534,28 @@ FrictionSim2D db create-key --name NAME [DB OPTIONS]
 
 ### db upload
 
-Upload one stored AiiDA simulation set to the shared central database. Reads the
-LOCAL AiiDA store only (spec U4) — SET_LABEL must already exist there:
+Upload one stored AiiDA simulation set to the central database. `SET_LABEL`
+is a **positional** argument (an existing AiiDA simulation-set label) and
+reads the local AiiDA store only (spec U4) — there is no automated fetch, so
+every central row instead carries a run UUID and the producing host, so a
+reader can contact the owner for the full time-series data:
 
 ```bash
-FrictionSim2D db upload SET_LABEL [--uploader NAME] [--contact EMAIL] \
+FrictionSim2D db upload SET_LABEL [-n/--uploader NAME] [--contact EMAIL] \
     [--aiida-profile PROFILE] [--dry-run] [DB OPTIONS]
 ```
 
-Each row carries a run UUID and the host that produced it, so a reader can
-contact the owner for the full time-series data — there is no automated
-fetch. Each row is validated automatically; valid rows are published.
+Rows are validated automatically; a row already present (matched by its
+`time_series_hash`) is counted **"skipped (already in central DB)"**, not an
+error. `--dry-run` reports what would be uploaded and connects to nothing.
 
 ### db stage
 
-Upload with an API key; rows are validated and published or rejected automatically:
+Same idea as `db upload`, with an API key; rows are validated and published
+or rejected automatically:
 
 ```bash
-FrictionSim2D db stage SET_LABEL --uploader NAME [--contact EMAIL] \
+FrictionSim2D db stage SET_LABEL -n/--uploader NAME [--contact EMAIL] \
     [--api-key KEY] [--aiida-profile PROFILE] [DB OPTIONS]
 ```
 
@@ -516,7 +568,7 @@ FrictionSim2D db query [OPTIONS] [DB OPTIONS]
 Options:
 
 - `-m, --material TEXT`
-- `--type TEXT` (`afm` or `sheetonsheet`)
+- `--type TEXT` (`afm`, `indent`, `sheetonsheet`, `hetero`, `flake`, `pes_tip`, or `pes_sheet`)
 - `-l, --layers INTEGER`
 - `-n, --uploader TEXT`
 - `--limit INTEGER` (default: 50)
@@ -572,7 +624,7 @@ Options:
 
 - Every `run` command exposes `--hpc-scripts` to generate scheduler scripts in one step.
 - `postprocess plot` requires a JSON config file, not a results directory.
-- `aiida dump` and `postprocess read --export` both produce `output_full_*.json` files, but `aiida dump` reads from the AiiDA database while `postprocess read` walks the raw LAMMPS output files on disk.
+- `aiida export-results` and `postprocess read --export` both produce a tree `postprocess read` can consume, but `aiida export-results` reads from the AiiDA store while `postprocess read` walks the raw LAMMPS output files on disk.
 
 ## Related docs
 

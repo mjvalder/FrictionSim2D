@@ -103,23 +103,23 @@ Import a completed simulation directory into the local AiiDA database:
 FrictionSim2D aiida import ./simulation_20260421_143404 --label "251113-afm"
 ```
 
-Dump stored time-series to JSON files for plotting:
+Write a stored set back out as an ordinary simulation tree, ready for `postprocess read`/plotting:
 
 ```bash
-FrictionSim2D aiida dump 251113-afm --output-dir ~/results/aiida_dump/251113-afm
+FrictionSim2D aiida export-results 251113-afm ~/results/exported/251113-afm
 ```
 
 Query the database:
 
 ```bash
 FrictionSim2D aiida query --material h-MoS2 --format table
-FrictionSim2D aiida query --set 251113-afm --format csv --output afm_results.csv
+FrictionSim2D aiida query --set-label 251113-afm --format csv --output afm_results.csv
 ```
 
-Export the full database to a portable archive:
+Export one simulation set to a portable archive:
 
 ```bash
-verdi -p friction2d archive create --all friction2d_results.aiida
+FrictionSim2D aiida export 251113-afm -o friction2d_results.aiida
 ```
 
 ## 9. Postprocess results

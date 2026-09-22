@@ -223,74 +223,92 @@ For sheet-on-sheet runs, script ordering is adjusted automatically to slide scri
 
 ## aiida
 
+Five fields, all reachable. The old SSH-connected HPC mode is gone: the HPC
+blocks direct connections, so the supported remote workflows are
+remote-manual (rsync out, `aiida import` on return) and hpc-direct (AiiDA
+runs in the HPC's own conda env, archive brought home) — see
+[aiida.md](aiida.md).
+
 Defaults:
 
 ```yaml
 aiida:
   enabled: false
-  lammps_code_label: lammps@my_hpc
-  postprocess_code_label: python@my_hpc
-  postprocess_script_path: ""
-  create_provenance: true
-  auto_import_results: false
-  hpc_mode: offline
+  profile: null                     # null = AiiDA's own default profile
+  lammps_code_label: lammps@localhost
   computer_label: localhost
-  transport: local
-  hostname: null
-  workdir: null
-  username: null
-  ssh_port: 22
-  key_filename: null
+  max_stored_file_mb: 20
 ```
 
-`hpc_mode` values:
+- `enabled` — turn on AiiDA provenance tracking for `run ... --aiida`.
+- `profile` — the AiiDA profile every profile-taking function falls back to
+  when its own `profile` argument (Python) or `--profile` option (CLI) is
+  omitted. `null` means "AiiDA's own default profile."
+- `lammps_code_label` — the `<code>@<computer>` label `aiida submit` looks
+  for before falling back to an ambiguous `%lammps%` search.
+- `computer_label` — the AiiDA computer label `aiida setup` registers
+  (`localhost` by default; every supported mode runs its CalcJobs on
+  `localhost`, even hpc-direct, because that *is* the HPC in that mode).
+- `max_stored_file_mb` — files larger than this are recorded by sha256 + path
+  instead of being copied into the AiiDA repository.
 
-- `offline`: generate and run outside AiiDA, import later
-- `local`: submit where daemon/computer is local
-- `remote`: submit to configured remote computer
+Several fields that used to live here are gone: the settings that named a
+second CalcJob for postprocessing on the HPC (never built — postprocessing
+always runs locally), a provenance on/off switch (provenance is always
+written now), a results-import on/off switch (an AiiDA WorkChain step that
+ran unconditionally regardless of the switch), a mode enum consolidating
+three flags that already agreed with each other, and the whole SSH-transport
+block (host/workdir/user/port/key file) for the SSH-connected remote mode,
+which is removed (see [aiida.md](aiida.md) for the two supported remote
+workflows). See `docs/superpowers/specs/TO-DO/future-works.md`
+§15.3/§15.4/§15.6 for the closed triage of each.
 
 ## database
 
-FrictionSim2D uses a **two-database architecture**:
+FrictionSim2D has **one** database now: the central summary store. The local
+store is AiiDA, configured entirely under `## aiida` above and via
+`FrictionSim2D aiida setup` — there is no separate local Postgres mirror any
+more.
 
-| Database | Backend | Contents | CLI group |
+| Store | Backend | Contents | CLI group |
 |---|---|---|---|
-| **Local (AiiDA)** | AiiDA-managed SQLite/PostgreSQL | Full time-series data, complete provenance | `FrictionSim2D aiida` |
-| **Central (remote)** | Shared PostgreSQL on remote server | Summary statistics only (mean COF, forces, conditions) | `FrictionSim2D db` |
+| **Local (AiiDA)** | AiiDA's own profile (SQLite/PostgreSQL) | Full time-series data, complete provenance | `FrictionSim2D aiida` |
+| **Central** | One shared PostgreSQL database | Summary statistics + a pointer back to the local run (mean COF, forces, conditions, run UUID, host) | `FrictionSim2D db` |
 
-The `database` section in `settings.yaml` configures connections for the **central DB** and an optional local mirror.
-The AiiDA database is configured separately via `verdi` / `FrictionSim2D aiida setup`.
-
-Defaults:
+Eight fields, central-only:
 
 ```yaml
 database:
-  active_profile: local   # 'local' = local mirror for testing; 'central' = shared remote DB
-  local:
-    host: localhost
-    port: 5432
-    dbname: frictionsim2ddb
-    user: ""
-    password: ""
-    api_key: ""
-  central:
-    host: ""              # hostname of your remote PostgreSQL server
-    port: 5432
-    dbname: frictionsim2ddb
-    user: ""
-    password: ""
-    api_key: ""
-  skip_fraction: 0.2
+  host: ""
+  port: 5432
+  dbname: frictionsim2ddb
+  user: ""
+  password: ""
+  api_key: ""
   api_url: http://localhost:8000
-  api_host: 0.0.0.0
-  api_port: 8000
+  skip_fraction: 0.2
 ```
 
-These values back the `db` and `api` command groups when explicit CLI options are not provided.
+- `host`, `port`, `dbname`, `user`, `password` — the central PostgreSQL
+  connection. `db`-group commands resolve these in order: an explicit CLI
+  flag (`--host`, `--port`, ...; its own env var is `FRICTION_DB_HOST`,
+  `FRICTION_DB_PORT`, ...), then this section — whose own defaults, when
+  nothing above set them, come from a *different* set of env vars
+  (`FRICTION_CENTRAL_DB_HOST`, `FRICTION_CENTRAL_DB_PORT`, ...) read when
+  settings are loaded.
+- `api_key` — the API key attached to writes made through this settings file
+  (`FRICTION_DB_API_KEY` overrides it). It records which contributor a row
+  came from; it does not gate read access on its own (Postgres role
+  permissions do that).
+- `api_url` — where `src.data.get_client(mode='api')` (the default client
+  mode) sends requests; `FrictionSim2D api serve` is what listens there.
+- `skip_fraction` — the same warm-up fraction the postprocessing COF
+  calculation uses, applied when the store computes summary statistics.
 
-> **Note**: `active_profile: local` points to a local PostgreSQL mirror of the central DB schema —
-> useful for offline testing. It is **not** the AiiDA database. To target the shared remote DB,
-> set `active_profile: central` or pass `--profile central` to `db` commands.
+The old profile switch that picked between a `local`/`central` nested pair,
+and the `api_host`/`api_port` fields, are gone — there is only ever one
+database to talk to now, and `FrictionSim2D api serve --host/--port` takes
+the server bind address directly instead of duplicating it here.
 
 ## Related docs
 
