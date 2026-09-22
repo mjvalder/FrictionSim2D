@@ -877,3 +877,21 @@ def test_query_materials_means_all_of_them():
     assert 'materials @> %s' in sql
     assert '&&' not in sql
     assert params == [['h-MoS2', 'h-WS2']]
+
+
+def test_an_empty_time_series_hash_is_uploaded_as_null():
+    """m2: '' used to occupy the UNIQUE `time_series_hash` slot, so every
+    later hashless row (incomplete, flake) was skipped as a duplicate."""
+    from src.data.models import ResultRecord
+
+    assert ResultRecord(material='h-MoS2', time_series_hash='').time_series_hash is None
+    assert ResultRecord(material='h-MoS2', time_series_hash='ab').time_series_hash == 'ab'
+
+    db, cursor = _recording_db()
+    db.upload_result(material='h-MoS2', family='flake', model='sheetonsheet',
+                     time_series_hash='', is_complete=False)
+
+    sql, params = cursor.executed[-1]
+    columns = sql.split('(', 1)[1].split(')', 1)[0].split(', ')
+    assert 'time_series_hash' not in columns or \
+        params[columns.index('time_series_hash')] is None

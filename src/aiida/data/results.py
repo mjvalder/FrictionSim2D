@@ -315,7 +315,7 @@ class FrictionResultsData(Data):
                 'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
                 'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy')},
             ntimesteps=self.ntimesteps,
-            time_series_hash=attrs.get('time_series_hash'),
+            time_series_hash=attrs.get('time_series_hash') or None,
             is_complete=self.is_complete,
             extras=self._extras_for_record(run_node, prov, sheets),
         )

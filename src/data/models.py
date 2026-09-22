@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +440,15 @@ class ResultRecord(BaseModel):
     data_url: Optional[str] = None  # URL to full time-series (Zenodo, etc.)
 
     model_config = {'use_enum_values': True}
+
+    @field_validator('time_series_hash', mode='before')
+    @classmethod
+    def _empty_hash_is_none(cls, value: Any) -> Any:
+        """`''` (no hash: an incomplete row, a flake with no resolved roles)
+        becomes None. The column is UNIQUE, and '' would occupy that one slot
+        so every later hashless row was silently skipped as a duplicate;
+        NULLs never collide."""
+        return None if value == '' else value
 
     @model_validator(mode='after')
     def _check_force_or_pressure(self) -> 'ResultRecord':
