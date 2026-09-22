@@ -165,6 +165,7 @@ class LammpsFrictionCalcJob(CalcJob):
         """
         super().on_terminated()
         _group_results_from_node_safely(self.node)
+        _supersede_older_results_safely(self.node)
 
 
 def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
@@ -274,6 +275,41 @@ def _group_results_from_node_safely(node) -> None:
             "calculation itself finished successfully.", node.pk)
 
 
+def _supersede_older_results_safely(node) -> None:
+    """`_supersede_older_results`, but never lets a failure escape -- the same
+    reasoning as `_group_results_from_node_safely`: marking an older node
+    stale is bookkeeping on top of a calculation that already finished."""
+    try:
+        _supersede_older_results(node)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception(
+            "Could not supersede older results for %s; the calculation "
+            "itself finished successfully.", node.pk)
+
+
+def _calc_results(node):
+    """`(simulation_node, [results outputs])` of a finished CalcJob node."""
+    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
+
+    sim_node = getattr(node.inputs, 'simulation_node', None)
+    if sim_node is None:
+        return None, []
+    outgoing = node.base.links.get_outgoing(link_type=LinkType.CREATE)
+    return sim_node, [triple.node for triple in outgoing.all()
+                      if triple.link_label.startswith('results__')]
+
+
+def _supersede_older_results(node) -> None:
+    """Mark every older live results node at the conditions this CalcJob just
+    produced as superseded, so a resubmitted run keeps ONE live node per load
+    point -- exactly what `ingest_run` does on the import path."""
+    sim_node, results = _calc_results(node)
+    if sim_node is None or not results:
+        return
+    from .ingest import supersede_older  # pylint: disable=import-outside-toplevel
+    supersede_older(sim_node, results)
+
+
 def _group_results_from_node(node) -> None:
     """File a finished CalcJob node's `results.*` outputs into its set group.
 
@@ -292,15 +328,8 @@ def _group_results_from_node(node) -> None:
     `PORT_NAMESPACE_SEPARATOR = '__'`) the real link label is joined with a
     double underscore instead.
     """
-    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
-
-    sim_node = getattr(node.inputs, 'simulation_node', None)
-    if sim_node is None:
-        return
-    outgoing = node.base.links.get_outgoing(link_type=LinkType.CREATE)
-    results = [triple.node for triple in outgoing.all()
-              if triple.link_label.startswith('results__')]
-    if not results:
+    sim_node, results = _calc_results(node)
+    if sim_node is None or not results:
         return
     from .ingest import add_results_to_group  # pylint: disable=import-outside-toplevel
     add_results_to_group(sim_node.set_label or sim_node.set_uuid, results)

@@ -603,3 +603,39 @@ def test_parser_copies_results_home_even_without_simulation_node(
     assert exit_code.status == LammpsFrictionCalcJob.exit_codes.ERROR_NO_SIMULATION_NODE.status
     copied = sorted(p.name for p in (local / 'results').iterdir())
     assert copied == sorted(p.name for p in (run_dir / 'results').iterdir())
+
+
+def test_a_resubmitted_calcjob_supersedes_the_older_live_results(
+        aiida_profile_clean, tmp_path):
+    """I3: the CalcJob path used to leave two live nodes per load point after
+    a resubmit. The termination hook now supersedes the older one."""
+    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
+    from src.aiida.calcjob import _supersede_older_results  # pylint: disable=import-outside-toplevel
+    from src.aiida.data_keys import is_superseded  # pylint: disable=import-outside-toplevel
+    from src.aiida.ingest import find_results, ingest_retrieved  # pylint: disable=import-outside-toplevel
+    from src.aiida.ingest import ingest_root, load_points  # pylint: disable=import-outside-toplevel
+    from src.aiida.ingest import find_or_create_run, find_or_create_set  # pylint: disable=import-outside-toplevel
+    from src.run.tree import discover_runs  # pylint: disable=import-outside-toplevel
+
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, REL, 'afm', loads=(10.0, 30.0))
+    ingest_root(root, label='resub')
+    loc, = discover_runs(root)
+    run_node, _ = find_or_create_run(find_or_create_set(root, 'resub'), loc)
+    older = {p.load: find_results(run_node, p) for p in load_points(loc)}
+    assert all(node is not None for node in older.values())
+
+    # The resubmitted job's parser output: fresh, then stored by the engine.
+    calc_node = _make_calc_node(simulation_node=run_node)
+    fresh = ingest_retrieved(run_dir, REL, run_node)
+    for index, node in enumerate(fresh):
+        node.base.links.add_incoming(calc_node, link_type=LinkType.CREATE,
+                                     link_label=f'results__point_{index}')
+        node.store()
+
+    _supersede_older_results(calc_node)
+
+    assert all(is_superseded(node) for node in older.values())
+    assert not any(is_superseded(node) for node in fresh)
+    for point in load_points(loc):
+        assert find_results(run_node, point).uuid in {n.uuid for n in fresh}

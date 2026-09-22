@@ -224,6 +224,14 @@ def find_results(run_node, point) -> Optional[object]:
     conditions, the newest one is the one a subsequent ingest should compare
     against and, if still stale, supersede -- not an arbitrary DB-order pick.
     """
+    live = _live_results(run_node, point)
+    return live[0] if live else None
+
+
+def _live_results(run_node, point) -> List:
+    """Every non-superseded results node of `run_node` at `point`'s
+    conditions, newest first. `point` is anything with `load_kind`, `load`,
+    `angle`, `speed` and `layers` -- a `LoadPoint` or a results node."""
     from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
 
     from .data import FrictionResultsData  # pylint: disable=import-outside-toplevel
@@ -240,13 +248,30 @@ def find_results(run_node, point) -> Optional[object]:
     qb = QueryBuilder()
     qb.append(FrictionResultsData, filters=filters)
     qb.order_by({FrictionResultsData: [{'ctime': 'desc'}]})
-    for node in qb.all(flat=True):
-        if node.layers != point.layers:
-            continue
-        if is_superseded(node):
-            continue
-        return node
-    return None
+    return [node for node in qb.all(flat=True)
+            if node.layers == point.layers and not is_superseded(node)]
+
+
+def supersede_older(run_node, nodes) -> List:
+    """Supersede every other live results node at the conditions of `nodes`.
+
+    The CalcJob path's counterpart to `ingest_run`'s `find_results` +
+    `supersede`: the parser hands the engine fresh nodes without looking at
+    what the run already holds, so after a resubmit two live nodes would
+    exist per load point. Called from `LammpsFrictionCalcJob.on_terminated`
+    once the new nodes are stored. `nodes` themselves are never superseded.
+    Returns the nodes it superseded.
+    """
+    keep = {str(node.uuid) for node in nodes}
+    superseded = []
+    for node in nodes:
+        for other in _live_results(run_node, node):
+            if str(other.uuid) in keep:
+                continue
+            supersede(other, run_node)
+            keep.add(str(other.uuid))
+            superseded.append(other)
+    return superseded
 
 
 def results_exist(run_node, point) -> bool:
