@@ -54,6 +54,7 @@ import numpy as np
 import pandas as pd
 
 from ..data.models import EV_A_TO_NN
+from ..run.tree import discover_runs
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,12 @@ def load_indent_meta(run_root: Path) -> Dict[str, Any]:
     n_steps: Dict[str, int] = {}
     run_dir: Dict[str, Path] = {}
 
-    for meta_path in sorted(run_root.rglob("provenance/indent_meta.json")):
+    for locator in discover_runs(Path(run_root)):
+        if locator.tokens.family != 'indent':
+            continue
+        meta_path = locator.provenance_dir / 'indent_meta.json'
+        if not meta_path.is_file():
+            continue
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -139,7 +145,10 @@ def load_indent_meta(run_root: Path) -> Dict[str, Any]:
         hold_steps[mat] = int(meta.get("hold_steps", 0))
         z_step[mat] = float(meta.get("z_step", 0.0))
         n_steps[mat] = int(meta.get("n_steps", 0))
-        run_dir[mat] = meta_path.parent.parent
+        # Was meta_path.parent.parent; locator.run_dir is the same directory for
+        # a sheet-like run and the correct L{n} level for an indent one --
+        # _run_wall_seconds rglobs the logs under it either way.
+        run_dir[mat] = locator.run_dir
         for layer_str, layer_seed in (meta.get("layers") or {}).items():
             try:
                 seed[(mat, int(layer_str))] = int(layer_seed)
@@ -153,98 +162,62 @@ def load_indent_meta(run_root: Path) -> Dict[str, Any]:
 # Penetration (hold) — per-load campaign-schema JSON
 # =============================================================================
 
-def _load_keys(sub_tree: Dict) -> List[str]:
-    """All ``f<load>`` keys present anywhere in one material's size sub-tree."""
-    keys: set = set()
-    for tip_data in sub_tree.values():
-        for r_data in tip_data.values():
-            for l_data in r_data.values():
-                for s_data in l_data.values():
-                    for f_data in s_data.values():
-                        keys.update(f_data.keys())
-    return sorted(keys)
+def split_by_load(runs: List['RunFrames'],
+                  base_seed: Dict[str, int]
+                  ) -> Dict[Tuple[str, int], List['RunFrames']]:
+    """Regroup runs into ``(load_key, seed) -> [RunFrames]``.
 
-
-def _filter_to_load(sub_tree: Dict, load_key: str) -> Dict:
-    """Copy a ``substrate → … → s{speed}`` sub-tree keeping only ``load_key``."""
-    out: Dict = {}
-    for sub, tip_data in sub_tree.items():
-        for tip, r_data in tip_data.items():
-            for radius, l_data in r_data.items():
-                for layer, s_data in l_data.items():
-                    for speed, f_data in s_data.items():
-                        if load_key in f_data:
-                            (out.setdefault(sub, {}).setdefault(tip, {})
-                                .setdefault(radius, {}).setdefault(layer, {})
-                                .setdefault(speed, {})[load_key]) = f_data[load_key]
-    return out
-
-
-def split_by_load(full_data_nested: Dict,
-                  base_seed: Dict[str, int]) -> Dict[Tuple[str, int], Dict]:
-    """Regroup the campaign tree into ``(load_key, seed) -> {material: subtree}``.
-
-    With a shared ``[indent] seed`` every material carries the same base seed, so
-    this yields one file per load; ad-hoc unseeded runs fall into per-material
-    seed batches (still correct, just more files).
+    With a shared ``[indent] seed`` every material carries the same base seed,
+    so this yields one file per load; ad-hoc unseeded runs fall into
+    per-material seed batches (still correct, just more files).
     """
-    per_file: Dict[Tuple[str, int], Dict] = {}
-    for material, size_data in full_data_nested.items():
-        seed = base_seed.get(material, 0)
-        for _size_key, sub_tree in size_data.items():
-            for load_key in _load_keys(sub_tree):
-                filtered = _filter_to_load(sub_tree, load_key)
-                per_file.setdefault((load_key, seed), {})[material] = filtered
+    per_file: Dict[Tuple[str, int], List['RunFrames']] = {}
+    for frames in runs:
+        seed = base_seed.get(frames.material, 0)
+        per_file.setdefault((f'f{frames.load}', seed), []).append(frames)
     return per_file
 
 
-def iter_hold_conditions(full_data_nested: Dict):
-    """Yield ``(material, layer, load_val)`` for every hold leaf.
-
-    Walks the campaign tree depth ``material → size → substrate → tip_mat →
-    radius → l{layer} → s{speed} → f{load} → a{angle}``.
-    """
-    for material, size_data in full_data_nested.items():
-        for sub_data in size_data.values():
-            for tip_data in sub_data.values():
-                for r_data in tip_data.values():
-                    for l_container in r_data.values():
-                        for l_key, l_data in l_container.items():
-                            layer = int(l_key.replace("l", ""))
-                            for s_data in l_data.values():
-                                for load_key in s_data:
-                                    yield material, layer, float(load_key[1:])
+def iter_hold_conditions(runs: List['RunFrames']):
+    """Yield ``(material, layer, load)`` for every hold run."""
+    for frames in runs:
+        yield (frames.material, int(frames.tokens.layers or 1),
+               float(frames.load))
 
 
-def _deliver_penetration(top: Path, out_dir: Path,
+def _deliver_penetration(run_root: Path, out_dir: Path,
                          meta: Dict[str, Any]) -> Tuple[Dict[str, Path], set]:
-    """Write the per-load penetration JSON; return (written, hold-condition set)."""
-    from .read_data import DataReader, _NpEncoder  # noqa: PLC0415
+    """Write the per-load penetration JSON; return (written, hold-condition set).
 
-    reader = DataReader(results_dir=str(top))
-    if not reader.full_data_nested:
-        logger.info("No indent hold results found under %s", top)
+    The document is the v2 export (`read_data.DataReader.export_payload`)
+    restricted to one load, plus the two indent keys. The old nested
+    ``results`` block was `DataReader.full_data_nested`, which this rework
+    deletes -- one export schema, not two.
+    """
+    from .read_data import DataReader, _NpEncoder  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+    reader = DataReader(results_dir=str(run_root))
+    indent_runs = [r for r in reader.runs if r.family == 'indent']
+    if not indent_runs:
+        logger.info("No indent hold results found under %s", run_root)
         return {}, set()
 
     written: Dict[str, Path] = {}
-    per_file = split_by_load(reader.full_data_nested, meta["base_seed"])
-    for (load_key, seed), materials in sorted(per_file.items()):
+    for (load_key, seed), runs in sorted(
+            split_by_load(indent_runs, meta["base_seed"]).items()):
         load_val = float(load_key[1:])
-        metadata = dict(reader.metadata)
-        metadata["time_series"] = reader.time_series
-        metadata["indent_load_nN"] = load_val
-        metadata["indent_base_seed"] = seed
-        payload = {"metadata": metadata, "results": materials}
+        payload = reader.export_payload(runs[0].size, runs)
+        payload["metadata"]["indent_load_nN"] = load_val
+        payload["metadata"]["indent_base_seed"] = seed
         name = f"output_indent_f{_load_token(load_val)}_s{seed}.json"
         path = out_dir / name
         with path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, cls=_NpEncoder)
         written[name] = path
-        logger.info("Wrote %d material(s) at load %g nN -> %s",
-                    len(materials), load_val, path)
+        logger.info("Wrote %d run(s) at load %g nN -> %s",
+                    len(runs), load_val, path)
 
-    conditions = {(m, l, ld) for m, l, ld in iter_hold_conditions(reader.full_data_nested)}
-    return written, conditions
+    return written, set(iter_hold_conditions(indent_runs))
 
 
 # =============================================================================
@@ -301,32 +274,29 @@ def retract_features(df: pd.DataFrame) -> Dict[str, float]:
     return out
 
 
-def _condition_from_path(csv_path: Path, run_root: Path) -> Optional[Tuple[str, int, float]]:
-    """Extract ``(material, layer, load)`` from a retract CSV path/name."""
-    m = _CSV_RE.search(csv_path.name)
-    if not m:
-        return None
-    try:
-        parts = csv_path.relative_to(run_root).parts
-    except ValueError:
-        parts = csv_path.parts
-    if INDENT_TOPDIR not in parts:
-        return None
-    i = parts.index(INDENT_TOPDIR)
-    if i + 1 >= len(parts):
-        return None
-    material = material_id(parts[i + 1])
-    return material, int(m.group("layer")), float(m.group("load"))
-
-
 def discover_curves(run_root: Path) -> List[Tuple[str, int, float, Path]]:
-    """Find ``(material, layer, load, csv_path)`` for every retract curve."""
+    """Find ``(material, layer, load, csv_path)`` for every retract curve.
+
+    Walks with `discover_runs`: a run is one `provenance.json`, and the
+    material comes from the parsed tokens. The old rglob took the directory
+    one level below `indent/` as the material, so a stray CSV under a
+    run-shaped path was picked up and filed under whatever sat in that slot.
+    """
     found: List[Tuple[str, int, float, Path]] = []
-    for csv_path in sorted(run_root.rglob("results/indent_f*N_l*.csv")):
-        cond = _condition_from_path(csv_path, run_root)
-        if cond is not None:
-            found.append((*cond, csv_path))
-    return found
+    for locator in discover_runs(Path(run_root)):
+        if locator.tokens.family != 'indent':
+            continue
+        material = (material_id(locator.tokens.materials[0])
+                    if locator.tokens.materials else '')
+        if not material:
+            continue
+        for csv_path in sorted(locator.results_dir.glob("indent_f*N_l*.csv")):
+            m = _CSV_RE.search(csv_path.name)
+            if m is None:
+                continue
+            found.append((material, int(m.group("layer")),
+                          float(m.group("load")), csv_path))
+    return sorted(found)
 
 
 def _deliver_adhesion(run_root: Path, out_dir: Path, data_dir: Path,
@@ -431,15 +401,13 @@ def run(run_root: Path, out_dir: Path, data_dir: Optional[Path] = None) -> Dict[
     run_root = Path(run_root)
     out_dir = Path(out_dir)
     data_dir = Path(data_dir) if data_dir is not None else out_dir
-    top = run_root / INDENT_TOPDIR if (run_root / INDENT_TOPDIR).is_dir() else run_root
-
     meta = load_indent_meta(run_root)
     curves = discover_curves(run_root)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     written: Dict[str, Path] = {}
 
-    pen_written, hold_conditions = _deliver_penetration(top, out_dir, meta)
+    pen_written, hold_conditions = _deliver_penetration(run_root, out_dir, meta)
     written.update(pen_written)
 
     written.update(_deliver_adhesion(run_root, out_dir, data_dir, curves))

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from src.postprocessing import indent
+from tests.helpers.results_tree import make_family_run
 
 
 # --- unit helpers ----------------------------------------------------------
@@ -30,17 +31,28 @@ def test_parse_wall_seconds():
     assert indent._parse_wall_seconds("45") == 45
 
 
-def test_split_by_load_groups_per_load_and_seed():
-    df = object()  # opaque leaf; split only reshapes the tree
-    tree = {
-        "h_MoS2": {"60x60y": {"aSi": {"Si": {"r25": {"l1": {"s2": {
-            "f10.0": {"a0": df}, "f30.0": {"a0": df},
-        }}}}}}},
-    }
-    per_file = indent.split_by_load(tree, base_seed={"h_MoS2": 777})
-    assert set(per_file.keys()) == {("f10.0", 777), ("f30.0", 777)}
-    leaf = per_file[("f10.0", 777)]["h_MoS2"]["aSi"]["Si"]["r25"]["l1"]["s2"]
-    assert set(leaf.keys()) == {"f10.0"}                       # only that load kept
+def test_split_by_load_groups_per_load_and_seed(tmp_path: Path):
+    from src.postprocessing.read_data import DataReader
+
+    _make_run(tmp_path)
+    runs = DataReader(results_dir=str(tmp_path)).runs
+
+    per_file = indent.split_by_load(runs, base_seed={"h_MoS2": 777})
+
+    assert set(per_file) == {("f10.0", 777), ("f30.0", 777)}
+    assert {r.load for r in per_file[("f10.0", 777)]} == {10.0}
+    assert {r.tokens.layers for r in per_file[("f10.0", 777)]} == {1, 2}
+
+
+def test_iter_hold_conditions_yields_material_layer_load(tmp_path: Path):
+    from src.postprocessing.read_data import DataReader
+
+    _make_run(tmp_path)
+    runs = DataReader(results_dir=str(tmp_path)).runs
+
+    assert set(indent.iter_hold_conditions(runs)) == {
+        ("h_MoS2", 1, 10.0), ("h_MoS2", 1, 30.0),
+        ("h_MoS2", 2, 10.0), ("h_MoS2", 2, 30.0)}
 
 
 # --- retract_features reduction --------------------------------------------
@@ -94,21 +106,28 @@ def _write_hold(dir_: Path, load: int, layer: int, tipz: float, comz: float):
 
 
 def _make_run(root: Path, seed=20260710, hold_steps=10000, z_step=0.2, n_steps=100):
-    base = root / "indent" / "h-MoS2" / "60x_60y" / "sub_amorph-Si_tip_Si_r25" / "K300"
+    """A real indent tree: two layers x two loads, hold files and retract curves."""
     for layer in (1, 2):
-        results = base / f"L{layer}" / "results"
+        run_dir = make_family_run(root, 'indent', material='h-MoS2',
+                                  size=(60.0, 60.0), temp=300, layers=layer,
+                                  loads=(10.0, 30.0))
+        results = run_dir / 'results'
+        for stale in results.iterdir():
+            stale.unlink()
         # Penetration (hold) files, one per load.
         _write_hold(results, load=10, layer=layer, tipz=12.0, comz=5.0)
         _write_hold(results, load=30, layer=layer, tipz=11.0, comz=5.0)
         # Adhesion (retract) curves, one per load.
         for load in (10, 30):
-            _synthetic_curve().to_csv(results / f"indent_f{load}N_l{layer}.csv", index=False)
-    prov = base / "provenance"
-    prov.mkdir(parents=True, exist_ok=True)
-    (prov / "indent_meta.json").write_text(json.dumps({
-        "base_seed": seed, "hold_steps": hold_steps, "z_step": z_step, "n_steps": n_steps,
-        "material": "h-MoS2", "layers": {"1": 111111, "2": 222222}, "loads": [10.0, 30.0],
-    }), encoding="utf-8")
+            _synthetic_curve().to_csv(
+                results / f"indent_f{load}N_l{layer}.csv", index=False)
+        prov = run_dir.parent / "provenance"
+        prov.mkdir(parents=True, exist_ok=True)
+        (prov / "indent_meta.json").write_text(json.dumps({
+            "base_seed": seed, "hold_steps": hold_steps, "z_step": z_step,
+            "n_steps": n_steps, "material": "h-MoS2",
+            "layers": {"1": 111111, "2": 222222}, "loads": [10.0, 30.0],
+        }), encoding="utf-8")
     return root
 
 
@@ -140,13 +159,16 @@ def test_run_writes_penetration_json(tmp_path: Path):
     assert "output_indent_f10_s20260710.json" in written
     assert "output_indent_f30_s20260710.json" in written
 
-    payload = json.loads((out / "output_indent_f10_s20260710.json").read_text())
-    leaf = (payload["results"]["h_MoS2"]["amorph-Si"]["Si"]["r25"]
-            ["l1"]["s2"]["f10.0"]["a0"])
-    assert "columns" in leaf and "data" in leaf
-    for col in ("nf", "comz", "tipz"):
-        assert col in leaf["columns"]                          # penetration channels
+    payload = json.loads(
+        (out / "output_indent_f10_s20260710.json").read_text(encoding="utf-8"))
+    assert payload["schema"] == 2
     assert payload["metadata"]["indent_load_nN"] == 10.0
+    assert payload["metadata"]["indent_base_seed"] == 20260710
+    assert {r["load"] for r in payload["runs"]} == {10.0}
+    assert {r["layers"] for r in payload["runs"]} == {1, 2}
+    columns = payload["runs"][0]["tiers"]["window"]["columns"]
+    for col in ("nf", "comz", "tipz"):
+        assert col in columns                                  # penetration channels
 
 
 def test_run_writes_adhesion_features_and_curves(tmp_path: Path):
@@ -185,3 +207,16 @@ def test_run_writes_combined_manifest(tmp_path: Path):
 
 def test_run_returns_empty_when_no_indent(tmp_path: Path):
     assert indent.run(tmp_path, tmp_path / "out") == {}
+
+
+def test_discover_curves_ignores_a_curve_outside_a_run(tmp_path: Path):
+    """A retract CSV under a run-shaped path is not a run -- the old rglob
+    picked it up and filed it under whatever sat in the material slot."""
+    _make_run(tmp_path)
+    stray = tmp_path / "indent" / "loose" / "results"
+    stray.mkdir(parents=True)
+    _synthetic_curve().to_csv(stray / "indent_f99N_l9.csv", index=False)
+
+    conds = {(m, l, ld) for m, l, ld, _p in indent.discover_curves(tmp_path)}
+
+    assert 99.0 not in {ld for _m, _l, ld in conds}
