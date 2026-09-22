@@ -13,10 +13,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
@@ -24,8 +25,13 @@ from ..workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['DatabaseController', 'DatabaseRequest', 'central_configured',
-          'request_key']
+__all__ = ['CACHE_KEEP', 'DatabaseController', 'DatabaseRequest',
+          'central_configured', 'request_key']
+
+#: How many keyed query-cache directories `.preview/_db` keeps. A cached
+#: `list` result is a few hundred kB of rows; ten covers the handful of
+#: queries a session cycles between and still bounds the directory.
+CACHE_KEEP = 10
 
 
 def request_key(kind: str, source: str, payload: Dict[str, Any]) -> str:
@@ -138,10 +144,39 @@ class DatabaseController(QObject):
         other kind reuses one scratch directory per kind: a `detail` fires on
         each row click, and its result is never read back from disk, so a
         directory per click would only grow `.preview/_db` without bound.
+
+        Every distinct query is a new keyed directory, though, and nothing
+        else deletes them: `Workspace.prune_previews` skips `_`-prefixed
+        entries (it must, or eight renders would throw the cache away) and
+        `_invalidate_cached_lists` only unlinks the result files. So a new
+        keyed directory prunes its siblings to the newest `CACHE_KEEP`.
         """
         if request.kind in self.CACHED_KINDS:
-            return self.request_dir(self.cache_key(request))
+            directory = self.request_dir(self.cache_key(request))
+            if not directory.exists():
+                directory.mkdir(parents=True, exist_ok=True)
+                self._prune_cached_results()
+            return directory
         return self._db_dir / '_scratch' / request.kind
+
+    def _prune_cached_results(self, keep: int = CACHE_KEEP) -> List[Path]:
+        """Delete all but the newest `keep` keyed cache directories.
+
+        `_scratch` is not one of them -- it is where every uncached kind
+        writes, and removing it under a running request would drop the result
+        file the worker is about to write.
+        """
+        entries = sorted(
+            (p for p in self._db_dir.iterdir()
+             if p.is_dir() and p.name != '_scratch'),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        removed = []
+        for stale in entries[keep:]:
+            shutil.rmtree(stale, ignore_errors=True)
+            removed.append(stale)
+        return removed
 
     def cache_key(self, request: DatabaseRequest) -> str:
         """Identity of a result: the request exactly as the worker reads it.
@@ -187,7 +222,7 @@ class DatabaseController(QObject):
             self._cancelled = False
             self.started.emit(request.kind)
             self.progress.emit('reusing the cached query result')
-            self._deliver(result_file)
+            self._deliver(result_file, cached=True)
             return
         result_file.unlink(missing_ok=True)
 
@@ -295,7 +330,14 @@ class DatabaseController(QObject):
             return
         self.failed.emit(self._kind, 'The database request process failed to start.')
 
-    def _deliver(self, result_file: Path) -> None:
+    def _deliver(self, result_file: Path, *, cached: bool = False) -> None:
+        """Hand one result to the window, saying whether it came off disk.
+
+        `elapsed_s` is the original query's, so a replayed result otherwise
+        reports a fresh-looking timing for a store nobody has touched since.
+        The window says so in the message panel; the flag is set here because
+        this is the only place that knows.
+        """
         try:
             result = json.loads(result_file.read_text(encoding='utf-8'))
         except (OSError, json.JSONDecodeError) as exc:
@@ -307,6 +349,7 @@ class DatabaseController(QObject):
             return
         if self._kind == 'import':
             self._invalidate_cached_lists()
+        result['cached'] = cached
         self.finished.emit(self._kind, result)
 
     def _invalidate_cached_lists(self) -> None:

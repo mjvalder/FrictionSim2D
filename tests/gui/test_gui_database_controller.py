@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from src.core.config import GlobalSettings  # noqa: E402
 from src.gui.controllers.database import (  # noqa: E402
-    DatabaseController, DatabaseRequest, request_key)
+    CACHE_KEEP, DatabaseController, DatabaseRequest, request_key)
 from src.gui.workspace import Workspace  # noqa: E402
 
 
@@ -361,3 +361,95 @@ class TestResultCache:
         controller._deliver(result_file)
 
         assert cached.exists()
+
+
+class TestCacheMarking:
+    """A replayed result must not read as a fresh one.
+
+    `elapsed_s` belongs to the query that first fetched it, so the pane needs
+    to know which branch delivered the result -- `_deliver` is the only place
+    that does.
+    """
+
+    def test_a_cached_result_is_marked_cached(self, controller):
+        request = DatabaseRequest(kind='list', source='local',
+                                  payload={'filters': {'family': 'afm'}})
+        _seed(controller.directory_for(request), _EMPTY_LIST_RESULT)
+        seen = []
+        controller.finished.connect(lambda kind, result: seen.append(result))
+
+        controller.start(request)
+
+        assert seen[0]['cached'] is True
+
+    def test_a_result_read_after_a_run_is_not(self, controller):
+        request = DatabaseRequest(kind='list', source='local',
+                                  payload={'filters': {'family': 'afm'}})
+        result_file = controller.directory_for(request) / 'result.json'
+        _seed(result_file.parent, _EMPTY_LIST_RESULT)
+        controller._kind = 'list'
+        controller._result_file = result_file
+        seen = []
+        controller.finished.connect(lambda kind, result: seen.append(result))
+
+        controller._deliver(result_file)
+
+        assert seen[0]['cached'] is False
+
+
+class TestCachePruning:
+    """`.preview/_db` is the one scratch area nothing else cleans up.
+
+    `Workspace.prune_previews` skips `_`-prefixed entries on purpose (pruning
+    to the newest few builds would throw the query cache away after eight
+    renders) and `_invalidate_cached_lists` only unlinks the result files,
+    leaving the directories behind. Every distinct query makes another one.
+    """
+
+    def _keyed(self, controller):
+        return sorted(p.name for p in controller._db_dir.iterdir()
+                      if p.is_dir() and p.name != '_scratch')
+
+    def test_a_new_query_directory_prunes_to_the_newest_keep(self, controller):
+        made = []
+        for index in range(CACHE_KEEP + 3):
+            directory = controller.directory_for(
+                DatabaseRequest(kind='list', source='local',
+                                payload={'filters': {'family': f"f{index}"}}))
+            made.append(directory)
+            # mtimes in a fixed, strictly increasing order: several
+            # directories made in the same millisecond would otherwise tie,
+            # and "the newest N" would not be a testable claim.
+            os.utime(directory, (1_600_000_000 + index, 1_600_000_000 + index))
+
+        assert self._keyed(controller) == sorted(p.name for p in made[3:])
+        assert all(p.exists() for p in made[3:])
+        assert not any(p.exists() for p in made[:3])
+
+    def test_the_scratch_directory_survives_the_prune(self, controller):
+        scratch = controller.directory_for(
+            DatabaseRequest(kind='detail', source='local', payload={'run_uuid': 'a'}))
+        scratch.mkdir(parents=True, exist_ok=True)
+        os.utime(scratch.parent, (1, 1))
+
+        for index in range(CACHE_KEEP + 2):
+            controller.directory_for(
+                DatabaseRequest(kind='list', source='local',
+                                payload={'filters': {'family': f"g{index}"}}))
+
+        assert scratch.is_dir()
+
+    def test_an_existing_directory_is_reused_without_pruning(self, controller,
+                                                             monkeypatch):
+        """A cache hit must not count as a new directory: re-querying the
+        same filters would otherwise age out a neighbour on every Search."""
+        request = DatabaseRequest(kind='list', source='local',
+                                  payload={'filters': {'family': 'afm'}})
+        directory = controller.directory_for(request)
+        (directory / 'result.json').write_text('{}', encoding='utf-8')
+        removed = []
+        monkeypatch.setattr(controller, '_prune_cached_results',
+                            lambda *args, **kwargs: removed.append(1))
+
+        assert controller.directory_for(request) == directory
+        assert removed == []
