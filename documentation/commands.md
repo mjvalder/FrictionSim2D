@@ -535,8 +535,11 @@ no in-place migration to schema 3, so `--drop` (which recreates
 `simulations` from scratch) is the only supported upgrade path.
 
 ```bash
-FrictionSim2D db init [--drop] [DB OPTIONS]
+FrictionSim2D db init [--drop [--yes]] [DB OPTIONS]
 ```
+
+`--drop` deletes every row, so it asks for confirmation first; `--yes`/`-y`
+skips the prompt (for scripts).
 
 ### db create-key
 

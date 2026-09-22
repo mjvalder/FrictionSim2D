@@ -1640,10 +1640,14 @@ def db_delete(
 
 @db_group.command('init')
 @click.option('--drop', is_flag=True,
-              help='Drop and recreate the simulations table (schema 3 has no migration).')
+              help='Drop and recreate the simulations table (schema 3 has no '
+                   'migration). Deletes every row; asks for confirmation.')
+@click.option('--yes', '-y', is_flag=True,
+              help='Do not ask for confirmation before --drop.')
 @_add_db_options
-def db_init(
+def db_init(  # pylint: disable=too-many-arguments
     drop: bool,
+    yes: bool,
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1654,13 +1658,17 @@ def db_init(
 
     Safe to run repeatedly without ``--drop`` — existing tables and columns
     are not overwritten. Pass ``--drop`` to recreate ``simulations`` from
-    scratch (there is no migration from an older schema version).
+    scratch (there is no migration from an older schema version); it asks
+    for confirmation first unless ``--yes`` is given.
 
     Example:\n
         FrictionSim2D db init
     """
     from .data.database import SCHEMA_VERSION  # noqa: PLC0415
 
+    if drop and not yes:
+        click.confirm('This will DROP the simulations table and delete every '
+                      'row in the central database. Continue?', abort=True)
     db = _make_db(host, port, dbname, user, password)
     db.init_schema(drop=drop)
     click.echo(f"✅ Schema version {SCHEMA_VERSION} ready"
