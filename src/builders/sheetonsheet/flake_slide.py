@@ -74,9 +74,9 @@ def flake_projected_area(shape: str, edge_length: float) -> float:
 def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Dict]:
     """Split a stacked substrate sheet's atoms into ``n_layers`` z-region bands.
 
-    The substrate sheet's layers share atom types (many-body ``sw``), so the
-    template groups them by z-slab (region), exactly like the D1 hetero slide.
-    Unlike the hetero path there is no per-layer ``.source``/``.z`` placement
+    The PotentialManager already writes a per-layer ``group layer_N type ...``
+    for the stacked sheet; the template ALSO adds each z-slab (region) to that
+    group, like the D1 hetero slide, which is a no-op when the two agree. Unlike the hetero path there is no per-layer ``.source``/``.z`` placement
     record (``build_sheet`` writes one stacked file), so the bands are recovered
     by cutting at the ``n_layers - 1`` largest inter-atom z-gaps of the sorted
     z-coordinates. For a well-separated 2D stack (interlayer gap > the largest
@@ -277,9 +277,11 @@ class FlakeSlideSimulation(SimulationBase):
         build_dir = self.output_dir / "build"
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Substrate sheet (homogeneous, stacked >=2 layers). Layer groups are
-        #    z-region bands (shared sw types), so register the sheet as ONE
-        #    component (n_layers=1) -- the D1 hetero convention.
+        # 1. Substrate sheet (homogeneous, stacked >=2 layers). The stacked file
+        #    carries PER-LAYER atom types (stack_multilayer_sheet renumbers them
+        #    element-first: Mo_L1, Mo_L2, S_L1, S_L2 for a MoS2 bilayer), so the
+        #    PotentialManager below must register the sheet with the same layer
+        #    count -- see step 3.
         sheet_path, _sheet_dims, lat_c = components.build_sheet(
             sheet_cfg, build_dir, stack_if_multi=True, settings=settings,
             n_layers_override=n_sheet_layers,
@@ -342,12 +344,21 @@ class FlakeSlideSimulation(SimulationBase):
                 potentials_prefix=prefix,
             )
             pm.set_lj_overrides(self.config.lj_override)
-            pm.register_component("sheet", sheet_cfg, n_layers=1)
+            # n_layers MUST match the stacked sheet file's per-layer types.
+            # Registering it as one layer gave the sheet 2 types while the file
+            # held 2*N: the flake's type offset then landed on the sheet's own
+            # upper types, so `group flake` swallowed the sheet's S atoms and
+            # the load, drive and v_fz acted on sheet + flake together.
+            pm.register_component("sheet", sheet_cfg, n_layers=n_sheet_layers)
             for name, comp in zip(flake_names, flake_components):
                 pm.register_component(name, comp, regions=[None, "corner"])
             if reserve_virtual_type:
                 pm.register_virtual_atom()
             pm.add_self_interaction("sheet")
+            if pm.is_sheet_lj(sheet_cfg.pot_type):
+                # One many-body instance per layer, so the layers need the
+                # interlayer LJ explicitly (sheetonsheet/base.py does the same).
+                pm.add_interlayer_interaction("sheet")
             for name in flake_names:
                 pm.add_self_interaction(name)
             for name in flake_names:
@@ -586,6 +597,14 @@ class FlakeSlideSimulation(SimulationBase):
         zlo = min(sheet_bot, f_zmin + dz) - 15.0
         zhi_box = max(sheet_top, placed_zmax) + 15.0
         box_region = _box_region_cmd(lx, ly, xy, zlo, zhi_box)
+        # `read_data ... add append` GROWS the box to take in the flake file's
+        # own (larger, carving) box. Pin it back to the sheet's periodic cell,
+        # or the substrate is a finite island with vacuum seams at the box edge.
+        tilt = f" xy final {xy:.6f}" if abs(xy) > 1e-9 else ""
+        restore_box = (
+            f"change_box      all x final 0.0 {lx:.6f} y final 0.0 {ly:.6f} "
+            f"z final {zlo:.6f} {zhi_box:.6f}{tilt} units box"
+        )
         atom_style = _detect_atom_style(sheet_path)
         total_types = len(pm.types)
         masses_block = pm.get_masses_string()
@@ -601,6 +620,7 @@ create_box      {total_types} box
 
 read_data       {sheet_path} add append shift 0.0 0.0 0.0 group g_sheet offset 0 0 0 0 0 nocoeff
 read_data       {flake_path} add append shift {dx:.6f} {dy:.6f} {dz:.6f} group g_flake offset {n_sheet_types} 0 0 0 0 nocoeff
+{restore_box}
 
 {masses_block}
 include         {settings_path}

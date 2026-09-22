@@ -233,6 +233,42 @@ def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
+def test_flake_slide_assembly_keeps_sheet_types_and_periodic_box(tmp_path):
+    """The stacked substrate carries PER-LAYER types and its own periodic cell.
+
+    Regressions: (1) the sheet was registered as one layer, so the flake's type
+    offset landed on the sheet's upper types and ``group flake`` held the
+    sheet's S atoms too; (2) ``read_data add`` grew the box to the flake file's
+    carving box, leaving vacuum seams that cut the periodic substrate.
+    """
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    from src.interfaces.ase import read_lammps_data
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    sim.build()
+    run_dir = Path(sim.run_dir())
+
+    sheet_file = next(run_dir.glob("build/h-MoS2_*.lmp"))
+    sheet = read_lammps_data(sheet_file)
+    n_sheet = int(re.search(r"^\s*(\d+)\s+atom types", sheet_file.read_text(), re.M).group(1))
+    sheet_types = set(range(1, n_sheet + 1))      # 2 layers x (Mo, S) = 4
+    assert n_sheet == 4
+    slide = next(run_dir.rglob("*slide*.in")).read_text()
+    flake_types = {int(t) for t in re.search(r"group\s+flake type ([\d ]+)", slide)
+                   .group(1).split()}
+    assert not sheet_types & flake_types, (sheet_types, flake_types)
+
+    settings = (run_dir / "lammps" / "system.in.settings").read_text()
+    assert re.search(r"^group layer_1 type 1 3$", settings, re.M)   # Mo_L1 S_L1
+    assert re.search(r"^group layer_2 type 2 4$", settings, re.M)   # Mo_L2 S_L2
+
+    combined = read_lammps_data(run_dir / "flake_slide.data")
+    assert combined.cell[0, 0] == pytest.approx(sheet.cell[0, 0], abs=1e-4)
+    assert combined.cell[1, 1] == pytest.approx(sheet.cell[1, 1], abs=1e-4)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 def test_driven_group_is_flake_and_virtual_type_reserved(tmp_path):
     from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 

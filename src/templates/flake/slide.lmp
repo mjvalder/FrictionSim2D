@@ -59,7 +59,7 @@ change_box      all z final -15.0 {{ zhi + 15 }} units box
 
 include         {{ potential_file }}
 
-# ---- Substrate-sheet layer groups by initial z-slab (shared types, so region not type) ----
+# ---- Substrate-sheet layer groups: add each initial z-slab to the per-layer type group ----
 {% for layer in sheet_layers %}
 region          reg_layer_{{ layer.idx }} block INF INF INF INF {{ '%.4f'|format(layer.zlo) }} {{ '%.4f'|format(layer.zhi) }} units box
 group           layer_{{ layer.idx }} region reg_layer_{{ layer.idx }}
@@ -87,8 +87,8 @@ min_style       {{ min_style }}
 # Uniform pressure v_pressure (GPa) over the flake's PROJECTED in-plane area,
 # from the [Flake] outline ({{ flake_shape }}, edge_length {{ flake_edge_length }} A):
 #   triangle (side a): sqrt(3)/4 a^2 | square (side a): a^2
-#   hexagon (circumradius R): (10 - 25 sqrt(3)/6) R^2, the outline
-#   components._in_hexagon actually carves (see flake_projected_area).
+#   hexagon (circumradius R): 3 sqrt(3)/2 R^2, the regular hexagon
+#   components._in_hexagon carves (see flake_projected_area).
 # Rotation/twist-invariant. A = {{ '%.4f'|format(flake_area) }} A^2 here.
 # 1 eV/A^3 = {{ ev_a3_to_gpa }} GPa; total load P*A (eV/A) split equally per
 # flake atom, pointing down onto the sheet -- sheetonsheet/slide.lmp's
