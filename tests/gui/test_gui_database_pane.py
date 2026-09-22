@@ -17,11 +17,11 @@ pytest.importorskip('PySide6')
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: E402
 
 from src.gui.widgets.database.filters import EMPTY_FILTERS  # noqa: E402
 from src.gui.widgets.database.pane import SOURCES, DatabasePane  # noqa: E402
-from src.gui.workspace import Workspace  # noqa: E402
+from src.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 
 RECORDS = [
     {'set_label': 's1', 'family': 'afm', 'materials': ['h-MoS2'], 'layers': 2,
@@ -659,3 +659,64 @@ class TestConnectionCheck:
         assert '[FAIL] profile loaded: boom' in text
         assert 'Check settings.aiida.profile' in text
         assert 'not ready' in text
+
+
+class TestWorkspaceMemory:
+    """Nothing new on disk: the workspace's existing key/value state."""
+
+    def test_a_query_records_the_source_and_the_filters(self, window, monkeypatch):
+        monkeypatch.setattr(window.database, 'start', lambda request: None)
+        window.database_pane.filters.family.addItem('afm')
+        window.database_pane.filters.family.setCurrentText('afm')
+
+        window.database_pane.search_button.click()
+
+        assert window.workspace.state['db_source'] == 'local'
+        assert window.workspace.state['db_filters']['family'] == 'afm'
+
+    def test_switching_source_is_recorded_immediately(self, window):
+        window.database_pane.set_source('central')
+
+        assert window.workspace.state['db_source'] == 'central'
+
+    def test_a_download_records_its_destination(self, window, tmp_path, monkeypatch):
+        monkeypatch.setattr(window.database, 'start', lambda request: None)
+        pane = window.database_pane
+        pane.set_records(RECORDS)
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        pane.table.selectRow(0)
+
+        pane.download_buttons['results'].click()
+
+        assert window.workspace.state['db_dest'] == str(tmp_path / 'dl')
+
+    def test_a_new_window_restores_what_the_last_one_left(self, qt_app, tmp_path):
+        del qt_app
+        from src.gui.app import MainWindow
+        workspace = Workspace.open(tmp_path / 'ws')
+        workspace.remember('db_source', 'central')
+        workspace.remember('db_filters', dict(EMPTY_FILTERS, family='hetero'))
+        workspace.remember('db_dest', str(tmp_path / 'dl'))
+
+        window = MainWindow(workspace)
+        try:
+            assert window.database_pane.source == 'central'
+            assert window.database_pane.filters.value()['family'] == 'hetero'
+            assert window.database_pane.last_dest == str(tmp_path / 'dl')
+        finally:
+            window.document.dirty = False
+            window.settings_document.dirty = False
+            window.close()
+
+    def test_changing_workspace_re_points_the_controller_and_restores(
+            self, window, tmp_path, monkeypatch):
+        other = Workspace.open(tmp_path / 'other')
+        other.remember('db_source', 'central')
+        monkeypatch.setattr(RecentWorkspaces, 'add', lambda self, root: [])
+        monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
+                            lambda *args, **kwargs: str(other.root))
+
+        window._choose_workspace()
+
+        assert window.database.workspace.root == other.root
+        assert window.database_pane.source == 'central'

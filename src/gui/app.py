@@ -47,13 +47,17 @@ from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.database.detail import format_bytes
-from .widgets.database.pane import DatabasePane, render_checks
+from .widgets.database.pane import SOURCES, DatabasePane, render_checks
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
 logger = logging.getLogger(__name__)
 
 APP_NAME = 'FrictionSim2D'
+
+#: What the Database pane remembers between sessions (D10). Workspace state
+#: is a plain key/value store, so this is the whole schema.
+DB_STATE_KEYS = ('db_source', 'db_filters', 'db_dest')
 
 
 def plural(count: int, word: str) -> str:
@@ -186,6 +190,7 @@ class MainWindow(QMainWindow):
         """The database pane (D1/D2). It never queries on construction: a
         query happens only when the user presses Search or Refresh."""
         self.database_pane = DatabasePane(self)
+        self._restore_database_state()
         return self.database_pane
 
     def _build_header(self) -> QWidget:
@@ -360,6 +365,7 @@ class MainWindow(QMainWindow):
         pane.import_requested.connect(self._on_db_import)
         pane.check_requested.connect(self._on_db_check)
         pane.cancel_requested.connect(self._on_db_cancel)
+        pane.source_changed.connect(lambda _source: self._remember_database_state())
 
         self.database.started.connect(self._on_db_started)
         self.database.progress.connect(self.statusBar().showMessage)
@@ -398,16 +404,36 @@ class MainWindow(QMainWindow):
         else:
             self.database_pane.message(f"Cancelled the {kind} request.", 'warn')
 
+    def _restore_database_state(self) -> None:
+        """Put back the source, filters and destination this workspace last used."""
+        state = self.workspace.state
+        source = state.get('db_source')
+        if source in SOURCES:
+            self.database_pane.set_source(source)
+        filters = state.get('db_filters')
+        if isinstance(filters, dict):
+            self.database_pane.filters.set_value(filters)
+        dest = state.get('db_dest')
+        if isinstance(dest, str):
+            self.database_pane.last_dest = dest
+
+    def _remember_database_state(self) -> None:
+        self.workspace.remember('db_source', self.database_pane.source)
+        self.workspace.remember('db_filters', self.database_pane.filters.value())
+
     def _on_db_query(self, source: str, filters: dict) -> None:
+        self._remember_database_state()
         self._start_db('list', source, {'filters': filters})
 
     def _on_db_refresh(self, source: str, filters: dict) -> None:
+        self._remember_database_state()
         self._start_db('list', source, {'filters': filters})
 
     def _on_db_detail(self, source: str, payload: dict) -> None:
         self._start_db('detail', source, payload)
 
     def _on_db_export(self, source: str, payload: dict) -> None:
+        self.workspace.remember('db_dest', payload.get('dest', ''))
         self._start_db('export', source, payload)
 
     def _on_db_import(self, source: str, payload: dict) -> None:
@@ -1014,6 +1040,8 @@ class MainWindow(QMainWindow):
         RecentWorkspaces().add(chosen)
         self.preview.workspace = self.workspace
         self.generator.workspace = self.workspace
+        self.database.workspace = self.workspace
+        self._restore_database_state()
         # Only meaningful for an unsaved document (write_material_names falls
         # back to source_path's own directory once there is one) -- but keep
         # it correct regardless, so switching workspaces before ever saving
