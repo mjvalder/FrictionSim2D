@@ -1,4 +1,5 @@
 """export-results is the inverse of ingest (spec §4.2)."""
+import json
 import re
 from pathlib import Path
 
@@ -374,6 +375,121 @@ def test_rebuild_stages_inputs_outside_dest(aiida_profile_clean, tmp_path,
     # the TemporaryDirectory is cleaned up on exit -- nothing was left behind
     assert not seen['config_dir'].exists()
     assert not seen['settings_dir'].exists()
+
+
+def _minimal_sheet_flake_config(tmp_path):
+    """A real, validating `SheetOnSheetSimulationConfig` with a `[Flake]`
+    section -- `flake_slide.py`'s `FlakeSlideSimulation` route -- built the
+    same way `tests/core/test_config.py`'s fixtures do (a dummy pot/cif file
+    on disk, real content unneeded since nothing here builds a structure).
+    """
+    from src.core.config import SheetOnSheetSimulationConfig, load_settings
+
+    dummy_pot = tmp_path / 'dummy.sw'
+    dummy_cif = tmp_path / 'dummy.cif'
+    dummy_pot.write_text('# dummy potential\n', encoding='utf-8')
+    dummy_cif.write_text('# dummy cif\n', encoding='utf-8')
+
+    return SheetOnSheetSimulationConfig(
+        general={'temp': 300.0},
+        **{'2D': {'mat': 'MoS2', 'pot_type': 'sw', 'pot_path': str(dummy_pot),
+                  'cif_path': str(dummy_cif), 'x': 50.0, 'y': 50.0,
+                  'layers': [1], 'stack_type': 'AB'},
+           # pot_type/pot_path/cif_path/mat given explicitly (rather than left
+           # at FlakeConfig's Optional=None default): model_dump_json() dumps
+           # every field, including None ones, as an EXPLICIT null -- and
+           # ComponentConfig.check_pot_type has no None-guard, so reloading an
+           # unset flake pot_type raises AttributeError on `.strip()`. That is
+           # a real, separate defect (a null-tolerant validator, or a
+           # `FlakeConfig`-specific override), out of scope for the alias fix
+           # this fixture exists to exercise -- sidestepped here rather than
+           # silently exercised.
+           'Flake': {'mat': 'MoS2', 'pot_type': 'sw', 'pot_path': str(dummy_pot),
+                     'cif_path': str(dummy_cif), 'edge_length': 20.0}},
+        settings=load_settings(),
+    )
+
+
+def test_normalize_config_aliases_lets_a_flake_slide_config_reload(tmp_path):
+    """Unit-level check of `_normalize_config_aliases`, independent of the
+    full `rebuild_set` flow covered below: a sheet-on-sheet config with a
+    `[Flake]` section, dumped the way `run_simulations` stores it (field
+    names, no `by_alias=True`) and normalized back, must reload with
+    `flake` still populated -- `SheetOnSheetSimulationConfig.flake` has
+    `alias='Flake'` and neither `populate_by_name` nor `validate_by_name`,
+    so the un-normalized field-name key `'flake'` silently validates to
+    `None` instead of raising.
+    """
+    from src.aiida.export import _normalize_config_aliases  # pylint: disable=import-outside-toplevel
+    from src.core.config import SheetOnSheetSimulationConfig  # pylint: disable=import-outside-toplevel
+
+    original = _minimal_sheet_flake_config(tmp_path)
+    assert original.flake is not None  # sanity: the fixture really has a flake
+
+    dumped = json.loads(original.model_dump_json())
+    assert 'flake' in dumped and 'Flake' not in dumped  # field name, not the alias
+    assert dumped['flake'] is not None
+
+    # Isolate the flake defect from the '2D' one (also present, and covered by
+    # the AFM-side tests/integration test): fix '2D' by hand first, so
+    # reloading fails ONLY on the still-unfixed 'flake' key, silently
+    # dropping it to its default rather than raising.
+    isolated = dict(dumped)
+    isolated['2D'] = isolated.pop('sheet')
+    assert SheetOnSheetSimulationConfig(**isolated).flake is None
+
+    _normalize_config_aliases(dumped, SheetOnSheetSimulationConfig)
+    assert 'Flake' in dumped and 'flake' not in dumped
+
+    reloaded = SheetOnSheetSimulationConfig(**dumped)
+    assert reloaded.flake is not None
+    assert reloaded.flake.edge_length == 20.0
+
+    # Idempotent: normalizing an already-fixed dict changes nothing further.
+    before = json.loads(json.dumps(dumped))
+    _normalize_config_aliases(dumped, SheetOnSheetSimulationConfig)
+    assert dumped == before
+
+
+def test_rebuild_normalizes_flake_alias_so_the_config_routes_to_flake_slide(
+        aiida_profile_clean, tmp_path, monkeypatch):
+    """End-to-end (`generate_package` mocked at the allowed `src.aiida.`
+    boundary): a stored sheet-on-sheet run whose `config.json` has a
+    `[Flake]` section must reach `generate_package` with that section
+    restored, or `run.simulate._select_sheet_builder_cls` -- the REAL
+    selector, not a reimplementation of it -- would route it to the plain
+    `SheetOnSheetSimulation` instead of `FlakeSlideSimulation`, silently
+    building the wrong thing with no error at all.
+    """
+    from src.core.config import SheetOnSheetSimulationConfig  # pylint: disable=import-outside-toplevel
+    from src.run.simulate import _select_sheet_builder_cls  # pylint: disable=import-outside-toplevel
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation  # pylint: disable=import-outside-toplevel
+
+    root = tmp_path / 'simulation_flake'
+    rel = 'sheetonsheet/h-MoS2/100x_100y/K300'
+    make_run(root, rel, 'sheetonsheet')
+
+    flake_cfg = _minimal_sheet_flake_config(tmp_path)
+    assert flake_cfg.flake is not None
+    (root / rel / 'provenance' / 'config.json').write_text(
+        flake_cfg.model_dump_json(indent=2), encoding='utf-8')
+
+    ingest_root(root, label='rb-flake')
+    seen = {}
+
+    def _fake(config_file, model, **kwargs):
+        data = json.loads(Path(config_file).read_text(encoding='utf-8'))
+        seen['config_obj'] = SheetOnSheetSimulationConfig(**data)
+        return _FakeResult()
+
+    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+
+    rebuild_set('rb-flake', tmp_path / 'rebuilt')
+
+    assert seen['config_obj'].flake is not None
+    assert seen['config_obj'].flake.edge_length == 20.0
+    assert _select_sheet_builder_cls('sheetonsheet',
+                                     seen['config_obj']) is FlakeSlideSimulation
 
 
 @pytest.mark.integration

@@ -21,13 +21,18 @@ as empty names now.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, get_args, get_origin
 
+from pydantic import BaseModel
+
+from ..core.config import AFMSimulationConfig, SheetOnSheetSimulationConfig
 from ..run.artifacts import generate_package
+from ..run.naming import AFM_LIKE_MODELS
 from ..run.tree import provenance_dir_for
 
 logger = logging.getLogger(__name__)
@@ -181,8 +186,6 @@ def _run_mapper(run_dest: Path, model: str) -> Callable[[str], Path]:
     `provenance/` prefix regardless of which case produced it, so this is the
     one place that has to tell them apart again, from the run's own model.
     """
-    from ..run.naming import AFM_LIKE_MODELS  # pylint: disable=import-outside-toplevel
-
     provenance_dest = run_dest.parent if model in AFM_LIKE_MODELS else run_dest
 
     def mapper(rel: str) -> Path:
@@ -221,31 +224,97 @@ def export_results(label: str, dest: Path, *,
     return sorted(written)
 
 
-def _fix_sheet_alias(config_json: Path) -> None:
-    """Rename a stored config's `sheet` key back to the `2D` alias it needs.
+def _nested_model_cls(annotation: Any) -> Optional[Type[BaseModel]]:
+    """The `BaseModel` subclass `annotation` names, through `Optional`/`List`.
+
+    Handles a bare model (`SheetConfig`), `Optional[SheetConfig]`
+    (`Union[SheetConfig, None]`) and `List[SheetConfig]`; returns `None` for
+    anything else (`str`, `float`, `Dict[str, Any]`, ...), which is most
+    fields -- `_normalize_config_aliases` only recurses where this returns
+    something.
+    """
+    origin = get_origin(annotation)
+    if origin is list:
+        args = get_args(annotation)
+        return _nested_model_cls(args[0]) if args else None
+    if origin is not None:  # Union (incl. Optional) and any other generic
+        none_type = type(None)
+        for arg in get_args(annotation):
+            if arg is none_type:  # the `None` half of `Optional[X]`, not a model
+                continue
+            found = _nested_model_cls(arg)
+            if found is not None:
+                return found
+        return None
+    if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
+        return annotation
+    return None
+
+
+def _normalize_config_aliases(data: Dict[str, Any], model_cls: Type[BaseModel]) -> None:
+    """Rename `model_cls`'s fields back to the aliases their stored JSON dropped.
 
     `run_simulations` stores `config_obj.model_dump_json()` with no
-    `by_alias=True`, so the primary `[2D]` section round-trips under its
-    Pydantic FIELD name, `sheet` (`AFMSimulationConfig.sheet`/
-    `SheetOnSheetSimulationConfig.sheet`, both `Field(..., alias='2D')`) --
-    not the alias that `src.run.expand.expand_config_sweeps` and
-    `src.run.naming.primary_sheet`/`output_dir_for` actually look up, since
-    both run on the raw dict BEFORE any Pydantic model exists and know
-    nothing about Pydantic aliasing. `src.aiida.integration`'s
-    soon-to-be-deleted (Task 27) `output_dir_for` copy already carries this
-    exact fix for the exact same reason; mirrored here rather than
-    duplicated blindly, since it is the only other place that ever re-parses
-    a stored `config.json` back from its field-name form. `flake`/`Flake`
-    needs no equivalent fix: `naming.py`'s flake lookup already falls back
-    from the alias to the lowercase field name.
+    `by_alias=True` (a deliberately unchanged choice -- every `config.json`
+    already on disk was written this way), so a field declared
+    `Field(..., alias=X)` round-trips under its PYTHON field name instead --
+    `AFMSimulationConfig.sheet`/`SheetOnSheetSimulationConfig.sheet` (alias
+    `'2D'`) and `SheetOnSheetSimulationConfig.flake` (alias `'Flake'`) today,
+    whatever the model gains an alias for tomorrow. Two independent readers
+    care: `src.run.expand.expand_config_sweeps` and `src.run.naming.
+    primary_sheet`/`output_dir_for` run on the raw dict BEFORE any Pydantic
+    model exists and look up the alias literally (`'2D'`), and Pydantic
+    itself only accepts the alias for a field whose class has neither
+    `populate_by_name` nor `validate_by_name` set (`AFMSimulationConfig`/
+    `SheetOnSheetSimulationConfig` do not) -- so a field-name key such as
+    `'flake'` silently validates to its default (`None`) instead of raising,
+    routing `run/simulate.py`'s `_select_sheet_builder_cls` to the wrong
+    builder with no error at all.
 
-    Rewrites the staged copy in place -- never the stored node or the
+    Derives the rename table from `model_cls.model_fields` instead of
+    hard-coding `'sheet'`/`'flake'`, and recurses into nested model fields
+    (plain, `Optional`, or `List[...]`) -- but only where the nested class
+    itself needs the same treatment, so a class that already tolerates both
+    forms (`ThermostatSettings`/`QuenchSettings`/`PotentialSettings`, all
+    `validate_by_name=True`) is left alone.
+
+    Mutates `data` in place; idempotent -- a key already in alias form is
+    never touched, so re-running this over an already-fixed dict is a no-op.
+    """
+    tolerant = model_cls.model_config.get('populate_by_name', False) or \
+        model_cls.model_config.get('validate_by_name', False)
+    for name, info in model_cls.model_fields.items():
+        alias = info.alias
+        key = name
+        if alias and alias != name and not tolerant:
+            if name in data and alias not in data:
+                data[alias] = data.pop(name)
+            key = alias
+        nested_cls = _nested_model_cls(info.annotation)
+        if nested_cls is None or key not in data or data[key] is None:
+            continue
+        if isinstance(data[key], list):
+            for item in data[key]:
+                if isinstance(item, dict):
+                    _normalize_config_aliases(item, nested_cls)
+        elif isinstance(data[key], dict):
+            _normalize_config_aliases(data[key], nested_cls)
+
+
+def _fix_config_aliases(config_json: Path, model: str) -> None:
+    """Normalize one staged `config.json` back to alias form (see above).
+
+    `model` picks the SAME config class `run_simulations` would build for it
+    (`AFMSimulationConfig` for `AFM_LIKE_MODELS`, `SheetOnSheetSimulationConfig`
+    otherwise) -- the class the stored JSON was originally validated from and
+    the one whose `Field(alias=...)` declarations define what "alias form"
+    means. Rewrites the staged copy in place -- never the stored node or the
     original tree.
     """
+    config_cls = AFMSimulationConfig if model in AFM_LIKE_MODELS else SheetOnSheetSimulationConfig
     data = json.loads(config_json.read_text(encoding='utf-8'))
-    if 'sheet' in data and '2D' not in data:
-        data['2D'] = data.pop('sheet')
-        config_json.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    _normalize_config_aliases(data, config_cls)
+    config_json.write_text(json.dumps(data, indent=2), encoding='utf-8')
 
 
 def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
@@ -312,7 +381,7 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
             if resolved in seen_configs:
                 continue
             seen_configs.add(resolved)
-            _fix_sheet_alias(config_json)
+            _fix_config_aliases(config_json, run_node.model)
 
             result = generate_package(
                 config_json,
