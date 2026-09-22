@@ -35,7 +35,7 @@ def test_calcjob_retrieve_list_is_the_retention_rule_plus_array_status(
 
     assert _retrieve_list_for(None) == list(retrieve_patterns()) + ['array_status/*']
     assert _retrieve_list_for('build/l2') == (
-        list(retrieve_patterns('build/l2')) + ['array_status/*'])
+        list(retrieve_patterns('build/l2')) + [('*.out', '.', None), 'array_status/*'])
 
 
 def test_sim_prefix_for_prefers_simulation_node_rel_path(aiida_profile_clean):
@@ -639,3 +639,39 @@ def test_a_resubmitted_calcjob_supersedes_the_older_live_results(
     assert not any(is_superseded(node) for node in fresh)
     for point in load_points(loc):
         assert find_results(run_node, point).uuid in {n.uuid for n in fresh}
+
+
+def test_prefixed_retrieval_keeps_the_root_level_lammps_stdout(aiida_profile_clean,
+                                                               tmp_path):
+    """m1: `stdout_name` is at the working-directory root, but a prefixed
+    submission only retrieved `<prefix>/*.out`, so stdout was dropped."""
+    import asyncio
+
+    from aiida.engine.daemon.execmanager import retrieve_files_from_list
+    from aiida.transports.plugins.local import LocalTransport
+    from src.aiida.calcjob import _retrieve_list_for  # pylint: disable=import-outside-toplevel
+
+    remote_root = tmp_path / 'remote'
+    make_run(remote_root, REL, 'afm', loads=(30.0,))
+    (remote_root / 'slide.in.out').write_text('LAMMPS stdout\n', encoding='utf-8')
+    retrieved_dir = tmp_path / 'retrieved'
+    retrieved_dir.mkdir()
+
+    class _FakeCalculation:  # only what retrieve_files_from_list touches
+        pk = 1
+
+        @staticmethod
+        def get_remote_workdir():
+            return str(remote_root)
+
+    patterns = [p for p in _retrieve_list_for(REL) if p != 'array_status/*']
+    transport = LocalTransport()
+    transport.open()
+    try:
+        asyncio.run(retrieve_files_from_list(
+            _FakeCalculation(), transport, str(retrieved_dir), patterns))
+    finally:
+        transport.close()
+
+    assert (retrieved_dir / 'slide.in.out').read_text(encoding='utf-8') == 'LAMMPS stdout\n'
+    assert (retrieved_dir / REL / 'results').is_dir()

@@ -208,6 +208,10 @@ def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
     return ancestor
 
 
+#: The root-level LAMMPS stdout files of a prefixed submission.
+STDOUT_RETRIEVE = ('*.out', '.', None)
+
+
 def _retrieve_list_for(sim_prefix: str | None) -> list:
     """The CalcJob's `retrieve_list`: the retention rule, unmodified, plus
     `array_status/*`.
@@ -219,10 +223,15 @@ def _retrieve_list_for(sim_prefix: str | None) -> list:
     re-derived. Array-mode status files are a different concern (job progress
     polling, not something the parser ingests) and are always written to the
     sim root by `_build_array_wrapper` regardless of `sim_prefix`, so they are
-    appended separately rather than folded into the retention list.
+    appended separately rather than folded into the retention list, and so
+    is the root-level stdout (`STDOUT_RETRIEVE`) of a prefixed submission.
     """
-    patterns = retrieve_patterns(sim_prefix) if sim_prefix else retrieve_patterns()
-    return list(patterns) + ['array_status/*']
+    if not sim_prefix:
+        return list(retrieve_patterns()) + ['array_status/*']
+    # LAMMPS stdout (`_make_code_info`'s `stdout_name`) is written to the
+    # remote working-directory ROOT, not under the run's prefix, so the
+    # prefixed `*.out` entry alone never matches it.
+    return list(retrieve_patterns(sim_prefix)) + [STDOUT_RETRIEVE, 'array_status/*']
 
 
 def _run_dir_in_retrieved(tmp_root: Path, run_node) -> Path:
