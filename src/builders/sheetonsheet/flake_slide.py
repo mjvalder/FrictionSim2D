@@ -45,16 +45,12 @@ def flake_projected_area(shape: str, edge_length: float) -> float:
 
     * ``triangle`` -- equilateral, side ``a``: ``A = sqrt(3)/4 * a**2``
     * ``square``   -- side ``a``: ``A = a**2``
-    * ``hexagon``  -- circumradius ``R``: ``A = (10 - 25*sqrt(3)/6) * R**2``
-      (~2.7831 R**2), NOT the regular hexagon's ``3*sqrt(3)/2 * R**2``
-      (~2.5981 R**2). ``components._in_hexagon`` bounds ``|x| <= R``,
-      ``|y| <= sqrt(3)/2 R`` and two oblique strips whose normals sit at +-60
-      deg rather than +-30 deg, so the outline it actually carves is an
-      irregular octagon with first-quadrant vertices (R, 0),
-      (R, (1 - 1/sqrt(3)) R), ((2 - sqrt(3)) sqrt(3)/2 R, sqrt(3)/2 R) and
-      (0, sqrt(3)/2 R). The load must act on the flake that exists, so the
-      area follows the predicate; ``test_flake_projected_area_matches_the_
-      carving_predicate`` fails the moment the predicate changes.
+    * ``hexagon``  -- circumradius ``R`` (= side): the regular hexagon,
+      ``A = 3*sqrt(3)/2 * R**2``
+
+    Each is the area of the outline ``components._in_*`` actually carves;
+    ``test_flake_projected_area_matches_the_carving_predicate`` integrates the
+    predicates numerically and fails the moment either side drifts.
 
     ``rotation_deg`` and the D3b twist are rigid in-plane rotations, so they
     leave the area unchanged. The value is the geometric cut outline, not an
@@ -68,7 +64,7 @@ def flake_projected_area(shape: str, edge_length: float) -> float:
     if shape_lower == "square":
         return a * a
     if shape_lower == "hexagon":
-        return float((10.0 - 25.0 * np.sqrt(3.0) / 6.0) * a * a)
+        return float(1.5 * np.sqrt(3.0) * a * a)
     raise ValueError(
         f"No projected-area formula for flake shape {shape!r} "
         "(supported: triangle, square, hexagon)."
@@ -142,6 +138,11 @@ class FlakeSlideSimulation(SimulationBase):
     #: split to one job. Explicit (the base default is the same) because the
     #: reroute from sheet-on-sheet is silent.
     SPLIT_OUTER_LOOPS = frozenset()
+
+    #: The slide is loaded by ``[general] pressure``; with none it would run at
+    #: 0 GPa and report a meaningless COF, so ``src.run.expand.missing_pressure``
+    #: refuses such a config before anything is built.
+    REQUIRES_PRESSURE: bool = True
 
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):

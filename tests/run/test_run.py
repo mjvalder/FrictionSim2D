@@ -278,6 +278,73 @@ def test_expand_config_sweeps_expands_general_non_lammps_lists() -> None:
         assert conf["general"]["scan_speed"] == [1.0, 2.0]
 
 
+class TestLoadedSlideRequiresAPressure:
+    """A flake slide and a hetero sheet-on-sheet slide are loaded by
+    ``[general] pressure``; with none they ran at 0 GPa and reported a
+    meaningless COF. Refused before anything is built -- and only for those
+    builders: the same ``[general]`` without a pressure is a valid pes-sheet
+    scan (no load)."""
+
+    _SHEET = {'mat': 'h-MoS2', 'cif_path': 'examples/materials/h-MoS2.cif',
+              'pot_path': 'examples/potentials/sw/MoS2_wen.sw', 'pot_type': 'sw',
+              'x': 12.0, 'y': 12.0, 'layers': [2]}
+
+    @classmethod
+    def _hetero(cls, **general):
+        ws2 = {**cls._SHEET, 'mat': 'h-WS2', 'cif_path': 'examples/materials/h-WS2.cif',
+               'pot_path': 'examples/potentials/sw/sw_lammps/t-WS2.sw'}
+        return {'2D': dict(cls._SHEET), '2D-1': dict(cls._SHEET), '2D-2': ws2,
+                'general': {'temp': 300, 'scan_speed': 1, **general}}
+
+    @classmethod
+    def _flake(cls, **general):
+        return {'2D': dict(cls._SHEET), 'Flake': {'shape': 'hexagon', 'edge_length': 5.0},
+                'general': {'temp': 300, 'scan_speed': 1, **general}}
+
+    @pytest.mark.parametrize("pressure", [None, '', []])
+    @pytest.mark.parametrize("builder, make", [
+        ("HeteroSheetOnSheetSimulation", "_hetero"),
+        ("FlakeSlideSimulation", "_flake"),
+    ])
+    def test_missing_pressure_names_the_section_key(self, builder, make, pressure):
+        from src.run.expand import missing_pressure
+
+        raw = getattr(self, make)()
+        if pressure is not None:
+            raw['general']['pressure'] = pressure
+        msg = missing_pressure(raw, 'sheetonsheet')
+        assert msg is not None
+        assert "[general] pressure is required for a loaded slide" in msg
+        assert builder in msg
+
+    @pytest.mark.parametrize("make", ["_hetero", "_flake"])
+    def test_a_set_pressure_passes(self, make):
+        from src.run.expand import missing_pressure
+
+        assert missing_pressure(getattr(self, make)(pressure=0.5), 'sheetonsheet') is None
+        assert missing_pressure(getattr(self, make)(pressure=[0.1, 1]), 'sheetonsheet') is None
+
+    def test_pes_sheet_and_plain_sheet_are_not_refused(self):
+        """The hetero PES scan inherits the hetero slide builder but applies no
+        load; the plain sheet slide is out of this check's scope."""
+        from src.run.expand import missing_pressure
+
+        assert missing_pressure(self._hetero(), 'pes_sheet') is None
+        plain = {'2D': dict(self._SHEET), 'general': {'temp': 300}}
+        assert missing_pressure(plain, 'sheetonsheet') is None
+
+    def test_run_simulations_refuses_before_anything_is_built(self, tmp_path, monkeypatch):
+        from src.core.config import write_config
+
+        monkeypatch.chdir(REPO_ROOT)
+        config_path = write_config(self._flake(), tmp_path / 'flake_noload.ini')
+        with pytest.raises(ValueError, match=r"\[general\] pressure is required"):
+            run_simulations(config_file=str(config_path), model='sheetonsheet',
+                            settings_file=None, output_root=tmp_path / 'out',
+                            generate_hpc=False)
+        assert not (tmp_path / 'out').exists()
+
+
 def _minimal_sheet_base_config(**general_overrides) -> dict:
     config = {
         "general": {"temp": 300.0, **general_overrides},

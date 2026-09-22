@@ -33,7 +33,7 @@ from ..config_validation import ConfigIssue, ConfigValidation, validate_config
 from ...run.placeholders import has_template_marker
 from ...run.expand import (
     ExpansionSummary, count_expansion, expand_config_sweeps,
-    outer_loop_conflict, read_material_entries, read_material_list,
+    missing_pressure, outer_loop_conflict, read_material_entries, read_material_list,
 )
 from ...run.naming import loopability, output_dir_for
 from ...core.utils.paths import _find_existing  # noqa: PLC2701
@@ -622,10 +622,12 @@ class ConfigDocument:
         constructed. Callers must not assume `.config` is usable when `ok` is
         True; check `pending_template_issues` first.
 
-        One check cannot come from the model: whether `outer_loop` conflicts
-        with `scan_angle_force` depends on which builder the config routes to
-        (`src.run.expand.outer_loop_conflict`), which a pydantic model cannot see.
-        It is asked here rather than reimplemented, so the panel refuses
+        Two checks cannot come from the model, because both depend on which
+        builder the config routes to, which a pydantic model cannot see:
+        whether `outer_loop` conflicts with `scan_angle_force`
+        (`src.run.expand.outer_loop_conflict`), and whether a loaded slide is
+        missing its `[general] pressure` (`src.run.expand.missing_pressure`).
+        They are asked here rather than reimplemented, so the panel refuses
         exactly what `run_simulations` refuses.
         """
         payload = self.normalised_values()
@@ -639,6 +641,11 @@ class ConfigDocument:
         if conflict is not None:
             result.issues.append(ConfigIssue(
                 message=conflict, section='general', key='outer_loop',
+            ))
+        no_load = missing_pressure(self.values, self.model)
+        if no_load is not None:
+            result.issues.append(ConfigIssue(
+                message=no_load, section='general', key='pressure',
             ))
 
         self.pending_template_issues = []

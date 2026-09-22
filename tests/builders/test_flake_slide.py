@@ -87,7 +87,7 @@ def _minimal_flake_slide_context():
         "driving_spring_ev": 3.121,
         "bond_spring_ev": 4.994,
         "lat_c": 3.16,
-        "ev_a_to_nn": 160.2176565,
+        "ev_a_to_nn": 1.602176565,
         "ev_a3_to_gpa": 160.2176565,
         "sheet_layers": sheet_layers,
         "flake_group_types": "5 6",
@@ -775,7 +775,8 @@ def _carved_area(shape: str, edge_length: float, rotation_deg: float,
     from src.builders.construction import components as comp
 
     inside = {
-        "triangle": lambda x, y: comp._in_equilateral_triangle(x, y, edge_length),
+        "triangle": lambda x, y: comp._in_equilateral_triangle(
+            x, y, edge_length, (0.0, 0.0), rotation_deg),
         "square": lambda x, y: comp._in_square(x, y, edge_length, (0.0, 0.0), rotation_deg),
         "hexagon": lambda x, y: comp._in_hexagon(x, y, edge_length, (0.0, 0.0), rotation_deg),
     }[shape]
@@ -788,11 +789,7 @@ def _carved_area(shape: str, edge_length: float, rotation_deg: float,
 @pytest.mark.parametrize("shape, edge, expected", [
     ("triangle", 10.0, 3 ** 0.5 / 4.0 * 100.0),        # side a: sqrt(3)/4 a^2
     ("square", 10.0, 100.0),                            # side a: a^2
-    # circumradius R. `_in_hexagon` carves an irregular octagon (its oblique
-    # strips' normals are at +-60 deg, not +-30), so the carved area is
-    # (10 - 25 sqrt(3)/6) R^2, not the regular 3 sqrt(3)/2 R^2 -- see
-    # flake_projected_area's docstring.
-    ("hexagon", 10.0, (10.0 - 25.0 * 3 ** 0.5 / 6.0) * 100.0),
+    ("hexagon", 10.0, 1.5 * 3 ** 0.5 * 100.0),         # circumradius R: 3 sqrt(3)/2 R^2
 ])
 def test_flake_projected_area_closed_form_per_shape(shape, edge, expected):
     from src.builders.sheetonsheet.flake_slide import flake_projected_area
@@ -830,7 +827,7 @@ def test_flake_load_context_uses_the_flake_outline_not_the_box():
     ctx = sim._normal_load_context()
     assert ctx["flake_shape"] == "hexagon"
     assert ctx["flake_edge_length"] == pytest.approx(5.0)
-    assert ctx["flake_area"] == pytest.approx((10.0 - 25.0 * 3 ** 0.5 / 6.0) * 25.0)
+    assert ctx["flake_area"] == pytest.approx(1.5 * 3 ** 0.5 * 25.0)
 
 
 def _loaded_ctx(**overrides):
@@ -858,7 +855,8 @@ def test_flake_slide_applies_the_pressure_over_the_flake_area():
     # not aveforce, which would average away the deformable flake's forces
     assert re.search(r"fix\s+force flake addforce 0\.0 0\.0 \$f", script)
     assert not re.search(r"^fix\s+\S+\s+\S+\s+aveforce", script, re.M)
-    assert re.search(r"variable\s+fz equal f_force\[3\]\*160\.2176565", script)
+    # nN, not GPa: 1 eV/A = 1.602176565 nN (the GPa factor is 100x that)
+    assert re.search(r"variable\s+fz equal f_force\[3\]\*1\.602176565\b", script)
 
 
 def test_flake_slide_emits_the_normal_force_in_the_results_file():

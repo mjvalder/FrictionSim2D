@@ -113,6 +113,10 @@ class PESGridMixin:
     #: A bilayer is enough (and cheapest) for a static PES.
     MIN_LAYERS: int = PES_SHEET_LAYERS
 
+    #: A static scan applies no normal load, so it needs no pressure -- this
+    #: overrides the hetero slide's True for HeteroPESSheetSimulation.
+    REQUIRES_PRESSURE: bool = False
+
     #: The two sheet scan templates, named in the refusal below so the claim is
     #: checkable rather than asserted: both read ONE pre-assembled data file.
     _SCAN_TEMPLATES_WITHOUT_A_FLAKE = (

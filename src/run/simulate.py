@@ -27,6 +27,7 @@ from ..core.config import (
 from .expand import (
     _validate_runtime_sweep_ordering,
     expand_config_sweeps,
+    missing_pressure,
     outer_loop_conflict,
 )
 from .hpc_dispatch import generate_hpc_scripts_for_root
@@ -227,6 +228,9 @@ def run_simulations(
         conflict = outer_loop_conflict(run_dict, model)
         if conflict is not None:
             raise ValueError(conflict)
+        no_load = missing_pressure(run_dict, model)
+        if no_load is not None:
+            raise ValueError(no_load)
 
     root_name = simulation_root_name or datetime.now().strftime("simulation_%Y%m%d_%H%M%S")
     base_root = Path(output_root) if output_root is not None else Path.cwd()

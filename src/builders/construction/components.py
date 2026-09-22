@@ -158,30 +158,53 @@ def _parse_lmp_atoms(
     return np.array(types), np.array(xs), np.array(ys), np.array(zs)
 
 
+def _to_shape_frame(
+    x: float,
+    y: float,
+    center: Tuple[float, float],
+    rotation_deg: float,
+) -> Tuple[float, float]:
+    """Point (x, y) relative to ``center``, rotated by ``-rotation_deg``.
+
+    Testing the un-rotated shape against this point is the same as testing the
+    shape rotated CCW by ``rotation_deg`` about ``center`` against (x, y).
+    """
+    x_rel = x - center[0]
+    y_rel = y - center[1]
+    if rotation_deg == 0.0:
+        return x_rel, y_rel
+    angle_rad = math.radians(-rotation_deg)
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    return cos_a * x_rel - sin_a * y_rel, sin_a * x_rel + cos_a * y_rel
+
+
 def _in_equilateral_triangle(
     x: float,
     y: float,
     edge_length: float,
     center: Tuple[float, float] = (0.0, 0.0),
+    rotation_deg: float = 0.0,
 ) -> bool:
-    """Check if point (x, y) is inside an equilateral triangle (apex pointing up)."""
-    cx, cy = center
-    x_rel = x - cx
-    y_rel = y - cy
+    """Check if point (x, y) is inside a (optionally rotated) equilateral triangle.
+
+    ``edge_length`` is the side ``a``. The triangle is centred on its CENTROID
+    at ``center``: at ``rotation_deg = 0`` the apex points up (+y) at
+    ``2h/3`` and the base lies along ``y = -h/3`` (``h = sqrt(3)/2 a``);
+    ``rotation_deg`` rotates it CCW about the centroid.
+    """
+    x_rot, y_rot = _to_shape_frame(x, y, center, rotation_deg)
 
     height = edge_length * math.sqrt(3) / 2.0
-    half_base = edge_length / 2.0
+    y_apex = 2.0 * height / 3.0
+    y_base = -height / 3.0
 
-    y_apex = height / 3.0
-    y_base = -2.0 * height / 3.0
-
-    if y_rel < y_base or y_rel > y_apex:
+    if y_rot < y_base or y_rot > y_apex:
         return False
 
-    left_bound = -half_base * (1.0 - (y_rel - y_base) / height)
-    right_bound = half_base * (1.0 - (y_rel - y_base) / height)
-
-    return left_bound <= x_rel <= right_bound
+    # Half-width shrinks linearly from a/2 at the base to 0 at the apex.
+    half_width = 0.5 * edge_length * (y_apex - y_rot) / height
+    return -half_width <= x_rot <= half_width
 
 
 def _in_square(
@@ -192,19 +215,7 @@ def _in_square(
     rotation_deg: float = 0.0,
 ) -> bool:
     """Check if point (x, y) is inside a (optionally rotated) square."""
-    cx, cy = center
-    x_rel = x - cx
-    y_rel = y - cy
-
-    if rotation_deg != 0.0:
-        angle_rad = math.radians(-rotation_deg)
-        cos_a = math.cos(angle_rad)
-        sin_a = math.sin(angle_rad)
-        x_rot = cos_a * x_rel - sin_a * y_rel
-        y_rot = sin_a * x_rel + cos_a * y_rel
-    else:
-        x_rot, y_rot = x_rel, y_rel
-
+    x_rot, y_rot = _to_shape_frame(x, y, center, rotation_deg)
     half = edge_length / 2.0
     return -half <= x_rot <= half and -half <= y_rot <= half
 
@@ -218,31 +229,22 @@ def _in_hexagon(
 ) -> bool:
     """Check if point (x, y) is inside a (optionally rotated) regular hexagon.
 
-    ``edge_length`` is the distance from the center to a vertex (circumradius).
+    ``edge_length`` is the distance from the center to a vertex (circumradius
+    ``R``, which for a regular hexagon also equals the side). At
+    ``rotation_deg = 0`` two vertices sit on the x axis at ``(+-R, 0)`` and
+    two edges are horizontal at ``y = +-sqrt(3)/2 R``; ``rotation_deg``
+    rotates it CCW about ``center``. Area ``3*sqrt(3)/2 * R**2``.
     """
-    cx, cy = center
-    x_rel = x - cx
-    y_rel = y - cy
-
-    if rotation_deg != 0.0:
-        angle_rad = math.radians(-rotation_deg)
-        cos_a = math.cos(angle_rad)
-        sin_a = math.sin(angle_rad)
-        x_rot = cos_a * x_rel - sin_a * y_rel
-        y_rot = sin_a * x_rel + cos_a * y_rel
-    else:
-        x_rot, y_rot = x_rel, y_rel
-
+    x_rot, y_rot = _to_shape_frame(x, y, center, rotation_deg)
     apothem = edge_length * math.sqrt(3) / 2.0
-
-    thresholds = [
-        abs(y_rot) <= apothem,
-        abs(x_rot) <= edge_length,
-        abs(x_rot / 2.0 + math.sqrt(3) * y_rot / 2.0) <= apothem,
-        abs(x_rot / 2.0 - math.sqrt(3) * y_rot / 2.0) <= apothem,
-    ]
-
-    return all(thresholds)
+    # The three pairs of parallel edges have outward normals at 90, 30 and
+    # 150 deg, each at distance `apothem` from the centre.
+    half_sqrt3 = math.sqrt(3) / 2.0
+    return (
+        abs(y_rot) <= apothem
+        and abs(half_sqrt3 * x_rot + 0.5 * y_rot) <= apothem
+        and abs(half_sqrt3 * x_rot - 0.5 * y_rot) <= apothem
+    )
 
 
 def build_flake(
@@ -297,7 +299,8 @@ def build_flake(
     natoms = len(types)
 
     boundary_check = {
-        "triangle": lambda x, y: _in_equilateral_triangle(x, y, edge_length, (cx, cy)),
+        "triangle": lambda x, y: _in_equilateral_triangle(
+            x, y, edge_length, (cx, cy), rotation_deg),
         "square": lambda x, y: _in_square(x, y, edge_length, (cx, cy), rotation_deg),
         "hexagon": lambda x, y: _in_hexagon(x, y, edge_length, (cx, cy), rotation_deg),
     }[shape_lower]

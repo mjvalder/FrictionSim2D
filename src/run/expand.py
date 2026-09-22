@@ -817,6 +817,40 @@ def outer_loop_conflict(config: Dict[str, Any], model: str) -> Optional[str]:
     )
 
 
+def missing_pressure(config: Dict[str, Any], model: str) -> Optional[str]:
+    """Why this config's loaded slide cannot run without a pressure, or None.
+
+    The flake slide and the hetero sheet-on-sheet slide load the moving body
+    with ``[general] pressure`` (GPa). Left unset, both used to run at 0 GPa
+    and report a "complete" but meaningless COF (friction over no load), so a
+    config routed to a builder declaring ``REQUIRES_PRESSURE`` must set one.
+
+    Routing-aware, like :func:`outer_loop_conflict` and for the same reason:
+    the same ``[general]`` is valid for ``run pes-sheet`` (a static scan, no
+    load) and for the flake/hetero slides only through ``run sheetonsheet``,
+    so a pydantic model -- which does not know the model name -- cannot decide
+    it. An unroutable config reports nothing (no build to protect).
+
+    Called before anything is built, by :func:`run_simulations` (which raises)
+    and by the GUI's validation panel (which lists it on ``pressure``).
+    """
+    general = config.get('general', {}) or {}
+    pressure = general.get('pressure')
+    if pressure not in (None, '', []):
+        return None
+
+    builder_cls = _builder_cls_for_count(config, model)
+    if builder_cls is None or not getattr(builder_cls, 'REQUIRES_PRESSURE', False):
+        return None
+
+    return (
+        f"[general] pressure is required for a loaded slide: {builder_cls.__name__} "
+        "applies the normal load as a pressure (GPa), and without one the run "
+        "would slide at 0 GPa and report a meaningless COF. Set [general] "
+        "pressure to a value or a list (GPa)."
+    )
+
+
 def _run_scripts_per_build(config: Dict[str, Any], model: str) -> Tuple[int, List[str]]:
     """How many run scripts one built directory will contain.
 

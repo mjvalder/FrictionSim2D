@@ -5,6 +5,7 @@ retyping (apply_flake_corner_types), the FlakeConfig model, and the LAMMPS
 template wiring (corner restraint present during indentation, absent in slide).
 """
 
+import math
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -27,6 +28,123 @@ def test_geometry_predicates_membership():
     assert not components._in_equilateral_triangle(0.0, 100.0, 10.0)
     assert components._in_hexagon(0.0, 0.0, 10.0)
     assert not components._in_hexagon(0.0, 100.0, 10.0)
+
+
+def _outline_vertices(inside, r_max: float, n_theta: int = 7200):
+    """Vertices of the convex region ``inside`` carves, recovered numerically.
+
+    Bisects the boundary radius r(theta) along ``n_theta`` rays from the
+    origin; the polygon's vertices are the strict local maxima of r(theta).
+    Independent of how the predicate is written: an octagon shows 8 maxima.
+    """
+    thetas = [2.0 * math.pi * k / n_theta for k in range(n_theta)]
+    radii = []
+    for th in thetas:
+        c, s = math.cos(th), math.sin(th)
+        lo, hi = 0.0, r_max
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            if inside(mid * c, mid * s):
+                lo = mid
+            else:
+                hi = mid
+        radii.append(lo)
+    verts = []
+    for k in range(n_theta):
+        r_prev, r, r_next = radii[k - 1], radii[k], radii[(k + 1) % n_theta]
+        if r > r_prev and r >= r_next:
+            verts.append((r * math.cos(thetas[k]), r * math.sin(thetas[k])))
+    return verts
+
+
+def _polygon_edges_and_angles(verts):
+    """Edge lengths and interior angles (deg) of a polygon in CCW order."""
+    n = len(verts)
+    edges = [math.dist(verts[i], verts[(i + 1) % n]) for i in range(n)]
+    angles = []
+    for i in range(n):
+        ax, ay = verts[i - 1][0] - verts[i][0], verts[i - 1][1] - verts[i][1]
+        bx, by = verts[(i + 1) % n][0] - verts[i][0], verts[(i + 1) % n][1] - verts[i][1]
+        cos_t = (ax * bx + ay * by) / (math.hypot(ax, ay) * math.hypot(bx, by))
+        angles.append(math.degrees(math.acos(max(-1.0, min(1.0, cos_t)))))
+    return edges, angles
+
+
+def _shoelace(verts):
+    n = len(verts)
+    return 0.5 * abs(sum(verts[i][0] * verts[(i + 1) % n][1]
+                         - verts[(i + 1) % n][0] * verts[i][1] for i in range(n)))
+
+
+@pytest.mark.parametrize("rotation_deg", [0.0, 17.0, 45.0])
+def test_hexagon_carves_a_regular_hexagon(rotation_deg):
+    """`_in_hexagon` is the regular hexagon of circumradius R its docstring
+    promises -- 6 equal edges (= R), 120 deg angles, area 3 sqrt(3)/2 R^2 --
+    vertex-on-x at rotation 0, rotated rigidly by rotation_deg. It used to be
+    an irregular octagon (oblique strip normals at +-60 deg, not +-30)."""
+    R = 10.0
+    verts = _outline_vertices(
+        lambda x, y: components._in_hexagon(x, y, R, (0.0, 0.0), rotation_deg), 2 * R)
+    assert len(verts) == 6
+    edges, angles = _polygon_edges_and_angles(verts)
+    assert edges == pytest.approx([R] * 6, rel=2e-3)
+    assert angles == pytest.approx([120.0] * 6, abs=0.3)
+    assert _shoelace(verts) == pytest.approx(3 * math.sqrt(3) / 2 * R * R, rel=2e-3)
+    # Vertex-on-x convention, rotated CCW by rotation_deg.
+    angles_deg = sorted((math.degrees(math.atan2(y, x)) - rotation_deg) % 60.0
+                        for x, y in verts)
+    for a in angles_deg:
+        assert min(a, 60.0 - a) < 0.2, angles_deg
+
+
+@pytest.mark.parametrize("rotation_deg", [0.0, 17.0, 45.0, 90.0])
+def test_triangle_is_centred_equilateral_and_honours_rotation(rotation_deg):
+    """`_in_equilateral_triangle` is centred on its centroid (the origin), has
+    side a and area sqrt(3)/4 a^2, and rotation_deg rotates it (apex at
+    90 + rotation_deg). It used to sit with its centroid at -h/3 and ignore
+    rotation entirely."""
+    a = 10.0
+    verts = _outline_vertices(
+        lambda x, y: components._in_equilateral_triangle(x, y, a, (0.0, 0.0), rotation_deg),
+        2 * a)
+    assert len(verts) == 3
+    edges, angles = _polygon_edges_and_angles(verts)
+    assert edges == pytest.approx([a] * 3, rel=2e-3)
+    assert angles == pytest.approx([60.0] * 3, abs=0.3)
+    assert _shoelace(verts) == pytest.approx(math.sqrt(3) / 4 * a * a, rel=2e-3)
+    cx = sum(v[0] for v in verts) / 3
+    cy = sum(v[1] for v in verts) / 3
+    assert abs(cx) < 1e-2 and abs(cy) < 1e-2
+    apex = 90.0 + rotation_deg
+    got = [math.degrees(math.atan2(y, x)) for x, y in verts]
+    assert min(abs((g - apex + 180.0) % 360.0 - 180.0) for g in got) < 0.2, got
+
+
+def test_triangle_rotation_moves_a_vertex():
+    a = 10.0
+    h = a * math.sqrt(3) / 2
+    apex = (0.0, 2 * h / 3 * 0.99)
+    assert components._in_equilateral_triangle(*apex, a)
+    assert not components._in_equilateral_triangle(*apex, a, (0.0, 0.0), 60.0)
+
+
+def test_build_flake_triangle_honours_rotation_deg(tmp_path: Path):
+    """build_flake passes rotation_deg to the triangle (it was silently dropped)."""
+    src = tmp_path / "super.lmp"
+    _write_supercell(src, span=60.0, spacing=1.0)
+    carved = {}
+    for rot in (0.0, 60.0):
+        out = tmp_path / f"tri_{rot}.data"
+        components.build_flake(src, out, shape="triangle", edge_length=30.0,
+                               rotation_deg=rot)
+        _t, xs, ys, _z = components._parse_lmp_atoms(out)
+        carved[rot] = (float(ys.max() - 30.0), float(ys.min() - 30.0))
+    h = 30.0 * math.sqrt(3) / 2
+    # Rotation 0: apex up at +2h/3, base at -h/3; 60 deg flips it.
+    assert carved[0.0][0] == pytest.approx(2 * h / 3, abs=1.0)
+    assert carved[0.0][1] == pytest.approx(-h / 3, abs=1.0)
+    assert carved[60.0][0] == pytest.approx(h / 3, abs=1.0)
+    assert carved[60.0][1] == pytest.approx(-2 * h / 3, abs=1.0)
 
 
 def test_square_rotation_is_symmetric():

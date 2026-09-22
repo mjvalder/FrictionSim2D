@@ -122,6 +122,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
     #: reroutes a sheet-on-sheet config here.
     SPLIT_OUTER_LOOPS = frozenset()
 
+    #: The slide is loaded by ``[general] pressure``; with none it would run at
+    #: 0 GPa and report a meaningless COF, so ``src.run.expand.missing_pressure``
+    #: refuses such a config before anything is built.
+    REQUIRES_PRESSURE: bool = True
+
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)
@@ -451,12 +456,12 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "atom_style": self._hetero_atom_style,
             "pot_type": "sw",
             "has_internal_lj": True,  # hybrid sw -> reaction-force friction proxy
-            # Default an unset load to 0.0 (zero-load slide). A raw None renders
-            # ``variable pressure equal None`` -> LAMMPS "Invalid thermo keyword
-            # 'None' in variable formula", breaking every default-config run.
-            # Mirrors the homogeneous loop-path fallback ``pressures or [0.0]``
-            # (src/builders/sheetonsheet.py) which never reaches the template
-            # with a bare None.
+            # ``run_simulations`` refuses a slide with no pressure
+            # (REQUIRES_PRESSURE, src.run.expand.missing_pressure). The 0.0
+            # fallback only keeps a raw None out of the template (``variable
+            # pressure equal None`` is a LAMMPS error) for a builder driven
+            # directly, and for the hetero PES scan subclass, which reads no
+            # pressure at all.
             "pressures": general.pressure if general.pressure is not None else 0.0,
             "scan_speed_config": general.scan_speed,
             "scan_angle_config": general.scan_angle,

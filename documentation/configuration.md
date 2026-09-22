@@ -62,7 +62,7 @@ Common knobs include:
 
 - `temp`
 - `force` (AFM workflows)
-- `pressure` (sheet-on-sheet workflows)
+- `pressure` (sheet-on-sheet workflows; **required** for a hetero or `[Flake]` sheet slide)
 - `scan_angle`
 - `scan_angle_force`
 - `scan_speed`
@@ -381,6 +381,19 @@ rotation_deg = 0
 corner_spring_k = 10.0
 ```
 
+**Shapes.** Every shape is centred on the flake centre and rotated CCW about
+it by `rotation_deg`:
+
+- `triangle` — equilateral, side `a`, centred on its centroid; at
+  `rotation_deg = 0` the apex points +y (at `2h/3`, base at `−h/3`,
+  `h = sqrt(3)/2 · a`).
+- `square` — side `a`, edges along x/y at `rotation_deg = 0`.
+- `hexagon` — the regular hexagon of circumradius `R` (side also `R`); at
+  `rotation_deg = 0` two vertices lie on the x axis at `±R` and two edges are
+  horizontal at `y = ±sqrt(3)/2 · R`.
+
+(The same outlines are used by an AFM `[flake]`.)
+
 **Normal load.** `[general] pressure` (GPa) is applied to the flake over its
 projected in-plane area, not the substrate box area. The area is that of the
 outline the builder carves:
@@ -389,13 +402,19 @@ outline the builder carves:
 |---|---|
 | `triangle` (side `a`) | `sqrt(3)/4 · a²` |
 | `square` (side `a`) | `a²` |
-| `hexagon` (circumradius `R`) | `(10 − 25·sqrt(3)/6) · R² ≈ 2.783 R²` — the carved outline is an irregular octagon, not a regular hexagon |
+| `hexagon` (circumradius `R`) | `3·sqrt(3)/2 · R² ≈ 2.598 R²` |
 
 Rotation and `twist_angle` do not change the area. The load `P·A` is spread
 equally over the flake's atoms (`fix addforce`). The results file records the
 felt normal force `v_fz` (nN, mean ≈ `P[GPa] · A[Å²] / 100`), so a flake run's
 COF is lateral force / normal load, as for sheet-on-sheet. Each pressure writes
 its own `friction_p<P>_…` file.
+
+**A pressure is required.** A `[Flake]` slide, and a hetero sheet-on-sheet
+slide (`[2D-1]`/`[2D-2]` or `twist_angle`), is refused before anything is
+built when `[general] pressure` is unset: `[general] pressure is required for
+a loaded slide`. Without it the run would slide at 0 GPa and report a
+meaningless COF. A `run pes-sheet` scan applies no load and needs none.
 
 ### [settings_override]
 
@@ -409,6 +428,7 @@ Common failures:
 - Missing referenced CIF or potential files
 - Non-ascending sweep values for force/pressure/angle selectors
 - Invalid sheet-on-sheet layer count
+- A hetero or `[Flake]` sheet slide with no `[general] pressure`
 - Incompatible `constraint_mode` with potentials that already include internal interlayer interactions
 
 ## Tips
