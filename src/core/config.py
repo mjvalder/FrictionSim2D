@@ -244,6 +244,24 @@ class GlobalSettings(BaseModel):
     aiida: AiidaSettings = Field(default_factory=AiidaSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
 
+#: `DatabaseSettings` fields that are credentials. Never written into a run
+#: tree: `provenance/settings.yaml` and `config.json` are stored in the AiiDA
+#: repository and travel in archives and export bundles.
+SECRET_DATABASE_FIELDS = ('password', 'api_key')
+
+
+def redact_secrets(settings: GlobalSettings) -> GlobalSettings:
+    """A deep copy of `settings` with the central-DB credentials blanked.
+
+    Every other field -- including the non-secret `database.host`/`api_url`,
+    which say where a run's rows were meant to go -- is kept.
+    """
+    safe = settings.model_copy(deep=True)
+    for name in SECRET_DATABASE_FIELDS:
+        setattr(safe.database, name, '')
+    return safe
+
+
 # --- User Input Settings (From .ini files) ---
 
 class ComponentConfig(BaseModel):

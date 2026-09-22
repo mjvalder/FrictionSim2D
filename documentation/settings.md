@@ -305,6 +305,11 @@ database:
 - `skip_fraction` — the same warm-up fraction the postprocessing COF
   calculation uses, applied when the store computes summary statistics.
 
+`password` and `api_key` are blanked in the copy of the settings written into
+every run tree (`provenance/settings.yaml` and the `settings` block of
+`provenance/config.json`): those files are stored in the AiiDA repository and
+travel in archives and export bundles. The other `database` fields are kept.
+
 The old profile switch that picked between a `local`/`central` nested pair,
 and the `api_host`/`api_port` fields, are gone — there is only ever one
 database to talk to now, and `FrictionSim2D api serve --host/--port` takes

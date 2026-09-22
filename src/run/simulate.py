@@ -4,6 +4,7 @@ Split out of src/core/run.py. This is the only module in the package that
 instantiates builders, which is why src/run/__init__.py stays free of eager
 re-exports.
 """
+import copy
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from ..core.config import (
     SheetOnSheetSimulationConfig,
     load_settings,
     parse_config,
+    redact_secrets,
 )
 from .expand import (
     _validate_runtime_sweep_ordering,
@@ -233,9 +235,13 @@ def run_simulations(
     (simulation_root / 'logs').mkdir(parents=True, exist_ok=True)
 
     created_simulations: List[Path] = []
+    # What goes INTO the run tree (config.json, provenance/settings.yaml, and
+    # through them the AiiDA repository, archives and export bundles) never
+    # carries the central-DB password or API key.
+    tree_settings = redact_secrets(defaults).model_dump()
 
     for run_dict in configs_to_run:
-        run_dict['settings'] = defaults.model_dump()
+        run_dict['settings'] = copy.deepcopy(tree_settings)
 
         output_dir = simulation_root / output_dir_for(run_dict, model)
 
@@ -245,7 +251,7 @@ def run_simulations(
         # wrote them before, so `aiida rebuild` silently used the defaults.
         import yaml  # pylint: disable=import-outside-toplevel
         (prov_dir / 'settings.yaml').write_text(
-            yaml.safe_dump(defaults.model_dump(), sort_keys=False), encoding='utf-8')
+            yaml.safe_dump(tree_settings, sort_keys=False), encoding='utf-8')
 
         try:
             if model in AFM_LIKE_MODELS:
