@@ -116,6 +116,42 @@ def test_potentials_and_set_labels_are_filterable_and_listed(aiida_profile_clean
     assert db.query(set_label='p1').total_count == 1
 
 
+def test_orphaned_results_are_excluded_from_query(aiida_profile_clean, tmp_path):
+    """A results node whose run_uuid names no live run must never come back --
+    not from a bare query(), and not from a result-level-only filter query."""
+    from src.aiida.data import FrictionResultsData
+
+    _populate(tmp_path)
+    orphan = FrictionResultsData()
+    orphan.family = 'afm'
+    orphan.load_kind = 'force'
+    orphan.load = 999.0
+    orphan.angle = 0.0
+    orphan.speed = 0.0
+    orphan.tiers = []
+    orphan.run_uuid = 'not-a-real-run-uuid'
+    orphan.store()
+
+    bare = Friction2DDB().query()
+    assert bare.total_count == 3
+    assert 999.0 not in {r.load for r in bare.results}
+
+    ranged = Friction2DDB().query(force_range=(0.0, 2000.0))
+    assert 999.0 not in {r.load for r in ranged.results}
+
+
+def test_run_uuid_filter_is_chunked(aiida_profile_clean, tmp_path, monkeypatch):
+    """Chunking the `run_uuid IN (...)` filter must not drop or duplicate
+    results across batches, however small the batch size."""
+    monkeypatch.setattr('src.aiida.query._RUN_UUID_CHUNK_SIZE', 1)
+    _populate(tmp_path)
+
+    out = Friction2DDB().query()
+
+    assert out.total_count == 3
+    assert {r.load for r in out.results} == {10.0, 30.0, 1.0}
+
+
 def test_materials_filter_uses_all_semantics(aiida_profile_clean, tmp_path):
     """A run matches only if it contains EVERY given material, not just one."""
     _populate(tmp_path)

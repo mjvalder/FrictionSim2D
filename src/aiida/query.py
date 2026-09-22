@@ -108,11 +108,18 @@ _RUN_EQ_FILTERS = {
     'size_x': 'size_x', 'size_y': 'size_y', 'rel_path': 'rel_path',
 }
 
-#: Result-node attribute behind each result-level range filter.
-_RES_RANGE_ATTR = {
-    'force_range': 'load', 'pressure_range': 'load',
-    'angle_range': 'angle', 'speed_range': 'speed',
-}
+#: Batch size for the `attributes.run_uuid IN (...)` filter in `_fetch_results`.
+#: Results are ALWAYS scoped to the run uuids `query()` just found -- an
+#: orphaned `FrictionResultsData` (a `run_uuid` naming no live run: the run was
+#: deleted, or the node predates a rename) must never leak into a query just
+#: because no run-level filter happened to be given. A single `{'in': [...]}`
+#: over the whole list would do that safely, but a real store's run count can
+#: run into the thousands (13k rows is the scale this store replaces) and
+#: SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` is 999 -- well under that, so
+#: one IN-clause over every run can fail the query outright rather than merely
+#: being slow. Kept comfortably under that limit; a test may monkeypatch this
+#: down to exercise the chunking loop itself without building 500+ runs.
+_RUN_UUID_CHUNK_SIZE = 500
 
 
 def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Optional[Dict[str, Any]]:
@@ -226,6 +233,52 @@ class Friction2DDB:
 
     # -- The query --------------------------------------------------------
 
+    def _fetch_results(self, run_uuids: List[str], *,
+                       force_range: Optional[Tuple[Optional[float], Optional[float]]],
+                       pressure_range: Optional[Tuple[Optional[float], Optional[float]]],
+                       angle_range: Optional[Tuple[Optional[float], Optional[float]]],
+                       speed_range: Optional[Tuple[Optional[float], Optional[float]]],
+                       ) -> List[Any]:
+        """Every result node (superseded ones included) whose `run_uuid` is in
+        `run_uuids`, plus the four result-level range filters.
+
+        ALWAYS filters on `run_uuid` -- never called with "skip the filter,
+        every run matched anyway", because a result node whose `run_uuid`
+        names no live run (orphaned: the run was deleted, or predates a
+        rename) would otherwise be returned regardless of what `query()` was
+        actually asked for. `run_uuids` is chunked into batches of
+        `_RUN_UUID_CHUNK_SIZE` -- one QueryBuilder query per batch, results
+        concatenated -- so this stays correct however large the run count
+        gets, per-key range filters unchanged (see `query()`'s docstring for
+        why `force_range`/`pressure_range` also gate on `load_kind`).
+        """
+        results: List[Any] = []
+        for start in range(0, len(run_uuids), _RUN_UUID_CHUNK_SIZE):
+            chunk = run_uuids[start:start + _RUN_UUID_CHUNK_SIZE]
+            res_qb = self._query_builder_cls()
+            res_qb.append(self._results_data_cls, tag='res', project=['*'],
+                          filters={'attributes.run_uuid': {'in': chunk}})
+            if force_range is not None:
+                res_qb.add_filter('res', {'attributes.load_kind': 'force'})
+                force_filter = _range_filter(force_range)
+                if force_filter is not None:
+                    res_qb.add_filter('res', {'attributes.load': force_filter})
+            if pressure_range is not None:
+                res_qb.add_filter('res', {'attributes.load_kind': 'pressure'})
+                pressure_filter = _range_filter(pressure_range)
+                if pressure_filter is not None:
+                    res_qb.add_filter('res', {'attributes.load': pressure_filter})
+            if angle_range is not None:
+                angle_filter = _range_filter(angle_range)
+                if angle_filter is not None:
+                    res_qb.add_filter('res', {'attributes.angle': angle_filter})
+            if speed_range is not None:
+                speed_filter = _range_filter(speed_range)
+                if speed_filter is not None:
+                    res_qb.add_filter('res', {'attributes.speed': speed_filter})
+            results.extend(res_qb.all(flat=True))
+        return results
+
     def query(  # pylint: disable=too-many-arguments,too-many-locals
         self, *, materials: Optional[List[str]] = None,
         family: Optional[str] = None, model: Optional[str] = None,
@@ -270,16 +323,6 @@ class Friction2DDB:
             'flake_material': flake_material, 'size_x': size_x,
             'size_y': size_y, 'rel_path': rel_path,
         }
-        # Whether ANY run-level filter was given. When none was, `runs` below
-        # is every run in the store, and there is no point building a
-        # `{'attributes.run_uuid': {'in': run_uuids}}` filter for the results
-        # query that would just repeat that same "every run" list back as a
-        # giant bound-variable IN clause -- SQLite's default parameter limit
-        # (999) makes that filter itself fail long before a real store's run
-        # count does, on a query that filters nothing.
-        run_filter_given = (bool(materials) or layers is not None
-                            or temperature_range is not None
-                            or any(v is not None for v in run_eq.values()))
 
         run_qb = self._query_builder_cls()
         run_qb.append(self._simulation_data_cls, tag='run', project=['*'])
@@ -308,34 +351,14 @@ class Friction2DDB:
 
         results: List[Any] = []
         if runs:
-            res_qb = self._query_builder_cls()
-            res_filters = ({'attributes.run_uuid': {'in': run_uuids}}
-                          if run_filter_given else {})
-            res_qb.append(self._results_data_cls, tag='res', project=['*'],
-                          filters=res_filters)
-            if force_range is not None:
-                res_qb.add_filter('res', {'attributes.load_kind': 'force'})
-                force_filter = _range_filter(force_range)
-                if force_filter is not None:
-                    res_qb.add_filter('res', {'attributes.load': force_filter})
-            if pressure_range is not None:
-                res_qb.add_filter('res', {'attributes.load_kind': 'pressure'})
-                pressure_filter = _range_filter(pressure_range)
-                if pressure_filter is not None:
-                    res_qb.add_filter('res', {'attributes.load': pressure_filter})
-            if angle_range is not None:
-                angle_filter = _range_filter(angle_range)
-                if angle_filter is not None:
-                    res_qb.add_filter('res', {'attributes.angle': angle_filter})
-            if speed_range is not None:
-                speed_filter = _range_filter(speed_range)
-                if speed_filter is not None:
-                    res_qb.add_filter('res', {'attributes.speed': speed_filter})
+            fetched = self._fetch_results(
+                run_uuids, force_range=force_range, pressure_range=pressure_range,
+                angle_range=angle_range, speed_range=speed_range)
             # R9: a superseded result must never be returned by a query --
             # excluded here, in Python, the same way `export._results_of`
             # and `ingest.find_results` do (the one shared `is_superseded`
             # predicate, not a second QueryBuilder JSONB-extras filter).
-            results = [r for r in res_qb.all(flat=True) if not is_superseded(r)]
+            results = [r for r in fetched if not is_superseded(r)]
 
         if order_by:
             key = order_by[1:] if order_by.startswith('-') else order_by
