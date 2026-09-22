@@ -124,7 +124,7 @@ FrictionSim2D uses two separate databases with different roles.
 | **Backend** | AiiDA-managed | PostgreSQL on a remote server |
 | **Contents** | Full time-series data, complete provenance | Summary statistics only (mean COF, forces, conditions) |
 | **CLI** | `FrictionSim2D aiida ...` | `FrictionSim2D db ...` |
-| **Setup** | `FrictionSim2D aiida setup` | `FrictionSim2D db setup --profile central` |
+| **Setup** | `FrictionSim2D aiida setup` | `FrictionSim2D db setup` (connection from `settings.database` or `--host/--port/...`) |
 | **Use for** | Analysis, plotting, rebuilding simulations | Cross-study comparison, sharing results |
 
 ## Reproducibility

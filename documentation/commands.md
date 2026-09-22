@@ -524,7 +524,10 @@ from.
 
 ### db setup
 
-First-time setup: initializes schema, creates an API key, and saves it to settings:
+First-time setup: initializes schema, creates an API key, and saves it to the
+per-user settings file `load_settings` reads
+(`$XDG_CONFIG_HOME/FrictionSim2D/settings.yaml`, else
+`~/.config/FrictionSim2D/settings.yaml`):
 
 ```bash
 FrictionSim2D db setup [--name NAME] [DB OPTIONS]

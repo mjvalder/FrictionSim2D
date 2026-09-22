@@ -28,8 +28,8 @@ Typical workflow::
     # 2. Import completed results into local AiiDA DB (full timeseries).
     FrictionSim2D aiida import ./simulation_YYYYMMDD
 
-    # 3. Upload summary statistics to the central shared DB.
-    FrictionSim2D db upload ./simulation_YYYYMMDD --uploader alice --profile central
+    # 3. Upload the stored set's summary statistics to the central shared DB.
+    FrictionSim2D db upload <SET_LABEL> --uploader alice
 
 Central DB staging pipeline::
 
@@ -39,7 +39,7 @@ Central DB staging pipeline::
 Usage
 -----
 Configure the central DB connection via environment variables, keyword
-arguments, or ``settings.yaml`` profiles::
+arguments, or the ``database`` section of ``settings.yaml``::
 
     export FRICTION_DB_HOST=db.example.com
     export FRICTION_DB_PORT=5432

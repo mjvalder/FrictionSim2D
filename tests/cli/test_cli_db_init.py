@@ -74,3 +74,28 @@ def test_a_central_db_failure_is_surfaced_not_retried_on_localhost(monkeypatch):
     assert result.exit_code != 0
     assert 'password authentication failed' in result.output
     assert built == []
+
+
+def test_db_setup_writes_the_key_where_load_settings_reads_it(monkeypatch, tmp_path):
+    """m8: `db setup` wrote ~/.config/... even with $XDG_CONFIG_HOME set, so
+    `load_settings` never saw the key it had just created."""
+    from src.core.config import load_settings
+
+    class _KeyDB:
+        def create_api_key(self, name):
+            return f'key-for-{name}'
+
+    xdg = tmp_path / 'xdg'
+    home = tmp_path / 'home'
+    home.mkdir()
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(xdg))
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setattr('src.data.database.central_db', lambda *a, **k: _KeyDB())
+
+    result = CliRunner().invoke(cli, ['db', 'setup', '--name', 'alice'])
+
+    assert result.exit_code == 0, result.output
+    assert (xdg / 'FrictionSim2D' / 'settings.yaml').is_file()
+    assert not (home / '.config').exists()
+    assert load_settings().database.api_key == 'key-for-alice'
+    assert 'db upload <SET_LABEL>' in result.output

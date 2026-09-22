@@ -1845,7 +1845,8 @@ def db_setup(
     This command:
     1. Initializes the database schema (safe to run repeatedly)
     2. Creates an API key for your user
-    3. Stores the API key in ~/.config/FrictionSim2D/settings.yaml
+    3. Stores the API key in the per-user settings file load_settings reads
+       ($XDG_CONFIG_HOME/FrictionSim2D/settings.yaml, else ~/.config/...)
 
     Example:
         FrictionSim2D db setup
@@ -1867,9 +1868,10 @@ def db_setup(
     click.echo(f"✅ API key generated: {raw_key}")
 
     click.echo("💾 Storing API key in settings...")
-    settings_dir = Path.home() / ".config" / "FrictionSim2D"
-    settings_file = settings_dir / "settings.yaml"
-    settings_dir.mkdir(parents=True, exist_ok=True)
+    # The same resolver `load_settings` uses, so the key lands where it is
+    # read back from (it honours $XDG_CONFIG_HOME; ~/.config did not).
+    settings_file = _global_settings_path()
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
 
     if settings_file.exists():
         settings_data = yaml.safe_load(settings_file.read_text(encoding='utf-8'))
@@ -1892,11 +1894,12 @@ def db_setup(
     click.echo()
     click.echo("📋 Next steps:")
     click.echo(
-        f"   1. You can now upload results: FrictionSim2D db upload <dir> "
-        f"--uploader {name}"
+        f"   1. You can now upload a stored set: FrictionSim2D db upload "
+        f"<SET_LABEL> --uploader {name}"
     )
     click.echo(
-        f"   2. Or stage for review: FrictionSim2D db stage <dir> --uploader {name}"
+        f"   2. Or stage it for review: FrictionSim2D db stage <SET_LABEL> "
+        f"--uploader {name}"
     )
     click.echo()
     click.echo("⚠️  Your API key is stored in settings.yaml. Keep it secure!")
