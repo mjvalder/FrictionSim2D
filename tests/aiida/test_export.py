@@ -587,3 +587,71 @@ def test_archive_round_trip_keeps_the_set_and_its_group(aiida_profile_clean, tmp
 def test_archive_of_an_unknown_label_raises(aiida_profile_clean, tmp_path):
     with pytest.raises(LookupError, match='no simulation set'):
         export_archive('nope', tmp_path / 'x.aiida')
+
+
+def test_reimporting_the_same_archive_leaves_no_stray_group(aiida_profile_clean,
+                                                             tmp_path):
+    """The archive already carries its own `friction2d/<label>` group (R19);
+    letting `aiida.tools.archive.import_archive` also create its default,
+    timestamp-labelled "import group" on every call leaves one of those
+    behind per import -- confirmed on a re-import, where nodes and the
+    `friction2d` group dedup correctly (n_new=0) but a stray
+    `20260922-...`-style group is still created. `import_archive` must pass
+    `create_group=False` so importing the same archive twice leaves exactly
+    one `Group` total.
+    """
+    from aiida.orm import Group, QueryBuilder
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='arch2')
+    archive = export_archive('arch2', tmp_path / 'arch2.aiida')
+
+    n_first = import_archive(archive)
+    assert n_first == 0  # already present in this profile (same one that exported it)
+    assert QueryBuilder().append(Group).count() == 1
+
+    n_second = import_archive(archive)
+    assert n_second == 0
+    assert QueryBuilder().append(Group).count() == 1
+
+
+def test_archive_round_trip_preserves_superseded_extras(aiida_profile_clean, tmp_path):
+    """`superseded` is an AiiDA *extra*, not an attribute -- must survive the
+    archive round trip so a re-imported store never re-serves a stale result
+    that `export_results` on the original profile would have excluded.
+    """
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+    from src.aiida.export import resolve_set
+    from src.aiida.ingest import find_or_create_run
+
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm', loads=(30.0,))
+    ingest_root(root, label='arch3')
+
+    set_node = resolve_set('arch3')
+    loc, = discover_runs(root)
+    run_node, _created = find_or_create_run(set_node, loc)
+    qb = QueryBuilder()
+    qb.append(FrictionResultsData, filters={'attributes.run_uuid': str(run_node.uuid)})
+    results_node = qb.first(flat=True)
+    results_node.base.extras.set('superseded', True)
+    old_uuid = results_node.uuid
+
+    archive = export_archive('arch3', tmp_path / 'arch3.aiida')
+
+    aiida_profile_clean.reset_storage()
+    import_archive(archive)
+
+    qb = QueryBuilder()
+    qb.append(FrictionResultsData)
+    reimported = qb.first(flat=True)
+    assert reimported.uuid == old_uuid
+    assert reimported.base.extras.get('superseded', False) is True
+
+    written = export_results('arch3', tmp_path / 'out')
+    name = 'friction_f30_a0_s2_layer2.txt'
+    assert not any(p.name == name for p in written)
+    assert not (tmp_path / 'out' / REL / 'results' / name).exists()

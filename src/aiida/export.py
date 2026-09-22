@@ -441,13 +441,21 @@ def import_archive(archive_path: Path, *, profile: Optional[str] = None) -> int:
     `new_nodes` count -- reading a `new_nodes` attribute off that return
     value is always 0. The profile's node count is compared across the call
     instead.
+
+    `create_group=False`: the archive already carries its own
+    `friction2d/<label>` group as one of its entities (`export_archive`
+    above), so aiida-core's default `create_group=True` would additionally
+    create its own timestamp-labelled "import group" containing the same
+    nodes on every single import -- nodes and the `friction2d` group dedup
+    correctly on a re-import (`n_new=0`), but that extra group does not and
+    is left behind every time.
     """
     from aiida.orm import Node, QueryBuilder  # pylint: disable=import-outside-toplevel
     from aiida.tools.archive import import_archive as _import  # pylint: disable=import-outside-toplevel
 
     _load_profile(profile)
     before = QueryBuilder().append(Node).count()
-    _import(Path(archive_path))
+    _import(Path(archive_path), create_group=False)
     after = QueryBuilder().append(Node).count()
     n_new = after - before
     logger.info("Imported %d new node(s) from %s", n_new, archive_path)
