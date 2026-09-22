@@ -173,6 +173,41 @@ def test_oversize_result_aux_files_are_logged_not_silently_dropped(
     assert any('final_f30.data' in message for message in caplog.messages)
 
 
+def test_reexport_overwrites_stale_files_and_writes_shared_provenance_once(
+        aiida_profile_clean, tmp_path):
+    """A re-export into a non-empty `dest` must overwrite whatever is already
+    there -- from an earlier export or a hand-edit -- never trust it. The
+    dedup that skips rewriting the shared AFM `provenance/**` subtree is
+    about not rewriting a path THIS call already wrote, not about the
+    filesystem; the multi-layer case (L1 and L2 share one `provenance/`)
+    must still only write that shared subtree once per call.
+    """
+    root = tmp_path / 'simulation_multi'
+    base = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300'
+    make_run(root, f'{base}/L1', 'afm', loads=(30.0,))
+    make_run(root, f'{base}/L2', 'afm', loads=(30.0,))
+    ingest_root(root, label='rt-multi')
+
+    out = tmp_path / 'out'
+    written = export_results('rt-multi', out)
+    shared = [p for p in written
+             if p.as_posix().endswith(f'{base}/provenance/config.json')]
+    assert len(shared) == 1
+
+    provenance_config = out / base / 'provenance' / 'config.json'
+    lammps_file = out / base / 'L1' / 'lammps' / 'system.in'
+    original_config = provenance_config.read_bytes()
+    original_lammps = lammps_file.read_bytes()
+
+    provenance_config.write_bytes(b'corrupted')
+    lammps_file.write_bytes(b'corrupted')
+
+    export_results('rt-multi', out)
+
+    assert provenance_config.read_bytes() == original_config
+    assert lammps_file.read_bytes() == original_lammps
+
+
 def test_sheet_like_provenance_stays_at_the_run_level(aiida_profile_clean, tmp_path):
     """A sheet-like run has no shared per-layer provenance -- unlike AFM,
     `provenance/` lives right next to `provenance.json`, inside the run

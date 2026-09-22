@@ -106,7 +106,7 @@ def _warn_oversize(node, rel_path: str) -> None:
 
 
 def _dump_repository(node, mapper: Callable[[str], Path], *,
-                     skip_existing: bool = False) -> List[Path]:
+                     seen: Optional[set] = None) -> List[Path]:
     """Write every file in a node's repository to `mapper(rel_posix_path)`.
 
     `mapper` decides the on-disk destination for each stored, run-relative
@@ -114,23 +114,34 @@ def _dump_repository(node, mapper: Callable[[str], Path], *,
     something that can redirect a run node's `provenance/**` prefix one level
     up for the AFM-like models (see `_run_mapper`).
 
-    `skip_existing`, used only for a run node's dump, skips a destination
-    that already has a file on it: the AFM-like models store an independent
-    copy of the SAME shared `provenance/**` subtree on every layer's run node
-    (Task 16's `add_run_files` walks `provenance_dir` once per run, not once
-    per campaign), so the second and third layer of one campaign would
-    otherwise re-read and rewrite files the first layer already wrote here,
-    byte-for-byte identical every time. A run's own `provenance.json` and
-    `lammps/**` are never shared this way (their destination is unique to
-    this run), so this never skips a file that should legitimately differ.
+    `seen`, given only for a run node's dump, is a `set[Path]` the WHOLE
+    `export_results` call shares across every run: a destination already
+    added to it this call is skipped rather than rewritten. This is
+    deliberately about THIS call's own writes, not the filesystem -- an
+    earlier version checked `out.is_file()` instead, which meant re-exporting
+    into a non-empty `dest` silently kept whatever bytes were already sitting
+    there (a stale `provenance.json`, a hand-edited `lammps/*.in`) instead of
+    overwriting them from the store, exactly backwards from what "export"
+    means. Checking `seen` instead only ever short-circuits the ONE case this
+    exists for: the AFM-like models store an independent copy of the SAME
+    shared `provenance/**` subtree on every layer's run node (Task 16's
+    `add_run_files` walks `provenance_dir` once per run, not once per
+    campaign), so the second and third layer of one export would otherwise
+    re-read and rewrite files the first layer already wrote earlier in this
+    same call, byte-for-byte identical every time. A run's own
+    `provenance.json` and `lammps/**` are never shared this way (their
+    destination is unique to this run), so this never skips a file that
+    should legitimately differ.
     """
     written = []
     for root, _dirs, files in node.base.repository.walk():
         for name in files:
             rel = (root / name).as_posix()
             out = mapper(rel)
-            if skip_existing and out.is_file():
-                continue
+            if seen is not None:
+                if out in seen:
+                    continue
+                seen.add(out)
             out.parent.mkdir(parents=True, exist_ok=True)
             with node.base.repository.open(rel, 'rb') as src:
                 out.write_bytes(src.read())
@@ -183,10 +194,11 @@ def export_results(label: str, dest: Path, *,
     dest.mkdir(parents=True, exist_ok=True)
 
     written = _dump_repository(set_node, lambda rel: dest / rel)
+    seen: set = set()
     for run_node in _runs_of(set_node):
         run_dest = dest / run_node.rel_path
         written += _dump_repository(run_node, _run_mapper(run_dest, run_node.model),
-                                    skip_existing=True)
+                                    seen=seen)
         _warn_oversize(run_node, run_node.rel_path)
         for result in _results_of(run_node):
             written += _dump_repository(result, lambda rel, d=run_dest: d / rel)
