@@ -35,7 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .controllers.database import DatabaseController, DatabaseRequest
+from .controllers.database import (DatabaseController, DatabaseRequest,
+                                   central_configured)
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
@@ -47,7 +48,8 @@ from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.database.detail import format_bytes
-from .widgets.database.pane import SOURCES, DatabasePane, render_checks
+from .widgets.database.pane import (SOURCES, DatabasePane, missing_backend,
+                                    render_checks)
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
@@ -195,6 +197,7 @@ class MainWindow(QMainWindow):
         query happens only when the user presses Search or Refresh."""
         self.database_pane = DatabasePane(self)
         self._restore_database_state()
+        self._apply_database_availability()
         return self.database_pane
 
     def _build_header(self) -> QWidget:
@@ -443,6 +446,27 @@ class MainWindow(QMainWindow):
         self.workspace.remember('db_source', self.database_pane.source)
         self.workspace.remember('db_filters', self.database_pane.filters.value())
 
+    def _apply_database_availability(self) -> None:
+        """Disable the central source until this installation is pointed at a
+        central database.
+
+        `missing_backend` answers "is httpx installed"; it cannot answer "does
+        a central database exist", and the answer today is no. Left enabled,
+        every central action ends as a raw ConnectionError against a localhost
+        URL nobody ever configured -- a stack-trace string in place of "you
+        have not set this up".
+        """
+        if missing_backend('central'):
+            return          # the pane already said what to install
+        if not central_configured(self.settings):
+            self.database_pane.set_source_enabled(
+                'central', False,
+                'Central: not configured. Set database.api_url (and '
+                'database.api_key) in the Settings tab. The Local store needs '
+                'none of this.')
+        else:
+            self.database_pane.set_source_enabled('central', True)
+
     def _on_db_query(self, source: str, filters: dict) -> None:
         self._remember_database_state()
         self._start_db('list', source, {'filters': filters})
@@ -666,6 +690,7 @@ class MainWindow(QMainWindow):
         self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage('Applied settings changes.')
+        self._apply_database_availability()
         return None
 
     def _sync_settings(self) -> bool:

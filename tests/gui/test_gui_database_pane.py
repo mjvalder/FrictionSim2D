@@ -690,9 +690,15 @@ class TestWorkspaceMemory:
 
         assert window.workspace.state['db_dest'] == str(tmp_path / 'dl')
 
-    def test_a_new_window_restores_what_the_last_one_left(self, qt_app, tmp_path):
+    def test_a_new_window_restores_what_the_last_one_left(
+            self, qt_app, tmp_path, monkeypatch):
         del qt_app
+        import src.gui.app as app_module
         from src.gui.app import MainWindow
+        # D11 disables central by default (no central database is configured);
+        # this test is about restoring the remembered source, not about D11,
+        # so pretend it is configured.
+        monkeypatch.setattr(app_module, 'central_configured', lambda s: True)
         workspace = Workspace.open(tmp_path / 'ws')
         workspace.remember('db_source', 'central')
         workspace.remember('db_filters', dict(EMPTY_FILTERS, family='hetero'))
@@ -741,3 +747,89 @@ class TestWorkspaceMemory:
         assert window.database_pane.filters.value()['family'] == 'hetero'
         reloaded = Workspace.open(other.root)
         assert reloaded.state['db_filters']['family'] == 'hetero'
+
+
+class TestDegradation:
+    """A machine without aiida still gets a window.
+
+    The pane is reached from `src.gui.app`, which is reached from `src.cli`;
+    an unconditional `import aiida` here would break the CLI on every compute
+    node that has no store.
+    """
+
+    def test_missing_backend_probes_without_importing(self, monkeypatch):
+        import src.gui.widgets.database.pane as pane_module
+        monkeypatch.setattr(pane_module, 'find_spec',
+                            lambda name: None if name == 'aiida' else object())
+
+        assert pane_module.missing_backend('local') == ['aiida']
+        assert pane_module.missing_backend('central') == []
+
+    def test_a_missing_backend_disables_its_source_and_says_why(
+            self, qt_app, monkeypatch):
+        del qt_app
+        import src.gui.widgets.database.pane as pane_module
+        monkeypatch.setattr(pane_module, 'missing_backend',
+                            lambda source: ['aiida'] if source == 'local' else [])
+
+        pane = pane_module.DatabasePane()
+
+        assert pane.source == 'central', 'a disabled source must not stay selected'
+        assert not pane._source_buttons.button(0).isEnabled()
+        text = pane.messages.toPlainText()
+        assert 'aiida' in text
+        assert "pip install -e '.[aiida]'" in text
+
+    def test_both_backends_missing_leaves_a_usable_but_inert_pane(
+            self, qt_app, monkeypatch):
+        del qt_app
+        import src.gui.widgets.database.pane as pane_module
+        monkeypatch.setattr(pane_module, 'missing_backend', lambda source: ['x'])
+
+        pane = pane_module.DatabasePane()
+
+        assert not pane.search_button.isEnabled()
+        assert not pane.import_button.isEnabled()
+        assert 'x' in pane.messages.toPlainText()
+
+    def test_a_present_backend_is_left_alone(self, pane):
+        assert pane._source_buttons.button(0).isEnabled()
+        assert pane.search_button.isEnabled()
+
+
+class TestNotConfigured:
+    """Installed is not the same as configured, and today there is no central
+    database at all."""
+
+    def test_the_default_url_alone_is_not_a_configured_database(self):
+        from types import SimpleNamespace
+        from src.gui.controllers.database import DEFAULT_API_URL, central_configured
+
+        bare = SimpleNamespace(database=SimpleNamespace(
+            api_url=DEFAULT_API_URL, api_key='', host=''))
+        keyed = SimpleNamespace(database=SimpleNamespace(
+            api_url=DEFAULT_API_URL, api_key='k', host=''))
+        elsewhere = SimpleNamespace(database=SimpleNamespace(
+            api_url='https://db.example.org', api_key='', host=''))
+        empty = SimpleNamespace(database=SimpleNamespace(
+            api_url='', api_key='', host=''))
+
+        assert central_configured(bare) is False
+        assert central_configured(keyed) is True
+        assert central_configured(elsewhere) is True
+        assert central_configured(empty) is False
+
+    def test_an_unconfigured_central_source_is_disabled_with_a_reason(self, window):
+        window.settings.database.api_url = ''
+        window._apply_database_availability()
+
+        text = window.database_pane.messages.toPlainText()
+        assert not window.database_pane._source_buttons.button(1).isEnabled()
+        assert 'not configured' in text
+        assert 'Local store' in text
+
+    def test_configuring_it_enables_the_source(self, window):
+        window.settings.database.api_url = 'https://db.example.org'
+        window._apply_database_availability()
+
+        assert window.database_pane._source_buttons.button(1).isEnabled()

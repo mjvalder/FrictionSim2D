@@ -23,11 +23,14 @@ def _run(code: str) -> subprocess.CompletedProcess:
     )
 
 
-def test_importing_gui_does_not_import_qt_or_ovito():
+LEAKY = ('PySide6', 'ovito', 'aiida', 'psycopg2', 'httpx')
+
+
+def test_importing_gui_does_not_import_qt_ovito_aiida_or_psycopg2():
     result = _run(
         "import sys\n"
         "import src.gui\n"
-        "leaked = [m for m in ('PySide6', 'ovito') if m in sys.modules]\n"
+        f"leaked = [m for m in {LEAKY!r} if m in sys.modules]\n"
         "print('LEAKED:' + ','.join(leaked))\n"
     )
     assert result.returncode == 0, result.stderr
@@ -36,16 +39,31 @@ def test_importing_gui_does_not_import_qt_or_ovito():
     assert leaked == "", f"src.gui pulled in {leaked} at import time"
 
 
-def test_importing_cli_does_not_import_qt_or_ovito():
+def test_importing_cli_does_not_import_qt_ovito_aiida_or_psycopg2():
     result = _run(
         "import sys\n"
         "import src.cli\n"
-        "leaked = [m for m in ('PySide6', 'ovito') if m in sys.modules]\n"
+        f"leaked = [m for m in {LEAKY!r} if m in sys.modules]\n"
         "print('LEAKED:' + ','.join(leaked))\n"
     )
     assert result.returncode == 0, result.stderr
     leaked = result.stdout.split("LEAKED:")[1].strip()
     assert leaked == "", f"src.cli pulled in {leaked} at import time"
+
+
+def test_the_db_worker_module_imports_nothing_heavy():
+    """Every backend import in the worker is inside a function: the module is
+    imported by the controller's test suite and by `python -m` on machines
+    that may have only one of the two backends."""
+    result = _run(
+        "import sys\n"
+        "import src.gui.db_worker\n"
+        f"leaked = [m for m in {LEAKY!r} if m in sys.modules]\n"
+        "print('LEAKED:' + ','.join(leaked))\n"
+    )
+    assert result.returncode == 0, result.stderr
+    leaked = result.stdout.split("LEAKED:")[1].strip()
+    assert leaked == "", f"src.gui.db_worker pulled in {leaked} at import time"
 
 
 def test_gui_available_flag_is_a_bool():

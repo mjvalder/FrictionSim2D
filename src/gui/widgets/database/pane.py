@@ -8,6 +8,7 @@ path hangs the test suite.
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -35,6 +36,7 @@ from .filters import FilterBar
 from .model import ResultSortProxyModel, ResultTableModel
 
 __all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS',
+          'BACKEND_MODULES', 'INSTALL_HINTS', 'missing_backend',
           'render_checks']
 
 #: The pane's third axis, beside the AiiDA profile.
@@ -56,6 +58,30 @@ EXPORT_LABELS: Tuple[Tuple[str, str, str], ...] = (
 
 #: Downloads the central summary DB cannot serve -- it holds no files.
 _LOCAL_ONLY_EXPORTS = ('results', 'provenance', 'run_tree')
+
+#: What each source needs installed. Probed with `find_spec`, never imported:
+#: this module is reached from `src.cli`, and a compute node has neither.
+BACKEND_MODULES: Dict[str, Tuple[str, ...]] = {
+    'local': ('aiida',),
+    'central': ('httpx',),
+}
+
+INSTALL_HINTS: Dict[str, str] = {
+    'local': "pip install -e '.[aiida]'",
+    'central': "pip install -e '.[api]'",
+}
+
+
+def missing_backend(source: str) -> List[str]:
+    """Modules this source needs that are not installed."""
+    missing = []
+    for name in BACKEND_MODULES.get(source, ()):
+        try:
+            if find_spec(name) is None:
+                missing.append(name)
+        except (ImportError, ValueError):
+            missing.append(name)
+    return missing
 
 
 def render_checks(result: Dict[str, Any]) -> str:
@@ -123,6 +149,8 @@ class DatabasePane(QWidget):
         self.messages.setPlaceholderText(
             'Query results, download reports and connection checks appear here.')
         layout.addWidget(self.messages)
+
+        self._apply_backend_availability()
 
     # ------------------------------------------------------------------- ui
 
@@ -248,6 +276,65 @@ class DatabasePane(QWidget):
         button = self._source_buttons.button(SOURCES.index(source))
         if button is not None:
             button.setChecked(True)
+
+    def set_source_enabled(self, source: str, enabled: bool,
+                           reason: str = '') -> None:
+        """Enable or disable one source, saying why in the message panel.
+
+        One note per source, replaced rather than appended, so re-enabling a
+        source clears its message instead of leaving a stale explanation on
+        screen. A source that is disabled while selected hands over to the
+        other one if that is usable.
+        """
+        if source not in SOURCES:
+            return
+        button = self._source_buttons.button(SOURCES.index(source))
+        if button is not None:
+            button.setEnabled(enabled)
+            button.setToolTip(reason)
+
+        if enabled:
+            self._notes.pop(source, None)
+        elif reason:
+            self._notes[source] = reason
+        if self._notes:
+            self.message('\n'.join(self._notes[s] for s in SOURCES
+                                   if s in self._notes), 'warn')
+
+        if not enabled and self._source == source:
+            other = next((s for s in SOURCES if s != source), None)
+            other_button = (self._source_buttons.button(SOURCES.index(other))
+                            if other else None)
+            if other_button is not None and other_button.isEnabled():
+                self.set_source(other)
+
+    def _apply_backend_availability(self) -> None:
+        """Build even with no backend installed (D11): disable what cannot
+        work and say what to install, rather than raising at construction.
+
+        "Not installed" only. Whether a source is *configured* is the window's
+        question -- it is the only one holding the settings.
+        """
+        usable = []
+        for source in SOURCES:
+            missing = missing_backend(source)
+            if missing:
+                self.set_source_enabled(
+                    source, False,
+                    f"{SOURCE_LABELS[source]}: {', '.join(missing)} is not "
+                    f"installed. {INSTALL_HINTS[source]}")
+            else:
+                usable.append(source)
+
+        if not usable:
+            self.set_busy(True)
+            self.cancel_button.setEnabled(False)
+            self.import_button.setEnabled(False)
+            for button in self.download_buttons.values():
+                button.setEnabled(False)
+            return
+        if self._source not in usable:
+            self.set_source(usable[0])
 
     def _on_source_toggled(self, source: str, checked: bool) -> None:
         if not checked or source == self._source:
