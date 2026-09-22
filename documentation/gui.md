@@ -660,8 +660,84 @@ download directory are remembered per workspace.
 Switching source empties the table: a row belongs to the store it came from,
 and the two stores identify a row differently.
 
+## Plots
+
+The third top-level tab builds a **plot document** -- the same JSON
+`FrictionSim2D postprocess plot` reads -- and renders it. A document written
+here runs unchanged on a cluster, and one written by hand or by
+`postprocess plot --init` opens here.
+
+### Datasets
+
+*Available datasets* lists every directory the workspace holds that looks
+plottable: one with an `outputs/` containing at least one
+`output_full_*.json`. Two places are scanned -- the workspace root, where
+Generate writes its simulation packages, and `.preview/_datasets/`, which is
+where a set pulled out of the local AiiDA store belongs:
+
+```bash
+FrictionSim2D aiida export-results <label> \
+    --output-dir <workspace>/.preview/_datasets/<label>
+```
+
+Select one and press **Add dataset** to put it in the document; the pane does
+not run `export-results` itself.
+
+If a directory you expect is missing, it has no export yet:
+
+```bash
+FrictionSim2D postprocess read <that directory> --export
+```
+
+### Plots and the form
+
+*Plots* lists the document's plots. **Add plot** appends one of the type in
+the combo beside it, and selecting a row opens it in the form below.
+
+The form is generated from `src/postprocessing/plot_config.py`, the same
+Pydantic schema the CLI validates against, and is split in two groups:
+**Common** (what every plot type takes -- filters, axes, labels, limits, the
+sampling tier) and one named for the plot type (what only it takes). Changing
+the type keeps the common values and drops the previous type's own.
+
+A field added to the schema appears here with no GUI change at all. An invalid
+value is reported in the status line at the bottom right, never in a dialog.
+
+### Rendering
+
+**Render** draws the **selected plot only**, as a PNG, and shows it in the
+panel on the right. Previewing one figure should not cost the time of ten.
+
+**Export** draws **every** plot with the chosen preset's own output formats --
+`publication` writes PDF, SVG and PNG at 600 dpi, sized for a single journal
+column. The status line names the formats and the directory they landed in.
+
+The **Preset** combo offers the shipped presets; `(none)` uses the screen
+defaults. For finer control, save the document and pass `--settings` on the
+command line.
+
+### Saving
+
+**Open...**, **Save** and **Save as...** read and write the plot document
+itself. `Save` writes back to the file the document came from and asks for a
+path only the first time.
+
+### Why there is no live canvas
+
+The preview is a PNG in a scrolled label, not an embedded matplotlib canvas,
+and that is deliberate. Rendering happens in a subprocess
+(`python -m src.gui.plot_worker`), so:
+
+- matplotlib never installs a second Qt backend beside the one OVITO's
+  viewport already owns -- the failure mode there is a hung window with
+  nothing to click;
+- a slow render cannot freeze the interface, and can be abandoned by killing
+  the process;
+- the figures on disk are the same files the CLI produces, not a screen-only
+  approximation of them.
+
 ## Not included
 
-Job monitoring (Part 2 of the requirements), loading or configuring plots,
-and standalone single-component builds. Stacks of more than two materials are
+Job monitoring (Part 2 of the requirements) and standalone single-component
+builds. Stacks of more than two materials are
 not editable here either — see [Configs](#configs).
