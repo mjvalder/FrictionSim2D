@@ -158,8 +158,15 @@ class FrictionHTTPClient:
                 params[key] = value
         for prefix, span in (("force", force_range), ("pressure", pressure_range),
                              ("temp", temperature_range), ("angle", angle_range)):
-            if span is not None:
-                params[f"{prefix}_min"], params[f"{prefix}_max"] = span
+            if span is None:
+                continue
+            # Only the bounds actually given: a `None` bound would be sent as
+            # an empty string, which the server rejects as a non-float.
+            lo, hi = span
+            if lo is not None:
+                params[f"{prefix}_min"] = lo
+            if hi is not None:
+                params[f"{prefix}_max"] = hi
 
         resp = self._client.get(self._url("/results"), params=params,
                                 headers=self._headers())

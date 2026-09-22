@@ -331,7 +331,9 @@ def query_results(  # pylint: disable=too-many-arguments,too-many-positional-arg
     queries. Pass ``status`` explicitly to override.
     """
     def _span(lo, hi):
-        return (lo, hi) if lo is not None and hi is not None else None
+        # One-sided is a real filter (`force_min` alone = "at least"); only a
+        # range with neither bound is no filter at all.
+        return (lo, hi) if lo is not None or hi is not None else None
 
     df = db.query(
         material=material,

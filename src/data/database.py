@@ -75,7 +75,7 @@ import os
 import secrets
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple, Union
 
 from .models import ResultRecord
 
@@ -433,7 +433,10 @@ class FrictionDB:
     #: here is the order of the `params` list the test asserts on.
     _EQ_CLAUSES = {
         'material': 'material = %s',
-        'materials': 'materials && %s',
+        # ALL, not ANY: a row matches when its `materials` contains every
+        # requested one -- the same meaning as `Friction2DDB.query` and the
+        # CLI's repeatable `--material`.
+        'materials': 'materials @> %s',
         'family': 'family = %s',
         'model': 'model = %s',
         'set_label': 'set_label = %s',
@@ -443,12 +446,26 @@ class FrictionDB:
         'status': 'status = %s',
         'is_complete': 'is_complete = %s',
     }
-    _RANGE_CLAUSES = {
-        'force_range': 'force_nN BETWEEN %s AND %s',
-        'pressure_range': 'pressure_gpa BETWEEN %s AND %s',
-        'temperature_range': 'temperature BETWEEN %s AND %s',
-        'angle_range': 'scan_angle BETWEEN %s AND %s',
+    #: range kwarg -> column. A `(lo, hi)` span becomes `BETWEEN`; a span with
+    #: one bound `None` is open-ended (`>=` or `<=`), never `BETWEEN NULL AND x`,
+    #: which matches no row at all.
+    _RANGE_COLUMNS = {
+        'force_range': 'force_nN',
+        'pressure_range': 'pressure_gpa',
+        'temperature_range': 'temperature',
+        'angle_range': 'scan_angle',
     }
+
+    @staticmethod
+    def _range_clause(column: str, span) -> Tuple[Optional[str], List[Any]]:
+        lo, hi = span
+        if lo is not None and hi is not None:
+            return f'{column} BETWEEN %s AND %s', [lo, hi]
+        if lo is not None:
+            return f'{column} >= %s', [lo]
+        if hi is not None:
+            return f'{column} <= %s', [hi]
+        return None, []
 
     def query(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, *, material: Optional[str] = None, materials: Optional[List[str]] = None,
@@ -488,9 +505,12 @@ class FrictionDB:
                 conditions.append(self._EQ_CLAUSES[name])
                 params.append(list(value) if name == 'materials' else value)
         for name, span in ranges.items():
-            if span is not None:
-                conditions.append(self._RANGE_CLAUSES[name])
-                params.extend(span)
+            if span is None:
+                continue
+            clause, values = self._range_clause(self._RANGE_COLUMNS[name], span)
+            if clause is not None:
+                conditions.append(clause)
+                params.extend(values)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         limit_clause = f"LIMIT {int(limit)}" if limit else ""

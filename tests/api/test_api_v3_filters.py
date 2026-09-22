@@ -148,3 +148,45 @@ def test_client_upload_result_still_raises_on_server_error():
 
     with pytest.raises(RuntimeError, match='500'):
         client.upload_result(material='h-MoS2')
+
+
+def _recording_api_db():
+    import pandas as pd
+
+    from src.api import auth
+
+    seen = {}
+
+    class _DB:
+        def query(self, **kwargs):
+            seen.update(kwargs)
+            return pd.DataFrame(columns=list(ResultRecord.model_fields))
+
+    auth.set_db(_DB())
+    return seen
+
+
+def test_api_accepts_a_one_sided_range():
+    """I5: `_span` used to drop a range unless BOTH bounds were given, so
+    `force_min=5` alone filtered nothing."""
+    seen = _recording_api_db()
+
+    resp = TestClient(app).get('/results', params={'force_min': 5.0,
+                                                   'temp_max': 400.0})
+
+    assert resp.status_code == 200
+    assert seen['force_range'] == (5.0, None)
+    assert seen['temperature_range'] == (None, 400.0)
+    assert seen['pressure_range'] is None
+
+
+def test_client_sends_only_the_given_bounds_end_to_end():
+    """Client -> real FastAPI app: a `(lo, None)` range used to go out as
+    `force_max=` (empty), which the server rejects as a non-float."""
+    seen = _recording_api_db()
+    client = _bare_client(TestClient(app))
+
+    client.query(force_range=(10.0, None), pressure_range=(None, 3.0))
+
+    assert seen['force_range'] == (10.0, None)
+    assert seen['pressure_range'] == (None, 3.0)

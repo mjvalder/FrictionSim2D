@@ -637,6 +637,13 @@ Options:
 - `--reload` — auto-reload on code changes (development only)
 - `--settings-file PATH`
 
+`GET /results` takes the range filters `force_min/force_max`,
+`pressure_min/pressure_max`, `temp_min/temp_max` and `angle_min/angle_max`.
+Each bound is optional: `force_min=5` alone means "at least 5 nN". The same
+holds for the Python clients (`query(force_range=(5.0, None))`, over the API
+or directly on `FrictionDB`). A `materials=[...]` filter on `FrictionDB`
+matches rows that contain **all** the given materials, like `aiida query -m`.
+
 ## Practical notes
 
 - Every `run` command exposes `--hpc-scripts` to generate scheduler scripts in one step.

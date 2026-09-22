@@ -849,3 +849,31 @@ def test_query_filters_on_family_and_set():
     assert 'pressure_gpa BETWEEN %s AND %s' in sql
     assert 'LIMIT 10' in sql
     assert params == ['hetero', '260910-afm', 0.5, 2.0]
+
+
+def test_query_one_sided_ranges_are_open_ended():
+    """I5: `(lo, None)` used to become `BETWEEN lo AND NULL`, matching nothing."""
+    db, cursor = _recording_db()
+
+    db.query(force_range=(10.0, None), temperature_range=(None, 400.0),
+             angle_range=(None, None))
+
+    sql, params = cursor.executed[-1]
+    assert 'force_nN >= %s' in sql
+    assert 'temperature <= %s' in sql
+    assert 'scan_angle' not in sql
+    assert 'NULL' not in sql
+    assert params == [10.0, 400.0]
+
+
+def test_query_materials_means_all_of_them():
+    """I5 ruling: `materials` is ALL everywhere -- array containment, not
+    overlap (`&&` would match a row holding ANY one of them)."""
+    db, cursor = _recording_db()
+
+    db.query(materials=['h-MoS2', 'h-WS2'])
+
+    sql, params = cursor.executed[-1]
+    assert 'materials @> %s' in sql
+    assert '&&' not in sql
+    assert params == [['h-MoS2', 'h-WS2']]
