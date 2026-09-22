@@ -20,7 +20,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _make_psycopg2_stub():
-    """Return a minimal psycopg2 stub module."""
+    """Return a minimal psycopg2 stub module, plus its `extras` submodule.
+
+    `upload_record` does `from psycopg2.extras import Json` -- without a
+    registered `psycopg2.extras` module in `sys.modules` that import raises
+    ImportError in every upload test, not just the ones carrying `extras`.
+    `Json` is a passthrough here: the fake cursor only cares that a dict
+    reaches it, not that it went through the real adapter.
+    """
     stub = ModuleType("psycopg2")
 
     class OperationalError(Exception):
@@ -28,10 +35,14 @@ def _make_psycopg2_stub():
 
     stub.OperationalError = OperationalError  # type: ignore[attr-defined]
     stub.connect = MagicMock()
-    return stub
+
+    extras_stub = ModuleType("psycopg2.extras")
+    extras_stub.Json = lambda value: value  # type: ignore[attr-defined]
+    stub.extras = extras_stub  # type: ignore[attr-defined]
+    return stub, extras_stub
 
 
-_PSYCOPG2_STUB = _make_psycopg2_stub()
+_PSYCOPG2_STUB, _PSYCOPG2_EXTRAS_STUB = _make_psycopg2_stub()
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +68,7 @@ class _FakeCursor:
             self._rows_queue = [(0.015,)]
         elif "GROUP BY material" in sql:
             self._rows_queue = [("h-MoS2", 3), ("h-WS2", 1)]
-        elif "GROUP BY simulation_type" in sql:
+        elif "GROUP BY family" in sql:
             self._rows_queue = [("afm", 4)]
         elif "ON CONFLICT" in sql:
             pass  # schema_version upsert
@@ -79,6 +90,7 @@ class _FakeCursor:
 def _inject_psycopg2_stub(monkeypatch):
     """Inject the psycopg2 stub into sys.modules for the duration of the test."""
     monkeypatch.setitem(sys.modules, "psycopg2", _PSYCOPG2_STUB)
+    monkeypatch.setitem(sys.modules, "psycopg2.extras", _PSYCOPG2_EXTRAS_STUB)
     import importlib
     import src.data.database as db_module
     importlib.reload(db_module)
@@ -155,7 +167,8 @@ class TestFrictionDBUpload:
     def test_upload_returns_row_id(self, db):
         row_id = db.upload_result(
             material="h-MoS2",
-            simulation_type="afm",
+            family="afm",
+            model="afm",
             layers=1,
             force_nN=10.0,
             scan_angle=0.0,
@@ -167,7 +180,8 @@ class TestFrictionDBUpload:
     def test_upload_all_fields(self, db):
         row_id = db.upload_result(
             material="h-WS2",
-            simulation_type="sheetonsheet",
+            family="sheetonsheet",
+            model="sheetonsheet",
             layers=2,
             force_nN=5.0,
             pressure_gpa=None,
@@ -182,7 +196,7 @@ class TestFrictionDBUpload:
             mean_nf=10.0,
             uploader="tester",
             notes="unit test",
-            metadata={"source": "test"},
+            extras={"source": "test"},
         )
         assert isinstance(row_id, int)
 
@@ -198,28 +212,24 @@ class TestFrictionDBQuery:
     def _make_db_with_rows(self):
         from src.data.database import FrictionDB, _COLUMN_NAMES
 
-        # Build sample rows matching the new 37-column schema
-        def _make_row(row_id, uploader, material, sim_type, layers, force, cof):
-            # id, uploaded_at, uploader,
-            # material, simulation_type, layers, size_x, size_y, stack_type,
-            # force_nN, pressure_gpa, scan_angle, scan_speed, temperature,
-            # tip_material, tip_radius, substrate_material, substrate_amorphous,
-            # potential_type,
-            # mean_cof, std_cof, mean_lf, std_lf, mean_nf, std_nf,
-            # mean_lfx, std_lfx, mean_lfy, std_lfy,
-            # ntimesteps, time_series_hash, is_complete,
-            # status, notes, metadata, data_url
-            return (
-                row_id, "2024-01-01", uploader,
-                material, sim_type, layers, 100.0, 100.0, "AA",
-                force, None, 0.0, 1.0, 300.0,
-                "Si", 20.0, None, None,
-                "sw",
-                cof, 0.001, 0.12, 0.01, 10.0, 0.5,
-                0.10, 0.01, 0.06, 0.005,
-                500000, None, True,
-                "published", None, None, None,
+        # Build sample rows from _COLUMN_NAMES itself (the record IS the
+        # schema, per Task 30) rather than hand-listing the schema-2 tuple.
+        def _make_row(row_id, uploader, material, family, layers, force, cof):
+            values = dict.fromkeys(_COLUMN_NAMES)
+            values.update(
+                id=row_id, uploaded_at="2024-01-01", uploader=uploader,
+                model=family, family=family,
+                materials=[material], material=material,
+                stack_type="AA", layers=layers, size_x=100.0, size_y=100.0,
+                temperature=300.0, tip_material="Si", tip_radius=20.0,
+                potential_type="sw",
+                force_nN=force, scan_angle=0.0, scan_speed=1.0,
+                mean_cof=cof, std_cof=0.001, mean_lf=0.12, std_lf=0.01,
+                mean_nf=10.0, std_nf=0.5, mean_lfx=0.10, std_lfx=0.01,
+                mean_lfy=0.06, std_lfy=0.005,
+                ntimesteps=500000, is_complete=True, status="published",
             )
+            return tuple(values[name] for name in _COLUMN_NAMES)
 
         sample_rows = [
             _make_row(1, "alice", "h-MoS2", "afm", 1, 10.0, 0.012),
@@ -460,8 +470,9 @@ class TestResultRecord:
 
         r = ResultRecord(material="h-MoS2")
         assert r.material == "h-MoS2"
-        assert r.simulation_type == "afm"
-        assert r.status == "local"
+        assert r.family is None
+        assert r.model is None
+        assert r.status == "staged"
 
     def test_force_and_pressure_exclusive(self):
         from src.data.models import ResultRecord
@@ -516,7 +527,7 @@ class TestValidation:
         from src.data.models import ResultRecord
         from src.data.validation import validate_record
 
-        r = ResultRecord(material="h-MoS2", mean_cof=0.012)
+        r = ResultRecord(material="h-MoS2", family="afm", model="afm", mean_cof=0.012)
         vr = validate_record(r)
         assert vr.is_valid
 
@@ -524,7 +535,7 @@ class TestValidation:
         from src.data.models import ResultRecord
         from src.data.validation import validate_record
 
-        r = ResultRecord(material="", mean_cof=0.012)
+        r = ResultRecord(material="", family="afm", model="afm", mean_cof=0.012)
         vr = validate_record(r)
         assert not vr.is_valid
 
@@ -532,7 +543,7 @@ class TestValidation:
         from src.data.models import ResultRecord
         from src.data.validation import validate_record
 
-        r = ResultRecord(material="h-MoS2", mean_cof=10.0)
+        r = ResultRecord(material="h-MoS2", family="afm", model="afm", mean_cof=10.0)
         vr = validate_record(r)
         assert not vr.is_valid
 
@@ -540,7 +551,8 @@ class TestValidation:
         from src.data.models import ResultRecord
         from src.data.validation import validate_record
 
-        r = ResultRecord(material="h-MoS2", mean_cof=0.01, time_series_hash="abc123")
+        r = ResultRecord(material="h-MoS2", family="afm", model="afm",
+                         mean_cof=0.01, time_series_hash="abc123")
         vr = validate_record(r, existing_hashes=["abc123"])
         assert not vr.is_valid
 
@@ -550,7 +562,7 @@ class TestValidation:
 
         # mean_lf/mean_nf != mean_cof
         r = ResultRecord(
-            material="h-MoS2", mean_cof=0.5,
+            material="h-MoS2", family="afm", model="afm", mean_cof=0.5,
             mean_lf=1.0, mean_nf=10.0,  # expected COF = 0.1
         )
         vr = validate_record(r)
@@ -645,7 +657,7 @@ class TestSchemaVersion:
 
     def test_schema_version_constant(self):
         from src.data.database import SCHEMA_VERSION
-        assert SCHEMA_VERSION == 2
+        assert SCHEMA_VERSION == 3
 
 
 class TestDbFromProfile:
@@ -655,3 +667,48 @@ class TestDbFromProfile:
         from src.data.database import db_from_profile
         with pytest.raises(ValueError, match="Unknown database profile"):
             db_from_profile('nonexistent')
+
+
+# ===========================================================================
+# Task 30: schema-3 init/upload/query
+# ===========================================================================
+
+def _recording_db():
+    """A `FrictionDB` whose fake cursor records every executed statement."""
+    from src.data.database import FrictionDB
+
+    with patch("src.data.database.FrictionDB._ensure_schema"):
+        instance = FrictionDB(host="localhost", port=5432, dbname="test_db",
+                              user="test", password="test", auto_create=False)
+    cursor = _FakeCursor()
+
+    @contextmanager
+    def _mock_cursor(commit=False):
+        yield cursor
+
+    instance._cursor = _mock_cursor  # type: ignore[method-assign]
+    return instance, cursor
+
+
+def test_init_schema_drop_recreates():
+    db, cursor = _recording_db()
+
+    db.init_schema(drop=True)
+
+    executed = ' '.join(sql for sql, _params in cursor.executed)
+    assert 'DROP TABLE IF EXISTS simulations' in executed
+    assert 'CREATE TABLE IF NOT EXISTS simulations' in executed
+
+
+def test_query_filters_on_family_and_set():
+    db, cursor = _recording_db()
+
+    db.query(family='hetero', set_label='260910-afm',
+             pressure_range=(0.5, 2.0), limit=10)
+
+    sql, params = cursor.executed[-1]
+    assert 'family = %s' in sql
+    assert 'set_label = %s' in sql
+    assert 'pressure_gpa BETWEEN %s AND %s' in sql
+    assert 'LIMIT 10' in sql
+    assert params == ['hetero', '260910-afm', 0.5, 2.0]

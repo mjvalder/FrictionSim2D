@@ -53,7 +53,7 @@ arguments, or ``settings.yaml`` profiles::
     db = FrictionDB()
 
     record = ResultRecord(
-        material="h-MoS2", simulation_type="afm",
+        material="h-MoS2", family="afm", model="afm",
         layers=1, force_nN=10.0, temperature=300.0, mean_cof=0.012,
     )
     db.upload_record(record)
@@ -73,71 +73,57 @@ database.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import secrets
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, TypedDict, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Union
+
+from .models import ResultRecord
 
 if TYPE_CHECKING:
     import pandas
 
 logger = logging.getLogger(__name__)
 
-
-class _StatsKwargs(TypedDict, total=False):
-    """Subset of upload_result kwargs produced by compute_friction_stats."""
-
-    mean_cof: float
-    std_cof: float
-    mean_lf: float
-    std_lf: float
-    mean_nf: float
-    std_nf: float
-    mean_lfx: float
-    std_lfx: float
-    mean_lfy: float
-    std_lfy: float
-
 # ---------------------------------------------------------------------------
 # Schema DDL
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS simulations (
     id                  SERIAL PRIMARY KEY,
     uploaded_at         TIMESTAMPTZ DEFAULT now(),
     uploader            TEXT,
-
-    -- Material & geometry
+    contact             TEXT,
+    run_uuid            TEXT,
+    result_uuid         TEXT,
+    set_label           TEXT,
+    source_host         TEXT,
+    model               TEXT,
+    family              TEXT,
+    materials           TEXT[],
     material            TEXT,
-    simulation_type     TEXT,
+    stack_type          TEXT,
     layers              INTEGER,
     size_x              REAL,
     size_y              REAL,
-    stack_type          TEXT,
-
-    -- Loading conditions
-    force_nN            REAL,
-    pressure_gpa        REAL,
-    scan_angle          REAL,
-    scan_speed          REAL,
     temperature         REAL,
-
-    -- Tip / substrate (AFM-specific)
     tip_material        TEXT,
     tip_radius          REAL,
     substrate_material  TEXT,
     substrate_amorphous BOOLEAN,
-
-    -- Potential
     potential_type      TEXT,
-
-    -- Results (from compute_friction_stats)
+    potential_name      TEXT,
+    pot_sha256          TEXT,
+    git_commit          TEXT,
+    force_nN            REAL,
+    pressure_gpa        REAL,
+    scan_angle          REAL,
+    scan_speed          REAL,
     mean_cof            REAL,
     std_cof             REAL,
     mean_lf             REAL,
@@ -148,23 +134,17 @@ CREATE TABLE IF NOT EXISTS simulations (
     std_lfx             REAL,
     mean_lfy            REAL,
     std_lfy             REAL,
-
-    -- Data provenance
     ntimesteps          INTEGER,
     time_series_hash    TEXT UNIQUE,
     is_complete         BOOLEAN DEFAULT true,
-
-    -- Staging pipeline
+    extras              JSONB,
     status              TEXT DEFAULT 'staged',
-
-    -- Free-form
     notes               TEXT,
-    metadata            JSONB,
-
-    -- Federated file storage
     data_url            TEXT
 );
 """
+
+_DROP_TABLE_SQL = "DROP TABLE IF EXISTS simulations CASCADE;"
 
 _CREATE_API_KEYS_SQL = """
 CREATE TABLE IF NOT EXISTS api_keys (
@@ -183,17 +163,8 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 """
 
-_COLUMN_NAMES = [
-    'id', 'uploaded_at', 'uploader',
-    'material', 'simulation_type', 'layers', 'size_x', 'size_y', 'stack_type',
-    'force_nN', 'pressure_gpa', 'scan_angle', 'scan_speed', 'temperature',
-    'tip_material', 'tip_radius', 'substrate_material', 'substrate_amorphous',
-    'potential_type',
-    'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
-    'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy',
-    'ntimesteps', 'time_series_hash', 'is_complete',
-    'status', 'notes', 'metadata', 'data_url',
-]
+#: Derived, not repeated: the record IS the schema (spec §5).
+_COLUMN_NAMES = list(ResultRecord.model_fields)
 
 # Allowed tokens for query ORDER BY sanitisation
 _ALLOWED_ORDER_COLS = set(_COLUMN_NAMES) | {'ASC', 'DESC', 'asc', 'desc'}
@@ -358,13 +329,16 @@ class FrictionDB:
 
     # -- Schema ----------------------------------------------------------------
 
-    def _ensure_schema(self) -> None:
-        """Create/verify the current schema in place.
+    def init_schema(self, drop: bool = False) -> None:
+        """Create the schema; `drop=True` recreates `simulations` from scratch.
 
-        Initialisation always enforces the current schema version.
+        `db init --drop` is the supported upgrade path (spec U6): there is no
+        migration from schema 2 and the central DB is not deployed yet.
         """
         with self._cursor(commit=True) as cur:
             cur.execute(_CREATE_SCHEMA_VERSION_SQL)
+            if drop:
+                cur.execute(_DROP_TABLE_SQL)
             cur.execute(_CREATE_TABLE_SQL)
             cur.execute(_CREATE_API_KEYS_SQL)
 
@@ -376,97 +350,27 @@ class FrictionDB:
             )
         logger.debug("Database schema verified (version %d)", SCHEMA_VERSION)
 
+    def _ensure_schema(self) -> None:
+        """Create/verify the current schema in place.
+
+        Initialisation always enforces the current schema version.
+        """
+        self.init_schema(drop=False)
+
     # -- Upload ----------------------------------------------------------------
 
-    def upload_result(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments,invalid-name
-        self,
-        material: str,
-        simulation_type: str = 'afm',
-        layers: Optional[int] = None,
-        size_x: Optional[float] = None,
-        size_y: Optional[float] = None,
-        stack_type: Optional[str] = None,
-        force_nN: Optional[float] = None,
-        pressure_gpa: Optional[float] = None,
-        scan_angle: Optional[float] = None,
-        scan_speed: Optional[float] = None,
-        temperature: Optional[float] = None,
-        tip_material: Optional[str] = None,
-        tip_radius: Optional[float] = None,
-        substrate_material: Optional[str] = None,
-        substrate_amorphous: Optional[bool] = None,
-        potential_type: Optional[str] = None,
-        mean_cof: Optional[float] = None,
-        std_cof: Optional[float] = None,
-        mean_lf: Optional[float] = None,
-        std_lf: Optional[float] = None,
-        mean_nf: Optional[float] = None,
-        std_nf: Optional[float] = None,
-        mean_lfx: Optional[float] = None,
-        std_lfx: Optional[float] = None,
-        mean_lfy: Optional[float] = None,
-        std_lfy: Optional[float] = None,
-        ntimesteps: Optional[int] = None,
-        time_series_hash: Optional[str] = None,
-        is_complete: bool = True,
-        status: str = 'staged',
-        uploader: Optional[str] = None,
-        notes: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        data_url: Optional[str] = None,
-    ) -> int:
-        """Upload a single simulation result to the database.
+    #: Columns whose Python value is a dict and must be adapted before it
+    #: reaches psycopg2. There is no `register_adapter(dict, Json)` anywhere in
+    #: this repo, and `psycopg2.extensions.adapt({'a': 1})` raises
+    #: `ProgrammingError: can't adapt type 'dict'`. `ResultRecord.extras`
+    #: defaults to `{}` and `to_upload_dict` drops only `None`, so without this
+    #: EVERY upload fails, not just the ones carrying extras. (The schema-2 code
+    #: did `json.dumps(metadata) if metadata else None` at database.py:459.)
+    _JSONB_COLUMNS = ('extras',)
 
-        Prefer :meth:`upload_record` which accepts a :class:`ResultRecord`
-        and guarantees consistent field naming.
-
-        Returns:
-            Database row ``id`` of the inserted record.
-        """
-        sql = """
-            INSERT INTO simulations (
-                uploader, material, simulation_type, layers,
-                size_x, size_y, stack_type,
-                force_nN, pressure_gpa, scan_angle, scan_speed, temperature,
-                tip_material, tip_radius, substrate_material, substrate_amorphous,
-                potential_type,
-                mean_cof, std_cof, mean_lf, std_lf, mean_nf, std_nf,
-                mean_lfx, std_lfx, mean_lfy, std_lfy,
-                ntimesteps, time_series_hash, is_complete,
-                status, notes, metadata, data_url
-            ) VALUES (
-                %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s,
-                %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s, %s
-            )
-            RETURNING id;
-        """
-        values = (
-            uploader, material, simulation_type, layers,
-            size_x, size_y, stack_type,
-            force_nN, pressure_gpa, scan_angle, scan_speed, temperature,
-            tip_material, tip_radius, substrate_material, substrate_amorphous,
-            potential_type,
-            mean_cof, std_cof, mean_lf, std_lf, mean_nf, std_nf,
-            mean_lfx, std_lfx, mean_lfy, std_lfy,
-            ntimesteps, time_series_hash, is_complete,
-            status, notes, json.dumps(metadata) if metadata else None, data_url,
-        )
-        with self._cursor(commit=True) as cur:
-            cur.execute(sql, values)
-            row_id: int = cur.fetchone()[0]
-
-        logger.info(
-            "Uploaded result for %s (id=%d, COF=%.4f, status=%s)",
-            material, row_id, mean_cof or 0.0, status,
-        )
-        return row_id
+    def upload_result(self, **fields) -> int:
+        """Insert one row, validated through :class:`ResultRecord` first."""
+        return self.upload_record(ResultRecord(**fields))
 
     def upload_record(self, record: Any, uploader: Optional[str] = None) -> int:
         """Upload a :class:`~src.data.models.ResultRecord` to the database.
@@ -481,112 +385,97 @@ class FrictionDB:
         Returns:
             Database row ``id`` of the inserted record.
         """
-        d = record.to_upload_dict()
+        from psycopg2.extras import Json  # pylint: disable=import-outside-toplevel
+
+        data = record.to_upload_dict()
         if uploader:
-            d['uploader'] = uploader
-        return self.upload_result(**d)
+            data['uploader'] = uploader
+        columns = [c for c in _COLUMN_NAMES if c in data]
+        values = [Json(data[c]) if c in self._JSONB_COLUMNS else data[c]
+                  for c in columns]
+        sql = (f"INSERT INTO simulations ({', '.join(columns)}) "
+               f"VALUES ({', '.join(['%s'] * len(columns))}) RETURNING id;")
+        with self._cursor(commit=True) as cur:
+            cur.execute(sql, values)
+            row_id = int(cur.fetchone()[0])
 
-    def upload_from_aiida(self, result_node: Any, uploader: Optional[str] = None) -> int:
-        """Upload a ``FrictionResultsData`` AiiDA node to the shared database.
-
-        Uses :func:`~src.data.models.compute_friction_stats` for canonical
-        COF calculation.
-
-        Args:
-            result_node: A stored ``FrictionResultsData`` AiiDA node.
-            uploader: Optional contributor identifier.
-
-        Returns:
-            Database row ``id`` of the inserted record.
-        """
-        from .models import compute_friction_stats  # pylint: disable=import-outside-toplevel
-        import numpy as np  # pylint: disable=import-outside-toplevel
-
-        ts = result_node.time_series
-        nf = np.asarray(ts.get('nf', []))
-        lfx = np.asarray(ts.get('lfx', []))
-        lfy = np.asarray(ts.get('lfy', []))
-
-        stats: _StatsKwargs = {}
-        if nf.size > 0:
-            stats = cast(_StatsKwargs, compute_friction_stats(nf, lfx, lfy))
-
-        return self.upload_result(
-            material=result_node.material,
-            simulation_type=getattr(result_node, 'simulation_type', 'afm'),
-            layers=getattr(result_node, 'layers', None),
-            force_nN=getattr(result_node, 'force', None),
-            scan_angle=getattr(result_node, 'angle', None),
-            scan_speed=getattr(result_node, 'speed', None),
-            temperature=getattr(result_node, 'temperature', None),
-            uploader=uploader,
-            metadata={'aiida_uuid': str(result_node.uuid)},
-            **stats,
+        logger.info(
+            "Uploaded result for %s (id=%d, COF=%s, status=%s)",
+            data.get('material'), row_id, data.get('mean_cof'),
+            data.get('status'),
         )
+        return row_id
 
     # -- Query -----------------------------------------------------------------
 
-    def query(  # pylint: disable=too-many-arguments,too-many-branches,too-many-locals,too-many-positional-arguments
-        self,
-        material: Optional[str] = None,
-        simulation_type: Optional[str] = None,
-        layers: Optional[int] = None,
-        force_range: Optional[tuple] = None,
-        temperature_range: Optional[tuple] = None,
-        angle_range: Optional[tuple] = None,
-        uploader: Optional[str] = None,
-        limit: Optional[int] = None,
-        order_by: str = 'uploaded_at DESC',
+    #: filter kwarg -> SQL fragment. Equality first, then the ranges; the order
+    #: here is the order of the `params` list the test asserts on.
+    _EQ_CLAUSES = {
+        'material': 'material = %s',
+        'materials': 'materials && %s',
+        'family': 'family = %s',
+        'model': 'model = %s',
+        'set_label': 'set_label = %s',
+        'potential_type': 'potential_type = %s',
+        'layers': 'layers = %s',
+        'uploader': 'uploader = %s',
+        'status': 'status = %s',
+        'is_complete': 'is_complete = %s',
+    }
+    _RANGE_CLAUSES = {
+        'force_range': 'force_nN BETWEEN %s AND %s',
+        'pressure_range': 'pressure_gpa BETWEEN %s AND %s',
+        'temperature_range': 'temperature BETWEEN %s AND %s',
+        'angle_range': 'scan_angle BETWEEN %s AND %s',
+    }
+
+    def query(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, *, material: Optional[str] = None, materials: Optional[List[str]] = None,
+        family: Optional[str] = None, model: Optional[str] = None,
+        set_label: Optional[str] = None, potential_type: Optional[str] = None,
+        layers: Optional[int] = None, uploader: Optional[str] = None,
+        force_range: Optional[tuple] = None, pressure_range: Optional[tuple] = None,
+        temperature_range: Optional[tuple] = None, angle_range: Optional[tuple] = None,
+        status: Optional[str] = None, is_complete: Optional[bool] = None,
+        limit: Optional[int] = None, order_by: str = 'uploaded_at DESC',
     ) -> 'pandas.DataFrame':
-        """Query the shared database with optional filters.
+        """Query the central database. Filters are the schema-3 columns.
 
-        Args:
-            material: Filter by material name (exact match).
-            simulation_type: Filter by type (``'afm'`` or ``'sheetonsheet'``).
-            layers: Filter by number of layers.
-            force_range: ``(min_nN, max_nN)`` tuple.
-            temperature_range: ``(min_K, max_K)`` tuple.
-            angle_range: ``(min_deg, max_deg)`` tuple.
-            uploader: Filter by uploader identifier.
-            limit: Maximum rows to return.
-            order_by: SQL ``ORDER BY`` clause (default: newest first).
-
-        Returns:
-            pandas ``DataFrame`` with one row per matching simulation.
+        `is_complete=True` is how a caller excludes rows whose COF could not be
+        computed. Those rows carry `mean_cof IS NULL`, never 0.0, so
+        `mean_cof BETWEEN ...` also drops them -- but the flag says WHY, and
+        without it in the filter list `is_complete` would be stored and never
+        consulted anywhere.
         """
         import pandas as pd  # pylint: disable=import-outside-toplevel
 
+        equalities = {
+            'material': material, 'materials': materials, 'family': family,
+            'model': model, 'set_label': set_label,
+            'potential_type': potential_type, 'layers': layers,
+            'uploader': uploader, 'status': status, 'is_complete': is_complete,
+        }
+        ranges = {
+            'force_range': force_range, 'pressure_range': pressure_range,
+            'temperature_range': temperature_range, 'angle_range': angle_range,
+        }
+
         conditions: List[str] = []
         params: List[Any] = []
-
-        if material is not None:
-            conditions.append("material = %s")
-            params.append(material)
-        if simulation_type is not None:
-            conditions.append("simulation_type = %s")
-            params.append(simulation_type)
-        if layers is not None:
-            conditions.append("layers = %s")
-            params.append(layers)
-        if uploader is not None:
-            conditions.append("uploader = %s")
-            params.append(uploader)
-        if force_range is not None:
-            conditions.append("force_nN BETWEEN %s AND %s")
-            params.extend(force_range)
-        if temperature_range is not None:
-            conditions.append("temperature BETWEEN %s AND %s")
-            params.extend(temperature_range)
-        if angle_range is not None:
-            conditions.append("scan_angle BETWEEN %s AND %s")
-            params.extend(angle_range)
+        for name, value in equalities.items():
+            if value is not None:
+                conditions.append(self._EQ_CLAUSES[name])
+                params.append(list(value) if name == 'materials' else value)
+        for name, span in ranges.items():
+            if span is not None:
+                conditions.append(self._RANGE_CLAUSES[name])
+                params.extend(span)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         limit_clause = f"LIMIT {int(limit)}" if limit else ""
 
         # Sanitise order_by: allow only column names + ASC/DESC
-        order_tokens = order_by.replace(',', ' ').split()
-        for token in order_tokens:
+        for token in order_by.replace(',', ' ').split():
             if token not in _ALLOWED_ORDER_COLS:
                 raise ValueError(f"Invalid order_by token: {token!r}")
 
@@ -617,7 +506,7 @@ class FrictionDB:
             by_material = dict(cur.fetchall())
 
             cur.execute(
-                "SELECT simulation_type, COUNT(*) FROM simulations GROUP BY simulation_type;"
+                "SELECT family, COUNT(*) FROM simulations GROUP BY family;"
             )
             by_type = dict(cur.fetchall())
 
@@ -685,7 +574,6 @@ class FrictionDB:
         Returns:
             :class:`~src.data.validation.ValidationResult`.
         """
-        from .models import ResultRecord  # pylint: disable=import-outside-toplevel
         from .validation import validate_record  # pylint: disable=import-outside-toplevel
 
         with self._cursor() as cur:

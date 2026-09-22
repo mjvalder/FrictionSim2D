@@ -24,15 +24,25 @@ _VALID_RANGES: Dict[str, tuple] = {
     'temperature': (0.0, 10_000.0),
     'force_nN': (0.0, 100_000.0),
     'pressure_gpa': (0.0, 10_000.0),
-    'scan_angle': (0.0, 360.0),
+    'scan_angle': (-360.0, 360.0),      # the scan angle is signed; -15 is a real run
     'layers': (1, 20),
     'tip_radius': (0.0, 10_000.0),
+    'size_x': (0.0, 100_000.0),
+    'size_y': (0.0, 100_000.0),
 }
 
-_REQUIRED_FIELDS = ['material', 'simulation_type']
-_REQUIRED_RESULT_FIELDS = ['mean_cof']
+_REQUIRED_FIELDS = ['material', 'family', 'model']
+#: A row must carry SOMETHING measured. A PES grid has no COF but has
+#: descriptors in `extras`, so either satisfies this.
+_REQUIRED_RESULT_FIELDS = ['mean_cof', 'extras']
 
-_VALID_SIMULATION_TYPES = {'afm', 'sheetonsheet'}
+#: The load column each family is expected to use, for the consistency warning.
+#: Families absent from this map (the PES scans) carry neither.
+_LOAD_COLUMN_BY_FAMILY = {
+    'afm': 'force_nN', 'indent': 'force_nN',
+    'sheetonsheet': 'pressure_gpa', 'hetero': 'pressure_gpa',
+    'flake': 'pressure_gpa',
+}
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +88,7 @@ class ValidationResult:
 
 
 def validate_completeness(record: ResultRecord) -> ValidationResult:
-    """Check that required fields are present and non-empty."""
+    """Check the record carries an identity and something measured."""
     result = ValidationResult()
 
     for field_name in _REQUIRED_FIELDS:
@@ -87,11 +97,20 @@ def validate_completeness(record: ResultRecord) -> ValidationResult:
             result.add_error(f"Required field '{field_name}' is missing or empty")
 
     has_any_result = any(
-        getattr(record, f, None) is not None for f in _REQUIRED_RESULT_FIELDS
+        getattr(record, f, None) for f in _REQUIRED_RESULT_FIELDS
     )
     if not has_any_result:
         result.add_error(
             f"At least one result field required: {_REQUIRED_RESULT_FIELDS}"
+        )
+
+    # `is_complete=False` means summarise_run could not compute a COF. Storing
+    # such a row locally is right; PUBLISHING it centrally is not, because
+    # nothing downstream distinguishes it from a measured one.
+    if not record.is_complete:
+        result.add_error(
+            "is_complete is False: no COF could be computed for this load "
+            "point, so it must not be published"
         )
 
     return result
@@ -99,6 +118,9 @@ def validate_completeness(record: ResultRecord) -> ValidationResult:
 
 def validate_ranges(record: ResultRecord) -> ValidationResult:
     """Check that numeric fields fall within physically reasonable ranges."""
+    from ..core.observables import FAMILIES  # pylint: disable=import-outside-toplevel
+    from ..run.naming import MODELS  # pylint: disable=import-outside-toplevel
+
     result = ValidationResult()
 
     for field_name, (lo, hi) in _VALID_RANGES.items():
@@ -110,9 +132,19 @@ def validate_ranges(record: ResultRecord) -> ValidationResult:
                 f"Field '{field_name}' = {val} is outside valid range [{lo}, {hi}]"
             )
 
-    if record.simulation_type and record.simulation_type not in _VALID_SIMULATION_TYPES:
-        result.add_error(
-            f"simulation_type '{record.simulation_type}' not in {_VALID_SIMULATION_TYPES}"
+    if record.family and record.family not in FAMILIES:
+        result.add_error(f"family '{record.family}' not in {FAMILIES}")
+    if record.model and record.model not in MODELS:
+        result.add_error(f"model '{record.model}' not in {MODELS}")
+
+    # An exact zero used to pass silently as "in range". It is either real
+    # superlubricity or a missing measurement, and only the uploader knows
+    # which -- so say so rather than publishing it unremarked.
+    if record.mean_cof == 0.0:
+        result.add_warning(
+            "mean_cof is exactly 0.0. If the COF could not be measured this "
+            "should be None with is_complete=False; if it is real "
+            "superlubricity, add a note."
         )
 
     return result
@@ -122,17 +154,15 @@ def validate_consistency(record: ResultRecord) -> ValidationResult:
     """Check internal consistency of the record."""
     result = ValidationResult()
 
-    # AFM should have force, sheet-on-sheet should have pressure
-    if record.simulation_type == 'afm':
+    expected = _LOAD_COLUMN_BY_FAMILY.get(record.family or '')
+    if expected == 'force_nN':
         if record.pressure_gpa is not None and record.force_nN is None:
             result.add_warning(
-                "AFM simulation has pressure_gpa but no force_nN"
-            )
-    elif record.simulation_type == 'sheetonsheet':
+                f"{record.family} result has pressure_gpa but no force_nN")
+    elif expected == 'pressure_gpa':
         if record.force_nN is not None and record.pressure_gpa is None:
             result.add_warning(
-                "Sheet-on-sheet simulation has force_nN but no pressure_gpa"
-            )
+                f"{record.family} result has force_nN but no pressure_gpa")
 
     # COF sanity: if both mean_lf and mean_nf are present, check COF matches
     if (

@@ -14,7 +14,7 @@ import enum
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from pydantic import BaseModel, model_validator
@@ -372,22 +372,25 @@ class ResultRecord(BaseModel):
     id: Optional[int] = None
     uploaded_at: Optional[datetime] = None
 
-    # -- Contributor ----------------------------------------------------------
+    # -- Contributor / pointers -------------------------------------------------
     uploader: Optional[str] = None
+    contact: Optional[str] = None
+    run_uuid: Optional[str] = None
+    result_uuid: Optional[str] = None
+    set_label: Optional[str] = None
+    source_host: Optional[str] = None
+
+    # -- Simulation identity ----------------------------------------------------
+    model: Optional[str] = None
+    family: Optional[str] = None
 
     # -- Material & geometry --------------------------------------------------
+    materials: List[str] = []
     material: str
-    simulation_type: str = 'afm'
+    stack_type: Optional[str] = None  # 'AA' or 'AB'
     layers: Optional[int] = None
     size_x: Optional[float] = None
     size_y: Optional[float] = None
-    stack_type: Optional[str] = None  # 'AA' or 'AB'
-
-    # -- Loading conditions ---------------------------------------------------
-    force_nN: Optional[float] = None          # AFM: normal force (nN)
-    pressure_gpa: Optional[float] = None      # Sheet-on-sheet: pressure (GPa)
-    scan_angle: Optional[float] = None
-    scan_speed: Optional[float] = None
     temperature: Optional[float] = None
 
     # -- Tip / substrate (AFM-specific) ---------------------------------------
@@ -398,6 +401,15 @@ class ResultRecord(BaseModel):
 
     # -- Potential ------------------------------------------------------------
     potential_type: Optional[str] = None
+    potential_name: Optional[str] = None
+    pot_sha256: Optional[str] = None
+    git_commit: Optional[str] = None
+
+    # -- Loading conditions ---------------------------------------------------
+    force_nN: Optional[float] = None          # AFM: normal force (nN)
+    pressure_gpa: Optional[float] = None      # Sheet-on-sheet: pressure (GPa)
+    scan_angle: Optional[float] = None
+    scan_speed: Optional[float] = None
 
     # -- Results (canonical, from compute_friction_stats) ----------------------
     mean_cof: Optional[float] = None
@@ -416,12 +428,13 @@ class ResultRecord(BaseModel):
     time_series_hash: Optional[str] = None
     is_complete: bool = True
 
-    # -- Staging pipeline -----------------------------------------------------
-    status: ResultStatus = ResultStatus.LOCAL
+    # -- Free-form --------------------------------------------------------------
+    extras: Dict[str, Any] = {}
 
-    # -- Free-form ------------------------------------------------------------
+    # -- Staging pipeline -----------------------------------------------------
+    status: ResultStatus = ResultStatus.STAGED
+
     notes: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
 
     # -- File archive (federated storage) -------------------------------------
     data_url: Optional[str] = None  # URL to full time-series (Zenodo, etc.)
