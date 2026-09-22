@@ -573,8 +573,95 @@ resolved independently when the config is expanded, and the merged table
 (inline rows plus whatever the file adds) is what gets inlined into every
 generated config.
 
+## Database
+
+The window has two top-level tabs. **Builder** is everything above; **Database**
+browses what has already been run.
+
+**Source.** Two stores, one toggle. *Local store* is this machine's AiiDA
+store — every run generated or imported here, files included. *Central* is
+the shared summary database over its REST API: numbers only, no files. A
+source whose backend is not installed, or — for Central — that has not been
+pointed at a real API, cannot be selected: its radio button is disabled and
+the message panel says what to install or configure. Disabling the source
+currently on screen hands the pane to the other one; the workspace still
+remembers the source you actually chose, so it comes back once the missing
+piece is fixed. Both sources are filtered by the same form, because both
+expose the same run fields.
+
+**Filters.** Family, model, material, potential, layers, a load range (force
+in nN or pressure in GPa — a run carries one or the other, never both),
+temperature range and set. They run against the store, so pressing **Search**
+re-queries. The **Find** box is different: it narrows the rows already
+fetched, instantly, without going back to the store. There is no
+Completeness filter — neither store's query takes one — but an incomplete
+row is not hidden; it is called out in the table instead (below).
+
+**The table.** Sortable by any column, multi-row selection. The columns shown
+are a curated subset; **All columns** widens it to every stored field. The
+Status column shows the row's own status word (`imported`, `staged`,
+`published`, `failed`, …); a row the store marks incomplete gets
+`(incomplete)` appended to that word and is coloured as a warning, and a
+failed or rejected row is coloured as an error regardless of completeness.
+Selecting a row fills the panel below it with every attribute of the run and
+its results, plus the stored files and their sizes — which answers "is this
+worth downloading" without downloading it. A query the row limit cut short
+reports it honestly, e.g. "5000 results (limit 5000)", rather than implying
+that is the whole store.
+
+**Downloads.** Four buttons, each asking once for a destination directory —
+there is no separate confirmation dialog:
+
+| Button | What lands in the directory |
+|---|---|
+| **Results files** | the stored tier files and logs of the selected runs, verbatim |
+| **Provenance bundle** | `provenance.json`, `config.json`, `settings.yaml`, the cif and the potential files |
+| **Summary CSV** | one row per visible table row, in the columns on screen |
+| **Recreate run tree** | a directory tree `FrictionSim2D postprocess read` can read; tick *rebuild lammps/* to regenerate the inputs too |
+
+**Recreate run tree** exports whole sets, not only the selected rows — one
+selected row pulls in every run beside it in the same set. Rather than a
+second dialog, a warning naming the affected sets and their run counts is
+written to the message panel before the destination chooser opens; cancelling
+that chooser is how you back out.
+
+The central source holds no files, so only **Summary CSV** is available
+there — and **Copy owner contact** instead, which puts the e-mail of whoever
+uploaded the selected rows on the clipboard. That, with the `source_host`
+shown in the detail panel, is how you ask for the files behind a summary row
+that was run on someone else's machine.
+
+**Import run directory…** ingests a simulation directory into the local store
+and prints the ingest report in the message panel, including any results
+still incomplete, any run directory with no results at all, and any path it
+could not even parse. It is the only write action here — deleting and
+submitting stay in the CLI.
+
+**Connection settings are not edited in this pane.** The local store uses
+`settings.aiida.profile` and the central database uses `database.api_url` and
+`database.api_key`, both from the Settings tab. **Check connection** reports
+what it found — profile loaded, API reachable, how many sets are stored — in
+the message panel, which is where every message from this pane appears;
+nothing here opens a dialog except the destination chooser. A local profile
+that fails to load points you at `FrictionSim2D aiida setup`.
+
+A **list** query's result is cached, keyed on the filters plus the connection
+it ran against — the AiiDA profile, or the API URL and a hash of the API
+key — since the same filters against a different store are a different
+answer. A result served from the cache says so in the message panel — its
+timing is the original query's, not a fresh one's. **Refresh** bypasses the
+cache, and a successful **Import run directory…** clears every cached list,
+since it just changed what the store holds. The ten most recent cached
+queries are kept; older ones are deleted as new queries arrive. Every other
+request kind (a row's detail, a download, a connection check) is never cached
+and runs from its own scratch directory. The source, the filters and the last
+download directory are remembered per workspace.
+
+Switching source empties the table: a row belongs to the store it came from,
+and the two stores identify a row differently.
+
 ## Not included
 
-Job monitoring and the results database (Parts 2 and 3 of the requirements),
+Job monitoring (Part 2 of the requirements), loading or configuring plots,
 and standalone single-component builds. Stacks of more than two materials are
 not editable here either — see [Configs](#configs).

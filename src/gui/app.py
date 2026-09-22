@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .controllers.database import (DatabaseController, DatabaseRequest,
+                                   central_configured)
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
@@ -45,12 +47,19 @@ from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
+from .widgets.database.detail import format_bytes
+from .widgets.database.pane import (SOURCES, DatabasePane, missing_backend,
+                                    render_checks)
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
 logger = logging.getLogger(__name__)
 
 APP_NAME = 'FrictionSim2D'
+
+#: What the Database pane remembers between sessions (D10). Workspace state
+#: is a plain key/value store, so this is the whole schema.
+DB_STATE_KEYS = ('db_source', 'db_filters', 'db_dest')
 
 
 def plural(count: int, word: str) -> str:
@@ -134,10 +143,15 @@ class MainWindow(QMainWindow):
 
         self.preview = PreviewController(workspace, self)
         self.generator = GenerateController(workspace, self)
+        self.database = DatabaseController(workspace, self.settings, self)
         # What was last rendered, so an edit afterwards can be flagged as
         # stale rather than leaving the viewport showing a superseded system
         # with no indication anything changed.
         self._render_snapshot: Optional[dict] = None
+        # Set around _restore_database_state so the pane's own signals
+        # (source_changed) don't loop back into _remember_database_state
+        # while a workspace's saved state is still being applied.
+        self._restoring_db_state = False
 
         self.setWindowTitle(f"{APP_NAME} — Simulation Builder")
         self.resize(1500, 950)
@@ -149,21 +163,41 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------- ui
 
     def _build_ui(self) -> None:
+        self.top_tabs = QTabWidget(self)
+        self.top_tabs.addTab(self._build_builder_tab(), 'Builder')
+        self.database_page = self._build_database_tab()
+        self.top_tabs.addTab(self.database_page, 'Database')
+
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.addWidget(self.top_tabs, 1)
+        self.setCentralWidget(container)
+
+        self.setStatusBar(QStatusBar(self))
+        self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
+
+    def _build_builder_tab(self) -> QWidget:
+        """Everything that existed before D1, unchanged, inside one tab."""
         splitter = QSplitter(Qt.Horizontal, self)
         splitter.addWidget(self._build_left())
         splitter.addWidget(self._build_right())
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 5)
 
-        container = QWidget(self)
-        layout = QVBoxLayout(container)
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
         layout.addWidget(self._build_header())
         layout.addWidget(splitter, 1)
         layout.addLayout(self._build_actions())
-        self.setCentralWidget(container)
+        self.builder_page = page
+        return page
 
-        self.setStatusBar(QStatusBar(self))
-        self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
+    def _build_database_tab(self) -> QWidget:
+        """The database pane (D1/D2). It never queries on construction: a
+        query happens only when the user presses Search or Refresh."""
+        self.database_pane = DatabasePane(self)
+        self._restore_database_state()
+        return self.database_pane
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)
@@ -326,6 +360,253 @@ class MainWindow(QMainWindow):
         self.generator.finished.connect(self._on_generated)
         self.generator.failed.connect(self._on_generate_failed)
 
+        self._connect_database()
+
+    def _connect_database(self) -> None:
+        pane = self.database_pane
+        pane.query_requested.connect(self._on_db_query)
+        pane.refresh_requested.connect(self._on_db_refresh)
+        pane.detail_requested.connect(self._on_db_detail)
+        pane.export_requested.connect(self._on_db_export)
+        pane.import_requested.connect(self._on_db_import)
+        pane.check_requested.connect(self._on_db_check)
+        pane.cancel_requested.connect(self._on_db_cancel)
+        pane.source_changed.connect(lambda _source: self._remember_database_state())
+
+        self.database.started.connect(self._on_db_started)
+        self.database.progress.connect(self.statusBar().showMessage)
+        self.database.finished.connect(self._on_db_finished)
+        self.database.failed.connect(self._on_db_failed)
+        self.database.cancelled.connect(self._on_db_cancelled)
+
+    # ------------------------------------------------------------- database
+
+    def _start_db(self, kind: str, source: str, payload: dict, *,
+                  use_cache: bool = True) -> None:
+        # A download or an import writes outside the workspace. `start` cancels
+        # whatever is running, and cancelling means SIGKILL -- mid-copy that
+        # leaves a half-written destination directory nobody cleans up. Since
+        # selecting a table row fires a `detail` request on its own, that was
+        # one stray click away at all times.
+        running = self.database.current_kind
+        if running in self.database.WRITE_KINDS:
+            self.database_pane.message(
+                f"A {running} is still running. Wait for it to finish, or press "
+                f"Cancel, before starting a {kind}.", 'warn')
+            return
+        # The controller reads the profile and API credentials off `settings`
+        # at start time, so a settings edit takes effect without a restart.
+        self.database.settings = self.settings
+        request = DatabaseRequest(kind=kind, source=source, payload=payload)
+        self.database.start(request, use_cache=use_cache)
+
+    def _on_db_cancel(self) -> None:
+        if not self.database.running:
+            return
+        kind = self.database.current_kind
+        self.database.cancel()
+        if kind in self.database.WRITE_KINDS:
+            self.database_pane.message(
+                f"Cancelled the {kind} request. Anything already written to "
+                f"the destination is still there.", 'warn')
+        else:
+            self.database_pane.message(f"Cancelled the {kind} request.", 'warn')
+
+    def _restore_database_state(self) -> None:
+        """Put back the source, filters and destination this workspace last used.
+
+        Snapshot all three values before touching the pane: `set_source` below
+        can emit `source_changed`, which is wired to `_remember_database_state`
+        (so a live source toggle is recorded even without a query). Since
+        `self.workspace.state` is the same dict object read here and written
+        there, applying `set_source` first and only then reading back
+        `db_filters` would read whatever `_remember_database_state` had just
+        written from the pane's still-stale, pre-switch filters -- silently
+        clobbering the new workspace's saved filters with the old workspace's.
+        The `_restoring_db_state` guard blocks that write outright; the
+        snapshot means correctness never depends on the two agreeing.
+
+        Availability (D11) is re-applied *before* `set_source`, under the same
+        guard, for both directions: a remembered source that is not usable
+        here must not get selected (`set_source` refuses a disabled button on
+        its own, but only if the button was already disabled -- checking here
+        first is what disables it in time), and a remembered source that has
+        become usable again (a workspace switch onto settings where central
+        is configured) must be re-enabled before `set_source` gets a chance to
+        select it. Guarded so a resulting handover -- disabling the source
+        this workspace remembered hands the pane to the other one -- writes
+        nothing back to disk; only the on-screen selection falls back. This
+        is also what re-checks availability on a workspace switch
+        (`_choose_workspace` only calls this method) without a second,
+        unguarded call that could write the fallback to the new workspace's
+        state.
+        """
+        state = self.workspace.state
+        source = state.get('db_source')
+        filters = state.get('db_filters')
+        dest = state.get('db_dest')
+        self._restoring_db_state = True
+        try:
+            self._apply_database_availability()
+            if source in SOURCES:
+                self.database_pane.set_source(source)
+            if isinstance(filters, dict):
+                self.database_pane.filters.set_value(filters)
+            if isinstance(dest, str):
+                self.database_pane.last_dest = dest
+        finally:
+            self._restoring_db_state = False
+
+    def _remember_database_state(self) -> None:
+        if self._restoring_db_state:
+            return
+        self.workspace.remember('db_source', self.database_pane.source)
+        self.workspace.remember('db_filters', self.database_pane.filters.value())
+
+    def _apply_database_availability(self) -> None:
+        """Disable the central source until this installation is pointed at a
+        central database.
+
+        `missing_backend` answers "is httpx installed"; it cannot answer "does
+        a central database exist", and the answer today is no. Left enabled,
+        every central action ends as a raw ConnectionError against a localhost
+        URL nobody ever configured -- a stack-trace string in place of "you
+        have not set this up".
+
+        Called from `_restore_database_state` (already under the
+        `_restoring_db_state` guard) but also from `_apply_settings`, live,
+        any time the Settings tab is applied -- clearing `database.api_url`
+        while Central is selected must not let the resulting fallback
+        (`set_source_enabled` hands the pane to Local) look like the user
+        chose Local: `source_changed` -> `_remember_database_state` would
+        otherwise overwrite the workspace's remembered 'central' with 'local'
+        outside of any restore. Wrapping the body in the same guard (saving
+        and restoring its previous value, since a call from
+        `_restore_database_state` already has it set) makes an
+        availability-driven fallback silent the same way a restore-driven one
+        already is. The other half of "comes back once the missing piece is
+        fixed": re-enabling Central here, while the workspace still remembers
+        it and the pane is showing the Local fallback, switches the pane back
+        rather than leaving it stranded on Local until the next restart.
+        """
+        if missing_backend('central'):
+            return          # the pane already said what to install
+        previous = self._restoring_db_state
+        self._restoring_db_state = True
+        try:
+            if not central_configured(self.settings):
+                self.database_pane.set_source_enabled(
+                    'central', False,
+                    'Central: not configured. Set database.api_url (and '
+                    'database.api_key) in the Settings tab. The Local store '
+                    'needs none of this.')
+            else:
+                self.database_pane.set_source_enabled('central', True)
+                if (self.workspace.state.get('db_source') == 'central'
+                        and self.database_pane.source != 'central'):
+                    self.database_pane.set_source('central')
+        finally:
+            self._restoring_db_state = previous
+
+    def _on_db_query(self, source: str, filters: dict) -> None:
+        self._remember_database_state()
+        self._start_db('list', source, {'filters': filters})
+
+    def _on_db_refresh(self, source: str, filters: dict) -> None:
+        # Through `_start_db`, not `database.start`: a Refresh is still a
+        # `start`, which SIGKILLs a running export or import.
+        self._remember_database_state()
+        self._start_db('list', source, {'filters': filters}, use_cache=False)
+
+    def _on_db_detail(self, source: str, payload: dict) -> None:
+        self._start_db('detail', source, payload)
+
+    def _on_db_export(self, source: str, payload: dict) -> None:
+        self.workspace.remember('db_dest', payload.get('dest', ''))
+        self._start_db('export', source, payload)
+
+    def _on_db_import(self, source: str, payload: dict) -> None:
+        self._start_db('import', source, payload)
+
+    def _on_db_check(self, source: str) -> None:
+        self._start_db('check', source, {})
+
+    def _on_db_started(self, kind: str) -> None:
+        self.database_pane.set_busy(True)
+        self.statusBar().showMessage(f"Database: {kind}…")
+
+    def _on_db_cancelled(self, kind: str) -> None:
+        del kind
+        self.database_pane.set_busy(False)
+
+    def _on_db_failed(self, kind: str, message: str) -> None:
+        self.database_pane.set_busy(False)
+        self.database_pane.message(f"{kind}: {message}", 'error')
+
+    def _on_db_finished(self, kind: str, result: object) -> None:
+        self.database_pane.set_busy(False)
+        if not isinstance(result, dict):
+            return
+        if kind == 'list':
+            self.database_pane.set_records(result.get('records') or [])
+            self.database_pane.set_facets(result.get('facets') or {})
+            self.database_pane.set_set_sizes(result.get('set_sizes') or {})
+            returned = result.get('returned', 0)
+            total = result.get('total_count')
+            elapsed = result.get('elapsed_s', 0)
+            limit = result.get('limit')
+            if total is None and limit:
+                # The central client has no true total once its own `limit`
+                # cut the rows short (see `_list` in db_worker.py) -- "N of
+                # None results" would read like a broken query rather than a
+                # truncated one.
+                lines = [f"{returned} results (limit {limit}) in {elapsed} s"]
+            else:
+                lines = [f"{returned} of {total} results in {elapsed} s"]
+            if result.get('cached'):
+                # `elapsed_s` belongs to the query this result was first
+                # fetched by, not to what just happened -- without saying so,
+                # a replay of a week-old answer reads as a fresh one.
+                lines[0] += ' (cached — Refresh to re-query)'
+            warnings = result.get('warnings') or []
+            lines += [f"note: {w}" for w in warnings]
+            self.database_pane.message('\n'.join(lines),
+                                       'warn' if warnings else 'info')
+        elif kind == 'detail':
+            self.database_pane.show_detail(result)
+        elif kind == 'export':
+            written = result.get('files') or []
+            warnings = result.get('warnings') or []
+            lines = [f"Wrote {plural(len(written), 'file')} "
+                     f"({format_bytes(int(result.get('bytes') or 0))}) "
+                     f"to {result.get('dest')}"]
+            lines += [f"note: {w}" for w in warnings]
+            self.database_pane.message('\n'.join(lines),
+                                       'warn' if warnings else 'info')
+        elif kind == 'import':
+            lines = [result.get('report', '')]
+            for label, key in (('incomplete', 'incomplete'),
+                               ('with no results at all', 'empty_runs')):
+                entries = result.get(key) or []
+                if entries:
+                    lines.append(f"{len(entries)} run(s) {label}: "
+                                 + ', '.join(entries[:5])
+                                 + (' …' if len(entries) > 5 else ''))
+            unparseable = result.get('unparseable') or []
+            if unparseable:
+                lines.append(f"{len(unparseable)} path(s) unparseable: "
+                             + ', '.join(unparseable[:5])
+                             + (' …' if len(unparseable) > 5 else ''))
+            quiet = not (result.get('incomplete') or result.get('empty_runs')
+                        or unparseable)
+            self.database_pane.message(
+                '\n'.join(line for line in lines if line),
+                'info' if result.get('ingest_ok') and quiet else
+                ('warn' if result.get('ingest_ok') else 'error'))
+        elif kind == 'check':
+            self.database_pane.message(
+                render_checks(result), 'info' if result.get('ready') else 'error')
+
     # -------------------------------------------------------------- helpers
 
     def _populate_modes(self) -> None:
@@ -457,6 +738,7 @@ class MainWindow(QMainWindow):
         self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage('Applied settings changes.')
+        self._apply_database_availability()
         return None
 
     def _sync_settings(self) -> bool:
@@ -656,6 +938,7 @@ class MainWindow(QMainWindow):
         config_dirty = self.document.dirty
         settings_dirty = self.settings_document.dirty
         if not (config_dirty or settings_dirty):
+            self.database.cancel()
             event.accept()
             return
 
@@ -676,6 +959,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if choice == QMessageBox.Discard:
+            self.database.cancel()
             event.accept()
             return
 
@@ -690,6 +974,7 @@ class MainWindow(QMainWindow):
         if self.document.dirty or self.settings_document.dirty:
             event.ignore()
             return
+        self.database.cancel()
         event.accept()
 
     def _on_family_changed(self) -> None:
@@ -850,6 +1135,8 @@ class MainWindow(QMainWindow):
         RecentWorkspaces().add(chosen)
         self.preview.workspace = self.workspace
         self.generator.workspace = self.workspace
+        self.database.workspace = self.workspace
+        self._restore_database_state()
         # Only meaningful for an unsaved document (write_material_names falls
         # back to source_path's own directory once there is one) -- but keep
         # it correct regardless, so switching workspaces before ever saving

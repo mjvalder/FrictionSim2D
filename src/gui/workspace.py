@@ -112,8 +112,12 @@ class Workspace:
         if not self.preview_dir.exists():
             return []
 
+        # `_db` (the database pane's query cache) lives beside the preview
+        # builds and is not one: pruning to the newest few would throw it away
+        # after eight renders. Underscore-prefixed entries are not builds.
         entries = sorted(
-            (p for p in self.preview_dir.iterdir() if p.is_dir()),
+            (p for p in self.preview_dir.iterdir()
+             if p.is_dir() and not p.name.startswith('_')),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
