@@ -4,15 +4,17 @@ Provides both a high-level Python API (:func:`run_with_aiida`) and
 an interactive CLI helper (:func:`smart_submit`) for submitting
 LAMMPS friction simulations through AiiDA.
 
-Submission functions (:func:`submit_simulation`, :func:`submit_batch`,
-:func:`submit_array`) handle the mechanics of building CalcJob inputs
-and dispatching them to the AiiDA daemon.
+Submission functions (:func:`submit_simulation`, :func:`submit_batch`)
+handle the mechanics of building CalcJob inputs and dispatching them to
+the AiiDA daemon. Array jobs on an HPC are done with `FrictionSim2D hpc
+generate` (PBS/SLURM array scripts, see `src/hpc/`) + qsub + rsync back +
+`aiida import` -- AiiDA-managed array CalcJobs (`aiida submit --array`)
+were removed; `aiida submit` submits one CalcJob per run.
 """
 
 import logging
-import io
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from aiida import orm
 from aiida.common.exceptions import NotExistent
@@ -21,23 +23,14 @@ from aiida.engine import run_get_node as _run_get_node
 from aiida.engine import submit as aiida_submit
 
 from ..core.config import GlobalSettings, load_settings
-from ..run.naming import layer_aware_path_sort_key
 from ..run.simulate import run_simulations
 from .calcjob import (
     LammpsFrictionCalcJob,
     prepare_simulation_folder,
-    prepare_simulation_root,
     apply_options,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _build_array_directive(scheduler: str, array_size: int) -> str:
-    """Build scheduler-specific array directive."""
-    if scheduler == 'slurm':
-        return f"#SBATCH --array=1-{array_size}"
-    return f"#PBS -J 1-{array_size}"
 
 _SUBMISSION_EXCEPTIONS = (OSError, ValueError, KeyError, TypeError, RuntimeError)
 
@@ -66,7 +59,6 @@ def run_with_aiida(
     output_root: Optional[Union[str, Path]] = None,
     auto_submit: bool = True,
     code_label: Optional[str] = None,
-    use_array: bool = False,
     auto_setup: bool = True,
     profile: Optional[str] = None,
     daemon: bool = False,
@@ -85,7 +77,6 @@ def run_with_aiida(
         output_root: Output directory (default: auto-generated).
         auto_submit: If ``True``, submit to AiiDA immediately.
         code_label: AiiDA code label (e.g. ``'lammps@hpc'``). Auto-detects if ``None``.
-        use_array: Submit as a single array job instead of batch.
         auto_setup: Auto-load AiiDA profile if not loaded.
         profile: AiiDA profile name to load (default: current profile).
         daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
@@ -131,29 +122,16 @@ def run_with_aiida(
     options, parameters = _build_resources(settings=settings, **resource_overrides)
 
     logger.info("Submitting %d run(s) to AiiDA", len(run_dirs))
-    if use_array:
-        process = submit_array(
-            simulation_root=root_dir,
-            simulation_dirs=run_dirs,
-            code_label=code,
-            options=options,
-            parameters=parameters,
-            scheduler=settings.hpc.scheduler_type,
-            daemon=daemon,
-        )
-        processes = [process]
-        logger.info("Submitted array job with PK=%d", process.pk)
-    else:
-        processes = submit_batch(
-            simulation_dirs=run_dirs,
-            code_label=code,
-            root_dir=root_dir,
-            options=options,
-            parameters=parameters,
-            daemon=daemon,
-        )
-        pks = [p.pk for p in processes]
-        logger.info("Submitted %d jobs: PKs=%s", len(processes), pks)
+    processes = submit_batch(
+        simulation_dirs=run_dirs,
+        code_label=code,
+        root_dir=root_dir,
+        options=options,
+        parameters=parameters,
+        daemon=daemon,
+    )
+    pks = [p.pk for p in processes]
+    logger.info("Submitted %d jobs: PKs=%s", len(processes), pks)
 
     return simulation_dirs, root_dir, processes
 
@@ -166,7 +144,6 @@ def smart_submit(
     simulation_dir: Path,
     settings_file: Optional[Union[str, Path]] = None,
     code_label: Optional[str] = None,
-    use_array: bool = False,
     scripts: Optional[str] = None,
     dry_run: bool = False,
     daemon: bool = False,
@@ -186,7 +163,6 @@ def smart_submit(
     Args:
         simulation_dir: A simulation root, or a directory inside one.
         code_label: AiiDA code label (auto-detects if ``None``).
-        use_array: Submit as array job.
         scripts: Comma-separated LAMMPS script names.
         dry_run: Preview only, don't submit.
         daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
@@ -238,7 +214,6 @@ def smart_submit(
     _preview_submission(
         simulation_dirs=simulation_dirs,
         code=code,
-        use_array=use_array,
         options=options,
         parameters=parameters,
         settings=settings,
@@ -253,26 +228,14 @@ def smart_submit(
         return []
 
     click.echo("\nSubmitting jobs..." if daemon else "\nRunning jobs in-process...")
-    if use_array:
-        process = submit_array(
-            simulation_root=root,
-            simulation_dirs=simulation_dirs,
-            code_label=code,
-            options=options,
-            parameters=parameters,
-            scheduler=settings.hpc.scheduler_type,
-            daemon=daemon,
-        )
-        processes = [process]
-    else:
-        processes = submit_batch(
-            simulation_dirs=simulation_dirs,
-            code_label=code,
-            root_dir=root,
-            options=options,
-            parameters=parameters,
-            daemon=daemon,
-        )
+    processes = submit_batch(
+        simulation_dirs=simulation_dirs,
+        code_label=code,
+        root_dir=root,
+        options=options,
+        parameters=parameters,
+        daemon=daemon,
+    )
 
     if not processes:
         raise click.ClickException(
@@ -410,75 +373,6 @@ def submit_batch(
             logger.warning("Failed to submit %s", sim_dir, exc_info=True)
 
     return processes
-
-
-def submit_array(
-    simulation_root: Path,
-    simulation_dirs: list,
-    code_label: Any,
-    options: Optional[Dict[str, Any]] = None,
-    parameters: Optional[Dict[str, Any]] = None,
-    scheduler: str = 'pbs',
-    daemon: bool = False,
-) -> orm.ProcessNode:
-    """Submit a single array job for multiple simulations.
-
-    Args:
-        simulation_root: Root directory containing simulation subdirectories.
-        simulation_dirs: List of simulation directories.
-        code_label: AiiDA code label or Code node.
-        options: Optional dict overriding resource/walltime settings.
-        parameters: Optional dict with runtime parameters.
-        scheduler: Scheduler type (``'pbs'`` or ``'slurm'``).
-        daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
-            Default runs in-process via ``aiida.engine.run``, no broker needed.
-
-    Returns:
-        The submitted (or, without ``daemon``, already-finished) ``ProcessNode``.
-    """
-    code = orm.load_code(code_label) if isinstance(code_label, str) else code_label
-    sim_root = Path(simulation_root)
-
-    ordered_dirs = sorted(
-        [Path(p) for p in simulation_dirs],
-        key=lambda p: layer_aware_path_sort_key(str(p.relative_to(sim_root))),
-    )
-    rel_paths = [str(p.relative_to(sim_root)) for p in ordered_dirs]
-
-    folder = prepare_simulation_root(sim_root, ordered_dirs)
-    map_payload = "\n".join(rel_paths).encode('utf-8')
-    folder.base.repository.put_object_from_filelike(
-        cast(Any, io.BytesIO(map_payload)),
-        'array_map.txt',
-    )
-    folder.store()
-
-    builder = LammpsFrictionCalcJob.get_builder()  # type: ignore[attr-defined]
-    builder.code = code
-    builder.simulation_dir = folder
-
-    merged_params = dict(parameters or {})
-    merged_params['array_mode'] = True
-    builder.parameters = orm.Dict(merged_params)
-
-    if options:
-        apply_options(builder, options)
-
-    array_size = len(rel_paths)
-    if array_size > 0:
-        array_cmd = _build_array_directive(scheduler, array_size)
-        metadata = getattr(builder, 'metadata')
-        existing = getattr(metadata.options, 'custom_scheduler_commands', None)
-        combined = "\n".join([c for c in [existing, array_cmd] if c])
-        metadata.options.custom_scheduler_commands = combined
-
-    metadata = getattr(builder, 'metadata')
-    prepend = getattr(metadata.options, 'prepend_text', '') or ''
-    metadata.options.prepend_text = "\n".join(
-        line for line in [prepend, 'bash run_array.sh', 'exit $?'] if line
-    )
-
-    return _dispatch(builder, daemon)
 
 
 # ---------------------------------------------------------------------------
@@ -730,7 +624,6 @@ def _parse_walltime(walltime_str: str) -> int:
 def _preview_submission(
     simulation_dirs: List[Path],
     code: orm.Code,
-    use_array: bool,
     options: Dict[str, Any],
     parameters: Dict[str, Any],
     settings: GlobalSettings,
@@ -744,7 +637,6 @@ def _preview_submission(
 
     click.echo(f"Code:        {code.full_label}")
     click.echo(f"Simulations: {len(simulation_dirs)}")
-    click.echo(f"Mode:        {'Array job' if use_array else 'Batch jobs'}")
 
     resources = options.get('resources', {})
     click.echo("\nResources:")

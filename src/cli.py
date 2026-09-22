@@ -1134,8 +1134,6 @@ def aiida_package(simulation_dir: str, output: Optional[str]):
               help='AiiDA code label (auto-detects if not specified)')
 @click.option('--scripts', default=None,
               help='Comma-separated list of LAMMPS scripts to run in order')
-@click.option('--array', 'use_array', is_flag=True,
-              help='Submit a single array job for all simulations')
 @click.option('--machines', type=int, default=None,
               help='Override: Number of machines per job')
 @click.option('--mpiprocs', type=int, default=None,
@@ -1158,7 +1156,6 @@ def aiida_submit(  # pylint: disable=too-many-arguments
     settings_file: Optional[Path],
     code: Optional[str],
     scripts: Optional[str],
-    use_array: bool,
     machines: Optional[int],
     mpiprocs: Optional[int],
     walltime: Optional[str],
@@ -1211,7 +1208,6 @@ def aiida_submit(  # pylint: disable=too-many-arguments
             simulation_dir=sim_path,
             settings_file=settings_file,
             code_label=code,
-            use_array=use_array,
             scripts=scripts,
             dry_run=dry_run,
             daemon=daemon,

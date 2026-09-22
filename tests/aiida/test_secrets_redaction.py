@@ -286,7 +286,7 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
 
 def test_calcjob_folder_data_staging_strips_credentials(aiida_profile_clean, tmp_path):
     """`prepare_simulation_folder`/`_stage_sim_dir` -- used by
-    `submit_simulation`/`submit_array` to build a CalcJob's `simulation_dir`
+    `submit_simulation` to build a CalcJob's `simulation_dir`
     input -- stage `provenance/**` the same way `FrictionSimulationData.
     add_run_files` does: a pre-redaction tree's credentials must not survive
     THIS staging path either. The LAMMPS input file it also stages must stay

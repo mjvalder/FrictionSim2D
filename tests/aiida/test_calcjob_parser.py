@@ -21,8 +21,7 @@ def test_calcjob_declares_the_new_surface(aiida_profile_clean):
     assert 'visuals/*' not in RETAINED_GLOBS
 
 
-def test_calcjob_retrieve_list_is_the_retention_rule_plus_array_status(
-        aiida_profile_clean):
+def test_calcjob_retrieve_list_is_the_retention_rule(aiida_profile_clean):
     """Not `retrieve_patterns() == list(RETRIEVE_LIST)` (a tautology that
     compares a function to the constant it returns): this pins what the
     CalcJob itself actually builds -- via its own `_retrieve_list_for` helper,
@@ -33,9 +32,9 @@ def test_calcjob_retrieve_list_is_the_retention_rule_plus_array_status(
     from src.aiida.calcjob import _retrieve_list_for  # pylint: disable=import-outside-toplevel
     from src.aiida.retention import retrieve_patterns  # pylint: disable=import-outside-toplevel
 
-    assert _retrieve_list_for(None) == list(retrieve_patterns()) + ['array_status/*']
+    assert _retrieve_list_for(None) == list(retrieve_patterns())
     assert _retrieve_list_for('build/l2') == (
-        list(retrieve_patterns('build/l2')) + [('*.out', '.', None), 'array_status/*'])
+        list(retrieve_patterns('build/l2')) + [('*.out', '.', None)])
 
 
 def test_sim_prefix_for_prefers_simulation_node_rel_path(aiida_profile_clean):
@@ -664,7 +663,7 @@ def test_prefixed_retrieval_keeps_the_root_level_lammps_stdout(aiida_profile_cle
         def get_remote_workdir():
             return str(remote_root)
 
-    patterns = [p for p in _retrieve_list_for(REL) if p != 'array_status/*']
+    patterns = _retrieve_list_for(REL)
     transport = LocalTransport()
     transport.open()
     try:

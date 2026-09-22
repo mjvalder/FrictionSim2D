@@ -407,7 +407,6 @@ Options:
 - `--settings-file PATH`
 - `-c, --code TEXT` (auto-detects if not specified, falling back to `settings.aiida.lammps_code_label`)
 - `--scripts TEXT` (comma-separated list)
-- `--array` — submit a single array job for all simulations
 - `--machines INTEGER`
 - `--mpiprocs INTEGER`
 - `--walltime TEXT` (`HH:MM:SS` or hours)

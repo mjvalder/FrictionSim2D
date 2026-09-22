@@ -31,6 +31,18 @@ def test_daemon_flag_uses_the_broker_path(aiida_profile_clean, monkeypatch):
     assert calls == ['submit']
 
 
+def test_array_submission_is_removed():
+    """AiiDA-managed array CalcJobs are removed (task-B brief): array jobs on
+    an HPC go through `hpc generate` + qsub + `aiida import` instead."""
+    assert not hasattr(submit_mod, 'submit_array')
+    assert not hasattr(submit_mod, '_build_array_directive')
+
+    from src.aiida import calcjob as calcjob_mod  # pylint: disable=import-outside-toplevel
+    assert not hasattr(calcjob_mod, 'prepare_simulation_root')
+    assert not hasattr(calcjob_mod, '_handle_array_mode')
+    assert not hasattr(calcjob_mod, '_build_array_wrapper')
+
+
 def test_get_code_falls_back_to_the_settings_label(aiida_profile_clean, monkeypatch,
                                                    tmp_path):
     settings_file = tmp_path / 'settings.yaml'

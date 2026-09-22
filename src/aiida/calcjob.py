@@ -57,11 +57,7 @@ _SHAREABLE_SUBDIRS = ('build', 'provenance')
 #: own files AND the shared `build`/`provenance` ones a level off. Combined
 #: with `_SHARED_SUBDIRS_ATTR` in `_sim_prefix_for`, this reconstructs the
 #: run's full prefix (`<shared ancestor>/<leaf name>`) without needing
-#: `simulation_node` at all. Not written by `prepare_simulation_root` (the
-#: array path, out of scope for this fix -- see its own module docstring
-#: note): that stages several runs already relative to the true sim ROOT, so
-#: `_detect_sim_prefix` alone is already correct there, and this attribute
-#: would be meaningless (one leaf name for many staged runs).
+#: `simulation_node` at all.
 _LEAF_NAME_ATTR = '_frictionsim2d_leaf_name'
 
 
@@ -141,7 +137,6 @@ class LammpsFrictionCalcJob(CalcJob):
             sim_folder.base.attributes.get(_SHARED_SUBDIRS_ATTR, None) or ())
 
         _stage_files_into_sandbox(folder, repo, sim_prefix, shared_subdirs)
-        _handle_array_mode(folder, sim_folder, params, scripts_override, lammps_scripts)
 
         code_infos = [
             _make_code_info(inputs.code.uuid, lammps_flag_list, script)
@@ -188,12 +183,11 @@ def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
     returned as-is, landing every staged path -- the run's own AND the shared
     ones -- one level off from what the rendered scripts actually read. If
     `simulation_dir` carries `_LEAF_NAME_ATTR`/`_SHARED_SUBDIRS_ATTR` (set by
-    `prepare_simulation_folder`, never by `prepare_simulation_root`'s
-    multi-run array path), the shallower guess is the shared ancestor and the
-    leaf name is the missing last segment, so joining them recovers the same
-    prefix `simulation_node.rel_path` would have given. `_detect_sim_prefix`
-    alone is still the answer for a sheet-like family (no such nesting, so
-    the guess is already the run's own directory) and for the array path.
+    `prepare_simulation_folder`), the shallower guess is the shared ancestor
+    and the leaf name is the missing last segment, so joining them recovers
+    the same prefix `simulation_node.rel_path` would have given.
+    `_detect_sim_prefix` alone is still the answer for a sheet-like family
+    (no such nesting, so the guess is already the run's own directory).
     """
     sim_node = inputs.get('simulation_node', None)
     if sim_node is not None:
@@ -214,25 +208,20 @@ STDOUT_RETRIEVE = ('*.out', '.', None)
 
 
 def _retrieve_list_for(sim_prefix: str | None) -> list:
-    """The CalcJob's `retrieve_list`: the retention rule, unmodified, plus
-    `array_status/*`.
+    """The CalcJob's `retrieve_list`: the retention rule, unmodified.
 
     `retrieve_patterns` (Task 13, verified against the real aiida-core
     execmanager; widened for a prefix by the Task 22 fix round so every entry
     nests consistently under it -- see `retention.py`) IS the retention
     guarantee for everything `ingest` reads -- it is used here as-is, never
-    re-derived. Array-mode status files are a different concern (job progress
-    polling, not something the parser ingests) and are always written to the
-    sim root by `_build_array_wrapper` regardless of `sim_prefix`, so they are
-    appended separately rather than folded into the retention list, and so
-    is the root-level stdout (`STDOUT_RETRIEVE`) of a prefixed submission.
+    re-derived.
     """
     if not sim_prefix:
-        return list(retrieve_patterns()) + ['array_status/*']
+        return list(retrieve_patterns())
     # LAMMPS stdout (`_make_code_info`'s `stdout_name`) is written to the
     # remote working-directory ROOT, not under the run's prefix, so the
     # prefixed `*.out` entry alone never matches it.
-    return list(retrieve_patterns(sim_prefix)) + [STDOUT_RETRIEVE, 'array_status/*']
+    return list(retrieve_patterns(sim_prefix)) + [STDOUT_RETRIEVE]
 
 
 def _run_dir_in_retrieved(tmp_root: Path, run_node) -> Path:
@@ -468,29 +457,6 @@ def prepare_simulation_folder(sim_dir: Path) -> orm.FolderData:
     return folder_data
 
 
-def prepare_simulation_root(root_dir: Path, simulation_dirs: list) -> orm.FolderData:
-    """Create a FolderData containing multiple simulation directories.
-
-    Args:
-        root_dir: Root directory containing simulation subdirectories.
-        simulation_dirs: List of simulation directories under root_dir.
-
-    Returns:
-        A new (unstored) ``FolderData`` node with staged inputs.
-    """
-    root_dir = Path(root_dir)
-    folder_data = orm.FolderData()
-    for sim_dir in simulation_dirs:
-        # Return value (which subdirs came from a parent fallback) is
-        # per-sim_dir and meaningless once several runs share one FolderData
-        # -- `relative_to=root_dir` already keys every file at its true
-        # sim-root-relative path, so no later re-prefixing is needed here at
-        # all (see `_sim_prefix_for`'s docstring on why this differs from
-        # `prepare_simulation_folder`).
-        _stage_sim_dir(folder_data, Path(sim_dir), relative_to=root_dir)
-    return folder_data
-
-
 def apply_options(builder, options: dict[str, Any] | None) -> None:
     """Apply metadata options to a CalcJob builder."""
     if not options:
@@ -526,10 +492,8 @@ def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
     for them.
 
     Returns the names of the subdirs actually sourced from `sim_dir.parent`,
-    for the caller to persist as `folder_data`'s `_SHARED_SUBDIRS_ATTR`
-    (`prepare_simulation_folder`, one `sim_dir`) or to discard
-    (`prepare_simulation_root`, several `sim_dir`s already keyed relative to
-    the true sim root -- see that function's own comment).
+    for `prepare_simulation_folder` to persist as `folder_data`'s
+    `_SHARED_SUBDIRS_ATTR`.
 
     A settings/config document among `provenance/**` -- a pre-redaction
     tree's `provenance/settings.yaml`/`provenance/config.json` -- is
@@ -612,31 +576,6 @@ def _stage_files_into_sandbox(folder: Folder, repo, sim_prefix: str | None,
                 pref.create_file_from_filelike(io.BytesIO(payload), file_name)
 
 
-def _handle_array_mode(folder, sim_folder, params, scripts_override,
-                       lammps_scripts) -> None:
-    """Write array-mode helper files into the sandbox if needed."""
-    if not params.get('array_mode'):
-        return
-
-    if 'array_map.txt' not in sim_folder.base.repository.list_object_names():
-        raise ValueError("array_map.txt missing for array mode")
-
-    if scripts_override:
-        scripts_payload = "\n".join(lammps_scripts).encode('utf-8')
-        folder.create_file_from_filelike(
-            io.BytesIO(scripts_payload), 'array_scripts.txt',
-        )
-
-    wrapper = _build_array_wrapper(
-        launcher_cmd=params.get('launcher_cmd', 'mpirun'),
-        lammps_exec=params.get('lammps_executable', 'lmp'),
-        lammps_flags=params.get('lammps_flags', '-l none'),
-    )
-    folder.create_file_from_filelike(
-        io.BytesIO(wrapper.encode('utf-8')), 'run_array.sh',
-    )
-
-
 def _make_code_info(code_uuid: str, flag_list: list, script: str) -> CodeInfo:
     """Build a CodeInfo for a single LAMMPS script."""
     codeinfo = CodeInfo()
@@ -680,73 +619,6 @@ def _detect_sim_prefix(repo, lammps_scripts):
         except FileNotFoundError:
             continue
     return None
-
-
-def _build_array_wrapper(launcher_cmd: str, lammps_exec: str,
-                         lammps_flags: str) -> str:
-    """Build a TMPDIR staging wrapper for array jobs."""
-    return f"""#!/usr/bin/env bash
-set -euo pipefail
-
-IDX="${{PBS_ARRAY_INDEX:-${{SLURM_ARRAY_TASK_ID:-1}}}}"
-
-mapfile -t SIMS < array_map.txt
-SIM_REL="${{SIMS[$((IDX-1))]:-}}"
-if [[ -z "${{SIM_REL}}" ]]; then
-    echo "No simulation for index ${{IDX}}" >&2
-    exit 2
-fi
-
-SIM_ROOT="$PWD"
-RUN_ROOT="${{TMPDIR:-/tmp}}/friction2d_${{IDX}}"
-LMP_FLAGS="{lammps_flags}"
-
-mkdir -p "$RUN_ROOT"
-mkdir -p "$SIM_ROOT/array_status"
-
-trap 'echo "{{\\\\\"index\\\\\": $IDX, \\\\\"simulation\\\\\": \\\\\"$SIM_REL\\\\\", \\\\\"status\\\\\": \\\\\"failed\\\\\"}}\" \\
-    > "$SIM_ROOT/array_status/${{IDX}}.json"' ERR
-
-echo "{{\\\\\"index\\\\\": $IDX, \\\\\"simulation\\\\\": \\\\\"$SIM_REL\\\\\", \\\\\"status\\\\\": \\\\\"running\\\\\"}}\" \\
-    > "$SIM_ROOT/array_status/${{IDX}}.json"
-
-rsync -a --exclude='*.lammpstrj' "$SIM_ROOT/$SIM_REL/" "$RUN_ROOT/$SIM_REL/"
-
-cd "$RUN_ROOT/$SIM_REL"
-
-if [[ -f "$SIM_ROOT/array_scripts.txt" ]]; then
-    mapfile -t SCRIPTS < "$SIM_ROOT/array_scripts.txt"
-else
-    mapfile -t ALLSCRIPTS < <(find lammps -maxdepth 1 -type f -name '*.in' -printf '%f\\\\n' | sort)
-    SYSTEM=()
-    SLIDES=()
-    OTHERS=()
-    for s in "${{ALLSCRIPTS[@]}}"; do
-        low="${{s,,}}"
-        if [[ "$low" == "system.in" ]]; then
-            SYSTEM+=("$s")
-        elif [[ "$low" == *slide* ]]; then
-            SLIDES+=("$s")
-        else
-            OTHERS+=("$s")
-        fi
-    done
-    SCRIPTS=("${{SYSTEM[@]}}" "${{SLIDES[@]}}" "${{OTHERS[@]}}")
-fi
-
-for script in "${{SCRIPTS[@]}}"; do
-    {launcher_cmd} {lammps_exec} $LMP_FLAGS -in "lammps/$script"
-done
-
-for sub in results visuals; do
-    if [[ -d "$RUN_ROOT/$SIM_REL/$sub" ]]; then
-        rsync -a "$RUN_ROOT/$SIM_REL/$sub" "$SIM_ROOT/$SIM_REL/"
-    fi
-done
-
-echo "{{\\\\\"index\\\\\": $IDX, \\\\\"simulation\\\\\": \\\\\"$SIM_REL\\\\\", \\\\\"status\\\\\": \\\\\"completed\\\\\"}}\" \\
-    > "$SIM_ROOT/array_status/${{IDX}}.json"
-"""
 
 
 def _copy_outputs_to_local(repo, names, local_sim_dir: Path) -> None:

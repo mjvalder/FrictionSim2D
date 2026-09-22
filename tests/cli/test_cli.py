@@ -486,3 +486,13 @@ def test_aiida_submit_help(runner):
     assert result.exit_code == 0
     assert '--dry-run' in result.output
     assert '--walltime' in result.output
+    assert '--array' not in result.output
+
+
+def test_aiida_submit_rejects_array_flag(runner):
+    """AiiDA-managed array CalcJobs are removed (see task-B brief): array
+    jobs on an HPC go through `hpc generate` + qsub + `aiida import` instead,
+    so `--array` is no longer a recognised option."""
+    result = runner.invoke(cli, ['aiida', 'submit', '.', '--array'])
+    assert result.exit_code != 0
+    assert 'no such option' in result.output.lower()

@@ -58,9 +58,8 @@ def _is_provenance_candidate(name: str) -> bool:
     than under its `cif/`/`potentials/` subdirectories.
 
     The `provenance` component need not be first: `src.aiida.calcjob.
-    _stage_sim_dir` (a CalcJob's `simulation_dir` input, built from a whole
-    simulation ROOT via `prepare_simulation_root`) can stage the very same
-    file several directories deep, e.g. `afm/h-MoS2/.../K300/provenance/
+    _stage_sim_dir` (a CalcJob's `simulation_dir` input) can stage the very
+    same file several directories deep, e.g. `afm/h-MoS2/.../K300/provenance/
     settings.yaml` -- `provenance` a middle component, not the first.
     Matching is case-insensitive.
     """

@@ -86,10 +86,10 @@ past it through exactly those shapes).
 `src.aiida.data.redact.stage_file` is the choke point: every path staged into
 a `FrictionSimulationSetData`, `FrictionSimulationData` or
 `FrictionResultsData` repository, and (via `src.aiida.calcjob._stage_sim_dir`,
-behind `prepare_simulation_folder`/`prepare_simulation_root`, which
-`submit.py` uses to build a CalcJob's `simulation_dir` input for the
-**local**/**hpc-direct** run modes) a CalcJob's own input `FolderData`, goes
-through it instead of writing to the repository directly. A candidate
+behind `prepare_simulation_folder`, which `submit.py` uses to build a
+CalcJob's `simulation_dir` input for the **local**/**hpc-direct** run modes)
+a CalcJob's own input `FolderData`, goes through it instead of writing to the
+repository directly. A candidate
 document -- `settings.yaml`/`.yml`, `config.json`, `*.ini`, any of those with
 an extra suffix such as `.bak`, or any file under a `provenance` path
 component outside its `cif/`/`potentials/` subdirectories -- is parsed (JSON,
@@ -265,11 +265,6 @@ Builds a `tar.gz` of simulation inputs for cluster transfer; excludes
   `None` for every flake run. A flake result can still be ingested and
   queried locally, but it cannot be published to the central database (which
   requires a COF).
-- **Array-mode submission (`aiida submit --array`, `submit_array`) is not
-  ingested by the parser.** It also lacks the AFM shared-build staging
-  (`build/`, `provenance/` staged once and reused by every layer) that a
-  normal per-run submission gets — an array job stages each run
-  independently.
 - **AFM's `provenance/` directory is not retrieved by the CalcJob.** The run
   node created at generation time (`run --aiida`) already holds the same
   provenance data as an attribute, so retrieving the directory again on
