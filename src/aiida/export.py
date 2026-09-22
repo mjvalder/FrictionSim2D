@@ -204,6 +204,22 @@ def _run_mapper(run_dest: Path, model: str) -> Callable[[str], Path]:
     return mapper
 
 
+def _write_updated_provenance(run_node, run_dest: Path,
+                              already: List[Path]) -> List[Path]:
+    """Overwrite the exported `provenance.json` with the post-run update the
+    run node carries in its extras, if any (see
+    `FrictionSimulationData.refresh_provenance`). Returns the path when it
+    was not already in `already`, so the caller's list stays duplicate-free.
+    """
+    text = run_node.provenance_file_text()
+    if text is None:
+        return []
+    out = run_dest / 'provenance.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding='utf-8')
+    return [] if out in already else [out]
+
+
 def export_results(label: str, dest: Path, *,
                    profile: Optional[str] = None) -> List[Path]:
     """Write a set's stored files back into a simulation tree at `dest`.
@@ -224,6 +240,7 @@ def export_results(label: str, dest: Path, *,
         run_dest = dest / run_node.rel_path
         written += _dump_repository(run_node, _run_mapper(run_dest, run_node.model),
                                     seen=seen)
+        written += _write_updated_provenance(run_node, run_dest, written)
         _warn_oversize(run_node, run_node.rel_path)
         for result in _results_of(run_node):
             written += _dump_repository(result, lambda rel, d=run_dest: d / rel)
@@ -471,6 +488,7 @@ def export_provenance_bundle(run, dest: Path) -> List[Path]:
             with run.base.repository.open(rel, 'rb') as src:
                 out.write_bytes(src.read())
             written.append(out)
+    written += _write_updated_provenance(run, dest, written)
     logger.info("Wrote %d provenance file(s) for %s to %s",
                len(written), run.rel_path, dest)
     return sorted(written)

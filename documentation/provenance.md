@@ -56,6 +56,9 @@ per-source RNG seeds (`seed_thermal_tip`, `seed_thermal_sub`,
 `git_dirty`, `config_hash`, `lammps_version`), and post-run enrichment fields
 (`ramp_converged`, `ramp_r`, `ramp_iterations`, `unloaded_reference_z`,
 `wall_time_s`, ...) filled in from the LAMMPS log after the run finishes.
+Enrichment happens after the AiiDA run node may already exist; re-running
+`aiida import` on the tree stores the enriched record (see
+[aiida.md](aiida.md), "provenance_updated").
 
 ### `provenance/settings.yaml`
 

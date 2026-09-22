@@ -230,6 +230,84 @@ class FrictionSimulationData(Data):  # pylint: disable=too-many-public-methods
     def job_id(self, value):
         self.base.extras.set('job_id', None if value is None else str(value))
 
+    # --- post-run provenance updates (EXTRAS) ----------------------------
+    #
+    # `hpc enrich-provenance` rewrites `provenance.json` AFTER the run node
+    # was created at generation time (`run --aiida`) -- ramp_*,
+    # unloaded_reference_z, lammps_version. The `provenance` attribute and the
+    # stored `provenance.json` are immutable, so a re-ingest records the newer
+    # file here (spec §4.1: extras are the mutable half), and every reader
+    # goes through `effective_provenance` / `provenance_file_text`.
+
+    _PROVENANCE_UPDATE = 'provenance_updated'
+
+    @property
+    def provenance_update(self) -> Optional[Dict[str, Any]]:
+        """`{'record', 'sha256', 'file', 'updated_at'}` of the newest post-run
+        `provenance.json`, or None when the stored one is still current."""
+        update = self.base.extras.get(self._PROVENANCE_UPDATE, None)
+        return update if isinstance(update, dict) else None
+
+    @property
+    def effective_provenance(self) -> Dict[str, Any]:
+        """The newest provenance record: the post-run update when there is
+        one, the build-time `provenance` attribute otherwise."""
+        update = self.provenance_update
+        if update is not None and isinstance(update.get('record'), dict):
+            return update['record']
+        return self.provenance
+
+    def provenance_file_text(self) -> Optional[str]:
+        """The updated `provenance.json` text, or None when the file stored in
+        the repository is still current."""
+        update = self.provenance_update
+        return None if update is None else update.get('file')
+
+    def _current_provenance_sha(self) -> str:
+        update = self.provenance_update
+        if update is not None:
+            return str(update.get('sha256', ''))
+        import hashlib  # pylint: disable=import-outside-toplevel
+        repo = self.base.repository
+        if 'provenance.json' in repo.list_object_names():
+            return hashlib.sha256(repo.get_object_content(
+                'provenance.json', mode='rb')).hexdigest()
+        for entry in self.oversize_files:
+            if entry.get('path') == 'provenance.json':
+                return str(entry.get('sha256', ''))
+        return ''
+
+    def provenance_changed(self, locator) -> bool:
+        """True when `locator`'s `provenance.json` differs from what this node
+        currently holds (stored file, or the latest recorded update)."""
+        import hashlib  # pylint: disable=import-outside-toplevel
+        data = Path(locator.provenance_file).read_bytes()
+        return hashlib.sha256(data).hexdigest() != self._current_provenance_sha()
+
+    def refresh_provenance(self, locator) -> bool:
+        """Record `locator`'s `provenance.json` as this run's provenance when it
+        changed since the node was created. Returns True when it recorded one;
+        re-running with an unchanged file records nothing (idempotent)."""
+        import hashlib  # pylint: disable=import-outside-toplevel
+        from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
+
+        from ...data.provenance import read_provenance  # pylint: disable=import-outside-toplevel
+
+        if not self.provenance_changed(locator):
+            return False
+        data = Path(locator.provenance_file).read_bytes()
+        tokens = locator.tokens
+        record = read_provenance(locator.provenance_file, family=tokens.family,
+                                 model=tokens.model,
+                                 material_name=tokens.materials[0])
+        self.base.extras.set(self._PROVENANCE_UPDATE, {
+            'record': _sanitize(record.model_dump()),
+            'sha256': hashlib.sha256(data).hexdigest(),
+            'file': data.decode('utf-8'),
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        })
+        return True
+
     # --- population / staging -------------------------------------------
 
     def set_from_locator(self, locator, set_uuid: str, set_label: str = '') -> None:

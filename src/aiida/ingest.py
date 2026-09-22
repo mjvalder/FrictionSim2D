@@ -434,6 +434,7 @@ class IngestReport:
     created_results: List[str] = field(default_factory=list)
     skipped_results: List[str] = field(default_factory=list)
     superseded_results: List[str] = field(default_factory=list)
+    updated_provenance: List[str] = field(default_factory=list)
     incomplete_results: List[str] = field(default_factory=list)
     empty_runs: List[str] = field(default_factory=list)
     unparseable: List[str] = field(default_factory=list)
@@ -453,6 +454,7 @@ class IngestReport:
             f"  results created:     {len(self.created_results)}",
             f"  results skipped:     {len(self.skipped_results)}",
             f"  results superseded:  {len(self.superseded_results)}",
+            f"  provenance updated:  {len(self.updated_provenance)}",
             f"  results incomplete:  {len(self.incomplete_results)}",
             f"  empty runs:          {len(self.empty_runs)}",
             f"  unparseable runs:    {len(self.unparseable)}",
@@ -640,6 +642,8 @@ def _plan_run(rel: str, set_node, locator, points: List[LoadPoint],
         report.created_runs.append(rel)
         report.created_results.extend(_point_key(rel, p) for p in points)
         return
+    if run_node.provenance_changed(locator):
+        report.updated_provenance.append(rel)
 
     for point in points:
         key = _point_key(rel, point)
@@ -696,6 +700,13 @@ def ingest_run(locator, set_node, report: IngestReport, *,
         return
     if created:
         report.created_runs.append(rel)
+    else:
+        try:
+            if run_node.refresh_provenance(locator):
+                report.updated_provenance.append(rel)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Could not record the updated provenance of %s", rel)
+            report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
 
     for point in points:
         key = _point_key(rel, point)

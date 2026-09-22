@@ -29,6 +29,14 @@ old `FrictionResultsData` node in place: the old node is marked
 exports and re-import matching all skip superseded nodes, so a stale result
 is never returned or double-counted, but it is never deleted either.
 
+The same goes for a run's `provenance.json`. `hpc enrich-provenance` rewrites
+it after the run node was created (`ramp_*`, `unloaded_reference_z`,
+`lammps_version`); the next `aiida import` of the tree sees that the file
+changed and records the new record, its sha256 and the file text in
+`extras['provenance_updated']` (reported as `provenance updated: N`).
+`export-results`, the provenance bundle and `db upload` all use that newer
+record; re-importing an unchanged file records nothing.
+
 Every node belonging to one simulation set is tagged with the AiiDA group
 `friction2d/<label>`. `aiida export <label>` archives that whole group
 (the group itself included); `aiida import-archive` does **not** recreate

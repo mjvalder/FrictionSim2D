@@ -276,7 +276,7 @@ class FrictionResultsData(Data):
         """
         from ...data.models import ResultRecord  # pylint: disable=import-outside-toplevel
 
-        prov = run_node.provenance or {}
+        prov = run_node.effective_provenance or {}
         sheets = [m for m in prov.get('materials', []) if m.get('role') == 'sheet']
         primary = sheets[0] if sheets else {}
         attrs = self.base.attributes

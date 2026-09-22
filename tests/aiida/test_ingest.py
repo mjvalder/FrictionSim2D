@@ -762,3 +762,71 @@ def test_find_run_by_rel_path_returns_none_for_an_uningested_root(aiida_profile_
     make_run(root, REL, 'afm', loads=(30.0,))
 
     assert find_run_by_rel_path(root / REL, root) is None
+
+
+def _enrich(run_dir, **updates):
+    import json as _json
+
+    prov = run_dir / 'provenance.json'
+    data = _json.loads(prov.read_text(encoding='utf-8'))
+    data.update(updates)
+    prov.write_text(_json.dumps(data), encoding='utf-8')
+
+
+def test_post_run_provenance_reaches_the_store_and_the_export(aiida_profile_clean,
+                                                              tmp_path):
+    """I2: `hpc enrich-provenance` rewrites provenance.json after `run
+    --aiida` created the run node. The attribute is immutable, so the newer
+    record rides in an extra; export, the bundle and `to_record` read it."""
+    import json as _json
+
+    from src.aiida.export import export_provenance_bundle, export_results
+
+    root = _root(tmp_path)
+    ingest_root(root, label='enrich')
+    _enrich(root / REL, ramp_converged=True, ramp_r=0.012, ramp_iterations=7,
+            unloaded_reference_z={'layer_1': 12.5}, lammps_version='29 Aug 2024')
+
+    report = ingest_root(root, label='enrich')
+
+    assert report.ok(), report.render()
+    assert report.updated_provenance == [REL]
+    assert 'provenance updated:  1' in report.render()
+    run_node, _ = find_or_create_run(find_or_create_set(root, 'enrich'),
+                                     discover_runs(root)[0])
+    assert run_node.effective_provenance['ramp_r'] == 0.012
+    assert run_node.effective_provenance['lammps_version'] == '29 Aug 2024'
+    assert run_node.provenance.get('ramp_r') is None  # attribute unchanged
+
+    out = tmp_path / 'exported'
+    export_results('enrich', out)
+    exported = _json.loads((out / REL / 'provenance.json').read_text(encoding='utf-8'))
+    assert exported['ramp_converged'] is True
+    assert exported['unloaded_reference_z'] == {'layer_1': 12.5}
+
+    bundle = tmp_path / 'bundle'
+    export_provenance_bundle(run_node, bundle)
+    assert _json.loads((bundle / 'provenance.json').read_text(
+        encoding='utf-8'))['ramp_iterations'] == 7
+
+    again = ingest_root(root, label='enrich')
+    assert again.updated_provenance == []
+
+    _enrich(root / REL, lammps_version='2 Apr 2025')
+    third = ingest_root(root, label='enrich')
+    assert third.updated_provenance == [REL]
+    assert run_node.effective_provenance['lammps_version'] == '2 Apr 2025'
+    assert run_node.effective_provenance['ramp_r'] == 0.012
+
+
+def test_dry_run_reports_a_pending_provenance_update(aiida_profile_clean, tmp_path):
+    root = _root(tmp_path)
+    ingest_root(root, label='enrich-dry')
+    _enrich(root / REL, lammps_version='29 Aug 2024')
+
+    plan = ingest_root(root, label='enrich-dry', dry_run=True)
+    assert plan.updated_provenance == [REL]
+
+    run_node, _ = find_or_create_run(find_or_create_set(root, 'enrich-dry'),
+                                     discover_runs(root)[0])
+    assert run_node.provenance_update is None  # a dry run records nothing
