@@ -648,11 +648,17 @@ that fails to load points you at `FrictionSim2D aiida setup`.
 A **list** query's result is cached, keyed on the filters plus the connection
 it ran against — the AiiDA profile, or the API URL and a hash of the API
 key — since the same filters against a different store are a different
-answer. **Refresh** bypasses that cache, and a successful **Import run
-directory…** clears every cached list, since it just changed what the store
-holds. Every other request kind (a row's detail, a download, a connection
-check) is never cached and runs from its own scratch directory. The source,
-the filters and the last download directory are remembered per workspace.
+answer. A result served from the cache says so in the message panel — its
+timing is the original query's, not a fresh one's. **Refresh** bypasses the
+cache, and a successful **Import run directory…** clears every cached list,
+since it just changed what the store holds. The ten most recent cached
+queries are kept; older ones are deleted as new queries arrive. Every other
+request kind (a row's detail, a download, a connection check) is never cached
+and runs from its own scratch directory. The source, the filters and the last
+download directory are remembered per workspace.
+
+Switching source empties the table: a row belongs to the store it came from,
+and the two stores identify a row differently.
 
 ## Not included
 
