@@ -1237,15 +1237,30 @@ def postprocess_group():
 @postprocess_group.command('read')
 @click.argument('results_dir', type=click.Path(exists=True))
 @click.option('--export', 'do_export', is_flag=True,
-              help='Export full time-series data to JSON.')
-def postprocess_read(results_dir: str, do_export: bool):
-    """Read and process simulation result data."""
+              help='Write outputs/output_full_<size>.json (schema 2) and '
+                   'outputs/summary_<size>.csv.')
+@click.option('--skip-fraction', default=0.2, show_default=True, type=float,
+              help='Transient fraction dropped before the summary statistics.')
+def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float):
+    """Read and process simulation result data.
+
+    RESULTS_DIR is a simulation root -- the directory holding afm/,
+    sheetonsheet/, indent/, pes_tip/, pes_sheet/.
+    """
     from .postprocessing import DataReader  # noqa: PLC0415
 
-    reader = DataReader(results_dir=results_dir)
+    reader = DataReader(results_dir=results_dir, skip_fraction=skip_fraction)
     reader.export_issue_reports()
+    if not reader.runs:
+        click.echo(f"No runs found under {results_dir}.", err=True)
+        return
+    click.echo(f"Found {len(reader.runs)} run(s) across "
+               f"{len(reader.runs_by_size())} size(s).")
     if do_export:
-        reader.export_full_data_to_json()
+        for path in reader.export_full_data_to_json():
+            click.echo(f"✅ {path}")
+        for path in reader.export_summary_csv():
+            click.echo(f"✅ {path}")
     click.echo("Postprocessing complete.")
 
 
