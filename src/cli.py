@@ -1401,11 +1401,16 @@ def _make_db(
     """
     has_explicit = any(v is not None for v in (host, port, dbname, user, password))
     if not has_explicit:
+        from .data.database import central_db  # noqa: PLC0415
         try:
-            from .data.database import central_db  # noqa: PLC0415
             return central_db()
-        except Exception:  # pylint: disable=broad-except  # settings not available
-            pass
+        except Exception as exc:  # pylint: disable=broad-except
+            # Surfaced, never retried against localhost defaults: that retry
+            # hid the real cause (bad host, wrong password) behind a second,
+            # misleading "connection refused on localhost".
+            raise click.ClickException(
+                f"Could not open the central database from settings.database: "
+                f"{exc}") from exc
     from .data.database import FrictionDB  # noqa: PLC0415
     return FrictionDB(host=host, port=port, dbname=dbname, user=user, password=password)
 
