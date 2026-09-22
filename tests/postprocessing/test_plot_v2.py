@@ -172,3 +172,97 @@ def test_written_starts_empty_and_records_what_save_plot_writes(tmp_path):
     plotter._save_plot(fig, 'lf_vs_load.png')  # pylint: disable=protected-access
 
     assert plotter.written == [out / 'lf_vs_load.png']
+
+
+def test_summary_df_comes_from_the_summary_csv(tmp_path):
+    """Three COF definitions used to reach one plot: df.mean() here,
+    element-wise compute_derived_columns in the reader, ratio-of-means in the
+    DB. There is one now, and it is summarise_run's."""
+    import pandas as pd
+
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0))
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    summary = plotter._get_summary_data_df()  # pylint: disable=protected-access
+
+    csv = pd.read_csv(root / 'outputs' / 'summary_100x100y.csv')
+    assert len(summary) == len(csv) == 2
+    assert sorted(summary['cof']) == pytest.approx(sorted(csv['mean_cof']))
+    assert sorted(summary['force']) == [10.0, 30.0]
+    assert set(summary['dataset_label']) == {'ds'}
+    assert set(summary['file_key']) == {'100x100y'}
+
+
+def test_summary_rows_carry_the_identity_and_the_spread(tmp_path):
+    import numpy as np
+
+    root = _dataset(tmp_path, 'hetero', material='h-MoS2',
+                    second_material='h-WS2', pot='sw_a')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    row = plotter._get_summary_data_df().iloc[0]
+
+    assert row['id'] == 'h_MoS2+h_WS2'
+    assert row['family'] == 'hetero'
+    assert row['potential'] == 'pot_sw_a'
+    assert row['size'] == '100x100y'
+    assert np.isnan(row['force'])
+    assert row['pressure'] == row['load']
+    assert 'std_cof' in row.index
+    assert row['nf'] == row['mean_nf']
+
+
+def test_lf_as_was_is_absent_rather_than_aliased(tmp_path):
+    """A DB or summary row has no v_xfrict-as-written column. Inventing one
+    by aliasing mean_lf made `lf_source: as_was` silently plot `lf`."""
+    root = _dataset(tmp_path, 'sheetonsheet')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    summary = plotter._get_summary_data_df()
+
+    assert 'lf_as_was' not in summary.columns
+    assert 'lf_sx_sy' in summary.columns
+
+
+def test_a_window_argument_still_averages_the_frames(tmp_path):
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0), n=20)
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    windowed = plotter._get_summary_data_df(first_n=5)
+
+    assert len(windowed) == 2
+    run = next(plotter._extract_all_runs('ds', '100x100y'))
+    head = run['df'].iloc[:5]
+    expected = float(head['lf'].mean()) / float(head['nf'].mean())
+    row = windowed[windowed['force'] == run['force']].iloc[0]
+    assert row['cof'] == pytest.approx(expected)
+
+
+def test_written_records_every_saved_file_end_to_end(tmp_path):
+    """Now that the summary path reads the CSV, a whole summary plot can be
+    driven and `written` compared against what actually reached disk."""
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 20.0, 30.0))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'summary', 'x_axis': 'force',
+                           'y_axis': 'lf', 'filename': 'lf_vs_load.png'})
+
+    assert plotter.written == [out / 'lf_vs_load.png']
+    assert (out / 'lf_vs_load.png').is_file()
+
+
+def test_a_missing_summary_csv_is_a_plot_data_error(tmp_path):
+    root = tmp_path / 'ds'
+    make_family_run(root, 'afm')
+    DataReader(results_dir=str(root)).export_full_data_to_json()   # no csv
+
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    with pytest.raises(PlotDataError, match='summary_100x100y.csv'):
+        plotter._get_summary_data_df()

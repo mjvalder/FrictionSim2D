@@ -23,6 +23,14 @@ from .plot_style import GEM24_COLORS
 logger = logging.getLogger(__name__)
 
 
+#: summary_<size>.csv column -> the name the plot specs use.
+SUMMARY_COLUMN_ALIASES = {
+    'mean_nf': 'nf', 'mean_lf': 'lf', 'mean_lfx': 'lfx', 'mean_lfy': 'lfy',
+    'mean_cof': 'cof', 'mean_lf_sx_sy': 'lf_sx_sy',
+    'mean_lf_fx_fy': 'lf_fx_fy',
+}
+
+
 class PlotCommonMixin(PlotterMixinBase):
     def _display_dataset_label(self, label: str) -> str:
         """Return configured display label for a dataset key."""
@@ -255,6 +263,10 @@ class PlotCommonMixin(PlotterMixinBase):
                 if match:
                     file_key = match.group(1)
                     self.full_data_files[label][file_key] = str(entry)
+                summary_match = re.match(r'summary_(.+)\.csv', entry.name)
+                if summary_match:
+                    self.summary_files.setdefault(label, {})[
+                        summary_match.group(1)] = entry
 
             if not self.full_data_files[label]:
                 # Raised, not logged: before this, a mistyped data_dir gave an
@@ -542,74 +554,98 @@ class PlotCommonMixin(PlotterMixinBase):
             self.summary_df_cache = self._calculate_summary_statistics()
         return self.summary_df_cache
 
+    def _summary_rows_from_csv(self) -> list[dict]:
+        """One row per load point, read from `summary_<size>.csv`.
+
+        The CSV is `summarise_run`'s own output (`DataReader.summary_rows`),
+        so `cof` here is the ratio-of-means the store and the central DB
+        carry. `df.mean()` over an element-wise cof column -- what this used
+        to do -- is a different number, and putting both on one axis is how
+        the same run reported two COFs.
+        """
+        rows: list[dict] = []
+        for label in self.full_data_files:
+            for file_key in self.full_data_files[label]:
+                path = self.summary_files.get(label, {}).get(file_key)
+                if path is None:
+                    raise PlotDataError(
+                        f"{label}: no summary_{file_key}.csv beside "
+                        f"output_full_{file_key}.json. Regenerate with "
+                        f"`FrictionSim2D postprocess read <root> --export`.")
+                frame = pd.read_csv(path)
+                for record in frame.to_dict('records'):
+                    row = dict(record)
+                    row['dataset_label'] = label
+                    row['file_key'] = file_key
+                    row['id'] = record['material']
+                    kind = record['load_kind']
+                    row['force'] = (record['load'] if kind == 'force'
+                                    else float('nan'))
+                    row['pressure'] = (record['load'] if kind == 'pressure'
+                                       else float('nan'))
+                    row['layer'] = record['layers']
+                    for src, dst in SUMMARY_COLUMN_ALIASES.items():
+                        if src in record:
+                            row[dst] = record[src]
+                    rows.append(row)
+        return rows
+
     def _calculate_summary_statistics(
         self,
         first_n: int | None = None,
         timestep_range: list[int] | None = None,
     ) -> pd.DataFrame:
-        """Calculate summary statistics for all runs."""
+        """Summary statistics for every run.
+
+        Default: read `summary_<size>.csv`, whose numbers are
+        `summarise_run`'s. With `first_n` or `timestep_range` the statistics
+        are recomputed over that window from the tier frames -- and `cof` is
+        still `mean(lf)/mean(nf)`, never `mean(cof)`, so the two paths differ
+        only in which samples they use.
+        """
         logger.info("Calculating summary statistics...")
-        all_records = []
+        if first_n is None and timestep_range is None:
+            all_records = self._summary_rows_from_csv()
+        else:
+            all_records = []
+            for label in self.full_data_files:
+                for file_key in self.full_data_files[label]:
+                    for run_data in self._extract_all_runs(label, file_key):
+                        run_data = dict(run_data)
+                        df = run_data.pop('df')
+                        if (timestep_range is not None
+                                and len(timestep_range) == 2):
+                            df = df.iloc[timestep_range[0]:timestep_range[1]]
+                        elif first_n is not None:
+                            df = df.iloc[:first_n]
+                        stats = df.mean(numeric_only=True).to_dict()
+                        if 'lf' in df.columns and 'nf' in df.columns:
+                            mean_nf = float(df['nf'].mean())
+                            stats['cof'] = (float(df['lf'].mean()) / mean_nf
+                                            if mean_nf else float('nan'))
+                        run_data.pop('tiers', None)
+                        run_data.pop('units', None)
+                        all_records.append({
+                            'dataset_label': label, 'file_key': file_key,
+                            **run_data, **stats})
 
-        for label in self.full_data_files:
-            for file_key in self.full_data_files[label]:
-                for run_data in self._extract_all_runs(label, file_key):
-                    df = run_data.pop('df')
-                    original_len = len(df)
-
-                    if timestep_range is not None and len(timestep_range) == 2:
-                        df = df.iloc[timestep_range[0]:timestep_range[1]]
-                        logger.info(
-                            "Applied timestep range [%s:%s]: %d -> %d steps",
-                            timestep_range[0],
-                            timestep_range[1],
-                            original_len,
-                            len(df),
-                        )
-                    elif first_n is not None:
-                        df = df.iloc[:first_n]
-                        logger.info(
-                            "Applied first %d timesteps: %d -> %d steps",
-                            first_n,
-                            original_len,
-                            len(df),
-                        )
-
-                    summary_stats = df.mean().to_dict()
-                    record = {
-                        'dataset_label': label,
-                        'file_key': file_key,
-                        **run_data,
-                        **summary_stats,
-                    }
-                    all_records.append(record)
-
-        # Append rows from DB-backed datasets (loaded in _load_db_labels).
-        # DB rows are pre-computed and not affected by first_n / timestep_range.
+        # DB-backed datasets are pre-computed and carry no time series, so a
+        # window argument cannot apply to them.
         if self._db_summary_rows and first_n is None and timestep_range is None:
             all_records.extend(self._db_summary_rows)
 
         summary_df = pd.DataFrame(all_records)
-
-        if (
-            not summary_df.empty
-            and 'id' in summary_df.columns
-        ):
-            summary_df['material_type'] = (
-                summary_df['id'].map(self.material_type_map)
-            )
+        if not summary_df.empty and 'id' in summary_df.columns:
+            summary_df['material_type'] = summary_df['id'].map(
+                self.material_type_map)
             if 'size' not in summary_df.columns:
                 summary_df['size'] = (
-                    summary_df['file_key']
-                    .str.extract(r'(\d+x\d+y?)')[0]
-                )
+                    summary_df['file_key'].str.extract(r'(\d+x\d+y?)')[0])
 
         if first_n is None and timestep_range is None:
             self.summary_df_cache = summary_df
 
-        logger.debug(
-            "Summary DataFrame shape %s", summary_df.shape,
-        )
+        logger.debug("Summary DataFrame shape %s", summary_df.shape)
         return summary_df
 
     # =====================================================================

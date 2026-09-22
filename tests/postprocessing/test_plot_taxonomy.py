@@ -20,6 +20,62 @@ LOADS = [2.0, 30.0, 100.0]
 
 
 
+
+def _write_v2_dataset(outputs_dir, runs, metadata=None, size='100x100y'):
+    """Write both halves of a dataset: the v2 export and its summary CSV.
+
+    The summary CSV is not optional decoration -- `_calculate_summary_statistics`
+    reads it for every windowless summary plot, because it holds
+    `summarise_run`'s COF rather than a `df.mean()` of an element-wise one.
+    """
+    import csv as _csv
+    import json as _json
+
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    (outputs_dir / f'output_full_{size}.json').write_text(
+        _json.dumps(_v2_doc(runs, metadata, size)), encoding='utf-8')
+
+    rows = []
+    for run in runs:
+        tier = run['tiers']['window']
+        frame = {name: [row[i] for row in tier['data']]
+                 for i, name in enumerate(tier['columns'])}
+        nf = frame.get('nf') or [float('nan')]
+        lfx = frame.get('lfx') or [0.0]
+        lfy = frame.get('lfy') or [0.0]
+        mean_nf = sum(nf) / len(nf)
+        mean_lf = sum((x ** 2 + y ** 2) ** 0.5
+                      for x, y in zip(lfx, lfy)) / len(lfx)
+        rows.append({
+            'model': run['model'], 'family': run['family'],
+            'material': run['material'], 'materials': run['material'],
+            'flake_material': '', 'size': run['size'],
+            'size_x': run['size_x'], 'size_y': run['size_y'],
+            'substrate': run['substrate'],
+            'substrate_amorphous': run['substrate_amorphous'],
+            'tip_material': run['tip_material'],
+            'tip_radius': run['tip_radius'],
+            'temperature': run['temperature'], 'layers': run['layers'],
+            'potential': run['potential'] or '', 'rel_path': run['rel_path'],
+            'load_kind': run['load_kind'], 'load': run['load'],
+            'angle': run['angle'], 'speed': run['speed'], 'tiers': 'window',
+            'mean_cof': mean_lf / mean_nf if mean_nf else float('nan'),
+            'std_cof': 0.0, 'mean_lf': mean_lf, 'std_lf': 0.0,
+            'mean_nf': mean_nf, 'std_nf': 0.0,
+            'mean_lfx': sum(lfx) / len(lfx), 'std_lfx': 0.0,
+            'mean_lfy': sum(lfy) / len(lfy), 'std_lfy': 0.0,
+            'skip_fraction': 0.2, 'ntimesteps': len(tier['data']),
+            'time_series_hash': '', 'is_complete': True,
+            'mean_lf_sx_sy': float('nan'), 'mean_lf_fx_fy': float('nan'),
+            'gap_min': float('nan'), 'deflect_max': float('nan'),
+            'gap_min_il': float('nan'), 'corrugation_max': float('nan'),
+        })
+    with (outputs_dir / f'summary_{size}.csv').open(
+            'w', encoding='utf-8', newline='') as fh:
+        writer = _csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
 def _v2_run(material, columns, rows, *, load=10.0, angle=0.0, load_kind='force',
             layers=2, size='100x100y', family='afm', model='afm'):
     """One `runs[]` entry of a v2 export document (see read_data.EXPORT_SCHEMA)."""
