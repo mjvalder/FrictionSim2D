@@ -475,17 +475,41 @@ class MainWindow(QMainWindow):
         every central action ends as a raw ConnectionError against a localhost
         URL nobody ever configured -- a stack-trace string in place of "you
         have not set this up".
+
+        Called from `_restore_database_state` (already under the
+        `_restoring_db_state` guard) but also from `_apply_settings`, live,
+        any time the Settings tab is applied -- clearing `database.api_url`
+        while Central is selected must not let the resulting fallback
+        (`set_source_enabled` hands the pane to Local) look like the user
+        chose Local: `source_changed` -> `_remember_database_state` would
+        otherwise overwrite the workspace's remembered 'central' with 'local'
+        outside of any restore. Wrapping the body in the same guard (saving
+        and restoring its previous value, since a call from
+        `_restore_database_state` already has it set) makes an
+        availability-driven fallback silent the same way a restore-driven one
+        already is. The other half of "comes back once the missing piece is
+        fixed": re-enabling Central here, while the workspace still remembers
+        it and the pane is showing the Local fallback, switches the pane back
+        rather than leaving it stranded on Local until the next restart.
         """
         if missing_backend('central'):
             return          # the pane already said what to install
-        if not central_configured(self.settings):
-            self.database_pane.set_source_enabled(
-                'central', False,
-                'Central: not configured. Set database.api_url (and '
-                'database.api_key) in the Settings tab. The Local store needs '
-                'none of this.')
-        else:
-            self.database_pane.set_source_enabled('central', True)
+        previous = self._restoring_db_state
+        self._restoring_db_state = True
+        try:
+            if not central_configured(self.settings):
+                self.database_pane.set_source_enabled(
+                    'central', False,
+                    'Central: not configured. Set database.api_url (and '
+                    'database.api_key) in the Settings tab. The Local store '
+                    'needs none of this.')
+            else:
+                self.database_pane.set_source_enabled('central', True)
+                if (self.workspace.state.get('db_source') == 'central'
+                        and self.database_pane.source != 'central'):
+                    self.database_pane.set_source('central')
+        finally:
+            self._restoring_db_state = previous
 
     def _on_db_query(self, source: str, filters: dict) -> None:
         self._remember_database_state()

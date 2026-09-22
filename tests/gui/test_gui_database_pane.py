@@ -874,6 +874,37 @@ class TestNotConfigured:
         assert window.database_pane._source_buttons.button(1).isEnabled()
 
 
+class TestAvailabilityChangeDoesNotClobberMemory:
+    """Regression: `_apply_settings` calls `_apply_database_availability()`
+    live, unguarded, any time Settings is applied -- not only at startup or
+    on a workspace switch, which already ran it under `_restoring_db_state`
+    (see `_restore_database_state`). Clearing `database.api_url` while
+    Central was selected disabled the source, `set_source_enabled` fell back
+    to Local, and the resulting `source_changed` -> `_remember_database_state`
+    wrote 'local' over the workspace's remembered 'central' -- exactly the
+    write the D11 fallback promises never to make ("only the on-screen
+    selection falls back")."""
+
+    def test_a_live_availability_change_does_not_overwrite_the_remembered_source(
+            self, window):
+        window.settings.database.api_url = 'https://db.example.org'
+        window._apply_database_availability()
+        window.database_pane.set_source('central')
+        assert window.workspace.state['db_source'] == 'central'
+
+        window.settings.database.api_url = ''
+        window._apply_database_availability()
+
+        assert window.database_pane.source == 'local'
+        assert window.workspace.state['db_source'] == 'central'
+
+        window.settings.database.api_url = 'https://db.example.org'
+        window._apply_database_availability()
+
+        assert window.database_pane.source == 'central'
+        assert window.workspace.state['db_source'] == 'central'
+
+
 class TestDisabledSourceIsNeverReachable:
     """Regression: a disabled-but-selected 'central' fired real central
     requests, because `set_source` did not consult the button's enabled
