@@ -459,12 +459,18 @@ def _frames_for(point: LoadPoint) -> Dict[str, Any]:
 
 
 def create_results(run_node, point: LoadPoint, run_dir: Path, *,
-                   skip_fraction: float = 0.2):
-    """Store one load point as a `FrictionResultsData` and return it.
+                   skip_fraction: float = 0.2, store: bool = True):
+    """Build one load point as a `FrictionResultsData` and return it.
 
     `run_dir` is the run's own root directory (`locator.run_dir`): every path
     in `point.tiers`/`point.aux` lives under it, and `add_result_files` needs
     it to compute each stored member's run-relative path (R18).
+
+    `store=False` (the CalcJob parser's path, via `ingest_retrieved`) returns
+    the node UNSTORED and skips the group: `Parser.out()` requires unstored
+    nodes so the engine can attach them to the calculation with real
+    provenance links, and there is no set/group to file an in-process node
+    into anyway -- the engine does that once the parser returns.
     """
     from ..data.models import summarise_run  # pylint: disable=import-outside-toplevel
 
@@ -491,9 +497,53 @@ def create_results(run_node, point: LoadPoint, run_dir: Path, *,
                           content_sha256=point.content_sha256)
     node.set_summary(summarise_run(_frames_for(point), point.family,
                                    skip_fraction=skip_fraction))
+    if not store:
+        return node
     node.store()
     _group_for(run_node.set_label or run_node.set_uuid).add_nodes([node])
     return node
+
+
+def locator_for(run_dir: Path, rel_path: str):
+    """A `RunLocator` for a bare run directory whose `rel_path` is known.
+
+    `discover_runs` needs a whole simulation root; a retrieved CalcJob folder
+    is one run with no `<model>/` above it, so the CalcJob parser builds its
+    locator from the `rel_path` recorded on the run node instead.
+    """
+    from dataclasses import replace  # pylint: disable=import-outside-toplevel
+    import json as _json  # pylint: disable=import-outside-toplevel
+
+    from ..run.naming import parse_run_path  # pylint: disable=import-outside-toplevel
+    from ..run.tree import RunLocator, provenance_dir_for  # pylint: disable=import-outside-toplevel
+
+    run_dir = Path(run_dir)
+    tokens = parse_run_path(rel_path)
+    prov_file = run_dir / 'provenance.json'
+    family = tokens.model
+    if prov_file.is_file():
+        family = _json.loads(prov_file.read_text(encoding='utf-8')).get(
+            'family') or tokens.model
+    return RunLocator(
+        tokens=replace(tokens, family=family), run_dir=run_dir,
+        provenance_file=prov_file, provenance_dir=provenance_dir_for(run_dir),
+        results_dir=run_dir / 'results', data_dir=run_dir / 'data',
+        lammps_dir=run_dir / 'lammps')
+
+
+def ingest_retrieved(run_dir: Path, rel_path: str, run_node, *,
+                     skip_fraction: float = 0.2) -> List:
+    """UNSTORED `FrictionResultsData` for a retrieved CalcJob folder.
+
+    A `Parser` must hand `self.out()` unstored nodes so the engine can attach
+    them to the calculation with real provenance links. Same `load_points` and
+    same `summarise_run` as the import path -- the nodes are indistinguishable
+    from ones `ingest_run` would have created.
+    """
+    locator = locator_for(run_dir, rel_path)
+    return [create_results(run_node, point, locator.run_dir,
+                           skip_fraction=skip_fraction, store=False)
+            for point in load_points(locator)]
 
 
 def _plan_run(rel: str, set_node, locator, points: List[LoadPoint],

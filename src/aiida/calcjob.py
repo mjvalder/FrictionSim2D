@@ -13,7 +13,7 @@ import logging
 import re
 import shlex
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any
 
 from aiida import orm
@@ -21,6 +21,8 @@ from aiida.common.datastructures import CalcInfo, CodeInfo
 from aiida.common.folders import Folder
 from aiida.engine import CalcJob
 from aiida.parsers.parser import Parser
+
+from .retention import retrieve_patterns
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +62,9 @@ class LammpsFrictionCalcJob(CalcJob):
         spec.input('metadata.options.parser_name', valid_type=str,
                    default='friction2d.lammps')
 
-        spec.output('results_folder', valid_type=orm.FolderData, required=False,
-                    help='Retrieved results directory.')
+        spec.output_namespace('results', valid_type=orm.Data, dynamic=True,
+                              required=False,
+                              help='One FrictionResultsData per load point.')
         spec.output('log_file', valid_type=orm.SinglefileData, required=False,
                     help='LAMMPS log file.')
         spec.output('stdout_folder', valid_type=orm.FolderData, required=False,
@@ -73,6 +76,9 @@ class LammpsFrictionCalcJob(CalcJob):
                        message='LAMMPS returned a non-zero exit code.')
         spec.exit_code(320, 'ERROR_NO_RESULTS',
                        message='No results files were produced.')
+        spec.exit_code(330, 'ERROR_NO_LOAD_POINTS',
+                       message='Results were retrieved but no load point could '
+                               'be formed from them.')
 
     def prepare_for_submission(self, folder: Folder) -> CalcInfo:
         """Prepare the calculation for submission."""
@@ -105,25 +111,24 @@ class LammpsFrictionCalcJob(CalcJob):
         calcinfo = CalcInfo()
         calcinfo.uuid = self.uuid
         calcinfo.codes_info = code_infos
-        calcinfo.retrieve_list = [
-            'results/*', 'visuals/*', 'log.lammps', '*.out', 'array_status/*',
-            # Retention list (spec §5 F6). results/* already covers the
-            # raw_*/peratom_* tiers; data/* adds the per-load, final-state and
-            # hold artefacts. AiiDA content-addresses whatever lands here, so
-            # this list IS the retention guarantee -- nothing re-checksums it.
-            'provenance.json', 'data/hold_*.txt', 'data/final_*.data',
-            'data/load_*.data',
-        ]
-        if sim_prefix:
-            calcinfo.retrieve_list.extend([
-                f'{sim_prefix}/results/*',
-                f'{sim_prefix}/visuals/*',
-                f'{sim_prefix}/provenance.json',
-                f'{sim_prefix}/data/hold_*.txt',
-                f'{sim_prefix}/data/final_*.data',
-                f'{sim_prefix}/data/load_*.data',
-            ])
+        calcinfo.retrieve_list = _retrieve_list_for(sim_prefix)
         return calcinfo
+
+
+def _retrieve_list_for(sim_prefix: str | None) -> list:
+    """The CalcJob's `retrieve_list`: the retention rule, unmodified, plus
+    `array_status/*`.
+
+    `retrieve_patterns` (Task 13, verified against the real aiida-core
+    execmanager) IS the retention guarantee for everything `ingest` reads --
+    it is used here as-is, never re-derived. Array-mode status files are a
+    different concern (job progress polling, not something the parser
+    ingests) and are always written to the sim root by `_build_array_wrapper`
+    regardless of `sim_prefix`, so they are appended separately rather than
+    folded into the retention list.
+    """
+    patterns = retrieve_patterns(sim_prefix) if sim_prefix else retrieve_patterns()
+    return list(patterns) + ['array_status/*']
 
 
 # ---------------------------------------------------------------------------
@@ -134,41 +139,47 @@ class LammpsFrictionParser(Parser):
     """Parse retrieved outputs for FrictionSim2D LAMMPS runs."""
 
     def parse(self, **kwargs):  # type: ignore[override]
-        """Parse retrieved files and create output nodes."""
+        """Parse retrieved files: rebuild the run tree, then ingest it.
+
+        The retrieved `FolderData` reproduces the run directory's own shape
+        (that IS the retention rule -- see `src.aiida.retention`), so it is
+        written to a scratch directory and handed to `ingest_retrieved`
+        exactly as a directory on disk would be. `Parser.out()` requires
+        UNSTORED nodes so the engine can attach them to this calculation with
+        real provenance links -- `ingest_retrieved` returns exactly those.
+        """
         retrieved = self.retrieved
         if retrieved is None:
             return self.exit_codes.ERROR_NO_RESULTS
 
         repo = retrieved.base.repository
         names = repo.list_object_names()
+        run_node = getattr(self.node.inputs, 'simulation_node', None)
 
-        result_names = [n for n in names if _is_result_file(n)]
-        visual_names = [n for n in names if _is_visual_file(n)]
-        stdout_names = [n for n in names if n.endswith('.out')]
-        has_log = 'log.lammps' in names
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            for root, _dirs, files in repo.walk():
+                for name in files:
+                    rel = (root / name).as_posix()
+                    out = run_dir / rel
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with repo.open(rel, 'rb') as src:
+                        out.write_bytes(src.read())
 
-        if not result_names and not visual_names and not stdout_names and not has_log:
-            return self.exit_codes.ERROR_NO_RESULTS
+            self._store_log(repo, 'log.lammps' in names)
+            self._store_stdout(repo, [n for n in names if n.endswith('.out')])
+            self._copy_local(repo, names)
 
-        self._store_results(repo, result_names + visual_names)
-        self._store_log(repo, has_log)
-        self._store_stdout(repo, stdout_names)
-        self._copy_local(repo, names)
+            if run_node is None:
+                return self.exit_codes.ERROR_NO_RESULTS
+            from .ingest import ingest_retrieved  # pylint: disable=import-outside-toplevel
+            nodes = ingest_retrieved(run_dir, run_node.rel_path, run_node)
 
-        if not result_names and not visual_names:
-            return self.exit_codes.ERROR_LAMMPS_FAILED
+        if not nodes:
+            return self.exit_codes.ERROR_NO_LOAD_POINTS
+        for index, node in enumerate(nodes):
+            self.out(f'results.point_{index}', node)
         return None
-
-    def _store_results(self, repo, file_names):
-        """Store results and visuals as FolderData."""
-        if not file_names:
-            return
-        results_folder = orm.FolderData()
-        for name in file_names:
-            with repo.open(name, 'rb') as handle:
-                results_folder.base.repository.put_object_from_filelike(handle, name)
-        results_folder.store()
-        self.out('results_folder', results_folder)
 
     def _store_log(self, repo, has_log):
         """Store LAMMPS log file as SinglefileData."""
@@ -257,18 +268,6 @@ def apply_options(builder, options: dict[str, Any] | None) -> None:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-
-def _is_result_file(name: str) -> bool:
-    """Check whether a retrieved file belongs to results."""
-    return (name.startswith('results/') or '/results/' in name
-            or name.startswith('friction_'))
-
-
-def _is_visual_file(name: str) -> bool:
-    """Check whether a retrieved file belongs to visuals."""
-    return (name.startswith('visuals/') or '/visuals/' in name
-            or name.endswith('.lammpstrj'))
-
 
 def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
                    relative_to: Path) -> None:
