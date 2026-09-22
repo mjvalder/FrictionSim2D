@@ -10,7 +10,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, NoReturn, Tuple
+from typing import Optional, NoReturn, Tuple
 import click
 
 from .core.config import load_settings, settings_origin, _global_settings_path
@@ -63,7 +63,8 @@ def _ensure_hpc_settings(hpc_settings) -> None:
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
                     use_aiida: bool, generate_hpc: bool,
-                    settings_file: Optional[Path] = None):
+                    settings_file: Optional[Path] = None,
+                    aiida_label: Optional[str] = None):
     if use_aiida:
         from .aiida import AIIDA_AVAILABLE
         if not AIIDA_AVAILABLE:
@@ -99,8 +100,12 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
 
     if created_simulations and use_aiida:
-        click.echo(f"\n📦 Registering {len(created_simulations)} simulations in AiiDA...")
-        _register_simulations_aiida(created_simulations, Path(config_file))
+        from .aiida.ingest import ingest_root  # noqa: PLC0415
+        click.echo(f"\n📦 Registering {simulation_root.name} in AiiDA...")
+        report = ingest_root(simulation_root, label=aiida_label)
+        click.echo(report.render())
+        if not report.ok():
+            raise click.Abort()
 
     click.echo(
         f"\n✅ Generation complete: {len(created_simulations)}/"
@@ -136,20 +141,24 @@ def run_group():
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
+@click.option('--label', '-l', 'aiida_label', default=None,
+              help='Label for the AiiDA simulation set it creates '
+                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
                             help='Generate HPC scripts for the simulation root')
 def run_afm(config_file: str, settings_file: Optional[Path], output_dir: str,
-            use_aiida: bool, generate_hpc: bool):
+            use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
     """Generate AFM simulation files.
-    
+
     Creates all necessary LAMMPS input files, structures, and potentials
     for tip-on-substrate friction simulations.
-    
+
     Example:
         FrictionSim2D run.afm afm_config.ini -o ./afm_output --aiida
     """
     _run_simulation(
-        'afm', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
+        'afm', config_file, output_dir, use_aiida, generate_hpc,
+        settings_file=settings_file, aiida_label=aiida_label
     )
 
 @run_group.command('sheetonsheet')
@@ -161,21 +170,24 @@ def run_afm(config_file: str, settings_file: Optional[Path], output_dir: str,
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
+@click.option('--label', '-l', 'aiida_label', default=None,
+              help='Label for the AiiDA simulation set it creates '
+                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
         help='Generate HPC scripts for the simulation root')
 def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir: str,
-             use_aiida: bool, generate_hpc: bool):
+             use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
     """Generate sheet-on-sheet simulation files.
-    
+
     Creates all necessary LAMMPS input files for 4-layer sheet-on-sheet
     friction simulations.
-    
+
     Example:
         FrictionSim2D run.sheetonsheet sheet_config.ini -o ./sheet_output
     """
     _run_simulation(
         'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc,
-        settings_file=settings_file
+        settings_file=settings_file, aiida_label=aiida_label
     )
 
 
@@ -188,10 +200,13 @@ def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
+@click.option('--label', '-l', 'aiida_label', default=None,
+              help='Label for the AiiDA simulation set it creates '
+                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
               help='Generate HPC scripts for the simulation root')
 def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: str,
-                  use_aiida: bool, generate_hpc: bool):
+                  use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
     """Generate sheet-on-sheet interlayer PES scan files.
 
     Builds a frozen bilayer and writes a cheap, static lateral grid-scan of the
@@ -202,7 +217,8 @@ def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: s
         FrictionSim2D run pes-sheet examples/pes_sheet_config.ini -o ./pes_output
     """
     _run_simulation(
-        'pes_sheet', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
+        'pes_sheet', config_file, output_dir, use_aiida, generate_hpc,
+        settings_file=settings_file, aiida_label=aiida_label
     )
 
 
@@ -215,10 +231,13 @@ def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: s
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
+@click.option('--label', '-l', 'aiida_label', default=None,
+              help='Label for the AiiDA simulation set it creates '
+                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
               help='Generate HPC scripts for the simulation root')
 def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str,
-                use_aiida: bool, generate_hpc: bool):
+                use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
     """Generate tip-on-sheet (AFM) surface PES scan files.
 
     Builds and indents the AFM tip + sheet + substrate stack to a low load
@@ -229,7 +248,8 @@ def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str
         FrictionSim2D run pes-tip examples/pes_tip_config.ini -o ./pes_output
     """
     _run_simulation(
-        'pes_tip', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
+        'pes_tip', config_file, output_dir, use_aiida, generate_hpc,
+        settings_file=settings_file, aiida_label=aiida_label
     )
 
 
@@ -242,10 +262,13 @@ def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str
               help='Output directory for generated files')
 @click.option('--aiida', 'use_aiida', is_flag=True,
               help='Enable AiiDA provenance tracking')
+@click.option('--label', '-l', 'aiida_label', default=None,
+              help='Label for the AiiDA simulation set it creates '
+                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
               help='Generate HPC scripts for the simulation root')
 def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
-               use_aiida: bool, generate_hpc: bool):
+               use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
     """Generate AFM indentation ("indent") simulation files: hold + pull-off retract.
 
     The standard AFM build + indentation ramp (system.in) to each load in
@@ -261,21 +284,9 @@ def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
         FrictionSim2D run indent examples/indent_config.ini -o ./indent_output --hpc-scripts
     """
     _run_simulation(
-        'indent', config_file, output_dir, use_aiida, generate_hpc, settings_file=settings_file
+        'indent', config_file, output_dir, use_aiida, generate_hpc,
+        settings_file=settings_file, aiida_label=aiida_label
     )
-
-
-def _register_simulations_aiida(simulation_dirs: List[Path], config_path: Path):
-    """Register generated simulations with AiiDA."""
-    try:
-        from .aiida.integration import register_simulation_batch
-        registered = register_simulation_batch(simulation_dirs, config_path)
-        click.echo(f"   ✅ Registered {len(registered)} simulations")
-    except ImportError:
-        click.echo("   ⚠️  AiiDA integration module not found", err=True)
-    except Exception as exc:  # pylint: disable=broad-except
-        click.echo(f"   ⚠️  Registration failed: {exc}", err=True)
-        logger.exception("AiiDA registration failed")
 
 
 def _parse_walltime(value: Optional[str]) -> Optional[int]:
