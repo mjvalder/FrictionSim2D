@@ -81,14 +81,22 @@ class FrictionHTTPClient:
 
     # -- Upload ----------------------------------------------------------------
 
-    def upload_result(self, **kwargs) -> int:
+    def upload_result(self, **kwargs) -> Optional[int]:
         """Stage a new result via the API.
 
         Accepts the same keyword arguments as
         :meth:`~src.data.database.FrictionDB.upload_result`.
 
         Returns:
-            Database row ID of the staged result.
+            Database row ID of the staged result, or ``None`` if the API
+            reports ``409 Conflict`` -- a duplicate ``time_series_hash``
+            already exists in the central DB (the same result uploaded
+            twice). Mirrors :meth:`~src.data.database.FrictionDB.upload_result`'s
+            ``Optional[int]`` return for the same outcome, so callers can
+            tell "already there" apart from a genuine server error with
+            an ``is None`` check instead of parsing the exception message.
+            Any other 4xx/5xx still raises :class:`RuntimeError` via
+            :meth:`_raise_for_status`.
         """
         # Remove keys that the API doesn't accept via body
         kwargs.pop("uploader", None)
@@ -101,11 +109,16 @@ class FrictionHTTPClient:
             json=body,
             headers=self._headers(auth=True),
         )
+        if resp.status_code == 409:
+            return None
         self._raise_for_status(resp)
         return resp.json()["id"]
 
-    def upload_record(self, record: Any, uploader: Optional[str] = None) -> int:
-        """Upload a :class:`~src.data.models.ResultRecord` via the API."""
+    def upload_record(self, record: Any, uploader: Optional[str] = None) -> Optional[int]:
+        """Upload a :class:`~src.data.models.ResultRecord` via the API.
+
+        Returns ``None`` on a duplicate upload -- see :meth:`upload_result`.
+        """
         _ = uploader
         d = record.to_upload_dict()
         d.pop("uploader", None)

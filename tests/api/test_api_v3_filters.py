@@ -95,3 +95,56 @@ def test_duplicate_upload_returns_409(monkeypatch):
                         headers={'X-API-Key': 'valid-key'})
 
     assert resp.status_code == 409
+
+
+class _FakeResponse:
+    """A minimal stand-in for an httpx.Response, for client-only tests."""
+
+    def __init__(self, status_code, detail='boom'):
+        self.status_code = status_code
+        self.text = detail
+        self._detail = detail
+
+    def json(self):
+        return {'detail': self._detail}
+
+
+class _FakeHTTPClient:
+    """A stand-in for httpx.Client whose .post always returns a fixed response."""
+
+    def __init__(self, response):
+        self._response = response
+
+    def post(self, *_args, **_kwargs):
+        return self._response
+
+
+def _bare_client(fake_http_client):
+    """A FrictionHTTPClient wired to a fake transport, bypassing __init__."""
+    from src.api.client import FrictionHTTPClient
+
+    client = FrictionHTTPClient.__new__(FrictionHTTPClient)
+    client._base = ''
+    client._api_key = 'k'
+    client._client = fake_http_client
+    return client
+
+
+def test_client_upload_result_returns_none_on_409():
+    client = _bare_client(_FakeHTTPClient(_FakeResponse(409, 'duplicate')))
+
+    assert client.upload_result(material='h-MoS2') is None
+
+
+def test_client_upload_record_returns_none_on_409():
+    client = _bare_client(_FakeHTTPClient(_FakeResponse(409, 'duplicate')))
+
+    record = ResultRecord(material='h-WS2', family='afm', mean_cof=0.03)
+    assert client.upload_record(record) is None
+
+
+def test_client_upload_result_still_raises_on_server_error():
+    client = _bare_client(_FakeHTTPClient(_FakeResponse(500, 'boom')))
+
+    with pytest.raises(RuntimeError, match='500'):
+        client.upload_result(material='h-MoS2')

@@ -408,6 +408,8 @@ def get_conditions(viewer_name: Optional[str] = Depends(optional_api_key),
         return {"min": int(lo), "max": int(hi)}
 
     def _counts(col: str) -> Optional[Dict[str, int]]:
+        if col not in df.columns:
+            return None
         series = df[col].dropna()
         return None if series.empty else {
             str(k): int(v) for k, v in series.value_counts().items()}
