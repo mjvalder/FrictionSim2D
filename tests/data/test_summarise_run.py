@@ -203,7 +203,7 @@ def test_non_finite_extras_become_none():
     out = summarise_run({'window': _window(), 'raw': raw, 'retract': retract},
                         'indent')
 
-    assert out.extras['slip_asymmetry'] is None
+    assert out.extras['slip_mean_interval_samples'] is None
     assert out.extras['contact_stiffness'] is None
     assert all(v is None or math.isfinite(v)
                for v in out.extras.values() if isinstance(v, float))
@@ -219,19 +219,24 @@ def test_indent_family_gets_retract_features():
     assert out.mean_nf == pytest.approx(30.0)
 
 
-def test_raw_tier_adds_slip_counts():
+def test_raw_tier_adds_the_four_slip_extras():
     n = 200
+    per = n // 10
+    ramp = np.concatenate([np.linspace(0, 5, per - 1), [0.0]])
     raw = pd.DataFrame({
         'time': np.arange(n) * 100,
         'raw_nf': np.full(n, 30.0),
-        'raw_lfx': np.tile(np.concatenate([np.linspace(0, 5, 19), [0.0]]), 10),
+        'raw_lfx': np.tile(ramp, 10)[:n],
         'raw_lfy': np.zeros(n),
     })
 
     out = summarise_run({'window': _window(), 'raw': raw}, 'afm')
 
     assert out.extras['slip_n_events'] >= 1
-    assert 'slip_mean_amplitude' in out.extras
+    assert set(out.extras) >= {'slip_n_events', 'slip_amplitude_mean',
+                               'slip_amplitude_std',
+                               'slip_mean_interval_samples'}
+    assert 'slip_asymmetry' not in out.extras
 
 
 def test_empty_frames_are_incomplete_not_an_exception():

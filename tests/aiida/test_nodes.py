@@ -335,7 +335,7 @@ def test_a_nan_free_summary_actually_stores(aiida_profile_clean):
 
     node.store()
 
-    assert node.base.attributes.get('slip_asymmetry') is None
+    assert node.base.attributes.get('slip_mean_interval_samples') is None
     assert node.base.attributes.get('mean_cof') is not None
 
 
