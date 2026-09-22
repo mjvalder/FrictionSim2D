@@ -22,7 +22,7 @@ from .simulation_types import MODES
 __all__ = [
     'FieldOverride', 'SectionOverride', 'overrides_for', 'section_override',
     'override_for_section', 'ENABLED', 'SET', 'field_override',
-    'CAPTION_BUDGET',
+    'CAPTION_BUDGET', 'SETTINGS_MODEL', 'PLOT_MODEL',
 ]
 
 #: A numbered sheet section as it is written to disk: ``[2D-1]``, ``[2D-2]``.
@@ -411,6 +411,37 @@ _COMMON: Dict[str, SectionOverride] = {
 #: labels rather than falling back to raw field names.
 SETTINGS_MODEL = '__settings__'
 
+#: Sentinel model name for the plot editor, like SETTINGS_MODEL. Not a
+#: simulation model: `overrides_for` branches on it before consulting MODES.
+PLOT_MODEL = '__plot__'
+
+#: Section labels for the plot editor. The fields themselves carry their
+#: Field(description=...) from plot_config, so only the sections need naming.
+_PLOT: Dict[str, SectionOverride] = {
+    'common': SectionOverride(
+        label='Common',
+        fields={
+            'tier': FieldOverride(
+                label='Sampling tier', order=1,
+                help='Which results tier to plot.',
+                detail='"window" is the block-averaged tier every summary '
+                       'uses; "raw" is 100 fs samples; "peratom" holds the '
+                       'per-atom computes.'),
+            'lf_source': FieldOverride(
+                label='Lateral-force source', order=2,
+                help='Which lateral-force definition to plot.',
+                detail='Refused rather than aliased when the dataset does '
+                       'not carry it -- a db:// dataset has one.'),
+        }),
+    'summary': SectionOverride(label='Summary'),
+    'timeseries': SectionOverride(label='Timeseries'),
+    'stick_slip_analysis': SectionOverride(label='Stick-slip'),
+    'scatter_comparison': SectionOverride(label='Scatter comparison'),
+    'rank_friction': SectionOverride(label='Ranking'),
+    'correlation': SectionOverride(label='Correlation'),
+    'cof_histogram': SectionOverride(label='COF-slope histogram'),
+}
+
 #: Settings groups. Only the fields worth explaining are listed; the rest fall
 #: back to their model description.
 _SETTINGS: Dict[str, SectionOverride] = {
@@ -581,6 +612,9 @@ def overrides_for(model: str) -> Dict[str, SectionOverride]:
     """
     if model == SETTINGS_MODEL:
         return dict(_SETTINGS)
+
+    if model == PLOT_MODEL:
+        return dict(_PLOT)
 
     entry = MODES.get(model)
     result = dict(_COMMON)
