@@ -24,9 +24,21 @@ class _Record:
                 'uploader': self.uploader, 'contact': self.contact}
 
 
+class _Run:
+    """A stand-in run node: real AiiDA run nodes always carry `.uuid`, and
+    `_upload_query_results` assumes that invariant rather than tolerating a
+    uuid-less run (Task 32 review: the earlier `hasattr`/`getattr` fallback
+    added no real protection -- `to_record` would still crash on a `None`
+    run_node, it only hid the crash from this test).
+    """
+    def __init__(self, uuid='run-0'):
+        self.uuid = uuid
+
+
 class _Result:
-    def __init__(self, uuid):
+    def __init__(self, uuid, run_uuid='run-0'):
         self._uuid = uuid
+        self.run_uuid = run_uuid
 
     def to_record(self, run_node, set_node, uploader=None, contact=None):
         return _Record(self._uuid, uploader=uploader, contact=contact)
@@ -34,7 +46,7 @@ class _Result:
 
 class _Query:
     def __init__(self, n):
-        self.runs = [object()]
+        self.runs = [_Run()]
         self.results = [_Result(f'r{i}') for i in range(n)]
 
 
@@ -151,3 +163,35 @@ def test_duplicate_upload_is_skipped_not_a_crash(monkeypatch):
     assert 'skipped=1' in result.output
     assert 'published=0' in result.output
     assert 'rejected=0' in result.output
+
+
+def test_result_with_missing_run_is_rejected_not_a_crash(monkeypatch):
+    """U4: a central row is worthless without its run pointer. A result
+    naming a run the query didn't return must be rejected cleanly -- never
+    uploaded, and never a crash that stops the rest of the batch.
+    """
+    loaded = []
+    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('src.aiida.load_aiida_profile',
+                        lambda profile=None: loaded.append(profile))
+
+    class _QueryWithAnOrphan:
+        def __init__(self):
+            self.runs = [_Run('run-0')]
+            self.results = [
+                _Result('r-orphan', run_uuid='run-does-not-exist'),
+                _Result('r-ok', run_uuid='run-0'),
+            ]
+
+    monkeypatch.setattr('src.aiida.query.Friction2DDB',
+                        lambda: type('DB', (), {
+                            'query': lambda self, **kw: _QueryWithAnOrphan()})())
+    monkeypatch.setattr('src.aiida.export.resolve_set', lambda label: object())
+    uploaded = _patch_db(monkeypatch)
+
+    result = CliRunner().invoke(cli, ['db', 'upload', '260910-afm'])
+
+    assert result.exit_code == 0, result.output
+    assert [r.run_uuid for r in uploaded] == ['r-ok']
+    assert 'published=1' in result.output
+    assert 'rejected=1' in result.output

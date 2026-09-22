@@ -1417,32 +1417,38 @@ def _add_db_options(func):
 
 
 def _run_by_uuid(runs):
-    """Map ``str(run.uuid) -> run`` for every run that carries a uuid.
-
-    A `Friction2DDB.query()` result's `runs` and `results` are aligned by
-    `run_uuid`, not index-parallel (see `QueryResult.to_dataframe`'s identical
-    pattern in `src/aiida/query.py`).
+    """Map ``str(run.uuid) -> run``, the way `Friction2DDB.query()` aligns
+    `runs` and `results`: by `run_uuid`, not index-parallel (see
+    `QueryResult.to_dataframe`'s identical pattern in `src/aiida/query.py`).
     """
-    return {str(run.uuid): run for run in runs if hasattr(run, 'uuid')}
-
-
-def _run_node_for(result, run_by_uuid):
-    run_uuid = getattr(result, 'run_uuid', None)
-    return run_by_uuid.get(str(run_uuid)) if run_uuid is not None else None
+    return {str(run.uuid): run for run in runs}
 
 
 def _upload_query_results(db, found, set_node, *, uploader, contact):
     """Upload every result in a `QueryResult`, returning (published, rejected,
-    skipped) counts. `skipped` counts rows `upload_record` reports as an
-    already-present `time_series_hash` (U4 dedup) -- a clean, counted outcome,
-    never a crash.
+    skipped) counts.
+
+    `rejected` counts a `validate_staged` failure, a result whose run cannot
+    be found (U4 forbids uploading a pointer-less row -- this is checked
+    OUTSIDE the try/except below so it is never mistaken for the generic
+    exception case), and any exception raised while building or uploading the
+    record -- none of these crash the batch. `skipped` counts rows
+    `upload_record` reports as an already-present `time_series_hash` (U4
+    dedup), also a clean, counted outcome.
     """
     run_by_uuid = _run_by_uuid(found.runs)
     n_published = n_rejected = n_skipped = 0
     for result in found.results:
-        run_node = _run_node_for(result, run_by_uuid)
-        record = result.to_record(run_node, set_node, uploader=uploader, contact=contact)
+        run_node = run_by_uuid.get(str(result.run_uuid))
+        if run_node is None:
+            n_rejected += 1
+            logger.warning(
+                "Skipped %s: no matching run found (U4 forbids a pointer-less row)",
+                result.run_uuid)
+            continue
         try:
+            record = result.to_record(run_node, set_node,
+                                      uploader=uploader, contact=contact)
             row_id = db.upload_record(record, uploader=uploader)
             if row_id is None:
                 n_skipped += 1
@@ -1454,7 +1460,7 @@ def _upload_query_results(db, found, set_node, *, uploader, contact):
                 n_rejected += 1
         except Exception as exc:  # pylint: disable=broad-except
             n_rejected += 1
-            logger.warning("Skipped %s: %s", record.run_uuid, exc)
+            logger.warning("Skipped %s: %s", result.run_uuid, exc)
     return n_published, n_rejected, n_skipped
 
 
