@@ -281,12 +281,26 @@ class ComponentConfig(BaseModel):
 
     @field_validator('pot_type', mode='after')
     @classmethod
-    def check_pot_type(cls, v: str, info: ValidationInfo) -> str:
+    def check_pot_type(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
         """Refuse a pair style LAMMPS will not recognise.
+
+        `None` passes through unchanged, matching the sibling `resolve_path`
+        validator below: `ComponentConfig` declares `pot_type: str` (always
+        required), but `FlakeConfig` overrides it to `Optional[str] = None`
+        (a flake with no material of its own, carved from the sheet's). Left
+        unguarded, an unset flake `pot_type` validates fine when the field is
+        OMITTED from the input (Pydantic skips `mode='after'` validators for
+        an unused default), but `model_dump_json()` serializes it as an
+        explicit `"pot_type": null` -- reloading that dump then passes `None`
+        as an EXPLICIT value, which this validator must accept too, or
+        `aiida rebuild` (spec §4.2) crashes on the ordinary single-material
+        flake case instead of a config-level `TypeError`/`ValueError`.
 
         Deferred import: `potentials -> core` is the one-way direction, so
         `core` may not import `potentials` at module level.
         """
+        if v is None:
+            return v
         from ..potentials.utils import validate_pot_type  # pylint: disable=import-outside-toplevel,cyclic-import
         return validate_pot_type(v, source=f'{info.field_name}')
 

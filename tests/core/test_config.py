@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from src.core.config import (
     AFMSimulationConfig,
+    FlakeConfig,
     PESConfig,
     SheetOnSheetSimulationConfig,
     TipConfig,
@@ -726,3 +727,33 @@ def test_finite_sheet_margin_must_exceed_lj_cutoff_in_x(tmp_path):
 def test_finite_sheet_margin_must_exceed_lj_cutoff_in_y(tmp_path):
     with pytest.raises(ValidationError, match=r'substrate_y - sheet_y'):
         AFMSimulationConfig(**_finite(tmp_path, 160.0, 105.0))
+
+
+def test_flake_pot_type_left_at_default_dumps_and_reloads():
+    """`ComponentConfig.check_pot_type` must accept `None`, matching its
+    sibling `resolve_path` validator: `FlakeConfig.pot_type` (unlike
+    `ComponentConfig`'s own `pot_type: str`, always required) is
+    `Optional[str] = None` for a flake with no material of its own, carved
+    from the sheet's -- the common single-material `[Flake]` case.
+    `model_dump_json()` serializes an unset `pot_type` as an explicit
+    `"pot_type": null`, not an omitted key, and reloading that dump (what
+    `src.aiida.export.rebuild_set`/spec §4.2 does with a stored
+    `config.json`) must pass an explicit `None` through the validator, not
+    crash on it.
+    """
+    original = FlakeConfig(edge_length=20.0)
+    assert original.pot_type is None
+
+    dumped = original.model_dump_json()
+    assert '"pot_type":null' in dumped.replace(' ', '')
+
+    reloaded = FlakeConfig.model_validate_json(dumped)
+    assert reloaded.pot_type is None
+    assert reloaded.edge_length == 20.0
+
+
+def test_flake_pot_type_invalid_still_raises():
+    """The `None` guard only skips the check for `None` -- an actual bad
+    pair style must still be refused."""
+    with pytest.raises(ValidationError, match='not a known LAMMPS pair style'):
+        FlakeConfig(edge_length=20.0, pot_type='not-a-real-potential')

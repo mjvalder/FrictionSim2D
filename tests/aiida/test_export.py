@@ -382,6 +382,15 @@ def _minimal_sheet_flake_config(tmp_path):
     section -- `flake_slide.py`'s `FlakeSlideSimulation` route -- built the
     same way `tests/core/test_config.py`'s fixtures do (a dummy pot/cif file
     on disk, real content unneeded since nothing here builds a structure).
+
+    `[Flake]` carries only `edge_length`: no `mat`/`pot_type`/`pot_path`/
+    `cif_path` of its own -- the common single-material case, where the flake
+    is carved from the `[2D]` sheet's own material rather than naming a
+    second one. `ComponentConfig.check_pot_type`'s `None` guard (added
+    alongside this fixture) is what makes this dump-and-reload safe at all;
+    before it, an unset flake `pot_type` round-tripped through
+    `model_dump_json()`'s explicit `null` into an `AttributeError` on reload,
+    independent of the alias fix this fixture exists to exercise.
     """
     from src.core.config import SheetOnSheetSimulationConfig, load_settings
 
@@ -395,17 +404,7 @@ def _minimal_sheet_flake_config(tmp_path):
         **{'2D': {'mat': 'MoS2', 'pot_type': 'sw', 'pot_path': str(dummy_pot),
                   'cif_path': str(dummy_cif), 'x': 50.0, 'y': 50.0,
                   'layers': [1], 'stack_type': 'AB'},
-           # pot_type/pot_path/cif_path/mat given explicitly (rather than left
-           # at FlakeConfig's Optional=None default): model_dump_json() dumps
-           # every field, including None ones, as an EXPLICIT null -- and
-           # ComponentConfig.check_pot_type has no None-guard, so reloading an
-           # unset flake pot_type raises AttributeError on `.strip()`. That is
-           # a real, separate defect (a null-tolerant validator, or a
-           # `FlakeConfig`-specific override), out of scope for the alias fix
-           # this fixture exists to exercise -- sidestepped here rather than
-           # silently exercised.
-           'Flake': {'mat': 'MoS2', 'pot_type': 'sw', 'pot_path': str(dummy_pot),
-                     'cif_path': str(dummy_cif), 'edge_length': 20.0}},
+           'Flake': {'edge_length': 20.0}},
         settings=load_settings(),
     )
 
