@@ -163,3 +163,28 @@ def test_a_legacy_sheet_file_is_corrected_on_both_paths(aiida_profile_clean,
     mean_cof = result_node.base.attributes.get('mean_cof')
     assert mean_cof is not None
     assert mean_cof == pytest.approx(expected)
+
+
+def test_an_indent_row_publishes_no_cof(aiida_profile_clean, tmp_path):
+    """m3: an indent window is a static hold; its "COF" is noise and must not
+    reach the central table. The normal force and retract features do."""
+    root = tmp_path / 'simulation_indent'
+    run_dir = make_run(root, 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1',
+                       'indent', loads=(30.0,), n=60)
+    (run_dir / 'results' / 'indent_f30N_l1.csv').write_text(
+        '# family=indent\nstep,z_tip,fz_tip,fx_tip,fy_tip,pe\n'
+        '0,0,5.0,0,0,-1\n1,1,-2.0,0,0,-1\n2,2,-1.0,0,0,-1\n', encoding='utf-8')
+    assert ingest_root(root, label='indent-cof').ok()
+    run_node, result_node = _stored_result('indent-cof')
+
+    record = result_node.to_record(run_node, resolve_set('indent-cof'))
+
+    for stat in ('mean_cof', 'std_cof', 'mean_lf', 'std_lf',
+                 'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy'):
+        assert getattr(record, stat) is None, stat
+    assert record.mean_nf == result_node.base.attributes.get('mean_nf')
+    assert record.force_nN == 30.0
+    assert record.extras['pulloff_force'] == pytest.approx(2.0)
+    assert 'work_of_adhesion_nnA' in record.extras
+    # the local store keeps what summarise_run computed; only publishing drops it
+    assert result_node.base.attributes.get('mean_cof') is not None

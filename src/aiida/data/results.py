@@ -277,6 +277,14 @@ class FrictionResultsData(Data):
         'oversize_files', 'tier_files',
     ))
 
+    #: Stats that are meaningless for a family and never published. An indent
+    #: run's window tier is a STATIC hold: its "COF" and lateral forces are
+    #: noise, not friction. The normal-force stats stay; the retract features
+    #: travel in `extras`.
+    _NO_SLIDE_STATS = {'indent': frozenset((
+        'mean_cof', 'std_cof', 'mean_lf', 'std_lf',
+        'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy'))}
+
     def to_record(self, run_node, set_node, *, uploader=None, contact=None):
         """Convert to the central DB's `ResultRecord` (Task 29 defines the
         schema-3 fields `to_record` populates here -- `extras`, `run_uuid`,
@@ -311,7 +319,8 @@ class FrictionResultsData(Data):
             force_nN=self.load if self.load_kind == 'force' else None,
             pressure_gpa=self.load if self.load_kind == 'pressure' else None,
             scan_angle=self.angle, scan_speed=self.speed,
-            **{k: attrs.get(k) for k in (
+            **{k: (None if k in self._NO_SLIDE_STATS.get(self.family, ())
+                   else attrs.get(k)) for k in (
                 'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
                 'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy')},
             ntimesteps=self.ntimesteps,
