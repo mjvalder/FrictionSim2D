@@ -30,6 +30,7 @@ def list_simulation_sets(profile: Optional[str] = None) -> List[Dict[str, Any]]:
 
     from .data import (FrictionResultsData, FrictionSimulationData,  # pylint: disable=import-outside-toplevel
                        FrictionSimulationSetData)
+    from .data_keys import is_superseded  # pylint: disable=import-outside-toplevel
 
     rows = []
     qb = QueryBuilder()
@@ -43,7 +44,10 @@ def list_simulation_sets(profile: Optional[str] = None) -> List[Dict[str, Any]]:
                        filters={'attributes.set_uuid': str(set_node.uuid)})
         row = set_node.to_dict()
         row['n_runs'] = runs.count()
-        row['n_results'] = results.count()
+        # Live results only: a superseded node is kept (it may already have
+        # been published) but it is not a result of this set any more.
+        row['n_results'] = sum(1 for node in results.all(flat=True)
+                               if not is_superseded(node))
         rows.append(row)
     return sorted(rows, key=lambda r: r['label'])
 

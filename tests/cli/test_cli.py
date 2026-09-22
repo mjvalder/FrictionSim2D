@@ -395,6 +395,51 @@ def test_aiida_query_unknown_set_label_raises(runner, monkeypatch):
     assert 'q1' in result.output
 
 
+def test_aiida_query_profile_failure_is_a_clean_error(runner, monkeypatch):
+    """m6: the profile used to be loaded outside the try -> a raw traceback."""
+    def _bad(profile=None):
+        raise RuntimeError(f'profile {profile!r} does not exist')
+
+    monkeypatch.setattr('src.aiida.load_aiida_profile', _bad)
+
+    result = runner.invoke(cli, ['aiida', 'query', '--profile', 'ghost'])
+
+    assert result.exit_code != 0
+    assert "Query failed: profile 'ghost' does not exist" in result.output
+    assert not isinstance(result.exception, RuntimeError)
+
+
+def test_aiida_query_json_prints_the_rows(runner, monkeypatch):
+    """m6: `--format json` without `-o` printed only the query parameters."""
+    import json
+
+    import pandas as pd
+
+    class _FakeResult:
+        total_count = 1
+        query_params = {'family': 'afm'}
+
+        def to_dataframe(self):
+            return pd.DataFrame([{'rel_path': 'afm/x/L2', 'mean_cof': 0.05}])
+
+    class _FakeDB:
+        def get_available_conditions(self):
+            return {'set_labels': []}
+
+        def query(self, **_kwargs):
+            return _FakeResult()
+
+    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr('src.aiida.query.Friction2DDB', _FakeDB)
+
+    result = runner.invoke(cli, ['aiida', 'query', '--family', 'afm',
+                                 '--format', 'json'])
+
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.output[result.output.index('['):])
+    assert rows == [{'rel_path': 'afm/x/L2', 'mean_cof': 0.05}]
+
+
 def test_aiida_export_help(runner):
     result = runner.invoke(cli, ['aiida', 'export', '--help'])
     assert result.exit_code == 0

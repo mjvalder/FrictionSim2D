@@ -956,3 +956,19 @@ def test_clear_removes_the_set_groups_too(aiida_profile_clean, tmp_path):
     assert not [label for label in labels if label.startswith('friction2d/')]
     assert other.label in labels
     assert Friction2DDB().get_available_conditions()['set_labels'] == []
+
+
+def test_list_sets_counts_only_live_results(aiida_profile_clean, tmp_path):
+    """m6: a superseded results node is kept but is not a result of the set."""
+    from src.aiida.integration import list_simulation_sets
+
+    root = _root(tmp_path)
+    ingest_root(root, label='live-count')
+    for path in (root / REL / 'results').glob('friction_*'):
+        path.write_text(path.read_text(encoding='utf-8') + '99000 0.5 0.5 0.5\n',
+                        encoding='utf-8')
+    report = ingest_root(root, label='live-count')
+    assert len(report.superseded_results) == 1
+
+    row, = list_simulation_sets()
+    assert row['n_results'] == 1

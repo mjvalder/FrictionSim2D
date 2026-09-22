@@ -281,6 +281,9 @@ Options:
 - `--profile TEXT`
 - `--format {table|json|csv}` (default: `table`)
 
+`Results` counts live results only; superseded nodes are kept in the store but
+not counted.
+
 ### aiida export-results
 
 Write a stored set back out as an ordinary simulation tree — the finished
@@ -327,7 +330,9 @@ Options:
 - `--temperature-min FLOAT` / `--temperature-max FLOAT`
 - `--limit INTEGER`
 - `--order-by TEXT` (prefix `-` for descending)
-- `--format {table|csv|json}` (default: `table`)
+- `--format {table|csv|json}` (default: `table`). `json` without `-o` prints
+  one object per result row; with `-o` it writes the query parameters and the
+  matching runs.
 - `-o, --output PATH`
 - `--profile TEXT`
 

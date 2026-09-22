@@ -970,15 +970,17 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
     def _range(lo, hi):
         return (lo, hi) if lo is not None or hi is not None else None
 
-    load_aiida_profile(profile)
+    try:
+        load_aiida_profile(profile)
+        db = Friction2DDB()
+        available = db.get_available_conditions()['set_labels'] if set_label else []
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("AiiDA query setup failed")
+        _raise_abort(f"❌ Query failed: {exc}", exc)
 
-    db = Friction2DDB()
-
-    if set_label:
-        available = db.get_available_conditions()['set_labels']
-        if set_label not in available:
-            raise click.ClickException(
-                f"No set found with label '{set_label}'. Available: {available}")
+    if set_label and set_label not in available:
+        raise click.ClickException(
+            f"No set found with label '{set_label}'. Available: {available}")
 
     query_kwargs = {
         'materials': list(materials) if materials else None,
@@ -1016,8 +1018,10 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
                 results.export_json(Path(output))
                 click.echo(f"✅ Saved to {output}")
             else:
-                import json
-                click.echo(json.dumps(results.query_params, indent=2))
+                # The rows, like `--format table/csv` print -- not just the
+                # query parameters.
+                click.echo(results.to_dataframe().to_json(
+                    orient='records', indent=2, default_handler=str))
 
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA query failed")
