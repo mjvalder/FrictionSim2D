@@ -7,12 +7,15 @@ loudly with the right message rather than a stack trace.
 
 Never raises: every check is wrapped and reported in ``messages``.
 """
+import importlib.util
 from dataclasses import dataclass, field
 from typing import List
 
 
 @dataclass
 class PreflightReport:
+    """What `preflight()` found, and what to print about it."""
+
     profile_found: bool = False
     profile_ok: bool = False
     sync_configured: bool = False
@@ -26,11 +29,14 @@ class PreflightReport:
 
 
 def preflight() -> PreflightReport:
+    # This module -- and this function most of all -- must stay importable
+    # and callable without aiida-core installed (a generation-only machine is
+    # a supported setup, see the module docstring), so every AiiDA import
+    # below is deferred to the branch that actually needs it.
+    # pylint: disable=import-outside-toplevel
     rep = PreflightReport()
 
-    try:
-        import aiida  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec('aiida') is None:
         rep.messages.append(
             "aiida-core is not installed in this environment "
             "(pip install -e '.[aiida]')")

@@ -43,7 +43,11 @@ def create_app(db=None) -> FastAPI:
             central database from ``settings.database`` is used.
     """
     if db is None:
-        from ..data.database import central_db  # noqa: PLC0415
+        # Deferred: `..data.database` pulls in `..data.models`, which imports
+        # numpy. A caller that supplies its own `db` (schema generation, a
+        # stub in tests) should not pay that import cost just for creating
+        # the app.
+        from ..data.database import central_db  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
         db = central_db()
 
     set_db(db)

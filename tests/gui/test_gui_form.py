@@ -179,34 +179,74 @@ class TestScanAngleZeroIsSet:
 
 class TestNestedFieldsAreNotHidden:
     """A nested sub-model has no flat control, so it is not rendered. Silently
-    omitting it is indistinguishable from the field not existing."""
+    omitting it is indistinguishable from the field not existing.
+
+    `DatabaseSettings` used to carry a real example of this (`local`/
+    `central`); the AiiDA data rework flattened it (spec U2 -- local storage
+    is AiiDA now, not a second Postgres), so no shipped section has a nested
+    field left. A stand-in model plus a document double narrow enough for
+    `SectionForm` keeps the regression instead of losing it.
+    """
+
+    @staticmethod
+    def _section():
+        from pydantic import BaseModel
+
+        from src.gui.schema.introspect import describe_section
+
+        class _Sub(BaseModel):
+            x: int = 0
+
+        class _WithNested(BaseModel):
+            nested: _Sub = _Sub()
+            plain: str = 'ok'
+
+        return describe_section(_WithNested, name='fake', key='fake')
+
+    @staticmethod
+    def _document():
+        class _FakeDocument:
+            """Duck-types just what `SectionForm` reads for a plain section."""
+
+            model = 'fake_model'
+
+            def __init__(self):
+                self.values = {'fake': {'nested': {'x': 0}, 'plain': 'ok'}}
+                self.dirty = False
+
+            def get(self, sec, key, default=None):
+                return self.values.get(sec, {}).get(key, default)
+
+            def set(self, sec, key, value):
+                self.values.setdefault(sec, {})[key] = value
+
+            def is_section_locked(self, _key):
+                return False
+
+            def has_section(self, _key):
+                return True
+
+        return _FakeDocument()
 
     def test_a_nested_field_is_shown_as_read_only(self, qt_app, monkeypatch):
-        from src.gui.controllers.settings_document import SettingsDocument
-        from src.gui.widgets.form import ConfigForm
+        from src.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
-        form = ConfigForm(SettingsDocument.defaults())
-        section = form.sections['database']
+        form = SectionForm(self._section(), self._document())
 
-        for key in ('local', 'central'):
-            assert key in section._rows, key
-            assert key not in section.editors, key
+        assert 'nested' in form._rows
+        assert 'nested' not in form.editors
         form.deleteLater()
 
     def test_a_nested_value_survives_a_commit(self, qt_app, monkeypatch):
-        """`SettingsDocument` has no `to_dict`; `.values` is the same plain
-        dict a real save would serialise, so a deep copy of it is the
-        equivalent check."""
         import copy
 
-        from src.gui.controllers.settings_document import SettingsDocument
-        from src.gui.widgets.form import ConfigForm
+        from src.gui.widgets.form import SectionForm
 
         monkeypatch.chdir(REPO_ROOT)
-        document = SettingsDocument.defaults()
+        document = self._document()
         before = copy.deepcopy(document.values)
-        form = ConfigForm(document)
+        form = SectionForm(self._section(), document)
         form.commit()
         assert document.values == before
         form.deleteLater()
