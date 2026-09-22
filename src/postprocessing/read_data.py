@@ -12,7 +12,9 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -272,6 +274,184 @@ def read_results_file(filepath: Path, family: str,
     return correct_legacy_lf_schema1(df, filepath, family)
 
 
+@dataclass(frozen=True)
+class LoadPoint:
+    """One results FILE's identity: which load point and which tier it holds."""
+    load_kind: str            # 'force' | 'pressure' | 'none'
+    load: float
+    angle: float
+    speed: float
+    tier: str
+    layer: Optional[int]
+
+
+#: Every results filename the campaign has ever written, in one pattern.
+#: Group `kind` is 'f' (nN) or 'p' (GPa) for the current names; the two legacy
+#: `fc_ave_slide_` forms carry their unit as a suffix instead. Angles are
+#: SIGNED: LAMMPS substitutes the scan angle verbatim, so a -15 deg scan writes
+#: `friction_f5_a-15_s1_...` and an unsigned pattern drops the run in silence.
+_RESULTS_RE = re.compile(
+    r'^(?:(?P<tier>friction|raw|peratom)_(?P<kind>[fp])(?P<load>-?\d+\.?\d*)'
+    r'_a(?P<angle>-?\d+\.?\d*)_s(?P<speed>-?\d+\.?\d*)'
+    r'(?:_layer(?P<layer>\d+))?'
+    r'|fc_ave_slide_(?P<lload>\d+\.?\d*)(?P<lunit>nN|GPa)'
+    r'_(?P<langle>-?\d+\.?\d*)angle_(?P<lspeed>\d+\.?\d*)ms'
+    r'(?:_l(?P<llayer>\d+))?)\.txt$')
+
+_TIER_BY_PREFIX = {'friction': 'window', 'raw': 'raw', 'peratom': 'peratom'}
+
+#: A PES scan's grid IS its window tier -- one grid per run, no load point to
+#: speak of. The same mapping `FrictionResultsData._TIER_PREFIX` makes when it
+#: files `pes_scan` under `'window'`; two readers, one rule.
+_PES_GRID_NAME = 'pes_scan.csv'
+_PES_POINT = LoadPoint(load_kind='none', load=0.0, angle=0.0, speed=0.0,
+                       tier='window', layer=None)
+
+
+def parse_results_name(name: str) -> Optional[LoadPoint]:
+    """The load point a results filename names, or None if it is not one.
+
+    `'none'` is a third `load_kind`: a PES scan is not run at a load at all,
+    it is one grid, and calling its absent load a force of 0.0 nN would put a
+    fictitious point on every load axis.
+    """
+    if name == _PES_GRID_NAME:
+        return _PES_POINT
+    match = _RESULTS_RE.match(name)
+    if match is None:
+        return None
+    if match.group('tier'):
+        layer = match.group('layer')
+        return LoadPoint(
+            load_kind='force' if match.group('kind') == 'f' else 'pressure',
+            load=float(match.group('load')),
+            angle=float(match.group('angle')),
+            speed=float(match.group('speed')),
+            tier=_TIER_BY_PREFIX[match.group('tier')],
+            layer=int(layer) if layer else None)
+    layer = match.group('llayer')
+    return LoadPoint(
+        load_kind='force' if match.group('lunit') == 'nN' else 'pressure',
+        load=float(match.group('lload')),
+        angle=float(match.group('langle')),
+        speed=float(match.group('lspeed')),
+        tier='window',
+        layer=int(layer) if layer else None)
+
+
+@dataclass
+class RunFrames:
+    """One load point of one run: its tiers, flat.
+
+    Replaces the eight-deep `full_data_nested` dict, which had no dimension for
+    the potential or the temperature -- two runs differing only in those
+    collapsed onto one leaf and the last one walked won.
+
+    `locator` is a `RunLocator`, not the `RunTokens` the spec's sketch named:
+    tokens alone cannot find a file, and `post_channels_for` needs `data_dir`,
+    the tier reader needs `results_dir` and `read_provenance` needs
+    `provenance_file` -- all already on the locator `discover_runs` built.
+    Carrying tokens and re-deriving the paths would be a second path parser.
+    """
+    locator: Any                        # src.run.tree.RunLocator
+    load_kind: str                      # 'force' | 'pressure' | 'none'
+    load: float
+    angle: float
+    speed: float
+    n_layers: int
+    tiers: Dict[str, pd.DataFrame]
+    source_files: Dict[str, Path]
+    post: Dict[str, float] = field(default_factory=dict)
+
+    @property
+    def tokens(self):
+        """The run's `RunTokens`."""
+        return self.locator.tokens
+
+    @property
+    def family(self) -> str:
+        return self.locator.tokens.family
+
+    @property
+    def material(self) -> str:
+        """The downstream material key: `h_MoS2`, `h_MoS2+h_WS2`.
+
+        Underscored, because every material filter and colour map in
+        `postprocessing/` and the ML feature tables key on that spelling.
+        """
+        token = '+'.join(self.tokens.materials)
+        if self.tokens.flake_material:
+            token = f'{token}+flake-{self.tokens.flake_material}'
+        return token.replace('-', '_')
+
+    @property
+    def size(self) -> str:
+        """`100x100y` -- the per-size export key."""
+        def fmt(v: float) -> str:
+            return str(int(v)) if float(v).is_integer() else f'{v:g}'
+        return f'{fmt(self.tokens.size_x)}x{fmt(self.tokens.size_y)}y'
+
+    @property
+    def window(self) -> pd.DataFrame:
+        """The window tier, or an empty frame when the run has none."""
+        return self.tiers.get('window', pd.DataFrame())
+
+    def frames_by_tier(self) -> Dict[str, pd.DataFrame]:
+        """What `summarise_run` consumes."""
+        return dict(self.tiers)
+
+
+def resolve_n_layers(locator) -> int:
+    """How many sheet layers this run has.
+
+    `RunTokens.layers` is the `L{n}` path level, and `output_dir_for` emits one
+    only for the AFM-like models -- the AFM builders append it
+    (`src/builders/afm/base.py:182`), the sheet-like ones never do. So for
+    `sheetonsheet`, `hetero`, `flake` and `pes_sheet` the token is `None`, and
+    defaulting it to 2 is exactly the defect P3 exists to fix, missed in the
+    families that need it most: a `layers=[4]` sheet run's `v_comz_L3`/`L4` and
+    its peratom `v_pe_sum_L3/L4`, `v_sigma_*_L3/L4` would stay un-renamed.
+
+    The count IS on disk. `ProvenanceRecord.layer_type_map` is keyed
+    `layer_1 ... layer_n` (`src/builders/sheetonsheet/base.py:62-83`,
+    `src/builders/afm/base.py:961-969`), and `discover_runs` already opens that
+    file to read `family`. It is `{}` for hetero and flake, whose layers are
+    z-band regions rather than atom-type groups; those log and fall back to 2,
+    which is what they have always assumed.
+    """
+    if locator.tokens.layers is not None:
+        return int(locator.tokens.layers)
+    try:
+        record = json.loads(locator.provenance_file.read_text(encoding='utf-8'))
+        count = len([k for k in (record.get('layer_type_map') or {})
+                     if str(k).startswith('layer_')])
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        logger.warning("Unreadable provenance for %s (%s); assuming 2 layers",
+                       locator.tokens.rel_path, exc)
+        return 2
+    if count:
+        return count
+    logger.info("%s has an empty layer_type_map (z-band layers); assuming 2",
+                locator.tokens.rel_path)
+    return 2
+
+
+def _load_points(locator) -> Dict[Tuple[str, float, float, float],
+                                  Dict[str, Tuple[Path, LoadPoint]]]:
+    """Group a run's results files by load point, then by tier."""
+    grouped: Dict[Tuple[str, float, float, float],
+                  Dict[str, Tuple[Path, LoadPoint]]] = {}
+    if not locator.results_dir.is_dir():
+        return grouped
+    for path in sorted(locator.results_dir.iterdir()):
+        point = parse_results_name(path.name) if path.is_file() else None
+        if point is None:
+            continue
+        key = (point.load_kind, point.load, point.angle, point.speed)
+        grouped.setdefault(key, {})[point.tier] = (path, point)
+    return grouped
+
+
 class _NpEncoder(json.JSONEncoder):
     """JSON encoder that handles NumPy and pandas types."""
 
@@ -338,15 +518,19 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         r'(?!pot_)([\w\d\-+_]+)?/?(?:pot_[^/]+/)?results'
     )
 
-    def __init__(self, results_dir: str = 'results_110725_test') -> None:
+    def __init__(self, results_dir: str = 'results_110725_test', *,
+                 skip_fraction: float = 0.2) -> None:
         """Initialise the DataReader.
 
         Args:
-            results_dir: Path to the directory containing simulation results.
+            results_dir: A simulation root -- the directory holding `afm/`,
+                `sheetonsheet/`, `indent/`, `pes_tip/`, `pes_sheet/`.
+            skip_fraction: Transient fraction `summarise_run` discards.
         """
         self.results_dir = Path(results_dir)
         self.output_dir = self.results_dir / 'outputs'
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.skip_fraction = skip_fraction
 
         self.full_data_nested: dict = {}
 
@@ -358,6 +542,45 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             self.metadata,
             self.ntimestep,
         ) = self.read_data()
+
+        # The `discover_runs` walk, alongside the regex one it replaces. Task
+        # 6 moves the metadata and completeness reports onto it and Task 14
+        # deletes `read_data`/`full_data_nested`; until then both run, so no
+        # intermediate commit leaves a consumer of the old attributes broken.
+        self.runs: List[RunFrames] = self._read_runs()
+
+    def _read_runs(self) -> List[RunFrames]:
+        """One walk with `discover_runs`, one `RunFrames` per load point."""
+        from ..run.tree import discover_runs  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+        runs: List[RunFrames] = []
+        for locator in discover_runs(self.results_dir):
+            family = locator.tokens.family
+            n_layers = resolve_n_layers(locator)
+            for (kind, load, angle, speed), tiers in _load_points(locator).items():
+                frames: Dict[str, pd.DataFrame] = {}
+                sources: Dict[str, Path] = {}
+                for tier, (path, _point) in sorted(tiers.items()):
+                    try:
+                        # A PES grid is a comma table with a `# family=` first
+                        # line, not a LAMMPS `ave/time` file, so it goes
+                        # through read_csv -- exactly as
+                        # `FrictionResultsData.frame` does for a stored `.csv`.
+                        frames[tier] = (
+                            pd.read_csv(path, comment='#') if path.suffix == '.csv'
+                            else read_results_file(path, family))
+                        sources[tier] = path
+                    except (SchemaError, ValueError, OSError,
+                            pd.errors.EmptyDataError) as exc:
+                        logger.warning("Could not process file %s: %s", path, exc)
+                if not frames:
+                    continue
+                runs.append(RunFrames(
+                    locator=locator, load_kind=kind, load=load, angle=angle,
+                    speed=speed, n_layers=n_layers, tiers=frames,
+                    source_files=sources))
+        return sorted(runs, key=lambda r: (r.tokens.rel_path, r.load_kind,
+                                           r.load, r.angle, r.speed))
 
     def _calculate_derived_quantities(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate lateral force and coefficient of friction.
