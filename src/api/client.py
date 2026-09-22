@@ -116,13 +116,19 @@ class FrictionHTTPClient:
 
     def query(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
+        *,
         material: Optional[str] = None,
-        simulation_type: Optional[str] = None,
+        family: Optional[str] = None,
+        model: Optional[str] = None,
+        set_label: Optional[str] = None,
+        potential_type: Optional[str] = None,
         layers: Optional[int] = None,
+        uploader: Optional[str] = None,
         force_range: Optional[tuple] = None,
+        pressure_range: Optional[tuple] = None,
         temperature_range: Optional[tuple] = None,
         angle_range: Optional[tuple] = None,
-        uploader: Optional[str] = None,
+        status: Optional[str] = None,
         limit: Optional[int] = None,
         order_by: str = "uploaded_at DESC",
     ) -> "pandas.DataFrame":
@@ -130,34 +136,22 @@ class FrictionHTTPClient:
         import pandas as pd  # pylint: disable=import-outside-toplevel
 
         params: Dict[str, Any] = {"order_by": order_by}
-        if material is not None:
-            params["material"] = material
-        if simulation_type is not None:
-            params["simulation_type"] = simulation_type
-        if layers is not None:
-            params["layers"] = layers
-        if uploader is not None:
-            params["uploader"] = uploader
-        if limit is not None:
-            params["limit"] = limit
-        if force_range is not None:
-            params["force_min"] = force_range[0]
-            params["force_max"] = force_range[1]
-        if temperature_range is not None:
-            params["temp_min"] = temperature_range[0]
-            params["temp_max"] = temperature_range[1]
-        if angle_range is not None:
-            params["angle_min"] = angle_range[0]
-            params["angle_max"] = angle_range[1]
+        for key, value in (("material", material), ("family", family),
+                           ("model", model), ("set_label", set_label),
+                           ("potential_type", potential_type),
+                           ("layers", layers), ("uploader", uploader),
+                           ("status", status), ("limit", limit)):
+            if value is not None:
+                params[key] = value
+        for prefix, span in (("force", force_range), ("pressure", pressure_range),
+                             ("temp", temperature_range), ("angle", angle_range)):
+            if span is not None:
+                params[f"{prefix}_min"], params[f"{prefix}_max"] = span
 
-        resp = self._client.get(
-            self._url("/results"),
-            params=params,
-            headers=self._headers(),
-        )
+        resp = self._client.get(self._url("/results"), params=params,
+                                headers=self._headers())
         self._raise_for_status(resp)
-        data = resp.json()
-        return pd.DataFrame(data["results"])
+        return pd.DataFrame(resp.json()["results"])
 
     # -- Single result -------------------------------------------------------
 

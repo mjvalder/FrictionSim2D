@@ -71,23 +71,33 @@ app.add_middleware(
 
 
 class ResultCreate(BaseModel):
-    """Schema for staging a new result via the API."""
+    """Schema for staging a new result via the API (schema 3)."""
     material: str
-    simulation_type: str = 'afm'
+    materials: List[str] = []
+    model: Optional[str] = None
+    family: Optional[str] = None
+    contact: Optional[str] = None
+    run_uuid: Optional[str] = None
+    result_uuid: Optional[str] = None
+    set_label: Optional[str] = None
+    source_host: Optional[str] = None
+    stack_type: Optional[str] = None
     layers: Optional[int] = None
     size_x: Optional[float] = None
     size_y: Optional[float] = None
-    stack_type: Optional[str] = None
-    force_nN: Optional[float] = None
-    pressure_gpa: Optional[float] = None
-    scan_angle: Optional[float] = None
-    scan_speed: Optional[float] = None
     temperature: Optional[float] = None
     tip_material: Optional[str] = None
     tip_radius: Optional[float] = None
     substrate_material: Optional[str] = None
     substrate_amorphous: Optional[bool] = None
     potential_type: Optional[str] = None
+    potential_name: Optional[str] = None
+    pot_sha256: Optional[str] = None
+    git_commit: Optional[str] = None
+    force_nN: Optional[float] = None
+    pressure_gpa: Optional[float] = None
+    scan_angle: Optional[float] = None
+    scan_speed: Optional[float] = None
     mean_cof: Optional[float] = None
     std_cof: Optional[float] = None
     mean_lf: Optional[float] = None
@@ -100,32 +110,44 @@ class ResultCreate(BaseModel):
     std_lfy: Optional[float] = None
     ntimesteps: Optional[int] = None
     time_series_hash: Optional[str] = None
+    is_complete: bool = True
+    extras: Dict[str, Any] = {}
     notes: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
     data_url: Optional[str] = None
 
 
 class ResultResponse(BaseModel):
-    """Schema for a single result in API responses."""
-    id: int
+    """One central row. Field-for-field `ResultRecord`, with `uploaded_at`
+    serialised as an ISO string."""
+    id: Optional[int] = None
     uploaded_at: Optional[str] = None
     uploader: Optional[str] = None
+    contact: Optional[str] = None
+    run_uuid: Optional[str] = None
+    result_uuid: Optional[str] = None
+    set_label: Optional[str] = None
+    source_host: Optional[str] = None
+    model: Optional[str] = None
+    family: Optional[str] = None
+    materials: List[str] = []
     material: Optional[str] = None
-    simulation_type: Optional[str] = None
+    stack_type: Optional[str] = None
     layers: Optional[int] = None
     size_x: Optional[float] = None
     size_y: Optional[float] = None
-    stack_type: Optional[str] = None
-    force_nN: Optional[float] = None
-    pressure_gpa: Optional[float] = None
-    scan_angle: Optional[float] = None
-    scan_speed: Optional[float] = None
     temperature: Optional[float] = None
     tip_material: Optional[str] = None
     tip_radius: Optional[float] = None
     substrate_material: Optional[str] = None
     substrate_amorphous: Optional[bool] = None
     potential_type: Optional[str] = None
+    potential_name: Optional[str] = None
+    pot_sha256: Optional[str] = None
+    git_commit: Optional[str] = None
+    force_nN: Optional[float] = None
+    pressure_gpa: Optional[float] = None
+    scan_angle: Optional[float] = None
+    scan_speed: Optional[float] = None
     mean_cof: Optional[float] = None
     std_cof: Optional[float] = None
     mean_lf: Optional[float] = None
@@ -139,9 +161,9 @@ class ResultResponse(BaseModel):
     ntimesteps: Optional[int] = None
     time_series_hash: Optional[str] = None
     is_complete: Optional[bool] = None
+    extras: Dict[str, Any] = {}
     status: Optional[str] = None
     notes: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
     data_url: Optional[str] = None
 
 
@@ -165,12 +187,14 @@ class MaterialsResponse(BaseModel):
 
 
 class ConditionsResponse(BaseModel):
-    """Parameter ranges in the dataset."""
+    """Parameter ranges and category counts in the dataset."""
     force_nN: Optional[Dict[str, float]] = None
     temperature: Optional[Dict[str, float]] = None
     scan_angle: Optional[Dict[str, float]] = None
     pressure_gpa: Optional[Dict[str, float]] = None
     layers: Optional[Dict[str, int]] = None
+    family: Optional[Dict[str, int]] = None
+    model: Optional[Dict[str, int]] = None
 
 
 FloatRange = Dict[str, float]
@@ -191,7 +215,7 @@ class ValidationResponse(BaseModel):
 
 class UploadResponse(BaseModel):
     """Response after staging a result."""
-    id: int
+    id: Optional[int] = None
     status: str
 
 
@@ -201,49 +225,14 @@ class UploadResponse(BaseModel):
 
 
 def _row_to_response(row: dict) -> ResultResponse:
-    """Convert a pandas row dict to a ResultResponse."""
-    # Handle timestamp serialisation
-    uploaded = row.get('uploaded_at')
-    if uploaded is not None:
-        uploaded = str(uploaded)
-    return ResultResponse(
-        id=row['id'],
-        uploaded_at=uploaded,
-        uploader=row.get('uploader'),
-        material=row.get('material'),
-        simulation_type=row.get('simulation_type'),
-        layers=row.get('layers'),
-        size_x=row.get('size_x'),
-        size_y=row.get('size_y'),
-        stack_type=row.get('stack_type'),
-        force_nN=row.get('force_nN'),
-        pressure_gpa=row.get('pressure_gpa'),
-        scan_angle=row.get('scan_angle'),
-        scan_speed=row.get('scan_speed'),
-        temperature=row.get('temperature'),
-        tip_material=row.get('tip_material'),
-        tip_radius=row.get('tip_radius'),
-        substrate_material=row.get('substrate_material'),
-        substrate_amorphous=row.get('substrate_amorphous'),
-        potential_type=row.get('potential_type'),
-        mean_cof=row.get('mean_cof'),
-        std_cof=row.get('std_cof'),
-        mean_lf=row.get('mean_lf'),
-        std_lf=row.get('std_lf'),
-        mean_nf=row.get('mean_nf'),
-        std_nf=row.get('std_nf'),
-        mean_lfx=row.get('mean_lfx'),
-        std_lfx=row.get('std_lfx'),
-        mean_lfy=row.get('mean_lfy'),
-        std_lfy=row.get('std_lfy'),
-        ntimesteps=row.get('ntimesteps'),
-        time_series_hash=row.get('time_series_hash'),
-        is_complete=row.get('is_complete'),
-        status=row.get('status'),
-        notes=row.get('notes'),
-        metadata=row.get('metadata'),
-        data_url=row.get('data_url'),
-    )
+    """Build the response straight from the row: one field list, not two."""
+    data = {field: row.get(field) for field in ResultResponse.model_fields.keys()}
+    uploaded = data.get('uploaded_at')
+    data['uploaded_at'] = uploaded.isoformat() if hasattr(uploaded, 'isoformat') \
+        else (str(uploaded) if uploaded is not None else None)
+    data['materials'] = list(row.get('materials') or [])
+    data['extras'] = dict(row.get('extras') or {})
+    return ResultResponse(**data)
 
 
 def _filter_visible_rows(df, viewer_name: Optional[str],
@@ -279,13 +268,14 @@ def _statistics_from_rows(df) -> StatisticsResponse:
         )
 
     materials = df['material'].dropna().value_counts().to_dict()
-    simulation_types = df['simulation_type'].dropna().value_counts().to_dict()
+    by_family = df['family'].dropna().value_counts().to_dict() \
+        if 'family' in df.columns else {}
     cof_values = df['mean_cof'].dropna()
     cof_global_mean = float(cof_values.mean()) if not cof_values.empty else None
     return StatisticsResponse(
         total_rows=len(df),
         by_material=materials,
-        by_type=simulation_types,
+        by_type=by_family,
         cof_global_mean=cof_global_mean,
     )
 
@@ -307,22 +297,25 @@ def health():
 
 
 @app.get("/results", response_model=QueryResponse)
-def query_results(
+def query_results(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     material: Optional[str] = Query(None),
-    simulation_type: Optional[str] = Query(None),
+    family: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    set_label: Optional[str] = Query(None),
+    potential_type: Optional[str] = Query(None),
     layers: Optional[int] = Query(None),
+    uploader: Optional[str] = Query(None),
     force_min: Optional[float] = Query(None),
     force_max: Optional[float] = Query(None),
+    pressure_min: Optional[float] = Query(None),
+    pressure_max: Optional[float] = Query(None),
     temp_min: Optional[float] = Query(None),
     temp_max: Optional[float] = Query(None),
     angle_min: Optional[float] = Query(None),
     angle_max: Optional[float] = Query(None),
-    uploader: Optional[str] = Query(None),
     result_status: Optional[str] = Query(
-        None,
-        alias="status",
-        description="Filter by status (published, validated, etc.)",
-    ),
+        None, alias="status",
+        description="Filter by status (published, validated, etc.)"),
     limit: int = Query(100, ge=1, le=10000),
     order_by: str = Query("uploaded_at DESC"),
     viewer_name: Optional[str] = Depends(optional_api_key),
@@ -333,30 +326,26 @@ def query_results(
     By default only ``published`` results are returned for unauthenticated
     queries. Pass ``status`` explicitly to override.
     """
-    force_range = None
-    if force_min is not None and force_max is not None:
-        force_range = (force_min, force_max)
-    temp_range = None
-    if temp_min is not None and temp_max is not None:
-        temp_range = (temp_min, temp_max)
-    angle_range = None
-    if angle_min is not None and angle_max is not None:
-        angle_range = (angle_min, angle_max)
+    def _span(lo, hi):
+        return (lo, hi) if lo is not None and hi is not None else None
 
     df = db.query(
         material=material,
-        simulation_type=simulation_type,
+        family=family,
+        model=model,
+        set_label=set_label,
+        potential_type=potential_type,
         layers=layers,
-        force_range=force_range,
-        temperature_range=temp_range,
-        angle_range=angle_range,
         uploader=uploader,
+        force_range=_span(force_min, force_max),
+        pressure_range=_span(pressure_min, pressure_max),
+        temperature_range=_span(temp_min, temp_max),
+        angle_range=_span(angle_min, angle_max),
         limit=limit,
         order_by=order_by,
     )
 
     df = _filter_visible_rows(df, viewer_name, result_status)
-
     results = [_row_to_response(row) for _, row in df.iterrows()]
     return QueryResponse(count=len(results), results=results)
 
@@ -418,12 +407,19 @@ def get_conditions(viewer_name: Optional[str] = Depends(optional_api_key),
         lo, hi = s.min(), s.max()
         return {"min": int(lo), "max": int(hi)}
 
+    def _counts(col: str) -> Optional[Dict[str, int]]:
+        series = df[col].dropna()
+        return None if series.empty else {
+            str(k): int(v) for k, v in series.value_counts().items()}
+
     return ConditionsResponse(
         force_nN=_float_range('force_nN'),
         temperature=_float_range('temperature'),
         scan_angle=_float_range('scan_angle'),
         pressure_gpa=_float_range('pressure_gpa'),
         layers=_int_range('layers'),
+        family=_counts('family'),
+        model=_counts('model'),
     )
 
 
@@ -443,12 +439,22 @@ def stage_result(
     Requires a valid API key (``X-API-Key`` header). The result is uploaded
     as ``staged``, automatically validated, and published when it passes
     validation.
+
+    A duplicate ``time_series_hash`` (the same result uploaded twice) is not
+    an upload failure — ``FrictionDB.upload_result`` returns ``None`` for it
+    (``ON CONFLICT DO NOTHING``) and this raises a clean 409 rather than
+    letting a non-optional ``UploadResponse.id`` crash on ``None``.
     """
     row_id = db.upload_result(
         uploader=user_name,
         status='staged',
         **body.model_dump(exclude_none=True),
     )
+    if row_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Duplicate result: time_series_hash already exists",
+        )
     validation = db.validate_staged(row_id)
     if validation.is_valid:
         db.publish(row_id)

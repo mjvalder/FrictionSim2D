@@ -29,7 +29,8 @@ _SAMPLE_ROW = {
     'uploaded_at': '2025-01-01T00:00:00+00:00',
     'uploader': 'alice',
     'material': 'h-MoS2',
-    'simulation_type': 'afm',
+    'family': 'afm',
+    'model': 'afm',
     'layers': 1,
     'size_x': 20.0,
     'size_y': 20.0,
@@ -59,7 +60,7 @@ _SAMPLE_ROW = {
     'is_complete': True,
     'status': 'published',
     'notes': None,
-    'metadata': None,
+    'extras': {},
     'data_url': None,
 }
 
@@ -249,7 +250,7 @@ class TestStageResult:
     def test_stage_success(self, client, mock_db):
         resp = client.post(
             "/results",
-            json={"material": "h-MoS2", "simulation_type": "afm", "mean_cof": 0.05},
+            json={"material": "h-MoS2", "family": "afm", "mean_cof": 0.05},
             headers={"X-API-Key": "valid-key"},
         )
         assert resp.status_code == 201
@@ -276,7 +277,7 @@ class TestStageResult:
     def test_stage_missing_material(self, client, mock_db):
         resp = client.post(
             "/results",
-            json={"simulation_type": "afm"},
+            json={"family": "afm"},
             headers={"X-API-Key": "valid-key"},
         )
         assert resp.status_code == 422  # validation error
@@ -441,7 +442,7 @@ class TestHTTPClient:
     def test_upload_record(self, mock_db):
         """Client.upload_record() wraps a ResultRecord."""
         client = self._make_auth_client()
-        record = ResultRecord(material="h-WS2", simulation_type="afm", mean_cof=0.03)
+        record = ResultRecord(material="h-WS2", family="afm", mean_cof=0.03)
         row_id = client.upload_record(record)
         assert row_id == 42
 

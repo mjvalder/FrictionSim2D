@@ -27,8 +27,8 @@ def _make_db(rows):
 @pytest.fixture(name="client_with_mixed_visibility")
 def _client_with_mixed_visibility_fixture():
     rows = [
-        {"id": 1, "material": "h-MoS2", "simulation_type": "afm", "status": "published", "mean_cof": 0.1},
-        {"id": 2, "material": "h-WS2", "simulation_type": "afm", "status": "staged", "mean_cof": 0.2},
+        {"id": 1, "material": "h-MoS2", "family": "afm", "status": "published", "mean_cof": 0.1},
+        {"id": 2, "material": "h-WS2", "family": "afm", "status": "staged", "mean_cof": 0.2},
     ]
     db = _make_db(rows)
     set_db(db)

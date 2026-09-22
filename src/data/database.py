@@ -374,7 +374,7 @@ class FrictionDB:
     #: did `json.dumps(metadata) if metadata else None` at database.py:459.)
     _JSONB_COLUMNS = ('extras',)
 
-    def upload_result(self, **fields) -> int:
+    def upload_result(self, **fields) -> Optional[int]:
         """Insert one row, validated through :class:`ResultRecord` first."""
         return self.upload_record(ResultRecord(**fields))
 
