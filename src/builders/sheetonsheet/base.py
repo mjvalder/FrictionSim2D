@@ -345,6 +345,12 @@ class SheetOnSheetSimulation(SimulationBase):
     #: scan angle (see write_inputs); there is no normal load to split by.
     SPLIT_OUTER_LOOPS = frozenset({'pressure', 'scan_speed', 'scan_angle'})
 
+    #: The slide is loaded by ``[general] pressure``; with none it would render
+    #: ``variable pressure equal None`` (a LAMMPS error) or slide at 0 GPa and
+    #: report a meaningless COF, so ``src.run.expand.missing_pressure`` refuses
+    #: such a config before anything is built. PESGridMixin overrides it.
+    REQUIRES_PRESSURE: bool = True
+
     def __init__(self, config: SheetOnSheetSimulationConfig, output_dir: str,
                  config_path: Optional[str] = None):
         super().__init__(config, output_dir, config_path=config_path)

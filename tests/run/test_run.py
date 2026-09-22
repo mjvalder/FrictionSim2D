@@ -324,14 +324,33 @@ class TestLoadedSlideRequiresAPressure:
         assert missing_pressure(getattr(self, make)(pressure=0.5), 'sheetonsheet') is None
         assert missing_pressure(getattr(self, make)(pressure=[0.1, 1]), 'sheetonsheet') is None
 
-    def test_pes_sheet_and_plain_sheet_are_not_refused(self):
-        """The hetero PES scan inherits the hetero slide builder but applies no
-        load; the plain sheet slide is out of this check's scope."""
+    def test_the_plain_sheet_slide_is_refused_too(self):
+        """A zero-load COF is as meaningless on the plain slide, which also
+        rendered ``pressure equal None`` (a LAMMPS error) on its single-script
+        path."""
+        from src.run.expand import missing_pressure
+
+        plain = {'2D': dict(self._SHEET), 'general': {'temp': 300}}
+        msg = missing_pressure(plain, 'sheetonsheet')
+        assert msg is not None and "SheetOnSheetSimulation" in msg
+        assert "[general] pressure is required" in msg
+        plain['general']['pressure'] = [0.1, 1.0]
+        assert missing_pressure(plain, 'sheetonsheet') is None
+
+    def test_pes_sheet_is_not_refused(self):
+        """Both sheet PES scans subclass a slide builder but apply no load."""
         from src.run.expand import missing_pressure
 
         assert missing_pressure(self._hetero(), 'pes_sheet') is None
         plain = {'2D': dict(self._SHEET), 'general': {'temp': 300}}
-        assert missing_pressure(plain, 'sheetonsheet') is None
+        assert missing_pressure(plain, 'pes_sheet') is None
+
+    def test_the_sheet_example_fixture_has_a_pressure(self):
+        from src.core.config import parse_config
+        from src.run.expand import missing_pressure
+
+        raw = parse_config(EXAMPLES / 'sheet_config.ini')
+        assert missing_pressure(raw, 'sheetonsheet') is None
 
     def test_run_simulations_refuses_before_anything_is_built(self, tmp_path, monkeypatch):
         from src.core.config import write_config

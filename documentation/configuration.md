@@ -62,7 +62,7 @@ Common knobs include:
 
 - `temp`
 - `force` (AFM workflows)
-- `pressure` (sheet-on-sheet workflows; **required** for a hetero or `[Flake]` sheet slide)
+- `pressure` (sheet-on-sheet workflows; **required** for every `run sheetonsheet` slide)
 - `scan_angle`
 - `scan_angle_force`
 - `scan_speed`
@@ -410,9 +410,9 @@ felt normal force `v_fz` (nN, mean ≈ `P[GPa] · A[Å²] / 100`), so a flake ru
 COF is lateral force / normal load, as for sheet-on-sheet. Each pressure writes
 its own `friction_p<P>_…` file.
 
-**A pressure is required.** A `[Flake]` slide, and a hetero sheet-on-sheet
-slide (`[2D-1]`/`[2D-2]` or `twist_angle`), is refused before anything is
-built when `[general] pressure` is unset: `[general] pressure is required for
+**A pressure is required.** Every `run sheetonsheet` slide -- plain, hetero
+(`[2D-1]`/`[2D-2]` or `twist_angle`) or `[Flake]` -- is refused before
+anything is built when `[general] pressure` is unset: `[general] pressure is required for
 a loaded slide`. Without it the run would slide at 0 GPa and report a
 meaningless COF. A `run pes-sheet` scan applies no load and needs none.
 
@@ -428,7 +428,7 @@ Common failures:
 - Missing referenced CIF or potential files
 - Non-ascending sweep values for force/pressure/angle selectors
 - Invalid sheet-on-sheet layer count
-- A hetero or `[Flake]` sheet slide with no `[general] pressure`
+- A `run sheetonsheet` slide (plain, hetero or `[Flake]`) with no `[general] pressure`
 - Incompatible `constraint_mode` with potentials that already include internal interlayer interactions
 
 ## Tips

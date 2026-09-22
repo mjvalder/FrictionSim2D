@@ -114,7 +114,7 @@ class PESGridMixin:
     MIN_LAYERS: int = PES_SHEET_LAYERS
 
     #: A static scan applies no normal load, so it needs no pressure -- this
-    #: overrides the hetero slide's True for HeteroPESSheetSimulation.
+    #: overrides the slide builders' True for both sheet PES scans.
     REQUIRES_PRESSURE: bool = False
 
     #: The two sheet scan templates, named in the refusal below so the claim is

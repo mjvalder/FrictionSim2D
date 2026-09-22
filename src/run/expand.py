@@ -820,14 +820,16 @@ def outer_loop_conflict(config: Dict[str, Any], model: str) -> Optional[str]:
 def missing_pressure(config: Dict[str, Any], model: str) -> Optional[str]:
     """Why this config's loaded slide cannot run without a pressure, or None.
 
-    The flake slide and the hetero sheet-on-sheet slide load the moving body
-    with ``[general] pressure`` (GPa). Left unset, both used to run at 0 GPa
-    and report a "complete" but meaningless COF (friction over no load), so a
-    config routed to a builder declaring ``REQUIRES_PRESSURE`` must set one.
+    Every sheet-on-sheet slide (plain, hetero, flake) loads the moving body
+    with ``[general] pressure`` (GPa). Left unset, they used to run at 0 GPa
+    (or, for the plain single-script slide, crash in LAMMPS on
+    ``pressure equal None``) and a 0 GPa run reports a meaningless COF
+    (friction over no load), so a config routed to a builder declaring
+    ``REQUIRES_PRESSURE`` must set one.
 
     Routing-aware, like :func:`outer_loop_conflict` and for the same reason:
     the same ``[general]`` is valid for ``run pes-sheet`` (a static scan, no
-    load) and for the flake/hetero slides only through ``run sheetonsheet``,
+    load) and needs a pressure only through ``run sheetonsheet``,
     so a pydantic model -- which does not know the model name -- cannot decide
     it. An unroutable config reports nothing (no build to protect).
 
