@@ -1,13 +1,13 @@
 """JobManifest is the read/write side of a file format: round-tripping matters.
 
-Covers hpc.md (c) findings 1 (save/load round-trip) and 2 (JobEntry.update_status
-timestamp/kwargs branching), plus the counts/query surface the CLI dispatch path
-(`src/run/hpc_dispatch.py`) relies on. Deliberately does not exercise the six
-`JobManifest` methods marked dead in hpc.md (b) H-1..H-6 (get_jobs_by_status,
+Covers hpc.md (c) finding 1 (save/load round-trip), plus the counts/query surface
+the CLI dispatch path (`src/run/hpc_dispatch.py`) relies on. The six `JobManifest`
+status methods marked dead in hpc.md (b) H-1..H-6 (get_jobs_by_status,
 get_jobs_by_material, update_job_status, mark_all_submitted,
-mark_completed_from_results, get_summary) -- those are kept as an unfinished
-work-in-progress layer (see docs/superpowers/specs/TO-DO/future-works.md), not
-tested here.
+mark_completed_from_results, get_summary), `JobEntry.update_status`, and the
+AiiDA-uuid fields were deleted outright (spec Sec 4.3, Task 26) -- they had no
+non-test caller, so the status they tracked was already fiction. `test_status_half_is_gone`
+pins their absence.
 """
 import json
 from pathlib import Path
@@ -83,7 +83,6 @@ def test_save_then_load_round_trips_the_full_manifest(tmp_path):
         material="h-MoS2", layers=2, force=1.5, angle=30.0, speed=5.0,
         status=JobStatus.COMPLETED.value, hpc_job_id="123",
         submitted_at="2026-01-01T00:00:00", completed_at="2026-01-02T00:00:00",
-        simulation_node_uuid="uuid-1", results_node_uuid="uuid-2",
         error_message=None,
     ))
     path = tmp_path / "manifest.json"
@@ -96,28 +95,12 @@ def test_save_then_load_round_trips_the_full_manifest(tmp_path):
     assert [j.to_dict() for j in reloaded.jobs] == [j.to_dict() for j in manifest.jobs]
 
 
-def test_update_status_records_the_new_status_on_the_entry():
-    entry = _entry(status=JobStatus.PREPARED)
-    entry.update_status(JobStatus.SUBMITTED)
-    assert entry.status == JobStatus.SUBMITTED.value
+def test_status_half_is_gone():
+    from src.hpc.manifest import JobEntry as _JobEntry, JobManifest as _JobManifest
 
-
-def test_update_status_sets_submitted_at_timestamp():
-    entry = _entry(status=JobStatus.PREPARED)
-    assert entry.submitted_at is None
-    entry.update_status(JobStatus.SUBMITTED)
-    assert entry.submitted_at is not None
-
-
-def test_update_status_sets_completed_at_timestamp_for_terminal_states():
-    entry = _entry(status=JobStatus.SUBMITTED)
-    assert entry.completed_at is None
-    entry.update_status(JobStatus.COMPLETED)
-    assert entry.completed_at is not None
-
-
-def test_update_status_applies_extra_kwargs():
-    entry = _entry(status=JobStatus.SUBMITTED)
-    entry.update_status(JobStatus.FAILED, error_message="boom")
-    assert entry.status == JobStatus.FAILED.value
-    assert entry.error_message == "boom"
+    for name in ('get_jobs_by_status', 'get_jobs_by_material', 'update_job_status',
+                 'mark_all_submitted', 'mark_completed_from_results', 'get_summary'):
+        assert not hasattr(_JobManifest, name), name
+    assert not hasattr(_JobEntry, 'update_status')
+    assert 'simulation_node_uuid' not in _JobEntry.__dataclass_fields__
+    assert 'results_node_uuid' not in _JobEntry.__dataclass_fields__

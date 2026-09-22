@@ -40,8 +40,6 @@ class JobEntry:
         created_at: ISO timestamp of creation.
         submitted_at: ISO timestamp of submission.
         completed_at: ISO timestamp of completion.
-        simulation_node_uuid: AiiDA simulation node UUID.
-        results_node_uuid: AiiDA results node UUID.
         error_message: Error description if failed.
     """
     job_id: str
@@ -57,26 +55,7 @@ class JobEntry:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     submitted_at: Optional[str] = None
     completed_at: Optional[str] = None
-    simulation_node_uuid: Optional[str] = None
-    results_node_uuid: Optional[str] = None
     error_message: Optional[str] = None
-
-    def update_status(self, new_status: JobStatus, **kwargs):
-        """Update job status with automatic timestamp management.
-        
-        Args:
-            new_status: New status to set.
-            **kwargs: Additional fields to update (e.g., hpc_job_id, error_message).
-        """
-        self.status = new_status.value
-        now = datetime.now().isoformat()
-        if new_status == JobStatus.SUBMITTED:
-            self.submitted_at = now
-        elif new_status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.IMPORTED):
-            self.completed_at = now
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -190,28 +169,6 @@ class JobManifest:
         """
         return next((j for j in self.jobs if j.job_id == job_id), None)
 
-    def get_jobs_by_status(self, status: JobStatus) -> List[JobEntry]:
-        """Get all jobs with specific status.
-        
-        Args:
-            status: Status to filter by.
-            
-        Returns:
-            List of matching JobEntry objects.
-        """
-        return [j for j in self.jobs if j.status == status.value]
-
-    def get_jobs_by_material(self, material: str) -> List[JobEntry]:
-        """Get all jobs for specific material.
-        
-        Args:
-            material: Material name.
-            
-        Returns:
-            List of matching JobEntry objects.
-        """
-        return [j for j in self.jobs if j.material == material]
-
     def get_system_jobs(self) -> List[JobEntry]:
         """Get all system initialization jobs.
         
@@ -238,105 +195,8 @@ class JobManifest:
         """
         return bool(self.get_system_jobs())
 
-    def update_job_status(self, job_id: str, new_status: JobStatus,
-                         **kwargs) -> bool:
-        """Update status of specific job.
-        
-        Args:
-            job_id: Job identifier.
-            new_status: New status to set.
-            **kwargs: Additional fields to update.
-            
-        Returns:
-            True if job was found and updated, False otherwise.
-        """
-        job = self.get_job(job_id)
-        if job:
-            job.update_status(new_status, **kwargs)
-            self._update_timestamp()
-            return True
-        return False
-
-    def mark_all_submitted(self, hpc_job_prefix: Optional[str] = None) -> int:
-        """Mark all prepared jobs as submitted.
-        
-        Args:
-            hpc_job_prefix: Optional prefix for HPC job IDs.
-            
-        Returns:
-            Number of jobs updated.
-        """
-        count = 0
-        for job in self.jobs:
-            if job.status == JobStatus.PREPARED.value:
-                hpc_id = f"{hpc_job_prefix}_{count}" if hpc_job_prefix else None
-                job.update_status(JobStatus.SUBMITTED, hpc_job_id=hpc_id)
-                count += 1
-        if count > 0:
-            self._update_timestamp()
-        return count
-
-    def mark_completed_from_results(self, results_dir: Path) -> Dict[str, str]:
-        """Mark jobs as completed based on presence of result files.
-        
-        Args:
-            results_dir: Directory containing simulation results.
-            
-        Returns:
-            Dictionary of job_id -> status for updated jobs.
-        """
-        results_dir = Path(results_dir)
-        updated = {}
-        for job in self.jobs:
-            if job.status in (JobStatus.SUBMITTED.value, JobStatus.RUNNING.value):
-                sim_path = results_dir / job.simulation_path / 'results'
-                if sim_path.exists() and any(sim_path.iterdir()):
-                    job.update_status(JobStatus.COMPLETED)
-                    updated[job.job_id] = JobStatus.COMPLETED.value
-        if updated:
-            self._update_timestamp()
-        return updated
-
-    def get_summary(self) -> Dict[str, Any]:
-        """Get manifest status summary.
-        
-        Returns:
-            Dictionary with status counts and metadata.
-        """
-        return {
-            'name': self.name,
-            'total_jobs': self.n_jobs,
-            'prepared': self.n_prepared,
-            'submitted': self.n_submitted,
-            'completed': self.n_completed,
-            'failed': self.n_failed,
-            'imported': self.n_imported,
-            'scheduler': self.scheduler,
-            'created_at': self.created_at,
-            'last_updated': self.last_updated,
-        }
-
     def _update_timestamp(self) -> None:
         self.last_updated = datetime.now().isoformat()
-
-    def save_script_list(self, filepath: Path,
-                        jobs: Optional[List[JobEntry]] = None) -> int:
-        """Write script paths to text file for HPC array jobs.
-        
-        Args:
-            filepath: Path to save script list.
-            jobs: Optional list of jobs to save. If None, uses all jobs.
-            
-        Returns:
-            Number of scripts written.
-        """
-        jobs_to_save = jobs if jobs is not None else self.jobs
-        script_paths = [
-            f"{j.simulation_path}/lammps/{j.lammps_script or 'slide.in'}"
-            for j in jobs_to_save
-        ]
-        Path(filepath).write_text('\n'.join(script_paths) + '\n', encoding='utf-8')
-        return len(script_paths)
 
     def save(self, filepath: Path) -> None:
         """Save manifest to JSON file.
