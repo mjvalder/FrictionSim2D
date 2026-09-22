@@ -229,7 +229,7 @@ def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
     assert "spring couple virtual" in text
     assert re.search(r"fix\s+spr flake spring couple virtual", text)   # driven group is the flake
     assert "fsbot" in text and "setforce 0.0 0.0 0.0" in text          # sheet bottom fixed
-    assert "corner_hold" in text                                       # default ON
+    assert "corner_hold" not in text                                   # default OFF (follow-up E)
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
@@ -446,11 +446,14 @@ def test_flake_slide_runs_and_translates_flake_com(tmp_path):
     sheet and actually RUN the virtual-atom drive in LAMMPS. Proves: run-dir-
     relative path resolution (data, settings, staged potentials, results), the
     baked reserved virtual type, a live flake drive (the flake COM translates),
-    no lost atoms and complete pair coeffs.
+    no lost atoms and complete pair coeffs. Relies on `corner_hold` defaulting
+    to False (follow-up E) -- with it on the flake cannot translate at all,
+    see `test_flake_slide_twisted_with_hold_on_keeps_corners_near_start`.
     """
     from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    assert cfg.flake.corner_hold is False
     cfg.settings.simulation.drive_method = "virtual_atom"
     # The template equilibrates a fixed 10000 steps, then defines the friction
     # fix (ave/time 1 1000 results_freq) and drives run_steps more. Nfreq=1000
@@ -536,9 +539,17 @@ def test_flake_slide_twist_rotates_the_flake(tmp_path):
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
-def test_flake_slide_twisted_runs_and_holds(tmp_path):
+def test_flake_slide_twisted_with_hold_off_translates(tmp_path):
+    """`corner_hold` defaults to False (follow-up E): the twisted flake is
+    deformable and translates under the COM drive, same as the untwisted case.
+
+    Renamed from `test_flake_slide_twisted_runs_and_holds` -- that name
+    described the corner-hold config, not this assertion (translation). The
+    "holds" behaviour now has its own test below.
+    """
     from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    assert cfg.flake.corner_hold is False
     cfg.general.twist_angle = 20.0
     cfg.settings.simulation.slide_run_steps = 4000
     cfg.general.scan_speed = 100
@@ -552,6 +563,35 @@ def test_flake_slide_twisted_runs_and_holds(tmp_path):
     ix, iy = cols.index("v_comx_flake"), cols.index("v_comy_flake")
     disp = abs(rows[-1][ix] - rows[0][ix]) + abs(rows[-1][iy] - rows[0][iy])
     assert disp > 0.5           # twisted flake still slides (drive live; superlubric contact is fine)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_flake_slide_twisted_with_hold_on_keeps_corners_near_start(tmp_path):
+    """`corner_hold=True` tethers each corner atom to its START xy position
+    (`fix spring/self`), so it is not "rigid while driven": it stops the
+    flake translating at all. See task-C-debug-report.md §4 -- with
+    `corner_radius=3.5` on this R=5 hexagon every flake atom is a corner atom,
+    so the tether (10 eV/Å² per atom) heavily outweighs the ~3 eV/Å² COM drive
+    spring, and the measured COM displacement was ~0.04 Å over the run.
+    """
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.flake.corner_hold = True
+    cfg.general.twist_angle = 20.0
+    cfg.settings.simulation.slide_run_steps = 4000
+    cfg.general.scan_speed = 100
+    sim = FlakeSlideSimulation(cfg, str(tmp_path)); sim.build()
+    run_dir = sim.run_dir()
+    slide = next(Path(run_dir).rglob("*slide*.in"))
+    text = slide.read_text()
+    assert "corner_hold" in text
+    proc, out = _run_lammps_slide(run_dir, slide.name)
+    assert proc.returncode == 0 and "Lost atoms" not in out
+    friction = next(run_dir.rglob("friction_*")); assert friction.stat().st_size > 0
+    cols, rows = _read_friction_records(friction)
+    ix, iy = cols.index("v_comx_flake"), cols.index("v_comy_flake")
+    disp = abs(rows[-1][ix] - rows[0][ix]) + abs(rows[-1][iy] - rows[0][iy])
+    assert disp < 0.5           # held: the flake barely moves, unlike the hold-off case above
 
 
 # --------------------------------------------------------------------------- #

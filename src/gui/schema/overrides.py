@@ -373,6 +373,16 @@ _COMMON: Dict[str, SectionOverride] = {
             'y': FieldOverride(label='Supercell y', unit=A, order=13),
             'center_x': FieldOverride(label='Centre x', unit=A, order=14),
             'center_y': FieldOverride(label='Centre y', unit=A, order=15),
+            'corner_hold': FieldOverride(
+                label='Hold corners', order=16,
+                help='Sheet-on-sheet flake slide only: tether the flake corners in place.',
+                detail=("Pins the flake's corner atoms to their starting xy "
+                        "position while it is driven, so the flake cannot "
+                        "translate -- only use it for static/indent-like "
+                        "studies. Default off, so the flake is deformable and "
+                        "moves under its drive spring. AFM indentation does "
+                        "not read this field: it always holds its corners."),
+            ),
         },
     ),
     'pes': SectionOverride(

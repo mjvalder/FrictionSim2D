@@ -752,6 +752,18 @@ def test_flake_pot_type_left_at_default_dumps_and_reloads():
     assert reloaded.edge_length == 20.0
 
 
+def test_flake_corner_hold_defaults_off():
+    """`corner_hold` (follow-up E, 2026-09-22) defaults to `False`: a flake
+    slide's flake is deformable and driven by its COM spring unless a config
+    explicitly turns the corner tether on. AFM indentation does not read this
+    field at all -- it always holds its corners, unconditionally, via a
+    separate template block -- so this default only changes flake-on-sheet
+    slide behaviour.
+    """
+    assert FlakeConfig(edge_length=20.0).corner_hold is False
+    assert FlakeConfig(edge_length=20.0, corner_hold=True).corner_hold is True
+
+
 def test_flake_pot_type_invalid_still_raises():
     """The `None` guard only skips the check for `None` -- an actual bad
     pair style must still be refused."""

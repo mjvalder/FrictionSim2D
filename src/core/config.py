@@ -485,8 +485,15 @@ class FlakeConfig(ComponentConfig):
     """A finite patch of 2D material placed between tip and sheet.
 
     The flake is cut from a supercell of its own material into a triangle, square
-    or hexagon. AFM indentation tethers its corner atoms in xy (free in z) to hold
-    that shape, and releases them before sliding.
+    or hexagon. AFM indentation always tethers its corner atoms in xy (free in
+    z) to hold that shape, and releases them before sliding -- that path does
+    not read ``corner_hold`` and is unaffected by it. A sheet-on-sheet flake
+    slide (``FlakeSlideSimulation``) reads ``corner_hold`` to decide whether the
+    same tether applies while the flake is driven; default off, since holding
+    every corner in place stops the flake translating at all (see
+    ``docs/superpowers/sdd/2026-09-22-aiida-followups/task-C-debug-report.md``
+    §4). Turn it on only for static/indent-like studies that need the flake
+    kept rigid in-plane.
 
     Attributes:
         shape: Flake outline ('triangle', 'square', 'hexagon').
@@ -497,6 +504,11 @@ class FlakeConfig(ComponentConfig):
             roughly twice ``edge_length`` so the shape always fits.
         center_x, center_y: Optional flake center override (box coords). When
             omitted the flake is centered under the tip.
+        corner_hold: Sheet-on-sheet flake slide only. Tether the flake's
+            corner atoms (within ``corner_radius`` of each vertex) in xy with
+            ``corner_spring_k`` while it is driven, pinning the flake in place.
+            Default off. Not read by AFM, which always applies its own
+            corner-hold during indentation.
     """
     # Optional because a hetero flake takes its two materials from
     # [Flake-1]/[Flake-2] (``flake_sheets``), leaving [Flake] a pure shape spec.
@@ -516,6 +528,15 @@ class FlakeConfig(ComponentConfig):
     corner_spring_k: float = Field(
         default=10.0,
         description="xy spring constant (eV/Å²) tethering corner atoms during indentation.",
+    )
+    corner_hold: bool = Field(
+        default=False,
+        description=(
+            "Sheet-on-sheet flake slide only: tether the flake's corner atoms "
+            "in xy while it is driven, pinning it in place. Default off. AFM "
+            "indentation does not read this field and always holds its "
+            "corners."
+        ),
     )
     center_x: Optional[float] = None
     center_y: Optional[float] = None

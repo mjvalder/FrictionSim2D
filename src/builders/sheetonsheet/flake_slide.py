@@ -470,7 +470,7 @@ class FlakeSlideSimulation(SimulationBase):
             "flake_group_types": " ".join(map(str, flake_group_ids)),
             "flake_corner_types": " ".join(map(str, flake_corner_ids)),
             "flake_corner_k": flake_cfg.corner_spring_k,
-            "corner_hold": getattr(flake_cfg, "corner_hold", True),
+            "corner_hold": flake_cfg.corner_hold,
             "virtual_offset": settings.geometry.lat_c_default,
             **self._normal_load_context(),
         }

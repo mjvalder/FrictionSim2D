@@ -379,6 +379,7 @@ shape = hexagon        # triangle | square | hexagon
 edge_length = 20       # Å: triangle/square side, hexagon circumradius
 rotation_deg = 0
 corner_spring_k = 10.0
+corner_hold = false    # default; see "Corner hold" below
 ```
 
 **Shapes.** Every shape is centred on the flake centre and rotated CCW about
@@ -393,6 +394,17 @@ it by `rotation_deg`:
   horizontal at `y = ±sqrt(3)/2 · R`.
 
 (The same outlines are used by an AFM `[flake]`.)
+
+**Corner hold.** `corner_hold` (default `false`) tethers the flake's corner
+atoms -- those within `corner_radius` Å of a vertex -- to their starting xy
+position with a `corner_spring_k` eV/Å² spring while the flake is driven. It
+does **not** keep the flake "rigid while sliding": it stops the flake
+translating at all, since the tether typically outweighs the COM drive
+spring. Leave it off for a normal slide (the flake is deformable and moves
+under the drive); turn it on only for static/indent-like studies where the
+flake must stay pinned in place. This is a sheet-on-sheet flake-slide setting
+only -- AFM indentation always tethers its flake's corners unconditionally,
+via a separate mechanism, and does not read this field.
 
 **Normal load.** `[general] pressure` (GPa) is applied to the flake over its
 projected in-plane area, not the substrate box area. The area is that of the
