@@ -116,6 +116,82 @@ def test_potentials_and_set_labels_are_filterable_and_listed(aiida_profile_clean
     assert db.query(set_label='p1').total_count == 1
 
 
+def test_materials_filter_uses_all_semantics(aiida_profile_clean, tmp_path):
+    """A run matches only if it contains EVERY given material, not just one."""
+    _populate(tmp_path)
+    db = Friction2DDB()
+
+    assert db.query(materials=['h-WS2']).total_count == 1          # SHEET only
+    assert db.query(materials=['h-MoS2']).total_count == 3         # both runs
+    assert db.query(materials=['h-MoS2', 'h-WS2']).total_count == 1     # SHEET only
+    assert db.query(materials=['h-WS2', 'h-MoS2']).total_count == 1     # order-independent
+
+
+def test_layers_substrate_and_tip_material_are_filterable(aiida_profile_clean, tmp_path):
+    _populate(tmp_path)
+    db = Friction2DDB()
+
+    assert db.query(layers=2).total_count == 2
+    assert db.query(substrate='Si').total_count == 2
+    assert db.query(tip_material='Si').total_count == 2
+
+
+def test_pressure_and_speed_ranges_filter_results(aiida_profile_clean, tmp_path):
+    _populate(tmp_path)
+    db = Friction2DDB()
+
+    out = db.query(pressure_range=(0.5, 2.0))
+    assert out.total_count == 1
+    assert out.results[0].load_kind == 'pressure'
+    assert out.results[0].load == 1.0
+
+    assert db.query(speed_range=(1.0, 3.0)).total_count == 3
+    assert db.query(speed_range=(2.5, 3.0)).total_count == 0
+
+
+def test_order_by_sorts_results_ascending_and_descending(aiida_profile_clean, tmp_path):
+    _populate(tmp_path)
+    db = Friction2DDB()
+
+    ascending = db.query(model='afm', order_by='load')
+    descending = db.query(model='afm', order_by='-load')
+
+    assert [r.load for r in ascending.results] == [10.0, 30.0]
+    assert [r.load for r in descending.results] == [30.0, 10.0]
+
+
+def test_default_order_is_deterministic_by_rel_path_then_load(aiida_profile_clean,
+                                                              tmp_path):
+    """No order_by given -- still the same order every time, not backend luck."""
+    _populate(tmp_path)
+
+    out = Friction2DDB().query()
+
+    assert [r.load for r in out.results] == [10.0, 30.0, 1.0]
+
+
+def test_limit_caps_the_result_list(aiida_profile_clean, tmp_path):
+    _populate(tmp_path)
+
+    out = Friction2DDB().query(limit=1)
+
+    assert out.total_count == 1
+    assert out.results[0].load == 10.0
+
+
+def test_get_statistics_counts_runs_by_model_family_and_material(aiida_profile_clean,
+                                                                  tmp_path):
+    _populate(tmp_path)
+
+    stats = Friction2DDB().get_statistics()
+
+    assert stats['total_simulations'] == 2
+    assert stats['by_model'] == {'afm': 1, 'sheetonsheet': 1}
+    assert stats['by_family'] == {'afm': 1, 'hetero': 1}
+    assert stats['by_material'] == {'h-MoS2': 2, 'h-WS2': 1}
+    assert stats['n_materials'] == 2
+
+
 def test_export_for_reproduction_delegates_to_export_results(aiida_profile_clean,
                                                              tmp_path, monkeypatch):
     _populate(tmp_path)

@@ -60,6 +60,14 @@ class QueryResult:
         for result in self.results:
             run = by_uuid.get(result.run_uuid)
             record = run.to_dict() if run is not None else {}
+            # The raw stored attributes go in FIRST: they include the result's
+            # own `tiers` (a plain list, e.g. `['window', 'raw']`) and `layers`
+            # (may differ from the run's if that ever became possible), which
+            # the explicit identity/derived fields below must be allowed to
+            # override -- most importantly `tiers`, joined into a single
+            # ``'window;raw'`` string. Applying `attributes.all` LAST would
+            # silently put the raw list back and undo that join.
+            record.update(result.base.attributes.all)
             record.update({
                 'run_uuid': result.run_uuid,
                 'result_uuid': str(result.uuid),
@@ -68,7 +76,6 @@ class QueryResult:
                 'angle': result.angle, 'speed': result.speed,
                 'tiers': ';'.join(result.tiers),
             })
-            record.update(result.base.attributes.all)
             records.append(record)
         return pd.DataFrame(records)
 
@@ -108,7 +115,7 @@ _RES_RANGE_ATTR = {
 }
 
 
-def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Dict[str, Any]:
+def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Optional[Dict[str, Any]]:
     """One QueryBuilder operator dict for a `(lo, hi)` range, never two calls.
 
     R5: two `add_filter` calls on the SAME key overwrite each other on this
@@ -117,8 +124,15 @@ def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Dict[str, An
     bound. Every range in this module goes through this helper instead, which
     folds both bounds into a single `{'and': [...]}` filter (or a single
     operator when one side of the range is open-ended, e.g. `(10.0, None)`).
+
+    Returns `None` for a fully-open range (`(None, None)`) -- there is no
+    constraint to express, and callers must skip `add_filter` entirely rather
+    than pass `None` as a QueryBuilder operator value (which is exactly the
+    `{'attributes.x': None}` shape R4 says never to construct).
     """
     lo, hi = span
+    if lo is None and hi is None:
+        return None
     if lo is not None and hi is not None:
         return {'and': [{'>=': lo}, {'<=': hi}]}
     if lo is not None:
@@ -127,7 +141,7 @@ def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Dict[str, An
 
 
 def _result_sort_key(result, key: str) -> Any:
-    """`order_by`'s sort value for one result node.
+    """`order_by`'s raw sort value for one result node.
 
     `key` is usually a `FrictionResultsData` property (`load`, `angle`,
     `speed`, ...), but `order_by` may also name a bare `RunSummary` scalar
@@ -137,6 +151,32 @@ def _result_sort_key(result, key: str) -> Any:
     if hasattr(type(result), key):
         return getattr(result, key)
     return result.base.attributes.get(key)
+
+
+def _none_safe(value: Any) -> Tuple[bool, Any]:
+    """A sort key that never compares `None` against a real value.
+
+    `sorted()`/`list.sort()` raise `TypeError` comparing `None` to a float or
+    a string -- a real risk here since several `RunSummary` extras and a
+    sheet run's `layers`/`tip_radius`/etc. are legitimately `None`. Wrapping
+    every key in `(value is None, value_or_placeholder)` sorts on the first
+    element whenever the two values disagree on nullness, so the real second
+    element is only ever compared against another real value of the same
+    kind (or another placeholder of the same kind), never against `None`.
+    """
+    return (value is None, value if value is not None else 0)
+
+
+def _default_sort_key(result, run_by_uuid: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Deterministic order for a `query()` with no `order_by`: by the owning
+    run's `rel_path`, then `load`, `angle`, `speed` -- so two calls with the
+    same filters always return results in the same order, instead of
+    whatever order the backend happens to return them in.
+    """
+    run = run_by_uuid.get(result.run_uuid)
+    rel_path = run.rel_path if run is not None else ''
+    return (_none_safe(rel_path), _none_safe(result.load),
+            _none_safe(result.angle), _none_safe(result.speed))
 
 
 class Friction2DDB:
@@ -230,9 +270,24 @@ class Friction2DDB:
             'flake_material': flake_material, 'size_x': size_x,
             'size_y': size_y, 'rel_path': rel_path,
         }
+        # Whether ANY run-level filter was given. When none was, `runs` below
+        # is every run in the store, and there is no point building a
+        # `{'attributes.run_uuid': {'in': run_uuids}}` filter for the results
+        # query that would just repeat that same "every run" list back as a
+        # giant bound-variable IN clause -- SQLite's default parameter limit
+        # (999) makes that filter itself fail long before a real store's run
+        # count does, on a query that filters nothing.
+        run_filter_given = (bool(materials) or layers is not None
+                            or temperature_range is not None
+                            or any(v is not None for v in run_eq.values()))
+
         run_qb = self._query_builder_cls()
         run_qb.append(self._simulation_data_cls, tag='run', project=['*'])
         if materials:
+            # ALL semantics (spec): a run matches only if it names EVERY
+            # material given, not merely one of them -- `'contains'` is a
+            # containment check (the run's own `materials` list is a
+            # superset of `materials`), not a `{'in': ...}` any-of check.
             run_qb.add_filter('run',
                               {'attributes.materials': {'contains': materials}})
         for name, value in run_eq.items():
@@ -244,30 +299,38 @@ class Friction2DDB:
                                       layers if isinstance(layers, int)
                                       else {'in': list(layers)}})
         if temperature_range is not None:
-            run_qb.add_filter('run', {'attributes.temperature':
-                                      _range_filter(temperature_range)})
+            temp_filter = _range_filter(temperature_range)
+            if temp_filter is not None:
+                run_qb.add_filter('run', {'attributes.temperature': temp_filter})
         runs = sorted(run_qb.all(flat=True), key=lambda n: n.rel_path)
         run_uuids = [str(run.uuid) for run in runs]
+        run_by_uuid = dict(zip(run_uuids, runs))
 
         results: List[Any] = []
-        if run_uuids:
+        if runs:
             res_qb = self._query_builder_cls()
+            res_filters = ({'attributes.run_uuid': {'in': run_uuids}}
+                          if run_filter_given else {})
             res_qb.append(self._results_data_cls, tag='res', project=['*'],
-                          filters={'attributes.run_uuid': {'in': run_uuids}})
+                          filters=res_filters)
             if force_range is not None:
                 res_qb.add_filter('res', {'attributes.load_kind': 'force'})
-                res_qb.add_filter('res', {'attributes.load':
-                                          _range_filter(force_range)})
+                force_filter = _range_filter(force_range)
+                if force_filter is not None:
+                    res_qb.add_filter('res', {'attributes.load': force_filter})
             if pressure_range is not None:
                 res_qb.add_filter('res', {'attributes.load_kind': 'pressure'})
-                res_qb.add_filter('res', {'attributes.load':
-                                          _range_filter(pressure_range)})
+                pressure_filter = _range_filter(pressure_range)
+                if pressure_filter is not None:
+                    res_qb.add_filter('res', {'attributes.load': pressure_filter})
             if angle_range is not None:
-                res_qb.add_filter('res', {'attributes.angle':
-                                          _range_filter(angle_range)})
+                angle_filter = _range_filter(angle_range)
+                if angle_filter is not None:
+                    res_qb.add_filter('res', {'attributes.angle': angle_filter})
             if speed_range is not None:
-                res_qb.add_filter('res', {'attributes.speed':
-                                          _range_filter(speed_range)})
+                speed_filter = _range_filter(speed_range)
+                if speed_filter is not None:
+                    res_qb.add_filter('res', {'attributes.speed': speed_filter})
             # R9: a superseded result must never be returned by a query --
             # excluded here, in Python, the same way `export._results_of`
             # and `ingest.find_results` do (the one shared `is_superseded`
@@ -276,8 +339,13 @@ class Friction2DDB:
 
         if order_by:
             key = order_by[1:] if order_by.startswith('-') else order_by
-            results.sort(key=lambda r: _result_sort_key(r, key),
+            results.sort(key=lambda r: _none_safe(_result_sort_key(r, key)),
                         reverse=order_by.startswith('-'))
+        else:
+            # Deterministic even with no explicit order_by -- two identical
+            # queries never return results in a different order just because
+            # the backend felt like it.
+            results.sort(key=lambda r: _default_sort_key(r, run_by_uuid))
         if limit:
             results = results[:limit]
 

@@ -943,7 +943,8 @@ def aiida_clear(profile: Optional[str]):
 
 @aiida_group.command('query')
 @click.option('--material', '-m', 'materials', multiple=True,
-              help='Filter by material (repeatable)')
+              help='Filter by material; repeatable, and a matching run must '
+                   'contain ALL given materials')
 @click.option('--family', default=None, help='Filter by family (e.g. afm, hetero)')
 @click.option('--model', default=None, help='Filter by model (e.g. afm, sheetonsheet)')
 @click.option('--set-label', default=None,
@@ -993,6 +994,12 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
     load_aiida_profile(profile)
 
     db = Friction2DDB()
+
+    if set_label:
+        available = db.get_available_conditions()['set_labels']
+        if set_label not in available:
+            raise click.ClickException(
+                f"No set found with label '{set_label}'. Available: {available}")
 
     query_kwargs = {
         'materials': list(materials) if materials else None,

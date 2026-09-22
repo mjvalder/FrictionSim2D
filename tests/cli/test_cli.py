@@ -352,6 +352,9 @@ def test_aiida_query_forwards_filters_to_friction2ddb(runner, monkeypatch):
         def __init__(self):
             pass
 
+        def get_available_conditions(self):
+            return {'set_labels': ['q1']}
+
         def query(self, **kwargs):
             calls.update(kwargs)
             return _FakeResult()
@@ -369,6 +372,27 @@ def test_aiida_query_forwards_filters_to_friction2ddb(runner, monkeypatch):
     assert calls['family'] == 'hetero'
     assert calls['set_label'] == 'q1'
     assert calls['force_range'] == (10.0, 30.0)
+
+
+def test_aiida_query_unknown_set_label_raises(runner, monkeypatch):
+    class _FakeDB:
+        def __init__(self):
+            pass
+
+        def get_available_conditions(self):
+            return {'set_labels': ['q1', 'q2']}
+
+        def query(self, **_kwargs):
+            raise AssertionError("query() must not run for an unknown set label")
+
+    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr('src.aiida.query.Friction2DDB', _FakeDB)
+
+    result = runner.invoke(cli, ['aiida', 'query', '--set-label', 'nope'])
+
+    assert result.exit_code != 0
+    assert 'nope' in result.output
+    assert 'q1' in result.output
 
 
 def test_aiida_export_help(runner):
