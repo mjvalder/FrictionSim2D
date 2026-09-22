@@ -65,14 +65,18 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
 
 
 def clear_all_nodes(profile: Optional[str] = None) -> int:
-    """Delete every FrictionSim2D node in the profile (spec U6)."""
+    """Delete every FrictionSim2D node in the profile (spec U6), and every
+    `friction2d/*` group with them -- a group left behind would keep offering
+    its set label (`get_available_conditions`, the GUI) for a set that no
+    longer exists."""
     _require_aiida()
     _ensure_aiida_profile(profile)
-    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
+    from aiida.orm import Group, QueryBuilder  # pylint: disable=import-outside-toplevel
     from aiida.tools import delete_nodes  # pylint: disable=import-outside-toplevel
 
     from .data import (FrictionResultsData, FrictionSimulationData,  # pylint: disable=import-outside-toplevel
                        FrictionSimulationSetData)
+    from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
 
     pks = []
     for cls in (FrictionResultsData, FrictionSimulationData,
@@ -82,4 +86,9 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
         pks.extend(pk for (pk,) in qb.all())
     if pks:
         delete_nodes(pks, dry_run=False)
+    groups = QueryBuilder()
+    groups.append(Group, filters={'label': {'like': f'{GROUP_PREFIX}/%'}},
+                  project=['id'])
+    for (group_pk,) in groups.all():
+        Group.collection.delete(group_pk)
     return len(pks)

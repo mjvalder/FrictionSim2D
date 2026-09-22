@@ -937,3 +937,22 @@ def test_truncation_is_not_guessed_without_the_run_settings(aiida_profile_clean,
 
     node, = QueryBuilder().append(FrictionResultsData).all(flat=True)
     assert node.is_complete is True
+
+
+def test_clear_removes_the_set_groups_too(aiida_profile_clean, tmp_path):
+    """m5: `aiida clear` left `friction2d/*` groups behind, so their labels
+    kept appearing as sets that no longer exist."""
+    from aiida.orm import Group, QueryBuilder
+
+    from src.aiida.integration import clear_all_nodes
+    from src.aiida.query import Friction2DDB
+
+    ingest_root(_root(tmp_path), label='to-clear')
+    other = Group(label='not-ours').store()
+
+    assert clear_all_nodes() > 0
+
+    labels = [g.label for g in QueryBuilder().append(Group).all(flat=True)]
+    assert not [label for label in labels if label.startswith('friction2d/')]
+    assert other.label in labels
+    assert Friction2DDB().get_available_conditions()['set_labels'] == []
