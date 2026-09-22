@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, cast
 from aiida import orm
 from aiida.common.exceptions import NotExistent
 from aiida.orm import QueryBuilder
+from aiida.engine import run_get_node as _run_get_node
 from aiida.engine import submit as aiida_submit
 
 from ..core.config import GlobalSettings, load_settings
@@ -41,6 +42,19 @@ def _build_array_directive(scheduler: str, array_size: int) -> str:
 _SUBMISSION_EXCEPTIONS = (OSError, ValueError, KeyError, TypeError, RuntimeError)
 
 
+def _dispatch(builder, daemon: bool):
+    """Launch one CalcJob.
+
+    `aiida.engine.run` needs no message broker, which is the difference that
+    matters here: RabbitMQ is not part of the local or hpc-direct workflow.
+    `--daemon` opts into the broker when one is actually running.
+    """
+    if daemon:
+        return aiida_submit(builder)
+    _result, node = _run_get_node(builder)
+    return node
+
+
 # ---------------------------------------------------------------------------
 # High-level Python API
 # ---------------------------------------------------------------------------
@@ -54,7 +68,8 @@ def run_with_aiida(
     code_label: Optional[str] = None,
     use_array: bool = False,
     auto_setup: bool = True,
-    profile_name: Optional[str] = None,
+    profile: Optional[str] = None,
+    daemon: bool = False,
     **resource_overrides,
 ) -> Tuple[List[Path], Path, Optional[List]]:
     """Run FrictionSim2D simulation with automatic AiiDA setup and submission.
@@ -71,7 +86,9 @@ def run_with_aiida(
         code_label: AiiDA code label (e.g. ``'lammps@hpc'``). Auto-detects if ``None``.
         use_array: Submit as a single array job instead of batch.
         auto_setup: Auto-load AiiDA profile if not loaded.
-        profile_name: AiiDA profile name to load (default: current profile).
+        profile: AiiDA profile name to load (default: current profile).
+        daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
+            Default runs in-process via ``aiida.engine.run``, no broker needed.
         **resource_overrides: Manual resource overrides (machines, mpiprocs,
             walltime_hours, queue, account, memory_mb, etc.).
 
@@ -79,7 +96,7 @@ def run_with_aiida(
         Tuple of ``(simulation_dirs, root_dir, process_nodes)``.
     """
     if auto_setup:
-        _ensure_profile_loaded(profile_name)
+        _ensure_profile_loaded(profile)
 
     settings: GlobalSettings = load_settings(settings_file=settings_file)
 
@@ -97,7 +114,7 @@ def run_with_aiida(
         logger.info("auto_submit=False, skipping submission")
         return simulation_dirs, root_dir, None
 
-    code = _get_code(code_label, interactive=False)
+    code = _get_code(code_label, interactive=False, settings_file=settings_file)
     options, parameters = _build_resources(settings=settings, **resource_overrides)
 
     logger.info("Submitting %d simulation(s) to AiiDA", len(simulation_dirs))
@@ -109,6 +126,7 @@ def run_with_aiida(
             options=options,
             parameters=parameters,
             scheduler=settings.hpc.scheduler_type,
+            daemon=daemon,
         )
         processes = [process]
         logger.info("Submitted array job with PK=%d", process.pk)
@@ -119,6 +137,7 @@ def run_with_aiida(
             config_path=Path(config_file),
             options=options,
             parameters=parameters,
+            daemon=daemon,
         )
         pks = [p.pk for p in processes]
         logger.info("Submitted %d jobs: PKs=%s", len(processes), pks)
@@ -137,6 +156,7 @@ def smart_submit(
     use_array: bool = False,
     scripts: Optional[str] = None,
     dry_run: bool = False,
+    daemon: bool = False,
     **manual_overrides,
 ) -> List[orm.ProcessNode]:
     """Smart CLI submission with auto-detection and interactive prompting.
@@ -147,6 +167,8 @@ def smart_submit(
         use_array: Submit as array job.
         scripts: Comma-separated LAMMPS script names.
         dry_run: Preview only, don't submit.
+        daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
+            Default runs in-process via ``aiida.engine.run``, no broker needed.
         **manual_overrides: Resource overrides (machines, mpiprocs, walltime, etc.).
 
     Returns:
@@ -156,7 +178,7 @@ def smart_submit(
 
     settings: GlobalSettings = load_settings(settings_file=settings_file)
 
-    code = _get_code(code_label, interactive=True)
+    code = _get_code(code_label, interactive=True, settings_file=settings_file)
     click.echo(f"Using code: {code.full_label}")
 
     simulation_dirs = _find_lammps_dirs(simulation_dir)
@@ -196,6 +218,7 @@ def smart_submit(
             options=options,
             parameters=parameters,
             scheduler=settings.hpc.scheduler_type,
+            daemon=daemon,
         )
         processes = [process]
         click.echo(f"Submitted array job (PK={process.pk})")
@@ -206,6 +229,7 @@ def smart_submit(
             config_path=None,
             options=options,
             parameters=parameters,
+            daemon=daemon,
         )
         pks = [p.pk for p in processes]
         click.echo(f"Submitted {len(processes)} jobs (PKs={pks[0]}-{pks[-1]})")
@@ -223,6 +247,7 @@ def submit_simulation(
     sim_node: Any = None,
     options: Optional[Dict[str, Any]] = None,
     parameters: Optional[Dict[str, Any]] = None,
+    daemon: bool = False,
 ) -> orm.ProcessNode:
     """Submit a single simulation via AiiDA.
 
@@ -232,9 +257,11 @@ def submit_simulation(
         sim_node: Optional ``FrictionSimulationData`` for tracking.
         options: Optional dict overriding resource/walltime settings.
         parameters: Optional dict with LAMMPS runtime parameters.
+        daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
+            Default runs in-process via ``aiida.engine.run``, no broker needed.
 
     Returns:
-        The submitted ``ProcessNode``.
+        The submitted (or, without ``daemon``, already-finished) ``ProcessNode``.
     """
     code = orm.load_code(code_label) if isinstance(code_label, str) else code_label
     folder = prepare_simulation_folder(sim_dir)
@@ -254,7 +281,7 @@ def submit_simulation(
     if options:
         apply_options(builder, options)
 
-    process = aiida_submit(builder)
+    process = _dispatch(builder, daemon)
 
     if sim_node and not sim_node.is_stored:
         sim_node.store()
@@ -272,6 +299,7 @@ def submit_batch(
     config_path: Optional[Path] = None,
     options: Optional[Dict[str, Any]] = None,
     parameters: Optional[Dict[str, Any]] = None,
+    daemon: bool = False,
 ) -> list:
     """Submit a batch of simulations via AiiDA.
 
@@ -281,6 +309,8 @@ def submit_batch(
         config_path: Original config file path (for registration).
         options: Optional dict overriding resource/walltime settings.
         parameters: Optional dict with LAMMPS runtime parameters.
+        daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
+            Default runs in-process via ``aiida.engine.run``, no broker needed.
 
     Returns:
         List of submitted ``ProcessNode`` instances.
@@ -305,6 +335,7 @@ def submit_batch(
                 sim_node=sim_node,
                 options=options,
                 parameters=parameters,
+                daemon=daemon,
             )
             processes.append(proc)
         except _SUBMISSION_EXCEPTIONS:
@@ -320,6 +351,7 @@ def submit_array(
     options: Optional[Dict[str, Any]] = None,
     parameters: Optional[Dict[str, Any]] = None,
     scheduler: str = 'pbs',
+    daemon: bool = False,
 ) -> orm.ProcessNode:
     """Submit a single array job for multiple simulations.
 
@@ -330,9 +362,11 @@ def submit_array(
         options: Optional dict overriding resource/walltime settings.
         parameters: Optional dict with runtime parameters.
         scheduler: Scheduler type (``'pbs'`` or ``'slurm'``).
+        daemon: If ``True``, submit through the AiiDA daemon (needs RabbitMQ).
+            Default runs in-process via ``aiida.engine.run``, no broker needed.
 
     Returns:
-        The submitted ``ProcessNode``.
+        The submitted (or, without ``daemon``, already-finished) ``ProcessNode``.
     """
     code = orm.load_code(code_label) if isinstance(code_label, str) else code_label
     sim_root = Path(simulation_root)
@@ -376,14 +410,14 @@ def submit_array(
         line for line in [prepend, 'bash run_array.sh', 'exit $?'] if line
     )
 
-    return aiida_submit(builder)
+    return _dispatch(builder, daemon)
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_profile_loaded(profile_name: Optional[str] = None) -> None:
+def _ensure_profile_loaded(profile: Optional[str] = None) -> None:
     """Ensure an AiiDA profile is loaded."""
     from aiida.manage.configuration import get_profile, load_profile  # pylint: disable=import-outside-toplevel
 
@@ -396,9 +430,9 @@ def _ensure_profile_loaded(profile_name: Optional[str] = None) -> None:
         pass
 
     try:
-        if profile_name:
-            load_profile(profile_name)
-            logger.info("Loaded AiiDA profile '%s'", profile_name)
+        if profile:
+            load_profile(profile)
+            logger.info("Loaded AiiDA profile '%s'", profile)
         else:
             load_profile()
             logger.info("Loaded default AiiDA profile")
@@ -408,17 +442,28 @@ def _ensure_profile_loaded(profile_name: Optional[str] = None) -> None:
         ) from exc
 
 
-def _get_code(code_label: Optional[str], interactive: bool = False) -> orm.Code:
-    """Get AiiDA code by label or auto-detect.
+def _get_code(code_label: Optional[str], interactive: bool = False,
+              settings_file=None) -> orm.Code:
+    """Resolve the LAMMPS code: explicit label, then settings, then discovery.
 
     Args:
-        code_label: Code label (e.g. ``'lammps@hpc'``). If ``None``, auto-detects.
+        code_label: Code label (e.g. ``'lammps@hpc'``). If ``None``, falls
+            back to ``settings.aiida.lammps_code_label`` before scanning.
         interactive: If ``True``, prompt user to select when ambiguous (CLI mode).
             If ``False``, raise ``ValueError`` on ambiguity (API mode).
+        settings_file: Explicit settings.yaml path for the fallback lookup.
 
     Returns:
         AiiDA Code node.
     """
+    if not code_label:
+        # `load_settings` is already imported at module scope (line 23);
+        # re-importing it locally here would just shadow it.
+        try:
+            code_label = load_settings(settings_file=settings_file).aiida.lammps_code_label
+        except (OSError, ValueError, AttributeError):
+            code_label = None
+
     if code_label:
         try:
             return orm.load_code(code_label)

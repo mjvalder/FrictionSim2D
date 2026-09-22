@@ -1024,59 +1024,26 @@ def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[
 
 
 @aiida_group.command('setup')
-@click.option('--profile', '-p', default=None,
-              help='AiiDA profile name (default: auto-created)')
+@click.option('--create-profile', '-p', 'create_profile', default=None,
+              help='Name of the AiiDA profile to CREATE (default: friction2d). '
+                   'Every other command spells --profile, which LOADS an existing one.')
 @click.option('--lammps-path', type=click.Path(),
-              help='Explicit path to LAMMPS executable')
-@click.option('--hpc-config', type=click.Path(exists=True),
-              help='(Deprecated) Path to hpc.yaml for PBS/SLURM computer setup')
-@click.option('--use-remote', is_flag=True,
-              help='Configure remote HPC computer using settings from settings.yaml')
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-                            default=None,
-                            help='Path to a settings.yaml file used with --use-remote.')
-def aiida_setup(profile: Optional[str], lammps_path: Optional[str],
-                                hpc_config: Optional[str], use_remote: bool,
-                                settings_file: Optional[Path]):
-    """Set up AiiDA profile, computer, and LAMMPS code.
+              help='Explicit path to the LAMMPS executable')
+def aiida_setup(create_profile: Optional[str], lammps_path: Optional[str]):
+    """Set up the AiiDA profile, the localhost computer and the LAMMPS code.
 
-    Performs first-time AiiDA configuration:
-    - Creates a profile (via verdi presto)
-    - Registers localhost or remote HPC as a computer
-    - Configures the LAMMPS code
+    localhost only: on the HPC, run this inside the HPC conda environment
+    (hpc-direct mode) and bring the archive home with `aiida export`.
 
-    For remote HPC setup, configure the AiiDA section in settings.yaml with
-    hostname, username, workdir, etc., then use --use-remote flag.
-
-    Example::
-
-        FrictionSim2D aiida setup
-        FrictionSim2D aiida setup --lammps-path /usr/local/bin/lmp_mpi
-        FrictionSim2D aiida setup --use-remote  # Uses settings.yaml AiiDA config
+    Example:
+        FrictionSim2D aiida setup --lammps-path /usr/local/bin/lmp
     """
-    from .aiida.setup import full_setup
+    from .aiida.setup import full_setup  # noqa: PLC0415
 
     click.echo("🔧 Running AiiDA first-time setup ...")
-
-    # Load HPC settings if using remote
-    hpc_settings = None
-    aiida_settings = None
-    if use_remote:
-        settings = load_settings(settings_file=settings_file)
-        hpc_settings = settings.hpc
-        aiida_settings = settings.aiida
-        click.echo(f"📡 Configuring remote HPC: {aiida_settings.hostname or 'localhost'}")
-
-    if hpc_config:
-        click.echo("⚠️  --hpc-config is deprecated. Use --use-remote with settings.yaml instead.")
-
     try:
-        full_setup(
-            profile_name=profile or 'friction2d',
-            lammps_executable=lammps_path,
-            hpc_settings=hpc_settings,
-            aiida_settings=aiida_settings,
-        )
+        full_setup(profile_name=create_profile or 'friction2d',
+                   lammps_executable=lammps_path)
         click.echo("✅ AiiDA setup complete")
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA setup failed")
@@ -1176,6 +1143,9 @@ def aiida_package(simulation_dir: str, output: Optional[str]):
               help='Override: Scheduler project/account')
 @click.option('--dry-run', is_flag=True,
               help='Preview configuration without submitting')
+@click.option('--daemon', is_flag=True, default=False,
+              help='Submit to the AiiDA daemon (needs RabbitMQ). '
+                   'Default: run in-process, which needs no broker.')
 def aiida_submit(
     simulation_dir: str,
     settings_file: Optional[Path],
@@ -1188,6 +1158,7 @@ def aiida_submit(
     queue: Optional[str],
     project: Optional[str],
     dry_run: bool,
+    daemon: bool,
 ):
     """Submit simulations to AiiDA with smart defaults and prompting.
 
@@ -1232,6 +1203,7 @@ def aiida_submit(
             use_array=use_array,
             scripts=scripts,
             dry_run=dry_run,
+            daemon=daemon,
             **overrides,
         )
 

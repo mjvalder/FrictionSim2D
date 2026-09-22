@@ -421,59 +421,38 @@ def full_setup(
     computer_label: str = 'localhost',
     lammps_label: str = 'lammps',
     lammps_executable: Optional[str] = None,
-    start_daemon_workers: int = 1,
-    hpc_settings: Optional['HPCSettings'] = None,
-    aiida_settings: Optional['AiidaSettings'] = None,
+    start_daemon_workers: int = 0,
 ) -> dict:
-    """Complete AiiDA setup for FrictionSim2D on HPC.
+    """First-time AiiDA setup for FrictionSim2D.
 
-    Performs all first-time setup steps in order:
-
-    1. Start RabbitMQ broker (``rabbitmq-server -detached``)
-    2. Create AiiDA profile (``verdi presto --use-postgres``)
-    3. Register localhost or remote HPC as an AiiDA computer
-    4. Register the LAMMPS code
-    5. Start the AiiDA daemon
-
-    Prerequisites (conda)::
-
-        conda install -c conda-forge aiida-core aiida-core.services
-        pip install --upgrade typing_extensions
+    localhost only. The SSH-connected HPC mode is gone (spec U5): the HPC
+    blocks direct connections, so the two supported remote workflows are
+    remote-manual (rsync + `aiida import`) and hpc-direct (AiiDA in the HPC
+    conda env, `aiida export` there, `import-archive` at home). No RabbitMQ
+    is started -- `aiida submit` runs through the engine unless `--daemon`
+    is passed.
 
     Args:
-        profile_name: AiiDA profile name.
-        computer_label: Computer label (used if no HPC settings provided).
+        profile_name: AiiDA profile name to CREATE.
+        computer_label: Computer label to register.
         lammps_label: LAMMPS code label.
         lammps_executable: Path to LAMMPS (auto-detected if ``None``).
-        start_daemon_workers: Number of daemon workers to start.
-        hpc_settings: HPCSettings from settings.yaml (preferred method).
-        aiida_settings: AiidaSettings from settings.yaml (preferred method).
+        start_daemon_workers: Number of daemon workers to start; ``0`` (the
+            default) starts none.
 
     Returns:
-        Dict with setup results (``rabbitmq``, ``profile``, ``computer``,
-        ``code``, ``daemon``).
+        Dict with setup results (``profile``, ``computer``, ``code``,
+        ``daemon_workers``, ``daemon``).
     """
     results = {}
-
-    results['rabbitmq'] = start_rabbitmq()
     results['profile'] = setup_profile(profile_name)
-
     if not results['profile']:
         raise RuntimeError("AiiDA profile setup failed — cannot continue")
-
-    if hpc_settings or aiida_settings:
-        resolved_hpc = hpc_settings or HPCSettings()
-        resolved_aiida = aiida_settings or AiidaSettings()
-        results['computer'] = setup_computer_from_hpc_settings(
-            resolved_hpc, resolved_aiida
-        )
-        computer_label = results['computer'].label
-    else:
-        results['computer'] = setup_localhost_computer(computer_label)
-
+    results['computer'] = setup_localhost_computer(computer_label)
     results['code'] = setup_lammps_code(
         lammps_label, computer_label, lammps_executable
     )
-    results['daemon'] = start_daemon(start_daemon_workers)
-
+    results['daemon_workers'] = start_daemon_workers
+    results['daemon'] = (start_daemon(start_daemon_workers)
+                         if start_daemon_workers else False)
     return results

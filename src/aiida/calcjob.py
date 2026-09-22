@@ -30,6 +30,15 @@ _SIM_SUBDIRS = (
     'lammps', 'data', 'potentials', 'results', 'visuals', 'build', 'provenance',
 )
 
+#: Attribute key on a staged `simulation_dir` FolderData listing which of
+#: `_SIM_SUBDIRS` were sourced from the run directory's PARENT rather than the
+#: run directory itself -- see `_stage_sim_dir`'s docstring. `None`, never
+#: `()`, is the "not present" default wherever this is read back:
+#: `NodeAttributes.get`'s own "no default given" sentinel IS the empty tuple
+#: (CPython interns it), so passing `()` there is silently indistinguishable
+#: from omitting the default and raises instead of falling back.
+_SHARED_SUBDIRS_ATTR = '_frictionsim2d_shared_subdirs'
+
 
 # ---------------------------------------------------------------------------
 # CalcJob
@@ -103,8 +112,10 @@ class LammpsFrictionCalcJob(CalcJob):
             or self._DEFAULT_LAMMPS_SCRIPTS
         )
         sim_prefix = _sim_prefix_for(inputs, repo, lammps_scripts)
+        shared_subdirs = frozenset(
+            sim_folder.base.attributes.get(_SHARED_SUBDIRS_ATTR, None) or ())
 
-        _stage_files_into_sandbox(folder, repo, sim_prefix)
+        _stage_files_into_sandbox(folder, repo, sim_prefix, shared_subdirs)
         _handle_array_mode(folder, sim_folder, params, scripts_override, lammps_scripts)
 
         code_infos = [
@@ -400,26 +411,86 @@ def apply_options(builder, options: dict[str, Any] | None) -> None:
 
 def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
                    relative_to: Path) -> None:
-    """Stage simulation subdirectories into a FolderData node."""
+    """Stage simulation subdirectories into a FolderData node.
+
+    Most `_SIM_SUBDIRS` live directly under `sim_dir`. AFM-family runs are
+    nested one level deeper (`.../K<temp>/L<layers>`, see
+    `AFMSimulation.build`/`write_inputs`): the run's own `lammps/`, `data/`,
+    `results/` and `visuals/` sit at that leaf, but `build/` and
+    `provenance/` (the built tip/sheet geometry and the potential files
+    `pair_coeff` reads) are shared across every layer count and sit one level
+    up, at `sim_dir.parent` -- exactly what `run/tree.py`'s
+    `provenance_dir_for` already falls back to for the same reason. A subdir
+    missing at `sim_dir` is looked for there instead, and its name is
+    recorded on `folder_data` (`_SHARED_SUBDIRS_ATTR`) so
+    `prepare_for_submission` (via `_stage_files_into_sandbox`) knows to nest
+    it under the PARENT of the run's prefix in the remote workdir, matching
+    the sim-root-relative paths the rendered LAMMPS scripts actually
+    reference (`relative_run_dir`, not `relative_run_dir_layer` --
+    `builders/simulation_base.py`'s `_run_dir_path` docstring). Sheet-like
+    families have no such nesting: `build`/`provenance` sit beside `lammps`
+    at `sim_dir` itself, taken by the first branch below like everything
+    else, so this fallback never triggers for them.
+    """
+    shared_subdirs = set()
     for subdir in _SIM_SUBDIRS:
         sub_path = sim_dir / subdir
-        if sub_path.exists():
-            for file_path in sub_path.rglob('*'):
-                if file_path.is_file():
-                    rel = file_path.relative_to(relative_to)
-                    folder_data.base.repository.put_object_from_file(
-                        str(file_path), str(rel),
-                    )
+        if not sub_path.exists():
+            if sim_dir.parent == sim_dir:
+                continue
+            sub_path = sim_dir.parent / subdir
+            if not sub_path.exists():
+                continue
+        for file_path in sub_path.rglob('*'):
+            if not file_path.is_file():
+                continue
+            try:
+                rel = file_path.relative_to(relative_to)
+            except ValueError:
+                rel = file_path.relative_to(sim_dir.parent)
+                shared_subdirs.add(subdir)
+            folder_data.base.repository.put_object_from_file(
+                str(file_path), str(rel),
+            )
+    if shared_subdirs:
+        existing = set(
+            folder_data.base.attributes.get(_SHARED_SUBDIRS_ATTR, None) or ())
+        folder_data.base.attributes.set(
+            _SHARED_SUBDIRS_ATTR, sorted(existing | shared_subdirs))
 
 
-def _stage_files_into_sandbox(folder: Folder, repo, sim_prefix: str | None) -> None:
-    """Copy all repository files into the AiiDA sandbox folder."""
+def _stage_files_into_sandbox(folder: Folder, repo, sim_prefix: str | None,
+                              shared_subdirs: frozenset[str] = frozenset()) -> None:
+    """Copy all repository files into the AiiDA sandbox folder.
+
+    Every file is written twice: once at its own repository-relative path (so
+    the fixed `-in lammps/{script}` entry point in `_make_code_info` always
+    resolves), and once nested under a prefix (so the LAMMPS scripts' own
+    sim-root-relative `read_data`/`include`/`pair_coeff` paths resolve too --
+    see `_sim_prefix_for`). `shared_subdirs` are the top-level directories
+    `_stage_sim_dir` sourced from the run directory's PARENT rather than the
+    run directory itself (AFM's `build/` and `provenance/`): those nest under
+    the PARENT of `sim_prefix` instead of `sim_prefix` itself, matching
+    `relative_run_dir` rather than `relative_run_dir_layer` in the rendered
+    scripts.
+    """
+    def _prefix_root(top_dir: str | None) -> str | None:
+        if not sim_prefix:
+            return None
+        if top_dir in shared_subdirs:
+            parent = Path(sim_prefix).parent
+            return None if parent == Path('.') else str(parent)
+        return sim_prefix
+
     for subdir in _SIM_SUBDIRS:
         folder.get_subfolder(subdir, create=True)
-        if sim_prefix:
-            folder.get_subfolder(f"{sim_prefix}/{subdir}", create=True)
+        prefix_root = _prefix_root(subdir)
+        if prefix_root:
+            folder.get_subfolder(f"{prefix_root}/{subdir}", create=True)
 
     for root, _dirs, files in repo.walk():
+        top_dir = root.parts[0] if root.parts else None
+        prefix_root = _prefix_root(top_dir)
         for file_name in files:
             rel_path = (root / file_name).as_posix()
             with repo.open(rel_path, 'rb') as src:
@@ -431,8 +502,8 @@ def _stage_files_into_sandbox(folder: Folder, repo, sim_prefix: str | None) -> N
                 sub = folder.get_subfolder(root.as_posix(), create=True)
                 sub.create_file_from_filelike(io.BytesIO(payload), file_name)
 
-            if sim_prefix:
-                pref_root = (Path(sim_prefix) / root).as_posix()
+            if prefix_root:
+                pref_root = (Path(prefix_root) / root).as_posix()
                 pref = folder.get_subfolder(pref_root, create=True)
                 pref.create_file_from_filelike(io.BytesIO(payload), file_name)
 
