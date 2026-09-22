@@ -69,30 +69,53 @@ path, size and sha256 instead of stored.
 
 ### Credentials never enter the store
 
-Every settings/config document staged into a node repository -- `settings.yaml`,
-`config.json`, and any `*.yaml`/`*.json` under `provenance/` -- is sanitised
-first: `src.core.config.redact_secrets_mapping` blanks `database.password`/
-`database.api_key` (the flat shape, and the pre-Task-31 nested `database.
-local.*`/`database.central.*` shape) before the file is written to the
-repository, whether the document already had them stripped at write time
-(`redact_secrets`, see [settings.md](settings.md#database)) or not. This is
-the second, independent gate: a tree built before write-time redaction
-existed, or a root `settings.yaml` a user wrote by hand with `settings init`
-run in the simulation root (`FrictionSimulationSetData.set_from_root` stages
-that file), never goes through the first one, but still cannot carry a
-credential into a node, an archive or an export bundle. Every other file is
-stored verbatim.
+**The guarantee:** any mapping key named like a credential -- `password`,
+`passwd`, `api_key`, `apikey`, `secret`, `token`, or a name ending in
+`_password`/`_secret`/`_token`/`_api_key` (case-insensitive) -- is blanked to
+`''` in every YAML, JSON or INI settings/config document before that document
+is stored in a friction2d node repository, an archive or an export bundle.
+This is a key-NAME rule, not a fixed path: it catches a credential wherever it
+sits (`database.password`, a legacy `database.local.password`, a YAML
+anchor/alias, `database.extra.password`, a stray `hpc.api_key`, a bare
+top-level `password`, ...), because `src.core.config.redact_secrets_mapping`
+walks every mapping and list in the parsed document rather than checking a
+`database`/`settings` path specifically (a 2026-09-22 review round replaced
+the original, narrower, path-based version after a probe got a credential
+past it through exactly those shapes).
 
-The same gate covers a run's OTHER path into the store: `src.aiida.calcjob.
-_stage_sim_dir` (behind `prepare_simulation_folder`/`prepare_simulation_root`,
-which `submit.py` uses to build a CalcJob's `simulation_dir` input for the
-**local**/**hpc-direct** run modes) stages `provenance/**` into a `FolderData`
-that becomes a real, stored CalcJob input -- and `aiida.tools.archive.
-create_archive`'s default traversal rules follow a results node BACKWARD
-through the calculation that created it to that calculation's own inputs, so
-this `FolderData` can reach an archive even when `export_archive` names only
-the set/run/results nodes of a group, never the `FolderData` or the
-`CalcJobNode` itself.
+`src.aiida.data.redact.stage_file` is the choke point: every path staged into
+a `FrictionSimulationSetData`, `FrictionSimulationData` or
+`FrictionResultsData` repository, and (via `src.aiida.calcjob._stage_sim_dir`,
+behind `prepare_simulation_folder`/`prepare_simulation_root`, which
+`submit.py` uses to build a CalcJob's `simulation_dir` input for the
+**local**/**hpc-direct** run modes) a CalcJob's own input `FolderData`, goes
+through it instead of writing to the repository directly. A candidate
+document -- `settings.yaml`/`.yml`, `config.json`, `*.ini`, any of those with
+an extra suffix such as `.bak`, or any file under a `provenance` path
+component outside its `cif/`/`potentials/` subdirectories -- is parsed (JSON,
+then YAML, then, for a `.ini` name, `configparser`) and re-serialised with
+every credential-named key blanked; anything else is stored verbatim,
+unchanged. A candidate that cannot be parsed in any of those forms (a
+multi-document YAML stream, non-UTF-8 content) is REFUSED outright
+(`UnparsableDocumentError`) rather than stored unexamined -- failing closed,
+not open. This is the second, independent gate: a tree built before
+write-time redaction existed (`redact_secrets`, built on the same
+`redact_secrets_mapping`, see [settings.md](settings.md#database)), or a root
+`settings.yaml`/`.yml` a user wrote by hand with `settings init` run in the
+simulation root (`FrictionSimulationSetData.set_from_root` stages that file),
+never goes through the first gate, but still cannot carry a credential into
+a node, an archive or an export bundle -- including through `aiida.tools.
+archive.create_archive`'s default traversal rules, which follow a results
+node BACKWARD through the calculation that created it to that calculation's
+own inputs, so a CalcJob's `simulation_dir` `FolderData` can reach an archive
+even when `export_archive` names only the set/run/results nodes of a group,
+never the `FolderData` or the `CalcJobNode` itself.
+
+**Nodes stored before this change are not rewritten.** Sanitisation only ever
+happens at staging time, going forward -- an archive taken from, or a node
+already sitting in, a profile populated before this guarantee existed can
+still carry a credential. Clear the profile (`FrictionSim2D aiida clear`) or
+re-create it before sharing an archive built from old data.
 
 ## 2. Idempotent import
 

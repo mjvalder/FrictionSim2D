@@ -246,77 +246,82 @@ class GlobalSettings(BaseModel):
 
 #: `DatabaseSettings` fields that are credentials. Never written into a run
 #: tree: `provenance/settings.yaml` and `config.json` are stored in the AiiDA
-#: repository and travel in archives and export bundles.
+#: repository and travel in archives and export bundles. Kept for readers of
+#: this constant; :func:`redact_secrets_mapping` no longer keys off it
+#: directly (see its docstring -- 2026-09-22 review round).
 SECRET_DATABASE_FIELDS = ('password', 'api_key')
 
+#: Mapping-key names that always name a credential, matched case-
+#: insensitively, WHEREVER they occur in a settings/config document -- not
+#: only under `database`. Audited against every field name in
+#: `GlobalSettings`, `AFMSimulationConfig` and `SheetOnSheetSimulationConfig`
+#: (2026-09-22): none is legitimately named any of these. `run/naming.py`'s
+#: `pot_token`/`RunTokens` vocabulary uses "token" for an unrelated concept
+#: (a directory-name fragment), but that value is never a key in a settings/
+#: config document -- it is an AiiDA node ATTRIBUTE
+#: (`FrictionSimulationData.pot_token`), which this function never touches.
+#: If a genuinely non-secret field is ever added under one of these names,
+#: it must be renamed, or carved out here explicitly with a comment saying
+#: why -- never worked around at a call site.
+_SECRET_KEY_NAMES = frozenset({
+    'password', 'passwd', 'api_key', 'apikey', 'secret', 'token',
+})
+#: Suffixed forms of the same names, e.g. `db_password`, `central_api_key`.
+_SECRET_KEY_SUFFIXES = ('_password', '_secret', '_token', '_api_key')
 
-def redact_secrets(settings: GlobalSettings) -> GlobalSettings:
-    """A deep copy of `settings` with the central-DB credentials blanked.
 
-    Every other field -- including the non-secret `database.host`/`api_url`,
-    which say where a run's rows were meant to go -- is kept.
-    """
-    safe = settings.model_copy(deep=True)
-    for name in SECRET_DATABASE_FIELDS:
-        setattr(safe.database, name, '')
-    return safe
-
-
-#: `DatabaseSettings.local`/`.central` -- the pre-Task-31 nested shape's two
-#: profile sub-keys, each a `DatabaseProfileSettings`-shaped mapping with its
-#: own `password`/`api_key`. `active_profile` names no credential itself and
-#: is left alone.
-_LEGACY_DB_PROFILE_KEYS = ('local', 'central')
-
-
-def _redact_database_mapping(database: Dict[str, Any]) -> Dict[str, Any]:
-    """Blank credential values on one raw ``database``-shaped mapping.
-
-    Handles the flat v3 shape (`password`/`api_key` at this level) and the
-    legacy nested shape (the same two fields one level down, under `local`/
-    `central`) in one pass -- a mapping can carry either or, transiently,
-    both. Key order is preserved.
-    """
-    redacted = dict(database)
-    for name in SECRET_DATABASE_FIELDS:
-        if name in redacted:
-            redacted[name] = ''
-    for profile_key in _LEGACY_DB_PROFILE_KEYS:
-        profile = redacted.get(profile_key)
-        if isinstance(profile, dict):
-            redacted[profile_key] = _redact_database_mapping(profile)
-    return redacted
+def is_secret_key(key: Any) -> bool:
+    """True when `key` (one mapping key of parsed YAML/JSON) names a
+    credential, by exact name or suffix, case-insensitively."""
+    if not isinstance(key, str):
+        return False
+    lowered = key.lower()
+    return lowered in _SECRET_KEY_NAMES or lowered.endswith(_SECRET_KEY_SUFFIXES)
 
 
 def redact_secrets_mapping(data: Any) -> Any:
-    """A copy of a raw settings/config mapping with credentials blanked.
+    """A copy of a raw settings/config structure with every credential blanked.
 
-    Unlike :func:`redact_secrets`, this works on a plain ``dict`` as loaded
-    from YAML/JSON -- e.g. `provenance/settings.yaml`, or `provenance/
-    config.json`'s embedded `run_dict['settings']` -- not a validated
-    :class:`GlobalSettings`, so it tolerates documents `GlobalSettings.
-    model_validate` would partially reject: the legacy `database.active_
-    profile`/`local`/`central` shape (see :data:`_LEGACY_DB_PROFILE_KEYS`)
-    as well as the current flat one.
+    Recurses into every mapping and sequence found anywhere in `data` --
+    not just a known `database`/`settings` path -- and blanks the value of
+    any mapping key that is :func:`is_secret_key`, to `''`, regardless of
+    where it sits or how it got there. This is what catches, among others:
+    a YAML anchor/alias (`base: &b {password: X}` then `database: *b`) --
+    already fully expanded into an ordinary nested dict by `yaml.safe_load`
+    before this ever runs, so every place the aliased mapping is referenced
+    is walked and blanked independently, not just the first; `database.
+    extra.password` or `general.settings.database.password` at any nesting
+    depth inside a `config.json` document; a stray `hpc.api_key`; and a bare
+    top-level `password`. `SECRET_DATABASE_FIELDS`-scoped, `database`/
+    `settings`-path-only redaction (this function's original 2026-09-22
+    shape) missed exactly these -- a 2026-09-22 review round's probe got a
+    credential through every one of them.
 
-    Recurses into a top-level ``settings`` key so one call sanitises a whole
-    `config.json` document (whose `database` block lives at `settings.
-    database`, not at the document's own top level) exactly as it would a
-    bare `settings.yaml`. Non-dict input is returned unchanged; a dict is
-    always shallow-copied (mutating neither the input nor, by extension, any
-    caller's on-disk bytes) even when it holds neither key. Key order is
+    Non-dict, non-list input passes through unchanged. Every dict and list
+    encountered is copied (the input is never mutated); key order is
     preserved throughout.
     """
-    if not isinstance(data, dict):
-        return data
-    redacted = dict(data)
-    database = redacted.get('database')
-    if isinstance(database, dict):
-        redacted['database'] = _redact_database_mapping(database)
-    settings = redacted.get('settings')
-    if isinstance(settings, dict):
-        redacted['settings'] = redact_secrets_mapping(settings)
-    return redacted
+    if isinstance(data, dict):
+        return {key: ('' if is_secret_key(key) else redact_secrets_mapping(value))
+                for key, value in data.items()}
+    if isinstance(data, list):
+        return [redact_secrets_mapping(item) for item in data]
+    return data
+
+
+def redact_secrets(settings: GlobalSettings) -> GlobalSettings:
+    """A copy of `settings` with every credential blanked.
+
+    Built on :func:`redact_secrets_mapping` -- the exact same function the
+    storage-time sanitiser (`src.aiida.data.redact`) uses on a raw `settings.
+    yaml`/`config.json` document -- via a `model_dump`/`model_validate` round
+    trip, so write-time and store-time redaction can never drift apart into
+    two different notions of "credential". Every other field -- including
+    the non-secret `database.host`/`api_url`, which say where a run's rows
+    were meant to go -- is kept. `settings` itself is not mutated.
+    """
+    redacted = redact_secrets_mapping(settings.model_dump())
+    return cast(GlobalSettings, GlobalSettings.model_validate(redacted))
 
 
 # --- User Input Settings (From .ini files) ---

@@ -23,7 +23,6 @@ pytestmark = pytest.mark.aiida
 from src.aiida.data import FrictionSimulationSetData  # noqa: E402
 from src.aiida.export import export_archive, export_results, import_archive, rebuild_set  # noqa: E402
 from src.aiida.ingest import group_label, ingest_root  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import make_run  # noqa: E402
 
 REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
@@ -124,6 +123,27 @@ def test_set_from_root_strips_credentials_from_a_root_settings_file(
     assert parsed['thermostat']['type'] == 'langevin'
 
 
+def test_set_from_root_also_finds_a_root_settings_yml(aiida_profile_clean, tmp_path):
+    """`.yml` is as valid a YAML extension as `.yaml`; `set_from_root` must
+    fall back to it when there is no `settings.yaml`, and still stage the
+    result under the canonical `settings.yaml` name (what `load_settings`/
+    `rebuild_set` look for)."""
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm')
+    (root / 'settings.yml').write_text(
+        yaml.safe_dump({'database': FLAT_DATABASE}, sort_keys=False),
+        encoding='utf-8')
+
+    node = FrictionSimulationSetData()
+    node.set_from_root(root, label='secrets-set-yml')
+    node.store()
+
+    assert 'settings.yaml' in node.base.repository.list_object_names()
+    stored = node.base.repository.get_object_content('settings.yaml', mode='r')
+    _assert_no_secrets(stored, 'settings.yaml (from a root settings.yml)')
+    assert yaml.safe_load(stored)['database']['host'] == 'db.example.org'
+
+
 @pytest.mark.parametrize('database', [FLAT_DATABASE, LEGACY_DATABASE],
                          ids=['flat', 'legacy-nested'])
 def test_ingest_strips_credentials_from_provenance_documents(
@@ -163,7 +183,17 @@ def test_group_wide_guard_no_secret_string_anywhere(aiida_profile_clean, tmp_pat
     (root / 'settings.yaml').write_text(
         yaml.safe_dump({'database': FLAT_DATABASE}), encoding='utf-8')
 
-    ingest_root(root, label='secrets-guard')
+    report = ingest_root(root, label='secrets-guard')
+    assert report.ok(), report.render()
+    assert len(report.created_runs) == 2
+    assert len(report.created_results) == 2
+
+    from aiida.orm import Group  # pylint: disable=import-outside-toplevel
+
+    group = Group.collection.get(label=group_label('secrets-guard'))
+    # 1 set + 2 runs + 2 results -- the store-wide guard below is only
+    # meaningful once this confirms every node actually landed in the group.
+    assert len(group.nodes) == 5
 
     _assert_group_has_no_secrets('secrets-guard')
 

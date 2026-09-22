@@ -118,3 +118,86 @@ def test_redact_secrets_mapping_passes_non_dict_input_through():
 def test_redact_secrets_mapping_tolerates_a_document_with_no_database():
     data = {'thermostat': {'type': 'langevin'}}
     assert redact_secrets_mapping(data) == data
+
+
+# --- 2026-09-22 review round: five shapes that got a credential past the
+# original database/settings-path-only implementation ------------------
+
+def test_redact_secrets_mapping_blanks_a_yaml_anchor_alias():
+    """`base: &b {password: X}` then `database: *b` -- `yaml.safe_load`
+    expands the alias into an ordinary (shared) nested dict before this ever
+    runs, so `base` itself, not just wherever `database` is checked, must be
+    walked and blanked."""
+    text = (
+        "base: &b\n"
+        "  host: db.example.org\n"
+        f"  password: {PASSWORD}\n"
+        "database: *b\n"
+    )
+    data = yaml.safe_load(text)
+
+    safe = redact_secrets_mapping(data)
+
+    assert safe['base']['password'] == ''
+    assert safe['database']['password'] == ''
+    assert safe['base']['host'] == 'db.example.org'
+
+
+def test_redact_secrets_mapping_blanks_an_unanticipated_database_subkey():
+    """`database.extra.password` -- an arbitrary nesting depth under
+    `database`, not one of the two named legacy profile keys."""
+    data = {'database': {'extra': {'password': PASSWORD}, 'host': 'x'}}
+
+    safe = redact_secrets_mapping(data)
+
+    assert safe['database']['extra']['password'] == ''
+    assert safe['database']['host'] == 'x'
+
+
+def test_redact_secrets_mapping_blanks_a_deeply_nested_config_json_shape():
+    """`general.settings.database.password` -- `config.json`'s `database`
+    block need not sit at `settings.database`; any nesting must be caught."""
+    data = {'general': {'settings': {'database': {'password': PASSWORD}}}}
+
+    safe = redact_secrets_mapping(data)
+
+    assert safe['general']['settings']['database']['password'] == ''
+
+
+def test_redact_secrets_mapping_blanks_a_stray_hpc_api_key():
+    """A credential-named key outside `database` entirely."""
+    data = {'hpc': {'api_key': API_KEY, 'queue': 'batch'}}
+
+    safe = redact_secrets_mapping(data)
+
+    assert safe['hpc']['api_key'] == ''
+    assert safe['hpc']['queue'] == 'batch'
+
+
+def test_redact_secrets_mapping_blanks_a_bare_top_level_password():
+    data = {'password': PASSWORD, 'other': 'kept'}
+
+    safe = redact_secrets_mapping(data)
+
+    assert safe['password'] == ''
+    assert safe['other'] == 'kept'
+
+
+def test_redact_secrets_mapping_blanks_case_insensitively_and_by_suffix():
+    data = {'Password': PASSWORD, 'API_KEY': API_KEY, 'db_password': 'x',
+           'central_api_key': 'y', 'secret': 'z', 'passwd': 'w', 'apikey': 'v'}
+
+    safe = redact_secrets_mapping(data)
+
+    assert all(value == '' for value in safe.values())
+
+
+def test_redact_secrets_mapping_leaves_non_secret_lookalikes_alone():
+    """Sanity check for the audit note in `src.core.config`: nothing in
+    `GlobalSettings` is legitimately named like a secret, so ordinary keys
+    that merely CONTAIN (rather than end in) a secret substring must be
+    left alone -- only an exact name or a `_`-joined suffix counts."""
+    data = {'tokenizer': 'unaffected', 'my_secretary': 'unaffected',
+           'passwordless': 'unaffected'}
+
+    assert redact_secrets_mapping(data) == data

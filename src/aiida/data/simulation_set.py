@@ -162,8 +162,13 @@ class FrictionSimulationSetData(Data):
 
         settings = root / 'settings.yaml'
         if not settings.is_file():
+            settings = root / 'settings.yml'
+        if not settings.is_file():
             settings = locators[0].provenance_dir / 'settings.yaml'
         if settings.is_file():
+            # Always staged under the canonical 'settings.yaml' name, even
+            # from a root `settings.yml`: `load_settings`, `rebuild_set` and
+            # `_expected_window_rows` all look it up by that literal name.
             self.add_file(settings, 'settings.yaml')
 
     def add_file(self, path: Path, name: str) -> None:

@@ -22,6 +22,7 @@ from aiida.common.folders import Folder
 from aiida.engine import CalcJob
 from aiida.parsers.parser import Parser
 
+from .data.redact import stage_file
 from .retention import retrieve_patterns
 
 logger = logging.getLogger(__name__)
@@ -541,8 +542,6 @@ def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
     `export_archive` never names this node directly. Every other staged file
     (LAMMPS inputs, CIFs, potentials) is stored verbatim, unchanged.
     """
-    from .data.redact import stage_file  # pylint: disable=import-outside-toplevel
-
     shared_subdirs = set()
     for subdir in _SIM_SUBDIRS:
         sub_path = sim_dir / subdir
