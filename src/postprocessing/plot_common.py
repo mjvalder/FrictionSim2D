@@ -16,12 +16,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ..data import get_client
 from .plot_mixin_base import PlotDataError, PlotterMixinBase
 from .plot_derived import add_plot_derived_columns
 from .plot_style import GEM24_COLORS
 
 logger = logging.getLogger(__name__)
 
+
+#: Scalar query parameters forwarded to the v3 client verbatim.
+DB_QUERY_KEYS = ('material', 'family', 'model', 'set_label', 'potential_type',
+                 'layers', 'uploader', 'status', 'limit')
+
+#: `<name>_min`/`<name>_max` URI pairs -> the client's range keyword.
+DB_RANGE_KEYS = {'force': 'force_range', 'pressure': 'pressure_range',
+                 'temperature': 'temperature_range', 'angle': 'angle_range'}
 
 #: summary_<size>.csv column -> the name the plot specs use.
 SUMMARY_COLUMN_ALIASES = {
@@ -285,82 +294,95 @@ class PlotCommonMixin(PlotterMixinBase):
 
     @staticmethod
     def _parse_db_uri(data_dir: str) -> dict | None:
-        """Parse a ``db://`` URI into a dict of query parameters.
+        """Parse a ``db://`` URI into v3 query parameters.
 
         URI format::
 
-            db://profile?uploader=NAME&simulation_type=sheetonsheet&layers=2
+            db://central?family=hetero&model=sheetonsheet&potential_type=sw
+                        &layers=2&force_min=10&force_max=40&limit=500
 
-        Supported query params: ``uploader``, ``simulation_type``, ``layers``,
-        ``material``, ``limit``.  ``profile`` defaults to ``'local'``.
+        `simulation_type` is gone: schema 3 splits it into `family` (what the
+        run IS) and `model` (where it lives), and silently accepting the old
+        spelling would filter on neither.
 
         Returns ``None`` if *data_dir* is not a ``db://`` URI.
         """
         if not str(data_dir).startswith('db://'):
             return None
-        from urllib.parse import urlparse, parse_qs  # noqa: PLC0415
+        from urllib.parse import parse_qs, urlparse  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
         parsed = urlparse(str(data_dir))
-        params: dict = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-        params['profile'] = parsed.netloc or 'local'
-        if 'layers' in params:
-            params['layers'] = int(params['layers'])
-        if 'limit' in params:
-            params['limit'] = int(params['limit'])
+        # There is exactly ONE database now: the database-profile concept is
+        # gone and the local store is AiiDA nodes, not SQL. Accepting
+        # `db://local` and quietly querying the central DB would be a URL that
+        # lies about where its numbers came from.
+        if parsed.netloc not in ('', 'central'):
+            raise PlotDataError(
+                f"db://{parsed.netloc}: the only database is 'central'. "
+                f"The local store is an AiiDA profile, not a SQL database -- "
+                f"export it to a tree first with `FrictionSim2D aiida "
+                f"export-results <label> --output-dir <dir>` and use that "
+                f"directory as the data_dir.")
+        raw = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        params: dict = {'profile': 'central'}
+        for key in DB_QUERY_KEYS:
+            if key in raw:
+                params[key] = (int(raw[key]) if key in ('layers', 'limit')
+                               else raw[key])
+        for name, keyword in DB_RANGE_KEYS.items():
+            low, high = raw.get(f'{name}_min'), raw.get(f'{name}_max')
+            if low is not None and high is not None:
+                params[keyword] = (float(low), float(high))
+        unknown = set(raw) - set(DB_QUERY_KEYS) - {
+            f'{n}_{b}' for n in DB_RANGE_KEYS for b in ('min', 'max')}
+        if unknown:
+            logger.warning("Ignoring unknown db:// query keys: %s",
+                           sorted(unknown))
         return params
 
     @staticmethod
-    def _db_df_to_summary_rows(label: str, db_df: 'pd.DataFrame') -> list[dict]:
-        """Convert a :class:`~src.data.database.FrictionDB` query result to
-        rows compatible with the summary DataFrame produced by
-        :meth:`_calculate_summary_statistics`.
+    def _db_df_to_summary_rows(label: str, db_df: pd.DataFrame) -> list[dict]:
+        """Convert a v3 query result to summary rows.
 
-        Notes
-        -----
-        * ``lf`` is mapped from ``mean_lf`` (i.e. mean of sqrt(lfx²+lfy²)).
-          For plots that use ``lf_source: "sx_sy"`` this is an approximation
-          because the DB does not store the v_sx/v_sy-derived lateral force.
-        * ``size`` is synthesised from ``size_x`` / ``size_y`` columns.
-          Rows where both are NULL receive the key ``"unknownx"``; add
-          a ``?size_x=100&size_y=100`` query parameter to the URI if needed.
+        The three `lf_*` variants are NOT emitted. The central DB stores one
+        lateral force (`mean_lf`); aliasing it to `lf_as_was`, `lf_sx_sy` and
+        `lf_fx_fy` made `lf_source` silently a no-op on DB-backed datasets --
+        the plot claimed a definition it did not have. Without the columns,
+        `_resolve_lf_axis` warns and falls back, which is the honest answer.
         """
         rows = []
-        for _, row in db_df.iterrows():
-            sx = row.get('size_x')
-            sy = row.get('size_y')
-            file_key = (
-                f"{int(sx)}x{int(sy)}y"
-                if (sx is not None and sy is not None
-                    and not (pd.isna(sx) or pd.isna(sy)))
-                else 'unknownx'
-            )
-            mean_lf = row.get('mean_lf')
-            record: dict = {
-                'dataset_label': label,
-                'file_key': file_key,
-                'id': row.get('material', ''),
-                'force': row.get('force_nN'),
-                'pressure': row.get('pressure_gpa'),
-                'angle': row.get('scan_angle', 0.0),
-                'layer': row.get('layers', 1),
-                'speed': row.get('scan_speed'),
-                'potential_type': row.get('potential_type'),
-                'size': file_key,
-                # Columns used by plot x_axis / y_axis
-                'nf': row.get('mean_nf'),
-                'lf': mean_lf,
-                'lfx': row.get('mean_lfx'),
-                'lfy': row.get('mean_lfy'),
-                # lf_sx_sy: DB stores v_xfrict-based lf; use as best available proxy
-                'lf_sx_sy': mean_lf,
-                'lf_as_was': mean_lf,
-                'lf_fx_fy': mean_lf,
-                'cof': row.get('mean_cof'),
-                'mean_nf': row.get('mean_nf'),
-                'mean_lf': mean_lf,
-                'mean_cof': row.get('mean_cof'),
-                'std_cof': row.get('std_cof'),
-            }
-            rows.append(record)
+        for _, record in db_df.iterrows():
+            sx, sy = record.get('size_x'), record.get('size_y')
+            file_key = (f"{int(sx)}x{int(sy)}y"
+                        if sx is not None and sy is not None
+                        and not (pd.isna(sx) or pd.isna(sy)) else 'unknownx')
+            rows.append({
+                'dataset_label': label, 'file_key': file_key,
+                'id': record.get('material', ''),
+                'material': record.get('material', ''),
+                'family': record.get('family'), 'model': record.get('model'),
+                'set_label': record.get('set_label'),
+                'potential': record.get('potential_name'),
+                'potential_type': record.get('potential_type'),
+                'temperature': record.get('temperature'),
+                'tip_material': record.get('tip_material'),
+                'tip_radius': record.get('tip_radius'),
+                'size': file_key, 'layer': record.get('layers'),
+                'force': record.get('force_nN'),
+                'pressure': record.get('pressure_gpa'),
+                'angle': record.get('scan_angle', 0.0),
+                'speed': record.get('scan_speed'),
+                'nf': record.get('mean_nf'), 'lf': record.get('mean_lf'),
+                'lfx': record.get('mean_lfx'), 'lfy': record.get('mean_lfy'),
+                'cof': record.get('mean_cof'),
+                'mean_nf': record.get('mean_nf'),
+                'mean_lf': record.get('mean_lf'),
+                'mean_cof': record.get('mean_cof'),
+                'std_cof': record.get('std_cof'),
+                'std_lf': record.get('std_lf'),
+                'ntimesteps': record.get('ntimesteps'),
+                'is_complete': record.get('is_complete'),
+            })
         return rows
 
     def _load_db_labels(self) -> None:
@@ -375,22 +397,21 @@ class PlotCommonMixin(PlotterMixinBase):
             if db_params is None:
                 continue
 
-            db_params.pop('profile', None)   # accepted and ignored: schema-2 configs
-            # Only pass params that FrictionDB.query accepts
-            _QUERY_KEYS = {'material', 'simulation_type', 'layers',
-                           'uploader', 'limit'}
-            query_kwargs = {k: v for k, v in db_params.items()
-                            if k in _QUERY_KEYS}
-
+            profile = db_params.pop('profile', 'central')
             try:
-                from ..data.database import central_db  # noqa: PLC0415
-                db = central_db()
-                db_df = db.query(**query_kwargs)
+                # No `profile=` kwarg: `src.data.get_client` forwards
+                # everything but `settings_file` to `FrictionHTTPClient(
+                # api_url, api_key, timeout)`, which has no such parameter.
+                # The client resolves its URL and key from settings; the URI's
+                # profile segment reaches the log line and nothing else.
+                client = get_client(mode='api')
+                db_df = client.query(**db_params)
                 rows = self._db_df_to_summary_rows(label, db_df)
                 self._db_summary_rows.extend(rows)
                 logger.info(
-                    "Loaded %d rows for DB-backed label '%s' (filters=%s)",
-                    len(rows), label, query_kwargs,
+                    "Loaded %d rows for DB-backed label '%s' "
+                    "(profile=%s, filters=%s)",
+                    len(rows), label, profile, db_params,
                 )
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error(

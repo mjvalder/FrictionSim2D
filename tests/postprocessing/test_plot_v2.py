@@ -414,3 +414,106 @@ def test_the_histogram_says_slope_not_cof(tmp_path):
 
     assert (out / 'hist.png').exists()
     assert label_for('cof_slope') == 'COF (slope of LF vs NF)'
+
+
+def test_db_uri_parses_the_v3_filters():
+    from src.postprocessing.plot_common import PlotCommonMixin
+
+    params = PlotCommonMixin._parse_db_uri(  # pylint: disable=protected-access
+        'db://central?family=hetero&model=sheetonsheet&potential_type=sw'
+        '&layers=2&force_min=10&force_max=40&limit=500')
+
+    assert params['profile'] == 'central'
+    assert params['family'] == 'hetero'
+    assert params['model'] == 'sheetonsheet'
+    assert params['potential_type'] == 'sw'
+    assert params['layers'] == 2
+    assert params['force_range'] == (10.0, 40.0)
+    assert params['limit'] == 500
+
+
+def test_a_non_db_uri_is_none():
+    from src.postprocessing.plot_common import PlotCommonMixin
+
+    assert PlotCommonMixin._parse_db_uri('/some/dir') is None
+
+
+def test_db_local_is_refused_rather_than_silently_meaning_central():
+    """There is one database. The local store is AiiDA nodes, not SQL, and a
+    URL that says 'local' while querying the central DB lies about where its
+    numbers came from."""
+    from src.postprocessing.plot_common import PlotCommonMixin
+
+    with pytest.raises(PlotDataError, match='export-results'):
+        PlotCommonMixin._parse_db_uri('db://local?family=afm')
+
+    assert PlotCommonMixin._parse_db_uri('db://central?family=afm')['profile'] \
+        == 'central'
+    assert PlotCommonMixin._parse_db_uri('db://?family=afm')['profile'] == 'central'
+
+
+def test_db_rows_carry_the_v3_identity_and_no_lf_aliases():
+    import pandas as pd
+
+    from src.postprocessing.plot_common import PlotCommonMixin
+
+    db_df = pd.DataFrame([{
+        'material': 'h_MoS2', 'materials': ['h-MoS2'], 'family': 'afm',
+        'model': 'afm', 'set_label': '260910-afm', 'potential_type': 'sw',
+        'potential_name': 'pot_sw_h-MoS2', 'layers': 2, 'size_x': 100.0,
+        'size_y': 100.0, 'temperature': 300.0, 'tip_material': 'Si',
+        'tip_radius': 25.0, 'force_nN': 30.0, 'pressure_gpa': None,
+        'scan_angle': 0.0, 'scan_speed': 2.0, 'mean_cof': 0.1, 'std_cof': 0.01,
+        'mean_lf': 3.0, 'std_lf': 0.2, 'mean_nf': 30.0, 'std_nf': 0.5,
+        'mean_lfx': 3.0, 'std_lfx': 0.2, 'mean_lfy': 0.0, 'std_lfy': 0.1,
+        'ntimesteps': 500, 'is_complete': True,
+    }])
+
+    row, = PlotCommonMixin._db_df_to_summary_rows('db', db_df)  # pylint: disable=protected-access
+
+    assert row['id'] == 'h_MoS2'
+    assert row['family'] == 'afm'
+    assert row['potential'] == 'pot_sw_h-MoS2'
+    assert row['temperature'] == 300.0
+    assert row['file_key'] == '100x100y'
+    assert row['force'] == 30.0
+    assert row['cof'] == 0.1
+    assert row['lf'] == 3.0
+    for absent in ('lf_as_was', 'lf_sx_sy', 'lf_fx_fy'):
+        assert absent not in row, f'{absent} must not be aliased from mean_lf'
+
+
+def test_lf_source_on_a_db_row_falls_back_loudly(tmp_path, caplog):
+    import pandas as pd
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    df = pd.DataFrame([{'lf': 3.0, 'nf': 30.0}])
+
+    with caplog.at_level('WARNING'):
+        col = plotter._resolve_lf_axis(df, 'lf', {'lf_source': 'sx_sy'})  # pylint: disable=protected-access
+
+    assert col == 'lf'
+    assert 'lf_sx_sy' in caplog.text
+
+
+def test_load_db_labels_calls_the_api_client(monkeypatch, tmp_path):
+    import pandas as pd
+
+    import src.postprocessing.plot_common as pc
+
+    seen = {}
+
+    class _Client:
+        def query(self, **kwargs):
+            seen.update(kwargs)
+            return pd.DataFrame(columns=['material', 'size_x', 'size_y',
+                                         'mean_cof', 'mean_lf', 'mean_nf'])
+
+    monkeypatch.setattr(pc, 'get_client', lambda **kw: _Client())
+
+    Plotter(data_dirs=['db://central?family=hetero&layers=2'], labels=['db'],
+            output_dir=str(tmp_path))
+
+    assert seen['family'] == 'hetero'
+    assert seen['layers'] == 2
+    assert 'profile' not in seen
