@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -28,15 +29,31 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .detail import DetailPanel
+from .detail import DetailPanel, format_bytes
 from .filters import FilterBar
 from .model import ResultSortProxyModel, ResultTableModel
 
-__all__ = ['DatabasePane', 'SOURCES', 'SOURCE_LABELS']
+__all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS']
 
 #: The pane's third axis, beside the AiiDA profile.
 SOURCES: Tuple[str, str] = ('local', 'central')
 SOURCE_LABELS = {'local': 'Local store', 'central': 'Central'}
+
+#: (kind, button text, tooltip). Buttons rather than a menu: a QMenu popup is
+#: one more thing that can be left open in a teardown path.
+EXPORT_LABELS: Tuple[Tuple[str, str, str], ...] = (
+    ('results', 'Results files',
+     'The stored tier files and logs of the selected runs, verbatim'),
+    ('provenance', 'Provenance bundle',
+     'provenance.json, config.json, settings.yaml, cif and potentials'),
+    ('summary_csv', 'Summary CSV',
+     'The rows currently visible in the table, with the columns shown'),
+    ('run_tree', 'Recreate run tree',
+     'A directory tree `postprocess read` can read'),
+)
+
+#: Downloads the central summary DB cannot serve -- it holds no files.
+_LOCAL_ONLY_EXPORTS = ('results', 'provenance', 'run_tree')
 
 
 class DatabasePane(QWidget):
@@ -154,8 +171,44 @@ class DatabasePane(QWidget):
         self.all_columns_box.setToolTip('Show every stored field, not the curated subset')
         self.all_columns_box.toggled.connect(self.model.set_all_columns)
         row.addWidget(self.all_columns_box)
+
         row.addStretch(1)
+
+        self.download_buttons: Dict[str, QPushButton] = {}
+        for what, label, tooltip in EXPORT_LABELS:
+            button = QPushButton(label, self)
+            button.setToolTip(tooltip)
+            button.clicked.connect(lambda _checked=False, kind=what:
+                                   self._request_export(kind))
+            self.download_buttons[what] = button
+            row.addWidget(button)
+
+        self.rebuild_box = QCheckBox('rebuild lammps/', self)
+        self.rebuild_box.setToolTip(
+            'After exporting the tree, regenerate its lammps/ inputs from the '
+            'stored config')
+        row.addWidget(self.rebuild_box)
+
+        self.copy_contact_button = QPushButton('Copy owner contact', self)
+        self.copy_contact_button.setToolTip(
+            'The e-mail of whoever uploaded the selected central row -- the '
+            'central database holds no files, so this is how you ask for them')
+        self.copy_contact_button.clicked.connect(self._copy_contact)
+        row.addWidget(self.copy_contact_button)
+
+        self._apply_source_actions()
         return row
+
+    def _apply_source_actions(self) -> None:
+        """The central DB holds summaries only: three downloads are local,
+        and the owner contact is the one action that is central-only."""
+        local = self._source == 'local'
+        for what in _LOCAL_ONLY_EXPORTS:
+            button = self.download_buttons.get(what)
+            if button is not None:
+                button.setEnabled(local)
+        self.rebuild_box.setEnabled(local)
+        self.copy_contact_button.setEnabled(not local)
 
     # ---------------------------------------------------------------- state
 
@@ -175,6 +228,7 @@ class DatabasePane(QWidget):
             return
         self._source = source
         self.source_changed.emit(source)
+        self._apply_source_actions()
 
     def set_records(self, records: Sequence[Dict[str, Any]]) -> None:
         self.model.set_records(records)
@@ -242,3 +296,91 @@ class DatabasePane(QWidget):
             return None
         self.last_dest = chosen
         return Path(chosen)
+
+    # ---------------------------------------------------------------- export
+
+    def _request_export(self, what: str) -> None:
+        """Ask the controller for one of the four downloads (D6).
+
+        `run_tree` copies every run in the selected rows' sets, not just the
+        selected rows. That is not gated behind a second modal (N2): the
+        warning is written to the message panel, at 'warn', before the
+        destination is even asked -- the user backs out by cancelling the
+        directory chooser that follows, same as any other download.
+        """
+        selection = self.selected_records()
+        if what != 'summary_csv' and not selection:
+            self.message('Select at least one row first.', 'warn')
+            return
+        if what == 'run_tree':
+            self.message(self._run_tree_warning(selection), 'warn')
+
+        dest = self._ask_directory()
+        if dest is None:
+            return
+
+        payload: Dict[str, Any] = {
+            'what': what,
+            'dest': str(dest),
+            'selection': [{'run_uuid': r.get('run_uuid') or '',
+                           'result_uuid': r.get('result_uuid') or '',
+                           'set_label': r.get('set_label') or ''}
+                          for r in selection],
+            'rebuild': bool(self.rebuild_box.isChecked()),
+        }
+        if what == 'summary_csv':
+            payload['records'] = self.visible_records()
+            payload['columns'] = [c.key for c in self.model.columns]
+        self.export_requested.emit(self._source, payload)
+
+    def _run_tree_warning(self, selection: List[Dict[str, Any]]) -> str:
+        """What "Recreate run tree" is actually about to copy.
+
+        The unit of this download is the SET, not the row: one selected row
+        drags every run beside it. That is the same hazard the provenance
+        bundle was written to avoid, and here it is the point of the feature
+        -- so it is warned about rather than prevented, with the scale quoted.
+        """
+        labels = sorted({str(r.get('set_label') or '') for r in selection} - {''})
+        lines = []
+        for label in labels:
+            runs = self.set_sizes.get(label)
+            if runs is None:
+                lines.append(f"  {label}: run count unknown")
+            elif self.last_detail_bytes:
+                lines.append(f"  {label}: {runs} runs, roughly "
+                             f"{format_bytes(runs * self.last_detail_bytes)}")
+            else:
+                lines.append(f"  {label}: {runs} runs")
+        if not lines:
+            lines = ['  (the selected rows name no set)']
+        rows = f"{len(selection)} selected row" + ('' if len(selection) == 1 else 's')
+        return ('This exports whole sets, not the ' + rows + ':\n'
+                + '\n'.join(lines)
+                + '\n\nAny size shown is extrapolated from the last run you '
+                  'inspected and is a rough figure.\n\nA destination chooser '
+                  'opens next -- cancel it to back out.')
+
+    def _copy_contact(self) -> None:
+        """Put the selected rows' owner contacts on the clipboard (D6).
+
+        The central database holds summaries, not files -- reaching the
+        person who ran it is the only way to get the rest.
+        """
+        records = self.selected_records()
+        if not records:
+            self.message('Select a row first.', 'warn')
+            return
+        contacts = sorted({str(r.get('contact') or '').strip() for r in records}
+                          - {''})
+        if not contacts:
+            self.message('That row carries no owner contact.', 'warn')
+            return
+        self._set_clipboard('\n'.join(contacts))
+        self.message('Copied to the clipboard: ' + ', '.join(contacts))
+
+    def _set_clipboard(self, text: str) -> None:
+        """The clipboard seam. A method rather than an inline call for the
+        same reason `_ask_directory` is one: a test can override it instead of
+        depending on what the offscreen platform plugin implements."""
+        QGuiApplication.clipboard().setText(text)

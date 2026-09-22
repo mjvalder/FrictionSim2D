@@ -46,6 +46,7 @@ from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
+from .widgets.database.detail import format_bytes
 from .widgets.database.pane import DatabasePane
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
@@ -355,6 +356,7 @@ class MainWindow(QMainWindow):
         pane.query_requested.connect(self._on_db_query)
         pane.refresh_requested.connect(self._on_db_refresh)
         pane.detail_requested.connect(self._on_db_detail)
+        pane.export_requested.connect(self._on_db_export)
         pane.check_requested.connect(self._on_db_check)
         pane.cancel_requested.connect(self._on_db_cancel)
 
@@ -404,6 +406,9 @@ class MainWindow(QMainWindow):
     def _on_db_detail(self, source: str, payload: dict) -> None:
         self._start_db('detail', source, payload)
 
+    def _on_db_export(self, source: str, payload: dict) -> None:
+        self._start_db('export', source, payload)
+
     def _on_db_check(self, source: str) -> None:
         self._start_db('check', source, {})
 
@@ -445,6 +450,15 @@ class MainWindow(QMainWindow):
                                        'warn' if warnings else 'info')
         elif kind == 'detail':
             self.database_pane.show_detail(result)
+        elif kind == 'export':
+            written = result.get('files') or []
+            warnings = result.get('warnings') or []
+            lines = [f"Wrote {plural(len(written), 'file')} "
+                     f"({format_bytes(int(result.get('bytes') or 0))}) "
+                     f"to {result.get('dest')}"]
+            lines += [f"note: {w}" for w in warnings]
+            self.database_pane.message('\n'.join(lines),
+                                       'warn' if warnings else 'info')
 
     # -------------------------------------------------------------- helpers
 

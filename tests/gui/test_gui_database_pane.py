@@ -145,26 +145,277 @@ class TestPaneLayout:
         assert seen == [1]
 
 
+class TestDownloads:
+    """Four downloads, one dialog. The dialog is overridden here -- an
+    unpatched QFileDialog would block the run forever."""
+
+    @pytest.fixture(name='ready')
+    def _ready(self, pane, tmp_path, monkeypatch):
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        pane.table.selectRow(0)
+        return pane
+
+    def test_there_is_a_button_for_each_export_kind(self, pane):
+        from src.gui.db_worker import EXPORT_KINDS
+        assert tuple(pane.download_buttons) == EXPORT_KINDS
+
+    def test_results_files_export_carries_the_selection(self, ready):
+        seen = []
+        ready.export_requested.connect(lambda source, payload: seen.append((source, payload)))
+
+        ready.download_buttons['results'].click()
+
+        source, payload = seen[0]
+        assert source == 'local'
+        assert payload['what'] == 'results'
+        assert payload['dest'].endswith('dl')
+        assert payload['selection'] == [
+            {'run_uuid': '1a2b', 'result_uuid': '9f8e', 'set_label': 's1'}]
+        assert payload['rebuild'] is False
+
+    def test_provenance_and_run_tree_carry_the_same_selection(self, ready):
+        seen = []
+        ready.export_requested.connect(lambda source, payload: seen.append(payload))
+
+        ready.download_buttons['provenance'].click()
+        ready.rebuild_box.setChecked(True)
+        ready.download_buttons['run_tree'].click()
+
+        assert seen[0]['what'] == 'provenance'
+        assert seen[1]['what'] == 'run_tree'
+        assert seen[1]['rebuild'] is True
+
+    def test_the_warning_appears_before_a_destination_is_even_asked(
+            self, ready, monkeypatch):
+        """One selected row exports every run in its set. That is the
+        feature, but it must never be a surprise (N2): a run_tree download
+        writes the warning to the message panel before the directory chooser
+        even opens, rather than gating on a second modal."""
+        order = []
+        monkeypatch.setattr(ready, 'message', lambda text, level='info':
+                            order.append(('message', level, text)))
+        monkeypatch.setattr(ready, '_ask_directory',
+                            lambda: order.append(('asked',)) or (
+                                Path('/tmp/dl')))
+        seen = []
+        ready.export_requested.connect(lambda *args: seen.append(args))
+
+        ready.download_buttons['run_tree'].click()
+
+        assert [step[0] for step in order] == ['message', 'asked']
+        assert order[0][1] == 'warn'
+        assert 'whole sets' in order[0][2]
+        assert seen  # the chooser answered, so the request still goes out
+
+    def test_cancelling_the_chooser_after_the_warning_asks_for_nothing(
+            self, ready, monkeypatch):
+        monkeypatch.setattr(ready, '_ask_directory', lambda: None)
+        seen = []
+        ready.export_requested.connect(lambda *args: seen.append(args))
+
+        ready.download_buttons['run_tree'].click()
+
+        assert seen == []
+
+    def test_the_confirmation_quotes_the_set_and_its_run_count(self, ready):
+        ready.set_set_sizes({'s1': 37})
+
+        question = ready._run_tree_warning(ready.selected_records())
+
+        assert 'whole sets' in question
+        assert 's1: 37 runs' in question
+        assert '1 selected row' in question
+
+    def test_the_confirmation_extrapolates_a_size_when_it_has_one(self, ready):
+        ready.set_set_sizes({'s1': 10})
+        ready.show_detail({'run': {'uuid': '', 'node_type': '', 'attributes': {}},
+                           'result': {'uuid': '', 'node_type': '', 'attributes': {}},
+                           'files': [{'node': 'run', 'path': 'a', 'bytes': 1024}],
+                           'total_bytes': 1024})
+
+        question = ready._run_tree_warning(ready.selected_records())
+
+        assert '10 runs, roughly 10.0 kB' in question
+        assert 'extrapolated' in question
+
+    def test_the_confirmation_says_so_when_it_cannot_size_the_set(self, ready):
+        ready.set_set_sizes({})
+
+        assert 'run count unknown' in ready._run_tree_warning(
+            ready.selected_records())
+
+    def test_the_other_three_downloads_write_no_such_warning(self, ready):
+        seen = []
+        ready.export_requested.connect(lambda source, payload: seen.append(payload))
+
+        for what in ('results', 'provenance', 'summary_csv'):
+            ready.download_buttons[what].click()
+
+        assert [p['what'] for p in seen] == ['results', 'provenance', 'summary_csv']
+        assert 'whole sets' not in ready.messages.toPlainText()
+
+    def test_summary_csv_carries_the_visible_rows_and_column_order(self, ready):
+        seen = []
+        ready.export_requested.connect(lambda source, payload: seen.append(payload))
+
+        ready.download_buttons['summary_csv'].click()
+
+        payload = seen[0]
+        assert payload['records'] == RECORDS
+        assert payload['columns'][:3] == ['set_label', 'family', 'materials']
+
+    def test_summary_csv_does_not_need_a_selection(self, pane, tmp_path, monkeypatch):
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        seen = []
+        pane.export_requested.connect(lambda source, payload: seen.append(payload))
+
+        pane.download_buttons['summary_csv'].click()
+
+        assert seen and seen[0]['what'] == 'summary_csv'
+
+    def test_the_other_three_refuse_an_empty_selection(self, pane, tmp_path, monkeypatch):
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        seen = []
+        pane.export_requested.connect(lambda *args: seen.append(args))
+
+        pane.download_buttons['results'].click()
+
+        assert seen == []
+        assert 'Select at least one row' in pane.messages.toPlainText()
+
+    def test_a_cancelled_dialog_asks_for_nothing(self, pane, monkeypatch):
+        monkeypatch.setattr(pane, '_ask_directory', lambda: None)
+        pane.table.selectRow(0)
+        seen = []
+        pane.export_requested.connect(lambda *args: seen.append(args))
+
+        pane.download_buttons['results'].click()
+
+        assert seen == []
+
+    def test_the_central_source_offers_only_the_summary_csv(self, pane):
+        pane.set_source('central')
+
+        assert pane.download_buttons['summary_csv'].isEnabled()
+        assert not pane.download_buttons['results'].isEnabled()
+        assert not pane.download_buttons['provenance'].isEnabled()
+        assert not pane.download_buttons['run_tree'].isEnabled()
+
+
 class TestModalSeams:
-    """Every modal reachable from this package must be a named seam on the
-    pane. Today there is one, `_ask_directory`; Task 10 adds `_confirm` for
-    the whole-set download and rewrites this class.
+    """The only modal reachable from this package is `_ask_directory`.
+
+    Task 10 considered a second modal (`_confirm`) for the whole-set
+    download and rejected it (N2): the run_tree warning is written to the
+    message panel instead, before the destination is even asked, so there
+    is still exactly one modal to override.
 
     An unpatched modal in a teardown path hangs the whole suite -- that is why
-    a bare `pytest` cannot be run in this repo. Few seams means few things for
+    a bare `pytest` cannot be run in this repo. One seam means one thing for
     a test to override, and this test is what keeps the count from growing.
     """
 
     def test_no_other_dialog_is_constructed_in_the_package(self):
-        package = Path('src/gui/widgets/database')
+        package = (Path(__file__).resolve().parents[2] / 'src' / 'gui'
+                   / 'widgets' / 'database')
         sources = {path.name: path.read_text(encoding='utf-8')
                    for path in package.glob('*.py')}
 
-        assert 'QMessageBox' not in ''.join(sources.values())
         offenders = [name for name, text in sources.items()
-                     if 'QFileDialog' in text and name != 'pane.py']
+                     if name != 'pane.py'
+                     and ('QFileDialog' in text or 'QMessageBox' in text)]
         assert offenders == []
+        assert 'QMessageBox' not in sources['pane.py']
         assert sources['pane.py'].count('QFileDialog.') == 1
+
+    def test_the_file_dialog_lives_only_in_ask_directory(self):
+        package = (Path(__file__).resolve().parents[2] / 'src' / 'gui'
+                   / 'widgets' / 'database')
+        text = (package / 'pane.py').read_text(encoding='utf-8')
+        start = text.index('def _ask_directory')
+        end = text.find('\n    def ', start + 1)
+        body = text[start:len(text) if end == -1 else end]
+        assert body.count('QFileDialog.') == 1
+
+
+class TestOwnerContact:
+    """The central database holds summaries, not files. Reaching the person
+    who ran it is the only way to get the rest, so it is one click (D6)."""
+
+    @pytest.fixture(name='central')
+    def _central(self, pane, monkeypatch):
+        copied = []
+        monkeypatch.setattr(pane, '_set_clipboard', copied.append)
+        pane.set_source('central')
+        pane.set_records([dict(RECORDS[0], contact='someone@example.org'),
+                          dict(RECORDS[1], contact=None)])
+        pane._copied = copied
+        return pane
+
+    def test_the_button_is_central_only(self, pane):
+        assert not pane.copy_contact_button.isEnabled()
+        pane.set_source('central')
+        assert pane.copy_contact_button.isEnabled()
+
+    def test_it_copies_the_selected_row_contact(self, central):
+        central.table.selectRow(0)
+
+        central.copy_contact_button.click()
+
+        assert central._copied == ['someone@example.org']
+        assert 'someone@example.org' in central.messages.toPlainText()
+
+    def test_a_row_with_no_contact_says_so_rather_than_copying_nothing(self, central):
+        central.table.selectRow(1)
+
+        central.copy_contact_button.click()
+
+        assert central._copied == []
+        assert 'no owner contact' in central.messages.toPlainText()
+
+    def test_it_refuses_an_empty_selection(self, central):
+        central.copy_contact_button.click()
+
+        assert central._copied == []
+        assert 'Select a row' in central.messages.toPlainText()
+
+
+class TestExportReachesTheController:
+
+    def test_a_download_becomes_an_export_request(self, window, tmp_path, monkeypatch):
+        calls = []
+        monkeypatch.setattr(window.database, 'start', calls.append)
+        pane = window.database_pane
+        pane.set_records(RECORDS)
+        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
+        pane.table.selectRow(0)
+
+        pane.download_buttons['results'].click()
+
+        # selectRow(0) itself fires a 'detail' request (wired since Task 8);
+        # the download is the last call to reach the controller.
+        assert calls[-1].kind == 'export'
+        assert calls[-1].payload['what'] == 'results'
+
+    def test_a_finished_export_reports_what_was_written(self, window):
+        window._on_db_finished('export', {
+            'ok': True, 'kind': 'export', 'what': 'results',
+            'dest': '/tmp/dl', 'files': ['/tmp/dl/a.csv', '/tmp/dl/b.csv'],
+            'bytes': 2048, 'warnings': []})
+
+        text = window.database_pane.messages.toPlainText()
+        assert '2 files' in text
+        assert '2.0 kB' in text
+        assert '/tmp/dl' in text
+
+    def test_an_export_warning_is_shown(self, window):
+        window._on_db_finished('export', {
+            'ok': True, 'kind': 'export', 'what': 'run_tree',
+            'dest': '/tmp/dl', 'files': ['/tmp/dl/a.csv'], 'bytes': 10,
+            'warnings': ["set 's1' was exported in full, not only the "
+                         "selected rows"]})
+
+        assert 'exported in full' in window.database_pane.messages.toPlainText()
 
 
 class TestWindowWiring:
