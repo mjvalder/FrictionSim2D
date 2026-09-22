@@ -39,6 +39,30 @@ _SIM_SUBDIRS = (
 #: from omitting the default and raises instead of falling back.
 _SHARED_SUBDIRS_ATTR = '_frictionsim2d_shared_subdirs'
 
+#: Only these two `_SIM_SUBDIRS` are ever looked for at `sim_dir.parent` when
+#: missing at `sim_dir` -- `_stage_sim_dir`'s docstring has the AFM-nesting
+#: reason. Restricted (fix round 1, finding 2) so an unrelated directory that
+#: happens to sit next to the run (e.g. a stray `results/` from a differently
+#: named sibling run) is never picked up as this run's own.
+_SHAREABLE_SUBDIRS = ('build', 'provenance')
+
+#: Attribute key recording the run directory's own basename (`sim_dir.name`,
+#: e.g. `'L2'`) on a `simulation_dir` FolderData built by
+#: `prepare_simulation_folder`. Fix round 1, finding 2: without a
+#: `simulation_node` input, `_sim_prefix_for` had no way to recover the run's
+#: own level -- only `_detect_sim_prefix`'s shared-ancestor guess -- so a
+#: `smart_submit`/`aiida submit` call (which never sets `simulation_node`,
+#: see `smart_submit`/`submit_batch(config_path=None)`) staged both the run's
+#: own files AND the shared `build`/`provenance` ones a level off. Combined
+#: with `_SHARED_SUBDIRS_ATTR` in `_sim_prefix_for`, this reconstructs the
+#: run's full prefix (`<shared ancestor>/<leaf name>`) without needing
+#: `simulation_node` at all. Not written by `prepare_simulation_root` (the
+#: array path, out of scope for this fix -- see its own module docstring
+#: note): that stages several runs already relative to the true sim ROOT, so
+#: `_detect_sim_prefix` alone is already correct there, and this attribute
+#: would be meaningless (one leaf name for many staged runs).
+_LEAF_NAME_ATTR = '_frictionsim2d_leaf_name'
+
 
 # ---------------------------------------------------------------------------
 # CalcJob
@@ -155,13 +179,32 @@ def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
     shared K-level ancestor of the per-layer `build/` directory
     (`self.relative_run_dir` in `builders/afm/base.py`) -- ONE level shallower
     than the run's actual directory (`.../K300/L{n}`, where `results/`,
-    `data/` and `provenance.json` actually live). `_detect_sim_prefix` is kept
-    as a fallback only for a caller that omits `simulation_node` entirely.
+    `data/` and `provenance.json` actually live).
+
+    Without `simulation_node` (fix round 1, finding 2: `smart_submit`'s
+    `config_path=None` path never sets one), that shallower guess used to be
+    returned as-is, landing every staged path -- the run's own AND the shared
+    ones -- one level off from what the rendered scripts actually read. If
+    `simulation_dir` carries `_LEAF_NAME_ATTR`/`_SHARED_SUBDIRS_ATTR` (set by
+    `prepare_simulation_folder`, never by `prepare_simulation_root`'s
+    multi-run array path), the shallower guess is the shared ancestor and the
+    leaf name is the missing last segment, so joining them recovers the same
+    prefix `simulation_node.rel_path` would have given. `_detect_sim_prefix`
+    alone is still the answer for a sheet-like family (no such nesting, so
+    the guess is already the run's own directory) and for the array path.
     """
     sim_node = inputs.get('simulation_node', None)
     if sim_node is not None:
         return sim_node.rel_path
-    return _detect_sim_prefix(repo, lammps_scripts)
+
+    ancestor = _detect_sim_prefix(repo, lammps_scripts)
+    sim_folder = inputs.get('simulation_dir', None)
+    if sim_folder is not None and ancestor:
+        shared = sim_folder.base.attributes.get(_SHARED_SUBDIRS_ATTR, None)
+        leaf_name = sim_folder.base.attributes.get(_LEAF_NAME_ATTR, None)
+        if shared and leaf_name:
+            return f"{ancestor}/{leaf_name}"
+    return ancestor
 
 
 def _retrieve_list_for(sim_prefix: str | None) -> list:
@@ -374,7 +417,13 @@ def prepare_simulation_folder(sim_dir: Path) -> orm.FolderData:
         raise FileNotFoundError(f"No lammps/ directory in {sim_dir}")
 
     folder_data = orm.FolderData()
-    _stage_sim_dir(folder_data, sim_dir, relative_to=sim_dir)
+    shared_subdirs = _stage_sim_dir(folder_data, sim_dir, relative_to=sim_dir)
+    # Always recorded, even when nothing was shared (sheet-like families):
+    # `_sim_prefix_for` only acts on it once `_SHARED_SUBDIRS_ATTR` is ALSO
+    # set, so a harmless leaf name sitting unused on that path costs nothing.
+    folder_data.base.attributes.set(_LEAF_NAME_ATTR, sim_dir.name)
+    if shared_subdirs:
+        folder_data.base.attributes.set(_SHARED_SUBDIRS_ATTR, sorted(shared_subdirs))
     return folder_data
 
 
@@ -391,6 +440,12 @@ def prepare_simulation_root(root_dir: Path, simulation_dirs: list) -> orm.Folder
     root_dir = Path(root_dir)
     folder_data = orm.FolderData()
     for sim_dir in simulation_dirs:
+        # Return value (which subdirs came from a parent fallback) is
+        # per-sim_dir and meaningless once several runs share one FolderData
+        # -- `relative_to=root_dir` already keys every file at its true
+        # sim-root-relative path, so no later re-prefixing is needed here at
+        # all (see `_sim_prefix_for`'s docstring on why this differs from
+        # `prepare_simulation_folder`).
         _stage_sim_dir(folder_data, Path(sim_dir), relative_to=root_dir)
     return folder_data
 
@@ -410,7 +465,7 @@ def apply_options(builder, options: dict[str, Any] | None) -> None:
 # ---------------------------------------------------------------------------
 
 def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
-                   relative_to: Path) -> None:
+                   relative_to: Path) -> set[str]:
     """Stage simulation subdirectories into a FolderData node.
 
     Most `_SIM_SUBDIRS` live directly under `sim_dir`. AFM-family runs are
@@ -420,23 +475,26 @@ def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
     `provenance/` (the built tip/sheet geometry and the potential files
     `pair_coeff` reads) are shared across every layer count and sit one level
     up, at `sim_dir.parent` -- exactly what `run/tree.py`'s
-    `provenance_dir_for` already falls back to for the same reason. A subdir
-    missing at `sim_dir` is looked for there instead, and its name is
-    recorded on `folder_data` (`_SHARED_SUBDIRS_ATTR`) so
-    `prepare_for_submission` (via `_stage_files_into_sandbox`) knows to nest
-    it under the PARENT of the run's prefix in the remote workdir, matching
-    the sim-root-relative paths the rendered LAMMPS scripts actually
-    reference (`relative_run_dir`, not `relative_run_dir_layer` --
-    `builders/simulation_base.py`'s `_run_dir_path` docstring). Sheet-like
-    families have no such nesting: `build`/`provenance` sit beside `lammps`
-    at `sim_dir` itself, taken by the first branch below like everything
-    else, so this fallback never triggers for them.
+    `provenance_dir_for` already falls back to for the same reason. Only
+    those two (`_SHAREABLE_SUBDIRS`, fix round 1 finding 2) are ever looked
+    for at `sim_dir.parent` when missing at `sim_dir` -- restricted so an
+    unrelated directory that happens to sit beside the run is never picked up
+    as this run's own. Sheet-like families have no such nesting: `build`/
+    `provenance` sit beside `lammps` at `sim_dir` itself, taken by the first
+    branch below like everything else, so the parent fallback never triggers
+    for them.
+
+    Returns the names of the subdirs actually sourced from `sim_dir.parent`,
+    for the caller to persist as `folder_data`'s `_SHARED_SUBDIRS_ATTR`
+    (`prepare_simulation_folder`, one `sim_dir`) or to discard
+    (`prepare_simulation_root`, several `sim_dir`s already keyed relative to
+    the true sim root -- see that function's own comment).
     """
     shared_subdirs = set()
     for subdir in _SIM_SUBDIRS:
         sub_path = sim_dir / subdir
         if not sub_path.exists():
-            if sim_dir.parent == sim_dir:
+            if subdir not in _SHAREABLE_SUBDIRS or sim_dir.parent == sim_dir:
                 continue
             sub_path = sim_dir.parent / subdir
             if not sub_path.exists():
@@ -452,11 +510,7 @@ def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
             folder_data.base.repository.put_object_from_file(
                 str(file_path), str(rel),
             )
-    if shared_subdirs:
-        existing = set(
-            folder_data.base.attributes.get(_SHARED_SUBDIRS_ATTR, None) or ())
-        folder_data.base.attributes.set(
-            _SHARED_SUBDIRS_ATTR, sorted(existing | shared_subdirs))
+    return shared_subdirs
 
 
 def _stage_files_into_sandbox(folder: Folder, repo, sim_prefix: str | None,
