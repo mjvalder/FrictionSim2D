@@ -128,34 +128,37 @@ def grid_descriptors(df: pd.DataFrame, kind: str) -> Dict[str, float]:
     return out
 
 
-def _material_from_run(csv_path: Path, run_root: Path, kind_topdir: str) -> Optional[str]:
-    """Extract the material id from a ``.../<kind>/<material>/.../results/pes_scan.csv``."""
-    try:
-        parts = csv_path.relative_to(run_root).parts
-    except ValueError:
-        parts = csv_path.parts
-    if kind_topdir in parts:
-        i = parts.index(kind_topdir)
-        if i + 1 < len(parts):
-            return material_id(parts[i + 1])
-    return None
+#: Scan kind -> the family a PES run's provenance.json declares.
+FAMILY_BY_KIND = {"sheet": "pes_sheet", "tip": "pes_tip"}
 
 
 def discover_grids(run_root: Path, kind: str) -> List[Tuple[str, Path]]:
     """Find (material, csv_path) for every PES ``pes_scan.csv`` of the given kind.
 
-    ``pes_scan_refine.csv`` grids are ignored here (they are a convergence check;
-    the base grid is the descriptor source).
+    Walks with `src.run.tree.discover_runs`: a run is one `provenance.json`,
+    and the material comes from the parsed tokens rather than from counting
+    path segments. The old `rglob("results/pes_scan.csv")` filed a grid under
+    whatever directory name happened to sit one level below the top directory,
+    which is the material only when no sweep level intervenes.
+
+    ``pes_scan_refine.csv`` grids are ignored here (they are a convergence
+    check; the base grid is the descriptor source).
     """
-    topdir = next(k for k, v in KIND_BY_TOPDIR.items() if v == kind)
+    from ..run.tree import discover_runs  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+    family = FAMILY_BY_KIND[kind]
     found: List[Tuple[str, Path]] = []
-    for csv_path in sorted(run_root.rglob("results/pes_scan.csv")):
-        if topdir not in csv_path.parts:
+    for locator in discover_runs(Path(run_root)):
+        if locator.tokens.family != family:
             continue
-        mat = _material_from_run(csv_path, run_root, topdir)
-        if mat:
-            found.append((mat, csv_path))
-    return found
+        csv_path = locator.results_dir / "pes_scan.csv"
+        if not csv_path.is_file():
+            continue
+        materials = locator.tokens.materials
+        if not materials:
+            continue
+        found.append((material_id(materials[0]), csv_path))
+    return sorted(found)
 
 
 def extract_all(run_root: Path, kind: str,

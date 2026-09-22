@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from src.postprocessing import pes_scan
+from tests.helpers.results_tree import make_family_run
 
 
 def _cosine_grid(n: int = 12, amp: float = 1.0, period: float = 3.0,
@@ -76,19 +77,20 @@ def test_tip_descriptors_include_fmax():
     assert "pes_flat_rms" in d
 
 
-def _write_grid(root: Path, rel_run: str) -> Path:
-    """Write a cosine grid at ``root/<rel_run>/results/pes_scan.csv``."""
-    d = root / rel_run / "results"
-    d.mkdir(parents=True, exist_ok=True)
-    csv = d / "pes_scan.csv"
+def _write_grid(root: Path, family: str, material: str,
+                size=(30.0, 30.0), temp=0) -> Path:
+    """A real PES run directory (provenance.json included) with a cosine grid."""
+    run_dir = make_family_run(root, family, material=material, size=size,
+                              temp=temp)
+    csv = run_dir / 'results' / 'pes_scan.csv'
     _cosine_grid().to_csv(csv, index=False)
     return csv
 
 
 def test_discover_and_run(tmp_path: Path):
-    _write_grid(tmp_path, "pes_sheet/h-MoS2/30x_30y/K0")
-    _write_grid(tmp_path, "pes_sheet/h-WS2/30x_30y/K0")
-    _write_grid(tmp_path, "pes_tip/h-MoS2/60x_60y/sub_amorph-Si_tip_Si_r25/K300/L1")
+    _write_grid(tmp_path, 'pes_sheet', 'h-MoS2')
+    _write_grid(tmp_path, 'pes_sheet', 'h-WS2')
+    _write_grid(tmp_path, 'pes_tip', 'h-MoS2', size=(60.0, 60.0), temp=300)
 
     sheet = pes_scan.discover_grids(tmp_path, "sheet")
     assert {m for m, _ in sheet} == {"h_MoS2", "h_WS2"}
@@ -107,11 +109,37 @@ def test_discover_and_run(tmp_path: Path):
 
 
 def test_refine_grids_are_ignored(tmp_path: Path):
-    csv = _write_grid(tmp_path, "pes_sheet/h-MoS2/30x_30y/K0")
+    csv = _write_grid(tmp_path, 'pes_sheet', 'h-MoS2')
     # a refine grid alongside must not create a second/duplicate material row
     _cosine_grid(n=20).to_csv(csv.parent / "pes_scan_refine.csv", index=False)
+
     found = pes_scan.discover_grids(tmp_path, "sheet")
+
     assert found == [("h_MoS2", csv)]
+
+
+def test_a_grid_without_a_provenance_record_is_not_found(tmp_path: Path):
+    """discover_runs finds runs, and a run is one provenance.json. A stray
+    CSV under a run-shaped path is not a run -- the old rglob picked it up
+    and filed it under whatever directory name sat in the material slot."""
+    stray = tmp_path / 'pes_sheet' / 'h-MoS2' / '30x_30y' / 'K0' / 'results'
+    stray.mkdir(parents=True)
+    _cosine_grid().to_csv(stray / 'pes_scan.csv', index=False)
+
+    assert pes_scan.discover_grids(tmp_path, "sheet") == []
+
+
+def test_a_potential_sweep_yields_one_grid_per_arm(tmp_path: Path):
+    for pot in ('sw_a', 'sw_b'):
+        run_dir = make_family_run(tmp_path, 'pes_sheet', material='h-MoS2',
+                                  size=(30.0, 30.0), temp=0, pot=pot)
+        _cosine_grid().to_csv(run_dir / 'results' / 'pes_scan.csv', index=False)
+
+    found = pes_scan.discover_grids(tmp_path, "sheet")
+
+    assert len(found) == 2
+    assert {m for m, _ in found} == {"h_MoS2"}
+    assert len({p for _, p in found}) == 2
 
 
 def test_run_returns_empty_when_no_grids(tmp_path: Path):
