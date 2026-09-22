@@ -1,12 +1,15 @@
 """Locating runs in a built simulation tree.
 
-One walk, one parser, offered to everything downstream. The AiiDA store is the
-first consumer and rewires fully; `postprocessing/read_data.py`,
-`postprocessing/pes_scan.py`, `postprocessing/indent.py` and `hpc
-enrich-provenance` (`collect_hpc_simulation_paths`) still carry their own
-walkers and are moved onto this module by the postprocessing rework
-(`docs/superpowers/specs/TO-DO/2026-09-10-postprocessing-rework-design.md`), not
-here. Do not claim they use it until they do.
+One walk, one parser, offered to everything downstream. The AiiDA store was
+the first consumer; `postprocessing/read_data.py`, `postprocessing/pes_scan.py`
+and `postprocessing/indent.py` were moved onto it by the postprocessing rework
+(`docs/superpowers/specs/COMPLETED/2026-09-10-postprocessing-rework-design.md`)
+and no longer carry walkers of their own.
+
+`hpc enrich-provenance` (`run/hpc_dispatch.collect_hpc_simulation_paths`) still
+does, and deliberately: it collects directories that hold a *lammps script*,
+which exist before a run has produced anything, while a run here is one
+`provenance.json`. Do not claim it uses this module until it does.
 """
 from __future__ import annotations
 
