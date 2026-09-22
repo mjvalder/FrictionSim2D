@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 
-import matplotlib.pyplot as plt
 
 from .plot_mixin_base import PlotterMixinBase
 
@@ -16,6 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 class PlotTimeseriesMixin(PlotterMixinBase):
+    @staticmethod
+    def _run_time_axis(df, time_scale: float, shift_to_zero: bool):
+        """One run's own time column, shifted and scaled.
+
+        Per run, not per plot: a global `time_series` from the metadata forced
+        every run onto the first one's length, so a crashed arm or a longer
+        4 ns run was either truncated or raised.
+        """
+        run_time = df['time'].to_numpy(dtype=float)
+        origin = run_time[0] if (shift_to_zero and run_time.size) else 0.0
+        return (run_time - origin) * time_scale
+
     def _generate_timeseries_plot(self, plot_config: dict) -> None:
         """Generate a timeseries plot with support for multiple datasets."""
         datasets = plot_config.get('datasets', [self.labels[0]] if self.labels else [])
@@ -28,20 +39,14 @@ class PlotTimeseriesMixin(PlotterMixinBase):
             logger.error("'filter_size' is required for timeseries plots.")
             return
 
-        time_series = None
-        for label in datasets:
-            _, local_metadata = self._load_full_data(label, file_key)
-            if local_metadata:
-                time_series = local_metadata.get('time_series')
-                if time_series:
-                    break
-        if not time_series:
-            logger.error("'time_series' not found in metadata for any dataset.")
-            return
+        # No global time_series: each run carries its own `time` column, so
+        # runs of different lengths (a crashed arm, a longer 4 ns run) plot
+        # side by side instead of being truncated to the first one's length.
+        tier = plot_config.get('tier', 'window')
 
         all_runs_by_dataset = {}
         for label in datasets:
-            all_runs = list(self._extract_all_runs(label, file_key))
+            all_runs = list(self._extract_all_runs(label, file_key, tier))
             if all_runs:
                 all_runs_by_dataset[label] = all_runs
             else:
@@ -164,8 +169,6 @@ class PlotTimeseriesMixin(PlotterMixinBase):
 
         time_scale = plot_config.get('time_scale', 1.0)
         shift_time_to_zero = plot_config.get('shift_time_to_zero', True)
-        time_origin = time_series[0] if shift_time_to_zero and len(time_series) else 0.0
-        scaled_time_series = [(t - time_origin) * time_scale for t in time_series]
 
         secondary_y_col = plot_config.get('secondary_y_axis')
         secondary_y_label = plot_config.get('secondary_y_label')
@@ -233,7 +236,8 @@ class PlotTimeseriesMixin(PlotterMixinBase):
                     else self._get_palette_color(color_idx)
                 )
                 primary_line, = ax.plot(
-                    scaled_time_series,
+                    self._run_time_axis(df, time_scale,
+                                        shift_time_to_zero),
                     df[run_y_col],
                     label=primary_label,
                     color=color,
@@ -256,7 +260,8 @@ class PlotTimeseriesMixin(PlotterMixinBase):
                     else:
                         assert ax2 is not None
                         secondary_line, = ax2.plot(
-                            scaled_time_series,
+                            self._run_time_axis(df, time_scale,
+                                        shift_time_to_zero),
                             df[secondary_y_col] * secondary_y_scale,
                             label='_nolegend_',
                             color=color,

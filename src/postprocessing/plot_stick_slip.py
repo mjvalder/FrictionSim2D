@@ -11,7 +11,6 @@ import logging
 import math
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import ticker
 
@@ -69,25 +68,10 @@ class PlotStickSlipMixin(PlotterMixinBase):
             logger.error("'filter_size' is required for stick_slip_analysis.")
             return None
 
-        _, local_metadata = self._load_full_data(label, file_key)
-        if not local_metadata:
-            logger.error(
-                "Could not load metadata for label '%s' and file '%s'.",
-                label,
-                file_key,
-            )
-            return None
-
-        time_series = local_metadata.get('time_series')
-        if not time_series:
-            logger.error(
-                "'time_series' missing in metadata for label '%s' and file '%s'.",
-                label,
-                file_key,
-            )
-            return None
-
-        all_runs = list(self._extract_all_runs(label, file_key))
+        # The time axis is the run's own `time` column, not a global
+        # metadata list: two runs of different lengths cannot share one.
+        tier = plot_config.get('tier', 'window')
+        all_runs = list(self._extract_all_runs(label, file_key, tier))
         if not all_runs:
             logger.error(
                 "No runs found for label '%s' and file_key '%s'.",
@@ -169,12 +153,13 @@ class PlotStickSlipMixin(PlotterMixinBase):
             ),
         )
 
-        n = min(len(time_series), len(df[displacement_col]))
+        run_time = df['time'].to_numpy(dtype=float)
+        n = min(len(run_time), len(df[displacement_col]))
         if n < 8:
             logger.error("Not enough points for stick-slip analysis.")
             return None
 
-        t = np.asarray(time_series[:n], dtype=float) * time_scale
+        t = (run_time[:n] - run_time[0]) * time_scale
         x = np.asarray(df[displacement_col].iloc[:n], dtype=float) * displacement_scale
 
         finite_mask = np.isfinite(t) & np.isfinite(x)

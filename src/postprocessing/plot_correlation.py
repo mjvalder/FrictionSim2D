@@ -8,7 +8,6 @@ import json
 import logging
 import re
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from .plot_mixin_base import PlotterMixinBase

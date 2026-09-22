@@ -266,3 +266,81 @@ def test_a_missing_summary_csv_is_a_plot_data_error(tmp_path):
 
     with pytest.raises(PlotDataError, match='summary_100x100y.csv'):
         plotter._get_summary_data_df()
+
+
+def test_timeseries_uses_each_run_own_time_column(tmp_path):
+    """The metadata `time_series` was one global list: two runs of different
+    lengths were plotted against the same x, and the shorter one was either
+    truncated or raised."""
+    root = tmp_path / 'ds'
+    make_family_run(root, 'afm', material='h-MoS2', n=20)
+    make_family_run(root, 'afm', material='h-WS2', n=8)
+    reader = DataReader(results_dir=str(root))
+    reader.export_full_data_to_json()
+    reader.export_summary_csv()
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'timeseries', 'y_axis': 'lf',
+                           'filter_size': '100x100y', 'datasets': ['ds'],
+                           'filename': 'ts.png'})
+
+    assert (out / 'ts.png').exists()
+    lengths = {len(r['df']) for r in plotter._extract_all_runs('ds', '100x100y')}
+    assert lengths == {20, 8}
+
+
+def test_timeseries_can_plot_the_raw_tier(tmp_path):
+    root = _dataset(tmp_path, 'afm', tiers=('window', 'raw'))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'timeseries', 'tier': 'raw',
+                           'y_axis': 'raw_nf', 'filter_size': '100x100y',
+                           'datasets': ['ds'], 'filename': 'raw.png'})
+
+    assert (out / 'raw.png').exists()
+
+
+def test_a_per_layer_channel_is_plottable_by_name(tmp_path):
+    """Q7: per-layer, energy, temperature and contact channels have no
+    special plot type -- they are columns, and now they are named columns."""
+    root = tmp_path / 'ds'
+    run_dir = make_family_run(root, 'sheetonsheet')
+    natives = ['v_fz', 'v_xfrict', 'v_yfrict', 'v_comz_L2', 'v_etot']
+    path = next((run_dir / 'results').iterdir())
+    path.write_text(
+        '# schema=2 lf_units=nN family=sheetonsheet\n'
+        '# TimeStep ' + ' '.join(natives) + '\n'
+        + '\n'.join(f'{(i + 1) * 1000} 1.0 2.0 0.0 {6.5 + i * 0.1:g} -12.0'
+                    for i in range(10)) + '\n', encoding='utf-8')
+    reader = DataReader(results_dir=str(root))
+    reader.export_full_data_to_json()
+    reader.export_summary_csv()
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'timeseries', 'y_axis': 'comz_L2',
+                           'filter_size': '100x100y', 'datasets': ['ds'],
+                           'filename': 'comz.png'})
+
+    assert (out / 'comz.png').exists()
+    run = next(plotter._extract_all_runs('ds', '100x100y'))
+    assert 'comz_L2' in run['df'].columns
+    assert 'etotal' in run['df'].columns
+
+
+def test_stick_slip_reads_the_run_time_column(tmp_path):
+    root = _dataset(tmp_path, 'afm', n=64)
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    loaded = plotter._load_stick_slip_run(  # pylint: disable=protected-access
+        {'plot_type': 'stick_slip_analysis', 'filter_size': '100x100y',
+         'datasets': ['ds'], 'filter_layer': 2})
+
+    assert loaded is not None
+    assert len(loaded['t']) == len(loaded['run']['df'])
+    assert set(loaded) >= {'run', 't', 'x', 'label', 'file_key',
+                           'displacement_col', 'time_scale',
+                           'displacement_scale', 'time_unit', 'disp_unit'}
