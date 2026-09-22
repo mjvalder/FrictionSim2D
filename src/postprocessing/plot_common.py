@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .plot_mixin_base import PlotterMixinBase
+from .plot_mixin_base import PlotDataError, PlotterMixinBase
 from .plot_derived import add_plot_derived_columns
 from .plot_style import GEM24_COLORS
 
@@ -245,11 +245,10 @@ class PlotCommonMixin(PlotterMixinBase):
                 search_dir = Path(data_dir)
 
             if not search_dir.is_dir():
-                logger.error(
-                    "Data directory not found for label '%s': %s",
-                    label, data_dir,
-                )
-                continue
+                raise PlotDataError(
+                    f"{label}: no output_full_*.json under {data_dir} "
+                    f"(the directory does not exist). Generate one with "
+                    f"`FrictionSim2D postprocess read <root> --export`.")
 
             for entry in search_dir.iterdir():
                 match = re.match(r'output_full_(.+)\.json', entry.name)
@@ -258,10 +257,15 @@ class PlotCommonMixin(PlotterMixinBase):
                     self.full_data_files[label][file_key] = str(entry)
 
             if not self.full_data_files[label]:
-                logger.warning(
-                    "No 'output_full_*.json' files found for label '%s'",
-                    label,
-                )
+                # Raised, not logged: before this, a mistyped data_dir gave an
+                # empty summary frame, an early return in
+                # `_generate_summary_plot`, and a user with no plot and no
+                # reason. It is also what makes the plot worker's `ok: false`
+                # path reachable for a bad document.
+                raise PlotDataError(
+                    f"{label}: no output_full_*.json under {data_dir}. "
+                    f"Generate one with "
+                    f"`FrictionSim2D postprocess read <root> --export`.")
 
     # =====================================================================
     # DB-BACKED DATA SOURCE  (db:// URI scheme)
@@ -393,75 +397,93 @@ class PlotCommonMixin(PlotterMixinBase):
 
     def _load_full_data(
         self, label: str, file_key: str,
-    ) -> tuple[dict | None, dict | None]:
-        """Load a single data file and return ``(results, metadata)``."""
+    ) -> tuple[list | None, dict | None]:
+        """Load one v2 export and return ``(runs, metadata)``.
+
+        A v1 file has no ``schema`` key at all. It is refused rather than
+        read: v1 has no family, no potential, no temperature and no tier, so
+        every plot drawn from one is missing whichever sweep arm the old
+        nested walk overwrote.
+        """
         file_path = self.full_data_files.get(label, {}).get(file_key)
         if not file_path:
-            logger.debug(
-                "No data file for label '%s', file_key '%s'",
-                label, file_key,
-            )
+            logger.debug("No data file for label '%s', file_key '%s'",
+                         label, file_key)
             return None, None
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return data.get('results', {}), data.get('metadata', {})
         except (IOError, json.JSONDecodeError) as e:
             logger.error("Loading data from %s: %s", file_path, e)
             return None, None
+
+        schema = data.get('schema')
+        if schema != 2:
+            raise PlotDataError(
+                f"{file_path}: export schema {schema!r}, expected 2. "
+                f"Regenerate with "
+                f"`FrictionSim2D postprocess read <root> --export`.")
+        metadata = dict(data.get('metadata', {}))
+        metadata['units'] = data.get('units', {})
+        return data.get('runs', []), metadata
 
     # =====================================================================
     # DATA EXTRACTION
     # =====================================================================
 
-    def _extract_all_runs(self, label: str, file_key: str):
-        """Yield a dict for each simulation run found in the data file."""
-        results, _ = self._load_full_data(label, file_key)
-        if not results:
+    def _extract_all_runs(self, label: str, file_key: str,
+                          tier: str = 'window'):
+        """Yield one dict per run in the v2 export, for the requested tier.
+
+        The v1 version walked a nested dict and reconstructed parameters from
+        key PREFIXES (`f30.0`, `a-15`, `l2`). Every one of those is now a
+        typed field on the run record, so there is nothing left to parse --
+        and nothing left to mis-parse.
+        """
+        runs, metadata = self._load_full_data(label, file_key)
+        if not runs:
+            return
+        cache_key = (label, file_key, tier)
+        if cache_key in self.runs_cache:
+            yield from self.runs_cache[cache_key]
             return
 
-        def process_level(data_dict, params_so_far):
-            if 'columns' in data_dict and 'data' in data_dict:
-                df = pd.DataFrame(
-                    data_dict['data'], columns=data_dict['columns'],
-                )
-                df = self._add_derived_columns(df)
-                run_data = params_so_far.copy()
-                run_data['df'] = df
-                yield run_data
-                return
-
-            for key, value in data_dict.items():
-                if not isinstance(value, dict):
-                    continue
-                new_params = params_so_far.copy()
-                if 'id' not in new_params:
-                    new_params['id'] = key.strip()
-                else:
-                    # The value is signed: the angle level is keyed a{angle}
-                    # (read_data), and a negative scan angle gives 'a-15'.
-                    # Without the sign that key matches nothing and the run
-                    # reaches the plots with no angle at all.
-                    match_prefix = re.match(
-                        r'([a-zA-Z]+)(-?\d+\.?\d*)', key,
-                    )
-                    if match_prefix:
-                        prefix, val_str = match_prefix.groups()
-                        val = float(val_str)
-                        param_map = {
-                            'f': 'force', 'a': 'angle',
-                            'r': 'tip_radius', 'l': 'layer',
-                            's': 'speed', 'p': 'pressure',
-                        }
-                        if prefix in param_map:
-                            new_params[param_map[prefix]] = val
-                    if m := re.match(r'(\d+\.?\d*)nN', key):
-                        new_params['force'] = float(m.group(1))
-                    if m := re.match(r'(\d+\.?\d*)deg', key):
-                        new_params['angle'] = float(m.group(1))
-                yield from process_level(value, new_params)
-
-        yield from process_level(results, {})
+        units = (metadata or {}).get('units', {})
+        built: list[dict] = []
+        for record in runs:
+            tier_data = record.get('tiers', {}).get(tier)
+            if tier_data is None:
+                continue
+            df = pd.DataFrame(tier_data['data'], columns=tier_data['columns'])
+            df.attrs.update(tier_data.get('attrs', {}))
+            df = self._add_derived_columns(df)
+            # A PES run's load_kind is 'none': neither key gets a value, so it
+            # never lands on a force or a pressure axis as a phantom 0.0.
+            kind = record['load_kind']
+            built.append({
+                'id': record['material'],
+                'material': record['material'],
+                'family': record['family'],
+                'model': record['model'],
+                'size': record['size'],
+                'temperature': record['temperature'],
+                'potential': record['potential'],
+                'rel_path': record['rel_path'],
+                'layer': record['layers'],
+                'speed': record['speed'],
+                'angle': record['angle'],
+                'tip_radius': record['tip_radius'],
+                'load_kind': record['load_kind'],
+                'load': record['load'],
+                'force': record['load'] if kind == 'force' else None,
+                'pressure': record['load'] if kind == 'pressure' else None,
+                'tiers': record.get('tiers', {}),
+                'units': units,
+                'post': record.get('post', {}),
+                'df': df,
+            })
+        self.runs_cache[cache_key] = built
+        yield from built
 
     def _add_derived_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add derived quantities to a DataFrame."""
@@ -972,6 +994,7 @@ class PlotCommonMixin(PlotterMixinBase):
                 pad_inches=0.1 if tight_bbox else 0.0,
             )
             logger.info("Generated plot: %s", output_path)
+            self.written.append(output_path)
 
         plt.close(fig)
 

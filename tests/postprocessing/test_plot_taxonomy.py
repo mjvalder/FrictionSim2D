@@ -19,6 +19,35 @@ MATERIALS = ["h_MoS2", "t_WSe2", "indiene"]
 LOADS = [2.0, 30.0, 100.0]
 
 
+
+def _v2_run(material, columns, rows, *, load=10.0, angle=0.0, load_kind='force',
+            layers=2, size='100x100y', family='afm', model='afm'):
+    """One `runs[]` entry of a v2 export document (see read_data.EXPORT_SCHEMA)."""
+    return {
+        'model': model, 'family': family, 'material': material,
+        'materials': [material.replace('_', '-')], 'flake_material': None,
+        'size': size, 'size_x': 100.0, 'size_y': 100.0,
+        'substrate': 'Si', 'substrate_amorphous': True,
+        'tip_material': 'Si', 'tip_radius': 25.0,
+        'temperature': 300.0, 'layers': layers, 'potential': None,
+        'rel_path': f'{model}/{material}/100x_100y/K300',
+        'load_kind': load_kind, 'load': load, 'angle': angle, 'speed': 2.0,
+        'n_layers': layers,
+        'tiers': {'window': {'columns': list(columns), 'data': rows,
+                             'attrs': {'lf_schema': 2, 'lf_corrected': False}}},
+        'post': {},
+    }
+
+
+def _v2_doc(runs, metadata=None, size='100x100y'):
+    """A whole v2 export document around `runs`."""
+    return {
+        'schema': 2, 'size': size, 'generated_by': 'FrictionSim2D',
+        'units': {'time': 'step', 'nf': 'nN', 'lfx': 'nN', 'lfy': 'nN'},
+        'metadata': metadata or {},
+        'runs': runs,
+    }
+
 def _labels() -> pd.DataFrame:
     modes = {
         ("h_MoS2", 2.0): "marginal_contact_chatter",
@@ -157,13 +186,10 @@ def test_exemplar_reads_runs_from_a_dataset(tmp_path, taxonomy_files):
     outputs_dir = tmp_path / "data" / "outputs"
     outputs_dir.mkdir(parents=True)
     columns = ["nf", "lfx", "lfy", "tipz", "comz", "lateral_force"]
-    leaf = {"columns": columns, "data": [[100.0, 1.0, 0.0, 30.0 - 0.1 * i, 20.0, 1.0]
-                                         for i in range(10)]}
-    synthetic = {
-        "metadata": {"time_series": [1000 * (i + 1) for i in range(10)]},
-        "results": {m: {"aSi": {"Si": {"r25": {"l2": {"s2": {"f100.0": {"a0": leaf}}}}}}}
-                    for m in ("h_MoS2", "t_WSe2")},
-    }
+    rows = [[100.0, 1.0, 0.0, 30.0 - 0.1 * i, 20.0, 1.0] for i in range(10)]
+    synthetic = _v2_doc(
+        [_v2_run(m, columns, rows, load=100.0) for m in ("h_MoS2", "t_WSe2")],
+        metadata={"time_series": [1000 * (i + 1) for i in range(10)]})
     (outputs_dir / "output_full_100x100y.json").write_text(json.dumps(synthetic), encoding="utf-8")
 
     plotter = Plotter(

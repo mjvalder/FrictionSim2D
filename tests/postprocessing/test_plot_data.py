@@ -8,6 +8,35 @@ import pandas as pd
 from src.postprocessing.plot_data import Plotter
 
 
+
+def _v2_run(material, columns, rows, *, load=10.0, angle=0.0, load_kind='force',
+            layers=2, size='100x100y', family='afm', model='afm'):
+    """One `runs[]` entry of a v2 export document (see read_data.EXPORT_SCHEMA)."""
+    return {
+        'model': model, 'family': family, 'material': material,
+        'materials': [material.replace('_', '-')], 'flake_material': None,
+        'size': size, 'size_x': 100.0, 'size_y': 100.0,
+        'substrate': 'Si', 'substrate_amorphous': True,
+        'tip_material': 'Si', 'tip_radius': 25.0,
+        'temperature': 300.0, 'layers': layers, 'potential': None,
+        'rel_path': f'{model}/{material}/100x_100y/K300',
+        'load_kind': load_kind, 'load': load, 'angle': angle, 'speed': 2.0,
+        'n_layers': layers,
+        'tiers': {'window': {'columns': list(columns), 'data': rows,
+                             'attrs': {'lf_schema': 2, 'lf_corrected': False}}},
+        'post': {},
+    }
+
+
+def _v2_doc(runs, metadata=None, size='100x100y'):
+    """A whole v2 export document around `runs`."""
+    return {
+        'schema': 2, 'size': size, 'generated_by': 'FrictionSim2D',
+        'units': {'time': 'step', 'nf': 'nN', 'lfx': 'nN', 'lfy': 'nN'},
+        'metadata': metadata or {},
+        'runs': runs,
+    }
+
 def _plotter(tmp_path):
     return Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
 
@@ -63,11 +92,12 @@ def test_extract_all_runs_keeps_a_negative_scan_angle(tmp_path):
     outputs_dir = tmp_path / "data" / "outputs"
     outputs_dir.mkdir(parents=True)
 
-    leaf = {"columns": ["lfx", "lfy", "nf"], "data": [[1.0, 0.0, 10.0]] * 5}
-    synthetic = {
-        "metadata": {},
-        "results": {"MoS2": {"f10.0": {"a0": leaf, "a-15": leaf}}},
-    }
+    columns = ["lfx", "lfy", "nf"]
+    rows = [[1.0, 0.0, 10.0]] * 5
+    synthetic = _v2_doc([
+        _v2_run("MoS2", columns, rows, load=10.0, angle=0.0),
+        _v2_run("MoS2", columns, rows, load=10.0, angle=-15.0),
+    ])
     (outputs_dir / "output_full_100x100y.json").write_text(
         json.dumps(synthetic), encoding="utf-8"
     )
@@ -88,19 +118,12 @@ def test_generate_summary_plot_creates_output_png(tmp_path):
     outputs_dir = tmp_path / "data" / "outputs"
     outputs_dir.mkdir(parents=True)
 
-    synthetic = {
-        "metadata": {},
-        "results": {
-            "MoS2": {
-                "f10.0": {"a0": {"columns": ["lfx", "lfy", "nf"],
-                                 "data": [[1.0, 0.0, 10.0]] * 5}},
-                "f20.0": {"a0": {"columns": ["lfx", "lfy", "nf"],
-                                 "data": [[2.0, 0.0, 20.0]] * 5}},
-                "f30.0": {"a0": {"columns": ["lfx", "lfy", "nf"],
-                                 "data": [[3.0, 0.0, 30.0]] * 5}},
-            }
-        },
-    }
+    columns = ["lfx", "lfy", "nf"]
+    synthetic = _v2_doc([
+        _v2_run("MoS2", columns, [[1.0, 0.0, 10.0]] * 5, load=10.0),
+        _v2_run("MoS2", columns, [[2.0, 0.0, 20.0]] * 5, load=20.0),
+        _v2_run("MoS2", columns, [[3.0, 0.0, 30.0]] * 5, load=30.0),
+    ])
     (outputs_dir / "output_full_100x100y.json").write_text(
         json.dumps(synthetic), encoding="utf-8"
     )

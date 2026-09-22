@@ -11,6 +11,9 @@ from pathlib import Path
 import pandas as pd
 
 from .plot_common import PlotCommonMixin
+# Re-exported: callers import it from here, it is defined there to keep
+# plot_common -> plot_data from being a cycle.
+from .plot_mixin_base import PlotDataError  # noqa: F401  # pylint: disable=unused-import
 from .plot_correlation import PlotCorrelationMixin
 from .plot_ranking import PlotRankingMixin
 from .plot_style import DEFAULT_SETTINGS
@@ -66,6 +69,11 @@ class Plotter(
         }
         self.metadata: dict = {}
         self.summary_df_cache: pd.DataFrame | None = None
+        #: Every file `_save_plot` wrote, in order.
+        self.written: list[Path] = []
+        #: label -> file_key -> summary_<size>.csv
+        self.summary_files: dict[str, dict[str, Path]] = {}
+        self.runs_cache: dict[tuple[str, str, str], list[dict]] = {}
         self.material_type_map: dict[str, str] = {}
         self._db_summary_rows: list[dict] = []
 
