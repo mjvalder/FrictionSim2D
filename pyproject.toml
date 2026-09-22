@@ -87,9 +87,6 @@ all = [
 [project.entry-points."aiida.parsers"]
 "friction2d.lammps" = "src.aiida.calcjob:LammpsFrictionParser"
 
-[project.entry-points."aiida.workflows"]
-"friction2d.friction" = "src.aiida.workchain:FrictionWorkChain"
-
 # ---------------------------------------------------------------------------
 # Test configuration
 # ---------------------------------------------------------------------------

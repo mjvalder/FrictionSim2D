@@ -36,7 +36,6 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'ingest_root': (f'{__name__}.ingest', 'ingest_root'),
     'export_results': (f'{__name__}.export', 'export_results'),
     'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),
-    'FrictionWorkChain': (f'{__name__}.workchain', 'FrictionWorkChain'),
     'run_with_aiida': (f'{__name__}.submit', 'run_with_aiida'),
     'smart_submit': (f'{__name__}.submit', 'smart_submit'),
     'full_setup': (f'{__name__}.setup', 'full_setup'),
