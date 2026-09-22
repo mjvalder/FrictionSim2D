@@ -494,6 +494,8 @@ class PlotCommonMixin(PlotterMixinBase):
                 'post': record.get('post', {}),
                 'df': df,
             })
+        if built:
+            self.plot_family = built[0]['family']
         self.runs_cache[cache_key] = built
         yield from built
 
@@ -903,14 +905,21 @@ class PlotCommonMixin(PlotterMixinBase):
         *, x_label: str | None = None, y_label: str | None = None,
     ) -> None:
         """Apply final formatting to a plot (MATLAB-style)."""
+        from .labels import label_for  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
         s = self.settings
 
+        # An explicit x_label/y_label still wins -- a paper figure sometimes
+        # needs a shorter axis than the honest one. The registry is the
+        # FALLBACK, in place of the bare column name this used to print.
         ax.set_xlabel(
-            x_label or plot_config.get('x_label', x_col or ''),
+            x_label or plot_config.get('x_label')
+            or (label_for(x_col, self.plot_family) if x_col else ''),
             fontsize=s["fonts"]["axis_label"],
         )
         ax.set_ylabel(
-            y_label or plot_config.get('y_label', y_col or ''),
+            y_label or plot_config.get('y_label')
+            or (label_for(y_col, self.plot_family) if y_col else ''),
             fontsize=s["fonts"]["axis_label"],
         )
         ax.tick_params(

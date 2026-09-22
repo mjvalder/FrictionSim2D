@@ -344,3 +344,73 @@ def test_stick_slip_reads_the_run_time_column(tmp_path):
     assert set(loaded) >= {'run', 't', 'x', 'label', 'file_key',
                            'displacement_col', 'time_scale',
                            'displacement_scale', 'time_unit', 'disp_unit'}
+
+
+def test_axis_labels_default_to_the_registry(tmp_path):
+    import matplotlib.pyplot as plt
+
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0))
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+    fig, ax = plotter.new_figure()
+    try:
+        plotter._finalize_plot(ax, {'plot_type': 'summary'}, 'force', 'lf')  # pylint: disable=protected-access
+
+        assert ax.get_xlabel() == 'Normal Load (nN)'
+        assert ax.get_ylabel() == 'Lateral Force (nN)'
+    finally:
+        plt.close(fig)
+
+
+def test_an_explicit_label_still_wins(tmp_path):
+    import matplotlib.pyplot as plt
+
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+    fig, ax = plotter.new_figure()
+    try:
+        plotter._finalize_plot(ax, {'plot_type': 'summary',
+                                    'x_label': 'Load, F$_N$ (nN)'},
+                               'force', 'lf')
+
+        assert ax.get_xlabel() == 'Load, F$_N$ (nN)'
+    finally:
+        plt.close(fig)
+
+
+def test_the_family_selects_the_label(tmp_path):
+    """`lfx` is a different registry entry for AFM and the sheet family.
+    Both are nN; the lookup must use the run's own family so a future
+    divergence shows up on the axis instead of being wrong in silence."""
+    import matplotlib.pyplot as plt
+
+    root = _dataset(tmp_path, 'flake')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+    list(plotter._extract_all_runs('ds', '100x100y'))
+
+    assert plotter.plot_family == 'flake'
+    fig, ax = plotter.new_figure()
+    try:
+        plotter._finalize_plot(ax, {'plot_type': 'summary'}, 'nf', 'lfx')
+        assert ax.get_ylabel() == 'Lateral Force x (nN)'
+    finally:
+        plt.close(fig)
+
+
+def test_the_histogram_says_slope_not_cof(tmp_path):
+    """A bar chart of `fit['slope']` labelled 'COF' put the regression slope
+    and mean(LF)/mean(NF) on the same axis under one name."""
+    from src.postprocessing.labels import label_for
+
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 20.0, 30.0))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot({'plot_type': 'cof_histogram', 'x_axis': 'force',
+                           'y_axis': 'lf', 'filter_size': '100x100y',
+                           'datasets': ['ds'], 'filename': 'hist.png'})
+
+    assert (out / 'hist.png').exists()
+    assert label_for('cof_slope') == 'COF (slope of LF vs NF)'

@@ -74,6 +74,10 @@ class Plotter(
         #: label -> file_key -> summary_<size>.csv
         self.summary_files: dict[str, dict[str, Path]] = {}
         self.runs_cache: dict[tuple[str, str, str], list[dict]] = {}
+        #: The family of the runs most recently extracted, for label
+        #: lookup. 'afm' until a dataset says otherwise -- label_for's
+        #: own default.
+        self.plot_family: str = 'afm'
         self.material_type_map: dict[str, str] = {}
         self._db_summary_rows: list[dict] = []
 

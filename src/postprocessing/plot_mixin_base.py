@@ -48,6 +48,7 @@ class PlotterMixinBase:
     summary_files: dict[str, dict[str, Path]]
     runs_cache: dict[tuple[str, str, str], list[dict]]
     constrained_layout: bool
+    plot_family: str
 
     def __getattr__(self, name: str) -> Any:
         """Raise standard AttributeError while allowing typed dynamic lookup."""

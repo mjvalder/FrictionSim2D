@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Rectangle
 
+from .labels import label_for
 from .plot_mixin_base import PlotterMixinBase
 
 logger = logging.getLogger(__name__)
@@ -616,7 +617,7 @@ class PlotSummaryMixin(PlotterMixinBase):
         slope_decimals = int(plot_config.get('slope_decimals', 5))
 
         bar_labels = []
-        bar_cofs = []
+        bar_slopes = []
         bar_errs = []
         bar_colors = []
         color_idx = 0
@@ -660,7 +661,8 @@ class PlotSummaryMixin(PlotterMixinBase):
                 continue
             label = self._display_dataset_label(ds_label)
             bar_labels.append(label)
-            bar_cofs.append(fit['slope'])
+            # the LF-vs-NF regression slope -- cof_slope, not the COF
+            bar_slopes.append(fit['slope'])
             bar_errs.append(fit['slope_stderr'])
             bar_colors.append(color)
 
@@ -756,7 +758,8 @@ class PlotSummaryMixin(PlotterMixinBase):
                 continue
 
             bar_labels.append(label)
-            bar_cofs.append(fit['slope'])
+            # the LF-vs-NF regression slope -- cof_slope, not the COF
+            bar_slopes.append(fit['slope'])
             bar_errs.append(fit['slope_stderr'])
             bar_colors.append(color)
 
@@ -769,7 +772,7 @@ class PlotSummaryMixin(PlotterMixinBase):
         bar_width = float(plot_config.get('bar_width', 0.6))
         bars_drawn = ax.bar(
             x_pos,
-            bar_cofs,
+            bar_slopes,
             width=bar_width,
             color=bar_colors,
             yerr=bar_errs,
@@ -780,7 +783,7 @@ class PlotSummaryMixin(PlotterMixinBase):
 
         ax.set_xlim(-0.5, len(bar_labels) - 0.5)
         ax.set_ylim(bottom=0)
-        y_top = max(c + e for c, e in zip(bar_cofs, bar_errs)) * 1.35
+        y_top = max(c + e for c, e in zip(bar_slopes, bar_errs)) * 1.35
         ax.set_ylim(top=y_top)
 
         internal_label_set = {
@@ -828,8 +831,10 @@ class PlotSummaryMixin(PlotterMixinBase):
             ha=ha,
             fontsize=self.settings["fonts"]["tick_label"],
         )
+        # 'COF' put the regression slope and mean(LF)/mean(NF) on one axis
+        # under one name. They are different quantities; this bar is the slope.
         ax.set_ylabel(
-            plot_config.get('y_label', 'COF'),
+            plot_config.get('y_label', label_for('cof_slope')),
             fontsize=self.settings["fonts"]["axis_label"],
         )
         ax.tick_params(
@@ -839,12 +844,12 @@ class PlotSummaryMixin(PlotterMixinBase):
         )
 
         if plot_config.get('annotate_bars', True):
-            err_pad = (max(bar_errs) if bar_errs else 0) * 0.3 + max(bar_cofs) * 0.01
-            for bar_obj, cof_val in zip(bars_drawn, bar_cofs):
+            err_pad = (max(bar_errs) if bar_errs else 0) * 0.3 + max(bar_slopes) * 0.01
+            for bar_obj, slope_val in zip(bars_drawn, bar_slopes):
                 ax.text(
                     bar_obj.get_x() + bar_obj.get_width() / 2.0,
                     bar_obj.get_height() + err_pad,
-                    f"{cof_val:.{slope_decimals}f}",
+                    f"{slope_val:.{slope_decimals}f}",
                     ha='center',
                     va='bottom',
                     fontsize=self.settings["fonts"]["legend"],
