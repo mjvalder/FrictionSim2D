@@ -1,14 +1,26 @@
-"""Database query interface for FrictionSim2D.
+"""Database query interface for FrictionSim2D (spec §4.4).
 
-Provides :class:`Friction2DDB`, a domain-specific wrapper around AiiDA's
-:class:`~aiida.orm.QueryBuilder` for querying stored friction simulation
-data following FAIR principles (Findable, Accessible, Interoperable, Reusable).
+`Friction2DDB.query` filters on `RunTokens` (Tasks 3-4) plus `family`,
+`model`, `set_label` and `potential`, and returns a `QueryResult` of matching
+run nodes and their (non-superseded) result nodes -- the summary scalars a
+`FrictionResultsData` carries are `RunSummary.as_dict()`'s fields (Task 8),
+written as attributes by `FrictionResultsData.set_summary` (Task 11).
+
+Runs and results are linked by a `run_uuid` ATTRIBUTE, not a provenance edge
+(spec §4.1 -- import does not fake process nodes), so this is two
+`QueryBuilder` passes, not one chained `append(..., with_X=...)`: the runs are
+found first, then the results are found among `attributes.run_uuid in
+<those runs>`. A single `append` of both classes with no link would be a
+cross product -- every run paired with every result -- and the run-level
+filters would not scope the returned rows at all.
 """
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+from .data_keys import is_superseded
 
 try:
     from aiida.orm import QueryBuilder as _QueryBuilder
@@ -22,108 +34,109 @@ except ImportError:
 
 @dataclass
 class QueryResult:
-    """Container for query results with metadata.
+    """Matching runs and their results. One row per RESULT, not per run.
 
-    Attributes:
-        simulations: List of ``FrictionSimulationData`` nodes.
-        total_count: Number of matching simulations.
-        query_params: Parameters used for the query.
+    `runs` and `results` are aligned by `run_uuid` -- not index-parallel, and
+    not necessarily the same length: a run with no matching result (every
+    load point excluded by a range filter) is dropped from `runs` too, so
+    every run in this list has at least one result in it.
     """
 
-    simulations: List[Any]
+    runs: List[Any]
+    results: List[Any]
     total_count: int
     query_params: Dict[str, Any]
 
     def to_dataframe(self):
-        """Convert results to a pandas DataFrame.
-
-        Returns:
-            DataFrame with simulation parameters and (if available) summary
-            statistics from linked result nodes.
+        """One row per result: the run's `to_dict()` plus the result's own
+        attributes (the `RunSummary` scalars among them), never a
+        hand-written subset -- a column this misses is a column the GUI
+        table and every CSV/JSON export miss too.
         """
         import pandas as pd  # pylint: disable=import-outside-toplevel
 
-        def _fallback_record(sim) -> Dict[str, Any]:
-            attrs = sim.base.attributes
-            return {
-                'uuid': str(getattr(sim, 'uuid', '')),
-                'pk': getattr(sim, 'pk', None),
-                'simulation_type': attrs.get('simulation_type', ''),
-                'material': attrs.get('material', ''),
-                'substrate_material': attrs.get('substrate_material', ''),
-                'substrate_amorphous': attrs.get('substrate_amorphous', False),
-                'tip_material': attrs.get('tip_material', ''),
-                'tip_radius': attrs.get('tip_radius', 0.0),
-                'layers': attrs.get('layers', 1),
-                'force': attrs.get('force', 0.0),
-                'pressure': attrs.get('pressure', None),
-                'scan_angle': attrs.get('scan_angle', 0.0),
-                'scan_speed': attrs.get('scan_speed', 0.0),
-                'temperature': attrs.get('temperature', 300.0),
-                'size_x': attrs.get('size_x', None),
-                'size_y': attrs.get('size_y', None),
-                'stack_type': attrs.get('stack_type', ''),
-                'potential_type': attrs.get('potential_type', ''),
-                'status': attrs.get('status', ''),
-                'simulation_path': attrs.get('simulation_path', ''),
-            }
-
+        by_uuid = {str(run.uuid): run for run in self.runs}
         records = []
-        for sim in self.simulations:
-            try:
-                record = sim.to_dict()
-            except (AttributeError, KeyError, TypeError):
-                record = _fallback_record(sim)
-            try:
-                results = sim.get_results()
-            except (AttributeError, KeyError, TypeError):
-                results = None
-            if results:
-                try:
-                    stats = results.get_summary_statistics()
-                    record.update({
-                        'mean_nf': stats.get('nf', {}).get('mean'),
-                        'mean_lfx': stats.get('lfx', {}).get('mean'),
-                        'mean_lfy': stats.get('lfy', {}).get('mean'),
-                        'friction_coefficient': stats.get('friction_coefficient'),
-                    })
-                except (KeyError, AttributeError):
-                    pass
+        for result in self.results:
+            run = by_uuid.get(result.run_uuid)
+            record = run.to_dict() if run is not None else {}
+            record.update({
+                'run_uuid': result.run_uuid,
+                'result_uuid': str(result.uuid),
+                'set_label': run.set_label if run is not None else '',
+                'load_kind': result.load_kind, 'load': result.load,
+                'angle': result.angle, 'speed': result.speed,
+                'tiers': ';'.join(result.tiers),
+            })
+            record.update(result.base.attributes.all)
             records.append(record)
-
         return pd.DataFrame(records)
 
     def export_csv(self, filepath: Path) -> Path:
-        """Export results to a CSV file.
-
-        Args:
-            filepath: Output file path.
-
-        Returns:
-            Path to the written file.
-        """
-        df = self.to_dataframe()
+        """Export the one-row-per-result table to a CSV file."""
         filepath = Path(filepath)
-        df.to_csv(filepath, index=False)
+        self.to_dataframe().to_csv(filepath, index=False)
         return filepath
 
     def export_json(self, filepath: Path) -> Path:
-        """Export results to a JSON file.
-
-        Args:
-            filepath: Output file path.
-
-        Returns:
-            Path to the written file.
-        """
-        data = {
+        """Export the query params and the matching RUNS (not results) as JSON."""
+        filepath = Path(filepath)
+        filepath.write_text(json.dumps({
             'query_params': self.query_params,
             'total_count': self.total_count,
-            'simulations': [sim.to_dict() for sim in self.simulations],
-        }
-        filepath = Path(filepath)
-        filepath.write_text(json.dumps(data, indent=2, default=str), encoding='utf-8')
+            'runs': [run.to_dict() for run in self.runs],
+        }, indent=2, default=str), encoding='utf-8')
         return filepath
+
+
+#: RunTokens field (plus family/model/set_label/potential) -> the run-node
+#: attribute it filters on. Equality filters only; the temperature range is
+#: handled separately below, and `layers`/`materials` need their own
+#: `{'in': ...}`/`{'contains': ...}` shape so they are not in this table.
+_RUN_EQ_FILTERS = {
+    'family': 'family', 'model': 'model', 'set_label': 'set_label',
+    'potential': 'pot_token', 'substrate': 'substrate',
+    'substrate_amorphous': 'substrate_amorphous', 'tip_material': 'tip_material',
+    'tip_radius': 'tip_radius', 'flake_material': 'flake_material',
+    'size_x': 'size_x', 'size_y': 'size_y', 'rel_path': 'rel_path',
+}
+
+#: Result-node attribute behind each result-level range filter.
+_RES_RANGE_ATTR = {
+    'force_range': 'load', 'pressure_range': 'load',
+    'angle_range': 'angle', 'speed_range': 'speed',
+}
+
+
+def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Dict[str, Any]:
+    """One QueryBuilder operator dict for a `(lo, hi)` range, never two calls.
+
+    R5: two `add_filter` calls on the SAME key overwrite each other on this
+    backend -- the second call replaces the first rather than ANDing with it,
+    so a naive `add_filter(lo); add_filter(hi)` silently drops the lower
+    bound. Every range in this module goes through this helper instead, which
+    folds both bounds into a single `{'and': [...]}` filter (or a single
+    operator when one side of the range is open-ended, e.g. `(10.0, None)`).
+    """
+    lo, hi = span
+    if lo is not None and hi is not None:
+        return {'and': [{'>=': lo}, {'<=': hi}]}
+    if lo is not None:
+        return {'>=': lo}
+    return {'<=': hi}
+
+
+def _result_sort_key(result, key: str) -> Any:
+    """`order_by`'s sort value for one result node.
+
+    `key` is usually a `FrictionResultsData` property (`load`, `angle`,
+    `speed`, ...), but `order_by` may also name a bare `RunSummary` scalar
+    (`mean_cof`) that has no property of its own -- those are read straight
+    off the stored attribute instead.
+    """
+    if hasattr(type(result), key):
+        return getattr(result, key)
+    return result.base.attributes.get(key)
 
 
 class Friction2DDB:
@@ -135,16 +148,9 @@ class Friction2DDB:
     Example::
 
         db = Friction2DDB()
-        results = db.query_by_material('h-MoS2')
-        for sim in results.simulations:
-            print(f"{sim.material} L{sim.layers}: μ = {sim.friction_coefficient}")
-
-        # Advanced query
-        results = db.query(
-            materials=['h-MoS2', 'h-WS2'],
-            force_range=(5.0, 15.0),
-            layers=[1, 2, 3],
-        )
+        results = db.query(materials=['h-MoS2'], force_range=(5.0, 15.0))
+        for run in results.runs:
+            print(f"{run.materials} L{run.layers}: {run.rel_path}")
 
     Raises:
         RuntimeError: If AiiDA is not available or no profile is loaded.
@@ -171,440 +177,227 @@ class Friction2DDB:
 
     # -- Simulation set queries -----------------------------------------------
 
-    def list_sets(self) -> List[Any]:
-        """Return all ``FrictionSimulationSetData`` nodes, newest first.
-
-        Returns:
-            List of set nodes ordered by creation time (descending).
-        """
+    def list_sets(self) -> List[Dict[str, Any]]:
+        """Every `FrictionSimulationSetData` node, newest first, as dicts."""
         qb = self._query_builder_cls()
         qb.append(self._simulation_set_cls, project=['*'])
         qb.order_by({self._simulation_set_cls: [{'ctime': 'desc'}]})
-        return [row[0] for row in qb.all()]
+        return [node.to_dict() for node in qb.all(flat=True)]
 
-    def query_by_set(self, set_uuid: str) -> QueryResult:
-        """Return all ``FrictionSimulationData`` nodes belonging to a set.
+    # -- The query --------------------------------------------------------
 
-        Args:
-            set_uuid: UUID of the ``FrictionSimulationSetData`` node.
-
-        Returns:
-            Matching simulation nodes.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, filters={'attributes.set_uuid': set_uuid})
-        simulations = [row[0] for row in qb.all()]
-        return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
-            query_params={'set_uuid': set_uuid},
-        )
-
-    def get_set_results(self, set_uuid: str) -> List[Any]:
-        """Return all ``FrictionResultsData`` nodes belonging to a set.
-
-        Args:
-            set_uuid: UUID of the ``FrictionSimulationSetData`` node.
-
-        Returns:
-            List of results nodes.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._results_data_cls, filters={'attributes.set_uuid': set_uuid})
-        return [row[0] for row in qb.all()]
-
-    # -- Simple queries -------------------------------------------------------
-
-    def query_by_material(self, material: str,
-                          status: Optional[str] = None) -> QueryResult:
-        """Find all simulations for a specific material.
-
-        Args:
-            material: Material name (e.g. ``'h-MoS2'``).
-            status: Optional status filter.
-
-        Returns:
-            Matching simulations.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, filters={'attributes.material': material})
-        if status:
-            qb.add_filter(self._simulation_data_cls, {'attributes.status': status})
-
-        simulations = [row[0] for row in qb.all()]
-        return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
-            query_params={'material': material, 'status': status},
-        )
-
-    def query_by_conditions(
-        self,
-        force: Optional[float] = None,
-        layers: Optional[int] = None,
-        temperature: Optional[float] = None,
-        angle: Optional[float] = None,
-        speed: Optional[float] = None,
-    ) -> QueryResult:
-        """Query simulations by experimental conditions.
-
-        Args:
-            force: Normal force (nN).
-            layers: Number of layers.
-            temperature: Temperature (K).
-            angle: Scan angle (degrees).
-            speed: Scan speed (m/s).
-
-        Returns:
-            Matching simulations.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, tag='sim')
-
-        attr_map = {
-            'force': force,
-            'layers': layers,
-            'temperature': temperature,
-            'scan_angle': angle,
-            'scan_speed': speed,
-        }
-        for attr, value in attr_map.items():
-            if value is not None:
-                qb.add_filter('sim', {f'attributes.{attr}': value})
-
-        simulations = [row[0] for row in qb.all()]
-        return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
-            query_params=attr_map,
-        )
-
-    def query_by_tip(self, tip_material: Optional[str] = None,
-                     tip_radius: Optional[float] = None) -> QueryResult:
-        """Query simulations by tip properties.
-
-        Args:
-            tip_material: Tip material (e.g. ``'Si'``).
-            tip_radius: Tip radius (Angstroms).
-
-        Returns:
-            Matching simulations.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, tag='sim')
-        if tip_material:
-            qb.add_filter('sim', {'attributes.tip_material': tip_material})
-        if tip_radius is not None:
-            qb.add_filter('sim', {'attributes.tip_radius': tip_radius})
-
-        simulations = [row[0] for row in qb.all()]
-        return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
-            query_params={'tip_material': tip_material, 'tip_radius': tip_radius},
-        )
-
-    def query_by_substrate(self, substrate_material: Optional[str] = None,
-                           amorphous: Optional[bool] = None) -> QueryResult:
-        """Query simulations by substrate properties.
-
-        Args:
-            substrate_material: Substrate material.
-            amorphous: Whether substrate is amorphous.
-
-        Returns:
-            Matching simulations.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, tag='sim')
-        if substrate_material:
-            qb.add_filter('sim', {'attributes.substrate_material': substrate_material})
-        if amorphous is not None:
-            qb.add_filter('sim', {'attributes.substrate_amorphous': amorphous})
-
-        simulations = [row[0] for row in qb.all()]
-        return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
-            query_params={'substrate_material': substrate_material, 'amorphous': amorphous},
-        )
-
-    # -- Advanced queries -----------------------------------------------------
-
-    def query(  # pylint: disable=too-many-arguments,too-many-branches
-        self,
-        materials: Optional[List[str]] = None,
-        simulation_type: Optional[str] = None,
-        force_range: Optional[Tuple[float, float]] = None,
+    def query(  # pylint: disable=too-many-arguments,too-many-locals
+        self, *, materials: Optional[List[str]] = None,
+        family: Optional[str] = None, model: Optional[str] = None,
+        set_label: Optional[str] = None, potential: Optional[str] = None,
         layers: Optional[Union[int, List[int]]] = None,
-        temperature_range: Optional[Tuple[float, float]] = None,
-        angle_range: Optional[Tuple[float, float]] = None,
-        status: Optional[Union[str, List[str]]] = None,
-        potential_type: Optional[str] = None,
-        limit: Optional[int] = None,
-        order_by: Optional[str] = None,
+        substrate: Optional[str] = None,
+        substrate_amorphous: Optional[bool] = None,
+        tip_material: Optional[str] = None, tip_radius: Optional[float] = None,
+        flake_material: Optional[str] = None,
+        size_x: Optional[float] = None, size_y: Optional[float] = None,
+        rel_path: Optional[str] = None,
+        temperature_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        force_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        pressure_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        angle_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        speed_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        limit: Optional[int] = None, order_by: Optional[str] = None,
     ) -> QueryResult:
-        """Advanced query with multiple filter options.
+        """Filter on every RunTokens axis plus family, model, set and potential.
 
-        Args:
-            materials: Material names to include.
-            simulation_type: ``'afm'`` or ``'sheetonsheet'``.
-            force_range: ``(min, max)`` force range (nN).
-            layers: Single value or list of layer counts.
-            temperature_range: ``(min, max)`` temperature range (K).
-            angle_range: ``(min, max)`` angle range (degrees).
-            status: Status string or list of statuses.
-            potential_type: Potential type (e.g. ``'sw'``).
-            limit: Maximum number of results.
-            order_by: Attribute to sort by (prefix ``'-'`` for descending).
+        Every parameter defaults to `None`, meaning "do not filter on this" --
+        this API never builds a QueryBuilder filter for an explicit `None`
+        (R4: `{'attributes.x': None}` raises `TypeError` on SQLite), so a
+        sheet-family run -- whose `layers`/`tip_radius`/`substrate`/
+        `flake_material` attributes ARE `None` -- is never the target of a
+        crashing filter; it is simply unaffected by an axis nobody asked to
+        filter on.
 
-        Returns:
-            Matching simulations.
+        `force_range`/`pressure_range`/`angle_range`/`speed_range` filter the
+        RESULT nodes; every other filter (including `set_label`, which is an
+        attribute of the run, not a provenance edge to the set) filters the
+        RUN nodes first, and only results of a matching run are considered
+        (R9 also drops any result marked `is_superseded`). `limit`/`order_by`
+        apply to the final result list, so a superseded row is never counted
+        against `limit`.
         """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, tag='sim')
-
+        run_eq = {
+            'family': family, 'model': model, 'set_label': set_label,
+            'potential': potential, 'substrate': substrate,
+            'substrate_amorphous': substrate_amorphous,
+            'tip_material': tip_material, 'tip_radius': tip_radius,
+            'flake_material': flake_material, 'size_x': size_x,
+            'size_y': size_y, 'rel_path': rel_path,
+        }
+        run_qb = self._query_builder_cls()
+        run_qb.append(self._simulation_data_cls, tag='run', project=['*'])
         if materials:
-            qb.add_filter('sim', {'attributes.material': {'in': materials}})
-        if simulation_type:
-            qb.add_filter('sim', {'attributes.simulation_type': simulation_type})
-        if force_range:
-            qb.add_filter('sim', {'attributes.force': {'>=': force_range[0]}})
-            qb.add_filter('sim', {'attributes.force': {'<=': force_range[1]}})
+            run_qb.add_filter('run',
+                              {'attributes.materials': {'contains': materials}})
+        for name, value in run_eq.items():
+            if value is not None:
+                run_qb.add_filter('run',
+                                  {f'attributes.{_RUN_EQ_FILTERS[name]}': value})
         if layers is not None:
-            if isinstance(layers, int):
-                qb.add_filter('sim', {'attributes.layers': layers})
-            else:
-                qb.add_filter('sim', {'attributes.layers': {'in': layers}})
-        if temperature_range:
-            qb.add_filter('sim', {'attributes.temperature': {'>=': temperature_range[0]}})
-            qb.add_filter('sim', {'attributes.temperature': {'<=': temperature_range[1]}})
-        if angle_range:
-            qb.add_filter('sim', {'attributes.scan_angle': {'>=': angle_range[0]}})
-            qb.add_filter('sim', {'attributes.scan_angle': {'<=': angle_range[1]}})
-        if status:
-            if isinstance(status, str):
-                qb.add_filter('sim', {'attributes.status': status})
-            else:
-                qb.add_filter('sim', {'attributes.status': {'in': status}})
-        if potential_type:
-            qb.add_filter('sim', {'attributes.potential_type': potential_type})
-        if order_by:
-            if order_by.startswith('-'):
-                qb.order_by({'sim': [{f'attributes.{order_by[1:]}': 'desc'}]})
-            else:
-                qb.order_by({'sim': [{f'attributes.{order_by}': 'asc'}]})
-        if limit:
-            qb.limit(limit)
+            run_qb.add_filter('run', {'attributes.layers':
+                                      layers if isinstance(layers, int)
+                                      else {'in': list(layers)}})
+        if temperature_range is not None:
+            run_qb.add_filter('run', {'attributes.temperature':
+                                      _range_filter(temperature_range)})
+        runs = sorted(run_qb.all(flat=True), key=lambda n: n.rel_path)
+        run_uuids = [str(run.uuid) for run in runs]
 
-        simulations = [row[0] for row in qb.all()]
+        results: List[Any] = []
+        if run_uuids:
+            res_qb = self._query_builder_cls()
+            res_qb.append(self._results_data_cls, tag='res', project=['*'],
+                          filters={'attributes.run_uuid': {'in': run_uuids}})
+            if force_range is not None:
+                res_qb.add_filter('res', {'attributes.load_kind': 'force'})
+                res_qb.add_filter('res', {'attributes.load':
+                                          _range_filter(force_range)})
+            if pressure_range is not None:
+                res_qb.add_filter('res', {'attributes.load_kind': 'pressure'})
+                res_qb.add_filter('res', {'attributes.load':
+                                          _range_filter(pressure_range)})
+            if angle_range is not None:
+                res_qb.add_filter('res', {'attributes.angle':
+                                          _range_filter(angle_range)})
+            if speed_range is not None:
+                res_qb.add_filter('res', {'attributes.speed':
+                                          _range_filter(speed_range)})
+            # R9: a superseded result must never be returned by a query --
+            # excluded here, in Python, the same way `export._results_of`
+            # and `ingest.find_results` do (the one shared `is_superseded`
+            # predicate, not a second QueryBuilder JSONB-extras filter).
+            results = [r for r in res_qb.all(flat=True) if not is_superseded(r)]
+
+        if order_by:
+            key = order_by[1:] if order_by.startswith('-') else order_by
+            results.sort(key=lambda r: _result_sort_key(r, key),
+                        reverse=order_by.startswith('-'))
+        if limit:
+            results = results[:limit]
+
+        kept_run_uuids = {r.run_uuid for r in results}
         return QueryResult(
-            simulations=simulations,
-            total_count=len(simulations),
+            runs=[run for run in runs if str(run.uuid) in kept_run_uuids],
+            results=results, total_count=len(results),
             query_params={
-                'materials': materials, 'simulation_type': simulation_type,
-                'force_range': force_range, 'layers': layers,
-                'temperature_range': temperature_range, 'angle_range': angle_range,
-                'status': status, 'potential_type': potential_type,
-            },
-        )
+                'materials': materials, 'family': family, 'model': model,
+                'set_label': set_label, 'potential': potential,
+                'layers': layers, 'substrate': substrate,
+                'substrate_amorphous': substrate_amorphous,
+                'tip_material': tip_material, 'tip_radius': tip_radius,
+                'flake_material': flake_material, 'size_x': size_x,
+                'size_y': size_y, 'rel_path': rel_path,
+                'temperature_range': temperature_range,
+                'force_range': force_range, 'pressure_range': pressure_range,
+                'angle_range': angle_range, 'speed_range': speed_range,
+                'limit': limit, 'order_by': order_by})
+
+    def query_by_set(self, label: str) -> QueryResult:
+        """Every run (and result) of one set, by its label."""
+        return self.query(set_label=label)
 
     # -- Aggregation ----------------------------------------------------------
 
-    def get_available_materials(self) -> List[str]:
-        """Get all unique material names in the database.
-
-        Returns:
-            Sorted list of material names.
-        """
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, project=['attributes.material'])
-        return sorted({row[0] for row in qb.all() if row[0]})
-
     def get_available_conditions(self) -> Dict[str, List[Any]]:
-        """Get all unique experimental conditions in the database.
+        """Distinct values behind each GUI filter dropdown.
 
-        Returns:
-            Dict with keys ``forces``, ``layers``, ``angles``, ``speeds``,
-            ``temperatures``.
+        Ten keys, one per combo in the GUI's filter bar (its database-pane
+        spec D3 populates the whole bar from this ONE call, so a filter with
+        no key here has no way to be populated). `potentials` are the
+        `pot_token` values carried on the run nodes; `set_labels` are the
+        labels of the `friction2d/<label>` groups, which is the authoritative
+        list -- a set exists as a group even before any run is attached to
+        it. A superseded result (R9) never contributes a value here, the same
+        way it is never returned by `query()`.
         """
+        from aiida.orm import Group  # pylint: disable=import-outside-toplevel
+
+        from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
+
         qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, project=[
-            'attributes.force', 'attributes.layers',
-            'attributes.scan_angle', 'attributes.scan_speed',
-            'attributes.temperature',
-        ])
+        qb.append(self._results_data_cls, project=['*'])
+        forces, pressures, angles, speeds, families = (set(), set(), set(),
+                                                        set(), set())
+        for (node,) in qb.all():
+            if is_superseded(node):
+                continue
+            (forces if node.load_kind == 'force' else pressures).add(node.load)
+            angles.add(node.angle)
+            speeds.add(node.speed)
+            if node.family:
+                families.add(node.family)
 
-        forces, layers, angles, speeds, temps = set(), set(), set(), set(), set()
-        for row in qb.all():
-            if row[0] is not None:
-                forces.add(row[0])
-            if row[1] is not None:
-                layers.add(row[1])
-            if row[2] is not None:
-                angles.add(row[2])
-            if row[3] is not None:
-                speeds.add(row[3])
-            if row[4] is not None:
-                temps.add(row[4])
+        qb2 = self._query_builder_cls()
+        qb2.append(self._simulation_data_cls, project=['*'])
+        temps, layers, models, potentials = set(), set(), set(), set()
+        for (node,) in qb2.all():
+            temps.add(node.temperature)
+            if node.layers is not None:
+                layers.add(node.layers)
+            if node.model:
+                models.add(node.model)
+            if node.pot_token:
+                potentials.add(node.pot_token)
 
-        return {
-            'forces': sorted(forces),
-            'layers': sorted(layers),
-            'angles': sorted(angles),
-            'speeds': sorted(speeds),
-            'temperatures': sorted(temps),
-        }
+        qb3 = self._query_builder_cls()
+        qb3.append(Group, filters={'label': {'like': f'{GROUP_PREFIX}/%'}},
+                  project=['label'])
+        prefix = f'{GROUP_PREFIX}/'
+        set_labels = {label[len(prefix):] for (label,) in qb3.all() if label}
+
+        return {'forces': sorted(forces), 'pressures': sorted(pressures),
+                'angles': sorted(angles), 'speeds': sorted(speeds),
+                'temperatures': sorted(temps), 'layers': sorted(layers),
+                'families': sorted(families), 'models': sorted(models),
+                'potentials': sorted(potentials),
+                'set_labels': sorted(set_labels)}
+
+    def get_available_materials(self) -> List[str]:
+        """Sorted, deduplicated list of every material named on a run."""
+        qb = self._query_builder_cls()
+        qb.append(self._simulation_data_cls, project=['attributes.materials'])
+        return sorted({m for (mats,) in qb.all() for m in (mats or [])})
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Get database statistics.
-
-        Returns:
-            Dict with ``total_simulations``, ``by_status``, ``by_type``,
-            ``by_material``, ``n_materials``.
-        """
+        """Counts by status, model, family and material across every run."""
         stats: Dict[str, Any] = {
-            'total_simulations': 0,
-            'by_status': {},
-            'by_type': {},
-            'by_material': {},
-            'n_materials': 0,
+            'total_simulations': 0, 'by_status': {}, 'by_model': {},
+            'by_family': {}, 'by_material': {}, 'n_materials': 0,
         }
         qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, project=[
-            'attributes.status', 'attributes.simulation_type', 'attributes.material',
-        ])
-        for row in qb.all():
+        qb.append(self._simulation_data_cls, project=['*'])
+        for (node,) in qb.all():
             stats['total_simulations'] += 1
-            for idx, bucket in enumerate(['by_status', 'by_type', 'by_material']):
-                key = row[idx] or 'unknown'
-                stats[bucket][key] = stats[bucket].get(key, 0) + 1
-
+            stats['by_status'][node.status] = stats['by_status'].get(
+                node.status, 0) + 1
+            stats['by_model'][node.model] = stats['by_model'].get(
+                node.model, 0) + 1
+            stats['by_family'][node.family] = stats['by_family'].get(
+                node.family, 0) + 1
+            for material in node.materials:
+                stats['by_material'][material] = stats['by_material'].get(
+                    material, 0) + 1
         stats['n_materials'] = len(stats['by_material'])
         return stats
 
-    # -- Comparison -----------------------------------------------------------
-
-    def compare_materials(
-        self,
-        materials: List[str],
-        conditions: Optional[Dict[str, Any]] = None,
-    ):
-        """Compare friction coefficients across materials.
-
-        Args:
-            materials: Materials to compare.
-            conditions: Optional filter dict (``force``, ``layers``, ``angle``).
-
-        Returns:
-            pandas DataFrame with comparison data.
-        """
-        import pandas as pd  # pylint: disable=import-outside-toplevel
-
-        query_params: Dict[str, Any] = {'materials': materials}
-        if conditions:
-            if 'force' in conditions:
-                query_params['force_range'] = (conditions['force'], conditions['force'])
-            if 'layers' in conditions:
-                query_params['layers'] = conditions['layers']
-            if 'angle' in conditions:
-                query_params['angle_range'] = (conditions['angle'], conditions['angle'])
-
-        result = self.query(**query_params, status='completed')
-
-        records = []
-        for sim in result.simulations:
-            results = sim.get_results()
-            if results:
-                try:
-                    mu = results.get_friction_coefficient()
-                    records.append({
-                        'material': sim.material,
-                        'layers': sim.layers,
-                        'force': sim.force,
-                        'angle': sim.scan_angle,
-                        'friction_coefficient': mu,
-                        'mean_lf': results.compute_mean('lfx'),
-                    })
-                except (KeyError, AttributeError):
-                    pass
-
-        return pd.DataFrame(records)
-
     # -- Provenance and reproducibility ---------------------------------------
 
-    def get_provenance(self, simulation) -> Dict[str, Any]:
-        """Get full provenance information for a simulation.
+    def export_for_reproduction(self, run, output_dir: Path) -> Path:
+        """Export one run's WHOLE SET back to a tree.
 
-        Args:
-            simulation: ``FrictionSimulationData`` node or UUID string.
-
-        Returns:
-            Dict with ``simulation``, ``files`` provenance data.
+        Every run of the set and every results file, not just `run` -- this
+        is the "recreate the run tree" action. For one run's provenance files
+        alone, use `src.aiida.export.export_provenance_bundle(run, dest)`.
         """
-        if isinstance(simulation, str):
-            simulation = self._load_node(simulation)
+        from .export import export_results  # pylint: disable=import-outside-toplevel
 
-        provenance = {
-            'simulation': simulation.to_dict(),
-            'files': None,
-        }
-        prov_node = simulation.get_provenance()
-        if prov_node:
-            provenance['files'] = prov_node.to_dict()
-
-        return provenance
-
-    def export_for_reproduction(self, simulation, output_dir: Path) -> Path:
-        """Export all files needed to reproduce a simulation.
-
-        Args:
-            simulation: ``FrictionSimulationData`` node or UUID string.
-            output_dir: Directory to export to.
-
-        Returns:
-            Path to the export directory.
-        """
-        if isinstance(simulation, str):
-            simulation = self._load_node(simulation)
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        info = {
-            'simulation_uuid': str(simulation.uuid),
-            'material': simulation.material,
-            'parameters': simulation.to_dict(),
-        }
-        (output_dir / 'reproduction_info.json').write_text(
-            json.dumps(info, indent=2, default=str), encoding='utf-8'
-        )
-        return output_dir
-
-    def find_similar(self, simulation,
-                     tolerance: Optional[Dict[str, float]] = None) -> QueryResult:
-        """Find simulations with similar parameters.
-
-        Args:
-            simulation: Reference simulation node or UUID string.
-            tolerance: Parameter tolerances, e.g.
-                ``{'force': 1.0, 'angle': 5.0, 'temperature': 10.0}``.
-
-        Returns:
-            Matching simulations.
-        """
-        if isinstance(simulation, str):
-            simulation = self._load_node(simulation)
-
-        tolerance = tolerance or {'force': 1.0, 'angle': 5.0, 'temperature': 10.0}
-
-        return self.query(
-            materials=[simulation.material],
-            layers=simulation.layers,
-            force_range=(simulation.force - tolerance.get('force', 1),
-                         simulation.force + tolerance.get('force', 1)),
-            angle_range=(simulation.scan_angle - tolerance.get('angle', 5),
-                         simulation.scan_angle + tolerance.get('angle', 5)),
-            temperature_range=(simulation.temperature - tolerance.get('temperature', 10),
-                               simulation.temperature + tolerance.get('temperature', 10)),
-        )
+        if isinstance(run, str):
+            run = self._load_node(run)
+        export_results(run.set_label, Path(output_dir))
+        return Path(output_dir)

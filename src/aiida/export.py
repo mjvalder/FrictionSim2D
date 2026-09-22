@@ -21,8 +21,10 @@ import re-creates it and the set stays visible to `resolve_set`/`delete`/
 `export`/`rebuild` on the far side (spec §4.2, R19). `import_archive` is its
 inverse.
 
-`export_provenance_bundle` belongs to a later task in this plan and is added
-to this module then, not pre-declared as an empty name now.
+`export_provenance_bundle` writes ONE run's provenance files only -- the
+GUI's "download provenance" action (database-pane spec D6) -- as opposed to
+`export_results`, which writes a whole set's tree including every results
+file.
 """
 from __future__ import annotations
 
@@ -42,7 +44,8 @@ from ..run.tree import provenance_dir_for
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['export_results', 'resolve_set', 'rebuild_set', 'export_archive', 'import_archive']
+__all__ = ['export_results', 'resolve_set', 'rebuild_set', 'export_archive',
+          'import_archive', 'export_provenance_bundle']
 
 
 def _load_profile(profile: Optional[str]) -> None:
@@ -431,6 +434,46 @@ def export_archive(label: str, output_path: Path, *,
     logger.info("Exported group %r (%d nodes) to %s", group.label,
                len(group.nodes), output_path)
     return output_path
+
+
+#: The provenance bundle: exactly these five categories of a run node's
+#: repository. NOT `lammps/*.in` (that is `rebuild_set`'s job) and NOT any
+#: results file (that is `export_results`'s).
+_BUNDLE_EXACT = ('provenance.json', 'provenance/config.json',
+                 'provenance/settings.yaml')
+_BUNDLE_PREFIXES = ('provenance/cif/', 'provenance/potentials/')
+
+
+def export_provenance_bundle(run, dest: Path) -> List[Path]:
+    """Write ONE run's provenance files into `dest`, and nothing else.
+
+    Exactly `provenance.json`, `provenance/config.json`,
+    `provenance/settings.yaml`, `provenance/cif/*` and
+    `provenance/potentials/*` -- what the GUI's "download provenance" action
+    (database-pane spec D6) hands the user. `export_results` writes a whole
+    set's tree including every results file, which is the wrong shape here.
+
+    Files keep their repository-relative layout, so the bundle is a strict
+    subset of what `export_results` writes for the same run and the same
+    reader works on both. `dest` is created if needed. Returns the paths
+    written, sorted.
+    """
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    written: List[Path] = []
+    for root, _dirs, files in run.base.repository.walk():
+        for name in files:
+            rel = (root / name).as_posix()
+            if rel not in _BUNDLE_EXACT and not rel.startswith(_BUNDLE_PREFIXES):
+                continue
+            out = dest / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with run.base.repository.open(rel, 'rb') as src:
+                out.write_bytes(src.read())
+            written.append(out)
+    logger.info("Wrote %d provenance file(s) for %s to %s",
+               len(written), run.rel_path, dest)
+    return sorted(written)
 
 
 def import_archive(archive_path: Path, *, profile: Optional[str] = None) -> int:

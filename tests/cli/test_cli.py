@@ -333,7 +333,42 @@ def test_aiida_query_help(runner):
     result = runner.invoke(cli, ['aiida', 'query', '--help'])
     assert result.exit_code == 0
     assert '--material' in result.output
-    assert '--set' in result.output
+    assert '--set-label' in result.output
+    assert '--force-min' in result.output
+    assert '--force-max' in result.output
+
+
+def test_aiida_query_forwards_filters_to_friction2ddb(runner, monkeypatch):
+    calls = {}
+
+    class _FakeResult:
+        total_count = 0
+
+        def to_dataframe(self):
+            import pandas as pd
+            return pd.DataFrame()
+
+    class _FakeDB:
+        def __init__(self):
+            pass
+
+        def query(self, **kwargs):
+            calls.update(kwargs)
+            return _FakeResult()
+
+    monkeypatch.setattr('src.aiida.load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr('src.aiida.query.Friction2DDB', _FakeDB)
+
+    result = runner.invoke(cli, [
+        'aiida', 'query', '--material', 'h-MoS2', '--family', 'hetero',
+        '--set-label', 'q1', '--force-min', '10', '--force-max', '30',
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls['materials'] == ['h-MoS2']
+    assert calls['family'] == 'hetero'
+    assert calls['set_label'] == 'q1'
+    assert calls['force_range'] == (10.0, 30.0)
 
 
 def test_aiida_export_help(runner):

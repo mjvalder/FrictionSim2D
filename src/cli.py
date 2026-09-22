@@ -942,60 +942,77 @@ def aiida_clear(profile: Optional[str]):
 
 
 @aiida_group.command('query')
-@click.option('--material', '-m', help='Filter by material')
-@click.option('--layers', '-l', type=int, help='Filter by layer count')
-@click.option('--force', '-f', type=float, help='Filter by applied force')
-@click.option('--set', '-s', 'set_label', default=None,
+@click.option('--material', '-m', 'materials', multiple=True,
+              help='Filter by material (repeatable)')
+@click.option('--family', default=None, help='Filter by family (e.g. afm, hetero)')
+@click.option('--model', default=None, help='Filter by model (e.g. afm, sheetonsheet)')
+@click.option('--set-label', default=None,
               help='Filter by simulation set label (e.g. "251113-afm")')
+@click.option('--potential', default=None, help='Filter by potential token')
+@click.option('--layers', '-l', type=int, help='Filter by layer count')
+@click.option('--force-min', type=float, help='Minimum applied force (nN)')
+@click.option('--force-max', type=float, help='Maximum applied force (nN)')
+@click.option('--pressure-min', type=float, help='Minimum applied pressure (GPa)')
+@click.option('--pressure-max', type=float, help='Maximum applied pressure (GPa)')
+@click.option('--angle-min', type=float, help='Minimum scan angle (degrees)')
+@click.option('--angle-max', type=float, help='Maximum scan angle (degrees)')
+@click.option('--speed-min', type=float, help='Minimum scan speed')
+@click.option('--speed-max', type=float, help='Maximum scan speed')
+@click.option('--temperature-min', type=float, help='Minimum temperature (K)')
+@click.option('--temperature-max', type=float, help='Maximum temperature (K)')
+@click.option('--limit', type=int, help='Maximum number of results')
+@click.option('--order-by', default=None,
+              help="Result attribute to sort by (prefix '-' for descending)")
 @click.option('--format', 'output_format', type=click.Choice(['table', 'csv', 'json']),
               default='table', help='Output format')
 @click.option('--output', '-o', type=click.Path(), help='Save to file')
 @click.option('--profile', default=None,
                             help='AiiDA profile name (default: configured default profile)')
-def aiida_query(material: Optional[str], layers: Optional[int], force: Optional[float],
-                                set_label: Optional[str], output_format: str,
-                                output: Optional[str], profile: Optional[str]):
-    """Query simulation database.
-    
+def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
+        materials: Tuple[str, ...], family: Optional[str], model: Optional[str],
+        set_label: Optional[str], potential: Optional[str], layers: Optional[int],
+        force_min: Optional[float], force_max: Optional[float],
+        pressure_min: Optional[float], pressure_max: Optional[float],
+        angle_min: Optional[float], angle_max: Optional[float],
+        speed_min: Optional[float], speed_max: Optional[float],
+        temperature_min: Optional[float], temperature_max: Optional[float],
+        limit: Optional[int], order_by: Optional[str], output_format: str,
+        output: Optional[str], profile: Optional[str]):
+    """Query simulation runs and their results.
+
     Example:
         FrictionSim2D aiida query --material h-MoS2 --layers 2 --format csv
-        FrictionSim2D aiida query --set 251113-afm --format table
+        FrictionSim2D aiida query --set-label 251113-afm --format table
     """
     from .aiida import load_aiida_profile
     from .aiida.query import Friction2DDB
+
+    def _range(lo, hi):
+        return (lo, hi) if lo is not None or hi is not None else None
 
     load_aiida_profile(profile)
 
     db = Friction2DDB()
 
-    if set_label:
-        from .aiida.integration import list_simulation_sets  # noqa: PLC0415
-        sets = list_simulation_sets(profile=profile)
-        matched = [s for s in sets if s['label'] == set_label]
-        if not matched:
-            available = [s['label'] for s in sets]
-            raise click.ClickException(
-                f"No set found with label '{set_label}'. Available: {available}"
-            )
-        set_uuid = matched[0]['uuid']
-        click.echo(f"🔍 Querying set '{set_label}' (UUID: {set_uuid[:8]}…)")
-        results = db.query_by_set(set_uuid)
+    query_kwargs = {
+        'materials': list(materials) if materials else None,
+        'family': family, 'model': model, 'set_label': set_label,
+        'potential': potential, 'layers': layers,
+        'force_range': _range(force_min, force_max),
+        'pressure_range': _range(pressure_min, pressure_max),
+        'angle_range': _range(angle_min, angle_max),
+        'speed_range': _range(speed_min, speed_max),
+        'temperature_range': _range(temperature_min, temperature_max),
+        'limit': limit, 'order_by': order_by,
+    }
+    shown = {k: v for k, v in query_kwargs.items() if v is not None}
+    click.echo(f"🔍 Querying database with filters: {shown}")
+    try:
+        results = db.query(**query_kwargs)
         click.echo(f"📊 Found {results.total_count} results")
-    else:
-        query_kwargs = {
-            'materials': [material] if material else None,
-            'layers': layers,
-            'force_range': (force, force) if force is not None else None,
-        }
-        # Remove None values before forwarding to Friction2DDB.query
-        query_kwargs = {k: v for k, v in query_kwargs.items() if v is not None}
-        click.echo(f"🔍 Querying database with filters: {query_kwargs}")
-        try:
-            results = db.query(**query_kwargs)
-            click.echo(f"📊 Found {results.total_count} results")
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("AiiDA query failed")
-            _raise_abort(f"❌ Query failed: {exc}", exc)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("AiiDA query failed")
+        _raise_abort(f"❌ Query failed: {exc}", exc)
 
     try:
         if output_format == 'table':
