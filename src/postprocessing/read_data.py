@@ -166,6 +166,11 @@ def _tier_of(filename: str) -> str:
             else 'window')
 
 
+#: Public alias. `src.aiida.ingest.load_points` imports this rather than
+#: reaching across packages for a private name.
+tier_of = _tier_of
+
+
 #: Filename patterns (moved out of `DataReader`; the class below keeps
 #: aliases, same as `parse_lf_schema`/`LF_SCHEMA1_CORRECTION` above). This is
 #: the ONE parser for slide-results filenames (R29/U7): `src.aiida.ingest.

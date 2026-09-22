@@ -19,10 +19,10 @@ from typing import Dict, List, Optional, Tuple
 
 from ..postprocessing.read_data import (
     FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
-    FILE_PATTERN_TIP_ALT, _tier_of,
+    FILE_PATTERN_TIP_ALT, tier_of,
 )
 from ..run.naming import AFM_LIKE_MODELS
-from .data.results import TIER_KEYS, _content_hash
+from .data_keys import TIER_KEYS, content_hash
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,15 @@ POINT_KEYS = TIER_KEYS + ('retract',)
 #: pattern (the DataReader never reads retract curves), so it is not lifted
 #: from anywhere.
 _INDENT_RE = re.compile(r'^indent_f(?P<load>\d+\.?\d*)N_l(?P<layers>\d+)\.csv$')
-_PES_GLOB = 'pes_scan*.csv'
+#: The base grid. `src.builders.sheetonsheet.pes_sheet._grid_variants` also
+#: writes `_PES_REFINE_NAME` alongside it when `pes.grid_n_refine` is set --
+#: a SECOND grid at a finer resolution for the same (family, load=0) point,
+#: not a second point: both would carry the identical identity (load_kind=
+#: 'none', load=angle=speed=0, layers=None), so treating it as its own point
+#: would make each ingest supersede the other and never settle. It rides
+#: along as an aux file on the one point instead.
+_PES_BASE_NAME = 'pes_scan.csv'
+_PES_REFINE_NAME = 'pes_scan_refine.csv'
 _PES_FAMILIES = ('pes_tip', 'pes_sheet')
 
 
@@ -246,7 +254,7 @@ def _match_point(name: str, model: str):
     `fc_ave_slide_*` form never had raw/peratom tiers, so it is only tried
     for the window tier.
     """
-    tier = _tier_of(name)
+    tier = tier_of(name)
     probe = name
     if tier == 'raw':
         probe = 'friction_' + name[len('raw_'):]
@@ -289,13 +297,15 @@ def load_points(locator) -> List[LoadPoint]:
     aux = _aux_files(locator)
 
     if family in _PES_FAMILIES:
-        return [
-            LoadPoint(family=family, load_kind='none', load=0.0, angle=0.0,
-                      speed=0.0, layers=locator.tokens.layers,
-                      tiers={'window': csv}, aux=aux,
-                      content_sha256=_content_hash([csv]))
-            for csv in sorted(locator.results_dir.glob(_PES_GLOB))
-        ]
+        base = locator.results_dir / _PES_BASE_NAME
+        if not base.is_file():
+            return []
+        refine = locator.results_dir / _PES_REFINE_NAME
+        point_aux = aux + ((refine,) if refine.is_file() else ())
+        return [LoadPoint(family=family, load_kind='none', load=0.0, angle=0.0,
+                          speed=0.0, layers=locator.tokens.layers,
+                          tiers={'window': base}, aux=point_aux,
+                          content_sha256=content_hash([base]))]
 
     model = locator.tokens.model
     grouped: Dict[Tuple[str, float, float, float, Optional[int]], Dict[str, Path]] = {}
@@ -304,8 +314,19 @@ def load_points(locator) -> List[LoadPoint]:
         if matched is None:
             continue
         kind, load, angle, speed, layers = matched
-        grouped.setdefault((kind, load, angle, speed, layers), {})[
-            _tier_of(path.name)] = path
+        key = (kind, load, angle, speed, layers)
+        bucket = grouped.setdefault(key, {})
+        tier = tier_of(path.name)
+        existing = bucket.get(tier)
+        if existing is not None and existing != path:
+            logger.warning(
+                "%s: %r and %r both match the %r tier of load point "
+                "(kind=%s, load=%s, angle=%s, speed=%s, layers=%s); keeping "
+                "%r, ignoring %r.",
+                locator.run_dir, existing.name, path.name, tier,
+                kind, load, angle, speed, layers, existing.name, path.name)
+            continue
+        bucket[tier] = path
 
     if family == 'indent':
         for path in sorted(locator.results_dir.glob('indent_f*N_l*.csv')):
@@ -324,5 +345,5 @@ def load_points(locator) -> List[LoadPoint]:
             family=family, load_kind=kind, load=load, angle=angle, speed=speed,
             layers=layers if layers is not None else locator.tokens.layers,
             tiers=ordered, aux=aux,
-            content_sha256=_content_hash(ordered.values())))
+            content_sha256=content_hash(ordered.values())))
     return points

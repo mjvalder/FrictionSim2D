@@ -1,4 +1,7 @@
 """Ingest is idempotent and set-scoped (spec §4.2)."""
+import subprocess
+import sys
+
 import pytest
 
 pytest.importorskip('aiida')
@@ -338,3 +341,87 @@ def test_families_tuple_is_fully_covered():
     from src.core.observables import FAMILIES
 
     assert {f for f, _rel, _kind in FAMILY_CASES} == set(FAMILIES)
+
+
+def test_pes_refine_grid_travels_as_aux_not_a_second_point(aiida_profile_clean, tmp_path):
+    """`pes_scan_refine.csv` (written alongside `pes_scan.csv` when
+    `pes.grid_n_refine` is set -- src/builders/sheetonsheet/pes_sheet.py
+    `_grid_variants`) must not become its own `LoadPoint`: both grids would
+    carry the identical identity (load_kind='none', load=angle=speed=0,
+    layers=None), so two points would supersede each other on every
+    ingest and neither would ever settle. It rides along as an aux file on
+    the one point the base grid forms instead."""
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, 'pes_sheet/h-MoS2/100x_100y/K300', 'pes_sheet',
+                       tiers=())
+    (run_dir / 'results' / 'pes_scan_refine.csv').write_text(
+        PES_GRID_CSV['pes_sheet'], encoding='utf-8')
+    loc, = discover_runs(root)
+
+    points = load_points(loc)
+
+    assert len(points) == 1
+    point = points[0]
+    assert point.tiers['window'].name == 'pes_scan.csv'
+    assert {Path(p).name for p in point.aux} == {'pes_scan_refine.csv'}
+
+    # Stable across re-ingest: same single point, same hash both times.
+    again, = load_points(loc)
+    assert again.content_sha256 == point.content_sha256
+
+
+def test_a_tier_collision_is_warned_not_silently_overwritten(
+        aiida_profile_clean, tmp_path, caplog):
+    """Two filenames that parse to the SAME (kind, load, angle, speed,
+    layers, tier) -- e.g. a stray `.bak` copy, or `f30` alongside `f30.0` --
+    must not silently overwrite one another in `tiers`; the second is
+    dropped with a warning naming both files."""
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    results_dir = run_dir / 'results'
+    original = results_dir / 'friction_f30_a0_s2_layer2.txt'
+    dup = results_dir / 'friction_f30.0_a0_s2_layer2.txt.bak'
+    dup.write_text(original.read_text(encoding='utf-8'), encoding='utf-8')
+    loc, = discover_runs(root)
+
+    with caplog.at_level('WARNING'):
+        point, = load_points(loc)
+
+    assert original.name in caplog.text
+    assert dup.name in caplog.text
+    assert point.tiers['window'].name in {original.name, dup.name}
+
+
+def test_importing_ingest_does_not_require_aiida():
+    """`src.aiida.ingest` must import without `aiida` installed: every
+    `aiida.orm` call in it is deferred into a function body specifically so
+    the module loads on a machine without aiida. A module-top import of
+    `TIER_KEYS` from `src.aiida.data`/`src.aiida.data.results` breaks this
+    -- that package eagerly imports three `aiida.orm.Data` node types.
+    `src.aiida.data_keys` (a sibling of `ingest.py`, not a child of the
+    `data` package) is the fix; this pins it with `aiida` actually blocked,
+    not just absent from this test's own environment.
+
+    Blocked via `sys.modules['aiida'] = None` -- the mechanism `importlib`
+    itself special-cases as "not installed" (`import aiida` then raises
+    `ImportError`, and `importlib.util.find_spec('aiida')`, which
+    `src/__init__.py` itself probes with at import time, returns `None`
+    rather than raising). A `sys.meta_path` finder that raises from
+    `find_spec` was tried first and broke on exactly that probe: raising
+    propagates through `find_spec()` instead of behaving like "not found",
+    so `import src` itself blew up before reaching `src.aiida.ingest`.
+    """
+    code = (
+        "import sys\n"
+        "sys.modules['aiida'] = None\n"
+        "import src.aiida.ingest as ingest\n"
+        "assert sys.modules.get('aiida') is None\n"
+        "assert hasattr(ingest, 'load_points')\n"
+        "assert hasattr(ingest, 'LoadPoint')\n"
+        "assert hasattr(ingest, 'TIER_KEYS')\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run([sys.executable, '-c', code],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert 'OK' in result.stdout

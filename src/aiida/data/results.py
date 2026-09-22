@@ -6,32 +6,13 @@ only summary scalars from `RunSummary` are attributes. Time series are NEVER
 attributes -- 13k JSONB blobs on SQLite is what this replaces.
 """
 
-import hashlib
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from aiida.orm import Data  # pyright: ignore[reportMissingImports]
 
-#: The three sampling tiers that become stored tier files. `src/aiida/ingest.py`
-#: imports this rather than declaring its own, so `POINT_KEYS = TIER_KEYS +
-#: ('retract',)` there and the loop here cannot disagree about what a tier is.
-TIER_KEYS = ('window', 'raw', 'peratom')
-
-
-def _content_hash(paths: Sequence[Path]) -> str:
-    """SHA-256 over the given files' bytes, in the given order.
-
-    The ONE definition of a content hash over a set of result files:
-    `add_result_files`'s fallback (below, when no hash is passed in) and
-    `src.aiida.ingest.load_points` (which hashes every entry of
-    `point.tiers`, `'retract'` included) both call this, so the two paths
-    can never diverge into hashing a different file set.
-    """
-    digest = hashlib.sha256()
-    for path in paths:
-        digest.update(Path(path).read_bytes())
-    return digest.hexdigest()
+from ..data_keys import TIER_KEYS, content_hash
 
 
 class FrictionResultsData(Data):
@@ -188,7 +169,7 @@ class FrictionResultsData(Data):
         `results_exist` would never match and every re-import of an indent run
         would create duplicates -- the exact opposite of the spec's "second
         ingest creates zero nodes". When no hash is passed (standalone/test
-        callers), one is computed here with `_content_hash` over the stored
+        callers), one is computed here with `content_hash` over the stored
         tier files so the attribute is never empty on a stored node.
         """
         limit = max_mb * 1024 * 1024
@@ -209,7 +190,7 @@ class FrictionResultsData(Data):
                 self.base.repository.put_object_from_file(
                     str(extra), self._run_relative_name(extra))
         self.tiers = tiers
-        self.content_sha256 = content_sha256 or _content_hash(tier_paths)
+        self.content_sha256 = content_sha256 or content_hash(tier_paths)
 
     def set_summary(self, summary) -> None:
         """Write every `RunSummary` scalar as a queryable attribute."""
