@@ -76,6 +76,10 @@ class LammpsFrictionCalcJob(CalcJob):
                        message='LAMMPS returned a non-zero exit code.')
         spec.exit_code(320, 'ERROR_NO_RESULTS',
                        message='No results files were produced.')
+        spec.exit_code(321, 'ERROR_NO_SIMULATION_NODE',
+                       message='No simulation_node input was given, so the '
+                               'parser has no rel_path to locate this run\'s '
+                               'results in the retrieved folder.')
         spec.exit_code(330, 'ERROR_NO_LOAD_POINTS',
                        message='Results were retrieved but no load point could '
                                'be formed from them.')
@@ -98,7 +102,7 @@ class LammpsFrictionCalcJob(CalcJob):
             _collect_lammps_scripts(sim_folder, scripts_override)
             or self._DEFAULT_LAMMPS_SCRIPTS
         )
-        sim_prefix = _detect_sim_prefix(repo, lammps_scripts)
+        sim_prefix = _sim_prefix_for(inputs, repo, lammps_scripts)
 
         _stage_files_into_sandbox(folder, repo, sim_prefix)
         _handle_array_mode(folder, sim_folder, params, scripts_override, lammps_scripts)
@@ -114,21 +118,105 @@ class LammpsFrictionCalcJob(CalcJob):
         calcinfo.retrieve_list = _retrieve_list_for(sim_prefix)
         return calcinfo
 
+    def on_terminated(self) -> None:
+        """Once this CalcJob reaches a terminal state, file its parser's
+        `results.*` outputs into the run's set group.
+
+        The engine attaches `Parser.out()`'s nodes to this calculation node
+        with real provenance links and stores them, but it never adds
+        anything to an AiiDA `Group` on its own -- `create_results` does that
+        itself for the import path; this is the CalcJob-native counterpart,
+        run once there is a finished node with real output links to read.
+        """
+        super().on_terminated()
+        _group_results_from_node(self.node)
+
+
+def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
+    """Where this run's own directory sits under the remote working directory.
+
+    `simulation_node.rel_path`, when the input is given, IS that directory --
+    the CalcJob stages `simulation_dir` rooted at exactly the run's own
+    directory (`prepare_simulation_folder(sim_dir=run_dir)`). It is
+    authoritative and preferred over `_detect_sim_prefix`'s heuristic: that
+    heuristic reads a `read_data <path>` line containing `/build/` and returns
+    everything before it, which for an AFM-family run recovers only the
+    shared K-level ancestor of the per-layer `build/` directory
+    (`self.relative_run_dir` in `builders/afm/base.py`) -- ONE level shallower
+    than the run's actual directory (`.../K300/L{n}`, where `results/`,
+    `data/` and `provenance.json` actually live). `_detect_sim_prefix` is kept
+    as a fallback only for a caller that omits `simulation_node` entirely.
+    """
+    sim_node = inputs.get('simulation_node', None)
+    if sim_node is not None:
+        return sim_node.rel_path
+    return _detect_sim_prefix(repo, lammps_scripts)
+
 
 def _retrieve_list_for(sim_prefix: str | None) -> list:
     """The CalcJob's `retrieve_list`: the retention rule, unmodified, plus
     `array_status/*`.
 
     `retrieve_patterns` (Task 13, verified against the real aiida-core
-    execmanager) IS the retention guarantee for everything `ingest` reads --
-    it is used here as-is, never re-derived. Array-mode status files are a
-    different concern (job progress polling, not something the parser
-    ingests) and are always written to the sim root by `_build_array_wrapper`
-    regardless of `sim_prefix`, so they are appended separately rather than
-    folded into the retention list.
+    execmanager; widened for a prefix by the Task 22 fix round so every entry
+    nests consistently under it -- see `retention.py`) IS the retention
+    guarantee for everything `ingest` reads -- it is used here as-is, never
+    re-derived. Array-mode status files are a different concern (job progress
+    polling, not something the parser ingests) and are always written to the
+    sim root by `_build_array_wrapper` regardless of `sim_prefix`, so they are
+    appended separately rather than folded into the retention list.
     """
     patterns = retrieve_patterns(sim_prefix) if sim_prefix else retrieve_patterns()
     return list(patterns) + ['array_status/*']
+
+
+def _run_dir_in_retrieved(tmp_root: Path, run_node) -> Path:
+    """Where the run's own directory landed inside the rebuilt retrieved tree.
+
+    `prepare_for_submission` nests the ENTIRE retrieval under
+    `run_node.rel_path` whenever `simulation_node` was given (`_sim_prefix_for`)
+    -- `results/`, `provenance.json` and everything else then sit at
+    `tmp_root/<rel_path>/`, not at `tmp_root` itself. Falls back to `tmp_root`
+    for a run retrieved unprefixed (nothing to nest under, e.g. a
+    sheet-on-sheet run whose own directory already IS the remote work
+    directory and had no `/build/`-style read_data line to (mis)detect).
+    """
+    prefixed = tmp_root / run_node.rel_path
+    if (prefixed / 'provenance.json').is_file():
+        return prefixed
+    return tmp_root
+
+
+def _group_results_from_node(node) -> None:
+    """File a finished CalcJob node's `results.*` outputs into its set group.
+
+    Free function, not a method: it only reads `node`'s own inputs/outgoing
+    links, so it can be exercised directly against a plain, manually-built
+    `CalcJobNode` in a test, with no live `Process` (engine, runner, broker)
+    required -- exactly the granularity `LammpsFrictionCalcJob.on_terminated`
+    needs to delegate to.
+
+    The link label to match is `results__point_0`, NOT `results.point_0`: a
+    dotted string is only the developer-facing spelling accepted by
+    `self.out()` (`Process.out` splits it on `spec().namespace_separator`,
+    `'.'`, to nest it under the `results` output namespace); AiiDA link labels
+    themselves allow only alphanumerics and underscores, so once the engine
+    actually stores the output (`Process.update_outputs` -> `_flat_outputs`,
+    `PORT_NAMESPACE_SEPARATOR = '__'`) the real link label is joined with a
+    double underscore instead.
+    """
+    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
+
+    sim_node = getattr(node.inputs, 'simulation_node', None)
+    if sim_node is None:
+        return
+    outgoing = node.base.links.get_outgoing(link_type=LinkType.CREATE)
+    results = [triple.node for triple in outgoing.all()
+              if triple.link_label.startswith('results__')]
+    if not results:
+        return
+    from .ingest import add_results_to_group  # pylint: disable=import-outside-toplevel
+    add_results_to_group(sim_node.set_label or sim_node.set_uuid, results)
 
 
 # ---------------------------------------------------------------------------
@@ -147,21 +235,30 @@ class LammpsFrictionParser(Parser):
         exactly as a directory on disk would be. `Parser.out()` requires
         UNSTORED nodes so the engine can attach them to this calculation with
         real provenance links -- `ingest_retrieved` returns exactly those.
+
+        `simulation_node` is checked BEFORE the scratch copy: without it
+        there is no `rel_path` to locate the run by (in the unprefixed case,
+        `locator_for` would happily but wrongly treat the raw retrieved
+        folder's root as the run itself) and no run to attach results to
+        either, so there is nothing useful the rest of this method could do.
         """
         retrieved = self.retrieved
         if retrieved is None:
             return self.exit_codes.ERROR_NO_RESULTS
 
+        run_node = getattr(self.node.inputs, 'simulation_node', None)
+        if run_node is None:
+            return self.exit_codes.ERROR_NO_SIMULATION_NODE
+
         repo = retrieved.base.repository
         names = repo.list_object_names()
-        run_node = getattr(self.node.inputs, 'simulation_node', None)
 
         with TemporaryDirectory() as tmp:
-            run_dir = Path(tmp)
+            tmp_root = Path(tmp)
             for root, _dirs, files in repo.walk():
                 for name in files:
                     rel = (root / name).as_posix()
-                    out = run_dir / rel
+                    out = tmp_root / rel
                     out.parent.mkdir(parents=True, exist_ok=True)
                     with repo.open(rel, 'rb') as src:
                         out.write_bytes(src.read())
@@ -170,8 +267,7 @@ class LammpsFrictionParser(Parser):
             self._store_stdout(repo, [n for n in names if n.endswith('.out')])
             self._copy_local(repo, names)
 
-            if run_node is None:
-                return self.exit_codes.ERROR_NO_RESULTS
+            run_dir = _run_dir_in_retrieved(tmp_root, run_node)
             from .ingest import ingest_retrieved  # pylint: disable=import-outside-toplevel
             nodes = ingest_retrieved(run_dir, run_node.rel_path, run_node)
 

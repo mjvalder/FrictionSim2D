@@ -1,5 +1,6 @@
 """The ONE retention rule: ingest and the CalcJob keep exactly the same files."""
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -190,9 +191,84 @@ def test_no_remote_pattern_relies_on_recursive_globbing():
 def test_retrieve_patterns_prefixes_only_the_remote_side():
     prefixed = retrieve_patterns('afm/h-MoS2/K300/L2')
 
-    assert prefixed[0] == ('afm/h-MoS2/K300/L2/provenance.json', '.', 1)
+    # The prefix ('afm/h-MoS2/K300/L2') is 4 segments; a literal entry's own
+    # depth (1 for 'provenance.json') must widen by that count, or the file
+    # lands at the retrieved ROOT instead of under the prefix like every
+    # wildcard entry does (the bug this test used to encode as "correct").
+    assert prefixed[0] == ('afm/h-MoS2/K300/L2/provenance.json', '.', 1 + 4)
     assert ('afm/h-MoS2/K300/L2/results/*', '.', None) in prefixed
     assert retrieve_patterns() == list(RETRIEVE_LIST)
+
+
+def test_retrieve_patterns_prefix_widens_literal_depths_only():
+    """Wildcard depths (`None`) are prefix-agnostic already; only the two
+    literal entries need their depth widened by the prefix's segment count."""
+    prefix = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'  # 6 segments
+    prefixed = retrieve_patterns(prefix)
+    by_remote = {remote: (local, depth) for remote, local, depth in prefixed}
+
+    assert by_remote[f'{prefix}/provenance.json'] == ('.', 1 + 6)
+    assert by_remote[f'{prefix}/lammps/system.in.settings'] == ('.', 2 + 6)
+    wildcard_depths = {depth for remote, (_local, depth) in by_remote.items()
+                       if not remote.endswith(('provenance.json',
+                                                'system.in.settings'))}
+    assert wildcard_depths == {None}
+
+
+@pytest.mark.aiida
+def test_real_retrieval_preserves_the_tree_under_a_prefix(tmp_path):
+    """The prefixed counterpart of `test_real_retrieval_preserves_the_tree`:
+    ground truth against the real execmanager, with the run nested under a
+    prefix the way a real AFM submission needs it (results/data/provenance
+    sit under `<K-level>/L{n}`, not at the remote work directory's root).
+
+    Before the Task 22 fix round, the retrieved tree here had
+    `<prefix>/results/...` next to a bare `provenance.json` dropped at the
+    root -- this pins that they now land at the SAME level.
+    """
+    pytest.importorskip('aiida')
+    from aiida.engine.daemon.execmanager import retrieve_files_from_list
+    from aiida.transports.plugins.local import LocalTransport
+
+    prefix = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
+    remote_dir = tmp_path / 'remote'
+    retrieved_dir = tmp_path / 'retrieved'
+    retrieved_dir.mkdir()
+    _touch(remote_dir / prefix,
+           'provenance.json',
+           'provenance/config.json', 'provenance/potentials/MoS.sw',
+           'lammps/system.in', 'lammps/slide.in', 'lammps/system.in.settings',
+           'results/friction_f30_a0_s2_layer2.txt',
+           'data/hold_f30.txt', 'data/final_f30.data', 'data/load_30N.data',
+           'log_slide.lammps', 'job.out')
+
+    class _FakeCalculation:  # only what retrieve_files_from_list touches
+        pk = 1
+
+        @staticmethod
+        def get_remote_workdir():
+            return str(remote_dir)
+
+    transport = LocalTransport()
+    transport.open()
+    try:
+        asyncio.run(retrieve_files_from_list(
+            _FakeCalculation(), transport, str(retrieved_dir),
+            retrieve_patterns(prefix)))
+    finally:
+        transport.close()
+
+    retrieved = {p.relative_to(retrieved_dir).as_posix()
+                 for p in retrieved_dir.rglob('*') if p.is_file()}
+    expected = {(Path(prefix) / p.relative_to(remote_dir / prefix)).as_posix()
+                for p in retained_paths(remote_dir / prefix)}
+
+    assert retrieved == expected
+    # the two literal entries land NEXT TO results/, not at the retrieved root
+    assert f'{prefix}/provenance.json' in retrieved
+    assert f'{prefix}/lammps/system.in.settings' in retrieved
+    assert 'provenance.json' not in retrieved
+    assert f'{prefix}/results/friction_f30_a0_s2_layer2.txt' in retrieved
 
 
 def test_retrieve_list_includes_hpc_run_logs():

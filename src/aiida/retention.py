@@ -100,14 +100,33 @@ def retained_paths(run_dir: Path) -> List[Path]:
 
 
 def retrieve_patterns(prefix: str = '') -> List[Tuple[str, str, Optional[int]]]:
-    """`RETRIEVE_LIST`, optionally under a remote working-directory prefix.
+    """`RETRIEVE_LIST`, optionally nested under a remote working-directory prefix.
 
-    Only the REMOTE half of each tuple is prefixed: the local half is where the
-    file lands inside the retrieved `FolderData`, and that layout must be the
-    same whether or not the run sat in a subdirectory on the cluster.
+    Only the REMOTE half of each tuple is prefixed, and the retrieved tree must
+    reproduce the SAME shape under that prefix as the unprefixed tree does at
+    its root -- `<prefix>/results/x.txt` next to `<prefix>/provenance.json`,
+    never one nested under the prefix while the other lands flattened at the
+    retrieved root.
+
+    That consistency does not fall out of prefixing the remote string alone.
+    A WILDCARD entry (`depth=None`) already reproduces the full path relative
+    to the remote working directory (`execmanager`'s `rel_rem` -- see
+    `RETRIEVE_LIST`'s own docstring), so prepending the prefix to the pattern
+    is enough: `rel_rem` picks it up for free. A LITERAL entry's `depth` is
+    instead a fixed path-SEGMENT COUNT (`tmp_rname.split('/')[-depth:]`) sized
+    to the pattern's own segments (`provenance.json` -> 1,
+    `lammps/system.in.settings` -> 2); left unchanged under a prefix, that
+    same count now selects only the pattern's own tail and drops the prefix
+    off the front, landing the two literal files at the retrieved ROOT while
+    every wildcard entry lands under `<prefix>/` -- exactly the split layout
+    `locator_for` cannot make sense of (it looks for `provenance.json`
+    alongside `results/`, not four directories above it). Every literal
+    entry's depth is therefore widened by the prefix's own segment count, so
+    it takes in the whole prefixed path too.
     """
     if not prefix:
         return list(RETRIEVE_LIST)
     head = prefix.rstrip('/')
-    return [(f'{head}/{remote}', local, depth)
+    extra = len(head.split('/'))
+    return [(f'{head}/{remote}', local, depth if depth is None else depth + extra)
             for remote, local, depth in RETRIEVE_LIST]

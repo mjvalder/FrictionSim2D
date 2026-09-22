@@ -469,8 +469,9 @@ def create_results(run_node, point: LoadPoint, run_dir: Path, *,
     `store=False` (the CalcJob parser's path, via `ingest_retrieved`) returns
     the node UNSTORED and skips the group: `Parser.out()` requires unstored
     nodes so the engine can attach them to the calculation with real
-    provenance links, and there is no set/group to file an in-process node
-    into anyway -- the engine does that once the parser returns.
+    provenance links. The engine does NOT add anything to a `Group` on its
+    own once it stores those outputs -- `LammpsFrictionCalcJob.on_terminated`
+    files them into the set's group afterwards, via `add_results_to_group`.
     """
     from ..data.models import summarise_run  # pylint: disable=import-outside-toplevel
 
@@ -515,7 +516,7 @@ def locator_for(run_dir: Path, rel_path: str):
     import json as _json  # pylint: disable=import-outside-toplevel
 
     from ..run.naming import parse_run_path  # pylint: disable=import-outside-toplevel
-    from ..run.tree import RunLocator, provenance_dir_for  # pylint: disable=import-outside-toplevel
+    from ..run.tree import RunLocator  # pylint: disable=import-outside-toplevel
 
     run_dir = Path(run_dir)
     tokens = parse_run_path(rel_path)
@@ -524,9 +525,17 @@ def locator_for(run_dir: Path, rel_path: str):
     if prov_file.is_file():
         family = _json.loads(prov_file.read_text(encoding='utf-8')).get(
             'family') or tokens.model
+    # NOT `provenance_dir_for(run_dir)`: for an AFM-family run that helper
+    # falls back to `run_dir.parent / 'provenance'` when `run_dir/provenance`
+    # does not exist -- correct for a real tree, wrong for a scratch directory
+    # that IS the whole retrieved tree. `run_dir.parent` there is arbitrary
+    # (whatever the CalcJob's `TemporaryDirectory` happens to sit under, or
+    # nothing at all if `run_dir` is the scratch root itself), never a real
+    # `provenance/` sibling, so this pins it to the one place that could
+    # possibly exist inside the retrieval.
     return RunLocator(
         tokens=replace(tokens, family=family), run_dir=run_dir,
-        provenance_file=prov_file, provenance_dir=provenance_dir_for(run_dir),
+        provenance_file=prov_file, provenance_dir=run_dir / 'provenance',
         results_dir=run_dir / 'results', data_dir=run_dir / 'data',
         lammps_dir=run_dir / 'lammps')
 
@@ -539,11 +548,42 @@ def ingest_retrieved(run_dir: Path, rel_path: str, run_node, *,
     them to the calculation with real provenance links. Same `load_points` and
     same `summarise_run` as the import path -- the nodes are indistinguishable
     from ones `ingest_run` would have created.
+
+    Degrades per point, exactly like `ingest_run`'s main loop: a truncated or
+    unparseable results file for ONE load point is logged and skipped, not
+    allowed to abort every other point of the same run (a PBS array where one
+    load's write got cut off must not also lose the 19 that finished cleanly).
+    The caller (the parser) treats an all-empty return the same as "no results
+    at all" -- `ERROR_NO_LOAD_POINTS` -- since there is no `IngestReport` here
+    to record a partial failure against.
     """
     locator = locator_for(run_dir, rel_path)
-    return [create_results(run_node, point, locator.run_dir,
-                           skip_fraction=skip_fraction, store=False)
-            for point in load_points(locator)]
+    nodes = []
+    for point in load_points(locator):
+        try:
+            nodes.append(create_results(run_node, point, locator.run_dir,
+                                        skip_fraction=skip_fraction,
+                                        store=False))
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("Ingest failed for a load point of %s", rel_path)
+    return nodes
+
+
+def add_results_to_group(label: str, nodes) -> None:
+    """File already-stored results nodes into `label`'s AiiDA group.
+
+    The counterpart to `create_results`'s own `_group_for(...).add_nodes(...)`
+    call for the CalcJob-native path: `ingest_retrieved` hands its nodes to
+    the parser UNSTORED (`store=False`), and the AiiDA engine stores and links
+    them for real once the process finishes -- but the engine never adds
+    anything to a `Group` on its own. `LammpsFrictionCalcJob.on_terminated`
+    calls this once those nodes are stored, so `export_archive`'s group-based
+    "everything this set produced" query includes CalcJob-native results too.
+    """
+    nodes = list(nodes)
+    if not nodes:
+        return
+    _group_for(label).add_nodes(nodes)
 
 
 def _plan_run(rel: str, set_node, locator, points: List[LoadPoint],
