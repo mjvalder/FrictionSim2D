@@ -112,9 +112,11 @@ class Workspace:
         if not self.preview_dir.exists():
             return []
 
-        # `_db` (the database pane's query cache) lives beside the preview
-        # builds and is not one: pruning to the newest few would throw it away
-        # after eight renders. Underscore-prefixed entries are not builds.
+        # `_db` (the database pane's query cache) and `_plots` (the Plots
+        # tab's rendered figures) live beside the preview builds and are not
+        # builds: pruning to the newest few would throw them away after eight
+        # renders. Underscore-prefixed entries are scratch areas owned by a
+        # controller, and are never pruned.
         entries = sorted(
             (p for p in self.preview_dir.iterdir()
              if p.is_dir() and not p.name.startswith('_')),

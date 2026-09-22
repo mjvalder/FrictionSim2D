@@ -124,6 +124,22 @@ class PlotBase(BaseModel):
     average_first_n_timesteps: Optional[int] = None
     average_timestep_range: Optional[List[int]] = None
 
+    @model_validator(mode='after')
+    def _plot_type_is_always_set(self):
+        """Keep `plot_type` in every `exclude_unset` dump.
+
+        `plot_type` is a `Literal` with a default on each concrete model, so
+        constructing `SummaryPlot(filename=...)` leaves it *unset* and
+        `model_dump(exclude_unset=True)` drops it -- producing a document
+        whose own discriminator then rejects it. Every writer of a plot
+        document hit this: the CLI's `--init`, the GUI's PlotController, and
+        anything that round-trips a plot. Marking it set fixes all of them at
+        once, including the nested serialisation inside `PlotDocument`, which
+        a `model_dump` override on this class would not reach.
+        """
+        self.__pydantic_fields_set__.add('plot_type')
+        return self
+
 
 class SummaryPlot(PlotBase):
     """Aggregate x-vs-y across runs, with fits and external series."""
