@@ -1,16 +1,21 @@
 """Read and process friction simulation output data.
 
-Walks through a directory of simulation results, parses filenames and
-paths to extract metadata, reads time-series data, calculates derived
-quantities (COF, lateral force) and stores everything in a structured
-format that can be exported to JSON for downstream plotting.
+One walk, through `src.run.tree.discover_runs`: a run is one
+`provenance.json`, its directory is parsed by `src.run.naming.parse_run_path`,
+and each of its load points becomes one flat `RunFrames`. The eight-deep
+nested dict this replaced had no dimension for the potential or the
+temperature, so two runs differing only in those collapsed onto one leaf and
+the last one walked won, silently.
+
+Exports the v2 `output_full_<size>.json` and `summary_<size>.csv`; every
+statistic in the latter comes from `src.data.models.summarise_run`, the single
+COF on the store path.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -555,30 +560,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     _branch_column = staticmethod(branch_column)
     _lateral_columns = staticmethod(lateral_columns)
     _is_lj_branch = staticmethod(is_lj_branch)
-    _FILE_PATTERN_TIP = FILE_PATTERN_TIP
-    _FILE_PATTERN_TIP_ALT = FILE_PATTERN_TIP_ALT
-    _FILE_PATTERN_SHEET = FILE_PATTERN_SHEET
-    _FILE_PATTERN_SHEET_ALT = FILE_PATTERN_SHEET_ALT
-
-    # Path patterns (compiled once at class level)
-    # [\w-] (not \w alone) so the amorphous-substrate/tip token survives:
-    # src.run.naming.output_dir_for writes 'amorph-<mat>' (Task 3b), and a
-    # material's own structure prefix can also carry a hyphen (h-MoS2).
-    _PATH_PATTERN_TIP = re.compile(r'(\d+x_\d+y)/sub_([\w-]+)_tip_([\w-]+)_(r\d+)')
-    # pot_ segment consumed NON-capturing so group 3 keeps its legacy meaning
-    # (substrate token). A repeated capturing group would capture only the
-    # LAST repetition and record pot_... as substrate_material.
-    #: ``+`` is in the material class deliberately: src.run.naming.material_token
-    #: joins a heterostructure's materials with it (``h_MoS2+h_WS2``) and appends
-    #: a ``+flake-<mat>`` suffix. Without it the match started AFTER the ``+``,
-    #: so a hetero run was silently filed under its SECOND constituent and
-    #: pooled with that material's homogeneous data -- misattributed, not
-    #: skipped. tests/test_read_data_hetero_paths.py pins this.
-    _PATH_PATTERN_SHEET = re.compile(
-        r'(?:sheetvsheet/)?([\w\d\-+_]+)/(\d+x_\d+y)/'
-        r'(?!pot_)([\w\d\-+_]+)?/?(?:pot_[^/]+/)?results'
-    )
-
     def __init__(self, results_dir: str = 'results_110725_test', *,
                  skip_fraction: float = 0.2) -> None:
         """Initialise the DataReader.
@@ -592,15 +573,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         self.output_dir = self.results_dir / 'outputs'
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.skip_fraction = skip_fraction
-
-        self.full_data_nested: dict = {}
-
-        # The regex walk, kept ONLY for `full_data_nested` until Task 14
-        # deletes it. Its four other return values are discarded: the
-        # `discover_runs` walk below is the source of truth for the metadata,
-        # the time series and the completeness reports, and merging the two
-        # would mean two answers to the same question.
-        self.read_data()
 
         self.runs: List[RunFrames] = self._read_runs()
         self.ntimestep: int = max((len(r.window) for r in self.runs), default=0)
@@ -745,70 +717,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         """Construct the full path for an output file."""
         return self.output_dir / filename
 
-    def _first_pass_ntimestep(self) -> int:
-        """First directory walk to determine the expected timestep count."""
-        ntimestep = 0
-        logger.info("Starting first pass to determine ntimestep...")
-        for root, _, files in os.walk(self.results_dir):
-            is_tip = self._PATH_PATTERN_TIP.search(root)
-            is_sheet = self._PATH_PATTERN_SHEET.search(root)
-            if not (is_tip or is_sheet):
-                continue
-            file_patterns = (
-                (self._FILE_PATTERN_TIP, self._FILE_PATTERN_TIP_ALT)
-                if is_tip
-                else (self._FILE_PATTERN_SHEET, self._FILE_PATTERN_SHEET_ALT)
-            )
-            for filename in files:
-                if any(p.match(filename) for p in file_patterns):
-                    filepath = Path(root) / filename
-                    try:
-                        df = pd.read_csv(
-                            filepath, sep=r'\s+', header=None, usecols=[0], skiprows=2,
-                        )
-                        ntimestep = max(ntimestep, len(df))
-                    except (pd.errors.EmptyDataError, IndexError):
-                        continue
-        return ntimestep
-
-    def _resolve_path_info(
-        self, root: str,
-    ) -> tuple[str, str, str, str, str, str] | None:
-        """Parse a directory path to extract simulation context.
-
-        Returns:
-            ``(sim_type, material, size, substrate, tip_material, tip_radius)``
-            or ``None`` if the path does not match any known pattern.
-        """
-        path_match_tip = self._PATH_PATTERN_TIP.search(root)
-        if path_match_tip:
-            size, substrate_material, tip_material, tip_radius = path_match_tip.groups()
-            try:
-                search_path = str(self.results_dir / 'afm')
-                start_dir = (
-                    search_path
-                    if os.path.commonpath([root, search_path]) == search_path
-                    else str(self.results_dir)
-                )
-                material_path_full = root[:root.find(size)]
-                material = str(Path(material_path_full).relative_to(start_dir)).strip('/')
-            except (IndexError, ValueError):
-                return None
-            if not material or material == '.':
-                return None
-            return ('tip', material, size, substrate_material, tip_material, tip_radius)
-
-        path_match_sheet = self._PATH_PATTERN_SHEET.search(root)
-        if path_match_sheet:
-            material, size, substrate_material = path_match_sheet.groups()
-            substrate_material = (substrate_material or 'N/A').strip('/')
-            return ('sheet', material, size, substrate_material, 'sheet', 'N/A')
-
-        return None
-
-    #: Traversal vocabulary ('tip'/'sheet') -> registry sim_type. The file's
-    #: own `family=` marker overrides this when present; every retained file
-    #: predates the marker and takes the fallback.
     _REGISTRY_SIM_TYPE = {'tip': 'afm', 'sheet': 'sheetonsheet'}
     _KNOWN_FAMILIES = FAMILIES
 
@@ -830,15 +738,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                     f"{cls._KNOWN_FAMILIES}")
             return family
         return cls._REGISTRY_SIM_TYPE.get(sim_type, 'afm')
-
-    @staticmethod
-    def _is_sheet_family(sim_type: str) -> bool:
-        """True for the traversal vocabulary's sheet side.
-
-        The filename patterns and parameter parsing are shared across the
-        whole sheet family; only rename_map needs the precise family.
-        """
-        return sim_type == 'sheet'
 
     def _correct_legacy_lf_schema1(self, df, filepath, sim_type: str):
         """Delegate, mapping the traversal vocabulary onto the family one.
@@ -866,146 +765,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         return read_results_file(filepath,
                                  self._registry_sim_type(sim_type, header),
                                  n_layers=n_layers)
-
-    def _parse_filename_params(
-        self,
-        sim_type: str,
-        filename: str,
-        file_match: re.Match,
-    ) -> tuple[float, int, int, int, bool]:
-        """Extract load, angle, speed, layer and pressure flag from a regex match.
-
-        Returns:
-            ``(load_val, angle, speed, layer, is_pressure)``
-        """
-        if sim_type == 'sheet':
-            if self._FILE_PATTERN_SHEET.match(filename):
-                load_str, unit_str, angle_str, speed_str = file_match.groups()
-                is_pressure = unit_str == 'GPa'
-                load_val = float(load_str)
-            else:
-                load_str, angle_str, speed_str = file_match.groups()
-                is_pressure = True
-                load_val = float(load_str)
-            layer = 2
-        else:
-            load_str, angle_str, speed_str, layer_str = file_match.groups()
-            layer = int(layer_str)
-            is_pressure = False
-            load_val = float(load_str)
-        return load_val, int(float(angle_str)), int(float(speed_str)), layer, is_pressure
-
-    @staticmethod
-    def _finalize_metadata(metadata: dict) -> dict:
-        """Convert mutable sets in the metadata dict to sorted lists."""
-        final: dict = {}
-        for k, v in metadata.items():
-            if k in ('forces_and_angles', 'pressures_and_angles'):
-                final[k] = {load: sorted(list(angles)) for load, angles in v.items()}
-            else:
-                final[k] = sorted(list(v))
-        # The module-level `material_types` is the one bucketing rule; this
-        # method used to carry its own copy. Task 14 deletes the method.
-        final['material_types'] = material_types(final.get('materials', []))
-        return final
-
-    def read_data(self) -> tuple:  # pylint: disable=too-many-locals
-        """Walk through the results directory and read all simulation data.
-
-        Uses a two-pass approach to dynamically determine the correct
-        number of timesteps for a complete file.
-        """
-        ntimestep = self._first_pass_ntimestep()
-        if ntimestep == 0:
-            logger.warning("No valid data files found. Could not determine ntimestep.")
-            return None, {}, {}, {}, 0
-        logger.info("Determined ntimestep for a complete file to be: %d", ntimestep)
-
-        time_series = None
-        incomplete_files: dict = {}
-        incomplete_materials: dict = {}
-        metadata: dict = {
-            'materials': set(), 'substrates': set(), 'tip_materials': set(),
-            'tip_radii': set(), 'layers': set(), 'speeds': set(),
-            'forces_and_angles': {}, 'pressures_and_angles': {},
-        }
-
-        for root, _, files in os.walk(self.results_dir):
-            path_info = self._resolve_path_info(root)
-            if path_info is None:
-                continue
-            sim_type, material, size, substrate_material, tip_material, tip_radius = path_info
-            safe_material = material.replace('-', '_').replace('/', '__')
-            size_key = size.replace('x_', 'x')
-
-            for filename in files:
-                if sim_type == 'sheet':
-                    file_match = (
-                        self._FILE_PATTERN_SHEET.match(filename)
-                        or self._FILE_PATTERN_SHEET_ALT.match(filename)
-                    )
-                else:
-                    file_match = (
-                        self._FILE_PATTERN_TIP.match(filename)
-                        or self._FILE_PATTERN_TIP_ALT.match(filename)
-                    )
-                if not file_match:
-                    continue
-
-                filepath = Path(root) / filename
-                try:
-                    df = self._read_dataframe(filepath, sim_type)
-
-                    if ntimestep - len(df) > 3:
-                        incomplete_files.setdefault(size_key, []).append(str(filepath))
-                        incomplete_materials.setdefault(size_key, set()).add(material)
-                        continue
-
-                    if time_series is None:
-                        time_series = df['time'].to_list()
-
-                    load_val, angle, speed, layer, is_pressure = self._parse_filename_params(
-                        sim_type, filename, file_match,
-                    )
-                    metadata['materials'].add(safe_material)
-                    metadata['substrates'].add(substrate_material)
-                    metadata['tip_materials'].add(tip_material)
-                    metadata['tip_radii'].add(tip_radius)
-                    metadata['speeds'].add(speed)
-                    metadata['layers'].add(layer)
-                    if is_pressure:
-                        metadata['pressures_and_angles'].setdefault(load_val, set()).add(angle)
-                    else:
-                        metadata['forces_and_angles'].setdefault(load_val, set()).add(angle)
-
-                    df_processed = df.drop(columns=['time'])
-                    df_processed = self._calculate_derived_quantities(df_processed)
-
-                    base_path = (
-                        self.full_data_nested
-                        .setdefault(safe_material, {})
-                        .setdefault(size_key, {})
-                        .setdefault(substrate_material, {})
-                        .setdefault(tip_material, {})
-                        .setdefault(tip_radius, {})
-                        .setdefault(f'l{layer}', {})
-                        .setdefault(f's{speed}', {})
-                    )
-                    load_key = f'p{load_val}' if is_pressure else f'f{load_val}'
-                    base_path.setdefault(load_key, {})[f'a{angle}'] = df_processed
-
-                except (pd.errors.EmptyDataError, IndexError, ValueError) as e:
-                    logger.warning("Could not process file %s: %s", filepath, e)
-                    incomplete_files.setdefault(size_key, []).append(str(filepath))
-                    incomplete_materials.setdefault(size_key, set()).add(material)
-
-        return (
-            time_series,
-            incomplete_files,
-            incomplete_materials,
-            self._finalize_metadata(metadata),
-            ntimestep,
-        )
 
     def run_payload(self, run: RunFrames) -> Dict[str, Any]:
         """One `runs[]` entry of the v2 document."""

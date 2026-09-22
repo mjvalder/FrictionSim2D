@@ -119,22 +119,24 @@ def test_raw_tier_is_picked_from_the_filename_prefix(tmp_path):
 
 
 def test_the_reader_delegates_to_it(tmp_path, monkeypatch):
-    path = tmp_path / 'friction_f30_a0_s2_layer2.txt'
-    path.write_text(
-        '# schema=2 lf_units=nN family=afm\n'
-        '# TimeStep v_fz_tip v_fx_spr v_fy_spr\n1000 30.0 3.0 0.0\n',
-        encoding='utf-8')
-    seen = []
+    """DataReader no longer has a `sim_type` traversal vocabulary to feed the
+    method form of the parser, so the delegation is asserted over a real walk."""
+    from tests.helpers.results_tree import make_family_run
 
     import src.postprocessing.read_data as rd
+
+    make_family_run(tmp_path, 'afm')
+    seen = []
     real = rd.read_results_file
     monkeypatch.setattr(
         rd, 'read_results_file',
-        lambda p, f, **kw: seen.append((p, f)) or real(p, f, **kw))
+        lambda p, f, n=2: seen.append((p, f, n)) or real(p, f, n))
 
-    DataReader.__new__(DataReader)._read_dataframe(path, 'tip')
+    rd.DataReader(results_dir=str(tmp_path))
 
-    assert seen == [(path, 'afm')]
+    assert len(seen) == 1
+    assert seen[0][1] == 'afm'
+    assert seen[0][2] == 2
 
 
 def test_layer_columns_are_named_for_the_requested_layer_count(tmp_path):

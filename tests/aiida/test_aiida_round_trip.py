@@ -56,22 +56,18 @@ def _result_files(root: Path):
 def _signature(root: Path):
     """A comparable fingerprint of everything DataReader found under `root`.
 
-    Keyed by the nested traversal DataReader builds, valued by
+    Keyed by (rel_path, load_kind, load, angle, speed, tier), valued by
     (column names, row count, the frame serialised) so a silent column shift or
     a dropped run fails the comparison.
     """
     reader = DataReader(results_dir=str(root))
     out = {}
-
-    def _walk(node, path):
-        if hasattr(node, 'columns'):
-            out[path] = (tuple(node.columns), len(node),
-                         node.to_csv(index=False, float_format='%.10g'))
-            return
-        for key, child in node.items():
-            _walk(child, path + (key,))
-
-    _walk(reader.full_data_nested, ())
+    for run in reader.runs:
+        for tier, frame in run.tiers.items():
+            key = (run.tokens.rel_path, run.load_kind, run.load, run.angle,
+                   run.speed, tier)
+            out[key] = (tuple(frame.columns), len(frame),
+                        frame.to_csv(index=False, float_format='%.10g'))
     return out
 
 

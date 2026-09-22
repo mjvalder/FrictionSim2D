@@ -536,3 +536,39 @@ def test_two_families_concatenate_through_pandas(tmp_path):
     assert len(combined) == 2
     assert set(combined['family']) == {'afm', 'sheetonsheet'}
     assert set(_SUMMARY_SCALARS) <= set(combined.columns)
+
+
+def test_the_regex_walk_is_gone():
+    """These six patterns were the walk. Two of them carried real defects --
+    _PATH_PATTERN_SHEET group 3 captured the K{T} token as the substrate, and
+    neither path pattern had a pot_ or K{T} group at all."""
+    import src.postprocessing.read_data as rd
+
+    for name in ('_FILE_PATTERN_TIP', '_FILE_PATTERN_TIP_ALT',
+                 '_FILE_PATTERN_SHEET', '_FILE_PATTERN_SHEET_ALT',
+                 '_PATH_PATTERN_TIP', '_PATH_PATTERN_SHEET'):
+        assert not hasattr(rd.DataReader, name), name
+
+
+def test_the_nested_tree_and_its_walk_are_gone(tmp_path):
+    import src.postprocessing.read_data as rd
+
+    make_family_run(tmp_path, 'afm')
+    reader = rd.DataReader(results_dir=str(tmp_path))
+
+    assert not hasattr(reader, 'full_data_nested')
+    for name in ('_first_pass_ntimestep', '_resolve_path_info',
+                 '_is_sheet_family', '_parse_filename_params',
+                 '_finalize_metadata', 'read_data'):
+        assert not hasattr(reader, name), name
+
+
+def test_the_file_level_parser_survives():
+    """Spec section 3: the file-level parser is untouched. 20 calls in
+    test_read_data_schema.py drive it directly."""
+    import src.postprocessing.read_data as rd
+
+    assert callable(rd.DataReader._read_dataframe)
+    assert callable(rd.DataReader._registry_sim_type)
+    assert rd.DataReader._LF_SCHEMA1_CORRECTION == 1.602176565
+    assert rd.DataReader._KNOWN_FAMILIES

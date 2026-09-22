@@ -103,19 +103,10 @@ def test_the_datareader_agrees_with_the_store(aiida_profile_clean, tmp_path,
     _run_node, result_node = _stored_result('cof2')
 
     reader = DataReader(results_dir=str(root))
-    frames = []
 
-    def _walk(node):
-        if hasattr(node, 'columns'):
-            frames.append(node)
-            return
-        for child in node.values():
-            _walk(child)
+    assert len(reader.runs) == 1
 
-    _walk(reader.full_data_nested)
-    assert len(frames) == 1
-
-    reader_cof = summarise_run({'window': frames[0]}, family).mean_cof
+    reader_cof = summarise_run(reader.runs[0].frames_by_tier(), family).mean_cof
 
     assert reader_cof == pytest.approx(
         result_node.base.attributes.get('mean_cof'), rel=COF_TOL)
