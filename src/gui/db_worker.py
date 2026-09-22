@@ -478,11 +478,74 @@ def _import(request: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _check(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Can this source be reached, and with what.
+
+    A fifth request kind beside D8's four: loading an AiiDA profile or
+    touching an HTTP endpoint is exactly the work that must not run on the UI
+    thread, so the check goes through the same subprocess everything else
+    does. `ok` says the check ran; `ready` says the source is usable.
+    """
+    from importlib.util import find_spec  # pylint: disable=import-outside-toplevel
+    source = request.get('source', 'local')
+    checks: List[Dict[str, Any]] = []
+    notes: List[str] = []
+
+    if source == 'central':
+        url = (request.get('api_url') or '').strip()
+        has_httpx = find_spec('httpx') is not None
+        checks.append({'name': 'httpx installed', 'ok': has_httpx,
+                       'detail': '' if has_httpx else "pip install -e '.[api]'"})
+        configured = bool(request.get('configured', bool(url)))
+        checks.append({
+            'name': 'api url', 'ok': configured,
+            'detail': url if configured else
+            'not configured -- set database.api_url (and database.api_key) in '
+            'Settings; there is no central database at the built-in default'})
+        if not configured:
+            notes.append('Until a central database exists, use the Local store.')
+        if has_httpx and configured:
+            try:
+                client = _central_client(request)
+                try:
+                    stats = client.get_statistics()
+                finally:
+                    client.close()
+                checks.append({'name': 'GET /statistics', 'ok': True,
+                               'detail': f"{stats.get('total_rows', '?')} results"})
+            except Exception as exc:  # pylint: disable=broad-except
+                checks.append({'name': 'GET /statistics', 'ok': False,
+                               'detail': f"{type(exc).__name__}: {exc}"})
+                notes.append('Start the API with: FrictionSim2D api serve')
+    else:
+        has_aiida = find_spec('aiida') is not None
+        checks.append({'name': 'aiida installed', 'ok': has_aiida,
+                       'detail': '' if has_aiida else "pip install -e '.[aiida]'"})
+        if not has_aiida:
+            notes.append("The local store needs aiida-core: pip install -e '.[aiida]'")
+        else:
+            try:
+                profile = _load_profile(request)
+                checks.append({'name': 'profile loaded', 'ok': True,
+                               'detail': str(profile)})
+                checks.append({'name': 'sets in the store', 'ok': True,
+                               'detail': str(len(_local_db(request).list_sets()))})
+            except Exception as exc:  # pylint: disable=broad-except
+                checks.append({'name': 'profile loaded', 'ok': False,
+                               'detail': f"{type(exc).__name__}: {exc}"})
+                notes.append('Check settings.aiida.profile, or run: '
+                             'FrictionSim2D aiida setup')
+
+    return {'ok': True, 'kind': 'check', 'source': source, 'checks': checks,
+            'notes': notes, 'ready': all(c['ok'] for c in checks)}
+
+
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     'list': _list,
     'detail': _detail,
     'export': _export,
     'import': _import,
+    'check': _check,
 }
 
 

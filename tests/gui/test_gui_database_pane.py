@@ -634,3 +634,28 @@ class TestImport:
             'report': "set 'x' (77aa)"})
 
         assert levels == ['warn']
+
+
+class TestConnectionCheck:
+
+    def test_the_button_asks_for_a_check_of_the_current_source(self, pane):
+        seen = []
+        pane.check_requested.connect(seen.append)
+
+        pane.set_source('central')
+        pane.check_button.click()
+
+        assert seen == ['central']
+
+    def test_the_report_renders_in_the_message_panel(self, window):
+        window._on_db_finished('check', {
+            'ok': True, 'kind': 'check', 'source': 'local', 'ready': False,
+            'checks': [{'name': 'aiida installed', 'ok': True, 'detail': '2.7.3'},
+                       {'name': 'profile loaded', 'ok': False, 'detail': 'boom'}],
+            'notes': ['Check settings.aiida.profile']})
+
+        text = window.database_pane.messages.toPlainText()
+        assert '[OK  ] aiida installed: 2.7.3' in text
+        assert '[FAIL] profile loaded: boom' in text
+        assert 'Check settings.aiida.profile' in text
+        assert 'not ready' in text

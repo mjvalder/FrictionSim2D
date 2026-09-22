@@ -348,3 +348,69 @@ def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
     assert result['unparseable'] == ['afm/d']
     assert result['report'] == 'ingested 1 run, 0 results (1 failure)'
     assert result['set_uuid'] == '77aa'
+
+
+def test_a_local_check_reports_the_profile_and_the_set_count(monkeypatch):
+    monkeypatch.setattr(db_worker, '_load_profile', lambda request: 'friction2d')
+    monkeypatch.setattr(db_worker, '_local_db',
+                        lambda request: type('DB', (), {'list_sets': lambda self: [1, 2]})())
+
+    result = db_worker.dispatch({'kind': 'check', 'source': 'local',
+                                 'profile': 'friction2d'})
+
+    assert result['ok'] is True
+    assert result['ready'] is True
+    names = [c['name'] for c in result['checks']]
+    assert 'profile loaded' in names
+    assert [c for c in result['checks'] if c['name'] == 'sets in the store'][0]['detail'] == '2'
+
+
+def test_a_local_check_turns_a_broken_profile_into_a_failed_check(monkeypatch):
+    def _boom(request):
+        raise RuntimeError('no profile named friction2d')
+
+    monkeypatch.setattr(db_worker, '_load_profile', _boom)
+
+    result = db_worker.dispatch({'kind': 'check', 'source': 'local'})
+
+    assert result['ok'] is True, 'the check ran -- it is the profile that is broken'
+    assert result['ready'] is False
+    failed = [c for c in result['checks'] if not c['ok']]
+    assert 'no profile named friction2d' in failed[0]['detail']
+    assert result['notes'], 'a failed check must say what to do about it'
+
+
+def test_a_central_check_calls_the_statistics_endpoint(fake_client):
+    fake_client.get_statistics = lambda: {'total_rows': 91}
+
+    result = db_worker.dispatch({'kind': 'check', 'source': 'central',
+                                 'api_url': 'http://localhost:8000'})
+
+    assert result['ready'] is True
+    assert [c for c in result['checks']
+            if c['name'] == 'GET /statistics'][0]['detail'] == '91 results'
+
+
+def test_a_central_check_without_a_url_fails_before_connecting():
+    result = db_worker.dispatch({'kind': 'check', 'source': 'central',
+                                 'api_url': ''})
+
+    assert result['ready'] is False
+    assert any('not configured' in c['detail'] for c in result['checks'])
+    assert any('Local store' in note for note in result['notes'])
+
+
+def test_an_unconfigured_central_check_never_connects(monkeypatch):
+    """`configured` False means the URL is only the built-in default: there
+    is no central database there, and a connection attempt would end as a
+    ConnectionError string the user cannot act on."""
+    def _never(request):
+        raise AssertionError('the check must not build a client')
+
+    monkeypatch.setattr(db_worker, '_central_client', _never)
+
+    result = db_worker.dispatch({'kind': 'check', 'source': 'central',
+                                 'api_url': 'http://localhost:8000',
+                                 'configured': False})
+
+    assert result['ready'] is False

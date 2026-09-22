@@ -24,7 +24,8 @@ from ..workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['DatabaseController', 'DatabaseRequest', 'request_key']
+__all__ = ['DatabaseController', 'DatabaseRequest', 'central_configured',
+          'request_key']
 
 
 def request_key(kind: str, source: str, payload: Dict[str, Any]) -> str:
@@ -34,6 +35,32 @@ def request_key(kind: str, source: str, payload: Dict[str, Any]) -> str:
     digest.update(source.encode())
     digest.update(json.dumps(payload, sort_keys=True, default=str).encode())
     return digest.hexdigest()[:24]
+
+
+#: What `DatabaseSettings.api_url` is when nobody has set it.
+DEFAULT_API_URL = 'http://localhost:8000'
+
+
+def central_configured(settings: Any) -> bool:
+    """Has this installation been pointed at a central database at all?
+
+    There is a difference between "the central database is down" and "there
+    is no central database", and only the second is true today. The field
+    default is a localhost URL, so a bare default with no key and no host
+    beside it means nobody has configured anything -- and every central action
+    would end as a ConnectionError string against a server that was never
+    supposed to be there.
+    """
+    database = getattr(settings, 'database', None)
+    if database is None:
+        return False
+    url = (getattr(database, 'api_url', '') or '').strip()
+    if not url:
+        return False
+    if url != DEFAULT_API_URL:
+        return True
+    return bool((getattr(database, 'api_key', '') or '').strip()
+                or (getattr(database, 'host', '') or '').strip())
 
 
 @dataclass
@@ -146,6 +173,7 @@ class DatabaseController(QObject):
         payload.update(request.payload)
         if request.source == 'central':
             payload['api_url'] = self.settings.database.api_url
+            payload['configured'] = central_configured(self.settings)
         else:
             payload['profile'] = self.settings.aiida.profile
         return payload

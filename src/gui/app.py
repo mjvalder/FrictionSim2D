@@ -47,7 +47,7 @@ from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.database.detail import format_bytes
-from .widgets.database.pane import DatabasePane
+from .widgets.database.pane import DatabasePane, render_checks
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
@@ -483,6 +483,9 @@ class MainWindow(QMainWindow):
                 '\n'.join(line for line in lines if line),
                 'info' if result.get('ingest_ok') and quiet else
                 ('warn' if result.get('ingest_ok') else 'error'))
+        elif kind == 'check':
+            self.database_pane.message(
+                render_checks(result), 'info' if result.get('ready') else 'error')
 
     # -------------------------------------------------------------- helpers
 

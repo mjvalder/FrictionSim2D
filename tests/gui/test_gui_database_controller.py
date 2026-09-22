@@ -171,3 +171,34 @@ def test_cancel_reports_the_kind_it_cancelled(controller):
 
     assert seen == ['list']
     assert not controller.running
+
+
+class TestTheWorkerReallyRuns:
+    """One test that spawns the actual `python -m src.gui.db_worker`.
+
+    Everything else in this suite calls `dispatch` in-process or stubs the
+    controller, which leaves the parts that only exist between two processes
+    untested: the `-m` entry point resolving, the working directory making
+    `src` importable, the newline-delimited JSON on stdout, the result file
+    landing where the request said, and the exit code. Those are exactly the
+    failures that make a worker look hung rather than broken, so one end-to-end
+    seam earns its runtime. `check` against an unconfigured central source is
+    the one request kind that needs no aiida, no httpx call and no network.
+    """
+
+    def test_a_check_round_trips_through_the_real_entry_point(self, controller):
+        controller.settings.database.api_url = ''
+        progress = []
+        controller.progress.connect(progress.append)
+
+        controller.start(DatabaseRequest(kind='check', source='central',
+                                         payload={}))
+        result = _run_until(controller.finished, timeout_ms=60000)
+
+        assert result, 'the worker never finished -- the -m entry point is broken'
+        kind, payload = result
+        assert kind == 'check'
+        assert payload['ok'] is True
+        assert payload['ready'] is False
+        assert any('not configured' in c['detail'] for c in payload['checks'])
+        assert not controller.running

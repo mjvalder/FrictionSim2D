@@ -29,11 +29,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...diagnostics import Check
 from .detail import DetailPanel, format_bytes
 from .filters import FilterBar
 from .model import ResultSortProxyModel, ResultTableModel
 
-__all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS']
+__all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS',
+          'render_checks']
 
 #: The pane's third axis, beside the AiiDA profile.
 SOURCES: Tuple[str, str] = ('local', 'central')
@@ -54,6 +56,23 @@ EXPORT_LABELS: Tuple[Tuple[str, str, str], ...] = (
 
 #: Downloads the central summary DB cannot serve -- it holds no files.
 _LOCAL_ONLY_EXPORTS = ('results', 'provenance', 'run_tree')
+
+
+def render_checks(result: Dict[str, Any]) -> str:
+    """A check response as `diagnostics.Report` renders one.
+
+    Same `Check` lines as `FrictionSim2D gui --check`, with this pane's own
+    heading -- the environment check's heading would be a lie here.
+    """
+    source = SOURCE_LABELS.get(result.get('source', ''), result.get('source', ''))
+    lines = [f"{source} connection check", '']
+    lines += [Check(c['name'], bool(c['ok']), c.get('detail', '')).render()
+              for c in result.get('checks') or []]
+    notes = result.get('notes') or []
+    if notes:
+        lines += ['', 'Notes:'] + [f"  - {note}" for note in notes]
+    lines += ['', 'Result: ' + ('ready' if result.get('ready') else 'not ready')]
+    return '\n'.join(lines)
 
 
 class DatabasePane(QWidget):
