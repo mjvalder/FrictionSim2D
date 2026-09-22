@@ -890,3 +890,50 @@ def test_every_retained_file_is_stored_somewhere(aiida_profile_clean, tmp_path,
     for node in results:
         assert node.frame('window') is not None
 
+
+@pytest.mark.parametrize('rows, complete', [(50, False), (99, True), (100, True)])
+def test_a_truncated_slide_trace_is_not_complete(aiida_profile_clean, tmp_path,
+                                                 rows, complete):
+    """I7: a walltime-killed run leaves a partial window trace whose COF is
+    not the run's COF. 100 000 slide steps at results_frequency 1000 -> 100
+    rows expected; one row short is normal, more is truncation."""
+    import json as _json
+
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, REL, 'afm', n=rows)
+    (run_dir.parent / 'provenance' / 'config.json').write_text(_json.dumps({
+        'general': {'temp': 300},
+        'settings': {'simulation': {'slide_run_steps': 100000},
+                     'output': {'results_frequency': 1000}}}), encoding='utf-8')
+
+    report = ingest_root(root, label=f'trunc-{rows}')
+
+    node, = QueryBuilder().append(FrictionResultsData).all(flat=True)
+    assert node.ntimesteps == rows
+    assert node.is_complete is complete
+    attrs = node.base.attributes
+    if complete:
+        assert attrs.get('truncated', None) is None
+        assert report.incomplete_results == []
+    else:
+        assert attrs.get('truncated') is True
+        assert attrs.get('expected_ntimesteps') == 100
+        assert len(report.incomplete_results) == 1
+
+
+def test_truncation_is_not_guessed_without_the_run_settings(aiida_profile_clean,
+                                                            tmp_path):
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+
+    root = tmp_path / 'sim'
+    make_run(root, REL, 'afm', n=5)  # config.json carries no settings block
+    ingest_root(root, label='trunc-unknown')
+
+    node, = QueryBuilder().append(FrictionResultsData).all(flat=True)
+    assert node.is_complete is True

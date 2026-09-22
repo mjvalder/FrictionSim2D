@@ -537,6 +537,54 @@ def _frames_for(point: LoadPoint) -> Dict[str, Any]:
     return frames
 
 
+#: Families whose `window` tier spans exactly the slide run
+#: (`fix fc_win` is defined right before `run {{ run_steps }}` in
+#: `templates/{afm,sheetonsheet}/slide.lmp`). Indent's window covers the hold
+#: phase and PES writes a grid, so no expected length is derived for them.
+_SLIDE_FAMILIES = ('afm', 'sheetonsheet', 'hetero', 'flake')
+
+
+def _expected_window_rows(run_node, family: str) -> Optional[int]:
+    """How many `window` rows a finished slide writes, or None if unknown.
+
+    `slide_run_steps // results_frequency`, read from the run's own stored
+    `provenance/config.json` (its `settings` block is the settings the run
+    was built with). None for a non-slide family, a run node without that
+    file, or a config missing either value -- the caller then leaves
+    `is_complete` as `summarise_run` set it.
+    """
+    import json  # pylint: disable=import-outside-toplevel
+
+    if family not in _SLIDE_FAMILIES:
+        return None
+    try:
+        cfg = json.loads(run_node.base.repository.get_object_content(
+            'provenance/config.json'))
+        settings = cfg['settings']
+        steps = int(settings['simulation']['slide_run_steps'])
+        every = int(settings['output']['results_frequency'])
+    except (FileNotFoundError, OSError, KeyError, TypeError, ValueError):
+        return None
+    return steps // every if every > 0 else None
+
+
+def _flag_truncation(summary, point: LoadPoint, expected: Optional[int]) -> None:
+    """Mark a slide trace cut short (e.g. a walltime kill) as incomplete.
+
+    Short by MORE than one output interval: `fix ave/time` may or may not
+    write a row at the step the fix was defined, so one row either way is
+    normal. The COF of a partial trace is not the COF of the run, so
+    `is_complete` goes False and `truncated`/`expected_ntimesteps` land in the
+    summary extras (attributes, and the central row's `extras`).
+    """
+    if expected is None or 'window' not in point.tiers:
+        return
+    if summary.ntimesteps < expected - 1:
+        summary.is_complete = False
+        summary.extras['truncated'] = True
+        summary.extras['expected_ntimesteps'] = expected
+
+
 def create_results(run_node, point: LoadPoint, run_dir: Path, *,
                    skip_fraction: float = 0.2, store: bool = True):
     """Build one load point as a `FrictionResultsData` and return it.
@@ -575,8 +623,10 @@ def create_results(run_node, point: LoadPoint, run_dir: Path, *,
     node.add_result_files(tiers, run_dir=run_dir, aux=aux,
                           max_mb=_max_stored_file_mb(),
                           content_sha256=point.content_sha256)
-    node.set_summary(summarise_run(_frames_for(point), point.family,
-                                   skip_fraction=skip_fraction))
+    summary = summarise_run(_frames_for(point), point.family,
+                            skip_fraction=skip_fraction)
+    _flag_truncation(summary, point, _expected_window_rows(run_node, point.family))
+    node.set_summary(summary)
     if not store:
         return node
     node.store()

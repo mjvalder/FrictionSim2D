@@ -90,6 +90,15 @@ FrictionSim2D aiida import ./simulation_20260421_143404 --dry-run
 `--profile` loads an existing AiiDA profile (default: `settings.aiida.profile`,
 or AiiDA's own default profile if that is unset too).
 
+**Truncated runs are not complete.** For the slide families (`afm`,
+`sheetonsheet`, `hetero`, `flake`) the expected length of the `window` trace
+is `slide_run_steps // results_frequency`, read from the run's stored
+`provenance/config.json`. A trace more than one output interval shorter (a
+walltime kill, say) is stored with `is_complete = False` and the attributes
+`truncated = True` and `expected_ntimesteps`; the import report counts it
+under `results incomplete`. When the expected length cannot be derived (no
+settings block, indent, PES) `is_complete` is left as computed.
+
 `FrictionSim2D run <model> ... --aiida --label 251113-afm` runs the same
 ingest at generation time: it registers the set and run nodes immediately
 (with no results yet), and a later `aiida import` on the finished tree
