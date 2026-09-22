@@ -76,7 +76,8 @@ def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Di
 
     The PotentialManager already writes a per-layer ``group layer_N type ...``
     for the stacked sheet; the template ALSO adds each z-slab (region) to that
-    group, like the D1 hetero slide, which is a no-op when the two agree. Unlike the hetero path there is no per-layer ``.source``/``.z`` placement
+    group, like the D1 hetero slide, which is a no-op when the two agree.
+    Unlike the hetero path there is no per-layer ``.source``/``.z`` placement
     record (``build_sheet`` writes one stacked file), so the bands are recovered
     by cutting at the ``n_layers - 1`` largest inter-atom z-gaps of the sorted
     z-coordinates. For a well-separated 2D stack (interlayer gap > the largest
