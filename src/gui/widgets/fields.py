@@ -348,8 +348,20 @@ class _ListEditor(FieldEditor):
     def value(self) -> Any:
         text = self.edit.text().strip()
         if not text:
-            return None
-        items = [part.strip() for part in text.strip('[]').split(',') if part.strip()]
+            # An empty list must round-trip as an empty list. `set_value([])`
+            # writes '' here, and reading that back as None made
+            # `settings_form.commit()` change `output.optional_channels` from
+            # [] to None on a form nobody had touched -- which dirtied a fresh
+            # SettingsDocument, so pressing Generate wrote a settings.yaml the
+            # user never asked for, carrying `optional_channels: null`.
+            #
+            # Keyed on an EMPTY-LIST default, not on "is None allowed": a
+            # required list (`[2D] layers`) or one with a non-empty default
+            # (`quench_slab_dims`) is genuinely unset when the box is cleared,
+            # and returning [] there would invent a zero-layer sheet.
+            return [] if self.spec.default == [] else None
+        items = [part.strip() for part in text.strip('[]').split(',')
+                 if part.strip()]
         try:
             return [self._coerce(item) for item in items]
         except ValueError:

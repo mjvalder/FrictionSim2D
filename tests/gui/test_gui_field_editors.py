@@ -366,3 +366,64 @@ class TestDefaultGhosting:
         ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT,
                                     required=False, default=80.0))
         assert ed.edit.placeholderText() == 'default: 80.0'
+
+
+class TestEmptyListRoundTrip:
+    """An empty list must come back as an empty list, not as None.
+
+    `_ListEditor.set_value([])` writes an empty box, and reading that back as
+    None made `settings_form.commit()` change `output.optional_channels` from
+    [] to None on a form nobody had touched. That dirtied a fresh
+    SettingsDocument, so pressing Generate wrote a settings.yaml the user never
+    asked for, carrying `optional_channels: null`.
+    """
+
+    def _editor(self, qt_app, default):
+        del qt_app
+        from src.gui.widgets.fields import _ListEditor
+
+        return _ListEditor(_spec(key='optional_channels',
+                                 kind=FieldKind.LIST,
+                                 item_kind=FieldKind.STR, default=default))
+
+    def test_an_empty_list_survives_set_then_get(self, qt_app):
+        editor = self._editor(qt_app, default=[])
+
+        editor.set_value([])
+
+        assert editor.value() == []
+
+    def test_a_cleared_box_is_still_empty_for_an_empty_list_default(
+            self, qt_app):
+        editor = self._editor(qt_app, default=[])
+        editor.set_value(['gap_min'])
+
+        editor.set_value([])
+
+        assert editor.value() == []
+
+    def test_a_non_empty_default_still_reads_an_empty_box_as_unset(
+            self, qt_app):
+        """`quench_slab_dims` has a real default and `[2D] layers` is
+        required. Clearing either genuinely means "not set" -- returning []
+        there would invent a zero-layer sheet."""
+        editor = self._editor(qt_app, default=[200, 200, 50])
+
+        editor.set_value(None)
+
+        assert editor.value() is None
+
+    def test_a_none_default_still_reads_an_empty_box_as_none(self, qt_app):
+        """`hpc.modules` is Optional[List[str]] -- None is a legal value."""
+        editor = self._editor(qt_app, default=None)
+
+        editor.set_value(None)
+
+        assert editor.value() is None
+
+    def test_a_populated_list_is_unaffected(self, qt_app):
+        editor = self._editor(qt_app, default=[])
+
+        editor.set_value(['gap_min', 'deflect_max'])
+
+        assert editor.value() == ['gap_min', 'deflect_max']

@@ -335,8 +335,21 @@ class TestMainWindow:
             EXAMPLES / 'indent_config.ini', 'indent')
         window.form.document = window.document
         window.form.rebuild()
-        # indent_config.ini already has x=60, y=60, r=25 -- under the 2x
-        # threshold -- so the warning fires without further edits.
+        # The radius is set HERE rather than relied on from the example, and
+        # it has to sit in the band BETWEEN the two thresholds:
+        #
+        #   blocking (model validator): footprint < 1.5 x tip diameter -> 3r
+        #   warning  (this precheck):   footprint < 2   x tip diameter -> 4r
+        #
+        # On a 60x60 sheet that is 20 < r <= 15 inverted -- i.e. r in (15, 20].
+        # r=18 gives 60 >= 3*18 (valid) and 60 < 4*18 (warned), which is the
+        # only combination that can show a warning is NON-blocking.
+        #
+        # indent_config.ini used to ship r=25, which trips BOTH and so cannot
+        # demonstrate it; d386926 shrank every example radius to 15, which
+        # trips neither. The test has had no usable fixture since.
+        window.form.sections['tip'].editors['r'].set_value(18.0)
+
         assert window._validate()
         assert '2× tip diameter' in window.issues.toPlainText()
 
