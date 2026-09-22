@@ -157,3 +157,89 @@ def test_filter_keys_are_all_real_friction2d_db_query_kwargs():
 
     assert set(db_worker.FILTER_KEYS) <= accepted
     assert 'is_complete' not in db_worker.FILTER_KEYS
+
+
+class FakeClient:
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+        self.closed = False
+
+    def query(self, **filters):
+        # The real client returns a DataFrame, not a list of dicts.
+        pandas = pytest.importorskip('pandas')
+        self.calls.append(filters)
+        return pandas.DataFrame(self.rows)
+
+    def get_result(self, result_id):
+        return dict(self.rows[0], id=result_id)
+
+    def list_materials(self):
+        return ['h-MoS2']
+
+    def close(self):
+        self.closed = True
+
+
+CENTRAL_ROWS = [{'id': 41, 'material': 'h_MoS2', 'family': 'afm', 'mean_cof': 0.07,
+                 'run_uuid': '1a2b', 'result_uuid': '9f8e', 'set_label': 's1',
+                 'contact': 'someone@example.org', 'source_host': 'cluster-a',
+                 'uploaded_at': '2026-09-01T10:00:00'}]
+
+
+@pytest.fixture(name='fake_client')
+def _fake_client(monkeypatch):
+    client = FakeClient(CENTRAL_ROWS)
+    monkeypatch.setattr(db_worker, '_central_client', lambda request: client)
+    return client
+
+
+def test_central_list_maps_filter_names_to_the_client(fake_client):
+    result = db_worker.dispatch({
+        'kind': 'list', 'source': 'central', 'api_url': 'http://x',
+        'filters': {'materials': ['h-MoS2'], 'potential': 'sw', 'family': 'afm',
+                    'limit': 200}})
+
+    assert result['ok'] is True
+    assert result['records'] == CENTRAL_ROWS
+    assert result['total_count'] == 1
+    assert fake_client.calls[0]['material'] == 'h-MoS2'
+    assert fake_client.calls[0]['potential_type'] == 'sw'
+    assert fake_client.calls[0]['family'] == 'afm'
+    assert fake_client.calls[0]['limit'] == 200
+    assert 'potential' not in fake_client.calls[0]
+    assert 'materials' not in fake_client.calls[0]
+
+
+def test_central_facets_are_read_off_the_rows(fake_client):
+    """The REST /conditions endpoint answers with ranges and count maps and
+    has no potential or set axis, so the fetched rows are the choices."""
+    result = db_worker.dispatch({'kind': 'list', 'source': 'central', 'filters': {}})
+
+    assert result['facets']['materials'] == ['h-MoS2']   # from list_materials()
+    assert result['facets']['families'] == ['afm']
+    assert result['facets']['set_labels'] == ['s1']
+    assert result['facets']['models'] == []
+
+
+def test_central_detail_wraps_the_record_in_the_shared_shape(fake_client):
+    result = db_worker.dispatch({'kind': 'detail', 'source': 'central',
+                                 'result_id': 41})
+
+    assert result['ok'] is True
+    assert result['kind'] == 'detail'
+    assert result['result']['attributes']['id'] == 41
+    assert result['result']['uuid'] == '9f8e'
+    assert result['run']['attributes'] == {}
+    assert result['files'] == []
+    assert result['total_bytes'] == 0
+
+
+def test_central_detail_carries_the_owner_contact(fake_client):
+    """The files of a central row live on someone else's machine; the
+    contact is how a reader asks for them (D6)."""
+    result = db_worker.dispatch({'kind': 'detail', 'source': 'central',
+                                 'result_id': 41})
+
+    assert result['result']['attributes']['contact'] == 'someone@example.org'
+    assert result['result']['attributes']['source_host'] == 'cluster-a'

@@ -164,20 +164,84 @@ def _set_sizes(sets: Any) -> Dict[str, int]:
     return out
 
 
+def _central_client(request: Dict[str, Any]):
+    """The central summary DB's HTTP client.
+
+    The API key comes from the environment, never from the request file: that
+    file is written into the workspace and kept as the D13 cache, and a secret
+    written there outlives the session in a directory the user may sync.
+    """
+    import os  # pylint: disable=import-outside-toplevel
+    from ..api.client import FrictionHTTPClient  # pylint: disable=import-outside-toplevel
+    return FrictionHTTPClient(api_url=request.get('api_url') or '',
+                              api_key=os.environ.get('FRICTIONSIM2D_API_KEY') or None)
+
+
+def _central_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
+    """FilterBar keys as `FrictionHTTPClient.query` kwargs.
+
+    The REST surface takes one `material` and calls the potential axis
+    `potential_type`; the local store takes a `materials` list and calls it
+    `potential`. One filter form serves both sources, so the translation
+    happens here rather than in the pane. Only kwargs
+    `FrictionHTTPClient.query` actually accepts are produced here -- there is
+    no `is_complete` (the pane has no Completeness filter) and no
+    `substrate`/`tip_material`/`angle_range`/`speed_range`/`order_by`, none of
+    which the REST surface takes either.
+    """
+    materials = filters.get('materials') or []
+    return {
+        'material': materials[0] if materials else None,
+        'family': filters.get('family'),
+        'model': filters.get('model'),
+        'set_label': filters.get('set_label'),
+        'potential_type': filters.get('potential'),
+        'layers': filters.get('layers'),
+        'force_range': filters.get('force_range'),
+        'pressure_range': filters.get('pressure_range'),
+        'temperature_range': filters.get('temperature_range'),
+        'limit': filters.get('limit'),
+    }
+
+
 def _list(request: Dict[str, Any]) -> Dict[str, Any]:
     """Rows for the table, plus the choices the filter combos offer."""
     filters = {k: v for k, v in (request.get('filters') or {}).items()
                if k in FILTER_KEYS and v is not None}
     started = time.monotonic()
 
-    db = _local_db(request)
-    _emit('progress', message='querying the local store')
-    result = db.query(**filters)
-    records = _records(result.to_dataframe())
-    _add_imported_at(records)
-    facets = {'materials': list(db.get_available_materials()),
-              **_facet_lists(db.get_available_conditions())}
-    total = result.total_count
+    sizes: Dict[str, int] = {}
+    limit = filters.get('limit')
+    if request.get('source') == 'central':
+        client = _central_client(request)
+        _emit('progress', message='querying the central database')
+        try:
+            records = _records(client.query(**_central_filters(filters)))
+            facets = {'materials': list(client.list_materials()),
+                      **_facet_lists({})}
+        finally:
+            client.close()
+        # The REST client has no way to ask the store for a true total: it
+        # only ever returns the rows the query matched, up to `limit`. When
+        # the returned count reaches that cap, treating it as the total would
+        # claim a store size that may just be where the client stopped
+        # asking, so the total is reported unknown and `limit` goes along
+        # with it -- the pane can still say "N results (limit L)" using
+        # `returned`.
+        truncated = bool(limit) and len(records) >= limit
+        total = None if truncated else len(records)
+    else:
+        db = _local_db(request)
+        _emit('progress', message='querying the local store')
+        result = db.query(**filters)
+        records = _records(result.to_dataframe())
+        _add_imported_at(records)
+        facets = {'materials': list(db.get_available_materials()),
+                  **_facet_lists(db.get_available_conditions())}
+        total = result.total_count
+        # Only the local source can export a whole set, so only it needs the
+        # run counts the run_tree confirmation quotes.
+        sizes = _set_sizes(db.list_sets())
 
     filled = _backfill_facets(facets, records)
     return {
@@ -185,15 +249,65 @@ def _list(request: Dict[str, Any]) -> Dict[str, Any]:
         'records': records,
         'columns': list(records[0]) if records else [],
         'facets': facets,
-        'set_sizes': _set_sizes(db.list_sets()),
-        'total_count': total, 'returned': len(records),
+        'set_sizes': sizes,
+        'total_count': total, 'returned': len(records), 'limit': limit,
         'elapsed_s': round(time.monotonic() - started, 3),
         'warnings': _facet_warnings(filled, len(records)),
     }
 
 
+def _node_dict(node) -> Dict[str, Any]:
+    """Identity plus every stored attribute of one node."""
+    return {'uuid': node.uuid, 'node_type': node.node_type,
+            'attributes': dict(node.base.attributes.all)}
+
+
+def _repository_files(node, which: str) -> List[Dict[str, Any]]:
+    """The node's stored files with their sizes.
+
+    `as_path` materialises the repository as a real directory, which is the
+    only way to get a size without reading every file into memory.
+    """
+    out: List[Dict[str, Any]] = []
+    with node.base.repository.as_path() as root:
+        for path in sorted(p for p in root.rglob('*') if p.is_file()):
+            out.append({'node': which, 'path': str(path.relative_to(root)),
+                        'bytes': path.stat().st_size})
+    return out
+
+
+def _detail(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Everything about one selected row -- without downloading anything."""
+    if request.get('source') == 'central':
+        client = _central_client(request)
+        try:
+            record = client.get_result(int(request['result_id']))
+        finally:
+            client.close()
+        return {
+            'ok': True, 'kind': 'detail', 'source': 'central',
+            'run': {'uuid': record.get('run_uuid') or '', 'node_type': '',
+                    'attributes': {}},
+            'result': {'uuid': record.get('result_uuid') or '', 'node_type': '',
+                       'attributes': record},
+            'files': [], 'total_bytes': 0,
+        }
+
+    _load_profile(request)
+    from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
+    run = load_node(uuid=request['run_uuid'])
+    result = load_node(uuid=request['result_uuid'])
+    files = _repository_files(run, 'run') + _repository_files(result, 'result')
+    return {
+        'ok': True, 'kind': 'detail', 'source': 'local',
+        'run': _node_dict(run), 'result': _node_dict(result),
+        'files': files, 'total_bytes': sum(f['bytes'] for f in files),
+    }
+
+
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     'list': _list,
+    'detail': _detail,
 }
 
 

@@ -35,3 +35,22 @@ def test_list_reads_the_store(aiida_profile_clean, tmp_path):
         'the Added column reads this -- to_dict() already carries it as an extra'
     assert 'h-MoS2' in result['facets']['materials']
     assert result['facets']['set_labels'] == ['w1']
+
+
+def test_detail_carries_attributes_and_the_stored_file_list(aiida_profile_clean,
+                                                            tmp_path):
+    _populate(tmp_path)
+    listed = db_worker.dispatch({'kind': 'list', 'source': 'local', 'filters': {}})
+    row = listed['records'][0]
+
+    detail = db_worker.dispatch({'kind': 'detail', 'source': 'local',
+                                 'run_uuid': row['run_uuid'],
+                                 'result_uuid': row['result_uuid']})
+
+    assert detail['ok'] is True
+    assert detail['run']['uuid'] == row['run_uuid']
+    assert detail['run']['attributes']['rel_path'] == AFM
+    assert detail['result']['attributes']['load'] in (10.0, 30.0)
+    assert detail['files'], 'the run stores at least provenance.json'
+    assert all(f['node'] in ('run', 'result') for f in detail['files'])
+    assert detail['total_bytes'] == sum(f['bytes'] for f in detail['files'])
