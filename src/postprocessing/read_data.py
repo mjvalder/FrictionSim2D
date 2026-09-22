@@ -21,6 +21,8 @@ import pandas as pd
 
 from src.core.observables import FAMILIES, rename_map
 
+from .post_channels import post_channels_for
+
 logger = logging.getLogger(__name__)
 
 
@@ -390,6 +392,20 @@ class RunFrames:
         return dict(self.tiers)
 
 
+#: Material-name prefix -> metadata bucket. `h_` hexagonal, `t_` T-phase,
+#: `b_` buckled, `p_` phosphorene-like; anything else is 'other'.
+_MATERIAL_TYPE_KEYS = ('b_type', 'h_type', 't_type', 'p_type', 'other')
+
+
+def material_types(materials) -> Dict[str, List[str]]:
+    """Group underscored material ids into the five plot-filter buckets."""
+    out: Dict[str, List[str]] = {key: [] for key in _MATERIAL_TYPE_KEYS}
+    for mat in materials:
+        key = f"{str(mat).split('_', 1)[0]}_type"
+        out[key if key in out else 'other'].append(str(mat))
+    return {key: sorted(values) for key, values in out.items()}
+
+
 def resolve_n_layers(locator) -> int:
     """How many sheet layers this run has.
 
@@ -523,20 +539,92 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
         self.full_data_nested: dict = {}
 
-        # Read the data and populate the dictionaries and metadata
-        (
-            self.time_series,
-            self.incomplete_files,
-            self.incomplete_materials,
-            self.metadata,
-            self.ntimestep,
-        ) = self.read_data()
+        # The regex walk, kept ONLY for `full_data_nested` until Task 14
+        # deletes it. Its four other return values are discarded: the
+        # `discover_runs` walk below is the source of truth for the metadata,
+        # the time series and the completeness reports, and merging the two
+        # would mean two answers to the same question.
+        self.read_data()
 
-        # The `discover_runs` walk, alongside the regex one it replaces. Task
-        # 6 moves the metadata and completeness reports onto it and Task 14
-        # deletes `read_data`/`full_data_nested`; until then both run, so no
-        # intermediate commit leaves a consumer of the old attributes broken.
         self.runs: List[RunFrames] = self._read_runs()
+        self.ntimestep: int = max((len(r.window) for r in self.runs), default=0)
+        self.time_series: List[int] = self._time_series()
+        self.incomplete_files: Dict[str, List[str]] = {}
+        self.incomplete_materials: Dict[str, set] = {}
+        self._flag_incomplete()
+        self.metadata: Dict[str, Any] = self._build_metadata()
+
+    def _time_series(self) -> List[int]:
+        """The `time` column of the first full-length window frame."""
+        for run in self.runs:
+            if len(run.window) == self.ntimestep and 'time' in run.window:
+                return [int(t) for t in run.window['time'].to_list()]
+        return []
+
+    def _flag_incomplete(self) -> None:
+        """Record runs whose window frame is short of `ntimestep`.
+
+        Three samples of slack, as the old two-pass reader used: a window tier
+        can legitimately miss its final block. Unlike the old reader the run is
+        KEPT -- flagging it and dropping it are different decisions, and only
+        the first is this class's to make.
+        """
+        for run in self.runs:
+            if self.ntimestep - len(run.window) <= 3:
+                continue
+            self.incomplete_files.setdefault(run.size, []).append(
+                str(run.source_files.get('window', run.locator.run_dir)))
+            self.incomplete_materials.setdefault(run.size, set()).add(run.material)
+
+    def runs_by_size(self) -> Dict[str, List[RunFrames]]:
+        """Runs grouped by their `size` token -- one export file per key."""
+        grouped: Dict[str, List[RunFrames]] = {}
+        for run in self.runs:
+            grouped.setdefault(run.size, []).append(run)
+        return grouped
+
+    def _build_metadata(self,
+                        runs: Optional[List[RunFrames]] = None) -> Dict[str, Any]:
+        """The v2 `metadata` block for `runs` (default: every run)."""
+        runs = self.runs if runs is None else runs
+        loads: Dict[str, Dict[str, set]] = {'force': {}, 'pressure': {}}
+        for run in runs:
+            loads.setdefault(run.load_kind, {}).setdefault(
+                str(run.load), set()).add(run.angle)
+        materials = sorted({run.material for run in runs})
+        return {
+            'families': sorted({run.family for run in runs}),
+            'models': sorted({run.tokens.model for run in runs}),
+            'materials': materials,
+            'material_types': material_types(materials),
+            'potentials': sorted({run.tokens.pot_token for run in runs
+                                  if run.tokens.pot_token}),
+            'temperatures': sorted({run.tokens.temperature for run in runs}),
+            'sizes': sorted({run.size for run in runs}),
+            'layers': sorted({run.tokens.layers for run in runs
+                              if run.tokens.layers is not None}),
+            'speeds': sorted({run.speed for run in runs}),
+            'substrates': sorted({run.tokens.substrate for run in runs
+                                  if run.tokens.substrate}),
+            'tip_materials': sorted({run.tokens.tip_material for run in runs
+                                     if run.tokens.tip_material}),
+            'tip_radii': sorted({run.tokens.tip_radius for run in runs
+                                 if run.tokens.tip_radius is not None}),
+            'loads_by_kind': {kind: {load: sorted(angles)
+                                     for load, angles in sorted(by_load.items())}
+                              for kind, by_load in loads.items()},
+            'tiers': sorted({tier for run in runs for tier in run.tiers}),
+            'ntimestep': self.ntimestep,
+            'time_series': self.time_series,
+            # Which COF definition produced the summary numbers beside this
+            # export. v1 files carried no such statement and the definition
+            # changed under readers with no way to tell; this is that way.
+            'summary_definition': {
+                'cof': 'ratio_of_means: mean(LF)/mean(NF)',
+                'skip_fraction': self.skip_fraction,
+                'source': 'src.data.models.summarise_run',
+            },
+        }
 
     def _read_runs(self) -> List[RunFrames]:
         """One walk with `discover_runs`, one `RunFrames` per load point."""
@@ -567,7 +655,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 runs.append(RunFrames(
                     locator=locator, load_kind=kind, load=load, angle=angle,
                     speed=speed, n_layers=n_layers, tiers=frames,
-                    source_files=sources))
+                    source_files=sources,
+                    post=post_channels_for(locator, kind, load, angle)))
         return sorted(runs, key=lambda r: (r.tokens.rel_path, r.load_kind,
                                            r.load, r.angle, r.speed))
 
@@ -759,14 +848,9 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 final[k] = {load: sorted(list(angles)) for load, angles in v.items()}
             else:
                 final[k] = sorted(list(v))
-        material_types: dict = {
-            'b_type': [], 'h_type': [], 't_type': [], 'p_type': [], 'other': [],
-        }
-        for mat in final.get('materials', []):
-            prefix = mat.split('_', 1)[0]
-            type_key = f"{prefix}_type"
-            material_types[type_key if type_key in material_types else 'other'].append(mat)
-        final['material_types'] = material_types
+        # The module-level `material_types` is the one bucketing rule; this
+        # method used to carry its own copy. Task 14 deletes the method.
+        final['material_types'] = material_types(final.get('materials', []))
         return final
 
     def read_data(self) -> tuple:  # pylint: disable=too-many-locals

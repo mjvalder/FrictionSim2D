@@ -241,3 +241,74 @@ def test_a_five_layer_run_names_its_layer_columns(tmp_path):
     assert run.n_layers == 5
     assert 'comz_L5' in run.window.columns
     assert 'v_comz_L5' not in run.window.columns
+
+
+def test_metadata_carries_every_sweep_axis(tmp_path):
+    make_family_run(tmp_path, 'afm', material='h-MoS2', temp=300, pot='sw_a',
+                    loads=(10.0, 30.0), tiers=('window', 'raw'))
+    make_family_run(tmp_path, 'afm', material='h-WS2', temp=77, pot='sw_b',
+                    layers=3)
+
+    meta = DataReader(results_dir=str(tmp_path)).metadata
+
+    assert meta['families'] == ['afm']
+    assert meta['models'] == ['afm']
+    assert meta['materials'] == ['h_MoS2', 'h_WS2']
+    assert meta['potentials'] == ['pot_sw_a', 'pot_sw_b']
+    assert meta['temperatures'] == [77.0, 300.0]
+    assert meta['layers'] == [2, 3]
+    assert meta['sizes'] == ['100x100y']
+    assert meta['speeds'] == [2.0]
+    # `aSi` is the LEGACY spelling of an amorphous Si substrate;
+    # `_split_amorph_token` separates it into the material name and the
+    # flag, so the substrate axis carries materials and nothing else.
+    assert meta['substrates'] == ['Si']
+    assert meta['tip_materials'] == ['Si']
+    assert meta['tip_radii'] == [25.0]
+    assert meta['tiers'] == ['raw', 'window']
+    assert meta['loads_by_kind']['force'] == {'10.0': [0.0], '30.0': [0.0]}
+    assert meta['loads_by_kind']['pressure'] == {}
+
+
+def test_material_types_classifies_by_prefix():
+    from src.postprocessing.read_data import material_types
+
+    types = material_types(['h_MoS2', 't_CoTe2', 'b_SiSe', 'p_CS', 'AlSe'])
+
+    assert types == {'b_type': ['b_SiSe'], 'h_type': ['h_MoS2'],
+                     't_type': ['t_CoTe2'], 'p_type': ['p_CS'],
+                     'other': ['AlSe']}
+
+
+def test_ntimestep_and_time_series(tmp_path):
+    make_family_run(tmp_path, 'afm', n=30)
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    assert reader.ntimestep == 30
+    assert reader.metadata['ntimestep'] == 30
+    assert reader.time_series[:2] == [1000, 2000]
+    assert len(reader.time_series) == 30
+
+
+def test_a_short_run_is_reported_incomplete(tmp_path):
+    make_family_run(tmp_path / 'r', 'afm', material='h-MoS2', n=50)
+    make_family_run(tmp_path / 'r', 'afm', material='h-WS2', n=5)
+
+    reader = DataReader(results_dir=str(tmp_path / 'r'))
+    reader.export_issue_reports()
+
+    assert reader.incomplete_materials['100x100y'] == {'h_WS2'}
+    report = (tmp_path / 'r' / 'outputs' / 'incomplete_materials_100x100y.txt')
+    assert report.read_text(encoding='utf-8').strip() == 'h_WS2'
+    assert len(reader.runs) == 2      # incomplete runs are kept, only flagged
+
+
+def test_runs_by_size_groups_and_sorts(tmp_path):
+    make_family_run(tmp_path, 'afm', size=(100.0, 100.0))
+    make_family_run(tmp_path, 'afm', size=(50.0, 50.0))
+
+    grouped = DataReader(results_dir=str(tmp_path)).runs_by_size()
+
+    assert sorted(grouped) == ['100x100y', '50x50y']
+    assert len(grouped['50x50y']) == 1
