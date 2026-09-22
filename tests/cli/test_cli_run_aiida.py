@@ -95,3 +95,29 @@ def test_a_failing_ingest_aborts_the_command(tmp_path, monkeypatch, runner):
 def test_register_simulations_aiida_is_gone():
     import src.cli as cli_mod
     assert not hasattr(cli_mod, '_register_simulations_aiida')
+
+
+def test_an_unloadable_profile_reports_the_generated_root_not_a_traceback(
+        tmp_path, monkeypatch, runner):
+    """`ingest_root` can raise before it ever gets to build an `IngestReport`
+    -- e.g. `load_aiida_profile` failing on a missing/misconfigured profile.
+    The tree already exists on disk at that point: the user must be told
+    where it landed and how to register it later, not shown a bare traceback.
+    """
+    def _boom(*args, **kwargs):
+        raise RuntimeError('no profile')
+
+    monkeypatch.setattr('src.cli.run_simulations', _fake_run_simulations)
+    monkeypatch.setattr('src.aiida.ingest.ingest_root', _boom)
+    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+
+    result = runner.invoke(cli, [
+        'run', 'afm', 'examples/afm_config.ini',
+        '-o', str(tmp_path), '--aiida', '--label', '260910-afm'])
+
+    assert result.exit_code != 0
+    generated_root = tmp_path / 'simulation_test'
+    assert str(generated_root.absolute()) in result.output
+    assert f'FrictionSim2D aiida import {generated_root} --label 260910-afm' \
+        in result.output
+    assert 'Traceback' not in result.output

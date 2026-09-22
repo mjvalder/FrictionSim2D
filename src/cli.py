@@ -100,9 +100,22 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
 
     if created_simulations and use_aiida:
-        from .aiida.ingest import ingest_root  # noqa: PLC0415
+        from .aiida.ingest import SetRootMismatch, ingest_root  # noqa: PLC0415
         click.echo(f"\n📦 Registering {simulation_root.name} in AiiDA...")
-        report = ingest_root(simulation_root, label=aiida_label)
+        import_hint = (
+            f"   The simulation tree was generated at {simulation_root.absolute()} "
+            "and is intact; register it later with:\n"
+            f"   FrictionSim2D aiida import {simulation_root} "
+            f"--label {aiida_label or simulation_root.name}"
+        )
+        try:
+            report = ingest_root(simulation_root, label=aiida_label)
+        except SetRootMismatch as exc:
+            logger.exception("AiiDA set/root mismatch")
+            _raise_abort(f"❌ {exc}\n{import_hint}", exc)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("AiiDA registration failed")
+            _raise_abort(f"❌ Registration failed: {exc}\n{import_hint}", exc)
         click.echo(report.render())
         if not report.ok():
             raise click.Abort()
