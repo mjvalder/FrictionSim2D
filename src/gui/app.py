@@ -381,7 +381,8 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- database
 
-    def _start_db(self, kind: str, source: str, payload: dict) -> None:
+    def _start_db(self, kind: str, source: str, payload: dict, *,
+                  use_cache: bool = True) -> None:
         # A download or an import writes outside the workspace. `start` cancels
         # whatever is running, and cancelling means SIGKILL -- mid-copy that
         # leaves a half-written destination directory nobody cleans up. Since
@@ -396,7 +397,11 @@ class MainWindow(QMainWindow):
         # The controller reads the profile and API credentials off `settings`
         # at start time, so a settings edit takes effect without a restart.
         self.database.settings = self.settings
-        self.database.start(DatabaseRequest(kind=kind, source=source, payload=payload))
+        request = DatabaseRequest(kind=kind, source=source, payload=payload)
+        if use_cache:
+            self.database.start(request)
+        else:
+            self.database.start(request, use_cache=False)
 
     def _on_db_cancel(self) -> None:
         if not self.database.running:
@@ -487,8 +492,10 @@ class MainWindow(QMainWindow):
         self._start_db('list', source, {'filters': filters})
 
     def _on_db_refresh(self, source: str, filters: dict) -> None:
+        # Through `_start_db`, not `database.start`: a Refresh is still a
+        # `start`, which SIGKILLs a running export or import.
         self._remember_database_state()
-        self._start_db('list', source, {'filters': filters})
+        self._start_db('list', source, {'filters': filters}, use_cache=False)
 
     def _on_db_detail(self, source: str, payload: dict) -> None:
         self._start_db('detail', source, payload)

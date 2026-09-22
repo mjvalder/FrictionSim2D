@@ -37,6 +37,14 @@ def request_key(kind: str, source: str, payload: Dict[str, Any]) -> str:
     return digest.hexdigest()[:24]
 
 
+def _cached_success(result_file: Path) -> bool:
+    """Whether a cached result exists and records a successful request."""
+    try:
+        return bool(json.loads(result_file.read_text(encoding='utf-8')).get('ok'))
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return False
+
+
 #: What `DatabaseSettings.api_url` is when nobody has set it.
 DEFAULT_API_URL = 'http://localhost:8000'
 
@@ -92,6 +100,10 @@ class DatabaseController(QObject):
     #: start anything while one of these is running.
     WRITE_KINDS: Tuple[str, ...] = ('export', 'import')
 
+    #: Kinds whose result may be served from disk. A download or an import
+    #: must always run: its result file describes work, not an answer.
+    CACHED_KINDS: Tuple[str, ...] = ('list',)
+
     def __init__(self, workspace: Workspace, settings: Any,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -115,20 +127,69 @@ class DatabaseController(QObject):
         return self._kind if self.running else ''
 
     def request_dir(self, key: str) -> Path:
-        """Where this request's files live. Under `.preview` because it is
-        the same kind of disposable, workspace-local scratch."""
-        return self.workspace.preview_dir / '_db' / key
+        """Where the files of the request keyed `key` live. Under `.preview`
+        because it is the same kind of disposable, workspace-local scratch."""
+        return self._db_dir / key
+
+    def directory_for(self, request: DatabaseRequest) -> Path:
+        """Where `request`'s `request.json` and `result.json` go.
+
+        A cached kind gets its own directory, keyed by `cache_key`. Every
+        other kind reuses one scratch directory per kind: a `detail` fires on
+        each row click, and its result is never read back from disk, so a
+        directory per click would only grow `.preview/_db` without bound.
+        """
+        if request.kind in self.CACHED_KINDS:
+            return self.request_dir(self.cache_key(request))
+        return self._db_dir / '_scratch' / request.kind
+
+    def cache_key(self, request: DatabaseRequest) -> str:
+        """Identity of a result: the request exactly as the worker reads it.
+
+        That is `_payload`, connection included -- the same filters against
+        another profile, URL or API key are another store's answer. The key
+        itself is hashed in, never written: it only changes the digest.
+        """
+        payload = self._payload(request)
+        if request.source == 'central':
+            api_key = (self.settings.database.api_key or '').strip()
+            payload['api_key_sha256'] = hashlib.sha256(api_key.encode()).hexdigest()
+        return request_key(request.kind, request.source, payload)
+
+    @property
+    def _db_dir(self) -> Path:
+        return self.workspace.preview_dir / '_db'
 
     # ------------------------------------------------------------------ run
 
-    def start(self, request: DatabaseRequest) -> None:
-        """Run a request, replacing any request already in flight."""
+    def start(self, request: DatabaseRequest, *, use_cache: bool = True) -> None:
+        """Run a request, replacing any request already in flight.
+
+        A successful `list` result is keyed by `cache_key` and reused, because
+        a query over a store with thousands of nodes takes seconds. Refresh
+        passes `use_cache=False`. Either way a result that is not reused is
+        deleted before the worker starts, so a failed or killed re-query can
+        never fall back to it -- and, as in `PreviewController`, a cached
+        failure is never replayed: its cause (a profile, a server) can lie
+        outside the key, and replaying it would outlive the fix.
+        """
         if self.running:
             self.cancel()
 
-        directory = self.request_dir(request.key())
+        directory = self.directory_for(request)
         directory.mkdir(parents=True, exist_ok=True)
         result_file = directory / 'result.json'
+
+        if (use_cache and request.kind in self.CACHED_KINDS
+                and _cached_success(result_file)):
+            self._kind = request.kind
+            self._result_file = result_file
+            self._cancelled = False
+            self.started.emit(request.kind)
+            self.progress.emit('reusing the cached query result')
+            self._deliver(result_file)
+            return
+        result_file.unlink(missing_ok=True)
 
         payload = self._payload(request)
         payload['result_file'] = str(result_file)
@@ -244,4 +305,15 @@ class DatabaseController(QObject):
             self.failed.emit(self._kind,
                              result.get('error', 'the database request failed'))
             return
+        if self._kind == 'import':
+            self._invalidate_cached_lists()
         self.finished.emit(self._kind, result)
+
+    def _invalidate_cached_lists(self) -> None:
+        """Forget every cached query result: an import changed the store they
+        describe, and a Search that replayed one would hide the new rows."""
+        if not self._db_dir.is_dir():
+            return
+        for directory in self._db_dir.iterdir():
+            if directory.is_dir() and directory.name != '_scratch':
+                (directory / 'result.json').unlink(missing_ok=True)

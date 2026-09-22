@@ -88,7 +88,7 @@ def test_start_writes_a_request_carrying_the_local_profile(controller):
     controller.cancel()
 
     written = json.loads(
-        (controller.request_dir(request.key()) / 'request.json').read_text(
+        (controller.directory_for(request) / 'request.json').read_text(
             encoding='utf-8'))
     assert written['kind'] == 'list'
     assert written['source'] == 'local'
@@ -109,7 +109,7 @@ def test_a_central_request_carries_the_url_but_never_the_key(controller):
     controller.cancel()
 
     written = json.loads(
-        (controller.request_dir(request.key()) / 'request.json').read_text(
+        (controller.directory_for(request) / 'request.json').read_text(
             encoding='utf-8'))
     assert written['api_url'] == 'http://localhost:8000'
     assert 'api_key' not in written
@@ -202,3 +202,162 @@ class TestTheWorkerReallyRuns:
         assert payload['ready'] is False
         assert any('not configured' in c['detail'] for c in payload['checks'])
         assert not controller.running
+
+
+_EMPTY_LIST_RESULT = {'ok': True, 'kind': 'list', 'source': 'local', 'records': [],
+                      'facets': {}, 'total_count': 0, 'returned': 0,
+                      'elapsed_s': 0.0, 'warnings': []}
+
+
+def _seed(directory, result) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'result.json').write_text(
+        result if isinstance(result, str) else json.dumps(result), encoding='utf-8')
+
+
+class TestResultCache:
+    """A local query over 13k nodes is seconds, not milliseconds."""
+
+    def test_a_cached_list_result_is_delivered_without_a_process(self, controller):
+        request = DatabaseRequest(kind='list', source='local',
+                                  payload={'filters': {'family': 'afm'}})
+        _seed(controller.directory_for(request), _EMPTY_LIST_RESULT)
+        seen = []
+        controller.finished.connect(lambda kind, result: seen.append(kind))
+
+        controller.start(request)
+
+        assert seen == ['list']
+        assert not controller.running, 'no subprocess should have been started'
+
+    def test_refresh_bypasses_and_clears_the_cache(self, controller):
+        request = DatabaseRequest(kind='list', source='local',
+                                  payload={'filters': {'family': 'afm'}})
+        directory = controller.directory_for(request)
+        _seed(directory, '{"ok": true, "kind": "list", "records": []}')
+        stale = directory / 'result.json'
+        seen = []
+        controller.finished.connect(lambda kind, result: seen.append(kind))
+
+        controller.start(request, use_cache=False)
+        controller.cancel()
+
+        assert seen == [], 'the stale result must not be delivered'
+        assert not stale.exists()
+
+    def test_only_list_results_are_cached(self, controller):
+        request = DatabaseRequest(kind='export', source='local',
+                                  payload={'what': 'summary_csv'})
+        _seed(controller.directory_for(request),
+              '{"ok": true, "kind": "export", "files": []}')
+        seen = []
+        controller.finished.connect(lambda kind, result: seen.append(kind))
+
+        controller.start(request)
+        controller.cancel()
+
+        assert seen == [], 'an export must always run, never be served from disk'
+        assert controller.CACHED_KINDS == ('list',)
+
+    def test_a_cached_failure_is_never_replayed(self, controller):
+        """PreviewController's rule: a failure's cause can lie outside the
+        key (a profile fixed, a server back up), so replaying it outlives
+        the fix."""
+        request = DatabaseRequest(kind='list', source='local',
+                                  payload={'filters': {}})
+        directory = controller.directory_for(request)
+        _seed(directory, {'ok': False, 'error': 'RuntimeError: no profile'})
+        failed = []
+        controller.failed.connect(lambda kind, message: failed.append(message))
+
+        controller.start(request)
+        assert controller.running, 'a cached failure must re-run the request'
+        controller.cancel()
+
+        assert failed == []
+        assert not (directory / 'result.json').exists()
+
+    def test_the_cache_key_includes_the_connection(self, controller):
+        """A different profile, URL or API key is a different database: the
+        same filters must not be answered from another store's result."""
+        local = DatabaseRequest(kind='list', source='local', payload={'filters': {}})
+        central = DatabaseRequest(kind='list', source='central', payload={'filters': {}})
+        before_local = controller.directory_for(local)
+        before_central = controller.directory_for(central)
+
+        controller.settings.aiida.profile = 'other'
+        controller.settings.database.api_url = 'https://db.example.org'
+        assert controller.directory_for(local) != before_local
+        changed_url = controller.directory_for(central)
+        assert changed_url != before_central
+
+        controller.settings.database.api_key = 'another-key'
+        assert controller.directory_for(central) != changed_url
+
+    def test_the_api_key_is_hashed_into_the_key_never_written(self, controller):
+        controller.settings.database.api_key = 'sekrit-token-123'
+        request = DatabaseRequest(kind='list', source='central', payload={'filters': {}})
+
+        controller.start(request)
+        controller.cancel()
+
+        directory = controller.directory_for(request)
+        for path in directory.rglob('*'):
+            assert 'sekrit-token-123' not in path.read_text(encoding='utf-8')
+        assert 'sekrit-token-123' not in str(directory)
+
+    def test_non_cached_kinds_share_one_scratch_directory_per_kind(self, controller):
+        """A `detail` fires on every row click; one directory per click would
+        grow `.preview/_db` without bound."""
+        first = DatabaseRequest(kind='detail', source='local',
+                                payload={'run_uuid': 'a', 'result_uuid': 'b'})
+        second = DatabaseRequest(kind='detail', source='local',
+                                 payload={'run_uuid': 'c', 'result_uuid': 'd'})
+        export = DatabaseRequest(kind='export', source='local',
+                                 payload={'what': 'summary_csv'})
+
+        assert controller.directory_for(first) == controller.directory_for(second)
+        assert controller.directory_for(first) != controller.directory_for(export)
+        assert controller.directory_for(first).parent.name == '_scratch'
+
+    def test_a_stale_scratch_result_is_never_delivered(self, controller):
+        """The scratch directory is reused, so a previous request's result
+        file must be gone before the next request runs -- otherwise a worker
+        that dies without writing one would deliver the previous answer."""
+        request = DatabaseRequest(kind='detail', source='local',
+                                  payload={'run_uuid': 'a', 'result_uuid': 'b'})
+        directory = controller.directory_for(request)
+        _seed(directory, {'ok': True, 'kind': 'detail'})
+
+        controller.start(request)
+        controller.cancel()
+
+        assert not (directory / 'result.json').exists()
+
+    def test_a_successful_import_invalidates_cached_lists(self, controller):
+        listing = DatabaseRequest(kind='list', source='local', payload={'filters': {}})
+        cached = controller.directory_for(listing) / 'result.json'
+        _seed(cached.parent, _EMPTY_LIST_RESULT)
+        importing = DatabaseRequest(kind='import', source='local',
+                                    payload={'path': '/tmp/tree'})
+        result_file = controller.directory_for(importing) / 'result.json'
+        _seed(result_file.parent, {'ok': True, 'kind': 'import'})
+        controller._kind = 'import'
+
+        controller._deliver(result_file)
+
+        assert not cached.exists()
+
+    def test_a_failed_import_keeps_cached_lists(self, controller):
+        listing = DatabaseRequest(kind='list', source='local', payload={'filters': {}})
+        cached = controller.directory_for(listing) / 'result.json'
+        _seed(cached.parent, _EMPTY_LIST_RESULT)
+        importing = DatabaseRequest(kind='import', source='local',
+                                    payload={'path': '/tmp/tree'})
+        result_file = controller.directory_for(importing) / 'result.json'
+        _seed(result_file.parent, {'ok': False, 'error': 'nope'})
+        controller._kind = 'import'
+
+        controller._deliver(result_file)
+
+        assert cached.exists()

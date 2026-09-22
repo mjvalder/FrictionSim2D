@@ -86,6 +86,19 @@ class TestWorkspace:
         workspace.prune_previews(keep=3)
         assert len(list(workspace.preview_dir.iterdir())) == 3
 
+    def test_pruning_never_deletes_the_database_cache(self, workspace):
+        """`.preview/_db` sits beside the preview builds. Pruning to the
+        newest few would otherwise throw the query cache away after eight
+        renders, silently."""
+        (workspace.preview_dir / '_db').mkdir()
+        for index in range(12):
+            (workspace.preview_dir / f"key{index:02d}").mkdir()
+
+        workspace.prune_previews(keep=3)
+
+        assert (workspace.preview_dir / '_db').is_dir()
+        assert len(list(workspace.preview_dir.iterdir())) == 4
+
     def test_recent_workspaces_round_trip(self, tmp_path):
         recent = RecentWorkspaces(path=tmp_path / 'recent.json')
         recent.add(tmp_path)

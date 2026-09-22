@@ -426,14 +426,43 @@ class TestWindowWiring:
 
     def test_a_query_reaches_the_controller_as_a_list_request(self, window, monkeypatch):
         calls = []
-        monkeypatch.setattr(window.database, 'start', calls.append)
+        monkeypatch.setattr(window.database, 'start',
+                            lambda request, **kwargs: calls.append((request, kwargs)))
 
         window.database_pane.search_button.click()
 
         assert len(calls) == 1
-        assert calls[0].kind == 'list'
-        assert calls[0].source == 'local'
-        assert calls[0].payload == {'filters': EMPTY_FILTERS}
+        request, kwargs = calls[0]
+        assert request.kind == 'list'
+        assert request.source == 'local'
+        assert request.payload == {'filters': EMPTY_FILTERS}
+        assert kwargs.get('use_cache', True) is True
+
+    def test_refresh_reaches_the_controller_bypassing_the_cache(self, window, monkeypatch):
+        calls = []
+        monkeypatch.setattr(window.database, 'start',
+                            lambda request, **kwargs: calls.append((request, kwargs)))
+
+        window.database_pane.refresh_button.click()
+
+        assert len(calls) == 1
+        request, kwargs = calls[0]
+        assert request.kind == 'list'
+        assert kwargs == {'use_cache': False}
+
+    def test_refresh_does_not_cancel_a_running_export(self, window, monkeypatch):
+        """Refresh is still a `start`, and `start` SIGKILLs what is running:
+        it must go through the same write guard as every other request."""
+        started = []
+        monkeypatch.setattr(window.database, 'start',
+                            lambda request, **kwargs: started.append(request))
+        monkeypatch.setattr(type(window.database), 'current_kind',
+                            property(lambda self: 'export'))
+
+        window.database_pane.refresh_button.click()
+
+        assert started == []
+        assert 'still running' in window.database_pane.messages.toPlainText()
 
     def test_a_finished_list_fills_the_table_and_the_combos(self, window):
         window._on_db_finished('list', {
