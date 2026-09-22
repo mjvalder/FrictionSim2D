@@ -597,3 +597,73 @@ def test_correlation_ignores_a_file_that_is_not_a_ranking(tmp_path):
                            'filename': 'corr.png'})
 
     assert not (out / 'corr.png').exists()   # nothing to correlate, no crash
+
+
+def test_generate_plot_accepts_a_model(tmp_path):
+    from src.postprocessing.plot_config import SummaryPlot
+
+    root = _dataset(tmp_path, 'afm', loads=(10.0, 30.0))
+    out = tmp_path / 'out'
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'], output_dir=str(out))
+
+    plotter.generate_plot(SummaryPlot(x_axis='force', y_axis='lf',
+                                      filename='model.png',
+                                      filter_size='100x100y'))
+
+    assert (out / 'model.png').exists()
+
+
+def test_only_the_keys_that_were_set_reach_the_mixin(tmp_path, monkeypatch):
+    """`spec.model_dump(exclude_unset=True)`: the mixins' own
+    `.get(key, default)` defaults stay authoritative, and the Pydantic
+    defaults document them. Dumping defaults would change every plot."""
+    from src.postprocessing.plot_config import SummaryPlot
+
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+    seen = {}
+    monkeypatch.setattr(type(plotter), '_generate_summary_plot',
+                        lambda self, cfg: seen.update(cfg))
+
+    plotter.generate_plot(SummaryPlot(filename='x.png', x_axis='force'))
+
+    assert seen == {'plot_type': 'summary', 'filename': 'x.png',
+                    'x_axis': 'force'}
+    assert 'legend_outside' not in seen
+    assert 'tier' not in seen
+
+
+def test_a_dict_still_works(tmp_path, monkeypatch):
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+    seen = {}
+    monkeypatch.setattr(type(plotter), '_generate_summary_plot',
+                        lambda self, cfg: seen.update(cfg))
+
+    plotter.generate_plot({'plot_type': 'summary', 'filename': 'x.png'})
+
+    assert seen == {'plot_type': 'summary', 'filename': 'x.png'}
+
+
+def test_an_unknown_plot_type_raises(tmp_path):
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    with pytest.raises(PlotDataError, match='sunburst'):
+        plotter.generate_plot({'plot_type': 'sunburst', 'filename': 'x.png'})
+
+
+def test_the_taxonomy_types_are_still_dispatchable(tmp_path):
+    """They have no model in plot_config, so they cannot appear in a
+    validated document -- but they are reachable from a dict, and the
+    stricter dispatch must not turn them into an error."""
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    for plot_type in ('taxonomy_signature_heatmap', 'taxonomy_prevalence',
+                      'taxonomy_exemplar', 'taxonomy_regime_map'):
+        plotter.generate_plot({'plot_type': plot_type, 'filename': 'x.png'})

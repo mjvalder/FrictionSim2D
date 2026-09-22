@@ -112,10 +112,27 @@ class Plotter(
                             constrained_layout=self.constrained_layout,
                             **kwargs)
 
-    def generate_plot(self, plot_config: dict) -> None:
-        """Dispatch to the appropriate plot generation method."""
-        plot_type = plot_config.get('plot_type', 'summary')
+    def generate_plot(self, plot_config) -> None:
+        """Dispatch one plot spec, given as a model or a plain dict.
 
+        A model is dumped with ``exclude_unset=True``: the mixins' own
+        ``.get(key, default)`` defaults stay authoritative and the Pydantic
+        defaults document them. Dumping defaults instead would change every
+        plot in the corpus at once, silently.
+
+        The four ``taxonomy_*`` types have no model in `plot_config` and so
+        cannot appear in a validated document; they are dispatched here
+        because they are reachable from a plain dict and from the Python API.
+        """
+        from .plot_config import PlotBase  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+        if isinstance(plot_config, PlotBase):
+            plot_config = plot_config.model_dump(exclude_unset=True)
+            # model_dump(exclude_unset=True) omits plot_type when the Literal
+            # defaulted it, and that is the one key the dispatcher needs.
+            plot_config.setdefault('plot_type', 'summary')
+
+        plot_type = plot_config.get('plot_type', 'summary')
         dispatch = {
             'summary': self._generate_summary_plot,
             'timeseries': self._generate_timeseries_plot,
@@ -129,8 +146,7 @@ class Plotter(
             'taxonomy_exemplar': self._generate_taxonomy_exemplar,
             'taxonomy_regime_map': self._generate_taxonomy_regime_map,
         }
-
-        if plot_type in dispatch:
-            dispatch[plot_type](plot_config)
-        else:
-            logger.error("Unknown plot type '%s'", plot_type)
+        if plot_type not in dispatch:
+            raise PlotDataError(
+                f"unknown plot_type {plot_type!r}; known: {sorted(dispatch)}")
+        dispatch[plot_type](plot_config)
