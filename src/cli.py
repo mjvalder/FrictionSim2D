@@ -725,59 +725,39 @@ def aiida_status():
         click.echo("\n📝 Setup AiiDA with: verdi presto --use-postgres")
 
 @aiida_group.command('import')
-@click.argument('simulation_folder', type=click.Path(exists=True))
+@click.argument('simulation_folder', type=click.Path(exists=True, path_type=Path))
 @click.option('--label', '-l', default=None,
-              help='Required label for the simulation set (prompted if omitted)')
-@click.option('--description', '-d', default='',
-              help='Optional description for this simulation set')
+              help='Label for the simulation set (default: the folder name).')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_import(simulation_folder: str, label: Optional[str], description: str,
-                 profile: Optional[str]):
-    """Import a simulation set into AiiDA with full provenance.
+@click.option('--dry-run', is_flag=True,
+              help='Print what would be ingested; create nothing.')
+def aiida_import(simulation_folder: Path, label: Optional[str],
+                 profile: Optional[str], dry_run: bool):
+    """Ingest a simulation tree into AiiDA.
 
-    SIMULATION_FOLDER must be the ``simulation_XXXXXXXX`` directory produced
-    by a single ``FrictionSim2D run`` invocation.  A label is required to
-    identify this set in the database; you will be prompted if one is not
-    supplied.
-
-    Creates one ``FrictionSimulationSetData`` node (shared config), one
-    ``FrictionSimulationData`` per material, and one ``FrictionResultsData``
-    per load/angle combination.
+    SIMULATION_FOLDER is the ``simulation_XXXXXXXX`` directory produced by one
+    ``FrictionSim2D run``. Idempotent: re-importing adds only new or changed
+    load points. Exits 1 if any run failed, was left empty, or could not be
+    parsed.
 
     Example:
-        FrictionSim2D aiida import ./simulation_20260421_173546 --label "251125-sheetonsheet"
+        FrictionSim2D aiida import ./simulation_20260421_173546 -l 260421-afm
     """
-    from .aiida.integration import import_simulation_set
-
-    sim_path = Path(simulation_folder)
-
-    if not label:
-        label = click.prompt(
-            'Label for this simulation set',
-            default=sim_path.name,
-        )
-    label = (label or '').strip()
-    if not label:
-        _raise_abort("❌ Label cannot be empty.", ValueError("empty label"))
-
-    click.echo(f"📥 Importing simulation set: {sim_path.name}")
-    click.echo(f"   Label: {label}")
-    if description:
-        click.echo(f"   Description: {description}")
+    from .aiida.ingest import SetRootMismatch, ingest_root  # noqa: PLC0415
 
     try:
-        set_uuid = import_simulation_set(
-            simulation_folder=sim_path,
-            label=label,
-            description=description,
-            aiida_profile=profile,
-        )
-        click.echo(f"✅ Import complete — set UUID: {set_uuid}")
-
+        report = ingest_root(simulation_folder, label=label, profile=profile,
+                             dry_run=dry_run)
+    except SetRootMismatch as exc:
+        _raise_abort(f"❌ {exc}", exc)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Import failed")
         _raise_abort(f"❌ Import failed: {exc}", exc)
+
+    click.echo(report.render())
+    if not report.ok() or report.empty_runs or report.unparseable:
+        raise SystemExit(1)
 
 
 @aiida_group.command('list-sets')
@@ -852,84 +832,58 @@ def aiida_list_sets(profile: Optional[str], output_format: str):
     click.echo(f"\nTotal sets: {len(rows)}")
 
 
-@aiida_group.command('dump')
+@aiida_group.command('export-results')
 @click.argument('set_label')
-@click.option('--output-dir', '-o', required=True, type=click.Path(),
-              help='Directory to write output_full_*.json files into')
+@click.argument('output_dir', type=click.Path(path_type=Path))
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_dump(set_label: str, output_dir: str, profile: Optional[str]):
-    """Export time-series data from an AiiDA set to output_full_*.json files.
+def aiida_export_results(set_label: str, output_dir: Path, profile: Optional[str]):
+    """Write a stored set back out as an ordinary simulation tree.
 
-    Creates <output_dir>/outputs/output_full_<size>.json in the same format
-    as ``postprocess read --export``, so you can regenerate plots with
-    ``postprocess plot`` against the AiiDA-exported data.
+    The result works unchanged with ``postprocess read`` and the GUI download.
 
     Example:
-        FrictionSim2D aiida dump 251113-afm --output-dir ~/Syncthing/aiida_dump/251113_afm
-        FrictionSim2D aiida dump 260227-sevik_mos2 -o ~/Syncthing/aiida_dump/sevik_mos2
+        FrictionSim2D aiida export-results 260421-afm ~/exported/260421-afm
     """
-    from .aiida import load_aiida_profile
-    from .aiida.integration import dump_results_to_json
+    from .aiida.export import export_results  # noqa: PLC0415
 
-    load_aiida_profile(profile)
-
-    click.echo(f"📤 Dumping set '{set_label}' → {output_dir}/outputs/")
     try:
-        n = dump_results_to_json(
-            set_label=set_label,
-            output_dir=Path(output_dir),
-            aiida_profile=profile,
-        )
-        click.echo(f"✅ Exported {n} simulation(s) to {output_dir}/outputs/")
+        written = export_results(set_label, output_dir, profile=profile)
     except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Dump failed")
-        _raise_abort(f"❌ Dump failed: {exc}", exc)
+        logger.exception("Export failed")
+        _raise_abort(f"❌ Export failed: {exc}", exc)
+
+    click.echo(f"✅ Wrote {len(written)} file(s) to {Path(output_dir).absolute()}")
 
 
 @aiida_group.command('rebuild')
 @click.argument('set_label')
-@click.option('--output-dir', '-o', default=None, type=click.Path(),
+@click.option('--output-dir', '-o', default='.', type=click.Path(path_type=Path),
               help='Root directory to write the simulation tree into (default: cwd)')
 @click.option('--hpc-scripts', is_flag=True, default=False,
               help='Generate HPC job-submission scripts after rebuilding')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_rebuild(set_label: str, output_dir: Optional[str], hpc_scripts: bool,
+def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
                    profile: Optional[str]):
-    """Rebuild LAMMPS input files for a set from its AiiDA provenance.
+    """Regenerate a set's LAMMPS inputs from the store.
 
-    Reads every FrictionSimulationData node for the set, exports the stored
-    CIF and potential files, and reruns the builder to produce a complete
-    simulation directory tree.  This validates that the stored provenance is
-    sufficient to reproduce the original simulation inputs.
-
-    The reconstructed tree mirrors the layout produced by ``FrictionSim2D run``
-    and can be submitted directly to an HPC cluster.
+    Exports each run's stored config.json and the set's settings.yaml, then
+    reruns the real builder router -- the same one ``FrictionSim2D run`` uses.
 
     Example:
-        FrictionSim2D aiida rebuild 251125-sheetonsheet --output-dir ~/rebuild_test/
-        FrictionSim2D aiida rebuild 251113-afm -o ~/rebuild_test/ --hpc-scripts
+        FrictionSim2D aiida rebuild 260421-afm -o ~/rebuild_test --hpc-scripts
     """
-    from .aiida import load_aiida_profile
-    from .aiida.integration import rebuild_simulation_set
+    from .aiida.export import rebuild_set  # noqa: PLC0415
 
-    load_aiida_profile(profile)
-
-    click.echo(f"🔨 Rebuilding set '{set_label}' from AiiDA provenance…")
     try:
-        created_dirs, simulation_root = rebuild_simulation_set(
-            label_or_uuid=set_label,
-            output_root=Path(output_dir) if output_dir else None,
-            generate_hpc=hpc_scripts,
-            aiida_profile=profile,
-        )
-        click.echo(
-            f"✅ Rebuilt {len(created_dirs)} simulation(s) → {simulation_root}"
-        )
+        created, root = rebuild_set(set_label, output_dir, profile=profile,
+                                    generate_hpc=hpc_scripts)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Rebuild failed")
         _raise_abort(f"❌ Rebuild failed: {exc}", exc)
+
+    click.echo(f"✅ Rebuilt {len(created)} run(s) → {Path(root).absolute()}")
 
 
 @aiida_group.command('delete')

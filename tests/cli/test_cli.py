@@ -305,13 +305,6 @@ def test_aiida_import_help(runner):
     assert '--label' in result.output
 
 
-def test_aiida_dump_help(runner):
-    result = runner.invoke(cli, ['aiida', 'dump', '--help'])
-    assert result.exit_code == 0
-    assert 'SET_LABEL' in result.output
-    assert '--output-dir' in result.output
-
-
 def test_aiida_rebuild_help(runner):
     result = runner.invoke(cli, ['aiida', 'rebuild', '--help'])
     assert result.exit_code == 0
