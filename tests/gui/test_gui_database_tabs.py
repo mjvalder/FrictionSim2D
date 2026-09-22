@@ -63,3 +63,4 @@ def test_building_the_window_starts_no_subprocess(window):
     the suite spawn dozens of aiida interpreters."""
     assert window.top_tabs.currentIndex() == 0
     assert window.findChildren(QProcess) == []
+    assert not window.database.running

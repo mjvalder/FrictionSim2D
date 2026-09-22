@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .controllers.database import DatabaseController, DatabaseRequest
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
@@ -45,6 +46,7 @@ from .qt_logging import install_message_filter, suppressed_summary
 from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
+from .widgets.database.pane import DatabasePane
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
@@ -134,6 +136,7 @@ class MainWindow(QMainWindow):
 
         self.preview = PreviewController(workspace, self)
         self.generator = GenerateController(workspace, self)
+        self.database = DatabaseController(workspace, self.settings, self)
         # What was last rendered, so an edit afterwards can be flagged as
         # stale rather than leaving the viewport showing a superseded system
         # with no indication anything changed.
@@ -179,16 +182,10 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_database_tab(self) -> QWidget:
-        """The database pane. Task 8 puts `DatabasePane` here; until then the
-        tab is an empty page, so D1 lands and is reviewable on its own."""
-        page = QWidget(self)
-        page.setObjectName('database_page')
-        layout = QVBoxLayout(page)
-        label = QLabel('The database pane is not built yet.', page)
-        label.setStyleSheet(CAPTION)
-        layout.addWidget(label)
-        layout.addStretch(1)
-        return page
+        """The database pane (D1/D2). It never queries on construction: a
+        query happens only when the user presses Search or Refresh."""
+        self.database_pane = DatabasePane(self)
+        return self.database_pane
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)
@@ -350,6 +347,104 @@ class MainWindow(QMainWindow):
         self.generator.progress.connect(self.statusBar().showMessage)
         self.generator.finished.connect(self._on_generated)
         self.generator.failed.connect(self._on_generate_failed)
+
+        self._connect_database()
+
+    def _connect_database(self) -> None:
+        pane = self.database_pane
+        pane.query_requested.connect(self._on_db_query)
+        pane.refresh_requested.connect(self._on_db_refresh)
+        pane.detail_requested.connect(self._on_db_detail)
+        pane.check_requested.connect(self._on_db_check)
+        pane.cancel_requested.connect(self._on_db_cancel)
+
+        self.database.started.connect(self._on_db_started)
+        self.database.progress.connect(self.statusBar().showMessage)
+        self.database.finished.connect(self._on_db_finished)
+        self.database.failed.connect(self._on_db_failed)
+        self.database.cancelled.connect(self._on_db_cancelled)
+
+    # ------------------------------------------------------------- database
+
+    def _start_db(self, kind: str, source: str, payload: dict) -> None:
+        # A download or an import writes outside the workspace. `start` cancels
+        # whatever is running, and cancelling means SIGKILL -- mid-copy that
+        # leaves a half-written destination directory nobody cleans up. Since
+        # selecting a table row fires a `detail` request on its own, that was
+        # one stray click away at all times.
+        running = self.database.current_kind
+        if running in self.database.WRITE_KINDS:
+            self.database_pane.message(
+                f"A {running} is still running. Wait for it to finish, or press "
+                f"Cancel, before starting a {kind}.", 'warn')
+            return
+        # The controller reads the profile and API credentials off `settings`
+        # at start time, so a settings edit takes effect without a restart.
+        self.database.settings = self.settings
+        self.database.start(DatabaseRequest(kind=kind, source=source, payload=payload))
+
+    def _on_db_cancel(self) -> None:
+        if not self.database.running:
+            return
+        kind = self.database.current_kind
+        self.database.cancel()
+        if kind in self.database.WRITE_KINDS:
+            self.database_pane.message(
+                f"Cancelled the {kind} request. Anything already written to "
+                f"the destination is still there.", 'warn')
+        else:
+            self.database_pane.message(f"Cancelled the {kind} request.", 'warn')
+
+    def _on_db_query(self, source: str, filters: dict) -> None:
+        self._start_db('list', source, {'filters': filters})
+
+    def _on_db_refresh(self, source: str, filters: dict) -> None:
+        self._start_db('list', source, {'filters': filters})
+
+    def _on_db_detail(self, source: str, payload: dict) -> None:
+        self._start_db('detail', source, payload)
+
+    def _on_db_check(self, source: str) -> None:
+        self._start_db('check', source, {})
+
+    def _on_db_started(self, kind: str) -> None:
+        self.database_pane.set_busy(True)
+        self.statusBar().showMessage(f"Database: {kind}…")
+
+    def _on_db_cancelled(self, kind: str) -> None:
+        del kind
+        self.database_pane.set_busy(False)
+
+    def _on_db_failed(self, kind: str, message: str) -> None:
+        self.database_pane.set_busy(False)
+        self.database_pane.message(f"{kind}: {message}", 'error')
+
+    def _on_db_finished(self, kind: str, result: object) -> None:
+        self.database_pane.set_busy(False)
+        if not isinstance(result, dict):
+            return
+        if kind == 'list':
+            self.database_pane.set_records(result.get('records') or [])
+            self.database_pane.set_facets(result.get('facets') or {})
+            self.database_pane.set_set_sizes(result.get('set_sizes') or {})
+            returned = result.get('returned', 0)
+            total = result.get('total_count')
+            elapsed = result.get('elapsed_s', 0)
+            limit = result.get('limit')
+            if total is None and limit:
+                # The central client has no true total once its own `limit`
+                # cut the rows short (see `_list` in db_worker.py) -- "N of
+                # None results" would read like a broken query rather than a
+                # truncated one.
+                lines = [f"{returned} results (limit {limit}) in {elapsed} s"]
+            else:
+                lines = [f"{returned} of {total} results in {elapsed} s"]
+            warnings = result.get('warnings') or []
+            lines += [f"note: {w}" for w in warnings]
+            self.database_pane.message('\n'.join(lines),
+                                       'warn' if warnings else 'info')
+        elif kind == 'detail':
+            self.database_pane.show_detail(result)
 
     # -------------------------------------------------------------- helpers
 
@@ -681,6 +776,7 @@ class MainWindow(QMainWindow):
         config_dirty = self.document.dirty
         settings_dirty = self.settings_document.dirty
         if not (config_dirty or settings_dirty):
+            self.database.cancel()
             event.accept()
             return
 
@@ -701,6 +797,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if choice == QMessageBox.Discard:
+            self.database.cancel()
             event.accept()
             return
 
@@ -715,6 +812,7 @@ class MainWindow(QMainWindow):
         if self.document.dirty or self.settings_document.dirty:
             event.ignore()
             return
+        self.database.cancel()
         event.accept()
 
     def _on_family_changed(self) -> None:
