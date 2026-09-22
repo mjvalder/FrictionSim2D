@@ -641,15 +641,27 @@ def expected_columns(sim_type: str, tier: str) -> list:
     return [ob.name for ob in channels_for(sim_type, tier)]
 
 
-def rename_map(sim_type: str, tier: str) -> dict:
-    """Native column name -> channel name, for one tier.
+def rename_map(sim_type: str, tier: str, n_layers: int = 2) -> dict:
+    """Native column name -> channel name, for one tier and layer count.
 
     The raw file's header repeats the window file's native names (v_fx_spr...),
     so those map to raw_lfx... in the raw map only. The parser picks the tier
     from the filename prefix: friction_/fc_ave_, raw_, peratom_.
+
+    REGISTRY carries only the L1/L2 per-layer entries (they exist for the
+    golden tests); :func:`layer_channels` is the generator builders already
+    use to EMIT the real layer count, and it is consulted here so the parser
+    can name back exactly what was emitted. Without it a 5-layer run's L3..L5
+    columns reached the export under their native ``v_comz_L3`` names,
+    invisible to every consumer that keys on channel names.
     """
     m = {}
     for ob in REGISTRY.values():
+        if sim_type not in ob.sim_types:
+            continue
+        if ob.tier == tier and ob.rename_to:
+            m[ob.rename_to] = ob.name
+    for ob in layer_channels(max(int(n_layers), 0)):
         if sim_type not in ob.sim_types:
             continue
         if ob.tier == tier and ob.rename_to:

@@ -294,3 +294,36 @@ def test_validate_registry_rejects_group_group_at_window_tier(monkeypatch):
     monkeypatch.setattr(obs, 'REGISTRY', reg)
     with pytest.raises(ValueError, match='group/group'):
         obs.validate_registry()
+
+
+def test_rename_map_covers_layers_beyond_the_registry_pair():
+    """REGISTRY holds com{x,y,z}_L1/L2 only, so a 5-layer run's L3..L5 columns
+    reached the JSON under their native v_comz_L3 names. layer_channels(n) has
+    always known them; rename_map just never asked."""
+    five = rename_map('sheetonsheet', 'window', 5)
+
+    assert five['v_comz_L5'] == 'comz_L5'
+    assert five['v_comx_L3'] == 'comx_L3'
+    assert 'v_comz_L6' not in five
+
+
+def test_rename_map_default_is_the_bilayer_map():
+    assert rename_map('afm', 'window') == rename_map('afm', 'window', 2)
+    assert rename_map('afm', 'window')['v_fz_tip'] == 'nf'
+
+
+def test_rename_map_layer_expansion_respects_the_tier():
+    """pe_sum_L{n}/sigma_*_L{n} are peratom-tier; they must not leak into the
+    window map just because layer_channels emits them."""
+    window = rename_map('sheetonsheet', 'window', 4)
+    peratom = rename_map('sheetonsheet', 'peratom', 4)
+
+    assert 'v_pe_sum_L4' not in window
+    assert peratom['v_pe_sum_L4'] == 'pe_sum_L4'
+    assert peratom['v_sigma_xx_2d_L4'] == 'sigma_xx_2d_L4'
+
+
+def test_rename_map_layer_expansion_respects_the_sim_type():
+    """layer_channels' com{x,y,z} entries declare afm/sheetonsheet/indent/
+    hetero/flake; pes_tip is not among them and must get no layer columns."""
+    assert 'v_comz_L3' not in rename_map('pes_tip', 'window', 3)
