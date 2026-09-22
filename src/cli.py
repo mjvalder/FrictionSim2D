@@ -738,8 +738,9 @@ def aiida_import(simulation_folder: Path, label: Optional[str],
 
     SIMULATION_FOLDER is the ``simulation_XXXXXXXX`` directory produced by one
     ``FrictionSim2D run``. Idempotent: re-importing adds only new or changed
-    load points. Exits 1 if any run failed, was left empty, or could not be
-    parsed.
+    load points. Exits 1 if any run failed; a real (non-dry-run) import also
+    exits 1 if any run was left empty or could not be parsed -- a dry-run
+    preview of a fresh, pre-HPC tree is legitimately all-empty.
 
     Example:
         FrictionSim2D aiida import ./simulation_20260421_173546 -l 260421-afm
@@ -756,7 +757,10 @@ def aiida_import(simulation_folder: Path, label: Optional[str],
         _raise_abort(f"❌ Import failed: {exc}", exc)
 
     click.echo(report.render())
-    if not report.ok() or report.empty_runs or report.unparseable:
+    failed = not report.ok()
+    if not dry_run:
+        failed = failed or bool(report.empty_runs) or bool(report.unparseable)
+    if failed:
         raise SystemExit(1)
 
 

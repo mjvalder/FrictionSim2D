@@ -78,6 +78,23 @@ def test_import_exits_non_zero_on_unparseable_runs(tmp_path, monkeypatch):
     assert result.exit_code == 1
 
 
+def test_import_dry_run_ignores_empty_runs_and_unparseable(tmp_path, monkeypatch):
+    """R8 fix round 1: --dry-run's empty_runs/unparseable must not fail it.
+
+    A dry-run preview of a fresh, pre-HPC tree is legitimately all-empty; only
+    a real import treats empty/unparseable runs as failures.
+    """
+    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr(
+        'src.aiida.ingest.ingest_root',
+        lambda *a, **k: _Report(empty_runs=['h_MoS2/L1'],
+                                unparseable=['h_MoS2/broken']))
+
+    result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path), '--dry-run'])
+
+    assert result.exit_code == 0, result.output
+
+
 def test_import_reports_a_set_root_mismatch_cleanly(tmp_path, monkeypatch):
     from src.aiida.ingest import SetRootMismatch
 
@@ -143,6 +160,22 @@ def test_rebuild_calls_rebuild_set(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert seen == {'label': '260910-afm', 'dest': tmp_path, 'hpc': True}
+
+
+def test_rebuild_reports_an_unknown_label_cleanly(tmp_path, monkeypatch):
+    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+
+    def _raise(*_a, **_k):
+        raise LookupError("no simulation set for label or UUID 'nope'")
+
+    monkeypatch.setattr('src.aiida.export.rebuild_set', _raise)
+
+    result = CliRunner().invoke(cli, [
+        'aiida', 'rebuild', 'nope', '-o', str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert result.exc_info[0] is not LookupError
+    assert 'nope' in result.output
 
 
 def test_dump_is_gone():
