@@ -1,0 +1,345 @@
+"""The plot-document schema.
+
+`postprocess plot` used to hand raw dicts straight to the mixins, so a typo
+in a key was a plot that silently ignored it. This is the same vocabulary,
+declared: one model per `plot_type`, `extra='forbid'`, and every field
+optional with `None` so a document says exactly what it sets and nothing more.
+
+**Defaults document, they do not decide.** `postprocess plot` passes
+`spec.model_dump(exclude_unset=True)`, so the mixins' own `.get(key, default)`
+defaults stay authoritative and a field's default here is documentation. Do
+not "fix" that by dumping defaults -- it would change every plot silently.
+
+Also the GUI's form source: `src/gui/schema/introspect.describe_section`
+reads these models, so a field added here appears in the Plots tab with no
+GUI change at all.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Dict, List, Literal, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing_extensions import Annotated
+
+__all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
+           'SummaryPlot', 'TimeseriesPlot', 'StickSlipPlot',
+           'ScatterComparisonPlot', 'RankFrictionPlot', 'CorrelationPlot',
+           'CofHistogramPlot', 'AnyPlot', 'DatasetsHeader', 'PlotDocument',
+           'load_plot_document', 'schema_markdown']
+
+#: Exactly the keys `Plotter.generate_plot`'s dispatch table accepts.
+#: 'stick_slip_analysis', not 'stick_slip': a model under the shorter name
+#: would validate documents the Plotter then logs as an unknown plot type.
+PLOT_TYPES = ('summary', 'timeseries', 'stick_slip_analysis',
+              'scatter_comparison', 'rank_friction', 'correlation',
+              'cof_histogram')
+
+_FORBID = ConfigDict(extra='forbid')
+
+
+class ExternalSeries(BaseModel):
+    """One literature/comparison curve overlaid on a summary or histogram."""
+    model_config = _FORBID
+
+    file: Optional[str] = Field(
+        None, description='JSON file, relative to the document')
+    path: Optional[List[str]] = Field(
+        None, description='Key path into that JSON')
+    x_key: Optional[str] = None
+    y_key: Optional[str] = None
+    label: Optional[str] = None
+    plot_style: Optional[str] = Field(None, description="'line' | 'scatter'")
+    line_style: Optional[str] = None
+    marker_style: Optional[str] = None
+    marker_face: Optional[str] = Field(None, description="'filled' | 'open'")
+    x_transform: Optional[str] = Field(
+        None, description='lambda source, evaluated')
+    y_transform: Optional[str] = None
+
+
+class SourceSpec(BaseModel):
+    """One axis of a scatter comparison: where its numbers come from."""
+    model_config = _FORBID
+
+    dataset: Optional[str] = None
+    metric: Optional[str] = None
+    file: Optional[str] = None
+    filter_size: Optional[str] = None
+    angle: Optional[float] = None
+    force: Optional[float] = None
+    force_range: Optional[List[float]] = None
+    error_column: Optional[str] = None
+    error_metric: Optional[str] = None
+    material_column: Optional[str] = None
+    value_column: Optional[str] = None
+
+
+class PlotBase(BaseModel):
+    """What every plot type accepts: identity, axes, legend and filters."""
+    model_config = _FORBID
+
+    plot_type: str
+    filename: Optional[str] = None
+    title: Optional[str] = None
+    datasets: Optional[List[str]] = None
+    use_dataset_colors: Optional[bool] = None
+    x_axis: Optional[str] = None
+    y_axis: Optional[str] = None
+    x_label: Optional[str] = Field(None, description='Overrides label_for()')
+    y_label: Optional[str] = Field(None, description='Overrides label_for()')
+    x_limits: Optional[List[Optional[float]]] = None
+    y_limits: Optional[List[Optional[float]]] = None
+    legend_location: Optional[str] = None
+    legend_outside: bool = False
+    figure_size: Optional[List[float]] = None
+    filter_size: Optional[str] = None
+    filter_layer: Optional[int] = None
+    filter_speed: Optional[float] = None
+    filter_tip_radius: Optional[float] = None
+    filter_materials: Optional[List[str]] = None
+    filter_forces: Optional[List[float]] = None
+    filter_pressures: Optional[List[float]] = None
+    #: The older spelling of `filter_pressures`. BOTH are read --
+    #: `plot_timeseries.py` and `plot_stick_slip.py` are each
+    #: `plot_config.get('pressures') or plot_config.get('filter_pressures')` --
+    #: and `documentation/publication/plots_publication.json` sets `pressures`
+    #: on three of its plots, so a schema without it refuses the project's own
+    #: shipped document.
+    pressures: Optional[List[float]] = None
+    angle: Optional[float] = None
+    force: Optional[float] = None
+    filter_force_range: Optional[List[float]] = None
+    filter_nf_range: Optional[List[float]] = None
+    lf_source: Optional[Literal['as_was', 'sx_sy', 'fx_fy']] = None
+    family: Optional[str] = Field(
+        None, description='Keep only runs of this family (new in v2)')
+    tier: Literal['window', 'raw', 'peratom'] = Field(
+        'window', description='Which sampling tier to plot (new in v2)')
+    use_scientific_notation: Optional[bool] = None
+    average_first_n_timesteps: Optional[int] = None
+    average_timestep_range: Optional[List[int]] = None
+
+
+class SummaryPlot(PlotBase):
+    """Aggregate x-vs-y across runs, with fits and external series."""
+    plot_type: Literal['summary'] = 'summary'
+
+    add_linear_fit: Optional[bool] = None
+    append_slope_to_legend: Optional[bool] = None
+    clip_fit_to_data: Optional[bool] = None
+    extend_fit_to_origin: Optional[bool] = None
+    external_series: Optional[List[ExternalSeries]] = None
+    external_outline_width: Optional[float] = None
+    fit_constraint: Optional[Literal['first_point', 'origin', 'none']] = None
+    fit_only: Optional[bool] = None
+    fit_x_range: Optional[List[float]] = None
+    label_prefix: Optional[str] = None
+    label_suffix: Optional[str] = None
+    legend_figure_size: Optional[List[float]] = None
+    legend_filename: Optional[str] = None
+    legend_ncol: Optional[int] = None
+    legend_separate_png: Optional[bool] = None
+    marker_by_potential_type: Optional[bool] = None
+    plot_by: Optional[str] = None
+    plot_style: Optional[str] = None
+    potential_markers: Optional[Dict[str, str]] = None
+    shift_external_series_to_origin: Optional[bool] = None
+    shift_series_to_origin: Optional[bool] = None
+    show_dataset_in_legend: Optional[bool] = None
+    show_error_bands: Optional[bool] = None
+    slope_decimals: Optional[int] = None
+    slope_fit_constraint: Optional[
+        Literal['first_point', 'origin', 'none']] = None
+    slope_label: Optional[str] = None
+    use_visible_xrange_for_fit: Optional[bool] = None
+
+
+class TimeseriesPlot(PlotBase):
+    """One line per run against the time axis."""
+    plot_type: Literal['timeseries'] = 'timeseries'
+
+    plot_all_forces: Optional[bool] = None
+    primary_line_alpha: Optional[float] = None
+    primary_line_style: Optional[str] = None
+    primary_line_width: Optional[float] = None
+    run_label_mode: Optional[str] = None
+    secondary_dash_pattern: Optional[List[float]] = None
+    secondary_line_alpha: Optional[float] = None
+    secondary_line_style: Optional[str] = None
+    secondary_line_width: Optional[float] = None
+    secondary_y_axis: Optional[str] = None
+    secondary_y_label: Optional[str] = None
+    secondary_y_scale: Optional[float] = None
+    shift_time_to_zero: Optional[bool] = None
+    time_scale: Optional[float] = None
+    time_unit: Optional[str] = None
+    use_run_labels: Optional[bool] = None
+
+
+class StickSlipPlot(PlotBase):
+    """One run's sawtooth, its extrema and its power spectrum."""
+    plot_type: Literal['stick_slip_analysis'] = 'stick_slip_analysis'
+
+    apply_hann_window: Optional[bool] = None
+    bottom_ylabel: Optional[str] = None
+    displacement_axis: Optional[str] = None
+    displacement_scale: Optional[float] = None
+    displacement_unit: Optional[str] = None
+    display_periods: Optional[float] = None
+    display_time_start: Optional[float] = None
+    #: `[start, end]`, not a duration: `plot_stick_slip` reads it as
+    #: `len(...) == 2` and takes both ends, and the shipped publication
+    #: document sets `[22, 260]` on two of its plots.
+    display_time_window: Optional[List[float]] = None
+    extrema_min_distance_points: Optional[int] = None
+    extrema_min_prominence: Optional[float] = None
+    extrema_smooth_window: Optional[int] = None
+    #: Declared, never read: `plot_stick_slip` gates on `extrema_min_prominence`
+    #: being set. Accepted because `documentation/publication/
+    #: plots_publication.json` sets it, and a schema that rejects the project's
+    #: own published document is one nobody adopts. Documented as inert here
+    #: rather than deleted from the document, which would rewrite a published
+    #: artefact to suit a schema.
+    extrema_use_prominence: Optional[bool] = None
+    fft_peak_min_distance_points: Optional[int] = None
+    fft_peak_min_prominence: Optional[float] = None
+    fft_peak_rank: Optional[int] = None
+    fft_peaks_to_report: Optional[int] = None
+    freq_max: Optional[float] = None
+    freq_min: Optional[float] = None
+    freq_plot_max: Optional[float] = None
+    freq_plot_min: Optional[float] = None
+    freq_xlabel: Optional[str] = None
+    max_intervals_to_draw: Optional[int] = None
+    results_filename: Optional[str] = None
+    run_index: Optional[int] = None
+    secondary_y_axis: Optional[str] = None
+    secondary_y_scale: Optional[float] = None
+    show_peak_trough_intervals: Optional[bool] = None
+    single_panel_figure_size: Optional[List[float]] = None
+    smooth_for_extrema: Optional[bool] = None
+    spectrum_filename: Optional[str] = None
+    time_scale: Optional[float] = None
+    time_unit: Optional[str] = None
+    top_ylabel: Optional[str] = None
+
+
+class ScatterComparisonPlot(PlotBase):
+    """One metric against another, one point per material."""
+    plot_type: Literal['scatter_comparison'] = 'scatter_comparison'
+
+    add_linear_fit: Optional[bool] = None
+    color_by_material_class: Optional[bool] = None
+    iterative_outlier_removal: Optional[bool] = None
+    point_label_fontsize: Optional[float] = None
+    show_error_bars: Optional[bool] = None
+    show_identity_line: Optional[bool] = None
+    show_point_labels: Optional[bool] = None
+    show_r_squared: Optional[bool] = None
+    x_source: Optional[SourceSpec] = None
+    y_source: Optional[SourceSpec] = None
+
+
+class RankFrictionPlot(PlotBase):
+    """Rank materials by a metric and write the ranking JSON."""
+    plot_type: Literal['rank_friction'] = 'rank_friction'
+
+    aggregate_over_force_range: Optional[bool] = None
+    fit_x_range: Optional[List[float]] = None
+    force_range: Optional[List[float]] = None
+    rank_by: Optional[str] = None
+    rank_order: Optional[Literal['ascending', 'descending']] = None
+
+
+class CorrelationPlot(PlotBase):
+    """Rank-correlation heatmaps over the ranking JSONs."""
+    plot_type: Literal['correlation'] = 'correlation'
+
+    correlate_by: Optional[Literal['size', 'force', 'pairwise']] = None
+    correlation_force: Optional[float] = None
+    filename_prefix: Optional[str] = None
+    sizes_to_compare: Optional[List[str]] = None
+
+
+class CofHistogramPlot(PlotBase):
+    """Bar chart of the LF-vs-NF regression slope per dataset (`cof_slope`)."""
+    plot_type: Literal['cof_histogram'] = 'cof_histogram'
+
+    annotate_bars: Optional[bool] = None
+    bar_width: Optional[float] = None
+    external_series: Optional[List[ExternalSeries]] = None
+    fit_x_range: Optional[List[float]] = None
+    slope_decimals: Optional[int] = None
+    slope_fit_constraint: Optional[
+        Literal['first_point', 'origin', 'none']] = None
+    x_label_rotation: Optional[int] = None
+
+
+AnyPlot = Annotated[
+    Union[SummaryPlot, TimeseriesPlot, StickSlipPlot, ScatterComparisonPlot,
+          RankFrictionPlot, CorrelationPlot, CofHistogramPlot],
+    Field(discriminator='plot_type')]
+
+
+class DatasetsHeader(BaseModel):
+    """The dataset half of a plot document, shared with the GUI's picker."""
+    model_config = _FORBID
+
+    data_dirs: List[str] = Field(
+        default_factory=list,
+        description="Directories holding outputs/, or db:// URIs")
+    labels: List[str] = Field(default_factory=list,
+                              description='One per data_dir')
+    dataset_display_labels: Dict[str, str] = Field(default_factory=dict)
+    series_color_map: Dict[str, Optional[str]] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    def _labels_match_dirs(self):
+        if len(self.labels) != len(self.data_dirs):
+            raise ValueError(
+                f"labels ({len(self.labels)}) must have one entry per "
+                f"data_dirs ({len(self.data_dirs)})")
+        return self
+
+
+class PlotDocument(DatasetsHeader):
+    """A whole `postprocess plot` document."""
+    plots: List[AnyPlot] = Field(default_factory=list)
+
+
+def load_plot_document(path: Path) -> PlotDocument:
+    """Read and validate one plot document."""
+    return PlotDocument.model_validate(
+        json.loads(Path(path).read_text(encoding='utf-8')))
+
+
+def _model_rows(model) -> List[str]:
+    rows = []
+    for name, info in model.model_fields.items():
+        annotation = str(info.annotation).replace('typing.', '')
+        doc = (info.description or '').replace('|', r'\|')
+        rows.append(f'| `{name}` | `{annotation}` | {doc} |')
+    return rows
+
+
+def schema_markdown() -> str:
+    """The plot schema as a Markdown table per type, for the manual.
+
+    Generated rather than hand-written so `documentation/postprocessing.md`
+    cannot drift from the models the CLI actually validates against.
+    """
+    models = {'summary': SummaryPlot, 'timeseries': TimeseriesPlot,
+              'stick_slip_analysis': StickSlipPlot,
+              'scatter_comparison': ScatterComparisonPlot,
+              'rank_friction': RankFrictionPlot,
+              'correlation': CorrelationPlot,
+              'cof_histogram': CofHistogramPlot}
+    out = ['## Document', '', '| field | type | meaning |', '|---|---|---|']
+    out += _model_rows(PlotDocument)
+    for plot_type, model in models.items():
+        out += ['', f'## `{plot_type}`', '',
+                '| field | type | meaning |', '|---|---|---|']
+        out += _model_rows(model)
+    return '\n'.join(out) + '\n'
