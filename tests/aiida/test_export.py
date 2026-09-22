@@ -1,10 +1,13 @@
 """export-results is the inverse of ingest (spec §4.2)."""
+import re
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip('aiida')
 pytestmark = pytest.mark.aiida
 
-from src.aiida.export import export_results  # noqa: E402
+from src.aiida.export import export_results, rebuild_set  # noqa: E402
 from src.aiida.ingest import ingest_root  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import make_run  # noqa: E402
@@ -14,6 +17,19 @@ from tests.helpers.synthetic_results import make_run  # noqa: E402
 #: `L2` directory (shared by every layer), not inside it. `provenance.json`
 #: itself stays inside `L2`, alongside `lammps/` and `results/` (R18).
 REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
+
+#: `langevin ... $(100.0*dt) <seed> zero yes tally yes` and
+#: `velocity ... create <temp> <seed>` -- the two RNG seeds
+#: `SimulationBase._run_seed` draws fresh with `random.randint` on every
+#: build. Used only by the real (non-mocked) round-trip test below to mask
+#: the one thing two builds of the same config are never expected to agree on.
+_LANGEVIN_SEED_RE = re.compile(r'(langevin\s+[\d.]+\s+[\d.]+\s+\$\([\d.]+\*dt\)\s+)\d+')
+_VELOCITY_SEED_RE = re.compile(r'(velocity\s+\S+\s+create\s+[\d.]+\s+)\d+')
+
+
+def _mask_rng_seeds(text: str) -> str:
+    text = _LANGEVIN_SEED_RE.sub(r'\1SEED', text)
+    return _VELOCITY_SEED_RE.sub(r'\1SEED', text)
 
 
 def test_round_trip_rebuilds_the_tree(aiida_profile_clean, tmp_path):
@@ -222,3 +238,189 @@ def test_sheet_like_provenance_stays_at_the_run_level(aiida_profile_clean, tmp_p
 
     out_run = tmp_path / 'out' / rel
     assert (out_run / 'provenance' / 'config.json').is_file()
+
+
+class _FakeResult:
+    """Stand-in for `GenerationResult` -- only the fields `rebuild_set` reads."""
+
+    def __init__(self, created=None, simulation_root=None):
+        self.created = created if created is not None else []
+        self.simulation_root = simulation_root
+        self.failures = []
+
+
+def test_rebuild_calls_generate_package_once_per_run(aiida_profile_clean, tmp_path,
+                                                     monkeypatch):
+    """One call per DISTINCT stored config, not one per run and not one per
+    model: a second `afm` run with a different material must still get its
+    own call.
+
+    `generate_package` is patched at `src.aiida.export.generate_package` (an
+    allowed `src.aiida.` boundary), not `src.run.artifacts.generate_package`
+    (refused by `tests/repo/test_mock_targets.py`'s ratchet) -- `rebuild_set`
+    imports the name at module level specifically so this is the patch point
+    that actually intercepts the call.
+    """
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm')
+    # a SECOND afm run: rebuild must call the builder for it too, not once per model
+    make_run(root, 'afm/h-WS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2', 'afm')
+    make_run(root, 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1', 'indent')
+    ingest_root(root, label='rb')
+    calls = []
+
+    def _fake(config_file, model, **kwargs):
+        calls.append((Path(config_file).name, model, kwargs))
+        return _FakeResult(created=[tmp_path / 'built'],
+                          simulation_root=tmp_path / 'built_root')
+
+    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+
+    created, out_root = rebuild_set('rb', tmp_path / 'rebuilt')
+
+    assert len(calls) == 3
+    assert sorted(m for _c, m, _k in calls) == ['afm', 'afm', 'indent']
+    assert all(name == 'config.json' for name, _m, _k in calls)
+    assert all(k['simulation_root_name'] == '.' for _c, _m, k in calls)
+    assert all(k['use_aiida'] is False for _c, _m, k in calls)
+    assert all(k['allow_generate_amorphous'] is False for _c, _m, k in calls)
+    assert out_root == tmp_path / 'rebuilt'
+    assert len(created) == 3
+
+
+def test_rebuild_uses_the_stored_settings_not_the_defaults(aiida_profile_clean,
+                                                           tmp_path, monkeypatch):
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm')
+    ingest_root(root, label='rb2')
+    seen = {}
+
+    def _fake(config_file, model, **kwargs):
+        # Checked from inside the call, not after `rebuild_set` returns: the
+        # staging directory is a `tempfile.TemporaryDirectory()` (R17) and is
+        # gone by the time the call comes back, so this is the only point at
+        # which the exported settings.yaml can still be read.
+        settings_file = kwargs['settings_file']
+        seen['name'] = Path(settings_file).name
+        seen['existed'] = Path(settings_file).is_file()
+        return _FakeResult(simulation_root=tmp_path / 'r')
+
+    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+
+    rebuild_set('rb2', tmp_path / 'rebuilt')
+
+    assert seen['name'] == 'settings.yaml'
+    assert seen['existed'] is True
+
+
+def test_rebuild_refuses_an_unknown_label(aiida_profile_clean, tmp_path):
+    with pytest.raises(LookupError, match='no simulation set'):
+        rebuild_set('nope', tmp_path / 'rebuilt')
+
+
+def test_rebuild_dedupes_shared_afm_config_across_layers(aiida_profile_clean,
+                                                         tmp_path, monkeypatch):
+    """`L1` and `L2` of one AFM layer sweep share ONE stored `config.json`
+    (`run_simulations` already flattened the sweep into one member that built
+    every layer) -- rebuilding must call `generate_package` once for the pair,
+    not once per `L{n}` run node, or it would redo the whole layer sweep a
+    second time.
+    """
+    root = tmp_path / 'simulation_multi'
+    base = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300'
+    make_run(root, f'{base}/L1', 'afm', loads=(30.0,))
+    make_run(root, f'{base}/L2', 'afm', loads=(30.0,))
+    ingest_root(root, label='rb-dedup')
+    calls = []
+
+    def _fake(config_file, model, **kwargs):
+        calls.append(Path(config_file).resolve())
+        return _FakeResult(created=[tmp_path / 'built'])
+
+    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+
+    created, _out_root = rebuild_set('rb-dedup', tmp_path / 'rebuilt')
+
+    assert len(calls) == 1
+    assert len(created) == 1
+
+
+def test_rebuild_stages_inputs_outside_dest(aiida_profile_clean, tmp_path,
+                                            monkeypatch):
+    """The staging export must live outside `dest`, in a real temp directory
+    that is gone once `rebuild_set` returns -- never `dest/something`, which
+    `JobManifest.from_simulation_directory`'s `rglob('lammps')` would also
+    find once `generate_hpc=True` builds real `lammps/` directories into
+    `dest`, duplicating every job (R17).
+    """
+    root = tmp_path / 'simulation_x'
+    make_run(root, REL, 'afm')
+    ingest_root(root, label='rb-stage')
+    seen = {}
+
+    def _fake(config_file, model, **kwargs):
+        seen['config_dir'] = Path(config_file).resolve().parent
+        seen['settings_dir'] = Path(kwargs['settings_file']).resolve().parent
+        return _FakeResult()
+
+    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+
+    dest = tmp_path / 'rebuilt'
+    rebuild_set('rb-stage', dest)
+
+    dest = dest.resolve()
+    assert dest not in seen['config_dir'].parents and seen['config_dir'] != dest
+    assert dest not in seen['settings_dir'].parents and seen['settings_dir'] != dest
+    # the TemporaryDirectory is cleaned up on exit -- nothing was left behind
+    assert not seen['config_dir'].exists()
+    assert not seen['settings_dir'].exists()
+
+
+@pytest.mark.integration
+def test_rebuild_round_trips_a_real_build_through_the_router(aiida_profile_clean,
+                                                              tmp_path):
+    """The one non-mocked check in this file: a stored `config.json` --
+    `model_dump()` with `settings` embedded, as `run_simulations` writes it --
+    actually round-trips through the real `generate_package` router, giving
+    back the same run layout and the same LAMMPS inputs. Every other test
+    here mocks `generate_package`, which only proves the plumbing calls it
+    correctly, not that what it stores can be read back by the real builder.
+
+    Compared after masking the `langevin`/`velocity create` RNG seeds: those
+    are drawn fresh with `random.randint` on every build by design
+    (`src.builders.simulation_base.SimulationBase._run_seed` -- "a fresh seed
+    per run is mandatory", never reused across builds of the same config), so
+    a second build of the identical config is expected to draw different
+    seeds. Everything else in the script -- box, materials, groups, fixes,
+    potentials, paths -- must still match exactly.
+    """
+    from tests.helpers.examples import build  # pylint: disable=import-outside-toplevel
+
+    built_root = tmp_path / 'built'
+    result = build('afm_config.ini', 'afm', built_root)
+    if not result.created:
+        pytest.skip("examples/afm_config.ini did not build in this environment "
+                   f"(missing material/potential fixtures?): "
+                   f"{[f.render() for f in result.failures]}")
+
+    ingest_root(result.simulation_root, label='rb-real')
+
+    rebuilt_dest = tmp_path / 'rebuilt'
+    created, out_root = rebuild_set('rb-real', rebuilt_dest)
+
+    assert created
+    assert out_root == rebuilt_dest
+
+    original = {loc.tokens.rel_path: loc for loc in discover_runs(result.simulation_root)}
+    rebuilt = {loc.tokens.rel_path: loc for loc in discover_runs(rebuilt_dest)}
+    assert original.keys() == rebuilt.keys()
+    assert original  # discover_runs found at least one run in each tree
+
+    for rel_path, orig_loc in original.items():
+        rebuilt_loc = rebuilt[rel_path]
+        orig_scripts = {p.name: _mask_rng_seeds(p.read_text(encoding='utf-8'))
+                        for p in orig_loc.lammps_dir.glob('*.in')}
+        rebuilt_scripts = {p.name: _mask_rng_seeds(p.read_text(encoding='utf-8'))
+                           for p in rebuilt_loc.lammps_dir.glob('*.in')}
+        assert orig_scripts, f"{orig_loc.lammps_dir} had no *.in scripts to compare"
+        assert orig_scripts == rebuilt_scripts, f"{rel_path}: rebuilt *.in differs"

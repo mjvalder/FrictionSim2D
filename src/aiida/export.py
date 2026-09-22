@@ -5,20 +5,34 @@ tree, so `postprocess read`, the GUI download and `rebuild` all work on the
 same shape the runner produces. It replaces `integration.dump_results_to_json`'s
 second, nested-dict writer.
 
-Only `export_results` (and the `resolve_set` lookup it shares with later
-tasks) is implemented here -- `export_provenance_bundle`, `rebuild_set`,
-`export_archive` and `import_archive` belong to later tasks in this plan and
-are added to this module then, not pre-declared as empty names now.
+`rebuild_set` goes one step further: it hands each run's stored `config.json`
+to `run.artifacts.generate_package` -- the same router `FrictionSim2D run`
+uses -- so a rebuild reaches the real builder instead of a drifted copy of
+`output_dir_for`. `generate_package` is imported at module level (not deferred
+into the function like the `aiida.orm` imports below) so tests can patch
+`src.aiida.export.generate_package` directly: it never touches `aiida-core`,
+so importing it costs nothing on a machine without AiiDA and does not weaken
+the "import this module without aiida-core installed" contract the deferred
+imports below exist for.
+
+`export_provenance_bundle` and `export_archive`/`import_archive` belong to
+later tasks in this plan and are added to this module then, not pre-declared
+as empty names now.
 """
 from __future__ import annotations
 
+import json
 import logging
+import tempfile
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
+
+from ..run.artifacts import generate_package
+from ..run.tree import provenance_dir_for
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['export_results', 'resolve_set']
+__all__ = ['export_results', 'resolve_set', 'rebuild_set']
 
 
 def _load_profile(profile: Optional[str]) -> None:
@@ -205,3 +219,113 @@ def export_results(label: str, dest: Path, *,
             _warn_oversize(result, run_node.rel_path)
     logger.info("Exported %d files for set %r to %s", len(written), label, dest)
     return sorted(written)
+
+
+def _fix_sheet_alias(config_json: Path) -> None:
+    """Rename a stored config's `sheet` key back to the `2D` alias it needs.
+
+    `run_simulations` stores `config_obj.model_dump_json()` with no
+    `by_alias=True`, so the primary `[2D]` section round-trips under its
+    Pydantic FIELD name, `sheet` (`AFMSimulationConfig.sheet`/
+    `SheetOnSheetSimulationConfig.sheet`, both `Field(..., alias='2D')`) --
+    not the alias that `src.run.expand.expand_config_sweeps` and
+    `src.run.naming.primary_sheet`/`output_dir_for` actually look up, since
+    both run on the raw dict BEFORE any Pydantic model exists and know
+    nothing about Pydantic aliasing. `src.aiida.integration`'s
+    soon-to-be-deleted (Task 27) `output_dir_for` copy already carries this
+    exact fix for the exact same reason; mirrored here rather than
+    duplicated blindly, since it is the only other place that ever re-parses
+    a stored `config.json` back from its field-name form. `flake`/`Flake`
+    needs no equivalent fix: `naming.py`'s flake lookup already falls back
+    from the alias to the lowercase field name.
+
+    Rewrites the staged copy in place -- never the stored node or the
+    original tree.
+    """
+    data = json.loads(config_json.read_text(encoding='utf-8'))
+    if 'sheet' in data and '2D' not in data:
+        data['2D'] = data.pop('sheet')
+        config_json.write_text(json.dumps(data, indent=2), encoding='utf-8')
+
+
+def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
+                generate_hpc: bool = False) -> Tuple[List[Path], Path]:
+    """Regenerate a set's LAMMPS inputs from the store, through the real router.
+
+    Exports the set's stored `settings.yaml` and every run's stored
+    `provenance/config.json` into a staging directory OUTSIDE `dest` -- a
+    `tempfile.TemporaryDirectory()`, never a subdirectory of `dest` itself.
+    A staging directory nested inside `dest` (e.g. `dest/.rebuild_inputs`)
+    would sit right next to the real `lammps/` directories `generate_package`
+    is about to write into `dest`, and `JobManifest.from_simulation_directory`
+    finds jobs with `rglob('lammps')` under `generate_hpc=True` -- it would
+    find the staged inputs' own `lammps/` copies too and duplicate every job.
+
+    Each DISTINCT stored `config.json` is then handed once to
+    `run.artifacts.generate_package` -- the SAME router `FrictionSim2D run`
+    uses, so every family (hetero, flake, freestanding, finite) reaches the
+    builder it actually needs. Nothing here duplicates `output_dir_for` and
+    nothing instantiates a builder directly. `use_aiida=False` and
+    `allow_generate_amorphous=False` are passed explicitly (a rebuild must not
+    re-register nodes, and must not spend a melt-quench regenerating a
+    substrate whose realization id is already recorded); `ensure_hpc_settings`
+    is left at `None`. `simulation_root_name='.'` makes `generate_package`
+    build straight into `dest` rather than a fresh timestamped root, which is
+    what keeps every run's `rel_path` identical to the original.
+
+    "Distinct" is by the resolved `provenance/config.json` PATH in the
+    staging export, not by the file's own bytes: an AFM-like run nests every
+    `L{n}` layer under one shared `provenance/`, one level above the run
+    directory (`run.tree.provenance_dir_for`) -- so `L1..Ln` of a single
+    layer sweep all resolve to the SAME stored file (one `config.json` was
+    already flattened into one member by `run_simulations`, and that one
+    member built every layer). Rebuilding `L1` already regenerates `L2`;
+    calling `generate_package` again for `L2` would redo that whole layer
+    sweep a second time. Two runs that merely happen to carry byte-identical
+    config content -- different materials or models with an equal payload --
+    are a coincidence, not a shared file, and are never deduplicated: only
+    file identity (the same stored path) collapses two run nodes into one
+    call.
+    """
+    _load_profile(profile)
+    set_node = resolve_set(label)
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    created: List[Path] = []
+    seen_configs: set = set()
+    with tempfile.TemporaryDirectory(prefix='frictionsim2d-rebuild-') as tmp_dir:
+        staging = Path(tmp_dir)
+        export_results(label, staging, profile=profile)
+        settings_file = staging / 'settings.yaml'
+        settings_file = settings_file if settings_file.is_file() else None
+
+        for run_node in _runs_of(set_node):
+            run_dir = staging / run_node.rel_path
+            config_json = provenance_dir_for(run_dir) / 'config.json'
+            if not config_json.is_file():
+                logger.warning("No config.json stored for %s -- skipping",
+                               run_node.rel_path)
+                continue
+
+            resolved = config_json.resolve()
+            if resolved in seen_configs:
+                continue
+            seen_configs.add(resolved)
+            _fix_sheet_alias(config_json)
+
+            result = generate_package(
+                config_json,
+                run_node.model,
+                output_root=dest,
+                settings_file=settings_file,
+                generate_hpc=generate_hpc,
+                use_aiida=False,
+                simulation_root_name='.',
+                allow_generate_amorphous=False,
+            )
+            for failure in result.failures:
+                logger.error("Rebuild failed: %s", failure.render())
+            created.extend(result.created)
+
+    return created, dest
