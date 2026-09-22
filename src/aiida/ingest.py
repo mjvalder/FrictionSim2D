@@ -316,19 +316,35 @@ class LoadPoint:
     content_sha256: str
 
 
-def _aux_files(locator) -> Tuple[Path, ...]:
-    """Logs and hold/final artefacts that ride along with every point of a run.
+#: What the RUN node stores (`FrictionSimulationData.add_run_files`), as
+#: run-relative globs: these retained files are never also a point's aux.
+_RUN_NODE_GLOBS = ('provenance.json', 'provenance/**/*', 'lammps/*.in',
+                   'lammps/system.in.settings')
 
-    Returned as absolute paths under the run root (not basenames), per R30:
-    Task 16 stores them via `path.relative_to(run_dir)`, which needs the full
-    path to compute.
+
+def _aux_files(locator, claimed=()) -> Tuple[Path, ...]:
+    """Every retained file of the run that neither the run node nor a load
+    point's tier/retract/grid file already stores.
+
+    Derived from `retention.retained_paths` -- the same rule the CalcJob's
+    `retrieve_list` is built from -- so the import path and the CalcJob path
+    store the same set of files: logs, `lammps/run_*.log`, `data/hold_*`,
+    `data/final_*`, `data/load_*`, `*.out`, and any `results/*` file no load
+    point claimed (e.g. `pes_scan_refine.csv`). `claimed` are the absolute
+    tier/retract/grid paths of every point of the run.
+
+    Returned as absolute paths under `locator.run_dir` (not basenames), per
+    R30: `create_results` stores them via `path.relative_to(run_dir)`.
     """
-    out = sorted(locator.run_dir.glob('log*.lammps'))
-    out += sorted(locator.lammps_dir.glob('run_*.log'))
-    if locator.data_dir.is_dir():
-        out += sorted(locator.data_dir.glob('hold_*.txt'))
-        out += sorted(locator.data_dir.glob('final_*.data'))
-    return tuple(out)
+    from .retention import retained_paths  # pylint: disable=import-outside-toplevel
+
+    run_dir = Path(locator.run_dir)
+    resolved_root = run_dir.resolve()
+    skip = {Path(p).resolve() for p in claimed}
+    for pattern in _RUN_NODE_GLOBS:
+        skip.update(p.resolve() for p in run_dir.glob(pattern))
+    return tuple(run_dir / path.relative_to(resolved_root)
+                 for path in retained_paths(run_dir) if path not in skip)
 
 
 def _match_point(name: str, model: str):
@@ -384,17 +400,16 @@ def load_points(locator) -> List[LoadPoint]:
     family = locator.tokens.family
     if not locator.results_dir.is_dir():
         return []
-    aux = _aux_files(locator)
 
     if family in _PES_FAMILIES:
         base = locator.results_dir / _PES_BASE_NAME
         if not base.is_file():
             return []
-        refine = locator.results_dir / _PES_REFINE_NAME
-        point_aux = aux + ((refine,) if refine.is_file() else ())
+        # `_PES_REFINE_NAME`, when present, is unclaimed and so rides in aux.
         return [LoadPoint(family=family, load_kind='none', load=0.0, angle=0.0,
                           speed=0.0, layers=locator.tokens.layers,
-                          tiers={'window': base}, aux=point_aux,
+                          tiers={'window': base},
+                          aux=_aux_files(locator, claimed=(base,)),
                           content_sha256=content_hash([base]))]
 
     model = locator.tokens.model
@@ -428,6 +443,8 @@ def load_points(locator) -> List[LoadPoint]:
                 if key[1] == load:
                     tiers['retract'] = path
 
+    claimed = [path for tiers in grouped.values() for path in tiers.values()]
+    aux = _aux_files(locator, claimed=claimed)
     points = []
     for (kind, load, angle, speed, layers), tiers in sorted(grouped.items()):
         ordered = {t: tiers[t] for t in POINT_KEYS if t in tiers}

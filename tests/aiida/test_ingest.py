@@ -830,3 +830,63 @@ def test_dry_run_reports_a_pending_provenance_update(aiida_profile_clean, tmp_pa
     run_node, _ = find_or_create_run(find_or_create_set(root, 'enrich-dry'),
                                      discover_runs(root)[0])
     assert run_node.provenance_update is None  # a dry run records nothing
+
+
+def _stored_run_relative(node, prefix=''):
+    return {prefix + (root / name).as_posix()
+            for root, _dirs, files in node.base.repository.walk() for name in files}
+
+
+@pytest.mark.parametrize('family, rel', [
+    ('afm', REL),
+    ('sheetonsheet', 'sheetonsheet/h-MoS2/100x_100y/K300'),
+    ('pes_sheet', 'pes_sheet/h-MoS2/100x_100y/K300'),
+])
+def test_every_retained_file_is_stored_somewhere(aiida_profile_clean, tmp_path,
+                                                 family, rel):
+    """I6: ingest's stored set derives from `retention.retained_paths`, so the
+    import path stores what the CalcJob path retrieves -- including
+    `data/load_*.data`, `*.out` and results files no load point claims."""
+    from aiida.orm import QueryBuilder
+
+    from src.aiida.data import FrictionResultsData
+    from src.aiida.retention import retained_paths
+
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, rel, family)
+    extras = {
+        'data/load_30.data': 'atoms\n', 'data/hold_30.txt': '1 2\n',
+        'data/final_30.data': 'atoms\n', 'lammps/run_slide.log': 'log\n',
+        'slide.in.out': 'stdout\n', 'log.lammps': 'LAMMPS (x)\n',
+        'results/notes_unrecognised.txt': 'hello\n',
+        'visuals/traj.lammpstrj': 'not retained\n',
+    }
+    if family == 'pes_sheet':
+        extras['results/pes_scan_refine.csv'] = '# family=pes_sheet\ndx,dy,energy_eV\n'
+    for name, text in extras.items():
+        (run_dir / name).parent.mkdir(parents=True, exist_ok=True)
+        (run_dir / name).write_text(text, encoding='utf-8')
+
+    report = ingest_root(root, label=f'retain-{family}')
+    assert report.ok(), report.render()
+
+    loc, = discover_runs(root)
+    run_node, _ = find_or_create_run(find_or_create_set(root, f'retain-{family}'), loc)
+    stored = _stored_run_relative(run_node)
+    qb = QueryBuilder()
+    qb.append(FrictionResultsData, filters={'attributes.run_uuid': str(run_node.uuid)})
+    results = qb.all(flat=True)
+    assert results
+    for node in results:
+        stored |= _stored_run_relative(node)
+
+    resolved = run_dir.resolve()
+    retained = {p.relative_to(resolved).as_posix() for p in retained_paths(run_dir)}
+    assert 'data/load_30.data' in retained
+    assert retained <= stored, sorted(retained - stored)
+    assert 'visuals/traj.lammpstrj' not in stored
+
+    # An unclaimed results file must not shadow the real tier on re-read.
+    for node in results:
+        assert node.frame('window') is not None
+

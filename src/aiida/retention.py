@@ -1,10 +1,14 @@
 """What a finished run keeps.
 
-One rule, two consumers: `ingest.py` walks a local run directory with
-`retained_paths`, and `LammpsFrictionCalcJob.prepare_for_submission` builds its
-`retrieve_list` from `retrieve_patterns`. They cannot drift, which is the whole
-point -- AiiDA content-addresses whatever lands in the repository, so this list
-IS the retention guarantee and nothing re-checksums it.
+One rule, two consumers: `ingest.py` derives what it stores from
+`retained_paths` -- the run node keeps its inputs and provenance, each load
+point its tier files, and every other retained file rides along as that
+point's aux (`ingest._aux_files`) -- and
+`LammpsFrictionCalcJob.prepare_for_submission` builds its `retrieve_list` from
+`retrieve_patterns`. So an imported run and a CalcJob-retrieved run store the
+same files. AiiDA content-addresses whatever lands in the repository, so this
+list IS the retention guarantee and nothing re-checksums it. Files over
+`aiida.max_stored_file_mb` are recorded by sha256 instead of stored.
 
 Trajectories (`visuals/`, `*.lammpstrj`) and build scratch (`build/`) are
 deliberately excluded: spec U3 keeps visual files on disk for verification only.

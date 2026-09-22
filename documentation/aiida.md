@@ -57,6 +57,16 @@ they exist for visual/manual verification only and stay on disk. LAMMPS run
 logs (`lammps/run_*.log`) **are** kept, because the settle-loop and
 build-identity diagnostics folded into provenance come from them.
 
+What *is* stored is one rule, `src/aiida/retention.py`, shared by
+`aiida import` and the CalcJob's `retrieve_list`, so both paths keep the same
+files: `provenance.json`, `provenance/**`, `lammps/*.in`,
+`lammps/system.in.settings`, `lammps/run_*.log`, `results/*`,
+`data/{hold_*,final_*,load_*}`, `log*.lammps` and `*.out`. The run node takes
+the inputs and provenance, each load point its own tier files, and every other
+retained file (including a `results/*` file no load point claims) rides along
+on each load point. Anything over `aiida.max_stored_file_mb` is recorded by
+path, size and sha256 instead of stored.
+
 ## 2. Idempotent import
 
 ```bash

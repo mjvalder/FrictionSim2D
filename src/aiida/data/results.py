@@ -182,15 +182,17 @@ class FrictionResultsData(Data):
         limit = max_mb * 1024 * 1024
         tiers: List[str] = []
         tier_paths: List[Path] = []
+        tier_files: Dict[str, str] = {}
         for tier in TIER_KEYS:
             path = paths.get(tier)
             if path is None:
                 continue
             path = Path(path)
-            self.base.repository.put_object_from_file(
-                str(path), path.relative_to(run_dir).as_posix())
+            name = path.relative_to(run_dir).as_posix()
+            self.base.repository.put_object_from_file(str(path), name)
             tiers.append(tier)
             tier_paths.append(path)
+            tier_files[tier] = name
         oversize: List[Dict[str, Any]] = []
         for extra in aux:
             extra = Path(extra)
@@ -204,6 +206,10 @@ class FrictionResultsData(Data):
                 continue
             self.base.repository.put_object_from_file(str(extra), name)
         self.base.attributes.set('oversize_files', oversize)
+        # Which stored member IS each tier: aux may carry other `results/*`
+        # files (anything no load point claimed), so `frame` must not guess
+        # by filename prefix when it can look the answer up.
+        self.base.attributes.set('tier_files', tier_files)
         self.tiers = tiers
         self.content_sha256 = content_sha256 or content_hash(tier_paths)
 
@@ -222,16 +228,18 @@ class FrictionResultsData(Data):
         goes through `pd.read_csv(comment='#')`; everything else goes through
         `read_data.read_results_file`, the same parser the DataReader uses.
 
-        Files are stored under a run-relative path (R18), so the repository is
-        walked recursively and matched on the BASENAME's prefix, not the
-        top-level object name.
+        The member is the one `add_result_files` recorded in `tier_files`.
+        Nodes without that attribute (and the indent `'retract'` curve, which
+        is not a tier) fall back to walking the repository -- files are stored
+        under a run-relative path (R18) -- and matching the BASENAME's prefix.
         """
         import pandas as pd  # pylint: disable=import-outside-toplevel
 
         from ...postprocessing.read_data import read_results_file  # pylint: disable=import-outside-toplevel
 
+        known = self.base.attributes.get('tier_files', None) or {}
         prefixes = self._TIER_PREFIX[tier]
-        names = sorted(
+        names = [known[tier]] if tier in known else sorted(
             (dirpath / fname).as_posix()
             for dirpath, _dirs, files in self.base.repository.walk()
             for fname in files)
@@ -266,7 +274,7 @@ class FrictionResultsData(Data):
     _NOT_EXTRAS = frozenset(_IDENTITY) | frozenset((
         'mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf', 'std_nf',
         'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy', 'time_series_hash',
-        'oversize_files',
+        'oversize_files', 'tier_files',
     ))
 
     def to_record(self, run_node, set_node, *, uploader=None, contact=None):
