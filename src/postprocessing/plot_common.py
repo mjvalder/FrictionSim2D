@@ -170,12 +170,42 @@ class PlotCommonMixin(PlotterMixinBase):
     # =====================================================================
 
     def _deep_merge_dict(self, d1: dict, d2: dict) -> None:
-        """Recursively merge *d2* into *d1*."""
+        """Recursively merge *d2* into *d1*; a list REPLACES, never extends.
+
+        Extending was the bug: `--settings '{"figure": {"size": [8, 6]}}'`
+        produced `[10, 7, 8, 6]`, matplotlib read the first two, and the
+        option silently did nothing. A settings list is a value, not an
+        accumulator -- there is no setting for which appending is right.
+        """
         for k, v in d2.items():
             if k in d1 and isinstance(d1[k], dict) and isinstance(v, dict):
                 self._deep_merge_dict(d1[k], v)
+            else:
+                d1[k] = v
+
+    def _merge_metadata(self, d1: dict, d2: dict) -> None:
+        """Merge one dataset's metadata into the accumulated metadata.
+
+        The OTHER merge: here a list is a SET OF VALUES SEEN and must be
+        unioned, because `_load_all_metadata` folds every dataset's
+        `materials`/`sizes`/`temperatures` into one. `_deep_merge_dict` used to
+        serve both call sites, so making settings lists replace (which is the
+        only right answer for `--settings`) would have made the second dataset
+        silently overwrite the first's material list. Two call sites, two
+        meanings, two functions.
+
+        Sorted and de-duplicated, so the accumulated metadata does not depend
+        on which dataset was read first.
+        """
+        for k, v in d2.items():
+            if k in d1 and isinstance(d1[k], dict) and isinstance(v, dict):
+                self._merge_metadata(d1[k], v)
             elif k in d1 and isinstance(d1[k], list) and isinstance(v, list):
-                d1[k].extend(v)
+                try:
+                    d1[k] = sorted(set(d1[k]) | set(v))
+                except TypeError:
+                    # unhashable entries (a nested list): keep insertion order
+                    d1[k] = d1[k] + [x for x in v if x not in d1[k]]
             else:
                 d1[k] = v
 
@@ -359,7 +389,7 @@ class PlotCommonMixin(PlotterMixinBase):
             for file_key in self.full_data_files[label]:
                 _, metadata = self._load_full_data(label, file_key)
                 if metadata:
-                    self._deep_merge_dict(self.metadata, metadata)
+                    self._merge_metadata(self.metadata, metadata)
 
     def _load_full_data(
         self, label: str, file_key: str,
@@ -917,17 +947,21 @@ class PlotCommonMixin(PlotterMixinBase):
         if original_ext and original_ext not in formats:
             formats = [original_ext] + list(formats)
 
-        try:
-            if tight_bbox:
-                fig.subplots_adjust(
-                    left=0.13, bottom=0.13, right=0.97, top=0.97,
-                )
-            else:
-                fig.subplots_adjust(
-                    left=0.16, bottom=0.24, right=0.98, top=0.92,
-                )
-        except (TypeError, ValueError) as e:
-            logger.warning("subplots_adjust failed: %s", e)
+        # subplots_adjust on a constrained-layout figure warns and disables
+        # the engine, so the fixed margins below would silently undo the
+        # setting they were never meant to coexist with.
+        if not getattr(self, 'constrained_layout', False):
+            try:
+                if tight_bbox:
+                    fig.subplots_adjust(
+                        left=0.13, bottom=0.13, right=0.97, top=0.97,
+                    )
+                else:
+                    fig.subplots_adjust(
+                        left=0.16, bottom=0.24, right=0.98, top=0.92,
+                    )
+            except (TypeError, ValueError) as e:
+                logger.warning("subplots_adjust failed: %s", e)
 
         for fmt in formats:
             output_path = self.output_dir / f"{base_name}.{fmt}"
@@ -1238,7 +1272,7 @@ class PlotCommonMixin(PlotterMixinBase):
             )
 
         # Create figure
-        fig, ax = plt.subplots(figsize=self.figure_size)
+        fig, ax = self.new_figure()
 
         palette = self.settings["colors"].get("palette", "gem12")
         show_error_bars = plot_config.get('show_error_bars', False)

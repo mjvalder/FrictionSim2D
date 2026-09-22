@@ -27,7 +27,10 @@ __all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
            'SummaryPlot', 'TimeseriesPlot', 'StickSlipPlot',
            'ScatterComparisonPlot', 'RankFrictionPlot', 'CorrelationPlot',
            'CofHistogramPlot', 'AnyPlot', 'DatasetsHeader', 'PlotDocument',
-           'load_plot_document', 'schema_markdown']
+           'load_plot_document', 'schema_markdown', 'FigureSettings',
+           'FontSettings', 'ColorSettings', 'MarkerSettings', 'LineSettings',
+           'GridSettings', 'ErrorBandSettings', 'LegendSettings',
+           'LayoutSettings', 'AxesSettings', 'ExportSettings', 'PlotSettings']
 
 #: Exactly the keys `Plotter.generate_plot`'s dispatch table accepts.
 #: 'stick_slip_analysis', not 'stick_slip': a model under the shorter name
@@ -307,6 +310,137 @@ class DatasetsHeader(BaseModel):
 class PlotDocument(DatasetsHeader):
     """A whole `postprocess plot` document."""
     plots: List[AnyPlot] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Style settings (Q4)
+#
+# Every list field uses `default_factory` rather than a literal default, so two
+# `PlotSettings()` never share a list and one Plotter's `--settings` cannot
+# mutate the next one's.
+# ---------------------------------------------------------------------------
+
+
+class FigureSettings(BaseModel):
+    """Canvas size and resolution."""
+    model_config = _FORBID
+
+    size: List[float] = Field(default_factory=lambda: [10, 7],
+                              description='[width, height] in inches')
+    dpi: int = 150
+
+
+class FontSettings(BaseModel):
+    """Type sizes, in points."""
+    model_config = _FORBID
+
+    family: str = 'sans-serif'
+    title: int = 26
+    axis_label: int = 24
+    tick_label: int = 22
+    legend: int = 16
+
+
+class ColorSettings(BaseModel):
+    """Which categorical palette series are drawn from."""
+    model_config = _FORBID
+
+    palette: str = 'gem12'
+
+
+class MarkerSettings(BaseModel):
+    """Default marker for scatter and summary series."""
+    model_config = _FORBID
+
+    style: str = 'o'
+    size: float = 12
+
+
+class LineSettings(BaseModel):
+    """Line weight, and how a fit line is drawn."""
+    model_config = _FORBID
+
+    width: float = 1.3
+    fit_style: str = '--'
+    fit_alpha: float = 0.8
+
+
+class GridSettings(BaseModel):
+    """Grid visibility and weight."""
+    model_config = _FORBID
+
+    show: bool = True
+    which: str = 'both'
+    major_style: str = '-'
+    minor_style: str = ':'
+    major_alpha: float = 0.5
+    minor_alpha: float = 0.3
+
+
+class ErrorBandSettings(BaseModel):
+    """Opacity of the +/- 1 sigma band."""
+    model_config = _FORBID
+
+    alpha: float = 0.2
+
+
+class LegendSettings(BaseModel):
+    """Where the legend sits when a plot does not override it."""
+    model_config = _FORBID
+
+    location: str = 'best'
+
+
+class LayoutSettings(BaseModel):
+    """How the axes are fitted to the canvas.
+
+    `layout` existed in `DEFAULT_SETTINGS` as an empty dict -- declared and
+    never read. `constrained_layout` is what a layout setting is for: it lets
+    matplotlib size the axes around the labels instead of the fixed
+    `subplots_adjust` margins `_save_plot` otherwise applies.
+    """
+    model_config = _FORBID
+
+    constrained_layout: bool = False
+
+
+class AxesSettings(BaseModel):
+    """Tick formatting."""
+    model_config = _FORBID
+
+    use_scientific_notation: bool = True
+    scilimits: List[int] = Field(default_factory=lambda: [-3, 4])
+
+
+class ExportSettings(BaseModel):
+    """Which files each plot writes."""
+    model_config = _FORBID
+
+    formats: List[str] = Field(default_factory=lambda: ['png'])
+    transparent: bool = False
+
+
+class PlotSettings(BaseModel):
+    """Style settings for a whole Plotter run.
+
+    Mirrors `plot_style.DEFAULT_SETTINGS` key for key: the dict was the schema
+    and nothing documented it, so `--settings` was written by reading the
+    source. `layout` was declared there and never read; it now carries
+    `constrained_layout`, which is what a layout setting is for.
+    """
+    model_config = _FORBID
+
+    figure: FigureSettings = Field(default_factory=FigureSettings)
+    fonts: FontSettings = Field(default_factory=FontSettings)
+    colors: ColorSettings = Field(default_factory=ColorSettings)
+    markers: MarkerSettings = Field(default_factory=MarkerSettings)
+    lines: LineSettings = Field(default_factory=LineSettings)
+    grid: GridSettings = Field(default_factory=GridSettings)
+    error_bands: ErrorBandSettings = Field(default_factory=ErrorBandSettings)
+    legend: LegendSettings = Field(default_factory=LegendSettings)
+    layout: LayoutSettings = Field(default_factory=LayoutSettings)
+    axes: AxesSettings = Field(default_factory=AxesSettings)
+    export: ExportSettings = Field(default_factory=ExportSettings)
 
 
 def load_plot_document(path: Path) -> PlotDocument:

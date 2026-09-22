@@ -412,7 +412,7 @@ class PlotTaxonomyMixin(PlotterMixinBase):
         clipped = bool(np.nanmax(np.abs(values)) > vlim)
 
         fonts = self.settings["fonts"]
-        fig, ax = plt.subplots(
+        fig, ax = self.new_figure(
             figsize=tuple(plot_config.get('figure_size', self.figure_size)),
         )
         image = ax.imshow(
@@ -506,7 +506,7 @@ class PlotTaxonomyMixin(PlotterMixinBase):
 
         colors = self._taxonomy_mode_colors(plot_config)
         fonts = self.settings["fonts"]
-        fig, ax = plt.subplots(
+        fig, ax = self.new_figure(
             figsize=tuple(plot_config.get('figure_size', self.figure_size)),
         )
         x_pos = np.arange(len(table.index))
@@ -677,7 +677,8 @@ class PlotTaxonomyMixin(PlotterMixinBase):
         line_width = float(plot_config.get('line_width', base_width * 1.25))
         n_channels = len(channels)
         fig_size = plot_config.get('figure_size', [self.figure_size[0], 3.0 * n_channels])
-        fig, axes = plt.subplots(n_channels, 1, figsize=tuple(fig_size), sharex=True)
+        fig, axes = self.new_figure(figsize=tuple(fig_size),
+                                    nrows=n_channels, sharex=True)
         axes = np.atleast_1d(axes)
 
         panel_config = {
@@ -827,7 +828,8 @@ class PlotTaxonomyMixin(PlotterMixinBase):
             'figure_size',
             [self.figure_size[0], max(self.figure_size[1], 0.3 * rows_per_column)],
         )
-        fig, axes = plt.subplots(1, n_columns, figsize=tuple(fig_size), squeeze=False)
+        fig, axes = self.new_figure(figsize=tuple(fig_size),
+                                    ncols=n_columns, squeeze=False)
         axes = axes[0]
 
         row_font = config.get('material_label_fontsize')

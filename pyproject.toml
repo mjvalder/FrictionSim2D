@@ -104,6 +104,11 @@ markers = [
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+# The shipped plot-settings presets are data, not modules, so
+# `packages` alone does not carry them into the wheel.
+[tool.hatch.build.targets.wheel.force-include]
+"src/postprocessing/presets" = "src/postprocessing/presets"
+
 [tool.hatch.build.targets.sdist]
 include = ["src/**"]
 

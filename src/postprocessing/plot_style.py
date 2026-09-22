@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from .plot_config import PlotSettings
+
 # Extended gem24 colour palette (24 distinct colours for line plots)
 # First 12: MATLAB gem12 originals; next 12: hand-picked to maximise
 # hue separation while preserving legibility on white backgrounds.
@@ -19,26 +21,9 @@ GEM24_COLORS = [
 
 GEM12_COLORS = GEM24_COLORS
 
-DEFAULT_SETTINGS: dict[str, Any] = {
-    "figure": {"size": [10, 7], "dpi": 150},
-    "fonts": {
-        "title": 26, "axis_label": 24,
-        "tick_label": 22, "legend": 16,
-    },
-    "colors": {"palette": "gem12"},
-    "markers": {"style": "o", "size": 12},
-    "lines": {"width": 1.3, "fit_style": "--", "fit_alpha": 0.8},
-    "grid": {
-        "show": True, "which": "both",
-        "major_style": "-", "minor_style": ":",
-        "major_alpha": 0.5, "minor_alpha": 0.3,
-    },
-    "error_bands": {"alpha": 0.2},
-    "legend": {"location": "best"},
-    "layout": {},
-    "axes": {"use_scientific_notation": True, "scilimits": [-3, 4]},
-    "export": {"formats": ["png"], "transparent": False},
-}
+#: The screen defaults, generated from the model so the two cannot drift.
+#: `postprocess plot --preset publication` merges the shipped preset on top.
+DEFAULT_SETTINGS: dict[str, Any] = PlotSettings().model_dump()
 
 
 @dataclasses.dataclass

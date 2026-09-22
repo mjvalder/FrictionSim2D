@@ -408,7 +408,7 @@ class PlotSummaryMixin(PlotterMixinBase):
                 )
 
         plot_fig_size = tuple(plot_config.get('figure_size', list(self.figure_size)))
-        fig, ax = plt.subplots(figsize=plot_fig_size)
+        fig, ax = self.new_figure(figsize=plot_fig_size)
 
         if plot_by == 'dataset_label':
             group_col = 'dataset_label'
@@ -764,7 +764,7 @@ class PlotSummaryMixin(PlotterMixinBase):
             logger.warning("No datasets produced COF values for histogram. Skipping.")
             return
 
-        fig, ax = plt.subplots(figsize=self.figure_size)
+        fig, ax = self.new_figure()
         x_pos = np.arange(len(bar_labels))
         bar_width = float(plot_config.get('bar_width', 0.6))
         bars_drawn = ax.bar(

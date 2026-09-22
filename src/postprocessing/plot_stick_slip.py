@@ -439,7 +439,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
         if not np.any(freq_plot_mask):
             freq_plot_mask = valid.copy()
 
-        fig_disp, ax_disp = plt.subplots(1, 1, figsize=single_panel_figure_size)
+        fig_disp, ax_disp = self.new_figure(figsize=single_panel_figure_size)
         ax_disp.plot(plot_t, plot_detrended, color=dataset_color, linewidth=1.2)
         ax_disp.axhline(0.0, color='gray', linestyle='--', linewidth=0.8)
 
@@ -548,7 +548,7 @@ class PlotStickSlipMixin(PlotterMixinBase):
         fig_disp.tight_layout()
         self._save_plot(fig_disp, displacement_filename, tight_bbox=False)
 
-        fig_psd, ax_psd = plt.subplots(1, 1, figsize=single_panel_figure_size)
+        fig_psd, ax_psd = self.new_figure(figsize=single_panel_figure_size)
         ax_psd.plot(freqs[freq_plot_mask], psd[freq_plot_mask], color=dataset_color, linewidth=1.2)
 
         peak_freqs = [

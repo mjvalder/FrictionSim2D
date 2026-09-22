@@ -121,3 +121,106 @@ def test_generate_summary_plot_creates_output_png(tmp_path):
     plotter._generate_summary_plot(plot_config)  # pylint: disable=protected-access
 
     assert (out_dir / "summary_test.png").exists()
+
+
+def test_settings_lists_are_replaced_not_extended(tmp_path):
+    """`--settings {"figure": {"size": [8, 6]}}` used to produce
+    [10, 7, 8, 6], and matplotlib then read the first two -- so the option
+    silently did nothing."""
+    from src.postprocessing.plot_data import Plotter
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
+                      settings={'figure': {'size': [8, 6]},
+                                'export': {'formats': ['pdf']}})
+
+    assert plotter.settings['figure']['size'] == [8, 6]
+    assert plotter.settings['export']['formats'] == ['pdf']
+    assert plotter.figure_size == (8, 6)
+
+
+def test_one_plotters_settings_do_not_leak_into_the_next(tmp_path):
+    """DEFAULT_SETTINGS was copied shallowly, so every sub-dict was shared
+    with the module-level default."""
+    from src.postprocessing.plot_data import Plotter
+
+    Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
+            settings={'figure': {'dpi': 999}})
+    second = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+
+    assert second.settings['figure']['dpi'] == 150
+
+
+def test_metadata_merging_still_unions_lists(tmp_path):
+    """`_load_all_metadata` folds every dataset's metadata into one dict, and
+    there a list is a set of values seen, not a value. It gets its own merge
+    rather than riding on the settings one, which now replaces."""
+    from src.postprocessing.plot_data import Plotter
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    accumulated = {'materials': ['h_MoS2'], 'sizes': ['100x100y'],
+                   'material_types': {'h_type': ['h_MoS2']}}
+
+    plotter._merge_metadata(accumulated, {  # pylint: disable=protected-access
+        'materials': ['h_WS2'], 'sizes': ['100x100y'],
+        'material_types': {'h_type': ['h_WS2'], 't_type': ['t_CoTe2']}})
+
+    assert accumulated['materials'] == ['h_MoS2', 'h_WS2']
+    assert accumulated['sizes'] == ['100x100y']          # de-duplicated
+    assert accumulated['material_types']['h_type'] == ['h_MoS2', 'h_WS2']
+    assert accumulated['material_types']['t_type'] == ['t_CoTe2']
+
+
+def test_the_two_merges_disagree_on_purpose(tmp_path):
+    from src.postprocessing.plot_data import Plotter
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    settings_side = {'formats': ['png']}
+    metadata_side = {'formats': ['png']}
+
+    plotter._deep_merge_dict(settings_side, {'formats': ['pdf']})  # pylint: disable=protected-access
+    plotter._merge_metadata(metadata_side, {'formats': ['pdf']})  # pylint: disable=protected-access
+
+    assert settings_side['formats'] == ['pdf']          # a value: replaced
+    assert metadata_side['formats'] == ['pdf', 'png']   # a set seen: unioned
+
+
+def test_nested_dicts_still_merge(tmp_path):
+    from src.postprocessing.plot_data import Plotter
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
+                      settings={'fonts': {'title': 12}})
+
+    assert plotter.settings['fonts']['title'] == 12
+    assert plotter.settings['fonts']['legend'] == 16      # untouched
+
+
+def test_constrained_layout_reaches_the_figure(tmp_path):
+    import matplotlib.pyplot as plt
+
+    from src.postprocessing.plot_data import Plotter
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
+                      settings={'layout': {'constrained_layout': True}})
+    fig, _ax = plotter.new_figure()
+    try:
+        assert fig.get_layout_engine() is not None
+    finally:
+        plt.close(fig)
+
+
+def test_save_plot_does_not_fight_constrained_layout(tmp_path):
+    """subplots_adjust on a constrained-layout figure raises a matplotlib
+    warning and disables the engine; _save_plot must skip it."""
+    import matplotlib.pyplot as plt
+
+    from src.postprocessing.plot_data import Plotter
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path),
+                      settings={'layout': {'constrained_layout': True}})
+    fig, ax = plotter.new_figure()
+    ax.plot([0, 1], [0, 1])
+
+    plotter._save_plot(fig, 'x.png')  # pylint: disable=protected-access
+
+    assert (tmp_path / 'x.png').exists()
+    assert not plt.get_fignums()

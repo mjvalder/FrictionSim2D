@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from pathlib import Path
 
@@ -48,11 +49,16 @@ class Plotter(
         self.dataset_display_labels = dataset_display_labels or {}
         self.series_color_map = dict(series_color_map or {})
 
-        self.settings = DEFAULT_SETTINGS.copy()
+        # deepcopy, not .copy(): a shallow copy shared every sub-dict with the
+        # module-level default, so one Plotter's --settings mutated the
+        # defaults for the next one constructed in the same process.
+        self.settings = copy.deepcopy(DEFAULT_SETTINGS)
         if settings:
             self._deep_merge_dict(self.settings, settings)
 
         self.figure_size = tuple(self.settings["figure"]["size"])
+        self.constrained_layout = bool(
+            self.settings.get("layout", {}).get("constrained_layout", False))
         self.time_step_fs = 1.0
 
         self.full_data_files: dict[str, dict] = {
@@ -77,6 +83,22 @@ class Plotter(
         self._load_all_metadata()
         self._create_material_type_map()
         self._initialize_series_color_map()
+
+    def new_figure(self, figsize=None, nrows=1, ncols=1, **kwargs):
+        """A figure honouring `layout.constrained_layout` and `fonts.family`.
+
+        One place, so every mixin gets both without each repeating the
+        `plt.subplots` keyword or touching rcParams itself. `nrows`/`ncols`
+        and the passthrough kwargs exist so the multi-panel taxonomy plots go
+        through here too -- a setting that reached only the single-axes plots
+        would be half a setting.
+        """
+        import matplotlib.pyplot as plt  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+        plt.rcParams['font.family'] = self.settings['fonts']['family']
+        return plt.subplots(nrows, ncols, figsize=figsize or self.figure_size,
+                            constrained_layout=self.constrained_layout,
+                            **kwargs)
 
     def generate_plot(self, plot_config: dict) -> None:
         """Dispatch to the appropriate plot generation method."""

@@ -160,7 +160,7 @@ class PlotTimeseriesMixin(PlotterMixinBase):
             logger.error("Missing y-axis for timeseries plot.")
             return
 
-        fig, ax = plt.subplots(figsize=self.figure_size)
+        fig, ax = self.new_figure()
 
         time_scale = plot_config.get('time_scale', 1.0)
         shift_time_to_zero = plot_config.get('shift_time_to_zero', True)

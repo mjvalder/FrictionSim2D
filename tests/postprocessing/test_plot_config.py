@@ -114,3 +114,63 @@ def test_schema_markdown_names_every_type_and_field():
         assert f'`{plot_type}`' in text
     assert 'filter_size' in text
     assert 'fft_peak_rank' in text
+
+
+def test_default_settings_come_from_the_model():
+    from src.postprocessing.plot_config import PlotSettings
+    from src.postprocessing.plot_style import DEFAULT_SETTINGS
+
+    assert DEFAULT_SETTINGS == PlotSettings().model_dump()
+    assert DEFAULT_SETTINGS['figure']['size'] == [10, 7]
+    assert DEFAULT_SETTINGS['fonts']['title'] == 26
+    assert DEFAULT_SETTINGS['fonts']['family'] == 'sans-serif'
+    assert DEFAULT_SETTINGS['grid']['which'] == 'both'
+    assert DEFAULT_SETTINGS['export']['formats'] == ['png']
+
+
+def test_layout_is_no_longer_an_empty_dict():
+    """`layout` was declared and never read -- a settings key that did
+    nothing at all."""
+    from src.postprocessing.plot_style import DEFAULT_SETTINGS
+
+    assert DEFAULT_SETTINGS['layout'] == {'constrained_layout': False}
+
+
+def test_the_publication_preset_validates_and_is_vector_first():
+    from src.postprocessing.plot_config import PlotSettings
+    from src.postprocessing.presets import PRESETS, load_preset, preset_path
+
+    assert PRESETS == ('publication',)
+    assert preset_path('publication').is_file()
+
+    settings = PlotSettings.model_validate(load_preset('publication'))
+
+    assert settings.export.formats == ['pdf', 'svg', 'png']
+    assert settings.figure.dpi == 600
+    assert settings.figure.size == [3.4, 2.6]      # one journal column
+    assert settings.fonts.axis_label == 9
+    assert settings.layout.constrained_layout is True
+    assert settings.grid.show is False
+
+
+def test_the_publication_preset_actually_differs_from_the_defaults():
+    """A preset that restated the model defaults would be a no-op dressed as
+    a feature."""
+    from src.postprocessing.plot_config import PlotSettings
+    from src.postprocessing.presets import load_preset
+
+    defaults = PlotSettings().model_dump()
+    preset = load_preset('publication')
+
+    differing = [section for section, values in preset.items()
+                 if values != defaults[section]]
+
+    assert set(differing) >= {'figure', 'fonts', 'markers', 'lines', 'grid',
+                              'layout', 'export'}
+
+
+def test_an_unknown_preset_is_a_key_error():
+    from src.postprocessing.presets import load_preset
+
+    with pytest.raises(KeyError, match='wallpaper'):
+        load_preset('wallpaper')

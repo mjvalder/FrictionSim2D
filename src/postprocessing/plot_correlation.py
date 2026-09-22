@@ -99,7 +99,7 @@ class PlotCorrelationMixin(PlotterMixinBase):
 
                 corr = pivot_df.corr(method='spearman')
 
-                fig, ax = plt.subplots(figsize=(10, 8))
+                fig, ax = self.new_figure(figsize=(10, 8))
                 sns = self._seaborn()
                 sns.heatmap(corr, annot=True, cmap='crest', fmt='.2f', ax=ax)
                 ax.set_title(
@@ -120,7 +120,7 @@ class PlotCorrelationMixin(PlotterMixinBase):
 
         corr = pivot_df.corr(method='spearman')
 
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax = self.new_figure(figsize=(8, 6))
         sns = self._seaborn()
         sns.heatmap(corr, annot=True, cmap='crest', fmt='.2f', ax=ax)
         ax.set_title(title)
@@ -173,7 +173,7 @@ class PlotCorrelationMixin(PlotterMixinBase):
                         combined['r2'], method='spearman',
                     )
 
-        fig, ax = plt.subplots(figsize=(12, 10))
+        fig, ax = self.new_figure(figsize=(12, 10))
         sns = self._seaborn()
         sns.heatmap(
             corr_matrix, annot=True, fmt='.2f', cmap='crest',
