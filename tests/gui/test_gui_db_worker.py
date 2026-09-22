@@ -203,12 +203,30 @@ def test_central_list_maps_filter_names_to_the_client(fake_client):
     assert result['ok'] is True
     assert result['records'] == CENTRAL_ROWS
     assert result['total_count'] == 1
+    assert result['limit'] == 200, \
+        'not truncated (1 row < limit 200) -- total_count is exact, but the ' \
+        'limit is still reported'
     assert fake_client.calls[0]['material'] == 'h-MoS2'
     assert fake_client.calls[0]['potential_type'] == 'sw'
     assert fake_client.calls[0]['family'] == 'afm'
     assert fake_client.calls[0]['limit'] == 200
     assert 'potential' not in fake_client.calls[0]
     assert 'materials' not in fake_client.calls[0]
+
+
+def test_central_total_count_is_unknown_when_the_limit_is_reached(fake_client):
+    """The REST client has no way to ask the store for a true total -- it only
+    ever returns what it fetched, up to `limit`. When the returned row count
+    reaches that cap, `total_count` must not claim that count is the store's
+    total; `limit` is reported instead so the pane can say
+    "N results (limit L)" using `returned`."""
+    result = db_worker.dispatch({
+        'kind': 'list', 'source': 'central',
+        'filters': {'limit': len(CENTRAL_ROWS)}})
+
+    assert result['returned'] == len(CENTRAL_ROWS)
+    assert result['total_count'] is None
+    assert result['limit'] == len(CENTRAL_ROWS)
 
 
 def test_central_facets_are_read_off_the_rows(fake_client):
