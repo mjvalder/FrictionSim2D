@@ -427,6 +427,27 @@ def units_for_columns(columns, family: str) -> Dict[str, str]:
     return out
 
 
+#: The identity half of a summary row, in CSV order.
+SUMMARY_IDENTITY_COLUMNS = (
+    'model', 'family', 'material', 'materials', 'flake_material', 'size',
+    'size_x', 'size_y', 'substrate', 'substrate_amorphous', 'tip_material',
+    'tip_radius', 'temperature', 'layers', 'potential', 'rel_path',
+    'load_kind', 'load', 'angle', 'speed', 'tiers')
+
+#: The two alternative lateral-force definitions the sheet family carries.
+#: NaN when the frame has no react_x/react_y (sx_sy) or drive_fx/drive_fy
+#: (fx_fy) -- never silently aliased to mean_lf, which is what the db://
+#: reader used to do.
+SUMMARY_LF_COLUMNS = ('mean_lf_sx_sy', 'mean_lf_fx_fy')
+
+#: The post-stream channels, all four, NaN where the family has none.
+SUMMARY_POST_COLUMNS = ('gap_min', 'deflect_max', 'gap_min_il',
+                        'corrugation_max')
+
+_LF_PAIRS = {'mean_lf_sx_sy': ('react_x', 'react_y'),
+             'mean_lf_fx_fy': ('drive_fx', 'drive_fy')}
+
+
 #: Material-name prefix -> metadata bucket. `h_` hexagonal, `t_` T-phase,
 #: `b_` buckled, `p_` phosphorene-like; anything else is 'other'.
 _MATERIAL_TYPE_KEYS = ('b_type', 'h_type', 't_type', 'p_type', 'other')
@@ -1033,6 +1054,78 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'metadata': self._build_metadata(runs),
             'runs': payloads,
         }
+
+    def summary_rows(self) -> List[Dict[str, Any]]:
+        """One flat row per load point -- the rows `db upload` sends.
+
+        Every statistic comes from `summarise_run`, the single COF on the
+        store path. Nothing here computes a mean of its own.
+        """
+        from ..data.models import summarise_run  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+        rows: List[Dict[str, Any]] = []
+        for run in self.runs:
+            tokens = run.tokens
+            summary = summarise_run(run.frames_by_tier(), run.family,
+                                    skip_fraction=self.skip_fraction,
+                                    post=run.post)
+            row: Dict[str, Any] = {
+                'model': tokens.model, 'family': run.family,
+                'material': run.material,
+                'materials': '+'.join(tokens.materials),
+                'flake_material': tokens.flake_material,
+                'size': run.size, 'size_x': tokens.size_x,
+                'size_y': tokens.size_y, 'substrate': tokens.substrate,
+                'substrate_amorphous': tokens.substrate_amorphous,
+                'tip_material': tokens.tip_material,
+                'tip_radius': tokens.tip_radius,
+                'temperature': tokens.temperature,
+                # The RESOLVED count, not `tokens.layers`: the sheet-like
+                # models emit no `L{n}` path level, and `layers` is a headline
+                # filter in the central DB, the API and the GUI. NULL there for
+                # every sheet, hetero, flake and pes_sheet row is worse than a
+                # number read from provenance.
+                'layers': run.n_layers,
+                'potential': tokens.pot_token, 'rel_path': tokens.rel_path,
+                'load_kind': run.load_kind, 'load': run.load,
+                'angle': run.angle, 'speed': run.speed,
+                'tiers': ';'.join(sorted(run.tiers)),
+            }
+            row.update(summary.as_dict())
+            window = run.window
+            for name, (x_col, y_col) in _LF_PAIRS.items():
+                if x_col in window.columns and y_col in window.columns:
+                    row[name] = float(np.mean(np.hypot(
+                        window[x_col].to_numpy(dtype=float),
+                        window[y_col].to_numpy(dtype=float))))
+                else:
+                    row[name] = float('nan')
+            for name in SUMMARY_POST_COLUMNS:
+                row[name] = float(run.post.get(name, float('nan')))
+            rows.append(row)
+        return rows
+
+    def export_summary_csv(self) -> List[Path]:
+        """Write one `summary_<size>.csv` per size; return the paths."""
+        by_size: Dict[str, List[Dict[str, Any]]] = {}
+        for row in self.summary_rows():
+            by_size.setdefault(row['size'], []).append(row)
+
+        written: List[Path] = []
+        for size, rows in sorted(by_size.items()):
+            frame = pd.DataFrame(rows)
+            ordered = [c for c in SUMMARY_IDENTITY_COLUMNS
+                       if c in frame.columns]
+            tail = list(SUMMARY_LF_COLUMNS) + list(SUMMARY_POST_COLUMNS)
+            middle = [c for c in frame.columns
+                      if c not in ordered and c not in tail]
+            frame = frame[ordered + middle + tail]
+            path = self._get_output_path(f'summary_{size}.csv')
+            frame.to_csv(path, index=False)
+            written.append(path)
+            logger.info("Exported %d summary row(s) for size %s to %s",
+                        len(rows), size, path)
+        return written
 
     def export_full_data_to_json(self) -> List[Path]:
         """Write one `output_full_<size>.json` per size; return the paths."""

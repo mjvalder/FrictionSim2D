@@ -8,13 +8,17 @@ and one of the two arms vanished without a warning.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from src.core.observables import FAMILIES
-from src.postprocessing.read_data import (DataReader, LoadPoint, RunFrames,
+from src.postprocessing.read_data import (SUMMARY_IDENTITY_COLUMNS,
+                                          SUMMARY_LF_COLUMNS,
+                                          SUMMARY_POST_COLUMNS, DataReader,
+                                          LoadPoint, RunFrames,
                                           parse_results_name)
 from tests.helpers.results_tree import make_family_run
 
@@ -403,3 +407,132 @@ def test_golden_export_per_family(tmp_path, family):
         (GOLDEN_DIR / f'output_full_v2_{family}.json').read_text(encoding='utf-8'))
 
     assert produced == golden
+
+
+def test_summary_rows_come_from_summarise_run(tmp_path):
+    """The one COF. `df.mean()` in plot_common, element-wise
+    compute_derived_columns in read_data and ratio-of-means in the DB were
+    three different numbers on one plot.
+
+    Checked against `compute_friction_stats` on the parsed arrays -- the
+    kernel `summarise_run` uses and the number the store writes into
+    `FrictionResultsData`'s attributes and the central `ResultRecord` --
+    rather than against `summarise_run` called again here, which would only
+    prove the function is deterministic."""
+    from src.data.models import compute_friction_stats
+
+    make_family_run(tmp_path, 'afm')
+
+    reader = DataReader(results_dir=str(tmp_path))
+    row, = reader.summary_rows()
+
+    run, = reader.runs
+    window = run.window
+    kernel = compute_friction_stats(window['nf'].to_numpy(float),
+                                    window['lfx'].to_numpy(float),
+                                    window['lfy'].to_numpy(float), 0.2)
+    assert row['mean_cof'] == pytest.approx(kernel['mean_cof'])
+    assert row['mean_lf'] == pytest.approx(kernel['mean_lf'])
+    assert row['std_lfy'] == pytest.approx(kernel['std_lfy'])
+    assert row['ntimesteps'] == len(window)
+    assert row['is_complete'] is True
+
+
+def test_summary_row_identity_columns(tmp_path):
+    make_family_run(tmp_path, 'hetero', material='h-MoS2',
+                    second_material='h-WS2', pot='sw_a',
+                    tiers=('window', 'raw'))
+
+    row, = DataReader(results_dir=str(tmp_path)).summary_rows()
+
+    assert row['model'] == 'sheetonsheet'
+    assert row['family'] == 'hetero'
+    assert row['material'] == 'h_MoS2+h_WS2'
+    assert row['materials'] == 'h-MoS2+h-WS2'
+    assert row['flake_material'] is None
+    assert row['potential'] == 'pot_sw_a'
+    assert row['tiers'] == 'raw;window'
+    assert row['load_kind'] == 'pressure'
+
+
+def test_the_summary_row_layers_column_is_the_resolved_count(tmp_path):
+    """`layers` is a headline filter in the DB, the API and the GUI. Taking it
+    from the path alone made it NULL for every sheet, hetero, flake and
+    pes_sheet row."""
+    run_dir = make_family_run(tmp_path, 'sheetonsheet')
+    prov = run_dir / 'provenance.json'
+    record = json.loads(prov.read_text(encoding='utf-8'))
+    record['layer_type_map'] = {f'layer_{i}': [i] for i in range(1, 5)}
+    prov.write_text(json.dumps(record), encoding='utf-8')
+
+    row, = DataReader(results_dir=str(tmp_path)).summary_rows()
+
+    assert row['layers'] == 4
+
+
+def test_post_channels_reach_the_row(tmp_path):
+    make_family_run(tmp_path, 'afm', final_data=True)
+
+    row, = DataReader(results_dir=str(tmp_path)).summary_rows()
+
+    assert row['gap_min'] == pytest.approx(3.1)
+    assert math.isnan(row['gap_min_il'])
+    assert math.isnan(row['corrugation_max'])
+
+
+def test_export_summary_csv_column_order(tmp_path):
+    make_family_run(tmp_path, 'afm', loads=(10.0, 30.0))
+
+    written, = DataReader(results_dir=str(tmp_path)).export_summary_csv()
+    frame = pd.read_csv(written)
+
+    assert written.name == 'summary_100x100y.csv'
+    assert list(frame.columns[:len(SUMMARY_IDENTITY_COLUMNS)]) == list(
+        SUMMARY_IDENTITY_COLUMNS)
+    tail = list(SUMMARY_LF_COLUMNS) + list(SUMMARY_POST_COLUMNS)
+    assert list(frame.columns[-len(tail):]) == tail
+    assert 'mean_cof' in frame.columns
+    assert len(frame) == 2
+
+
+#: The fourteen RunSummary scalars, in `RunSummary.as_dict()` order. Every
+#: family carries all of them; `extras` is what varies.
+_SUMMARY_SCALARS = ('mean_cof', 'std_cof', 'mean_lf', 'std_lf', 'mean_nf',
+                    'std_nf', 'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy',
+                    'skip_fraction', 'ntimesteps', 'time_series_hash',
+                    'is_complete')
+
+
+@pytest.mark.parametrize('family', FAMILIES)
+def test_every_family_produces_the_same_frame(tmp_path, family):
+    """Not the same HEADER -- `RunSummary.extras` is family-specific by
+    design -- but the same frame: identity columns first, the fourteen
+    scalars next, the lf and post columns last, extras in the middle."""
+    root = tmp_path / family
+    make_family_run(root, family)
+
+    written, = DataReader(results_dir=str(root)).export_summary_csv()
+    columns = list(pd.read_csv(written).columns)
+
+    head = len(SUMMARY_IDENTITY_COLUMNS)
+    tail = list(SUMMARY_LF_COLUMNS) + list(SUMMARY_POST_COLUMNS)
+    assert columns[:head] == list(SUMMARY_IDENTITY_COLUMNS)
+    assert columns[-len(tail):] == tail
+    assert set(_SUMMARY_SCALARS) <= set(columns)
+
+
+def test_two_families_concatenate_through_pandas(tmp_path):
+    """The honest concatenation story: pd.concat fills the extras one family
+    has and the other does not with NaN."""
+    frames = []
+    for family in ('afm', 'sheetonsheet'):
+        root = tmp_path / family
+        make_family_run(root, family)
+        written, = DataReader(results_dir=str(root)).export_summary_csv()
+        frames.append(pd.read_csv(written))
+
+    combined = pd.concat(frames, ignore_index=True)
+
+    assert len(combined) == 2
+    assert set(combined['family']) == {'afm', 'sheetonsheet'}
+    assert set(_SUMMARY_SCALARS) <= set(combined.columns)
