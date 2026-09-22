@@ -492,14 +492,10 @@ class TestDatabaseAPISettings:
         from src.core.config import DatabaseSettings
         cfg = DatabaseSettings()
         assert cfg.api_url == 'http://localhost:8000'
-        assert cfg.api_host == '0.0.0.0'
-        assert cfg.api_port == 8000
 
     def test_custom(self):
         from src.core.config import DatabaseSettings
         cfg = DatabaseSettings(
             api_url='https://db.example.com',
-            api_port=9000,
         )
         assert cfg.api_url == 'https://db.example.com'
-        assert cfg.api_port == 9000

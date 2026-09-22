@@ -258,7 +258,7 @@ def test_db_setup_help(runner):
     result = runner.invoke(cli, ['db', 'setup', '--help'])
     assert result.exit_code == 0
     assert '--name' in result.output
-    assert '--profile' in result.output
+    assert '--profile' not in result.output
 
 
 # ---------------------------------------------------------------------------

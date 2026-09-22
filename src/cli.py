@@ -8,7 +8,6 @@ Unified CLI for simulation execution, HPC script generation, and AiiDA integrati
 
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, NoReturn, Tuple
 import click
@@ -28,26 +27,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
-
-
-def _bootstrap_local_db_once() -> None:
-    """Best-effort one-time local schema bootstrap for new environments.
-
-    This is intentionally non-fatal: if PostgreSQL credentials or server are
-    not available yet, FrictionSim2D commands should still run.
-    """
-    marker = Path.home() / '.config' / 'FrictionSim2D' / '.local_db_bootstrapped'
-    if marker.exists():
-        return
-
-    try:
-        from .data.database import db_from_profile  # noqa: PLC0415
-        db_from_profile('local')
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(f"{datetime.utcnow().isoformat()}Z\n", encoding='utf-8')
-        logger.info("Bootstrapped local FrictionSim2D DB schema.")
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.info("Skipping local DB bootstrap: %s", exc)
 
 
 def _ensure_hpc_settings(hpc_settings) -> None:
@@ -1390,9 +1369,7 @@ def db_group():
     \b
       1. Explicit CLI flags (--host, --port, etc.)
       2. Environment variables (FRICTION_DB_HOST, FRICTION_DB_PORT, ...)
-      3. The active database profile in settings.yaml
-
-    Use ``--profile local`` or ``--profile central`` to switch profiles.
+      3. settings.database in settings.yaml
     """
 
 
@@ -1402,18 +1379,17 @@ def _make_db(
     dbname: Optional[str],
     user: Optional[str],
     password: Optional[str],
-    profile: Optional[str] = None,
 ):
     """Instantiate a :class:`~src.data.database.FrictionDB`.
 
-    If none of the explicit connection parameters are provided, falls back
-    to the settings.yaml database profile.
+    With no explicit connection parameter, falls back to `settings.database` --
+    there is only one database now, so there is no profile to choose.
     """
     has_explicit = any(v is not None for v in (host, port, dbname, user, password))
     if not has_explicit:
         try:
-            from .data.database import db_from_profile  # noqa: PLC0415
-            return db_from_profile(profile)
+            from .data.database import central_db  # noqa: PLC0415
+            return central_db()
         except Exception:  # pylint: disable=broad-except  # settings not available
             pass
     from .data.database import FrictionDB  # noqa: PLC0415
@@ -1421,10 +1397,8 @@ def _make_db(
 
 
 _DB_OPTIONS = [
-    click.option('--profile', '-p', default=None,
-                 help="Database profile from settings.yaml ('local' or 'central')."),
     click.option('--host', default=None, envvar='FRICTION_DB_HOST',
-                 help='Database hostname (default: $FRICTION_DB_HOST or localhost)'),
+                 help='Database hostname (default: $FRICTION_DB_HOST or settings)'),
     click.option('--port', default=None, type=int, envvar='FRICTION_DB_PORT',
                  help='Database port (default: $FRICTION_DB_PORT or 5432)'),
     click.option('--dbname', default=None, envvar='FRICTION_DB_NAME',
@@ -1490,7 +1464,6 @@ def _iter_reader_rows(reader):
 def db_upload(
     results_dir: str,
     uploader: Optional[str],
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1511,7 +1484,7 @@ def db_upload(
 
     click.echo(f"📂 Reading results from {results_dir} ...")
     reader = DataReader(results_dir=str(results_dir))
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     n_published = 0
     n_rejected = 0
     for (
@@ -1564,7 +1537,6 @@ def db_query(
     uploader: Optional[str],
     limit: int,
     output_csv: Optional[str],
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1578,7 +1550,7 @@ def db_query(
 
         FrictionSim2D db query --material h-WS2 --csv results.csv
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     df = db.query(
         material=material,
         family=sim_type,
@@ -1602,7 +1574,6 @@ def db_query(
 @db_group.command('stats')
 @_add_db_options
 def db_stats(
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1610,7 +1581,7 @@ def db_stats(
     password: Optional[str],
 ):
     """Show aggregate statistics for the shared database."""
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     stats = db.get_statistics()
 
     click.echo(f"Total simulations : {stats['total_rows']}")
@@ -1631,7 +1602,6 @@ def db_stats(
 @_add_db_options
 def db_delete(
     uploader: str,
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1645,7 +1615,7 @@ def db_delete(
     Example:
         FrictionSim2D db delete --uploader alice
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     count = db.delete_own_results(uploader)
     click.echo(f"🗑  Deleted {count} row(s) for uploader '{uploader}'.")
 
@@ -1656,7 +1626,6 @@ def db_delete(
 @_add_db_options
 def db_init(
     drop: bool,
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1670,11 +1639,11 @@ def db_init(
     scratch (there is no migration from an older schema version).
 
     Example:\n
-        FrictionSim2D db init --profile local
+        FrictionSim2D db init
     """
     from .data.database import SCHEMA_VERSION  # noqa: PLC0415
 
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     db.init_schema(drop=drop)
     click.echo(f"✅ Schema version {SCHEMA_VERSION} ready"
                + (" (table recreated)." if drop else "."))
@@ -1686,7 +1655,6 @@ def db_init(
 @_add_db_options
 def db_create_key(
     name: str,
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1701,7 +1669,7 @@ def db_create_key(
     Example:\n
         FrictionSim2D db create-key --name alice
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     raw_key = db.create_api_key(name)
     click.echo(f"🔑 API key for '{name}':")
     click.echo(f"   {raw_key}")
@@ -1719,7 +1687,6 @@ def db_stage(
     results_dir: str,
     uploader: str,
     api_key: Optional[str],
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1734,7 +1701,7 @@ def db_stage(
     Example:\n
         FrictionSim2D db stage ./results --uploader alice --api-key <key>
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
 
     if api_key:
         verified_user = db.verify_api_key(api_key)
@@ -1783,7 +1750,6 @@ def db_stage(
 @_add_db_options
 def db_publish(
     row_id: int,
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1798,7 +1764,7 @@ def db_publish(
     Example:\n
         FrictionSim2D db publish 42
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     ok = db.publish(row_id)
     if ok:
         click.echo(f"✅ Result {row_id} published.")
@@ -1816,7 +1782,6 @@ def db_publish(
 def db_reject(
     row_id: int,
     reason: Optional[str],
-    profile: Optional[str],
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1828,7 +1793,7 @@ def db_reject(
     Example:\n
         FrictionSim2D db reject 42 --reason "Duplicate of row 37"
     """
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     ok = db.reject(row_id, reason=reason)
     if ok:
         click.echo(f"❌ Result {row_id} rejected.")
@@ -1844,7 +1809,6 @@ def db_reject(
 @_add_db_options
 def db_setup(
     name: Optional[str],
-    profile: str,
     host: Optional[str],
     port: Optional[int],
     dbname: Optional[str],
@@ -1859,8 +1823,8 @@ def db_setup(
     3. Stores the API key in ~/.config/FrictionSim2D/settings.yaml
 
     Example:
-        FrictionSim2D db setup                              # local setup (default profile)
-        FrictionSim2D db setup --name alice --profile central
+        FrictionSim2D db setup
+        FrictionSim2D db setup --name alice
     """
     import os as os_module  # noqa: PLC0415
     import yaml  # noqa: PLC0415
@@ -1869,7 +1833,7 @@ def db_setup(
         name = os_module.environ.get('USER', os_module.environ.get('USERNAME', 'user'))
 
     click.echo("📊 Initializing database schema...")
-    db = _make_db(host, port, dbname, user, password, profile=profile)
+    db = _make_db(host, port, dbname, user, password)
     from .data.database import SCHEMA_VERSION  # noqa: PLC0415
     click.echo(f"✅ Database initialised at schema version {SCHEMA_VERSION}.")
 
@@ -1892,10 +1856,8 @@ def db_setup(
 
     if 'database' not in settings_data:
         settings_data['database'] = {}
-    if profile not in settings_data['database']:
-        settings_data['database'][profile] = {}
 
-    settings_data['database'][profile]['api_key'] = raw_key
+    settings_data['database']['api_key'] = raw_key
 
     settings_file.write_text(
         yaml.safe_dump(settings_data, sort_keys=False),
@@ -1906,11 +1868,10 @@ def db_setup(
     click.echo("📋 Next steps:")
     click.echo(
         f"   1. You can now upload results: FrictionSim2D db upload <dir> "
-        f"--uploader {name} --profile {profile}"
+        f"--uploader {name}"
     )
     click.echo(
-        f"   2. Or stage for review: FrictionSim2D db stage <dir> --uploader "
-        f"{name} --profile {profile}"
+        f"   2. Or stage for review: FrictionSim2D db stage <dir> --uploader {name}"
     )
     click.echo()
     click.echo("⚠️  Your API key is stored in settings.yaml. Keep it secure!")
@@ -1927,18 +1888,15 @@ def api_group():
 
 @api_group.command('serve')
 @click.option('--host', default=None,
-              help='Bind host (default: settings.database.api_host or 0.0.0.0)')
+              help='Bind host (default: 0.0.0.0)')
 @click.option('--port', '-p', default=None, type=int,
-              help='Port (default: settings.database.api_port or 8000)')
-@click.option('--profile', default=None,
-              help="Database profile to back the server ('local' or 'central').")
+              help='Port (default: 8000)')
 @click.option('--reload', is_flag=True,
               help='Auto-reload on code changes (development only).')
 @click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
               help='Path to a settings.yaml file for this command.')
-def api_serve(host: Optional[str], port: Optional[int],
-              profile: Optional[str], reload: bool,
+def api_serve(host: Optional[str], port: Optional[int], reload: bool,
               settings_file: Optional[Path]):
     """Start the REST API server.
 
@@ -1948,8 +1906,8 @@ def api_serve(host: Optional[str], port: Optional[int],
 
     \b
     Server setup (run once on your machine):
-        FrictionSim2D db init --profile local
-        FrictionSim2D db create-key --name alice --profile local
+        FrictionSim2D db init
+        FrictionSim2D db create-key --name alice
         FrictionSim2D api serve --host 0.0.0.0 --port 8000
 
     \b
@@ -1966,13 +1924,12 @@ def api_serve(host: Optional[str], port: Optional[int],
             exc,
         )
 
-    settings = load_settings(settings_file=settings_file)
-    db_cfg = settings.database
-    _host = host or getattr(db_cfg, 'api_host', None) or '0.0.0.0'
-    _port = port or getattr(db_cfg, 'api_port', None) or 8000
+    _host = host or '0.0.0.0'
+    _port = port or 8000
 
+    from .data.database import central_db  # noqa: PLC0415
     from .api.server import create_app  # noqa: PLC0415
-    create_app(profile=profile or db_cfg.active_profile)
+    create_app(db=central_db(settings_file=settings_file))
 
     click.echo(f"🌐 FrictionSim2D API server → http://{_host}:{_port}")
     click.echo("   Press Ctrl-C to stop.\n")
@@ -1981,8 +1938,6 @@ def api_serve(host: Optional[str], port: Optional[int],
 
 def main():
     try:
-        if not any(arg in ('--help', '-h') for arg in sys.argv[1:]):
-            _bootstrap_local_db_once()
         cli()
     except Exception:  # pylint: disable=broad-except
         logger.exception("Command failed")

@@ -216,34 +216,20 @@ class AiidaSettings(BaseModel):
     max_stored_file_mb: int = 20
 
 
-class DatabaseProfileSettings(BaseModel):
-    """Connection parameters for a single database profile."""
-    host: str = 'localhost'
-    port: int = 5432
-    dbname: str = 'frictionsim2ddb'
-    user: str = ''
-    password: str = ''
-    api_key: str = ''
-
-
 class DatabaseSettings(BaseModel):
-    """Database connection and staging pipeline configuration."""
-    active_profile: str = 'local'
-    local: DatabaseProfileSettings = Field(default_factory=DatabaseProfileSettings)
-    central: DatabaseProfileSettings = Field(
-        default_factory=lambda: DatabaseProfileSettings(
-            host=os.environ.get('FRICTION_CENTRAL_DB_HOST', ''),
-            port=int(os.environ.get('FRICTION_CENTRAL_DB_PORT', '5432')),
-            dbname=os.environ.get('FRICTION_CENTRAL_DB_NAME', 'frictionsim2ddb'),
-            user=os.environ.get('FRICTION_CENTRAL_DB_USER', ''),
-            password=os.environ.get('FRICTION_CENTRAL_DB_PASSWORD', ''),
-            api_key=os.environ.get('FRICTION_DB_API_KEY', ''),
-        )
-    )
-    skip_fraction: float = 0.2
+    """The CENTRAL summary database, and nothing else.
+
+    The local store is AiiDA (spec U2): `database.local` and `active_profile`
+    described a second local Postgres beside it and are gone.
+    """
+    host: str = os.environ.get('FRICTION_CENTRAL_DB_HOST', '')
+    port: int = int(os.environ.get('FRICTION_CENTRAL_DB_PORT', '5432'))
+    dbname: str = os.environ.get('FRICTION_CENTRAL_DB_NAME', 'frictionsim2ddb')
+    user: str = os.environ.get('FRICTION_CENTRAL_DB_USER', '')
+    password: str = os.environ.get('FRICTION_CENTRAL_DB_PASSWORD', '')
+    api_key: str = os.environ.get('FRICTION_DB_API_KEY', '')
     api_url: str = os.environ.get('FRICTION_CENTRAL_API_URL', 'http://localhost:8000')
-    api_host: str = '0.0.0.0'
-    api_port: int = 8000
+    skip_fraction: float = 0.2
 
 
 class GlobalSettings(BaseModel):
@@ -989,6 +975,13 @@ def _settings_paths_in_precedence_order(
     return paths
 
 
+#: `database.*` keys from the old per-profile shape (`active_profile`, `local`,
+#: `central`). `DatabaseSettings` is flat and central-only now (Task 31) --
+#: these are silently dropped as unknown extras by pydantic, which would take
+#: a user's central-DB credentials with them, so `load_settings` warns instead.
+_OLD_DATABASE_PROFILE_KEYS = frozenset({'active_profile', 'local', 'central'})
+
+
 def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
     """Load the first readable settings file onto the hardcoded defaults.
 
@@ -1002,6 +995,17 @@ def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSet
             with path.open('r', encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
             if data:
+                db_block = data.get('database')
+                if isinstance(db_block, dict) and _OLD_DATABASE_PROFILE_KEYS & db_block.keys():
+                    logger.warning(
+                        "settings file %s uses the old database.active_profile/"
+                        "local/central shape, which no longer exists -- "
+                        "DatabaseSettings is central-only and flat now. Its host/"
+                        "port/dbname/user/password/api_key are being IGNORED. "
+                        "Flatten them to top-level database.* keys, e.g. "
+                        "database.host, database.port, database.api_key.",
+                        path,
+                    )
                 return cast(GlobalSettings, GlobalSettings.model_validate(data))
         except (FileNotFoundError, OSError, yaml.YAMLError) as exc:
             logger.warning("skipping settings file %s: %s", path, exc)

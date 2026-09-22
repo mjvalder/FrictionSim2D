@@ -7,13 +7,15 @@ from .models import ResultRecord, compute_friction_stats
 __all__ = ['ResultRecord', 'compute_friction_stats']
 
 
-def get_client(mode: str = 'direct', **kwargs):
-    """Create a database client in the specified mode.
+def get_client(mode: str = 'api', **kwargs):
+    """Create a database client. Default ``'api'``: only the machine hosting the
+    DB talks psycopg2 to it (spec §5).
 
     Args:
-        mode: ``'direct'`` for a direct PostgreSQL connection via
-            :class:`~src.data.database.FrictionDB`, or ``'api'`` for an
-            HTTP client via :class:`~src.api.client.FrictionHTTPClient`.
+        mode: ``'api'`` for an HTTP client via
+            :class:`~src.api.client.FrictionHTTPClient` (the default -- see
+            above), or ``'direct'`` for a direct PostgreSQL connection via
+            :class:`~src.data.database.FrictionDB`.
         **kwargs: Passed to the underlying client constructor.
             For ``'api'`` mode: ``api_url``, ``api_key``, ``timeout``.
             For ``'direct'`` mode: ``host``, ``port``, ``dbname``, ``user``,
@@ -38,7 +40,7 @@ def get_client(mode: str = 'direct', **kwargs):
         if kwargs.get('api_key') is None:
             kwargs['api_key'] = (
                 os.environ.get('FRICTION_DB_API_KEY')
-                or settings.database.central.api_key
+                or settings.database.api_key
                 or None
             )
 

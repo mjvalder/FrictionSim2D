@@ -647,35 +647,67 @@ class TestColumnMappings:
 # ===========================================================================
 
 class TestDatabaseSettings:
-    """Verify DatabaseSettings Pydantic model from config.py."""
+    """Verify DatabaseSettings Pydantic model from config.py -- central-only, flat."""
 
-    def test_default_active_profile(self):
+    def test_central_host_defaults_empty(self):
         from src.core.config import DatabaseSettings
         ds = DatabaseSettings()
-        assert ds.active_profile == 'local'
-
-    def test_local_profile_defaults(self):
-        from src.core.config import DatabaseSettings
-        ds = DatabaseSettings()
-        assert ds.local.host == 'localhost'
-        assert ds.local.port == 5432
-        assert ds.local.dbname == 'frictionsim2ddb'
-
-    def test_central_profile_empty_host(self):
-        from src.core.config import DatabaseSettings
-        ds = DatabaseSettings()
-        assert ds.central.host == ''
+        assert ds.host == ''
+        assert ds.port == 5432
+        assert ds.dbname == 'frictionsim2ddb'
 
     def test_global_settings_includes_database(self):
         from src.core.config import GlobalSettings
         gs = GlobalSettings()
         assert hasattr(gs, 'database')
-        assert gs.database.active_profile == 'local'
+        assert gs.database.dbname == 'frictionsim2ddb'
 
     def test_skip_fraction_default(self):
         from src.core.config import DatabaseSettings
         ds = DatabaseSettings()
         assert ds.skip_fraction == 0.2
+
+
+class TestCentralDb:
+    """`central_db` replaces `db_from_profile` -- one database, no profile."""
+
+    def test_central_db_reads_the_flat_settings(self, tmp_path):
+        from unittest.mock import patch
+
+        from src.data.database import central_db
+
+        settings_file = tmp_path / 'settings.yaml'
+        settings_file.write_text(
+            'database:\n  host: db.example.org\n  port: 6543\n'
+            '  dbname: friction\n  user: alice\n  password: s3cr3t\n',
+            encoding='utf-8')
+
+        with patch("src.data.database.FrictionDB._ensure_schema"):
+            db = central_db(settings_file=settings_file)
+
+        assert db._conn_params['host'] == 'db.example.org'
+        assert db._conn_params['port'] == 6543
+        assert db._conn_params['user'] == 'alice'
+
+    def test_db_from_profile_is_gone(self):
+        import src.data.database as db_mod
+
+        assert not hasattr(db_mod, 'db_from_profile')
+
+    def test_get_client_defaults_to_the_api(self, monkeypatch):
+        from src.data import get_client
+
+        seen = {}
+        monkeypatch.setattr('src.api.client.FrictionHTTPClient',
+                            lambda **kw: seen.update(kw) or 'CLIENT')
+
+        assert get_client() == 'CLIENT'
+        assert 'api_url' in seen
+
+    def test_cli_has_no_local_bootstrap(self):
+        import src.cli as cli_mod
+
+        assert not hasattr(cli_mod, '_bootstrap_local_db_once')
 
 
 class TestSchemaVersion:
@@ -684,15 +716,6 @@ class TestSchemaVersion:
     def test_schema_version_constant(self):
         from src.data.database import SCHEMA_VERSION
         assert SCHEMA_VERSION == 3
-
-
-class TestDbFromProfile:
-    """Test db_from_profile settings resolution."""
-
-    def test_unknown_profile_raises(self):
-        from src.data.database import db_from_profile
-        with pytest.raises(ValueError, match="Unknown database profile"):
-            db_from_profile('nonexistent')
 
 
 # ===========================================================================

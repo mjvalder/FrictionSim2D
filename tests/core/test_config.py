@@ -771,3 +771,65 @@ def test_aiida_settings_is_five_fields():
     assert defaults.lammps_code_label == 'lammps@localhost'
     assert defaults.computer_label == 'localhost'
     assert defaults.max_stored_file_mb == 20
+
+
+def test_database_settings_is_central_only():
+    from src.core.config import DatabaseSettings
+
+    assert set(DatabaseSettings.model_fields) == {
+        'host', 'port', 'dbname', 'user', 'password', 'api_key', 'api_url',
+        'skip_fraction'}
+    import src.core.config as config_mod
+    assert not hasattr(config_mod, 'DatabaseProfileSettings')
+
+
+def test_old_settings_file_with_removed_aiida_and_database_keys_still_loads(
+        tmp_path, caplog):
+    """Regression (T25 carry-over): a settings.yaml written before both the
+    AiidaSettings reduction (Task 25) and the DatabaseSettings flattening
+    (Task 31) must still load without error -- the removed keys are unknown
+    extras, silently dropped by pydantic. The old nested `database.central`/
+    `database.local` shape held real credentials, though, so losing them
+    silently is a trap: `load_settings` must warn about that one specifically.
+    """
+    settings_file = tmp_path / 'settings.yaml'
+    settings_file.write_text(
+        'aiida:\n'
+        '  enabled: true\n'
+        '  transport: ssh\n'
+        '  hostname: my_hpc\n'
+        '  workdir: /scratch/me\n'
+        '  username: me\n'
+        '  ssh_port: 2222\n'
+        '  key_filename: ~/.ssh/id_rsa\n'
+        '  hpc_mode: remote\n'
+        '  postprocess_code_label: python@my_hpc\n'
+        '  postprocess_script_path: /scripts/post.py\n'
+        '  create_provenance: true\n'
+        '  auto_import_results: false\n'
+        'database:\n'
+        '  active_profile: central\n'
+        '  local:\n'
+        '    host: localhost\n'
+        '  central:\n'
+        '    host: db.example.org\n'
+        '    port: 6543\n'
+        '    user: alice\n'
+        '    password: s3cr3t\n',
+        encoding='utf-8')
+
+    with caplog.at_level('WARNING'):
+        settings = load_settings(settings_file=settings_file)
+
+    # Loads without error; the removed aiida.* keys are dropped, the five
+    # reachable fields keep their defaults since none of them were spelled here.
+    assert settings.aiida.enabled is True
+    assert not hasattr(settings.aiida, 'transport')
+
+    # The nested database.central block is now silently ignored --
+    # DatabaseSettings.host stays at its default, NOT 'db.example.org'.
+    assert settings.database.host == ''
+    assert any(
+        'database.active_profile' in rec.message or 'central' in rec.message
+        for rec in caplog.records
+    ), "load_settings must warn when it silently drops an old nested database block"

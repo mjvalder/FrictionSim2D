@@ -35,21 +35,16 @@ from .auth import get_db, optional_api_key, require_api_key, set_db
 # App factory
 # ---------------------------------------------------------------------------
 
-def create_app(db=None, *, profile: Optional[str] = None) -> FastAPI:
+def create_app(db=None) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
-        db: An existing :class:`~src.data.database.FrictionDB` instance.
-            If ``None``, one is created from the given *profile*.
-        profile: Database settings profile (``'local'`` or ``'central'``).
-            Ignored if *db* is provided.
-
-    Returns:
-        Configured :class:`FastAPI` application.
+        db: An existing :class:`~src.data.database.FrictionDB`. If ``None``, the
+            central database from ``settings.database`` is used.
     """
     if db is None:
-        from ..data.database import db_from_profile  # noqa: PLC0415
-        db = db_from_profile(profile)
+        from ..data.database import central_db  # noqa: PLC0415
+        db = central_db()
 
     set_db(db)
     return app

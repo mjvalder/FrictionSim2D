@@ -751,9 +751,9 @@ def ingest_root(root: Path, label: Optional[str] = None,
     load_aiida_profile(profile)
 
     settings = load_settings()
-    # `settings.database.skip_fraction` predates this plan; read it
-    # defensively in case a future rework (Task 31) ever makes it optional.
-    skip_fraction = getattr(settings.database, 'skip_fraction', 0.2)
+    # `DatabaseSettings.skip_fraction` is a plain, always-present field
+    # (Task 31 made `DatabaseSettings` central-only but kept this field).
+    skip_fraction = settings.database.skip_fraction
 
     if dry_run:
         set_node = _find_set(root, label)

@@ -61,13 +61,10 @@ arguments, or ``settings.yaml`` profiles::
     df = db.query(material="h-MoS2", layers=1)
     print(df)
 
-Connection profiles
--------------------
-:func:`db_from_profile` creates a :class:`FrictionDB` from the active profile
-in ``settings.yaml``.  Use profile ``'central'`` for the remote shared DB.
-The ``'local'`` profile name in settings refers to a *separate* local copy of
-the central-DB schema (useful for offline testing) and is **not** the AiiDA
-database.
+Connection
+----------
+:func:`central_db` creates a :class:`FrictionDB` from ``settings.database`` --
+there is one database, so there is no profile to choose any more.
 """
 
 from __future__ import annotations
@@ -208,40 +205,16 @@ def _get_connection_params(  # pylint: disable=too-many-arguments,too-many-posit
     }
 
 
-def db_from_profile(
-    profile: Optional[str] = None,
-    settings_file: Optional[Union[str, Path]] = None,
-) -> 'FrictionDB':
-    """Create a :class:`FrictionDB` from a ``settings.yaml`` database profile.
+def central_db(settings_file: Optional[Union[str, Path]] = None) -> 'FrictionDB':
+    """The central summary DB, from `settings.database`.
 
-    Args:
-        profile: Profile name (``'local'`` or ``'central'``).  If ``None``,
-            uses the ``database.active_profile`` value from settings.
-        settings_file: Optional explicit settings YAML path for this call.
-
-    Returns:
-        Configured :class:`FrictionDB` instance.
+    One database, so one function: there is no profile to choose any more.
     """
     from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
 
-    settings = load_settings(settings_file=settings_file)
-    db_cfg = settings.database
-    name = profile or db_cfg.active_profile
-
-    if name == 'local':
-        p = db_cfg.local
-    elif name == 'central':
-        p = db_cfg.central
-    else:
-        raise ValueError(f"Unknown database profile: {name!r}. Use 'local' or 'central'.")
-
-    return FrictionDB(
-        host=p.host or None,
-        port=p.port,
-        dbname=p.dbname,
-        user=p.user or None,
-        password=p.password or None,
-    )
+    cfg = load_settings(settings_file=settings_file).database
+    return FrictionDB(host=cfg.host or None, port=cfg.port, dbname=cfg.dbname,
+                      user=cfg.user or None, password=cfg.password or None)
 
 
 # ---------------------------------------------------------------------------

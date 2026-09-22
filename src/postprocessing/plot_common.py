@@ -329,7 +329,7 @@ class PlotCommonMixin(PlotterMixinBase):
             if db_params is None:
                 continue
 
-            profile = db_params.pop('profile', 'local')
+            db_params.pop('profile', None)   # accepted and ignored: schema-2 configs
             # Only pass params that FrictionDB.query accepts
             _QUERY_KEYS = {'material', 'simulation_type', 'layers',
                            'uploader', 'limit'}
@@ -337,14 +337,14 @@ class PlotCommonMixin(PlotterMixinBase):
                             if k in _QUERY_KEYS}
 
             try:
-                from ..data.database import db_from_profile  # noqa: PLC0415
-                db = db_from_profile(profile)
+                from ..data.database import central_db  # noqa: PLC0415
+                db = central_db()
                 db_df = db.query(**query_kwargs)
                 rows = self._db_df_to_summary_rows(label, db_df)
                 self._db_summary_rows.extend(rows)
                 logger.info(
-                    "Loaded %d rows for DB-backed label '%s' (profile=%s, filters=%s)",
-                    len(rows), label, profile, query_kwargs,
+                    "Loaded %d rows for DB-backed label '%s' (filters=%s)",
+                    len(rows), label, query_kwargs,
                 )
             except Exception as exc:  # pylint: disable=broad-except
                 logger.error(
