@@ -392,6 +392,41 @@ class RunFrames:
         return dict(self.tiers)
 
 
+#: Version of the export document. v1 (no 'schema' key) is not read by the
+#: plot stack; regenerate with `postprocess read --export`.
+EXPORT_SCHEMA = 2
+
+#: Units of the columns this module derives rather than parses.
+_DERIVED_UNITS = {'lateral_force': 'nN', 'cof': '1'}
+
+
+def units_for_columns(columns, family: str) -> Dict[str, str]:
+    """`{column: unit}` for the columns present, from the registry.
+
+    `time` is a LAMMPS timestep index, which no Observable declares; it is
+    named 'step' here so a consumer never has to special-case a missing key.
+    Columns with no declared unit are omitted rather than guessed at.
+
+    No family carries a unit CAVEAT any more. An earlier draft flagged the
+    flake's `nf` as an interfacial adhesion rather than an applied load;
+    flake slides now apply a real normal load (`fix force flake addforce`),
+    so its `nf` and `cof` are the same quantities as the sheet's.
+    """
+    from ..core.observables import REGISTRY  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+    by_name = {ob.name: ob.units for ob in REGISTRY.values()
+               if family in ob.sim_types and ob.units}
+    out: Dict[str, str] = {}
+    for col in columns:
+        if col == 'time':
+            out['time'] = 'step'
+        elif col in _DERIVED_UNITS:
+            out[col] = _DERIVED_UNITS[col]
+        elif col in by_name:
+            out[col] = by_name[col]
+    return out
+
+
 #: Material-name prefix -> metadata bucket. `h_` hexagonal, `t_` T-phase,
 #: `b_` buckled, `p_` phosphorene-like; anything else is 'other'.
 _MATERIAL_TYPE_KEYS = ('b_type', 'h_type', 't_type', 'p_type', 'other')
@@ -951,36 +986,66 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             ntimestep,
         )
 
-    def export_full_data_to_json(self) -> None:
-        """Export the full time-series data to JSON files, one per size."""
-        data_by_size: dict = {}
-        for material, mat_data in self.full_data_nested.items():
-            for size, size_data in mat_data.items():
-                data_by_size.setdefault(size, {})[material] = size_data
-
-        for size_key, size_data in data_by_size.items():
-            output_path = self._get_output_path(f'output_full_{size_key}.json')
-
-            full_output_metadata = self.metadata.copy()
-            full_output_metadata['time_series'] = self.time_series
-
-            relevant_tip_radii: set = set()
-            for mat_data in size_data.values():
-                for sub_data in mat_data.values():
-                    for tip_mat_data in sub_data.values():
-                        relevant_tip_radii.update(tip_mat_data.keys())
-
-            full_output_metadata['tip_radii'] = sorted(list(relevant_tip_radii))
-            full_output_metadata['size'] = size_key
-
-            output_with_metadata = {
-                'metadata': full_output_metadata,
-                'results': size_data,
+    def run_payload(self, run: RunFrames) -> Dict[str, Any]:
+        """One `runs[]` entry of the v2 document."""
+        tokens = run.tokens
+        tiers: Dict[str, Any] = {}
+        for tier, frame in sorted(run.tiers.items()):
+            out = frame
+            if tier == 'window':
+                out = self._calculate_derived_quantities(frame.copy())
+                out.attrs = dict(frame.attrs)
+            tiers[tier] = {
+                'columns': list(out.columns),
+                'data': out.values.tolist(),
+                'attrs': {'lf_schema': out.attrs.get('lf_schema', 2),
+                          'lf_corrected': bool(out.attrs.get('lf_corrected',
+                                                             False))},
             }
+        return {
+            'model': tokens.model, 'family': run.family,
+            'material': run.material, 'materials': list(tokens.materials),
+            'flake_material': tokens.flake_material,
+            'size': run.size, 'size_x': tokens.size_x, 'size_y': tokens.size_y,
+            'substrate': tokens.substrate,
+            'substrate_amorphous': tokens.substrate_amorphous,
+            'tip_material': tokens.tip_material,
+            'tip_radius': tokens.tip_radius,
+            'temperature': tokens.temperature, 'layers': tokens.layers,
+            'potential': tokens.pot_token, 'rel_path': tokens.rel_path,
+            'load_kind': run.load_kind, 'load': run.load, 'angle': run.angle,
+            'speed': run.speed, 'n_layers': run.n_layers,
+            'tiers': tiers, 'post': dict(run.post),
+        }
 
-            with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(output_with_metadata, f, cls=_NpEncoder)
-            logger.info("Full time-series data for size %s exported to %s", size_key, output_path)
+    def export_payload(self, size: str, runs: List[RunFrames]) -> Dict[str, Any]:
+        """The whole v2 document for one size."""
+        payloads = [self.run_payload(run) for run in runs]
+        units: Dict[str, str] = {}
+        for run, payload in zip(runs, payloads):
+            for tier in payload['tiers'].values():
+                units.update(units_for_columns(tier['columns'], run.family))
+        return {
+            'schema': EXPORT_SCHEMA,
+            'size': size,
+            'generated_by': 'FrictionSim2D',
+            'units': dict(sorted(units.items())),
+            'metadata': self._build_metadata(runs),
+            'runs': payloads,
+        }
+
+    def export_full_data_to_json(self) -> List[Path]:
+        """Write one `output_full_<size>.json` per size; return the paths."""
+        written: List[Path] = []
+        for size, runs in sorted(self.runs_by_size().items()):
+            path = self._get_output_path(f'output_full_{size}.json')
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(self.export_payload(size, runs), fh, cls=_NpEncoder,
+                          indent=1, sort_keys=False)
+            written.append(path)
+            logger.info("Exported %d run(s) for size %s to %s",
+                        len(runs), size, path)
+        return written
 
     def export_issue_reports(self) -> None:
         """Export reports on incomplete files and materials to text files."""

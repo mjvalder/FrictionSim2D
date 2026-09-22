@@ -8,12 +8,17 @@ and one of the two arms vanished without a warning.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
+import pytest
 
+from src.core.observables import FAMILIES
 from src.postprocessing.read_data import (DataReader, LoadPoint, RunFrames,
                                           parse_results_name)
 from tests.helpers.results_tree import make_family_run
+
+GOLDEN_DIR = Path(__file__).resolve().parents[1] / 'fixtures' / 'golden'
 
 
 def test_parse_results_name_reads_a_window_file():
@@ -312,3 +317,89 @@ def test_runs_by_size_groups_and_sorts(tmp_path):
 
     assert sorted(grouped) == ['100x100y', '50x50y']
     assert len(grouped['50x50y']) == 1
+
+
+def test_export_writes_one_file_per_size(tmp_path):
+    make_family_run(tmp_path, 'afm', size=(100.0, 100.0))
+    make_family_run(tmp_path, 'afm', size=(50.0, 50.0))
+
+    written = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+
+    assert sorted(p.name for p in written) == [
+        'output_full_100x100y.json', 'output_full_50x50y.json']
+    assert all(p.parent.name == 'outputs' for p in written)
+
+
+def test_v2_document_shape(tmp_path):
+    make_family_run(tmp_path, 'afm', pot='sw_a', loads=(10.0, 30.0),
+                    angles=(0.0, 90.0), tiers=('window', 'raw'),
+                    final_data=True)
+
+    written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+    doc = json.loads(written.read_text(encoding='utf-8'))
+
+    assert doc['schema'] == 2
+    assert doc['size'] == '100x100y'
+    assert doc['generated_by'] == 'FrictionSim2D'
+    assert doc['units']['time'] == 'step'
+    assert doc['units']['nf'] == 'nN'
+    assert doc['units']['cof'] == '1'
+    assert doc['units']['lateral_force'] == 'nN'
+    assert doc['metadata']['families'] == ['afm']
+    assert doc['metadata']['potentials'] == ['pot_sw_a']
+    assert doc['metadata']['tiers'] == ['raw', 'window']
+    assert doc['metadata']['summary_definition']['skip_fraction'] == 0.2
+    assert 'ratio_of_means' in doc['metadata']['summary_definition']['cof']
+    assert len(doc['runs']) == 4
+
+    run = doc['runs'][0]
+    assert set(run) == {
+        'model', 'family', 'material', 'materials', 'flake_material', 'size',
+        'size_x', 'size_y', 'substrate', 'substrate_amorphous', 'tip_material',
+        'tip_radius', 'temperature', 'layers', 'potential', 'rel_path',
+        'load_kind', 'load', 'angle', 'speed', 'n_layers', 'tiers', 'post'}
+    assert run['load_kind'] == 'force'
+    assert set(run['tiers']) == {'window', 'raw'}
+    assert run['tiers']['window']['columns'][0] == 'time'
+    assert 'cof' in run['tiers']['window']['columns']
+    assert 'cof' not in run['tiers']['raw']['columns']
+    assert run['tiers']['window']['attrs']['lf_schema'] == 2
+    assert run['post'] == {'gap_min': pytest.approx(3.1),
+                           'deflect_max': pytest.approx(0.4)}
+
+
+def test_runs_are_sorted_in_the_document(tmp_path):
+    make_family_run(tmp_path, 'afm', loads=(30.0, 10.0), angles=(90.0, 0.0))
+
+    written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+    runs = json.loads(written.read_text(encoding='utf-8'))['runs']
+
+    keys = [(r['rel_path'], r['load_kind'], r['load'], r['angle'], r['speed'])
+            for r in runs]
+    assert keys == sorted(keys)
+
+
+def test_a_run_without_final_data_has_an_empty_post(tmp_path):
+    make_family_run(tmp_path, 'sheetonsheet')
+
+    written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+
+    assert json.loads(written.read_text(encoding='utf-8'))['runs'][0]['post'] == {}
+
+
+@pytest.mark.parametrize('family', FAMILIES)
+def test_golden_export_per_family(tmp_path, family):
+    """The whole document is pinned, byte for byte after a stable dump.
+
+    A golden is the only test that catches a key silently disappearing --
+    every targeted assertion above passes just as happily on a document that
+    lost three keys nobody asserted on."""
+    make_family_run(tmp_path, family, final_data=True, n=4,
+                    tiers=('window', 'raw'))
+
+    written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+    produced = json.loads(written.read_text(encoding='utf-8'))
+    golden = json.loads(
+        (GOLDEN_DIR / f'output_full_v2_{family}.json').read_text(encoding='utf-8'))
+
+    assert produced == golden

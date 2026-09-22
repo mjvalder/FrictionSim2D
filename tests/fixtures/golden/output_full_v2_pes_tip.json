@@ -1,0 +1,241 @@
+{
+ "schema": 2,
+ "size": "100x100y",
+ "generated_by": "FrictionSim2D",
+ "units": {},
+ "metadata": {
+  "families": [
+   "pes_tip"
+  ],
+  "models": [
+   "pes_tip"
+  ],
+  "materials": [
+   "h_MoS2"
+  ],
+  "material_types": {
+   "b_type": [],
+   "h_type": [
+    "h_MoS2"
+   ],
+   "t_type": [],
+   "p_type": [],
+   "other": []
+  },
+  "potentials": [],
+  "temperatures": [
+   300.0
+  ],
+  "sizes": [
+   "100x100y"
+  ],
+  "layers": [
+   2
+  ],
+  "speeds": [
+   0.0
+  ],
+  "substrates": [
+   "Si"
+  ],
+  "tip_materials": [
+   "Si"
+  ],
+  "tip_radii": [
+   25.0
+  ],
+  "loads_by_kind": {
+   "force": {},
+   "pressure": {},
+   "none": {
+    "0.0": [
+     0.0
+    ]
+   }
+  },
+  "tiers": [
+   "window"
+  ],
+  "ntimestep": 16,
+  "time_series": [],
+  "summary_definition": {
+   "cof": "ratio_of_means: mean(LF)/mean(NF)",
+   "skip_fraction": 0.2,
+   "source": "src.data.models.summarise_run"
+  }
+ },
+ "runs": [
+  {
+   "model": "pes_tip",
+   "family": "pes_tip",
+   "material": "h_MoS2",
+   "materials": [
+    "h-MoS2"
+   ],
+   "flake_material": null,
+   "size": "100x100y",
+   "size_x": 100.0,
+   "size_y": 100.0,
+   "substrate": "Si",
+   "substrate_amorphous": true,
+   "tip_material": "Si",
+   "tip_radius": 25.0,
+   "temperature": 300.0,
+   "layers": 2,
+   "potential": null,
+   "rel_path": "pes_tip/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2",
+   "load_kind": "none",
+   "load": 0.0,
+   "angle": 0.0,
+   "speed": 0.0,
+   "n_layers": 2,
+   "tiers": {
+    "window": {
+     "columns": [
+      "x",
+      "y",
+      "energy_eV",
+      "fx",
+      "fy",
+      "fz"
+     ],
+     "data": [
+      [
+       0.0,
+       0.0,
+       -1.0,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       0.0,
+       1.0,
+       -0.9,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       0.0,
+       2.0,
+       -0.8,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       0.0,
+       3.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       0.0,
+       -0.9,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       1.0,
+       -0.8,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       2.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       3.0,
+       -0.6,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       0.0,
+       -0.8,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       1.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       2.0,
+       -0.6,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       3.0,
+       -0.5,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       0.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       1.0,
+       -0.6,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       2.0,
+       -0.5,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       3.0,
+       -0.3999999999999999,
+       0.1,
+       0.2,
+       -3.0
+      ]
+     ],
+     "attrs": {
+      "lf_schema": 2,
+      "lf_corrected": false
+     }
+    }
+   },
+   "post": {}
+  }
+ ]
+}

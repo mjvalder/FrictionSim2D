@@ -1,0 +1,327 @@
+{
+ "schema": 2,
+ "size": "100x100y",
+ "generated_by": "FrictionSim2D",
+ "units": {
+  "cof": "1",
+  "comx": "A",
+  "comx_L1": "A",
+  "comx_L2": "A",
+  "comy": "A",
+  "comy_L1": "A",
+  "comy_L2": "A",
+  "comz": "A",
+  "comz_L1": "A",
+  "comz_L2": "A",
+  "etotal": "eV",
+  "ke": "eV",
+  "lateral_force": "nN",
+  "lfx": "nN",
+  "lfy": "nN",
+  "nf": "nN",
+  "pe": "eV",
+  "raw_lfx": "nN",
+  "raw_lfy": "nN",
+  "raw_nf": "nN",
+  "raw_tipx": "A",
+  "raw_tipy": "A",
+  "raw_tipz": "A",
+  "temp_sheet_3d": "K",
+  "time": "step",
+  "tipx": "A",
+  "tipy": "A",
+  "tipz": "A",
+  "w_thermostat_sub": "eV",
+  "w_thermostat_tip": "eV"
+ },
+ "metadata": {
+  "families": [
+   "indent"
+  ],
+  "models": [
+   "indent"
+  ],
+  "materials": [
+   "h_MoS2"
+  ],
+  "material_types": {
+   "b_type": [],
+   "h_type": [
+    "h_MoS2"
+   ],
+   "t_type": [],
+   "p_type": [],
+   "other": []
+  },
+  "potentials": [],
+  "temperatures": [
+   300.0
+  ],
+  "sizes": [
+   "100x100y"
+  ],
+  "layers": [
+   2
+  ],
+  "speeds": [
+   2.0
+  ],
+  "substrates": [
+   "Si"
+  ],
+  "tip_materials": [
+   "Si"
+  ],
+  "tip_radii": [
+   25.0
+  ],
+  "loads_by_kind": {
+   "force": {
+    "30.0": [
+     0.0
+    ]
+   },
+   "pressure": {}
+  },
+  "tiers": [
+   "raw",
+   "window"
+  ],
+  "ntimestep": 4,
+  "time_series": [
+   1000,
+   2000,
+   3000,
+   4000
+  ],
+  "summary_definition": {
+   "cof": "ratio_of_means: mean(LF)/mean(NF)",
+   "skip_fraction": 0.2,
+   "source": "src.data.models.summarise_run"
+  }
+ },
+ "runs": [
+  {
+   "model": "indent",
+   "family": "indent",
+   "material": "h_MoS2",
+   "materials": [
+    "h-MoS2"
+   ],
+   "flake_material": null,
+   "size": "100x100y",
+   "size_x": 100.0,
+   "size_y": 100.0,
+   "substrate": "Si",
+   "substrate_amorphous": true,
+   "tip_material": "Si",
+   "tip_radius": 25.0,
+   "temperature": 300.0,
+   "layers": 2,
+   "potential": null,
+   "rel_path": "indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2",
+   "load_kind": "force",
+   "load": 30.0,
+   "angle": 0.0,
+   "speed": 2.0,
+   "n_layers": 2,
+   "tiers": {
+    "raw": {
+     "columns": [
+      "time",
+      "raw_tipx",
+      "raw_tipy",
+      "raw_tipz",
+      "raw_lfx",
+      "raw_lfy",
+      "raw_nf"
+     ],
+     "data": [
+      [
+       1000.0,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1
+      ],
+      [
+       2000.0,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2
+      ],
+      [
+       3000.0,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3
+      ],
+      [
+       4000.0,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4
+      ]
+     ],
+     "attrs": {
+      "lf_schema": 2,
+      "lf_corrected": false
+     }
+    },
+    "window": {
+     "columns": [
+      "time",
+      "comx",
+      "comx_L1",
+      "comx_L2",
+      "tipx",
+      "comy",
+      "comy_L1",
+      "comy_L2",
+      "tipy",
+      "comz",
+      "comz_L1",
+      "comz_L2",
+      "tipz",
+      "etotal",
+      "lfx",
+      "lfy",
+      "nf",
+      "ke",
+      "pe",
+      "temp_sheet_3d",
+      "w_thermostat_sub",
+      "w_thermostat_tip",
+      "lateral_force",
+      "cof"
+     ],
+     "data": [
+      [
+       1000.0,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.14142135623730953,
+       1.4142135623730951
+      ],
+      [
+       2000.0,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.28284271247461906,
+       1.4142135623730951
+      ],
+      [
+       3000.0,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.4242640687119285,
+       1.4142135623730951
+      ],
+      [
+       4000.0,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.5656854249492381,
+       1.4142135623730951
+      ]
+     ],
+     "attrs": {
+      "lf_schema": 2,
+      "lf_corrected": false
+     }
+    }
+   },
+   "post": {
+    "gap_min": 3.0999999999999996,
+    "deflect_max": 0.40000000000000036
+   }
+  }
+ ]
+}
