@@ -260,11 +260,11 @@ Builds a `tar.gz` of simulation inputs for cluster transfer; excludes
 
 ## Known gaps
 
-- **The flake family has no normal-load channel.** `channel_by_role('flake',
-  'normal_load')` has nothing to resolve, so `summarise_run` records COF as
-  `None` for every flake run. A flake result can still be ingested and
-  queried locally, but it cannot be published to the central database (which
-  requires a COF).
+- **Flake results written before 2026-09-22 have no COF.** Flake slides now
+  apply the configured pressure to the flake and record the normal force
+  `v_fz`, so `summarise_run` computes their COF and they can be published like
+  any sheet-on-sheet result. An older flake results file has no `v_fz` column:
+  it ingests with COF `None` and `is_complete=False`, and cannot be published.
 - **AFM's `provenance/` directory is not retrieved by the CalcJob.** The run
   node created at generation time (`run --aiida`) already holds the same
   provenance data as an attribute, so retrieving the directory again on

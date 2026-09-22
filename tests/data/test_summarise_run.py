@@ -128,18 +128,42 @@ def test_sheet_family_resolves_its_own_channel_names():
     assert 'driven_com_z_mean' not in out_afm.extras
 
 
-def test_flake_family_has_no_normal_load_channel_but_does_not_raise():
-    """R27: the registry declares no normal_load role for 'flake' (only
-    sheetonsheet/hetero carry nf@sheet). summarise_run must not raise, and
-    every stat that depends on nf -- including mean_cof and mean_nf -- must
-    come out None, never 0.0."""
-    out = summarise_run({'window': _window()}, 'flake')
+def test_flake_family_resolves_a_normal_load_and_gets_a_cof():
+    """flake/slide.lmp loads the flake and emits v_fz (follow-up C,
+    2026-09-22), so 'flake' resolves normal_load exactly like the sheet: its
+    COF is lateral force / normal load, and the run is complete. (It used to
+    be the known gap R27 -- no normal_load role, COF always None.)"""
+    assert channel_by_role('flake', 'normal_load').name == 'nf'
 
-    assert out.mean_cof is None
-    assert out.mean_nf is None
-    assert out.std_cof is None
-    assert out.mean_lfx is None
-    assert out.is_complete is False
+    df = _window()
+    out = summarise_run({'window': df}, 'flake')
+    kernel = compute_friction_stats(df['nf'].to_numpy(), df['lfx'].to_numpy(),
+                                    df['lfy'].to_numpy(), 0.2)
+
+    assert out.mean_cof == pytest.approx(kernel['mean_cof'])
+    assert out.mean_nf == pytest.approx(30.0)
+    assert out.is_complete is True
+    assert len(out.time_series_hash) == 64
+
+
+def test_flake_results_file_round_trips_to_a_cof(tmp_path):
+    """End to end over the synthetic writer: the flake window header now
+    carries v_fz, the reader renames it to nf, and summarise_run computes a
+    COF from it."""
+    from src.postprocessing.read_data import read_results_file
+    from tests.helpers.synthetic_results import make_run
+
+    run = make_run(tmp_path, 'sheetonsheet/h-MoS2+flake-h-MoS2/100x_100y/K300',
+                   'flake', loads=(1.0,))
+    friction = next((run / 'results').glob('friction_*.txt'))
+    header = friction.read_text().splitlines()[1].split()
+    assert 'v_fz' in header
+
+    frame = read_results_file(friction, 'flake')
+    assert 'nf' in frame.columns
+    out = summarise_run({'window': frame}, 'flake')
+    assert out.mean_cof is not None
+    assert out.is_complete is True
 
 
 def test_pes_family_gets_grid_descriptors_and_no_cof():

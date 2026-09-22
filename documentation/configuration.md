@@ -366,6 +366,37 @@ n_steps = 100        # retract steps
 seed = 20260710      # campaign base seed
 ```
 
+### [Flake] (sheet-on-sheet flake slide)
+
+A `[Flake]` section on a `run sheetonsheet` config builds a finite flake on a
+>=2-layer substrate sheet and drives the flake across it (no tip). A single
+`[Flake]` reuses the `[2D]` material; `[Flake-1]`/`[Flake-2]` make a hetero
+bilayer flake with `[Flake]` as the shape spec.
+
+```ini
+[Flake]
+shape = hexagon        # triangle | square | hexagon
+edge_length = 20       # Å: triangle/square side, hexagon circumradius
+rotation_deg = 0
+corner_spring_k = 10.0
+```
+
+**Normal load.** `[general] pressure` (GPa) is applied to the flake over its
+projected in-plane area, not the substrate box area. The area is that of the
+outline the builder carves:
+
+| shape | area (Å²) |
+|---|---|
+| `triangle` (side `a`) | `sqrt(3)/4 · a²` |
+| `square` (side `a`) | `a²` |
+| `hexagon` (circumradius `R`) | `(10 − 25·sqrt(3)/6) · R² ≈ 2.783 R²` — the carved outline is an irregular octagon, not a regular hexagon |
+
+Rotation and `twist_angle` do not change the area. The load `P·A` is spread
+equally over the flake's atoms (`fix addforce`). The results file records the
+felt normal force `v_fz` (nN, mean ≈ `P[GPa] · A[Å²] / 100`), so a flake run's
+COF is lateral force / normal load, as for sheet-on-sheet. Each pressure writes
+its own `friction_p<P>_…` file.
+
 ### [settings_override]
 
 Documented in legacy workflows but not currently merged in the active runtime path.

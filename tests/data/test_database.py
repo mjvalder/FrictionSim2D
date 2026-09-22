@@ -881,7 +881,7 @@ def test_query_materials_means_all_of_them():
 
 def test_an_empty_time_series_hash_is_uploaded_as_null():
     """m2: '' used to occupy the UNIQUE `time_series_hash` slot, so every
-    later hashless row (incomplete, flake) was skipped as a duplicate."""
+    later hashless row (e.g. an incomplete one) was skipped as a duplicate."""
     from src.data.models import ResultRecord
 
     assert ResultRecord(material='h-MoS2', time_series_hash='').time_series_hash is None

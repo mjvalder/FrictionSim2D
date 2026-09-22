@@ -2,8 +2,10 @@
 
 The flake (single-material or a hetero bilayer) is driven across a substrate
 sheet by a virtual-atom / COM spring. The substrate sheet's bottom band is
-fixed; its interior + the flake are thermostatted; lateral friction is read
-from the bottom-sheet reaction force (the many-body ``sw`` observable).
+fixed; its interior + the flake are thermostatted; the configured pressure
+loads the flake over its projected area; lateral friction is read from the
+bottom-sheet reaction force (the many-body ``sw`` observable) and the normal
+load from ``v_fz``.
 """
 import re
 import shutil
@@ -93,6 +95,9 @@ def _minimal_flake_slide_context():
         "flake_corner_k": 10.0,
         "corner_hold": True,
         "virtual_offset": 10.0,
+        "flake_area": 64.951905,
+        "flake_shape": "hexagon",
+        "flake_edge_length": 5.0,
     }
 
 
@@ -150,7 +155,9 @@ def test_flake_slide_drives_flake_group_not_layer():
     assert "reduce max z" not in script
     # Top-sheet-layer drive/load blocks are DROPPED (plan item 4/5).
     assert "fstage_top" not in script      # top sheet layer not rigidified/driven
-    assert "aveforce" not in script        # no normal load on the sheet top
+    # no aveforce anywhere: the sheet top is not loaded, and the flake's load
+    # is a per-atom addforce (aveforce would average its forces away)
+    assert not re.search(r"^fix\s+\S+\s+\S+\s+aveforce", script, re.M)
     # No undefined layer_0 (a 2-layer sheet must never reference n_layers-2).
     assert "layer_0" not in script
 
@@ -748,3 +755,238 @@ def test_flake_slide_still_accepts_a_single_material_flake(tmp_path):
 
     with pytest.raises(ValueError, match=r"[Aa]t least 2"):
         sim.build()
+
+
+# --------------------------------------------------------------------------- #
+# Normal load on the flake (follow-up C, 2026-09-22): the flake slide applies
+# the configured pressure over the flake's PROJECTED in-plane area and emits
+# the felt normal force v_fz, so a flake run gets a COF defined like
+# sheet-on-sheet (lateral force / normal load).
+# --------------------------------------------------------------------------- #
+
+def _carved_area(shape: str, edge_length: float, rotation_deg: float,
+                 step: float = 0.02) -> float:
+    """Numerically integrate the builder's OWN carving predicate on a grid.
+
+    Independent of the closed-form formula under test: it counts grid cells
+    inside `components._in_*`, the exact test `build_flake` uses to keep atoms.
+    """
+    import numpy as np
+    from src.builders.construction import components as comp
+
+    inside = {
+        "triangle": lambda x, y: comp._in_equilateral_triangle(x, y, edge_length),
+        "square": lambda x, y: comp._in_square(x, y, edge_length, (0.0, 0.0), rotation_deg),
+        "hexagon": lambda x, y: comp._in_hexagon(x, y, edge_length, (0.0, 0.0), rotation_deg),
+    }[shape]
+    half = 1.1 * edge_length
+    grid = np.arange(-half, half, step) + step / 2.0
+    count = sum(1 for x in grid for y in grid if inside(float(x), float(y)))
+    return count * step * step
+
+
+@pytest.mark.parametrize("shape, edge, expected", [
+    ("triangle", 10.0, 3 ** 0.5 / 4.0 * 100.0),        # side a: sqrt(3)/4 a^2
+    ("square", 10.0, 100.0),                            # side a: a^2
+    # circumradius R. `_in_hexagon` carves an irregular octagon (its oblique
+    # strips' normals are at +-60 deg, not +-30), so the carved area is
+    # (10 - 25 sqrt(3)/6) R^2, not the regular 3 sqrt(3)/2 R^2 -- see
+    # flake_projected_area's docstring.
+    ("hexagon", 10.0, (10.0 - 25.0 * 3 ** 0.5 / 6.0) * 100.0),
+])
+def test_flake_projected_area_closed_form_per_shape(shape, edge, expected):
+    from src.builders.sheetonsheet.flake_slide import flake_projected_area
+
+    assert flake_projected_area(shape, edge) == pytest.approx(expected, rel=1e-12)
+
+
+@pytest.mark.parametrize("shape", ["triangle", "square", "hexagon"])
+@pytest.mark.parametrize("rotation_deg", [0.0, 17.0, 45.0])
+def test_flake_projected_area_matches_the_carving_predicate(shape, rotation_deg):
+    """The formula is the area of the outline `build_flake` actually cuts, for
+    every supported shape and independent of in-plane rotation (rotation_deg
+    and the D3b twist are rigid rotations: area-preserving)."""
+    from src.builders.sheetonsheet.flake_slide import flake_projected_area
+
+    edge = 8.0
+    assert _carved_area(shape, edge, rotation_deg) == pytest.approx(
+        flake_projected_area(shape, edge), rel=5e-3)
+
+
+def test_flake_projected_area_refuses_an_unknown_shape():
+    from src.builders.sheetonsheet.flake_slide import flake_projected_area
+
+    with pytest.raises(ValueError, match="circle"):
+        flake_projected_area("circle", 5.0)
+
+
+def test_flake_load_context_uses_the_flake_outline_not_the_box():
+    """The render context carries the FLAKE's area (hexagon, R=5 A), not the
+    substrate box's -- the load is a pressure on the flake contact."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    sim = FlakeSlideSimulation(cfg, "unused")
+    ctx = sim._normal_load_context()
+    assert ctx["flake_shape"] == "hexagon"
+    assert ctx["flake_edge_length"] == pytest.approx(5.0)
+    assert ctx["flake_area"] == pytest.approx((10.0 - 25.0 * 3 ** 0.5 / 6.0) * 25.0)
+
+
+def _loaded_ctx(**overrides):
+    ctx = _minimal_flake_slide_context()
+    ctx.update({"pressures": [0.5, 1.0], "flake_area": 64.951905,
+                "flake_shape": "hexagon", "flake_edge_length": 5.0})
+    ctx.update(overrides)
+    return ctx
+
+
+def _first_line(script: str, pattern: str) -> int:
+    for i, line in enumerate(script.splitlines()):
+        if re.search(pattern, line):
+            return i
+    raise AssertionError(f"no line matches {pattern!r}")
+
+
+def test_flake_slide_applies_the_pressure_over_the_flake_area():
+    script = _render_flake_slide_for_test(_loaded_ctx())
+
+    assert re.search(r"variable\s+A equal 64\.951905\b", script)
+    assert re.search(r"variable\s+p equal v_pressure/160\.2176565", script)
+    assert re.search(r"variable\s+f equal -v_p\*v_A/\(count\(flake\)\)", script)
+    # the flake (the driven body) receives the load, as a per-atom addforce --
+    # not aveforce, which would average away the deformable flake's forces
+    assert re.search(r"fix\s+force flake addforce 0\.0 0\.0 \$f", script)
+    assert not re.search(r"^fix\s+\S+\s+\S+\s+aveforce", script, re.M)
+    assert re.search(r"variable\s+fz equal f_force\[3\]\*160\.2176565", script)
+
+
+def test_flake_slide_emits_the_normal_force_in_the_results_file():
+    script = _render_flake_slide_for_test(_loaded_ctx())
+    fc_win = [l for l in script.splitlines() if "fc_win" in l and "ave/time" in l]
+    assert fc_win and " v_fz" in fc_win[0]
+
+
+def test_flake_load_precedes_the_thermostat_and_the_equilibration_run():
+    """Load then equilibrate then slide (the sheet ordering), and the load fix
+    precedes every other force-modifying fix so f_force[3] -- the group force
+    BEFORE the load is added -- is the sheet-flake interaction alone."""
+    script = _render_flake_slide_for_test(_loaded_ctx(thermostat_type="langevin"))
+    load = _first_line(script, r"^fix\s+force flake addforce")
+    assert load < _first_line(script, r"^fix\s+lang center langevin")
+    assert load < _first_line(script, r"^fix\s+corner_hold")
+    assert load < _first_line(script, r"^run\s+10000")
+    assert load < _first_line(script, r"^fix\s+spr ")
+
+
+_DEF_PATTERNS = {
+    "v": re.compile(r"^variable\s+(\w+)\s"),
+    "c": re.compile(r"^compute\s+(\w+)\s"),
+    "f": re.compile(r"^fix\s+(\w+)\s"),
+}
+_REF = re.compile(r"\b([vcf])_(\w+)")
+
+
+def _undefined_references(script: str):
+    """Every v_/c_/f_ reference that precedes its definition, plus every
+    `unfix` naming no live fix. `clear` resets the fix/compute namespace (a
+    loop iteration); index variables survive it, as in LAMMPS."""
+    defined = {"v": set(), "c": set(), "f": set()}
+    problems = []
+    for n, raw in enumerate(script.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line == "clear":
+            defined["c"].clear()
+            defined["f"].clear()
+            continue
+        if line.startswith("unfix"):
+            name = line.split()[1]
+            if name not in defined["f"]:
+                problems.append((n, f"unfix {name}"))
+            defined["f"].discard(name)
+            continue
+        new = None
+        for kind, pat in _DEF_PATTERNS.items():
+            m = pat.match(line)
+            if m:
+                new = (kind, m.group(1))
+        body = line
+        if new is not None:
+            body = line.split(None, 2)[2] if len(line.split(None, 2)) > 2 else ""
+        for kind, name in _REF.findall(body):
+            if name not in defined[kind]:
+                problems.append((n, f"{kind}_{name}"))
+        if new is not None:
+            defined[new[0]].add(new[1])
+    return problems
+
+
+@pytest.mark.parametrize("drive_method", ["smd", "fix_move", "virtual_atom"])
+@pytest.mark.parametrize("constraint_mode", ["none", "com_spring"])
+@pytest.mark.parametrize("corner_hold", [True, False])
+@pytest.mark.parametrize("thermostat", ["langevin", "nose-hoover"])
+def test_loaded_flake_script_defines_everything_before_use(
+        drive_method, constraint_mode, corner_hold, thermostat):
+    script = _render_flake_slide_for_test(_loaded_ctx(
+        drive_method=drive_method, constraint_mode=constraint_mode,
+        corner_hold=corner_hold, thermostat_type=thermostat))
+    assert re.search(r"fix\s+force flake addforce", script)
+    assert _undefined_references(script) == []
+
+
+def test_the_def_before_use_checker_catches_a_missing_definition():
+    """The checker must be able to fail: drop the load fix and v_fz dangles."""
+    script = _render_flake_slide_for_test(_loaded_ctx())
+    broken = re.sub(r"^fix\s+force flake addforce.*$", "", script, flags=re.M)
+    assert any("f_force" in p for _n, p in _undefined_references(broken))
+
+
+@pytest.mark.parametrize("constraint_mode", ["none", "com_spring"])
+def test_no_flake_constraint_pins_z_against_the_load(constraint_mode):
+    """Every flake constraint leaves z free, so the applied load is carried by
+    the contact: com_spring couples x/y only (z NULL), corner-hold is
+    spring/self xy, and every drive tethers x/y only."""
+    for drive in ("smd", "fix_move", "virtual_atom"):
+        script = _render_flake_slide_for_test(_loaded_ctx(
+            constraint_mode=constraint_mode, drive_method=drive, corner_hold=True))
+        for line in script.splitlines():
+            if re.match(r"fix\s+com_spring ", line):
+                assert line.split()[-2] == "NULL", line
+            if re.match(r"fix\s+corner_hold ", line):
+                assert line.split()[-1] == "xy", line
+            if re.match(r"fix\s+spr ", line):
+                assert "NULL" in line.split(), line
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
+    """LAMMPS confirmation of the load block (lammps-marked; not in the fast
+    suite). With the flake's COM z-acceleration averaging to zero, the
+    pre-load group force the fix records (f_force[3], the sheet pushing up on
+    the flake) must average to +P*A_flake: in nN, P[GPa]*A[A^2]/100."""
+    from src.builders.sheetonsheet.flake_slide import (FlakeSlideSimulation,
+                                                       flake_projected_area)
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=False)
+    cfg.settings.simulation.drive_method = "virtual_atom"
+    cfg.settings.simulation.slide_run_steps = 4000
+    cfg.general.scan_speed = 100
+    cfg.general.pressure = 5.0
+
+    sim = FlakeSlideSimulation(cfg, str(tmp_path))
+    sim.build()
+    run_dir = sim.run_dir()
+    slide = next(Path(run_dir).rglob("*slide*.in"))
+    proc, out = _run_lammps_slide(run_dir, slide.name)
+    assert proc.returncode == 0, f"lmp_serial exited {proc.returncode}:\n{out[-3000:]}"
+    assert "Lost atoms" not in out
+
+    friction = next(run_dir.rglob("friction_*"))
+    cols, rows = _read_friction_records(friction)
+    assert "v_fz" in cols
+    fz = [r[cols.index("v_fz")] for r in rows]
+    expected = 5.0 * flake_projected_area("hexagon", 5.0) / 100.0   # nN
+    mean_fz = sum(fz) / len(fz)
+    assert mean_fz == pytest.approx(expected, rel=0.3), (fz, expected)

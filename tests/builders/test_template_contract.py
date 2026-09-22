@@ -691,7 +691,8 @@ def _render_flake_slide(n_layers: int) -> str:
         ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
         bond_spring_ev=3.0, flake_group_types='5 6', flake_corner_types='6',
         flake_corner_k=10.0, corner_hold=True, virtual_offset=3.16,
-        reserve_virtual_type=False,
+        reserve_virtual_type=False, flake_area=64.95, flake_shape='hexagon',
+        flake_edge_length=5.0,
     )
 
 
@@ -723,15 +724,19 @@ def test_flake_drive_com_maps_to_the_flake_body():
     assert 'v_comx_top' not in m
 
 
-def test_flake_gains_no_energy_or_normal_load_channels():
-    """flake/slide.lmp defines no v_etot/v_pe_now/v_ke_now, no v_fx/v_fy/v_fz
-    (no fix aveforce on a driven layer -- the flake is driven by a spring),
-    and no interlayer/contact channel. Emitting any of these would reference
-    an undefined LAMMPS variable at setup."""
+def test_flake_gains_no_energy_channels_but_emits_the_normal_load():
+    """flake/slide.lmp defines no v_etot/v_pe_now/v_ke_now, no v_fx/v_fy and
+    no interlayer/contact channel -- emitting any of these would reference an
+    undefined LAMMPS variable at setup. It DOES define v_fz (the flake load,
+    `fix force flake addforce`, follow-up C 2026-09-22), and the window tier
+    must carry it: it is the COF denominator."""
     ctx = _flake_obs_ctx(n_layers=4)
     emitted = set(ctx['window_varlist'].split())
-    forbidden = {'v_etot', 'v_pe_now', 'v_ke_now', 'v_fx', 'v_fy', 'v_fz'}
+    forbidden = {'v_etot', 'v_pe_now', 'v_ke_now', 'v_fx', 'v_fy'}
     assert not (forbidden & emitted)
+    assert 'v_fz' in emitted
+    assert re.search(r'^variable\s+fz equal f_force\[3\]\*',
+                     _render_flake_slide(4), re.M)
     assert ctx['raw_varlist'] == ''
     assert ctx['peratom_varlist'] == ''
     assert ctx['emit_raw'] is False

@@ -368,12 +368,19 @@ _add(Observable(name='lfy', key='lfy@sheet',
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_yfrict', units='nN',
                 role_key='lateral_force_y'))
-_add(Observable(name='nf', key='nf@sheet', sim_types=('sheetonsheet', 'hetero'),
+# 'flake' too: flake/slide.lmp loads the flake with `fix force flake addforce`
+# (pressure x the flake's projected area) and emits v_fz = f_force[3] in nN,
+# so a flake run's COF is lateral force / normal load like the sheet's.
+# `group` is a label (the sheet's driven top layer); for flake the loaded
+# body is the flake group.
+_add(Observable(name='nf', key='nf@sheet',
+                sim_types=('sheetonsheet', 'hetero', 'flake'),
                 group='layer_n', tier='window', stream='results',
                 rename_to='v_fz', units='nN', role_key='normal_load'))
 # nf and drive_fx/drive_fy are inconsistent siblings: all three come from
 # f_force[1..3] on one fix aveforce, but v_fz is named nf because every
 # downstream COF consumer expects it. Back-compatibility beats symmetry.
+# The flake template defines only v_fz, so drive_fx/fy stay sheet/hetero.
 for _ax, _native in (('x', 'v_fx'), ('y', 'v_fy')):
     _add(Observable(name=f'drive_f{_ax}', sim_types=('sheetonsheet', 'hetero'),
                     group='layer_n', tier='window', stream='results',

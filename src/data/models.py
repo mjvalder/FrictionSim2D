@@ -444,7 +444,7 @@ class ResultRecord(BaseModel):
     @field_validator('time_series_hash', mode='before')
     @classmethod
     def _empty_hash_is_none(cls, value: Any) -> Any:
-        """`''` (no hash: an incomplete row, a flake with no resolved roles)
+        """`''` (no hash: an incomplete row whose roles did not resolve)
         becomes None. The column is UNIQUE, and '' would occupy that one slot
         so every later hashless row was silently skipped as a duplicate;
         NULLs never collide."""

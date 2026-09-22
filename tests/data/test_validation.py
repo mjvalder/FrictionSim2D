@@ -94,9 +94,11 @@ def test_bookkeeping_only_extras_with_no_cof_is_incomplete():
 
 
 def test_a_realistic_flake_row_without_a_cof_is_refused():
-    """A flake run whose role columns never resolved: summarise_run sets
-    is_complete=False and mean_cof stays None, but extras still carries the
-    bookkeeping keys to_record always writes -- neither should let it pass.
+    """A flake run whose role columns never resolved (e.g. a results file
+    from before flake slides applied a load, with no `v_fz` column):
+    summarise_run sets is_complete=False and mean_cof stays None, but extras
+    still carries the bookkeeping keys to_record always writes -- neither
+    should let it pass.
     """
     record = _record(family='flake', model='sheetonsheet', mean_cof=None,
                      force_nN=None, pressure_gpa=1.0, is_complete=False,

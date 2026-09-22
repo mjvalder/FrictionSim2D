@@ -22,8 +22,8 @@ from tests.helpers.synthetic_results import (            # noqa: E402
 pytestmark = [pytest.mark.integration, pytest.mark.aiida]
 
 #: Every shipped example. `HETERO` is added below under its own lmp_serial
-#: guard; the `flake` family has no shipped example at all (R27) and is
-#: covered separately, from a synthetic tree.
+#: guard; the `flake` family has no shipped example at all and is covered
+#: separately, from a synthetic tree.
 ROUND_TRIP_CASES = [(name, model) for name, model, _members in CASES]
 
 
@@ -132,10 +132,10 @@ def test_round_trip_hetero(aiida_profile_clean, tmp_path):
 
 
 def test_round_trip_flake_synthetic(aiida_profile_clean, tmp_path):
-    """R27: no example .ini produces family='flake' (the registry gives it no
-    normal-load channel, so its COF is always None), so the shipped-example
-    cases above never exercise it. Cover it directly from a synthetic tree
-    instead of inventing an example config or a normal-load channel for it.
+    """No example .ini produces family='flake', so the shipped-example cases
+    above never exercise it. Cover it directly from a synthetic tree. Since
+    flake slides apply a load (2026-09-22) the synthetic window file carries
+    `v_fz`, so the ingested results have a COF like any sheet run.
     """
     root = tmp_path / 'simulation_flake'
     rel = 'sheetonsheet/h-MoS2+flake-h-WS2/100x_100y/K300'
@@ -145,6 +145,14 @@ def test_round_trip_flake_synthetic(aiida_profile_clean, tmp_path):
     assert report.ok(), report.render()
     assert report.created_runs
     assert report.created_results
+
+    from aiida.orm import QueryBuilder
+    from src.aiida.data import FrictionResultsData
+    nodes = QueryBuilder().append(FrictionResultsData).all(flat=True)
+    assert len(nodes) == 2
+    for node in nodes:
+        assert node.base.attributes.get('mean_cof') is not None
+        assert node.base.attributes.get('is_complete') is True
 
     exported = tmp_path / 'exported'
     export_results('rt-flake', exported)

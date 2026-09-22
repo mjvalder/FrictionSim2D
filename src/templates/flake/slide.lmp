@@ -7,9 +7,11 @@
 #   * the DRIVEN group is the flake (by type), NOT a sheet layer_N;
 #   * the sheet bottom band (layer_1) is fixed; the sheet interior
 #     (layer_2..layer_{{ n_layers }}) + the flake are thermostatted;
-#   * the tip-approach, top-sheet-layer rigidify and normal-load blocks are
-#     DROPPED -- a flake slide has no tip and no load on the sheet top; the
-#     flake sits at the minimized gap;
+#   * the tip-approach and top-sheet-layer rigidify blocks are DROPPED -- a
+#     flake slide has no tip, and the sheet top is not a driven body;
+#   * the normal load acts on the FLAKE: pressure x the flake's projected area
+#     (not the box area), as a per-atom fix addforce (not aveforce -- see the
+#     load block);
 #   * optional corner-hold keeps the flake rigid in-plane while driven;
 #   * friction proxy = bottom-sheet reaction force (many-body sw observable).
 
@@ -80,6 +82,29 @@ balance         1.0 rcb
 
 min_style       {{ min_style }}
 {{ minimization_command }}
+
+# ---- Normal load on the flake (the driven body) ----
+# Uniform pressure v_pressure (GPa) over the flake's PROJECTED in-plane area,
+# from the [Flake] outline ({{ flake_shape }}, edge_length {{ flake_edge_length }} A):
+#   triangle (side a): sqrt(3)/4 a^2 | square (side a): a^2
+#   hexagon (circumradius R): (10 - 25 sqrt(3)/6) R^2, the outline
+#   components._in_hexagon actually carves (see flake_projected_area).
+# Rotation/twist-invariant. A = {{ '%.4f'|format(flake_area) }} A^2 here.
+# 1 eV/A^3 = {{ ev_a3_to_gpa }} GPa; total load P*A (eV/A) split equally per
+# flake atom, pointing down onto the sheet -- sheetonsheet/slide.lmp's
+# conversion with the flake area in place of the box area.
+# fix addforce, NOT aveforce: aveforce replaces every atom's force by the group
+# mean, which is harmless on the sheet's rigid/nve top layer but would erase
+# the deformable flake's internal, thermostat and corner-hold forces.
+# Defined BEFORE the thermostat, corner-hold and drive fixes so f_force[1..3]
+# (the group force before this fix adds the load) is the sheet-flake
+# interaction alone; its time mean balances the load, so v_fz = +P*A in steady
+# sliding and is the COF denominator, in nN like the lateral channels.
+variable        A equal {{ flake_area }}
+variable        p equal v_pressure/{{ ev_a3_to_gpa }}
+variable        f equal -v_p*v_A/(count(flake))
+fix             force flake addforce 0.0 0.0 $f
+variable        fz equal f_force[3]*{{ ev_a_to_nn }}
 
 # Thermostat: the substrate-sheet interior (layer 2 .. {{ n_layers }}) + the flake.
 group           center union {% for i in range(2, n_layers + 1) %}layer_{{ i }} {% endfor %}flake

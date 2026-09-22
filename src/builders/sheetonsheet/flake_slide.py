@@ -1,15 +1,19 @@
 """D4 flake-driven slide: a finite flake driven across a substrate sheet.
 
-A finite flake (single-material or a hetero bilayer) sits on a substrate sheet
-at the minimized flake--sheet gap and is driven laterally by a virtual-atom /
-COM spring (no tip, no substrate slab). The substrate sheet's bottom band is
-fixed; its interior + the flake are thermostatted; lateral friction is read
-from the bottom-sheet reaction force (the many-body ``sw`` observable).
+A finite flake (single-material or a hetero bilayer) is placed on a substrate
+sheet at the minimized flake--sheet gap, pressed onto it by the configured
+normal pressure (applied over the flake's projected area, see
+:func:`flake_projected_area`) and driven laterally by a virtual-atom / COM
+spring (no tip, no substrate slab). The substrate sheet's bottom band is fixed;
+its interior + the flake are thermostatted; lateral friction is read from the
+bottom-sheet reaction force (the many-body ``sw`` observable) and the normal
+load from the force the sheet exerts on the flake (``v_fz``), so COF is
+lateral force / normal load exactly as for sheet-on-sheet.
 
 This reuses the D1 slide body (``templates/hetero/slide.lmp``) via a dedicated
-``templates/flake/slide.lmp`` in which the driven group is the flake (by type),
-the tip/load blocks are dropped, and the substrate-sheet layer groups are the
-z-region bands.
+``templates/flake/slide.lmp`` in which the driven and loaded group is the flake
+(by type), the tip block is dropped, and the substrate-sheet layer groups are
+the z-region bands.
 """
 import logging
 from pathlib import Path
@@ -30,6 +34,46 @@ from ...interfaces.ase import read_lammps_data
 logger = logging.getLogger(__name__)
 
 PAD = 1.0  # Å pad above/below each sheet layer's atom z-range (mirrors hetero_slide.PAD)
+
+
+def flake_projected_area(shape: str, edge_length: float) -> float:
+    """Projected in-plane area (Å²) of the outline ``build_flake`` carves.
+
+    The flake-slide normal load is a pressure over this area (the sheet slide
+    uses the periodic box area instead; a finite flake's contact is its own
+    footprint). ``edge_length`` means what :class:`FlakeConfig` says it means:
+
+    * ``triangle`` -- equilateral, side ``a``: ``A = sqrt(3)/4 * a**2``
+    * ``square``   -- side ``a``: ``A = a**2``
+    * ``hexagon``  -- circumradius ``R``: ``A = (10 - 25*sqrt(3)/6) * R**2``
+      (~2.7831 R**2), NOT the regular hexagon's ``3*sqrt(3)/2 * R**2``
+      (~2.5981 R**2). ``components._in_hexagon`` bounds ``|x| <= R``,
+      ``|y| <= sqrt(3)/2 R`` and two oblique strips whose normals sit at +-60
+      deg rather than +-30 deg, so the outline it actually carves is an
+      irregular octagon with first-quadrant vertices (R, 0),
+      (R, (1 - 1/sqrt(3)) R), ((2 - sqrt(3)) sqrt(3)/2 R, sqrt(3)/2 R) and
+      (0, sqrt(3)/2 R). The load must act on the flake that exists, so the
+      area follows the predicate; ``test_flake_projected_area_matches_the_
+      carving_predicate`` fails the moment the predicate changes.
+
+    ``rotation_deg`` and the D3b twist are rigid in-plane rotations, so they
+    leave the area unchanged. The value is the geometric cut outline, not an
+    atom count: it differs from ``N_atoms * area_per_atom`` only by the edge
+    discretisation of the carved lattice.
+    """
+    a = float(edge_length)
+    shape_lower = shape.lower()
+    if shape_lower == "triangle":
+        return float(np.sqrt(3.0) / 4.0 * a * a)
+    if shape_lower == "square":
+        return a * a
+    if shape_lower == "hexagon":
+        return float((10.0 - 25.0 * np.sqrt(3.0) / 6.0) * a * a)
+    raise ValueError(
+        f"No projected-area formula for flake shape {shape!r} "
+        "(supported: triangle, square, hexagon)."
+    )
+
 
 def compute_sheet_zbands(sheet_path, n_layers: int, pad: float = PAD) -> List[Dict]:
     """Split a stacked substrate sheet's atoms into ``n_layers`` z-region bands.
@@ -72,12 +116,13 @@ class FlakeSlideSimulation(SimulationBase):
     """Builder for a finite flake driven across a substrate sheet (D4, no tip).
 
     Assembles a single-material (or hetero-bilayer) flake sitting on a
-    single-material substrate sheet at the minimized flake--sheet gap, and drives
-    the flake laterally by a virtual-atom / COM spring. The substrate sheet's
-    bottom band is fixed; its interior + the flake are thermostatted; lateral
-    friction is read from the bottom-sheet reaction force (the many-body ``sw``
-    observable). Routed from ``run sheetonsheet`` when a ``[Flake]`` section is
-    present.
+    single-material substrate sheet at the minimized flake--sheet gap, loads the
+    flake with ``pressure`` x its projected area, and drives the flake laterally
+    by a virtual-atom / COM spring. The substrate sheet's bottom band is fixed;
+    its interior + the flake are thermostatted; lateral friction is read from
+    the bottom-sheet reaction force (the many-body ``sw`` observable), the
+    normal load from ``v_fz``. Routed from ``run sheetonsheet`` when a
+    ``[Flake]`` section is present.
 
     Mirrors :class:`~src.builders.sheetonsheet.hetero.HeteroSheetOnSheetSimulation`'s
     run-dir-relative convention: everything (``flake_slide.data``,
@@ -174,6 +219,20 @@ class FlakeSlideSimulation(SimulationBase):
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
         )
+
+    def _normal_load_context(self) -> Dict[str, object]:
+        """Render keys for the flake normal-load block.
+
+        The ``[Flake]`` section is the shape spec for both a single-material
+        and a hetero (``[Flake-1]``/``[Flake-2]``) flake, so its
+        ``shape``/``edge_length`` give the contact outline either way.
+        """
+        flake = self.config.flake
+        return {
+            "flake_shape": flake.shape,
+            "flake_edge_length": float(flake.edge_length),
+            "flake_area": float(flake_projected_area(flake.shape, flake.edge_length)),
+        }
 
     def build(self) -> None:
         """Assemble the flake-on-sheet system and write ``lammps/slide.in``."""
@@ -401,6 +460,7 @@ class FlakeSlideSimulation(SimulationBase):
             "flake_corner_k": flake_cfg.corner_spring_k,
             "corner_hold": getattr(flake_cfg, "corner_hold", True),
             "virtual_offset": settings.geometry.lat_c_default,
+            **self._normal_load_context(),
         }
 
         script = self.render_template("flake/slide.lmp", context)
