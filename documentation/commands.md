@@ -420,15 +420,20 @@ Options:
 
 ### postprocess read
 
-Walk a simulation directory and export time-series data to JSON:
+Walk a simulation root and export its runs:
 
 ```bash
-FrictionSim2D postprocess read RESULTS_DIR [--export]
+FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
 ```
 
 Options:
 
-- `--export` — write `output_full_*.json` files alongside results
+- `--export` — write `outputs/output_full_<size>.json` (schema 2) **and**
+  `outputs/summary_<size>.csv`
+- `--skip-fraction FLOAT` (default `0.2`) — transient fraction dropped before the
+  summary statistics
+
+See [postprocessing.md](postprocessing.md) for both schemas.
 
 ### postprocess plot
 
@@ -441,9 +446,16 @@ FrictionSim2D postprocess plot PLOT_CONFIG [OPTIONS]
 Options:
 
 - `-o, --output-dir TEXT` (default: `plots`)
-- `--settings PATH` — additional JSON plot-style settings
+- `--settings PATH` — a partial `PlotSettings` JSON, merged over `--preset`
+- `--preset NAME` — a shipped settings preset (currently: `publication`)
+- `--validate` — validate the document against the plot schema and exit
+- `--schema` — print the plot schema as Markdown and exit (no `PLOT_CONFIG` needed)
+- `--init PATH` — write a valid starter plot document and exit
+- `--data-dir DIR` — with `--init`, a dataset directory to reference (repeatable)
 
-`PLOT_CONFIG` must define `data_dirs`, `labels`, and `plots`. See [examples.md](examples.md) and the reference config at [publication/plots_publication.json](publication/plots_publication.json).
+`PLOT_CONFIG` must define `data_dirs`, `labels`, and `plots`; unknown keys are errors.
+See [postprocessing.md](postprocessing.md) for the full schema, [examples.md](examples.md),
+and the reference config at [publication/plots_publication.json](publication/plots_publication.json).
 
 ### postprocess pes-scan
 

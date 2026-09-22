@@ -1,0 +1,759 @@
+# Postprocessing
+
+A simulation root goes in, `outputs/` comes out. `postprocess read` walks every run
+under a root, reads its results files, and writes two machine-readable exports plus the
+completeness reports. `postprocess plot` reads those exports — never the raw tree — and
+draws figures from a validated plot document.
+
+A "run" is one `provenance.json`. The walk is `src.run.tree.discover_runs`, and the
+directory is parsed by `src.run.naming.parse_run_path`, so the potential, the
+temperature, the twist and every other sweep axis reach the export as typed fields
+rather than as directory names nobody parsed.
+
+---
+
+## The output tree
+
+```
+<simulation root>/
+  afm/ sheetonsheet/ indent/ pes_tip/ pes_sheet/     the runs
+  outputs/
+    output_full_<size>.json          every run's time series, schema 2
+    summary_<size>.csv               one row per load point
+    incomplete_files_<size>.txt      runs whose window tier is short
+    incomplete_materials_<size>.txt  the materials those runs belong to
+```
+
+A *size* is the `100x100y` token built from the run's `size_x`/`size_y`. One export file
+per size, because a size is the one axis along which two runs are rarely compared
+directly.
+
+An incomplete run is **flagged, not dropped**: it stays in both exports and is listed in
+the reports. Flagging a run and discarding it are different decisions, and only the
+first belongs to the reader.
+
+---
+
+## `output_full_<size>.json` (schema 2)
+
+```jsonc
+{
+  "schema": 2,                       // int, always 2
+  "size": "100x100y",                // str, the export key
+  "generated_by": "FrictionSim2D",   // str, constant
+  "units": {                         // {column: unit}, from the observable registry
+    "time": "step",                  //   'time' is always 'step'
+    "nf": "nN", "lfx": "nN", "lfy": "nN",
+    "comz_L3": "A",
+    "lateral_force": "nN",           //   derived
+    "cof": "1"                       //   derived, dimensionless
+  },
+  "metadata": {
+    "families": ["afm"],                       // [str], sorted
+    "models": ["afm"],                         // [str], sorted
+    "materials": ["h_MoS2"],                   // [str], sorted, underscored
+    "material_types": {                        // {str: [str]}, five fixed keys
+      "b_type": [], "h_type": ["h_MoS2"], "t_type": [], "p_type": [], "other": []
+    },
+    "potentials": ["pot_sw_h-MoS2"],           // [str], sorted
+    "temperatures": [300.0],                   // [float], sorted
+    "sizes": ["100x100y"],                     // [str], sorted
+    "layers": [1, 2],                          // [int], sorted; [] for sheet-like
+    "speeds": [2.0],                           // [float], sorted
+    "substrates": ["Si"],                      // [str], sorted; [] for sheet-like
+    "tip_materials": ["Si"],                   // [str], sorted; [] for sheet-like
+    "tip_radii": [25.0],                       // [float], sorted; [] for sheet-like
+    "loads_by_kind": {                         // {kind: {load: [angles]}}
+      "force": {"30.0": [0.0, 90.0]},
+      "pressure": {}
+    },
+    "tiers": ["peratom", "raw", "window"],     // [str], sorted
+    "ntimestep": 500,                          // int, longest window frame
+    "time_series": [1000, 2000, 3000],         // [int], the first complete frame
+    "summary_definition": {                    // which COF made the summary numbers
+      "cof": "ratio_of_means: mean(LF)/mean(NF)",
+      "skip_fraction": 0.2,
+      "source": "src.data.models.summarise_run"
+    }
+  },
+  "runs": [                                    // sorted by
+                                               // (rel_path, load_kind, load, angle, speed)
+    {
+      "model": "afm",                          // str, the top directory
+      "family": "afm",                         // str, from provenance.json
+      "material": "h_MoS2",                    // str, underscored join key
+      "materials": ["h-MoS2"],                 // [str], as written on disk
+      "flake_material": null,                  // str | null
+      "size": "100x100y",                      // str
+      "size_x": 100.0, "size_y": 100.0,        // float
+      "substrate": "Si",                       // str | null
+      "substrate_amorphous": true,             // bool | null
+      "tip_material": "Si",                    // str | null
+      "tip_radius": 25.0,                      // float | null
+      "temperature": 300.0,                    // float
+      "layers": 2,                             // int | null (the L{n} path level)
+      "potential": "pot_sw_h-MoS2",            // str | null
+      "rel_path": "afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-MoS2/L2",
+      "load_kind": "force",                    // 'force' | 'pressure' | 'none' (PES)
+      "load": 30.0,                            // float
+      "angle": 0.0,                            // float, SIGNED
+      "speed": 2.0,                            // float
+      "n_layers": 2,                           // int, the resolved layer count
+      "tiers": {                               // absent tiers are absent keys
+        "window": {
+          "columns": ["time", "nf", "lfx", "lfy", "lateral_force", "cof"],
+          "data": [[1000, 30.0, 3.0, 0.0, 3.0, 0.1]],
+          "attrs": {"lf_schema": 2, "lf_corrected": false}
+        },
+        "raw":     {"columns": ["time", "raw_nf", "raw_lfx"],
+                    "data": [[100, 30.1, 2.9]],
+                    "attrs": {"lf_schema": 2, "lf_corrected": false}},
+        "peratom": {"columns": ["time", "n_contact"],
+                    "data": [[1000, 12.0]],
+                    "attrs": {"lf_schema": 2, "lf_corrected": false}}
+      },
+      "post": {"gap_min": 3.1, "deflect_max": 0.4}   // {} when no data/final_*.data
+    }
+  ]
+}
+```
+
+Four rules the JSON cannot state:
+
+1. **One file per size.** `runs` holds every load point of every run at that size.
+2. **`time` is kept in every tier.** The v1 export dropped it and reconstructed one
+   global axis from the metadata, so two runs of different lengths could not be drawn
+   together.
+3. **`lateral_force` and `cof` are derived onto the window tier only.** No other tier
+   carries them.
+4. **`post` is `{}`** when the run has no `data/final_*.data`, and for the two PES
+   families, whose load point has no matching file.
+
+A **PES run** has `"load_kind": "none"`, `"load": 0.0`, and exactly one `window` tier
+parsed from `results/pes_scan.csv`. Calling its absent load a force of 0.0 nN would put
+a fictitious point on every load axis.
+
+A **v1 file has no `"schema"` key at all**, and the plot stack refuses it with a
+`PlotDataError` naming the command that replaces it:
+
+```bash
+FrictionSim2D postprocess read <root> --export
+```
+
+---
+
+## `summary_<size>.csv`
+
+One row per load point. Column order:
+
+1. **Identity** — `model, family, material, materials, flake_material, size, size_x,
+   size_y, substrate, substrate_amorphous, tip_material, tip_radius, temperature,
+   layers, potential, rel_path, load_kind, load, angle, speed, tiers`.
+   `materials` is `'+'.join(...)`, `tiers` is `';'.join(sorted(...))`, and `layers` is
+   the **resolved** count — the `L{n}` path level for the AFM-like models, and
+   `provenance.json`'s `layer_type_map` for the sheet-like ones, which emit no `L{n}`
+   level at all.
+2. **The fourteen `RunSummary` scalars** — `mean_cof, std_cof, mean_lf, std_lf, mean_nf,
+   std_nf, mean_lfx, std_lfx, mean_lfy, std_lfy, skip_fraction, ntimesteps,
+   time_series_hash, is_complete`.
+3. **Family-specific extras** — `slip_*` for any run with a raw tier, `pes_*` for a PES
+   run, the retract features for `indent`, the slide distance and driven-COM drift for a
+   slide family. The header therefore differs between families *by design*; the frame
+   does not. Two campaigns of the same family concatenate directly, and two of different
+   families concatenate through `pd.concat`, which fills the missing extras with `NaN`.
+4. **`mean_lf_sx_sy, mean_lf_fx_fy`** — the two alternative lateral-force definitions,
+   `NaN` where the frame carries no `react_x`/`react_y` or `drive_fx`/`drive_fy`.
+5. **`gap_min, deflect_max, gap_min_il, corrugation_max`** — the post-stream channels,
+   `NaN` where the family has none.
+
+**Every number in this file comes from `src.data.models.summarise_run`**, the single COF
+on the store path — the same function the AiiDA node and the central database read. In
+particular `mean_cof` is `mean(LF)/mean(NF)`, computed after discarding the first
+`skip_fraction` (0.2 by default) of the run as transient.
+
+`cof_slope` is a **different quantity**: the slope of a linear fit of lateral force
+against normal load across a load sweep. Both are legitimate; they have different names
+because calling them by one name is how a single run reported two COFs. The COF
+histogram plots `cof_slope`, and its axis says so.
+
+---
+
+## Migration
+
+**Figures drawn before this rework used a different COF.** The plot stack averaged an
+element-wise `cof` column over *all* samples (`df.mean()`); it now reads
+`summary_<size>.csv`, whose `mean_cof` is `ratio_of_means` — `mean(LF)/mean(NF)` after
+dropping the first `skip_fraction`. The new definition is the tribology convention and
+is what the central database has always stored, but the two disagree by more than
+rounding wherever a run has a load ramp or a slow start.
+
+**Any figure already in a paper or a talk must be regenerated and re-read, not assumed
+unchanged.** The export records which definition produced its numbers, under
+`metadata.summary_definition`, so a reader can tell from the file rather than from its
+date.
+
+Two smaller changes in the same direction:
+
+- A **potential or temperature sweep** used to collapse: the v1 nested tree had no level
+  for either, so two runs differing only in those landed on one leaf and the last one
+  walked won. A v1 figure over such a sweep is missing an arm.
+- **Per-layer columns beyond `L2`** (`comz_L3`, `pe_sum_L4`, …) reached v1 exports under
+  their native `v_comz_L3` names and were invisible to every consumer keyed on channel
+  names.
+
+---
+
+## Plot documents
+
+A minimal document:
+
+```json
+{
+  "data_dirs": ["/data/campaign_a"],
+  "labels": ["campaign A"],
+  "plots": [
+    {
+      "plot_type": "summary",
+      "x_axis": "force",
+      "y_axis": "lf",
+      "filter_size": "100x100y",
+      "filename": "lf_vs_load.png",
+      "add_linear_fit": true
+    }
+  ]
+}
+```
+
+`data_dirs` holds directories containing an `outputs/`, and must name at least one — a
+document with none can draw nothing. `labels` has one entry per `data_dir`. Start one
+with:
+
+```bash
+FrictionSim2D postprocess plot --init plots.json --data-dir /data/campaign_a
+```
+
+### Reading from the central database
+
+A `data_dir` may instead be a `db://` URI:
+
+```
+db://central?family=hetero&potential_type=sw&layers=2&force_min=10&force_max=40&limit=500
+```
+
+Scalar filters: `material`, `family`, `model`, `set_label`, `potential_type`, `layers`,
+`uploader`, `status`, `limit`. Range filters come in `<name>_min`/`<name>_max` pairs for
+`force`, `pressure`, `temperature` and `angle`. Unknown keys are logged and ignored.
+
+`central` is the only database. The local AiiDA store is a set of nodes, not SQL; export
+it to a tree first and use that directory:
+
+```bash
+FrictionSim2D aiida export-results <label> --output-dir <dir>
+```
+
+**`lf_source` does not apply to `db://` rows.** The central database stores one lateral
+force, so `sx_sy` and `fx_fy` have nothing to select; the axis falls back to `lf` and
+logs a warning rather than plotting one definition under another's name.
+
+---
+
+## Plot schema
+
+Unknown keys are **errors**, not ignored. `postprocess plot --validate` checks a document
+without rendering it, and `postprocess plot --schema` regenerates the tables below
+straight from the models, so this section cannot drift from what the CLI validates
+against.
+
+## Document
+
+| field | type | meaning |
+|---|---|---|
+| `data_dirs` | `List[str]` | Directories holding outputs/, or db:// URIs |
+| `labels` | `List[str]` | One per data_dir |
+| `dataset_display_labels` | `Dict[str, str]` |  |
+| `series_color_map` | `Dict[str, Optional[str]]` |  |
+| `plots` | `List[Annotated[Union[src.postprocessing.plot_config.SummaryPlot, src.postprocessing.plot_config.TimeseriesPlot, src.postprocessing.plot_config.StickSlipPlot, src.postprocessing.plot_config.ScatterComparisonPlot, src.postprocessing.plot_config.RankFrictionPlot, src.postprocessing.plot_config.CorrelationPlot, src.postprocessing.plot_config.CofHistogramPlot], FieldInfo(annotation=NoneType, required=True, discriminator='plot_type')]]` |  |
+
+## `summary`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['summary']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `add_linear_fit` | `Optional[bool]` |  |
+| `append_slope_to_legend` | `Optional[bool]` |  |
+| `clip_fit_to_data` | `Optional[bool]` |  |
+| `extend_fit_to_origin` | `Optional[bool]` |  |
+| `external_series` | `Optional[List[src.postprocessing.plot_config.ExternalSeries]]` |  |
+| `external_outline_width` | `Optional[float]` |  |
+| `fit_constraint` | `Optional[Literal['first_point', 'origin', 'none']]` |  |
+| `fit_only` | `Optional[bool]` |  |
+| `fit_x_range` | `Optional[List[float]]` |  |
+| `label_prefix` | `Optional[str]` |  |
+| `label_suffix` | `Optional[str]` |  |
+| `legend_figure_size` | `Optional[List[float]]` |  |
+| `legend_filename` | `Optional[str]` |  |
+| `legend_ncol` | `Optional[int]` |  |
+| `legend_separate_png` | `Optional[bool]` |  |
+| `marker_by_potential_type` | `Optional[bool]` |  |
+| `plot_by` | `Optional[str]` |  |
+| `plot_style` | `Optional[str]` |  |
+| `potential_markers` | `Optional[Dict[str, str]]` |  |
+| `shift_external_series_to_origin` | `Optional[bool]` |  |
+| `shift_series_to_origin` | `Optional[bool]` |  |
+| `show_dataset_in_legend` | `Optional[bool]` |  |
+| `show_error_bands` | `Optional[bool]` |  |
+| `slope_decimals` | `Optional[int]` |  |
+| `slope_fit_constraint` | `Optional[Literal['first_point', 'origin', 'none']]` |  |
+| `slope_label` | `Optional[str]` |  |
+| `use_visible_xrange_for_fit` | `Optional[bool]` |  |
+
+## `timeseries`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['timeseries']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `plot_all_forces` | `Optional[bool]` |  |
+| `primary_line_alpha` | `Optional[float]` |  |
+| `primary_line_style` | `Optional[str]` |  |
+| `primary_line_width` | `Optional[float]` |  |
+| `run_label_mode` | `Optional[str]` |  |
+| `secondary_dash_pattern` | `Optional[List[float]]` |  |
+| `secondary_line_alpha` | `Optional[float]` |  |
+| `secondary_line_style` | `Optional[str]` |  |
+| `secondary_line_width` | `Optional[float]` |  |
+| `secondary_y_axis` | `Optional[str]` |  |
+| `secondary_y_label` | `Optional[str]` |  |
+| `secondary_y_scale` | `Optional[float]` |  |
+| `shift_time_to_zero` | `Optional[bool]` |  |
+| `time_scale` | `Optional[float]` |  |
+| `time_unit` | `Optional[str]` |  |
+| `use_run_labels` | `Optional[bool]` |  |
+
+## `stick_slip_analysis`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['stick_slip_analysis']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `apply_hann_window` | `Optional[bool]` |  |
+| `bottom_ylabel` | `Optional[str]` |  |
+| `displacement_axis` | `Optional[str]` |  |
+| `displacement_scale` | `Optional[float]` |  |
+| `displacement_unit` | `Optional[str]` |  |
+| `display_periods` | `Optional[float]` |  |
+| `display_time_start` | `Optional[float]` |  |
+| `display_time_window` | `Optional[List[float]]` |  |
+| `extrema_min_distance_points` | `Optional[int]` |  |
+| `extrema_min_prominence` | `Optional[float]` |  |
+| `extrema_smooth_window` | `Optional[int]` |  |
+| `extrema_use_prominence` | `Optional[bool]` |  |
+| `fft_peak_min_distance_points` | `Optional[int]` |  |
+| `fft_peak_min_prominence` | `Optional[float]` |  |
+| `fft_peak_rank` | `Optional[int]` |  |
+| `fft_peaks_to_report` | `Optional[int]` |  |
+| `freq_max` | `Optional[float]` |  |
+| `freq_min` | `Optional[float]` |  |
+| `freq_plot_max` | `Optional[float]` |  |
+| `freq_plot_min` | `Optional[float]` |  |
+| `freq_xlabel` | `Optional[str]` |  |
+| `max_intervals_to_draw` | `Optional[int]` |  |
+| `results_filename` | `Optional[str]` |  |
+| `run_index` | `Optional[int]` |  |
+| `secondary_y_axis` | `Optional[str]` |  |
+| `secondary_y_scale` | `Optional[float]` |  |
+| `show_peak_trough_intervals` | `Optional[bool]` |  |
+| `single_panel_figure_size` | `Optional[List[float]]` |  |
+| `smooth_for_extrema` | `Optional[bool]` |  |
+| `spectrum_filename` | `Optional[str]` |  |
+| `time_scale` | `Optional[float]` |  |
+| `time_unit` | `Optional[str]` |  |
+| `top_ylabel` | `Optional[str]` |  |
+
+## `scatter_comparison`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['scatter_comparison']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `add_linear_fit` | `Optional[bool]` |  |
+| `color_by_material_class` | `Optional[bool]` |  |
+| `iterative_outlier_removal` | `Optional[bool]` |  |
+| `point_label_fontsize` | `Optional[float]` |  |
+| `show_error_bars` | `Optional[bool]` |  |
+| `show_identity_line` | `Optional[bool]` |  |
+| `show_point_labels` | `Optional[bool]` |  |
+| `show_r_squared` | `Optional[bool]` |  |
+| `x_source` | `Optional[src.postprocessing.plot_config.SourceSpec]` |  |
+| `y_source` | `Optional[src.postprocessing.plot_config.SourceSpec]` |  |
+
+## `rank_friction`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['rank_friction']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `aggregate_over_force_range` | `Optional[bool]` |  |
+| `fit_x_range` | `Optional[List[float]]` |  |
+| `force_range` | `Optional[List[float]]` |  |
+| `rank_by` | `Optional[str]` |  |
+| `rank_order` | `Optional[Literal['ascending', 'descending']]` |  |
+
+## `correlation`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['correlation']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `correlate_by` | `Optional[Literal['size', 'force', 'pairwise']]` |  |
+| `correlation_force` | `Optional[float]` |  |
+| `filename_prefix` | `Optional[str]` |  |
+| `sizes_to_compare` | `Optional[List[str]]` |  |
+
+## `cof_histogram`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['cof_histogram']` |  |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `<class 'bool'>` |  |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `annotate_bars` | `Optional[bool]` |  |
+| `bar_width` | `Optional[float]` |  |
+| `external_series` | `Optional[List[src.postprocessing.plot_config.ExternalSeries]]` |  |
+| `fit_x_range` | `Optional[List[float]]` |  |
+| `slope_decimals` | `Optional[int]` |  |
+| `slope_fit_constraint` | `Optional[Literal['first_point', 'origin', 'none']]` |  |
+| `x_label_rotation` | `Optional[int]` |  |
+
+---
+
+## Settings and presets
+
+Plot style is a `PlotSettings` document. Every section is optional; what you set is
+merged over the defaults.
+
+```jsonc
+{
+  "figure":      {"size": [10, 7], "dpi": 150},
+  "fonts":       {"family": "sans-serif", "title": 26, "axis_label": 24,
+                  "tick_label": 22, "legend": 16},
+  "colors":      {"palette": "gem12"},
+  "markers":     {"style": "o", "size": 12},
+  "lines":       {"width": 1.3, "fit_style": "--", "fit_alpha": 0.8},
+  "grid":        {"show": true, "which": "both", "major_style": "-",
+                  "minor_style": ":", "major_alpha": 0.5, "minor_alpha": 0.3},
+  "error_bands": {"alpha": 0.2},
+  "legend":      {"location": "best"},
+  "layout":      {"constrained_layout": false},
+  "axes":        {"use_scientific_notation": true, "scilimits": [-3, 4]},
+  "export":      {"formats": ["png"], "transparent": false}
+}
+```
+
+### The `publication` preset
+
+Sized for a single journal column (3.4 in, the APS/Elsevier width), vector-first, with
+type that sits correctly against a 9–10 pt body:
+
+```json
+{
+  "figure": {"size": [3.4, 2.6], "dpi": 600},
+  "fonts": {"family": "sans-serif", "title": 9, "axis_label": 9, "tick_label": 8, "legend": 7},
+  "colors": {"palette": "gem12"},
+  "markers": {"style": "o", "size": 4},
+  "lines": {"width": 1.0, "fit_style": "--", "fit_alpha": 0.9},
+  "grid": {"show": false, "which": "major", "major_style": "-", "minor_style": ":", "major_alpha": 0.25, "minor_alpha": 0.15},
+  "error_bands": {"alpha": 0.18},
+  "legend": {"location": "best"},
+  "layout": {"constrained_layout": true},
+  "axes": {"use_scientific_notation": true, "scilimits": [-3, 4]},
+  "export": {"formats": ["pdf", "svg", "png"], "transparent": false}
+}
+```
+
+```bash
+FrictionSim2D postprocess plot plots.json --preset publication
+```
+
+**Precedence**, lowest to highest: the defaults, then `--preset`, then `--settings`.
+
+**A list in an override REPLACES the default list; it never extends it.**
+`--settings '{"figure": {"size": [8, 6]}}'` gives `[8, 6]`, not `[10, 7, 8, 6]`. There is
+no setting for which appending is the right answer.
+
+### Axis labels
+
+An axis with no `x_label`/`y_label` on the plot spec is labelled from the observable
+registry: `label_for('nf', 'afm')` is `Normal Load (nN)`, `label_for('comz_L4', ...)` is
+`Layer 4 COM z (A)`. An explicit label on the spec still wins — a paper figure sometimes
+needs a shorter axis than the honest one.
+
+---
+
+## Commands
+
+### `postprocess read`
+
+```bash
+FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
+```
+
+- `RESULTS_DIR` — a simulation root, the directory holding `afm/`, `sheetonsheet/`,
+  `indent/`, `pes_tip/`, `pes_sheet/`.
+- `--export` — write `outputs/output_full_<size>.json` (schema 2) **and**
+  `outputs/summary_<size>.csv`, echoing each path.
+- `--skip-fraction FLOAT` (default `0.2`) — the transient fraction dropped before the
+  summary statistics, forwarded to `summarise_run`.
+
+The completeness reports are written either way.
+
+### `postprocess plot`
+
+```bash
+FrictionSim2D postprocess plot [PLOT_CONFIG] [OPTIONS]
+```
+
+- `-o, --output-dir DIR` (default: `plots`)
+- `--settings PATH` — a partial `PlotSettings` JSON, merged over `--preset`
+- `--preset NAME` — a shipped preset (currently: `publication`)
+- `--validate` — validate the document and exit, without importing matplotlib
+- `--schema` — print the plot schema as Markdown and exit; needs no `PLOT_CONFIG`
+- `--init PATH` — write a valid two-plot starter document and exit
+- `--data-dir DIR` — with `--init`, a dataset directory to reference (repeatable)
+
+Every file written is echoed, and the count is reported at the end.
+
+### `postprocess pes-scan`
+
+```bash
+FrictionSim2D postprocess pes-scan RUN_ROOT [OPTIONS]
+```
+
+- `-d, --data-dir PATH` (default: `data`) — output dir for `pes_scan_{sheet,tip}.csv`
+- `--grid-dir PATH` — also copy tidied per-material grids
+- `--kind [sheet|tip|both]` (default: `both`)
+
+See [pes_scan.md](pes_scan.md).
+
+### `postprocess indent`
+
+```bash
+FrictionSim2D postprocess indent RUN_ROOT [OPTIONS]
+```
+
+- `-o, --out-dir PATH` (default: `outputs/poke_sims`)
+- `-d, --data-dir PATH` (default: same as `--out-dir`) — for `indent_features.csv`
+
+The per-load `output_indent_f<load>_s<seed>.json` is the v2 export document restricted to
+one load, plus `metadata.indent_load_nN` and `metadata.indent_base_seed`. See
+[indent.md](indent.md).

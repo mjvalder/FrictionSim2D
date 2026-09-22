@@ -121,9 +121,11 @@ class OutputSettings(BaseModel):
         default_factory=lambda: {'window': True, 'raw': True, 'peratom': True},
         description=(
             "Which observable sampling tiers get a fix ave/time. 'window' is the COF "
-            "source and the only tier postprocessing ingests; 'raw' (100 fs samples) "
-            "and 'peratom' (per-atom computes, including the neighbour-list-rebuilding "
-            "group/group) cost runtime and disk. All on by default."
+            "source; 'raw' (100 fs samples) and 'peratom' (per-atom computes, including "
+            "the neighbour-list-rebuilding group/group) cost runtime and disk. "
+            "Postprocessing reads all three tiers: the raw tier feeds the slip "
+            "statistics and the peratom tier is plottable by column name. All on by "
+            "default."
         ),
     )
     optional_channels: List[str] = Field(

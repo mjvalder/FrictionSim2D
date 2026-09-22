@@ -19,10 +19,11 @@ Read in this order if you are new; each document also stands alone.
 | 11 | [hpc_jobs.md](hpc_jobs.md) | Scheduler script generation and two-phase submission |
 | 12 | [provenance.md](provenance.md) | Provenance manifest model and file tracking internals |
 | 13 | [python_api.md](python_api.md) | Driving the package from Python instead of the CLI |
-| 14 | [testing.md](testing.md) | Test tiers and how to run them, markers, layout, the integration tier |
+| 14 | [postprocessing.md](postprocessing.md) | The `outputs/` schemas, plot documents, the plot schema, settings presets |
+| 15 | [testing.md](testing.md) | Test tiers and how to run them, markers, layout, the integration tier |
 
 If your goal is simply to generate and run simulations, documents 1 through 6 are
-sufficient. Documents 12 to 14 matter for development and reproducibility work.
+sufficient. Documents 12 to 15 matter for development and reproducibility work.
 
 ## Publication dataset
 
