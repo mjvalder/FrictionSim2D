@@ -368,6 +368,17 @@ class HeteroAFMSimulation(AFMSimulation):
         )
         return rep
 
+    def _flake_periodic_cell(self) -> tuple[float, float]:
+        """The REPLICATED coincidence cell, which is the box the flake sees.
+
+        ``compute_replication_factors`` sizes the replication from the tip
+        radius alone -- it knows nothing about a flake -- so a small tip (2x2
+        replication) under a large flake is exactly the combination the
+        clearance check has to catch.
+        """
+        lx, ly, _z = self._hetero_rep_box
+        return float(lx), float(ly)
+
     def _build_components(self, build_dir):
         """D2 tip + substrate build, with an opt-in crystalline-matched substrate (D2b).
 
@@ -395,6 +406,7 @@ class HeteroAFMSimulation(AFMSimulation):
             )
             logger.info("Built flake: %s", self.flake_path.name)
             self._maybe_twist_flake()
+            self._check_flake_fits_the_cell()
 
         sub_path = None
         if self.config.sub is not None:

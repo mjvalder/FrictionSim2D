@@ -1,3 +1,4 @@
+{% import 'common/halt.lmp' as halt_guard %}
 {# The sliding contact. The stack splits into two sheets of equal thickness
    (thinner half below for odd n), so the interface sits at the middle:
    il_bot = n//2, il_top = n//2 + 1. Everything that names the interface --
@@ -87,6 +88,7 @@ fix             nve_center center nve
 timestep        {{ timestep }}
 thermo          {{ thermo }}
 
+{{ halt_guard.emit_temperature_halt(halt_temperature) }}
 # Top layer (layer {{ n_layers }}): driven
 {% if drive_method == 'fix_move' %}
 fix             fstage_top layer_{{ n_layers }} rigid/nve single force * off off on torque * off off off

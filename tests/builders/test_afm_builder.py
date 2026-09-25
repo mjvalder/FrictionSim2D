@@ -77,6 +77,10 @@ fix_modify      lang_sub temp temp_sub
 group           nve_apply subtract all sub_fix tip_fix
 fix             nve_all nve_apply nve
 
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error hard message yes
+
 compute         COM_top 2D_all com
 variable        comx equal c_COM_top[1]
 variable        comy equal c_COM_top[2]

@@ -66,7 +66,21 @@ simulation:
   slide_run_steps: 500000
   drive_method: virtual_atom
   constraint_mode: none
+  halt_temperature_factor: 10.0
 ```
+
+`halt_temperature_factor` is a physics guard, not a thermostat setting: every
+template that integrates in time emits a `fix halt` that ends the run the first
+time the global temperature crosses `factor x max([general] temp, 300 K)`.
+LAMMPS already aborts on lost atoms; this catches the blow-up that keeps all its
+atoms and would otherwise spend the whole step budget. The abort is hard — the
+job exits non-zero and writes no final state — so a runaway does not quietly
+leave a plausible-looking output directory behind.
+
+The 300 K floor is not cosmetic: a 1 K-target run legitimately reaches tens of
+K once minimisation strain energy is released (13–119 K measured across the
+LAMMPS test set), so a bare `factor x 1 K` threshold would abort healthy runs.
+Set the factor to `0` to disable the guard.
 
 `constraint_mode` options:
 

@@ -1,3 +1,4 @@
+{% import 'common/halt.lmp' as halt_guard %}
 # LAMMPS input script for AFM System Initialization and Indentation
 
 clear
@@ -81,6 +82,7 @@ fix             nve_all nve_apply nve
 fix             nvt_sys system nvt temp {{ temp }} {{ temp }} $(100.0*dt)
 {% endif %}
 
+{{ halt_guard.emit_temperature_halt(halt_temperature) }}
 fix             sub_fix sub_fix setforce 0.0 0.0 0.0
 velocity        sub_fix set 0.0 0.0 0.0
 

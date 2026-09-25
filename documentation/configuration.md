@@ -382,6 +382,15 @@ corner_spring_k = 10.0
 corner_hold = false    # default; see "Corner hold" below
 ```
 
+**The cell has to clear the flake.** The flake is finite, the sheet under it is
+periodic: what separates the flake from its own image is `cell - flake span`,
+and while that gap is inside `settings.potential.lj_cutoff` the flake slides
+against a copy of itself. The build refuses such a config and names the
+offending axis, so enlarge `[2D] x`/`y` (sheet-on-sheet) or shrink
+`edge_length`. On a hetero AFM the cell is the coincidence cell replicated from
+the tip radius alone — a small `[tip] r` with a large flake is the combination
+that trips it.
+
 **Shapes.** Every shape is centred on the flake centre and rotated CCW about
 it by `rotation_deg`:
 

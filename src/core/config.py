@@ -78,6 +78,15 @@ class SimulationSettings(BaseModel):
             "shearing interface (layer_{n//2+1}/layer_{n//2})."
         ),
     )
+    halt_temperature_factor: float = Field(
+        default=10.0,
+        ge=0.0,
+        description=(
+            "Abort a run whose global temperature exceeds this multiple of the "
+            "target temperature -- a blow-up that keeps all its atoms would "
+            "otherwise spend the whole step budget. 0 disables the guard."
+        ),
+    )
     ramp_max_iterations: int = Field(
         default=40,
         description=(

@@ -1,0 +1,22 @@
+{#
+  Temperature runaway guard (hetero-rework integration spec §3.10).
+
+  Atom loss already aborts LAMMPS; a configuration that blows up while keeping
+  every atom does not, and spends its whole step budget before anyone reads the
+  log. `fix halt` ends the run the first time the global temperature crosses
+  `settings.simulation.halt_temperature_factor` x the target.
+
+  `error hard` on purpose, matching the atom-loss behaviour: a runaway means
+  the setup is wrong, so the remaining sweep arms would burn budget on the same
+  fault. Nothing is written half-finished -- LAMMPS exits before write_data.
+
+  `halt_temperature` is None when the guard is off, and the macro then emits
+  nothing at all.
+#}
+{% macro emit_temperature_halt(halt_temperature) %}
+{% if halt_temperature is not none and halt_temperature %}
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > {{ halt_temperature }} error hard message yes
+{% endif %}
+{% endmacro %}

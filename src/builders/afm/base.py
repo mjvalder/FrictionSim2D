@@ -11,7 +11,7 @@ from itertools import product
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from ..simulation_base import SimulationBase
+from ..simulation_base import SimulationBase, halt_temperature
 from ...core.config import AFMSimulationConfig
 from ...core.utils.structures import cifread
 from ...lattice.apply import rotate_flake_in_plane
@@ -339,6 +339,26 @@ class AFMSimulation(SimulationBase):
         rotate_flake_in_plane(self.flake_path, float(twist))
         logger.info("Twisted AFM flake by %.3f deg (D3b)", float(twist))
 
+    def _flake_periodic_cell(self) -> Tuple[float, float]:
+        """The periodic in-plane cell the flake sits in, ``(lx, ly)`` in A.
+
+        The built sheet, here; the hetero AFM builder overrides this with its
+        REPLICATED coincidence cell, which is the box the flake actually sees.
+        """
+        return (float(self.sheet_dims['xhi'] - self.sheet_dims['xlo']),
+                float(self.sheet_dims['yhi'] - self.sheet_dims['ylo']))
+
+    def _check_flake_fits_the_cell(self) -> None:
+        """Refuse a flake within the pair cutoff of its own periodic image.
+
+        Called after the twist, since rotating the flake changes its span.
+        """
+        components.check_flake_pbc_clearance(
+            components.flake_atom_span(self.flake_path),
+            self._flake_periodic_cell(),
+            self.config.settings.potential.lj_cutoff,
+        )
+
     def _build_components(self, build_dir: Path) -> Tuple[Path, float, Path]:
         """Builds tip and substrate (shared across layer configurations).
         
@@ -359,6 +379,7 @@ class AFMSimulation(SimulationBase):
             )
             logger.info("Built flake: %s", self.flake_path.name)
             self._maybe_twist_flake()
+            self._check_flake_fits_the_cell()
 
         sub_path = None
         if self.config.sub is not None:
@@ -715,6 +736,8 @@ class AFMSimulation(SimulationBase):
 
         context = {
             'temp': self.config.general.temp,
+            'halt_temperature': halt_temperature(
+                self.config.settings, self.config.general.temp),
             'forces': self.config.general.force,
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,

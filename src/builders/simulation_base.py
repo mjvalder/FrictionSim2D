@@ -31,6 +31,33 @@ POTENTIAL_EXTENSIONS = {
     '.comb', '.comb3', '.morse', '.rebomos', '.mod'
 }
 
+#: The target temperature the halt threshold is floored at (K). A cold run is
+#: not a cold system: releasing the minimiser's strain energy into 500-odd
+#: atoms puts a 1 K-target smoke run at tens of K within a thousand steps, and
+#: it is perfectly healthy there. Measured 2026-09-22: 119 K on the AFM smoke,
+#: 13-78 K across the hetero and flake slides, every one of them a good run
+#: that a bare 10x1 K threshold aborted.
+HALT_FLOOR_TEMPERATURE_K = 300.0
+
+
+def halt_temperature(settings: Any, temp: Optional[float]) -> Optional[float]:
+    """The absolute temperature (K) at which a run aborts, or None for no guard.
+
+    ``factor`` x the target, floored at ``factor`` x
+    :data:`HALT_FLOOR_TEMPERATURE_K`: the guard exists to catch a blow-up
+    (thousands of K), not to police the ordinary heating of a cold run, and
+    multiplying a 1 K target by 10 would do exactly that.
+
+    One rule in one place for every template: the guard is off when the factor
+    is 0 (its documented off switch) and when the config carries no target
+    temperature at all.
+    """
+    factor = settings.simulation.halt_temperature_factor
+    if not factor or not temp:
+        return None
+    return max(float(temp), HALT_FLOOR_TEMPERATURE_K) * float(factor)
+
+
 def _infer_provenance_category(file_path: Path) -> str:
     """Infer provenance category from file extension."""
     ext = file_path.suffix.lower()

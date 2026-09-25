@@ -83,6 +83,10 @@ fix             nve_center center nve
 timestep        0.001
 thermo          100000
 
+# --- runaway-temperature guard ----------------------------------------------
+variable        halt_T equal temp
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error hard message yes
+
 # Top layer (layer 3): driven
 fix             fstage_top layer_3 rigid/nve single force * on on on torque * off off off
 # Bottom layer (layer 1): fixed

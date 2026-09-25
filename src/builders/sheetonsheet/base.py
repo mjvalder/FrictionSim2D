@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Union
 
-from ..simulation_base import SimulationBase
+from ..simulation_base import SimulationBase, halt_temperature
 from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
@@ -688,6 +688,8 @@ class SheetOnSheetSimulation(SimulationBase):
             'seed_sheet_center': self._run_seed('sheet_center'),
             'data_dir': f"{rel_run_dir_str}/data",   # final-state retention
             'temp': self.config.general.temp,
+            'halt_temperature': halt_temperature(
+                self.config.settings, self.config.general.temp),
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,
             'xlo': self.sheet_dims.get('xlo', 0.0),

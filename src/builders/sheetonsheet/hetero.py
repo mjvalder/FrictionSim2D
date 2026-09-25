@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from ...core.config import SheetOnSheetSimulationConfig
-from ..simulation_base import SimulationBase
+from ..simulation_base import SimulationBase, halt_temperature
 from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -436,6 +436,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # and the same SIM-ROOT-RELATIVE paths that builder uses.
         context = {
             "temp": general.temp,
+            "halt_temperature": halt_temperature(settings, general.temp),
             # One seed per channel, drawn in the builder like every other
             # family -- see SimulationBase._run_seed for why, and note a
             # template-side `| random` re-draws per occurrence.

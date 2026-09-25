@@ -23,7 +23,7 @@ import numpy as np
 
 from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
-from ..simulation_base import SimulationBase
+from ..simulation_base import SimulationBase, halt_temperature
 from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -326,6 +326,16 @@ class FlakeSlideSimulation(SimulationBase):
             self._record_twist_manifest(float(twist))
             logger.info("Twisted flake by %.3f deg (D3b incommensurate)", float(twist))
 
+        # 2c. The flake is finite and the substrate sheet is periodic: a flake
+        #     too wide for the cell slides against a copy of itself. Checked
+        #     after the twist, which changes the span.
+        components.check_flake_pbc_clearance(
+            components.flake_atom_span(flake_path),
+            (float(_sheet_dims['xhi'] - _sheet_dims['xlo']),
+             float(_sheet_dims['yhi'] - _sheet_dims['ylo'])),
+            settings.potential.lj_cutoff,
+        )
+
         # 3. ONE PotentialManager: sheet -> flake(s) -> reserved virtual, so global
         #    atom types are sheet 1..S, flake S+1..S+F, virtual S+F+1.
         #
@@ -420,6 +430,7 @@ class FlakeSlideSimulation(SimulationBase):
 
         context = {
             "temp": general.temp,
+            "halt_temperature": halt_temperature(settings, general.temp),
             # One seed per channel, drawn in the builder like every other
             # family -- see SimulationBase._run_seed for why, and note a
             # template-side `| random` re-draws per occurrence.

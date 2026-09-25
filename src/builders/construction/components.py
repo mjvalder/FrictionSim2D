@@ -558,6 +558,60 @@ def apply_flake_corner_types(
     return flake_path
 
 
+def flake_atom_span(flake_path: Path) -> Tuple[float, float]:
+    """The flake's own ``(span_x, span_y)`` in A, measured from its atoms.
+
+    Not the box: :func:`build_flake` writes the carving supercell's x/y bounds
+    into the flake file unchanged, so the box says nothing about how wide the
+    carved shape is.
+    """
+    parsed = _parse_lmp_atoms(flake_path)
+    if parsed is None or len(parsed[0]) == 0:
+        raise ValueError(f"No atoms found in {flake_path}")
+    _types, xs, ys, _zs = parsed
+    return float(xs.max() - xs.min()), float(ys.max() - ys.min())
+
+
+def check_flake_pbc_clearance(
+    flake_span: Tuple[float, float],
+    cell: Tuple[float, float],
+    lj_cutoff: float,
+) -> None:
+    """Refuse a flake that interacts with its own periodic image.
+
+    The sheet is periodic; the flake is not. What separates a flake from its
+    image is ``cell - span``, and while that gap is within the pair cutoff the
+    flake feels a copy of itself and the recorded friction is not the friction
+    of one flake. This is the ``[flake]`` counterpart of
+    :meth:`~src.core.config.AFMSimulationConfig.validate_tip_sheet_footprint`,
+    and it uses the same criterion as the finite-sheet substrate margin: the
+    gap must exceed ``settings.potential.lj_cutoff``.
+
+    Checked here rather than in the config models because the span is a
+    property of the carved structure (shape, rotation and lattice registry all
+    move it), and for a hetero stack the cell is not known until the
+    coincidence cell has been matched and replicated.
+
+    Raises:
+        ValueError: naming the offending axis, its gap and the cutoff.
+    """
+    span_x, span_y = float(flake_span[0]), float(flake_span[1])
+    cell_x, cell_y = float(cell[0]), float(cell[1])
+    gaps = {'x': cell_x - span_x, 'y': cell_y - span_y}
+    tight = {axis: gap for axis, gap in gaps.items() if gap <= float(lj_cutoff)}
+    if not tight:
+        return
+    detail = ", ".join(f"{axis}: {gap:.2f} A" for axis, gap in sorted(tight.items()))
+    raise ValueError(
+        f"Flake ({span_x:.2f} x {span_y:.2f} A) is too close to its own "
+        f"periodic image in a {cell_x:.2f} x {cell_y:.2f} A cell ({detail}; "
+        f"pair cutoff {float(lj_cutoff)}). The flake would feel a copy of "
+        "itself and the recorded forces would not be those of one flake. "
+        "Shrink [Flake] edge_length, or enlarge the sheet ([2D] x/y, or a "
+        "larger [tip] r, which replicates the hetero cell further)."
+    )
+
+
 def build_flake_component(
     config: "FlakeConfig",
     build_dir: Path,

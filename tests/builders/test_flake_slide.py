@@ -197,11 +197,15 @@ def _flake_on_sheet_cfg(hetero_flake: bool = False):
     (a MoS2/WS2 bilayer flake); otherwise the single-material flake reuses the
     substrate ``[2D]`` material (the builder fills its material fields).
     """
+    # 24 A, not the 16 A this fixture used to carve: the flake is finite and
+    # the sheet is periodic, so the cell has to clear the flake's ~9.6 x 8.3 A
+    # span by more than the 11 A pair cutoff or the flake slides against its
+    # own image (check_flake_pbc_clearance). At 16 A the gap was 6.4 x 7.7 A.
     raw = {
         "general": {"temp": 300, "scan_speed": 100},
         "2D": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
                "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
-               "x": 16.0, "y": 16.0, "layers": [2]},
+               "x": 24.0, "y": 24.0, "layers": [2]},
         "Flake": {"shape": "hexagon", "edge_length": 5.0, "corner_radius": 3.5,
                   "corner_spring_k": 10.0},
     }
@@ -1039,13 +1043,25 @@ def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
     """LAMMPS confirmation of the load block (lammps-marked; not in the fast
     suite). With the flake's COM z-acceleration averaging to zero, the
     pre-load group force the fix records (f_force[3], the sheet pushing up on
-    the flake) must average to +P*A_flake: in nN, P[GPa]*A[A^2]/100."""
+    the flake) must average to +P*A_flake: in nN, P[GPa]*A[A^2]/100.
+
+    **The premise is checked, not assumed.** `MoS2_wen.sw` does not hold the
+    flake at its starting height (future-works, "MoS2_wen.sw does not hold its
+    structure at temperature"): the flake sinks by ~4.5 A at a seed-dependent
+    moment, and while it is accelerating downward the reaction force is
+    legitimately below the load. Measured 2026-09-22 over four builds of this
+    same config: a quiescent window gives 2.8-3.3 nN against the 3.25 nN
+    expectation, a window straddling the sink gives 1.6-1.7 -- so averaging
+    every record makes the assertion a coin flip on the seed. The run is
+    therefore long enough to contain a settled stretch, and only the records
+    where the COM is not moving in z are averaged.
+    """
     from src.builders.sheetonsheet.flake_slide import (FlakeSlideSimulation,
                                                        flake_projected_area)
 
     cfg = _flake_on_sheet_cfg(hetero_flake=False)
     cfg.settings.simulation.drive_method = "virtual_atom"
-    cfg.settings.simulation.slide_run_steps = 4000
+    cfg.settings.simulation.slide_run_steps = 20000
     cfg.general.scan_speed = 100
     cfg.general.pressure = 5.0
 
@@ -1059,8 +1075,21 @@ def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
 
     friction = next(run_dir.rglob("friction_*"))
     cols, rows = _read_friction_records(friction)
-    assert "v_fz" in cols
-    fz = [r[cols.index("v_fz")] for r in rows]
+    assert "v_fz" in cols and "v_comz_flake" in cols
+    ifz, icz = cols.index("v_fz"), cols.index("v_comz_flake")
+
+    #: A record counts as settled when the flake COM moved less than this in z
+    #: over the preceding window. The sink moves it 0.25-1.14 A per window;
+    #: quiescent windows sit at 0.01-0.12 A, so the two are well separated.
+    settled_dz = 0.15
+    settled = [rows[k][ifz] for k in range(1, len(rows))
+               if abs(rows[k][icz] - rows[k - 1][icz]) < settled_dz]
+    assert len(settled) >= 3, (
+        f"the flake never settled in z: only {len(settled)} of {len(rows) - 1} "
+        f"windows moved less than {settled_dz} A. Load balance is not defined "
+        f"while it sinks -- see future-works on MoS2_wen.sw. "
+        f"comz={[r[icz] for r in rows]}")
+
     expected = 5.0 * flake_projected_area("hexagon", 5.0) / 100.0   # nN
-    mean_fz = sum(fz) / len(fz)
-    assert mean_fz == pytest.approx(expected, rel=0.3), (fz, expected)
+    mean_fz = sum(settled) / len(settled)
+    assert mean_fz == pytest.approx(expected, rel=0.3), (settled, expected)

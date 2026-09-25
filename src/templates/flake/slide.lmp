@@ -1,3 +1,4 @@
+{% import 'common/halt.lmp' as halt_guard %}
 {% import 'common/observables.lmp' as obs %}
 # LAMMPS Input Script for Flake-on-Sheet Sliding (D4)
 # A finite flake driven across a {{ n_layers }}-layer substrate sheet by a
@@ -120,6 +121,7 @@ fix             nve_center center nve
 timestep        {{ timestep }}
 thermo          {{ thermo }}
 
+{{ halt_guard.emit_temperature_halt(halt_temperature) }}
 # Substrate-sheet bottom band (layer 1): fixed.
 fix             fsbot layer_1 setforce 0.0 0.0 0.0
 velocity        layer_1 set 0.0 0.0 0.0 units box

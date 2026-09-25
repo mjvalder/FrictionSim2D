@@ -140,7 +140,8 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
         n_layers=n_layers, has_internal_lj=has_internal_lj,
         constraint_mode=constraint_mode, pot_type='sw' if not has_internal_lj else 'rebomos',
         scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
-        scan_angle_force=None, temp=300, thermostat_type='langevin',
+        scan_angle_force=None, temp=300, halt_temperature=3000.0,
+        thermostat_type='langevin',
         drive_method='fix_move', dump_enabled=False,
         seed_sheet_center=12345,
         # All tiers on: these tests are about the has_internal_lj branch,
@@ -425,7 +426,8 @@ def _render_hetero_slide(n_layers: int) -> str:
                 for i in range(1, n_layers + 1)],
         constraint_mode='none', pot_type='sw',
         scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
-        scan_angle_force=None, temp=300, thermostat_type='langevin',
+        scan_angle_force=None, temp=300, halt_temperature=3000.0,
+        thermostat_type='langevin',
         drive_method='fix_move', dump_enabled=False, seed_sheet_center=12345,
         obs_ctx=_hetero_obs_ctx(n_layers),
         xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,
@@ -678,7 +680,8 @@ def _render_flake_slide(n_layers: int) -> str:
                      for i in range(1, n_layers + 1)],
         constraint_mode='none', pot_type='sw',
         scan_speed_config=1.0, pressures=1.0, scan_angle_config=0.0,
-        scan_angle_force=None, temp=300, thermostat_type='langevin',
+        scan_angle_force=None, temp=300, halt_temperature=3000.0,
+        thermostat_type='langevin',
         drive_method='fix_move', dump_enabled=False, seed_sheet_center=12345,
         obs_ctx=_flake_obs_ctx(n_layers),
         xlo=0.0, xhi=100.0, ylo=0.0, yhi=100.0, zhi=15.0,
@@ -1018,3 +1021,79 @@ def test_hetero_and_flake_interface_layers_substitution_is_correct():
                 assert f'layer_{il_top}' in joined, (sim_type, n_layers)
     finally:
         REGISTRY['n_contact_il'] = original
+
+
+# --- temperature halt guard (integration spec §3.10) -------------------------
+#
+# A run whose temperature runs away is not recoverable, and without a guard it
+# spends its whole step budget before anyone sees it. Atom loss already aborts
+# LAMMPS; this is the same contract for the blow-up that keeps every atom.
+
+#: Every template that integrates in time must carry the guard. The PES scans
+#: and the structure-building templates run 0 steps of dynamics and do not.
+DYNAMIC_TEMPLATES = (
+    'afm/system_init.lmp', 'afm/slide.lmp', 'afm/indent.lmp',
+    'sheetonsheet/slide.lmp', 'hetero/slide.lmp', 'flake/slide.lmp',
+)
+
+
+@pytest.mark.parametrize('template', DYNAMIC_TEMPLATES)
+def test_every_dynamic_template_calls_the_halt_macro(template):
+    """Source-level, so a newly added dynamic template that forgets the guard
+    fails here rather than silently running unguarded."""
+    from importlib import resources
+    text = (resources.files('src.templates')
+            .joinpath(template).read_text(encoding='utf-8'))
+    assert 'emit_temperature_halt' in text, template
+
+
+def test_the_afm_slide_halts_on_a_runaway_temperature(slide_text):
+    assert 'variable        halt_T equal temp' in slide_text
+    # _make_afm_config runs at 300 K, the default factor is 10
+    assert ('fix             halt_hot all halt 1000 v_halt_T > 3000.0 '
+            'error hard message yes') in slide_text
+
+
+def test_system_init_halts_on_a_runaway_temperature(tmp_path):
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
+    assert 'fix             halt_hot all halt 1000 v_halt_T > 3000.0' in text
+
+
+def test_the_guard_is_off_when_the_factor_is_zero(tmp_path):
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.settings.simulation.halt_temperature_factor = 0.0
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    assert 'halt_hot' not in slide_path.read_text(encoding='utf-8')
+
+
+def test_the_sheet_slide_halts_on_a_runaway_temperature():
+    text = _render_sheet_slide(has_internal_lj=False)
+    assert 'fix             halt_hot all halt 1000 v_halt_T > 3000.0' in text
+
+
+def test_a_cold_run_keeps_the_floored_threshold(tmp_path):
+    """factor x 1 K would abort a healthy smoke run: releasing the minimiser's
+    strain energy puts a 1 K-target system at tens of K (measured 13-119 K
+    across the LAMMPS set, 2026-09-22). The threshold floors at 10x300 K."""
+    from src.builders.simulation_base import halt_temperature
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.temp = 1.0
+    assert halt_temperature(config.settings, 1.0) == 3000.0
+
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    slide_path = _prepare_builder_for_slide_write(builder, tmp_path)
+    assert ('fix             halt_hot all halt 1000 v_halt_T > 3000.0'
+            in slide_path.read_text(encoding='utf-8'))
+
+
+def test_a_hot_run_scales_above_the_floor(tmp_path):
+    from src.builders.simulation_base import halt_temperature
+    config = _make_afm_config(tmp_path, layers=[1])
+    assert halt_temperature(config.settings, 900.0) == 9000.0

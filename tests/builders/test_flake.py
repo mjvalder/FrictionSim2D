@@ -359,3 +359,72 @@ def test_slide_has_no_corner_restraint(tmp_path: Path):
     # The flake rides into the load data file; sliding must not re-tether corners.
     assert "corner_hold" not in slide_in
     assert "flake_corner" not in slide_in
+
+
+# ---------------------------------------------------------------------------
+# PBC self-interaction guard
+# ---------------------------------------------------------------------------
+
+def test_flake_atom_span_measures_the_atoms_not_the_box(tmp_path: Path):
+    """The carved file keeps the SUPERCELL box in x/y -- the flake's own span
+    is only in its atom coordinates, and it is the span that has to clear the
+    periodic image."""
+    src = tmp_path / "super.lmp"
+    _write_supercell(src, span=60.0, spacing=1.0)
+    out = tmp_path / "hex.data"
+    components.build_flake(src, out, shape="hexagon", edge_length=10.0)
+
+    span_x, span_y = components.flake_atom_span(out)
+    # hexagon circumradius 10 -> 20 A vertex-to-vertex, sqrt(3)*10 across flats
+    assert span_x == pytest.approx(20.0, abs=1.5)
+    assert span_y == pytest.approx(10.0 * math.sqrt(3), abs=1.5)
+    assert span_x < 60.0 and span_y < 60.0        # not the box
+
+
+def test_a_flake_clear_of_its_image_passes():
+    # 19.1 A flake in a 50.96 x 44.13 cell: the r=10 row of the measured table
+    components.check_flake_pbc_clearance(
+        (19.10, 16.54), (50.96, 44.13), lj_cutoff=11.0)
+
+
+def test_a_flake_inside_the_cutoff_of_its_image_is_refused():
+    # the same flake in the r=5 cell: 6.38 x 5.52 A to its own image
+    with pytest.raises(ValueError, match=r"periodic image"):
+        components.check_flake_pbc_clearance(
+            (19.10, 16.54), (25.48, 22.07), lj_cutoff=11.0)
+
+
+def test_the_refusal_names_the_axis_and_the_numbers():
+    with pytest.raises(ValueError) as excinfo:
+        components.check_flake_pbc_clearance(
+            (19.10, 5.0), (25.48, 44.13), lj_cutoff=11.0)
+    message = str(excinfo.value)
+    assert "x" in message and "6.38" in message and "11.0" in message
+
+
+def test_a_flake_wider_than_the_cell_is_refused():
+    with pytest.raises(ValueError, match=r"periodic image"):
+        components.check_flake_pbc_clearance(
+            (60.0, 10.0), (25.48, 44.13), lj_cutoff=11.0)
+
+
+def test_the_afm_builder_checks_its_flake_against_the_sheet_cell(tmp_path: Path):
+    """The guard is wired into the builder, not just available as a function:
+    a real carved flake against a too-small sheet is refused."""
+    src = tmp_path / "super.lmp"
+    _write_supercell(src, span=60.0, spacing=1.0)
+    flake = tmp_path / "flake.data"
+    components.build_flake(src, flake, shape="hexagon", edge_length=10.0)
+
+    sim = MagicMock()
+    sim.flake_path = flake
+    sim.sheet_dims = {'xlo': 0.0, 'xhi': 25.0, 'ylo': 0.0, 'yhi': 25.0}
+    sim.config.settings.potential.lj_cutoff = 11.0
+    # the cell comes from the real accessor (the hetero builder overrides it)
+    sim._flake_periodic_cell = lambda: AFMSimulation._flake_periodic_cell(sim)
+
+    with pytest.raises(ValueError, match=r"periodic image"):
+        AFMSimulation._check_flake_fits_the_cell(sim)
+
+    sim.sheet_dims = {'xlo': 0.0, 'xhi': 60.0, 'ylo': 0.0, 'yhi': 60.0}
+    AFMSimulation._check_flake_fits_the_cell(sim)      # clears at 60 A

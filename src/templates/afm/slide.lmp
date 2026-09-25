@@ -1,3 +1,4 @@
+{% import 'common/halt.lmp' as halt_guard %}
 # LAMMPS input script for AFM Sliding Simulation
 {% import 'common/observables.lmp' as obs %}
 
@@ -78,6 +79,7 @@ fix             nve_all nve_apply nve
 {% else %}
 {% endif %}
 
+{{ halt_guard.emit_temperature_halt(halt_temperature) }}
 compute         COM_top {{ layer_group }} com
 variable        comx equal c_COM_top[1]
 variable        comy equal c_COM_top[2]

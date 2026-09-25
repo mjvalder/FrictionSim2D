@@ -862,6 +862,11 @@ def _build_hetero_flake_components(out_dir, monkeypatch, twist=None):
     # stub tip file) is skipped; it is not what this test covers.
     cfg.settings.thermostat.type = 'nose-hoover'
     sim = HeteroAFMSimulation(cfg, str(out_dir))
+    # The real build sets this in _build_sheet_for_layers, which this test
+    # skips; the flake's PBC clearance check reads it. r=10 replicates the
+    # h-MoS2/h-MoS2 coincidence cell 4x4 -> 50.96 x 44.13 A (the measured
+    # figure in future-works, "No PBC self-interaction guard for [flake]").
+    sim._hetero_rep_box = (50.96, 44.13, 20.0)
     built = sim._build_components(Path(out_dir) / "build")
     return sim, built
 

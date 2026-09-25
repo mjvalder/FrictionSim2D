@@ -1,3 +1,4 @@
+{% import 'common/halt.lmp' as halt_guard %}
 # LAMMPS input script for the AFM indentation "indent" run: hold + pull-off retract.
 #
 # One vertical-contact run per load, merging the two contact measurements that the
@@ -85,6 +86,7 @@ group           nve_apply subtract all sub_fix {{ tip_fix_group }}
 fix             nve_all nve_apply nve
 {% endif %}
 
+{{ halt_guard.emit_temperature_halt(halt_temperature) }}
 # Out-of-plane channels: sheet-COM z (comz) and tip-COM z (tipz). Penetration
 # depth = tipz - comz; both use the exact groups the sliding campaign records so
 # the indent penetration is directly comparable to the campaign contact features.
