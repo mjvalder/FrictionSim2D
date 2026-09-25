@@ -122,7 +122,17 @@ class PlotsPane(QWidget):  # pylint: disable=too-many-instance-attributes
         plot_buttons.addWidget(self.add_button)
         plot_buttons.addWidget(self.remove_button)
         left_layout.addLayout(plot_buttons)
-        left_layout.addWidget(self.form, 2)
+        # In a QScrollArea, not straight into the layout: a ConfigForm's
+        # minimum height is the sum of its expanded sections (~1800 px for the
+        # plot schema), and a widget added directly propagates that all the way
+        # to the window -- which the window manager then cannot resize
+        # vertically or maximise, whichever tab is in front, since
+        # QStackedWidget takes the maximum over its pages. Both Builder tabs
+        # already host their form this way (`app.py` `config_scroll`).
+        self.form_scroll = QScrollArea(left)
+        self.form_scroll.setWidget(self.form)
+        self.form_scroll.setWidgetResizable(True)
+        left_layout.addWidget(self.form_scroll, 2)
 
         # ---- right column: the PNG, the preset, the actions -------------
         self.preview_label = QLabel()

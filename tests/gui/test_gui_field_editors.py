@@ -244,6 +244,17 @@ class TestKeyValueGrid:
         editor.set_value({})
         assert editor.value() is None
 
+    def test_a_dump_phase_key_is_captioned_without_its_underscore(self, editor):
+        """`system_init` is a dump-phase key, so it reaches the form verbatim
+        and read as an identifier rather than a label. Only the caption
+        changes -- value() still returns the stored key."""
+        from PySide6.QtWidgets import QLabel
+
+        editor.set_value({'system_init': True})
+        row, _control = editor._rows['system_init']
+        assert row.findChild(QLabel).text() == 'system init'
+        assert editor.value() == {'system_init': True}
+
     def test_an_added_row_matches_the_declared_item_kind(self, qt_app):
         """add_row used to choose a checkbox from the runtime type of the
         value it was handed, and _on_add_clicked always passes '' -- so a row

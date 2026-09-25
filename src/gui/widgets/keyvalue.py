@@ -29,6 +29,7 @@ __all__ = ['KeyValueGridEditor', 'FixedListEditor']
 #: YAML round-trip is untouched.
 _KEY_LABELS = {
     'peratom': 'per atom',
+    'system_init': 'system init',
 }
 
 

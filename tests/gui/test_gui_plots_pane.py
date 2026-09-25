@@ -614,3 +614,40 @@ class TestPlotsPane:
 
         assert 'warning' in pane.status_label.text().lower()
         assert 'plot 2' in pane.status_label.text()
+
+
+class TestPaneFitsOnAScreen:
+    """A window cannot be resized below its layout's minimum, and a window
+    manager cannot maximise it into a screen shorter than that. A tall form
+    added straight to a layout therefore locks the whole application's
+    vertical size -- and because QStackedWidget takes the maximum over all its
+    pages, it does so whichever tab is in front.
+    """
+
+    #: Shortest screen the app is expected to run on (a 1366x768 laptop, less
+    #: room for the panel and window decorations).
+    SCREEN_HEIGHT = 700
+
+    def test_the_pane_does_not_demand_more_height_than_a_screen(
+            self, qt_app, workspace):
+        from src.gui.widgets.plots.pane import PlotsPane
+
+        pane = PlotsPane(workspace)
+        assert pane.minimumSizeHint().height() <= self.SCREEN_HEIGHT, (
+            "PlotsPane demands more vertical space than a laptop screen; the "
+            "window manager cannot resize or maximise a window whose minimum "
+            "exceeds the screen")
+
+    def test_the_main_window_does_not_demand_more_height_than_a_screen(
+            self, qt_app, workspace):
+        from src.gui.app import MainWindow
+
+        window = MainWindow(workspace)
+        try:
+            assert window.minimumSizeHint().height() <= self.SCREEN_HEIGHT, (
+                "MainWindow's minimum height exceeds a laptop screen: it "
+                "cannot be resized vertically or maximised")
+        finally:
+            window.document.dirty = False
+            window.settings_document.dirty = False
+            window.close()
