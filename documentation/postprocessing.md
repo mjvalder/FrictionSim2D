@@ -20,8 +20,9 @@ rather than as directory names nobody parsed.
   outputs/
     output_full_<size>.json          every run's time series, schema 3
     summary_<size>.csv               one row per load point
-    incomplete_files_<size>.txt      runs whose window tier is short
-    incomplete_materials_<size>.txt  the materials those runs belong to
+    incomplete_files_<size>.txt      every load point whose status is not complete,
+                                     one line each with a [status] suffix
+    incomplete_materials_<size>.txt  the materials those points belong to
 ```
 
 A *size* is the `100x100y` token built from the run's `size_x`/`size_y`. One export file
@@ -141,7 +142,9 @@ a fictitious point on every load axis.
 ### Schema 3 additions
 
 Schema 3 is schema 2 plus new keys only; nothing from schema 2 is renamed, removed or
-changes meaning. The plot stack still reads schema 2 files.
+changes meaning. The plot stack reads schema 2 and schema 3 files, and **draws only
+`complete` points**: `truncated`, `no_output`, `unreadable` and `not_reached` entries are
+skipped (a schema 2 record has no `status` and counts as complete).
 
 - **Four status keys per `runs[]` entry**: `status`, `status_detail`, `n_rows`,
   `expected_rows`. Every load point the run's config expects is exported, so a load
@@ -155,10 +158,18 @@ changes meaning. The plot stack still reads schema 2 files.
   as `{"value": v}` when all runs agree or `{"values": {v: n_runs}}` when they differ;
   plus `config_hashes`, `seeds_unique` and `seeds_shared_across_runs`. Seeds, the file
   hash, `execution` and the per-load ramp fields are never pooled.
-- **`metadata.status_counts`**: `{status: n}` over all `runs[]` entries, zeros included.
+- **`metadata.status_counts`**: `{status: n}` over every load point of the size, zeros
+  included. Without `--complete-only` that is exactly the `runs[]` entries; with it the
+  counts still cover every point, including the non-complete ones left out of `runs[]`.
 - **The v2 `metadata` keys** (`loads_by_kind`, `speeds`, `materials`, ...) cover only
   points that have data (`complete`/`truncated`), as before.
-- `--complete-only` on `postprocess read` restricts the export to `complete` points.
+- `--complete-only` on `postprocess read` restricts the export and the summary CSV to
+  `complete` points.
+- **Legacy truncation rule.** A slide-family point whose config gives no expected row
+  count (no `settings` in `provenance/config.json`) is `truncated` when its window is
+  more than three rows shorter than the longest window of the same family and size.
+  PES and indent points are never judged this way: their row counts follow the scan
+  grid and the indent protocol.
 
 A **v1 file has no `"schema"` key at all**, and the plot stack refuses it with a
 `PlotDataError` naming the command that replaces it:
@@ -175,14 +186,17 @@ One row per load point. Column order:
 
 1. **Identity** — `model, family, material, materials, flake_material, size, size_x,
    size_y, substrate, substrate_amorphous, tip_material, tip_radius, temperature,
-   layers, potential, rel_path, load_kind, load, angle, speed, tiers`.
+   layers, potential, rel_path, load_kind, load, angle, speed, tiers, status,
+   status_detail`.
    `materials` is `'+'.join(...)`, `tiers` is `';'.join(sorted(...))`, and `layers` is
    the **resolved** count — the `L{n}` path level for the AFM-like models, and
    `provenance.json`'s `layer_type_map` for the sheet-like ones, which emit no `L{n}`
    level at all.
 2. **The fourteen `RunSummary` scalars** — `mean_cof, std_cof, mean_lf, std_lf, mean_nf,
    std_nf, mean_lfx, std_lfx, mean_lfy, std_lfy, skip_fraction, ntimesteps,
-   time_series_hash, is_complete`.
+   time_series_hash, is_complete`. Here `is_complete` is `status == "complete"` **and**
+   `summarise_run`'s own check (non-empty window, role columns resolved), so a point
+   tagged `complete` can still read `False`.
 3. **Family-specific extras** — `slip_*` for any run with a raw tier, `pes_*` for a PES
    run, the retract features for `indent`, the slide distance and driven-COM drift for a
    slide family. The header therefore differs between families *by design*; the frame
@@ -732,7 +746,7 @@ needs a shorter axis than the honest one.
 ### `postprocess read`
 
 ```bash
-FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
+FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT] [--complete-only]
 ```
 
 - `RESULTS_DIR` — a simulation root, the directory holding `afm/`, `sheetonsheet/`,
@@ -741,6 +755,8 @@ FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
   `outputs/summary_<size>.csv`, echoing each path.
 - `--skip-fraction FLOAT` (default `0.2`) — the transient fraction dropped before the
   summary statistics, forwarded to `summarise_run`.
+- `--complete-only` — export and summarise only `complete` load points (the
+  pre-schema-3 behaviour); `metadata.status_counts` still counts every point.
 
 The completeness reports are written either way.
 
