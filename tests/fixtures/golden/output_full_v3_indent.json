@@ -128,6 +128,9 @@
    "config.output.tier_frequency": {
     "value": null
    },
+   "config.simulation.afm_hold_steps": {
+    "value": 10000
+   },
    "config.simulation.constraint_mode": {
     "value": null
    },
@@ -566,7 +569,8 @@
       "constraint_mode": null,
       "sheet_hold_steps": null,
       "ramp_max_iterations": null,
-      "halt_temperature_factor": null
+      "halt_temperature_factor": null,
+      "afm_hold_steps": 10000
      },
      "output": {
       "results_frequency": null,

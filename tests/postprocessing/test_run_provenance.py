@@ -199,3 +199,19 @@ def test_pooling_tolerates_an_unreadable_record(tmp_path):
     prov = _pooled(tmp_path)['provenance']
 
     assert prov['config_hashes'] == {'ff' * 32: 1}
+
+
+def test_afm_hold_steps_for_every_family_that_runs_the_afm_hold():
+    """`indent` renders `afm/system_init.lmp` too, so it holds like `afm`."""
+    assert config_settings({}, 'afm')['simulation']['afm_hold_steps'] == 10000
+    assert config_settings({}, 'indent')['simulation']['afm_hold_steps'] == 10000
+    assert 'afm_hold_steps' not in config_settings(
+        {}, 'sheetonsheet')['simulation']
+
+
+def test_afm_hold_steps_lives_in_core_observables():
+    """One definition, importable without the AFM builder stack; the builder
+    re-exports the same object for the template render."""
+    from src.builders.afm.base import AFM_HOLD_STEPS as builder_value
+    from src.core.observables import AFM_HOLD_STEPS
+    assert AFM_HOLD_STEPS == builder_value == 10000

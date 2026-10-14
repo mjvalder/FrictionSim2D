@@ -301,3 +301,27 @@ def test_enrich_records_ramp_and_load_per_load(tmp_path):
     assert set(out["ramp_by_load"]) == {"10", "20"}
     assert out["load_achieved_by_load"] == {"10": 1.5, "20": 2.5}
     assert out["load_achieved"] == 2.5
+
+
+def test_load_achieved_without_configured_loads_is_the_largest_load(tmp_path):
+    """No `general.force` to name the last load: `load_achieved` is the hold
+    at the largest load, not the last file by name (hold_5N sorts after
+    hold_10N)."""
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+    prov = tmp_path / "out" / "provenance"
+    prov.mkdir(exist_ok=True)
+    (prov / "config.json").write_text(
+        json.dumps({"general": {"force": None}}), encoding="utf-8")
+    data = layer_dir / "data"
+    data.mkdir(exist_ok=True)
+    hdr = "# TimeStep v_hold_fz v_hold_tipz v_hold_shz\n"
+    (data / "hold_10N.txt").write_text(hdr + "1000 9.5 5 6\n", encoding="utf-8")
+    (data / "hold_5N.txt").write_text(hdr + "1000 4.5 5 6\n", encoding="utf-8")
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "# RAMP_STATUS converged=1 r=0.04 iterations=5 load=10\n")
+
+    result = enrich_provenance_post_run(layer_dir, log_path)
+    out = json.loads(result.read_text(encoding="utf-8"))
+    assert out["load_achieved"] == 9.5

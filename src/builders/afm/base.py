@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from ...core.config import AFMSimulationConfig
+from ...core.observables import AFM_HOLD_STEPS
 from ...core.utils.structures import cifread
 from ...lattice.apply import rotate_flake_in_plane
 from ...potentials.manager import PotentialManager
@@ -126,9 +127,11 @@ def enrich_provenance_post_run(output_root: Path,
     achieved = parse_hold_files(output_root / 'data')
     if achieved:
         updates['load_achieved_by_load'] = achieved
+        # The last configured load when known, else the largest held load:
+        # `achieved` is in filename order, where hold_5N sorts after hold_10N.
         last = f'{float(loads[-1]):g}' if loads else None
-        updates['load_achieved'] = (achieved[last] if last in achieved
-                                    else list(achieved.values())[-1])
+        updates['load_achieved'] = achieved.get(
+            last, achieved[max(achieved, key=float)])
     if not updates:
         logger.warning(
             "No RAMP_STATUS/UNLOADED_REF/LAMMPS-version lines found in "
@@ -146,11 +149,6 @@ def enrich_provenance_post_run(output_root: Path,
 
     write_provenance(output_root, record)
     return prov_path
-
-
-#: Length (steps) of the constant-load hold in ``afm/system_init.lmp``; rendered
-#: into the template so the script and the exported config cannot drift.
-AFM_HOLD_STEPS = 10000
 
 
 class AFMSimulation(SimulationBase):

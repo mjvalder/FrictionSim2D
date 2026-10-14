@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
-from src.core.observables import tier_frequencies
+from src.core.observables import AFM_HOLD_STEPS, tier_frequencies
 from src.data.provenance import load_key, read_provenance, sha256_file
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 #: `provenance['execution']`.
 EXECUTION_FIELDS = ('wall_time_s', 'n_procs', 'atoms_per_proc')
 
-#: Families whose slide runs the AFM `system_init` hold (`AFM_HOLD_STEPS`).
-_AFM_STACK_FAMILIES = ('afm',)
+#: Families whose system phase renders `afm/system_init.lmp`, and so runs its
+#: constant-load hold (`AFM_HOLD_STEPS`): AFM slides and indents alike.
+_AFM_STACK_FAMILIES = ('afm', 'indent')
 
 _TIP_KEYS = ('r', 'amorph', 'dspring', 'damping_ratio')
 _GENERAL_KEYS = ('force', 'pressure', 'scan_angle', 'scan_speed',
@@ -55,8 +56,6 @@ def config_settings(config: Optional[Mapping],
     """
     if config is None:
         return None
-    # pylint: disable-next=import-outside-toplevel
-    from src.builders.afm.base import AFM_HOLD_STEPS
     settings = _section(config, 'settings')
     sim = _section(settings, 'simulation')
     output = _section(settings, 'output')

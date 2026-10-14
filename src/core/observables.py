@@ -33,6 +33,11 @@ TIER_ARGS = {
     'peratom': (1000, 1, 1000),
 }
 
+#: Length (steps) of the constant-load hold in ``afm/system_init.lmp``; the
+#: AFM builder renders it into the template, so the script and the exported
+#: config (`config.simulation.afm_hold_steps`) cannot drift.
+AFM_HOLD_STEPS: int = 10000
+
 #: Families whose `window` tier spans exactly the slide run (`fix fc_win` is
 #: defined right before `run {{ run_steps }}` in the slide templates). Indent's
 #: window covers the hold phase and PES writes a grid, so no expected length is
