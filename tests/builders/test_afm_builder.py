@@ -11,6 +11,7 @@ import pytest
 
 from src.builders.afm import AFMSimulation
 from src.builders.construction import components
+from tests.builders.test_builders import MOS2_CIF, MOS2_POT
 from src.potentials.utils import normalize_potential_type
 from tests.helpers.afm import _make_afm_config, _prepare_builder_for_slide_write, _seed_builder_state
 
@@ -706,31 +707,43 @@ def test_afm_provenance_records_the_drive_spring(tmp_path, method, expected):
 def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkeypatch):
     config = _make_afm_config(tmp_path, layers=[2])
     config.sheet.lat_c = None
+    # Real material files so the real build_sheet runs end to end; only the
+    # LAMMPS instance that minimises the interlayer distance is faked.
+    config.sheet.mat = "h-MoS2"
+    config.sheet.pot_path = MOS2_POT
+    config.sheet.cif_path = MOS2_CIF
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
 
-    def fake(_config, build_dir, **kw):
-        kw["unit_cell_out"].update(
-            {"xlo": 0, "xhi": 3.19, "ylo": 0, "yhi": 5.52, "zlo": 0, "zhi": 3.1})
-        kw["lat_c_info_out"].update(
-            {"lat_c_source": "minimised", "atoms_per_layer": 12,
-             "layer_thickness": 3.1})
-        path = Path(build_dir) / "fake.lmp"
-        path.write_text("# dummy\n", encoding="utf-8")
-        dims = {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0,
-                "zlo": 0.0, "zhi": 12.0}
-        return path, dims, 6.15
+    config.sheet.x = config.sheet.y = 12.0
 
-    monkeypatch.setattr(components, "build_sheet", fake)
+    real_create = components._create_lammps_instance  # pylint: disable=protected-access
+
+    class _MinimisedLatC:
+        """The real LAMMPS instance, except the minimised lat_c is a known value."""
+
+        def __init__(self):
+            self._lmp = real_create()
+
+        def extract_variable(self, name, group, vartype):
+            if name == "lat_c":
+                return 6.15
+            return self._lmp.extract_variable(name, group, vartype)
+
+        def __getattr__(self, name):
+            return getattr(self._lmp, name)
+
+    monkeypatch.setattr(components, "_create_lammps_instance", _MinimisedLatC)
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     builder._build_sheet_for_layers(build_dir, 2)  # pylint: disable=protected-access
-    assert builder.lat_c == 6.15
+    assert builder.lat_c == pytest.approx(6.15)
 
     # Seed the rest of the state without overwriting lat_c / the unit cell.
     keep = (builder.lat_c, dict(builder.sheet_unit_cell), dict(builder.sheet_dims))
     layer_dir = _seed_builder_state(builder, tmp_path)
     builder.lat_c, builder.sheet_unit_cell, builder.sheet_dims = keep
     builder.sheet_paths[2] = builder.sheet_paths[1]
+    builder.sheet_paths[2].write_text("# dummy\n", encoding="utf-8")
     builder.output_dir_layer[2] = layer_dir.parent / "L2"
     builder.relative_run_dir_layer[2] = Path("out") / "L2"
     builder.z_positions[2] = builder.z_positions[1]
@@ -748,10 +761,15 @@ def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkey
     builder.write_inputs(2)
 
     geometry = _afm_provenance(layer_dir.parent / "L2")["geometry"]
-    assert geometry["lat_c"] == 6.15 == contexts[0]["lat_c"]
+    assert geometry["lat_c"] == pytest.approx(6.15)
+    assert geometry["lat_c"] == contexts[0]["lat_c"]
     assert geometry["lat_c_source"] == "minimised"
-    assert geometry["cell_a"] == pytest.approx(3.19)
-    assert geometry["atoms_per_layer"] == 12
+    # Measured on the real monolayer, so cross-check against the real files.
+    assert geometry["cell_a"] == pytest.approx(
+        builder.sheet_unit_cell["xhi"] - builder.sheet_unit_cell["xlo"])
+    assert geometry["cell_a"] > 0
+    assert geometry["atoms_per_layer"] > 0
+    assert geometry["layer_thickness"] > 0
 
 
 def test_a_monolayer_has_no_interlayer_distance(tmp_path):
