@@ -7,19 +7,26 @@ model and builders must construct it completely.
 """
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 PROVENANCE_SCHEMA_VERSION = '2.1.0'
 
 #: Which part of the built system a MaterialProvenance entry describes.
 MATERIAL_ROLES = ('sheet', 'flake', 'tip', 'substrate')
 
+# Anchored: LAMMPS echoes the ``print "# RAMP_STATUS ..."`` command into the log
+# too, and that line (starting with ``print``) must not count as a result.
 _RAMP_RE = re.compile(
-    r'# RAMP_STATUS converged=(\d) r=([\d.eE+-]+) iterations=(\d+)')
+    r'^# RAMP_STATUS converged=(\d) r=([\d.eE+-]+) iterations=(\d+)'
+    r'(?: load=([\d.eE+-]+))?', re.M)
+_HOLD_FILE_RE = re.compile(r'^hold_(-?[\d.]+)N\.txt$')
 _ZREF_RE = re.compile(r'# UNLOADED_REF layer=(\d+) z=([\d.eE+-]+)')
 
 
@@ -187,20 +194,49 @@ def read_provenance(path: Path, *, family: str = 'afm', model: str = 'afm',
     return ProvenanceRecord(**data)
 
 
-def parse_log_extras(log_path: Path) -> dict:
+def load_key(load: float) -> str:
+    """The one spelling of a load as a dict key (10, 10.0 -> '10'; 2.5 -> '2.5')."""
+    return f'{float(load):g}'
+
+
+def _ramp_by_load(matches: list, loads: Optional[Sequence[float]],
+                  log_path: Path) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Key each RAMP_STATUS entry by load: its own ``load=``, else by position."""
+    entries = [{'converged': conv == '1', 'r': float(r_val),
+                'iterations': int(iters)} for conv, r_val, iters, _ in matches]
+    if all(m[3] for m in matches):
+        keys = [load_key(float(m[3])) for m in matches]
+    elif loads is not None and len(loads) == len(matches):
+        keys = [load_key(x) for x in loads]
+    else:
+        logger.warning(
+            "%s: %d RAMP_STATUS lines without load= cannot be matched to %s "
+            "configured loads; ramp_by_load omitted.", log_path, len(matches),
+            'no' if loads is None else len(loads))
+        return None
+    return dict(zip(keys, entries))
+
+
+def parse_log_extras(log_path: Path,
+                     loads: Optional[Sequence[float]] = None) -> dict:
     """Post-run enrichment: RAMP_STATUS + UNLOADED_REF lines from the log.
 
-    Returns a dict of ProvenanceRecord field updates; multiple RAMP_STATUS
-    lines (one per load) keep the last, matching write order.
+    Returns a dict of ProvenanceRecord field updates. The scalar ramp fields
+    keep the last RAMP_STATUS line (write order); ``ramp_by_load`` keeps all of
+    them, keyed by each line's ``load=`` or, for older logs without it, paired
+    by position with ``loads`` when the counts agree.
     """
     text = Path(log_path).read_text(encoding='utf-8', errors='ignore')
     updates: dict = {}
     ramp_matches = _RAMP_RE.findall(text)
     if ramp_matches:
-        conv, r_val, iters = ramp_matches[-1]
+        conv, r_val, iters, _ = ramp_matches[-1]
         updates['ramp_converged'] = conv == '1'
         updates['ramp_r'] = float(r_val)
         updates['ramp_iterations'] = int(iters)
+        by_load = _ramp_by_load(ramp_matches, loads, Path(log_path))
+        if by_load:
+            updates['ramp_by_load'] = by_load
     zrefs = {f'layer_{lyr}': float(z) for lyr, z in _ZREF_RE.findall(text)}
     if zrefs:
         updates['unloaded_reference_z'] = zrefs
@@ -208,3 +244,35 @@ def parse_log_extras(log_path: Path) -> dict:
     if m:
         updates['lammps_version'] = m.group(1)
     return updates
+
+
+def _mean_hold_fz(path: Path) -> float:
+    """Mean of column ``v_hold_fz`` of an ``ave/time`` file."""
+    names: List[str] = []
+    values: List[float] = []
+    for line in path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        if line.startswith('#'):
+            if 'TimeStep' in line:
+                names = line.lstrip('# ').split()
+            continue
+        if not line.strip():
+            continue
+        values.append(float(line.split()[names.index('v_hold_fz')]))
+    return sum(values) / len(values)
+
+
+def parse_hold_files(data_dir: Path) -> Dict[str, float]:
+    """Mean hold normal force per load from ``hold_<load>N.txt`` files."""
+    out: Dict[str, float] = {}
+    data_dir = Path(data_dir)
+    if not data_dir.is_dir():
+        return out
+    for path in sorted(data_dir.iterdir()):
+        m = _HOLD_FILE_RE.match(path.name)
+        if not m:
+            continue
+        try:
+            out[load_key(float(m.group(1)))] = _mean_hold_fz(path)
+        except (ValueError, ZeroDivisionError, OSError) as exc:
+            logger.warning("Skipping unparseable hold file %s (%s).", path, exc)
+    return out

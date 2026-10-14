@@ -169,11 +169,11 @@ if              '${r} < 0.1' then 'jump SELF loop_end'
 next            ramp_iter
 jump            SELF ramp_iter_loop
 # cap exhausted (next deleted ramp_iter and skipped the jump above)
-print           "# RAMP_STATUS converged=0 r=${r} iterations={{ ramp_max_iterations }}"
+print           "# RAMP_STATUS converged=0 r=${r} iterations={{ ramp_max_iterations }} load=$(v_find)"
 jump            SELF hold_start
 
 label           loop_end
-print           "# RAMP_STATUS converged=1 r=${r} iterations=${ramp_iter}"
+print           "# RAMP_STATUS converged=1 r=${r} iterations=${ramp_iter} load=$(v_find)"
 variable        ramp_iter delete
 
 label           hold_start

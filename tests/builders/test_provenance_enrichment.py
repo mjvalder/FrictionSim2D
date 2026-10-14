@@ -277,3 +277,27 @@ def test_a_realistic_slide_log_rewrites_only_the_version(tmp_path):
         assert after[field] == settled[field], field
     # The one field a later log does take over, documented as accepted.
     assert after["lammps_version"] == "21 Nov 2023"
+
+
+def test_enrich_records_ramp_and_load_per_load(tmp_path):
+    builder = _builder(tmp_path)
+    layer_dir = _built_layer_dir(builder, tmp_path)
+    prov = tmp_path / "out" / "provenance"
+    prov.mkdir(exist_ok=True)
+    (prov / "config.json").write_text(
+        json.dumps({"general": {"force": [10, 20]}}), encoding="utf-8")
+    data = layer_dir / "data"
+    data.mkdir(exist_ok=True)
+    hdr = "# TimeStep v_hold_fz v_hold_tipz v_hold_shz\n"
+    (data / "hold_10N.txt").write_text(hdr + "1000 1.5 5 6\n", encoding="utf-8")
+    (data / "hold_20N.txt").write_text(hdr + "1000 2.5 5 6\n", encoding="utf-8")
+    log_path = _write_log(
+        tmp_path, "log_system.lammps",
+        "# RAMP_STATUS converged=1 r=0.04 iterations=5 load=10\n"
+        "# RAMP_STATUS converged=1 r=0.05 iterations=6 load=20\n")
+
+    result = enrich_provenance_post_run(layer_dir, log_path)
+    out = json.loads(result.read_text(encoding="utf-8"))
+    assert set(out["ramp_by_load"]) == {"10", "20"}
+    assert out["load_achieved_by_load"] == {"10": 1.5, "20": 2.5}
+    assert out["load_achieved"] == 2.5

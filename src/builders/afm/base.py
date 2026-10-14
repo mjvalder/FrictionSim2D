@@ -6,6 +6,7 @@ generates the necessary potentials, and writes the LAMMPS input scripts.
 """
 
 import hashlib
+import json
 import logging
 from itertools import product
 from pathlib import Path
@@ -28,6 +29,23 @@ logger = logging.getLogger(__name__)
 # tip-sheet element pairs, recorded in provenance with its source.
 K_CONTACT = 1.5
 _CONTACT_CUTOFF_FALLBACK = 5.0  # Angstrom; used only when the CIF is unreadable
+
+
+def _configured_loads(output_root: Path) -> Optional[list]:
+    """``general.force`` from the run's ``provenance/config.json``, as a list."""
+    for base in (output_root, output_root.parent):
+        cfg_path = base / 'provenance' / 'config.json'
+        if not cfg_path.is_file():
+            continue
+        try:
+            force = json.loads(cfg_path.read_text(encoding='utf-8'))['general']['force']
+        except (ValueError, OSError, KeyError, TypeError) as exc:
+            logger.warning("Could not read loads from %s (%s).", cfg_path, exc)
+            return None
+        if force is None:
+            return None
+        return [float(x) for x in (force if isinstance(force, list) else [force])]
+    return None
 
 
 def enrich_provenance_post_run(output_root: Path,
@@ -77,7 +95,8 @@ def enrich_provenance_post_run(output_root: Path,
     real output must never be hidden behind a failed enrichment).
     """
     # pylint: disable-next=import-outside-toplevel
-    from ...data.provenance import parse_log_extras, read_provenance, write_provenance
+    from ...data.provenance import (
+        parse_hold_files, parse_log_extras, read_provenance, write_provenance)
 
     output_root = Path(output_root)
     log_path = Path(log_path)
@@ -102,7 +121,14 @@ def enrich_provenance_post_run(output_root: Path,
             "unenriched.", prov_path, exc)
         return None
 
-    updates = parse_log_extras(log_path)
+    loads = _configured_loads(output_root)
+    updates = parse_log_extras(log_path, loads)
+    achieved = parse_hold_files(output_root / 'data')
+    if achieved:
+        updates['load_achieved_by_load'] = achieved
+        last = f'{float(loads[-1]):g}' if loads else None
+        updates['load_achieved'] = (achieved[last] if last in achieved
+                                    else list(achieved.values())[-1])
     if not updates:
         logger.warning(
             "No RAMP_STATUS/UNLOADED_REF/LAMMPS-version lines found in "

@@ -238,6 +238,8 @@ def test_settle_loop_is_capped(tmp_path):
     assert f'variable        ramp_iter loop {ramp_max_iterations}' in text
     assert 'RAMP_STATUS' in text
     assert 'variable        ramp_iter delete' in text   # cap resets per load
+    assert 'iterations=${ramp_iter} load=$(v_find)' in text
+    assert f'iterations={ramp_max_iterations} load=$(v_find)' in text
 
 
 def test_hold_channels_emitted_selfcontained(tmp_path):

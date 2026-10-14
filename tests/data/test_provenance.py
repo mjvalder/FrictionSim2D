@@ -184,3 +184,51 @@ def test_a_2_0_record_without_the_new_fields_still_reads(tmp_path):
 def test_lat_c_source_vocabulary_is_closed():
     with pytest.raises(pydantic.ValidationError):
         BuiltGeometry(lat_c_source='guess')
+
+
+_RAMP_PRINT = ('print           "# RAMP_STATUS converged=1 r=${r} '
+               'iterations=${ramp_iter} load=$(v_find)"\n')
+
+
+def test_three_ramp_lines_give_three_entries(tmp_path):
+    log = tmp_path / 'log.lammps'
+    body = ''.join(
+        _RAMP_PRINT + f"# RAMP_STATUS converged=1 r=0.0{i} iterations={i} load={ld}\n"
+        for i, ld in ((1, 10), (2, 20), (3, 30)))
+    log.write_text("LAMMPS (29 Aug 2024)\n" + body)
+    up = parse_log_extras(log)
+    assert up['ramp_by_load'] == {
+        '10': {'converged': True, 'r': 0.01, 'iterations': 1},
+        '20': {'converged': True, 'r': 0.02, 'iterations': 2},
+        '30': {'converged': True, 'r': 0.03, 'iterations': 3}}
+    assert up['ramp_iterations'] == 3
+    assert up['ramp_r'] == pytest.approx(0.03)
+
+
+def _old_log(tmp_path):
+    log = tmp_path / 'old.lammps'
+    log.write_text(''.join(
+        f"# RAMP_STATUS converged=1 r=0.1 iterations={i}\n" for i in (1, 2, 3)))
+    return log
+
+
+def test_old_lines_pair_by_position(tmp_path):
+    up = parse_log_extras(_old_log(tmp_path), loads=[10, 20, 30.0])
+    assert list(up['ramp_by_load']) == ['10', '20', '30']
+    assert up['ramp_by_load']['20']['iterations'] == 2
+
+
+def test_old_lines_with_mismatched_load_count_are_not_paired(tmp_path):
+    up = parse_log_extras(_old_log(tmp_path), loads=[10, 20])
+    assert 'ramp_by_load' not in up
+    assert up['ramp_iterations'] == 3
+
+
+def test_parse_hold_files(tmp_path):
+    from src.data.provenance import parse_hold_files
+    hdr = ("# Time-averaged data for fix hold_ave\n"
+           "# TimeStep v_hold_fz v_hold_tipz v_hold_shz\n")
+    (tmp_path / 'hold_10N.txt').write_text(hdr + "1000 1.0 5 6\n2000 3.0 5 6\n")
+    (tmp_path / 'hold_2.5N.txt').write_text(hdr + "1000 0.5 5 6\n")
+    (tmp_path / 'hold_7N.txt').write_text("garbage\n")
+    assert parse_hold_files(tmp_path) == {'10': 2.0, '2.5': 0.5}
