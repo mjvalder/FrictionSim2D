@@ -1256,7 +1256,11 @@ def _merge_settings(base: dict, overlay: dict) -> None:
                    'outputs/summary_<size>.csv.')
 @click.option('--skip-fraction', default=0.2, show_default=True, type=float,
               help='Transient fraction dropped before the summary statistics.')
-def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float):
+@click.option('--complete-only', is_flag=True,
+              help='Export only load points whose status is complete '
+                   '(the pre-schema-3 behaviour).')
+def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float,
+                     complete_only: bool):
     """Read and process simulation result data.
 
     RESULTS_DIR is a simulation root -- the directory holding afm/,
@@ -1264,13 +1268,18 @@ def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float):
     """
     from .postprocessing import DataReader  # noqa: PLC0415
 
-    reader = DataReader(results_dir=results_dir, skip_fraction=skip_fraction)
+    reader = DataReader(results_dir=results_dir, skip_fraction=skip_fraction,
+                        complete_only=complete_only)
     reader.export_issue_reports()
-    if not reader.runs:
+    if not reader.points:
         click.echo(f"No runs found under {results_dir}.", err=True)
         return
-    click.echo(f"Found {len(reader.runs)} run(s) across "
-               f"{len(reader.runs_by_size())} size(s).")
+    counts: dict = {}
+    for point in reader.points:
+        counts[point.status] = counts.get(point.status, 0) + 1
+    summary = ', '.join(f'{k}={v}' for k, v in sorted(counts.items()) if v)
+    click.echo(f"Found {len(reader.points)} load point(s) ({summary}) "
+               f"across {len({p.size for p in reader.points})} size(s).")
     if do_export:
         for path in reader.export_full_data_to_json():
             click.echo(f"✅ {path}")

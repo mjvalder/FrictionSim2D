@@ -594,3 +594,49 @@ def test_the_file_level_parser_survives():
     assert callable(rd.DataReader._registry_sim_type)
     assert rd.DataReader._LF_SCHEMA1_CORRECTION == 1.602176565
     assert rd.DataReader._KNOWN_FAMILIES
+
+
+# --- status column / complete_only ---------------------------------------
+
+def _cut_short(root):
+    from tests.postprocessing.test_run_status import _cut_short_tree
+    return _cut_short_tree(root)
+
+
+def test_csv_has_status_and_is_complete_follows_it(tmp_path):
+    _cut_short(tmp_path)
+    reader = DataReader(results_dir=str(tmp_path))
+    reader.export_summary_csv()
+
+    frame = pd.read_csv(tmp_path / 'outputs' / 'summary_100x100y.csv')
+
+    assert list(frame['status']) == ['complete', 'complete', 'truncated',
+                                     'not_reached', 'not_reached']
+    assert list(frame['is_complete']) == [True, True, False, False, False]
+
+
+def test_csv_status_column_order(tmp_path):
+    _cut_short(tmp_path)
+    reader = DataReader(results_dir=str(tmp_path))
+    reader.export_summary_csv()
+
+    cols = list(pd.read_csv(tmp_path / 'outputs' / 'summary_100x100y.csv'))
+
+    i = cols.index('tiers')
+    assert cols[i + 1:i + 3] == ['status', 'status_detail']
+
+
+def test_complete_only_drops_the_rest(tmp_path):
+    _cut_short(tmp_path)
+    reader = DataReader(results_dir=str(tmp_path), complete_only=True)
+    reader.export_issue_reports()
+    reader.export_full_data_to_json()
+    reader.export_summary_csv()
+
+    out = tmp_path / 'outputs'
+    doc = json.loads((out / 'output_full_100x100y.json').read_text())
+    assert len(doc['runs']) == 2
+    assert doc['metadata']['status_counts']['not_reached'] == 2
+    assert len(pd.read_csv(out / 'summary_100x100y.csv')) == 2
+    lines = (out / 'incomplete_files_100x100y.txt').read_text().splitlines()
+    assert len(lines) == 3

@@ -44,7 +44,7 @@ def test_read_reports_how_many_runs_it_found(runner, tmp_path):
 
     result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path)])
 
-    assert '4 run' in result.output
+    assert '4 load point' in result.output
 
 
 def test_skip_fraction_reaches_the_summary(runner, tmp_path):
@@ -226,3 +226,41 @@ def test_plot_renders_and_reports_what_it_wrote(runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert (tmp_path / 'plots' / 'lf.png').is_file()
     assert 'lf.png' in result.output
+
+
+def test_complete_only_flag(runner, tmp_path):
+    from tests.helpers.results_tree import slide_config
+    from tests.helpers.synthetic_results import write_results
+
+    loads = (10, 20, 30)
+    run_dir = make_family_run(tmp_path, 'afm', loads=loads, n=50,
+                              config=slide_config('afm', loads=loads))
+    write_results(run_dir, 'afm', load_kind='force', loads=(30,), layers=2,
+                  n=20)
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path),
+                                 '--export', '--complete-only'])
+
+    assert result.exit_code == 0, result.output
+    assert 'complete=2, truncated=1' in result.output
+    doc = json.loads((tmp_path / 'outputs'
+                      / 'output_full_100x100y.json').read_text())
+    assert [r['status'] for r in doc['runs']] == ['complete', 'complete']
+
+
+def test_a_tree_with_only_missing_output_still_exports(runner, tmp_path):
+    from tests.helpers.results_tree import slide_config
+
+    run_dir = make_family_run(tmp_path, 'afm', loads=(10, 20), n=50,
+                              config=slide_config('afm', loads=(10, 20)))
+    for path in (run_dir / 'results').iterdir():
+        path.unlink()
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path),
+                                 '--export'])
+
+    assert result.exit_code == 0, result.output
+    assert 'No runs found' not in result.output
+    doc = json.loads((tmp_path / 'outputs'
+                      / 'output_full_100x100y.json').read_text())
+    assert [r['status'] for r in doc['runs']] == ['no_output', 'not_reached']

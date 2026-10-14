@@ -274,7 +274,7 @@ def test_timeseries_uses_each_run_own_time_column(tmp_path):
     truncated or raised."""
     root = tmp_path / 'ds'
     make_family_run(root, 'afm', material='h-MoS2', n=20)
-    make_family_run(root, 'afm', material='h-WS2', n=8)
+    make_family_run(root, 'afm', material='h-WS2', n=18)
     reader = DataReader(results_dir=str(root))
     reader.export_full_data_to_json()
     reader.export_summary_csv()
@@ -287,7 +287,7 @@ def test_timeseries_uses_each_run_own_time_column(tmp_path):
 
     assert (out / 'ts.png').exists()
     lengths = {len(r['df']) for r in plotter._extract_all_runs('ds', '100x100y')}
-    assert lengths == {20, 8}
+    assert lengths == {20, 18}
 
 
 def test_timeseries_can_plot_the_raw_tier(tmp_path):
@@ -689,3 +689,66 @@ def test_plot_stack_reads_schema_3_and_still_reads_schema_2(tmp_path):
                       output_dir=str(tmp_path / 'out'))
 
     assert list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access
+
+
+# --- status filter ---------------------------------------------------------
+
+def _cut_short_dataset(tmp_path: Path, name: str, **reader_kw) -> Path:
+    from tests.postprocessing.test_run_status import _cut_short_tree
+    root = tmp_path / name
+    _cut_short_tree(root)
+    reader = DataReader(results_dir=str(root), **reader_kw)
+    reader.export_full_data_to_json()
+    reader.export_summary_csv()
+    return root
+
+
+def test_truncated_runs_are_hidden_by_default(tmp_path):
+    root = _cut_short_dataset(tmp_path, 'ds')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    runs = list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access
+
+    assert sorted(r['load'] for r in runs) == [10.0, 20.0]
+
+
+def test_no_output_entries_do_not_break_any_plot_reader(tmp_path):
+    results = {}
+    for name, kw in (('full', {}), ('only', {'complete_only': True})):
+        root = _cut_short_dataset(tmp_path, name, **kw)
+        out = tmp_path / f'out_{name}'
+        plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                          output_dir=str(out))
+        window = list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access
+        raw = list(plotter._extract_all_runs('ds', '100x100y', 'raw'))  # pylint: disable=protected-access
+        summary = plotter._calculate_summary_statistics()  # pylint: disable=protected-access
+        windowed = plotter._calculate_summary_statistics(first_n=10)  # pylint: disable=protected-access
+        plotter.generate_plot({'plot_type': 'timeseries', 'y_axis': 'lf',
+                               'filter_size': '100x100y', 'datasets': ['ds'],
+                               'filename': 'ts.png'})
+        plotter.generate_plot({'plot_type': 'stick_slip_analysis',
+                               'filter_size': '100x100y', 'datasets': ['ds'],
+                               'filter_layer': 2, 'filename': 'ss.png'})
+        assert (out / 'ts.png').exists()
+        results[name] = (
+            [(r['rel_path'], r['load']) for r in window], len(raw),
+            summary.sort_values('force')[['force', 'lf']].to_dict('records'),
+            windowed.sort_values('force')[['force', 'lf']].to_dict('records'))
+
+    assert results['full'] == results['only']
+    assert [load for _, load in results['full'][0]] == [10.0, 20.0]
+
+
+def test_a_hand_built_no_output_record_yields_nothing(tmp_path):
+    root = _dataset(tmp_path, 'afm', loads=(10.0,))
+    path = root / 'outputs' / 'output_full_100x100y.json'
+    doc = json.loads(path.read_text())
+    doc['runs'].append({**doc['runs'][0], 'status': 'no_output', 'tiers': {}})
+    path.write_text(json.dumps(doc))
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    runs = list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access
+
+    assert len(runs) == 1

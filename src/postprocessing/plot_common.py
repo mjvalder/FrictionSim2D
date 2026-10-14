@@ -23,6 +23,10 @@ from .plot_style import GEM24_COLORS
 
 logger = logging.getLogger(__name__)
 
+#: Statuses the plot stack draws. A v2 record has no status and counts as
+#: complete; truncated and missing points never reach a plot.
+PLOT_STATUSES = ("complete",)
+
 
 #: Scalar query parameters forwarded to the v3 client verbatim.
 DB_QUERY_KEYS = ('material', 'family', 'model', 'set_label', 'potential_type',
@@ -484,6 +488,8 @@ class PlotCommonMixin(PlotterMixinBase):
         units = (metadata or {}).get('units', {})
         built: list[dict] = []
         for record in runs:
+            if record.get('status', 'complete') not in PLOT_STATUSES:
+                continue
             tier_data = record.get('tiers', {}).get(tier)
             if tier_data is None:
                 continue
@@ -597,6 +603,10 @@ class PlotCommonMixin(PlotterMixinBase):
                         f"`FrictionSim2D postprocess read <root> --export`.")
                 frame = pd.read_csv(path)
                 for record in frame.to_dict('records'):
+                    status = record.get('status')
+                    if (isinstance(status, str)
+                            and status not in PLOT_STATUSES):
+                        continue
                     row = dict(record)
                     row['dataset_label'] = label
                     row['file_key'] = file_key

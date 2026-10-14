@@ -457,7 +457,8 @@ SUMMARY_IDENTITY_COLUMNS = (
     'model', 'family', 'material', 'materials', 'flake_material', 'size',
     'size_x', 'size_y', 'substrate', 'substrate_amorphous', 'tip_material',
     'tip_radius', 'temperature', 'layers', 'potential', 'rel_path',
-    'load_kind', 'load', 'angle', 'speed', 'tiers')
+    'load_kind', 'load', 'angle', 'speed', 'tiers', 'status',
+    'status_detail')
 
 #: The two alternative lateral-force definitions the sheet family carries.
 #: NaN when the frame has no react_x/react_y (sx_sy) or drive_fx/drive_fy
@@ -696,15 +697,18 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             grouped.setdefault(point.size, []).append(point)
         return grouped
 
-    def _build_metadata(self,
-                        runs: Optional[List[RunFrames]] = None) -> Dict[str, Any]:
+    def _build_metadata(self, runs: Optional[List[RunFrames]] = None,
+                        counted: Optional[List[RunFrames]] = None
+                        ) -> Dict[str, Any]:
         """The `metadata` block for `entries` (default: every point).
 
         The v2 keys are computed over the entries that have data (non-empty
         tiers), so their v2 meaning is unchanged; `status_counts` and the
-        pooled `provenance` cover every entry.
+        pooled `provenance` cover every entry. `counted` widens only
+        `status_counts` (e.g. to every point of the size under `complete_only`).
         """
         entries = self.points if runs is None else runs
+        counted = entries if counted is None else counted
         runs = [run for run in entries if run.tiers]
         loads: Dict[str, Dict[str, set]] = {'force': {}, 'pressure': {}}
         for run in runs:
@@ -739,7 +743,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 [(run.tokens.rel_path, self._run_block(run))
                  for run in entries]),
             'status_counts': {
-                status: sum(1 for run in entries if run.status == status)
+                status: sum(1 for run in counted if run.status == status)
                 for status in STATUSES},
             # Which COF definition produced the summary numbers beside this
             # export. v1 files carried no such statement and the definition
@@ -968,6 +972,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
     def export_payload(self, size: str, runs: List[RunFrames]) -> Dict[str, Any]:
         """The whole export document (schema 3) for one size."""
+        counted = [p for p in self.points if p.size == size]
         payloads = [self.run_payload(run) for run in runs]
         units: Dict[str, str] = {}
         for run, payload in zip(runs, payloads):
@@ -978,7 +983,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'size': size,
             'generated_by': 'FrictionSim2D',
             'units': dict(sorted(units.items())),
-            'metadata': self._build_metadata(runs),
+            'metadata': self._build_metadata(runs, counted),
             'runs': payloads,
         }
 
@@ -991,7 +996,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         from ..data.models import summarise_run  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
         rows: List[Dict[str, Any]] = []
-        for run in self.runs:
+        for run in self.points:
             if self.complete_only and run.status != 'complete':
                 continue
             tokens = run.tokens
@@ -1019,8 +1024,12 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 'load_kind': run.load_kind, 'load': run.load,
                 'angle': run.angle, 'speed': run.speed,
                 'tiers': ';'.join(sorted(run.tiers)),
+                'status': run.status,
+                'status_detail': run.status_detail,
             }
             row.update(summary.as_dict())
+            row['is_complete'] = (run.status == 'complete'
+                                  and bool(summary.is_complete))
             window = run.window
             for name, (x_col, y_col) in _LF_PAIRS.items():
                 if x_col in window.columns and y_col in window.columns:
