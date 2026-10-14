@@ -95,7 +95,7 @@ def test_afm_run_records_sheet_tip_and_substrate(tmp_path):
     for loc in runs:
         record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
 
-        assert record['schema_version'] == '2.0.0'
+        assert record['schema_version'] == '2.1.0'
         assert record['family'] == 'afm'
         assert record['model'] == 'afm'
         roles = [m['role'] for m in record['materials']]

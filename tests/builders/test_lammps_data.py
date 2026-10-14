@@ -10,7 +10,7 @@ from pathlib import Path
 from src.builders.utils.lammps_data import atomic2charge, atomic2molecular, charge2atom
 from src.builders.utils.lammps_data import get_model_dimensions
 from src.builders.utils.lammps_data import (
-    _is_lammps_section_header, get_num_atom_types, shift_atoms_to_z_zero)
+    _is_lammps_section_header, atom_count_and_z_extent, get_num_atom_types, shift_atoms_to_z_zero)
 
 
 class TestGetModelDimensions:
@@ -378,3 +378,27 @@ Atoms
             path = Path(f.name)
         assert get_num_atom_types(path) == 1
         path.unlink()
+
+
+class TestAtomCountAndZExtent:
+    HEADER = "t\n\n3 atoms\n1 atom types\n\n0 5 xlo xhi\n0 5 ylo yhi\n0 9 zlo zhi\n\nMasses\n\n1 1.0\n\n"
+
+    def test_atom_count_and_z_extent(self, tmp_path):
+        f = tmp_path / "a.data"
+        f.write_text(self.HEADER + "Atoms # atomic\n\n1 1 0 0 0.0\n2 1 1 1 1.5\n3 1 2 2 3.1\n")
+        n, dz = atom_count_and_z_extent(f)
+        assert n == 3
+        assert dz == pytest.approx(3.1)
+
+    def test_charge_style(self, tmp_path):
+        f = tmp_path / "c.data"
+        f.write_text(self.HEADER + "Atoms # charge\n\n1 1 0.0 0 0 0.0\n2 1 0.0 1 1 1.5\n3 1 0.0 2 2 3.1\n")
+        n, dz = atom_count_and_z_extent(f)
+        assert n == 3
+        assert dz == pytest.approx(3.1)
+
+    def test_image_flags_are_ignored(self, tmp_path):
+        f = tmp_path / "i.data"
+        f.write_text(self.HEADER + "Atoms # atomic\n\n1 1 0 0 0.0 0 0 0\n2 1 1 1 1.5 0 0 1\n3 1 2 2 3.1 1 0 0\n")
+        assert atom_count_and_z_extent(f)[0] == 3
+        assert atom_count_and_z_extent(f)[1] == pytest.approx(3.1)

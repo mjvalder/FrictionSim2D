@@ -495,3 +495,79 @@ def _count_atoms(lmp_path: Path) -> int:
 def _z_extent(lmp_path: Path) -> float:
     dims = components.get_model_dimensions(lmp_path)
     return dims['zhi'] - dims['zlo']
+
+
+class _FakeLmp:
+    """Stands in for a LAMMPS instance: only lat_c extraction is meaningful."""
+
+    def __init__(self, lat_c):
+        self._lat_c = lat_c
+
+    def command(self, _cmd):
+        pass
+
+    def extract_variable(self, _name, _group, _vartype):
+        return self._lat_c
+
+    def close(self):
+        pass
+
+
+def _stack_with_fake_lmp(monkeypatch, tmp_path, fake_lat_c, lat_c, info,
+                         n_layers=2):
+    settings = load_settings()
+    config = SheetConfig(
+        mat="h-MoS2", pot_type="sw", pot_path=MOS2_POT, cif_path=MOS2_CIF,
+        x=12.0, y=12.0, layers=[n_layers], lat_c=lat_c,
+    )
+    base, dims, pot_counts, total_types, supercell = \
+        components.build_monolayer(config)
+    monkeypatch.setattr(components, '_create_lammps_instance',
+                        lambda: _FakeLmp(fake_lat_c))
+    result = components.stack_multilayer_sheet(
+        base_layer_path=base, config=config, output_path=tmp_path / "s.lmp",
+        box_dims=dims, n_layers=n_layers, types_per_layer=total_types,
+        pot_counts=pot_counts, supercell_dims=supercell, lat_c=lat_c,
+        settings=settings, info_out=info)
+    return result, settings
+
+
+def test_stack_reports_minimised_source(monkeypatch, tmp_path):
+    info = {}
+    result, _ = _stack_with_fake_lmp(monkeypatch, tmp_path, 6.15, None, info)
+    assert result == pytest.approx(6.15)
+    assert info == {'lat_c_source': 'minimised'}
+
+
+def test_stack_reports_default_source_when_extraction_fails(monkeypatch, tmp_path):
+    info = {}
+    result, settings = _stack_with_fake_lmp(monkeypatch, tmp_path, None, None, info)
+    assert result == pytest.approx(settings.geometry.lat_c_default)
+    assert info == {'lat_c_source': 'default'}
+
+
+def test_stack_reports_config_source(monkeypatch, tmp_path):
+    info = {}
+    result, _ = _stack_with_fake_lmp(monkeypatch, tmp_path, 6.15, 6.0, info)
+    assert result == pytest.approx(6.0)
+    assert info == {'lat_c_source': 'config'}
+
+
+def test_stack_recursion_for_three_layers_still_reports_minimised(monkeypatch, tmp_path):
+    info = {}
+    result, _ = _stack_with_fake_lmp(monkeypatch, tmp_path, 6.15, None, info,
+                                     n_layers=3)
+    assert result == pytest.approx(6.15)
+    assert info == {'lat_c_source': 'minimised'}
+
+
+def test_build_sheet_reports_monolayer_geometry(tmp_path):
+    config = SheetConfig(
+        mat="h-MoS2", pot_type="sw", pot_path=MOS2_POT, cif_path=MOS2_CIF,
+        x=12.0, y=12.0, layers=[1],
+    )
+    info = {}
+    components.build_sheet(config, tmp_path, lat_c_info_out=info)
+    assert info['lat_c_source'] == 'not_applicable'
+    assert info['atoms_per_layer'] > 0
+    assert info['layer_thickness'] > 0

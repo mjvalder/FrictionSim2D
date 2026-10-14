@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
-PROVENANCE_SCHEMA_VERSION = '2.0.0'
+PROVENANCE_SCHEMA_VERSION = '2.1.0'
 
 #: Which part of the built system a MaterialProvenance entry describes.
 MATERIAL_ROLES = ('sheet', 'flake', 'tip', 'substrate')
@@ -36,6 +36,20 @@ class MaterialProvenance(BaseModel):
     pot_type: Optional[str] = None
     pot_resolution_route: Optional[str] = None
     pot_file_sha256: Optional[str] = None
+
+
+class BuiltGeometry(BaseModel):
+    """Geometry the builder computed and, until now, discarded (lengths in Angstrom)."""
+    lat_c: Optional[float] = None
+    lat_c_source: Optional[
+        Literal['config', 'minimised', 'default', 'not_applicable']] = None
+    unit_cell: Optional[Dict[str, float]] = None   # xlo..zhi of the ortho cell
+    cell_a: Optional[float] = None                 # unit_cell xhi - xlo
+    cell_b: Optional[float] = None                 # unit_cell yhi - ylo
+    sheet_dims: Optional[Dict[str, float]] = None  # supercell box xlo..zhi
+    atoms_per_layer: Optional[int] = None
+    layer_thickness: Optional[float] = None        # z-extent of one layer's atoms
+    tip_r: Optional[float] = None
 
 
 class ProvenanceRecord(BaseModel):
@@ -94,6 +108,16 @@ class ProvenanceRecord(BaseModel):
     ramp_converged: Optional[bool] = None
     ramp_r: Optional[float] = None
     ramp_iterations: Optional[int] = None
+
+    # drive spring (builder-computed: unit conversion and fallback live in Python)
+    drive_k: Optional[float] = None             # eV/A^2
+    drive_rest_length: Optional[float] = None   # A
+
+    geometry: Optional[BuiltGeometry] = None
+
+    # per-load diagnostics, keyed f'{load:g}' (enriched post-run)
+    ramp_by_load: Optional[Dict[str, Dict[str, Any]]] = None
+    load_achieved_by_load: Optional[Dict[str, float]] = None
 
     # execution (enriched post-run)
     wall_time_s: Optional[float] = None

@@ -99,7 +99,7 @@ def test_enrich_a_legacy_one_x_provenance_json_works(tmp_path):
     assert result == prov_path
 
     data = json.loads(result.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "2.0.0"
+    assert data["schema_version"] == "2.1.0"
     assert data["family"] == "afm"
     assert data["model"] == "afm"
     assert data["materials"] == [{

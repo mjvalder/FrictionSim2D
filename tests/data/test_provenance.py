@@ -6,7 +6,7 @@ import pydantic
 import pytest
 
 from src.data.provenance import (
-    MATERIAL_ROLES, MaterialProvenance, PROVENANCE_SCHEMA_VERSION,
+    BuiltGeometry, MATERIAL_ROLES, MaterialProvenance, PROVENANCE_SCHEMA_VERSION,
     ProvenanceRecord, parse_log_extras, read_provenance, sha256_file,
     write_provenance,
 )
@@ -73,9 +73,9 @@ def test_parse_log_extras(tmp_path):
 
 
 def test_schema_is_two_and_materials_replace_the_single_triple():
-    assert PROVENANCE_SCHEMA_VERSION == '2.0.0'
+    assert PROVENANCE_SCHEMA_VERSION == '2.1.0'
     rec = _record()
-    assert rec.schema_version == '2.0.0'
+    assert rec.schema_version == '2.1.0'
     assert not hasattr(rec, 'pot_path')
     assert [m.role for m in rec.materials] == ['sheet']
 
@@ -116,7 +116,7 @@ def test_reader_upgrades_a_one_x_file(tmp_path):
     rec = read_provenance(path, family='hetero', model='sheetonsheet',
                           material_name='h-MoS2')
 
-    assert rec.schema_version == '2.0.0'
+    assert rec.schema_version == '2.1.0'
     assert rec.family == 'hetero'
     assert rec.model == 'sheetonsheet'
     assert len(rec.materials) == 1
@@ -147,3 +147,40 @@ def test_builder_writes_provenance(tmp_path):
     assert data['contact_cutoff'] > 0
     assert data['run_role'] == 'label'
     assert data['thermostat_scheme'] == 'langevin_y_tip_sub_nve_sheet'
+
+
+def test_new_fields_default_to_none_and_round_trip(tmp_path):
+    bare = _record()
+    assert bare.drive_k is None and bare.geometry is None
+    assert bare.ramp_by_load is None and bare.load_achieved_by_load is None
+
+    rec = _record(
+        geometry=BuiltGeometry(lat_c=6.15, lat_c_source='minimised',
+                               cell_a=3.19),
+        drive_k=0.4994, drive_rest_length=37.5,
+        ramp_by_load={'10': {'converged': True, 'r': 0.01, 'iterations': 4}},
+        load_achieved_by_load={'10': 9.8})
+    path = write_provenance(tmp_path, rec)
+
+    assert read_provenance(path) == rec
+
+
+def test_a_2_0_record_without_the_new_fields_still_reads(tmp_path):
+    path = write_provenance(tmp_path, _record())
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['schema_version'] = '2.0.0'
+    for key in ('drive_k', 'drive_rest_length', 'geometry', 'ramp_by_load',
+                'load_achieved_by_load'):
+        data.pop(key)
+    path.write_text(json.dumps(data), encoding='utf-8')
+
+    rec = read_provenance(path)
+
+    assert rec.drive_k is None and rec.drive_rest_length is None
+    assert rec.geometry is None and rec.ramp_by_load is None
+    assert rec.load_achieved_by_load is None
+
+
+def test_lat_c_source_vocabulary_is_closed():
+    with pytest.raises(pydantic.ValidationError):
+        BuiltGeometry(lat_c_source='guess')

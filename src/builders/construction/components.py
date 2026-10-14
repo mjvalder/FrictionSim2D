@@ -35,7 +35,7 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 from importlib import resources
 import re
 import math
@@ -49,7 +49,7 @@ from ...core.config import (
 )
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import (
-    atomic2charge, charge2atom, get_model_dimensions,
+    atom_count_and_z_extent, atomic2charge, charge2atom, get_model_dimensions,
     get_num_atom_types, shift_atoms_to_z_zero,
 )
 from ...core.utils.paths import get_material_path
@@ -1801,7 +1801,9 @@ def stack_multilayer_sheet(
     settings: Optional[GlobalSettings] = None,
     use_pair_bonding: bool = False,
     stacking_type: str = 'AB',
-    edge_mode: str = 'none'
+    edge_mode: str = 'none',
+    info_out: Optional[Dict[str, Any]] = None,
+    _lat_c_source: Optional[str] = None,
 ) -> float:
     """Stack multiple 2D material layers with proper atom type renumbering.
     
@@ -1819,6 +1821,11 @@ def stack_multilayer_sheet(
         use_pair_bonding: If True, layers are bonded in pairs (L1-L2, L3-L4)
             with no relative shift within pairs. Used for sheetonsheet simulations.
         stacking_type: Stacking type ('AA' or 'AB'). AA has no shifts, AB has shifts.
+        info_out: Optional mutable dict; ``lat_c_source`` is set to ``'config'``
+            (lat_c passed in), ``'minimised'`` (extracted from LAMMPS) or
+            ``'default'`` (extraction failed, ``lat_c_default`` used).
+        _lat_c_source: Internal override used by the recursive call, which
+            receives a non-None ``lat_c`` that was minimised one level up.
     Returns:
         float: Interlayer distance (lat_c).
     """
@@ -1826,6 +1833,8 @@ def stack_multilayer_sheet(
         raise ValueError("stack_multilayer_sheet requires at least 2 layers")
 
     calculate_lat_c = lat_c is None
+    if info_out is not None and not calculate_lat_c:
+        info_out['lat_c_source'] = _lat_c_source or 'config'
 
     if calculate_lat_c:
         assert settings is not None
@@ -1909,6 +1918,9 @@ def stack_multilayer_sheet(
         if calculate_lat_c:
             extracted = lmp.extract_variable("lat_c", None, 0)
             lat_c = float(extracted) if extracted is not None else initial_guess
+            lat_c_source = 'minimised' if extracted is not None else 'default'
+            if info_out is not None:
+                info_out['lat_c_source'] = lat_c_source
             logger.info("Found optimal lat_c: %.4f", lat_c)
 
             if n_layers > 2:
@@ -1926,7 +1938,9 @@ def stack_multilayer_sheet(
                     settings=settings,
                     use_pair_bonding=use_pair_bonding,
                     stacking_type=stacking_type,
-                    edge_mode=edge_mode
+                    edge_mode=edge_mode,
+                    info_out=info_out,
+                    _lat_c_source=lat_c_source,
                 )
 
         lat_c = lat_c or initial_guess
@@ -2355,6 +2369,7 @@ def build_sheet(
     edge_mode: str = 'none',
     edge_width: float = 0.0,
     unit_cell_out: Optional[Dict[str, float]] = None,
+    lat_c_info_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Path, dict, Optional[float]]:
     """Build 2D material sheet (single or multi-layer).
 
@@ -2369,6 +2384,9 @@ def build_sheet(
         unit_cell_out: Optional mutable dict populated in-place with the
             orthogonalized single-unit-cell bounds (xlo/xhi/ylo/yhi/...). Used by
             PES scans to size the lateral grid to one surface lattice period.
+        lat_c_info_out: Optional mutable dict filled with ``lat_c_source``,
+            ``atoms_per_layer`` and ``layer_thickness`` (the last two measured
+            on the monolayer before stacking).
 
     Returns:
         Tuple of (path, box_dims, lat_c).
@@ -2384,6 +2402,12 @@ def build_sheet(
     n_layers = n_layers_override or (max(config.layers) if config.layers else 1)
     stacked_path = build_dir / f"{config.mat}_{n_layers}.lmp"
     lat_c = config.lat_c
+    if lat_c_info_out is not None:
+        n_atoms, thickness = atom_count_and_z_extent(base_path)
+        lat_c_info_out['atoms_per_layer'] = n_atoms
+        lat_c_info_out['layer_thickness'] = thickness
+        lat_c_info_out['lat_c_source'] = (
+            'config' if config.lat_c is not None else 'not_applicable')
     if not stack_if_multi:
         shutil.copy(base_path, stacked_path)
         return stacked_path, dims, lat_c
@@ -2403,6 +2427,7 @@ def build_sheet(
             use_pair_bonding=use_pair_bonding,
             stacking_type=stacking_type,
             edge_mode=edge_mode,
+            info_out=lat_c_info_out,
         )
         return stacked_path, dims, lat_c
 

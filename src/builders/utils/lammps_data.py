@@ -8,7 +8,7 @@ files, not structure files, and use no ASE.
 """
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from ...core.utils.tokens import _is_int_token  # noqa: PLC2701
 
@@ -257,3 +257,41 @@ def get_num_atom_types(lmp_path: Union[str, Path]) -> int:
             if "atom types" in line:
                 return int(line.split()[0])
     return 1
+
+
+def _atom_z_column(n_columns: int) -> int:
+    """Index of the z column in an Atoms line of ``n_columns`` fields.
+
+    atomic is ``id type x y z`` (5, or 8 with image flags); charge is
+    ``id type q x y z`` (6, or 9 with image flags).
+    """
+    return 5 if n_columns in (6, 9) else 4
+
+
+def atom_count_and_z_extent(path: Union[str, Path]) -> Tuple[int, float]:
+    """Atom count in the ``Atoms`` section and ``max(z) - min(z)``.
+
+    Handles ``atomic`` (``id type x y z``) and ``charge``
+    (``id type q x y z``) styles: the last three numeric columns before any
+    image flags are the coordinates, so the z column is the one found by
+    :func:`_atom_z_column`.
+    """
+    n_atoms = 0
+    z_values: List[float] = []
+    in_atoms = False
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        if LAMPS_SECTION_ATOMS in line:
+            in_atoms = True
+            continue
+        if not in_atoms or not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].lstrip('-').isdigit():
+            try:
+                z_values.append(float(parts[_atom_z_column(len(parts))]))
+            except ValueError:
+                continue
+            n_atoms += 1
+    if not z_values:
+        return 0, 0.0
+    return n_atoms, max(z_values) - min(z_values)
