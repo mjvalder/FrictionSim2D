@@ -362,6 +362,7 @@ class HeteroAFMSimulation(AFMSimulation):
         # so lat_c is only ever multiplied by (n_layers-1)=0; set it non-None to
         # skip the base's 6.0 A fallback.
         self.lat_c = z_extent
+        self.lat_c_source = 'not_applicable'
         logger.info(
             "Built hetero AFM sheet: coincidence cell %.2f x %.2f A, replicated "
             "%dx%d -> %.2f x %.2f A footprint.", lx_cell, ly_cell, nx, ny, lx, ly,
@@ -461,6 +462,16 @@ class HeteroAFMSimulation(AFMSimulation):
         """
         self._build_hetero_sheet(Path(build_dir))
         self.sheet_paths[n_layers] = self._hetero_rep_path
+
+    def _built_geometry(self, n_layers):
+        """Hetero stack: no interlayer distance, no single unit cell."""
+        geometry = super()._built_geometry(n_layers)
+        geometry.lat_c = None
+        geometry.lat_c_source = 'not_applicable'
+        geometry.unit_cell = None
+        geometry.cell_a = None
+        geometry.cell_b = None
+        return geometry
 
     def _calculate_z_positions(self, n_layers, tip_radius):
         """Z-placement for the hetero stack (no single 'sheet' component exists).

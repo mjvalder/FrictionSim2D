@@ -184,7 +184,7 @@ variable        hold_fz   equal f_forcetip[3]*{{ ev_a_to_nn }}
 variable        hold_tipz equal xcm(tip_all,z)
 variable        hold_shz  equal xcm(2D_all,z)
 fix             hold_ave all ave/time 1 1000 1000 v_hold_fz v_hold_tipz v_hold_shz file {{ output_dir }}/hold_$(v_find)N.txt
-run             10000
+run             {{ afm_hold_steps }}
 unfix           hold_ave
 variable        hold_fz delete
 variable        hold_tipz delete

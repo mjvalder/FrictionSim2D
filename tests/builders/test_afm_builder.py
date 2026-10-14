@@ -676,3 +676,89 @@ def test_provenance_skips_absent_substrate(tmp_path):
     builder._init_provenance()  # must not raise on a None substrate
     assert "sub" not in seen
     assert {"sheet", "tip"} <= set(seen)
+
+
+def _afm_provenance(layer_dir: Path) -> dict:
+    return json.loads((layer_dir / "provenance.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("method, expected", [
+    ("virtual_atom", (8.0 / 16.02, 37.5)),
+    ("smd", (8.0 / 16.02, 0.0)),
+    ("fix_move", (None, None)),
+])
+def test_afm_provenance_records_the_drive_spring(tmp_path, method, expected):
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.general.driving_spring = 8.0
+    config.tip.r = 25.0
+    config.settings.simulation.drive_method = method
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    layer_dir = _seed_builder_state(builder, tmp_path)
+    builder.write_inputs(1)
+    prov = _afm_provenance(layer_dir)
+    assert prov["drive_k"] == pytest.approx(expected[0])
+    assert prov["drive_rest_length"] == pytest.approx(expected[1])
+    if method == "virtual_atom":
+        assert prov["drive_k"] == pytest.approx(0.4994, abs=1e-4)
+
+
+def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkeypatch):
+    config = _make_afm_config(tmp_path, layers=[2])
+    config.sheet.lat_c = None
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+
+    def fake(_config, build_dir, **kw):
+        kw["unit_cell_out"].update(
+            {"xlo": 0, "xhi": 3.19, "ylo": 0, "yhi": 5.52, "zlo": 0, "zhi": 3.1})
+        kw["lat_c_info_out"].update(
+            {"lat_c_source": "minimised", "atoms_per_layer": 12,
+             "layer_thickness": 3.1})
+        path = Path(build_dir) / "fake.lmp"
+        path.write_text("# dummy\n", encoding="utf-8")
+        dims = {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0,
+                "zlo": 0.0, "zhi": 12.0}
+        return path, dims, 6.15
+
+    monkeypatch.setattr("src.builders.construction.components.build_sheet", fake)
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    builder._build_sheet_for_layers(build_dir, 2)  # pylint: disable=protected-access
+    assert builder.lat_c == 6.15
+
+    # Seed the rest of the state without overwriting lat_c / the unit cell.
+    keep = (builder.lat_c, dict(builder.sheet_unit_cell), dict(builder.sheet_dims))
+    layer_dir = _seed_builder_state(builder, tmp_path)
+    builder.lat_c, builder.sheet_unit_cell, builder.sheet_dims = keep
+    builder.sheet_paths[2] = builder.sheet_paths[1]
+    builder.output_dir_layer[2] = layer_dir.parent / "L2"
+    builder.relative_run_dir_layer[2] = Path("out") / "L2"
+    builder.z_positions[2] = builder.z_positions[1]
+    builder.groups[2] = builder.groups[1]
+    builder.pm[2] = builder.pm[1]
+
+    contexts = []
+    original = builder.render_template
+
+    def spy(name, context):
+        contexts.append(context)
+        return original(name, context)
+
+    monkeypatch.setattr(builder, "render_template", spy)
+    builder.write_inputs(2)
+
+    geometry = _afm_provenance(layer_dir.parent / "L2")["geometry"]
+    assert geometry["lat_c"] == 6.15 == contexts[0]["lat_c"]
+    assert geometry["lat_c_source"] == "minimised"
+    assert geometry["cell_a"] == pytest.approx(3.19)
+    assert geometry["atoms_per_layer"] == 12
+
+
+def test_a_monolayer_has_no_interlayer_distance(tmp_path):
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    layer_dir = _seed_builder_state(builder, tmp_path)
+    builder.write_inputs(1)
+    geometry = _afm_provenance(layer_dir)["geometry"]
+    assert geometry["lat_c"] is None
+    assert geometry["lat_c_source"] == "not_applicable"
+    assert geometry["tip_r"] == 20.0

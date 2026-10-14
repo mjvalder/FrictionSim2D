@@ -1097,3 +1097,14 @@ def test_a_hot_run_scales_above_the_floor(tmp_path):
     from src.builders.simulation_base import halt_temperature
     config = _make_afm_config(tmp_path, layers=[1])
     assert halt_temperature(config.settings, 900.0) == 9000.0
+
+
+def test_afm_hold_length_comes_from_the_constant(tmp_path):
+    from src.builders.afm.base import AFM_HOLD_STEPS
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
+    assert AFM_HOLD_STEPS == 10000
+    hold = text[text.index('fix             hold_ave'):]
+    assert 'run             10000' in hold

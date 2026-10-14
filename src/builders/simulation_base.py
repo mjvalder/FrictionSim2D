@@ -9,7 +9,7 @@ import random
 import subprocess
 from abc import ABC
 from pathlib import Path
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, List, Tuple, Union, Optional
 import shutil
 import json
 from datetime import datetime
@@ -56,6 +56,21 @@ def halt_temperature(settings: Any, temp: Optional[float]) -> Optional[float]:
     if not factor or not temp:
         return None
     return max(float(temp), HALT_FLOOR_TEMPERATURE_K) * float(factor)
+
+
+def drive_spring(drive_method: str, k_ev: float,
+                 rest_length: float) -> Tuple[Optional[float], Optional[float]]:
+    """The (K in eV/A^2, R0 in A) of the drive spring a run really uses.
+
+    ``fix_move`` has no spring, so both are None; ``smd`` pulls from the
+    start position (R0 = 0); ``virtual_atom`` holds the virtual atom
+    ``rest_length`` away.
+    """
+    if drive_method == 'fix_move':
+        return None, None
+    if drive_method == 'smd':
+        return k_ev, 0.0
+    return k_ev, rest_length
 
 
 def _infer_provenance_category(file_path: Path) -> str:

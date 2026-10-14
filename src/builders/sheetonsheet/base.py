@@ -16,9 +16,9 @@ Constraint modes control interlayer bonding and ghost interactions:
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Union
+from typing import Any, Dict, Optional, List, Union, TYPE_CHECKING
 
-from ..simulation_base import SimulationBase, halt_temperature
+from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
@@ -27,6 +27,9 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
+
+if TYPE_CHECKING:
+    from ...data.provenance import BuiltGeometry
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +88,10 @@ def sheet_layer_type_map(builder) -> Dict[str, List[int]]:
 
 def write_sheet_provenance(builder, *, contact_cutoff: float,
                            cutoff_source: str, thermostat_scheme: str,
-                           output_root: Optional[Path] = None) -> Path:
+                           output_root: Optional[Path] = None,
+                           drive_k: Optional[float] = None,
+                           drive_rest_length: Optional[float] = None,
+                           geometry: Optional['BuiltGeometry'] = None) -> Path:
     """Write ``provenance.json`` for one sheet-family run.
 
     The sheet family's counterpart to
@@ -145,6 +151,9 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
             ``'langevin_center_nve'``.
         output_root: directory to write into; defaults to the builder's own
             run directory.
+        drive_k: drive spring constant (eV/A^2), None when there is no spring.
+        drive_rest_length: drive spring rest length (A).
+        geometry: built geometry to record, if the builder tracks it.
 
     Returns:
         The path written.
@@ -213,6 +222,9 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
         load_requested=None,
         pressure_requested=pressure_requested,
         twist_angle=getattr(config.general, 'twist_angle', None),
+        drive_k=drive_k,
+        drive_rest_length=drive_rest_length,
+        geometry=geometry,
     )
     return write_provenance(output_root or builder.output_dir, record)
 
@@ -362,6 +374,7 @@ class SheetOnSheetSimulation(SimulationBase):
         self.lat_c: Optional[float] = None
         self.sheet_dims: Optional[Dict] = None
         self.sheet_unit_cell: Dict[str, float] = {}
+        self.lat_c_info: Dict[str, Any] = {}
 
     @property
     def n_layers(self) -> int:
@@ -419,6 +432,7 @@ class SheetOnSheetSimulation(SimulationBase):
 
         logger.info("Building %d-layer sheet stack...", n_layers)
         stacking_type = getattr(self.config.sheet, 'stack_type', 'AB')
+        lat_c_info: Dict[str, Any] = {}
         sheet_path, dims, lat_c = components.build_sheet(
             self.config.sheet, build_dir,
             stack_if_multi=True, settings=self.config.settings,
@@ -427,7 +441,9 @@ class SheetOnSheetSimulation(SimulationBase):
             edge_mode=self.config.settings.geometry.finite_sheet_sheetonsheet_edge_mode,
             edge_width=self.config.settings.geometry.finite_sheet_edge_width,
             unit_cell_out=self.sheet_unit_cell,
+            lat_c_info_out=lat_c_info,
         )
+        self.lat_c_info = lat_c_info
         self.structure_paths['sheet'] = sheet_path
 
         self.pm = self._generate_potentials()
@@ -441,6 +457,26 @@ class SheetOnSheetSimulation(SimulationBase):
         self.write_inputs()
         self._generate_hpc_scripts()
         logger.info("Build complete.")
+
+    def _built_geometry(self, n_layers: int) -> 'BuiltGeometry':
+        """What the build computed about the sheet stack, for ``provenance.json``."""
+        # pylint: disable-next=import-outside-toplevel
+        from ...data.provenance import BuiltGeometry
+        multilayer = n_layers > 1
+        unit_cell = dict(self.sheet_unit_cell) or None
+        info = self.lat_c_info
+        return BuiltGeometry(
+            lat_c=self.lat_c if multilayer else None,
+            lat_c_source=(info.get('lat_c_source')
+                          if multilayer else 'not_applicable'),
+            unit_cell=unit_cell,
+            cell_a=(unit_cell['xhi'] - unit_cell['xlo']) if unit_cell else None,
+            cell_b=(unit_cell['yhi'] - unit_cell['ylo']) if unit_cell else None,
+            sheet_dims=dict(self.sheet_dims) if self.sheet_dims else None,
+            atoms_per_layer=info.get('atoms_per_layer'),
+            layer_thickness=info.get('layer_thickness'),
+            tip_r=None,
+        )
 
     def _material_id(self) -> str:
         """Material token for HPC job names: this builder's single material.
@@ -759,6 +795,8 @@ class SheetOnSheetSimulation(SimulationBase):
         # Before the branching below, not after: write_inputs has four exits
         # (per-angle split, single script, per-pressure split, per-speed split)
         # and the record belongs to the build, not to any one of them.
+        drive_k, drive_rest_length = drive_spring(
+            sim.drive_method, base_context['driving_spring_ev'], 0.0)
         write_sheet_provenance(
             self,
             contact_cutoff=base_context['obs_ctx']['contact_cutoff'],
@@ -766,6 +804,9 @@ class SheetOnSheetSimulation(SimulationBase):
             # 'unknown' would mean it never ran, which cannot happen here.
             cutoff_source=getattr(self, '_contact_cutoff_source', 'unknown'),
             thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
+            drive_k=drive_k,
+            drive_rest_length=drive_rest_length,
+            geometry=self._built_geometry(n_layers),
         )
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)

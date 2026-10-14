@@ -390,3 +390,25 @@ def test_a_sheet_run_with_no_log_is_reported_not_crashed(tmp_path):
     outcome, detail = _enrich_one_run(run_dir, None, enrich_provenance_post_run)
     assert outcome == "skipped"
     assert "no run log" in detail
+
+
+def test_sheet_provenance_records_drive_and_geometry(tmp_path):
+    from src.data.models import NM_TO_EV_A2
+
+    config_general = {"driving_spring": 50.0}
+    run_dir, _slide, builder = _build_homogeneous(tmp_path, **config_general)
+    record = _record(run_dir)
+    assert record.drive_k == pytest.approx(50.0 / NM_TO_EV_A2)
+    assert record.drive_rest_length == 0.0
+    assert record.geometry is not None
+    assert record.geometry.lat_c == builder.lat_c
+    assert record.geometry.tip_r is None
+
+
+def test_pes_sheet_records_no_drive(tmp_path):
+    builder = _pes_builder(tmp_path)
+    builder.write_inputs()
+    record = _record(builder.output_dir)
+    assert record.drive_k is None
+    assert record.drive_rest_length is None
+    assert record.geometry is None

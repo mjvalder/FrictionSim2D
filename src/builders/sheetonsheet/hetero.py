@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from ...core.config import SheetOnSheetSimulationConfig
-from ..simulation_base import SimulationBase, halt_temperature
+from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -499,11 +499,15 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # class never calls SheetOnSheetSimulation._contact_cutoff (it cannot --
         # see _build_obs_ctx), so _contact_cutoff_source is genuinely absent and
         # sheet_obs_ctx's documented fallback is what the script uses.
+        drive_k, drive_rest_length = drive_spring(
+            context["drive_method"], context["driving_spring_ev"], 0.0)
         write_sheet_provenance(
             self,
             contact_cutoff=context["obs_ctx"]["contact_cutoff"],
             cutoff_source="fallback_default",
             thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
+            drive_k=drive_k,
+            drive_rest_length=drive_rest_length,
         )
         logger.info("Wrote hetero slide script to %s/lammps/slide.in", self.output_dir)
 

@@ -9,9 +9,9 @@ import hashlib
 import logging
 from itertools import product
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from ..simulation_base import SimulationBase, halt_temperature
+from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from ...core.config import AFMSimulationConfig
 from ...core.utils.structures import cifread
 from ...lattice.apply import rotate_flake_in_plane
@@ -122,6 +122,11 @@ def enrich_provenance_post_run(output_root: Path,
     return prov_path
 
 
+#: Length (steps) of the constant-load hold in ``afm/system_init.lmp``; rendered
+#: into the template so the script and the exported config cannot drift.
+AFM_HOLD_STEPS = 10000
+
+
 class AFMSimulation(SimulationBase):
     """Builder for AFM simulations (Tip + Sheet + Substrate).
 
@@ -159,6 +164,8 @@ class AFMSimulation(SimulationBase):
         self.lat_c: Optional[float] = None
         self.sheet_dims: Dict[str, float] = {}
         self.sheet_unit_cell: Dict[str, float] = {}
+        self.lat_c_source: Optional[str] = None
+        self.sheet_build_info: Dict[str, Any] = {}
         self.box_dims: Dict[str, float] = {}
         self.sheet_offset: Dict[str, float] = {'x': 0.0, 'y': 0.0}
         self.output_dir_layer: Dict[int, Path] = {}
@@ -209,6 +216,7 @@ class AFMSimulation(SimulationBase):
         overriding the whole ``build`` orchestration.
         """
         stacking_type = getattr(self.config.sheet, 'stack_type', 'AB')
+        info: Dict[str, Any] = {}
         sheet_path, sheet_dims, lat_c = components.build_sheet(
             self.config.sheet, build_dir,
             stack_if_multi=True, settings=self.config.settings,
@@ -220,10 +228,13 @@ class AFMSimulation(SimulationBase):
                 ),
                 edge_width=self.config.settings.geometry.finite_sheet_edge_width,
                 unit_cell_out=self.sheet_unit_cell,
+                lat_c_info_out=info,
         )
         self.sheet_paths[n_layers] = sheet_path
         if self.lat_c is None:
             self.lat_c = lat_c
+            self.lat_c_source = info.get('lat_c_source')
+            self.sheet_build_info = dict(info)
             self.sheet_dims = dict(sheet_dims)
 
     def _material_id(self) -> str:
@@ -792,6 +803,7 @@ class AFMSimulation(SimulationBase):
             'damp_ev': damp_ev,
             'damping_ratio': damping_ratio,
             'spring_ev': (self.config.general.driving_spring or 8.0) / 16.02,
+            'afm_hold_steps': AFM_HOLD_STEPS,
             'virtual_offset': self.config.tip.r * 1.5, 
             'results_freq': out.results_frequency,
             'dump_freq': out.dump_frequency.get('slide', 1000),
@@ -1021,6 +1033,13 @@ class AFMSimulation(SimulationBase):
         if self.config.sub is not None:
             materials.append(material_provenance(self.config.sub, 'substrate'))
 
+        drive_k: Optional[float] = None
+        drive_rest_length: Optional[float] = None
+        if self.FAMILY == 'afm':
+            drive_k, drive_rest_length = drive_spring(
+                context['drive_method'], context['spring_ev'],
+                context['virtual_offset'])
+
         record = ProvenanceRecord(
             family=self.FAMILY,
             model=self.model,
@@ -1045,8 +1064,37 @@ class AFMSimulation(SimulationBase):
             run_role='label',
             load_requested=load_requested,
             twist_angle=getattr(self.config.general, 'twist_angle', None),
+            drive_k=drive_k,
+            drive_rest_length=drive_rest_length,
+            geometry=self._built_geometry(n_layers),
         )
         write_provenance(output_root, record)
+
+    def _built_geometry(self, n_layers: int):
+        """What the build computed about the sheet, for ``provenance.json``.
+
+        ``getattr`` throughout: the PES-tip and freestanding builders reach
+        ``_write_provenance`` by their own route and may lack some state.
+        """
+        # pylint: disable-next=import-outside-toplevel
+        from ...data.provenance import BuiltGeometry
+        multilayer = n_layers > 1
+        unit_cell = dict(getattr(self, 'sheet_unit_cell', None) or {}) or None
+        info = getattr(self, 'sheet_build_info', None) or {}
+        sheet_dims = dict(getattr(self, 'sheet_dims', None) or {}) or None
+        tip = getattr(self.config, 'tip', None)
+        return BuiltGeometry(
+            lat_c=getattr(self, 'lat_c', None) if multilayer else None,
+            lat_c_source=(getattr(self, 'lat_c_source', None)
+                          if multilayer else 'not_applicable'),
+            unit_cell=unit_cell,
+            cell_a=(unit_cell['xhi'] - unit_cell['xlo']) if unit_cell else None,
+            cell_b=(unit_cell['yhi'] - unit_cell['ylo']) if unit_cell else None,
+            sheet_dims=sheet_dims,
+            atoms_per_layer=info.get('atoms_per_layer'),
+            layer_thickness=info.get('layer_thickness'),
+            tip_r=getattr(tip, 'r', None),
+        )
 
     def _write_slide_scripts(self, context: Dict, output_root: Path) -> None:
         """Write the slide phase script(s).

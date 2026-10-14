@@ -23,7 +23,7 @@ import numpy as np
 
 from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
-from ..simulation_base import SimulationBase, halt_temperature
+from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -493,11 +493,15 @@ class FlakeSlideSimulation(SimulationBase):
         # See the note on the hetero builder's call: this class does not have
         # SheetOnSheetSimulation._contact_cutoff either, so the fallback is what
         # its obs_ctx used and what the script carries.
+        drive_k, drive_rest_length = drive_spring(
+            context["drive_method"], context["driving_spring_ev"], 0.0)
         write_sheet_provenance(
             self,
             contact_cutoff=context["obs_ctx"]["contact_cutoff"],
             cutoff_source="fallback_default",
             thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
+            drive_k=drive_k,
+            drive_rest_length=drive_rest_length,
         )
         logger.info("Wrote flake slide script to %s/lammps/slide.in", self.output_dir)
 
