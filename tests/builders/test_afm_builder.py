@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.builders.afm import AFMSimulation
+from src.builders.construction import components
 from src.potentials.utils import normalize_potential_type
 from tests.helpers.afm import _make_afm_config, _prepare_builder_for_slide_write, _seed_builder_state
 
@@ -719,7 +720,7 @@ def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkey
                 "zlo": 0.0, "zhi": 12.0}
         return path, dims, 6.15
 
-    monkeypatch.setattr("src.builders.construction.components.build_sheet", fake)
+    monkeypatch.setattr(components, "build_sheet", fake)
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     builder._build_sheet_for_layers(build_dir, 2)  # pylint: disable=protected-access
