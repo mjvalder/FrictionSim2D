@@ -268,3 +268,36 @@ def test_incomplete_report_lists_every_non_complete_point(tmp_path):
     assert f'{run_dir} force=40 a=0 s=2 [not_reached]' in lines
     assert (out / 'incomplete_materials_100x100y.txt').read_text(
         encoding='utf-8').strip() == 'h_MoS2'
+
+
+def test_status_counts(tmp_path):
+    _cut_short_tree(tmp_path)
+
+    meta = DataReader(results_dir=str(tmp_path)).metadata
+
+    assert meta['status_counts'] == {'complete': 2, 'truncated': 1,
+                                     'not_reached': 2, 'no_output': 0,
+                                     'unreadable': 0}
+
+
+def test_legacy_metadata_ignores_empty_entries(tmp_path):
+    """v2 metadata keeps its v2 meaning: only points with data count."""
+    _cut_short_tree(tmp_path)
+
+    meta = DataReader(results_dir=str(tmp_path)).metadata
+
+    assert sorted(meta['loads_by_kind']['force'], key=float) == [
+        '10.0', '20.0', '30.0']
+
+
+def test_a_no_output_load_does_not_enter_loads_by_kind(tmp_path):
+    run_dir = make_family_run(tmp_path, 'afm', loads=(10, 20, 30), n=50,
+                              config=slide_config('afm', loads=(10, 20, 30)))
+    for path in (run_dir / 'results').glob('friction_f20_*'):
+        path.unlink()
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    assert reader.metadata['status_counts']['no_output'] == 1
+    assert sorted(reader.metadata['loads_by_kind']['force'],
+                  key=float) == ['10.0', '30.0']

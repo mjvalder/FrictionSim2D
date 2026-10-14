@@ -18,7 +18,7 @@ rather than as directory names nobody parsed.
 <simulation root>/
   afm/ sheetonsheet/ indent/ pes_tip/ pes_sheet/     the runs
   outputs/
-    output_full_<size>.json          every run's time series, schema 2
+    output_full_<size>.json          every run's time series, schema 3
     summary_<size>.csv               one row per load point
     incomplete_files_<size>.txt      runs whose window tier is short
     incomplete_materials_<size>.txt  the materials those runs belong to
@@ -34,11 +34,11 @@ first belongs to the reader.
 
 ---
 
-## `output_full_<size>.json` (schema 2)
+## `output_full_<size>.json` (schema 3)
 
 ```jsonc
 {
-  "schema": 2,                       // int, always 2
+  "schema": 3,                       // int, always 3
   "size": "100x100y",                // str, the export key
   "generated_by": "FrictionSim2D",   // str, constant
   "units": {                         // {column: unit}, from the observable registry
@@ -112,7 +112,12 @@ first belongs to the reader.
                     "data": [[1000, 12.0]],
                     "attrs": {"lf_schema": 2, "lf_corrected": false}}
       },
-      "post": {"gap_min": 3.1, "deflect_max": 0.4}   // {} when no data/final_*.data
+      "post": {"gap_min": 3.1, "deflect_max": 0.4},  // {} when no data/final_*.data
+      "status": "complete",          // schema 3: complete | truncated | no_output | unreadable | not_reached
+      "status_detail": "",           //   why, e.g. "window 20/50 rows"
+      "n_rows": {"window": 50},      //   rows actually read, per tier
+      "expected_rows": {"window": 50},  // rows the config says, per tier ({} if unknown)
+      "provenance": {...}            // schema 3: the run's record, physics config, geometry, this load's ramp
     }
   ]
 }
@@ -132,6 +137,28 @@ Four rules the JSON cannot state:
 A **PES run** has `"load_kind": "none"`, `"load": 0.0`, and exactly one `window` tier
 parsed from `results/pes_scan.csv`. Calling its absent load a force of 0.0 nN would put
 a fictitious point on every load axis.
+
+### Schema 3 additions
+
+Schema 3 is schema 2 plus new keys only; nothing from schema 2 is renamed, removed or
+changes meaning. The plot stack still reads schema 2 files.
+
+- **Four status keys per `runs[]` entry**: `status`, `status_detail`, `n_rows`,
+  `expected_rows`. Every load point the run's config expects is exported, so a load
+  that wrote nothing appears as `no_output` (or `not_reached` after an earlier failure
+  of the same chained script) with empty `tiers`, instead of vanishing.
+- **`provenance` block per `runs[]` entry**: the run's `provenance.json` record, the
+  physics slice of `provenance/config.json`, the built geometry, and this load's
+  `ramp` / `load_achieved`. An unreadable record yields only `error`,
+  `provenance_sha256` and `config`.
+- **`metadata.provenance`**: every provenance leaf pooled over runs (not load points),
+  as `{"value": v}` when all runs agree or `{"values": {v: n_runs}}` when they differ;
+  plus `config_hashes`, `seeds_unique` and `seeds_shared_across_runs`. Seeds, the file
+  hash, `execution` and the per-load ramp fields are never pooled.
+- **`metadata.status_counts`**: `{status: n}` over all `runs[]` entries, zeros included.
+- **The v2 `metadata` keys** (`loads_by_kind`, `speeds`, `materials`, ...) cover only
+  points that have data (`complete`/`truncated`), as before.
+- `--complete-only` on `postprocess read` restricts the export to `complete` points.
 
 A **v1 file has no `"schema"` key at all**, and the plot stack refuses it with a
 `PlotDataError` naming the command that replaces it:
@@ -710,7 +737,7 @@ FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
 
 - `RESULTS_DIR` — a simulation root, the directory holding `afm/`, `sheetonsheet/`,
   `indent/`, `pes_tip/`, `pes_sheet/`.
-- `--export` — write `outputs/output_full_<size>.json` (schema 2) **and**
+- `--export` — write `outputs/output_full_<size>.json` (schema 3) **and**
   `outputs/summary_<size>.csv`, echoing each path.
 - `--skip-fraction FLOAT` (default `0.2`) — the transient fraction dropped before the
   summary statistics, forwarded to `summarise_run`.

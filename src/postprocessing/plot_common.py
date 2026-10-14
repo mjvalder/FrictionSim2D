@@ -451,9 +451,9 @@ class PlotCommonMixin(PlotterMixinBase):
             return None, None
 
         schema = data.get('schema')
-        if schema != 2:
+        if schema not in (2, 3):
             raise PlotDataError(
-                f"{file_path}: export schema {schema!r}, expected 2. "
+                f"{file_path}: export schema {schema!r}, expected 2 or 3. "
                 f"Regenerate with "
                 f"`FrictionSim2D postprocess read <root> --export`.")
         metadata = dict(data.get('metadata', {}))

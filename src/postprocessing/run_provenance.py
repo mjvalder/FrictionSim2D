@@ -9,9 +9,10 @@ read yields `{'error': ...}` so one bad file cannot sink the whole export.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from src.core.observables import tier_frequencies
 from src.data.provenance import load_key, read_provenance, sha256_file
@@ -121,3 +122,68 @@ def point_provenance(run_block: dict, load: float) -> dict:
     point['load_achieved'] = (run_block.get('load_achieved_by_load')
                               or {}).get(key)
     return point
+
+
+#: Per-run or per-load values that differ by construction; never pooled.
+_UNPOOLED = frozenset({
+    'provenance_sha256', 'execution', 'ramp', 'load_achieved',
+    'ramp_by_load', 'load_achieved_by_load', 'unloaded_reference_z', 'error'})
+
+
+def _leaves(block: Mapping, prefix: str = ''):
+    """`(dotted.path, value)` for every pooled leaf; lists are leaves."""
+    for name, value in block.items():
+        if name in _UNPOOLED or name.startswith('seed_'):
+            continue
+        path = f'{prefix}{name}'
+        if isinstance(value, Mapping):
+            yield from _leaves(value, f'{path}.')
+        else:
+            yield path, value
+
+
+def _value_key(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value,
+                                                           sort_keys=True)
+
+
+def pool_provenance(blocks: Sequence[Tuple[str, dict]]) -> dict:
+    """Pool per-run provenance blocks: one entry per leaf, counted over runs.
+
+    `blocks` is `(rel_path, run_block)`, deduplicated by `rel_path` (a run is
+    counted once however many load points it has). A leaf that agrees across
+    runs is `{'value': v}`, otherwise `{'values': {key: n_runs}}`. Seeds are
+    unique per run by design: reported as `seeds_unique` and
+    `seeds_shared_across_runs`, never pooled. Tolerates blocks of unreadable
+    records (missing keys).
+    """
+    unique = dict(blocks)
+    counts: Dict[str, Dict[str, int]] = {}
+    originals: Dict[str, Dict[str, Any]] = {}
+    for block in unique.values():
+        for path, value in _leaves(block):
+            key = _value_key(value)
+            by_key = counts.setdefault(path, {})
+            by_key[key] = by_key.get(key, 0) + 1
+            originals.setdefault(path, {})[key] = value
+    pooled: Dict[str, Any] = {}
+    for path, by_key in sorted(counts.items()):
+        if len(by_key) == 1:
+            pooled[path] = {'value': originals[path][next(iter(by_key))]}
+        else:
+            pooled[path] = {'values': by_key}
+    hashes: Dict[str, int] = {}
+    seed_runs: Dict[Tuple[str, Any], int] = {}
+    for block in unique.values():
+        digest = block.get('config_hash')
+        if digest is not None:
+            hashes[digest] = hashes.get(digest, 0) + 1
+        seen = {(name, _value_key(value)) for name, value in block.items()
+                if name.startswith('seed_') and value is not None}
+        for item in seen:
+            seed_runs[item] = seed_runs.get(item, 0) + 1
+    shared = sum(1 for n in seed_runs.values() if n > 1)
+    pooled['config_hashes'] = hashes
+    pooled['seeds_unique'] = shared == 0
+    pooled['seeds_shared_across_runs'] = shared
+    return pooled

@@ -667,3 +667,25 @@ def test_the_taxonomy_types_are_still_dispatchable(tmp_path):
     for plot_type in ('taxonomy_signature_heatmap', 'taxonomy_prevalence',
                       'taxonomy_exemplar', 'taxonomy_regime_map'):
         plotter.generate_plot({'plot_type': plot_type, 'filename': 'x.png'})
+
+
+def test_plot_stack_reads_schema_3_and_still_reads_schema_2(tmp_path):
+    root = _dataset(tmp_path, 'afm')
+    plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+    assert len(list(plotter._extract_all_runs('ds', '100x100y'))) == 1  # pylint: disable=protected-access
+
+    golden = (Path(__file__).resolve().parents[1] / 'fixtures' / 'golden'
+              / 'output_full_v2_afm.json')
+    assert json.loads(golden.read_text(encoding='utf-8'))['schema'] == 2
+    old = tmp_path / 'ds_old'
+    (old / 'outputs').mkdir(parents=True)
+    (old / 'outputs' / 'output_full_100x100y.json').write_text(
+        golden.read_text(encoding='utf-8'), encoding='utf-8')
+    (old / 'outputs' / 'summary_100x100y.csv').write_text(
+        (root / 'outputs' / 'summary_100x100y.csv').read_text(
+            encoding='utf-8'), encoding='utf-8')
+    plotter = Plotter(data_dirs=[str(old)], labels=['ds'],
+                      output_dir=str(tmp_path / 'out'))
+
+    assert list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access

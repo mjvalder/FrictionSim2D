@@ -361,7 +361,7 @@ def test_v2_document_shape(tmp_path):
     written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
     doc = json.loads(written.read_text(encoding='utf-8'))
 
-    assert doc['schema'] == 2
+    assert doc['schema'] == 3
     assert doc['size'] == '100x100y'
     assert doc['generated_by'] == 'FrictionSim2D'
     assert doc['units']['time'] == 'step'

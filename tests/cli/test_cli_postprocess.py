@@ -67,7 +67,7 @@ def test_read_on_an_empty_root_says_so(runner, tmp_path):
     assert 'No runs found' in result.output
 
 
-def test_the_exported_json_is_schema_two(runner, tmp_path):
+def test_the_exported_json_is_schema_three(runner, tmp_path):
     make_family_run(tmp_path, 'sheetonsheet')
 
     runner.invoke(cli, ['postprocess', 'read', str(tmp_path), '--export'])
@@ -75,7 +75,7 @@ def test_the_exported_json_is_schema_two(runner, tmp_path):
     doc = json.loads(
         (tmp_path / 'outputs' / 'output_full_100x100y.json').read_text(
             encoding='utf-8'))
-    assert doc['schema'] == 2
+    assert doc['schema'] == 3
 
 
 def _document(tmp_path, data_dir):

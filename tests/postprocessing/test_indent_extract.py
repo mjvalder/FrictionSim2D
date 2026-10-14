@@ -161,7 +161,7 @@ def test_run_writes_penetration_json(tmp_path: Path):
 
     payload = json.loads(
         (out / "output_indent_f10_s20260710.json").read_text(encoding="utf-8"))
-    assert payload["schema"] == 2
+    assert payload["schema"] == 3
     assert payload["metadata"]["indent_load_nN"] == 10.0
     assert payload["metadata"]["indent_base_seed"] == 20260710
     assert {r["load"] for r in payload["runs"]} == {10.0}

@@ -1252,7 +1252,7 @@ def _merge_settings(base: dict, overlay: dict) -> None:
 @postprocess_group.command('read')
 @click.argument('results_dir', type=click.Path(exists=True))
 @click.option('--export', 'do_export', is_flag=True,
-              help='Write outputs/output_full_<size>.json (schema 2) and '
+              help='Write outputs/output_full_<size>.json (schema 3) and '
                    'outputs/summary_<size>.csv.')
 @click.option('--skip-fraction', default=0.2, show_default=True, type=float,
               help='Transient fraction dropped before the summary statistics.')

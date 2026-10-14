@@ -7,7 +7,7 @@ nested dict this replaced had no dimension for the potential or the
 temperature, so two runs differing only in those collapsed onto one leaf and
 the last one walked won, silently.
 
-Exports the v2 `output_full_<size>.json` and `summary_<size>.csv`; every
+Exports the schema-3 `output_full_<size>.json` and `summary_<size>.csv`; every
 statistic in the latter comes from `src.data.models.summarise_run`, the single
 COF on the store path.
 """
@@ -27,10 +27,11 @@ import pandas as pd
 from src.core.observables import FAMILIES, expected_tier_rows, rename_map
 
 from .post_channels import post_channels_for
-from .run_provenance import point_provenance, run_provenance
-from .run_status import (GRID_FAMILIES, PointKey, classify, expected_chains,
-                         load_kind_for_family, mark_not_reached, point_key,
-                         read_run_config)
+from .run_provenance import (point_provenance, pool_provenance,
+                             run_provenance)
+from .run_status import (GRID_FAMILIES, STATUSES, PointKey, classify,
+                         expected_chains, load_kind_for_family,
+                         mark_not_reached, point_key, read_run_config)
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +419,7 @@ class RunFrames:
 
 #: Version of the export document. v1 (no 'schema' key) is not read by the
 #: plot stack; regenerate with `postprocess read --export`.
-EXPORT_SCHEMA = 2
+EXPORT_SCHEMA = 3
 
 #: Units of the columns this module derives rather than parses.
 _DERIVED_UNITS = {'lateral_force': 'nN', 'cof': '1'}
@@ -697,8 +698,14 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
     def _build_metadata(self,
                         runs: Optional[List[RunFrames]] = None) -> Dict[str, Any]:
-        """The v2 `metadata` block for `runs` (default: every run)."""
-        runs = self.runs if runs is None else runs
+        """The `metadata` block for `entries` (default: every point).
+
+        The v2 keys are computed over the entries that have data (non-empty
+        tiers), so their v2 meaning is unchanged; `status_counts` and the
+        pooled `provenance` cover every entry.
+        """
+        entries = self.points if runs is None else runs
+        runs = [run for run in entries if run.tiers]
         loads: Dict[str, Dict[str, set]] = {'force': {}, 'pressure': {}}
         for run in runs:
             loads.setdefault(run.load_kind, {}).setdefault(
@@ -728,6 +735,12 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'tiers': sorted({tier for run in runs for tier in run.tiers}),
             'ntimestep': self.ntimestep,
             'time_series': self.time_series,
+            'provenance': pool_provenance(
+                [(run.tokens.rel_path, self._run_block(run))
+                 for run in entries]),
+            'status_counts': {
+                status: sum(1 for run in entries if run.status == status)
+                for status in STATUSES},
             # Which COF definition produced the summary numbers beside this
             # export. v1 files carried no such statement and the definition
             # changed under readers with no way to tell; this is that way.
@@ -954,7 +967,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         }
 
     def export_payload(self, size: str, runs: List[RunFrames]) -> Dict[str, Any]:
-        """The whole v2 document for one size."""
+        """The whole export document (schema 3) for one size."""
         payloads = [self.run_payload(run) for run in runs]
         units: Dict[str, str] = {}
         for run, payload in zip(runs, payloads):

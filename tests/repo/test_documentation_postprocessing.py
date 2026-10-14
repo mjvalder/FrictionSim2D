@@ -23,7 +23,7 @@ def test_it_documents_the_export_schema_and_the_csv():
     text = DOC.read_text(encoding='utf-8')
 
     assert 'output_full_<size>.json' in text
-    assert '"schema": 2' in text
+    assert '"schema": 3' in text
     assert 'summary_<size>.csv' in text
     for column in ('rel_path', 'load_kind', 'mean_cof', 'gap_min'):
         assert column in text

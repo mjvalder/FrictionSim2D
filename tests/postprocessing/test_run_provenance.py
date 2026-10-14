@@ -124,3 +124,78 @@ def test_config_settings_tolerates_missing_keys():
     assert out['output']['tier_frequency'] is None
     assert out['thermostat'] is None
     assert 'afm_hold_steps' not in out['simulation']
+
+
+# --- pooled metadata ---------------------------------------------------------
+
+def _pooled(root):
+    reader = DataReader(results_dir=str(root))
+    written, = reader.export_full_data_to_json()
+    return json.loads(written.read_text(encoding='utf-8'))['metadata']
+
+
+def _two_runs(root, **update_b):
+    dir_a = make_family_run(root, 'afm', pot='a', loads=(10, 20, 30))
+    dir_b = make_family_run(root, 'afm', pot='b')
+    return dir_a, dir_b
+
+
+def test_identical_fields_pool_to_a_value(tmp_path):
+    for pot in ('a', 'b'):
+        make_family_run(tmp_path, 'afm', pot=pot,
+                        config=slide_config('afm', loads=(30,)))
+
+    meta = _pooled(tmp_path)
+
+    assert meta['provenance']['config.simulation.slide_run_steps'] == {
+        'value': 50_000}
+
+
+def test_varying_fields_list_counts(tmp_path):
+    dir_a, dir_b = _two_runs(tmp_path)
+    _rewrite(dir_a, drive_k=0.4994)
+    _rewrite(dir_b, drive_k=3.12)
+
+    meta = _pooled(tmp_path)
+
+    # three load points of run A still count once
+    assert meta['provenance']['drive_k'] == {
+        'values': {'0.4994': 1, '3.12': 1}}
+
+
+def test_config_hashes_count_runs(tmp_path):
+    dir_a, dir_b = _two_runs(tmp_path)
+    dir_c = make_family_run(tmp_path, 'afm', pot='c')
+    _rewrite(dir_a, config_hash='aa' * 32)
+    _rewrite(dir_b, config_hash='aa' * 32)
+    _rewrite(dir_c, config_hash='bb' * 32)
+
+    assert _pooled(tmp_path)['provenance']['config_hashes'] == {
+        'aa' * 32: 2, 'bb' * 32: 1}
+
+
+def test_seeds_are_not_pooled(tmp_path):
+    dir_a, dir_b = _two_runs(tmp_path)
+    _rewrite(dir_a, seed_velocity=1)
+    _rewrite(dir_b, seed_velocity=2)
+
+    prov = _pooled(tmp_path)['provenance']
+
+    assert not any(key.startswith('seed_') for key in prov)
+    assert prov['seeds_unique'] is True
+    assert prov['seeds_shared_across_runs'] == 0
+
+    _rewrite(dir_a, seed_velocity=7)
+    _rewrite(dir_b, seed_velocity=7)
+    prov = _pooled(tmp_path)['provenance']
+    assert prov['seeds_unique'] is False
+    assert prov['seeds_shared_across_runs'] == 1
+
+
+def test_pooling_tolerates_an_unreadable_record(tmp_path):
+    dir_a, dir_b = _two_runs(tmp_path)
+    (dir_b / 'provenance.json').write_text('{not json', encoding='utf-8')
+
+    prov = _pooled(tmp_path)['provenance']
+
+    assert prov['config_hashes'] == {'ff' * 32: 1}
