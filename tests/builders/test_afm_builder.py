@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,8 +12,8 @@ import pytest
 
 from src.builders.afm import AFMSimulation
 from src.builders.construction import components
-from tests.builders.test_builders import MOS2_CIF, MOS2_POT
 from src.potentials.utils import normalize_potential_type
+from tests.builders.test_builders import MOS2_CIF, MOS2_POT
 from tests.helpers.afm import _make_afm_config, _prepare_builder_for_slide_write, _seed_builder_state
 
 # The langevin fixes embed a fresh `{{ range(1, 999999) | random }}` seed on
@@ -679,6 +680,8 @@ def test_provenance_skips_absent_substrate(tmp_path):
     assert "sub" not in seen
     assert {"sheet", "tip"} <= set(seen)
 
+LMP = shutil.which("lmp_serial")
+
 
 def _afm_provenance(layer_dir: Path) -> dict:
     return json.loads((layer_dir / "provenance.json").read_text(encoding="utf-8"))
@@ -704,6 +707,7 @@ def test_afm_provenance_records_the_drive_spring(tmp_path, method, expected):
         assert prov["drive_k"] == pytest.approx(0.4994, abs=1e-4)
 
 
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
 def test_a_bilayer_with_lat_c_unset_records_the_minimised_value(tmp_path, monkeypatch):
     config = _make_afm_config(tmp_path, layers=[2])
     config.sheet.lat_c = None
