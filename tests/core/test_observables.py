@@ -1,8 +1,11 @@
 """Tests for the central observable registry."""
+import pytest
+
 from src.core.observables import (
     REGISTRY, TIERS, STREAMS,
     channels_for, expected_columns, rename_map, layer_channels,
-    validate_registry,
+    validate_registry, expected_tier_rows, expected_window_rows,
+    is_truncated, tier_frequencies,
 )
 
 
@@ -327,3 +330,40 @@ def test_rename_map_layer_expansion_respects_the_sim_type():
     """layer_channels' com{x,y,z} entries declare afm/sheetonsheet/indent/
     hetero/flake; pes_tip is not among them and must get no layer columns."""
     assert 'v_comz_L3' not in rename_map('pes_tip', 'window', 3)
+
+
+CFG = {'settings': {'simulation': {'slide_run_steps': 100000},
+                    'output': {'results_frequency': 1000}}}
+
+
+def test_expected_rows_per_tier_for_a_slide_family():
+    assert expected_tier_rows(CFG, 'afm') == {'window': 100, 'raw': 1000, 'peratom': 100}
+
+
+def test_disabled_channels_have_no_expectation():
+    cfg = {'settings': {**CFG['settings'], 'output': {
+        'results_frequency': 1000, 'channels': {'window': True, 'raw': False, 'peratom': False}}}}
+    assert expected_tier_rows(cfg, 'sheetonsheet') == {'window': 100}
+
+
+@pytest.mark.parametrize('family', ['indent', 'pes_tip', 'pes_sheet'])
+def test_non_slide_families_expect_nothing(family):
+    assert expected_tier_rows(CFG, family) == {}
+    assert expected_window_rows(CFG, family) is None
+
+
+@pytest.mark.parametrize('cfg', [{}, {'settings': {}}, {'general': {'temp': 300}},
+                                 {'settings': {'simulation': {'slide_run_steps': 'x'},
+                                               'output': {'results_frequency': 0}}}])
+def test_missing_or_bad_settings_expect_nothing(cfg):
+    assert expected_tier_rows(cfg, 'afm') == {}
+
+
+def test_one_row_of_slack():
+    assert not is_truncated(99, 100) and not is_truncated(100, 100)
+    assert is_truncated(98, 100)
+    assert not is_truncated(3, None)
+
+
+def test_tier_frequencies_come_from_tier_args():
+    assert tier_frequencies(CFG) == {'window': 1000, 'raw': 100, 'peratom': 1000}

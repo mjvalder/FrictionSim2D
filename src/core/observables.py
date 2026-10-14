@@ -12,7 +12,7 @@ costly per-atom computes once per 1000. ``group/group`` rebuilds a neighbour
 list per call, so ``validate_registry`` bans it from the window tier.
 """
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 TIERS = ('window', 'raw', 'peratom')
 STREAMS = ('results', 'post')
@@ -32,6 +32,60 @@ TIER_ARGS = {
     'raw': (100, 1, 100),
     'peratom': (1000, 1, 1000),
 }
+
+#: Families whose `window` tier spans exactly the slide run (`fix fc_win` is
+#: defined right before `run {{ run_steps }}` in the slide templates). Indent's
+#: window covers the hold phase and PES writes a grid, so no expected length is
+#: derived for them.
+SLIDE_FAMILIES: Tuple[str, ...] = ('afm', 'sheetonsheet', 'hetero', 'flake')
+
+#: A trace may be one row short: `fix ave/time` may or may not write a row at
+#: the step the fix was defined.
+TRUNCATION_SLACK_ROWS: int = 1
+
+
+def tier_frequencies(config: Mapping[str, Any]) -> Dict[str, int]:
+    """Output interval (steps) of each tier; `{}` if the window one is unknown."""
+    try:
+        every = int(config['settings']['output']['results_frequency'])
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {}
+    if every <= 0:
+        return {}
+    return {'window': every,
+            'raw': TIER_ARGS['raw'][2],
+            'peratom': TIER_ARGS['peratom'][2]}
+
+
+def expected_tier_rows(config: Mapping[str, Any], family: str) -> Dict[str, int]:
+    """Rows each enabled tier writes over a finished slide, `{}` if unknown.
+
+    `slide_run_steps // frequency`, from the run's own stored config (its
+    `settings` block). `{}` for a non-slide family or any missing or
+    non-positive value. An absent `output.channels` means every tier is on.
+    """
+    if family not in SLIDE_FAMILIES:
+        return {}
+    freqs = tier_frequencies(config)
+    try:
+        steps = int(config['settings']['simulation']['slide_run_steps'])
+        channels = config['settings']['output'].get('channels')
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {}
+    if not freqs or steps <= 0:
+        return {}
+    return {tier: steps // every for tier, every in freqs.items()
+            if channels is None or channels.get(tier, True)}
+
+
+def expected_window_rows(config: Mapping[str, Any], family: str) -> Optional[int]:
+    """Expected `window` rows of a finished slide, or None if unknown."""
+    return expected_tier_rows(config, family).get('window')
+
+
+def is_truncated(n_rows: int, expected: Optional[int]) -> bool:
+    """True when a trace is short by more than `TRUNCATION_SLACK_ROWS`."""
+    return expected is not None and n_rows < expected - TRUNCATION_SLACK_ROWS
 
 
 @dataclass(frozen=True)

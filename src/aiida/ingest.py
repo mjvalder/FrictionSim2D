@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..core.observables import expected_window_rows, is_truncated
 from ..postprocessing.read_data import (
     FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
     FILE_PATTERN_TIP_ALT, tier_of,
@@ -537,13 +538,6 @@ def _frames_for(point: LoadPoint) -> Dict[str, Any]:
     return frames
 
 
-#: Families whose `window` tier spans exactly the slide run
-#: (`fix fc_win` is defined right before `run {{ run_steps }}` in
-#: `templates/{afm,sheetonsheet}/slide.lmp`). Indent's window covers the hold
-#: phase and PES writes a grid, so no expected length is derived for them.
-_SLIDE_FAMILIES = ('afm', 'sheetonsheet', 'hetero', 'flake')
-
-
 def _expected_window_rows(run_node, family: str) -> Optional[int]:
     """How many `window` rows a finished slide writes, or None if unknown.
 
@@ -555,17 +549,12 @@ def _expected_window_rows(run_node, family: str) -> Optional[int]:
     """
     import json  # pylint: disable=import-outside-toplevel
 
-    if family not in _SLIDE_FAMILIES:
-        return None
     try:
         cfg = json.loads(run_node.base.repository.get_object_content(
             'provenance/config.json'))
-        settings = cfg['settings']
-        steps = int(settings['simulation']['slide_run_steps'])
-        every = int(settings['output']['results_frequency'])
-    except (FileNotFoundError, OSError, KeyError, TypeError, ValueError):
+    except (FileNotFoundError, OSError, ValueError):
         return None
-    return steps // every if every > 0 else None
+    return expected_window_rows(cfg, family)
 
 
 def _flag_truncation(summary, point: LoadPoint, expected: Optional[int]) -> None:
@@ -579,7 +568,7 @@ def _flag_truncation(summary, point: LoadPoint, expected: Optional[int]) -> None
     """
     if expected is None or 'window' not in point.tiers:
         return
-    if summary.ntimesteps < expected - 1:
+    if is_truncated(summary.ntimesteps, expected):
         summary.is_complete = False
         summary.extras['truncated'] = True
         summary.extras['expected_ntimesteps'] = expected
