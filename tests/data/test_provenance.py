@@ -232,3 +232,13 @@ def test_parse_hold_files(tmp_path):
     (tmp_path / 'hold_2.5N.txt').write_text(hdr + "1000 0.5 5 6\n")
     (tmp_path / 'hold_7N.txt').write_text("garbage\n")
     assert parse_hold_files(tmp_path) == {'10': 2.0, '2.5': 0.5}
+
+
+def test_parse_hold_files_skips_a_partial_last_line(tmp_path):
+    """A job killed mid-write leaves "2000" alone on the last line: that row
+    is skipped, the complete rows still give the mean, nothing raises."""
+    from src.data.provenance import parse_hold_files
+    hdr = "# TimeStep v_hold_fz v_hold_tipz v_hold_shz\n"
+    (tmp_path / 'hold_10N.txt').write_text(hdr + "1000 1.0 5 6\n2000")
+    (tmp_path / 'hold_20N.txt').write_text(hdr + "2000\n")
+    assert parse_hold_files(tmp_path) == {'10': 1.0}

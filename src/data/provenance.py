@@ -247,7 +247,11 @@ def parse_log_extras(log_path: Path,
 
 
 def _mean_hold_fz(path: Path) -> float:
-    """Mean of column ``v_hold_fz`` of an ``ave/time`` file."""
+    """Mean of column ``v_hold_fz`` of an ``ave/time`` file.
+
+    A data row with fewer fields than the header (a job killed mid-write) is
+    skipped rather than read: its last field may itself be cut short.
+    """
     names: List[str] = []
     values: List[float] = []
     for line in path.read_text(encoding='utf-8', errors='ignore').splitlines():
@@ -255,9 +259,10 @@ def _mean_hold_fz(path: Path) -> float:
             if 'TimeStep' in line:
                 names = line.lstrip('# ').split()
             continue
-        if not line.strip():
-            continue
-        values.append(float(line.split()[names.index('v_hold_fz')]))
+        fields = line.split()
+        if not fields or (names and len(fields) < len(names)):
+            continue        # blank, or a row cut short by a mid-write kill
+        values.append(float(fields[names.index('v_hold_fz')]))
     return sum(values) / len(values)
 
 
