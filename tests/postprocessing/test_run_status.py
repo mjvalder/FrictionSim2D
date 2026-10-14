@@ -301,3 +301,35 @@ def test_a_no_output_load_does_not_enter_loads_by_kind(tmp_path):
     assert reader.metadata['status_counts']['no_output'] == 1
     assert sorted(reader.metadata['loads_by_kind']['force'],
                   key=float) == ['10.0', '30.0']
+
+
+def test_mixed_root_pes_and_indent_are_not_judged_against_afm(tmp_path):
+    """A complete pes_tip (grid rows) and indent (protocol rows) beside a
+    50-row AFM run are not `truncated`: their row counts are not windows of
+    the same length, so the legacy rule must not compare them."""
+    make_family_run(tmp_path, 'afm', loads=(10,), n=50)
+    make_family_run(tmp_path, 'pes_tip')
+    make_family_run(tmp_path, 'indent', loads=(10,), n=20)
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    assert {p.family: p.status for p in reader.points} == {
+        'afm': 'complete', 'pes_tip': 'complete', 'indent': 'complete'}
+
+
+def test_legacy_rule_compares_within_family_and_size(tmp_path):
+    """A 20-row sheetonsheet run is not short against a 50-row AFM run; a
+    20-row AFM run of the same size still is."""
+    make_family_run(tmp_path, 'afm', loads=(10,), n=50)
+    make_family_run(tmp_path, 'sheetonsheet', loads=(10,), n=20)
+    make_family_run(tmp_path, 'afm', size=(50.0, 50.0), loads=(10,), n=20)
+
+    reader = DataReader(results_dir=str(tmp_path))
+
+    by = {(p.family, p.size): p.status for p in reader.points}
+    assert set(by.values()) == {'complete'}
+
+    make_family_run(tmp_path, 'afm', material='h-WS2', loads=(10,), n=20)
+    reader = DataReader(results_dir=str(tmp_path))
+    short = [p for p in reader.points if p.status == 'truncated']
+    assert [(p.family, p.material) for p in short] == [('afm', 'h_WS2')]

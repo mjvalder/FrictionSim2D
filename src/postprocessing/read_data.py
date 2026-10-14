@@ -305,6 +305,11 @@ _TIER_BY_PREFIX = {'friction': 'window', 'raw': 'raw', 'peratom': 'peratom'}
 #: speak of. The same mapping `FrictionResultsData._TIER_PREFIX` makes when it
 #: files `pes_scan` under `'window'`; two readers, one rule.
 _PES_GRID_NAME = 'pes_scan.csv'
+
+#: Families whose row count is set by a scan grid or an indent protocol, not
+#: by a run length shared with their neighbours: the legacy truncation rule
+#: has no reference to judge them against.
+_UNWINDOWED_FAMILIES = ('pes_tip', 'pes_sheet', 'indent')
 _PES_POINT = LoadPoint(load_kind='none', load=0.0, angle=0.0, speed=0.0,
                        tier='window', layer=None)
 
@@ -646,19 +651,28 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     def _apply_legacy_truncation(self) -> None:
         """The old rule, for points whose config gives no expected length.
 
-        Short by more than three samples against the longest window in the
-        walk: a window tier can legitimately miss its final block. Only a
-        point with frames and no `expected_rows` is judged this way -- every
-        existing tree whose `config.json` carries no `settings`.
+        Short by more than three samples against the longest window of the
+        same (family, size): a window tier can legitimately miss its final
+        block. Only a slide-family point with frames and no `expected_rows`
+        is judged this way -- every existing tree whose `config.json` carries
+        no `settings`. PES and indent are never judged: their row counts are
+        set by the scan grid and the indent protocol, which vary per run.
         """
-        for run in self.runs:
+        judged = [run for run in self.runs
+                  if run.family not in _UNWINDOWED_FAMILIES]
+        longest: Dict[Tuple[str, str], int] = {}
+        for run in judged:
+            key = (run.family, run.size)
+            longest[key] = max(longest.get(key, 0), len(run.window))
+        for run in judged:
             if (run.expected_rows or run.status != 'complete'
-                    or self.ntimestep - len(run.window) <= 3):
+                    or longest[(run.family, run.size)] - len(run.window) <= 3):
                 continue
             run.status = 'truncated'
             run.status_detail = _join_detail(
                 run.status_detail,
-                'short vs longest window in walk; no configured length')
+                'short vs longest window of its family and size; '
+                'no configured length')
 
     def _flag_incomplete(self) -> None:
         """Record every point whose status is not `complete`.
