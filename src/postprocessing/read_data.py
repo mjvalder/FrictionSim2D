@@ -24,9 +24,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.core.observables import FAMILIES, rename_map
+from src.core.observables import FAMILIES, expected_tier_rows, rename_map
 
 from .post_channels import post_channels_for
+from .run_status import (GRID_FAMILIES, PointKey, classify, expected_chains,
+                         load_kind_for_family, mark_not_reached, point_key,
+                         read_run_config)
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +351,12 @@ class RunFrames:
     the tier reader needs `results_dir` and `read_provenance` needs
     `provenance_file` -- all already on the locator `discover_runs` built.
     Carrying tokens and re-deriving the paths would be a second path parser.
+
+    `status` is one of `run_status.STATUSES`; a point that never wrote a file
+    (`no_output`/`not_reached`) or whose window failed to parse (`unreadable`)
+    has `tiers == {}`. `expected_rows` is what the run's config says each tier
+    writes over a finished slide (`{}` when unknown); `config` is the run's
+    parsed `provenance/config.json`, or None.
     """
     locator: Any                        # src.run.tree.RunLocator
     load_kind: str                      # 'force' | 'pressure' | 'none'
@@ -358,6 +367,15 @@ class RunFrames:
     tiers: Dict[str, pd.DataFrame]
     source_files: Dict[str, Path]
     post: Dict[str, float] = field(default_factory=dict)
+    status: str = 'complete'
+    status_detail: str = ''
+    expected_rows: Dict[str, int] = field(default_factory=dict)
+    config: Optional[dict] = None
+
+    @property
+    def n_rows(self) -> Dict[str, int]:
+        """`{tier: rows}` actually read."""
+        return {tier: len(frame) for tier, frame in sorted(self.tiers.items())}
 
     @property
     def tokens(self):
@@ -518,6 +536,23 @@ def _load_points(locator) -> Dict[Tuple[str, float, float, float],
     return grouped
 
 
+def _join_detail(*parts: str) -> str:
+    """Non-empty detail fragments, `'; '`-joined."""
+    return '; '.join(part for part in parts if part)
+
+
+def _grid_note(grid, config: Optional[dict], family: str) -> str:
+    """Why a run's points are on-disk only; '' when the grid is known."""
+    if grid is not None:
+        return ''
+    if family not in GRID_FAMILIES:
+        return f'grid not modelled for {family}'
+    if config is None:
+        return 'grid unknown: no readable provenance/config.json'
+    return (f'grid unknown: config has no general.'
+            f'{load_kind_for_family(family)}')
+
+
 class _NpEncoder(json.JSONEncoder):
     """JSON encoder that handles NumPy and pandas types."""
 
@@ -561,21 +596,36 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     _lateral_columns = staticmethod(lateral_columns)
     _is_lj_branch = staticmethod(is_lj_branch)
     def __init__(self, results_dir: str = 'results_110725_test', *,
-                 skip_fraction: float = 0.2) -> None:
+                 skip_fraction: float = 0.2,
+                 complete_only: bool = False) -> None:
         """Initialise the DataReader.
 
         Args:
             results_dir: A simulation root -- the directory holding `afm/`,
                 `sheetonsheet/`, `indent/`, `pes_tip/`, `pes_sheet/`.
             skip_fraction: Transient fraction `summarise_run` discards.
+            complete_only: Export and summarise only `complete` points (the
+                old behaviour); by default every status is written.
         """
         self.results_dir = Path(results_dir)
         self.output_dir = self.results_dir / 'outputs'
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.skip_fraction = skip_fraction
+        self.complete_only = complete_only
 
-        self.runs: List[RunFrames] = self._read_runs()
+        #: Every expected load point, any status. `runs` keeps its old meaning
+        #: -- the points with frames -- for `indent.py` and existing callers.
+        self.points: List[RunFrames]
+        chains: List[Tuple[List[PointKey], Dict[PointKey, RunFrames]]]
+        self.points, chains = self._read_runs()
+        self.runs: List[RunFrames] = [p for p in self.points if p.tiers]
         self.ntimestep: int = max((len(r.window) for r in self.runs), default=0)
+        self._apply_legacy_truncation()
+        for chain, by_key in chains:
+            status = {key: point.status for key, point in by_key.items()}
+            mark_not_reached(chain, status)
+            for key, point in by_key.items():
+                point.status = status[key]
         self.time_series: List[int] = self._time_series()
         self.incomplete_files: Dict[str, List[str]] = {}
         self.incomplete_materials: Dict[str, set] = {}
@@ -589,26 +639,58 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 return [int(t) for t in run.window['time'].to_list()]
         return []
 
-    def _flag_incomplete(self) -> None:
-        """Record runs whose window frame is short of `ntimestep`.
+    def _apply_legacy_truncation(self) -> None:
+        """The old rule, for points whose config gives no expected length.
 
-        Three samples of slack, as the old two-pass reader used: a window tier
-        can legitimately miss its final block. Unlike the old reader the run is
-        KEPT -- flagging it and dropping it are different decisions, and only
-        the first is this class's to make.
+        Short by more than three samples against the longest window in the
+        walk: a window tier can legitimately miss its final block. Only a
+        point with frames and no `expected_rows` is judged this way -- every
+        existing tree whose `config.json` carries no `settings`.
         """
         for run in self.runs:
-            if self.ntimestep - len(run.window) <= 3:
+            if (run.expected_rows or run.status != 'complete'
+                    or self.ntimestep - len(run.window) <= 3):
                 continue
-            self.incomplete_files.setdefault(run.size, []).append(
-                str(run.source_files.get('window', run.locator.run_dir)))
-            self.incomplete_materials.setdefault(run.size, set()).add(run.material)
+            run.status = 'truncated'
+            run.status_detail = _join_detail(
+                run.status_detail,
+                'short vs longest window in walk; no configured length')
+
+    def _flag_incomplete(self) -> None:
+        """Record every point whose status is not `complete`.
+
+        One line per point: the window file when there is one, else the run
+        directory and the point, suffixed with the status. Unlike the old
+        reader nothing is dropped -- flagging and dropping are different
+        decisions, and only the first is this class's to make.
+        """
+        for point in self.points:
+            if point.status == 'complete':
+                continue
+            where = point.source_files.get('window')
+            line = (str(where) if where is not None else
+                    f'{point.locator.run_dir} {point.load_kind}='
+                    f'{point.load:g} a={point.angle:g} s={point.speed:g}')
+            self.incomplete_files.setdefault(point.size, []).append(
+                f'{line} [{point.status}]')
+            self.incomplete_materials.setdefault(point.size, set()).add(
+                point.material)
 
     def runs_by_size(self) -> Dict[str, List[RunFrames]]:
         """Runs grouped by their `size` token -- one export file per key."""
         grouped: Dict[str, List[RunFrames]] = {}
         for run in self.runs:
             grouped.setdefault(run.size, []).append(run)
+        return grouped
+
+    def points_by_size(self) -> Dict[str, List[RunFrames]]:
+        """Exported points grouped by `size` (only `complete` ones when
+        `complete_only`)."""
+        grouped: Dict[str, List[RunFrames]] = {}
+        for point in self.points:
+            if self.complete_only and point.status != 'complete':
+                continue
+            grouped.setdefault(point.size, []).append(point)
         return grouped
 
     def _build_metadata(self,
@@ -654,39 +736,96 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             },
         }
 
-    def _read_runs(self) -> List[RunFrames]:
-        """One walk with `discover_runs`, one `RunFrames` per load point."""
+    def _read_runs(self) -> Tuple[List[RunFrames],
+                                  List[Tuple[List[PointKey],
+                                             Dict[PointKey, RunFrames]]]]:
+        """One walk with `discover_runs`, one `RunFrames` per load point.
+
+        The points are the configured grid (`expected_chains` over the run's
+        `provenance/config.json`) plus whatever is on disk. Returns them
+        sorted, and each chain with its points so `not_reached` can be set
+        once the legacy truncation pass has run.
+        """
         from ..run.tree import discover_runs  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
-        runs: List[RunFrames] = []
+        points: List[RunFrames] = []
+        chains: List[Tuple[List[PointKey], Dict[PointKey, RunFrames]]] = []
         for locator in discover_runs(self.results_dir):
             family = locator.tokens.family
             n_layers = resolve_n_layers(locator)
-            for (kind, load, angle, speed), tiers in _load_points(locator).items():
-                frames: Dict[str, pd.DataFrame] = {}
-                sources: Dict[str, Path] = {}
-                for tier, (path, _point) in sorted(tiers.items()):
-                    try:
-                        # A PES grid is a comma table with a `# family=` first
-                        # line, not a LAMMPS `ave/time` file, so it goes
-                        # through read_csv -- exactly as
-                        # `FrictionResultsData.frame` does for a stored `.csv`.
-                        frames[tier] = (
-                            pd.read_csv(path, comment='#') if path.suffix == '.csv'
-                            else read_results_file(path, family, n_layers))
-                        sources[tier] = path
-                    except (SchemaError, ValueError, OSError,
-                            pd.errors.EmptyDataError) as exc:
-                        logger.warning("Could not process file %s: %s", path, exc)
-                if not frames:
-                    continue
-                runs.append(RunFrames(
-                    locator=locator, load_kind=kind, load=load, angle=angle,
-                    speed=speed, n_layers=n_layers, tiers=frames,
-                    source_files=sources,
-                    post=post_channels_for(locator, kind, load, angle)))
-        return sorted(runs, key=lambda r: (r.tokens.rel_path, r.load_kind,
-                                           r.load, r.angle, r.speed))
+            config = read_run_config(locator)
+            expected = expected_tier_rows(config, family) if config else {}
+            grid = expected_chains(config, family)
+            on_disk = {point_key(*key): (key, tiers)
+                       for key, tiers in _load_points(locator).items()}
+            grid_keys = list(dict.fromkeys(
+                key for chain in grid or [] for key in chain))
+            in_grid = set(grid_keys)
+            note = _grid_note(grid, config, family)
+            by_key: Dict[PointKey, RunFrames] = {}
+            for key in dict.fromkeys(grid_keys + list(on_disk)):
+                raw_key, tiers = on_disk.get(key, (key, {}))
+                point = self._read_point(locator, raw_key, tiers, n_layers,
+                                         expected, config)
+                if grid is not None and key not in in_grid:
+                    point.status_detail = _join_detail(
+                        'not in configured grid', point.status_detail)
+                point.status_detail = _join_detail(note, point.status_detail)
+                by_key[key] = point
+                points.append(point)
+            for chain in grid or []:
+                chains.append((chain, {key: by_key[key] for key in chain}))
+        points.sort(key=lambda r: (r.tokens.rel_path, r.load_kind, r.load,
+                                   r.angle, r.speed))
+        return points, chains
+
+    @staticmethod
+    def _read_point(locator, key: Tuple[str, float, float, float],
+                    tiers: Dict[str, Tuple[Path, LoadPoint]], n_layers: int,
+                    expected: Dict[str, int],
+                    config: Optional[dict]) -> RunFrames:
+        """Parse one load point's tier files and give it its first status."""
+        kind, load, angle, speed = key
+        family = locator.tokens.family
+        frames: Dict[str, pd.DataFrame] = {}
+        sources: Dict[str, Path] = {}
+        failures: List[str] = []
+        window_error: Optional[str] = None
+        for tier, (path, _point) in sorted(tiers.items()):
+            try:
+                # A PES grid is a comma table with a `# family=` first
+                # line, not a LAMMPS `ave/time` file, so it goes
+                # through read_csv -- exactly as
+                # `FrictionResultsData.frame` does for a stored `.csv`.
+                frames[tier] = (
+                    pd.read_csv(path, comment='#') if path.suffix == '.csv'
+                    else read_results_file(path, family, n_layers))
+                sources[tier] = path
+            except (SchemaError, ValueError, OSError,
+                    pd.errors.EmptyDataError) as exc:
+                logger.warning("Could not process file %s: %s", path, exc)
+                if tier == 'window':
+                    window_error = str(exc)
+                failures.append(f'{tier} unreadable: {exc}')
+        point = RunFrames(locator=locator, load_kind=kind, load=load,
+                          angle=angle, speed=speed, n_layers=n_layers,
+                          tiers=frames, source_files=sources,
+                          expected_rows=dict(expected), config=config)
+        if not tiers:
+            point.status = 'no_output'
+        elif window_error is not None or not frames:
+            # Discarding a good trace because a raw/peratom sidecar is corrupt
+            # would lose data, so only a failed window (or nothing parsed at
+            # all) makes the whole point unreadable.
+            point.tiers, point.source_files = {}, {}
+            point.status = 'unreadable'
+            point.status_detail = (window_error if window_error is not None
+                                   else '; '.join(failures))
+        else:
+            point.status, detail = classify(point.n_rows, expected)
+            point.status_detail = _join_detail(*failures, detail)
+            point.post = post_channels_for(locator, kind, load, angle)
+        return point
 
     def _calculate_derived_quantities(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate lateral force and coefficient of friction.
@@ -796,6 +935,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'load_kind': run.load_kind, 'load': run.load, 'angle': run.angle,
             'speed': run.speed, 'n_layers': run.n_layers,
             'tiers': tiers, 'post': dict(run.post),
+            'status': run.status, 'status_detail': run.status_detail,
+            'n_rows': run.n_rows, 'expected_rows': dict(run.expected_rows),
         }
 
     def export_payload(self, size: str, runs: List[RunFrames]) -> Dict[str, Any]:
@@ -824,6 +965,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
         rows: List[Dict[str, Any]] = []
         for run in self.runs:
+            if self.complete_only and run.status != 'complete':
+                continue
             tokens = run.tokens
             summary = summarise_run(run.frames_by_tier(), run.family,
                                     skip_fraction=self.skip_fraction,
@@ -889,7 +1032,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     def export_full_data_to_json(self) -> List[Path]:
         """Write one `output_full_<size>.json` per size; return the paths."""
         written: List[Path] = []
-        for size, runs in sorted(self.runs_by_size().items()):
+        for size, runs in sorted(self.points_by_size().items()):
             path = self._get_output_path(f'output_full_{size}.json')
             with open(path, 'w', encoding='utf-8') as fh:
                 json.dump(self.export_payload(size, runs), fh, cls=_NpEncoder,

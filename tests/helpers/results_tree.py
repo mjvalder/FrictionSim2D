@@ -92,8 +92,14 @@ def make_family_run(root: Path, family: str, *, material: str = 'h-MoS2',
                     angles: Sequence[float] = (0.0,),
                     speeds: Sequence[float] = (2.0,),
                     tiers: Sequence[str] = ('window',),
-                    n: int = 50, final_data: bool = False) -> Path:
-    """Write one complete run directory; return the directory."""
+                    n: int = 50, final_data: bool = False,
+                    config: Optional[dict] = None) -> Path:
+    """Write one complete run directory; return the directory.
+
+    `config` is written as `provenance/config.json` (default: the minimal
+    `{'general': {'temp': temp}}`, which carries no load grid). Pass
+    `slide_config(...)` to give the reader a grid and expected row counts.
+    """
     if layers is None and family in _AFM_LIKE:
         layers = 2
     rel = FAMILY_LAYOUT[family].format(
@@ -111,7 +117,8 @@ def make_family_run(root: Path, family: str, *, material: str = 'h-MoS2',
     prov_parent = run_dir.parent if family in _AFM_LIKE else run_dir
     (prov_parent / 'provenance').mkdir(parents=True, exist_ok=True)
     (prov_parent / 'provenance' / 'config.json').write_text(
-        json.dumps({'general': {'temp': temp}}), encoding='utf-8')
+        json.dumps(config if config is not None else {'general': {'temp': temp}}),
+        encoding='utf-8')
     write_provenance(run_dir, _record(family, material, second_material,
                                       flake_material))
 
@@ -131,6 +138,36 @@ def make_family_run(root: Path, family: str, *, material: str = 'h-MoS2',
         write_final_data(run_dir, family, load_kind=load_kind,
                          load=loads[0], angle=angles[0])
     return run_dir
+
+
+def slide_config(family: str, *, loads: Sequence[float],
+                 angles: Sequence[float] = (0.0,),
+                 speeds: Sequence[float] = (2.0,), steps: int = 50_000,
+                 freq: int = 1000, outer_loop: Optional[str] = None,
+                 scan_angle_force: Optional[Sequence[float]] = None,
+                 channels: Optional[Dict[str, bool]] = None) -> dict:
+    """A `provenance/config.json` body with a load grid and output settings.
+
+    The shape is the top-level `model_dump` the runner writes: `general` holds
+    the sweep (`force` for afm, `pressure` for the sheet-like families),
+    `settings` the slide length and the window frequency, so
+    `expected_tier_rows` gives `steps // freq` window rows.
+    """
+    kind = 'force' if family == 'afm' else 'pressure'
+    return {
+        'general': {
+            'temp': 300, kind: list(loads), 'scan_angle': list(angles),
+            'scan_speed': list(speeds), 'outer_loop': outer_loop,
+            'scan_angle_force': (None if scan_angle_force is None
+                                 else list(scan_angle_force)),
+        },
+        'settings': {
+            'simulation': {'slide_run_steps': steps},
+            'output': {'results_frequency': freq,
+                       'channels': channels or {'window': True, 'raw': False,
+                                                'peratom': False}},
+        },
+    }
 
 
 def write_pes_grid(run_dir: Path, family: str, *, n: int = 4) -> Path:

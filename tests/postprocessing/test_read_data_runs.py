@@ -7,6 +7,7 @@ and one of the two arms vanished without a warning.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from pathlib import Path
@@ -23,6 +24,24 @@ from src.postprocessing.read_data import (SUMMARY_IDENTITY_COLUMNS,
 from tests.helpers.results_tree import make_family_run
 
 GOLDEN_DIR = Path(__file__).resolve().parents[1] / 'fixtures' / 'golden'
+
+#: Keys schema 3 adds to each `runs[]` entry and to `metadata`. Removing them
+#: from a v3 document must give back the v2 golden exactly: v3 is additive.
+V3_RUN_KEYS = {'status', 'status_detail', 'n_rows', 'expected_rows',
+               'provenance'}
+V3_META_KEYS = {'provenance', 'status_counts'}
+
+
+def as_v2(doc):
+    """A v3 document minus everything v3 added; must equal the v2 golden."""
+    doc = copy.deepcopy(doc)
+    doc['schema'] = 2
+    for key in V3_META_KEYS:
+        doc['metadata'].pop(key, None)
+    for run in doc['runs']:
+        for key in V3_RUN_KEYS:
+            run.pop(key, None)
+    return doc
 
 
 def test_parse_results_name_reads_a_window_file():
@@ -361,7 +380,8 @@ def test_v2_document_shape(tmp_path):
         'model', 'family', 'material', 'materials', 'flake_material', 'size',
         'size_x', 'size_y', 'substrate', 'substrate_amorphous', 'tip_material',
         'tip_radius', 'temperature', 'layers', 'potential', 'rel_path',
-        'load_kind', 'load', 'angle', 'speed', 'n_layers', 'tiers', 'post'}
+        'load_kind', 'load', 'angle', 'speed', 'n_layers', 'tiers', 'post',
+        'status', 'status_detail', 'n_rows', 'expected_rows'}
     assert run['load_kind'] == 'force'
     assert set(run['tiers']) == {'window', 'raw'}
     assert run['tiers']['window']['columns'][0] == 'time'
@@ -392,12 +412,14 @@ def test_a_run_without_final_data_has_an_empty_post(tmp_path):
 
 
 @pytest.mark.parametrize('family', FAMILIES)
-def test_golden_export_per_family(tmp_path, family):
+def test_v3_is_v2_plus_new_keys_only(tmp_path, family):
     """The whole document is pinned, byte for byte after a stable dump.
 
     A golden is the only test that catches a key silently disappearing --
     every targeted assertion above passes just as happily on a document that
-    lost three keys nobody asserted on."""
+    lost three keys nobody asserted on. The v2 golden stays the reference:
+    with the keys schema 3 added stripped, the document must be unchanged,
+    so no v2 key was renamed, removed or changed meaning."""
     make_family_run(tmp_path, family, final_data=True, n=4,
                     tiers=('window', 'raw'))
 
@@ -406,7 +428,7 @@ def test_golden_export_per_family(tmp_path, family):
     golden = json.loads(
         (GOLDEN_DIR / f'output_full_v2_{family}.json').read_text(encoding='utf-8'))
 
-    assert produced == golden
+    assert as_v2(produced) == golden
 
 
 def test_summary_rows_come_from_summarise_run(tmp_path):
