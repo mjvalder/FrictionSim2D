@@ -27,6 +27,7 @@ import pandas as pd
 from src.core.observables import FAMILIES, expected_tier_rows, rename_map
 
 from .post_channels import post_channels_for
+from .run_provenance import point_provenance, run_provenance
 from .run_status import (GRID_FAMILIES, PointKey, classify, expected_chains,
                          load_kind_for_family, mark_not_reached, point_key,
                          read_run_config)
@@ -612,6 +613,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.skip_fraction = skip_fraction
         self.complete_only = complete_only
+        self._run_blocks: Dict[Path, dict] = {}
 
         #: Every expected load point, any status. `runs` keeps its old meaning
         #: -- the points with frames -- for `indent.py` and existing callers.
@@ -905,6 +907,13 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                                  self._registry_sim_type(sim_type, header),
                                  n_layers=n_layers)
 
+    def _run_block(self, run: RunFrames) -> dict:
+        """The run's provenance block, built once per run directory."""
+        key = Path(run.locator.run_dir)
+        if key not in self._run_blocks:
+            self._run_blocks[key] = run_provenance(run.locator, run.config)
+        return self._run_blocks[key]
+
     def run_payload(self, run: RunFrames) -> Dict[str, Any]:
         """One `runs[]` entry of the v2 document."""
         tokens = run.tokens
@@ -921,6 +930,10 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                           'lf_corrected': bool(out.attrs.get('lf_corrected',
                                                              False))},
             }
+        block = self._run_block(run)
+        detail = run.status_detail
+        if 'error' in block:
+            detail = _join_detail(detail, 'provenance unreadable')
         return {
             'model': tokens.model, 'family': run.family,
             'material': run.material, 'materials': list(tokens.materials),
@@ -935,7 +948,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'load_kind': run.load_kind, 'load': run.load, 'angle': run.angle,
             'speed': run.speed, 'n_layers': run.n_layers,
             'tiers': tiers, 'post': dict(run.post),
-            'status': run.status, 'status_detail': run.status_detail,
+            'status': run.status, 'status_detail': detail,
+            'provenance': point_provenance(block, run.load),
             'n_rows': run.n_rows, 'expected_rows': dict(run.expected_rows),
         }
 

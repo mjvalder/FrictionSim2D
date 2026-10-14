@@ -381,7 +381,7 @@ def test_v2_document_shape(tmp_path):
         'size_x', 'size_y', 'substrate', 'substrate_amorphous', 'tip_material',
         'tip_radius', 'temperature', 'layers', 'potential', 'rel_path',
         'load_kind', 'load', 'angle', 'speed', 'n_layers', 'tiers', 'post',
-        'status', 'status_detail', 'n_rows', 'expected_rows'}
+        'status', 'status_detail', 'n_rows', 'expected_rows', 'provenance'}
     assert run['load_kind'] == 'force'
     assert set(run['tiers']) == {'window', 'raw'}
     assert run['tiers']['window']['columns'][0] == 'time'
