@@ -1,0 +1,513 @@
+{
+ "schema": 3,
+ "size": "100x100y",
+ "generated_by": "FrictionSim2D",
+ "units": {},
+ "metadata": {
+  "families": [
+   "pes_tip"
+  ],
+  "models": [
+   "pes_tip"
+  ],
+  "materials": [
+   "h_MoS2"
+  ],
+  "material_types": {
+   "b_type": [],
+   "h_type": [
+    "h_MoS2"
+   ],
+   "t_type": [],
+   "p_type": [],
+   "other": []
+  },
+  "potentials": [],
+  "temperatures": [
+   300.0
+  ],
+  "sizes": [
+   "100x100y"
+  ],
+  "layers": [
+   2
+  ],
+  "speeds": [
+   0.0
+  ],
+  "substrates": [
+   "Si"
+  ],
+  "tip_materials": [
+   "Si"
+  ],
+  "tip_radii": [
+   25.0
+  ],
+  "loads_by_kind": {
+   "force": {},
+   "pressure": {},
+   "none": {
+    "0.0": [
+     0.0
+    ]
+   }
+  },
+  "tiers": [
+   "window"
+  ],
+  "ntimestep": 16,
+  "time_series": [],
+  "provenance": {
+   "config.general.bond_spring": {
+    "value": null
+   },
+   "config.general.driving_spring": {
+    "value": null
+   },
+   "config.general.force": {
+    "value": null
+   },
+   "config.general.outer_loop": {
+    "value": null
+   },
+   "config.general.pressure": {
+    "value": null
+   },
+   "config.general.scan_angle": {
+    "value": null
+   },
+   "config.general.scan_angle_force": {
+    "value": null
+   },
+   "config.general.scan_speed": {
+    "value": null
+   },
+   "config.output.channels": {
+    "value": null
+   },
+   "config.output.results_frequency": {
+    "value": null
+   },
+   "config.output.tier_frequency": {
+    "value": null
+   },
+   "config.simulation.constraint_mode": {
+    "value": null
+   },
+   "config.simulation.drive_method": {
+    "value": null
+   },
+   "config.simulation.halt_temperature_factor": {
+    "value": null
+   },
+   "config.simulation.ramp_max_iterations": {
+    "value": null
+   },
+   "config.simulation.sheet_hold_steps": {
+    "value": null
+   },
+   "config.simulation.slide_run_steps": {
+    "value": null
+   },
+   "config.simulation.timestep": {
+    "value": null
+   },
+   "config.thermostat": {
+    "value": null
+   },
+   "config.tip": {
+    "value": null
+   },
+   "config_hash": {
+    "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   },
+   "contact_cutoff": {
+    "value": 4.8
+   },
+   "cutoff_source": {
+    "value": "test"
+   },
+   "damp_ev": {
+    "value": null
+   },
+   "damping_ratio": {
+    "value": null
+   },
+   "drive_k": {
+    "value": null
+   },
+   "drive_rest_length": {
+    "value": null
+   },
+   "enriched": {
+    "value": false
+   },
+   "family": {
+    "value": "pes_tip"
+   },
+   "geometry": {
+    "value": null
+   },
+   "git_commit": {
+    "value": "deadbeef"
+   },
+   "git_dirty": {
+    "value": false
+   },
+   "lammps_version": {
+    "value": null
+   },
+   "layer_type_map.layer_1": {
+    "value": [
+     1
+    ]
+   },
+   "layer_type_map.layer_2": {
+    "value": [
+     2
+    ]
+   },
+   "load_requested": {
+    "value": 30.0
+   },
+   "materials": {
+    "value": [
+     {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "MoS.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": "explicit",
+      "pot_file_sha256": "abababababababababababababababababababababababababababababababab"
+     }
+    ]
+   },
+   "model": {
+    "value": "pes_tip"
+   },
+   "pressure_achieved": {
+    "value": null
+   },
+   "pressure_requested": {
+    "value": null
+   },
+   "ramp_converged": {
+    "value": null
+   },
+   "ramp_iterations": {
+    "value": null
+   },
+   "ramp_r": {
+    "value": null
+   },
+   "run_role": {
+    "value": "label"
+   },
+   "schema_version": {
+    "value": "2.0.0"
+   },
+   "substrate_realization_id": {
+    "value": null
+   },
+   "thermostat_scheme": {
+    "value": "langevin"
+   },
+   "tip_group_sizes": {
+    "value": null
+   },
+   "twist_angle": {
+    "value": null
+   },
+   "config_hashes": {
+    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff": 1
+   },
+   "seeds_unique": true,
+   "seeds_shared_across_runs": 0
+  },
+  "status_counts": {
+   "complete": 1,
+   "truncated": 0,
+   "no_output": 0,
+   "unreadable": 0,
+   "not_reached": 0
+  },
+  "summary_definition": {
+   "cof": "ratio_of_means: mean(LF)/mean(NF)",
+   "skip_fraction": 0.2,
+   "source": "src.data.models.summarise_run"
+  }
+ },
+ "runs": [
+  {
+   "model": "pes_tip",
+   "family": "pes_tip",
+   "material": "h_MoS2",
+   "materials": [
+    "h-MoS2"
+   ],
+   "flake_material": null,
+   "size": "100x100y",
+   "size_x": 100.0,
+   "size_y": 100.0,
+   "substrate": "Si",
+   "substrate_amorphous": true,
+   "tip_material": "Si",
+   "tip_radius": 25.0,
+   "temperature": 300.0,
+   "layers": 2,
+   "potential": null,
+   "rel_path": "pes_tip/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2",
+   "load_kind": "none",
+   "load": 0.0,
+   "angle": 0.0,
+   "speed": 0.0,
+   "n_layers": 2,
+   "tiers": {
+    "window": {
+     "columns": [
+      "x",
+      "y",
+      "energy_eV",
+      "fx",
+      "fy",
+      "fz"
+     ],
+     "data": [
+      [
+       0.0,
+       0.0,
+       -1.0,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       0.0,
+       1.0,
+       -0.9,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       0.0,
+       2.0,
+       -0.8,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       0.0,
+       3.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       0.0,
+       -0.9,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       1.0,
+       -0.8,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       2.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       1.0,
+       3.0,
+       -0.6,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       0.0,
+       -0.8,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       1.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       2.0,
+       -0.6,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       2.0,
+       3.0,
+       -0.5,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       0.0,
+       -0.7,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       1.0,
+       -0.6,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       2.0,
+       -0.5,
+       0.1,
+       0.2,
+       -3.0
+      ],
+      [
+       3.0,
+       3.0,
+       -0.3999999999999999,
+       0.1,
+       0.2,
+       -3.0
+      ]
+     ],
+     "attrs": {
+      "lf_schema": 2,
+      "lf_corrected": false
+     }
+    }
+   },
+   "post": {},
+   "status": "complete",
+   "status_detail": "",
+   "provenance": {
+    "schema_version": "2.0.0",
+    "family": "pes_tip",
+    "model": "pes_tip",
+    "materials": [
+     {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "MoS.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": "explicit",
+      "pot_file_sha256": "abababababababababababababababababababababababababababababababab"
+     }
+    ],
+    "twist_angle": null,
+    "seed_thermal_tip": null,
+    "seed_thermal_sub": null,
+    "seed_velocity": null,
+    "seed_sheet_center": null,
+    "substrate_realization_id": null,
+    "damping_ratio": null,
+    "damp_ev": null,
+    "git_commit": "deadbeef",
+    "git_dirty": false,
+    "config_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "lammps_version": null,
+    "layer_type_map": {
+     "layer_1": [
+      1
+     ],
+     "layer_2": [
+      2
+     ]
+    },
+    "unloaded_reference_z": {
+     "layer_1": 0.0,
+     "layer_2": 6.5
+    },
+    "contact_cutoff": 4.8,
+    "cutoff_source": "test",
+    "thermostat_scheme": "langevin",
+    "tip_group_sizes": null,
+    "run_role": "label",
+    "load_requested": 30.0,
+    "load_achieved": null,
+    "pressure_requested": null,
+    "pressure_achieved": null,
+    "ramp_converged": null,
+    "ramp_r": null,
+    "ramp_iterations": null,
+    "drive_k": null,
+    "drive_rest_length": null,
+    "geometry": null,
+    "ramp_by_load": null,
+    "load_achieved_by_load": null,
+    "execution": {
+     "wall_time_s": null,
+     "n_procs": null,
+     "atoms_per_proc": null
+    },
+    "config": {
+     "simulation": {
+      "timestep": null,
+      "slide_run_steps": null,
+      "drive_method": null,
+      "constraint_mode": null,
+      "sheet_hold_steps": null,
+      "ramp_max_iterations": null,
+      "halt_temperature_factor": null
+     },
+     "output": {
+      "results_frequency": null,
+      "tier_frequency": null,
+      "channels": null
+     },
+     "thermostat": null,
+     "tip": null,
+     "general": {
+      "force": null,
+      "pressure": null,
+      "scan_angle": null,
+      "scan_speed": null,
+      "scan_angle_force": null,
+      "outer_loop": null,
+      "driving_spring": null,
+      "bond_spring": null
+     }
+    },
+    "provenance_sha256": "064514e0a3f17a3f9e8b7e81d1410a6aac548e08aa02524af485b21bc4e5e1ff",
+    "enriched": false,
+    "ramp": null
+   },
+   "n_rows": {
+    "window": 16
+   },
+   "expected_rows": {}
+  }
+ ]
+}

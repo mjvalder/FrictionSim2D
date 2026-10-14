@@ -431,6 +431,41 @@ def test_v3_is_v2_plus_new_keys_only(tmp_path, family):
     assert as_v2(produced) == golden
 
 
+@pytest.mark.parametrize('family', FAMILIES)
+def test_golden_v3_export_per_family(tmp_path, family):
+    """The v3 document pinned whole; the v3 goldens were read before pinning."""
+    make_family_run(tmp_path, family, final_data=True, n=4,
+                    tiers=('window', 'raw'))
+
+    written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+    produced = json.loads(written.read_text(encoding='utf-8'))
+    golden = json.loads(
+        (GOLDEN_DIR / f'output_full_v3_{family}.json').read_text(encoding='utf-8'))
+
+    assert produced == golden
+
+
+def test_golden_v3_statuses(tmp_path):
+    """Every status value and a non-trivial `provenance.config` pinned."""
+    from tests.helpers.results_tree import slide_config
+    from tests.helpers.synthetic_results import write_results
+    loads = (10, 20, 30, 40, 50)
+    run_dir = make_family_run(
+        tmp_path, 'afm', loads=loads, n=4,
+        config=slide_config('afm', loads=loads, steps=4000, freq=1000))
+    write_results(run_dir, 'afm', load_kind='force', loads=(30,), layers=2, n=1)
+    for load in (40, 50):
+        for path in (run_dir / 'results').glob(f'friction_f{load}_*'):
+            path.unlink()
+
+    written, = DataReader(results_dir=str(tmp_path)).export_full_data_to_json()
+    produced = json.loads(written.read_text(encoding='utf-8'))
+    golden = json.loads((GOLDEN_DIR / 'output_full_v3_afm_statuses.json')
+                        .read_text(encoding='utf-8'))
+
+    assert produced == golden
+
+
 def test_summary_rows_come_from_summarise_run(tmp_path):
     """The one COF. `df.mean()` in plot_common, element-wise
     compute_derived_columns in read_data and ratio-of-means in the DB were

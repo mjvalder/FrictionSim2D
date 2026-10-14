@@ -1,0 +1,610 @@
+{
+ "schema": 3,
+ "size": "100x100y",
+ "generated_by": "FrictionSim2D",
+ "units": {
+  "cof": "1",
+  "comx": "A",
+  "comx_L1": "A",
+  "comx_L2": "A",
+  "comy": "A",
+  "comy_L1": "A",
+  "comy_L2": "A",
+  "comz": "A",
+  "comz_L1": "A",
+  "comz_L2": "A",
+  "etotal": "eV",
+  "ke": "eV",
+  "lateral_force": "nN",
+  "lfx": "nN",
+  "lfy": "nN",
+  "nf": "nN",
+  "pe": "eV",
+  "raw_lfx": "nN",
+  "raw_lfy": "nN",
+  "raw_nf": "nN",
+  "raw_tipx": "A",
+  "raw_tipy": "A",
+  "raw_tipz": "A",
+  "temp_sheet_3d": "K",
+  "time": "step",
+  "tip_min_z": "A",
+  "tipx": "A",
+  "tipy": "A",
+  "tipz": "A",
+  "w_thermostat_sub": "eV",
+  "w_thermostat_tip": "eV"
+ },
+ "metadata": {
+  "families": [
+   "afm"
+  ],
+  "models": [
+   "afm"
+  ],
+  "materials": [
+   "h_MoS2"
+  ],
+  "material_types": {
+   "b_type": [],
+   "h_type": [
+    "h_MoS2"
+   ],
+   "t_type": [],
+   "p_type": [],
+   "other": []
+  },
+  "potentials": [],
+  "temperatures": [
+   300.0
+  ],
+  "sizes": [
+   "100x100y"
+  ],
+  "layers": [
+   2
+  ],
+  "speeds": [
+   2.0
+  ],
+  "substrates": [
+   "Si"
+  ],
+  "tip_materials": [
+   "Si"
+  ],
+  "tip_radii": [
+   25.0
+  ],
+  "loads_by_kind": {
+   "force": {
+    "30.0": [
+     0.0
+    ]
+   },
+   "pressure": {}
+  },
+  "tiers": [
+   "raw",
+   "window"
+  ],
+  "ntimestep": 4,
+  "time_series": [
+   1000,
+   2000,
+   3000,
+   4000
+  ],
+  "provenance": {
+   "config.general.bond_spring": {
+    "value": null
+   },
+   "config.general.driving_spring": {
+    "value": null
+   },
+   "config.general.force": {
+    "value": null
+   },
+   "config.general.outer_loop": {
+    "value": null
+   },
+   "config.general.pressure": {
+    "value": null
+   },
+   "config.general.scan_angle": {
+    "value": null
+   },
+   "config.general.scan_angle_force": {
+    "value": null
+   },
+   "config.general.scan_speed": {
+    "value": null
+   },
+   "config.output.channels": {
+    "value": null
+   },
+   "config.output.results_frequency": {
+    "value": null
+   },
+   "config.output.tier_frequency": {
+    "value": null
+   },
+   "config.simulation.afm_hold_steps": {
+    "value": 10000
+   },
+   "config.simulation.constraint_mode": {
+    "value": null
+   },
+   "config.simulation.drive_method": {
+    "value": null
+   },
+   "config.simulation.halt_temperature_factor": {
+    "value": null
+   },
+   "config.simulation.ramp_max_iterations": {
+    "value": null
+   },
+   "config.simulation.sheet_hold_steps": {
+    "value": null
+   },
+   "config.simulation.slide_run_steps": {
+    "value": null
+   },
+   "config.simulation.timestep": {
+    "value": null
+   },
+   "config.thermostat": {
+    "value": null
+   },
+   "config.tip": {
+    "value": null
+   },
+   "config_hash": {
+    "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   },
+   "contact_cutoff": {
+    "value": 4.8
+   },
+   "cutoff_source": {
+    "value": "test"
+   },
+   "damp_ev": {
+    "value": null
+   },
+   "damping_ratio": {
+    "value": null
+   },
+   "drive_k": {
+    "value": null
+   },
+   "drive_rest_length": {
+    "value": null
+   },
+   "enriched": {
+    "value": false
+   },
+   "family": {
+    "value": "afm"
+   },
+   "geometry": {
+    "value": null
+   },
+   "git_commit": {
+    "value": "deadbeef"
+   },
+   "git_dirty": {
+    "value": false
+   },
+   "lammps_version": {
+    "value": null
+   },
+   "layer_type_map.layer_1": {
+    "value": [
+     1
+    ]
+   },
+   "layer_type_map.layer_2": {
+    "value": [
+     2
+    ]
+   },
+   "load_requested": {
+    "value": 30.0
+   },
+   "materials": {
+    "value": [
+     {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "MoS.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": "explicit",
+      "pot_file_sha256": "abababababababababababababababababababababababababababababababab"
+     }
+    ]
+   },
+   "model": {
+    "value": "afm"
+   },
+   "pressure_achieved": {
+    "value": null
+   },
+   "pressure_requested": {
+    "value": null
+   },
+   "ramp_converged": {
+    "value": null
+   },
+   "ramp_iterations": {
+    "value": null
+   },
+   "ramp_r": {
+    "value": null
+   },
+   "run_role": {
+    "value": "label"
+   },
+   "schema_version": {
+    "value": "2.0.0"
+   },
+   "substrate_realization_id": {
+    "value": null
+   },
+   "thermostat_scheme": {
+    "value": "langevin"
+   },
+   "tip_group_sizes": {
+    "value": null
+   },
+   "twist_angle": {
+    "value": null
+   },
+   "config_hashes": {
+    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff": 1
+   },
+   "seeds_unique": true,
+   "seeds_shared_across_runs": 0
+  },
+  "status_counts": {
+   "complete": 1,
+   "truncated": 0,
+   "no_output": 0,
+   "unreadable": 0,
+   "not_reached": 0
+  },
+  "summary_definition": {
+   "cof": "ratio_of_means: mean(LF)/mean(NF)",
+   "skip_fraction": 0.2,
+   "source": "src.data.models.summarise_run"
+  }
+ },
+ "runs": [
+  {
+   "model": "afm",
+   "family": "afm",
+   "material": "h_MoS2",
+   "materials": [
+    "h-MoS2"
+   ],
+   "flake_material": null,
+   "size": "100x100y",
+   "size_x": 100.0,
+   "size_y": 100.0,
+   "substrate": "Si",
+   "substrate_amorphous": true,
+   "tip_material": "Si",
+   "tip_radius": 25.0,
+   "temperature": 300.0,
+   "layers": 2,
+   "potential": null,
+   "rel_path": "afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2",
+   "load_kind": "force",
+   "load": 30.0,
+   "angle": 0.0,
+   "speed": 2.0,
+   "n_layers": 2,
+   "tiers": {
+    "raw": {
+     "columns": [
+      "time",
+      "raw_tipx",
+      "raw_tipy",
+      "raw_tipz",
+      "raw_lfx",
+      "raw_lfy",
+      "raw_nf"
+     ],
+     "data": [
+      [
+       1000.0,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1
+      ],
+      [
+       2000.0,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2
+      ],
+      [
+       3000.0,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3
+      ],
+      [
+       4000.0,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4
+      ]
+     ],
+     "attrs": {
+      "lf_schema": 2,
+      "lf_corrected": false
+     }
+    },
+    "window": {
+     "columns": [
+      "time",
+      "comx",
+      "comx_L1",
+      "comx_L2",
+      "tipx",
+      "comy",
+      "comy_L1",
+      "comy_L2",
+      "tipy",
+      "comz",
+      "comz_L1",
+      "comz_L2",
+      "tipz",
+      "etotal",
+      "lfx",
+      "lfy",
+      "nf",
+      "ke",
+      "pe",
+      "temp_sheet_3d",
+      "tip_min_z",
+      "w_thermostat_sub",
+      "w_thermostat_tip",
+      "lateral_force",
+      "cof"
+     ],
+     "data": [
+      [
+       1000.0,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.1,
+       0.14142135623730953,
+       1.4142135623730951
+      ],
+      [
+       2000.0,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.2,
+       0.28284271247461906,
+       1.4142135623730951
+      ],
+      [
+       3000.0,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.3,
+       0.4242640687119285,
+       1.4142135623730951
+      ],
+      [
+       4000.0,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.4,
+       0.5656854249492381,
+       1.4142135623730951
+      ]
+     ],
+     "attrs": {
+      "lf_schema": 2,
+      "lf_corrected": false
+     }
+    }
+   },
+   "post": {
+    "gap_min": 3.0999999999999996,
+    "deflect_max": 0.40000000000000036
+   },
+   "status": "complete",
+   "status_detail": "grid unknown: config has no general.force",
+   "provenance": {
+    "schema_version": "2.0.0",
+    "family": "afm",
+    "model": "afm",
+    "materials": [
+     {
+      "name": "h-MoS2",
+      "role": "sheet",
+      "pot_path": "MoS.sw",
+      "pot_type": "sw",
+      "pot_resolution_route": "explicit",
+      "pot_file_sha256": "abababababababababababababababababababababababababababababababab"
+     }
+    ],
+    "twist_angle": null,
+    "seed_thermal_tip": null,
+    "seed_thermal_sub": null,
+    "seed_velocity": null,
+    "seed_sheet_center": null,
+    "substrate_realization_id": null,
+    "damping_ratio": null,
+    "damp_ev": null,
+    "git_commit": "deadbeef",
+    "git_dirty": false,
+    "config_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "lammps_version": null,
+    "layer_type_map": {
+     "layer_1": [
+      1
+     ],
+     "layer_2": [
+      2
+     ]
+    },
+    "unloaded_reference_z": {
+     "layer_1": 0.0,
+     "layer_2": 6.5
+    },
+    "contact_cutoff": 4.8,
+    "cutoff_source": "test",
+    "thermostat_scheme": "langevin",
+    "tip_group_sizes": null,
+    "run_role": "label",
+    "load_requested": 30.0,
+    "load_achieved": null,
+    "pressure_requested": null,
+    "pressure_achieved": null,
+    "ramp_converged": null,
+    "ramp_r": null,
+    "ramp_iterations": null,
+    "drive_k": null,
+    "drive_rest_length": null,
+    "geometry": null,
+    "ramp_by_load": null,
+    "load_achieved_by_load": null,
+    "execution": {
+     "wall_time_s": null,
+     "n_procs": null,
+     "atoms_per_proc": null
+    },
+    "config": {
+     "simulation": {
+      "timestep": null,
+      "slide_run_steps": null,
+      "drive_method": null,
+      "constraint_mode": null,
+      "sheet_hold_steps": null,
+      "ramp_max_iterations": null,
+      "halt_temperature_factor": null,
+      "afm_hold_steps": 10000
+     },
+     "output": {
+      "results_frequency": null,
+      "tier_frequency": null,
+      "channels": null
+     },
+     "thermostat": null,
+     "tip": null,
+     "general": {
+      "force": null,
+      "pressure": null,
+      "scan_angle": null,
+      "scan_speed": null,
+      "scan_angle_force": null,
+      "outer_loop": null,
+      "driving_spring": null,
+      "bond_spring": null
+     }
+    },
+    "provenance_sha256": "8ac7c685226736d3c371338cdbb77ae6abb686662d7c6fee5c3dedd5fabf0c45",
+    "enriched": false,
+    "ramp": null
+   },
+   "n_rows": {
+    "raw": 4,
+    "window": 4
+   },
+   "expected_rows": {}
+  }
+ ]
+}
