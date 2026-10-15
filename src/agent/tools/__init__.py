@@ -14,6 +14,8 @@ def compact(text: str, limit: int = RESULT_LIMIT) -> str:
     if len(text) <= limit:
         return text
     lines = text.splitlines()
+    if len(lines[0]) + 1 > limit - 40:  # nothing fits on a line boundary
+        return text[:limit - 20] + ' ... (truncated)'
     kept, size = [], 0
     for index, line in enumerate(lines):
         if size + len(line) + 1 > limit - 40:

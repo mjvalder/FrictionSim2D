@@ -24,6 +24,9 @@ KEY_FIELDS = (('2D', 'x'), ('2D', 'y'), ('2D', 'layers'), ('2D', 'pot_type'),
               ('general', 'scan_angle'))
 
 
+#: Most values `make_sweep` produces: every value becomes at least one run.
+MAX_SWEEP = 200
+
 #: Settings the assistant may not propose, because they are executed rather
 #: than read: LAMMPS runs the ``*_command`` strings verbatim, and the whole
 #: ``hpc`` section (modules, conda_env, mpi_command, *_dir, ...) is written into
@@ -163,6 +166,10 @@ def make_sweep(start: float, stop: float, n: int,
     """``n`` values from ``start`` to ``stop``, linear or logarithmic."""
     if n < 1:
         raise ToolInputError('n must be at least 1')
+    if n > MAX_SWEEP:
+        raise ToolInputError(f'n must be at most {MAX_SWEEP}; each value is a run')
+    if not (math.isfinite(start) and math.isfinite(stop)):
+        raise ToolInputError('start and stop must be finite numbers')
     if n == 1:
         return [float(start)]
     if spacing == 'log':

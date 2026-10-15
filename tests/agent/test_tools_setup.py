@@ -131,3 +131,20 @@ def test_refused_settings_constant_covers_the_rule(deps):
 def test_set_fields_refuses_newlines(deps, scope, section, key, value):
     with pytest.raises(ToolInputError, match='line break'):
         set_fields(deps, [FieldChange(scope=scope, section=section, key=key, value=value)])
+
+
+def test_compact_cuts_a_single_huge_line():
+    from src.agent.tools import compact
+    text = compact('x' * 5000 + '\nmore', limit=100)
+    assert len(text) <= 100 and text.startswith('x' * 50) and text.endswith('(truncated)')
+
+
+@pytest.mark.parametrize('args', [(0, 1, 201), (float('nan'), 1, 3), (0, float('inf'), 3),
+                                  (float('-inf'), 0, 3)])
+def test_make_sweep_rejects_huge_or_non_finite(args):
+    with pytest.raises(ToolInputError):
+        make_sweep(*args)
+
+
+def test_make_sweep_allows_200():
+    assert len(make_sweep(0, 1, 200)) == 200
