@@ -150,9 +150,9 @@ def redact(text: str, roots: SearchRoots, home: Optional[PathLike] = None) -> st
     home = Path.home() if home is None else Path(home)
     replacements = []
     for label, root in roots.tiers():
-        for spelling in {str(_lexical(root)), os.path.realpath(root)}:
+        for spelling in (str(_lexical(root)), os.path.realpath(root)):
             replacements.append((spelling, f'{label}:/'))
-    for spelling in {str(_lexical(home)), os.path.realpath(home)}:
+    for spelling in (str(_lexical(home)), os.path.realpath(home)):
         if spelling != '/':
             replacements.append((spelling, '~/'))
     for spelling, label in sorted(replacements, key=lambda r: len(r[0]), reverse=True):
