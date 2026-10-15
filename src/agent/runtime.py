@@ -22,7 +22,7 @@ from .changes import ToolInputError
 from .context import AgentDeps
 from .events import TurnEvent
 from .prompts import build_system_prompt, estimate_tokens
-from .providers import build_model
+from .providers import ProviderUnavailable, build_model
 from .sandbox import SandboxError
 from .settings import AgentSettings
 from .tools import compact, materials, setup, workspace
@@ -43,7 +43,7 @@ def _call(ctx: RunContext[AgentDeps], func: Callable, *args, **kwargs) -> str:
         raise ModelRetry(str(exc)) from exc
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception('assistant tool %s failed', func.__name__)
-        return f'error in {func.__name__}: {type(exc).__name__}: {exc}'
+        return f'error in {func.__name__}: {type(exc).__name__}'
 
 
 def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
@@ -174,7 +174,7 @@ class AgentSession:
     def _build_agent(self) -> Agent:
         model = self._model if self._model is not None else build_model(self.settings)
         agent = Agent(model, deps_type=AgentDeps, retries=2,
-                      system_prompt=build_system_prompt(self.settings.provider))
+                      instructions=build_system_prompt(self.settings.provider))
         _register_tools(agent)
         return agent
 
@@ -231,7 +231,7 @@ class AgentSession:
             emit(TurnEvent('tool_call', f'{event.part.tool_name}({str(event.part.args)[:120]})'))
         elif isinstance(event, FunctionToolResultEvent):
             name = getattr(event.part, 'tool_name', 'tool')
-            emit(TurnEvent('tool_result', f'{name}: {str(event.content)[:200]}'))
+            emit(TurnEvent('tool_result', f'{name}: {str(event.part.content)[:200]}'))
         elif isinstance(event, AgentRunResultEvent):
             self.history = event.result.all_messages()
             emit(TurnEvent('done', payload=event.result.usage.requests))
@@ -247,6 +247,8 @@ class AgentSession:
                     usage_limits=UsageLimits(request_limit=REQUEST_LIMIT)) as events:
                 async for event in events:
                     self._dispatch(event, emit)
+        except ProviderUnavailable as exc:
+            emit(TurnEvent('error', str(exc), payload='unavailable'))
         except RunCancelled:
             emit(TurnEvent('error', 'Stopped.', payload='cancelled'))
         except ModelHTTPError as exc:

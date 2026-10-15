@@ -56,6 +56,8 @@ def test_tool_call_streams_proposal_and_text(deps):
     assert 'tool_call' in kinds and 'proposal' in kinds and kinds[-1] == 'done'
     assert ''.join(e.text for e in events if e.kind == 'text').endswith('speed 2 m/s.')
     assert session.history
+    results = [e.text for e in events if e.kind == 'tool_result']
+    assert results and 'proposed' in results[0].lower()
 
 
 def test_bad_arguments_retry_then_succeed(deps):
@@ -120,3 +122,36 @@ def test_every_tool_registered():
                      'setup_indent', 'setup_pes_tip', 'setup_pes_sheet',
                      'search_structures', 'search_potentials', 'workspace_overview',
                      'describe_run', 'propose_mkdir', 'propose_copy_in'}
+
+
+def test_instructions_survive_switch(deps):
+    seen = []
+
+    async def spy(messages, info):
+        seen.append(info.instructions)
+        yield 'ok'
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=spy))
+    run(session, deps, 'one')
+    session.switch(AgentSettings(provider='ollama'))
+    session._model = FunctionModel(stream_function=spy)  # pylint: disable=protected-access
+    run(session, deps, 'two')
+    assert len(seen) == 2 and '/no_think' in seen[1]
+
+
+def test_unavailable_provider_is_an_event(deps, tmp_path, monkeypatch):
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'empty'))
+    events = run(AgentSession(AgentSettings()), deps, 'x')
+    assert events[-1].kind == 'error' and events[-1].payload == 'unavailable'
+
+
+def test_tool_crash_hides_paths(deps, monkeypatch):
+    from src.agent.tools import setup
+
+    def boom(_deps):
+        raise RuntimeError('/home/x/secret')
+    monkeypatch.setattr(setup, 'list_modes', boom)
+    events = run(AgentSession(AgentSettings(), model=FunctionModel(
+        stream_function=scripted(('list_modes', {}), 'ok'))), deps, 'x')
+    results = [e.text for e in events if e.kind == 'tool_result']
+    assert results and '/home/' not in results[0]
