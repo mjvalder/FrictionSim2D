@@ -4,14 +4,15 @@ from __future__ import annotations
 import difflib
 import math
 import re
-from typing import Any, List, Literal
+from typing import Any, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat
 
 from ...gui.schema.overrides import override_for_section
 from ...gui.schema.simulation_types import FAMILIES, MODES
 from ..changes import Op, ToolInputError, build_changeset
 from . import compact
+from .materials import material_ops
 
 #: Fields `explain_current` reports when set, in this order.
 KEY_FIELDS = (('2D', 'x'), ('2D', 'y'), ('2D', 'layers'), ('2D', 'pot_type'),
@@ -155,3 +156,104 @@ def suggest_values(deps, quantity: str, descriptor: Literal['low', 'mid', 'high'
     return (f"No scaling rule for '{descriptor} {quantity}' yet: what counts as "
             f"{descriptor} depends on tip size, model size and speed; ask the user "
             f"for a range (min, max and unit), then call make_sweep with n={n}.")
+
+
+class _SetupBase(BaseModel):
+    materials: List[str] = Field(min_length=1, description='Material names exactly as '
+                                 'search_structures returns them, e.g. h-MoS2')
+    potential_type: Optional[str] = Field(
+        None, description="e.g. 'sw', 'tersoff', 'rebomos', 'reaxff'")
+    size_A: Optional[Tuple[PositiveFloat, PositiveFloat]] = Field(
+        None, description='Sheet x, y in Angstrom')
+    layers: Optional[List[int]] = Field(None, description='Layer counts to sweep, e.g. [1, 2, 3]')
+
+
+class AFMSetupRequest(_SetupBase):
+    """AFM tip sliding on a sheet (model afm)."""
+
+    loads_nN: List[PositiveFloat] = Field(default_factory=list, description='Normal loads in nN')
+    speed_m_s: Optional[PositiveFloat] = Field(None, description='Sliding speed in m/s')
+    tip_radius_A: Optional[PositiveFloat] = Field(None, description='Tip radius in Angstrom')
+    temperature_K: Optional[NonNegativeFloat] = None
+    scan_angles_deg: Optional[List[float]] = None
+
+
+class SheetSetupRequest(_SetupBase):
+    """Sheet sliding on sheet (model sheetonsheet)."""
+
+    pressures_GPa: List[float] = Field(default_factory=list, description='Normal pressures in GPa')
+    speed_m_s: Optional[PositiveFloat] = None
+    temperature_K: Optional[NonNegativeFloat] = None
+    scan_angles_deg: Optional[List[float]] = None
+
+
+class IndentSetupRequest(_SetupBase):
+    """Approach, hold and retract without sliding (model indent)."""
+
+    loads_nN: List[PositiveFloat] = Field(default_factory=list)
+    tip_radius_A: Optional[PositiveFloat] = None
+    temperature_K: Optional[NonNegativeFloat] = None
+
+
+class PESTipSetupRequest(_SetupBase):
+    """Static energy map of the tip over the sheet (model pes_tip)."""
+
+    load_nN: Optional[PositiveFloat] = Field(None, description='One low normal load in nN')
+    grid_n: Optional[int] = Field(None, ge=2, description='N for the N x N grid')
+    tip_radius_A: Optional[PositiveFloat] = None
+
+
+class PESSheetSetupRequest(_SetupBase):
+    """Static energy map of one sheet over another (model pes_sheet)."""
+
+    grid_n: Optional[int] = Field(None, ge=2)
+
+
+#: Request field -> (section, key) it sets.
+FIELD_MAP = {
+    'loads_nN': ('general', 'force'), 'load_nN': ('general', 'force'),
+    'speed_m_s': ('general', 'scan_speed'), 'tip_radius_A': ('tip', 'r'),
+    'temperature_K': ('general', 'temp'), 'scan_angles_deg': ('general', 'scan_angle'),
+    'pressures_GPa': ('general', 'pressure'), 'grid_n': ('pes', 'grid_n'),
+    'layers': ('2D', 'layers'),
+}
+
+
+def _setup(deps, model: str, request: _SetupBase, title: str) -> str:
+    ops = [] if deps.document.model == model else [Op('set_model', value=model)]
+    material, notes = material_ops(deps, request.materials, request.potential_type)
+    ops += material
+    for name, (section, key) in FIELD_MAP.items():
+        value = getattr(request, name, None)
+        if value is None or value == []:
+            continue
+        is_seq = isinstance(value, (list, tuple))
+        ops.append(Op('set', section, key, list(value) if is_seq else value))
+    if request.size_A is not None:
+        ops += [Op('set', '2D', 'x', request.size_A[0]), Op('set', '2D', 'y', request.size_A[1])]
+    return deps.propose(build_changeset(deps, title, ops, notes))
+
+
+def setup_afm(deps, request: AFMSetupRequest) -> str:
+    """Propose an AFM sliding simulation."""
+    return _setup(deps, 'afm', request, 'AFM: ' + ', '.join(request.materials))
+
+
+def setup_sheet(deps, request: SheetSetupRequest) -> str:
+    """Propose a sheet-on-sheet sliding simulation."""
+    return _setup(deps, 'sheetonsheet', request, 'Sheet on sheet: ' + ', '.join(request.materials))
+
+
+def setup_indent(deps, request: IndentSetupRequest) -> str:
+    """Propose an indentation (hold and retract) simulation."""
+    return _setup(deps, 'indent', request, 'Indent: ' + ', '.join(request.materials))
+
+
+def setup_pes_tip(deps, request: PESTipSetupRequest) -> str:
+    """Propose a static PES scan of the tip over a sheet."""
+    return _setup(deps, 'pes_tip', request, 'PES tip scan: ' + ', '.join(request.materials))
+
+
+def setup_pes_sheet(deps, request: PESSheetSetupRequest) -> str:
+    """Propose a static PES scan of a sheet over a sheet."""
+    return _setup(deps, 'pes_sheet', request, 'PES sheet scan: ' + ', '.join(request.materials))
