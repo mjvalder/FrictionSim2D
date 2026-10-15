@@ -169,6 +169,11 @@ class MainWindow(QMainWindow):
         self.top_tabs.addTab(self.database_page, 'Database')
         self.plots_page = self._build_plots_tab()
         self.top_tabs.addTab(self.plots_page, 'Plots')
+        # Built on first show, so pydantic-ai is never imported at startup.
+        self.assistant_page = QWidget()
+        self._assistant_pane = None
+        self.top_tabs.addTab(self.assistant_page, 'Assistant')
+        self.top_tabs.currentChanged.connect(self._on_top_tab_changed)
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -212,6 +217,115 @@ class MainWindow(QMainWindow):
 
         self.plots_pane = PlotsPane(self.workspace, self)
         return self.plots_pane
+
+    def _on_top_tab_changed(self, index: int) -> None:
+        if self.top_tabs.widget(index) is self.assistant_page and self._assistant_pane is None:
+            self._build_assistant()
+
+    def _build_assistant(self) -> None:
+        layout = QVBoxLayout(self.assistant_page)
+        from ..agent import _AGENT_AVAILABLE  # pylint: disable=import-outside-toplevel
+        if not _AGENT_AVAILABLE:
+            label = QLabel('The Assistant needs the optional "agent" extra (Python 3.11+):\n'
+                           '  pip install -e ".[agent]"', self.assistant_page)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            self._assistant_pane = label
+            return
+        # pylint: disable=import-outside-toplevel
+        from ..agent.runtime import AgentSession
+        from ..agent.settings import load_agent_settings
+        from .assistant.pane import AssistantPane
+        settings = load_agent_settings()
+        pane = AssistantPane(AgentSession(settings), self.assistant_deps, settings,
+                             self.assistant_page)
+        pane.apply_requested.connect(self._apply_assistant_change)
+        pane.fs_apply_requested.connect(self._apply_assistant_fs_change)
+        layout.addWidget(pane)
+        self._assistant_pane = pane
+
+    def assistant_deps(self, document=None):
+        """Snapshot of the Builder for one assistant turn (GUI thread only)."""
+        # pylint: disable=import-outside-toplevel
+        from ..agent.context import snapshot_deps
+        from ..agent.sandbox import SearchRoots, find_examples_dir
+        self.form.commit()
+        roots = SearchRoots(self.workspace.root, find_examples_dir())
+        return snapshot_deps(document or self.document, self.settings_document,
+                             self.settings, roots)
+
+    def _resync_family_and_mode(self) -> None:
+        """Point both selectors at the document's model without re-entering handlers."""
+        family = MODES[self.document.model][0]
+        index = self.family_box.findData(family.key)
+        if index >= 0 and index != self.family_box.currentIndex():
+            self.family_box.blockSignals(True)
+            try:
+                self.family_box.setCurrentIndex(index)
+            finally:
+                self.family_box.blockSignals(False)
+            self._populate_modes()
+        self._resync_mode_box()
+
+    def _apply_assistant_change(self, change, as_new: bool) -> None:
+        # pylint: disable=import-outside-toplevel
+        from ..agent.changes import ToolInputError, apply_changeset, build_changeset
+        pane = self._assistant_pane
+        if (as_new or change.changes_model(self.document.model)) and self.document.dirty:
+            answer = QMessageBox.question(
+                self, 'Unsaved changes',
+                'The Builder has unsaved changes that this will replace. Continue?',
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+        target = self.document
+        try:
+            if as_new:
+                target = ConfigDocument.blank(self.document.model)
+                target.workspace_dir = self.workspace.configs_dir
+                target.workspace_root = self.workspace.root
+                change = build_changeset(self.assistant_deps(document=target), change.title,
+                                         change.ops, change.notes)
+                result = apply_changeset(change, target, self.settings_document, force=True)
+            else:
+                result = apply_changeset(change, target, self.settings_document)
+                if result.stale:
+                    fresh = build_changeset(self.assistant_deps(), change.title,
+                                            change.ops, change.notes)
+                    pane.replace_change(change, fresh,
+                                        'The Builder changed since that was proposed; '
+                                        're-checked against the current config. Apply again '
+                                        'to use it.')
+                    return
+        except ToolInputError as exc:
+            pane.mark_applied(change, f'Not applied: {exc}')
+            return
+        pane.mark_applied(change, result.message)
+        if not result.applied:
+            return
+        if target is not self.document:
+            self.document = target
+            self.form.document = target
+        self._resync_family_and_mode()
+        self.form.rebuild()
+        if change.touches_settings():
+            self.settings_form.rebuild()
+            self._on_settings_changed()
+        self._refresh_counts()
+        self._validate()
+        self._on_config_changed()
+        self.top_tabs.setCurrentIndex(0)
+        self.statusBar().showMessage(result.message)
+
+    def _apply_assistant_fs_change(self, change) -> None:
+        from ..agent.changes import apply_fs_changeset  # pylint: disable=import-outside-toplevel
+        result = apply_fs_changeset(change, self.workspace.root)
+        self._assistant_pane.mark_applied(change, result.message)
+        self.statusBar().showMessage(result.message)
+
+    def _shutdown_assistant(self) -> None:
+        if hasattr(self._assistant_pane, 'shutdown'):
+            self._assistant_pane.shutdown()
 
     def _build_header(self) -> QWidget:
         header = QWidget(self)
@@ -953,6 +1067,7 @@ class MainWindow(QMainWindow):
         settings_dirty = self.settings_document.dirty
         if not (config_dirty or settings_dirty):
             self.database.cancel()
+            self._shutdown_assistant()
             event.accept()
             return
 
@@ -974,6 +1089,7 @@ class MainWindow(QMainWindow):
             return
         if choice == QMessageBox.Discard:
             self.database.cancel()
+            self._shutdown_assistant()
             event.accept()
             return
 
@@ -989,6 +1105,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.database.cancel()
+        self._shutdown_assistant()
         event.accept()
 
     def _on_family_changed(self) -> None:
@@ -1151,6 +1268,8 @@ class MainWindow(QMainWindow):
         self.generator.workspace = self.workspace
         self.database.workspace = self.workspace
         self._restore_database_state()
+        if hasattr(self._assistant_pane, 'new_chat'):
+            self._assistant_pane.new_chat()
         # Only meaningful for an unsaved document (write_material_names falls
         # back to source_path's own directory once there is one) -- but keep
         # it correct regardless, so switching workspaces before ever saving
