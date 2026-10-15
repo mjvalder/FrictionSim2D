@@ -41,10 +41,11 @@ def test_find_parameter_no_match(deps):
 
 
 def test_set_fields_proposes_without_touching(deps):
-    handle = set_fields(deps, [FieldChange(section='general', key='scan_speed', value=2)])
+    handle = set_fields(deps, [FieldChange(section='general', key='scan_speed', value=7)])
     assert 'proposed' in handle
     assert deps.pending[0].ops[-1].key == 'scan_speed'
-    assert deps.document.get('general', 'scan_speed') != 7
+    assert deps.pending[0].ops[-1].value == 7
+    assert deps.document.get('general', 'scan_speed') == 2.0
 
 
 def test_set_fields_accepts_dotted_key(deps):
