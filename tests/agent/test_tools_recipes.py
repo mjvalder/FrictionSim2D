@@ -57,3 +57,50 @@ def test_negative_load_rejected_by_schema():
 def test_unknown_material_is_a_retry_hint(deps):
     with pytest.raises(ToolInputError):
         setup_afm(deps, AFMSetupRequest(materials=['unobtainium'], potential_type='sw'))
+
+
+@pytest.mark.parametrize('materials', [['h-MoS2', 'h-WS2'], ['h-MoS2']])
+def test_afm_fills_tip_and_substrate_from_blank(deps, materials):
+    setup_afm(deps, AFMSetupRequest(materials=materials, potential_type='sw', loads_nN=[5, 10]))
+    cs = deps.pending[-1]
+    ops = _ops(deps)
+    for section in ('tip', 'sub'):
+        assert ops[(section, 'mat')] == 'Si' and ops[(section, 'pot_type')] == 'sw'
+        assert ops[(section, 'cif_path')].endswith('materials/Si.cif')
+        assert ops[(section, 'pot_path')].endswith('Si.sw')
+    assert ops[('sub', 'amorph')] == 'a'
+    assert not [i for i in cs.issues if i.startswith(('tip.mat', 'tip.pot', 'tip.cif',
+                                                       'sub.mat', 'sub.pot', 'sub.cif'))]
+    assert any('tip: Si (sw) from examples:/materials/Si.cif' in n
+               and 'substrate: amorphous Si' in n for n in cs.notes)
+
+
+def test_indent_and_pes_tip_fill_the_tip(deps):
+    from src.agent.tools.setup import IndentSetupRequest, setup_indent
+    setup_indent(deps, IndentSetupRequest(materials=['h-MoS2'], potential_type='sw'))
+    assert _ops(deps)[('sub', 'mat')] == 'Si'
+    setup_pes_tip(deps, PESTipSetupRequest(materials=['h-MoS2'], potential_type='sw'))
+    ops = _ops(deps)  # switching from afm keeps its required [sub]: fill it too
+    assert ops[('tip', 'mat')] == 'Si' and ops[('sub', 'mat')] == 'Si'
+    assert not [i for i in deps.pending[-1].issues if i.startswith(('tip.mat', 'sub.mat'))]
+
+
+def test_pes_tip_leaves_an_absent_substrate_off(tmp_path, mock_settings):
+    deps = make_deps(tmp_path, mock_settings, model='pes_tip')
+    setup_pes_tip(deps, PESTipSetupRequest(materials=['h-MoS2'], potential_type='sw'))
+    ops = _ops(deps)
+    assert ops[('tip', 'mat')] == 'Si' and ('sub', 'mat') not in ops
+    assert not [i for i in deps.pending[-1].issues if i.startswith(('tip.', 'sub.'))
+                and not i.startswith('tip.r')]
+
+
+def test_tip_left_alone_when_set_unless_named(deps):
+    for section in ('tip', 'sub'):
+        deps.document.set(section, 'mat', 'Mine')
+        for key in ('cif_path', 'pot_path', 'pot_type'):
+            deps.document.set(section, key, 'x')
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw'))
+    assert ('tip', 'mat') not in _ops(deps)
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                    tip_material='Si'))
+    assert _ops(deps)[('tip', 'mat')] == 'Si' and ('sub', 'mat') not in _ops(deps)

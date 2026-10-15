@@ -172,7 +172,8 @@ def resolve_material(deps, name: str,
     return structures[0], potentials[0]
 
 
-def _config_path(deps, path: Path) -> str:
+def config_path(deps, path: Path) -> str:
+    """``path`` as a config value: relative to the config's folder when it can be."""
     base = deps.document.base_dir
     if base is not None:
         try:
@@ -191,8 +192,8 @@ def material_ops(deps, names: List[str],
     if len(names) == 1:
         structure, potential = resolved[0]
         ops = [Op('set', '2D', 'mat', names[0]),
-               Op('set', '2D', 'cif_path', _config_path(deps, structure.path)),
-               Op('set', '2D', 'pot_path', _config_path(deps, potential.path)),
+               Op('set', '2D', 'cif_path', config_path(deps, structure.path)),
+               Op('set', '2D', 'pot_path', config_path(deps, potential.path)),
                Op('set', '2D', 'pot_type', potential.pot_type)]
         if deps.document.has_material_list():
             ops.insert(0, Op('materials', value=[]))

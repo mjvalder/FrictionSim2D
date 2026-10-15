@@ -1,6 +1,7 @@
 """Setup tools: read the Builder's documents, propose field changes, build sweeps."""
 from __future__ import annotations
 
+import copy
 import difflib
 import math
 import re
@@ -10,9 +11,11 @@ from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat
 
 from ...gui.schema.overrides import override_for_section
 from ...gui.schema.simulation_types import FAMILIES, MODES
+from ...gui.controllers.document import DocumentError
 from ..changes import Op, ToolInputError, build_changeset
+from ..sandbox import display_path
 from . import compact
-from .materials import material_ops
+from .materials import config_path, material_ops, resolve_material
 
 #: Fields `explain_current` reports when set, in this order.
 KEY_FIELDS = (('2D', 'x'), ('2D', 'y'), ('2D', 'layers'), ('2D', 'pot_type'),
@@ -194,8 +197,19 @@ class _SetupBase(BaseModel):
     layers: Optional[List[int]] = Field(None, description='Layer counts to sweep, e.g. [1, 2, 3]')
 
 
+_TIP = Field('Si', description='Tip material, a structure name as search_structures '
+                                'returns it; the default Si tip is usually right')
+_SUB = Field('Si', description='Substrate material under the sheet (built amorphous); '
+                               'the default amorphous Si is usually right')
+_TIP_POT = Field('sw', description='Potential type for the tip and substrate')
+
+
 class AFMSetupRequest(_SetupBase):
     """AFM tip sliding on a sheet (model afm)."""
+
+    tip_material: str = _TIP
+    substrate_material: str = _SUB
+    tip_potential_type: str = _TIP_POT
 
     loads_nN: List[PositiveFloat] = Field(default_factory=list, description='Normal loads in nN')
     speed_m_s: Optional[PositiveFloat] = Field(None, description='Sliding speed in m/s')
@@ -216,6 +230,10 @@ class SheetSetupRequest(_SetupBase):
 class IndentSetupRequest(_SetupBase):
     """Approach, hold and retract without sliding (model indent)."""
 
+    tip_material: str = _TIP
+    substrate_material: str = _SUB
+    tip_potential_type: str = _TIP_POT
+
     loads_nN: List[PositiveFloat] = Field(default_factory=list)
     tip_radius_A: Optional[PositiveFloat] = None
     temperature_K: Optional[NonNegativeFloat] = None
@@ -223,6 +241,11 @@ class IndentSetupRequest(_SetupBase):
 
 class PESTipSetupRequest(_SetupBase):
     """Static energy map of the tip over the sheet (model pes_tip)."""
+
+    tip_material: str = _TIP
+    substrate_material: str = Field('Si', description='Substrate material, used only when '
+                                    'the config has a [sub] section')
+    tip_potential_type: str = _TIP_POT
 
     load_nN: Optional[PositiveFloat] = Field(None, description='One low normal load in nN')
     grid_n: Optional[int] = Field(None, ge=2, description='N for the N x N grid')
@@ -245,10 +268,57 @@ FIELD_MAP = {
 }
 
 
+#: Request field -> (config section, what the card calls it, extra ops' values).
+_TIP_PARTS = (('tip_material', 'tip', 'tip', {}),
+              ('substrate_material', 'sub', 'substrate', {'amorph': 'a'}))
+_MATERIAL_KEYS = ('mat', 'cif_path', 'pot_path', 'pot_type')
+
+
+def _tip_and_substrate_ops(deps, model: str, request: BaseModel) -> Tuple[List[Op], List[str]]:
+    """Point [tip] (and [sub]) at a material when they are unset or one is named.
+
+    A blank AFM-family document has no tip or substrate material, so without
+    this no setup could ever validate. The defaults (Si tip, amorphous Si
+    substrate) are what examples/afm_config.ini uses.
+    """
+    probe = copy.deepcopy(deps.document)
+    try:
+        probe.set_model(model)
+    except DocumentError as exc:
+        raise ToolInputError(str(exc)) from exc
+    ops, described = [], []
+    for field_name, section, label, extra in _TIP_PARTS:
+        name = getattr(request, field_name, None)
+        if name is None:
+            continue
+        named = field_name in request.model_fields_set
+        if not probe.has_section(section) and not named:
+            continue  # an optional [sub] (pes_tip) stays off unless asked for
+        unset = any(probe.get(section, key) in (None, '') for key in _MATERIAL_KEYS)
+        if not unset and not named:
+            continue
+        structure, potential = resolve_material(deps, name, request.tip_potential_type)
+        if not probe.has_section(section):
+            ops.append(Op('enable_section', section, value=True))
+        ops += [Op('set', section, 'mat', name),
+                Op('set', section, 'cif_path', config_path(deps, structure.path)),
+                Op('set', section, 'pot_path', config_path(deps, potential.path)),
+                Op('set', section, 'pot_type', potential.pot_type)]
+        ops += [Op('set', section, key, value) for key, value in extra.items()]
+        kind = 'amorphous ' if extra.get('amorph') == 'a' else ''
+        described.append(f'{label}: {kind}{name} ({potential.pot_type}) from '
+                         f'{display_path(structure.path, deps.roots)}')
+    notes = ['; '.join(described) + ' -- change if needed'] if described else []
+    return ops, notes
+
+
 def _setup(deps, model: str, request: _SetupBase, title: str) -> str:
     ops = [] if deps.document.model == model else [Op('set_model', value=model)]
     material, notes = material_ops(deps, request.materials, request.potential_type)
     ops += material
+    tip_ops, tip_notes = _tip_and_substrate_ops(deps, model, request)
+    ops += tip_ops
+    notes += tip_notes
     for name, (section, key) in FIELD_MAP.items():
         value = getattr(request, name, None)
         if value is None or value == []:

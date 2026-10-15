@@ -7,3 +7,4 @@ Sheet-on-sheet family (sheets sliding on each other):
 - Dynamic (slide) [sheetonsheet]: loads are pressures ([general] pressure, GPa, list); needs at least 3 layers (4 for a heterostructure pair). Tool: setup_sheet.
 - PES scan [pes_sheet]: static sheet-over-sheet energy map ([pes] grid_n). Tool: setup_pes_sheet.
 PES tip and PES sheet scans are different models: pick the tool the user means.
+AFM-family setups (setup_afm, setup_indent, setup_pes_tip) default to a Si tip and an amorphous Si substrate (sw), as the examples do; pass tip_material or substrate_material only when the user asks for another.
