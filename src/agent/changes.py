@@ -249,6 +249,16 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
     return change
 
 
+def _settings_problem(settings_document) -> str:
+    """Why ``settings_document`` is not a valid `GlobalSettings`, or ''."""
+    try:
+        settings_document.as_settings()
+    except Exception as exc:  # pylint: disable=broad-except
+        lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+        return '; '.join(lines[1:] or lines)[:300]
+    return ''
+
+
 def apply_changeset(change: ChangeSet, document, settings_document, *,
                     force: bool = False) -> ApplyResult:
     """Replay ``change`` on the live documents, unless they changed since the preview."""
@@ -261,10 +271,15 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
             scratch_parent.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix='apply-', dir=scratch_parent))
         try:  # dry run on copies so a failing op cannot half-apply
-            _replay(change.ops, copy.deepcopy(document),
-                    copy.deepcopy(settings_document), scratch / 'materials.txt')
+            dry_settings = copy.deepcopy(settings_document)
+            _replay(change.ops, copy.deepcopy(document), dry_settings,
+                    scratch / 'materials.txt')
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+        if change.touches_settings():
+            invalid = _settings_problem(dry_settings)
+            if invalid:
+                return ApplyResult(False, False, f'Not applied: settings invalid: {invalid}')
         problems = _replay(change.ops, document, settings_document, None)
     except DocumentError as exc:
         return ApplyResult(False, False, f'Not applied: {exc}')

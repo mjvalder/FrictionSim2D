@@ -60,6 +60,7 @@ def test_stale_apply_replaces_card(window, monkeypatch):
     pane = _open_assistant(window)
     change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [5])])
     window.document.set('general', 'temp', 123)
+    window.form.rebuild()  # as a real form edit leaves it: editors show the value
     replaced = []
     monkeypatch.setattr(pane, 'replace_change', lambda old, new, note: replaced.append(new))
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
@@ -134,3 +135,28 @@ def test_settings_change_refreshes_live_settings(window):
     change = build_changeset(window.assistant_deps(), 's', [_Op('settings_set', section, key, new)])
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
     assert getattr(getattr(window.settings, section), key) == new
+
+
+def test_invalid_settings_apply_anyway_is_refused_cleanly(window):
+    pane = _open_assistant(window)
+    change = build_changeset(window.assistant_deps(), 's',
+                             [Op('settings_set', 'simulation', 'timestep', 'abc')])
+    assert not change.ok
+    pane._add_card(change)  # pylint: disable=protected-access
+    before = window.settings
+    window._apply_assistant_change(change, False)  # pylint: disable=protected-access
+    assert window.settings is before
+    assert window.settings_document.get('simulation', 'timestep') != 'abc'
+    assert 'settings invalid' in pane.cards[change.id].status.text()
+
+
+def test_apply_commits_pending_form_edits_first(window, monkeypatch):
+    pane = _open_assistant(window)
+    change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [5])])
+    # A value typed into the form but not yet committed when Apply is clicked.
+    monkeypatch.setattr(window.form, 'commit',
+                        lambda *a, **k: window.document.set('general', 'temp', 123))
+    replaced = []
+    monkeypatch.setattr(pane, 'replace_change', lambda old, new, note: replaced.append(new))
+    window._apply_assistant_change(change, False)  # pylint: disable=protected-access
+    assert len(replaced) == 1 and window.document.get('general', 'force') != [5]

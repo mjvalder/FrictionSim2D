@@ -272,6 +272,7 @@ class MainWindow(QMainWindow):
         from ..agent.changes import ToolInputError, apply_changeset, build_changeset
         pane = self._assistant_pane
         proposed = change
+        self.form.commit()  # a value still in an editor counts as a Builder edit
         if (as_new or change.changes_model(self.document.model)) and self.document.dirty:
             answer = QMessageBox.question(
                 self, 'Unsaved changes',
@@ -312,8 +313,13 @@ class MainWindow(QMainWindow):
         if change.touches_settings():
             self.settings_form.rebuild()
             self._on_settings_changed()
-            self.settings = self.settings_document.as_settings()
-            self.form.set_settings(self.settings)
+            try:
+                self.settings = self.settings_document.as_settings()
+            except Exception as exc:  # pylint: disable=broad-except
+                # apply_changeset refuses invalid settings; this is a backstop.
+                pane.mark_applied(proposed, f'Applied, but the settings are invalid: {exc}')
+            else:
+                self.form.set_settings(self.settings)
         self._refresh_counts()
         self._validate()
         self._on_config_changed()

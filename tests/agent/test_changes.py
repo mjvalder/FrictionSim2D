@@ -191,3 +191,14 @@ def test_fs_apply_rechecks_and_reports_progress(deps):
     assert not result.applied
     assert 'already exists' in result.message
     assert (ws / 'a' / 'x.cif').read_text() == 'mine'
+
+
+def test_invalid_settings_value_is_not_applied(deps):
+    live_doc, live_settings = _live(deps)
+    cs = build_changeset(deps, 's', [Op('settings_set', 'simulation', 'timestep', 'abc')])
+    assert not cs.ok  # the preview already says so; this is "Apply anyway"
+    before = copy.deepcopy(live_settings.values)
+    result = apply_changeset(cs, live_doc, live_settings)
+    assert not result.applied and not result.stale
+    assert result.message.startswith('Not applied: settings invalid')
+    assert live_settings.values == before and not live_settings.dirty
