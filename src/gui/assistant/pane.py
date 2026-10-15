@@ -1,11 +1,15 @@
-"""The Assistant tab: chat, provider picker, proposal cards."""
+"""The Assistant side pane: chat, provider picker, proposal cards.
+
+Laid out for a narrow dock beside the main tabs: header rows on top, chat
+above the cards, input at the bottom.
+"""
 from __future__ import annotations
 
 import html
 import logging
 from typing import Callable, Optional
 
-from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import (QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat,
                            QTextCursor)
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QInputDialog, QLabel,
@@ -73,25 +77,38 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        header = QHBoxLayout()
+        layout.setContentsMargins(4, 4, 4, 4)
+        top = QHBoxLayout()
+        self.context_label = QLabel('', self)
+        self.context_label.setToolTip('The tab you are on (shown here only).')
+        self.requests_label = QLabel('requests: 0', self)
+        top.addWidget(self.context_label)
+        top.addStretch(1)
+        top.addWidget(self.requests_label)
+        layout.addLayout(top)
+
+        picker = QHBoxLayout()
         self.provider_box = QComboBox(self)
         self.provider_box.addItem('Gemini (cloud)', 'gemini')
         self.provider_box.addItem('Ollama (local, experimental)', 'ollama')
         self.provider_box.setCurrentIndex(self.provider_box.findData(self.settings.provider))
         self.provider_box.currentIndexChanged.connect(self._on_provider_changed)
         self.model_edit = QLineEdit(self)
+        self.model_edit.setToolTip('Model')
         self.model_edit.editingFinished.connect(self._on_model_edited)
+        picker.addWidget(self.provider_box)
+        picker.addWidget(self.model_edit, 1)
+        layout.addLayout(picker)
+
+        status = QHBoxLayout()
         self.cloud_badge = QLabel('cloud: data leaves this machine', self)
         self.status_label = QLabel('', self)
-        self.requests_label = QLabel('requests: 0', self)
-        for widget in (QLabel('Provider:', self), self.provider_box, QLabel('Model:', self),
-                       self.model_edit, self.cloud_badge, self.status_label):
-            header.addWidget(widget)
-        header.addStretch(1)
-        header.addWidget(self.requests_label)
-        layout.addLayout(header)
+        self.status_label.setWordWrap(True)
+        status.addWidget(self.cloud_badge)
+        status.addWidget(self.status_label, 1)
+        layout.addLayout(status)
 
-        split = QSplitter(self)
+        split = QSplitter(Qt.Vertical, self)
         self.chat = QTextBrowser(split)
         self.chat.setOpenExternalLinks(False)
         card_host = QWidget()
@@ -100,6 +117,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         scroll = QScrollArea(split)
         scroll.setWidgetResizable(True)
         scroll.setWidget(card_host)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 2)
         layout.addWidget(split, 1)
 
         self.input = QPlainTextEdit(self)
@@ -122,6 +141,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         row.addStretch(1)
         layout.addLayout(row)
         QShortcut(QKeySequence('Ctrl+Return'), self.input, activated=self.send)
+
+    def set_context_label(self, text: str) -> None:
+        """Show which main tab is active. Display only: never sent to the model."""
+        self.context_label.setText(f'On: {text}' if text else '')
 
     def _refresh_header(self) -> None:
         provider = self.settings.provider

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -60,6 +60,10 @@ APP_NAME = 'FrictionSim2D'
 #: What the Database pane remembers between sessions (D10). Workspace state
 #: is a plain key/value store, so this is the whole schema.
 DB_STATE_KEYS = ('db_source', 'db_filters', 'db_dest')
+
+#: Workspace state key for the Assistant dock: {'open': bool, 'width': int}.
+ASSISTANT_STATE_KEY = 'assistant'
+ASSISTANT_DEFAULT_WIDTH = 420
 
 
 def plural(count: int, word: str) -> str:
@@ -169,16 +173,36 @@ class MainWindow(QMainWindow):
         self.top_tabs.addTab(self.database_page, 'Database')
         self.plots_page = self._build_plots_tab()
         self.top_tabs.addTab(self.plots_page, 'Plots')
-        # Built on first show, so pydantic-ai is never imported at startup.
-        self.assistant_page = QWidget()
-        self._assistant_pane = None
-        self.top_tabs.addTab(self.assistant_page, 'Assistant')
         self.top_tabs.currentChanged.connect(self._on_top_tab_changed)
+
+        # The Assistant docks beside the tabs, so one conversation stays in
+        # view whichever tab is open. Its pane is built on first expand, so
+        # pydantic-ai is never imported at startup.
+        self.assistant_dock = QWidget(self)
+        dock_layout = QVBoxLayout(self.assistant_dock)
+        dock_layout.setContentsMargins(0, 0, 0, 0)
+        self.assistant_dock.hide()
+        self._assistant_pane = None
+        self._assistant_width = ASSISTANT_DEFAULT_WIDTH
+
+        self.main_splitter = QSplitter(Qt.Horizontal, self)
+        self.main_splitter.addWidget(self.top_tabs)
+        self.main_splitter.addWidget(self.assistant_dock)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 0)
+        self.main_splitter.setCollapsible(0, False)
+        self.main_splitter.setCollapsible(1, False)
+        self.main_splitter.splitterMoved.connect(
+            lambda *_: self._remember_assistant_state())
+
+        self.assistant_shortcut = QShortcut(QKeySequence('Ctrl+Shift+A'), self)
+        self.assistant_shortcut.activated.connect(self.toggle_assistant)
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
-        layout.addWidget(self.top_tabs, 1)
+        layout.addWidget(self.main_splitter, 1)
         self.setCentralWidget(container)
+        self._restore_assistant_state()
 
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage(f"Workspace: {self.workspace.root}")
@@ -219,15 +243,73 @@ class MainWindow(QMainWindow):
         return self.plots_pane
 
     def _on_top_tab_changed(self, index: int) -> None:
-        if self.top_tabs.widget(index) is self.assistant_page and self._assistant_pane is None:
+        if hasattr(self._assistant_pane, 'set_context_label'):
+            self._assistant_pane.set_context_label(self.top_tabs.tabText(index))
+
+    def toggle_assistant(self) -> None:
+        """Expand or collapse the Assistant dock (button and Ctrl+Shift+A)."""
+        self.set_assistant_open(self.assistant_dock.isHidden())
+
+    def set_assistant_open(self, open_: bool, *, remember: bool = True) -> None:
+        """Show the dock at its remembered width, or hide it; build on first show."""
+        if not open_:
+            self._capture_assistant_width()
+        if open_ and self._assistant_pane is None:
             self._build_assistant()
+        self.assistant_dock.setVisible(open_)
+        if open_:
+            self._apply_assistant_width()
+        self.assistant_button.blockSignals(True)
+        try:
+            self.assistant_button.setChecked(open_)
+        finally:
+            self.assistant_button.blockSignals(False)
+        if remember:
+            self._remember_assistant_state()
+
+    def _apply_assistant_width(self) -> None:
+        """Give the dock its remembered width. Before the window is shown the
+        splitter has no real geometry, so `showEvent` applies it instead."""
+        if not self.isVisible():
+            return
+        total = sum(self.main_splitter.sizes()) or self.main_splitter.width()
+        width = self._assistant_width
+        self.main_splitter.setSizes([max(total - width, 1), width])
+
+    def showEvent(self, event) -> None:  # pylint: disable=invalid-name
+        """Lay the dock out at its remembered width once there is a geometry."""
+        super().showEvent(event)
+        if self.assistant_dock.isVisibleTo(self):
+            self._apply_assistant_width()
+
+    def _capture_assistant_width(self) -> None:
+        # Only a laid-out window has a splitter size worth keeping.
+        if self.isVisible() and self.assistant_dock.isVisibleTo(self):
+            width = self.main_splitter.sizes()[1]
+            if width > 0:
+                self._assistant_width = width
+
+    def _remember_assistant_state(self) -> None:
+        self._capture_assistant_width()
+        self.workspace.remember(ASSISTANT_STATE_KEY, {
+            'open': self.assistant_dock.isVisibleTo(self),
+            'width': self._assistant_width})
+
+    def _restore_assistant_state(self) -> None:
+        """Put the dock back the way this workspace left it (collapsed if new)."""
+        state = self.workspace.state.get(ASSISTANT_STATE_KEY)
+        state = state if isinstance(state, dict) else {}
+        width = state.get('width')
+        if isinstance(width, int) and not isinstance(width, bool) and width > 0:
+            self._assistant_width = width
+        self.set_assistant_open(state.get('open') is True, remember=False)
 
     def _build_assistant(self) -> None:
-        layout = QVBoxLayout(self.assistant_page)
+        layout = self.assistant_dock.layout()
         from ..agent import _AGENT_AVAILABLE  # pylint: disable=import-outside-toplevel
         if not _AGENT_AVAILABLE:
             label = QLabel('The Assistant needs the optional "agent" extra (Python 3.11+):\n'
-                           '  pip install -e ".[agent]"', self.assistant_page)
+                           '  pip install -e ".[agent]"', self.assistant_dock)
             label.setWordWrap(True)
             layout.addWidget(label)
             self._assistant_pane = label
@@ -238,9 +320,10 @@ class MainWindow(QMainWindow):
         from .assistant.pane import AssistantPane
         settings = load_agent_settings()
         pane = AssistantPane(AgentSession(settings), self.assistant_deps, settings,
-                             self.assistant_page)
+                             self.assistant_dock)
         pane.apply_requested.connect(self._apply_assistant_change)
         pane.fs_apply_requested.connect(self._apply_assistant_fs_change)
+        pane.set_context_label(self.top_tabs.tabText(self.top_tabs.currentIndex()))
         layout.addWidget(pane)
         self._assistant_pane = pane
 
@@ -368,6 +451,12 @@ class MainWindow(QMainWindow):
         change = QPushButton('Change workspace…', header)
         change.clicked.connect(self._choose_workspace)
         row.addWidget(change)
+
+        self.assistant_button = QPushButton('Assistant', header)
+        self.assistant_button.setCheckable(True)
+        self.assistant_button.setToolTip('Show or hide the Assistant pane (Ctrl+Shift+A)')
+        self.assistant_button.toggled.connect(self.set_assistant_open)
+        row.addWidget(self.assistant_button)
 
         self._populate_modes()
         self._update_workspace_label()
@@ -1072,6 +1161,7 @@ class MainWindow(QMainWindow):
         behaviour on offer; this puts the same Save/Discard/Cancel choice in
         front of the user that closing an editor normally would.
         """
+        self._remember_assistant_state()
         config_dirty = self.document.dirty
         settings_dirty = self.settings_document.dirty
         if not (config_dirty or settings_dirty):
@@ -1279,6 +1369,7 @@ class MainWindow(QMainWindow):
         self._restore_database_state()
         if hasattr(self._assistant_pane, 'new_chat'):
             self._assistant_pane.new_chat()
+        self._restore_assistant_state()
         # Only meaningful for an unsaved document (write_material_names falls
         # back to source_path's own directory once there is one) -- but keep
         # it correct regardless, so switching workspaces before ever saving

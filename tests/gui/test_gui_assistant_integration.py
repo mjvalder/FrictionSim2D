@@ -1,4 +1,4 @@
-"""The Assistant tab inside MainWindow: lazy build, apply, stale and unsaved paths."""
+"""The Assistant side pane in MainWindow: lazy dock, toggle, state, apply paths."""
 from __future__ import annotations
 
 import os
@@ -23,29 +23,134 @@ def _qt_app():
     yield QApplication.instance() or QApplication([])
 
 
-@pytest.fixture(name='window')
-def _window(qt_app, tmp_path, monkeypatch):
+@pytest.fixture(name='make_window')
+def _make_window(qt_app, tmp_path, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
     from src.gui.app import MainWindow
-    window = MainWindow(Workspace.open(tmp_path / 'ws'))
-    yield window
-    window.document.dirty = False
-    window.settings_document.dirty = False
-    window.close()
+    made = []
+
+    def make(root=tmp_path / 'ws'):
+        window = MainWindow(Workspace.open(root))
+        made.append(window)
+        return window
+    yield make
+    for window in made:
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
+
+
+@pytest.fixture(name='window')
+def _window(make_window):
+    return make_window()
 
 
 def _open_assistant(window):
-    window.top_tabs.setCurrentWidget(window.assistant_page)
+    window.set_assistant_open(True)
     QApplication.processEvents()
     return window._assistant_pane  # pylint: disable=protected-access
 
 
-def test_tab_is_built_only_when_shown(window):
-    assert window.top_tabs.tabText(window.top_tabs.indexOf(window.assistant_page)) == 'Assistant'
+def test_dock_is_hidden_and_unbuilt_at_startup(window):
+    assert window.top_tabs.count() == 3
+    assert [window.top_tabs.tabText(i) for i in range(3)] == ['Builder', 'Database', 'Plots']
+    assert not window.assistant_dock.isVisibleTo(window)
+    assert not window.assistant_button.isChecked()
     assert window._assistant_pane is None  # pylint: disable=protected-access
-    assert _open_assistant(window) is not None
+
+
+def test_dock_sits_beside_the_tabs_not_inside_them(window):
+    assert window.main_splitter.indexOf(window.top_tabs) == 0
+    assert window.main_splitter.indexOf(window.assistant_dock) == 1
+    assert not window.top_tabs.isAncestorOf(window.assistant_dock)
+
+
+def test_button_builds_and_shows_the_pane(window):
+    window.assistant_button.click()
+    pane = window._assistant_pane  # pylint: disable=protected-access
+    assert pane is not None and window.assistant_dock.isAncestorOf(pane)
+    assert window.assistant_dock.isVisibleTo(window)
+    window.assistant_button.click()
+    assert not window.assistant_dock.isVisibleTo(window)
+    assert window._assistant_pane is pane  # pylint: disable=protected-access
+
+
+def test_shortcut_toggles_the_dock(window):
+    assert window.assistant_shortcut.key().toString() == 'Ctrl+Shift+A'
+    window.assistant_shortcut.activated.emit()
+    assert window.assistant_dock.isVisibleTo(window)
+    assert window.assistant_button.isChecked()
+    window.assistant_shortcut.activated.emit()
+    assert not window.assistant_dock.isVisibleTo(window)
+    assert not window.assistant_button.isChecked()
+
+
+def test_dock_stays_open_across_tab_switches(window):
+    pane = _open_assistant(window)
+    for index in (1, 2, 0):
+        window.top_tabs.setCurrentIndex(index)
+        QApplication.processEvents()
+        assert window.assistant_dock.isVisibleTo(window)
+        assert window._assistant_pane is pane  # pylint: disable=protected-access
+
+
+def test_context_label_follows_the_tab(window):
+    window.top_tabs.setCurrentIndex(1)
+    pane = _open_assistant(window)
+    assert 'Database' in pane.context_label.text()
+    window.top_tabs.setCurrentIndex(2)
+    assert 'Plots' in pane.context_label.text()
+    window.top_tabs.setCurrentIndex(0)
+    assert 'Builder' in pane.context_label.text()
+
+
+def test_state_is_remembered_and_restored(make_window, tmp_path):
+    first = make_window()
+    first.show()
+    _open_assistant(first)
+    total = sum(first.main_splitter.sizes())
+    # 300, not wider: the Builder tab's minimum width caps the dock offscreen
+    first.main_splitter.setSizes([total - 300, 300])  # as a drag of the handle leaves it
+    QApplication.processEvents()
+    assert first.main_splitter.sizes()[1] == 300
+    first.close()
+    state = Workspace.open(tmp_path / 'ws').state['assistant']
+    assert state['open'] is True and state['width'] == 300
+    second = make_window()
+    assert second.assistant_dock.isVisibleTo(second)
+    assert second.assistant_button.isChecked()
+    assert second._assistant_pane is not None  # pylint: disable=protected-access
+    second.show()
+    QApplication.processEvents()
+    assert second.main_splitter.sizes()[1] == 300
+
+
+def test_collapse_is_remembered(make_window, tmp_path):
+    first = make_window()
+    _open_assistant(first)
+    first.set_assistant_open(False)
+    assert Workspace.open(tmp_path / 'ws').state['assistant']['open'] is False
+    second = make_window()
+    assert not second.assistant_dock.isVisibleTo(second)
+    assert second._assistant_pane is None  # pylint: disable=protected-access
+
+
+def test_workspace_change_restores_its_state_and_clears_the_chat(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))  # RecentWorkspaces writes there
+    pane = _open_assistant(window)
+    cleared = []
+    monkeypatch.setattr(pane, 'new_chat', lambda: cleared.append(1))
+    other = Workspace.open(tmp_path / 'other')
+    other.remember('assistant', {'open': False, 'width': 300})
+    monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
+                        lambda *a, **k: str(other.root))
+    window._choose_workspace()  # pylint: disable=protected-access
+    assert cleared == [1]
+    assert not window.assistant_dock.isVisibleTo(window)
+    assert not window.assistant_button.isChecked()
 
 
 def test_apply_sets_live_document_and_returns_to_builder(window):
@@ -54,6 +159,7 @@ def test_apply_sets_live_document_and_returns_to_builder(window):
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
     assert window.document.get('general', 'force') == [5, 10]
     assert window.top_tabs.currentIndex() == 0
+    assert window.assistant_dock.isVisibleTo(window)  # Apply leaves the dock open
 
 
 def test_stale_apply_replaces_card(window, monkeypatch):

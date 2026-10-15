@@ -1,6 +1,15 @@
-# The Assistant tab
+# The Assistant pane
 
-The Assistant is a chat pane in the GUI. It proposes changes to the Builder's
+The Assistant is a chat pane docked on the right of the GUI window, beside the
+Builder, Database and Plots tabs. It is not a tab: one pane, and one
+conversation, stays in view whichever tab is open. Show or hide it with the
+**Assistant** button in the Builder header or **Ctrl+Shift+A** (from any tab);
+drag the divider to resize it. Each workspace remembers whether the pane was
+open and how wide, and a new workspace starts with it collapsed. The pane's
+header shows which tab you are on (display only, not sent to the model);
+**Apply** on a card switches to the Builder while the pane stays open.
+
+It proposes changes to the Builder's
 config and settings, finds structures and potentials, and adds folders or files
 to your workspace. **Nothing changes until you click Apply on a card.**
 

@@ -249,3 +249,21 @@ def test_key_store_error_shows_in_chat(qt_app, env, monkeypatch):
     pane.send('x')
     QApplication.processEvents()
     assert session.texts == [] and 'disk full' in pane.chat.toPlainText()
+
+
+def test_narrow_layout_stacks_chat_above_cards(qt_app, env):
+    from PySide6.QtCore import Qt
+    pane = _pane([])
+    split = pane.chat.parent()
+    assert split.orientation() == Qt.Vertical
+    assert split.indexOf(pane.chat) == 0 and split.count() == 2
+
+
+def test_context_label_is_display_only(qt_app, env):
+    session = FakeSession([TurnEvent('done', payload=1)])
+    pane = _pane([], session=session)
+    pane.set_context_label('Plots')
+    assert 'Plots' in pane.context_label.text()
+    pane.send('hi')
+    _run_until(pane.turn_finished)
+    assert session.texts == ['hi']
