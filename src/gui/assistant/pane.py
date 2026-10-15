@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import html
+import logging
 from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
+from PySide6.QtGui import (QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat,
+                           QTextCursor)
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QScrollArea, QSplitter, QTextBrowser,
@@ -16,6 +18,9 @@ from ...agent.providers import OLLAMA_SETUP_HELP, ollama_modelfile, ollama_statu
 from ...agent.settings import AgentSettings, gemini_key, save_agent_settings, store_gemini_key
 from .cards import ChangeCard, FsCard
 from .worker import AgentWorker
+
+logger = logging.getLogger(__name__)
+_ORPHAN_THREADS = []  # keeps a still-running QThread alive past its pane
 
 CONSENT_TEXT = (
     'Gemini runs in Google\'s cloud. Your messages and the assistant\'s tool results '
@@ -30,7 +35,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     apply_requested = Signal(object, bool)
     fs_apply_requested = Signal(object)
     turn_finished = Signal()
-    _start_turn = Signal(str, object)
+    _start_turn = Signal(str, object, object)
 
     def __init__(self, session, deps_factory: Callable[[], object],
                  settings: AgentSettings, parent=None, *,
@@ -45,6 +50,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._ask_key = ask_key or self._default_ask_key
         self._confirm_consent = confirm_consent or self._default_confirm_consent
         self._busy = False
+        self._text_open = False
         self._last_text = ''
         self._requests = 0
         self.cards = {}
@@ -55,6 +61,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._start_turn.connect(self._worker.run_turn)
         self._worker.event.connect(self._on_event)
         self._worker.finished.connect(self._on_finished)
+        self._thread.finished.connect(self._worker.deleteLater)
         self._thread.start()
         self._refresh_header()
 
@@ -124,12 +131,18 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self.status_label.setText(ollama_status(self.settings)[1])
 
     def _append(self, text: str, style: str = '') -> None:
+        self._text_open = False
         self.chat.moveCursor(QTextCursor.End)
         escaped = html.escape(text).replace('\n', '<br>')
         self.chat.append(f'<span style="{style}">{escaped}</span>' if style else escaped)
 
     def _append_inline(self, text: str) -> None:
         self.chat.moveCursor(QTextCursor.End)
+        if not self._text_open:
+            cursor = self.chat.textCursor()
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            self.chat.setTextCursor(cursor)
+            self._text_open = True
         self.chat.insertPlainText(text)
 
     # ------------------------------------------------------------ provider
@@ -196,9 +209,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._last_text = text
         self.retry_button.hide()
         self._append(f'You: {text}', 'font-weight:bold')
-        self._append('')
         self._set_busy(True)
-        self._start_turn.emit(text, self._deps_factory())
+        token = self.session.new_token()
+        self._worker.arm(token)
+        self._start_turn.emit(text, self._deps_factory(), token)
 
     def stop(self) -> None:
         """Cancel the running turn."""
@@ -208,6 +222,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._busy = busy
         self.send_button.setEnabled(not busy)
         self.stop_button.setEnabled(busy)
+        for widget in (self.provider_box, self.model_edit, self.new_button):
+            widget.setEnabled(not busy)
 
     def _on_event(self, event) -> None:
         if event.kind == 'text':
@@ -226,7 +242,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             if event.payload == 'rate_limited':
                 self.retry_button.setEnabled(False)
                 self.retry_button.show()
-                QTimer.singleShot(int(event.retry_after * 1000),
+                QTimer.singleShot(int(event.retry_after * 1000), self.retry_button,
                                   lambda: self.retry_button.setEnabled(True))
 
     def _on_finished(self) -> None:
@@ -269,4 +285,11 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         """Stop the worker thread (window close)."""
         self._worker.cancel()
         self._thread.quit()
-        self._thread.wait(3000)
+        if self._thread.wait(3000):
+            return
+        logger.warning('assistant worker thread did not stop within 3 s')
+        if self._worker.busy:
+            self._thread.wait()  # the cancelled turn ends at its next await
+        if self._thread.isRunning():
+            self._thread.setParent(None)
+            _ORPHAN_THREADS.append(self._thread)

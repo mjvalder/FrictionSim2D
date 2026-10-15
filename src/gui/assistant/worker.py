@@ -22,12 +22,20 @@ class AgentWorker(QObject):
         self.session = session
         self._token = None
 
-    @Slot(str, object)
-    def run_turn(self, text: str, deps) -> None:
+    def arm(self, token) -> None:
+        """Store the turn's token (GUI thread, before the turn is queued)."""
+        self._token = token
+
+    @property
+    def busy(self) -> bool:
+        """True from `arm` until the turn ends."""
+        return self._token is not None
+
+    @Slot(str, object, object)
+    def run_turn(self, text: str, deps, token) -> None:
         """One turn, start to finish; always emits `finished`."""
-        self._token = self.session.new_token()
         try:
-            asyncio.run(self.session.run_turn(text, deps, self.event.emit, self._token))
+            asyncio.run(self.session.run_turn(text, deps, self.event.emit, token))
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception('assistant turn failed')
             self.event.emit(TurnEvent('error', f'Internal error: {exc}', payload='internal'))

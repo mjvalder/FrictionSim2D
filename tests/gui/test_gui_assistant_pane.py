@@ -5,6 +5,7 @@ test_gui_plots_pane.py. Nothing may open a modal: every dialog is injected.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 import pytest
@@ -61,18 +62,37 @@ def _qt_app():
     yield QApplication.instance() or QApplication([])
 
 
+_PANES = []
+
+
+@pytest.fixture(autouse=True)
+def _shutdown_panes():
+    yield
+    while _PANES:
+        _PANES.pop().shutdown()
+
+
+class SlowSession(FakeSession):
+    async def run_turn(self, text, deps, emit, token):
+        self.texts.append(text)
+        await asyncio.sleep(0.3)
+        for event in self.events:
+            emit(event)
+
+
 @pytest.fixture(name='env')
 def _env(monkeypatch, tmp_path):
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
 
 
-def _pane(events, *, consent=True, settings=None, ask_key=lambda: None):
+def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None):
     s = settings or AgentSettings()
     s.gemini.consent_given = consent
-    pane = AssistantPane(FakeSession(events), lambda: object(), s,
+    pane = AssistantPane(session or FakeSession(events), lambda: object(), s,
                          save_settings=lambda *a, **k: None, ask_key=ask_key,
                          confirm_consent=lambda: True)
+    _PANES.append(pane)
     return pane
 
 
@@ -146,3 +166,41 @@ def test_provider_switch_and_new_chat(qt_app, env, monkeypatch):
     pane.new_chat()
     assert pane.session.cleared == 1 and pane.chat.toPlainText() == ''
     pane.shutdown()
+
+
+def test_reply_text_starts_its_own_line(qt_app, env):
+    pane = _pane([TurnEvent('tool_call', 'search(MoS2)'), TurnEvent('text', 'Found it.'),
+                  TurnEvent('done', payload=1)])
+    pane.send('hi')
+    _run_until(pane.turn_finished)
+    lines = pane.chat.toPlainText().splitlines()
+    assert any('search(MoS2)' in ln and 'Found' not in ln for ln in lines)
+    assert 'Found it.' in lines
+
+
+def test_controls_locked_mid_turn(qt_app, env):
+    pane = _pane([TurnEvent('done')], session=SlowSession([TurnEvent('done')]))
+    pane.send('x')
+    for widget in (pane.provider_box, pane.model_edit, pane.new_button):
+        assert not widget.isEnabled()
+    _run_until(pane.turn_finished)
+    for widget in (pane.provider_box, pane.model_edit, pane.new_button):
+        assert widget.isEnabled()
+
+
+def test_shutdown_mid_turn_stops_thread(qt_app, env):
+    pane = _pane([], session=SlowSession([]))
+    pane.send('x')
+    pane.shutdown()
+    assert not pane._thread.isRunning()
+
+
+def test_stop_right_after_send_cancels_token(qt_app, env):
+    session = SlowSession([])
+    tokens = []
+    orig = session.new_token
+    session.new_token = lambda: tokens.append(orig()) or tokens[-1]
+    pane = _pane([], session=session)
+    pane.send('x')
+    pane.stop()
+    assert tokens and tokens[0].cancelled
