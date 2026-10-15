@@ -1,0 +1,3 @@
+- AFM: the sheet footprint (x and y) must be at least twice the tip diameter (4 x [tip] r) so the tip does not meet its periodic image.
+- Substrate thickness is about 12 Angstrom.
+- Validation issues on a card are real problems: explain them; do not work around them.

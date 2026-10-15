@@ -1,0 +1,4 @@
+- A list value sweeps that parameter, e.g. [general] force = [5, 10, 20].
+- Loads in [general] force run inside one simulation; other lists (materials, layers, scan angles) create separate runs. Each card reports configs, builds and jobs: read those back, never estimate them.
+- A material sweep needs the structure files in one folder and the potential files in one folder, named after the materials (e.g. h-MoS2.cif with h-MoS2.sw). Otherwise set up one material at a time.
+- For n evenly spaced values call make_sweep. For descriptors such as "low load" call suggest_values; it has no rules yet, so ask the user for a range, then call make_sweep.

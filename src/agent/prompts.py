@@ -1,0 +1,39 @@
+"""The assistant's system prompt: a role, rules, and the knowledge files."""
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+KNOWLEDGE_DIR = Path(__file__).with_name('knowledge')
+KNOWLEDGE_FILES = ('conventions', 'families', 'sweeps', 'geometry', 'workspace')
+#: Spec §4.4: the whole prompt for a small local model stays under this.
+OLLAMA_BUDGET_TOKENS = 2500
+
+ROLE = """You are the FrictionSim2D assistant inside its GUI. You help the user set up
+LAMMPS friction simulations of 2D materials, find structures and potentials,
+and organise their workspace.
+Rules:
+- Use the tools. Changes you propose appear to the user as cards that they apply;
+  never claim a change is applied.
+- Never invent a number you were not given or did not get from a tool.
+- If the request is ambiguous, or a unit does not fit (loads are nN, lengths
+  Angstrom, pressures GPa, speeds m/s), ask before proposing anything.
+- Use material names exactly as search_structures returns them.
+- Keep replies short: what you proposed, and anything the card flags."""
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token count (4 characters per token), enough for a budget check."""
+    return math.ceil(len(text) / 4)
+
+
+def build_system_prompt(provider: str) -> str:
+    """Role, then every knowledge file under its own heading."""
+    parts = [ROLE]
+    for name in KNOWLEDGE_FILES:
+        body = (KNOWLEDGE_DIR / f'{name}.md').read_text(encoding='utf-8').strip()
+        parts.append(f'## {name}\n{body}')
+    prompt = '\n\n'.join(parts)
+    # Phase 0: /no_think at the very top switches Qwen3's thinking off through
+    # Ollama's OpenAI-compatible endpoint.
+    return f'/no_think\n{prompt}' if provider == 'ollama' else prompt
