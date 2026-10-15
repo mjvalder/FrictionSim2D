@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
@@ -129,9 +129,13 @@ def _fold_controls(parent: QWidget, form: ConfigForm) -> QHBoxLayout:
 class MainWindow(QMainWindow):
     """Configuration on the left, rendered system on the right."""
 
-    def __init__(self, workspace: Workspace) -> None:
+    def __init__(self, workspace: Workspace, *,
+                 agent_settings_loader: Optional[Callable[[], object]] = None) -> None:
         super().__init__()
         self.workspace = workspace
+        # Injectable so a test can make the Assistant's build fail; None
+        # means src.agent.settings.load_agent_settings, imported lazily.
+        self._agent_settings_loader = agent_settings_loader
         self.document = ConfigDocument.blank('afm')
         # An unsaved config still needs somewhere to write a material list --
         # see ConfigDocument.write_material_names' docstring for why it
@@ -190,6 +194,8 @@ class MainWindow(QMainWindow):
         self.assistant_dock.hide()
         self._assistant_pane = None
         self._assistant_width = ASSISTANT_DEFAULT_WIDTH
+        self._assistant_applied_width: Optional[int] = None
+        self._assistant_width_pending = False
 
         self.main_splitter = QSplitter(Qt.Horizontal, self)
         self.main_splitter.addWidget(self.top_tabs)
@@ -262,13 +268,18 @@ class MainWindow(QMainWindow):
         self.set_assistant_open(self.assistant_dock.isHidden())
 
     def set_assistant_open(self, open_: bool, *, remember: bool = True) -> None:
-        """Show the dock at its remembered width, or hide it; build on first show."""
-        if not open_:
+        """Show the dock at its remembered width, or hide it; build on first show.
+
+        `remember=False` is a restore: it neither captures the on-screen width
+        (that belongs to the previous workspace) nor writes state.
+        """
+        if not open_ and remember:
             self._capture_assistant_width()
         if open_ and self._assistant_pane is None:
             self._build_assistant()
+        was_open = self.assistant_dock.isVisibleTo(self)
         self.assistant_dock.setVisible(open_)
-        if open_:
+        if open_ and (not was_open or not remember):
             self._apply_assistant_width()
         self.assistant_button.blockSignals(True)
         try:
@@ -280,24 +291,32 @@ class MainWindow(QMainWindow):
 
     def _apply_assistant_width(self) -> None:
         """Give the dock its remembered width. Before the window is shown the
-        splitter has no real geometry, so `showEvent` applies it instead."""
+        splitter has no real geometry, so the next `showEvent` applies it --
+        once per expand, so re-showing the window never undoes a drag."""
         if not self.isVisible():
+            self._assistant_width_pending = True
             return
+        self._assistant_width_pending = False
         total = sum(self.main_splitter.sizes()) or self.main_splitter.width()
         width = self._assistant_width
         self.main_splitter.setSizes([max(total - width, 1), width])
+        # What the splitter actually gave; if it had to clip, this differs
+        # from the request and must not replace the remembered width.
+        self._assistant_applied_width = self.main_splitter.sizes()[1]
 
     def showEvent(self, event) -> None:  # pylint: disable=invalid-name
         """Lay the dock out at its remembered width once there is a geometry."""
         super().showEvent(event)
-        if self.assistant_dock.isVisibleTo(self):
+        if self._assistant_width_pending and self.assistant_dock.isVisibleTo(self):
             self._apply_assistant_width()
 
     def _capture_assistant_width(self) -> None:
-        # Only a laid-out window has a splitter size worth keeping.
+        # Only a laid-out window has a splitter size worth keeping, and a size
+        # unchanged since `_apply_assistant_width` is the splitter's clip of
+        # the remembered width, not a choice the user made.
         if self.isVisible() and self.assistant_dock.isVisibleTo(self):
             width = self.main_splitter.sizes()[1]
-            if width > 0:
+            if width > 0 and width != self._assistant_applied_width:
                 self._assistant_width = width
 
     def _remember_assistant_state(self) -> None:
@@ -308,36 +327,49 @@ class MainWindow(QMainWindow):
             'width': self._assistant_width})
 
     def _restore_assistant_state(self) -> None:
-        """Put the dock back the way this workspace left it (collapsed if new)."""
+        """Put the dock back the way this workspace left it (collapsed, at the
+        default width, if it saved nothing)."""
         state = self.workspace.state.get(ASSISTANT_STATE_KEY)
         state = state if isinstance(state, dict) else {}
         width = state.get('width')
-        if isinstance(width, int) and not isinstance(width, bool) and width > 0:
-            self._assistant_width = width
+        valid = isinstance(width, int) and not isinstance(width, bool) and width > 0
+        self._assistant_width = width if valid else ASSISTANT_DEFAULT_WIDTH
+        self._assistant_applied_width = None
         self.set_assistant_open(state.get('open') is True, remember=False)
 
     def _build_assistant(self) -> None:
-        layout = self.assistant_dock.layout()
+        """Build the pane into the dock; any failure becomes a message there."""
+        try:
+            self._assistant_pane = self._make_assistant_pane()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception('the Assistant pane could not be built')
+            self._assistant_pane = self._dock_message(f'The Assistant could not start: {exc}')
+            return
+        self.assistant_dock.layout().addWidget(self._assistant_pane)
+
+    def _dock_message(self, text: str) -> QLabel:
+        label = QLabel(text, self.assistant_dock)
+        label.setWordWrap(True)
+        self.assistant_dock.layout().addWidget(label)
+        return label
+
+    def _make_assistant_pane(self) -> QWidget:
         from ..agent import _AGENT_AVAILABLE  # pylint: disable=import-outside-toplevel
         if not _AGENT_AVAILABLE:
-            label = QLabel('The Assistant needs the optional "agent" extra (Python 3.11+):\n'
-                           '  pip install -e ".[agent]"', self.assistant_dock)
-            label.setWordWrap(True)
-            layout.addWidget(label)
-            self._assistant_pane = label
-            return
+            return self._dock_message(
+                'The Assistant needs the optional "agent" extra (Python 3.11+):\n'
+                '  pip install -e ".[agent]"')
         # pylint: disable=import-outside-toplevel
         from ..agent.runtime import AgentSession
         from ..agent.settings import load_agent_settings
         from .assistant.pane import AssistantPane
-        settings = load_agent_settings()
+        settings = (self._agent_settings_loader or load_agent_settings)()
         pane = AssistantPane(AgentSession(settings), self.assistant_deps, settings,
                              self.assistant_dock)
         pane.apply_requested.connect(self._apply_assistant_change)
         pane.fs_apply_requested.connect(self._apply_assistant_fs_change)
         pane.set_context_label(self.top_tabs.tabText(self.top_tabs.currentIndex()))
-        layout.addWidget(pane)
-        self._assistant_pane = pane
+        return pane
 
     def assistant_deps(self, document=None):
         """Snapshot of the Builder for one assistant turn (GUI thread only)."""
@@ -1367,6 +1399,8 @@ class MainWindow(QMainWindow):
             self, 'Choose a workspace', str(self.workspace.root))
         if not chosen:
             return
+        if self._assistant_width_timer.isActive():
+            self._remember_assistant_state()  # a pending drag belongs to the old workspace
         self.workspace = Workspace.open(chosen)
         RecentWorkspaces().add(chosen)
         self.preview.workspace = self.workspace

@@ -293,3 +293,87 @@ def test_dock_width_saves_are_debounced(window, monkeypatch):
     QTimer.singleShot(800, loop.quit)
     loop.exec()
     assert writes == ['assistant']
+
+
+def _switch_workspace(window, root, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))  # RecentWorkspaces writes there
+    monkeypatch.setattr(QFileDialog, 'getExistingDirectory', lambda *a, **k: str(root))
+    window._choose_workspace()  # pylint: disable=protected-access
+    QApplication.processEvents()
+
+
+def _drag_dock_to(window, width):
+    total = sum(window.main_splitter.sizes())
+    window.main_splitter.setSizes([total - width, width])
+    window.main_splitter.splitterMoved.emit(total - width, 1)
+
+
+def test_switch_uses_the_new_workspaces_width(window, monkeypatch, tmp_path):
+    window.show()
+    _open_assistant(window)
+    _drag_dock_to(window, 300)
+    other = Workspace.open(tmp_path / 'b')
+    # 290: inside the dock's offscreen limits (pane minimum ~260, Builder cap ~337)
+    other.remember('assistant', {'open': False, 'width': 290})
+    _switch_workspace(window, other.root, monkeypatch, tmp_path)
+    # the pending drag was flushed into the old workspace, not the new one
+    assert Workspace.open(tmp_path / 'ws').state['assistant']['width'] == 300
+    assert Workspace.open(tmp_path / 'b').state['assistant']['width'] == 290
+    window.set_assistant_open(True)
+    QApplication.processEvents()
+    assert window.main_splitter.sizes()[1] == 290
+
+
+def test_switch_to_a_fresh_workspace_resets_the_width(window, monkeypatch, tmp_path):
+    from src.gui.app import ASSISTANT_DEFAULT_WIDTH
+    window.show()
+    _open_assistant(window)
+    _drag_dock_to(window, 300)
+    window.set_assistant_open(False)
+    _switch_workspace(window, tmp_path / 'fresh', monkeypatch, tmp_path)
+    assert window._assistant_width == ASSISTANT_DEFAULT_WIDTH  # pylint: disable=protected-access
+
+
+def test_a_clipped_width_does_not_replace_the_remembered_one(make_window, tmp_path):
+    Workspace.open(tmp_path / 'ws').remember('assistant', {'open': True, 'width': 5000})
+    window = make_window()
+    window.show()
+    QApplication.processEvents()
+    assert window.main_splitter.sizes()[1] < 5000  # the splitter had to clip it
+    window.set_assistant_open(False)
+    assert Workspace.open(tmp_path / 'ws').state['assistant']['width'] == 5000
+
+
+def test_reshowing_the_window_keeps_a_recent_drag(window):
+    window.show()
+    _open_assistant(window)
+    QApplication.processEvents()
+    _drag_dock_to(window, 300)
+    window.hide()
+    window.show()
+    QApplication.processEvents()
+    assert window.main_splitter.sizes()[1] == 300
+
+
+def test_a_failing_build_shows_an_error_in_the_dock(qt_app, tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'cfg'))
+    from src.gui.app import MainWindow
+    Workspace.open(tmp_path / 'ws').remember('assistant', {'open': True, 'width': 300})
+
+    def broken():
+        raise ValueError('agent.yaml is malformed')
+    window = MainWindow(Workspace.open(tmp_path / 'ws'), agent_settings_loader=broken)
+    try:
+        pane = window._assistant_pane  # pylint: disable=protected-access
+        assert 'agent.yaml is malformed' in pane.text()
+        assert window.assistant_dock.isAncestorOf(pane)
+        assert window.assistant_dock.isVisibleTo(window)
+        assert window.assistant_button.isChecked()
+        window.toggle_assistant()
+        assert not window.assistant_button.isChecked()
+    finally:
+        window.document.dirty = False
+        window.settings_document.dirty = False
+        window.close()
