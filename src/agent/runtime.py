@@ -100,7 +100,8 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
         return _call(ctx, setup.setup_pes_tip, request)
 
     @agent.tool
-    def setup_pes_sheet(ctx: RunContext[AgentDeps], request: setup.PESSheetSetupRequest) -> str:
+    def setup_pes_sheet(ctx: RunContext[AgentDeps],
+                        request: setup.PESSheetSetupRequest) -> str:
         """Propose a static PES scan of one sheet over another."""
         return _call(ctx, setup.setup_pes_sheet, request)
 
@@ -215,8 +216,7 @@ class AgentSession:
                 who = 'User' if isinstance(part, UserPromptPart) else 'Assistant'
                 lines.append(f'{who}: {str(part.content)[:200]}')
         self.history = [ModelRequest(parts=[UserPromptPart(
-    def setup_pes_sheet(ctx: RunContext[AgentDeps],
-                        request: setup.PESSheetSetupRequest) -> str:
+                            content='Summary of the earlier conversation:\n' + '\n'.join(lines[-30:]))]),
                         ModelResponse(parts=[TextPart(content='Understood.')])]
         return self.history
 
