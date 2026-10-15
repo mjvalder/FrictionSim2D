@@ -100,19 +100,19 @@ def test_reaxff_found_by_material(deps):
 
 
 def test_cap_counts_only_candidates_and_per_tier(deps, monkeypatch):
-    monkeypatch.setattr('src.agent.tools.materials.MAX_FILES', 400)
     for i in range(800):
         (deps.roots.workspace / f'out{i}.log').write_text('x')
     (deps.roots.workspace / 'zz').mkdir()
     (deps.roots.workspace / 'zz' / 'h-MoS2.cif').write_text('x')
+    deps.material_index = build_index(deps.roots, max_files=400)
     text = search_structures(deps, 'MoS2')
     assert 'workspace:/zz/h-MoS2.cif' in text and 'examples:/materials/h-MoS2.cif' in text
 
 
 def test_cap_truncation_reported_and_examples_walked(deps, monkeypatch):
-    monkeypatch.setattr('src.agent.tools.materials.MAX_FILES', 400)
     for i in range(410):
         (deps.roots.workspace / f'a{i}.cif').write_text('x')
+    deps.material_index = build_index(deps.roots, max_files=400)
     text = search_structures(deps, 'WS2')
     assert 'examples:/materials/h-WS2.cif' in text
     assert 'workspace search stopped after 400 files' in text

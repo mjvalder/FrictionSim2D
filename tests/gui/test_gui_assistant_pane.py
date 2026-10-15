@@ -86,12 +86,13 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
 
 
-def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None):
+def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None, status_fn=None):
     s = settings or AgentSettings()
     s.gemini.consent_given = consent
     pane = AssistantPane(session or FakeSession(events), lambda: object(), s,
                          save_settings=lambda *a, **k: None, ask_key=ask_key,
-                         confirm_consent=lambda: True)
+                         confirm_consent=lambda: True,
+                         **({'status_fn': status_fn} if status_fn else {}))
     _PANES.append(pane)
     return pane
 
@@ -157,9 +158,7 @@ def test_missing_key_declined_no_turn(qt_app, env, monkeypatch):
 
 
 def test_provider_switch_and_new_chat(qt_app, env, monkeypatch):
-    monkeypatch.setattr('src.gui.assistant.pane.ollama_status',
-                        lambda s: (False, 'Ollama is not running'))
-    pane = _pane([])
+    pane = _pane([], status_fn=lambda s: (False, 'Ollama is not running'))
     pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
     assert pane.session.switched == ['ollama']
     assert 'not running' in pane.status_label.text()

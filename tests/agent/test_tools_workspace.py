@@ -52,10 +52,9 @@ def test_copy_in_plans_folder_and_copy(deps):
 
 
 def test_describe_run_caps_the_walk(deps, monkeypatch):
-    monkeypatch.setattr('src.agent.tools.workspace.MAX_DESCRIBE_FILES', 10)
     run = deps.roots.workspace / 'afm_h-MoS2' / 'l1'
     for i in range(15):
         (run / f'extra{i}.txt').write_text('x')
-    text = describe_run(deps, 'afm_h-MoS2/l1')
+    text = describe_run(deps, 'afm_h-MoS2/l1', max_files=10)
     assert '10+ files' in text and 'MB' not in text
     assert 'provenance.json keys: schema, model' in text

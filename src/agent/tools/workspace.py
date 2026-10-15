@@ -16,12 +16,12 @@ MAX_LINES = 60
 MAX_DESCRIBE_FILES = 5000
 
 
-def _walk_capped(folder: Path) -> tuple[list[Path], bool]:
-    """Files under ``folder``, stopping at MAX_DESCRIBE_FILES; flag if capped."""
+def _walk_capped(folder: Path, max_files: int = MAX_DESCRIBE_FILES) -> tuple[list[Path], bool]:
+    """Files under ``folder``, stopping at ``max_files``; flag if capped."""
     files: list[Path] = []
     for base, _dirs, names in os.walk(folder):
         for name in sorted(names):
-            if len(files) >= MAX_DESCRIBE_FILES:
+            if len(files) >= max_files:
                 return files, True
             files.append(Path(base) / name)
     return files, False
@@ -47,12 +47,12 @@ def workspace_overview(deps, depth: int = 2) -> str:
     return compact('\n'.join(lines))
 
 
-def describe_run(deps, path: str) -> str:
+def describe_run(deps, path: str, max_files: int = MAX_DESCRIBE_FILES) -> str:
     """What a folder holds: provenance keys, results files, inputs and logs."""
     folder = resolve_readable(path, deps.roots)
     if not folder.is_dir():
         raise SandboxError(f'{path}: not a folder')
-    files, capped = _walk_capped(folder)
+    files, capped = _walk_capped(folder, max_files)
     if capped:
         summary = f'{len(files)}+ files'
     else:

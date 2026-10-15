@@ -40,6 +40,7 @@ class MaterialIndex:
     structures: List[FoundFile] = field(default_factory=list)
     potentials: List[FoundFile] = field(default_factory=list)
     truncated: List[str] = field(default_factory=list)
+    max_files: int = MAX_FILES
 
 
 def elements_of(name: str) -> frozenset:
@@ -73,9 +74,9 @@ def _stem(path: Path) -> str:
     return path.name.split('.')[0] if path.name.lower().startswith('ffield') else path.stem
 
 
-def build_index(roots) -> MaterialIndex:
+def build_index(roots, max_files: int = MAX_FILES) -> MaterialIndex:
     """Walk each root (depth- and count-limited per tier), skipping dot-folders."""
-    index = MaterialIndex()
+    index = MaterialIndex(max_files=max_files)
     for tier, root in roots.tiers():
         root = Path(root)
         seen = 0
@@ -98,7 +99,7 @@ def build_index(roots) -> MaterialIndex:
                                       elements_of(path.name))
                     target = index.potentials
                 seen += 1
-                if seen > MAX_FILES:
+                if seen > max_files:
                     full = True
                     break
                 target.append(found)
@@ -120,8 +121,9 @@ def _norm(text: str) -> str:
 
 
 def _note(deps) -> str:
-    return ''.join(f'\n({tier} search stopped after {MAX_FILES} files)'
-                   for tier in index_for(deps).truncated)
+    index = index_for(deps)
+    return ''.join(f'\n({tier} search stopped after {index.max_files} files)'
+                   for tier in index.truncated)
 
 
 def search_structures(deps, query: str) -> str:

@@ -39,7 +39,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def __init__(self, session, deps_factory: Callable[[], object],
                  settings: AgentSettings, parent=None, *,
-                 save_settings=save_agent_settings,
+                 save_settings=save_agent_settings, status_fn=ollama_status,
                  ask_key: Optional[Callable[[], Optional[str]]] = None,
                  confirm_consent: Optional[Callable[[], bool]] = None) -> None:
         super().__init__(parent)
@@ -47,6 +47,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.settings = settings
         self._deps_factory = deps_factory
         self._save_settings = save_settings
+        self._status_fn = status_fn
         self._ask_key = ask_key or self._default_ask_key
         self._confirm_consent = confirm_consent or self._default_confirm_consent
         self._busy = False
@@ -128,7 +129,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self.status_label.setText('key set' if gemini_key(self.settings)
                                       else 'no API key yet (you will be asked)')
         else:
-            self.status_label.setText(ollama_status(self.settings)[1])
+            self.status_label.setText(self._status_fn(self.settings)[1])
 
     def _append(self, text: str, style: str = '') -> None:
         self._text_open = False
