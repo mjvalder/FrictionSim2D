@@ -30,6 +30,7 @@ class FoundFile:
     pot_type: Optional[str]
     path: Path
     tier: str
+    elements: frozenset = frozenset()
 
 
 @dataclass
@@ -38,6 +39,7 @@ class MaterialIndex:
 
     structures: List[FoundFile] = field(default_factory=list)
     potentials: List[FoundFile] = field(default_factory=list)
+    truncated: List[str] = field(default_factory=list)
 
 
 def elements_of(name: str) -> frozenset:
@@ -72,27 +74,37 @@ def _stem(path: Path) -> str:
 
 
 def build_index(roots) -> MaterialIndex:
-    """Walk each root (depth- and count-limited), skipping dot-folders."""
+    """Walk each root (depth- and count-limited per tier), skipping dot-folders."""
     index = MaterialIndex()
-    seen = 0
     for tier, root in roots.tiers():
         root = Path(root)
+        seen = 0
+        full = False
         for current, dirs, files in os.walk(root):
             depth = len(Path(current).relative_to(root).parts)
             dirs[:] = sorted(d for d in dirs if not d.startswith('.') and d not in _SKIP_DIRS
                              and depth < MAX_DEPTH)
             for filename in sorted(files):
-                seen += 1
-                if seen > MAX_FILES:
-                    return index
                 path = Path(current) / filename
                 if path.suffix.lower() == STRUCTURE_SUFFIX:
-                    index.structures.append(FoundFile(path.stem, 'structure', None, path, tier))
-                    continue
-                pot_type = potential_type_of(path)
-                if pot_type:
-                    index.potentials.append(
-                        FoundFile(_stem(path), 'potential', pot_type, path, tier))
+                    found = FoundFile(path.stem, 'structure', None, path, tier,
+                                      elements_of(path.stem))
+                    target = index.structures
+                else:
+                    pot_type = potential_type_of(path)
+                    if not pot_type:
+                        continue
+                    found = FoundFile(_stem(path), 'potential', pot_type, path, tier,
+                                      elements_of(path.name))
+                    target = index.potentials
+                seen += 1
+                if seen > MAX_FILES:
+                    full = True
+                    break
+                target.append(found)
+            if full:
+                index.truncated.append(tier)
+                break
     return index
 
 
@@ -107,20 +119,26 @@ def _norm(text: str) -> str:
     return re.sub(r'[\s_\-]', '', text).casefold()
 
 
+def _note(deps) -> str:
+    return ''.join(f'\n({tier} search stopped after {MAX_FILES} files)'
+                   for tier in index_for(deps).truncated)
+
+
 def search_structures(deps, query: str) -> str:
     """Structure files whose name contains the query (case and dashes ignored)."""
     wanted = _norm(query)
     hits = [f for f in index_for(deps).structures if wanted in _norm(f.name)]
     if not hits:
-        return f"no structure matching '{query}' in the workspace or examples"
-    return compact('\n'.join(f'{f.name} -- {display_path(f.path, deps.roots)}' for f in hits[:15]))
+        return f"no structure matching '{query}' in the workspace or examples" + _note(deps)
+    return compact('\n'.join(f'{f.name} -- {display_path(f.path, deps.roots)}'
+                             for f in hits[:15])) + _note(deps)
 
 
 def _potentials_for(deps, material: str, potential_type: Optional[str]) -> List[FoundFile]:
     wanted = elements_of(material)
     exact = [f for f in index_for(deps).potentials if f.name.casefold() == material.casefold()]
     by_elements = [f for f in index_for(deps).potentials
-                   if wanted and elements_of(f.name) == wanted and f not in exact]
+                   if wanted and f.elements == wanted and f not in exact]
     found = exact + by_elements
     if potential_type:
         found = [f for f in found if f.pot_type == potential_type.lower()]
@@ -132,9 +150,9 @@ def search_potentials(deps, material: str, potential_type: Optional[str] = None)
     hits = _potentials_for(deps, material, potential_type)
     if not hits:
         kind = f'{potential_type} ' if potential_type else ''
-        return f"no {kind}potential for '{material}' in the workspace or examples"
+        return f"no {kind}potential for '{material}' in the workspace or examples" + _note(deps)
     return compact('\n'.join(f'{f.pot_type}: {f.path.name} -- {display_path(f.path, deps.roots)}'
-                             for f in hits[:15]))
+                             for f in hits[:15])) + _note(deps)
 
 
 def resolve_material(deps, name: str,

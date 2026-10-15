@@ -92,3 +92,27 @@ def test_sweep_needs_one_folder_each(deps):
     (other / 'h-MoSe2.cif').write_text('x')
     with pytest.raises(ToolInputError, match='one structure folder'):
         material_ops(deps, ['h-MoS2', 'h-MoSe2'], 'sw')
+
+
+def test_reaxff_found_by_material(deps):
+    assert 'ffield_Wang.reax.MoS' in search_potentials(deps, 'h-MoS2', 'reaxff')
+    assert resolve_material(deps, 'h-MoS2', 'reaxff')[1].pot_type == 'reaxff'
+
+
+def test_cap_counts_only_candidates_and_per_tier(deps, monkeypatch):
+    monkeypatch.setattr('src.agent.tools.materials.MAX_FILES', 400)
+    for i in range(800):
+        (deps.roots.workspace / f'out{i}.log').write_text('x')
+    (deps.roots.workspace / 'zz').mkdir()
+    (deps.roots.workspace / 'zz' / 'h-MoS2.cif').write_text('x')
+    text = search_structures(deps, 'MoS2')
+    assert 'workspace:/zz/h-MoS2.cif' in text and 'examples:/materials/h-MoS2.cif' in text
+
+
+def test_cap_truncation_reported_and_examples_walked(deps, monkeypatch):
+    monkeypatch.setattr('src.agent.tools.materials.MAX_FILES', 400)
+    for i in range(410):
+        (deps.roots.workspace / f'a{i}.cif').write_text('x')
+    text = search_structures(deps, 'WS2')
+    assert 'examples:/materials/h-WS2.cif' in text
+    assert 'workspace search stopped after 400 files' in text
