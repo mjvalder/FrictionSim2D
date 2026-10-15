@@ -46,3 +46,14 @@ def test_ollama_status_model_missing(monkeypatch):
 def test_modelfile_carries_limits():
     text = ollama_modelfile(AgentSettings())
     assert 'PARAMETER num_thread 8' in text and 'PARAMETER num_ctx 8192' in text
+
+
+def test_ollama_status_not_ollama(monkeypatch):
+    class Resp:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            raise ValueError('not json')
+    monkeypatch.setattr(httpx, 'get', lambda *a, **k: Resp())
+    ok, message = ollama_status(AgentSettings(provider='ollama'))
+    assert not ok and 'did not answer like Ollama' in message

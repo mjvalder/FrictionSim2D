@@ -83,3 +83,14 @@ def test_examples_destination_refused(deps):
     assert not change.ok and 'examples:/' in change.issues[0]
     propose_copy_in(deps, 'examples:/materials/h-MoS2.cif', dest_dir='examples:/materials')
     assert not deps.pending[-1].ok
+
+
+def test_overview_survives_an_unreadable_folder(deps):
+    locked = deps.roots.workspace / 'locked'
+    (locked / 'inner').mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        text = workspace_overview(deps)
+    finally:
+        locked.chmod(0o755)
+    assert 'locked/ (unreadable)' in text and 'afm_h-MoS2/' in text

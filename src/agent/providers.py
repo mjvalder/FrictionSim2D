@@ -49,7 +49,11 @@ def ollama_status(settings: AgentSettings, timeout: float = 2.0) -> Tuple[bool, 
         response.raise_for_status()
     except httpx.HTTPError:
         return False, f'Ollama is not running at {settings.ollama.base_url}.'
-    names = {m.get('name', '').split(':')[0] for m in response.json().get('models', [])}
+    try:
+        names = {m.get('name', '').split(':')[0] for m in response.json().get('models', [])}
+    except (ValueError, AttributeError, TypeError):
+        return False, f'Ollama at {settings.ollama.base_url} did not answer like Ollama.'
+
     if settings.ollama.model.split(':')[0] not in names:
         return False, f'Ollama is running but has no model {settings.ollama.model}.'
     return True, f'Ollama ready ({settings.ollama.model}).'

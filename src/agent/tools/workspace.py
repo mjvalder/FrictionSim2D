@@ -39,7 +39,11 @@ def workspace_overview(deps, depth: int = 2) -> str:
                             if p.is_dir() and not p.name.startswith('.')):
             if len(lines) >= MAX_LINES:
                 return
-            count = sum(1 for _ in child.iterdir())
+            try:
+                count = sum(1 for _ in child.iterdir())
+            except OSError:
+                lines.append(f"{'  ' * level}{child.name}/ (unreadable)")
+                continue
             lines.append(f"{'  ' * level}{child.name}/ ({count} entries)")
             walk(child, level + 1)
 
