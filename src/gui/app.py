@@ -271,6 +271,7 @@ class MainWindow(QMainWindow):
         # pylint: disable=import-outside-toplevel
         from ..agent.changes import ToolInputError, apply_changeset, build_changeset
         pane = self._assistant_pane
+        proposed = change
         if (as_new or change.changes_model(self.document.model)) and self.document.dirty:
             answer = QMessageBox.question(
                 self, 'Unsaved changes',
@@ -292,15 +293,15 @@ class MainWindow(QMainWindow):
                 if result.stale:
                     fresh = build_changeset(self.assistant_deps(), change.title,
                                             change.ops, change.notes)
-                    pane.replace_change(change, fresh,
+                    pane.replace_change(proposed, fresh,
                                         'The Builder changed since that was proposed; '
                                         're-checked against the current config. Apply again '
                                         'to use it.')
                     return
         except ToolInputError as exc:
-            pane.mark_applied(change, f'Not applied: {exc}')
+            pane.mark_applied(proposed, f'Not applied: {exc}')
             return
-        pane.mark_applied(change, result.message)
+        pane.mark_applied(proposed, result.message)
         if not result.applied:
             return
         if target is not self.document:
@@ -311,6 +312,8 @@ class MainWindow(QMainWindow):
         if change.touches_settings():
             self.settings_form.rebuild()
             self._on_settings_changed()
+            self.settings = self.settings_document.as_settings()
+            self.form.set_settings(self.settings)
         self._refresh_counts()
         self._validate()
         self._on_config_changed()

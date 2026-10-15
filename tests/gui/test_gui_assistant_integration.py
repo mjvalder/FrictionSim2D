@@ -94,3 +94,43 @@ def test_fs_apply_creates_folder(window):
     change = build_fs_changeset(window.assistant_deps(), 'mk', [('mkdir', 'materials')])
     window._apply_assistant_fs_change(change)  # pylint: disable=protected-access
     assert (window.workspace.root / 'materials').is_dir()
+
+
+def test_as_new_replaces_document_and_freezes_original_card(window, monkeypatch):
+    pane = _open_assistant(window)
+    window.document.dirty = False
+    old = window.document
+    change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [7])])
+    marked = []
+    real = pane.mark_applied
+    monkeypatch.setattr(pane, 'mark_applied', lambda c, m: (marked.append(c.id), real(c, m)))
+    window._apply_assistant_change(change, True)  # pylint: disable=protected-access
+    assert window.document is not old
+    assert window.document.workspace_dir == window.workspace.configs_dir
+    assert window.document.get('general', 'force') == 7
+    assert marked == [change.id]
+
+
+def test_as_new_with_unsaved_edits_declined_changes_nothing(window, monkeypatch):
+    pane = _open_assistant(window)
+    window.document.dirty = True
+    old = window.document
+    monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: QMessageBox.No)
+    change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [7])])
+    marked = []
+    monkeypatch.setattr(pane, 'mark_applied', lambda c, m: marked.append(c.id))
+    window._apply_assistant_change(change, True)  # pylint: disable=protected-access
+    assert window.document is old and not marked
+    assert window.document.get('general', 'force') != 7
+
+
+def test_settings_change_refreshes_live_settings(window):
+    from src.agent.changes import Op as _Op
+    _open_assistant(window)
+    doc = window.settings_document
+    section = next(k for k, v in doc.values.items() if isinstance(v, dict) and v)
+    key = next(k for k, v in doc.values[section].items() if isinstance(v, (int, float)) and not isinstance(v, bool))
+    new = doc.values[section][key] + 1
+    change = build_changeset(window.assistant_deps(), 's', [_Op('settings_set', section, key, new)])
+    window._apply_assistant_change(change, False)  # pylint: disable=protected-access
+    assert getattr(getattr(window.settings, section), key) == new
