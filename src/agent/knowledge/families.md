@@ -1,3 +1,4 @@
+Notation: [afm] etc. is a model name; [general] force means key force in config section [general].
 AFM tip family (a tip pressed onto a supported sheet):
 - Dynamic + indent [afm]: approach, indent, then slide under each load. Loads: [general] force (nN, list). Speed: [general] scan_speed. Tip radius: [tip] r. Tool: setup_afm.
 - Indent only [indent]: approach, hold at each load, retract; no sliding. Tool: setup_indent.
