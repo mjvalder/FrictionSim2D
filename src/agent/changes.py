@@ -13,6 +13,7 @@ import hashlib
 import json
 import shutil
 import tempfile
+import textwrap
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -178,6 +179,23 @@ def _check_proposed_paths(ops: Sequence[Op], base_dir, roots) -> None:
                                  'use a path returned by search_structures/search_potentials')
 
 
+def _has_line_break(value: Any) -> bool:
+    if isinstance(value, str):
+        return '\n' in value or '\r' in value
+    if isinstance(value, (list, tuple)):
+        return any(_has_line_break(v) for v in value)
+    return False
+
+
+def _check_proposed_values(ops: Sequence[Op]) -> None:
+    """Refuse multi-line strings: config and settings values end up in LAMMPS
+    scripts, where a line break starts a new command."""
+    for op in ops:
+        if op.kind in ('set', 'settings_set') and _has_line_break(op.value):
+            raise ToolInputError(f'{op.section}.{op.key}: a value may not contain a line '
+                                 'break')
+
+
 def _diff(scope: str, before: dict, after: dict) -> List[FieldDiff]:
     out = []
     for section in sorted(set(before) | set(after)):
@@ -202,6 +220,7 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
     """Preview ``ops`` on copies of ``deps``' documents and package the result."""
     live = deps.document
     _check_proposed_paths(ops, live.base_dir, deps.roots)
+    _check_proposed_values(ops)
     document = copy.deepcopy(live)
     settings_document = copy.deepcopy(deps.settings_document)
     change = ChangeSet(id=_new_id(), title=title, ops=list(ops), notes=list(notes),
@@ -340,9 +359,14 @@ def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:
     return ApplyResult(True, False, f'Applied: {change.title}')
 
 
-def _short(value: Any) -> str:
-    text = repr(value)
-    return text if len(text) <= 80 else text[:77] + '...'
+CARD_WIDTH = 100
+
+
+def _wrapped(line: str, indent: str = '      ') -> List[str]:
+    """``line`` broken into card-width pieces; nothing is ever cut off."""
+    return textwrap.wrap(line, CARD_WIDTH, subsequent_indent=indent,
+                         break_long_words=True, break_on_hyphens=False,
+                         drop_whitespace=False) or ['']
 
 
 def describe_change(change) -> str:
@@ -356,7 +380,7 @@ def describe_change(change) -> str:
         lines.append('Changes:')
         for d in change.diff:
             where = f'[{d.section}] {d.key}'.strip() if d.key else d.section
-            lines.append(f'  {d.scope} {where}: {_short(d.before)} -> {_short(d.after)}')
+            lines += _wrapped(f'  {d.scope} {where}: {d.before!r} -> {d.after!r}')
         if change.side_effects:
             lines += ['Writes:'] + [f'  - {s}' for s in change.side_effects]
         if change.notes:

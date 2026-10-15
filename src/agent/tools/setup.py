@@ -21,6 +21,28 @@ KEY_FIELDS = (('2D', 'x'), ('2D', 'y'), ('2D', 'layers'), ('2D', 'pot_type'),
               ('general', 'scan_angle'))
 
 
+#: Settings the assistant may not propose, because they are executed rather
+#: than read: LAMMPS runs the ``*_command`` strings verbatim, and the whole
+#: ``hpc`` section (modules, conda_env, mpi_command, *_dir, ...) is written into
+#: job scripts the scheduler runs. The rule, for keys added later: the ``hpc``
+#: section, any key ending in ``_command`` or ``_dir``, ``modules``, ``conda_env``
+#: (pinned against GlobalSettings by tests/agent/test_tools_setup.py).
+REFUSED_SETTINGS = frozenset({
+    ('simulation', 'minimization_command'), ('simulation', 'neigh_modify_command'),
+    ('hpc', 'scheduler_type'), ('hpc', 'queue'), ('hpc', 'partition'), ('hpc', 'account'),
+    ('hpc', 'hpc_host'), ('hpc', 'hpc_home'), ('hpc', 'log_dir'), ('hpc', 'scratch_dir'),
+    ('hpc', 'num_nodes'), ('hpc', 'num_cpus'), ('hpc', 'memory_gb'),
+    ('hpc', 'walltime_hours'), ('hpc', 'max_array_size'), ('hpc', 'modules'),
+    ('hpc', 'conda_env'), ('hpc', 'mpi_command'), ('hpc', 'use_tmpdir'),
+    ('hpc', 'preflight'), ('hpc', 'lammps_scripts'),
+})
+
+
+def _refused_setting(section: str, key: str) -> bool:
+    return ((section, key) in REFUSED_SETTINGS or section == 'hpc'
+            or key.endswith(('_command', '_dir')) or key in ('modules', 'conda_env'))
+
+
 class FieldChange(BaseModel):
     """One value to propose; find the section and key with find_parameter first."""
 
@@ -125,6 +147,10 @@ def set_fields(deps, changes: List[FieldChange], title: str = 'Set fields') -> s
                 ops.append(Op('enable_section', section, value=True))
             ops.append(Op('set', section, key, change.value))
         else:
+            if _refused_setting(section, key):
+                raise ToolInputError(
+                    f"{section}.{key}: this setting is executed by LAMMPS/the HPC "
+                    "scheduler; change it in the Settings tab yourself")
             ops.append(Op('settings_set', section, key, change.value))
     return deps.propose(build_changeset(deps, title, ops))
 

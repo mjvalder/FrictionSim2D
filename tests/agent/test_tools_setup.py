@@ -97,3 +97,37 @@ def test_make_sweep_tool_text(deps):
 def test_suggest_values_asks_until_scaling_exists(deps):
     text = suggest_values(deps, 'load', 'low', 5)
     assert 'ask the user' in text and 'make_sweep' in text
+
+
+@pytest.mark.parametrize('section, key, value', [
+    ('simulation', 'minimization_command', 'minimize 0 0 1 1'),
+    ('simulation', 'neigh_modify_command', 'neigh_modify every 2'),
+    ('hpc', 'num_cpus', 64),
+    ('hpc', 'modules', ['lammps']),
+    ('hpc', 'conda_env', '/opt/env'),
+    ('hpc', 'scratch_dir', '/scratch'),
+])
+def test_set_fields_refuses_executed_settings(deps, section, key, value):
+    with pytest.raises(ToolInputError, match='Settings tab yourself'):
+        set_fields(deps, [FieldChange(scope='settings', section=section, key=key, value=value)])
+    assert deps.pending == []
+
+
+def test_refused_settings_constant_covers_the_rule(deps):
+    from src.agent.tools.setup import REFUSED_SETTINGS
+    for spec in deps.settings_document.sections():
+        for spec_field in spec.fields:
+            key = spec_field.key
+            if (spec.key == 'hpc' or key.endswith(('_command', '_dir'))
+                    or key in ('modules', 'conda_env')):
+                assert (spec.key, key) in REFUSED_SETTINGS
+
+
+@pytest.mark.parametrize('scope, section, key, value', [
+    ('config', 'general', 'scan_speed', '2\nprint hi'),
+    ('settings', 'simulation', 'min_style', 'cg\nshell rm -rf x'),
+    ('config', 'general', 'force', ['1', '2\n3']),
+])
+def test_set_fields_refuses_newlines(deps, scope, section, key, value):
+    with pytest.raises(ToolInputError, match='line break'):
+        set_fields(deps, [FieldChange(scope=scope, section=section, key=key, value=value)])

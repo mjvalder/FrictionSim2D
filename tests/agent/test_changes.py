@@ -202,3 +202,12 @@ def test_invalid_settings_value_is_not_applied(deps):
     assert not result.applied and not result.stale
     assert result.message.startswith('Not applied: settings invalid')
     assert live_settings.values == before and not live_settings.dirty
+
+
+def test_card_shows_long_values_in_full(deps):
+    value = 'abc' * 100
+    cs = build_changeset(deps, 'long', [Op('set', 'general', 'temp', value)])
+    text = describe_change(cs)
+    assert '...' not in text.split('Validation')[0]
+    assert repr(value) in ''.join(text.split())
+    assert max(len(line) for line in text.splitlines()) <= 120
