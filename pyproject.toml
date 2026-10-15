@@ -62,6 +62,11 @@ gui = [
   "ovito>=3.15",
   "PySide6>=6.8.3",
 ]
+agent = [
+  # The GUI assistant. pydantic-ai requires Python >= 3.11; the marker keeps
+  # `.[all]` installable on 3.9/3.10, where src.agent._AGENT_AVAILABLE is False.
+  "pydantic-ai-slim[openai,google]~=2.56; python_version >= '3.11'",
+]
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.0",
@@ -70,7 +75,7 @@ dev = [
   "pytest-qt>=4.2",
 ]
 all = [
-  "FrictionSim2D[aiida,db,plotting,api,gui]",
+  "FrictionSim2D[aiida,db,plotting,api,gui,agent]",
 ]
 
 # ---------------------------------------------------------------------------
@@ -94,11 +99,12 @@ all = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short -m 'not lammps'"
+addopts = "-v --tb=short -m 'not lammps and not agent_eval'"
 markers = [
     "lammps: executes real LAMMPS runs (skipped when lmp_serial is absent; deselect with -m 'not lammps')",
     "integration: cross-package artifact-level tests in tests/integration/ (a file may also carry lammps; Phase 3 adds the lmp_serial-free ones)",
     "aiida: needs aiida-core; runs against a temporary broker-less SQLite profile (aiida_profile_clean), never the daemon",
+    "agent_eval: live-LLM evaluation of the GUI assistant (needs GEMINI_API_KEY or a running Ollama; deselected by default)",
 ]
 
 [tool.hatch.build.targets.wheel]

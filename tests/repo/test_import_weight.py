@@ -107,3 +107,37 @@ def test_reading_a_structure_does_load_ase(materials_path):
         "Reading a CIF did not load ASE -- the adapter in src/interfaces/ase.py "
         "is not actually calling it."
     )
+
+
+#: Modules of the GUI assistant that must import without Qt (the agent core is
+#: headless and tested without a display). Later tasks append to this list.
+NO_QT_MODULES = ['src.agent', 'src.agent.tools']
+
+#: Modules that must not pull pydantic-ai in: GUI startup and the agent core.
+#: Only src.agent.runtime (and providers, inside functions) may import it.
+NO_PYDANTIC_AI_MODULES = ['src.agent', 'src.agent.tools', 'src.gui.app']
+
+
+def _loaded_after_importing(module: str, banned: str) -> bool:
+    """Whether importing ``module`` in a fresh interpreter loads ``banned``."""
+    code = (
+        "import importlib, sys\n"
+        f"importlib.import_module({module!r})\n"
+        f"print({banned!r} in sys.modules)\n"
+    )
+    out = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                         text=True, check=True)
+    return out.stdout.strip().splitlines()[-1] == 'True'
+
+
+@pytest.mark.parametrize('module', NO_QT_MODULES)
+def test_agent_core_does_not_import_qt(module):
+    assert not _loaded_after_importing(module, 'PySide6')
+
+
+@pytest.mark.parametrize('module', NO_PYDANTIC_AI_MODULES)
+def test_module_does_not_import_pydantic_ai(module):
+    pytest.importorskip('pydantic_ai')
+    if module.startswith('src.gui'):
+        pytest.importorskip('PySide6')
+    assert not _loaded_after_importing(module, 'pydantic_ai')
