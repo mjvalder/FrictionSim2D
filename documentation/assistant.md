@@ -3,7 +3,7 @@
 The Assistant is a chat pane docked on the right of the GUI window, beside the
 Builder, Database and Plots tabs. It is not a tab: one pane, and one
 conversation, stays in view whichever tab is open. Show or hide it with the
-**Assistant** button in the Builder header or **Ctrl+Shift+A** (from any tab);
+**Assistant** button at the right end of the tab bar or **Ctrl+Shift+A**;
 drag the divider to resize it. Each workspace remembers whether the pane was
 open and how wide, and a new workspace starts with it collapsed. The pane's
 header shows which tab you are on (display only, not sent to the model);

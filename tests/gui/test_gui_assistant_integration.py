@@ -266,3 +266,30 @@ def test_apply_commits_pending_form_edits_first(window, monkeypatch):
     monkeypatch.setattr(pane, 'replace_change', lambda old, new, note: replaced.append(new))
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
     assert len(replaced) == 1 and window.document.get('general', 'force') != [5]
+
+
+def test_toggle_button_is_visible_on_every_tab(window):
+    window.show()
+    QApplication.processEvents()
+    assert window.top_tabs.cornerWidget() is window.assistant_button
+    for index in range(window.top_tabs.count()):
+        window.top_tabs.setCurrentIndex(index)
+        QApplication.processEvents()
+        assert window.assistant_button.isVisibleTo(window), window.top_tabs.tabText(index)
+
+
+def test_dock_width_saves_are_debounced(window, monkeypatch):
+    from PySide6.QtCore import QEventLoop, QTimer
+    window.show()
+    _open_assistant(window)
+    writes = []
+    real = window.workspace.remember
+    monkeypatch.setattr(window.workspace, 'remember',
+                        lambda key, value: (writes.append(key), real(key, value)))
+    for pos in (900, 905, 910, 915, 920):
+        window.main_splitter.splitterMoved.emit(pos, 1)
+    assert writes == []
+    loop = QEventLoop()
+    QTimer.singleShot(800, loop.quit)
+    loop.exec()
+    assert writes == ['assistant']

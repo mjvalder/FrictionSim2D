@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -168,6 +168,12 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.top_tabs = QTabWidget(self)
+        # In the tab bar's corner, so the toggle is there on every tab.
+        self.assistant_button = QPushButton('Assistant', self.top_tabs)
+        self.assistant_button.setCheckable(True)
+        self.assistant_button.setToolTip('Show or hide the Assistant pane (Ctrl+Shift+A)')
+        self.assistant_button.toggled.connect(self.set_assistant_open)
+        self.top_tabs.setCornerWidget(self.assistant_button, Qt.TopRightCorner)
         self.top_tabs.addTab(self._build_builder_tab(), 'Builder')
         self.database_page = self._build_database_tab()
         self.top_tabs.addTab(self.database_page, 'Database')
@@ -192,8 +198,13 @@ class MainWindow(QMainWindow):
         self.main_splitter.setStretchFactor(1, 0)
         self.main_splitter.setCollapsible(0, False)
         self.main_splitter.setCollapsible(1, False)
+        # A drag emits splitterMoved per step; save the width once it settles.
+        self._assistant_width_timer = QTimer(self)
+        self._assistant_width_timer.setSingleShot(True)
+        self._assistant_width_timer.setInterval(400)
+        self._assistant_width_timer.timeout.connect(self._remember_assistant_state)
         self.main_splitter.splitterMoved.connect(
-            lambda *_: self._remember_assistant_state())
+            lambda *_: self._assistant_width_timer.start())
 
         self.assistant_shortcut = QShortcut(QKeySequence('Ctrl+Shift+A'), self)
         self.assistant_shortcut.activated.connect(self.toggle_assistant)
@@ -290,6 +301,7 @@ class MainWindow(QMainWindow):
                 self._assistant_width = width
 
     def _remember_assistant_state(self) -> None:
+        self._assistant_width_timer.stop()  # this write covers any pending drag
         self._capture_assistant_width()
         self.workspace.remember(ASSISTANT_STATE_KEY, {
             'open': self.assistant_dock.isVisibleTo(self),
@@ -451,12 +463,6 @@ class MainWindow(QMainWindow):
         change = QPushButton('Change workspace…', header)
         change.clicked.connect(self._choose_workspace)
         row.addWidget(change)
-
-        self.assistant_button = QPushButton('Assistant', header)
-        self.assistant_button.setCheckable(True)
-        self.assistant_button.setToolTip('Show or hide the Assistant pane (Ctrl+Shift+A)')
-        self.assistant_button.toggled.connect(self.set_assistant_open)
-        row.addWidget(self.assistant_button)
 
         self._populate_modes()
         self._update_workspace_label()
