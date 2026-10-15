@@ -162,7 +162,8 @@ def _check_proposed_paths(ops: Sequence[Op], base_dir, roots) -> None:
     """Refuse a path-valued field the agent proposes outside the readable roots."""
     candidates = []
     for op in ops:
-        if op.kind == 'set' and op.key in PATH_KEYS and isinstance(op.value, str) and op.value:
+        if (op.kind == 'set' and (op.key in PATH_KEYS or op.key == 'materials_list')
+                and isinstance(op.value, str) and op.value):
             candidates.append(op.value)
         if op.kind == 'material_dirs':
             candidates.extend(str(v) for v in op.value[:2])
@@ -228,6 +229,11 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
+    target = live.material_list_target()
+    if target is not None and any(op.kind == 'materials' and op.value for op in ops):
+        # The preview wrote to scratch; show what Apply will really set.
+        document.set('2D', 'materials_list',
+                     str(live._relative_to_config(target)))  # pylint: disable=protected-access
     if live.model != document.model:
         change.diff.append(FieldDiff('config', '(model)', '', live.model, document.model))
     change.diff += _diff('config', live.values, document.values)
@@ -248,10 +254,23 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
     """Replay ``change`` on the live documents, unless they changed since the preview."""
     if not force and fingerprint(document, settings_document) != change.base_fingerprint:
         return ApplyResult(False, True, 'The Builder changed since this was proposed.')
+    root = getattr(document, 'workspace_root', None) or document.base_dir
+    scratch_parent = Path(root) / '.preview' / '_agent' if root else None
     try:
+        if scratch_parent is not None:
+            scratch_parent.mkdir(parents=True, exist_ok=True)
+        scratch = Path(tempfile.mkdtemp(prefix='apply-', dir=scratch_parent))
+        try:  # dry run on copies so a failing op cannot half-apply
+            _replay(change.ops, copy.deepcopy(document),
+                    copy.deepcopy(settings_document), scratch / 'materials.txt')
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
         problems = _replay(change.ops, document, settings_document, None)
     except DocumentError as exc:
         return ApplyResult(False, False, f'Not applied: {exc}')
+    except OSError as exc:
+        return ApplyResult(False, False, f'Not applied (file error, the Builder '
+                                         f'may be partly changed): {exc}')
     message = f'Applied: {change.title}'
     if problems:
         message += ' (' + '; '.join(problems) + ')'
