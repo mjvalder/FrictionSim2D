@@ -1,0 +1,265 @@
+"""The agent loop: pydantic-ai Agent, tool wrappers, events and history.
+
+All pydantic-ai *run* APIs live here (spec §3); `providers.py` builds models.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any, Callable, List, Optional
+
+from pydantic_ai import (Agent, AgentRunResultEvent, CancellationToken,
+                         ModelRetry, RunContext)
+from pydantic_ai.exceptions import (ModelAPIError, ModelHTTPError, RunCancelled,
+                                    UnexpectedModelBehavior, UsageLimitExceeded)
+from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent,
+                                  ModelRequest, ModelResponse, PartDeltaEvent,
+                                  PartStartEvent, TextPart, TextPartDelta,
+                                  UserPromptPart)
+from pydantic_ai.usage import UsageLimits
+
+from .changes import ToolInputError
+from .context import AgentDeps
+from .events import TurnEvent
+from .prompts import build_system_prompt, estimate_tokens
+from .providers import build_model
+from .sandbox import SandboxError
+from .settings import AgentSettings
+from .tools import compact, materials, setup, workspace
+
+logger = logging.getLogger(__name__)
+
+REQUEST_LIMIT = 8
+HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000}
+_RETRY_IN = re.compile(r'retry in ([\d.]+)\s*s', re.IGNORECASE)
+_RETRY_DELAY = re.compile(r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s")
+
+
+def _call(ctx: RunContext[AgentDeps], func: Callable, *args, **kwargs) -> str:
+    """Run a plain tool: bad input becomes a retry hint, a crash a short error."""
+    try:
+        return compact(func(ctx.deps, *args, **kwargs))
+    except (ToolInputError, SandboxError) as exc:
+        raise ModelRetry(str(exc)) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception('assistant tool %s failed', func.__name__)
+        return f'error in {func.__name__}: {type(exc).__name__}: {exc}'
+
+
+def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
+    @agent.tool
+    def list_modes(ctx: RunContext[AgentDeps]) -> str:
+        """Simulation families and modes, with the model each builds."""
+        return _call(ctx, setup.list_modes)
+
+    @agent.tool
+    def explain_current(ctx: RunContext[AgentDeps]) -> str:
+        """Summarise the config open in the Builder and its validation issues."""
+        return _call(ctx, setup.explain_current)
+
+    @agent.tool
+    def find_parameter(ctx: RunContext[AgentDeps], query: str) -> str:
+        """Search config and settings parameters by name or description."""
+        return _call(ctx, setup.find_parameter, query)
+
+    @agent.tool
+    def set_fields(ctx: RunContext[AgentDeps], changes: List[setup.FieldChange]) -> str:
+        """Propose values for parameters found with find_parameter."""
+        return _call(ctx, setup.set_fields, changes)
+
+    @agent.tool
+    def make_sweep(ctx: RunContext[AgentDeps], start: float, stop: float, n: int,
+                   spacing: str = 'linear') -> str:
+        """n evenly spaced values from start to stop ('linear' or 'log')."""
+        return _call(ctx, setup.make_sweep_tool, start, stop, n, spacing)
+
+    @agent.tool
+    def suggest_values(ctx: RunContext[AgentDeps], quantity: str, descriptor: str,
+                       n: int, spacing: str = 'linear') -> str:
+        """Turn a descriptor such as 'low load' into values, when a rule exists."""
+        return _call(ctx, setup.suggest_values, quantity, descriptor, n, spacing)
+
+    @agent.tool
+    def setup_afm(ctx: RunContext[AgentDeps], request: setup.AFMSetupRequest) -> str:
+        """Propose an AFM tip sliding simulation."""
+        return _call(ctx, setup.setup_afm, request)
+
+    @agent.tool
+    def setup_sheet(ctx: RunContext[AgentDeps], request: setup.SheetSetupRequest) -> str:
+        """Propose a sheet-on-sheet sliding simulation."""
+        return _call(ctx, setup.setup_sheet, request)
+
+    @agent.tool
+    def setup_indent(ctx: RunContext[AgentDeps], request: setup.IndentSetupRequest) -> str:
+        """Propose an indentation (hold and retract) simulation."""
+        return _call(ctx, setup.setup_indent, request)
+
+    @agent.tool
+    def setup_pes_tip(ctx: RunContext[AgentDeps], request: setup.PESTipSetupRequest) -> str:
+        """Propose a static PES scan of the AFM tip over a sheet."""
+        return _call(ctx, setup.setup_pes_tip, request)
+
+    @agent.tool
+    def setup_pes_sheet(ctx: RunContext[AgentDeps], request: setup.PESSheetSetupRequest) -> str:
+        """Propose a static PES scan of one sheet over another."""
+        return _call(ctx, setup.setup_pes_sheet, request)
+
+    @agent.tool
+    def search_structures(ctx: RunContext[AgentDeps], query: str) -> str:
+        """Find structure (CIF) files by material name or formula."""
+        return _call(ctx, materials.search_structures, query)
+
+    @agent.tool
+    def search_potentials(ctx: RunContext[AgentDeps], material: str,
+                          potential_type: Optional[str] = None) -> str:
+        """Find interatomic potential files for a material."""
+        return _call(ctx, materials.search_potentials, material, potential_type)
+
+    @agent.tool
+    def workspace_overview(ctx: RunContext[AgentDeps], depth: int = 2) -> str:
+        """List the workspace's folders."""
+        return _call(ctx, workspace.workspace_overview, depth)
+
+    @agent.tool
+    def describe_run(ctx: RunContext[AgentDeps], path: str) -> str:
+        """Describe what a workspace folder holds."""
+        return _call(ctx, workspace.describe_run, path)
+
+    @agent.tool
+    def propose_mkdir(ctx: RunContext[AgentDeps], path: str) -> str:
+        """Propose creating a folder in the workspace."""
+        return _call(ctx, workspace.propose_mkdir, path)
+
+    @agent.tool
+    def propose_copy_in(ctx: RunContext[AgentDeps], source: str,
+                        dest_dir: str = 'materials') -> str:
+        """Propose copying a found structure or potential file into the workspace."""
+        return _call(ctx, workspace.propose_copy_in, source, dest_dir)
+
+
+def _retry_after(exc: ModelHTTPError) -> float:
+    text = str(exc.body)
+    for pattern in (_RETRY_IN, _RETRY_DELAY):
+        match = pattern.search(text)
+        if match:
+            return float(match.group(1))
+    return 30.0
+
+
+def _text_only(messages: List[Any]) -> List[Any]:
+    """User prompts and assistant text, without tool calls (provider-neutral)."""
+    out = []
+    for message in messages:
+        if isinstance(message, ModelRequest):
+            parts = [p for p in message.parts if isinstance(p, UserPromptPart)]
+            if parts:
+                out.append(ModelRequest(parts=parts))
+        elif isinstance(message, ModelResponse):
+            parts = [p for p in message.parts if isinstance(p, TextPart) and p.content]
+            if parts:
+                out.append(ModelResponse(parts=parts))
+    return out
+
+
+class AgentSession:
+    """One chat: the agent, its history, and how a turn is run."""
+
+    def __init__(self, settings: AgentSettings, model: Any = None) -> None:
+        self.settings = settings
+        self._model = model
+        self._agent: Optional[Agent] = None
+        self.history: List[Any] = []
+
+    def _build_agent(self) -> Agent:
+        model = self._model if self._model is not None else build_model(self.settings)
+        agent = Agent(model, deps_type=AgentDeps, retries=2,
+                      system_prompt=build_system_prompt(self.settings.provider))
+        _register_tools(agent)
+        return agent
+
+    @property
+    def agent(self) -> Agent:
+        """The pydantic-ai agent, built on first use (so a missing key surfaces then)."""
+        if self._agent is None:
+            self._agent = self._build_agent()
+        return self._agent
+
+    def tool_names(self) -> List[str]:
+        """Names of the registered tools."""
+        return list(self.agent._function_toolset.tools)  # pylint: disable=protected-access
+
+    @staticmethod
+    def new_token() -> CancellationToken:
+        """A fresh token for one turn; ``cancel()`` is thread-safe."""
+        return CancellationToken()
+
+    def new_chat(self) -> None:
+        """Forget the conversation."""
+        self.history = []
+
+    def switch(self, settings: AgentSettings) -> None:
+        """Change provider/model; keep only text so formats cannot clash."""
+        self.settings = settings
+        self._agent = None
+        self._model = None
+        self.history = _text_only(self.history)
+
+    def _trimmed_history(self) -> List[Any]:
+        """Append-only history; once over budget, collapse it into one summary."""
+        budget = HISTORY_BUDGET.get(self.settings.provider, 32000)
+        if estimate_tokens(repr(self.history)) <= budget:
+            return self.history
+        lines = []
+        for message in _text_only(self.history):
+            for part in message.parts:
+                who = 'User' if isinstance(part, UserPromptPart) else 'Assistant'
+                lines.append(f'{who}: {str(part.content)[:200]}')
+        self.history = [ModelRequest(parts=[UserPromptPart(
+    def setup_pes_sheet(ctx: RunContext[AgentDeps],
+                        request: setup.PESSheetSetupRequest) -> str:
+                        ModelResponse(parts=[TextPart(content='Understood.')])]
+        return self.history
+
+    def _dispatch(self, event: Any, emit: Callable[[TurnEvent], None]) -> None:
+        if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+            if event.part.content:
+                emit(TurnEvent('text', event.part.content))
+        elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+            emit(TurnEvent('text', event.delta.content_delta))
+        elif isinstance(event, FunctionToolCallEvent):
+            emit(TurnEvent('tool_call', f'{event.part.tool_name}({str(event.part.args)[:120]})'))
+        elif isinstance(event, FunctionToolResultEvent):
+            name = getattr(event.part, 'tool_name', 'tool')
+            emit(TurnEvent('tool_result', f'{name}: {str(event.content)[:200]}'))
+        elif isinstance(event, AgentRunResultEvent):
+            self.history = event.result.all_messages()
+            emit(TurnEvent('done', payload=event.result.usage.requests))
+
+    async def run_turn(self, text: str, deps: AgentDeps,
+                       emit: Callable[[TurnEvent], None], token: CancellationToken) -> None:
+        """Run one user turn, emitting events; never raises for provider trouble."""
+        deps.on_proposal = lambda change: emit(TurnEvent('proposal', payload=change))
+        try:
+            async with self.agent.run_stream_events(
+                    text, deps=deps, message_history=self._trimmed_history(),
+                    cancellation_token=token, model_settings={'temperature': 0.0},
+                    usage_limits=UsageLimits(request_limit=REQUEST_LIMIT)) as events:
+                async for event in events:
+                    self._dispatch(event, emit)
+        except RunCancelled:
+            emit(TurnEvent('error', 'Stopped.', payload='cancelled'))
+        except ModelHTTPError as exc:
+            if exc.status_code in (429, 503):
+                delay = _retry_after(exc)
+                emit(TurnEvent('error', f'The provider is rate-limited or busy; retry in '
+                                        f'{delay:.0f} s.', payload='rate_limited',
+                               retry_after=delay))
+            else:
+                emit(TurnEvent('error', f'Provider error {exc.status_code}: {exc}',
+                               payload='provider'))
+        except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
+            emit(TurnEvent('error', f'The assistant could not finish this ({exc}). Any '
+                                    'proposal above still stands; finish the rest in the '
+                                    'Builder form.', payload='gave_up'))
+        except ModelAPIError as exc:
+            emit(TurnEvent('error', f'Provider error: {exc}', payload='provider'))

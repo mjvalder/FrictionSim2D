@@ -1,0 +1,122 @@
+"""The agent loop, driven by pydantic-ai's FunctionModel (no network)."""
+import asyncio
+import json
+
+import pytest
+
+pytest.importorskip('pydantic_ai')
+
+from pydantic_ai import CancellationToken  # noqa: E402
+from pydantic_ai.exceptions import ModelHTTPError  # noqa: E402
+from pydantic_ai.messages import ToolReturnPart, RetryPromptPart  # noqa: E402
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel  # noqa: E402
+
+from src.agent.runtime import AgentSession  # noqa: E402
+from src.agent.settings import AgentSettings  # noqa: E402
+from tests.helpers.agent import make_deps  # noqa: E402
+
+
+def _last_parts(messages):
+    return messages[-1].parts if messages else []
+
+
+def scripted(*steps):
+    """A stream function: step i runs on the i-th model request of the turn.
+
+    Each step is either text (str) or a (tool_name, args_dict) call.
+    """
+    async def stream(messages, info):
+        requests = sum(1 for m in messages if m.kind == 'request')
+        step = steps[min(requests, len(steps)) - 1]
+        if isinstance(step, str):
+            yield step
+        else:
+            yield {0: DeltaToolCall(name=step[0], json_args=json.dumps(step[1]))}
+    return stream
+
+
+def run(session, deps, text, token=None):
+    events = []
+    asyncio.run(session.run_turn(text, deps, events.append, token or session.new_token()))
+    return events
+
+
+@pytest.fixture(name='deps')
+def _deps(tmp_path, mock_settings):
+    return make_deps(tmp_path, mock_settings)
+
+
+def test_tool_call_streams_proposal_and_text(deps):
+    model = FunctionModel(stream_function=scripted(
+        ('set_fields', {'changes': [{'section': 'general', 'key': 'scan_speed', 'value': 2}]}),
+        'Proposed: speed 2 m/s.'))
+    session = AgentSession(AgentSettings(), model=model)
+    events = run(session, deps, 'speed 2')
+    kinds = [e.kind for e in events]
+    assert 'tool_call' in kinds and 'proposal' in kinds and kinds[-1] == 'done'
+    assert ''.join(e.text for e in events if e.kind == 'text').endswith('speed 2 m/s.')
+    assert session.history
+
+
+def test_bad_arguments_retry_then_succeed(deps):
+    model = FunctionModel(stream_function=scripted(
+        ('set_fields', {'changes': [{'section': 'general', 'key': 'scan_sped', 'value': 2}]}),
+        ('set_fields', {'changes': [{'section': 'general', 'key': 'scan_speed', 'value': 2}]}),
+        'done'))
+    events = run(AgentSession(AgentSettings(), model=model), deps, 'speed 2')
+    assert sum(e.kind == 'proposal' for e in events) == 1
+    assert events[-1].kind == 'done'
+
+
+def test_gives_up_after_retries(deps):
+    bad = ('set_fields', {'changes': [{'section': 'general', 'key': 'nope', 'value': 2}]})
+    model = FunctionModel(stream_function=scripted(bad, bad, bad, bad, bad))
+    events = run(AgentSession(AgentSettings(), model=model), deps, 'x')
+    assert events[-1].kind == 'error' and events[-1].payload == 'gave_up'
+    assert 'Builder form' in events[-1].text
+
+
+def test_cancel_before_start(deps):
+    model = FunctionModel(stream_function=scripted('hello'))
+    session = AgentSession(AgentSettings(), model=model)
+    token = session.new_token()
+    token.cancel()
+    events = run(session, deps, 'x', token)
+    assert events[-1].kind == 'error' and events[-1].payload == 'cancelled'
+
+
+def test_rate_limit_event(deps):
+    async def limited(messages, info):
+        raise ModelHTTPError(429, 'gemini', body={'error': {'message': 'Please retry in 7.5s.'}})
+        yield ''  # pragma: no cover  (makes this an async generator)
+    events = run(AgentSession(AgentSettings(), model=FunctionModel(stream_function=limited)), deps, 'x')
+    assert events[-1].payload == 'rate_limited'
+    assert events[-1].retry_after == pytest.approx(7.5)
+
+
+def test_switch_keeps_text_only(deps):
+    model = FunctionModel(stream_function=scripted(
+        ('explain_current', {}), 'All good.'))
+    session = AgentSession(AgentSettings(), model=model)
+    run(session, deps, 'check')
+    session.switch(AgentSettings(provider='ollama'))
+    parts = [type(p).__name__ for m in session.history for p in m.parts]
+    assert 'ToolCallPart' not in parts and 'ToolReturnPart' not in parts
+    assert 'UserPromptPart' in parts and 'TextPart' in parts
+
+
+def test_new_chat_clears(deps):
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=scripted('hi')))
+    run(session, deps, 'x')
+    session.new_chat()
+    assert session.history == []
+
+
+def test_every_tool_registered():
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=scripted('hi')))
+    names = set(session.tool_names())
+    assert names == {'list_modes', 'explain_current', 'find_parameter', 'set_fields',
+                     'make_sweep', 'suggest_values', 'setup_afm', 'setup_sheet',
+                     'setup_indent', 'setup_pes_tip', 'setup_pes_sheet',
+                     'search_structures', 'search_potentials', 'workspace_overview',
+                     'describe_run', 'propose_mkdir', 'propose_copy_in'}
