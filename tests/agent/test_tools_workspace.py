@@ -58,3 +58,28 @@ def test_describe_run_caps_the_walk(deps, monkeypatch):
     text = describe_run(deps, 'afm_h-MoS2/l1', max_files=10)
     assert '10+ files' in text and 'MB' not in text
     assert 'provenance.json keys: schema, model' in text
+
+
+def test_mkdir_accepts_the_display_form(deps):
+    propose_mkdir(deps, 'workspace:/runs/new')
+    change = deps.pending[-1]
+    assert change.ok, change.issues
+    assert change.ops == [('mkdir', str(deps.roots.workspace / 'runs' / 'new'))]
+
+
+def test_copy_in_accepts_display_form_dest(deps):
+    propose_copy_in(deps, 'examples:/materials/h-MoS2.cif', dest_dir='workspace:/materials')
+    change = deps.pending[-1]
+    assert change.ok, change.issues
+    ws = deps.roots.workspace
+    assert change.ops[0] == ('mkdir', str(ws / 'materials'))
+    assert change.ops[1][2] == str(ws / 'materials' / 'h-MoS2.cif')
+    assert all('workspace:' not in part for op in change.ops for part in op[1:])
+
+
+def test_examples_destination_refused(deps):
+    propose_mkdir(deps, 'examples:/x')
+    change = deps.pending[-1]
+    assert not change.ok and 'examples:/' in change.issues[0]
+    propose_copy_in(deps, 'examples:/materials/h-MoS2.cif', dest_dir='examples:/materials')
+    assert not deps.pending[-1].ok

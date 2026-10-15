@@ -58,19 +58,36 @@ def within_roots(path: PathLike, roots: SearchRoots) -> bool:
     return any(_within(path, root) for _, root in roots.tiers())
 
 
-def _from_display(path: str, roots: SearchRoots) -> Optional[Path]:
+_DISPLAY = re.compile(r'^([A-Za-z]\w*):/(.*)$', re.DOTALL)
+
+
+def from_display(path: str, roots: SearchRoots) -> Optional[Path]:
     """Turn ``workspace:/a/b`` (what tools show) back into a real path."""
-    if ':/' not in path:
+    match = _DISPLAY.match(path)
+    if match is None:
         return None
-    label, rest = path.split(':/', 1)
-    base = dict(roots.tiers()).get(label)
-    return base / rest if base is not None else None
+    base = dict(roots.tiers()).get(match.group(1))
+    return base / match.group(2) if base is not None else None
+
+
+def write_path(path: PathLike, roots: SearchRoots) -> Path:
+    """A write destination as a real path: ``workspace:/x`` maps back, and any
+    other ``label:/`` (the read-only examples) is refused. Containment is left
+    to `check_write_target`."""
+    text = str(path)
+    match = _DISPLAY.match(text)
+    if match is None:
+        return Path(text)
+    if match.group(1) != 'workspace':
+        raise SandboxError(f'{text}: only workspace:/ paths can be written; '
+                           f'{match.group(1)}:/ is read-only')
+    return Path(roots.workspace) / match.group(2)
 
 
 def resolve_readable(path: PathLike, roots: SearchRoots) -> Path:
     """An existing file or folder inside the roots; relative paths try each tier."""
     text = str(path)
-    raw = _from_display(text, roots) or Path(text).expanduser()
+    raw = from_display(text, roots) or Path(text).expanduser()
     candidates = [raw] if raw.is_absolute() else [root / raw for _, root in roots.tiers()]
     for candidate in candidates:
         if within_roots(candidate, roots) and candidate.exists():

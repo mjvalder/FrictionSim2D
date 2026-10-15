@@ -21,7 +21,7 @@ from typing import Any, List, Literal, Optional, Sequence, Tuple
 from ..gui.config_validation import PATH_KEYS
 from ..gui.controllers.document import DocumentError
 from .sandbox import (SandboxError, check_write_target, display_path,
-                      resolve_readable, within_roots)
+                      resolve_readable, within_roots, write_path)
 
 OpKind = Literal['set', 'set_model', 'enable_section', 'material_dirs',
                  'materials', 'settings_set']
@@ -285,7 +285,7 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
     for op in ops:
         try:
             if op[0] == 'mkdir':
-                target = Path(op[1])
+                target = write_path(op[1], deps.roots)
                 target = target if target.is_absolute() else workspace / target
                 if target.is_dir():
                     continue
@@ -295,7 +295,8 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
                 source = resolve_readable(op[1], deps.roots)
                 if not source.is_file():
                     raise SandboxError(f'{op[1]}: not a file')
-                checked.append(('copy', str(source), str(check_write_target(op[2], workspace))))
+                checked.append(('copy', str(source), str(check_write_target(
+                    write_path(op[2], deps.roots), workspace))))
             else:
                 raise SandboxError(f'unknown operation {op[0]!r}')
         except SandboxError as exc:
