@@ -111,12 +111,16 @@ def test_reading_a_structure_does_load_ase(materials_path):
 
 #: Modules of the GUI assistant that must import without Qt (the agent core is
 #: headless and tested without a display). Later tasks append to this list.
-NO_QT_MODULES = ['src.agent', 'src.agent.tools', 'src.agent.changes', 'src.agent.context']
+NO_QT_MODULES = ['src.agent', 'src.agent.tools', 'src.agent.changes', 'src.agent.context',
+                  'src.agent.tools.setup', 'src.agent.tools.materials',
+                  'src.agent.tools.workspace']
 
 #: Modules that must not pull pydantic-ai in: GUI startup and the agent core.
 #: Only src.agent.runtime (and providers, inside functions) may import it.
 NO_PYDANTIC_AI_MODULES = ['src.agent', 'src.agent.tools', 'src.gui.app',
-                           'src.agent.changes', 'src.agent.context']
+                           'src.agent.changes', 'src.agent.context',
+                           'src.agent.tools.setup', 'src.agent.tools.materials',
+                           'src.agent.tools.workspace']
 
 
 def _loaded_after_importing(module: str, banned: str) -> bool:
