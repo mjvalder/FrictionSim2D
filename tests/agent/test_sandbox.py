@@ -83,3 +83,16 @@ def test_write_target_never_overwrites(roots):
 
 def test_display_outside(roots):
     assert display_path(Path('/etc/passwd'), roots) == '(outside the allowed folders)'
+
+
+def test_write_target_refuses_symlinked_escapes(roots, tmp_path):
+    ws = roots.workspace
+    (ws / '.preview').mkdir()
+    (ws / 'lnk').symlink_to(ws / '.preview')
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (ws / 'outl').symlink_to(outside)
+    (ws / 'dang').symlink_to(outside / 'new.txt')
+    for bad in ('lnk/x', 'outl/x', 'dang'):
+        with pytest.raises(SandboxError):
+            check_write_target(bad, ws)

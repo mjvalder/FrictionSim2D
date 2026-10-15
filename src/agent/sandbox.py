@@ -87,9 +87,26 @@ def check_write_target(path: PathLike, workspace: PathLike) -> Path:
     relative = target.relative_to(workspace)
     if any(part.startswith('.') for part in relative.parts):
         raise SandboxError(f'{path}: dot-folders such as .preview are off limits')
-    if target.exists():
+    if os.path.lexists(target):
         raise SandboxError(f'{path}: already exists (nothing is overwritten)')
+    _check_real_parent(path, target, workspace)
     return target
+
+
+def _check_real_parent(path: PathLike, target: Path, workspace: Path) -> None:
+    """Refuse writes that reach outside the workspace or a dot-folder via symlinks."""
+    ancestor = target.parent
+    while not os.path.lexists(ancestor):
+        ancestor = ancestor.parent
+    real_ws = Path(os.path.realpath(workspace))
+    real_ancestor = Path(os.path.realpath(ancestor))
+    try:
+        real_rel = real_ancestor.relative_to(real_ws)
+    except ValueError:
+        raise SandboxError(f'{path}: outside the workspace') from None
+    rest = target.relative_to(ancestor).parts
+    if any(part.startswith('.') for part in (*real_rel.parts, *rest)):
+        raise SandboxError(f'{path}: dot-folders such as .preview are off limits')
 
 
 def display_path(path: PathLike, roots: SearchRoots) -> str:
