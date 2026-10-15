@@ -173,6 +173,7 @@ class AgentSession:
         self._model = model
         self._agent: Optional[Agent] = None
         self.history: List[Any] = []
+        self._generation = 0  # bumped by new_chat; a turn from before it keeps out
 
     def _build_agent(self) -> Agent:
         model = self._model if self._model is not None else build_model(self.settings)
@@ -198,8 +199,9 @@ class AgentSession:
         return CancellationToken()
 
     def new_chat(self) -> None:
-        """Forget the conversation."""
+        """Forget the conversation; a turn still running will not write it back."""
         self.history = []
+        self._generation += 1
 
     def switch(self, settings: AgentSettings) -> None:
         """Change provider/model; keep only text so formats cannot clash."""
@@ -224,7 +226,8 @@ class AgentSession:
                         ModelResponse(parts=[TextPart(content='Understood.')])]
         return self.history
 
-    def _dispatch(self, event: Any, emit: Callable[[TurnEvent], None]) -> None:
+    def _dispatch(self, event: Any, emit: Callable[[TurnEvent], None],
+                  generation: int) -> None:
         if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
             if event.part.content:
                 emit(TurnEvent('text', event.part.content))
@@ -236,20 +239,22 @@ class AgentSession:
             name = getattr(event.part, 'tool_name', 'tool')
             emit(TurnEvent('tool_result', f'{name}: {str(event.part.content)[:200]}'))
         elif isinstance(event, AgentRunResultEvent):
-            self.history = event.result.all_messages()
+            if generation == self._generation:
+                self.history = event.result.all_messages()
             emit(TurnEvent('done', payload=event.result.usage.requests))
 
     async def run_turn(self, text: str, deps: AgentDeps,
                        emit: Callable[[TurnEvent], None], token: CancellationToken) -> None:
         """Run one user turn, emitting events; never raises for provider trouble."""
         deps.on_proposal = lambda change: emit(TurnEvent('proposal', payload=change))
+        generation = self._generation
         try:
             async with self.agent.run_stream_events(
                     text, deps=deps, message_history=self._trimmed_history(),
                     cancellation_token=token, model_settings={'temperature': 0.0},
                     usage_limits=UsageLimits(request_limit=REQUEST_LIMIT)) as events:
                 async for event in events:
-                    self._dispatch(event, emit)
+                    self._dispatch(event, emit, generation)
         except ProviderUnavailable as exc:
             emit(TurnEvent('error', str(exc), payload='unavailable'))
         except RunCancelled:

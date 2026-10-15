@@ -35,18 +35,20 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     apply_requested = Signal(object, bool)
     fs_apply_requested = Signal(object)
     turn_finished = Signal()
-    _start_turn = Signal(str, object, object)
+    _start_turn = Signal(str, object, object, int)
 
     def __init__(self, session, deps_factory: Callable[[], object],
                  settings: AgentSettings, parent=None, *,
                  save_settings=save_agent_settings, status_fn=ollama_status,
                  ask_key: Optional[Callable[[], Optional[str]]] = None,
-                 confirm_consent: Optional[Callable[[], bool]] = None) -> None:
+                 confirm_consent: Optional[Callable[[], bool]] = None,
+                 store_key=store_gemini_key) -> None:
         super().__init__(parent)
         self.session = session
         self.settings = settings
         self._deps_factory = deps_factory
         self._save_settings = save_settings
+        self._store_key = store_key
         self._status_fn = status_fn
         self._ask_key = ask_key or self._default_ask_key
         self._confirm_consent = confirm_consent or self._default_confirm_consent
@@ -54,6 +56,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._text_open = False
         self._last_text = ''
         self._requests = 0
+        self._turn_id = 0  # events from any other turn are dropped
         self.cards = {}
         self._build_ui()
         self._thread = QThread(self)
@@ -150,7 +153,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _on_provider_changed(self) -> None:
         self.settings.provider = self.provider_box.currentData()
-        self._save_settings(self.settings)
+        self._save()
         self.session.switch(self.settings)
         self._refresh_header()
         self._append(f'Switched to {self.provider_box.currentText()} (history kept as text only).',
@@ -163,8 +166,15 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         provider = getattr(self.settings, self.settings.provider)
         if self.model_edit.text().strip() and self.model_edit.text().strip() != provider.model:
             provider.model = self.model_edit.text().strip()
-            self._save_settings(self.settings)
+            self._save()
             self.session.switch(self.settings)
+
+    def _save(self) -> None:
+        """Save the assistant settings; a file error is shown, not raised."""
+        try:
+            self._save_settings(self.settings)
+        except OSError as exc:
+            self._append(f'Could not save the assistant settings: {exc}', 'color:#b00')
 
     def _default_ask_key(self) -> Optional[str]:
         key, ok = QInputDialog.getText(self, 'Gemini API key',
@@ -187,14 +197,18 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                              'color:gray')
                 return False
             self.settings.gemini.consent_given = True
-            self._save_settings(self.settings)
+            self._save()
         if not gemini_key(self.settings):
             key = self._ask_key()
             if not key:
                 self._append('No Gemini API key: get one at aistudio.google.com/apikey.',
                              'color:gray')
                 return False
-            store_gemini_key(key)
+            try:
+                self._store_key(key)
+            except OSError as exc:
+                self._append(f'Could not store the Gemini API key: {exc}', 'color:#b00')
+                return False
             self.session.switch(self.settings)
             self._refresh_header()
         return True
@@ -213,7 +227,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._set_busy(True)
         token = self.session.new_token()
         self._worker.arm(token)
-        self._start_turn.emit(text, self._deps_factory(), token)
+        self._turn_id += 1
+        self._start_turn.emit(text, self._deps_factory(), token, self._turn_id)
 
     def stop(self) -> None:
         """Cancel the running turn."""
@@ -226,7 +241,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         for widget in (self.provider_box, self.model_edit, self.new_button):
             widget.setEnabled(not busy)
 
-    def _on_event(self, event) -> None:
+    def _on_event(self, turn_id: int, event) -> None:
+        if turn_id != self._turn_id:
+            return  # a turn from before New chat / a workspace change
         if event.kind == 'text':
             self._append_inline(event.text)
         elif event.kind == 'tool_call':
@@ -246,8 +263,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                 QTimer.singleShot(int(event.retry_after * 1000), self.retry_button,
                                   lambda: self.retry_button.setEnabled(True))
 
-    def _on_finished(self) -> None:
-        self._set_busy(False)
+    def _on_finished(self, _turn_id: int) -> None:
+        self._set_busy(False)  # the worker is free whichever turn this was
         self.turn_finished.emit()
 
     # ---------------------------------------------------------------- cards
@@ -275,7 +292,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._add_card(new)
 
     def new_chat(self) -> None:
-        """Forget the conversation and clear the cards."""
+        """Cancel a running turn, forget the conversation and clear the cards."""
+        self._worker.cancel()
+        self._turn_id += 1
         self.session.new_chat()
         self.chat.clear()
         for card in self.cards.values():

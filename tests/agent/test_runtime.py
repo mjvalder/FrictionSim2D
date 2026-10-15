@@ -184,3 +184,14 @@ def test_retry_messages_carry_no_absolute_paths(deps, tmp_path):
     with pytest.raises(ModelRetry) as info:
         _call(SimpleNamespace(deps=deps), refuse)
     assert str(tmp_path) not in str(info.value) and 'workspace:/x' in str(info.value)
+
+
+def test_new_chat_mid_turn_keeps_history_empty(deps):
+    session = AgentSession(AgentSettings())
+
+    async def stream(messages, info):
+        session.new_chat()  # e.g. the workspace changed while this turn ran
+        yield 'late reply'
+    session._model = FunctionModel(stream_function=stream)  # pylint: disable=protected-access
+    run(session, deps, 'x')
+    assert session.history == []

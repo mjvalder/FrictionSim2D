@@ -203,3 +203,49 @@ def test_stop_right_after_send_cancels_token(qt_app, env):
     pane.send('x')
     pane.stop()
     assert tokens and tokens[0].cancelled
+
+
+def test_new_chat_mid_turn_cancels_and_drops_its_events(qt_app, env, tmp_path, mock_settings):
+    deps = make_deps(tmp_path, mock_settings)
+    change = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
+    session = SlowSession([TurnEvent('text', 'old workspace reply'),
+                           TurnEvent('proposal', payload=change), TurnEvent('done', payload=1)])
+    tokens = []
+    orig = session.new_token
+    session.new_token = lambda: tokens.append(orig()) or tokens[-1]
+    pane = _pane([], session=session)
+    pane.send('x')
+    pane.new_chat()
+    assert tokens[0].cancelled and session.cleared == 1
+    assert _run_until(pane.turn_finished)
+    assert 'old workspace reply' not in pane.chat.toPlainText()
+    assert pane.cards == {} and pane.requests_label.text() == 'requests: 0'
+    assert pane.send_button.isEnabled()
+
+
+def test_save_errors_show_in_chat(qt_app, env, monkeypatch):
+    def broken(*_a, **_k):
+        raise PermissionError('read-only config')
+    s = AgentSettings()
+    s.gemini.consent_given = True
+    pane = AssistantPane(FakeSession([]), lambda: object(), s, save_settings=broken,
+                         ask_key=lambda: None, confirm_consent=lambda: True,
+                         status_fn=lambda s: (False, 'down'))
+    _PANES.append(pane)
+    pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
+    assert 'read-only config' in pane.chat.toPlainText()
+
+
+def test_key_store_error_shows_in_chat(qt_app, env, monkeypatch):
+    monkeypatch.delenv('GEMINI_API_KEY')
+    def broken(_key):
+        raise OSError('disk full')
+    session = FakeSession([TurnEvent('done')])
+    s = AgentSettings()
+    s.gemini.consent_given = True
+    pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
+                         ask_key=lambda: 'k', confirm_consent=lambda: True, store_key=broken)
+    _PANES.append(pane)
+    pane.send('x')
+    QApplication.processEvents()
+    assert session.texts == [] and 'disk full' in pane.chat.toPlainText()

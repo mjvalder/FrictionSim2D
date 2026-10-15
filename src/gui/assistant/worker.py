@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 class AgentWorker(QObject):
     """Lives on a worker thread; emits `TurnEvent`s back to the GUI thread."""
 
-    event = Signal(object)
-    finished = Signal()
+    event = Signal(int, object)  # (turn id, TurnEvent)
+    finished = Signal(int)
 
     def __init__(self, session) -> None:
         super().__init__()
@@ -31,17 +31,20 @@ class AgentWorker(QObject):
         """True from `arm` until the turn ends."""
         return self._token is not None
 
-    @Slot(str, object, object)
-    def run_turn(self, text: str, deps, token) -> None:
-        """One turn, start to finish; always emits `finished`."""
+    @Slot(str, object, object, int)
+    def run_turn(self, text: str, deps, token, turn_id: int) -> None:
+        """One turn, start to finish; always emits `finished`. Every signal
+        carries ``turn_id`` so the pane can drop a turn it has moved past."""
+        def emit(event) -> None:
+            self.event.emit(turn_id, event)
         try:
-            asyncio.run(self.session.run_turn(text, deps, self.event.emit, token))
+            asyncio.run(self.session.run_turn(text, deps, emit, token))
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception('assistant turn failed')
-            self.event.emit(TurnEvent('error', f'Internal error: {exc}', payload='internal'))
+            emit(TurnEvent('error', f'Internal error: {exc}', payload='internal'))
         finally:
             self._token = None
-            self.finished.emit()
+            self.finished.emit(turn_id)
 
     def cancel(self) -> None:
         """Called from the GUI thread; the token is thread-safe."""
