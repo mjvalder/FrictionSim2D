@@ -801,8 +801,7 @@ class ConfigDocument:
             return None
 
         if target is None:
-            target = (self._existing_material_list_target()
-                      or self._default_material_list_target())
+            target = self.material_list_target()
         if target is None:
             return None
 
@@ -811,6 +810,15 @@ class ConfigDocument:
         self.set('2D', 'materials_list', str(
             self._relative_to_config(target)))
         return target
+
+    def material_list_target(self) -> Optional[Path]:
+        """Where `write_material_names` would write right now, without writing.
+
+        The assistant shows this on a proposal card before the user applies it;
+        asking `write_material_names` would write the file to find out.
+        """
+        return (self._existing_material_list_target()
+                or self._default_material_list_target())
 
     def _default_material_list_target(self) -> Optional[Path]:
         """This config's own list file: beside the saved config, else in the

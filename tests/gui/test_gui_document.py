@@ -1238,3 +1238,17 @@ class TestUnsavedPathsResolveAgainstTheWorkspace:
         document.set('2D', 'cif_path', 'cif/h-MoS2.cif')
         document.save(workspace / 'configs' / 'a.ini')
         assert document.get('2D', 'cif_path') == '../cif/h-MoS2.cif'
+
+
+def test_material_list_target_predicts_the_write_location(tmp_path):
+    doc = ConfigDocument.blank('afm')
+    doc.workspace_dir = tmp_path / 'configs'
+    doc.workspace_root = tmp_path
+    target = doc.material_list_target()
+    assert target == tmp_path / 'configs' / 'materials.txt'
+    assert not target.exists()
+    assert doc.write_material_names(['h-MoS2']) == target
+
+
+def test_material_list_target_is_none_with_nowhere_to_write():
+    assert ConfigDocument.blank('afm').material_list_target() is None
