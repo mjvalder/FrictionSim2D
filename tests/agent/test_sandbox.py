@@ -96,3 +96,21 @@ def test_write_target_refuses_symlinked_escapes(roots, tmp_path):
     for bad in ('lnk/x', 'outl/x', 'dang'):
         with pytest.raises(SandboxError):
             check_write_target(bad, ws)
+
+
+def test_redact_replaces_roots_longest_first_and_home(roots, tmp_path):
+    from src.agent.sandbox import redact
+    nested = SearchRoots(roots.workspace, roots.workspace / 'ex')
+    text = (f"a {roots.workspace}/configs/a.ini b {roots.workspace / 'ex'}/m.cif "
+            f"c {roots.workspace} d {tmp_path}/home/me/x.txt e {roots.workspace}2/y")
+    out = redact(text, nested, home=tmp_path / 'home' / 'me')
+    assert 'a workspace:/configs/a.ini' in out
+    assert 'b examples:/m.cif' in out
+    assert 'c workspace:/ d' in out
+    assert 'd ~/x.txt' in out
+    assert str(tmp_path) in out.split(' e ')[1]  # a sibling of a root is not a root
+
+
+def test_redact_leaves_plain_text(roots):
+    from src.agent.sandbox import redact
+    assert redact('no paths here: 5 nN', roots) == 'no paths here: 5 nN'

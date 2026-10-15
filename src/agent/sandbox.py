@@ -8,6 +8,7 @@ are not.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -116,3 +117,27 @@ def display_path(path: PathLike, roots: SearchRoots) -> str:
             relative = _lexical(path).relative_to(_lexical(root)).as_posix()
             return f'{label}:/' if relative == '.' else f'{label}:/{relative}'
     return '(outside the allowed folders)'
+
+
+def _path_pattern(root: str) -> re.Pattern:
+    """``root`` as a whole path component: followed by ``/`` or not by a name character."""
+    return re.compile(re.escape(root.rstrip('/')) + r'(?:/|(?![\w.\-]))')
+
+
+def redact(text: str, roots: SearchRoots, home: Optional[PathLike] = None) -> str:
+    """``text`` with every root shown as ``label:/`` and the home folder as ``~``.
+
+    The longest root goes first, so a root nested in another (or in home) keeps
+    its own label. Both the lexical and the symlink-resolved spelling count.
+    """
+    home = Path.home() if home is None else Path(home)
+    replacements = []
+    for label, root in roots.tiers():
+        for spelling in {str(_lexical(root)), os.path.realpath(root)}:
+            replacements.append((spelling, f'{label}:/'))
+    for spelling in {str(_lexical(home)), os.path.realpath(home)}:
+        if spelling != '/':
+            replacements.append((spelling, '~/'))
+    for spelling, label in sorted(replacements, key=lambda r: len(r[0]), reverse=True):
+        text = _path_pattern(spelling).sub(label, text)
+    return text

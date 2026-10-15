@@ -155,3 +155,32 @@ def test_tool_crash_hides_paths(deps, monkeypatch):
         stream_function=scripted(('list_modes', {}), 'ok'))), deps, 'x')
     results = [e.text for e in events if e.kind == 'tool_result']
     assert results and '/home/' not in results[0]
+
+
+def test_tool_results_carry_no_absolute_paths(deps, tmp_path):
+    from types import SimpleNamespace
+    from src.agent.changes import apply_changeset
+    from src.agent.runtime import _call
+    from src.agent.tools import setup
+    deps.document.workspace_dir = None  # an unsaved config keeps absolute paths
+    setup.setup_afm(deps, setup.AFMSetupRequest(materials=['h-MoS2'], potential_type='sw'))
+    apply_changeset(deps.pending[-1], deps.document, deps.settings_document, force=True)
+    deps.document.set('2D', 'cif_path', str(deps.roots.workspace / 'missing.cif'))
+    ctx = SimpleNamespace(deps=deps)
+    for text in (_call(ctx, setup.find_parameter, 'cif path'),
+                 _call(ctx, setup.explain_current)):
+        assert '/home' not in text and str(tmp_path) not in text, text
+    assert 'examples:/potentials/' in _call(ctx, setup.find_parameter, 'pot_path')
+
+
+def test_retry_messages_carry_no_absolute_paths(deps, tmp_path):
+    from types import SimpleNamespace
+    from pydantic_ai import ModelRetry
+    from src.agent.runtime import _call
+    from src.agent.sandbox import SandboxError
+
+    def refuse(d):
+        raise SandboxError(f'{d.roots.workspace}/x: outside')
+    with pytest.raises(ModelRetry) as info:
+        _call(SimpleNamespace(deps=deps), refuse)
+    assert str(tmp_path) not in str(info.value) and 'workspace:/x' in str(info.value)

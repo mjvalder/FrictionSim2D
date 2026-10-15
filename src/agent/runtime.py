@@ -23,7 +23,7 @@ from .context import AgentDeps
 from .events import TurnEvent
 from .prompts import build_system_prompt, estimate_tokens
 from .providers import ProviderUnavailable, build_model
-from .sandbox import SandboxError
+from .sandbox import SandboxError, redact
 from .settings import AgentSettings
 from .tools import compact, materials, setup, workspace
 
@@ -36,11 +36,14 @@ _RETRY_DELAY = re.compile(r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s")
 
 
 def _call(ctx: RunContext[AgentDeps], func: Callable, *args, **kwargs) -> str:
-    """Run a plain tool: bad input becomes a retry hint, a crash a short error."""
+    """Run a plain tool: bad input becomes a retry hint, a crash a short error.
+
+    Results and retry hints are redacted: no absolute path reaches the model.
+    """
     try:
-        return compact(func(ctx.deps, *args, **kwargs))
+        return compact(redact(func(ctx.deps, *args, **kwargs), ctx.deps.roots))
     except (ToolInputError, SandboxError) as exc:
-        raise ModelRetry(str(exc)) from exc
+        raise ModelRetry(redact(str(exc), ctx.deps.roots)) from exc
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception('assistant tool %s failed', func.__name__)
         return f'error in {func.__name__}: {type(exc).__name__}'
