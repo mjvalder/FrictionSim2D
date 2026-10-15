@@ -216,7 +216,8 @@ class AgentSession:
                 who = 'User' if isinstance(part, UserPromptPart) else 'Assistant'
                 lines.append(f'{who}: {str(part.content)[:200]}')
         self.history = [ModelRequest(parts=[UserPromptPart(
-                            content='Summary of the earlier conversation:\n' + '\n'.join(lines[-30:]))]),
+                            content='Summary of the earlier conversation:\n'
+                            + '\n'.join(lines[-30:]))]),
                         ModelResponse(parts=[TextPart(content='Understood.')])]
         return self.history
 
