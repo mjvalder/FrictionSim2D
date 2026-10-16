@@ -267,3 +267,37 @@ def test_context_label_is_display_only(qt_app, env):
     pane.send('hi')
     _run_until(pane.turn_finished)
     assert session.texts == ['hi']
+
+
+class LoopBoundSession(FakeSession):
+    """Like the real session: an object made in turn 1 is bound to turn 1's loop."""
+
+    def __init__(self, events):
+        super().__init__(events)
+        self._event = None
+
+    async def run_turn(self, text, deps, emit, token):
+        self.texts.append(text)
+        if self._event is None:
+            self._event = asyncio.Event()
+        waiter = asyncio.ensure_future(self._event.wait())
+        await asyncio.sleep(0)  # the waiter blocks, binding the Event to this loop
+        self._event.set()
+        await waiter  # binds the Event to the running loop; a new loop raises
+        self._event.clear()
+        for event in self.events:
+            emit(event)
+
+
+def test_consecutive_turns_share_the_worker_loop(qt_app, env):
+    pane = _pane([], session=LoopBoundSession([TurnEvent('done', payload=1)]))
+    for text in ('one', 'two', 'three'):
+        pane.send(text)
+        assert _run_until(pane.turn_finished)
+    assert pane.session.texts == ['one', 'two', 'three']
+    assert 'error' not in pane.chat.toPlainText().lower()
+    assert pane.requests_label.text() == 'requests: 3'
+    loop = pane._worker._runner._loop  # pylint: disable=protected-access
+    assert loop is not None and not loop.is_closed()
+    pane.shutdown()
+    assert loop.is_closed()  # closed on the worker thread as it finished

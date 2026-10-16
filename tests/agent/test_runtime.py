@@ -195,3 +195,13 @@ def test_new_chat_mid_turn_keeps_history_empty(deps):
     session._model = FunctionModel(stream_function=stream)  # pylint: disable=protected-access
     run(session, deps, 'x')
     assert session.history == []
+
+
+def test_unexpected_exception_becomes_an_internal_error_event(deps):
+    async def stream(messages, info):
+        raise RuntimeError('boom')
+        yield 'never'  # pylint: disable=unreachable
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=stream))
+    events = run(session, deps, 'hi')
+    assert [(e.kind, e.text, e.payload) for e in events] == [
+        ('error', 'RuntimeError: boom', 'internal')]

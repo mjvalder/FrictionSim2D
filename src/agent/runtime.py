@@ -274,3 +274,6 @@ class AgentSession:
                                     'Builder form.', payload='gave_up'))
         except ModelAPIError as exc:
             emit(TurnEvent('error', f'Provider error: {exc}', payload='provider'))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception('assistant turn failed unexpectedly')
+            emit(TurnEvent('error', f'{type(exc).__name__}: {exc}', payload='internal'))

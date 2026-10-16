@@ -69,6 +69,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._start_turn.connect(self._worker.run_turn)
         self._worker.event.connect(self._on_event)
         self._worker.finished.connect(self._on_finished)
+        # Direct: `finished` is emitted on the worker thread, whose own event
+        # loop has stopped, so a queued call would never run.
+        self._thread.finished.connect(self._worker.close, Qt.DirectConnection)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.start()
         self._refresh_header()
