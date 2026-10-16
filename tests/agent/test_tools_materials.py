@@ -99,7 +99,7 @@ def test_reaxff_found_by_material(deps):
     assert resolve_material(deps, 'h-MoS2', 'reaxff')[1].pot_type == 'reaxff'
 
 
-def test_cap_counts_only_candidates_and_per_tier(deps, monkeypatch):
+def test_cap_counts_only_candidates_and_per_tier(deps):
     for i in range(800):
         (deps.roots.workspace / f'out{i}.log').write_text('x')
     (deps.roots.workspace / 'zz').mkdir()
@@ -109,7 +109,7 @@ def test_cap_counts_only_candidates_and_per_tier(deps, monkeypatch):
     assert 'workspace:/zz/h-MoS2.cif' in text and 'examples:/materials/h-MoS2.cif' in text
 
 
-def test_cap_truncation_reported_and_examples_walked(deps, monkeypatch):
+def test_cap_truncation_reported_and_examples_walked(deps):
     for i in range(410):
         (deps.roots.workspace / f'a{i}.cif').write_text('x')
     deps.material_index = build_index(deps.roots, max_files=400)

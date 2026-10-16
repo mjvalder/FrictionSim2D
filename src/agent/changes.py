@@ -21,8 +21,12 @@ from typing import Any, List, Literal, Optional, Sequence, Tuple
 
 from ..gui.config_validation import PATH_KEYS
 from ..gui.controllers.document import DocumentError
-from .sandbox import (SandboxError, check_write_target, display_path,
+from .sandbox import (PathLike, SandboxError, check_write_target, display_path, from_display,
                       resolve_readable, within_roots, write_path)
+from .tools import compact
+
+#: Most characters a change handle (a tool result) may take.
+HANDLE_LIMIT = 600
 
 OpKind = Literal['set', 'set_model', 'enable_section', 'material_dirs',
                  'materials', 'settings_set']
@@ -99,12 +103,12 @@ class ChangeSet:
             f'{len(self.issues)} issue(s): ' + '; '.join(self.issues[:3]))
         runs = f'; runs: {self.expansion_text}' if self.expansion_text else ''
         head = (f"change {self.id} proposed ('{self.title}'): {len(self.diff)} "
-                f"field(s), {state}{runs}. ")
+                f"field(s), {state}{runs}.")
         if direct:
-            return head + ("It will be applied unless it is refused; the user sees "
-                           "the outcome and can undo it.")
-        return head + ("Proposed only: the user sees it as a card and decides "
-                       "whether to apply it; do not say it is applied.")
+            return _capped(head, "It will be applied unless it is refused; the user "
+                                 "sees the outcome and can undo it.")
+        return _capped(head, "Proposed only: the user sees it as a card and decides "
+                             "whether to apply it; do not say it is applied.")
 
     def changes_model(self, current: str) -> bool:
         """Whether applying this switches the simulation model away from ``current``."""
@@ -123,6 +127,8 @@ class FsChangeSet:
     title: str
     ops: List[Tuple[str, ...]]
     issues: List[str] = field(default_factory=list)
+    #: ``ops`` with every path as ``workspace:/...`` / ``examples:/...``, for the card.
+    shown: List[Tuple[str, ...]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -133,9 +139,21 @@ class FsChangeSet:
         """What the model sees. File operations always wait for the user, so
         ``direct`` (the config apply mode) does not change it."""
         state = 'valid' if self.ok else 'refused: ' + '; '.join(self.issues[:3])
-        return (f"change {self.id} proposed ('{self.title}'): {len(self.ops)} file "
-                f"operation(s), {state}. The user decides whether to apply it; do "
-                f"not say it is done.")
+        return _capped(f"change {self.id} proposed ('{self.title}'): {len(self.ops)} "
+                       f"file operation(s), {state}.",
+                       "The user decides whether to apply it; do not say it is done.")
+
+
+def _capped(head: str, instruction: str) -> str:
+    """``head`` cut so the whole handle fits `HANDLE_LIMIT`; ``instruction`` kept whole."""
+    return compact(head, HANDLE_LIMIT - len(instruction) - 1) + ' ' + instruction
+
+
+def _clean_error(exc: Exception) -> str:
+    """An exception's text without pydantic's "For further information visit" lines."""
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    return '\n'.join(line for line in lines
+                     if not line.startswith('For further information'))
 
 
 def fingerprint(document, settings_document) -> str:
@@ -175,12 +193,43 @@ def _replay(ops: Sequence[Op], document, settings_document,
     return problems
 
 
+def _is_path_op(op: Op) -> bool:
+    return (op.kind == 'set' and (op.key in PATH_KEYS or op.key == 'materials_list')
+            and isinstance(op.value, str) and bool(op.value))
+
+
+def _real_path(value: str, base_dir, roots) -> str:
+    """``examples:/a`` / ``workspace:/a`` (what tools show) as a config value:
+    relative to the config's folder when it can be; anything else unchanged."""
+    real = from_display(value, roots)
+    if real is None:
+        return value
+    if base_dir is not None:
+        try:
+            return str(real.relative_to(Path(base_dir)))
+        except ValueError:
+            pass
+    return str(real)
+
+
+def _undisplay(ops: Sequence[Op], base_dir, roots) -> List[Op]:
+    """``ops`` with display-form path values mapped back to real paths."""
+    out = []
+    for op in ops:
+        if _is_path_op(op):
+            op = Op(op.kind, op.section, op.key, _real_path(op.value, base_dir, roots))
+        elif op.kind == 'material_dirs':
+            dirs = tuple(_real_path(str(v), base_dir, roots) for v in op.value[:2])
+            op = Op(op.kind, op.section, op.key, (*dirs, *op.value[2:]))
+        out.append(op)
+    return out
+
+
 def _check_proposed_paths(ops: Sequence[Op], base_dir, roots) -> None:
     """Refuse a path-valued field the agent proposes outside the readable roots."""
     candidates = []
     for op in ops:
-        if (op.kind == 'set' and (op.key in PATH_KEYS or op.key == 'materials_list')
-                and isinstance(op.value, str) and op.value):
+        if _is_path_op(op):
             candidates.append(op.value)
         if op.kind == 'material_dirs':
             candidates.extend(str(v) for v in op.value[:2])
@@ -236,23 +285,23 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
                     notes: Sequence[str] = ()) -> ChangeSet:
     """Preview ``ops`` on copies of ``deps``' documents and package the result."""
     live = deps.document
+    ops = _undisplay(ops, live.base_dir, deps.roots)
     _check_proposed_paths(ops, live.base_dir, deps.roots)
     _check_proposed_values(ops)
     document = copy.deepcopy(live)
     settings_document = copy.deepcopy(deps.settings_document)
     change = ChangeSet(id=_new_id(), title=title, ops=list(ops), notes=list(notes),
                        base_fingerprint=fingerprint(live, deps.settings_document))
-    scratch_root = Path(deps.roots.workspace) / '.preview' / '_agent'
-    scratch_root.mkdir(parents=True, exist_ok=True)
-    scratch = Path(tempfile.mkdtemp(prefix='agent-', dir=scratch_root))
+    scratch = _scratch(Path(deps.roots.workspace), 'agent-', ops)
     try:
-        problems = _replay(ops, document, settings_document, scratch / 'materials.txt')
+        problems = _replay(ops, document, settings_document,
+                           scratch / 'materials.txt' if scratch else None)
         settings = deps.settings
         if change.touches_settings():
             try:
                 settings = settings_document.as_settings()
             except Exception as exc:  # pylint: disable=broad-except
-                problems.append(f'settings: {exc}')
+                problems.append('settings: ' + _clean_error(exc))
         validation = document.validate(settings)
         change.issues = [_render_issue(i) for i in validation.issues] + problems
         try:
@@ -263,7 +312,8 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
     except DocumentError as exc:
         raise ToolInputError(str(exc)) from exc
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     target = live.material_list_target()
     if target is not None and any(op.kind == 'materials' and op.value for op in ops):
@@ -286,12 +336,23 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
     return change
 
 
+def _scratch(root: Optional[Path], prefix: str, ops: Sequence[Op]) -> Optional[Path]:
+    """A temporary folder under ``root/.preview/_agent`` for a preview's material
+    list -- only when an operation writes one; None otherwise."""
+    if not any(op.kind == 'materials' for op in ops):
+        return None
+    parent = Path(root) / '.preview' / '_agent' if root else None
+    if parent is not None:
+        parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
+
+
 def _settings_problem(settings_document) -> str:
     """Why ``settings_document`` is not a valid `GlobalSettings`, or ''."""
     try:
         settings_document.as_settings()
     except Exception as exc:  # pylint: disable=broad-except
-        lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+        lines = _clean_error(exc).splitlines()
         return '; '.join(lines[1:] or lines)[:300]
     return ''
 
@@ -302,18 +363,16 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
     if not force and fingerprint(document, settings_document) != change.base_fingerprint:
         return ApplyResult(False, True, 'The Builder changed since this was proposed.')
     root = getattr(document, 'workspace_root', None) or document.base_dir
-    scratch_parent = Path(root) / '.preview' / '_agent' if root else None
     live = False
     try:
-        if scratch_parent is not None:
-            scratch_parent.mkdir(parents=True, exist_ok=True)
-        scratch = Path(tempfile.mkdtemp(prefix='apply-', dir=scratch_parent))
+        scratch = _scratch(root, 'apply-', change.ops)
         try:  # dry run on copies so a failing op cannot half-apply
             dry_settings = copy.deepcopy(settings_document)
             _replay(change.ops, copy.deepcopy(document), dry_settings,
-                    scratch / 'materials.txt')
+                    scratch / 'materials.txt' if scratch else None)
         finally:
-            shutil.rmtree(scratch, ignore_errors=True)
+            if scratch is not None:
+                shutil.rmtree(scratch, ignore_errors=True)
         if change.touches_settings():
             invalid = _settings_problem(dry_settings)
             if invalid:
@@ -337,7 +396,6 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
     """Check folder/copy operations; refused ones are listed as issues."""
     workspace = Path(deps.roots.workspace)
     checked, issues = [], []
-    planned = set()
     for op in ops:
         try:
             if op[0] == 'mkdir':
@@ -346,7 +404,6 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
                 if target.is_dir():
                     continue
                 checked.append(('mkdir', str(check_write_target(target, workspace))))
-                planned.add(str(target))
             elif op[0] == 'copy':
                 source = resolve_readable(op[1], deps.roots)
                 if not source.is_file():
@@ -357,7 +414,16 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
                 raise SandboxError(f'unknown operation {op[0]!r}')
         except SandboxError as exc:
             issues.append(str(exc))
-    return FsChangeSet(id=_new_id(), title=title, ops=checked, issues=issues)
+    shown = [(op[0], *(display_path(p, deps.roots) for p in op[1:])) for op in checked]
+    return FsChangeSet(id=_new_id(), title=title, ops=checked, issues=issues, shown=shown)
+
+
+def _copy_new(source: PathLike, target: PathLike) -> None:
+    """Copy ``source`` to a *new* file: ``'xb'`` fails if ``target`` appeared
+    since it was checked, so nothing is ever overwritten."""
+    with open(source, 'rb') as src, open(target, 'xb') as dst:
+        shutil.copyfileobj(src, dst)
+    shutil.copystat(source, target)
 
 
 def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:
@@ -373,7 +439,7 @@ def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:
             else:
                 target = check_write_target(op[2], workspace_root)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(op[1], target)
+                _copy_new(op[1], target)
         except (SandboxError, OSError) as exc:
             finished = f" after {', '.join(done)}" if done else ''
             return ApplyResult(False, False, f'Stopped{finished}: {exc}')
@@ -412,9 +478,9 @@ def describe_change(change) -> str:
     """Plain-text body of a proposal card."""
     lines = [change.title]
     if isinstance(change, FsChangeSet):
-        lines += [f'  {op[0]}: ' + ' -> '.join(Path(p).name if i else p
-                                               for i, p in enumerate(op[1:]))
-                  for op in change.ops]
+        shown = change.shown or [(op[0], *(Path(p).name for p in op[1:]))
+                                 for op in change.ops]
+        lines += [f'  {op[0]}: ' + ' -> '.join(op[1:]) for op in shown]
     else:
         lines.append('Changes:')
         for d in change.diff:

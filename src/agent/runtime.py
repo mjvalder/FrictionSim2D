@@ -223,8 +223,8 @@ class AgentSession:
 
     def new_chat(self) -> None:
         """Forget the conversation; a turn still running will not write it back."""
+        self._generation += 1  # first: a turn finishing in between must not write back
         self.history = []
-        self._generation += 1
 
     def switch(self, settings: AgentSettings) -> None:
         """Change provider/model; keep only text so formats cannot clash."""

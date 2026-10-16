@@ -190,3 +190,10 @@ def test_pes_tip_override_is_explained(deps):
     cs = deps.pending[-1]
     assert cs.ok, cs.issues
     assert any('2x the tip diameter' in n for n in cs.notes)
+
+
+def test_layers_must_be_positive():
+    with pytest.raises(ValidationError):
+        AFMSetupRequest(materials=['h-MoS2'], layers=[0])
+    with pytest.raises(ValidationError):
+        SheetSetupRequest(materials=['h-MoS2'], layers=[3, -1])

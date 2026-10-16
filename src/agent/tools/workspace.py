@@ -4,6 +4,7 @@ No move, rename or delete exists here or anywhere in the assistant.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,9 @@ from . import compact
 
 MAX_LINES = 60
 MAX_DESCRIBE_FILES = 5000
+#: Deepest level `workspace_overview` shows, and most entries it counts per folder.
+MAX_DEPTH = 4
+MAX_COUNT = 1000
 
 
 def _walk_capped(folder: Path, max_files: int = MAX_DESCRIBE_FILES) -> tuple[list[Path], bool]:
@@ -28,26 +32,33 @@ def _walk_capped(folder: Path, max_files: int = MAX_DESCRIBE_FILES) -> tuple[lis
 
 
 def workspace_overview(deps, depth: int = 2) -> str:
-    """Folder tree of the workspace (no dot-folders), with entry counts."""
+    """Folder tree of the workspace (no dot-folders), with entry counts; depth 1-4."""
     root = Path(deps.roots.workspace)
+    depth = max(1, min(int(depth), MAX_DEPTH))
     lines = ['workspace:/']
+    truncated = False
 
     def walk(folder: Path, level: int) -> None:
-        if level > depth or len(lines) >= MAX_LINES:
+        nonlocal truncated
+        if level > depth:
             return
         for child in sorted(p for p in folder.iterdir()
                             if p.is_dir() and not p.name.startswith('.')):
             if len(lines) >= MAX_LINES:
+                truncated = True
                 return
             try:
-                count = sum(1 for _ in child.iterdir())
+                count = sum(1 for _ in itertools.islice(child.iterdir(), MAX_COUNT + 1))
             except OSError:
                 lines.append(f"{'  ' * level}{child.name}/ (unreadable)")
                 continue
-            lines.append(f"{'  ' * level}{child.name}/ ({count} entries)")
+            shown = f'{MAX_COUNT}+' if count > MAX_COUNT else str(count)
+            lines.append(f"{'  ' * level}{child.name}/ ({shown} entries)")
             walk(child, level + 1)
 
     walk(root, 1)
+    if truncated:
+        lines.append('… more')
     return compact('\n'.join(lines))
 
 

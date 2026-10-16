@@ -112,12 +112,18 @@ def store_gemini_key(key: str, secrets_path: Optional[Path] = None) -> Path:
 
     ``os.open`` with mode 0o600 creates the file private from the first byte;
     ``fchmod`` covers a file that already existed with a wider mode, which
-    O_CREAT alone would leave untouched.
+    O_CREAT alone would leave untouched. ``O_NOFOLLOW`` refuses a symlink
+    planted in its place, and a config folder created here is owner-only.
     """
+    key = key.strip()
+    if '\n' in key or '\r' in key:
+        raise ValueError('the API key may not contain a line break')
     path = secrets_path or config_dir() / SECRETS_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if not path.parent.is_dir():
+        path.parent.mkdir(parents=True, mode=0o700)
+        os.chmod(path.parent, 0o700)  # mkdir's mode is masked by the umask
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-        handle.write(f'gemini={key.strip()}\n')
+        handle.write(f'gemini={key}\n')
     return path

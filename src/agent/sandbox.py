@@ -137,8 +137,10 @@ def display_path(path: PathLike, roots: SearchRoots) -> str:
 
 
 def _path_pattern(root: str) -> re.Pattern:
-    """``root`` as a whole path component: followed by ``/`` or not by a name character."""
-    return re.compile(re.escape(root.rstrip('/')) + r'(?:/|(?![\w.\-]))')
+    """``root`` as a whole path: not preceded by a path character (so a relative
+    path that merely contains it is left alone), and followed by ``/`` or not by
+    a name character."""
+    return re.compile(r'(?<![\w.\-/])' + re.escape(root.rstrip('/')) + r'(?:/|(?![\w.\-]))')
 
 
 def redact(text: str, roots: SearchRoots, home: Optional[PathLike] = None) -> str:

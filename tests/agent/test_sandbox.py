@@ -114,3 +114,9 @@ def test_redact_replaces_roots_longest_first_and_home(roots, tmp_path):
 def test_redact_leaves_plain_text(roots):
     from src.agent.sandbox import redact
     assert redact('no paths here: 5 nN', roots) == 'no paths here: 5 nN'
+
+
+def test_redact_leaves_a_relative_path_that_contains_a_root(roots):
+    from src.agent.sandbox import redact
+    text = f'archive{roots.workspace}/a.ini and mirror/x{roots.workspace}/b'
+    assert redact(text, roots, home='/nonexistent-home') == text

@@ -51,7 +51,7 @@ def test_copy_in_plans_folder_and_copy(deps):
     assert ops[1][2].endswith('materials/h-MoS2.cif')
 
 
-def test_describe_run_caps_the_walk(deps, monkeypatch):
+def test_describe_run_caps_the_walk(deps):
     run = deps.roots.workspace / 'afm_h-MoS2' / 'l1'
     for i in range(15):
         (run / f'extra{i}.txt').write_text('x')
@@ -94,3 +94,28 @@ def test_overview_survives_an_unreadable_folder(deps):
     finally:
         locked.chmod(0o755)
     assert 'locked/ (unreadable)' in text and 'afm_h-MoS2/' in text
+
+
+def test_overview_depth_is_clamped(deps):
+    deep = deps.roots.workspace / 'd1' / 'd2' / 'd3' / 'd4' / 'd5' / 'd6'
+    deep.mkdir(parents=True)
+    assert 'd5/' not in workspace_overview(deps, depth=100)
+    assert 'd4/' in workspace_overview(deps, depth=100)
+    shallow = workspace_overview(deps, depth=0)
+    assert 'd1/' in shallow and 'd2/' not in shallow
+
+
+def test_overview_counts_are_capped(deps):
+    from src.agent.tools import workspace as ws_tools
+    big = deps.roots.workspace / 'big'
+    big.mkdir()
+    for i in range(ws_tools.MAX_COUNT + 5):
+        (big / f'f{i}').touch()
+    assert f'big/ ({ws_tools.MAX_COUNT}+ entries)' in workspace_overview(deps)
+
+
+def test_overview_says_when_truncated(deps):
+    for i in range(80):
+        (deps.roots.workspace / f'run{i:02d}').mkdir()
+    text = workspace_overview(deps)
+    assert text.rstrip().endswith('… more')

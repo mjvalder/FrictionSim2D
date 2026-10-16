@@ -1,5 +1,6 @@
 """Change sets: previewed on copies, replayed on the live documents on Apply."""
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -301,3 +302,66 @@ def test_field_diff_is_public():
     from src.agent.changes import field_diff
     out = field_diff('config', {'general': {'a': 1, 'b': 2}}, {'general': {'a': 1, 'b': 3}})
     assert [(d.section, d.key, d.before, d.after) for d in out] == [('general', 'b', 2, 3)]
+
+
+def test_display_form_path_values_become_real_paths(deps):
+    shown = 'examples:/materials/h-MoS2.cif'
+    cs = build_changeset(deps, 'cif', [Op('set', '2D', 'cif_path', shown)])
+    value = next(op.value for op in cs.ops if op.key == 'cif_path')
+    assert ':/' not in value
+    base = deps.document.base_dir or deps.roots.workspace
+    assert (Path(base) / value).resolve() == (CIF / 'h-MoS2.cif').resolve()
+
+
+def test_display_form_outside_example_tree_refused(deps):
+    with pytest.raises(ToolInputError, match='outside'):
+        build_changeset(deps, 'bad', [Op('set', '2D', 'cif_path', 'examples:/../../etc/passwd')])
+
+
+def test_settings_refusal_drops_the_pydantic_link(deps):
+    live_doc, live_settings = _live(deps)
+    cs = build_changeset(deps, 's', [Op('settings_set', 'simulation', 'timestep', 'abc')])
+    assert not any('errors.pydantic.dev' in i or 'further information' in i for i in cs.issues)
+    result = apply_changeset(cs, live_doc, live_settings)
+    assert 'errors.pydantic.dev' not in result.message
+    assert 'further information' not in result.message
+
+
+def test_fs_card_shows_display_paths_never_absolute(deps):
+    change = build_fs_changeset(deps, 'copy in', [
+        ('mkdir', 'materials'), ('copy', 'examples:/materials/h-MoS2.cif', 'materials/h-MoS2.cif')])
+    text = describe_change(change)
+    assert str(deps.roots.workspace) not in text and str(EXAMPLES) not in text
+    assert 'workspace:/materials' in text
+    assert 'examples:/materials/h-MoS2.cif -> workspace:/materials/h-MoS2.cif' in text
+
+
+def test_handles_are_capped_and_keep_their_instruction(deps):
+    cs = build_changeset(deps, 'x' * 400, [Op('set', 'general', 'force', [5])])
+    cs.issues = ['a very long issue ' * 40] * 3
+    for direct in (False, True):
+        handle = cs.handle(direct=direct)
+        assert len(handle) <= 600
+        assert handle.endswith('undo it.' if direct else 'do not say it is applied.')
+    fs = build_fs_changeset(deps, 'y' * 400, [('copy', '/etc/passwd' * 30, 'a')] * 3)
+    assert len(fs.handle()) <= 600 and fs.handle().endswith('do not say it is done.')
+
+
+def test_copy_never_overwrites_a_file_that_appeared(deps, tmp_path):
+    from src.agent.changes import _copy_new
+    source, target = tmp_path / 'src.txt', tmp_path / 'dst.txt'
+    source.write_text('new')
+    target.write_text('mine')
+    with pytest.raises(FileExistsError):
+        _copy_new(source, target)
+    assert target.read_text() == 'mine'
+    fresh = tmp_path / 'fresh.txt'
+    _copy_new(source, fresh)
+    assert fresh.read_text() == 'new'
+
+
+def test_preview_scratch_only_for_material_lists(deps):
+    live_doc, live_settings = _live(deps)
+    cs = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
+    assert apply_changeset(cs, live_doc, live_settings).applied
+    assert not (deps.roots.workspace / '.preview').exists()

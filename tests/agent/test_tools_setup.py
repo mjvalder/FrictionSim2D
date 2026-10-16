@@ -166,3 +166,38 @@ def test_direct_mode_keeps_the_snapshot_in_step_with_the_gui(deps):
     assert result.applied and not result.stale
     assert live[0].get('general', 'scan_speed') == 7 and live[0].get('general', 'temp') == 250
 
+
+
+def test_make_sweep_keeps_tiny_values():
+    values = make_sweep(1e-9, 1e-7, 3, 'log')
+    assert values == pytest.approx([1e-9, 1e-8, 1e-7], rel=1e-8)
+    assert make_sweep(0, 2e-8, 3) == pytest.approx([0, 1e-8, 2e-8], rel=1e-8)
+    assert make_sweep(0.1, 0.3, 3) == [0.1, 0.2, 0.3]
+
+
+def test_set_fields_matches_section_case_insensitively(deps):
+    set_fields(deps, [FieldChange(section='GENERAL', key='temp', value=300)])
+    assert any(op.section == 'general' and op.key == 'temp' for op in deps.pending[-1].ops)
+
+
+def test_set_fields_unknown_section_suggests(deps):
+    with pytest.raises(ToolInputError, match="did you mean general"):
+        set_fields(deps, [FieldChange(section='genral', key='temp', value=300)])
+
+
+def test_set_fields_key_case_hint(deps):
+    with pytest.raises(ToolInputError, match='did you mean scan_speed'):
+        set_fields(deps, [FieldChange(section='general', key='SCAN_SPEED', value=1)])
+
+
+def test_set_fields_enables_a_section_once(deps):
+    absent = [s for s in deps.document.sections()
+              if s.optional and not deps.document.has_section(s.key)
+              and not deps.document.is_section_locked(s.key) and len(s.fields) >= 2]
+    if not absent:
+        pytest.skip('no optional section with two fields absent in a blank afm document')
+    spec = absent[0]
+    set_fields(deps, [FieldChange(section=spec.key, key=f.key, value=f.default)
+                      for f in spec.fields[:2]])
+    kinds = [op.kind for op in deps.pending[-1].ops]
+    assert kinds.count('enable_section') == 1

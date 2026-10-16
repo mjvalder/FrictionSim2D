@@ -109,3 +109,27 @@ def test_legacy_model_kept_when_installed_and_others_untouched():
     assert s.ollama.model == 'fs2d-qwen3-4b'
     s.ollama.model = 'mistral:7b'  # a user's own choice is never rewritten
     assert fallback_ollama_model(s, ['qwen3:4b']) is None and s.ollama.model == 'mistral:7b'
+
+
+@pytest.mark.parametrize('key', ['abc\ndef', 'abc\rdef', 'abc\r\ngemini=evil'])
+def test_key_with_line_break_refused(tmp_path, key):
+    path = tmp_path / 'agent.secrets'
+    with pytest.raises(ValueError, match='line break'):
+        store_gemini_key(key, path)
+    assert not path.exists()
+
+
+def test_key_file_symlink_not_followed(tmp_path):
+    victim = tmp_path / 'victim.txt'
+    victim.write_text('keep')
+    link = tmp_path / 'agent.secrets'
+    link.symlink_to(victim)
+    with pytest.raises(OSError):
+        store_gemini_key('k', link)
+    assert victim.read_text() == 'keep'
+
+
+def test_new_config_dir_is_owner_only(tmp_path):
+    path = tmp_path / 'cfg' / 'FrictionSim2D' / 'agent.secrets'
+    store_gemini_key('k', path)
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700

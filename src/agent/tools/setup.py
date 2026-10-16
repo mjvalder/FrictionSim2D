@@ -7,7 +7,7 @@ import math
 import re
 from typing import Any, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat
+from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat, conint
 
 from ...gui.schema.overrides import override_for_section
 from ...gui.schema.simulation_types import FAMILIES, MODES
@@ -133,23 +133,39 @@ def _split_key(section: str, key: str):
     return section, key
 
 
+def _suggest(name: str, known: List[str]) -> str:
+    """``; did you mean ...?`` for ``name`` among ``known``, ignoring case; or ''."""
+    lowered = {k.lower(): k for k in known}
+    close = [lowered[m] for m in difflib.get_close_matches(name.lower(), list(lowered), n=3)]
+    return f"; did you mean {', '.join(close)}?" if close else ''
+
+
+def _section_spec(doc, scope: str, section: str):
+    """``(section, spec)``: the exact section, else the one that differs only in case."""
+    spec = doc.section(section)
+    if spec is not None:
+        return section, spec
+    known = [s.key for s in doc.sections()]
+    same = [k for k in known if k.lower() == section.lower()]
+    if len(same) == 1:
+        return same[0], doc.section(same[0])
+    raise ToolInputError(f"unknown {scope} section '{section}'{_suggest(section, known)}; "
+                         'use find_parameter to locate the field')
+
+
 def set_fields(deps, changes: List[FieldChange], title: str = 'Set fields') -> str:
     """Propose values for config or settings fields (shown as a card)."""
-    ops = []
+    ops, enabled = [], set()
     for change in changes:
         section, key = _split_key(change.section, change.key)
         doc = deps.document if change.scope == 'config' else deps.settings_document
-        spec = doc.section(section)
-        if spec is None:
-            raise ToolInputError(f"unknown {change.scope} section '{section}'; "
-                                 'use find_parameter to locate the field')
+        section, spec = _section_spec(doc, change.scope, section)
         known = list(spec.field_map())
         if key not in known:
-            close = difflib.get_close_matches(key, known, n=3)
-            hint = f"; did you mean {', '.join(close)}?" if close else ''
-            raise ToolInputError(f"'{section}' has no key '{key}'{hint}")
+            raise ToolInputError(f"'{section}' has no key '{key}'{_suggest(key, known)}")
         if change.scope == 'config':
-            if not doc.has_section(section):
+            if not doc.has_section(section) and section not in enabled:
+                enabled.add(section)
                 ops.append(Op('enable_section', section, value=True))
             ops.append(Op('set', section, key, change.value))
         else:
@@ -176,8 +192,13 @@ def make_sweep(start: float, stop: float, n: int,
         if start <= 0 or stop <= 0:
             raise ToolInputError('log spacing needs positive start and stop')
         a, b = math.log10(start), math.log10(stop)
-        return [round(10 ** (a + i * (b - a) / (n - 1)), 6) for i in range(n)]
-    return [round(start + i * (stop - start) / (n - 1), 6) for i in range(n)]
+        return [_significant(10 ** (a + i * (b - a) / (n - 1))) for i in range(n)]
+    return [_significant(start + i * (stop - start) / (n - 1)) for i in range(n)]
+
+
+def _significant(value: float) -> float:
+    """``value`` to 9 significant figures: float noise goes, tiny values stay."""
+    return float(f'{value:.9g}')
 
 
 def make_sweep_tool(deps, start: float, stop: float, n: int,  # pylint: disable=unused-argument
@@ -203,7 +224,8 @@ class _SetupBase(BaseModel):
         None, description="e.g. 'sw', 'tersoff', 'rebomos', 'reaxff'")
     size_A: Optional[Tuple[PositiveFloat, PositiveFloat]] = Field(
         None, description='Sheet x, y in Angstrom')
-    layers: Optional[List[int]] = Field(None, description='Layer counts to sweep, e.g. [1, 2, 3]')
+    layers: Optional[List[conint(ge=1)]] = Field(  # type: ignore[valid-type]
+        None, description='Layer counts to sweep, e.g. [1, 2, 3]')
 
 
 _TIP = Field('Si', description='Tip material, a structure name as search_structures '

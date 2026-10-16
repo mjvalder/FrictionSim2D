@@ -300,3 +300,22 @@ def test_history_collapse_keeps_the_latest_turn_intact():
     trimmed = session._trimmed_history()  # pylint: disable=protected-access
     assert trimmed[-3:] == latest
     assert 'Summary of the earlier conversation' in repr(trimmed[0])
+
+
+def test_new_chat_bumps_the_generation_before_clearing():
+    seen = []
+
+    class Watched(AgentSession):
+        @property
+        def history(self):
+            return self.__dict__.get('_hist', [])
+
+        @history.setter
+        def history(self, value):
+            seen.append(getattr(self, '_generation', None))
+            self.__dict__['_hist'] = value
+
+    session = Watched(AgentSettings())
+    seen.clear()
+    session.new_chat()
+    assert seen == [1]
