@@ -67,3 +67,10 @@ def test_key_never_written_to_settings_yaml(tmp_path, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'secret-value')
     path = save_agent_settings(AgentSettings(), tmp_path / 'agent.yaml')
     assert 'secret-value' not in path.read_text()
+
+
+def test_ask_before_apply_defaults_off_and_round_trips(tmp_path):
+    assert AgentSettings().ask_before_apply is False
+    s = AgentSettings(ask_before_apply=True)
+    path = save_agent_settings(s, tmp_path / 'agent.yaml')
+    assert load_agent_settings(path).ask_before_apply is True

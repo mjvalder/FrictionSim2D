@@ -82,14 +82,22 @@ class ChangeSet:
         """Valid as previewed: no validation issues and no blocked side effect."""
         return not self.issues
 
-    def handle(self) -> str:
-        """What the model sees: short, and explicit that nothing is applied yet."""
+    def handle(self, direct: bool = False) -> str:
+        """What the model sees: short, and explicit about whether it is applied.
+
+        ``direct``: the GUI applies the change as it arrives (the user can
+        undo it); otherwise it waits on a card for the user.
+        """
         state = 'valid' if self.ok else (
             f'{len(self.issues)} issue(s): ' + '; '.join(self.issues[:3]))
         runs = f'; runs: {self.expansion_text}' if self.expansion_text else ''
-        return (f"change {self.id} proposed ('{self.title}'): {len(self.diff)} "
-                f"field(s), {state}{runs}. The user sees it as a card and decides "
-                f"whether to apply it; do not say it is applied.")
+        head = (f"change {self.id} proposed ('{self.title}'): {len(self.diff)} "
+                f"field(s), {state}{runs}. ")
+        if direct:
+            return head + ("It is being applied to the Builder now; the user sees "
+                           "what changed and can undo it.")
+        return head + ("Proposed only: the user sees it as a card and decides "
+                       "whether to apply it; do not say it is applied.")
 
     def changes_model(self, current: str) -> bool:
         """Whether applying this switches the simulation model away from ``current``."""
@@ -114,8 +122,9 @@ class FsChangeSet:
         """No refused operation."""
         return not self.issues
 
-    def handle(self) -> str:
-        """What the model sees."""
+    def handle(self, direct: bool = False) -> str:  # pylint: disable=unused-argument
+        """What the model sees. File operations always wait for the user, so
+        ``direct`` (the config apply mode) does not change it."""
         state = 'valid' if self.ok else 'refused: ' + '; '.join(self.issues[:3])
         return (f"change {self.id} proposed ('{self.title}'): {len(self.ops)} file "
                 f"operation(s), {state}. The user decides whether to apply it; do "
@@ -357,6 +366,23 @@ def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:
             return ApplyResult(False, False, f'Stopped{finished}: {exc}')
         done.append(f'{op[0]} {Path(op[-1]).name}')
     return ApplyResult(True, False, f'Applied: {change.title}')
+
+
+SUMMARY_FIELDS = 4
+
+
+def applied_summary(change: ChangeSet) -> str:
+    """One chat line for an applied change set: which fields, and the model."""
+    fields = [d for d in change.diff if d.section != '(model)']
+    model = next((d.after for d in change.diff if d.section == '(model)'), None)
+    names = [('settings ' if d.scope == 'settings' else '')
+             + (f'[{d.section}] {d.key}' if d.key else f'[{d.section}]') for d in fields]
+    shown = ', '.join(names[:SUMMARY_FIELDS]) + (', …' if len(names) > SUMMARY_FIELDS else '')
+    noun = 'field' if len(fields) == 1 else 'fields'
+    if not fields:
+        return f'Switched model → {model}' if model else 'No field changed'
+    text = f'Set {len(fields)} {noun}: {shown}'
+    return f'{text} (+ model → {model})' if model else text
 
 
 CARD_WIDTH = 100

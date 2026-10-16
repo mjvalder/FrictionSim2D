@@ -211,3 +211,44 @@ def test_card_shows_long_values_in_full(deps):
     assert '...' not in text.split('Validation')[0]
     assert repr(value) in ''.join(text.split())
     assert max(len(line) for line in text.splitlines()) <= 120
+
+
+def test_direct_handle_says_applied_and_undoable(deps):
+    cs = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
+    handle = cs.handle(direct=True)
+    assert cs.id in handle and 'applied' in handle and 'undo' in handle
+    assert 'do not say it is applied' not in handle
+    assert len(handle) < 600
+
+
+def test_fs_handle_ignores_direct(deps):
+    change = build_fs_changeset(deps, 'mk', [('mkdir', 'materials')])
+    assert change.handle(direct=True) == change.handle()
+
+
+def test_propose_passes_the_apply_mode(deps):
+    cs = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
+    deps.direct_apply = True
+    assert deps.propose(cs) == cs.handle(direct=True)
+
+
+def test_applied_summary_names_fields_and_model(deps):
+    from src.agent.changes import applied_summary
+    ops = [Op('set_model', value='sheetonsheet')] + [
+        Op('set', 'general', key, value) for key, value in
+        (('force', [5]), ('temp', 250), ('scan_speed', 3), ('scan_angle', 15), ('pressure', 1))]
+    cs = build_changeset(deps, 'many', ops)
+    text = applied_summary(cs)
+    fields = [d for d in cs.diff if d.section != '(model)']
+    assert text.startswith(f'Set {len(fields)} fields: [general] ')
+    assert '…' in text and text.endswith('(+ model → sheetonsheet)')
+    one = build_changeset(deps, 'one', [Op('set', 'general', 'force', [5])])
+    assert applied_summary(one) == 'Set 1 field: [general] force'
+    model = build_changeset(deps, 'm', [Op('set_model', value='sheetonsheet')])
+    assert 'model → sheetonsheet' in applied_summary(model)
+
+
+def test_applied_summary_marks_settings(deps):
+    from src.agent.changes import applied_summary
+    cs = build_changeset(deps, 's', [Op('settings_set', 'simulation', 'timestep', 0.002)])
+    assert applied_summary(cs) == 'Set 1 field: settings [simulation] timestep'

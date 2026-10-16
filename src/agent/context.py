@@ -24,13 +24,17 @@ class AgentDeps:
     pending: List[Any] = field(default_factory=list)
     on_proposal: Optional[Callable[[Any], None]] = None
     material_index: Any = None
+    #: Whether the GUI applies config/settings change sets as they arrive
+    #: (the default) or shows them as cards first; it changes what the model
+    #: is told about a proposal.
+    direct_apply: bool = False
 
     def propose(self, change: Any) -> str:
         """Record a change set for the user, notify the pane, return its handle."""
         self.pending.append(change)
         if self.on_proposal is not None:
             self.on_proposal(change)
-        return change.handle()
+        return change.handle(direct=self.direct_apply)
 
 
 def snapshot_deps(document: ConfigDocument, settings_document: SettingsDocument,

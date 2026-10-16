@@ -41,6 +41,9 @@ class AgentSettings(BaseModel):
     provider: Literal['gemini', 'ollama'] = 'gemini'
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    #: Off: config/settings changes land in the Builder at once (with Undo).
+    #: On: they wait as cards, like file operations always do.
+    ask_before_apply: bool = False
 
 
 def config_dir() -> Path:

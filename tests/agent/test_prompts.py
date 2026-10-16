@@ -28,7 +28,7 @@ def test_families_file_names_every_model():
 
 def test_rules_present():
     prompt = build_system_prompt('gemini')
-    for phrase in ('never claim a change is applied', 'ask', 'nN', 'Angstrom'):
+    for phrase in ('undo', 'file operations wait', 'ask', 'nN', 'Angstrom'):
         assert phrase in prompt
 
 
