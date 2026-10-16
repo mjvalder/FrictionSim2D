@@ -57,3 +57,40 @@ def test_ollama_status_not_ollama(monkeypatch):
     monkeypatch.setattr(httpx, 'get', lambda *a, **k: Resp())
     ok, message = ollama_status(AgentSettings(provider='ollama'))
     assert not ok and 'did not answer like Ollama' in message
+
+
+def test_ollama_binary_prefers_path(tmp_path):
+    from src.agent.providers import ollama_binary
+    assert ollama_binary(which=lambda name: '/usr/bin/ollama', home=tmp_path) == '/usr/bin/ollama'
+
+
+def test_ollama_binary_falls_back_to_the_user_install(tmp_path):
+    from src.agent.providers import ollama_binary
+    binary = tmp_path / '.local' / 'ollama' / 'bin' / 'ollama'
+    binary.parent.mkdir(parents=True)
+    binary.write_text('')
+    assert ollama_binary(which=lambda name: None, home=tmp_path) == str(binary)
+
+
+def test_ollama_binary_plain_name_when_not_found(tmp_path):
+    from src.agent.providers import ollama_binary
+    assert ollama_binary(which=lambda name: None, home=tmp_path) == 'ollama'
+
+
+def test_start_command_is_throttled_and_names_the_binary(tmp_path):
+    from src.agent.providers import ollama_start_command
+    settings = AgentSettings(provider='ollama')
+    command = ollama_start_command(settings, which=lambda name: '/opt/x/ollama', home=tmp_path)
+    for part in ('OLLAMA_IGPU_ENABLE=1', 'OLLAMA_VULKAN=1', 'OLLAMA_MAX_LOADED_MODELS=1',
+                 'OLLAMA_NUM_PARALLEL=1', 'OLLAMA_KEEP_ALIVE=2m', 'OLLAMA_CONTEXT_LENGTH=8192',
+                 'nice -n 10'):
+        assert part in command
+    assert command.endswith('/opt/x/ollama serve')
+
+
+def test_setup_help_carries_the_start_command(tmp_path):
+    from src.agent.providers import ollama_setup_help
+    text = ollama_setup_help(AgentSettings(provider='ollama'), which=lambda name: None,
+                             home=tmp_path)
+    assert 'OLLAMA_IGPU_ENABLE=1' in text and 'ollama serve' in text
+    assert 'ollama pull qwen3:4b' in text

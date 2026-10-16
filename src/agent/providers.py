@@ -5,20 +5,58 @@ provider status without it.
 """
 from __future__ import annotations
 
-from typing import Tuple
+import shutil
+from pathlib import Path
+from typing import Callable, Optional, Tuple
 
 import httpx
 
 from .settings import AgentSettings, gemini_key
 
-OLLAMA_SETUP_HELP = (
-    'Ollama is the experimental offline option (Phase 0: about a minute per turn '
-    'on a Radeon 780M). To use it: install Ollama, start it with\n'
-    '  OLLAMA_IGPU_ENABLE=1 OLLAMA_VULKAN=1 OLLAMA_MAX_LOADED_MODELS=1 '
-    'OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE=2m ollama serve\n'
-    '(OLLAMA_VULKAN is not listed by `ollama serve --help` but is honoured), then\n'
-    '  ollama pull qwen3:4b\n'
-    '  ollama create fs2d-qwen3-4b -f <the Modelfile below>')
+#: Where the user-local install (no root) puts the binary, under $HOME.
+OLLAMA_USER_BINARY = Path('.local') / 'ollama' / 'bin' / 'ollama'
+
+
+def ollama_binary(which: Callable[[str], Optional[str]] = shutil.which,
+                  home: Optional[Path] = None) -> str:
+    """The ollama binary: on PATH, else the user-local install, else plain ``ollama``."""
+    found = which('ollama')
+    if found:
+        return found
+    local = (home if home is not None else Path.home()) / OLLAMA_USER_BINARY
+    return str(local) if local.is_file() else 'ollama'
+
+
+def ollama_start_command(settings: AgentSettings,
+                         which: Callable[[str], Optional[str]] = shutil.which,
+                         home: Optional[Path] = None) -> str:
+    """The throttled ``ollama serve`` line for the user to run (never run here).
+
+    OLLAMA_IGPU_ENABLE=1 is what lets Ollama use an integrated GPU such as
+    the Radeon 780M (Phase 0); OLLAMA_VULKAN is honoured though not listed
+    by ``ollama serve --help``.
+    """
+    env = ('OLLAMA_IGPU_ENABLE=1 OLLAMA_VULKAN=1 OLLAMA_MAX_LOADED_MODELS=1 '
+           f'OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE={settings.ollama.keep_alive} '
+           f'OLLAMA_CONTEXT_LENGTH={settings.ollama.context_tokens}')
+    return f'{env} nice -n 10 {ollama_binary(which, home)} serve'
+
+
+def ollama_setup_help(settings: AgentSettings,
+                      which: Callable[[str], Optional[str]] = shutil.which,
+                      home: Optional[Path] = None, start_command: Optional[str] = None) -> str:
+    """How to get the local provider going, naming the binary actually found.
+
+    ``start_command`` replaces the `ollama_start_command` line when given.
+    """
+    binary = ollama_binary(which, home)
+    start = start_command or ollama_start_command(settings, which, home)
+    return ('Ollama is the experimental offline option (Phase 0: about a minute per turn '
+            'on a Radeon 780M). To use it: install Ollama, start it in a terminal with\n'
+            f'  {start}\n'
+            'then\n'
+            f'  {binary} pull qwen3:4b\n'
+            f'  {binary} create {settings.ollama.model} -f <the Modelfile below>')
 
 
 class ProviderUnavailable(RuntimeError):

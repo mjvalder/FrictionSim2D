@@ -301,3 +301,39 @@ def test_consecutive_turns_share_the_worker_loop(qt_app, env):
     assert loop is not None and not loop.is_closed()
     pane.shutdown()
     assert loop.is_closed()  # closed on the worker thread as it finished
+
+
+def test_ollama_not_ready_shows_a_selectable_start_command(qt_app, env):
+    from PySide6.QtCore import Qt
+    s = AgentSettings(provider='ollama')
+    pane = AssistantPane(FakeSession([]), lambda: object(), s,
+                         save_settings=lambda *a, **k: None, ask_key=lambda: None,
+                         confirm_consent=lambda: True,
+                         status_fn=lambda _s: (False, 'Ollama is not running at here.'),
+                         start_command_fn=lambda _s: 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve')
+    _PANES.append(pane)
+    text = pane.status_label.text()
+    assert 'not running' in text and 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve' in text
+    assert pane.status_label.textInteractionFlags() & Qt.TextSelectableByMouse
+
+
+def test_ollama_ready_shows_no_start_command(qt_app, env):
+    s = AgentSettings(provider='ollama')
+    pane = AssistantPane(FakeSession([]), lambda: object(), s,
+                         save_settings=lambda *a, **k: None, ask_key=lambda: None,
+                         confirm_consent=lambda: True,
+                         status_fn=lambda _s: (True, 'Ollama ready (m).'),
+                         start_command_fn=lambda _s: 'SERVE-CMD')
+    _PANES.append(pane)
+    assert 'SERVE-CMD' not in pane.status_label.text()
+
+
+def test_switch_to_ollama_help_uses_the_start_command(qt_app, env):
+    pane = AssistantPane(FakeSession([]), lambda: object(), AgentSettings(),
+                         save_settings=lambda *a, **k: None, ask_key=lambda: None,
+                         confirm_consent=lambda: True,
+                         status_fn=lambda _s: (False, 'Ollama is not running at here.'),
+                         start_command_fn=lambda _s: 'SERVE-CMD')
+    _PANES.append(pane)
+    pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
+    assert 'SERVE-CMD' in pane.chat.toPlainText()

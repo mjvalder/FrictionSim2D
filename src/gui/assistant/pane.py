@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QInputDialog, QLabel,
                                QVBoxLayout, QWidget)
 
 from ...agent.changes import FsChangeSet
-from ...agent.providers import OLLAMA_SETUP_HELP, ollama_modelfile, ollama_status
+from ...agent.providers import (ollama_modelfile, ollama_setup_help, ollama_start_command,
+                                ollama_status)
 from ...agent.settings import AgentSettings, gemini_key, save_agent_settings, store_gemini_key
 from .cards import ChangeCard, FsCard
 from .worker import AgentWorker
@@ -46,7 +47,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                  save_settings=save_agent_settings, status_fn=ollama_status,
                  ask_key: Optional[Callable[[], Optional[str]]] = None,
                  confirm_consent: Optional[Callable[[], bool]] = None,
-                 store_key=store_gemini_key) -> None:
+                 store_key=store_gemini_key,
+                 start_command_fn=ollama_start_command) -> None:
         super().__init__(parent)
         self.session = session
         self.settings = settings
@@ -54,6 +56,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._save_settings = save_settings
         self._store_key = store_key
         self._status_fn = status_fn
+        self._start_command_fn = start_command_fn
+        self._ollama_ready = False
         self._ask_key = ask_key or self._default_ask_key
         self._confirm_consent = confirm_consent or self._default_confirm_consent
         self._busy = False
@@ -107,6 +111,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.cloud_badge = QLabel('cloud: data leaves this machine', self)
         self.status_label = QLabel('', self)
         self.status_label.setWordWrap(True)
+        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         status.addWidget(self.cloud_badge)
         status.addWidget(self.status_label, 1)
         layout.addLayout(status)
@@ -158,7 +163,11 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self.status_label.setText('key set' if gemini_key(self.settings)
                                       else 'no API key yet (you will be asked)')
         else:
-            self.status_label.setText(self._status_fn(self.settings)[1])
+            self._ollama_ready, message = self._status_fn(self.settings)
+            if not self._ollama_ready:
+                message += ('\nIf it is not running, start it in a terminal with:\n'
+                            + self._start_command_fn(self.settings))
+            self.status_label.setText(message)
 
     def _append(self, text: str, style: str = '') -> None:
         self._text_open = False
@@ -184,8 +193,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._refresh_header()
         self._append(f'Switched to {self.provider_box.currentText()} (history kept as text only).',
                      'color:gray')
-        if self.settings.provider == 'ollama' and 'ready' not in self.status_label.text():
-            self._append(OLLAMA_SETUP_HELP + '\n\nModelfile:\n' + ollama_modelfile(self.settings),
+        if self.settings.provider == 'ollama' and not self._ollama_ready:
+            help_text = ollama_setup_help(
+                self.settings, start_command=self._start_command_fn(self.settings))
+            self._append(help_text + '\n\nModelfile:\n' + ollama_modelfile(self.settings),
                          'color:gray')
 
     def _on_model_edited(self) -> None:
