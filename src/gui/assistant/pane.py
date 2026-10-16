@@ -23,8 +23,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QInput
                                QVBoxLayout, QWidget)
 
 from ...agent.changes import FsChangeSet
-from ...agent.providers import (ollama_modelfile, ollama_setup_help, ollama_start_command,
-                                ollama_status)
+from ...agent.providers import ollama_setup_help, ollama_start_command, ollama_status
 from ...agent.settings import AgentSettings, gemini_key, save_agent_settings, store_gemini_key
 from .cards import ChangeCard, FsCard
 from .worker import AgentWorker
@@ -247,8 +246,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         if self.settings.provider == 'ollama' and not self._ollama_ready:
             help_text = ollama_setup_help(
                 self.settings, start_command=self._start_command_fn(self.settings))
-            self._append(help_text + '\n\nModelfile:\n' + ollama_modelfile(self.settings),
-                         'color:gray')
+            self._append(help_text, 'color:gray')
 
     def _on_model_edited(self) -> None:
         provider = getattr(self.settings, self.settings.provider)

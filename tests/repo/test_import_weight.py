@@ -114,7 +114,7 @@ def test_reading_a_structure_does_load_ase(materials_path):
 NO_QT_MODULES = ['src.agent', 'src.agent.events', 'src.agent.providers',
                   'src.agent.runtime', 'src.agent.tools', 'src.agent.changes', 'src.agent.context',
                   'src.agent.tools.setup', 'src.agent.tools.materials',
-                  'src.agent.tools.workspace']
+                  'src.agent.tools.workspace', 'src.agent.ollama_server']
 
 #: Modules that must not pull pydantic-ai in: GUI startup and the agent core.
 #: Only src.agent.runtime (and providers, inside functions) may import it.
@@ -122,7 +122,7 @@ NO_PYDANTIC_AI_MODULES = ['src.agent', 'src.agent.events', 'src.agent.providers'
                            'src.agent.tools', 'src.gui.app',
                            'src.agent.changes', 'src.agent.context',
                            'src.agent.tools.setup', 'src.agent.tools.materials',
-                           'src.agent.tools.workspace']
+                           'src.agent.tools.workspace', 'src.agent.ollama_server']
 
 
 def _loaded_after_importing(module: str, banned: str) -> bool:

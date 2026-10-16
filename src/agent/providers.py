@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple
 
 import httpx
 
@@ -52,11 +52,11 @@ def ollama_setup_help(settings: AgentSettings,
     binary = ollama_binary(which, home)
     start = start_command or ollama_start_command(settings, which, home)
     return ('Ollama is the experimental offline option (Phase 0: about a minute per turn '
-            'on a Radeon 780M). To use it: install Ollama, start it in a terminal with\n'
+            'on a Radeon 780M). The Assistant starts it when needed; to start it '
+            'yourself, run\n'
             f'  {start}\n'
-            'then\n'
-            f'  {binary} pull qwen3:4b\n'
-            f'  {binary} create {settings.ollama.model} -f <the Modelfile below>')
+            'and fetch the model once with\n'
+            f'  {binary} pull {settings.ollama.model}')
 
 
 class ProviderUnavailable(RuntimeError):
@@ -79,6 +79,27 @@ def build_model(settings: AgentSettings, key_lookup=gemini_key):
     return OpenAIChatModel(settings.ollama.model, provider=OllamaProvider(base_url=base))
 
 
+def model_installed(model: str, installed: Iterable[str]) -> bool:
+    """Whether ``model`` is among ``installed`` (an untagged name means ``:latest``)."""
+    names = set(installed)
+    return model in names or (':' not in model and f'{model}:latest' in names)
+
+
+def ollama_models(settings: AgentSettings, http_get: Callable = httpx.get,
+                  timeout: float = 2.0) -> Optional[List[str]]:
+    """Installed model names from /api/tags; None when Ollama does not answer."""
+    url = settings.ollama.base_url.rstrip('/') + '/api/tags'
+    try:
+        response = http_get(url, timeout=timeout)
+        response.raise_for_status()
+        return [m.get('name', '') for m in response.json().get('models', [])
+                if m.get('name')]
+    except httpx.HTTPError:
+        return None
+    except (ValueError, AttributeError, TypeError):
+        return []
+
+
 def ollama_status(settings: AgentSettings, timeout: float = 2.0) -> Tuple[bool, str]:
     """Whether Ollama answers and has the configured model."""
     url = settings.ollama.base_url.rstrip('/') + '/api/tags'
@@ -88,18 +109,9 @@ def ollama_status(settings: AgentSettings, timeout: float = 2.0) -> Tuple[bool, 
     except httpx.HTTPError:
         return False, f'Ollama is not running at {settings.ollama.base_url}.'
     try:
-        names = {m.get('name', '').split(':')[0] for m in response.json().get('models', [])}
+        names = [m.get('name', '') for m in response.json().get('models', [])]
     except (ValueError, AttributeError, TypeError):
         return False, f'Ollama at {settings.ollama.base_url} did not answer like Ollama.'
-
-    if settings.ollama.model.split(':')[0] not in names:
+    if not model_installed(settings.ollama.model, names):
         return False, f'Ollama is running but has no model {settings.ollama.model}.'
-    return True, f'Ollama ready ({settings.ollama.model}).'
-
-
-def ollama_modelfile(settings: AgentSettings, base: str = 'qwen3:4b') -> str:
-    """A Modelfile that applies the configured thread and context limits."""
-    return (f'FROM {base}\n'
-            f'PARAMETER num_thread {settings.ollama.max_threads}\n'
-            f'PARAMETER num_ctx {settings.ollama.context_tokens}\n'
-            'PARAMETER temperature 0\n')
+    return True, f'Ollama ready ({settings.ollama.model})'

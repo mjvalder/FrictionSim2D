@@ -8,23 +8,29 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Iterable, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
 
 SETTINGS_NAME = 'agent.yaml'
 SECRETS_NAME = 'agent.secrets'
+#: The default local model, used as Ollama ships it (no derived Modelfile).
+OLLAMA_DEFAULT_MODEL = 'qwen3:4b'
+#: The derived model older agent.yaml files name; it was never published.
+OLLAMA_LEGACY_MODEL = 'fs2d-qwen3-4b'
 
 
 class OllamaSettings(BaseModel):
     """Local, experimental provider (Phase 0: ~67 s per cold turn on a 780M)."""
 
     base_url: str = 'http://localhost:11434'
-    model: str = 'fs2d-qwen3-4b'
+    model: str = OLLAMA_DEFAULT_MODEL
     max_threads: int = Field(8, ge=1)
     context_tokens: int = Field(8192, ge=2048)
     keep_alive: str = '2m'
+    #: A server the pane started is stopped after this long without a turn.
+    idle_minutes: int = Field(10, ge=1)
 
 
 class GeminiSettings(BaseModel):
@@ -44,6 +50,23 @@ class AgentSettings(BaseModel):
     #: Off: config/settings changes land in the Builder at once (with Undo).
     #: On: they wait as cards, like file operations always do.
     ask_before_apply: bool = False
+    #: Model requests one turn may make before it stops to save quota.
+    max_requests_per_turn: int = Field(50, ge=1)
+
+
+def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str]) -> Optional[str]:
+    """Swap the retired derived model for the default when it is not installed.
+
+    Only `OLLAMA_LEGACY_MODEL` is rewritten, never a model the user chose.
+    Returns a note for the user when the setting changed, else None.
+    """
+    names = set(installed)
+    legacy = OLLAMA_LEGACY_MODEL
+    if settings.ollama.model != legacy or {legacy, f'{legacy}:latest'} & names:
+        return None
+    settings.ollama.model = OLLAMA_DEFAULT_MODEL
+    return (f'Model {legacy} is not installed; using {OLLAMA_DEFAULT_MODEL} '
+            '(thinking off, temperature 0, set by the assistant itself).')
 
 
 def config_dir() -> Path:

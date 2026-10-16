@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip('pydantic_ai')
 
 from src.agent.providers import (ProviderUnavailable, build_model,  # noqa: E402
-                                 ollama_modelfile, ollama_status)
+                                 ollama_models, ollama_status)
 from src.agent.settings import AgentSettings  # noqa: E402
 
 
@@ -21,7 +21,7 @@ def test_gemini_model_built_with_key():
 
 def test_ollama_model_uses_openai_endpoint():
     model = build_model(AgentSettings(provider='ollama'))
-    assert model.model_name == 'fs2d-qwen3-4b'
+    assert model.model_name == 'qwen3:4b'
 
 
 def test_ollama_status_unreachable(monkeypatch):
@@ -37,15 +37,40 @@ def test_ollama_status_model_missing(monkeypatch):
         def raise_for_status(self):
             return None
         def json(self):
-            return {'models': [{'name': 'qwen3:4b'}]}
+            return {'models': [{'name': 'qwen3:8b'}]}
     monkeypatch.setattr(httpx, 'get', lambda *a, **k: Resp())
     ok, message = ollama_status(AgentSettings(provider='ollama'))
-    assert not ok and 'fs2d-qwen3-4b' in message
+    assert not ok and 'qwen3:4b' in message  # qwen3:8b is not qwen3:4b
 
 
-def test_modelfile_carries_limits():
-    text = ollama_modelfile(AgentSettings())
-    assert 'PARAMETER num_thread 8' in text and 'PARAMETER num_ctx 8192' in text
+def _tags(*names):
+    def get(url, timeout=None):
+        assert url.endswith('/api/tags')
+        return httpx.Response(200, json={'models': [{'name': n} for n in names]},
+                              request=httpx.Request('GET', url))
+    return get
+
+
+def test_ollama_models_lists_installed_names():
+    names = ollama_models(AgentSettings(), http_get=_tags('qwen3:4b', 'llama3.1:8b'))
+    assert names == ['qwen3:4b', 'llama3.1:8b']
+
+
+def test_ollama_models_none_when_down():
+    def down(url, timeout=None):
+        raise httpx.ConnectError('refused')
+    assert ollama_models(AgentSettings(), http_get=down) is None
+
+
+def test_ollama_status_ready_with_exact_model(monkeypatch):
+    monkeypatch.setattr(httpx, 'get', _tags('qwen3:4b'))
+    assert ollama_status(AgentSettings(provider='ollama')) == (True, 'Ollama ready (qwen3:4b)')
+
+
+def test_untagged_model_matches_latest():
+    from src.agent.providers import model_installed
+    assert model_installed('mymodel', ['mymodel:latest'])
+    assert not model_installed('qwen3:4b', ['qwen3:8b'])
 
 
 def test_ollama_status_not_ollama(monkeypatch):
@@ -94,3 +119,4 @@ def test_setup_help_carries_the_start_command(tmp_path):
                              home=tmp_path)
     assert 'OLLAMA_IGPU_ENABLE=1' in text and 'ollama serve' in text
     assert 'ollama pull qwen3:4b' in text
+    assert 'create' not in text and 'Modelfile' not in text
