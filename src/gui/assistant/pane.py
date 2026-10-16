@@ -23,12 +23,13 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBox
                                QVBoxLayout, QWidget)
 
 from ...agent.changes import FsChangeSet
+from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local
 from ...agent.providers import (model_installed, ollama_binary, ollama_models,
                                 ollama_start_command)
 from ...agent.settings import (AgentSettings, fallback_ollama_model, gemini_key,
                                save_agent_settings, store_gemini_key)
-from .cards import ChangeCard, FsCard
+from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     apply_requested = Signal(object, bool)
     fs_apply_requested = Signal(object)
+    #: A plot change's card was applied.
+    plot_apply_requested = Signal(object)
+    #: An applied line's "Show" link: switch to the tab with this title.
+    show_tab_requested = Signal(str)
     #: A config/settings change set to apply now (ask-before-applying is off).
     change_proposed = Signal(object)
     #: The Undo link of applied change ``id`` was clicked while enabled.
@@ -619,6 +624,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         if isinstance(change, FsChangeSet):
             card = FsCard(change)
             card.apply_requested.connect(self.fs_apply_requested.emit)
+        elif isinstance(change, PlotChange):
+            card = PlotCard(change)
+            card.apply_requested.connect(self.plot_apply_requested.emit)
         else:
             card = ChangeCard(change)
             card.apply_requested.connect(self.apply_requested.emit)
@@ -666,8 +674,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     # ------------------------------------------------------------ undo lines
 
-    def add_applied_line(self, entry_id: int, text: str) -> None:
-        """One chat line for an applied change, ending in its Undo link."""
+    def add_applied_line(self, entry_id: int, text: str, show_tab: str = '') -> None:
+        """One chat line for an applied change, ending in its Undo link --
+        and, with ``show_tab``, a "Show" link that switches to that tab."""
         self.chat.moveCursor(QTextCursor.End)
         cursor = self.chat.textCursor()
         cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
@@ -676,12 +685,26 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         cursor.insertText(f'✓ {text}  ', plain)
         self._undo_states[entry_id] = 'enabled'
         cursor.insertText(*self._undo_fragment(entry_id, 'enabled'))
+        if show_tab:
+            cursor.insertText('  ', QTextCharFormat())
+            cursor.insertText('Show', self._link_format(f'show:{show_tab}',
+                                                        f'Switch to the {show_tab} tab'))
         # A plain character after the link: text typed or streamed at the end
         # takes the format of the character before it, which must not be the
         # anchor.
         cursor.insertText(' ', QTextCharFormat())
         self.chat.setTextCursor(cursor)
         self._text_open = False
+
+    @staticmethod
+    def _link_format(href: str, tip: str) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor('#0b57d0'))
+        fmt.setToolTip(tip)
+        fmt.setAnchor(True)
+        fmt.setAnchorHref(href)
+        fmt.setFontUnderline(True)
+        return fmt
 
     @staticmethod
     def _undo_fragment(entry_id: int, state: str):
@@ -731,6 +754,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         return None
 
     def _on_anchor(self, url: QUrl) -> None:
+        if url.scheme() == 'show':
+            self.show_tab_requested.emit(url.path())
+            return
         if url.scheme() != 'undo':
             return
         try:

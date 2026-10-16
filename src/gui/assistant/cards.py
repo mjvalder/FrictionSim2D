@@ -64,3 +64,17 @@ class FsCard(_Card):
         self.apply_button.clicked.connect(lambda: self.apply_requested.emit(self.change))
         for button in (self.apply_button, self.discard_button):
             self.buttons.addWidget(button)
+
+
+class PlotCard(_Card):
+    """A plot for the Plots tab."""
+
+    apply_requested = Signal(object)
+    discarded = Signal(object)
+
+    def __init__(self, change, parent=None) -> None:
+        super().__init__(change, parent)
+        self.apply_button = QPushButton('Add plot' if change.ok else 'Add anyway', self)
+        self.apply_button.clicked.connect(lambda: self.apply_requested.emit(self.change))
+        for button in (self.apply_button, self.discard_button):
+            self.buttons.addWidget(button)

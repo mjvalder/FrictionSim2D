@@ -683,3 +683,145 @@ def test_undo_of_a_second_change_restores_the_first_highlight(window):
     assert editor.highlight() == f'{temp!r} → 260'
     window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
     assert window.form.highlights()[('general', 'temp')] == f'{temp!r} → 250'
+
+
+# ---------------------------------------------------------------- plots
+
+def _plot_window(window):
+    """``window`` with two datasets in its workspace and a recorded render hook."""
+    for name in ('campaign', 'other'):
+        outputs = window.workspace.root / name / 'outputs'
+        outputs.mkdir(parents=True, exist_ok=True)
+        (outputs / 'output_full_100x100y.json').write_text('{"runs": []}')
+    renders = []
+    window._render_plot = lambda: renders.append(  # pylint: disable=protected-access
+        window.plots_pane.plot_list.currentRow())
+    return renders
+
+
+def _plot(window, datasets=('campaign',), plot_type='summary', fields=None):
+    from src.agent.plot_changes import build_plot_change
+    return build_plot_change(window.assistant_deps(), 'plot', plot_type,
+                             fields or {'y_axis': 'cof'}, list(datasets))
+
+
+def test_deps_carry_the_plot_document(window):
+    _plot_window(window)
+    deps = window.assistant_deps()
+    assert deps.plot_document['data_dirs'] == [] and deps.plot_document['plots'] == []
+
+
+def test_direct_plot_apply_adds_dataset_and_plot_and_renders(window):
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window))
+    document = window.plots_pane.document()
+    assert document.data_dirs == [str(window.workspace.root / 'campaign')]
+    assert document.labels == ['campaign']
+    assert [p.plot_type for p in document.plots] == ['summary']
+    assert document.plots[0].datasets == ['campaign']
+    assert renders == [0]  # the new row, selected before the render
+    assert window.top_tabs.currentIndex() == 0  # the assistant does not switch tabs
+    text = pane.chat.toPlainText()
+    assert 'Added plot: summary on campaign' in text and 'Show' in text
+    assert window._assistant_undo[-1].plots_before is not None  # pylint: disable=protected-access
+
+
+def test_plot_apply_reuses_a_loaded_dataset_and_selects_the_new_row(window):
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    window.top_tabs.setCurrentIndex(2)
+    pane.receive_proposal(_plot(window))
+    pane.receive_proposal(_plot(window, ('campaign', 'other'), 'timeseries'))
+    document = window.plots_pane.document()
+    assert document.labels == ['campaign', 'other'] and len(document.plots) == 2
+    assert renders == [0, 1] and window.plots_pane.plot_list.currentRow() == 1
+    assert 'Show' not in pane.chat.toPlainText()  # the Plots tab is in front
+
+
+def test_show_link_switches_to_the_plots_tab(window):
+    from PySide6.QtCore import QUrl
+    _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window))
+    pane.chat.anchorClicked.emit(QUrl('show:Plots'))
+    assert window.top_tabs.currentWidget() is window.plots_page
+
+
+def test_plot_undo_restores_the_plots_document(window):
+    from PySide6.QtCore import QUrl
+    _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window))
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    pane.chat.anchorClicked.emit(QUrl(f'undo:{entry}'))
+    document = window.plots_pane.document()
+    assert document.data_dirs == [] and document.plots == []
+    assert pane.undo_state(entry) == 'undone'
+
+
+def test_plot_undo_asks_before_reverting_later_plot_edits(window):
+    _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window))
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    window.plots_pane.add_plot('rank_friction')  # the user's own edit since
+    asked = []
+    window._confirm_undo = lambda text: asked.append(text) or False  # pylint: disable=protected-access
+    window._undo_assistant_change(entry)  # pylint: disable=protected-access
+    assert asked and 'Plots' in asked[0]
+    assert len(window.plots_pane.document().plots) == 2
+    window._confirm_undo = lambda text: True  # pylint: disable=protected-access
+    window._undo_assistant_change(entry)  # pylint: disable=protected-access
+    assert window.plots_pane.document().plots == []
+
+
+def test_plot_card_in_ask_mode_applies(window):
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    _card_mode(pane)
+    change = _plot(window)
+    pane.receive_proposal(change)
+    assert change.id in pane.cards and window.plots_pane.document().plots == []
+    pane.cards[change.id].apply_button.click()
+    assert pane.cards == {} and len(window.plots_pane.document().plots) == 1
+    assert renders == [0] and 'Added plot: summary on campaign' in pane.chat.toPlainText()
+
+
+def test_busy_user_gets_the_plot_as_a_card(window):
+    _plot_window(window)
+    pane = _open_assistant(window)
+    window._user_busy = lambda: True  # pylint: disable=protected-access
+    change = _plot(window)
+    pane.receive_proposal(change)
+    assert change.id in pane.cards and window.plots_pane.document().plots == []
+
+
+def test_saving_the_config_keeps_the_plot_undo(window, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+    _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5])]))
+    config_entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    pane.receive_proposal(_plot(window))
+    plot_entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName',
+                        lambda *a, **k: (str(tmp_path / 'saved.ini'), ''))
+    window._save_config()  # pylint: disable=protected-access
+    assert pane.undo_state(config_entry) == 'locked'
+    assert pane.undo_state(plot_entry) == 'enabled'
+    window._undo_assistant_change(plot_entry)  # pylint: disable=protected-access
+    assert window.plots_pane.document().plots == []
+
+
+def test_an_invalid_plot_being_edited_does_not_break_the_turn_or_the_apply(window):
+    from src.gui.controllers.plot_document import COMMON_SECTION
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    window.plots_pane.add_plot('summary')
+    window.plots_pane._editors[0].values[COMMON_SECTION]['x_limits'] = 'abc'  # pylint: disable=protected-access
+    deps = window.assistant_deps()
+    assert deps.plot_document is None
+    pane.receive_proposal(_plot(window))
+    assert renders == [] and 'Not added' in pane.chat.toPlainText()

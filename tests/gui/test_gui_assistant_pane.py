@@ -765,3 +765,51 @@ def test_shutdown_prunes_finished_orphan_threads(qt_app, env):
     pane = _pane([])
     pane.shutdown()
     assert stale not in pane_module._ORPHAN_THREADS
+
+
+def _plot_change(tmp_path, mock_settings):
+    from src.agent.plot_changes import build_plot_change
+    deps = make_deps(tmp_path, mock_settings)
+    outputs = deps.roots.workspace / 'campaign' / 'outputs'
+    outputs.mkdir(parents=True)
+    (outputs / 'output_full_100x100y.json').write_text('{"runs": []}')
+    return build_plot_change(deps, 'COF vs load', 'summary', {'y_axis': 'cof'}, ['campaign'])
+
+
+def test_plot_proposal_is_handed_over_without_a_card(qt_app, env, tmp_path, mock_settings):
+    change = _plot_change(tmp_path, mock_settings)
+    pane = _pane([TurnEvent('proposal', payload=change), TurnEvent('done', payload=1)])
+    seen = []
+    pane.change_proposed.connect(seen.append)
+    pane.send('plot it')
+    _run_until(pane.turn_finished)
+    assert seen == [change] and pane.cards == {}
+
+
+def test_plot_card_in_ask_mode_requests_a_plot_apply(qt_app, env, tmp_path, mock_settings):
+    change = _plot_change(tmp_path, mock_settings)
+    pane = _pane([TurnEvent('proposal', payload=change), TurnEvent('done', payload=1)],
+                 settings=AgentSettings(ask_before_apply=True))
+    configs, plots = [], []
+    pane.apply_requested.connect(lambda c, new: configs.append(c))
+    pane.plot_apply_requested.connect(plots.append)
+    pane.send('plot it')
+    _run_until(pane.turn_finished)
+    card = pane.cards[change.id]
+    assert 'Plot: summary' in card.body.text() and 'workspace:/campaign' in card.body.text()
+    card.apply_button.click()
+    assert plots == [change] and configs == []
+
+
+def test_applied_line_can_offer_a_show_link(qt_app, env):
+    from PySide6.QtCore import QUrl
+    pane = _pane([])
+    shown, undone = [], []
+    pane.show_tab_requested.connect(shown.append)
+    pane.undo_requested.connect(undone.append)
+    pane.add_applied_line(1, 'Added plot: summary on campaign', show_tab='Plots')
+    assert 'Show' in pane.chat.toPlainText()
+    pane.chat.anchorClicked.emit(QUrl('show:Plots'))
+    assert shown == ['Plots']
+    pane.set_undo_state(1, 'undone')  # the Show link is not the Undo control
+    assert 'Show' in pane.chat.toPlainText() and undone == []

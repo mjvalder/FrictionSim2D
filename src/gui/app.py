@@ -15,7 +15,7 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
@@ -79,8 +79,9 @@ class AssistantUndo:
     """
 
     id: int
-    document: ConfigDocument
-    settings_document: SettingsDocument
+    #: None for a plot change, which touches only the Plots tab.
+    document: Optional[ConfigDocument] = None
+    settings_document: Optional[SettingsDocument] = None
     config_keys: List[Tuple[str, str]] = field(default_factory=list)
     settings_keys: List[Tuple[str, str]] = field(default_factory=list)
     #: Highlights this change replaced (the key was already marked by an
@@ -95,6 +96,11 @@ class AssistantUndo:
     #: revert edits the user made since.
     after: Optional[Tuple[str, dict, dict]] = None
     after_fingerprint: str = ''
+    #: A plot change: the Plots tab's document before it (a `PlotDocument`),
+    #: and as a dict right after it, to tell whether Undo would also revert
+    #: plot edits the user made since.
+    plots_before: Any = None
+    plots_after: Optional[dict] = None
 
 
 def _merge_highlights(form: ConfigForm, new: Dict[Tuple[str, str], str]):
@@ -316,6 +322,11 @@ class MainWindow(QMainWindow):
         self.plots_pane = PlotsPane(self.workspace, self)
         return self.plots_pane
 
+    def _render_plot(self) -> None:
+        """Render the Plots tab's preview (replaced in tests, which must never
+        start the plot worker)."""
+        self.plots_pane.render()
+
     def _on_top_tab_changed(self, index: int) -> None:
         if hasattr(self._assistant_pane, 'set_context_label'):
             self._assistant_pane.set_context_label(self.top_tabs.tabText(index))
@@ -426,6 +437,9 @@ class MainWindow(QMainWindow):
                              self.assistant_dock, ollama_server=OllamaServer())
         pane.apply_requested.connect(self._apply_assistant_change)
         pane.fs_apply_requested.connect(self._apply_assistant_fs_change)
+        pane.plot_apply_requested.connect(
+            lambda change: self._apply_assistant_plot_change(change, from_card=True))
+        pane.show_tab_requested.connect(self._show_tab)
         pane.change_proposed.connect(self._apply_assistant_change_now)
         pane.undo_requested.connect(self._undo_assistant_change)
         pane.accept_requested.connect(self._accept_assistant_changes)
@@ -441,7 +455,70 @@ class MainWindow(QMainWindow):
         self.form.commit()
         roots = SearchRoots(self.workspace.root, find_examples_dir())
         return snapshot_deps(document or self.document, self.settings_document,
-                             self.settings, roots)
+                             self.settings, roots, plot_document=self._plots_state())
+
+    def _plots_state(self) -> Optional[dict]:
+        """The Plots tab's document as a dict (None before the tab exists)."""
+        if getattr(self, 'plots_pane', None) is None:
+            return None
+        try:
+            return self.plots_pane.document().model_dump(mode='json', exclude_unset=True)
+        except ValueError:  # a plot being edited does not validate yet
+            logger.info('the Plots document does not validate; not shown to the assistant')
+            return None
+
+    def _show_tab(self, title: str) -> None:
+        for index in range(self.top_tabs.count()):
+            if self.top_tabs.tabText(index) == title:
+                self.top_tabs.setCurrentIndex(index)
+                return
+
+    def _apply_assistant_plot_change(self, change, from_card: bool = False) -> None:
+        """Add a proposed plot (and the datasets it needs) to the Plots tab,
+        select it and render its preview; offer Undo. The tab is not switched."""
+        # pylint: disable=import-outside-toplevel
+        from ..agent.plot_changes import apply_plot_change
+        from ..postprocessing.plot_config import PlotDocument
+        pane = self._assistant_pane
+        if not from_card and self._user_busy():
+            pane.queue_card(change, 'Not added yet: kept as a card because you were busy. '
+                                    'Add it when ready.')
+            return
+        try:
+            before = self.plots_pane.document()
+            new, _added = apply_plot_change(
+                change, before.model_dump(mode='json', exclude_unset=True), self.workspace.root)
+            document = PlotDocument.model_validate(new)
+        except ValueError as exc:  # a refused dataset, or a plot that no longer validates
+            message = f'Not added: {change.title}: {exc}'
+            if from_card:
+                pane.finish_card(change, message, error=True)
+            else:
+                pane.note(message, error=True)
+            return
+        if from_card:
+            pane.finish_card(change, '')
+        self.plots_pane.set_document(document)
+        self.plots_pane.plot_list.setCurrentRow(len(document.plots) - 1)
+        self._render_plot()
+        undo = AssistantUndo(id=next(self._assistant_ids), plots_before=before,
+                             plots_after=self._plots_state())
+        self._assistant_undo.append(undo)
+        hidden = self.top_tabs.currentWidget() is not self.plots_page
+        pane.add_applied_line(undo.id, change.summary(), show_tab='Plots' if hidden else '')
+        self._refresh_undo_states()
+        self.statusBar().showMessage(change.summary())
+
+    def _undo_plot_change(self, entry: AssistantUndo) -> None:
+        """Put the Plots tab's document back as it was before ``entry``."""
+        if self._plots_state() != entry.plots_after and not self._confirm_undo(
+                'Undo also reverts your later edits in the Plots tab. Undo anyway?'):
+            return
+        self._assistant_undo.pop()
+        self.plots_pane.set_document(entry.plots_before.model_copy(deep=True))
+        self._assistant_pane.set_undo_state(entry.id, 'undone')
+        self._refresh_undo_states()
+        self.statusBar().showMessage('Undid the assistant\'s last plot.')
 
     def _resync_family_and_mode(self) -> None:
         """Point both selectors at the document's model without re-entering handlers."""
@@ -509,6 +586,10 @@ class MainWindow(QMainWindow):
         """
         # pylint: disable=import-outside-toplevel
         from ..agent.changes import ToolInputError, apply_changeset, build_changeset
+        from ..agent.plot_changes import PlotChange
+        if isinstance(change, PlotChange):
+            self._apply_assistant_plot_change(change)
+            return
         pane = self._assistant_pane
         self.form.commit()  # a value still in an editor counts as a Builder edit
         if self._user_busy():
@@ -621,6 +702,9 @@ class MainWindow(QMainWindow):
         """Put the Builder back as it was before the most recent change."""
         if not self._assistant_undo or self._assistant_undo[-1].id != entry_id:
             return
+        if self._assistant_undo[-1].plots_before is not None:
+            self._undo_plot_change(self._assistant_undo[-1])
+            return
         later = self._edits_since(self._assistant_undo[-1])
         if later and not self._confirm_undo(
                 f'Undo also reverts your later edits to {later}. Undo anyway?'):
@@ -697,11 +781,18 @@ class MainWindow(QMainWindow):
 
     def _end_assistant_undo(self, lock: bool = True) -> None:
         """Forget the undo records: the config was saved or replaced, or the
-        chat holding their Undo links was cleared. ``lock`` greys those links."""
+        chat holding their Undo links was cleared. ``lock`` greys those links.
+
+        A config or settings write (``lock``) leaves plot changes undoable:
+        their Undo restores only the Plots tab, which no such write touches."""
+        kept = [e for e in self._assistant_undo if lock and e.plots_before is not None]
         if lock and hasattr(self._assistant_pane, 'set_undo_state'):
             for entry in self._assistant_undo:
-                self._assistant_pane.set_undo_state(entry.id, 'locked')
-        self._assistant_undo = []
+                if entry.plots_before is None:
+                    self._assistant_pane.set_undo_state(entry.id, 'locked')
+        self._assistant_undo = kept
+        if kept and hasattr(self._assistant_pane, 'set_undo_state'):
+            self._refresh_undo_states()
 
     def _apply_assistant_fs_change(self, change) -> None:
         from ..agent.changes import apply_fs_changeset  # pylint: disable=import-outside-toplevel
