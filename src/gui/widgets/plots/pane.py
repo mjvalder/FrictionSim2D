@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel,
 
 from ...controllers.plot_document import COMMON_SECTION, PlotEditorDocument
 from ...controllers.plots import PlotController, PlotFigure, PlotRequest
+from ...datasets import DATASETS_DIRNAME, discover_datasets
 from ...workspace import Workspace
 from ..form import ConfigForm
 
@@ -31,34 +32,6 @@ logger = logging.getLogger(__name__)
 __all__ = ['PlotsPane', 'discover_datasets', 'DATASETS_DIRNAME']
 
 _NO_PRESET = '(none)'
-
-#: Where `aiida export-results --output-dir ...` is expected to drop a set.
-DATASETS_DIRNAME = '_datasets'
-
-
-def discover_datasets(workspace: Workspace) -> List[Path]:
-    """Every directory that looks like a plottable dataset.
-
-    A dataset is a directory with an `outputs/` holding at least one
-    `output_full_*.json` -- the same thing `Plotter` accepts as a `data_dir`.
-    Two places are searched: the workspace root (where `run` writes its
-    simulation packages) and `<workspace>/.preview/_datasets/`, which is where
-    `FrictionSim2D aiida export-results --output-dir ...` puts a set pulled
-    back out of the local store.
-    """
-    roots = [workspace.root, workspace.preview_dir / DATASETS_DIRNAME]
-    found: List[Path] = []
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for candidate in sorted(root.iterdir()):
-            if not candidate.is_dir():
-                continue
-            outputs = candidate / 'outputs'
-            if outputs.is_dir() and any(outputs.glob('output_full_*.json')):
-                if candidate not in found:
-                    found.append(candidate)
-    return found
 
 
 class PlotsPane(QWidget):  # pylint: disable=too-many-instance-attributes

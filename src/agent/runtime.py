@@ -26,7 +26,7 @@ from .prompts import build_system_prompt, estimate_tokens
 from .providers import ProviderUnavailable, build_model
 from .sandbox import SandboxError, redact
 from .settings import AgentSettings
-from .tools import compact, materials, setup, workspace
+from .tools import analysis, compact, materials, setup, workspace
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,28 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
                         dest_dir: str = 'materials') -> str:
         """Propose copying a found structure or potential file into the workspace."""
         return _call(ctx, workspace.propose_copy_in, source, dest_dir)
+
+    @agent.tool
+    def find_result_sets(ctx: RunContext[AgentDeps]) -> str:
+        """List result datasets (outputs/output_full_*.json) and simulation roots."""
+        return _call(ctx, analysis.find_result_sets)
+
+    @agent.tool
+    def summarise_results(ctx: RunContext[AgentDeps], path: str,
+                          material: Optional[str] = None, size: Optional[str] = None,
+                          max_rows: int = 30) -> str:
+        """Status counts and a run table for a dataset or simulation root."""
+        return _call(ctx, analysis.summarise_results, path, material, size, max_rows)
+
+    @agent.tool
+    def plot_types(ctx: RunContext[AgentDeps]) -> str:
+        """The plot types, one line each."""
+        return _call(ctx, analysis.plot_types)
+
+    @agent.tool
+    def plot_schema(ctx: RunContext[AgentDeps], plot_type: str) -> str:
+        """The fields one plot type accepts."""
+        return _call(ctx, analysis.plot_schema, plot_type)
 
 
 def _retry_after(exc: ModelHTTPError) -> float:

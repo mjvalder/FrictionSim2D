@@ -121,7 +121,9 @@ def test_every_tool_registered():
                      'make_sweep', 'suggest_values', 'setup_afm', 'setup_sheet',
                      'setup_indent', 'setup_pes_tip', 'setup_pes_sheet',
                      'search_structures', 'search_potentials', 'workspace_overview',
-                     'describe_run', 'propose_mkdir', 'propose_copy_in'}
+                     'describe_run', 'propose_mkdir', 'propose_copy_in',
+                     'find_result_sets', 'summarise_results', 'plot_types',
+                     'plot_schema'}
 
 
 def test_instructions_survive_switch(deps):
