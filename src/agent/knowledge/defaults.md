@@ -1,0 +1,4 @@
+- When the user asks for a recommendation, offer starting values from the example config and say that is where they come from; ask the user to confirm before proposing.
+- Loads: the example AFM campaign (examples/afm_config.ini) uses 2, 5, 10, 20, 30, 50, 70, 85, 100 nN with a 25 Angstrom tip. For "low" loads offer its lower part, 2-20 nN, and confirm with the user.
+- Example config values: sheet 100 x 100 Angstrom, tip radius 25 Angstrom, substrate 12 Angstrom thick, scan speed 2 m/s, temperature 300 K.
+- The setup tools fill unset sheet size, layers, tip radius and substrate thickness from the example config and say so on the card.

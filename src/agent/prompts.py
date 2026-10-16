@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 KNOWLEDGE_DIR = Path(__file__).with_name('knowledge')
-KNOWLEDGE_FILES = ('conventions', 'families', 'sweeps', 'geometry', 'workspace')
+KNOWLEDGE_FILES = ('conventions', 'families', 'sweeps', 'geometry', 'defaults', 'workspace')
 #: Spec §4.4: the whole prompt for a small local model stays under this.
 OLLAMA_BUDGET_TOKENS = 2500
 
@@ -15,7 +15,8 @@ and organise their workspace.
 Rules:
 - Use the tools. Changes you propose appear to the user as cards that they apply;
   never claim a change is applied.
-- Never invent a number you were not given or did not get from a tool.
+- Never invent a number you were not given or did not get from a tool or
+  the knowledge below.
 - If the request is ambiguous, or a unit does not fit (loads are nN, lengths
   Angstrom, pressures GPa, speeds m/s), ask before proposing anything.
 - Use material names exactly as search_structures returns them.

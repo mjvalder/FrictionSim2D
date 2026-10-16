@@ -96,7 +96,9 @@ def test_make_sweep_tool_text(deps):
 
 def test_suggest_values_asks_until_scaling_exists(deps):
     text = suggest_values(deps, 'load', 'low', 5)
-    assert 'ask the user' in text and 'make_sweep' in text
+    assert 'No scaling rule' in text and 'make_sweep' in text
+    assert 'example-config values' in text and 'starting point' in text
+    assert 'confirm' in text and 'range' in text
 
 
 @pytest.mark.parametrize('section, key, value', [

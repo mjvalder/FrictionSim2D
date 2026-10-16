@@ -104,3 +104,78 @@ def test_tip_left_alone_when_set_unless_named(deps):
     setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
                                     tip_material='Si'))
     assert _ops(deps)[('tip', 'mat')] == 'Si' and ('sub', 'mat') not in _ops(deps)
+
+
+_GEOMETRY = ('tip.r', 'sub.thickness', '2D.x', '2D.y', '2D.layers')
+
+
+def test_afm_fills_geometry_from_the_example_config(deps):
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                    loads_nN=[5, 10, 20, 30, 50]))
+    cs = deps.pending[-1]
+    assert not [i for i in cs.issues if i.startswith(_GEOMETRY)], cs.issues
+    ops = _ops(deps)
+    assert (ops[('2D', 'x')], ops[('2D', 'y')], ops[('2D', 'layers')]) == (100, 100, [1])
+    assert (ops[('tip', 'r')], ops[('sub', 'thickness')]) == (25, 12)
+    note = next(n for n in cs.notes if 'examples/afm_config.ini' in n)
+    for text in ('2D.x=100', '2D.y=100', '2D.layers=[1]', 'tip.r=25', 'sub.thickness=12',
+                 'change if needed'):
+        assert text in note
+
+
+def test_request_and_document_values_beat_the_example_defaults(deps):
+    deps.document.set('tip', 'r', 40)
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                    size_A=(150, 120), layers=[2]))
+    ops = _ops(deps)
+    assert (ops[('2D', 'x')], ops[('2D', 'y')], ops[('2D', 'layers')]) == (150, 120, [2])
+    assert ('tip', 'r') not in ops
+    note = next(n for n in deps.pending[-1].notes if 'examples/afm_config.ini' in n)
+    assert '2D.x' not in note and 'tip.r' not in note and 'sub.thickness=12' in note
+
+
+def test_request_tip_radius_beats_the_default(deps):
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw', tip_radius_A=30))
+    assert _ops(deps)[('tip', 'r')] == 30
+
+
+@pytest.mark.parametrize('setup, request_, source, expected', [
+    ('setup_sheet', SheetSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                      pressures_GPa=[1]),
+     'sheet_config.ini', {('2D', 'x'): 100, ('2D', 'layers'): [3]}),
+    ('setup_indent', None, 'indent_config.ini', {('2D', 'x'): 60, ('tip', 'r'): 15}),
+    ('setup_pes_tip', PESTipSetupRequest(materials=['h-MoS2'], potential_type='sw', load_nN=2),
+     'pes_tip_config.ini', {('2D', 'x'): 60, ('tip', 'r'): 25}),
+    ('setup_pes_sheet', None, 'pes_sheet_config.ini', {('2D', 'x'): 30, ('2D', 'layers'): [2]}),
+])
+def test_each_model_uses_its_own_example(deps, setup, request_, source, expected):
+    from src.agent.tools import setup as tools
+    if request_ is None:
+        cls = {'setup_indent': tools.IndentSetupRequest,
+               'setup_pes_sheet': tools.PESSheetSetupRequest}[setup]
+        request_ = cls(materials=['h-MoS2'], potential_type='sw')
+    getattr(tools, setup)(deps, request_)
+    cs = deps.pending[-1]
+    ops = _ops(deps)
+    for key, value in expected.items():
+        assert ops[key] == value
+    assert any(f'examples/{source}' in n for n in cs.notes)
+    assert not [i for i in cs.issues if i.startswith(_GEOMETRY)], cs.issues
+
+
+def test_example_defaults_match_the_example_files():
+    """The table is copied from examples/*.ini: keep it honest."""
+    import configparser
+    import json
+    from pathlib import Path
+    from src.agent.tools.setup import EXAMPLE_DEFAULTS
+    examples = Path(__file__).resolve().parents[2] / 'examples'
+    for _model, (source, values) in EXAMPLE_DEFAULTS.items():
+        parser = configparser.ConfigParser(inline_comment_prefixes=('#',))
+        parser.read(examples / Path(source).name)
+        for (section, key), value in values.items():
+            raw = json.loads(parser[section][key])
+            if key == 'layers':
+                assert set(value) <= set(raw), (source, key)
+            else:
+                assert raw == value, (source, section, key)

@@ -188,10 +188,12 @@ def make_sweep_tool(deps, start: float, stop: float, n: int,  # pylint: disable=
 
 def suggest_values(deps, quantity: str, descriptor: Literal['low', 'mid', 'high'],  # pylint: disable=unused-argument
                    n: int, spacing: Literal['linear', 'log'] = 'linear') -> str:  # pylint: disable=unused-argument
-    """Descriptor -> values. No scaling rules exist yet (spec §4.3), so it says to ask."""
+    """Descriptor -> values. No scaling rules exist yet (spec §4.3): point at the examples."""
     return (f"No scaling rule for '{descriptor} {quantity}' yet: what counts as "
-            f"{descriptor} depends on tip size, model size and speed; ask the user "
-            f"for a range (min, max and unit), then call make_sweep with n={n}.")
+            f"{descriptor} depends on tip size, model size and speed. Offer the "
+            f"example-config values from the knowledge (defaults) as a starting point, "
+            f"say they come from the example config, and ask the user to confirm them "
+            f"or give a range (min, max and unit); then call make_sweep with n={n}.")
 
 
 class _SetupBase(BaseModel):
@@ -275,24 +277,56 @@ FIELD_MAP = {
 }
 
 
+#: Model -> (source example, {(section, key): value}): geometry a blank
+#: document leaves unset, copied from the example configs so a setup can
+#: validate without the model inventing numbers. Filled only when neither the
+#: request nor the document has a value; the card names the source.
+#: tests/agent/test_tools_recipes.py checks every value against its file.
+EXAMPLE_DEFAULTS = {
+    # examples/afm_config.ini sweeps layers [1,2,3]; one layer is the default here.
+    'afm': ('examples/afm_config.ini', {
+        ('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [1],
+        ('tip', 'r'): 25, ('sub', 'thickness'): 12}),
+    # examples/sheet_config.ini: three layers is SheetOnSheetSimulation.MIN_LAYERS.
+    'sheetonsheet': ('examples/sheet_config.ini', {
+        ('2D', 'x'): 100, ('2D', 'y'): 100, ('2D', 'layers'): [3]}),
+    # examples/indent_config.ini sweeps layers [1, 2]; one layer is the default here.
+    'indent': ('examples/indent_config.ini', {
+        ('2D', 'x'): 60, ('2D', 'y'): 60, ('2D', 'layers'): [1],
+        ('tip', 'r'): 15, ('sub', 'thickness'): 12}),
+    # examples/pes_tip_config.ini
+    'pes_tip': ('examples/pes_tip_config.ini', {
+        ('2D', 'x'): 60, ('2D', 'y'): 60, ('2D', 'layers'): [1],
+        ('tip', 'r'): 25, ('sub', 'thickness'): 12}),
+    # examples/pes_sheet_config.ini: a frozen bottom layer + a scanned top one.
+    'pes_sheet': ('examples/pes_sheet_config.ini', {
+        ('2D', 'x'): 30, ('2D', 'y'): 30, ('2D', 'layers'): [2]}),
+}
+
+
 #: Request field -> (config section, what the card calls it, extra ops' values).
 _TIP_PARTS = (('tip_material', 'tip', 'tip', {}),
               ('substrate_material', 'sub', 'substrate', {'amorph': 'a'}))
 _MATERIAL_KEYS = ('mat', 'cif_path', 'pot_path', 'pot_type')
 
 
-def _tip_and_substrate_ops(deps, model: str, request: BaseModel) -> Tuple[List[Op], List[str]]:
+def _probe(deps, model: str):
+    """A copy of the Builder's document switched to ``model``."""
+    probe = copy.deepcopy(deps.document)
+    try:
+        probe.set_model(model)
+    except DocumentError as exc:
+        raise ToolInputError(str(exc)) from exc
+    return probe
+
+
+def _tip_and_substrate_ops(deps, probe, request: BaseModel) -> Tuple[List[Op], List[str]]:
     """Point [tip] (and [sub]) at a material when they are unset or one is named.
 
     A blank AFM-family document has no tip or substrate material, so without
     this no setup could ever validate. The defaults (Si tip, amorphous Si
     substrate) are what examples/afm_config.ini uses.
     """
-    probe = copy.deepcopy(deps.document)
-    try:
-        probe.set_model(model)
-    except DocumentError as exc:
-        raise ToolInputError(str(exc)) from exc
     ops, described = [], []
     for field_name, section, label, extra in _TIP_PARTS:
         name = getattr(request, field_name, None)
@@ -319,11 +353,30 @@ def _tip_and_substrate_ops(deps, model: str, request: BaseModel) -> Tuple[List[O
     return ops, notes
 
 
+def _example_default_ops(probe, model: str, ops: List[Op]) -> Tuple[List[Op], List[str]]:
+    """Fill geometry still unset after ``ops`` from the model's example config."""
+    source, values = EXAMPLE_DEFAULTS.get(model, ('', {}))
+    proposed = {(op.section, op.key) for op in ops if op.kind == 'set'}
+    filled, described = [], []
+    for (section, key), value in values.items():
+        spec = probe.section(section)
+        if (spec is None or key not in spec.field_map() or not probe.has_section(section)
+                or (section, key) in proposed
+                or probe.get(section, key) not in (None, '', [])):
+            continue
+        filled.append(Op('set', section, key, copy.deepcopy(value)))
+        described.append(f'{section}.{key}={value}')
+    if not described:
+        return [], []
+    return filled, [f"defaults from {source} -- change if needed: {', '.join(described)}"]
+
+
 def _setup(deps, model: str, request: _SetupBase, title: str) -> str:
     ops = [] if deps.document.model == model else [Op('set_model', value=model)]
     material, notes = material_ops(deps, request.materials, request.potential_type)
     ops += material
-    tip_ops, tip_notes = _tip_and_substrate_ops(deps, model, request)
+    probe = _probe(deps, model)
+    tip_ops, tip_notes = _tip_and_substrate_ops(deps, probe, request)
     ops += tip_ops
     notes += tip_notes
     for name, (section, key) in FIELD_MAP.items():
@@ -334,6 +387,9 @@ def _setup(deps, model: str, request: _SetupBase, title: str) -> str:
         ops.append(Op('set', section, key, list(value) if is_seq else value))
     if request.size_A is not None:
         ops += [Op('set', '2D', 'x', request.size_A[0]), Op('set', '2D', 'y', request.size_A[1])]
+    default_ops, default_notes = _example_default_ops(probe, model, ops)
+    ops += default_ops
+    notes += default_notes
     return deps.propose(build_changeset(deps, title, ops, notes))
 
 
