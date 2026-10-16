@@ -118,6 +118,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._turn_id = 0  # events from any other turn are dropped
         self.cards = {}
         self._undo_states = {}
+        self._undo_tips = {}  # entry id -> its enabled Undo's tooltip, when not the default
         self._build_ui()
         self._thread = QThread(self)
         self._worker = AgentWorker(session)
@@ -674,9 +675,11 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     # ------------------------------------------------------------ undo lines
 
-    def add_applied_line(self, entry_id: int, text: str, show_tab: str = '') -> None:
+    def add_applied_line(self, entry_id: int, text: str, show_tab: str = '',
+                         undo_tip: str = '') -> None:
         """One chat line for an applied change, ending in its Undo link --
-        and, with ``show_tab``, a "Show" link that switches to that tab."""
+        and, with ``show_tab``, a "Show" link that switches to that tab.
+        ``undo_tip`` replaces the enabled Undo's tooltip (default: the Builder's)."""
         self.chat.moveCursor(QTextCursor.End)
         cursor = self.chat.textCursor()
         cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
@@ -684,6 +687,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         plain.setForeground(QColor('#2e7d32'))
         cursor.insertText(f'✓ {text}  ', plain)
         self._undo_states[entry_id] = 'enabled'
+        if undo_tip:
+            self._undo_tips[entry_id] = undo_tip
         cursor.insertText(*self._undo_fragment(entry_id, 'enabled'))
         if show_tab:
             cursor.insertText('  ', QTextCharFormat())
@@ -706,9 +711,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         fmt.setFontUnderline(True)
         return fmt
 
-    @staticmethod
-    def _undo_fragment(entry_id: int, state: str):
+    def _undo_fragment(self, entry_id: int, state: str):
         text, tip, colour, link = _UNDO_LOOK[state]
+        if state == 'enabled':
+            tip = self._undo_tips.get(entry_id, tip)
         fmt = QTextCharFormat()
         fmt.setProperty(_UNDO_ID, entry_id)
         fmt.setForeground(QColor(colour))
@@ -739,6 +745,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     def undo_tooltip(self, entry_id: int) -> str:
         """The tooltip on an applied line's Undo control ('' when not shown)."""
         state = self._undo_states.get(entry_id)
+        if state == 'enabled' and entry_id in self._undo_tips:
+            return self._undo_tips[entry_id]
         return _UNDO_LOOK[state][1] if state else ''
 
     def _find_undo(self, entry_id: int):
@@ -776,6 +784,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             card.deleteLater()
         self.cards = {}
         self._undo_states = {}
+        self._undo_tips = {}
         self._fit_pending()
         self.chat_cleared.emit()
         if self.settings.provider == 'ollama':

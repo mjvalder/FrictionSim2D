@@ -185,7 +185,8 @@ class MainWindow(QMainWindow):
     def __init__(self, workspace: Workspace, *,
                  agent_settings_loader: Optional[Callable[[], object]] = None,
                  confirm_undo: Optional[Callable[[str], bool]] = None,
-                 user_busy: Optional[Callable[[], bool]] = None) -> None:
+                 user_busy: Optional[Callable[[], bool]] = None,
+                 plots_busy: Optional[Callable[[], bool]] = None) -> None:
         super().__init__()
         self.workspace = workspace
         # Injectable so tests never meet a modal: asked before an Undo that
@@ -193,6 +194,8 @@ class MainWindow(QMainWindow):
         self._confirm_undo = confirm_undo or self._default_confirm_undo
         # Whether the user is mid-edit, so a direct change waits as a card.
         self._user_busy = user_busy or self._default_user_busy
+        # The same, for the Plots tab: a direct plot waits as a card.
+        self._plots_busy = plots_busy or self._default_plots_busy
         # Injectable so a test can make the Assistant's build fail; None
         # means src.agent.settings.load_agent_settings, imported lazily.
         self._agent_settings_loader = agent_settings_loader
@@ -482,7 +485,7 @@ class MainWindow(QMainWindow):
         from ..agent.plot_changes import apply_plot_change
         from ..postprocessing.plot_config import PlotDocument
         pane = self._assistant_pane
-        if not from_card and self._user_busy():
+        if not from_card and self._plots_busy():
             pane.queue_card(change, 'Not added yet: kept as a card because you were busy. '
                                     'Add it when ready.')
             return
@@ -507,7 +510,8 @@ class MainWindow(QMainWindow):
                              plots_after=self._plots_state())
         self._assistant_undo.append(undo)
         hidden = self.top_tabs.currentWidget() is not self.plots_page
-        pane.add_applied_line(undo.id, change.summary(), show_tab='Plots' if hidden else '')
+        pane.add_applied_line(undo.id, change.summary(), show_tab='Plots' if hidden else '',
+                              undo_tip='Put the Plots tab back as it was before this change')
         self._refresh_undo_states()
         self.statusBar().showMessage(change.summary())
 
@@ -517,7 +521,12 @@ class MainWindow(QMainWindow):
                 'Undo also reverts your later edits in the Plots tab. Undo anyway?'):
             return
         self._assistant_undo.pop()
-        self.plots_pane.set_document(entry.plots_before.model_copy(deep=True))
+        restored = entry.plots_before.model_copy(deep=True)
+        self.plots_pane.set_document(restored)
+        if restored.plots:
+            self._render_plot()  # the preview must not keep showing the removed plot
+        else:
+            self.plots_pane.preview_label.clear()
         self._assistant_pane.set_undo_state(entry.id, 'undone')
         self._refresh_undo_states()
         self.statusBar().showMessage('Undid the assistant\'s last plot.')
@@ -628,6 +637,15 @@ class MainWindow(QMainWindow):
         focus = QApplication.focusWidget()
         return focus is not None and (self.form.isAncestorOf(focus)
                                       or self.settings_form.isAncestorOf(focus))
+
+    def _default_plots_busy(self) -> bool:
+        """The user is editing a plot (focus in the Plots tab's form, or a
+        refused value there) or a modal dialog is open."""
+        form = self.plots_pane.form
+        if form.refusals() or QApplication.activeModalWidget() is not None:
+            return True
+        focus = QApplication.focusWidget()
+        return focus is not None and (focus is form or form.isAncestorOf(focus))
 
     def _assistant_snapshot(self, change, target) -> AssistantUndo:
         """The undo record for ``change``, taken before it touches anything.

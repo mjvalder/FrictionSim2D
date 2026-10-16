@@ -788,13 +788,87 @@ def test_plot_card_in_ask_mode_applies(window):
     assert renders == [0] and 'Added plot: summary on campaign' in pane.chat.toPlainText()
 
 
-def test_busy_user_gets_the_plot_as_a_card(window):
+def test_busy_plots_user_gets_the_plot_as_a_card(window):
     _plot_window(window)
     pane = _open_assistant(window)
-    window._user_busy = lambda: True  # pylint: disable=protected-access
+    window._plots_busy = lambda: True  # pylint: disable=protected-access
     change = _plot(window)
     pane.receive_proposal(change)
     assert change.id in pane.cards and window.plots_pane.document().plots == []
+
+
+def test_plots_busy_means_focus_in_the_plots_editors_not_the_builder(window, monkeypatch):
+    focus = []
+    monkeypatch.setattr(QApplication, 'focusWidget', staticmethod(lambda: focus[-1]))
+    focus.append(window.form)
+    assert not window._default_plots_busy()  # pylint: disable=protected-access
+    focus.append(window.plots_pane.form)
+    assert window._default_plots_busy()  # pylint: disable=protected-access
+
+
+def test_editing_the_builder_does_not_hold_a_plot_back(window):
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    window._user_busy = lambda: True  # pylint: disable=protected-access
+    pane.receive_proposal(_plot(window))
+    assert pane.cards == {} and renders == [0]
+
+
+def test_second_plot_of_a_direct_turn_applies_after_the_first_was_held(window):
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    deps = window.assistant_deps()
+    deps.direct_apply = True
+    from src.agent.plot_changes import build_plot_change
+    first = build_plot_change(deps, 'one', 'summary', {}, ['campaign'])
+    deps.propose(first)  # the snapshot now says campaign is loaded
+    second = build_plot_change(deps, 'two', 'timeseries', {}, ['campaign'])
+    window._plots_busy = lambda: True  # pylint: disable=protected-access
+    pane.receive_proposal(first)        # held back as a card
+    window._plots_busy = lambda: False  # pylint: disable=protected-access
+    pane.receive_proposal(second)
+    document = window.plots_pane.document()
+    assert document.labels == ['campaign'] and len(document.plots) == 1
+    assert document.plots[0].datasets == ['campaign'] and renders == [0]
+
+
+def test_ask_mode_add_after_the_dataset_was_removed(window):
+    _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window, ('other',)))   # direct: loads other
+    _card_mode(pane)
+    change = _plot(window, ('campaign', 'other'), 'timeseries')
+    pane.receive_proposal(change)
+    window.plots_pane.dataset_list.setCurrentRow(0)
+    window.plots_pane.remove_selected_dataset()       # the user drops other
+    pane.cards[change.id].apply_button.click()
+    document = window.plots_pane.document()
+    assert sorted(document.labels) == ['campaign', 'other']
+    assert document.plots[-1].datasets == ['campaign', 'other']
+
+
+def test_plot_undo_rerenders_or_clears_the_preview(window):
+    from PySide6.QtCore import QUrl
+    renders = _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window))
+    pane.receive_proposal(_plot(window, plot_type='timeseries'))
+    second = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    first = window._assistant_undo[0].id  # pylint: disable=protected-access
+    assert renders == [0, 1]
+    pane.chat.anchorClicked.emit(QUrl(f'undo:{second}'))
+    assert renders == [0, 1, 0]
+    window.plots_pane.preview_label.setText('stale')
+    pane.chat.anchorClicked.emit(QUrl(f'undo:{first}'))
+    assert renders == [0, 1, 0] and window.plots_pane.preview_label.text() == ''
+
+
+def test_plot_undo_tooltip_names_the_plots_tab(window):
+    _plot_window(window)
+    pane = _open_assistant(window)
+    pane.receive_proposal(_plot(window))
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    assert pane.undo_tooltip(entry) == 'Put the Plots tab back as it was before this change'
 
 
 def test_saving_the_config_keeps_the_plot_undo(window, monkeypatch, tmp_path):
