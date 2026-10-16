@@ -94,8 +94,28 @@ def test_make_sweep_tool_text(deps):
     assert make_sweep_tool(deps, 2, 10, 5) == 'values: 2, 4, 6, 8, 10'
 
 
-def test_suggest_values_asks_until_scaling_exists(deps):
+def test_suggest_values_low_load_uses_measured_regime(deps):
     text = suggest_values(deps, 'load', 'low', 5)
+    assert 'values: 10, 12.5, 15, 17.5, 20' in text
+    assert 'nN' in text and 'ML_taxonomy' in text and 'BASELINE_LOADS' in text
+    assert 'warning' not in text.lower()
+    assert len(text) <= 1500
+
+
+def test_suggest_values_accepts_synonyms(deps):
+    assert 'values: 20, 35, 50' in suggest_values(deps, 'load', 'moderate', 3)
+
+
+def test_suggest_values_warns_outside_validity(deps):
+    deps.document.set('tip', 'r', 60)
+    text = suggest_values(deps, 'load', 'low', 5)
+    assert 'values: 10, 12.5, 15, 17.5, 20' in text
+    assert 'warning' in text.lower() and 'R = 60' in text
+
+
+def test_suggest_values_without_rule_offers_examples(tmp_path, mock_settings):
+    deps = make_deps(tmp_path, mock_settings, model='sheetonsheet')
+    text = suggest_values(deps, 'pressure', 'low', 5)
     assert 'No scaling rule' in text and 'make_sweep' in text
     assert 'example-config values' in text and 'starting point' in text
     assert 'confirm' in text and 'range' in text

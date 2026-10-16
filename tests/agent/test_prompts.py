@@ -35,6 +35,7 @@ def test_rules_present():
 def test_defaults_knowledge_offers_example_values():
     assert 'defaults' in KNOWLEDGE_FILES
     prompt = build_system_prompt('ollama')
-    for phrase in ('example config', '2, 5, 10, 20, 30, 50, 70, 85, 100 nN', '2-20 nN',
+    for phrase in ('example config', '2, 5, 10, 20, 30, 50, 70, 85, 100 nN', '10-20 nN',
+                   'poor contact', 'suggest_values',
                    '100 x 100', '25 Angstrom', '12 Angstrom', '2 m/s', '300 K', 'confirm'):
         assert phrase in prompt, phrase

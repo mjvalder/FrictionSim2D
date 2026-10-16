@@ -9,6 +9,7 @@ from typing import Any, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat, conint
 
+from ...core.scaling import ScaleContext, scale
 from ...gui.schema.overrides import override_for_section
 from ...gui.schema.simulation_types import FAMILIES, MODES
 from ...gui.controllers.document import DocumentError
@@ -207,14 +208,35 @@ def make_sweep_tool(deps, start: float, stop: float, n: int,  # pylint: disable=
     return 'values: ' + ', '.join(f'{v:g}' for v in make_sweep(start, stop, n, spacing))
 
 
-def suggest_values(deps, quantity: str, descriptor: Literal['low', 'mid', 'high'],  # pylint: disable=unused-argument
-                   n: int, spacing: Literal['linear', 'log'] = 'linear') -> str:  # pylint: disable=unused-argument
-    """Descriptor -> values. No scaling rules exist yet (spec §4.3): point at the examples."""
-    return (f"No scaling rule for '{descriptor} {quantity}' yet: what counts as "
-            f"{descriptor} depends on tip size, model size and speed. Offer the "
-            f"example-config values from the knowledge (defaults) as a starting point, "
-            f"say they come from the example config, and ask the user to confirm them "
-            f"or give a range (min, max and unit); then call make_sweep with n={n}.")
+def _scale_context(doc) -> ScaleContext:
+    """What `scale` needs from the Builder's document (None for absent sections)."""
+    def value(section, key):
+        return doc.get(section, key) if doc.has_section(section) else None
+    return ScaleContext(model=doc.model, tip_radius_A=value('tip', 'r'),
+                        driving_spring_N_m=value('general', 'driving_spring'),
+                        temperature_K=value('general', 'temp'))
+
+
+def suggest_values(deps, quantity: str, descriptor: str, n: int,
+                   spacing: Literal['linear', 'log'] = 'linear') -> str:  # pylint: disable=unused-argument
+    """Descriptor -> values from a measured regime (src.core.scaling), else the examples.
+
+    The values are always linear between the regime's ends: the regimes are
+    measured ranges, not decades, so ``spacing`` is not applied.
+    """
+    scaled = scale(quantity, descriptor, _scale_context(deps.document))
+    if scaled is None:
+        return (f"No scaling rule for '{descriptor} {quantity}' yet: what counts as "
+                f"{descriptor} depends on tip size, model size and speed. Offer the "
+                f"example-config values from the knowledge (defaults) as a starting point, "
+                f"say they come from the example config, and ask the user to confirm them "
+                f"or give a range (min, max and unit); then call make_sweep with n={n}.")
+    values = make_sweep(scaled.low, scaled.high, n, 'linear')
+    lines = [f"values: {', '.join(f'{v:g}' for v in values)} {scaled.unit}",
+             f'working: {scaled.working}']
+    lines += [f'warning: {w}' for w in scaled.warnings]
+    lines.append('Tell the user where the numbers come from and confirm before proposing.')
+    return compact('\n'.join(lines))
 
 
 class _SetupBase(BaseModel):
