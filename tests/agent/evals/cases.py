@@ -102,6 +102,12 @@ def mentions(result, *words: str) -> bool:
     return bool(words) and all(norm(w) in reply for w in words)
 
 
+def mentions_any(result, *words: str) -> bool:
+    """Whether the reply names at least one of ``words`` (normalised)."""
+    reply = norm(result.text)
+    return any(norm(w) in reply for w in words)
+
+
 def config_changes(result) -> List[ChangeSet]:
     """Config/settings change sets."""
     return [p for p in result.pending if isinstance(p, ChangeSet)]
@@ -159,6 +165,35 @@ def has_numbers(text: str, expected: Iterable[float]) -> bool:
     expected = list(expected)
     return bool(expected) and all(any(math.isclose(f, float(e), rel_tol=REL_TOL)
                                       for f in found) for e in expected)
+
+
+#: A decimal standing alone: '1.23' and '0.5', not '1T', '2D', 'MoS2' or a '1.' list mark.
+_DECIMAL = re.compile(r'(?<![\w.])\d+\.\d+(?![\w.]*\d)(?![A-Za-z])')
+
+
+def _fixture_numbers() -> List[float]:
+    """Every number in the fake database rows: what a lookup can legitimately return."""
+    return [float(v) for row in MP_ROWS + DM_ROWS for v in row.values()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)]
+
+
+def grounded(result, extra: Iterable[float] = ()) -> bool:
+    """Whether every decimal in the reply came from a tool result, the fixture rows
+    or ``extra``, allowing the reply to round to its own printed precision.
+
+    Integers are not checked: layer counts, polytypes (2H) and list numbers are
+    integers, while invented property values (gaps, lattice constants, COFs)
+    are decimals."""
+    allowed = [*extra, *_fixture_numbers()]
+    for event in result.events:
+        if event.kind == 'tool_result':
+            allowed.extend(numbers_in(event.text))
+    for token in _DECIMAL.findall(result.text):
+        value, places = float(token), len(token.split('.')[1])
+        if not any(math.isclose(a, value, rel_tol=REL_TOL) or round(a, places) == value
+                   for a in allowed):
+            return False
+    return True
 
 
 def same(value: Any, expected: Iterable[float]) -> bool:
@@ -580,9 +615,72 @@ DECLINES = {
         tools=('setup_afm',)),
 }
 
+def _concept(*stem_groups: Tuple[str, ...]):
+    """A concept answer: no proposal, nothing invented, one stem from every group."""
+    return lambda r: (not r.pending and grounded(r) and bool(r.text.strip())
+                      and all(mentions_any(r, *stems) for stems in stem_groups))
+
+
+def _any_setup(result, models: Iterable[str], names: Iterable[str]) -> bool:
+    return any(setup_ok(result, model, names) for model in models)
+
+
+#: Domain cases (spec 2026-10-16 LoRA fine-tune §8): vocabulary and causes,
+#: a goal turned into the right simulation, and numbers only from tools.
+DOMAIN = {
+    'concept_superlubricity': Case(
+        'In one or two sentences: why can two incommensurate crystalline sheets slide '
+        'past each other with very low friction?',
+        _concept(('incommensura', 'mismatch'), ('cancel', 'corrugat', 'average', 'lock'))),
+    'concept_prefix_t': Case(
+        'What does the t- prefix in t-MoS2 mean?',
+        _concept(('T-phase', 'T phase', 'octahedral', '1T'))),
+    'concept_tmd': Case(
+        'Is h-WS2 a transition-metal dichalcogenide? Answer in one sentence.',
+        _concept(('dichalcogenide', 'TMD'), ('yes',))),
+    'concept_cof': Case(
+        'In these simulations, what is the coefficient of friction computed from?',
+        _concept(('lateral', 'friction force'), ('normal',))),
+    'concept_stick_slip': Case(
+        'What is stick-slip motion in an AFM friction simulation?',
+        _concept(('stick',), ('slip',), ('lattice', 'period', 'energy', 'spring'))),
+    'cheap_corrugation': Case(
+        'Before any sliding MD, I want a cheap comparison of how corrugated the energy '
+        'landscape is for h-MoS2 and for h-WS2, each sliding on itself. Set it up with sw.',
+        lambda r: _any_setup(r, ('pes_sheet', 'pes_tip'), ['h-MoS2', 'h-WS2']),
+        tools=('list_modes', 'setup_pes_sheet')),
+    'layer_dependence': Case(
+        'Does friction under an AFM tip on h-MoS2 depend on how many layers there are? '
+        f"Set up a run with sw at 20 nN that tests {LAYERS[0]} to {LAYERS[-1]} layers.",
+        lambda r: setup_ok(r, 'afm', ['h-MoS2'])
+        and same(sets(r).get(('2D', 'layers')), LAYERS),
+        tools=('setup_afm',)),
+    'direction_dependence': Case(
+        'I want to know whether friction between two h-MoS2 sheets depends on the sliding '
+        f"direction. Set it up with sw at 1 GPa, sliding at {', '.join(map(str, ANGLES))} "
+        'degrees.',
+        lambda r: setup_ok(r, 'sheetonsheet', ['h-MoS2'])
+        and same(sets(r).get(('general', 'scan_angle')), ANGLES),
+        tools=('setup_sheet',)),
+    'gap_needs_lookup': Case(
+        'What is the band gap of MoS2?',
+        lambda r: called(r, 'query_materials_project') and grounded(r)
+        and has_numbers(r.text, [_stable_mp()['band_gap']]),
+        tools=('query_materials_project',)),
+    'stable_polytype': Case(
+        'Which MoS2 polytype is the most stable?',
+        lambda r: called(r, 'query_materials_project', 'query_2dmatpedia') and grounded(r)
+        and mentions_any(r, _stable_mp()['material_id'], _stable_mp()['spacegroup']),
+        tools=('query_materials_project',)),
+    'cof_guess': Case(
+        'Roughly what friction coefficient will I get for h-MoS2 under an AFM tip?',
+        kind='declines',
+        check=lambda r: grounded(r) and mentions_any(r, 'simulat', 'run ', 'measure')),
+}
+
 GROUPS = {'setup': SETUP, 'params': PARAMS, 'sweeps': SWEEPS, 'materials': MATERIALS,
           'workspace': WORKSPACE, 'analysis': ANALYSIS, 'materials_db': MATERIALS_DB,
-          'must_ask': MUST_ASK, 'declines': DECLINES}
+          'must_ask': MUST_ASK, 'declines': DECLINES, 'domain': DOMAIN}
 CASES = {name: case for group in GROUPS.values() for name, case in group.items()}
 GROUP_OF = {name: group for group, cases in GROUPS.items() for name in cases}
 

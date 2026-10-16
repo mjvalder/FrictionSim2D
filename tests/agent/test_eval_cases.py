@@ -12,9 +12,12 @@ from src.agent.runtime import AgentSession  # noqa: E402
 from src.agent.settings import AgentSettings  # noqa: E402
 from src.agent.tools.materials_db import fetch_2dmatpedia_structure  # noqa: E402
 from src.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot  # noqa: E402
-from src.agent.tools.setup import AFMSetupRequest, make_sweep, setup_afm  # noqa: E402
-from tests.agent.evals.cases import (CASES, DATASET, DECLINES, DM_ROWS, GROUPS,  # noqa: E402
-                                     MUST_ASK, band, prepare_deps, verdict)
+from src.agent.tools.setup import (AFMSetupRequest, PESSheetSetupRequest,  # noqa: E402
+                                   SheetSetupRequest, make_sweep, setup_afm,
+                                   setup_pes_sheet, setup_sheet)
+from tests.agent.evals.cases import (ANGLES, CASES, DATASET, DECLINES, DM_ROWS,  # noqa: E402
+                                     GROUPS, LAYERS, MP_ROWS, MUST_ASK, band, grounded,
+                                     prepare_deps, verdict)
 from tests.helpers.agent import make_deps  # noqa: E402
 from tests.helpers.agent_eval import FUNCTION_REPLY, EvalResult  # noqa: E402
 
@@ -201,3 +204,100 @@ def test_cof_plot_needs_cof_on_the_y_axis(tmp_path, mock_settings):
 def test_slope_bar_chart_prompt_names_what_cof_histogram_draws():
     assert 'slope' in CASES['plot_slope_bars'].prompt
     assert 'plot_histogram' not in CASES
+
+
+# ---- domain group: concepts, goal -> simulation, grounded numbers ----------------
+
+def _tool_result(text):
+    return TurnEvent('tool_result', text)
+
+
+def test_grounded_ignores_integers_and_formula_tokens(tmp_path, mock_settings):
+    deps = _deps('concept_tmd', tmp_path, mock_settings)
+    assert grounded(_result(deps, 'Yes: 2H MoS2 and 1T phases, 3 layers, 2D sheets.'))
+
+
+def test_grounded_accepts_tool_and_fixture_values_rounded(tmp_path, mock_settings):
+    deps = _deps('gap_needs_lookup', tmp_path, mock_settings)
+    gap = MP_ROWS[0]['band_gap']
+    assert grounded(_result(deps, f'The gap is {gap} eV.'))
+    assert grounded(_result(deps, f'The gap is about {gap:.1f} eV.'))
+    result = _result(deps, 'The mismatch is 4.27 %.')
+    result.events.insert(0, _tool_result('lattice: mismatch 4.271 %'))
+    assert grounded(result)
+    assert not grounded(_result(deps, 'The gap is 1.8 eV.'))
+
+
+@pytest.mark.parametrize('name, good, bad', [
+    ('concept_superlubricity',
+     'Their lattices are incommensurate, so the lateral forces from the atoms cancel out.',
+     'Because the sheets are smooth.'),
+    ('concept_prefix_t', 'It means the T-phase (octahedral, 1T) polytype.',
+     'It is a hexagonal structure.'),
+    ('concept_tmd', 'Yes, WS2 is a transition-metal dichalcogenide.',
+     'No, it is an oxide.'),
+    ('concept_cof', 'The COF is the mean lateral force divided by the normal load.',
+     'It is the friction.'),
+    ('concept_stick_slip', 'The tip sticks in a minimum of the energy landscape, the '
+                           'spring loads, then it slips by one lattice period.',
+     'The tip moves at constant speed.'),
+])
+def test_concept_cases_judge_the_explanation(name, good, bad, tmp_path, mock_settings):
+    deps = _deps(name, tmp_path, mock_settings)
+    assert verdict(CASES[name], _result(deps, good))
+    assert not verdict(CASES[name], _result(deps, bad))
+    assert not verdict(CASES[name], _result(deps, good + ' Typically 0.37 nN.'))
+    deps.pending.append(build_changeset(deps, 'x', []))
+    assert not verdict(CASES[name], _result(deps, good))
+
+
+def test_cheap_corrugation_wants_a_pes_scan_of_both(tmp_path, mock_settings):
+    deps = _deps('cheap_corrugation', tmp_path, mock_settings)
+    setup_pes_sheet(deps, PESSheetSetupRequest(materials=['h-MoS2', 'h-WS2'],
+                                               potential_type='sw'))
+    assert verdict(CASES['cheap_corrugation'], _result(deps, 'Proposed a PES scan.'))
+    deps = _deps('cheap_corrugation', tmp_path / 'b', mock_settings)
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2', 'h-WS2'], potential_type='sw',
+                                    loads_nN=[10]))
+    assert not verdict(CASES['cheap_corrugation'], _result(deps, 'Proposed AFM.'))
+
+
+def test_layer_dependence_wants_a_layer_sweep(tmp_path, mock_settings):
+    deps = _deps('layer_dependence', tmp_path, mock_settings)
+    setup_afm(deps, AFMSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                    loads_nN=[20], layers=list(LAYERS)))
+    assert verdict(CASES['layer_dependence'], _result(deps, 'Proposed.'))
+
+
+def test_direction_dependence_wants_scan_angles_on_sheets(tmp_path, mock_settings):
+    deps = _deps('direction_dependence', tmp_path, mock_settings)
+    setup_sheet(deps, SheetSetupRequest(materials=['h-MoS2'], potential_type='sw',
+                                        pressures_GPa=[1], scan_angles_deg=list(ANGLES)))
+    assert verdict(CASES['direction_dependence'], _result(deps, 'Proposed.'))
+
+
+def test_gap_lookup_needs_the_tool_and_the_fixture_value(tmp_path, mock_settings):
+    deps = _deps('gap_needs_lookup', tmp_path, mock_settings)
+    tools = ['query_materials_project']
+    gap = min(MP_ROWS, key=lambda row: row['e_above_hull'])['band_gap']
+    assert verdict(CASES['gap_needs_lookup'], _result(deps, f'{gap} eV.', tools=tools))
+    assert not verdict(CASES['gap_needs_lookup'], _result(deps, f'{gap} eV.'))
+    assert not verdict(CASES['gap_needs_lookup'],
+                       _result(deps, f'{gap} eV, bulk 1.29 eV.', tools=tools))
+
+
+def test_stable_polytype_names_the_entry(tmp_path, mock_settings):
+    deps = _deps('stable_polytype', tmp_path, mock_settings)
+    tools = ['query_materials_project']
+    assert verdict(CASES['stable_polytype'],
+                   _result(deps, '2H, P6_3/mmc (mp-2815), 0.000 eV above the hull.',
+                           tools=tools))
+    assert not verdict(CASES['stable_polytype'], _result(deps, 'The R3m one.', tools=tools))
+
+
+def test_cof_guess_declines_to_invent_a_value(tmp_path, mock_settings):
+    deps = _deps('cof_guess', tmp_path, mock_settings)
+    assert verdict(CASES['cof_guess'],
+                   _result(deps, "I can't give a value without running a simulation; "
+                                 'shall I set one up?'))
+    assert not verdict(CASES['cof_guess'], _result(deps, 'Around 0.01 to 0.05.'))
