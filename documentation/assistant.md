@@ -30,10 +30,66 @@ wait for you to click Apply.**
   limits requests per minute; a reply costs 2-7 requests, and the pane shows a
   Retry button when the limit is hit.
 - **Ollama (local, experimental).** Fully offline but slow on a laptop iGPU
-  (about a minute per reply). The pane shows the setup commands and a
-  Modelfile when you select it.
+  (about a minute per reply). The default model is `qwen3:4b`, used as Ollama
+  ships it: the Assistant turns thinking off (`/no_think`) and sets
+  temperature 0 itself, so no Modelfile or `ollama create` is needed. Fetch it
+  once with `ollama pull qwen3:4b` (the user-local install lives at
+  `~/.local/ollama/bin/ollama`). An `agent.yaml` that still names the retired
+  `fs2d-qwen3-4b` falls back to `qwen3:4b` when that model is not installed,
+  with a note in the chat.
 
-Settings live in `~/.config/FrictionSim2D/agent.yaml`.
+### Ollama starts and stops itself
+
+The Assistant starts `ollama serve` when you select Ollama, start a New chat
+with it, or send a message while it is down (the message goes as soon as it
+is up; if the start fails, a red line says why and your text goes back into
+the input). The status line reads `Starting Ollama…` meanwhile; nothing in
+the window blocks. It is started throttled for a laptop: `nice -n 10`,
+`OLLAMA_IGPU_ENABLE=1 OLLAMA_VULKAN=1 OLLAMA_MAX_LOADED_MODELS=1
+OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE=2m` and `OLLAMA_CONTEXT_LENGTH` from
+`ollama.context_tokens`, with its output in
+`~/.cache/FrictionSim2D/ollama.log` (honours `XDG_CACHE_HOME`).
+
+A server the Assistant started is stopped after `ollama.idle_minutes`
+(default 10) without a reply, and when the window closes; the status then
+reads `Ollama stopped after N min idle (starts again on your next message)`.
+**A server you started yourself is never stopped.**
+
+### Status line
+
+One line under the provider and model pickers: `Ollama ready (qwen3:4b)`,
+`Starting Ollama…`, `Ollama not running — starts on your next message`, or
+why it could not start. **Check again** re-asks Ollama (it never starts it).
+**Details** unfolds the start command, a **Copy start command** button, the
+log path and, when the model is missing, the `ollama pull` line. Gemini shows
+one line too (`Gemini: key set`).
+
+The model box is editable: for Ollama it lists the installed models (from
+`/api/tags`); for Gemini it shows the configured model. Type any other name
+to use it.
+
+### agent.yaml
+
+Settings live in `~/.config/FrictionSim2D/agent.yaml`:
+
+| key | default | meaning |
+|---|---|---|
+| `provider` | `gemini` | `gemini` or `ollama` |
+| `ask_before_apply` | `false` | changes wait as cards (below) |
+| `max_requests_per_turn` | `50` | model requests one reply may make |
+| `ollama.model` | `qwen3:4b` | local model |
+| `ollama.idle_minutes` | `10` | stop a server the Assistant started after this long idle |
+| `ollama.context_tokens` | `8192` | `OLLAMA_CONTEXT_LENGTH` of a started server |
+| `ollama.keep_alive` | `2m` | `OLLAMA_KEEP_ALIVE` of a started server |
+| `gemini.model` | `gemini-3.5-flash-lite` | cloud model |
+
+### Step cap
+
+Each tool call the model makes is one request ("step"). A reply stops after
+`max_requests_per_turn` of them with `Stopped after N steps to save quota —
+type 'continue' to carry on.` The work so far is kept, so typing `continue`
+picks up where it stopped. Raise the value in `agent.yaml` for long setups;
+lower it to protect a free-tier quota.
 
 ## What it can do
 
