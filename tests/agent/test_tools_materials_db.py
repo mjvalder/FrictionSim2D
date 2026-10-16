@@ -1,7 +1,7 @@
 """Materials Project and 2DMatPedia tools, over a fake client (no network)."""
 import pytest
 
-from src.agent.changes import FsChangeSet, apply_fs_changeset
+from src.agent.changes import FsChangeSet, apply_fs_changeset, describe_change
 from src.agent.materials_db import NO_KEY, MaterialsDBError
 from src.agent.tools.materials_db import (fetch_2dmatpedia_structure, query_2dmatpedia,
                                           query_materials_project)
@@ -124,3 +124,18 @@ def test_first_download_is_mentioned(deps):
     assert text.startswith('Downloaded the 2DMatPedia listing (first use; cached for 7 days)')
     client.downloaded_listing = False
     assert not query_2dmatpedia(deps, 'MoS2').startswith('Downloaded')
+
+
+def test_fetch_card_describes_the_structure_not_the_cif(deps):
+    pytest.importorskip('pymatgen.core')
+    from pymatgen.core import Lattice, Structure  # pylint: disable=import-outside-toplevel
+    from pymatgen.io.cif import CifWriter  # pylint: disable=import-outside-toplevel
+    cif = str(CifWriter(Structure(Lattice.hexagonal(3.19, 20.0), ['Mo', 'S', 'S'],
+                                  [[1 / 3, 2 / 3, 0.5], [2 / 3, 1 / 3, 0.42],
+                                   [2 / 3, 1 / 3, 0.58]])))
+    fetch_2dmatpedia_structure(_with(deps, FakeClient(dm_rows=[_dm_row(5)], cif=cif)), '2dm-5')
+    change = deps.pending[-1]
+    text = describe_change(change)
+    assert 'Structure: MoS2, 3 sites, a=3.190 b=3.190 c=20.000 Å' in text
+    assert '_cell_length_a' not in text and '_atom_site' not in text
+    assert change.notes == ['Structure: MoS2, 3 sites, a=3.190 b=3.190 c=20.000 Å']

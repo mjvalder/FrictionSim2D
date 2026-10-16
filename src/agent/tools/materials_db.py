@@ -10,7 +10,7 @@ import re
 from typing import Any, Callable, List, Optional
 
 from ..changes import ToolInputError, build_fs_changeset
-from ..materials_db import MaterialsDBError
+from ..materials_db import MaterialsDBError, describe_cif
 from . import compact
 
 MAX_ROWS = 10
@@ -105,6 +105,7 @@ def fetch_2dmatpedia_structure(deps, dm_id: str, dest_dir: str = 'materials') ->
         checked = build_fs_changeset(deps, title, ops(''))
         if not checked.ok:
             return deps.propose(checked)
+        text = client.structure_cif(entry['structure_id'])
         return deps.propose(build_fs_changeset(
-            deps, title, ops(client.structure_cif(entry['structure_id']))))
+            deps, title, ops(text), notes=[f'Structure: {describe_cif(text)}']))
     return _with_client(deps, run)

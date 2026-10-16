@@ -257,3 +257,18 @@ def test_summarise_keeps_the_tail_line_within_budget(deps):
     text = summarise_results(deps, 'campaign')
     assert '… ' in text and 'more rows' in text
     assert len(text) <= RESULT_LIMIT and 'more lines' not in text
+
+
+def test_summarise_parse_budget_is_aggregate(deps):
+    """Each file under the per-file limit, together over the call's budget: the
+    files past it are named as not read, never parsed."""
+    out = deps.roots.workspace / 'many' / 'outputs'
+    out.mkdir(parents=True)
+    for size in ('1x1y', '2x2y', '3x3y'):
+        (out / f'output_full_{size}.json').write_text(json.dumps({
+            'runs': [{'material': f'm{size}', 'status': 'complete'}], 'pad': 'x' * 400}))
+    text = summarise_results(deps, 'many', summary_budget_mb=0.0006)
+    assert 'output_full_1x1y.json: 1 runs' in text
+    assert 'output_full_2x2y.json: not read (budget)' in text
+    assert 'output_full_3x3y.json: not read (budget)' in text
+    assert 'm2x2y' not in text and 'm3x3y' not in text

@@ -110,6 +110,35 @@ def reduced_formula(formula: str) -> str:
         raise MaterialsDBError(f'{formula!r} is not a chemical formula') from exc
 
 
+def _require_pymatgen() -> None:
+    """Raise `MaterialsDBUnavailable` unless pymatgen can be imported."""
+    try:
+        import pymatgen.core  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
+    except ImportError as exc:
+        raise MaterialsDBUnavailable(PYMATGEN_MISSING) from exc
+
+
+def describe_cif(text: str) -> str:
+    """What a CIF holds, for a proposal card: reduced formula, number of
+    sites and lattice lengths (``'MoS2, 3 sites, a=3.190 b=3.190 c=20.000 Å'``)
+    -- never the CIF text itself."""
+    try:
+        # pylint: disable=import-outside-toplevel
+        import warnings
+        from pymatgen.core import Structure
+    except ImportError:
+        return 'not described (pymatgen is not installed)'
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            structure = Structure.from_str(text, fmt='cif')
+    except Exception:  # pylint: disable=broad-except
+        return 'not a readable structure'
+    a, b, c = structure.lattice.abc
+    return (f'{structure.composition.reduced_formula}, {len(structure)} sites, '
+            f'a={a:.3f} b={b:.3f} c={c:.3f} Å')
+
+
 def _cache_dir() -> Path:
     base = os.environ.get('XDG_CACHE_HOME') or str(Path.home() / '.cache')
     return Path(base) / 'FrictionSim2D'
@@ -214,8 +243,13 @@ class MPClient:
     # -- Materials Project ---------------------------------------------------
 
     def summary(self, formula: str) -> List[Dict[str, Any]]:
-        """Summary rows for ``formula`` (reduced), most stable first."""
+        """Summary rows for ``formula`` (reduced), most stable first.
+
+        Stop is checked before the request; the single ``search`` call itself
+        cannot be interrupted once sent (mp-api offers no cancellation).
+        """
         reduced = reduced_formula(formula)
+        self._check_stop()
         try:
             with self._rester_factory(self._key) as rester:
                 docs = rester.materials.summary.search(formula=[reduced],
@@ -264,7 +298,10 @@ class MPClient:
 
     def _fetch_listing(self) -> List[Dict[str, Any]]:
         """Every 2DMatPedia contribution, paged with ``_skip`` (the server
-        ignores ``_page`` and would return page 1 forever)."""
+        ignores ``_page`` and would return page 1 forever). Every row needs
+        pymatgen's reduced formula, so its absence is reported before the
+        first page is downloaded rather than after."""
+        _require_pymatgen()
         rows: List[Dict[str, Any]] = []
         for page in range(MAX_PAGES):
             body = self._get_json(f'{API}/contributions/', {
@@ -322,13 +359,13 @@ class MPClient:
         (``Structure.from_dict`` fails: the payload has no @module/@class)."""
         if not _PLAIN_ID.match(str(structure_id)):
             raise MaterialsDBError(f'{structure_id!r} is not a structure id')
-        payload = self._get_json(f'{API}/structures/{structure_id}/', {'_fields': '_all'})
-        try:
+        try:  # before the request: without pymatgen its reply is useless
             # pylint: disable=import-outside-toplevel
             from pymatgen.core import Lattice, Structure
             from pymatgen.io.cif import CifWriter
         except ImportError as exc:
             raise MaterialsDBUnavailable(PYMATGEN_MISSING) from exc
+        payload = self._get_json(f'{API}/structures/{structure_id}/', {'_fields': '_all'})
         try:
             sites = payload['sites']
             if not sites:

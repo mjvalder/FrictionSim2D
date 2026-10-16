@@ -27,8 +27,11 @@ from ..changes import ToolInputError
 from ..sandbox import display_path, resolve_readable
 from . import RESULT_LIMIT, compact
 
-#: Largest `output_full_*.json` `summarise_results` will parse.
+#: Largest `output_full_*.json` `summarise_results` will parse ...
 MAX_JSON_MB = 200
+#: ... and the most it parses in one call, all files of a dataset together;
+#: the files past it are listed as "not read (budget)".
+SUMMARY_BUDGET_MB = 400
 #: Largest file `find_result_sets` parses just to count its runs ...
 COUNT_JSON_MB = 20
 #: ... and the most it parses for counting in one call, all files together.
@@ -236,12 +239,18 @@ def _file_header(path: Path, doc: dict) -> List[str]:
 
 
 def _summarise_dataset(deps, folder: Path, files: List[Path], filters: Dict[str, Any],
-                       max_rows: int, max_json_mb: float) -> str:
+                       max_rows: int, max_json_mb: float, budget_mb: float) -> str:
     lines = [f'{display_path(folder, deps.roots)} — dataset, {len(files)} file(s)']
     rows: List[Tuple[int, str]] = []
     for path in files:
         if filters['size'] and _norm_size(_size_of(path)) != _norm_size(filters['size']):
             continue
+        size = _megabytes(path)
+        if size <= max_json_mb:  # an oversized file is refused below, at no cost
+            if size > budget_mb:
+                lines.append(f'{path.name}: not read (budget)')
+                continue
+            budget_mb -= size
         doc, why = _load(path, max_json_mb)
         if doc is None:
             lines.append(f'{path.name}: {why}')
@@ -323,16 +332,21 @@ def _summarise_root(deps, folder: Path, runs, filters: Dict[str, Any], max_rows:
 def summarise_results(deps, path: str, material: Optional[str] = None,
                       size: Optional[str] = None, max_rows: int = 15,
                       max_json_mb: float = MAX_JSON_MB,
-                      config_reader: Callable = read_run_config) -> str:
-    """Status counts, materials, loads and a run table for a dataset or simulation root."""
+                      config_reader: Callable = read_run_config, *,
+                      summary_budget_mb: float = SUMMARY_BUDGET_MB) -> str:
+    """Status counts, materials, loads and a run table for a dataset or simulation root.
+
+    A dataset's files are parsed while ``summary_budget_mb`` lasts, each one
+    no larger than ``max_json_mb``; the rest are named but not read.
+    """
     target = resolve_readable(path, deps.roots)
     filters = {'material': material, 'size': size}
     if target.is_file() and target.match('output_full_*.json'):
         return compact(_summarise_dataset(deps, target.parent.parent, [target], filters,
-                                          max_rows, max_json_mb))
+                                          max_rows, max_json_mb, summary_budget_mb))
     if is_dataset(target):
         return compact(_summarise_dataset(deps, target, dataset_files(target), filters,
-                                          max_rows, max_json_mb))
+                                          max_rows, max_json_mb, summary_budget_mb))
     runs = discover_runs(target) if target.is_dir() else []
     if runs:
         return compact(_summarise_root(deps, target, runs, filters, max_rows,

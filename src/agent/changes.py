@@ -132,6 +132,8 @@ class FsChangeSet:
     issues: List[str] = field(default_factory=list)
     #: ``ops`` with every path as ``workspace:/...`` / ``examples:/...``, for the card.
     shown: List[Tuple[str, ...]] = field(default_factory=list)
+    #: Plain lines for the card, e.g. what a written file holds.
+    notes: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -395,7 +397,8 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
     return ApplyResult(True, False, message)
 
 
-def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsChangeSet:
+def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]],
+                       notes: Sequence[str] = ()) -> FsChangeSet:
     """Check folder/copy/write operations; refused ones are listed as issues."""
     workspace = Path(deps.roots.workspace)
     checked, issues = [], []
@@ -421,7 +424,8 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
         except SandboxError as exc:
             issues.append(str(exc))
     shown = [(op[0], *(display_path(p, deps.roots) for p in _op_paths(op))) for op in checked]
-    return FsChangeSet(id=_new_id(), title=title, ops=checked, issues=issues, shown=shown)
+    return FsChangeSet(id=_new_id(), title=title, ops=checked, issues=issues, shown=shown,
+                       notes=list(notes))
 
 
 def _op_paths(op: Tuple[str, ...]) -> Tuple[str, ...]:
@@ -454,8 +458,9 @@ def _publish(temp: str, target: PathLike, link) -> None:
 
     ``link`` (``os.link`` when None, looked up per call) is atomic and
     fails if ``target`` exists. Where the filesystem has no hard links the
-    bytes are copied into an exclusively created ``target`` instead -- still never overwriting, and removed again
-    if the copy fails, so no partial file is left behind.
+    bytes are copied into an exclusively created ``target`` instead -- still
+    never overwriting, and removed again if the copy fails, so no partial
+    file is left behind.
     """
     try:
         (link or os.link)(temp, target)
@@ -571,6 +576,7 @@ def describe_change(change) -> str:
         shown = change.shown or [(op[0], *(Path(p).name for p in _op_paths(op)))
                                  for op in change.ops]
         lines += [f'  {op[0]}: ' + ' -> '.join(op[1:]) for op in shown]
+        lines += [f'  {note}' for note in change.notes]
     else:
         lines.append('Changes:')
         for d in change.diff:

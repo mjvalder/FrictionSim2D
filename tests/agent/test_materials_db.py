@@ -4,6 +4,7 @@ Nothing here touches the network: the client takes its rester and its HTTP
 GET as injected callables.
 """
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ pytest.importorskip('pymatgen.core')
 
 # pylint: disable=wrong-import-position
 from src.agent.materials_db import (API, CACHE_SECONDS, MP_API_MISSING, NO_KEY, MPClient,
+                                    describe_cif,
                                     MaterialsDBError, MaterialsDBUnavailable,
                                     PYMATGEN_MISSING, default_materials_db,
                                     mp_api_key)
@@ -344,3 +346,44 @@ def test_structure_id_must_be_plain(tmp_path):
     client, _ = _client(tmp_path, http=FakeHTTP([]))
     with pytest.raises(MaterialsDBError, match='structure id'):
         client.structure_cif('../contributions')
+
+
+def test_summary_checks_stop_before_the_request(tmp_path):
+    """The single summary request cannot be interrupted once sent, so Stop is
+    honoured before it."""
+    made = []
+
+    def rester(key):
+        made.append(key)
+        return FakeRester(FakeSummary([]))
+
+    client, _ = _client(tmp_path, rester=rester, should_stop=lambda: True)
+    with pytest.raises(MaterialsDBError, match='stopped'):
+        client.summary('MoS2')
+    assert not made
+
+
+def test_listing_checks_pymatgen_before_downloading(tmp_path, monkeypatch):
+    """Every listing row needs pymatgen's reduced formula: without it, say so
+    before the first page is downloaded, not after."""
+    monkeypatch.setitem(sys.modules, 'pymatgen.core', None)
+    http = FakeHTTP(lambda url, params: _page([_contribution(1)], False))
+    client, _ = _client(tmp_path, http=http)
+    with pytest.raises(MaterialsDBUnavailable, match='pymatgen'):
+        client.twodmatpedia_entry('2dm-1')
+    with pytest.raises(MaterialsDBUnavailable, match='pymatgen'):
+        client.structure_cif('abc')
+    assert not http.calls
+
+
+def test_describe_cif_reads_formula_sites_and_lattice():
+    from pymatgen.core import Lattice, Structure  # pylint: disable=import-outside-toplevel
+    from pymatgen.io.cif import CifWriter  # pylint: disable=import-outside-toplevel
+    structure = Structure(Lattice.hexagonal(3.19, 20.0), ['Mo', 'S', 'S'],
+                          [[1 / 3, 2 / 3, 0.5], [2 / 3, 1 / 3, 0.42], [2 / 3, 1 / 3, 0.58]])
+    text = describe_cif(str(CifWriter(structure)))
+    assert text == 'MoS2, 3 sites, a=3.190 b=3.190 c=20.000 Å'
+
+
+def test_describe_cif_of_unreadable_text():
+    assert describe_cif('data_x\n_cell_length_a 3.19\n') == 'not a readable structure'

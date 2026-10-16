@@ -26,8 +26,9 @@ CIF_TEXT = 'data_MoS2\n_cell_length_a 3.19\n'
 class FakeMaterialsClient:
     """The part of MPClient the materials tools use; never touches the network."""
 
-    def __init__(self, mp_rows=(), dm_rows=(), error=None):
+    def __init__(self, mp_rows=(), dm_rows=(), error=None, cif=CIF_TEXT):
         self.mp_rows, self.dm_rows, self.error = list(mp_rows), list(dm_rows), error
+        self.cif = cif
         self.structures = []
         self.downloaded_listing = False
 
@@ -50,7 +51,7 @@ class FakeMaterialsClient:
     def structure_cif(self, structure_id):
         self._check()
         self.structures.append(structure_id)
-        return CIF_TEXT
+        return self.cif
 
 
 def materials_factory(client):
