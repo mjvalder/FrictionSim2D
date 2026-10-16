@@ -86,13 +86,40 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
 
 
-def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None, status_fn=None):
+class FakeServer:
+    """Stands in for OllamaServer: never starts a process."""
+
+    def __init__(self, ok=True, message='Ollama started.', on_ensure=None):
+        self.ok, self.message, self.on_ensure = ok, message, on_ensure
+        self.ensured = self.touched = self.stopped = 0
+        self.idle = False
+        self.log_path = '/fake/cache/ollama.log'
+
+    def ensure_running(self, settings):
+        self.ensured += 1
+        if self.on_ensure:
+            self.on_ensure()
+        return self.ok, self.message
+
+    def touch(self):
+        self.touched += 1
+
+    def stop_if_idle(self, now=None):
+        return self.idle
+
+    def stop(self):
+        self.stopped += 1
+
+
+def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None,
+          server=None, models_fn=lambda s: None, save_settings=lambda *a, **k: None,
+          **kwargs):
     s = settings or AgentSettings()
     s.gemini.consent_given = consent
     pane = AssistantPane(session or FakeSession(events), lambda: object(), s,
-                         save_settings=lambda *a, **k: None, ask_key=ask_key,
-                         confirm_consent=lambda: True,
-                         **({'status_fn': status_fn} if status_fn else {}))
+                         save_settings=save_settings, ask_key=ask_key,
+                         confirm_consent=lambda: True, ollama_server=server or FakeServer(),
+                         models_fn=models_fn, **kwargs)
     _PANES.append(pane)
     return pane
 
@@ -275,10 +302,11 @@ def test_missing_key_declined_no_turn(qt_app, env, monkeypatch):
 
 
 def test_provider_switch_and_new_chat(qt_app, env, monkeypatch):
-    pane = _pane([], status_fn=lambda s: (False, 'Ollama is not running'))
+    pane = _pane([], server=FakeServer(ok=False, message='Ollama is not installed'))
     pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
     assert pane.session.switched == ['ollama']
-    assert 'not running' in pane.status_label.text()
+    assert _run_until(pane.ollama_checked)
+    assert 'could not start' in pane.status_label.text()
     pane.new_chat()
     assert pane.session.cleared == 1 and pane.chat.toPlainText() == ''
     pane.shutdown()
@@ -297,10 +325,10 @@ def test_reply_text_starts_its_own_line(qt_app, env):
 def test_controls_locked_mid_turn(qt_app, env):
     pane = _pane([TurnEvent('done')], session=SlowSession([TurnEvent('done')]))
     pane.send('x')
-    for widget in (pane.provider_box, pane.model_edit, pane.new_button):
+    for widget in (pane.provider_box, pane.model_box, pane.new_button):
         assert not widget.isEnabled()
     _run_until(pane.turn_finished)
-    for widget in (pane.provider_box, pane.model_edit, pane.new_button):
+    for widget in (pane.provider_box, pane.model_box, pane.new_button):
         assert widget.isEnabled()
 
 
@@ -347,10 +375,11 @@ def test_save_errors_show_in_chat(qt_app, env, monkeypatch):
     s.gemini.consent_given = True
     pane = AssistantPane(FakeSession([]), lambda: object(), s, save_settings=broken,
                          ask_key=lambda: None, confirm_consent=lambda: True,
-                         status_fn=lambda s: (False, 'down'))
+                         ollama_server=FakeServer(ok=False), models_fn=lambda s: None)
     _PANES.append(pane)
     pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
     assert 'read-only config' in pane.chat.toPlainText()
+    _run_until(pane.ollama_checked)
 
 
 def test_key_store_error_shows_in_chat(qt_app, env, monkeypatch):
@@ -421,40 +450,192 @@ def test_consecutive_turns_share_the_worker_loop(qt_app, env):
     assert loop.is_closed()  # closed on the worker thread as it finished
 
 
-def test_ollama_not_ready_shows_a_selectable_start_command(qt_app, env):
+def test_ollama_not_running_is_one_line_with_collapsed_details(qt_app, env):
     from PySide6.QtCore import Qt
+    pane = _pane([], settings=AgentSettings(provider='ollama'),
+                 start_command_fn=lambda _s: 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve')
+    status = pane.status_label.text()
+    assert status.startswith('Ollama not running') and '\n' not in status
+    assert 'serve' not in status
+    assert pane.details_box.isHidden() and not pane.details_button.isHidden()
+    pane.details_button.click()
+    assert not pane.details_box.isHidden()
+    details = pane.details_label.text()
+    assert 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve' in details
+    assert '/fake/cache/ollama.log' in details
+    assert pane.details_label.textInteractionFlags() & Qt.TextSelectableByMouse
+    pane.copy_button.click()
+    assert QApplication.clipboard().text() == 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve'
+    pane.details_button.click()
+    assert pane.details_box.isHidden()
+
+
+def test_ollama_ready_status_names_the_model(qt_app, env):
+    pane = _pane([], settings=AgentSettings(provider='ollama'),
+                 models_fn=lambda s: ['qwen3:4b', 'qwen3:8b'])
+    assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
+
+
+def test_check_again_reruns_the_status_check(qt_app, env):
+    state = {'models': None}
+    server = FakeServer()
+    pane = _pane([], settings=AgentSettings(provider='ollama'),
+                 models_fn=lambda s: state['models'], server=server)
+    assert pane.status_label.text().startswith('Ollama not running')
+    state['models'] = ['qwen3:4b']
+    pane.check_button.click()
+    assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
+    assert server.ensured == 0  # checking never starts anything
+
+
+def test_selecting_ollama_starts_it_off_the_gui_thread(qt_app, env):
+    import threading
+    threads = []
+    server = FakeServer(on_ensure=lambda: threads.append(threading.current_thread()))
+    state = {'models': None}
+    server.on_ensure = lambda: (threads.append(threading.current_thread()),
+                                state.update(models=['qwen3:4b']))
+    pane = _pane([], server=server, models_fn=lambda s: state['models'])
+    pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
+    assert pane.status_label.text() == 'Starting Ollama…'
+    assert _run_until(pane.ollama_checked) == [(True,)]
+    assert server.ensured == 1 and threads[0] is not threading.main_thread()
+    assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
+
+
+def test_send_while_not_ready_starts_then_sends(qt_app, env):
+    state = {'models': None}
+    server = FakeServer(on_ensure=lambda: state.update(models=['qwen3:4b']))
+    session = FakeSession([TurnEvent('done', payload=1)])
+    pane = _pane([], settings=AgentSettings(provider='ollama'), session=session,
+                 server=server, models_fn=lambda s: state['models'])
+    pane.input.setPlainText('hello')
+    pane.send()
+    assert session.texts == [] and pane.status_label.text() == 'Starting Ollama…'
+    assert _run_until(pane.turn_finished)
+    assert server.ensured == 1
+    assert session.texts == ['hello'] and 'You: hello' in pane.chat.toPlainText()
+    assert server.touched >= 2  # the turn's start and end
+
+
+def test_send_when_start_fails_says_why_and_keeps_the_text(qt_app, env):
+    server = FakeServer(ok=False, message='Ollama did not answer within 20 s; see /l.log.')
+    session = FakeSession([TurnEvent('done')])
+    pane = _pane([], settings=AgentSettings(provider='ollama'), session=session,
+                 server=server)
+    pane.send('hello')
+    assert _run_until(pane.ollama_checked) == [(False,)]
+    assert session.texts == []
+    assert 'did not answer within 20 s' in pane.chat.toPlainText()
+    assert pane.input.toPlainText() == 'hello'
+    assert 'could not start' in pane.status_label.text()
+    assert 'did not answer' in pane.details_label.text()
+
+
+def test_new_chat_with_ollama_ensures_it(qt_app, env):
+    server = FakeServer()
+    pane = _pane([], settings=AgentSettings(provider='ollama'), server=server,
+                 models_fn=lambda s: ['qwen3:4b'])
+    pane.new_chat()
+    assert _run_until(pane.ollama_checked)
+    assert server.ensured == 1
+
+
+def test_idle_timer_stop_updates_the_status(qt_app, env):
+    server = FakeServer()
     s = AgentSettings(provider='ollama')
-    pane = AssistantPane(FakeSession([]), lambda: object(), s,
-                         save_settings=lambda *a, **k: None, ask_key=lambda: None,
-                         confirm_consent=lambda: True,
-                         status_fn=lambda _s: (False, 'Ollama is not running at here.'),
-                         start_command_fn=lambda _s: 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve')
-    _PANES.append(pane)
-    text = pane.status_label.text()
-    assert 'not running' in text and 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve' in text
-    assert pane.status_label.textInteractionFlags() & Qt.TextSelectableByMouse
+    s.ollama.idle_minutes = 7
+    pane = _pane([], settings=s, server=server, models_fn=lambda _s: ['qwen3:4b'])
+    assert pane.idle_timer.isActive() and pane.idle_timer.interval() == 60_000
+    pane.idle_timer.timeout.emit()
+    assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
+    server.idle = True
+    pane.idle_timer.timeout.emit()
+    assert pane.status_label.text() == ('Ollama stopped after 7 min idle '
+                                        '(starts again on your next message)')
+    pane.send('x')  # not ready any more: starting again comes first
+    assert pane.status_label.text() == 'Starting Ollama…'
+    assert _run_until(pane.turn_finished)
+    assert server.ensured == 1 and pane.session.texts == ['x']
 
 
-def test_ollama_ready_shows_no_start_command(qt_app, env):
-    s = AgentSettings(provider='ollama')
-    pane = AssistantPane(FakeSession([]), lambda: object(), s,
-                         save_settings=lambda *a, **k: None, ask_key=lambda: None,
-                         confirm_consent=lambda: True,
-                         status_fn=lambda _s: (True, 'Ollama ready (m).'),
-                         start_command_fn=lambda _s: 'SERVE-CMD')
-    _PANES.append(pane)
-    assert 'SERVE-CMD' not in pane.status_label.text()
-
-
-def test_switch_to_ollama_help_uses_the_start_command(qt_app, env):
+def test_shutdown_stops_our_server(qt_app, env):
+    server = FakeServer()
     pane = AssistantPane(FakeSession([]), lambda: object(), AgentSettings(),
                          save_settings=lambda *a, **k: None, ask_key=lambda: None,
-                         confirm_consent=lambda: True,
-                         status_fn=lambda _s: (False, 'Ollama is not running at here.'),
-                         start_command_fn=lambda _s: 'SERVE-CMD')
-    _PANES.append(pane)
-    pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
-    assert 'SERVE-CMD' in pane.chat.toPlainText()
+                         confirm_consent=lambda: True, ollama_server=server)
+    pane.shutdown()
+    assert server.stopped == 1
+
+
+def test_model_combo_lists_installed_models_and_fits(qt_app, env):
+    from PySide6.QtWidgets import QComboBox
+    saved = []
+    s = AgentSettings(provider='ollama')
+    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3:4b', 'qwen3:8b', 'llama3.1:8b'],
+                 save_settings=lambda settings: saved.append(settings.ollama.model))
+    box = pane.model_box
+    assert isinstance(box, QComboBox) and box.isEditable()
+    assert [box.itemText(i) for i in range(box.count())] == ['qwen3:4b', 'qwen3:8b',
+                                                              'llama3.1:8b']
+    assert box.currentText() == 'qwen3:4b'
+    assert box.minimumContentsLength() >= len('llama3.1:8b')
+    pane.resize(pane.minimumSizeHint().width(), 600)
+    pane.show()
+    QApplication.processEvents()
+    assert pane.minimumSizeHint().width() <= 300  # the dock's narrow width still fits
+    assert box.lineEdit().width() > box.fontMetrics().horizontalAdvance('llama3.1:8b')
+    pane.hide()
+    box.setCurrentIndex(1)
+    box.activated.emit(1)
+    assert s.ollama.model == 'qwen3:8b' and saved[-1] == 'qwen3:8b'
+    assert pane.session.switched[-1] == 'ollama'
+    assert pane.status_label.text() == 'Ollama ready (qwen3:8b)'
+
+
+def test_typed_model_name_is_kept(qt_app, env):
+    s = AgentSettings()
+    pane = _pane([], settings=s)
+    pane.model_box.setEditText('gemini-9-pro')
+    pane.model_box.lineEdit().editingFinished.emit()
+    assert s.gemini.model == 'gemini-9-pro'
+
+
+def test_legacy_model_falls_back_with_a_note(qt_app, env):
+    saved = []
+    s = AgentSettings(provider='ollama')
+    s.ollama.model = 'fs2d-qwen3-4b'
+    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3:4b', 'llama3.1:8b'],
+                 save_settings=lambda settings: saved.append(settings.ollama.model))
+    assert s.ollama.model == 'qwen3:4b' and saved == ['qwen3:4b']
+    assert pane.model_box.currentText() == 'qwen3:4b'
+    assert 'fs2d-qwen3-4b is not installed' in pane.chat.toPlainText()
+    assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
+
+
+def test_missing_model_is_named_and_details_say_how_to_pull(qt_app, env):
+    s = AgentSettings(provider='ollama')
+    s.ollama.model = 'mistral:7b'
+    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3:4b'])
+    assert 'no model mistral:7b' in pane.status_label.text()
+    assert 'pull mistral:7b' in pane.details_label.text()
+    assert pane.model_box.currentText() == 'mistral:7b'
+
+
+def test_gemini_is_unaffected_by_the_ollama_controls(qt_app, env):
+    server = FakeServer()
+    session = FakeSession([TurnEvent('done', payload=1)])
+    pane = _pane([], session=session, server=server)
+    assert pane.status_label.text() == 'Gemini: key set'
+    assert pane.details_button.isHidden() and pane.check_button.isHidden()
+    assert pane.details_box.isHidden()
+    assert [pane.model_box.itemText(i) for i in range(pane.model_box.count())] == [
+        'gemini-3.5-flash-lite']
+    pane.send('x')
+    _run_until(pane.turn_finished)
+    pane.new_chat()
+    pane.idle_timer.timeout.emit()
+    assert session.texts == ['x'] and server.ensured == 0
 
 
 def _anchor_of(chat, text):

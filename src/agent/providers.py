@@ -42,23 +42,6 @@ def ollama_start_command(settings: AgentSettings,
     return f'{env} nice -n 10 {ollama_binary(which, home)} serve'
 
 
-def ollama_setup_help(settings: AgentSettings,
-                      which: Callable[[str], Optional[str]] = shutil.which,
-                      home: Optional[Path] = None, start_command: Optional[str] = None) -> str:
-    """How to get the local provider going, naming the binary actually found.
-
-    ``start_command`` replaces the `ollama_start_command` line when given.
-    """
-    binary = ollama_binary(which, home)
-    start = start_command or ollama_start_command(settings, which, home)
-    return ('Ollama is the experimental offline option (Phase 0: about a minute per turn '
-            'on a Radeon 780M). The Assistant starts it when needed; to start it '
-            'yourself, run\n'
-            f'  {start}\n'
-            'and fetch the model once with\n'
-            f'  {binary} pull {settings.ollama.model}')
-
-
 class ProviderUnavailable(RuntimeError):
     """The chosen provider cannot be used right now; the message says why."""
 

@@ -14,17 +14,20 @@ import html
 import logging
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import Qt, QThread, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import (QColor, QKeySequence, QShortcut, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTextFormat)
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog,
-                               QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-                               QPushButton, QScrollArea, QTextBrowser,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout,
+                               QInputDialog, QLabel, QLineEdit, QMessageBox,
+                               QPlainTextEdit, QPushButton, QScrollArea, QTextBrowser,
                                QVBoxLayout, QWidget)
 
 from ...agent.changes import FsChangeSet
-from ...agent.providers import ollama_setup_help, ollama_start_command, ollama_status
-from ...agent.settings import AgentSettings, gemini_key, save_agent_settings, store_gemini_key
+from ...agent.ollama_server import OllamaServer
+from ...agent.providers import (model_installed, ollama_binary, ollama_models,
+                                ollama_start_command)
+from ...agent.settings import (AgentSettings, fallback_ollama_model, gemini_key,
+                               save_agent_settings, store_gemini_key)
 from .cards import ChangeCard, FsCard
 from .worker import AgentWorker
 
@@ -37,6 +40,10 @@ CONSENT_TEXT = (
     'Google. On the free tier Google may use them to improve its products.\n\n'
     'Use Gemini for the Assistant?')
 
+#: How often the idle check runs (a server the pane started stops when idle).
+IDLE_CHECK_MS = 60_000
+#: Characters the model box always shows ("llama3.1:8b" and shorter fit).
+MODEL_BOX_CHARS = 14
 #: Cards shown in the Pending strip before it scrolls.
 PENDING_VISIBLE = 3
 #: Char-format property tagging an applied line's Undo control with its id.
@@ -65,24 +72,33 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     #: New chat: the applied lines (and their Undo links) are gone.
     chat_cleared = Signal()
     turn_finished = Signal()
+    #: An Ollama start/check finished: whether it is ready for a turn.
+    ollama_checked = Signal(bool)
     _start_turn = Signal(str, object, object, int)
+    _ollama_started = Signal(bool, str, object)  # (ok, message, installed models)
 
     def __init__(self, session, deps_factory: Callable[[], object],
                  settings: AgentSettings, parent=None, *,
-                 save_settings=save_agent_settings, status_fn=ollama_status,
+                 save_settings=save_agent_settings,
                  ask_key: Optional[Callable[[], Optional[str]]] = None,
                  confirm_consent: Optional[Callable[[], bool]] = None,
                  store_key=store_gemini_key,
-                 start_command_fn=ollama_start_command) -> None:
+                 start_command_fn=ollama_start_command,
+                 ollama_server=None, models_fn=ollama_models) -> None:
         super().__init__(parent)
         self.session = session
         self.settings = settings
         self._deps_factory = deps_factory
         self._save_settings = save_settings
         self._store_key = store_key
-        self._status_fn = status_fn
         self._start_command_fn = start_command_fn
+        self._server = ollama_server if ollama_server is not None else OllamaServer()
+        self._models_fn = models_fn
         self._ollama_ready = False
+        self._ollama_starting = False
+        self._ollama_problem = ''  # why it is not ready, for Details
+        self._installed = []
+        self._pending_text: Optional[str] = None  # sent once Ollama is up
         self._ask_key = ask_key or self._default_ask_key
         self._confirm_consent = confirm_consent or self._default_confirm_consent
         self._busy = False
@@ -104,6 +120,11 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._thread.finished.connect(self._worker.close, Qt.DirectConnection)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.start()
+        self._ollama_started.connect(self._on_ollama_started)
+        self.idle_timer = QTimer(self)
+        self.idle_timer.setInterval(IDLE_CHECK_MS)
+        self.idle_timer.timeout.connect(self._check_idle)
+        self.idle_timer.start()
         self._refresh_header()
 
     # ------------------------------------------------------------------ ui
@@ -139,14 +160,21 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         picker = QHBoxLayout()
         self.provider_box = QComboBox(self)
         self.provider_box.addItem('Gemini (cloud)', 'gemini')
-        self.provider_box.addItem('Ollama (local, experimental)', 'ollama')
+        self.provider_box.addItem('Ollama (local)', 'ollama')
+        self.provider_box.setItemData(1, 'Offline; experimental and slow on a laptop GPU',
+                                      Qt.ToolTipRole)
         self.provider_box.setCurrentIndex(self.provider_box.findData(self.settings.provider))
         self.provider_box.currentIndexChanged.connect(self._on_provider_changed)
-        self.model_edit = QLineEdit(self)
-        self.model_edit.setToolTip('Model')
-        self.model_edit.editingFinished.connect(self._on_model_edited)
+        self.model_box = QComboBox(self)
+        self.model_box.setEditable(True)
+        self.model_box.setInsertPolicy(QComboBox.NoInsert)
+        self.model_box.setToolTip('Model (Ollama: the installed ones; any name can be typed)')
+        self.model_box.setMinimumContentsLength(MODEL_BOX_CHARS)
+        self.model_box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.model_box.activated.connect(self._on_model_chosen)
+        self.model_box.lineEdit().editingFinished.connect(self._on_model_chosen)
         picker.addWidget(self.provider_box)
-        picker.addWidget(self.model_edit, 1)
+        picker.addWidget(self.model_box, 1)
         layout.addLayout(picker)
 
         status = QHBoxLayout()
@@ -154,9 +182,33 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.status_label = QLabel('', self)
         self.status_label.setWordWrap(True)
         self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.check_button = QPushButton('Check again', self)
+        self.check_button.setToolTip('Ask Ollama again whether it is up (never starts it)')
+        self.check_button.clicked.connect(self._check_ollama)
+        self.details_button = QPushButton('Details', self)
+        self.details_button.setCheckable(True)
         status.addWidget(self.cloud_badge)
         status.addWidget(self.status_label, 1)
+        status.addWidget(self.check_button)
+        status.addWidget(self.details_button)
         layout.addLayout(status)
+
+        self.details_box = QFrame(self)
+        details = QVBoxLayout(self.details_box)
+        details.setContentsMargins(0, 0, 0, 0)
+        self.details_label = QLabel('', self.details_box)
+        self.details_label.setWordWrap(True)
+        self.details_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.copy_button = QPushButton('Copy start command', self.details_box)
+        self.copy_button.clicked.connect(self._copy_start_command)
+        details.addWidget(self.details_label)
+        copy_row = QHBoxLayout()
+        copy_row.addWidget(self.copy_button)
+        copy_row.addStretch(1)
+        details.addLayout(copy_row)
+        self.details_box.hide()
+        self.details_button.toggled.connect(self.details_box.setVisible)
+        layout.addWidget(self.details_box)
 
         self.chat = QTextBrowser(self)
         self.chat.setOpenExternalLinks(False)
@@ -204,20 +256,145 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         """Show which main tab is active. Display only: never sent to the model."""
         self.context_label.setText(f'On: {text}' if text else '')
 
-    def _refresh_header(self) -> None:
+    def _refresh_header(self, check: bool = True) -> None:
+        """Model box, badge and status for the current provider.
+
+        ``check``: ask Ollama now (quick, never starts it).
+        """
         provider = self.settings.provider
-        model = getattr(self.settings, provider).model
-        self.model_edit.setText(model)
-        self.cloud_badge.setVisible(provider == 'gemini')
-        if provider == 'gemini':
-            self.status_label.setText('key set' if gemini_key(self.settings)
-                                      else 'no API key yet (you will be asked)')
+        ollama = provider == 'ollama'
+        self.cloud_badge.setVisible(not ollama)
+        self.check_button.setVisible(ollama)
+        self.details_button.setVisible(ollama)
+        if not ollama:
+            self.details_button.setChecked(False)
+            self._fill_models([])
+            self._set_status('Gemini: key set' if gemini_key(self.settings)
+                             else 'Gemini: no API key yet (you will be asked)')
+        elif check:
+            self._check_ollama()
         else:
-            self._ollama_ready, message = self._status_fn(self.settings)
-            if not self._ollama_ready:
-                message += ('\nIf it is not running, start it in a terminal with:\n'
-                            + self._start_command_fn(self.settings))
-            self.status_label.setText(message)
+            self._fill_models(self._installed)
+
+    def _set_status(self, text: str) -> None:
+        self.status_label.setText(text)
+        self._fill_details()
+
+    def _fill_details(self) -> None:
+        lines = [self._ollama_problem] if self._ollama_problem else []
+        lines += ['The Assistant starts Ollama when needed and stops it after '
+                  f'{self.settings.ollama.idle_minutes} min idle. To start it yourself:',
+                  self._start_command_fn(self.settings),
+                  f'Log: {self._server.log_path}']
+        self.details_label.setText('\n'.join(lines))
+
+    def _copy_start_command(self) -> None:
+        QApplication.clipboard().setText(self._start_command_fn(self.settings))
+
+    def _fill_models(self, installed) -> None:
+        """Offer the installed models (Ollama) or the current one; keep it selected."""
+        current = getattr(self.settings, self.settings.provider).model
+        names = list(installed) if self.settings.provider == 'ollama' else []
+        if current not in names:
+            names.append(current)
+        self.model_box.blockSignals(True)
+        self.model_box.clear()
+        self.model_box.addItems(names)
+        self.model_box.setCurrentText(current)
+        self.model_box.blockSignals(False)
+
+    # -------------------------------------------------------------- ollama
+
+    def _check_ollama(self) -> None:
+        """Ask a running Ollama for its models (Check again); never starts it."""
+        self._show_ollama(self._models_fn(self.settings))
+
+    def _show_ollama(self, installed) -> None:
+        """Status from the installed model list (None: not running)."""
+        if installed is None:
+            self._ollama_ready = False
+            self._ollama_problem = ''
+            self._fill_models(self._installed)
+            self._set_status('Ollama not running — starts on your next message')
+            return
+        self._installed = list(installed)
+        note = fallback_ollama_model(self.settings, self._installed)
+        if note:
+            self._save()
+            self.session.switch(self.settings)
+            self.note(note)
+        self._fill_models(self._installed)
+        self._update_ollama_ready()
+
+    def _update_ollama_ready(self) -> None:
+        model = self.settings.ollama.model
+        self._ollama_ready = model_installed(model, self._installed)
+        if self._ollama_ready:
+            self._ollama_problem = ''
+            self._set_status(f'Ollama ready ({model})')
+        else:
+            self._ollama_problem = (f'Fetch the model once with: '
+                                    f'{ollama_binary()} pull {model}')
+            self._set_status(f'Ollama is running but has no model {model} — see Details')
+
+    def _ensure_ollama(self, pending_text: Optional[str] = None) -> None:
+        """Start Ollama (if needed) on a pool thread; ``pending_text`` is sent after."""
+        if pending_text is not None:
+            self._pending_text = pending_text
+        if self._ollama_starting:
+            return
+        self._ollama_starting = True
+        self._set_status('Starting Ollama…')
+        server, settings, models_fn = self._server, self.settings, self._models_fn
+        done = self._ollama_started
+
+        def task() -> None:
+            try:
+                ok, message = server.ensure_running(settings)
+                installed = models_fn(settings) if ok else None
+                if ok and installed is None:
+                    ok, message = False, 'Ollama started but does not list its models.'
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception('starting Ollama failed')
+                ok, message, installed = False, f'Could not start Ollama: {exc}', None
+            try:
+                done.emit(ok, message, installed)
+            except RuntimeError:  # the pane is gone (window closed meanwhile)
+                pass
+        QThreadPool.globalInstance().start(task)
+
+    def _on_ollama_started(self, ok: bool, message: str, installed) -> None:
+        self._ollama_starting = False
+        pending, self._pending_text = self._pending_text, None
+        if self.settings.provider != 'ollama':
+            if pending and not self.input.toPlainText().strip():
+                self.input.setPlainText(pending)
+            self.ollama_checked.emit(False)
+            return
+        if ok:
+            self._show_ollama(installed)
+        else:
+            self._ollama_ready = False
+            self._ollama_problem = message
+            self._set_status('Ollama could not start — see Details')
+        if pending:
+            if self._ollama_ready:
+                self.send(pending)
+            else:
+                reason = message if not ok else self.status_label.text()
+                self._append(f'Not sent: {reason}', 'color:#b00')
+                if not self.input.toPlainText().strip():
+                    self.input.setPlainText(pending)
+        self.ollama_checked.emit(self._ollama_ready)
+
+    def _check_idle(self) -> None:
+        if self._busy or self._ollama_starting:
+            return
+        if self._server.stop_if_idle():
+            self._ollama_ready = False
+            if self.settings.provider == 'ollama':
+                self._set_status(f'Ollama stopped after {self.settings.ollama.idle_minutes} '
+                                 'min idle (starts again on your next message)')
 
     def _append(self, text: str, style: str = '') -> None:
         self._text_open = False
@@ -240,20 +417,23 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.settings.provider = self.provider_box.currentData()
         self._save()
         self.session.switch(self.settings)
-        self._refresh_header()
+        ollama = self.settings.provider == 'ollama'
+        self._refresh_header(check=not ollama)
         self._append(f'Switched to {self.provider_box.currentText()} (history kept as text only).',
                      'color:gray')
-        if self.settings.provider == 'ollama' and not self._ollama_ready:
-            help_text = ollama_setup_help(
-                self.settings, start_command=self._start_command_fn(self.settings))
-            self._append(help_text, 'color:gray')
+        if ollama:
+            self._ensure_ollama()
 
-    def _on_model_edited(self) -> None:
+    def _on_model_chosen(self, *_args) -> None:
+        text = self.model_box.currentText().strip()
         provider = getattr(self.settings, self.settings.provider)
-        if self.model_edit.text().strip() and self.model_edit.text().strip() != provider.model:
-            provider.model = self.model_edit.text().strip()
-            self._save()
-            self.session.switch(self.settings)
+        if not text or text == provider.model:
+            return
+        provider.model = text
+        self._save()
+        self.session.switch(self.settings)
+        if self.settings.provider == 'ollama' and self._installed:
+            self._update_ollama_ready()
 
     def _on_ask_toggled(self, checked: bool) -> None:
         self.settings.ask_before_apply = checked
@@ -280,7 +460,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _ready(self) -> bool:
         if self.settings.provider != 'gemini':
-            return True
+            return self._ollama_ready
         if not self.settings.gemini.consent_given:
             if not self._confirm_consent():
                 self._append('Gemini not used: consent declined. Switch to Ollama or ask again.',
@@ -308,8 +488,17 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     def send(self, text: Optional[str] = None) -> None:
         """Start a turn with ``text`` (default: the input box)."""
         text = (text if text is not None else self.input.toPlainText()).strip()
-        if not text or self._busy or not self._ready():
+        if not text or self._busy:
             return
+        if self.settings.provider == 'ollama' and not self._ollama_ready:
+            self.input.clear()
+            self.note('Starting Ollama; your message goes as soon as it is up.')
+            self._ensure_ollama(text)
+            return
+        if not self._ready():
+            return
+        if self.settings.provider == 'ollama':
+            self._server.touch()
         self.input.clear()
         self._last_text = text
         self.retry_button.hide()
@@ -331,7 +520,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._busy = busy
         self.send_button.setEnabled(not busy)
         self.stop_button.setEnabled(busy)
-        for widget in (self.provider_box, self.model_edit, self.new_button, self.ask_box):
+        for widget in (self.provider_box, self.model_box, self.new_button, self.ask_box):
             widget.setEnabled(not busy)
 
     def _on_event(self, turn_id: int, event) -> None:
@@ -358,6 +547,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _on_finished(self, _turn_id: int) -> None:
         self._set_busy(False)  # the worker is free whichever turn this was
+        if self.settings.provider == 'ollama':
+            self._server.touch()  # idle time counts from the end of a turn
         self.turn_finished.emit()
 
     # ------------------------------------------------------------ changes
@@ -517,9 +708,20 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._undo_states = {}
         self._fit_pending()
         self.chat_cleared.emit()
+        if self.settings.provider == 'ollama':
+            self._ensure_ollama()
+
+    def stop_ollama(self) -> None:
+        """Stop the Ollama server the pane started (never one it did not)."""
+        self.idle_timer.stop()
+        try:
+            self._server.stop()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('stopping Ollama failed')
 
     def shutdown(self) -> None:
-        """Stop the worker thread (window close)."""
+        """Stop the worker thread and our Ollama server (window close)."""
+        self.stop_ollama()
         self._worker.cancel()
         self._thread.quit()
         if self._thread.wait(3000):

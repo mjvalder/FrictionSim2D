@@ -111,12 +111,3 @@ def test_start_command_is_throttled_and_names_the_binary(tmp_path):
                  'nice -n 10'):
         assert part in command
     assert command.endswith('/opt/x/ollama serve')
-
-
-def test_setup_help_carries_the_start_command(tmp_path):
-    from src.agent.providers import ollama_setup_help
-    text = ollama_setup_help(AgentSettings(provider='ollama'), which=lambda name: None,
-                             home=tmp_path)
-    assert 'OLLAMA_IGPU_ENABLE=1' in text and 'ollama serve' in text
-    assert 'ollama pull qwen3:4b' in text
-    assert 'create' not in text and 'Modelfile' not in text
