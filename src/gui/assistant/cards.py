@@ -1,4 +1,8 @@
-"""Proposal cards: what the agent wants to change, with Apply and Discard."""
+"""Proposal cards: what the agent wants to change, with Apply and Discard.
+
+A card is removed from the pane once applied or discarded; the outcome goes
+to the chat, so a card has no status of its own.
+"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -20,24 +24,13 @@ class _Card(QFrame):
         self.body.setWordWrap(True)
         self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.body)
-        self.status = QLabel('', self)
-        self.status.hide()
-        layout.addWidget(self.status)
         self.buttons = QHBoxLayout()
         layout.addLayout(self.buttons)
         self.discard_button = QPushButton('Discard', self)
         self.discard_button.clicked.connect(self._discard)
 
     def _discard(self) -> None:
-        self.mark_applied('Discarded.')
         self.discarded.emit(self.change)  # pylint: disable=no-member
-
-    def mark_applied(self, message: str) -> None:
-        """Freeze the card and show what happened."""
-        for button in self.findChildren(QPushButton):
-            button.setEnabled(False)
-        self.status.setText(message)
-        self.status.show()
 
 
 class ChangeCard(_Card):

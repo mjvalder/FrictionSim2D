@@ -162,12 +162,16 @@ class FieldEditor(QWidget):
             rules.append(f'background-color: {HIGHLIGHT_COLOR}; color: black;')
         for child in self.findChildren(QLineEdit):
             child.setStyleSheet(' '.join(rules))
-        self.setAutoFillBackground(bool(self._highlight))
-        if self._highlight:
+        filled = bool(self._highlight)
+        if filled == self.autoFillBackground():
+            return  # an error toggled: the fill is already right
+        self.setAutoFillBackground(filled)
+        if filled:
             palette = self.palette()
             palette.setColor(QPalette.Window, QColor(HIGHLIGHT_COLOR))
             self.setPalette(palette)
         else:
+            # A palette with no roles set: everything inherited again.
             self.setPalette(QPalette())
 
 

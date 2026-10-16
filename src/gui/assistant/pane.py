@@ -372,6 +372,12 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         else:
             self.change_proposed.emit(change)
 
+    def queue_card(self, change, note: str = '') -> None:
+        """Keep a change for the user to apply, whatever the apply mode."""
+        self._add_card(change)
+        if note:
+            self.note(note)
+
     def note(self, text: str, error: bool = False) -> None:
         """One line in the chat: gray, or red for something that failed."""
         self._append(text, 'color:#b00' if error else 'color:gray')
@@ -437,6 +443,11 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         cursor.insertText(f'✓ {text}  ', plain)
         self._undo_states[entry_id] = 'enabled'
         cursor.insertText(*self._undo_fragment(entry_id, 'enabled'))
+        # A plain character after the link: text typed or streamed at the end
+        # takes the format of the character before it, which must not be the
+        # anchor.
+        cursor.insertText(' ', QTextCharFormat())
+        self.chat.setTextCursor(cursor)
         self._text_open = False
 
     @staticmethod

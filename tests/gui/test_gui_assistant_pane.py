@@ -455,3 +455,37 @@ def test_switch_to_ollama_help_uses_the_start_command(qt_app, env):
     _PANES.append(pane)
     pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
     assert 'SERVE-CMD' in pane.chat.toPlainText()
+
+
+def _anchor_of(chat, text):
+    block = chat.document().begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            if text in fragment.text():
+                return fragment.charFormat().isAnchor()
+            it += 1
+        block = block.next()
+    raise AssertionError(f'{text!r} not in the chat')
+
+
+def test_text_after_an_undo_line_is_not_part_of_the_link(qt_app, env):
+    from PySide6.QtGui import QTextCursor
+    pane = _pane([])
+    pane.add_applied_line(1, 'Set 1 field: [general] force')
+    pane.chat.moveCursor(QTextCursor.End)
+    pane.chat.insertPlainText('tail')
+    assert _anchor_of(pane.chat, 'Undo') and not _anchor_of(pane.chat, 'tail')
+    pane._append_inline('streamed')  # pylint: disable=protected-access
+    assert not _anchor_of(pane.chat, 'streamed')
+
+
+def test_queue_card_keeps_a_change_as_a_card_with_a_note(qt_app, env, tmp_path, mock_settings):
+    change = build_changeset(make_deps(tmp_path, mock_settings), 'loads',
+                             [Op('set', 'general', 'force', [5])])
+    pane = _pane([])
+    pane.queue_card(change, 'kept as a card because you were editing')
+    assert change.id in pane.cards and not pane.pending_box.isHidden()
+    assert 'kept as a card because you were editing' in pane.chat.toPlainText()
+    assert not hasattr(pane.cards[change.id], 'status')

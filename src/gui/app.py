@@ -83,8 +83,28 @@ class AssistantUndo:
     settings_document: SettingsDocument
     config_keys: List[Tuple[str, str]] = field(default_factory=list)
     settings_keys: List[Tuple[str, str]] = field(default_factory=list)
+    #: Highlights this change replaced (the key was already marked by an
+    #: earlier change), put back by its Undo.
+    replaced_config: Dict[Tuple[str, str], str] = field(default_factory=dict)
+    replaced_settings: Dict[Tuple[str, str], str] = field(default_factory=dict)
+    touched_settings: bool = False
     material_path: Optional[Path] = None
     material_bytes: Optional[bytes] = None
+    #: The Builder right after the apply -- (model, config values, settings
+    #: values) and their fingerprint -- to tell whether Undo would also
+    #: revert edits the user made since.
+    after: Optional[Tuple[str, dict, dict]] = None
+    after_fingerprint: str = ''
+
+
+def _merge_highlights(form: ConfigForm, new: Dict[Tuple[str, str], str]):
+    """``new`` with a key an earlier change already marked reading from that
+    change's *before* ("a → c", not "b → c"); plus the marks it replaces."""
+    current = form.highlights()
+    replaced = {key: current[key] for key in new if key in current}
+    merged = {key: (current[key].split(' → ', 1)[0] + ' → ' + text.split(' → ', 1)[1]
+                    if key in replaced else text) for key, text in new.items()}
+    return merged, replaced
 
 
 def _highlight_map(change, scope: str) -> Dict[Tuple[str, str], str]:
@@ -157,9 +177,16 @@ class MainWindow(QMainWindow):
     """Configuration on the left, rendered system on the right."""
 
     def __init__(self, workspace: Workspace, *,
-                 agent_settings_loader: Optional[Callable[[], object]] = None) -> None:
+                 agent_settings_loader: Optional[Callable[[], object]] = None,
+                 confirm_undo: Optional[Callable[[str], bool]] = None,
+                 user_busy: Optional[Callable[[], bool]] = None) -> None:
         super().__init__()
         self.workspace = workspace
+        # Injectable so tests never meet a modal: asked before an Undo that
+        # would also revert later edits (default: a Yes/No box, No default).
+        self._confirm_undo = confirm_undo or self._default_confirm_undo
+        # Whether the user is mid-edit, so a direct change waits as a card.
+        self._user_busy = user_busy or self._default_user_busy
         # Injectable so a test can make the Assistant's build fail; None
         # means src.agent.settings.load_agent_settings, imported lazily.
         self._agent_settings_loader = agent_settings_loader
@@ -469,8 +496,9 @@ class MainWindow(QMainWindow):
             return
         pane.finish_card(proposed, '' if result.applied else result.message,
                          error=not result.applied)
-        if result.applied:
-            self._land_assistant_change(change, target, undo, result.message)
+        if result.applied or result.partial:
+            self._land_assistant_change(change, target, undo, result.message,
+                                        partial=result.partial)
 
     def _apply_assistant_change_now(self, change) -> None:
         """Apply a config/settings change set as it arrives (no card).
@@ -482,6 +510,10 @@ class MainWindow(QMainWindow):
         from ..agent.changes import ToolInputError, apply_changeset, build_changeset
         pane = self._assistant_pane
         self.form.commit()  # a value still in an editor counts as a Builder edit
+        if self._user_busy():
+            pane.queue_card(change, 'Not applied yet: kept as a card because you were '
+                                    'editing the Builder. Apply it when ready.')
+            return
         try:
             undo = self._assistant_snapshot(change, self.document)
             result = apply_changeset(change, self.document, self.settings_document)
@@ -497,8 +529,21 @@ class MainWindow(QMainWindow):
             return
         if not result.applied:
             pane.note(result.message, error=True)
-            return
-        self._land_assistant_change(change, self.document, undo, result.message)
+            if not result.partial:
+                return
+        self._land_assistant_change(change, self.document, undo, result.message,
+                                    partial=result.partial)
+
+    def _default_user_busy(self) -> bool:
+        """The user is in the middle of something a direct apply would trample:
+        a refused commit, a modal dialog, or the cursor in a form field."""
+        if self.form.refusals() or self.settings_form.refusals():
+            return True
+        if QApplication.activeModalWidget() is not None:
+            return True
+        focus = QApplication.focusWidget()
+        return focus is not None and (self.form.isAncestorOf(focus)
+                                      or self.settings_form.isAncestorOf(focus))
 
     def _assistant_snapshot(self, change, target) -> AssistantUndo:
         """The undo record for ``change``, taken before it touches anything.
@@ -518,10 +563,14 @@ class MainWindow(QMainWindow):
         return undo
 
     def _land_assistant_change(self, change, target, undo: AssistantUndo,
-                               message: str) -> None:
-        """Refresh the Builder after an apply, mark what changed, offer Undo."""
+                               message: str, partial: bool = False) -> None:
+        """Refresh the Builder after an apply, mark what changed, offer Undo.
+
+        ``partial``: a file error stopped the apply part-way; nothing is
+        highlighted (what landed is unknown) but Undo is offered.
+        """
         # pylint: disable=import-outside-toplevel
-        from ..agent.changes import applied_summary
+        from ..agent.changes import applied_summary, fingerprint
         pane = self._assistant_pane
         if target is not self.document:
             self.document = target
@@ -541,12 +590,22 @@ class MainWindow(QMainWindow):
         self._refresh_counts()
         self._validate()
         self._on_config_changed()
-        undo.config_keys = list(_highlight_map(change, 'config'))
-        undo.settings_keys = list(_highlight_map(change, 'settings'))
-        self.form.highlight(_highlight_map(change, 'config'))
-        self.settings_form.highlight(_highlight_map(change, 'settings'))
+        undo.touched_settings = change.touches_settings()
+        if not partial:
+            config, undo.replaced_config = _merge_highlights(
+                self.form, _highlight_map(change, 'config'))
+            settings, undo.replaced_settings = _merge_highlights(
+                self.settings_form, _highlight_map(change, 'settings'))
+            undo.config_keys, undo.settings_keys = list(config), list(settings)
+            self.form.highlight(config)
+            self.settings_form.highlight(settings)
+        undo.after = (self.document.model, copy.deepcopy(self.document.values),
+                      copy.deepcopy(self.settings_document.values))
+        undo.after_fingerprint = fingerprint(self.document, self.settings_document)
         self._assistant_undo.append(undo)
-        pane.add_applied_line(undo.id, applied_summary(change))
+        summary = applied_summary(change)
+        pane.add_applied_line(undo.id, f'Partly applied, then stopped: {summary}'
+                              if partial else summary)
         self._refresh_undo_states()
         self.statusBar().showMessage(message)
 
@@ -560,6 +619,10 @@ class MainWindow(QMainWindow):
     def _undo_assistant_change(self, entry_id: int) -> None:
         """Put the Builder back as it was before the most recent change."""
         if not self._assistant_undo or self._assistant_undo[-1].id != entry_id:
+            return
+        later = self._edits_since(self._assistant_undo[-1])
+        if later and not self._confirm_undo(
+                f'Undo also reverts your later edits to {later}. Undo anyway?'):
             return
         entry = self._assistant_undo.pop()
         self.document = entry.document
@@ -585,14 +648,44 @@ class MainWindow(QMainWindow):
             logger.exception('settings restored by Undo do not validate')
         else:
             self.form.set_settings(self.settings)
+        if entry.touched_settings:
+            # The restored values must reach settings.yaml at the next build,
+            # whatever the snapshot's own flag said.
+            self.settings_document.dirty = True
         self.form.clear_highlights(entry.config_keys)
         self.settings_form.clear_highlights(entry.settings_keys)
+        self.form.highlight(entry.replaced_config)
+        self.settings_form.highlight(entry.replaced_settings)
         self._refresh_counts()
         self._validate()
         self._on_config_changed()
         self._assistant_pane.set_undo_state(entry_id, 'undone')
         self._refresh_undo_states()
         self.statusBar().showMessage('Undid the assistant\'s last change.')
+
+    def _edits_since(self, entry: AssistantUndo) -> str:
+        """The fields the user changed after ``entry`` was applied, as text
+        ('' when none: Undo then reverts only the assistant's change)."""
+        # pylint: disable=import-outside-toplevel
+        from ..agent.changes import field_diff, fingerprint
+        self.form.commit()
+        if entry.after is None or (fingerprint(self.document, self.settings_document)
+                                   == entry.after_fingerprint):
+            return ''
+        model, config, settings = entry.after
+        names = (['the simulation model'] if model != self.document.model else [])
+        names += [f'[{d.section}] {d.key}'.strip()
+                  for d in field_diff('config', config, self.document.values)]
+        names += [f'settings [{d.section}] {d.key}'.strip()
+                  for d in field_diff('settings', settings, self.settings_document.values)]
+        if not names:
+            return 'the Builder'
+        return ', '.join(names[:6]) + (', …' if len(names) > 6 else '')
+
+    def _default_confirm_undo(self, text: str) -> bool:
+        answer = QMessageBox.question(self, 'Undo the assistant\'s change?', text,
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
 
     def _accept_assistant_changes(self) -> None:
         """Accept: the changes stay, their yellow marks go."""
@@ -1112,6 +1205,7 @@ class MainWindow(QMainWindow):
         self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.settings_form.clear_highlights()
+        self._end_assistant_undo()  # settings.yaml now holds these values
         self.statusBar().showMessage(f"Saved {written}")
 
     def _revert_settings(self) -> None:
@@ -1156,6 +1250,9 @@ class MainWindow(QMainWindow):
             return result.render()
 
         self.settings_document.save(self.workspace.settings_path)
+        # Written to disk: an Undo now would leave settings.yaml (what builds
+        # read) on values the Builder no longer shows.
+        self._end_assistant_undo()
         self.settings = self.settings_document.as_settings()
         self.form.set_settings(self.settings)
         self._refresh_settings_origin()

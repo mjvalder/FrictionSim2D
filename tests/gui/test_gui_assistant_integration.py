@@ -31,8 +31,13 @@ def _make_window(qt_app, tmp_path, monkeypatch):
     from src.gui.app import MainWindow
     made = []
 
+    def no_modal(text):
+        raise AssertionError(f'unexpected Undo confirmation: {text}')
+
     def make(root=tmp_path / 'ws'):
         window = MainWindow(Workspace.open(root))
+        window._confirm_undo = no_modal  # pylint: disable=protected-access
+        window._user_busy = lambda: False  # pylint: disable=protected-access
         made.append(window)
         return window
     yield make
@@ -554,3 +559,119 @@ def test_a_failing_build_shows_an_error_in_the_dock(qt_app, tmp_path, monkeypatc
         window.document.dirty = False
         window.settings_document.dirty = False
         window.close()
+
+
+# ------------------------------------------------------------- review fixes
+
+def _settings_change(window):
+    section, key = _numeric_setting(window.settings_document)
+    old = window.settings_document.values[section][key]
+    return section, key, old, build_changeset(window.assistant_deps(), 's',
+                                              [Op('settings_set', section, key, old + 1)])
+
+
+@pytest.mark.parametrize('write', ['_apply_settings', '_save_settings'])
+def test_writing_settings_to_disk_ends_undo(window, write):
+    pane = _open_assistant(window)
+    section, key, old, change = _settings_change(window)
+    pane.receive_proposal(change)
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    getattr(window, write)()
+    assert window.workspace.settings_path.is_file()
+    assert pane.undo_state(entry) == 'locked'
+    window._undo_assistant_change(entry)  # pylint: disable=protected-access
+    assert window.settings_document.values[section][key] == old + 1
+
+
+def test_undo_of_a_settings_change_leaves_settings_to_be_written(window):
+    pane = _open_assistant(window)
+    section, key, old, change = _settings_change(window)
+    pane.receive_proposal(change)
+    window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    assert window.settings_document.values[section][key] == old
+    assert window.settings_document.dirty
+
+
+def _user_edits_temp(window):
+    window.document.set('general', 'temp', 123)
+    window.form.rebuild()
+
+
+def test_undo_over_later_user_edits_asks_and_no_keeps_everything(window):
+    pane = _open_assistant(window)
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5, 10])]))
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    _user_edits_temp(window)
+    asked = []
+    window._confirm_undo = lambda text: asked.append(text) or False  # pylint: disable=protected-access
+    window._undo_assistant_change(entry)  # pylint: disable=protected-access
+    assert asked and '[general] temp' in asked[0]
+    assert window.document.get('general', 'force') == [5, 10]
+    assert window.document.get('general', 'temp') == 123
+    assert pane.undo_state(entry) == 'enabled'
+
+
+def test_undo_over_later_user_edits_yes_reverts(window):
+    pane = _open_assistant(window)
+    temp = window.document.get('general', 'temp')
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5, 10])]))
+    _user_edits_temp(window)
+    window._confirm_undo = lambda text: True  # pylint: disable=protected-access
+    window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    assert window.document.get('general', 'force') != [5, 10]
+    assert window.document.get('general', 'temp') == temp
+
+
+def test_direct_change_while_the_user_is_editing_waits_as_a_card(window):
+    pane = _open_assistant(window)
+    window._user_busy = lambda: True  # pylint: disable=protected-access
+    change = build_changeset(window.assistant_deps(), 'loads',
+                             [Op('set', 'general', 'force', [5, 10])])
+    pane.receive_proposal(change)
+    assert window.document.get('general', 'force') != [5, 10]
+    assert change.id in pane.cards
+    assert 'kept as a card because you were editing' in pane.chat.toPlainText()
+
+
+def test_user_busy_counts_refusals_and_form_focus(window, monkeypatch):
+    from src.gui.app import MainWindow
+    busy = MainWindow._default_user_busy.__get__(window)  # the real predicate  # pylint: disable=protected-access
+    assert not busy()
+    monkeypatch.setattr(window.form, 'refusals', lambda: ['[general] temp: refused'])
+    assert busy()
+    monkeypatch.setattr(window.form, 'refusals', lambda: [])
+    monkeypatch.setattr(QApplication, 'focusWidget',
+                        staticmethod(lambda: _editor(window.form, 'general', 'temp').edit))
+    assert busy()
+
+
+def test_partial_direct_apply_offers_undo(window):
+    pane = _open_assistant(window)
+    before = dict(window.document.values.get('2D') or {})
+    change = _sweep(window)
+    configs = window.workspace.configs_dir
+    configs.mkdir(parents=True, exist_ok=True)
+    configs.chmod(0o500)
+    try:
+        pane.receive_proposal(change)
+        assert 'partly changed' in pane.chat.toPlainText()
+        assert window._assistant_undo  # pylint: disable=protected-access
+        window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    finally:
+        configs.chmod(0o700)
+    assert dict(window.document.values.get('2D') or {}) == before
+
+
+def test_undo_of_a_second_change_restores_the_first_highlight(window):
+    pane = _open_assistant(window)
+    temp = window.document.get('general', 'temp')
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'a',
+                                          [Op('set', 'general', 'temp', 250)]))
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'b',
+                                          [Op('set', 'general', 'temp', 260)]))
+    editor = _editor(window.form, 'general', 'temp')
+    assert editor.highlight() == f'{temp!r} → 260'
+    window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    assert window.form.highlights()[('general', 'temp')] == f'{temp!r} → 250'

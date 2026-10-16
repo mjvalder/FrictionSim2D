@@ -52,21 +52,29 @@ It cannot run or submit jobs, delete, move or rename anything.
   open config as soon as the assistant makes it. If you edited the Builder
   while it was working, the change is re-checked against your current config
   first. A change that cannot be applied leaves the Builder untouched and shows
-  a red line in the chat saying why.
+  a red line in the chat saying why. If you are in the middle of editing (the
+  cursor is in a Builder or Settings field, a dialog is open, or a field was
+  refused), the change is not applied but kept as a card in the Pending strip.
+  If a file error stops a change part-way, the line says so and Undo is offered.
 - **Yellow highlights.** Every field the assistant set turns pale yellow; its
   tooltip reads `Set by assistant: <before> → <after>`. Validation errors still
   show their red border on top. Sections holding a highlighted field unfold.
   A highlight goes when you edit that field, when you click **Accept** (clears
   them all; the values stay), or when you save the config with the Builder's
   Save. A switch of simulation model has no field; it is named in the chat line.
+  A field changed twice keeps its original value in the tooltip (`a → c`), and
+  undoing the second change puts the first change's mark back.
 - **Chat line and Undo.** Each applied change adds one line, e.g. `Set 3
   fields: [general] force, [2D] x, [2D] y (+ model → sheetonsheet)`, with an
   **Undo** link. Undo puts the Builder back exactly as it was just before that
   change -- config, settings, and a material-list file it wrote (restored, or
-  deleted if the change created it) -- so edits you made after the change are
-  undone too. Only the most recent change can be undone; older lines say "undo
-  newer changes first" until the newer ones are undone. Saving the config (or
-  opening another one) ends Undo for every line so far, and New chat drops them.
+  deleted if the change created it). If you edited the Builder after the
+  change, Undo first asks, naming the fields it would also revert (default No).
+  Only the most recent change can be undone; older lines say "undo newer
+  changes first" until the newer ones are undone. Saving the config (or opening
+  another one) and writing the settings to the workspace -- Save to workspace,
+  or the automatic write before Render/Generate -- end Undo for every line so
+  far; New chat drops them.
 - **Ask before applying.** Tick this in the pane's header (remembered in
   `agent.yaml` as `ask_before_apply`) to review changes first: each one waits
   as a card showing every field it changes, files it would write, validation

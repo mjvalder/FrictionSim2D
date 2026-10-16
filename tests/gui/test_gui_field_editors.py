@@ -479,3 +479,19 @@ class TestAssistantHighlight:
         assert ed.autoFillBackground()
         ed.set_highlight(None)
         assert not ed.autoFillBackground()
+
+    def test_palette_only_changes_with_the_highlight(self, qt_app):
+        from src.gui.widgets.fields import build_editor
+
+        ed = build_editor(FieldSpec(name='b', key='b', kind=FieldKind.BOOL, required=False))
+        calls = []
+        ed.setPalette = calls.append
+        ed.set_error('bad')
+        ed.set_error(None)
+        assert calls == []
+        ed.set_highlight('False → True')
+        ed.set_error('bad')
+        ed.set_highlight('False → True ')
+        assert len(calls) == 1
+        ed.set_highlight(None)
+        assert len(calls) == 2
