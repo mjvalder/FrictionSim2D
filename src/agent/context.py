@@ -30,8 +30,17 @@ class AgentDeps:
     direct_apply: bool = False
 
     def propose(self, change: Any) -> str:
-        """Record a change set for the user, notify the pane, return its handle."""
+        """Record a change set for the user, notify the pane, return its handle.
+
+        In direct-apply mode the snapshot is moved on to the change's preview,
+        so later tools in the same turn read -- and later change sets are
+        fingerprinted against -- what the GUI is about to hold. If the GUI
+        refuses it after all, its stale re-check catches the mismatch.
+        """
         self.pending.append(change)
+        preview = getattr(change, 'preview', None)
+        if self.direct_apply and preview is not None:
+            self.document, self.settings_document = copy.deepcopy(preview)
         if self.on_proposal is not None:
             self.on_proposal(change)
         return change.handle(direct=self.direct_apply)

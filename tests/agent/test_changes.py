@@ -216,7 +216,7 @@ def test_card_shows_long_values_in_full(deps):
 def test_direct_handle_says_applied_and_undoable(deps):
     cs = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
     handle = cs.handle(direct=True)
-    assert cs.id in handle and 'applied' in handle and 'undo' in handle
+    assert cs.id in handle and "applied" in handle and "undo" in handle
     assert 'do not say it is applied' not in handle
     assert len(handle) < 600
 
@@ -252,3 +252,52 @@ def test_applied_summary_marks_settings(deps):
     from src.agent.changes import applied_summary
     cs = build_changeset(deps, 's', [Op('settings_set', 'simulation', 'timestep', 0.002)])
     assert applied_summary(cs) == 'Set 1 field: settings [simulation] timestep'
+
+
+def test_direct_propose_replays_on_the_snapshot_incl_material_list(deps):
+    live = _live(deps)
+    deps.direct_apply = True
+    sweep = build_changeset(deps, 'sweep', [
+        Op('material_dirs', value=(str(CIF), str(SW), '.sw')),
+        Op('materials', value=['h-MoS2', 'h-WS2']), Op('set', '2D', 'pot_type', 'sw')])
+    deps.propose(sweep)
+    assert deps.document.get('2D', 'pot_type') == 'sw'
+    assert not (deps.roots.workspace / 'configs' / 'materials.txt').exists()  # real list untouched
+    loads = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5, 10])])
+    deps.propose(loads)
+    assert apply_changeset(sweep, *live).applied
+    result = apply_changeset(loads, *live)
+    assert result.applied and not result.stale
+
+
+def test_ask_mode_propose_leaves_the_snapshot_alone(deps):
+    before = copy.deepcopy(deps.document.values)
+    deps.propose(build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])]))
+    assert deps.document.values == before
+
+
+def test_direct_handle_wording(deps):
+    cs = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
+    assert ('will be applied unless it is refused; the user sees the outcome and can '
+            'undo it') in cs.handle(direct=True)
+
+
+def test_partial_apply_is_reported_as_partial(deps):
+    document, settings_document = _live(deps)
+    configs = deps.roots.workspace / 'configs'
+    ops = [Op('material_dirs', value=(str(CIF), str(SW), '.sw')),
+           Op('materials', value=['h-MoS2', 'h-WS2'])]
+    change = build_changeset(deps, 'sweep', ops)
+    configs.chmod(0o500)
+    try:
+        result = apply_changeset(change, document, settings_document)
+    finally:
+        configs.chmod(0o700)
+    assert not result.applied and result.partial
+    assert 'partly changed' in result.message
+
+
+def test_field_diff_is_public():
+    from src.agent.changes import field_diff
+    out = field_diff('config', {'general': {'a': 1, 'b': 2}}, {'general': {'a': 1, 'b': 3}})
+    assert [(d.section, d.key, d.before, d.after) for d in out] == [('general', 'b', 2, 3)]

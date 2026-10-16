@@ -60,6 +60,9 @@ class ApplyResult:
     applied: bool
     stale: bool
     message: str
+    #: Not applied, but the live documents may hold some of the operations
+    #: (a file error part-way through); the caller should offer to undo.
+    partial: bool = False
 
 
 @dataclass
@@ -76,6 +79,10 @@ class ChangeSet:
     issues: List[str] = field(default_factory=list)
     expansion: Any = None
     expansion_text: str = ''
+    #: ``(document, settings_document)`` as they will be once applied: the
+    #: copies the preview ran on. Lets a direct-apply turn keep its snapshot
+    #: in step with the GUI (`AgentDeps.propose`).
+    preview: Any = field(default=None, repr=False, compare=False)
 
     @property
     def ok(self) -> bool:
@@ -94,8 +101,8 @@ class ChangeSet:
         head = (f"change {self.id} proposed ('{self.title}'): {len(self.diff)} "
                 f"field(s), {state}{runs}. ")
         if direct:
-            return head + ("It is being applied to the Builder now; the user sees "
-                           "what changed and can undo it.")
+            return head + ("It will be applied unless it is refused; the user sees "
+                           "the outcome and can undo it.")
         return head + ("Proposed only: the user sees it as a card and decides "
                        "whether to apply it; do not say it is applied.")
 
@@ -205,7 +212,8 @@ def _check_proposed_values(ops: Sequence[Op]) -> None:
                                  'break')
 
 
-def _diff(scope: str, before: dict, after: dict) -> List[FieldDiff]:
+def field_diff(scope: str, before: dict, after: dict) -> List[FieldDiff]:
+    """Every value that differs between two ``{section: {key: value}}`` maps."""
     out = []
     for section in sorted(set(before) | set(after)):
         old, new = before.get(section) or {}, after.get(section) or {}
@@ -262,10 +270,11 @@ def build_changeset(deps, title: str, ops: Sequence[Op],
         # The preview wrote to scratch; show what Apply will really set.
         document.set('2D', 'materials_list',
                      str(live._relative_to_config(target)))  # pylint: disable=protected-access
+    change.preview = (document, settings_document)
     if live.model != document.model:
         change.diff.append(FieldDiff('config', '(model)', '', live.model, document.model))
-    change.diff += _diff('config', live.values, document.values)
-    change.diff += _diff('settings', deps.settings_document.values, settings_document.values)
+    change.diff += field_diff('config', live.values, document.values)
+    change.diff += field_diff('settings', deps.settings_document.values, settings_document.values)
     for op in ops:
         if op.kind == 'materials' and op.value:
             target = live.material_list_target()
@@ -294,6 +303,7 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
         return ApplyResult(False, True, 'The Builder changed since this was proposed.')
     root = getattr(document, 'workspace_root', None) or document.base_dir
     scratch_parent = Path(root) / '.preview' / '_agent' if root else None
+    live = False
     try:
         if scratch_parent is not None:
             scratch_parent.mkdir(parents=True, exist_ok=True)
@@ -308,12 +318,15 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
             invalid = _settings_problem(dry_settings)
             if invalid:
                 return ApplyResult(False, False, f'Not applied: settings invalid: {invalid}')
+        live = True
         problems = _replay(change.ops, document, settings_document, None)
     except DocumentError as exc:
         return ApplyResult(False, False, f'Not applied: {exc}')
     except OSError as exc:
+        if not live:
+            return ApplyResult(False, False, f'Not applied (file error): {exc}')
         return ApplyResult(False, False, f'Not applied (file error, the Builder '
-                                         f'may be partly changed): {exc}')
+                                         f'may be partly changed): {exc}', partial=True)
     message = f'Applied: {change.title}'
     if problems:
         message += ' (' + '; '.join(problems) + ')'

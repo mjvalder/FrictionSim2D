@@ -150,3 +150,19 @@ def test_make_sweep_rejects_huge_or_non_finite(args):
 
 def test_make_sweep_allows_200():
     assert len(make_sweep(0, 1, 200)) == 200
+
+
+def test_direct_mode_keeps_the_snapshot_in_step_with_the_gui(deps):
+    import copy
+    from src.agent.changes import apply_changeset
+    live = copy.deepcopy(deps.document), copy.deepcopy(deps.settings_document)
+    deps.direct_apply = True
+    set_fields(deps, [FieldChange(section='general', key='scan_speed', value=7)])
+    assert 'general.scan_speed = 7' in explain_current(deps)
+    set_fields(deps, [FieldChange(section='general', key='temp', value=250)])
+    first, second = deps.pending
+    assert apply_changeset(first, *live).applied
+    result = apply_changeset(second, *live)
+    assert result.applied and not result.stale
+    assert live[0].get('general', 'scan_speed') == 7 and live[0].get('general', 'temp') == 250
+
