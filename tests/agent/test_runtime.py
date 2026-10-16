@@ -205,3 +205,42 @@ def test_unexpected_exception_becomes_an_internal_error_event(deps):
     events = run(session, deps, 'hi')
     assert [(e.kind, e.text, e.payload) for e in events] == [
         ('error', 'RuntimeError: boom', 'internal')]
+
+
+def _looping_model():
+    async def stream(messages, info):
+        yield {0: DeltaToolCall(name='list_modes', json_args='{}')}
+    return FunctionModel(stream_function=stream)
+
+
+def test_step_cap_stops_with_a_continue_hint(deps):
+    settings = AgentSettings(max_requests_per_turn=3)
+    events = run(AgentSession(settings, model=_looping_model()), deps, 'loop')
+    assert sum(e.kind == 'tool_call' for e in events) == 3
+    last = events[-1]
+    assert (last.kind, last.payload) == ('error', 'step_limit')
+    assert last.text == "Stopped after 3 steps to save quota — type 'continue' to carry on."
+
+
+def test_continue_after_the_step_cap_keeps_the_work_so_far(deps):
+    seen = []
+
+    async def stream(messages, info):
+        seen.append(messages)
+        if len(seen) <= 2:
+            yield {0: DeltaToolCall(name='list_modes', json_args='{}')}
+        else:
+            yield 'carried on'
+    session = AgentSession(AgentSettings(max_requests_per_turn=2),
+                           model=FunctionModel(stream_function=stream))
+    assert run(session, deps, 'loop')[-1].payload == 'step_limit'
+    events = run(session, deps, 'continue')
+    assert events[-1].kind == 'done'
+    kinds = [type(p).__name__ for m in seen[-1] for p in m.parts]
+    assert 'ToolReturnPart' in kinds  # the capped turn's tool results are remembered
+
+
+def test_default_step_cap_is_fifty(deps):
+    events = run(AgentSession(AgentSettings(), model=_looping_model()), deps, 'loop')
+    assert sum(e.kind == 'tool_call' for e in events) == 50
+    assert events[-1].payload == 'step_limit'

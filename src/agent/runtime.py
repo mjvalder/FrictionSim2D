@@ -9,7 +9,7 @@ import re
 from typing import Any, Callable, List, Optional
 
 from pydantic_ai import (Agent, AgentRunResultEvent, CancellationToken,
-                         ModelRetry, RunContext)
+                         ModelRetry, RunContext, capture_run_messages)
 from pydantic_ai.exceptions import (ModelAPIError, ModelHTTPError, RunCancelled,
                                     UnexpectedModelBehavior, UsageLimitExceeded)
 from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent,
@@ -29,7 +29,6 @@ from .tools import compact, materials, setup, workspace
 
 logger = logging.getLogger(__name__)
 
-REQUEST_LIMIT = 8
 HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000}
 _RETRY_IN = re.compile(r'retry in ([\d.]+)\s*s', re.IGNORECASE)
 _RETRY_DELAY = re.compile(r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s")
@@ -243,18 +242,31 @@ class AgentSession:
                 self.history = event.result.all_messages()
             emit(TurnEvent('done', payload=event.result.usage.requests))
 
+    async def _stream(self, text: str, deps: AgentDeps, emit: Callable[[TurnEvent], None],
+                      token: CancellationToken, generation: int, limit: int) -> None:
+        async with self.agent.run_stream_events(
+                text, deps=deps, message_history=self._trimmed_history(),
+                cancellation_token=token, model_settings={'temperature': 0.0},
+                usage_limits=UsageLimits(request_limit=limit)) as events:
+            async for event in events:
+                self._dispatch(event, emit, generation)
+
     async def run_turn(self, text: str, deps: AgentDeps,
                        emit: Callable[[TurnEvent], None], token: CancellationToken) -> None:
         """Run one user turn, emitting events; never raises for provider trouble."""
         deps.on_proposal = lambda change: emit(TurnEvent('proposal', payload=change))
         generation = self._generation
+        limit = self.settings.max_requests_per_turn
+        messages: List[Any] = []
         try:
-            async with self.agent.run_stream_events(
-                    text, deps=deps, message_history=self._trimmed_history(),
-                    cancellation_token=token, model_settings={'temperature': 0.0},
-                    usage_limits=UsageLimits(request_limit=REQUEST_LIMIT)) as events:
-                async for event in events:
-                    self._dispatch(event, emit, generation)
+            with capture_run_messages() as messages:
+                await self._stream(text, deps, emit, token, generation, limit)
+        except UsageLimitExceeded:
+            # Keep the capped turn so 'continue' picks up where it stopped.
+            if generation == self._generation and messages:
+                self.history = list(messages)
+            emit(TurnEvent('error', f'Stopped after {limit} steps to save quota — type '
+                                    "'continue' to carry on.", payload='step_limit'))
         except ProviderUnavailable as exc:
             emit(TurnEvent('error', str(exc), payload='unavailable'))
         except RunCancelled:
@@ -268,7 +280,7 @@ class AgentSession:
             else:
                 emit(TurnEvent('error', f'Provider error {exc.status_code}: {exc}',
                                payload='provider'))
-        except (UnexpectedModelBehavior, UsageLimitExceeded) as exc:
+        except UnexpectedModelBehavior as exc:
             emit(TurnEvent('error', f'The assistant could not finish this ({exc}). Any '
                                     'proposal above still stands; finish the rest in the '
                                     'Builder form.', payload='gave_up'))
