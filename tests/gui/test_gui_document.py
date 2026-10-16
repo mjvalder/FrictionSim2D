@@ -365,6 +365,73 @@ class TestSecondMaterialValidation:
         assert document.pending_template_issues
 
 
+class TestSweepProbe:
+    """A templated sweep config is validated against its first material.
+
+    `{mat}.cif` does not exist, so the path validator raises and pydantic
+    abandons the whole model -- taking every *other* error (an empty `[tip]`)
+    with it. Without a probe a sweep with half its sections unset read as
+    valid, and only failed once it was expanded and built.
+    """
+
+    @staticmethod
+    def _afm_sweep(tmp_path, names, *, complete):
+        listing = tmp_path / 'mats.txt'
+        listing.write_text(''.join(f'{n}\n' for n in names), encoding='utf-8')
+        if complete:
+            document = ConfigDocument.from_file(EXAMPLES / 'afm_config.ini', 'afm')
+        else:
+            document = ConfigDocument.blank('afm')
+            for key, value in (('x', 100), ('y', 100), ('layers', [1])):
+                document.set('2D', key, value)
+        document.set('2D', 'materials_list', str(listing))
+        document.set('2D', 'mat', '{mat}')
+        document.set('2D', 'cif_path', 'examples/materials/{mat}.cif')
+        document.set('2D', 'pot_path', 'examples/potentials/sw/sw_lammps/{mat}.sw')
+        document.set('2D', 'pot_type', 'sw')
+        return document
+
+    def test_an_unset_tip_is_reported_through_the_sweep(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(REPO_ROOT)
+        document = self._afm_sweep(tmp_path, ['h-MoS2', 'h-WS2'], complete=False)
+        result = document.validate()
+        assert not result.ok
+        assert result.issues_for('tip', 'mat'), result.render()
+        assert {i.section for i in result.issues} >= {'tip', 'sub'}
+
+    def test_a_complete_sweep_is_ok_with_its_templates_pending(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(REPO_ROOT)
+        document = self._afm_sweep(tmp_path, ['h-MoS2', 'h-WS2'], complete=True)
+        result = document.validate()
+        assert result.ok, result.render()
+        assert document.pending_template_issues
+
+    def test_a_pair_sweep_probes_its_first_pair(self, monkeypatch, tmp_path):
+        """The second member of the first line fills `{mat2}`: naming one with
+        no structure file must surface as a `[2D-2]` problem."""
+        monkeypatch.chdir(REPO_ROOT)
+        pairs = tmp_path / 'pairs.txt'
+        pairs.write_text('h-MoS2 + no-such-mat\nh-MoSe2 + h-WSe2\n',
+                         encoding='utf-8')
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        document.set('2D', 'materials_list', str(pairs))
+        result = document.validate()
+        assert not result.ok
+        flagged = result.issues_for('2D-2', 'cif_path')
+        assert flagged and 'no-such-mat' in flagged[0].message, result.render()
+        assert not result.issues_for('2D', 'cif_path'), result.render()
+
+    def test_an_empty_list_validates_as_before(self, monkeypatch, tmp_path):
+        """Nothing to probe with: the templates stay pending and nothing else
+        is reported, exactly as before the probe existed."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = self._afm_sweep(tmp_path, [], complete=False)
+        result = document.validate()
+        assert result.ok, result.render()
+        assert document.pending_template_issues
+
+
 class TestPairExpansion:
 
     def test_one_config_per_ordered_pair(self, monkeypatch):

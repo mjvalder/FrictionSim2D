@@ -30,7 +30,7 @@ from ...core.config import (
 )
 from ...core.config import write_config
 from ..config_validation import ConfigIssue, ConfigValidation, validate_config
-from ...run.placeholders import has_template_marker
+from ...run.placeholders import has_template_marker, substitute_materials
 from ...run.expand import (
     ExpansionSummary, count_expansion, expand_config_sweeps,
     missing_pressure, outer_loop_conflict, read_material_entries, read_material_list,
@@ -622,6 +622,12 @@ class ConfigDocument:
         constructed. Callers must not assume `.config` is usable when `ok` is
         True; check `pending_template_issues` first.
 
+        Those placeholders also stop the model short (the path validator
+        raises on `{mat}.cif`), hiding every other error. So a sweep whose
+        list names at least one entry is validated a second time with that
+        first entry substituted in, and its issues are reported as hard ones
+        -- see `_probe_issues`.
+
         Two checks cannot come from the model, because both depend on which
         builder the config routes to, which a pydantic model cannot see:
         whether `outer_loop` conflicts with `scan_angle_force`
@@ -632,10 +638,7 @@ class ConfigDocument:
         """
         payload = self.normalised_values()
         payload['settings'] = (settings or load_settings()).model_dump()
-        result = validate_config(
-            payload, root_model_for(self.model), base_dir=self.base_dir,
-        )
-        result.issues = self._issues_for_form(result.issues)
+        result = self._validate_payload(payload)
 
         conflict = outer_loop_conflict(self.values, self.model)
         if conflict is not None:
@@ -656,7 +659,61 @@ class ConfigDocument:
         for issue in result.issues:
             (pending if issue.kind == 'unexpanded_template' else hard).append(issue)
         self.pending_template_issues = pending
+        hard.extend(self._probe_issues(payload, hard))
         return ConfigValidation(issues=hard, config=result.config)
+
+    def _validate_payload(self, payload: Dict[str, Any]) -> ConfigValidation:
+        """`validate_config` on a written-shape payload, issues re-addressed
+        to the sections the form shows."""
+        result = validate_config(
+            payload, root_model_for(self.model), base_dir=self.base_dir,
+        )
+        result.issues = self._issues_for_form(result.issues)
+        return result
+
+    def _probe_issues(self, payload: Dict[str, Any],
+                      known: List[ConfigIssue]) -> List[ConfigIssue]:
+        """Issues the templated config has once its first entry is substituted.
+
+        The templated payload alone cannot be validated past its paths: the
+        literal `{mat}.cif` makes the path validator raise, pydantic abandons
+        the model, and every other error -- an empty `[tip]`, say -- is lost
+        with it. Substituting the list's first entry (the same substitution
+        `expand_config_sweeps` makes) lets the model run to completion, so a
+        sweep that cannot build reads as one. Sections and keys are unchanged
+        by substitution, so each issue already names the templated field.
+
+        Returns nothing new when the list is empty or unreadable -- there is
+        then nothing to probe with -- and never an `unexpanded_template` issue
+        (a `{mat2}` on a single-material entry), which stays pending.
+        """
+        entries = self.material_entries()
+        if not entries:
+            return []
+        first = entries[0]
+        mat1, mat2 = first[0], (first[1] if len(first) > 1 else None)
+
+        def fill(value: Any) -> Any:
+            if isinstance(value, str) and has_template_marker(value):
+                return substitute_materials(value, mat1, mat2)
+            if isinstance(value, list):
+                return [fill(v) for v in value]
+            return value
+
+        probe = {
+            name: ({k: fill(v) for k, v in section.items()}
+                   if name != 'settings' and isinstance(section, dict) else section)
+            for name, section in payload.items()
+        }
+        seen = {(i.section, i.key, i.kind, i.message) for i in known}
+        out: List[ConfigIssue] = []
+        for issue in self._validate_payload(probe).issues:
+            marker = (issue.section, issue.key, issue.kind, issue.message)
+            if issue.kind == 'unexpanded_template' or marker in seen:
+                continue
+            seen.add(marker)
+            out.append(issue)
+        return out
 
     def _issues_for_form(self, issues: List[ConfigIssue]) -> List[ConfigIssue]:
         """Re-address validated-config issues to the sections the form shows.
