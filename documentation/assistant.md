@@ -11,9 +11,11 @@ Applying a change never switches tabs: you stay where you are, and the pane
 says what happened.
 
 It edits the Builder's config and settings, finds structures and potentials,
-and adds folders or files to your workspace. Config and settings edits land in
-the Builder straight away, marked and undoable (below); **file operations always
-wait for you to click Apply.**
+reads your result sets and proposes plots for the Plots tab, and adds folders,
+copied files or fetched structure files to your workspace. Config and settings
+edits land in the Builder straight away (marked), and plots in the Plots tab,
+each with an Undo (below); **file operations (folders, copies, fetched
+files) always wait for you to click Apply.**
 
 ## Enabling it
 
@@ -109,6 +111,10 @@ lower it to protect a free-tier quota.
 - Look a formula up on Materials Project (stability, band gap, moduli) and
   2DMatPedia, and propose saving a 2DMatPedia monolayer as
   `materials/<formula>_<dm_id>.cif` (see below).
+- Turn "low / mid / high load" into numbers from reference load bands (see
+  below).
+- Find datasets and simulation roots in the workspace, summarise them, and
+  propose plots of them (see below).
 
 It cannot run or submit jobs, delete, move or rename anything.
 
@@ -123,8 +129,73 @@ it in ~/.mp_api_key`. **Only formulas and ids are sent to Materials Project**
 2DMatPedia is read from the MPContribs project `2dmatpedia`; its full listing
 is cached for 7 days in `~/.cache/FrictionSim2D/2dmatpedia.json` (honours
 `XDG_CACHE_HOME`). A fetched structure is a new file proposal: it waits for
-Apply, lands only inside the workspace and never overwrites. Turn lookups off
-with `materials_project.enabled: false`.
+Apply, lands only inside the workspace and never overwrites. Its card names
+what will be written -- reduced formula, number of sites and lattice lengths
+a/b/c, read from the CIF with pymatgen -- never the CIF text itself. The file
+is written to a temporary file beside the target and then published, so a
+failed write leaves nothing behind; it gets the permissions of any new file
+(`0666` minus your umask). Without pymatgen a 2DMatPedia lookup says so before
+anything is downloaded. Stop is honoured between listing pages and before each
+request; a request already sent (a single Materials Project summary search
+included) runs to its end. Turn lookups off with
+`materials_project.enabled: false`.
+
+### Load bands
+
+Asked for a "low", "mid" or "high" load (also small/light, moderate/medium/
+intermediate, large/heavy), the Assistant takes the values from reference
+bands in `src/core/scaling.py`, spread linearly over the band:
+
+| band | AFM, indent, PES tip | where the numbers come from |
+|---|---|---|
+| low | 10-20 nN | the ML_taxonomy baseline loads (10, 20, 30 nN), chosen for good contact; 2-5 nN give poor contact |
+| mid | 20-50 nN | the ML_taxonomy mid-load core window its reference trends are fitted on |
+| high | 50-100 nN | from the top of the mid window to the example campaign's maximum (100 nN) |
+
+These are reference bands, **not a contact model** and not measured regimes:
+they come from an R = 25 Å Si tip at 300 K with an 8 or 50 N/m driving
+spring. A config whose tip radius, temperature or driving spring differs gets
+the same numbers plus a warning to treat them as a starting point -- never a
+rescaling. The Assistant says where the numbers come from and asks you to
+confirm. Sheet-on-sheet pressure, speed and temperature have no band yet: it
+offers the example config's values and asks for a range instead.
+
+### Result sets and analysis
+
+All read-only; each result is at most 1,500 characters and shows paths as
+`workspace:/...`.
+
+- **find_result_sets** walks the workspace up to 4 folder levels deep (no
+  dot-folders except `.preview/_datasets`, where exported sets go; no
+  symlinks that leave the workspace) and lists up to 15 hits: *datasets*
+  (a folder with `outputs/output_full_*.json`, as `postprocess read` writes)
+  with their sizes and run counts, and *simulation roots* with
+  `provenance.json` runs per model (counted up to 1000). Run counts parse
+  files of at most 20 MB, 50 MB in one call; past that a dataset shows its
+  size in MB instead.
+- **summarise_results** on a dataset (or one `output_full_*.json`): per file,
+  status counts, materials, temperatures and loads, then a run table (complete
+  runs first, 15 rows by default), filterable by material and size. A file
+  over 200 MB is reported as too large; at most 400 MB are parsed per call,
+  and files past that are listed as `not read (budget)`. On a simulation root
+  that is not post-processed yet it lists runs from their folder names, with
+  the points expected and the results files present, and suggests running
+  `FrictionSim2D postprocess read` on it.
+- **plot_types** lists every plot type with one line each; **plot_schema**
+  lists the fields one type accepts, from the plot schema.
+
+### Plot proposals
+
+A proposed plot is checked against the plot schema, and each dataset it reads
+must be a dataset folder inside the workspace. It lands in the **Plots tab**
+(never a file): the datasets it needs are added under a free label, the plot
+is appended, selected and rendered, and the tab you are on does not change --
+the chat line gets a **Show** link to the Plots tab when you are elsewhere.
+If you are editing a plot (cursor in the Plots form, a refused value there,
+or a dialog open), it waits as a card instead (**Add plot**, or **Add
+anyway** when it has issues). With *Ask before applying* every plot is a
+card. **Undo** puts the Plots tab back as it was before the plot; if you
+edited the Plots tab since, it asks first.
 
 ## How changes land
 
@@ -153,8 +224,9 @@ with `materials_project.enabled: false`.
   Only the most recent change can be undone; older lines say "undo newer
   changes first" until the newer ones are undone. Saving the config (or opening
   another one) and writing the settings to the workspace -- Save to workspace,
-  or the automatic write before Render/Generate -- end Undo for every line so
-  far; New chat drops them.
+  or the automatic write before Render/Generate -- end Undo for every config
+  and settings line so far; plot lines keep their Undo, since it restores only
+  the Plots tab. New chat drops them all.
 - **Ask before applying.** Tick this in the pane's header (remembered in
   `agent.yaml` as `ask_before_apply`) to review changes first: each one waits
   as a card showing every field it changes, files it would write, validation
@@ -163,8 +235,10 @@ with `materials_project.enabled: false`.
   the open config has unsaved edits), **Discard** drops it. If you edited the
   Builder after the proposal, Apply re-checks it and shows the re-checked card
   to apply again. An applied card is highlighted and undoable as above.
-- **File operations still ask.** Creating folders and copying files in always
-  arrive as cards, whatever the switch says.
+- **File operations still ask.** Creating folders, copying files in and
+  writing a fetched structure always arrive as cards, whatever the switch
+  says. None of them overwrites a file; a copy or write that fails part-way
+  leaves no partial file, so it can simply be retried.
 
 Cards sit in a compact **Pending** strip above the input, shown only while
 something is waiting; a card leaves it as soon as it is applied or discarded,
