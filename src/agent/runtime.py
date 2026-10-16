@@ -165,7 +165,8 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
 
     @agent.tool
     def propose_plot(ctx: RunContext[AgentDeps], request: plots.PlotProposalRequest) -> str:
-        """Propose a plot for the Plots tab on datasets from find_result_sets."""
+        """Propose a plot for the Plots tab on datasets from find_result_sets; fields
+        are key/value pairs from plot_schema."""
         return _call(ctx, plots.propose_plot, request)
 
     @agent.tool
