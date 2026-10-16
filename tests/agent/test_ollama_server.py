@@ -85,15 +85,22 @@ class FakePopen:
 class FakeProcTable:
     """pid -> cmdline of 'live' processes, plus the signals sent to them."""
 
-    def __init__(self, table=None):
+    def __init__(self, table=None, identity=None, deny=False):
         self.table = dict(table or {})
+        self.identity = dict(identity or {})  # pid -> (uid, start ticks)
+        self.deny = deny  # kill raises PermissionError (someone else's pid)
         self.signals = []
+
+    def read_identity(self, pid):
+        return self.identity.get(pid) if pid in self.table else None
 
     def read_cmdline(self, pid):
         return self.table.get(pid)
 
     def kill(self, pid, sig):
         import signal
+        if self.deny:
+            raise PermissionError(1, 'Operation not permitted')
         self.signals.append((pid, sig))
         if sig in (signal.SIGTERM, signal.SIGKILL):
             self.table.pop(pid, None)
@@ -108,7 +115,8 @@ def _server(tmp_path, http, popen=None, clock=None, which=None, procs=None, exit
                         popen=popen or FakePopen(), http_get=http, clock=clock,
                         sleep=clock.sleep, log_path=tmp_path / 'cache' / 'ollama.log',
                         read_cmdline=procs.read_cmdline, kill=procs.kill,
-                        register_exit=exits.append, **kwargs)
+                        register_exit=exits.append, read_identity=procs.read_identity,
+                        getuid=lambda: 1000, **kwargs)
 
 
 def test_already_up_starts_nothing(tmp_path):
@@ -261,19 +269,22 @@ def test_stop_during_the_poll_ends_it_and_terminates_our_process(tmp_path):
 def test_first_start_registers_stop_at_exit_and_writes_a_pidfile(tmp_path):
     exits = []
     process = FakeProcess(pid=777)
-    server = _server(tmp_path, FakeHttp(up_after=1), FakePopen(process), exits=exits)
+    procs = FakeProcTable({777: ['ollama', 'serve']}, {777: (1000, 98765)})
+    server = _server(tmp_path, FakeHttp(up_after=1), FakePopen(process), exits=exits,
+                     procs=procs)
     assert server.ensure_running(AgentSettings())[0]
     assert exits == [server.stop]
     pidfile = tmp_path / 'cache' / 'ollama.pid'
-    assert pidfile.read_text().split()[0] == '777'
+    assert pidfile.read_text().split() == ['777', '98765']  # pid and its start time
     server.stop()
     assert not pidfile.exists()
 
 
 def test_a_later_session_adopts_our_server_from_the_pidfile(tmp_path):
     (tmp_path / 'cache').mkdir()
-    (tmp_path / 'cache' / 'ollama.pid').write_text('555 1700000000.0\n')
-    procs = FakeProcTable({555: ['/home/u/.local/ollama/bin/ollama', 'serve']})
+    (tmp_path / 'cache' / 'ollama.pid').write_text('555 98765\n')
+    procs = FakeProcTable({555: ['/home/u/.local/ollama/bin/ollama', 'serve']},
+                          {555: (1000, 98765)})
     clock = FakeClock()
     popen = FakePopen()
     exits = []
@@ -289,8 +300,9 @@ def test_a_later_session_adopts_our_server_from_the_pidfile(tmp_path):
 
 def test_a_pidfile_naming_another_program_is_not_adopted(tmp_path):
     (tmp_path / 'cache').mkdir()
-    (tmp_path / 'cache' / 'ollama.pid').write_text('555 1700000000.0\n')
-    procs = FakeProcTable({555: ['/usr/bin/python', 'worker.py']})  # pid reused
+    (tmp_path / 'cache' / 'ollama.pid').write_text('555 98765\n')
+    procs = FakeProcTable({555: ['/usr/bin/python', 'worker.py']},  # pid reused
+                          {555: (1000, 98765)})
     server = _server(tmp_path, FakeHttp(up=True), procs=procs)
     assert server.ensure_running(AgentSettings())[0]
     assert not server.started_by_us
@@ -378,3 +390,77 @@ def test_big_log_is_rotated_at_start(tmp_path):
     assert server.ensure_running(AgentSettings())[0]
     assert (log.parent / 'ollama.log.1').stat().st_size > 5 * 1024 * 1024
     assert log.stat().st_size == 0
+
+
+def _adoption(tmp_path, identity):
+    (tmp_path / 'cache').mkdir()
+    (tmp_path / 'cache' / 'ollama.pid').write_text('555 98765\n')
+    procs = FakeProcTable({555: ['/usr/bin/ollama', 'serve']}, {555: identity})
+    server = _server(tmp_path, FakeHttp(up=True), procs=procs)
+    assert server.ensure_running(AgentSettings())[0]
+    server.stop()
+    return server, procs
+
+
+def test_recycled_pid_with_another_start_time_is_not_adopted(tmp_path):
+    server, procs = _adoption(tmp_path, (1000, 11111))  # a later ollama serve
+    assert procs.signals == [] and not server.started_by_us
+
+
+def test_another_users_server_is_not_adopted(tmp_path):
+    server, procs = _adoption(tmp_path, (1001, 98765))
+    assert procs.signals == [] and not server.started_by_us
+
+
+def test_permission_error_at_stop_is_swallowed(tmp_path):
+    (tmp_path / 'cache').mkdir()
+    (tmp_path / 'cache' / 'ollama.pid').write_text('555 98765\n')
+    procs = FakeProcTable({555: ['/usr/bin/ollama', 'serve']}, {555: (1000, 98765)})
+    clock = FakeClock()
+    server = _server(tmp_path, FakeHttp(up=True), procs=procs, clock=clock)
+    assert server.ensure_running(AgentSettings())[0] and server.started_by_us
+    procs.deny = True
+    server.stop(grace=0.1)  # SIGTERM and SIGKILL both refused: no exception
+    server.send_signal(999, signal.SIGTERM)
+
+
+def test_overlapping_starts_keep_starting_until_both_finish(tmp_path):
+    import threading
+    import time
+    clock = FakeClock()
+    process = FakeProcess()
+    http = FakeHttp()
+    server = None
+    observed = []
+    gate = threading.Event()
+    second_done = threading.Event()
+
+    def second():
+        server.ensure_running(AgentSettings())
+        second_done.set()
+
+    calls = {'n': 0}
+
+    def sleep(seconds):
+        if threading.current_thread() is not threading.main_thread():
+            gate.set()  # the second call is polling; its clock stays put
+            time.sleep(0.001)
+            return
+        clock.sleep(seconds)
+        calls['n'] += 1
+        if calls['n'] == 1:
+            worker = threading.Thread(target=second)
+            worker.start()
+            gate.wait(0.5)  # let the second call enter its poll
+            http.up = True
+            second_done.wait(2)
+            # the second ensure has finished; the first is still polling
+            observed.append(server.stop_if_idle(clock() + 3600))
+    server = OllamaServer(which=lambda n: f'/usr/bin/{n}', home=tmp_path,
+                          popen=FakePopen(process), http_get=http, clock=clock,
+                          sleep=sleep, log_path=tmp_path / 'ollama.log',
+                          read_cmdline=lambda pid: None, kill=lambda pid, sig: None,
+                          register_exit=lambda f: None, read_identity=lambda pid: None,
+                          getuid=lambda: 1000)
+    assert server.ensure_running(AgentSettings())[0]
+    assert observed == [False] and not process.terminated

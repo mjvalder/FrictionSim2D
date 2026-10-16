@@ -90,6 +90,20 @@ def read_cmdline(pid: int) -> Optional[List[str]]:
     return [part.decode(errors='replace') for part in raw.split(b'\0') if part] or None
 
 
+def read_identity(pid: int) -> Optional[Tuple[int, int]]:
+    """(owner uid, start time in clock ticks) of a live process; None if unknown.
+
+    The start time is field 22 of /proc/<pid>/stat, counted after the
+    parenthesised command name (which may itself contain spaces).
+    """
+    try:
+        uid = os.stat(f'/proc/{pid}').st_uid
+        stat = Path(f'/proc/{pid}/stat').read_text(encoding='utf-8', errors='replace')
+        return uid, int(stat.rsplit(')', 1)[1].split()[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
 def _is_ollama_serve(cmdline: Optional[List[str]]) -> bool:
     return bool(cmdline) and 'serve' in cmdline and any('ollama' in p for p in cmdline)
 
@@ -140,7 +154,9 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
                  start_timeout: float = START_TIMEOUT,
                  read_cmdline: Callable[[int], Optional[List[str]]] = read_cmdline,  # pylint: disable=redefined-outer-name
                  kill: Callable[[int, int], None] = os.kill,
-                 register_exit: Callable[[Callable], Any] = atexit.register) -> None:
+                 register_exit: Callable[[Callable], Any] = atexit.register,
+                 read_identity: Callable[[int], Optional[Tuple[int, int]]] = read_identity,  # pylint: disable=redefined-outer-name
+                 getuid: Callable[[], int] = os.getuid) -> None:
         self._which = which
         self._home = home
         self._popen = popen
@@ -150,11 +166,15 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
         self.read_cmdline = read_cmdline
         self._kill = kill
         self._register_exit = register_exit
+        self._read_identity = read_identity
+        self._getuid = getuid
         self._log_path = log_path
         self._start_timeout = start_timeout
         self._lock = threading.Lock()
         self._closed = threading.Event()
-        self._starting = False
+        self._starting = 0  # ensure_running calls polling right now
+        self._not_stopping = threading.Event()  # cleared while an idle stop terminates
+        self._not_stopping.set()
         self._exit_registered = False
         self._spawner: Optional[ThreadPoolExecutor] = None
         self._process = None
@@ -180,10 +200,11 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
         return process is not None and process.poll() is None
 
     def send_signal(self, pid: int, sig: int) -> None:
-        """Signal ``pid``; a process that is already gone is fine."""
+        """Signal ``pid``; one that is gone or not ours never raises (stop
+        runs at exit, where an exception helps no one)."""
         try:
             self._kill(pid, sig)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
 
     def _url(self, settings: AgentSettings, path: str) -> str:
@@ -234,6 +255,7 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
         """Make sure a server answers, starting one when none does."""
         self._settings = settings
         self.touch()
+        self._not_stopping.wait(STOP_GRACE + 1.0)  # an idle stop finishes first
         if self._closed.is_set():
             return False, 'The Assistant is closing; Ollama was not started.'
         state = self.probe(settings)
@@ -257,12 +279,12 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
                 if failure:
                     return False, failure
             process = self._process
-            self._starting = True
+            self._starting += 1
         try:
             return self._poll(settings, process)
         finally:
             with self._lock:
-                self._starting = False
+                self._starting -= 1
 
     def _poll(self, settings: AgentSettings, process) -> Tuple[bool, str]:
         deadline = self.clock() + self._start_timeout
@@ -282,15 +304,21 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
                        f'see {self.log_path}.')
 
     def _adopt(self) -> None:
-        """Own the running server if our pidfile names it (lock held)."""
+        """Own the running server if it is the very process our pidfile records.
+
+        Same pid, same start time (so not a recycled pid), owned by this user,
+        and still an ``ollama serve`` (lock held).
+        """
         try:
-            pid = int(self.pid_path.read_text(encoding='utf-8').split()[0])
-        except (OSError, ValueError, IndexError):
+            pid_text, start_text = self.pid_path.read_text(encoding='utf-8').split()[:2]
+            pid, start = int(pid_text), int(start_text)
+        except (OSError, ValueError):
             return
-        if _is_ollama_serve(self.read_cmdline(pid)):
+        if (self._read_identity(pid) == (self._getuid(), start)
+                and _is_ollama_serve(self.read_cmdline(pid))):
             self._own(_PidProcess(pid, self))
         else:
-            self.pid_path.unlink(missing_ok=True)  # stale: the pid is something else now
+            self.pid_path.unlink(missing_ok=True)  # stale: not our server any more
 
     def _rotate_log(self) -> None:
         log = self.log_path
@@ -322,8 +350,10 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
         except OSError as exc:
             return f'Could not start Ollama ({exc}); see {self.log_path}.'
         self._own(process)
+        identity = self._read_identity(process.pid)
         try:
-            self.pid_path.write_text(f'{process.pid} {time.time():.0f}\n', encoding='utf-8')
+            if identity is not None:  # no /proc: nothing a later session could verify
+                self.pid_path.write_text(f'{process.pid} {identity[1]}\n', encoding='utf-8')
         except OSError:
             pass  # adoption by a later session is a convenience
         return None
@@ -346,7 +376,11 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
             if self._models_loaded():
                 return False
             process, self._process = self._process, None
-        self._terminate(process, STOP_GRACE)
+            self._not_stopping.clear()  # a start waits until this one has exited
+        try:
+            self._terminate(process, STOP_GRACE)
+        finally:
+            self._not_stopping.set()
         return True
 
     def stop(self, grace: float = STOP_GRACE) -> None:
@@ -370,4 +404,7 @@ class OllamaServer:  # pylint: disable=too-many-instance-attributes
             process.wait(timeout=grace)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.wait()
+            try:
+                process.wait(timeout=grace)
+            except subprocess.TimeoutExpired:  # e.g. not ours to signal: give up
+                pass
