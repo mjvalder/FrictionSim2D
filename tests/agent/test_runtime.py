@@ -126,6 +126,18 @@ def test_every_tool_registered():
                      'plot_schema'}
 
 
+def test_suggest_values_tool_has_no_spacing(deps):
+    schemas = {}
+
+    async def spy(messages, info):
+        schemas.update({t.name: t.parameters_json_schema for t in info.function_tools})
+        yield 'ok'
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=spy))
+    run(session, deps, 'x')
+    properties = schemas['suggest_values']['properties']
+    assert 'spacing' not in properties and 'descriptor' in properties
+
+
 def test_instructions_survive_switch(deps):
     seen = []
 

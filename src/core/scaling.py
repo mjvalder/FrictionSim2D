@@ -1,9 +1,9 @@
-"""Descriptors such as 'low load' turned into measured ranges.
+"""Descriptors such as 'low load' turned into reference load bands.
 
-There is no contact model here (no Hertz scaling): the numbers are load
-regimes measured on the reference AFM setup by the ML_taxonomy campaigns, and
-they are returned as measured. A context outside the setup they were measured
-on gets the same numbers plus a warning, never an extrapolation.
+These are reference bands from the ML_taxonomy work and the example campaign,
+not a contact model and not measured regimes: each band's ``source`` says what
+its numbers are. A context that differs from the reference setup gets the
+same numbers plus a warning, never a rescaling.
 
 Stdlib only, and nothing from ``run``/``agent``/``gui``: the GUI assistant
 imports this at startup.
@@ -33,7 +33,7 @@ class ScaleContext:
 
 @dataclass(frozen=True)
 class ScaledRange:
-    """A measured range for one descriptor."""
+    """A reference band for one descriptor."""
 
     quantity: str
     unit: str
@@ -45,7 +45,7 @@ class ScaledRange:
 
 @dataclass(frozen=True)
 class Regime:
-    """One measured range and where it was measured."""
+    """One reference band and what its numbers are."""
 
     models: Tuple[str, ...]
     quantity: str
@@ -56,27 +56,28 @@ class Regime:
     source: str
 
 
-#: Validity of the reference AFM setup: (context field, low, high, unit, label).
-REFERENCE_SETUP = 'R = 25 A Si tip, driving spring 8-50 N/m, 300 K'
-AFM_VALIDITY = (('tip_radius_A', 20.0, 30.0, 'A', 'R'),
-                ('driving_spring_N_m', 8.0, 50.0, 'N/m', 'spring'),
-                ('temperature_K', 250.0, 350.0, 'K', 'T'))
+#: The reference AFM setup the bands come from.
+REFERENCE_SETUP = 'R = 25 A Si tip at 300 K, driving spring 8 or 50 N/m'
+#: (context field, reference values, tolerance, unit, what to call it).
+REFERENCE_VALUES = (('tip_radius_A', (25.0,), 0.5, 'A', 'tip radius'),
+                    ('temperature_K', (300.0,), 1.0, 'K', 'temperature'),
+                    ('driving_spring_N_m', (8.0, 50.0), 0.5, 'N/m', 'driving spring'))
 
 _AFM_FAMILY = ('afm', 'indent', 'pes_tip')
-_SETUP = f'reference AFM setup ({REFERENCE_SETUP})'
 
-#: The measured regimes. Sheet-on-sheet pressure, speed and temperature have
+#: The reference bands. Sheet-on-sheet pressure, speed and temperature have
 #: none yet, so `scale` returns None for them.
 REGIMES = (
     Regime(_AFM_FAMILY, 'load', 'low', 'nN', 10.0, 20.0,
-           'ML_taxonomy taxlib/constants.py BASELINE_LOADS = (10, 20, 30) nN, '
-           f'{_SETUP}; 2-5 nN give poor contact (user ruling 2026-10-16)'),
+           'baseline loads chosen for good contact (user ruling 2026-10-16: 2-5 nN '
+           'give poor contact) -- ML_taxonomy taxlib BASELINE_LOADS = (10, 20, 30); '
+           'this band takes its lower part'),
     Regime(_AFM_FAMILY, 'load', 'mid', 'nN', 20.0, 50.0,
-           'ML_taxonomy runtax/constants.py MID_LOAD_CORE = [20, 50] nN, '
-           f'measured over the full campaign, {_SETUP}'),
+           'the mid-load core window the ML_taxonomy analysis fits its reference '
+           'trends on (runtax MID_LOAD_CORE = [20, 50])'),
     Regime(_AFM_FAMILY, 'load', 'high', 'nN', 50.0, 100.0,
-           'ML_taxonomy tip campaign (loads 2-100 nN): above MID_LOAD_CORE up to '
-           f'the campaign maximum of 100 nN, {_SETUP}'),
+           "from the top of the mid window to the example campaign's maximum "
+           '(100 nN); no dedicated constant'),
 )
 
 _DESCRIPTORS = {
@@ -109,19 +110,20 @@ def _values(value: Value) -> Tuple[float, ...]:
     return tuple(numbers)
 
 
-def _validity_warnings(context: ScaleContext) -> Tuple[str, ...]:
+def _reference_warnings(context: ScaleContext) -> Tuple[str, ...]:
     warnings = []
-    for field_name, low, high, unit, label in AFM_VALIDITY:
-        outside = [v for v in _values(getattr(context, field_name)) if not low <= v <= high]
-        if outside:
-            shown = ', '.join(f'{v:g}' for v in outside)
-            warnings.append(f'measured for an {REFERENCE_SETUP} ({label} {low:g}-{high:g} '
-                            f'{unit}); untested for {label} = {shown} {unit}')
+    for field_name, reference, tolerance, unit, label in REFERENCE_VALUES:
+        differs = [v for v in _values(getattr(context, field_name))
+                   if all(abs(v - r) > tolerance for r in reference)]
+        if differs:
+            shown = ', '.join(f'{v:g}' for v in differs)
+            warnings.append(f'reference setup is {REFERENCE_SETUP}; your {label} '
+                            f'{shown} {unit} differs -- treat as a starting point')
     return tuple(warnings)
 
 
 def scale(quantity: str, descriptor: str, context: ScaleContext) -> Optional[ScaledRange]:
-    """The measured range for ``descriptor quantity`` on ``context.model``, or None."""
+    """The reference band for ``descriptor quantity`` on ``context.model``, or None."""
     name = _QUANTITIES.get(quantity.strip().lower())
     level = _descriptor(descriptor)
     if name is None or level is None:
@@ -129,8 +131,8 @@ def scale(quantity: str, descriptor: str, context: ScaleContext) -> Optional[Sca
     for regime in REGIMES:
         if (context.model in regime.models and regime.quantity == name
                 and regime.descriptor == level):
-            working = (f'{level} {name} = {regime.low:g}-{regime.high:g} {regime.unit} '
-                       f'from {regime.source}')
+            working = (f'{level} {name} = {regime.low:g}-{regime.high:g} {regime.unit}: '
+                       f'{regime.source}')
             return ScaledRange(name, regime.unit, regime.low, regime.high, working,
-                               _validity_warnings(context))
+                               _reference_warnings(context))
     return None

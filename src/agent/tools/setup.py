@@ -217,12 +217,13 @@ def _scale_context(doc) -> ScaleContext:
                         temperature_K=value('general', 'temp'))
 
 
-def suggest_values(deps, quantity: str, descriptor: str, n: int,
-                   spacing: Literal['linear', 'log'] = 'linear') -> str:  # pylint: disable=unused-argument
-    """Descriptor -> values from a measured regime (src.core.scaling), else the examples.
+def suggest_values(deps, quantity: str, descriptor: str, n: int) -> str:
+    """Descriptor -> n linear values from a reference band (src.core.scaling), else the examples.
 
-    The values are always linear between the regime's ends: the regimes are
-    measured ranges, not decades, so ``spacing`` is not applied.
+    Descriptors: low (also small, light, lower), mid (moderate, medium, middle,
+    intermediate), high (large, heavy, higher); a phrase such as 'low load'
+    works too. Quantities: load (force, normal load). Bands exist for AFM,
+    indent and PES-tip loads; anything else gets the example-config advice.
     """
     scaled = scale(quantity, descriptor, _scale_context(deps.document))
     if scaled is None:

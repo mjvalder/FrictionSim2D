@@ -30,42 +30,61 @@ def test_quantity_synonyms(quantity):
     assert scale(quantity, 'low', AFM).high == 20
 
 
-def test_working_names_the_measured_source():
-    result = scale('load', 'low', AFM)
-    assert 'ML_taxonomy' in result.working and 'BASELINE_LOADS' in result.working
-    assert '\n' not in result.working
-    assert 'MID_LOAD_CORE' in scale('load', 'mid', AFM).working
+def test_working_says_what_each_band_is():
+    low = scale('load', 'low', AFM).working
+    assert 'baseline loads' in low and 'BASELINE_LOADS' in low and 'poor contact' in low
+    assert 'lower part' in low
+    mid = scale('load', 'mid', AFM).working
+    assert 'MID_LOAD_CORE' in mid and 'reference trends' in mid
+    high = scale('load', 'high', AFM).working
+    assert '100 nN' in high and 'no dedicated constant' in high
+    for text in (low, mid, high):
+        assert 'measured' not in text.lower() and '\n' not in text
 
 
-def test_every_regime_has_a_source():
+def test_every_regime_has_a_source_and_none_claims_measurement():
     assert REGIMES
     for regime in REGIMES:
         assert regime.source and regime.low < regime.high
+        assert 'measured' not in regime.source.lower()
 
 
-def test_inside_validity_no_warning():
-    assert scale('load', 'low', AFM).warnings == ()
-    edge = ScaleContext('afm', tip_radius_A=20, driving_spring_N_m=50, temperature_K=350)
-    assert scale('load', 'low', edge).warnings == ()
+def test_module_docstring_disclaims_measurement():
+    import src.core.scaling as module
+    assert 'not measured regimes' in module.__doc__
+    assert 'not a contact model' in module.__doc__
 
 
-def test_tip_radius_outside_validity_warns_same_numbers():
-    result = scale('load', 'low', ScaleContext('afm', tip_radius_A=60))
+@pytest.mark.parametrize('context', [
+    AFM,
+    ScaleContext('afm', tip_radius_A=25.4, driving_spring_N_m=50.3, temperature_K=300.8),
+    ScaleContext('afm'),
+    ScaleContext('afm', driving_spring_N_m=[8, 50]),
+])
+def test_reference_setup_no_warning(context):
+    assert scale('load', 'low', context).warnings == ()
+
+
+def test_tip_radius_differs_warns_same_numbers():
+    result = scale('load', 'low', ScaleContext('afm', tip_radius_A=22))
     assert (result.low, result.high) == (10, 20)
     assert len(result.warnings) == 1
-    assert 'R = 25' in result.warnings[0] and 'R = 60' in result.warnings[0]
+    warning = result.warnings[0]
+    assert 'reference setup is' in warning and 'R = 25' in warning
+    assert 'tip radius' in warning and '22' in warning and 'starting point' in warning
 
 
-def test_spring_and_temperature_outside_validity_warn():
-    result = scale('load', 'mid', ScaleContext('afm', driving_spring_N_m=2, temperature_K=500))
+def test_spring_and_temperature_differ_warn():
+    result = scale('load', 'mid', ScaleContext('afm', driving_spring_N_m=20, temperature_K=310))
     assert len(result.warnings) == 2
-    assert any('2 N/m' in w for w in result.warnings)
-    assert any('500 K' in w for w in result.warnings)
+    assert any('driving spring' in w and '20 N/m' in w for w in result.warnings)
+    assert any('temperature' in w and '310 K' in w for w in result.warnings)
 
 
 def test_swept_temperature_checks_every_value():
     result = scale('load', 'low', ScaleContext('afm', temperature_K=[300, 400]))
     assert len(result.warnings) == 1 and '400' in result.warnings[0]
+    assert '300,' not in result.warnings[0].split('differs')[0].split('your')[-1]
 
 
 @pytest.mark.parametrize('quantity, model', [

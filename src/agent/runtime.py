@@ -78,9 +78,9 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
 
     @agent.tool
     def suggest_values(ctx: RunContext[AgentDeps], quantity: str, descriptor: str,
-                       n: int, spacing: str = 'linear') -> str:
+                       n: int) -> str:
         """Turn a descriptor such as 'low load' into values, when a rule exists."""
-        return _call(ctx, setup.suggest_values, quantity, descriptor, n, spacing)
+        return _call(ctx, setup.suggest_values, quantity, descriptor, n)
 
     @agent.tool
     def setup_afm(ctx: RunContext[AgentDeps], request: setup.AFMSetupRequest) -> str:
