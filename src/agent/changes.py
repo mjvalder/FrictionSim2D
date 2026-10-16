@@ -9,6 +9,7 @@ list, via `write_material_names`) and `apply_fs_changeset`.
 from __future__ import annotations
 
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -428,10 +429,56 @@ def _op_paths(op: Tuple[str, ...]) -> Tuple[str, ...]:
     return op[1:2] if op[0] == 'write_text' else op[1:]
 
 
-def _write_new(target: PathLike, text: str) -> None:
+#: ``os.link`` errors meaning "this filesystem has no hard links" (FAT, some
+#: network and FUSE mounts), not "the target exists": publish by exclusive
+#: create instead.
+NO_HARD_LINKS = frozenset({errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.ENOSYS})
+
+
+def _umask() -> int:
+    """The process umask, read without changing it where the OS allows."""
+    try:
+        with open('/proc/self/status', encoding='ascii') as status:
+            for line in status:
+                if line.startswith('Umask:'):
+                    return int(line.split()[1], 8)
+    except (OSError, ValueError, IndexError):
+        pass
+    mask = os.umask(0o022)  # no reader: the set-and-restore round trip
+    os.umask(mask)
+    return mask
+
+
+def _publish(temp: str, target: PathLike, link) -> None:
+    """Make the finished ``temp`` appear at ``target``, never overwriting.
+
+    ``link`` (``os.link`` when None, looked up per call) is atomic and
+    fails if ``target`` exists. Where the filesystem has no hard links the
+    bytes are copied into an exclusively created ``target`` instead -- still never overwriting, and removed again
+    if the copy fails, so no partial file is left behind.
+    """
+    try:
+        (link or os.link)(temp, target)
+        return
+    except OSError as exc:
+        if exc.errno not in NO_HARD_LINKS:
+            raise
+    with open(temp, 'rb') as src, open(target, 'xb') as dst:
+        try:
+            shutil.copyfileobj(src, dst)
+        except BaseException:
+            dst.close()
+            os.unlink(target)
+            raise
+    shutil.copymode(temp, target)
+
+
+def _write_new(target: PathLike, text: str, *, link=None) -> None:
     """Write ``text`` to a *new* file, whole or not at all.
 
-    The text goes to a temporary file beside ``target`` first; ``os.link``
+    The text goes to a temporary file beside ``target`` first, with the
+    permissions a plain new file gets (``0o666 & ~umask`` -- ``mkstemp``'s
+    ``0o600`` would leave a fetched CIF unreadable to the group); ``link``
     then publishes it, failing if ``target`` appeared since it was checked,
     so nothing is overwritten and no partial file is ever left at ``target``.
     """
@@ -439,17 +486,28 @@ def _write_new(target: PathLike, text: str) -> None:
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as handle:
             handle.write(text)
-        os.link(temp, target)
+        os.chmod(temp, 0o666 & ~_umask())
+        _publish(temp, target, link)
     finally:
         os.unlink(temp)
 
 
-def _copy_new(source: PathLike, target: PathLike) -> None:
-    """Copy ``source`` to a *new* file: ``'xb'`` fails if ``target`` appeared
-    since it was checked, so nothing is ever overwritten."""
-    with open(source, 'rb') as src, open(target, 'xb') as dst:
-        shutil.copyfileobj(src, dst)
-    shutil.copystat(source, target)
+def _copy_new(source: PathLike, target: PathLike, *, copier=None, link=None) -> None:
+    """Copy ``source`` to a *new* file, whole or not at all.
+
+    Same temporary-file-then-link pattern as `_write_new`: a copy that fails
+    part-way leaves nothing at ``target``, so a retry is not refused by a
+    half-written file, and a ``target`` that appeared since it was checked is
+    never overwritten.
+    """
+    fd, temp = tempfile.mkstemp(dir=Path(target).parent, prefix='.', suffix='.part')
+    try:
+        with open(source, 'rb') as src, os.fdopen(fd, 'wb') as dst:
+            (copier or shutil.copyfileobj)(src, dst)
+        shutil.copystat(source, temp)
+        _publish(temp, target, link)
+    finally:
+        os.unlink(temp)
 
 
 def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:

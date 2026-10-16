@@ -1,6 +1,8 @@
 """Change sets: previewed on copies, replayed on the live documents on Apply."""
 import copy
+import errno
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -406,3 +408,62 @@ def test_fs_write_text_failure_leaves_nothing_and_retry_works(deps, monkeypatch)
     assert apply_fs_changeset(change, ws).applied
     assert (ws / 'm' / 'x.cif').read_text() == 'data_x\n'
     assert [p.name for p in (ws / 'm').iterdir()] == ['x.cif']
+
+
+def _current_umask():
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+def test_write_new_gives_the_file_normal_permissions(tmp_path):
+    from src.agent.changes import _write_new
+    target = tmp_path / 'x.cif'
+    _write_new(target, 'data_x\n')
+    assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~_current_umask()
+    assert [p.name for p in tmp_path.iterdir()] == ['x.cif']
+
+
+@pytest.mark.parametrize('code', [errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.ENOSYS])
+def test_write_new_falls_back_when_hard_links_are_unsupported(tmp_path, code):
+    from src.agent.changes import _write_new
+
+    def no_links(_src, _dst):
+        raise OSError(code, 'no hard links here')
+
+    target = tmp_path / 'x.cif'
+    _write_new(target, 'data_x\n', link=no_links)
+    assert target.read_text() == 'data_x\n'
+    assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~_current_umask()
+    assert [p.name for p in tmp_path.iterdir()] == ['x.cif']
+    with pytest.raises(FileExistsError):  # the fallback still never overwrites
+        _write_new(target, 'other\n', link=no_links)
+    assert target.read_text() == 'data_x\n'
+
+
+def test_write_new_other_link_errors_still_raise(tmp_path):
+    from src.agent.changes import _write_new
+
+    def broken(_src, _dst):
+        raise OSError(errno.EIO, 'disk on fire')
+
+    with pytest.raises(OSError):
+        _write_new(tmp_path / 'x.cif', 'data_x\n', link=broken)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_failed_copy_leaves_no_partial_target_and_a_retry_works(tmp_path):
+    from src.agent.changes import _copy_new
+    source, target = tmp_path / 'src.txt', tmp_path / 'out' / 'dst.txt'
+    target.parent.mkdir()
+    source.write_text('payload')
+
+    def failing(_src, _dst):
+        raise OSError(errno.ENOSPC, 'disk full')
+
+    with pytest.raises(OSError):
+        _copy_new(source, target, copier=failing)
+    assert list(target.parent.iterdir()) == []
+    _copy_new(source, target)
+    assert target.read_text() == 'payload'
+    assert list(target.parent.iterdir()) == [target]
