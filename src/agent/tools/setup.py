@@ -304,6 +304,15 @@ EXAMPLE_DEFAULTS = {
 }
 
 
+#: Example values that would fail validation, replaced with the reason shown on
+#: the change note. examples/pes_tip_config.ini (fixture data, left as is) uses a
+#: 60 x 60 Angstrom sheet with [tip] r = 25, below the 2x-tip-diameter footprint
+#: (100 Angstrom) the AFM models require.
+EXAMPLE_OVERRIDES = {
+    'pes_tip': ({('2D', 'x'): 100, ('2D', 'y'): 100},
+                'sheet raised to 100 x 100 so it is at least 2x the tip diameter'),
+}
+
 #: Request field -> (config section, what the card calls it, extra ops' values).
 _TIP_PARTS = (('tip_material', 'tip', 'tip', {}),
               ('substrate_material', 'sub', 'substrate', {'amorph': 'a'}))
@@ -356,6 +365,8 @@ def _tip_and_substrate_ops(deps, probe, request: BaseModel) -> Tuple[List[Op], L
 def _example_default_ops(probe, model: str, ops: List[Op]) -> Tuple[List[Op], List[str]]:
     """Fill geometry still unset after ``ops`` from the model's example config."""
     source, values = EXAMPLE_DEFAULTS.get(model, ('', {}))
+    overrides, reason = EXAMPLE_OVERRIDES.get(model, ({}, ''))
+    values = {**values, **overrides}
     proposed = {(op.section, op.key) for op in ops if op.kind == 'set'}
     filled, described = [], []
     for (section, key), value in values.items():
@@ -368,7 +379,10 @@ def _example_default_ops(probe, model: str, ops: List[Op]) -> Tuple[List[Op], Li
         described.append(f'{section}.{key}={value}')
     if not described:
         return [], []
-    return filled, [f"defaults from {source} -- change if needed: {', '.join(described)}"]
+    note = f"defaults from {source} -- change if needed: {', '.join(described)}"
+    if reason and any((op.section, op.key) in overrides for op in filled):
+        note += f' ({reason})'
+    return filled, [note]
 
 
 def _setup(deps, model: str, request: _SetupBase, title: str) -> str:

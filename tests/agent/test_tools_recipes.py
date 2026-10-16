@@ -145,7 +145,7 @@ def test_request_tip_radius_beats_the_default(deps):
      'sheet_config.ini', {('2D', 'x'): 100, ('2D', 'layers'): [3]}),
     ('setup_indent', None, 'indent_config.ini', {('2D', 'x'): 60, ('tip', 'r'): 15}),
     ('setup_pes_tip', PESTipSetupRequest(materials=['h-MoS2'], potential_type='sw', load_nN=2),
-     'pes_tip_config.ini', {('2D', 'x'): 60, ('tip', 'r'): 25}),
+     'pes_tip_config.ini', {('2D', 'x'): 100, ('2D', 'y'): 100, ('tip', 'r'): 25}),
     ('setup_pes_sheet', None, 'pes_sheet_config.ini', {('2D', 'x'): 30, ('2D', 'layers'): [2]}),
 ])
 def test_each_model_uses_its_own_example(deps, setup, request_, source, expected):
@@ -179,3 +179,14 @@ def test_example_defaults_match_the_example_files():
                 assert set(value) <= set(raw), (source, key)
             else:
                 assert raw == value, (source, section, key)
+
+
+def test_pes_tip_override_is_explained(deps):
+    """examples/pes_tip_config.ini's 60 x 60 sheet breaks the 2x-tip rule; the
+    assistant raises it and says why instead of copying a failing value."""
+    from src.agent.tools import setup as tools
+    tools.setup_pes_tip(deps, tools.PESTipSetupRequest(materials=['h-MoS2'],
+                                                       potential_type='sw', load_nN=2))
+    cs = deps.pending[-1]
+    assert cs.ok, cs.issues
+    assert any('2x the tip diameter' in n for n in cs.notes)
