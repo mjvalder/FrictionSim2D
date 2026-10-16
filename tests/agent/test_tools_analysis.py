@@ -173,3 +173,87 @@ def test_plot_schema_is_that_types_slice():
 def test_plot_schema_unknown_type():
     with pytest.raises(ToolInputError, match='rank_friction'):
         plot_schema(None, 'histogram')
+
+
+# ---- staying bounded on large workspaces -------------------------------------
+
+def _fake_runs(root, n):
+    """n run dirs with a parseable path and a minimal provenance.json."""
+    for i in range(n):
+        run = root / 'afm' / 'h-MoS2' / '100x_100y' / 'sub_aSi_tip_Si_r25' / 'K300' / f'L{i + 1}'
+        run.mkdir(parents=True)
+        (run / 'provenance.json').write_text('{}')
+
+
+def test_find_counts_a_huge_root_cheaply(deps):
+    import time
+    _fake_runs(deps.roots.workspace / 'big', 2000)
+    start = time.monotonic()
+    text = find_result_sets(deps)
+    assert time.monotonic() - start < 5
+    assert 'workspace:/big — simulation root (afm: 1000+ runs)' in text
+
+
+def test_find_needs_a_provenance_file_for_a_root(deps):
+    (deps.roots.workspace / 'notes' / 'afm' / 'drafts').mkdir(parents=True)
+    assert 'workspace:/notes' not in find_result_sets(deps)
+
+
+def test_find_stops_when_the_output_is_full(deps):
+    for i in range(40):
+        out = deps.roots.workspace / f'set{i:02d}' / 'outputs'
+        out.mkdir(parents=True)
+        (out / 'output_full_1x1y.json').write_text('{}')
+    text = find_result_sets(deps)
+    assert '… more result sets' in text
+    assert len(text) <= RESULT_LIMIT and 'more lines' not in text
+
+
+def test_find_parse_budget_is_aggregate(deps):
+    for i in range(3):
+        out = deps.roots.workspace / f'big{i}' / 'outputs'
+        out.mkdir(parents=True)
+        (out / 'output_full_1x1y.json').write_text(
+            json.dumps({'runs': [{}] * 2, 'pad': 'x' * 400}))
+    text = find_result_sets(deps, count_budget_mb=0.0006)
+    assert 'workspace:/big0 — dataset (sizes: 1x1y; 2 runs)' in text
+    assert 'workspace:/big1 — dataset (sizes: 1x1y; 0 MB)' in text
+
+
+def test_find_skips_symlinks_leaving_the_workspace(deps, tmp_path):
+    outside = tmp_path / 'outside' / 'ds'
+    (outside / 'outputs').mkdir(parents=True)
+    (outside / 'outputs' / 'output_full_1x1y.json').write_text('{}')
+    (deps.roots.workspace / 'link').symlink_to(tmp_path / 'outside')
+    assert 'link' not in find_result_sets(deps)
+
+
+def test_summarise_root_reads_configs_only_for_shown_rows(deps):
+    _fake_runs(deps.roots.workspace / 'big', 2000)
+    calls = []
+
+    def reader(locator):
+        calls.append(locator)
+        return None
+
+    text = summarise_results(deps, 'big', config_reader=reader)
+    shown = [ln for ln in text.splitlines() if ln.startswith('afm ')]
+    assert 0 < len(calls) <= 30 and len(shown) <= len(calls)
+    assert 'more runs not inspected' in text
+    assert len(text) <= RESULT_LIMIT and 'more lines' not in text
+
+
+def test_summarise_falls_back_to_counting_statuses(deps):
+    doc = json.loads(_doc(deps).read_text())
+    del doc['metadata']['status_counts']
+    _doc(deps).write_text(json.dumps(doc))
+    assert 'complete 3, no_output 1' in summarise_results(deps, 'campaign')
+
+
+def test_summarise_keeps_the_tail_line_within_budget(deps):
+    doc = json.loads(_doc(deps).read_text())
+    doc['runs'] = doc['runs'] * 50
+    _doc(deps).write_text(json.dumps(doc))
+    text = summarise_results(deps, 'campaign')
+    assert '… ' in text and 'more rows' in text
+    assert len(text) <= RESULT_LIMIT and 'more lines' not in text

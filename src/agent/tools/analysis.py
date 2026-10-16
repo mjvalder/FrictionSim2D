@@ -12,10 +12,11 @@ A folder can be both: `postprocess read` writes `outputs/` into the root.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import Counter, deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ...gui.datasets import DATASETS_DIRNAME, dataset_files, is_dataset
 from ...postprocessing import plot_config
@@ -24,26 +25,42 @@ from ...run.naming import MODELS
 from ...run.tree import discover_runs
 from ..changes import ToolInputError
 from ..sandbox import display_path, resolve_readable
-from . import compact
+from . import RESULT_LIMIT, compact
 
 #: Largest `output_full_*.json` `summarise_results` will parse.
 MAX_JSON_MB = 200
-#: Largest file `find_result_sets` parses just to count its runs.
+#: Largest file `find_result_sets` parses just to count its runs ...
 COUNT_JSON_MB = 20
+#: ... and the most it parses for counting in one call, all files together.
+COUNT_BUDGET_MB = 50
 MAX_FIND_DEPTH = 4
-MAX_FIND_HITS = 200
+#: Result-set lines `find_result_sets` collects: about what fits in one result.
+MAX_FIND_HITS = 15
+#: `provenance.json` files counted per simulation root before saying "N+".
+MAX_ROOT_RUNS = 1000
 #: At most this many scalar `post` entries shown per row.
 MAX_POST = 3
+#: Kept free at the end of a result for the "… N more" line.
+TAIL_RESERVE = 60
 
 
 # ---- finding -----------------------------------------------------------------
 
-def _children(folder: Path) -> List[Path]:
+def _children(folder: Path, real_root: str) -> List[Path]:
+    """Sub-folders, without dot-folders or symlinks that leave the workspace."""
     try:
-        return sorted(p for p in folder.iterdir()
-                      if p.is_dir() and not p.name.startswith('.'))
+        children = sorted(p for p in folder.iterdir()
+                          if p.is_dir() and not p.name.startswith('.'))
     except OSError:
         return []
+    kept = []
+    for child in children:
+        if child.is_symlink():
+            real = os.path.realpath(child)
+            if real != real_root and not real.startswith(real_root + os.sep):
+                continue
+        kept.append(child)
+    return kept
 
 
 def _megabytes(path: Path) -> float:
@@ -69,68 +86,82 @@ def _size_of(path: Path) -> str:
     return path.stem[len('output_full_'):]
 
 
-def _dataset_line(deps, folder: Path) -> str:
+def _dataset_line(deps, folder: Path, budget: List[float]) -> str:
+    """One dataset line; parses for run counts while ``budget[0]`` MB remain."""
     files = dataset_files(folder)
     sizes = ', '.join(_size_of(p) for p in files)
-    counts = []
-    for path in files:
-        doc, _ = _load(path, COUNT_JSON_MB)
-        if doc is None:
-            counts = None
-            break
-        counts.append(len(doc.get('runs') or []))
-    tail = (f'{sum(counts)} runs' if counts is not None
-            else f'{sum(_megabytes(p) for p in files):.0f} MB')
+    total = sum(_megabytes(p) for p in files)
+    counts: Optional[List[int]] = None
+    if total <= budget[0] and all(_megabytes(p) <= COUNT_JSON_MB for p in files):
+        budget[0] -= total
+        counts = []
+        for path in files:
+            doc, _ = _load(path, COUNT_JSON_MB)
+            if doc is None:
+                counts = None
+                break
+            counts.append(len(doc.get('runs') or []))
+    tail = f'{sum(counts)} runs' if counts is not None else f'{total:.0f} MB'
     return f'{display_path(folder, deps.roots)} — dataset (sizes: {sizes}; {tail})'
 
 
+def _count_runs(folder: Path, cap: int = MAX_ROOT_RUNS) -> Tuple[Counter, bool]:
+    """`provenance.json` files per model under ``folder``, stopping at ``cap``."""
+    counts: Counter = Counter()
+    for model in MODELS:
+        model_dir = folder / model
+        if not model_dir.is_dir():
+            continue
+        for _base, _dirs, names in os.walk(model_dir):
+            if 'provenance.json' in names:
+                counts[model] += 1
+                if sum(counts.values()) >= cap:
+                    return counts, True
+    return counts, False
+
+
 def _root_line(deps, folder: Path) -> Optional[str]:
-    runs = discover_runs(folder)
-    if not runs:
+    counts, capped = _count_runs(folder)
+    if not counts:
         return None
-    models = Counter(run.tokens.model for run in runs)
-    shown = ', '.join(f'{model}: {models[model]} runs' for model in MODELS if model in models)
-    return f'{display_path(folder, deps.roots)} — simulation root ({shown})'
+    shown = [f'{model}: {counts[model]} runs' for model in MODELS if model in counts]
+    if capped:
+        shown[-1] = shown[-1].replace(' runs', '+ runs')
+    return f"{display_path(folder, deps.roots)} — simulation root ({', '.join(shown)})"
 
 
-def find_result_sets(deps, max_hits: int = MAX_FIND_HITS) -> str:
+def find_result_sets(deps, max_hits: int = MAX_FIND_HITS,
+                     count_budget_mb: float = COUNT_BUDGET_MB) -> str:
     """Datasets and simulation roots in the workspace (4 levels deep at most)."""
     root = Path(deps.roots.workspace)
+    real_root = os.path.realpath(root)
     queue = deque([(root, 0)])
     exported = root / '.preview' / DATASETS_DIRNAME
     if exported.is_dir():
         queue.append((exported, 2))
+    budget = [float(count_budget_mb)]
     lines: List[str] = []
-    capped = False
-    while queue:
+    while queue and len(lines) <= max_hits:
         folder, depth = queue.popleft()
-        found = []
         if is_dataset(folder):
-            found.append(_dataset_line(deps, folder))
+            lines.append(_dataset_line(deps, folder, budget))
         has_runs = False
         if any((folder / model).is_dir() for model in MODELS):
             line = _root_line(deps, folder)
             if line is not None:
-                found.append(line)
+                lines.append(line)
                 has_runs = True
-        for line in found:
-            if len(lines) >= max_hits:
-                capped = True
-                break
-            lines.append(line)
-        if capped:
-            break
         if depth >= MAX_FIND_DEPTH:
             continue
-        for child in _children(folder):
+        for child in _children(folder, real_root):
             if child.name == 'outputs' or (has_runs and child.name in MODELS):
                 continue
             queue.append((child, depth + 1))
     if not lines:
         return ('no datasets or simulation roots in the workspace (searched '
                 f'{MAX_FIND_DEPTH} levels deep)')
-    if capped:
-        lines.append(f'… stopped after {max_hits} result sets')
+    if len(lines) > max_hits:
+        lines = lines[:max_hits] + [f'… more result sets; stopped after {max_hits}']
     return compact('\n'.join(lines))
 
 
@@ -194,7 +225,8 @@ def _loads(meta: dict) -> str:
 
 def _file_header(path: Path, doc: dict) -> List[str]:
     meta = doc.get('metadata') or {}
-    counts = meta.get('status_counts') or {}
+    counts = meta.get('status_counts') or Counter(
+        run.get('status') for run in doc.get('runs') or [] if isinstance(run, dict))
     status = ', '.join(f'{s} {counts[s]}' for s in STATUSES if counts.get(s))
     lines = [f"{path.name}: {len(doc.get('runs') or [])} runs — {status or 'no status'}"]
     lines.append(f"materials: {', '.join(meta.get('materials') or [])}; "
@@ -220,54 +252,78 @@ def _summarise_dataset(deps, folder: Path, files: List[Path], filters: Dict[str,
                 status = run.get('status')
                 rank = STATUSES.index(status) if status in STATUSES else len(STATUSES)
                 rows.append((rank, _row(run)))
-    return '\n'.join(lines + _table(rows, filters, max_rows))
-
-
-def _table(rows: List[Tuple[int, str]], filters: Dict[str, Any], max_rows: int) -> List[str]:
     if not rows:
-        wanted = ', '.join(f'{k}={v}' for k, v in filters.items() if v)
-        return [f'no runs match {wanted}'] if wanted else ['no runs']
+        return '\n'.join(lines + [_no_match(filters)])
     rows.sort(key=lambda r: r[0])  # stable: complete first, file order kept
     max_rows = max(1, int(max_rows))
-    out = [row for _, row in rows[:max_rows]]
-    if len(rows) > max_rows:
-        out.append(f'… {len(rows) - max_rows} more rows')
-    return out
+    return _fit(lines, [row for _, row in rows[:max_rows]], len(rows[max_rows:]), 'rows')
 
 
-def _summarise_root(deps, folder: Path, runs, filters: Dict[str, Any],
-                    max_rows: int) -> str:
-    lines = [f'{display_path(folder, deps.roots)} — simulation root, {len(runs)} runs '
-             '(not post-processed: run `FrictionSim2D postprocess read` on it for a dataset)']
-    rows: List[Tuple[int, str]] = []
+def _fit(header: List[str], rows: List[str], more: int, noun: str) -> str:
+    """``header`` + as many ``rows`` as fit in a result, then "… N more {noun}"."""
+    room = RESULT_LIMIT - TAIL_RESERVE - sum(len(line) + 1 for line in header)
+    shown: List[str] = []
+    for row in rows:
+        if len(row) + 1 > room:
+            break
+        shown.append(row)
+        room -= len(row) + 1
+    more += len(rows) - len(shown)
+    tail = [f'… {more} more {noun}'] if more else []
+    return '\n'.join(header + shown + tail)
+
+
+def _no_match(filters: Dict[str, Any]) -> str:
+    wanted = ', '.join(f'{k}={v}' for k, v in filters.items() if v)
+    return f'no runs match {wanted}' if wanted else 'no runs'
+
+
+def _token_row(run) -> str:
+    tokens = run.tokens
+    parts = [tokens.model if tokens.family == tokens.model
+             else f'{tokens.model}/{tokens.family}',
+             '+'.join(tokens.materials), f'{tokens.size_x:g}x{tokens.size_y:g}y',
+             f'T{tokens.temperature:g}']
+    if tokens.layers is not None:
+        parts.append(f'L{tokens.layers}')
+    if tokens.pot_token:
+        parts.append(f'pot {tokens.pot_token}')
+    return ' '.join(parts)
+
+
+def _summarise_root(deps, folder: Path, runs, filters: Dict[str, Any], max_rows: int,
+                    config_reader: Callable) -> str:
+    """Rows from path tokens; config and results/ are looked at for shown rows only."""
+    header = [f'{display_path(folder, deps.roots)} — simulation root, {len(runs)} runs '
+              '(not post-processed: run `FrictionSim2D postprocess read` on it for a dataset)']
+    matching = []
     for run in runs:
         tokens = run.tokens
-        size = f'{tokens.size_x:g}x{tokens.size_y:g}y'
         fake = {'material': tokens.materials[0] if tokens.materials else None,
-                'materials': tokens.materials, 'size': size}
-        if not _matches(fake, filters['material'], filters['size']):
-            continue
-        parts = [tokens.model if tokens.family == tokens.model
-                 else f'{tokens.model}/{tokens.family}',
-                 '+'.join(tokens.materials), size, f'T{tokens.temperature:g}']
-        if tokens.layers is not None:
-            parts.append(f'L{tokens.layers}')
-        if tokens.pot_token:
-            parts.append(f'pot {tokens.pot_token}')
-        chains = expected_chains(read_run_config(run), tokens.family)
+                'materials': tokens.materials,
+                'size': f'{tokens.size_x:g}x{tokens.size_y:g}y'}
+        if _matches(fake, filters['material'], filters['size']):
+            matching.append(run)
+    if not matching:
+        return '\n'.join(header + [_no_match(filters)])
+    max_rows = max(1, int(max_rows))
+    rows = []
+    for run in matching[:max_rows]:
+        chains = expected_chains(config_reader(run), run.tokens.family)
         expected = ('grid unknown' if chains is None
                     else f'{sum(len(c) for c in chains)} points expected')
         try:
             n_files = sum(1 for p in run.results_dir.iterdir() if p.is_file())
         except OSError:
             n_files = 0
-        rows.append((0, f"{' '.join(parts)}: {expected}, {n_files} results files"))
-    return '\n'.join(lines + _table(rows, filters, max_rows))
+        rows.append(f'{_token_row(run)}: {expected}, {n_files} results files')
+    return _fit(header, rows, len(matching[max_rows:]), 'runs not inspected')
 
 
 def summarise_results(deps, path: str, material: Optional[str] = None,
-                      size: Optional[str] = None, max_rows: int = 30,
-                      max_json_mb: float = MAX_JSON_MB) -> str:
+                      size: Optional[str] = None, max_rows: int = 15,
+                      max_json_mb: float = MAX_JSON_MB,
+                      config_reader: Callable = read_run_config) -> str:
     """Status counts, materials, loads and a run table for a dataset or simulation root."""
     target = resolve_readable(path, deps.roots)
     filters = {'material': material, 'size': size}
@@ -279,7 +335,8 @@ def summarise_results(deps, path: str, material: Optional[str] = None,
                                           max_rows, max_json_mb))
     runs = discover_runs(target) if target.is_dir() else []
     if runs:
-        return compact(_summarise_root(deps, target, runs, filters, max_rows))
+        return compact(_summarise_root(deps, target, runs, filters, max_rows,
+                                       config_reader))
     raise ToolInputError(f'{display_path(target, deps.roots)}: neither a dataset nor a '
                          'simulation root; use find_result_sets to list them')
 

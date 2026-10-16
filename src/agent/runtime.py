@@ -148,7 +148,7 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
     @agent.tool
     def summarise_results(ctx: RunContext[AgentDeps], path: str,
                           material: Optional[str] = None, size: Optional[str] = None,
-                          max_rows: int = 30) -> str:
+                          max_rows: int = 15) -> str:
         """Status counts and a run table for a dataset or simulation root."""
         return _call(ctx, analysis.summarise_results, path, material, size, max_rows)
 
