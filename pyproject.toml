@@ -104,7 +104,7 @@ markers = [
     "lammps: executes real LAMMPS runs (skipped when lmp_serial is absent; deselect with -m 'not lammps')",
     "integration: cross-package artifact-level tests in tests/integration/ (a file may also carry lammps; Phase 3 adds the lmp_serial-free ones)",
     "aiida: needs aiida-core; runs against a temporary broker-less SQLite profile (aiida_profile_clean), never the daemon",
-    "agent_eval: live-LLM evaluation of the GUI assistant (needs GEMINI_API_KEY or a running Ollama; deselected by default)",
+    "agent_eval: live-LLM evaluation of the GUI assistant (AGENT_EVAL_PROVIDER: gemini needs GEMINI_API_KEY, ollama a running server; deselected by default)",
 ]
 
 [tool.hatch.build.targets.wheel]

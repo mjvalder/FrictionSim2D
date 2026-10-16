@@ -18,3 +18,6 @@ log.lammps
 .superpowers/
 .stfolder/
 MultiplexedPath*
+
+# agent eval results (tests/agent/evals/conftest.py)
+tests/agent/evals/.results/

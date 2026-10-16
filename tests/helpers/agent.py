@@ -18,3 +18,44 @@ def make_deps(tmp_path, settings, model='afm', with_examples=True):
     document.workspace_root = workspace
     roots = SearchRoots(workspace, EXAMPLES if with_examples else None)
     return snapshot_deps(document, SettingsDocument.defaults(), settings, roots)
+
+
+CIF_TEXT = 'data_MoS2\n_cell_length_a 3.19\n'
+
+
+class FakeMaterialsClient:
+    """The part of MPClient the materials tools use; never touches the network."""
+
+    def __init__(self, mp_rows=(), dm_rows=(), error=None):
+        self.mp_rows, self.dm_rows, self.error = list(mp_rows), list(dm_rows), error
+        self.structures = []
+        self.downloaded_listing = False
+
+    def _check(self):
+        if self.error is not None:
+            raise self.error
+
+    def summary(self, formula):  # pylint: disable=unused-argument
+        self._check()
+        return self.mp_rows
+
+    def twodmatpedia(self, formula):  # pylint: disable=unused-argument
+        self._check()
+        return self.dm_rows
+
+    def twodmatpedia_entry(self, dm_id):
+        self._check()
+        return next((r for r in self.dm_rows if r['dm_id'] == dm_id), None)
+
+    def structure_cif(self, structure_id):
+        self._check()
+        self.structures.append(structure_id)
+        return CIF_TEXT
+
+
+def materials_factory(client):
+    """An `AgentDeps.materials_db` factory that hands out ``client``."""
+    def factory(should_stop=None):
+        client.should_stop = should_stop
+        return client
+    return factory

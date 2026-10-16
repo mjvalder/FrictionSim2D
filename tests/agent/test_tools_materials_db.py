@@ -5,9 +5,8 @@ from src.agent.changes import FsChangeSet, apply_fs_changeset
 from src.agent.materials_db import NO_KEY, MaterialsDBError
 from src.agent.tools.materials_db import (fetch_2dmatpedia_structure, query_2dmatpedia,
                                           query_materials_project)
-from tests.helpers.agent import make_deps
-
-CIF_TEXT = 'data_MoS2\n_cell_length_a 3.19\n'
+from tests.helpers.agent import CIF_TEXT, make_deps, materials_factory
+from tests.helpers.agent import FakeMaterialsClient as FakeClient
 
 
 def _mp_row(i):
@@ -23,46 +22,13 @@ def _dm_row(i, formula='MoS2'):
             'E': -7.1, 'Ed': 0.07, 'Ex': 0.02, 'dE': 0.01, 'Evdw': -0.3, 'mu': 0.0}
 
 
-class FakeClient:
-    """The part of MPClient the tools use."""
-
-    def __init__(self, mp_rows=(), dm_rows=(), error=None):
-        self.mp_rows, self.dm_rows, self.error = list(mp_rows), list(dm_rows), error
-        self.structures = []
-        self.downloaded_listing = False
-
-    def _check(self):
-        if self.error is not None:
-            raise self.error
-
-    def summary(self, formula):  # pylint: disable=unused-argument
-        self._check()
-        return self.mp_rows
-
-    def twodmatpedia(self, formula):  # pylint: disable=unused-argument
-        self._check()
-        return self.dm_rows
-
-    def twodmatpedia_entry(self, dm_id):
-        self._check()
-        return next((r for r in self.dm_rows if r['dm_id'] == dm_id), None)
-
-    def structure_cif(self, structure_id):
-        self._check()
-        self.structures.append(structure_id)
-        return CIF_TEXT
-
-
 @pytest.fixture(name='deps')
 def _deps(tmp_path, mock_settings):
     return make_deps(tmp_path, mock_settings)
 
 
 def _with(deps, client):
-    def factory(should_stop=None):
-        client.should_stop = should_stop
-        return client
-    deps.materials_db = factory
+    deps.materials_db = materials_factory(client)
     return deps
 
 

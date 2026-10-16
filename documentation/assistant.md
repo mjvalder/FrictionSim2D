@@ -174,3 +174,12 @@ and the result is written to the chat.
 
     pytest tests/agent -q                                  # no network
     pytest tests/agent/evals -m agent_eval                 # live model
+
+The eval tier judges one provider/model on ~60 cases (setup per family,
+parameters, sweeps and reference load bands, materials, workspace, analysis
+and plots, Materials Project against a fake client, and must-ask prompts).
+Switches: `AGENT_EVAL_PROVIDER` (`gemini` default, `ollama`), `AGENT_EVAL_MODEL`,
+`AGENT_EVAL_REPEATS` (default 3), `AGENT_EVAL_PAUSE` (seconds between turns).
+Each run writes `tests/agent/evals/.results/<provider>-<model>-<timestamp>.json`
+(gitignored) and prints pass rate per case and overall, p50/p95 latency, and
+mean requests and tokens per turn. A rate-limited turn is skipped, not failed.
