@@ -18,6 +18,7 @@ def test_defaults_match_phase0():
     assert (s.ollama.max_threads, s.ollama.context_tokens, s.ollama.keep_alive) == (8, 8192, '2m')
     assert s.ollama.idle_minutes == 10
     assert s.max_requests_per_turn == 50
+    assert s.materials_project.enabled is True
 
 
 def test_config_dir_honours_xdg(monkeypatch, tmp_path):

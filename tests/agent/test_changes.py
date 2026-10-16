@@ -365,3 +365,27 @@ def test_preview_scratch_only_for_material_lists(deps):
     cs = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
     assert apply_changeset(cs, live_doc, live_settings).applied
     assert not (deps.roots.workspace / '.preview').exists()
+
+
+def test_fs_write_text_creates_a_new_file(deps):
+    ws = deps.roots.workspace
+    change = build_fs_changeset(deps, 'cif', [('write_text', 'materials/x.cif', 'data_x\n')])
+    assert change.ok, change.issues
+    assert change.shown == [('write_text', 'workspace:/materials/x.cif')]
+    assert 'data_x' not in describe_change(change)
+    result = apply_fs_changeset(change, ws)
+    assert result.applied
+    assert (ws / 'materials' / 'x.cif').read_text() == 'data_x\n'
+
+
+@pytest.mark.parametrize('dest', ['.preview/x.cif', '../x.cif', 'examples:/x.cif', '/tmp/x.cif'])
+def test_fs_write_text_refuses_bad_destinations(deps, dest):
+    assert not build_fs_changeset(deps, 'bad', [('write_text', dest, 'x')]).ok
+
+
+def test_fs_write_text_never_overwrites_at_apply(deps):
+    ws = deps.roots.workspace
+    change = build_fs_changeset(deps, 'cif', [('write_text', 'x.cif', 'new')])
+    (ws / 'x.cif').write_text('mine')
+    result = apply_fs_changeset(change, ws)
+    assert not result.applied and (ws / 'x.cif').read_text() == 'mine'

@@ -88,6 +88,7 @@ Settings live in `~/.config/FrictionSim2D/agent.yaml`:
 | `ollama.context_tokens` | `8192` | `OLLAMA_CONTEXT_LENGTH` of a started server |
 | `ollama.keep_alive` | `2m` | `OLLAMA_KEEP_ALIVE` of a started server |
 | `gemini.model` | `gemini-3.5-flash-lite` | cloud model |
+| `materials_project.enabled` | `true` | allow Materials Project / 2DMatPedia lookups |
 
 ### Step cap
 
@@ -105,8 +106,25 @@ lower it to protect a free-tier quota.
 - Search structures and potentials: your workspace first, then the bundled
   examples (labelled; verify them before production runs).
 - Describe workspace folders, create folders, copy found files in.
+- Look a formula up on Materials Project (stability, band gap, moduli) and
+  2DMatPedia, and propose saving a 2DMatPedia monolayer as
+  `materials/<formula>_<dm_id>.cif` (see below).
 
 It cannot run or submit jobs, delete, move or rename anything.
+
+### Materials Project and 2DMatPedia
+
+Needs `pip install mp-api` (pulls in pymatgen) and a free key from
+https://next-gen.materialsproject.org/api, looked up in this order:
+`$MP_API_KEY`, `~/.mp_api_key`, `PMG_MAPI_KEY` in `~/.config/.pmgrc.yaml`.
+Without one the tools reply `No Materials Project key: set MP_API_KEY or put
+it in ~/.mp_api_key`. **Only formulas and ids are sent to Materials Project**
+(the key goes in a request header and is never logged or cached).
+2DMatPedia is read from the MPContribs project `2dmatpedia`; its full listing
+is cached for 7 days in `~/.cache/FrictionSim2D/2dmatpedia.json` (honours
+`XDG_CACHE_HOME`). A fetched structure is a new file proposal: it waits for
+Apply, lands only inside the workspace and never overwrites. Turn lookups off
+with `materials_project.enabled: false`.
 
 ## How changes land
 

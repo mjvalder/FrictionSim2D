@@ -21,6 +21,9 @@ Rules:
 - If the request is ambiguous, or a unit does not fit (loads are nN, lengths
   Angstrom, pressures GPa, speeds m/s), ask before proposing anything.
 - Use material names exactly as search_structures returns them.
+- query_materials_project / query_2dmatpedia look a formula up online;
+  only formulas and ids are sent to Materials Project. If a tool says there
+  is no key, pass that on; do not retry.
 - Keep replies short: what you changed or proposed, and any issue it flags."""
 
 

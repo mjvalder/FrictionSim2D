@@ -115,7 +115,8 @@ NO_QT_MODULES = ['src.agent', 'src.agent.events', 'src.agent.providers',
                   'src.agent.runtime', 'src.agent.tools', 'src.agent.changes', 'src.agent.context',
                   'src.agent.tools.setup', 'src.agent.tools.materials',
                   'src.agent.tools.workspace', 'src.agent.ollama_server',
-                  'src.core.scaling', 'src.agent.tools.analysis', 'src.gui.datasets']
+                  'src.core.scaling', 'src.agent.tools.analysis', 'src.gui.datasets',
+                  'src.agent.materials_db', 'src.agent.tools.materials_db']
 
 #: Modules that must not pull pydantic-ai in: GUI startup and the agent core.
 #: Only src.agent.runtime (and providers, inside functions) may import it.
@@ -124,7 +125,8 @@ NO_PYDANTIC_AI_MODULES = ['src.agent', 'src.agent.events', 'src.agent.providers'
                            'src.agent.changes', 'src.agent.context',
                            'src.agent.tools.setup', 'src.agent.tools.materials',
                            'src.agent.tools.workspace', 'src.agent.ollama_server',
-                           'src.core.scaling', 'src.agent.tools.analysis']
+                           'src.core.scaling', 'src.agent.tools.analysis',
+                           'src.agent.materials_db', 'src.agent.tools.materials_db']
 
 
 def _loaded_after_importing(module: str, banned: str) -> bool:

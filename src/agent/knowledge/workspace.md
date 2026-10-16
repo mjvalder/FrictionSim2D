@@ -1,2 +1,3 @@
 - configs/ holds saved configs and material lists; simulation output folders sit in the workspace; .preview/ is GUI scratch.
 - You can list and describe folders, create folders, and copy a found structure or potential file into the workspace (propose_copy_in). You cannot move, rename or delete anything.
+- fetch_2dmatpedia_structure proposes a new <formula>_<dm_id>.cif in materials/ (the user approves it like any file operation).

@@ -27,6 +27,7 @@ from .providers import ProviderUnavailable, build_model
 from .sandbox import SandboxError, redact
 from .settings import AgentSettings
 from .tools import analysis, compact, materials, plots, setup, workspace
+from .tools import materials_db
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,22 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
     def propose_plot(ctx: RunContext[AgentDeps], request: plots.PlotProposalRequest) -> str:
         """Propose a plot for the Plots tab on datasets from find_result_sets."""
         return _call(ctx, plots.propose_plot, request)
+
+    @agent.tool
+    def query_materials_project(ctx: RunContext[AgentDeps], formula: str) -> str:
+        """Materials Project entries (stability, band gap, moduli) for a formula."""
+        return _call(ctx, materials_db.query_materials_project, formula)
+
+    @agent.tool
+    def query_2dmatpedia(ctx: RunContext[AgentDeps], formula: str) -> str:
+        """2DMatPedia monolayers for a formula, with their dm_id."""
+        return _call(ctx, materials_db.query_2dmatpedia, formula)
+
+    @agent.tool
+    def fetch_2dmatpedia_structure(ctx: RunContext[AgentDeps], dm_id: str,
+                                   dest_dir: str = 'materials') -> str:
+        """Propose saving a 2DMatPedia structure (dm_id) as a CIF in the workspace."""
+        return _call(ctx, materials_db.fetch_2dmatpedia_structure, dm_id, dest_dir)
 
 
 def _retry_after(exc: ModelHTTPError) -> float:

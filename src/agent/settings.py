@@ -41,12 +41,20 @@ class GeminiSettings(BaseModel):
     consent_given: bool = False
 
 
+class MaterialsProjectSettings(BaseModel):
+    """Materials Project / 2DMatPedia lookups: only formulas and ids are sent."""
+
+    enabled: bool = True
+
+
 class AgentSettings(BaseModel):
     """Everything the Assistant pane remembers between sessions."""
 
     provider: Literal['gemini', 'ollama'] = 'gemini'
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    materials_project: MaterialsProjectSettings = Field(
+        default_factory=MaterialsProjectSettings)
     #: Off: config/settings changes land in the Builder at once (with Undo).
     #: On: they wait as cards, like file operations always do.
     ask_before_apply: bool = False

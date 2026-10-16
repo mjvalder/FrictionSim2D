@@ -121,7 +121,8 @@ class ChangeSet:
 
 @dataclass
 class FsChangeSet:
-    """A proposal to create folders or copy found files into the workspace."""
+    """A proposal to create folders, copy found files, or write a new text
+    file (``('write_text', target, text)``) into the workspace."""
 
     id: str
     title: str
@@ -393,7 +394,7 @@ def apply_changeset(change: ChangeSet, document, settings_document, *,
 
 
 def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsChangeSet:
-    """Check folder/copy operations; refused ones are listed as issues."""
+    """Check folder/copy/write operations; refused ones are listed as issues."""
     workspace = Path(deps.roots.workspace)
     checked, issues = [], []
     for op in ops:
@@ -410,12 +411,27 @@ def build_fs_changeset(deps, title: str, ops: Sequence[Tuple[str, ...]]) -> FsCh
                     raise SandboxError(f'{op[1]}: not a file')
                 checked.append(('copy', str(source), str(check_write_target(
                     write_path(op[2], deps.roots), workspace))))
+            elif op[0] == 'write_text':
+                checked.append(('write_text', str(check_write_target(
+                    write_path(op[1], deps.roots), workspace)), str(op[2])))
             else:
                 raise SandboxError(f'unknown operation {op[0]!r}')
         except SandboxError as exc:
             issues.append(str(exc))
-    shown = [(op[0], *(display_path(p, deps.roots) for p in op[1:])) for op in checked]
+    shown = [(op[0], *(display_path(p, deps.roots) for p in _op_paths(op))) for op in checked]
     return FsChangeSet(id=_new_id(), title=title, ops=checked, issues=issues, shown=shown)
+
+
+def _op_paths(op: Tuple[str, ...]) -> Tuple[str, ...]:
+    """The paths an operation names (a ``write_text`` op also carries its text)."""
+    return op[1:2] if op[0] == 'write_text' else op[1:]
+
+
+def _write_new(target: PathLike, text: str) -> None:
+    """Write ``text`` to a *new* file: ``'x'`` fails if ``target`` appeared
+    since it was checked, so nothing is ever overwritten."""
+    with open(target, 'x', encoding='utf-8') as handle:
+        handle.write(text)
 
 
 def _copy_new(source: PathLike, target: PathLike) -> None:
@@ -436,6 +452,10 @@ def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:
             if op[0] == 'mkdir':
                 if not Path(op[1]).is_dir():
                     check_write_target(op[1], workspace_root).mkdir(parents=True)
+            elif op[0] == 'write_text':
+                target = check_write_target(op[1], workspace_root)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _write_new(target, op[2])
             else:
                 target = check_write_target(op[2], workspace_root)
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -443,7 +463,7 @@ def apply_fs_changeset(change: FsChangeSet, workspace_root) -> ApplyResult:
         except (SandboxError, OSError) as exc:
             finished = f" after {', '.join(done)}" if done else ''
             return ApplyResult(False, False, f'Stopped{finished}: {exc}')
-        done.append(f'{op[0]} {Path(op[-1]).name}')
+        done.append(f'{op[0]} {Path(_op_paths(op)[-1]).name}')
     return ApplyResult(True, False, f'Applied: {change.title}')
 
 
@@ -480,7 +500,7 @@ def describe_change(change) -> str:
         return change.describe()
     lines = [change.title]
     if isinstance(change, FsChangeSet):
-        shown = change.shown or [(op[0], *(Path(p).name for p in op[1:]))
+        shown = change.shown or [(op[0], *(Path(p).name for p in _op_paths(op)))
                                  for op in change.ops]
         lines += [f'  {op[0]}: ' + ' -> '.join(op[1:]) for op in shown]
     else:

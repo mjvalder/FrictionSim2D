@@ -1,0 +1,137 @@
+"""Materials Project and 2DMatPedia tools, over a fake client (no network)."""
+import pytest
+
+from src.agent.changes import FsChangeSet, apply_fs_changeset
+from src.agent.materials_db import NO_KEY, MaterialsDBError
+from src.agent.tools.materials_db import (fetch_2dmatpedia_structure, query_2dmatpedia,
+                                          query_materials_project)
+from tests.helpers.agent import make_deps
+
+CIF_TEXT = 'data_MoS2\n_cell_length_a 3.19\n'
+
+
+def _mp_row(i):
+    return {'material_id': f'mp-{i}', 'formula': 'MoS2', 'e_above_hull': 0.01 * i,
+            'formation_energy': -0.9, 'band_gap': 1.2, 'is_metal': False,
+            'density': 5.0, 'bulk_modulus': 50.0, 'shear_modulus': None,
+            'spacegroup': 'P6_3/mmc'}
+
+
+def _dm_row(i, formula='MoS2'):
+    return {'dm_id': f'2dm-{i}', 'mp_id': 'mp-2815', 'formula': formula,
+            'structure_id': f'sid{i}', 'process': 'top-down exfoliation',
+            'E': -7.1, 'Ed': 0.07, 'Ex': 0.02, 'dE': 0.01, 'Evdw': -0.3, 'mu': 0.0}
+
+
+class FakeClient:
+    """The part of MPClient the tools use."""
+
+    def __init__(self, mp_rows=(), dm_rows=(), error=None):
+        self.mp_rows, self.dm_rows, self.error = list(mp_rows), list(dm_rows), error
+        self.structures = []
+
+    def _check(self):
+        if self.error is not None:
+            raise self.error
+
+    def summary(self, formula):  # pylint: disable=unused-argument
+        self._check()
+        return self.mp_rows
+
+    def twodmatpedia(self, formula):  # pylint: disable=unused-argument
+        self._check()
+        return self.dm_rows
+
+    def twodmatpedia_entry(self, dm_id):
+        self._check()
+        return next((r for r in self.dm_rows if r['dm_id'] == dm_id), None)
+
+    def structure_cif(self, structure_id):
+        self._check()
+        self.structures.append(structure_id)
+        return CIF_TEXT
+
+
+@pytest.fixture(name='deps')
+def _deps(tmp_path, mock_settings):
+    return make_deps(tmp_path, mock_settings)
+
+
+def _with(deps, client):
+    deps.materials_db = lambda: client
+    return deps
+
+
+def test_mp_table_is_compact_and_capped(deps):
+    text = query_materials_project(_with(deps, FakeClient(mp_rows=[_mp_row(i)
+                                                                   for i in range(25)])), 'MoS2')
+    assert 'mp-0' in text and 'mp-9' in text and 'mp-10' not in text
+    assert '25 entries' in text and len(text) <= 1500
+    assert 'P6_3/mmc' in text
+
+
+def test_mp_no_match(deps):
+    assert 'no Materials Project entry' in query_materials_project(
+        _with(deps, FakeClient()), 'XeF9')
+
+
+def test_2dmatpedia_table(deps):
+    text = query_2dmatpedia(_with(deps, FakeClient(dm_rows=[_dm_row(i) for i in range(12)])),
+                            'MoS2')
+    assert '2dm-0' in text and '2dm-10' not in text and 'mp-2815' in text
+    assert 'fetch_2dmatpedia_structure' in text and len(text) <= 1500
+
+
+def test_no_key_is_reported_as_text(deps):
+    def factory():
+        raise MaterialsDBError(NO_KEY)
+    deps.materials_db = factory
+    assert query_materials_project(deps, 'MoS2') == NO_KEY
+    assert NO_KEY == ('No Materials Project key: set MP_API_KEY or put it in '
+                      '~/.mp_api_key')
+
+
+def test_client_errors_become_text(deps):
+    client = FakeClient(error=MaterialsDBError('Materials Project key rejected'))
+    assert query_2dmatpedia(_with(deps, client), 'MoS2') == 'Materials Project key rejected'
+
+
+def test_no_factory_is_reported(deps):
+    deps.materials_db = None
+    assert 'not available' in query_materials_project(deps, 'MoS2')
+
+
+def test_fetch_proposes_write_and_applies(deps):
+    client = FakeClient(dm_rows=[_dm_row(5)])
+    handle = fetch_2dmatpedia_structure(_with(deps, client), '2dm-5')
+    assert client.structures == ['sid5']
+    change = deps.pending[-1]
+    assert isinstance(change, FsChangeSet) and change.ok, change.issues
+    assert change.id in handle and 'do not say it is done' in handle
+    assert [op[0] for op in change.ops] == ['mkdir', 'write_text']
+    assert change.shown[-1] == ('write_text', 'workspace:/materials/MoS2_2dm-5.cif')
+    ws = deps.roots.workspace
+    assert apply_fs_changeset(change, ws).applied
+    assert (ws / 'materials' / 'MoS2_2dm-5.cif').read_text() == CIF_TEXT
+
+
+def test_fetch_unknown_id(deps):
+    text = fetch_2dmatpedia_structure(_with(deps, FakeClient(dm_rows=[_dm_row(5)])), '2dm-6')
+    assert 'no 2DMatPedia entry 2dm-6' in text and not deps.pending
+
+
+def test_fetch_never_overwrites(deps):
+    ws = deps.roots.workspace
+    (ws / 'materials').mkdir()
+    (ws / 'materials' / 'MoS2_2dm-5.cif').write_text('mine')
+    fetch_2dmatpedia_structure(_with(deps, FakeClient(dm_rows=[_dm_row(5)])), '2dm-5')
+    change = deps.pending[-1]
+    assert not change.ok and 'already exists' in change.issues[0]
+    assert not apply_fs_changeset(change, ws).applied
+    assert (ws / 'materials' / 'MoS2_2dm-5.cif').read_text() == 'mine'
+
+
+@pytest.mark.parametrize('dest', ['../outside', '.preview', 'examples:/materials'])
+def test_fetch_confined_to_workspace(deps, dest):
+    fetch_2dmatpedia_structure(_with(deps, FakeClient(dm_rows=[_dm_row(5)])), '2dm-5', dest)
+    assert not deps.pending[-1].ok

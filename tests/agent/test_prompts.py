@@ -39,3 +39,8 @@ def test_defaults_knowledge_offers_example_values():
                    'poor contact', 'suggest_values',
                    '100 x 100', '25 Angstrom', '12 Angstrom', '2 m/s', '300 K', 'confirm'):
         assert phrase in prompt, phrase
+
+
+def test_materials_project_privacy_rule():
+    prompt = build_system_prompt('ollama')
+    assert 'only formulas and ids are sent to Materials Project' in prompt

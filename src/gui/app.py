@@ -451,11 +451,13 @@ class MainWindow(QMainWindow):
         """Snapshot of the Builder for one assistant turn (GUI thread only)."""
         # pylint: disable=import-outside-toplevel
         from ..agent.context import snapshot_deps
+        from ..agent.materials_db import default_materials_db
         from ..agent.sandbox import SearchRoots, find_examples_dir
         self.form.commit()
         roots = SearchRoots(self.workspace.root, find_examples_dir())
         return snapshot_deps(document or self.document, self.settings_document,
-                             self.settings, roots, plot_document=self._plots_state())
+                             self.settings, roots, plot_document=self._plots_state(),
+                             materials_db=default_materials_db)
 
     def _plots_state(self) -> Optional[dict]:
         """The Plots tab's document as a dict (None before the tab exists)."""
