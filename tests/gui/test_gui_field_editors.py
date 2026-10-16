@@ -438,3 +438,44 @@ class TestEmptyListRoundTrip:
         editor.set_value(['gap_min', 'deflect_max'])
 
         assert editor.value() == ['gap_min', 'deflect_max']
+
+
+class TestAssistantHighlight:
+    """A field the assistant set is marked yellow, with what it was before;
+    an error decoration on the same field must still show."""
+
+    def test_highlight_sets_tooltip_and_background(self, qt_app):
+        from src.gui.widgets.fields import HIGHLIGHT_COLOR, build_editor
+
+        ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
+        ed.set_base_tooltip('help text')
+        ed.set_highlight('None → 5.0')
+        assert ed.highlight() == 'None → 5.0'
+        assert ed.toolTip().startswith('Set by assistant: None → 5.0')
+        assert 'help text' in ed.toolTip()
+        assert HIGHLIGHT_COLOR in ed.edit.styleSheet()
+        ed.set_highlight(None)
+        assert ed.highlight() is None and ed.toolTip() == 'help text'
+        assert HIGHLIGHT_COLOR not in ed.edit.styleSheet()
+
+    def test_error_and_highlight_combine(self, qt_app):
+        from src.gui.widgets.fields import HIGHLIGHT_COLOR, build_editor
+
+        ed = build_editor(FieldSpec(name='x', key='x', kind=FieldKind.FLOAT, required=False))
+        ed.set_highlight('1 → 2')
+        ed.set_error('too big')
+        assert 'border' in ed.edit.styleSheet() and HIGHLIGHT_COLOR in ed.edit.styleSheet()
+        assert ed.toolTip() == 'too big'
+        ed.set_error(None)
+        assert ed.toolTip().startswith('Set by assistant: 1 → 2')
+        assert 'border' not in ed.edit.styleSheet()
+        assert HIGHLIGHT_COLOR in ed.edit.styleSheet()
+
+    def test_non_text_editor_fills_its_background(self, qt_app):
+        from src.gui.widgets.fields import build_editor
+
+        ed = build_editor(FieldSpec(name='b', key='b', kind=FieldKind.BOOL, required=False))
+        ed.set_highlight('False → True')
+        assert ed.autoFillBackground()
+        ed.set_highlight(None)
+        assert not ed.autoFillBackground()

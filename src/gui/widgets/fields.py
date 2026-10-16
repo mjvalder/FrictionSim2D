@@ -14,6 +14,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,7 +27,11 @@ from PySide6.QtWidgets import (
 
 from ..schema.introspect import FieldKind, FieldSpec
 
-__all__ = ['FieldEditor', 'build_editor', 'EDITOR_REGISTRY', 'register_editor']
+__all__ = ['FieldEditor', 'build_editor', 'EDITOR_REGISTRY', 'register_editor',
+           'HIGHLIGHT_COLOR']
+
+#: Background of a field the assistant just set (see `set_highlight`).
+HIGHLIGHT_COLOR = '#fff3b0'
 
 
 class FieldEditor(QWidget):
@@ -54,6 +59,9 @@ class FieldEditor(QWidget):
         #: overwrote it (e.g. "default: 2.0"), so re-enabling gives it back
         #: instead of leaving the placeholder blank.
         self._saved_placeholders: Dict[QLineEdit, str] = {}
+        #: "before → after" while the field shows a value the assistant set,
+        #: else None. See `set_highlight`.
+        self._highlight: Optional[str] = None
 
     def value(self) -> Any:
         raise NotImplementedError
@@ -65,7 +73,16 @@ class FieldEditor(QWidget):
         """The tooltip to show when there is no validation error."""
         self._base_tooltip = text or ''
         if not self._error:
-            self.setToolTip(self._base_tooltip)
+            self.setToolTip(self._tooltip())
+
+    def _tooltip(self) -> str:
+        """Error first, then what the assistant changed, then the help text."""
+        if self._error:
+            return self._error
+        if self._highlight:
+            text = f'Set by assistant: {self._highlight}'
+            return f'{text}\n\n{self._base_tooltip}' if self._base_tooltip else text
+        return self._base_tooltip
 
     def set_error(self, message: Optional[str]) -> None:
         """Mark the field invalid. Idempotent: repeating the same state is a
@@ -73,8 +90,24 @@ class FieldEditor(QWidget):
         if message == self._error:
             return
         self._error = message
-        self.setToolTip(message or self._base_tooltip)
+        self.setToolTip(self._tooltip())
         self._apply_error_style(bool(message))
+
+    def set_highlight(self, text: Optional[str]) -> None:
+        """Mark (``"before → after"``) or unmark a value the assistant set.
+
+        A pale yellow background, on top of -- never instead of -- the error
+        border: both are written into one stylesheet by `_apply_style`.
+        """
+        if text == self._highlight:
+            return
+        self._highlight = text
+        self.setToolTip(self._tooltip())
+        self._apply_style(bool(self._error))
+
+    def highlight(self) -> Optional[str]:
+        """The "before → after" text of an assistant change shown here, if any."""
+        return self._highlight
 
     def error(self) -> Optional[str]:
         """The validation message currently shown against this field, if any."""
@@ -113,9 +146,29 @@ class FieldEditor(QWidget):
         return None
 
     def _apply_error_style(self, invalid: bool) -> None:
+        self._apply_style(invalid)
+
+    def _apply_style(self, invalid: bool) -> None:
+        """Error border and assistant highlight, together.
+
+        Text boxes carry both in their stylesheet (dark text on the yellow, so
+        a dark theme stays readable). Every other control -- check boxes,
+        combos -- sits on the editor's own background, filled yellow.
+        """
+        rules = []
+        if invalid:
+            rules.append('border: 1px solid palette(highlight);')
+        if self._highlight:
+            rules.append(f'background-color: {HIGHLIGHT_COLOR}; color: black;')
         for child in self.findChildren(QLineEdit):
-            child.setStyleSheet(
-                'border: 1px solid palette(highlight);' if invalid else '')
+            child.setStyleSheet(' '.join(rules))
+        self.setAutoFillBackground(bool(self._highlight))
+        if self._highlight:
+            palette = self.palette()
+            palette.setColor(QPalette.Window, QColor(HIGHLIGHT_COLOR))
+            self.setPalette(palette)
+        else:
+            self.setPalette(QPalette())
 
 
 class _TextEditor(FieldEditor):

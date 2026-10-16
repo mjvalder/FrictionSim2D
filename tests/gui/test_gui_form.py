@@ -912,3 +912,50 @@ class TestSweepDirectoriesFromPairTemplates:
         assert potentials == base / 'examples' / 'potentials' / 'sw' / 'sw_lammps'
         assert extension == '.sw'
         form.deleteLater()
+
+
+class TestAssistantHighlights:
+    """ConfigForm.highlight marks fields the assistant set; the marks outlive a
+    rebuild and go when the user edits the field or they are cleared."""
+
+    def test_highlight_marks_exactly_those_editors(self, form):
+        form.highlight({('general', 'force'): 'None → [5]'})
+        marked = [(s, k) for s, f in form.sections.items()
+                  for k, e in f.editors.items() if e.highlight()]
+        assert marked == [('general', 'force')]
+        assert form.highlights() == {('general', 'force'): 'None → [5]'}
+
+    def test_highlights_survive_rebuild(self, form):
+        form.highlight({('general', 'force'): 'None → [5]'})
+        form.rebuild()
+        assert form.sections['general'].editors['force'].highlight() == 'None → [5]'
+
+    def test_user_edit_clears_that_field_only(self, form):
+        form.highlight({('general', 'force'): 'a → b', ('general', 'temp'): 'c → d'})
+        editor = form.sections['general'].editors['temp']
+        editor.edit.setText('250')
+        editor.edit.textEdited.emit('250')
+        assert editor.highlight() is None
+        assert form.highlights() == {('general', 'force'): 'a → b'}
+
+    def test_load_does_not_clear(self, form):
+        form.highlight({('general', 'force'): 'a → b'})
+        form.load()
+        assert form.highlights() == {('general', 'force'): 'a → b'}
+
+    def test_clear_highlights_some_or_all(self, form):
+        form.highlight({('general', 'force'): 'a → b', ('general', 'temp'): 'c → d'})
+        form.clear_highlights([('general', 'force')])
+        assert form.highlights() == {('general', 'temp'): 'c → d'}
+        form.clear_highlights()
+        assert form.highlights() == {}
+        assert form.sections['general'].editors['temp'].highlight() is None
+
+    def test_highlight_unfolds_its_section(self, qt_app, monkeypatch):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        form = ConfigForm(ConfigDocument.blank('afm'), start_collapsed=True)
+        form.highlight({('general', 'force'): 'a → b'})
+        assert not form.sections['general'].is_collapsed()
+        form.deleteLater()

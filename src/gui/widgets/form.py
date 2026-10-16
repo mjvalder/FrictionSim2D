@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QCursor
@@ -197,6 +197,9 @@ class SectionForm(QGroupBox):
     #: The document refused this section's commit. Carries a message ready to
     #: show; deliberately NOT a dialog, see `_on_field_changed`.
     refused = Signal(str)
+    #: The user edited one field (its key). Never emitted while `load()` or a
+    #: prefill writes the editors, so it means a person touched the control.
+    field_edited = Signal(str)
 
     def __init__(self, section: SectionSpec, document: ConfigDocument,
                  parent: Optional[QWidget] = None,
@@ -481,6 +484,7 @@ class SectionForm(QGroupBox):
             editor=(key_override.editor if key_override else None),
             choice_labels=(key_override.choice_labels if key_override else None))
         editor.changed.connect(self._on_field_changed)
+        editor.changed.connect(lambda key=spec.key: self._on_editor_edited(key))
         self.editors[spec.key] = editor
 
         # Required fields are marked, so "which of these must I fill in?" is
@@ -1497,6 +1501,10 @@ class SectionForm(QGroupBox):
             self.summary.setText(self.summarise())
         self.changed.emit()
 
+    def _on_editor_edited(self, key: str) -> None:
+        if not self._loading:
+            self.field_edited.emit(key)
+
     def _on_toggled(self, enabled: bool) -> None:
         if self._loading:
             return
@@ -1547,6 +1555,9 @@ class ConfigForm(QWidget):
         #: scratch, so a refusal that only ever existed as a signal would be
         #: erased by the very validation that provoked it.
         self._refusals: List[str] = []
+        #: Fields the assistant set, ``(section, key) -> "before → after"``.
+        #: Kept here, not only on the editors, so they survive `rebuild()`.
+        self._highlights: Dict[Tuple[str, str], str] = {}
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -1615,6 +1626,7 @@ class ConfigForm(QWidget):
                 self._restore_material_sweep()
             self._wire_lj_known_elements_refresh()
             self._wire_second_sheet_to_the_sweep()
+            self._apply_highlights()
 
             self._layout.addStretch(1)
         finally:
@@ -1627,6 +1639,8 @@ class ConfigForm(QWidget):
         form.collapsed_changed.connect(self._remember_collapsed)
         form.structure_changed.connect(self._on_structure_changed)
         form.refused.connect(self._record_refusal)
+        form.field_edited.connect(
+            lambda key, s=section.key: self.clear_highlights([(s, key)]))
         self.sections[section.key] = form
         self._layout.addWidget(form)
 
@@ -1747,6 +1761,42 @@ class ConfigForm(QWidget):
         pair_editor = section_form.pair_editor if section_form else None
         if pair_editor is not None:
             pair_editor.set_known_elements(scan_config_elements(self.document))
+
+    # ------------------------------------------------------------- highlights
+
+    def highlight(self, fields: Dict[Tuple[str, str], str]) -> None:
+        """Mark fields the assistant set, ``(section, key) -> "before → after"``,
+        and unfold their sections so the marks can be seen."""
+        self._highlights.update(fields)
+        self._apply_highlights()
+        for section in {section for section, _key in fields}:
+            form = self.sections.get(section)
+            if form is not None and form.is_collapsed():
+                form.set_collapsed(False)
+
+    def clear_highlights(self, keys: Optional[Iterable[Tuple[str, str]]] = None) -> None:
+        """Unmark ``keys`` (every highlighted field when None)."""
+        keys = list(self._highlights) if keys is None else list(keys)
+        for section, key in keys:
+            if self._highlights.pop((section, key), None) is None:
+                continue
+            editor = self._editor(section, key)
+            if editor is not None:
+                editor.set_highlight(None)
+
+    def highlights(self) -> Dict[Tuple[str, str], str]:
+        """The fields currently marked as set by the assistant."""
+        return dict(self._highlights)
+
+    def _editor(self, section: str, key: str):
+        form = self.sections.get(section)
+        return form.editors.get(key) if form is not None else None
+
+    def _apply_highlights(self) -> None:
+        for (section, key), text in self._highlights.items():
+            editor = self._editor(section, key)
+            if editor is not None:
+                editor.set_highlight(text)
 
     # ------------------------------------------------------------- collapsing
 
