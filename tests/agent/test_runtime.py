@@ -244,3 +244,59 @@ def test_default_step_cap_is_fifty(deps):
     events = run(AgentSession(AgentSettings(), model=_looping_model()), deps, 'loop')
     assert sum(e.kind == 'tool_call' for e in events) == 50
     assert events[-1].payload == 'step_limit'
+
+
+def test_connection_refused_is_an_unreachable_event(deps):
+    import httpx
+    from pydantic_ai.exceptions import ModelAPIError
+
+    async def refused(messages, info):
+        raise ModelAPIError('qwen3:4b', 'Connection error.') from httpx.ConnectError('refused')
+        yield ''  # pragma: no cover
+    settings = AgentSettings(provider='ollama')
+    events = run(AgentSession(settings, model=FunctionModel(stream_function=refused)), deps, 'x')
+    assert (events[-1].kind, events[-1].payload) == ('error', 'unreachable')
+    assert 'could not reach' in events[-1].text.lower()
+
+
+def test_continue_after_the_cap_survives_a_history_collapse(deps):
+    seen = []
+
+    async def stream(messages, info):
+        seen.append(messages)
+        last = messages[-1].parts[-1]
+        if type(last).__name__ == 'UserPromptPart' and last.content == 'continue':
+            yield 'carried on'
+        elif len(seen) <= 3 or type(last).__name__ != 'UserPromptPart':
+            yield {0: DeltaToolCall(name='list_modes', json_args='{}')}
+        else:
+            yield 'ok'
+    session = AgentSession(AgentSettings(max_requests_per_turn=2),
+                           model=FunctionModel(stream_function=stream), history_budget=50)
+    run(session, deps, 'earlier question')  # capped too: history is long now
+    assert run(session, deps, 'set up a sweep')[-1].payload == 'step_limit'
+    assert run(session, deps, 'continue')[-1].kind == 'done'
+    sent = seen[-1]
+    kinds = [type(p).__name__ for m in sent for p in m.parts]
+    assert 'ToolReturnPart' in kinds  # the capped turn reached the model intact
+    text = repr(sent)
+    assert 'Summary of the earlier conversation' in text  # earlier turns collapsed
+    assert 'set up a sweep' in text
+
+
+def test_history_collapse_keeps_the_latest_turn_intact():
+    from pydantic_ai.messages import (ModelRequest, ModelResponse, TextPart,
+                                      ToolCallPart, ToolReturnPart, UserPromptPart)
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=scripted('x')),
+                           history_budget=10)
+    old = [ModelRequest(parts=[UserPromptPart(content='old ' * 50)]),
+           ModelResponse(parts=[TextPart(content='old answer ' * 50)])]
+    latest = [ModelRequest(parts=[UserPromptPart(content='latest')]),
+              ModelResponse(parts=[ToolCallPart(tool_name='list_modes', args={},
+                                                tool_call_id='c1')]),
+              ModelRequest(parts=[ToolReturnPart(tool_name='list_modes', content='r',
+                                                 tool_call_id='c1')])]
+    session.history = old + latest
+    trimmed = session._trimmed_history()  # pylint: disable=protected-access
+    assert trimmed[-3:] == latest
+    assert 'Summary of the earlier conversation' in repr(trimmed[0])

@@ -8,6 +8,7 @@ import logging
 import re
 from typing import Any, Callable, List, Optional
 
+import httpx
 from pydantic_ai import (Agent, AgentRunResultEvent, CancellationToken,
                          ModelRetry, RunContext, capture_run_messages)
 from pydantic_ai.exceptions import (ModelAPIError, ModelHTTPError, RunCancelled,
@@ -164,12 +165,35 @@ def _text_only(messages: List[Any]) -> List[Any]:
     return out
 
 
+def _latest_turn_start(messages: List[Any]) -> int:
+    """Index of the request carrying the latest user prompt (0 if none)."""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, ModelRequest) and any(
+                isinstance(p, UserPromptPart) for p in message.parts):
+            return index
+    return 0
+
+
+def _unreachable(exc: BaseException) -> bool:
+    """Whether ``exc`` (or what caused it) is a refused or failed connection."""
+    seen = 0
+    while exc is not None and seen < 5:
+        if isinstance(exc, (httpx.ConnectError, ConnectionError)) \
+                or type(exc).__name__ == 'APIConnectionError':
+            return True
+        exc, seen = exc.__cause__ or exc.__context__, seen + 1
+    return False
+
+
 class AgentSession:
     """One chat: the agent, its history, and how a turn is run."""
 
-    def __init__(self, settings: AgentSettings, model: Any = None) -> None:
+    def __init__(self, settings: AgentSettings, model: Any = None,
+                 history_budget: Optional[int] = None) -> None:
         self.settings = settings
         self._model = model
+        self._history_budget = history_budget  # tokens; None: per provider
         self._agent: Optional[Agent] = None
         self.history: List[Any] = []
         self._generation = 0  # bumped by new_chat; a turn from before it keeps out
@@ -210,19 +234,27 @@ class AgentSession:
         self.history = _text_only(self.history)
 
     def _trimmed_history(self) -> List[Any]:
-        """Append-only history; once over budget, collapse it into one summary."""
-        budget = HISTORY_BUDGET.get(self.settings.provider, 32000)
+        """Append-only history; once over budget, collapse the earlier turns.
+
+        The latest turn stays intact (tool calls and results too), so a turn
+        stopped at the step cap can be carried on with 'continue'.
+        """
+        budget = self._history_budget or HISTORY_BUDGET.get(self.settings.provider, 32000)
         if estimate_tokens(repr(self.history)) <= budget:
             return self.history
+        start = _latest_turn_start(self.history)
+        if start == 0:
+            return self.history
+        earlier, latest = self.history[:start], self.history[start:]
         lines = []
-        for message in _text_only(self.history):
+        for message in _text_only(earlier):
             for part in message.parts:
                 who = 'User' if isinstance(part, UserPromptPart) else 'Assistant'
                 lines.append(f'{who}: {str(part.content)[:200]}')
         self.history = [ModelRequest(parts=[UserPromptPart(
                             content='Summary of the earlier conversation:\n'
                             + '\n'.join(lines[-30:]))]),
-                        ModelResponse(parts=[TextPart(content='Understood.')])]
+                        ModelResponse(parts=[TextPart(content='Understood.')])] + latest
         return self.history
 
     def _dispatch(self, event: Any, emit: Callable[[TurnEvent], None],
@@ -285,7 +317,11 @@ class AgentSession:
                                     'proposal above still stands; finish the rest in the '
                                     'Builder form.', payload='gave_up'))
         except ModelAPIError as exc:
-            emit(TurnEvent('error', f'Provider error: {exc}', payload='provider'))
+            if _unreachable(exc):
+                emit(TurnEvent('error', f'Could not reach the {self.settings.provider} '
+                                        f'server ({exc}).', payload='unreachable'))
+            else:
+                emit(TurnEvent('error', f'Provider error: {exc}', payload='provider'))
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception('assistant turn failed unexpectedly')
             emit(TurnEvent('error', f'{type(exc).__name__}: {exc}', payload='internal'))
