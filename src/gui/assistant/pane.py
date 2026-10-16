@@ -435,10 +435,12 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         server = self._server
         self._run_ollama_task('idle', lambda: (server.stop_if_idle(), '', None))
 
-    def _append(self, text: str, style: str = '') -> None:
+    def _append(self, text: str, style: str = '', indent: int = 0) -> None:
+        """A new chat line; ``indent`` non-breaking spaces lead it (HTML would
+        collapse plain ones)."""
         self._text_open = False
         self.chat.moveCursor(QTextCursor.End)
-        escaped = html.escape(text).replace('\n', '<br>')
+        escaped = '&nbsp;' * indent + html.escape(text).replace('\n', '<br>')
         self.chat.append(f'<span style="{style}">{escaped}</span>' if style else escaped)
 
     def _append_inline(self, text: str) -> None:
@@ -570,7 +572,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         elif event.kind == 'tool_call':
             self._append(f'· {event.text}', 'color:gray;font-size:small')
         elif event.kind == 'tool_result':
-            self._append(f'  → {event.text}', 'color:gray;font-size:small')
+            self._append(f'→ {event.text}', 'color:gray;font-size:small', indent=2)
         elif event.kind == 'proposal':
             self.receive_proposal(event.payload)
         elif event.kind == 'done':
@@ -763,6 +765,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def shutdown(self) -> None:
         """Stop the worker thread and our Ollama server (window close)."""
+        _ORPHAN_THREADS[:] = [t for t in _ORPHAN_THREADS if t.isRunning()]
         self.stop_ollama()
         self._worker.cancel()
         self._thread.quit()

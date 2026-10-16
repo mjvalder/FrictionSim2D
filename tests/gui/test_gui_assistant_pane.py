@@ -306,7 +306,7 @@ def test_missing_key_declined_no_turn(qt_app, env, monkeypatch):
     pane.shutdown()
 
 
-def test_provider_switch_and_new_chat(qt_app, env, monkeypatch):
+def test_provider_switch_and_new_chat(qt_app, env):
     pane = _pane([], server=FakeServer(ok=False, message='Ollama is not installed'))
     pane.provider_box.setCurrentIndex(pane.provider_box.findData('ollama'))
     assert pane.session.switched == ['ollama']
@@ -373,7 +373,7 @@ def test_new_chat_mid_turn_cancels_and_drops_its_events(qt_app, env, tmp_path, m
     assert pane.send_button.isEnabled()
 
 
-def test_save_errors_show_in_chat(qt_app, env, monkeypatch):
+def test_save_errors_show_in_chat(qt_app, env):
     def broken(*_a, **_k):
         raise PermissionError('read-only config')
     s = AgentSettings()
@@ -742,3 +742,26 @@ def test_queue_card_keeps_a_change_as_a_card_with_a_note(qt_app, env, tmp_path, 
     assert change.id in pane.cards and not pane.pending_box.isHidden()
     assert 'kept as a card because you were editing' in pane.chat.toPlainText()
     assert not hasattr(pane.cards[change.id], 'status')
+
+
+def test_tool_result_is_indented(qt_app, env):
+    pane = _pane([TurnEvent('tool_call', 'search(MoS2)'),
+                  TurnEvent('tool_result', 'search: found'), TurnEvent('done', payload=1)])
+    pane.send('hi')
+    _run_until(pane.turn_finished)
+    line = next(ln for ln in pane.chat.toPlainText().splitlines() if 'search: found' in ln)
+    assert line.startswith('  →')  # nbsp survives HTML; toPlainText shows spaces
+
+
+def test_shutdown_prunes_finished_orphan_threads(qt_app, env):
+    from src.gui.assistant import pane as pane_module
+
+    class Finished:
+        def isRunning(self):
+            return False
+
+    stale = Finished()
+    pane_module._ORPHAN_THREADS.append(stale)
+    pane = _pane([])
+    pane.shutdown()
+    assert stale not in pane_module._ORPHAN_THREADS
