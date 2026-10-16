@@ -403,8 +403,11 @@ def settings_reset(global_: bool):
 @cli.group('gui', invoke_without_command=True)
 @click.option('--check', 'run_check', is_flag=True,
               help='Diagnose the GUI environment and exit without launching.')
+@click.option('--verbose', is_flag=True,
+              help='Show all log output and library warnings in the terminal '
+                   '(also FRICTIONSIM2D_GUI_VERBOSE=1).')
 @click.pass_context
-def gui_group(ctx, run_check: bool):
+def gui_group(ctx, run_check: bool, verbose: bool):
     """Launch the desktop simulation builder.
 
     With no subcommand this starts the GUI. Use --check to verify that Qt,
@@ -427,7 +430,7 @@ def gui_group(ctx, run_check: bool):
         ctx.exit(0 if report.ok else 1)
 
     from .gui import main as gui_main  # noqa: PLC0415
-    ctx.exit(gui_main(tuple()))
+    ctx.exit(gui_main(tuple(), verbose=verbose))
 
 
 @cli.group('hpc')

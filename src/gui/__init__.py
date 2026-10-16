@@ -8,6 +8,9 @@ neither PySide6 nor ovito is installed.
 The heavy imports live in :mod:`src.gui.app`, reached through :func:`main`.
 """
 
+import logging
+import os
+import warnings
 from importlib import import_module
 from importlib.util import find_spec
 from typing import List, Tuple
@@ -46,13 +49,35 @@ INSTALL_HINT = (
 )
 
 
-def main(argv: Tuple[str, ...] = ()) -> int:
+#: Libraries that log every HTTP request at INFO (the Assistant polls Ollama).
+_CHATTY_LOGGERS = ('httpx', 'httpcore', 'openai', 'google_genai', 'pydantic_ai')
+
+
+def quiet_console(verbose: bool = False) -> None:
+    """Keep the launching terminal readable unless ``verbose`` is set.
+
+    The CLI configures the root logger at INFO for batch commands; in the GUI
+    that turns every Ollama status poll into a terminal line. Also drops the
+    ovito "installed from PyPI" warning -- the pip build is the supported one
+    here (see pyproject's ``gui`` extra) -- and pydantic-ai's startup banner.
+    """
+    if verbose:
+        return
+    warnings.filterwarnings('ignore', message='.*OVITO.*PyPI')
+    os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
+    logging.getLogger().setLevel(logging.WARNING)
+    for name in _CHATTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def main(argv: Tuple[str, ...] = (), verbose: bool = False) -> int:
     """Launch the GUI. Imports Qt and ovito only when called."""
     missing = _missing_dependencies()
     if missing:
         raise ImportError(f"Missing GUI dependencies: {', '.join(missing)}.\n{INSTALL_HINT}")
+    quiet_console(verbose or bool(os.environ.get('FRICTIONSIM2D_GUI_VERBOSE')))
     app_module = import_module(f'{__name__}.app')
     return app_module.main(argv)
 
 
-__all__ = ['GUI_AVAILABLE', '_GUI_AVAILABLE', 'INSTALL_HINT', 'main']
+__all__ = ['GUI_AVAILABLE', '_GUI_AVAILABLE', 'INSTALL_HINT', 'main', 'quiet_console']
