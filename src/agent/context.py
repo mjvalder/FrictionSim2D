@@ -28,6 +28,9 @@ class AgentDeps:
     #: (the default) or shows them as cards first; it changes what the model
     #: is told about a proposal.
     direct_apply: bool = False
+    #: The Plots tab's document as a dict (a copy taken on the GUI thread),
+    #: so plot tools know which datasets are loaded; None without a Plots tab.
+    plot_document: Optional[dict] = None
 
     def propose(self, change: Any) -> str:
         """Record a change set for the user, notify the pane, return its handle.
@@ -41,14 +44,19 @@ class AgentDeps:
         preview = getattr(change, 'preview', None)
         if self.direct_apply and preview is not None:
             self.document, self.settings_document = copy.deepcopy(preview)
+        plot_preview = getattr(change, 'plot_preview', None)
+        if self.direct_apply and plot_preview is not None:
+            self.plot_document = copy.deepcopy(plot_preview)
         if self.on_proposal is not None:
             self.on_proposal(change)
         return change.handle(direct=self.direct_apply)
 
 
 def snapshot_deps(document: ConfigDocument, settings_document: SettingsDocument,
-                  settings: GlobalSettings, roots: SearchRoots) -> AgentDeps:
+                  settings: GlobalSettings, roots: SearchRoots,
+                  plot_document: Optional[dict] = None) -> AgentDeps:
     """Deps for one turn, holding copies of the live documents."""
     return AgentDeps(document=copy.deepcopy(document),
                      settings_document=copy.deepcopy(settings_document),
-                     settings=settings, roots=roots)
+                     settings=settings, roots=roots,
+                     plot_document=copy.deepcopy(plot_document))

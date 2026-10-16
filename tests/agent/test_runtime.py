@@ -123,7 +123,7 @@ def test_every_tool_registered():
                      'search_structures', 'search_potentials', 'workspace_overview',
                      'describe_run', 'propose_mkdir', 'propose_copy_in',
                      'find_result_sets', 'summarise_results', 'plot_types',
-                     'plot_schema'}
+                     'plot_schema', 'propose_plot'}
 
 
 def test_suggest_values_tool_has_no_spacing(deps):

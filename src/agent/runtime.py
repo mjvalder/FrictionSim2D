@@ -26,7 +26,7 @@ from .prompts import build_system_prompt, estimate_tokens
 from .providers import ProviderUnavailable, build_model
 from .sandbox import SandboxError, redact
 from .settings import AgentSettings
-from .tools import analysis, compact, materials, setup, workspace
+from .tools import analysis, compact, materials, plots, setup, workspace
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,11 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
     def plot_schema(ctx: RunContext[AgentDeps], plot_type: str) -> str:
         """The fields one plot type accepts."""
         return _call(ctx, analysis.plot_schema, plot_type)
+
+    @agent.tool
+    def propose_plot(ctx: RunContext[AgentDeps], request: plots.PlotProposalRequest) -> str:
+        """Propose a plot for the Plots tab on datasets from find_result_sets."""
+        return _call(ctx, plots.propose_plot, request)
 
 
 def _retry_after(exc: ModelHTTPError) -> float:

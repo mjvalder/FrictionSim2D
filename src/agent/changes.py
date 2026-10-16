@@ -476,6 +476,8 @@ def _wrapped(line: str, indent: str = '      ') -> List[str]:
 
 def describe_change(change) -> str:
     """Plain-text body of a proposal card."""
+    if hasattr(change, 'describe'):  # a PlotChange describes itself
+        return change.describe()
     lines = [change.title]
     if isinstance(change, FsChangeSet):
         shown = change.shown or [(op[0], *(Path(p).name for p in op[1:]))
