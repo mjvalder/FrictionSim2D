@@ -29,6 +29,7 @@ class FakeClient:
     def __init__(self, mp_rows=(), dm_rows=(), error=None):
         self.mp_rows, self.dm_rows, self.error = list(mp_rows), list(dm_rows), error
         self.structures = []
+        self.downloaded_listing = False
 
     def _check(self):
         if self.error is not None:
@@ -58,7 +59,10 @@ def _deps(tmp_path, mock_settings):
 
 
 def _with(deps, client):
-    deps.materials_db = lambda: client
+    def factory(should_stop=None):
+        client.should_stop = should_stop
+        return client
+    deps.materials_db = factory
     return deps
 
 
@@ -83,7 +87,7 @@ def test_2dmatpedia_table(deps):
 
 
 def test_no_key_is_reported_as_text(deps):
-    def factory():
+    def factory(should_stop=None):  # pylint: disable=unused-argument
         raise MaterialsDBError(NO_KEY)
     deps.materials_db = factory
     assert query_materials_project(deps, 'MoS2') == NO_KEY
@@ -124,7 +128,9 @@ def test_fetch_never_overwrites(deps):
     ws = deps.roots.workspace
     (ws / 'materials').mkdir()
     (ws / 'materials' / 'MoS2_2dm-5.cif').write_text('mine')
-    fetch_2dmatpedia_structure(_with(deps, FakeClient(dm_rows=[_dm_row(5)])), '2dm-5')
+    client = FakeClient(dm_rows=[_dm_row(5)])
+    fetch_2dmatpedia_structure(_with(deps, client), '2dm-5')
+    assert client.structures == []  # refused before any structure request
     change = deps.pending[-1]
     assert not change.ok and 'already exists' in change.issues[0]
     assert not apply_fs_changeset(change, ws).applied
@@ -133,5 +139,22 @@ def test_fetch_never_overwrites(deps):
 
 @pytest.mark.parametrize('dest', ['../outside', '.preview', 'examples:/materials'])
 def test_fetch_confined_to_workspace(deps, dest):
-    fetch_2dmatpedia_structure(_with(deps, FakeClient(dm_rows=[_dm_row(5)])), '2dm-5', dest)
-    assert not deps.pending[-1].ok
+    client = FakeClient(dm_rows=[_dm_row(5)])
+    fetch_2dmatpedia_structure(_with(deps, client), '2dm-5', dest)
+    assert not deps.pending[-1].ok and client.structures == []
+
+
+def test_tools_pass_the_turn_cancellation(deps):
+    client = FakeClient()
+    deps.cancelled = lambda: True
+    query_2dmatpedia(_with(deps, client), 'MoS2')
+    assert client.should_stop is deps.cancelled
+
+
+def test_first_download_is_mentioned(deps):
+    client = FakeClient(dm_rows=[_dm_row(1)])
+    client.downloaded_listing = True
+    text = query_2dmatpedia(_with(deps, client), 'MoS2')
+    assert text.startswith('Downloaded the 2DMatPedia listing (first use; cached for 7 days)')
+    client.downloaded_listing = False
+    assert not query_2dmatpedia(deps, 'MoS2').startswith('Downloaded')

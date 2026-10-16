@@ -14,6 +14,7 @@ from ..materials_db import MaterialsDBError
 from . import compact
 
 MAX_ROWS = 10
+DOWNLOADED = 'Downloaded the 2DMatPedia listing (first use; cached for 7 days).'
 _DM_ID = re.compile(r'^2dm-\d+$')
 
 
@@ -31,9 +32,13 @@ def _with_client(deps, action: Callable[[Any], str]) -> str:
     if factory is None:
         return 'Materials Project lookups are not available here.'
     try:
-        return action(factory())
+        client = factory(should_stop=getattr(deps, 'cancelled', None))
+        text = action(client)
     except MaterialsDBError as exc:
         return str(exc)
+    if getattr(client, 'downloaded_listing', False):
+        return compact(f'{DOWNLOADED}\n{text}')
+    return text
 
 
 def _more(total: int) -> List[str]:
@@ -90,10 +95,16 @@ def fetch_2dmatpedia_structure(deps, dm_id: str, dest_dir: str = 'materials') ->
         entry = client.twodmatpedia_entry(dm_id)
         if entry is None or not entry.get('structure_id'):
             return f'no 2DMatPedia entry {dm_id} with a structure'
-        text = client.structure_cif(entry['structure_id'])
         formula = re.sub(r'[^A-Za-z0-9]', '', str(entry.get('formula') or '')) or 'structure'
         name = f'{formula}_{dm_id}.cif'
-        ops = [('mkdir', dest_dir), ('write_text', f'{dest_dir}/{name}', text)]
+        title = f'Write 2DMatPedia {dm_id} as {dest_dir}/{name}'
+
+        def ops(text: str):
+            return [('mkdir', dest_dir), ('write_text', f'{dest_dir}/{name}', text)]
+        # Check the destination first: a refused one costs no structure request.
+        checked = build_fs_changeset(deps, title, ops(''))
+        if not checked.ok:
+            return deps.propose(checked)
         return deps.propose(build_fs_changeset(
-            deps, f'Write 2DMatPedia {dm_id} as {dest_dir}/{name}', ops))
+            deps, title, ops(client.structure_cif(entry['structure_id']))))
     return _with_client(deps, run)

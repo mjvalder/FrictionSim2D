@@ -332,6 +332,7 @@ class AgentSession:
                        emit: Callable[[TurnEvent], None], token: CancellationToken) -> None:
         """Run one user turn, emitting events; never raises for provider trouble."""
         deps.on_proposal = lambda change: emit(TurnEvent('proposal', payload=change))
+        deps.cancelled = lambda: token.cancelled
         generation = self._generation
         limit = self.settings.max_requests_per_turn
         messages: List[Any] = []

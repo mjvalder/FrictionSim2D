@@ -31,10 +31,14 @@ class AgentDeps:
     #: The Plots tab's document as a dict (a copy taken on the GUI thread),
     #: so plot tools know which datasets are loaded; None without a Plots tab.
     plot_document: Optional[dict] = None
-    #: Builds the Materials Project / 2DMatPedia client (raising
+    #: Builds the Materials Project / 2DMatPedia client from a ``should_stop``
+    #: keyword (raising
     #: `MaterialsDBError` when off or without a key). The GUI passes
     #: `materials_db.default_materials_db`; tests a fake; None: unavailable.
-    materials_db: Optional[Callable[[], Any]] = None
+    materials_db: Optional[Callable[..., Any]] = None
+    #: Whether the user pressed Stop on this turn; `AgentSession.run_turn`
+    #: points it at the turn's token. Long downloads check it between requests.
+    cancelled: Callable[[], bool] = field(default=lambda: False)
 
     def propose(self, change: Any) -> str:
         """Record a change set for the user, notify the pane, return its handle.
@@ -59,7 +63,7 @@ class AgentDeps:
 def snapshot_deps(document: ConfigDocument, settings_document: SettingsDocument,
                   settings: GlobalSettings, roots: SearchRoots,
                   plot_document: Optional[dict] = None,
-                  materials_db: Optional[Callable[[], Any]] = None) -> AgentDeps:
+                  materials_db: Optional[Callable[..., Any]] = None) -> AgentDeps:
     """Deps for one turn, holding copies of the live documents."""
     return AgentDeps(document=copy.deepcopy(document),
                      settings_document=copy.deepcopy(settings_document),

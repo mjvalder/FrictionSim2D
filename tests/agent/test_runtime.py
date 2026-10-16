@@ -334,3 +334,26 @@ def test_new_chat_bumps_the_generation_before_clearing():
     seen.clear()
     session.new_chat()
     assert seen == [1]
+
+
+def test_turn_cancellation_reaches_the_materials_client(deps):
+    seen = []
+
+    class Client:  # pylint: disable=too-few-public-methods
+        downloaded_listing = False
+
+        def twodmatpedia(self, formula):  # pylint: disable=unused-argument
+            seen.append(seen[0]())
+            return []
+
+    def factory(should_stop=None):
+        seen.append(should_stop)
+        return Client()
+    deps.materials_db = factory
+    session = AgentSession(AgentSettings(), model=FunctionModel(stream_function=scripted(
+        ('query_2dmatpedia', {'formula': 'MoS2'}), 'none')))
+    token = session.new_token()
+    run(session, deps, 'MoS2?', token)
+    assert seen[0] is deps.cancelled and seen[1] is False
+    token.cancel()
+    assert deps.cancelled() is True

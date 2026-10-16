@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import textwrap
@@ -428,10 +429,19 @@ def _op_paths(op: Tuple[str, ...]) -> Tuple[str, ...]:
 
 
 def _write_new(target: PathLike, text: str) -> None:
-    """Write ``text`` to a *new* file: ``'x'`` fails if ``target`` appeared
-    since it was checked, so nothing is ever overwritten."""
-    with open(target, 'x', encoding='utf-8') as handle:
-        handle.write(text)
+    """Write ``text`` to a *new* file, whole or not at all.
+
+    The text goes to a temporary file beside ``target`` first; ``os.link``
+    then publishes it, failing if ``target`` appeared since it was checked,
+    so nothing is overwritten and no partial file is ever left at ``target``.
+    """
+    fd, temp = tempfile.mkstemp(dir=Path(target).parent, prefix='.', suffix='.part')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            handle.write(text)
+        os.link(temp, target)
+    finally:
+        os.unlink(temp)
 
 
 def _copy_new(source: PathLike, target: PathLike) -> None:

@@ -29,7 +29,9 @@ PAGE_SIZE = 500
 MAX_PAGES = 100
 CACHE_NAME = '2dmatpedia.json'
 CACHE_SECONDS = 7 * 24 * 3600
-TIMEOUT = 60
+TIMEOUT = 30
+MP_API_MISSING = 'Materials Project lookups need the mp-api package (pip install mp-api)'
+PYMATGEN_MISSING = 'Materials Project lookups need pymatgen (pip install pymatgen)'
 NO_KEY = 'No Materials Project key: set MP_API_KEY or put it in ~/.mp_api_key'
 
 SUMMARY_FIELDS = ['material_id', 'formula_pretty', 'energy_above_hull',
@@ -80,9 +82,10 @@ def mp_api_key(settings=None, env: Optional[Mapping[str, str]] = None,
     return None
 
 
-def default_materials_db():
+def default_materials_db(should_stop: Optional[Callable[[], bool]] = None):
     """The real client, as `AgentDeps.materials_db` expects: built per call
-    from agent.yaml and the key lookup; raises `MaterialsDBError` when off or
+    from agent.yaml and the key lookup (``should_stop``: the turn's Stop);
+    raises `MaterialsDBError` when off or
     when no key is set."""
     from .settings import load_agent_settings  # pylint: disable=import-outside-toplevel
     settings = load_agent_settings()
@@ -92,7 +95,7 @@ def default_materials_db():
     key = mp_api_key(settings)
     if key is None:
         raise MaterialsDBError(NO_KEY)
-    return MPClient(key)
+    return MPClient(key, should_stop=should_stop)
 
 
 def reduced_formula(formula: str) -> str:
@@ -100,7 +103,7 @@ def reduced_formula(formula: str) -> str:
     try:
         from pymatgen.core import Composition  # pylint: disable=import-outside-toplevel
     except ImportError as exc:
-        raise MaterialsDBUnavailable('pip install pymatgen') from exc
+        raise MaterialsDBUnavailable(PYMATGEN_MISSING) from exc
     try:
         return Composition(str(formula).strip()).reduced_formula
     except Exception as exc:  # pylint: disable=broad-except
@@ -116,16 +119,17 @@ def _default_rester(key: str):
     try:
         from mp_api.client import MPRester  # pylint: disable=import-outside-toplevel
     except ImportError as exc:
-        raise MaterialsDBUnavailable('pip install mp-api') from exc
+        raise MaterialsDBUnavailable(MP_API_MISSING) from exc
     return MPRester(api_key=key, mute_progress_bars=True)
 
 
 def _default_http_get(url: str, params=None, headers=None):
-    """``httpx.get``, with transport failures turned into `ConnectionError`."""
+    """``httpx.get``; any httpx failure becomes a `ConnectionError` naming
+    only its type (so no URL or header reaches a message)."""
     import httpx  # pylint: disable=import-outside-toplevel
     try:
         return httpx.get(url, params=params, headers=headers, timeout=TIMEOUT)
-    except httpx.TransportError as exc:
+    except httpx.HTTPError as exc:
         raise ConnectionError(type(exc).__name__) from exc
 
 
@@ -193,8 +197,12 @@ class MPClient:
     def __init__(self, key: str, rester_factory: Optional[Callable[[str], Any]] = None,
                  http_get: Optional[Callable[..., Any]] = None,
                  cache_dir: Optional[Path] = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time,
+                 should_stop: Optional[Callable[[], bool]] = None) -> None:
         self._key = key
+        self._should_stop = should_stop or (lambda: False)
+        #: Whether the last `listing` call downloaded (rather than read the cache).
+        self.downloaded_listing = False
         self._rester_factory = rester_factory or _default_rester
         self._http_get = http_get or _default_http_get
         self._cache = Path(cache_dir or _cache_dir()) / CACHE_NAME
@@ -236,7 +244,12 @@ class MPClient:
 
     # -- MPContribs ------------------------------------------------------------
 
+    def _check_stop(self) -> None:
+        if self._should_stop():
+            raise MaterialsDBError('stopped')
+
     def _get_json(self, url: str, params: Dict[str, Any]) -> Any:
+        self._check_stop()
         try:
             response = self._http_get(url, params=params, headers={'X-API-KEY': self._key})
         except OSError as exc:  # ConnectionError, TimeoutError, ...
@@ -286,10 +299,12 @@ class MPClient:
 
     def listing(self) -> List[Dict[str, Any]]:
         """The flattened 2DMatPedia listing, cached for a week."""
+        self.downloaded_listing = False
         rows = self._read_cache()
         if rows is None:
             rows = self._fetch_listing()
             self._write_cache(rows)
+            self.downloaded_listing = True
         return rows
 
     def twodmatpedia(self, formula: str) -> List[Dict[str, Any]]:
@@ -313,7 +328,7 @@ class MPClient:
             from pymatgen.core import Lattice, Structure
             from pymatgen.io.cif import CifWriter
         except ImportError as exc:
-            raise MaterialsDBUnavailable('pip install pymatgen') from exc
+            raise MaterialsDBUnavailable(PYMATGEN_MISSING) from exc
         try:
             sites = payload['sites']
             if not sites:

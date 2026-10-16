@@ -1,5 +1,6 @@
 """Change sets: previewed on copies, replayed on the live documents on Apply."""
 import copy
+import os
 from pathlib import Path
 
 import pytest
@@ -389,3 +390,19 @@ def test_fs_write_text_never_overwrites_at_apply(deps):
     (ws / 'x.cif').write_text('mine')
     result = apply_fs_changeset(change, ws)
     assert not result.applied and (ws / 'x.cif').read_text() == 'mine'
+
+
+def test_fs_write_text_failure_leaves_nothing_and_retry_works(deps, monkeypatch):
+    ws = deps.roots.workspace
+    change = build_fs_changeset(deps, 'cif', [('write_text', 'm/x.cif', 'data_x\n')])
+
+    def boom(*_args, **_kwargs):
+        raise OSError('disk full')
+    monkeypatch.setattr(os, 'link', boom)
+    assert not apply_fs_changeset(change, ws).applied
+    assert not (ws / 'm' / 'x.cif').exists()
+    assert list((ws / 'm').iterdir()) == []  # no temp file left behind
+    monkeypatch.undo()
+    assert apply_fs_changeset(change, ws).applied
+    assert (ws / 'm' / 'x.cif').read_text() == 'data_x\n'
+    assert [p.name for p in (ws / 'm').iterdir()] == ['x.cif']

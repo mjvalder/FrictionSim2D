@@ -11,8 +11,9 @@ import pytest
 pytest.importorskip('pymatgen.core')
 
 # pylint: disable=wrong-import-position
-from src.agent.materials_db import (API, CACHE_SECONDS, NO_KEY, MPClient, MaterialsDBError,
-                                    MaterialsDBUnavailable, default_materials_db,
+from src.agent.materials_db import (API, CACHE_SECONDS, MP_API_MISSING, NO_KEY, MPClient,
+                                    MaterialsDBError, MaterialsDBUnavailable,
+                                    PYMATGEN_MISSING, default_materials_db,
                                     mp_api_key)
 from src.agent.settings import AgentSettings
 
@@ -87,10 +88,11 @@ def _page(rows, has_more):
     return FakeResponse(200, {'data': rows, 'has_more': has_more})
 
 
-def _client(tmp_path, http=None, rester=None, now=1000.0):
+def _client(tmp_path, http=None, rester=None, now=1000.0, should_stop=None):
     clock = SimpleNamespace(t=now)
     client = MPClient(KEY, rester_factory=rester, http_get=http,
-                      cache_dir=tmp_path / 'cache', clock=lambda: clock.t)
+                      cache_dir=tmp_path / 'cache', clock=lambda: clock.t,
+                      should_stop=should_stop)
     return client, clock
 
 
@@ -181,6 +183,41 @@ def test_summary_without_mp_api(tmp_path):
     client, _ = _client(tmp_path, rester=factory)
     with pytest.raises(MaterialsDBUnavailable, match='mp-api'):
         client.summary('MoS2')
+
+
+def test_dependency_messages_are_clear():
+    assert MP_API_MISSING == ('Materials Project lookups need the mp-api package '
+                              '(pip install mp-api)')
+    assert PYMATGEN_MISSING == ('Materials Project lookups need pymatgen '
+                                '(pip install pymatgen)')
+
+
+def test_stop_between_pages_writes_no_cache(tmp_path):
+    http = FakeHTTP(lambda url, params: _page([_contribution(params['_skip'])], True))
+    client, _ = _client(tmp_path, http=http, should_stop=lambda: len(http.calls) >= 1)
+    with pytest.raises(MaterialsDBError, match='stopped'):
+        client.twodmatpedia('MoS2')
+    assert len(http.calls) == 1
+    assert not (tmp_path / 'cache' / '2dmatpedia.json').exists()
+
+
+def test_stop_before_structure_fetch(tmp_path):
+    http = FakeHTTP([])
+    client, _ = _client(tmp_path, http=http, should_stop=lambda: True)
+    with pytest.raises(MaterialsDBError, match='stopped'):
+        client.structure_cif('abc')
+    assert not http.calls
+
+
+def test_downloaded_listing_flag(tmp_path):
+    http = FakeHTTP(lambda url, params: _page([_contribution(1)], False))
+    client, _ = _client(tmp_path, http=http)
+    assert client.downloaded_listing is False
+    client.twodmatpedia('MoS2')
+    assert client.downloaded_listing is True
+    again, _ = _client(tmp_path, http=http)
+    again.twodmatpedia('MoS2')
+    assert again.downloaded_listing is False
 
 
 @pytest.mark.parametrize('error, message', [
