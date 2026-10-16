@@ -9,10 +9,13 @@ Imports Qt, so it must only be reached through :func:`src.gui.main`.
 
 from __future__ import annotations
 
+import copy
+import itertools
 import logging
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
@@ -64,6 +67,30 @@ DB_STATE_KEYS = ('db_source', 'db_filters', 'db_dest')
 #: Workspace state key for the Assistant dock: {'open': bool, 'width': int}.
 ASSISTANT_STATE_KEY = 'assistant'
 ASSISTANT_DEFAULT_WIDTH = 420
+
+
+@dataclass
+class AssistantUndo:
+    """Everything one applied assistant change can be undone back to.
+
+    Taken immediately before the apply: deep copies of both documents (source
+    path and workspace dirs included) and, when the change writes a material
+    list, that file's prior state (``material_bytes`` None: it did not exist).
+    """
+
+    id: int
+    document: ConfigDocument
+    settings_document: SettingsDocument
+    config_keys: List[Tuple[str, str]] = field(default_factory=list)
+    settings_keys: List[Tuple[str, str]] = field(default_factory=list)
+    material_path: Optional[Path] = None
+    material_bytes: Optional[bytes] = None
+
+
+def _highlight_map(change, scope: str) -> Dict[Tuple[str, str], str]:
+    """``(section, key) -> "before → after"`` for one scope of a change's diff."""
+    return {(d.section, d.key): f'{d.before!r} → {d.after!r}'
+            for d in change.diff if d.scope == scope and d.key and d.section != '(model)'}
 
 
 def plural(count: int, word: str) -> str:
@@ -196,6 +223,9 @@ class MainWindow(QMainWindow):
         self._assistant_width = ASSISTANT_DEFAULT_WIDTH
         self._assistant_applied_width: Optional[int] = None
         self._assistant_width_pending = False
+        #: Applied assistant changes, oldest first; only the last can be undone.
+        self._assistant_undo: List[AssistantUndo] = []
+        self._assistant_ids = itertools.count(1)
 
         self.main_splitter = QSplitter(Qt.Horizontal, self)
         self.main_splitter.addWidget(self.top_tabs)
@@ -368,6 +398,10 @@ class MainWindow(QMainWindow):
                              self.assistant_dock)
         pane.apply_requested.connect(self._apply_assistant_change)
         pane.fs_apply_requested.connect(self._apply_assistant_fs_change)
+        pane.change_proposed.connect(self._apply_assistant_change_now)
+        pane.undo_requested.connect(self._undo_assistant_change)
+        pane.accept_requested.connect(self._accept_assistant_changes)
+        pane.chat_cleared.connect(lambda: self._end_assistant_undo(lock=False))
         pane.set_context_label(self.top_tabs.tabText(self.top_tabs.currentIndex()))
         return pane
 
@@ -395,12 +429,14 @@ class MainWindow(QMainWindow):
         self._resync_mode_box()
 
     def _apply_assistant_change(self, change, as_new: bool) -> None:
+        """Apply a change set from a card (ask-before-applying, or Apply as new)."""
         # pylint: disable=import-outside-toplevel
         from ..agent.changes import ToolInputError, apply_changeset, build_changeset
         pane = self._assistant_pane
         proposed = change
         self.form.commit()  # a value still in an editor counts as a Builder edit
-        if (as_new or change.changes_model(self.document.model)) and self.document.dirty:
+        # Undo covers an in-place apply; a new config throws the open one away.
+        if as_new and self.document.dirty:
             answer = QMessageBox.question(
                 self, 'Unsaved changes',
                 'The Builder has unsaved changes that this will replace. Continue?',
@@ -415,8 +451,10 @@ class MainWindow(QMainWindow):
                 target.workspace_root = self.workspace.root
                 change = build_changeset(self.assistant_deps(document=target), change.title,
                                          change.ops, change.notes)
+                undo = self._assistant_snapshot(change, target)
                 result = apply_changeset(change, target, self.settings_document, force=True)
             else:
+                undo = self._assistant_snapshot(change, target)
                 result = apply_changeset(change, target, self.settings_document)
                 if result.stale:
                     fresh = build_changeset(self.assistant_deps(), change.title,
@@ -427,11 +465,64 @@ class MainWindow(QMainWindow):
                                         'to use it.')
                     return
         except ToolInputError as exc:
-            pane.mark_applied(proposed, f'Not applied: {exc}')
+            pane.finish_card(proposed, f'Not applied: {exc}', error=True)
             return
-        pane.mark_applied(proposed, result.message)
+        pane.finish_card(proposed, '' if result.applied else result.message,
+                         error=not result.applied)
+        if result.applied:
+            self._land_assistant_change(change, target, undo, result.message)
+
+    def _apply_assistant_change_now(self, change) -> None:
+        """Apply a config/settings change set as it arrives (no card).
+
+        If the user edited the Builder during the turn, the change is rebuilt
+        against the current documents and that is applied instead.
+        """
+        # pylint: disable=import-outside-toplevel
+        from ..agent.changes import ToolInputError, apply_changeset, build_changeset
+        pane = self._assistant_pane
+        self.form.commit()  # a value still in an editor counts as a Builder edit
+        try:
+            undo = self._assistant_snapshot(change, self.document)
+            result = apply_changeset(change, self.document, self.settings_document)
+            if result.stale:
+                change = build_changeset(self.assistant_deps(), change.title,
+                                         change.ops, change.notes)
+                pane.note('The Builder changed during the turn; re-checked against '
+                          'the current config.')
+                undo = self._assistant_snapshot(change, self.document)
+                result = apply_changeset(change, self.document, self.settings_document)
+        except ToolInputError as exc:
+            pane.note(f'Not applied: {change.title}: {exc}', error=True)
+            return
         if not result.applied:
+            pane.note(result.message, error=True)
             return
+        self._land_assistant_change(change, self.document, undo, result.message)
+
+    def _assistant_snapshot(self, change, target) -> AssistantUndo:
+        """The undo record for ``change``, taken before it touches anything.
+
+        The material-list path is where `write_material_names` writes for
+        ``target`` as it stands now -- an op earlier in the same change that
+        re-points `materials_list` is not followed (no tool emits one).
+        """
+        undo = AssistantUndo(id=next(self._assistant_ids),
+                             document=copy.deepcopy(self.document),
+                             settings_document=copy.deepcopy(self.settings_document))
+        if any(op.kind == 'materials' and op.value for op in change.ops):
+            path = target.material_list_target()
+            if path is not None:
+                undo.material_path = Path(path)
+                undo.material_bytes = path.read_bytes() if path.is_file() else None
+        return undo
+
+    def _land_assistant_change(self, change, target, undo: AssistantUndo,
+                               message: str) -> None:
+        """Refresh the Builder after an apply, mark what changed, offer Undo."""
+        # pylint: disable=import-outside-toplevel
+        from ..agent.changes import applied_summary
+        pane = self._assistant_pane
         if target is not self.document:
             self.document = target
             self.form.document = target
@@ -444,19 +535,84 @@ class MainWindow(QMainWindow):
                 self.settings = self.settings_document.as_settings()
             except Exception as exc:  # pylint: disable=broad-except
                 # apply_changeset refuses invalid settings; this is a backstop.
-                pane.mark_applied(proposed, f'Applied, but the settings are invalid: {exc}')
+                pane.note(f'Applied, but the settings are invalid: {exc}', error=True)
             else:
                 self.form.set_settings(self.settings)
         self._refresh_counts()
         self._validate()
         self._on_config_changed()
-        self.top_tabs.setCurrentIndex(0)
-        self.statusBar().showMessage(result.message)
+        undo.config_keys = list(_highlight_map(change, 'config'))
+        undo.settings_keys = list(_highlight_map(change, 'settings'))
+        self.form.highlight(_highlight_map(change, 'config'))
+        self.settings_form.highlight(_highlight_map(change, 'settings'))
+        self._assistant_undo.append(undo)
+        pane.add_applied_line(undo.id, applied_summary(change))
+        self._refresh_undo_states()
+        self.statusBar().showMessage(message)
+
+    def _refresh_undo_states(self) -> None:
+        pane = self._assistant_pane
+        for index, entry in enumerate(self._assistant_undo):
+            last = index == len(self._assistant_undo) - 1
+            pane.set_undo_state(entry.id, 'enabled' if last else 'blocked')
+        pane.set_accept_enabled(bool(self.form.highlights() or self.settings_form.highlights()))
+
+    def _undo_assistant_change(self, entry_id: int) -> None:
+        """Put the Builder back as it was before the most recent change."""
+        if not self._assistant_undo or self._assistant_undo[-1].id != entry_id:
+            return
+        entry = self._assistant_undo.pop()
+        self.document = entry.document
+        self.form.document = entry.document
+        self.settings_document = entry.settings_document
+        self.settings_form.document = entry.settings_document
+        if entry.material_path is not None:
+            try:
+                if entry.material_bytes is None:
+                    entry.material_path.unlink(missing_ok=True)
+                else:
+                    entry.material_path.write_bytes(entry.material_bytes)
+            except OSError as exc:
+                self._assistant_pane.note(f'Could not restore {entry.material_path}: {exc}',
+                                          error=True)
+        self._resync_family_and_mode()
+        self.form.rebuild()
+        self.settings_form.rebuild()
+        self._refresh_settings_origin()
+        try:
+            self.settings = self.settings_document.as_settings()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('settings restored by Undo do not validate')
+        else:
+            self.form.set_settings(self.settings)
+        self.form.clear_highlights(entry.config_keys)
+        self.settings_form.clear_highlights(entry.settings_keys)
+        self._refresh_counts()
+        self._validate()
+        self._on_config_changed()
+        self._assistant_pane.set_undo_state(entry_id, 'undone')
+        self._refresh_undo_states()
+        self.statusBar().showMessage('Undid the assistant\'s last change.')
+
+    def _accept_assistant_changes(self) -> None:
+        """Accept: the changes stay, their yellow marks go."""
+        self.form.clear_highlights()
+        self.settings_form.clear_highlights()
+        if hasattr(self._assistant_pane, 'set_accept_enabled'):
+            self._assistant_pane.set_accept_enabled(False)
+
+    def _end_assistant_undo(self, lock: bool = True) -> None:
+        """Forget the undo records: the config was saved or replaced, or the
+        chat holding their Undo links was cleared. ``lock`` greys those links."""
+        if lock and hasattr(self._assistant_pane, 'set_undo_state'):
+            for entry in self._assistant_undo:
+                self._assistant_pane.set_undo_state(entry.id, 'locked')
+        self._assistant_undo = []
 
     def _apply_assistant_fs_change(self, change) -> None:
         from ..agent.changes import apply_fs_changeset  # pylint: disable=import-outside-toplevel
         result = apply_fs_changeset(change, self.workspace.root)
-        self._assistant_pane.mark_applied(change, result.message)
+        self._assistant_pane.finish_card(change, result.message, error=not result.applied)
         self.statusBar().showMessage(result.message)
 
     def _shutdown_assistant(self) -> None:
@@ -955,11 +1111,13 @@ class MainWindow(QMainWindow):
         self.settings = self.settings_document.as_settings()
         self.form.set_settings(self.settings)
         self._refresh_settings_origin()
+        self.settings_form.clear_highlights()
         self.statusBar().showMessage(f"Saved {written}")
 
     def _revert_settings(self) -> None:
         self.settings_document = SettingsDocument.defaults()
         self.settings_form.document = self.settings_document
+        self.settings_form.clear_highlights()
         self.settings_form.rebuild()
         self._refresh_settings_origin()
         # _apply_settings and _save_settings both refresh self.settings and
@@ -1361,6 +1519,8 @@ class MainWindow(QMainWindow):
         self.document.workspace_dir = self.workspace.configs_dir
         self.document.workspace_root = self.workspace.root
         self.form.document = self.document
+        self.form.clear_highlights()
+        self._end_assistant_undo()
         self.form.rebuild()
         self._validate()
         # Opening a different config swaps the whole document out from under
@@ -1392,6 +1552,12 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # pylint: disable=broad-except
             QMessageBox.critical(self, 'Could not save', str(exc))
             return
+        # Saved: the assistant's marks have served their purpose, and an Undo
+        # would now leave the Builder disagreeing with the file just written.
+        self.form.clear_highlights()
+        self._end_assistant_undo()
+        if hasattr(self._assistant_pane, 'set_accept_enabled'):
+            self._assistant_pane.set_accept_enabled(bool(self.settings_form.highlights()))
         self.statusBar().showMessage(f"Saved {written}")
 
     def _choose_workspace(self) -> None:

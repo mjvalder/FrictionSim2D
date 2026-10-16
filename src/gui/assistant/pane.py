@@ -1,7 +1,12 @@
-"""The Assistant side pane: chat, provider picker, proposal cards.
+"""The Assistant side pane: chat, provider picker, pending cards, Undo lines.
 
-Laid out for a narrow dock beside the main tabs: header rows on top, chat
-above the cards, input at the bottom.
+Laid out for a narrow dock beside the main tabs: header rows on top, the chat,
+a "Pending" strip of cards (hidden when empty), then the input.
+
+Config and settings changes are handed to the window as they arrive
+(`change_proposed`) unless "Ask before applying" is on; file operations always
+wait on a card. Each applied change gets one chat line with an Undo link, whose
+state the window drives (`set_undo_state`).
 """
 from __future__ import annotations
 
@@ -9,12 +14,12 @@ import html
 import logging
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import (QKeySequence, QShortcut, QTextBlockFormat, QTextCharFormat,
-                           QTextCursor)
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QInputDialog, QLabel,
-                               QLineEdit, QMessageBox, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSplitter, QTextBrowser,
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import (QColor, QKeySequence, QShortcut, QTextBlockFormat,
+                           QTextCharFormat, QTextCursor, QTextFormat)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog,
+                               QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+                               QPushButton, QScrollArea, QTextBrowser,
                                QVBoxLayout, QWidget)
 
 from ...agent.changes import FsChangeSet
@@ -33,12 +38,33 @@ CONSENT_TEXT = (
     'Google. On the free tier Google may use them to improve its products.\n\n'
     'Use Gemini for the Assistant?')
 
+#: Cards shown in the Pending strip before it scrolls.
+PENDING_VISIBLE = 3
+#: Char-format property tagging an applied line's Undo control with its id.
+_UNDO_ID = QTextFormat.Property.UserProperty.value + 1
+#: (text, tooltip, colour, is a link) per Undo state.
+_UNDO_LOOK = {
+    'enabled': ('Undo', 'Put the Builder back as it was before this change', '#0b57d0', True),
+    'blocked': ('Undo', 'undo newer changes first', 'gray', False),
+    'undone': ('undone', 'This change was undone', 'gray', False),
+    'locked': ('Undo unavailable', 'The config was saved (or replaced) since; '
+               'undo no longer applies', 'gray', False),
+}
+
 
 class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
-    """Chat with the assistant; its proposals appear as cards to apply."""
+    """Chat with the assistant; its changes land directly or wait as cards."""
 
     apply_requested = Signal(object, bool)
     fs_apply_requested = Signal(object)
+    #: A config/settings change set to apply now (ask-before-applying is off).
+    change_proposed = Signal(object)
+    #: The Undo link of applied change ``id`` was clicked while enabled.
+    undo_requested = Signal(int)
+    #: Accept: clear the assistant's highlights.
+    accept_requested = Signal()
+    #: New chat: the applied lines (and their Undo links) are gone.
+    chat_cleared = Signal()
     turn_finished = Signal()
     _start_turn = Signal(str, object, object, int)
 
@@ -66,6 +92,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._requests = 0
         self._turn_id = 0  # events from any other turn are dropped
         self.cards = {}
+        self._undo_states = {}
         self._build_ui()
         self._thread = QThread(self)
         self._worker = AgentWorker(session)
@@ -89,10 +116,26 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.context_label = QLabel('', self)
         self.context_label.setToolTip('The tab you are on (shown here only).')
         self.requests_label = QLabel('requests: 0', self)
+        self.ask_box = QCheckBox('Ask before applying', self)
+        self.ask_box.setToolTip('Off: the assistant\'s config and settings changes land in '
+                                'the Builder at once (yellow, with Undo). On: they wait as '
+                                'cards. File operations always wait.')
+        self.ask_box.setChecked(self.settings.ask_before_apply)
+        self.ask_box.toggled.connect(self._on_ask_toggled)
         top.addWidget(self.context_label)
         top.addStretch(1)
         top.addWidget(self.requests_label)
         layout.addLayout(top)
+        # Its own row, with Accept: the dock is narrow and must stay so.
+        review = QHBoxLayout()
+        self.accept_button = QPushButton('Accept', self)
+        self.accept_button.setToolTip('Clear the yellow marks on fields the assistant set')
+        self.accept_button.setEnabled(False)
+        self.accept_button.clicked.connect(self.accept_requested.emit)
+        review.addWidget(self.ask_box)
+        review.addStretch(1)
+        review.addWidget(self.accept_button)
+        layout.addLayout(review)
 
         picker = QHBoxLayout()
         self.provider_box = QComboBox(self)
@@ -116,18 +159,26 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         status.addWidget(self.status_label, 1)
         layout.addLayout(status)
 
-        split = QSplitter(Qt.Vertical, self)
-        self.chat = QTextBrowser(split)
+        self.chat = QTextBrowser(self)
         self.chat.setOpenExternalLinks(False)
+        self.chat.setOpenLinks(False)  # undo: links are handled, never followed
+        self.chat.anchorClicked.connect(self._on_anchor)
+        layout.addWidget(self.chat, 1)
+
+        self.pending_box = QFrame(self)
+        pending = QVBoxLayout(self.pending_box)
+        pending.setContentsMargins(0, 0, 0, 0)
+        pending.addWidget(QLabel('Pending', self.pending_box))
         card_host = QWidget()
         self._card_layout = QVBoxLayout(card_host)
-        self._card_layout.addStretch(1)
-        scroll = QScrollArea(split)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(card_host)
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 2)
-        layout.addWidget(split, 1)
+        self._card_layout.setContentsMargins(0, 0, 0, 0)
+        self.pending_scroll = QScrollArea(self.pending_box)
+        self.pending_scroll.setWidgetResizable(True)
+        self.pending_scroll.setWidget(card_host)
+        self.pending_scroll.setFrameShape(QFrame.NoFrame)
+        pending.addWidget(self.pending_scroll)
+        self.pending_box.hide()
+        layout.addWidget(self.pending_box)
 
         self.input = QPlainTextEdit(self)
         self.input.setPlaceholderText('Ask the assistant (Ctrl+Enter to send)')
@@ -206,6 +257,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self._save()
             self.session.switch(self.settings)
 
+    def _on_ask_toggled(self, checked: bool) -> None:
+        self.settings.ask_before_apply = checked
+        self._save()
+
     def _save(self) -> None:
         """Save the assistant settings; a file error is shown, not raised."""
         try:
@@ -265,7 +320,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         token = self.session.new_token()
         self._worker.arm(token)
         self._turn_id += 1
-        self._start_turn.emit(text, self._deps_factory(), token, self._turn_id)
+        deps = self._deps_factory()
+        if hasattr(deps, 'direct_apply'):
+            deps.direct_apply = not self.settings.ask_before_apply
+        self._start_turn.emit(text, deps, token, self._turn_id)
 
     def stop(self) -> None:
         """Cancel the running turn."""
@@ -275,7 +333,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._busy = busy
         self.send_button.setEnabled(not busy)
         self.stop_button.setEnabled(busy)
-        for widget in (self.provider_box, self.model_edit, self.new_button):
+        for widget in (self.provider_box, self.model_edit, self.new_button, self.ask_box):
             widget.setEnabled(not busy)
 
     def _on_event(self, turn_id: int, event) -> None:
@@ -288,7 +346,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         elif event.kind == 'tool_result':
             self._append(f'  → {event.text}', 'color:gray;font-size:small')
         elif event.kind == 'proposal':
-            self._add_card(event.payload)
+            self.receive_proposal(event.payload)
         elif event.kind == 'done':
             self._requests += int(event.payload or 0)
             self.requests_label.setText(f'requests: {self._requests}')
@@ -304,7 +362,19 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._set_busy(False)  # the worker is free whichever turn this was
         self.turn_finished.emit()
 
-    # ---------------------------------------------------------------- cards
+    # ------------------------------------------------------------ changes
+
+    def receive_proposal(self, change) -> None:
+        """Route a change set: file operations (and everything, when asking
+        first) wait as a card; a config/settings change goes to the window."""
+        if isinstance(change, FsChangeSet) or self.settings.ask_before_apply:
+            self._add_card(change)
+        else:
+            self.change_proposed.emit(change)
+
+    def note(self, text: str, error: bool = False) -> None:
+        """One line in the chat: gray, or red for something that failed."""
+        self._append(text, 'color:#b00' if error else 'color:gray')
 
     def _add_card(self, change) -> None:
         if isinstance(change, FsChangeSet):
@@ -313,20 +383,118 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         else:
             card = ChangeCard(change)
             card.apply_requested.connect(self.apply_requested.emit)
+        card.discarded.connect(self._on_discarded)
         self.cards[change.id] = card
-        self._card_layout.insertWidget(self._card_layout.count() - 1, card)
+        self._card_layout.addWidget(card)
+        self._fit_pending()
 
-    def mark_applied(self, change, message: str) -> None:
-        """Freeze a card after Apply (or a refusal) with what happened."""
-        card = self.cards.get(change.id)
+    def _on_discarded(self, change) -> None:
+        self.finish_card(change, f'Discarded: {change.title}')
+
+    def finish_card(self, change, message: str, error: bool = False) -> None:
+        """Take a card out of the Pending strip; ``message`` goes to the chat."""
+        card = self.cards.pop(change.id, None)
         if card is not None:
-            card.mark_applied(message)
+            self._card_layout.removeWidget(card)
+            card.hide()
+            card.deleteLater()
+            self._fit_pending()
+        if message:
+            self.note(message, error)
 
     def replace_change(self, old, new, note: str) -> None:
         """Swap a stale card for a re-checked one."""
-        self.mark_applied(old, 'Superseded by a re-check.')
-        self._append(note, 'color:gray')
+        self.finish_card(old, '')
+        self.note(note)
         self._add_card(new)
+
+    def _fit_pending(self) -> None:
+        """Show the strip only with cards in it, sized to (up to three of) them."""
+        cards = list(self.cards.values())
+        self.pending_box.setVisible(bool(cards))
+        if not cards:
+            return
+        shown = cards[:PENDING_VISIBLE]
+        spacing = max(self._card_layout.spacing(), 0)
+        height = sum(card.sizeHint().height() for card in shown) + spacing * (len(shown) - 1)
+        self.pending_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff if len(cards) <= PENDING_VISIBLE else Qt.ScrollBarAsNeeded)
+        self.pending_scroll.setFixedHeight(height + 2 * self.pending_scroll.frameWidth())
+
+    def set_accept_enabled(self, enabled: bool) -> None:
+        """Whether there are highlights for Accept to clear."""
+        self.accept_button.setEnabled(enabled)
+
+    # ------------------------------------------------------------ undo lines
+
+    def add_applied_line(self, entry_id: int, text: str) -> None:
+        """One chat line for an applied change, ending in its Undo link."""
+        self.chat.moveCursor(QTextCursor.End)
+        cursor = self.chat.textCursor()
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        plain = QTextCharFormat()
+        plain.setForeground(QColor('#2e7d32'))
+        cursor.insertText(f'✓ {text}  ', plain)
+        self._undo_states[entry_id] = 'enabled'
+        cursor.insertText(*self._undo_fragment(entry_id, 'enabled'))
+        self._text_open = False
+
+    @staticmethod
+    def _undo_fragment(entry_id: int, state: str):
+        text, tip, colour, link = _UNDO_LOOK[state]
+        fmt = QTextCharFormat()
+        fmt.setProperty(_UNDO_ID, entry_id)
+        fmt.setForeground(QColor(colour))
+        fmt.setToolTip(tip)
+        if link:
+            fmt.setAnchor(True)
+            fmt.setAnchorHref(f'undo:{entry_id}')
+            fmt.setFontUnderline(True)
+        return text, fmt
+
+    def set_undo_state(self, entry_id: int, state: str) -> None:
+        """'enabled', 'blocked' (a newer change is on top), 'undone' or 'locked'."""
+        if self._undo_states.get(entry_id) in (None, state):
+            return
+        span = self._find_undo(entry_id)
+        if span is None:
+            return
+        self._undo_states[entry_id] = state
+        cursor = QTextCursor(self.chat.document())
+        cursor.setPosition(span[0])
+        cursor.setPosition(span[1], QTextCursor.KeepAnchor)
+        cursor.insertText(*self._undo_fragment(entry_id, state))
+
+    def undo_state(self, entry_id: int) -> Optional[str]:
+        """The Undo state of an applied line, or None when it is not shown."""
+        return self._undo_states.get(entry_id)
+
+    def undo_tooltip(self, entry_id: int) -> str:
+        """The tooltip on an applied line's Undo control ('' when not shown)."""
+        state = self._undo_states.get(entry_id)
+        return _UNDO_LOOK[state][1] if state else ''
+
+    def _find_undo(self, entry_id: int):
+        block = self.chat.document().begin()
+        while block.isValid():
+            it = block.begin()
+            while not it.atEnd():
+                fragment = it.fragment()
+                if fragment.charFormat().property(_UNDO_ID) == entry_id:
+                    return fragment.position(), fragment.position() + fragment.length()
+                it += 1
+            block = block.next()
+        return None
+
+    def _on_anchor(self, url: QUrl) -> None:
+        if url.scheme() != 'undo':
+            return
+        try:
+            entry_id = int(url.path())
+        except ValueError:
+            return
+        if self._undo_states.get(entry_id) == 'enabled':
+            self.undo_requested.emit(entry_id)
 
     def new_chat(self) -> None:
         """Cancel a running turn, forget the conversation and clear the cards."""
@@ -337,6 +505,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         for card in self.cards.values():
             card.deleteLater()
         self.cards = {}
+        self._undo_states = {}
+        self._fit_pending()
+        self.chat_cleared.emit()
 
     def shutdown(self) -> None:
         """Stop the worker thread (window close)."""

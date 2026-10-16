@@ -6,12 +6,14 @@ conversation, stays in view whichever tab is open. Show or hide it with the
 **Assistant** button at the right end of the tab bar or **Ctrl+Shift+A**;
 drag the divider to resize it. Each workspace remembers whether the pane was
 open and how wide, and a new workspace starts with it collapsed. The pane's
-header shows which tab you are on (display only, not sent to the model);
-**Apply** on a card switches to the Builder while the pane stays open.
+header shows which tab you are on (display only, not sent to the model).
+Applying a change never switches tabs: you stay where you are, and the pane
+says what happened.
 
-It proposes changes to the Builder's
-config and settings, finds structures and potentials, and adds folders or files
-to your workspace. **Nothing changes until you click Apply on a card.**
+It edits the Builder's config and settings, finds structures and potentials,
+and adds folders or files to your workspace. Config and settings edits land in
+the Builder straight away, marked and undoable (below); **file operations always
+wait for you to click Apply.**
 
 ## Enabling it
 
@@ -37,20 +39,48 @@ Settings live in `~/.config/FrictionSim2D/agent.yaml`.
 
 - Set up AFM, indent, PES tip, sheet-on-sheet and PES sheet simulations from a
   sentence, including material sweeps.
-- Find any config or settings parameter and propose a value.
+- Find any config or settings parameter and set it.
 - Search structures and potentials: your workspace first, then the bundled
   examples (labelled; verify them before production runs).
 - Describe workspace folders, create folders, copy found files in.
 
 It cannot run or submit jobs, delete, move or rename anything.
 
-## Cards
+## How changes land
 
-Each proposal shows every field it changes, files it would write, validation
-issues and the run count (configs / builds / jobs). **Apply** changes the open
-config; **Apply as new config** starts from a blank one. If you edited the
-Builder after the proposal, Apply re-checks it against your current config
-first. Save the config with the Builder's Save as usual.
+- **Direct edits (default).** A config or settings change is applied to the
+  open config as soon as the assistant makes it. If you edited the Builder
+  while it was working, the change is re-checked against your current config
+  first. A change that cannot be applied leaves the Builder untouched and shows
+  a red line in the chat saying why.
+- **Yellow highlights.** Every field the assistant set turns pale yellow; its
+  tooltip reads `Set by assistant: <before> → <after>`. Validation errors still
+  show their red border on top. Sections holding a highlighted field unfold.
+  A highlight goes when you edit that field, when you click **Accept** (clears
+  them all; the values stay), or when you save the config with the Builder's
+  Save. A switch of simulation model has no field; it is named in the chat line.
+- **Chat line and Undo.** Each applied change adds one line, e.g. `Set 3
+  fields: [general] force, [2D] x, [2D] y (+ model → sheetonsheet)`, with an
+  **Undo** link. Undo puts the Builder back exactly as it was just before that
+  change -- config, settings, and a material-list file it wrote (restored, or
+  deleted if the change created it) -- so edits you made after the change are
+  undone too. Only the most recent change can be undone; older lines say "undo
+  newer changes first" until the newer ones are undone. Saving the config (or
+  opening another one) ends Undo for every line so far, and New chat drops them.
+- **Ask before applying.** Tick this in the pane's header (remembered in
+  `agent.yaml` as `ask_before_apply`) to review changes first: each one waits
+  as a card showing every field it changes, files it would write, validation
+  issues and the run count (configs / builds / jobs). **Apply** changes the
+  open config, **Apply as new config** starts from a blank one (asking first if
+  the open config has unsaved edits), **Discard** drops it. If you edited the
+  Builder after the proposal, Apply re-checks it and shows the re-checked card
+  to apply again. An applied card is highlighted and undoable as above.
+- **File operations still ask.** Creating folders and copying files in always
+  arrive as cards, whatever the switch says.
+
+Cards sit in a compact **Pending** strip above the input, shown only while
+something is waiting; a card leaves it as soon as it is applied or discarded,
+and the result is written to the chat.
 
 ## Testing the assistant
 

@@ -108,20 +108,137 @@ def test_streams_text_and_tool_lines(qt_app, env):
     pane.shutdown()
 
 
-def test_proposal_card_apply_emits(qt_app, env, tmp_path, mock_settings):
+def test_config_proposal_is_handed_over_without_a_card(qt_app, env, tmp_path, mock_settings):
     deps = make_deps(tmp_path, mock_settings)
     change = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
     pane = _pane([TurnEvent('proposal', payload=change), TurnEvent('done', payload=1)])
     seen = []
+    pane.change_proposed.connect(seen.append)
+    pane.send('loads 5')
+    _run_until(pane.turn_finished)
+    assert seen == [change] and pane.cards == {}
+    assert pane.pending_box.isHidden()
+
+
+def test_ask_before_apply_shows_a_card_in_the_pending_strip(qt_app, env, tmp_path, mock_settings):
+    deps = make_deps(tmp_path, mock_settings)
+    change = build_changeset(deps, 'loads', [Op('set', 'general', 'force', [5])])
+    pane = _pane([TurnEvent('proposal', payload=change), TurnEvent('done', payload=1)],
+                 settings=AgentSettings(ask_before_apply=True))
+    direct, seen = [], []
+    pane.change_proposed.connect(direct.append)
     pane.apply_requested.connect(lambda c, new: seen.append((c, new)))
     pane.send('loads 5')
     _run_until(pane.turn_finished)
-    card = pane.cards[change.id]
-    card.apply_button.click()
+    assert direct == [] and not pane.pending_box.isHidden()
+    pane.cards[change.id].apply_button.click()
     assert seen == [(change, False)]
-    pane.mark_applied(change, 'Applied: loads')
-    assert not card.apply_button.isEnabled()
-    pane.shutdown()
+    pane.finish_card(change, '')
+    assert pane.cards == {} and pane.pending_box.isHidden()
+
+
+def test_ask_switch_is_saved(qt_app, env):
+    saved = []
+    s = AgentSettings()
+    s.gemini.consent_given = True
+    pane = AssistantPane(FakeSession([]), lambda: object(), s,
+                         save_settings=lambda settings: saved.append(settings.ask_before_apply),
+                         ask_key=lambda: None, confirm_consent=lambda: True)
+    _PANES.append(pane)
+    assert not pane.ask_box.isChecked()
+    pane.ask_box.setChecked(True)
+    assert s.ask_before_apply is True and saved == [True]
+
+
+def test_ask_switch_locked_mid_turn(qt_app, env):
+    pane = _pane([], session=SlowSession([TurnEvent('done')]))
+    pane.send('x')
+    assert not pane.ask_box.isEnabled()
+    _run_until(pane.turn_finished)
+    assert pane.ask_box.isEnabled()
+
+
+def test_send_tells_the_deps_the_apply_mode(qt_app, env, tmp_path, mock_settings):
+    seen = []
+
+    class Recording(FakeSession):
+        async def run_turn(self, text, deps, emit, token):
+            seen.append(deps.direct_apply)
+    s = AgentSettings()
+    s.gemini.consent_given = True
+    pane = AssistantPane(Recording([]), lambda: make_deps(tmp_path, mock_settings), s,
+                         save_settings=lambda *a, **k: None, ask_key=lambda: None,
+                         confirm_consent=lambda: True)
+    _PANES.append(pane)
+    pane.send('a')
+    _run_until(pane.turn_finished)
+    pane.ask_box.setChecked(True)
+    pane.send('b')
+    _run_until(pane.turn_finished)
+    assert seen == [True, False]
+
+
+def test_file_card_discard_removes_it_and_says_so(qt_app, env, tmp_path, mock_settings):
+    from src.agent.changes import build_fs_changeset
+    change = build_fs_changeset(make_deps(tmp_path, mock_settings), 'mk', [('mkdir', 'materials')])
+    pane = _pane([])
+    assert pane.pending_box.isHidden()
+    pane.receive_proposal(change)
+    assert not pane.pending_box.isHidden() and change.id in pane.cards
+    pane.cards[change.id].discard_button.click()
+    assert pane.cards == {} and pane.pending_box.isHidden()
+    assert 'Discarded: mk' in pane.chat.toPlainText()
+
+
+def test_pending_strip_scrolls_only_past_three_cards(qt_app, env, tmp_path, mock_settings):
+    from PySide6.QtCore import Qt
+    from src.agent.changes import build_fs_changeset
+    deps = make_deps(tmp_path, mock_settings)
+    pane = _pane([])
+    changes = [build_fs_changeset(deps, f'mk{i}', [('mkdir', f'd{i}')]) for i in range(4)]
+    for change in changes[:3]:
+        pane.receive_proposal(change)
+    assert pane.pending_scroll.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    pane.receive_proposal(changes[3])
+    assert pane.pending_scroll.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+
+
+def test_applied_lines_offer_undo_for_the_latest_only(qt_app, env):
+    from PySide6.QtCore import QUrl
+    pane = _pane([])
+    asked = []
+    pane.undo_requested.connect(asked.append)
+    pane.add_applied_line(1, 'Set 1 field: [general] force')
+    pane.add_applied_line(2, 'Set 1 field: [general] temp')
+    pane.set_undo_state(1, 'blocked')
+    assert pane.undo_state(1) == 'blocked' and pane.undo_state(2) == 'enabled'
+    pane.chat.anchorClicked.emit(QUrl('undo:1'))
+    assert asked == []
+    pane.chat.anchorClicked.emit(QUrl('undo:2'))
+    assert asked == [2]
+    pane.set_undo_state(2, 'undone')
+    text = pane.chat.toPlainText()
+    assert 'Set 1 field: [general] force' in text and 'undone' in text
+    assert pane.chat.toPlainText().count('undo newer changes first') == 0  # tooltip only
+    assert pane.undo_tooltip(1) == 'undo newer changes first'
+
+
+def test_accept_button_emits(qt_app, env):
+    pane = _pane([])
+    accepted = []
+    pane.accept_requested.connect(lambda: accepted.append(1))
+    assert not pane.accept_button.isEnabled()
+    pane.set_accept_enabled(True)
+    pane.accept_button.click()
+    assert accepted == [1]
+
+
+def test_new_chat_announces_it(qt_app, env):
+    pane = _pane([])
+    cleared = []
+    pane.chat_cleared.connect(lambda: cleared.append(1))
+    pane.new_chat()
+    assert cleared == [1]
 
 
 def test_rate_limited_shows_retry(qt_app, env):
@@ -251,12 +368,13 @@ def test_key_store_error_shows_in_chat(qt_app, env, monkeypatch):
     assert session.texts == [] and 'disk full' in pane.chat.toPlainText()
 
 
-def test_narrow_layout_stacks_chat_above_cards(qt_app, env):
-    from PySide6.QtCore import Qt
+def test_narrow_layout_stacks_chat_pending_input(qt_app, env):
+    from PySide6.QtWidgets import QSplitter
     pane = _pane([])
-    split = pane.chat.parent()
-    assert split.orientation() == Qt.Vertical
-    assert split.indexOf(pane.chat) == 0 and split.count() == 2
+    assert pane.findChildren(QSplitter) == []
+    layout = pane.layout()
+    order = [layout.indexOf(w) for w in (pane.chat, pane.pending_box, pane.input)]
+    assert order == sorted(order) and -1 not in order
 
 
 def test_context_label_is_display_only(qt_app, env):

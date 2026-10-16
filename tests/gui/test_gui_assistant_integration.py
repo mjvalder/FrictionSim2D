@@ -153,13 +153,23 @@ def test_workspace_change_restores_its_state_and_clears_the_chat(window, tmp_pat
     assert not window.assistant_button.isChecked()
 
 
-def test_apply_sets_live_document_and_returns_to_builder(window):
-    _open_assistant(window)
+def _card_mode(pane):
+    pane.ask_box.setChecked(True)
+
+
+def test_card_apply_sets_live_document_and_stays_put(window):
+    pane = _open_assistant(window)
+    _card_mode(pane)
+    window.top_tabs.setCurrentIndex(1)
     change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [5, 10])])
-    window._apply_assistant_change(change, False)  # pylint: disable=protected-access
+    pane.receive_proposal(change)
+    pane.cards[change.id].apply_button.click()
     assert window.document.get('general', 'force') == [5, 10]
-    assert window.top_tabs.currentIndex() == 0
+    assert window.top_tabs.currentIndex() == 1
     assert window.assistant_dock.isVisibleTo(window)  # Apply leaves the dock open
+    assert pane.cards == {} and pane.pending_box.isHidden()
+    assert window.form.highlights() == {('general', 'force'): 'None → [5, 10]'}
+    assert pane.undo_state(window._assistant_undo[-1].id) == 'enabled'  # pylint: disable=protected-access
 
 
 def test_stale_apply_replaces_card(window, monkeypatch):
@@ -174,7 +184,7 @@ def test_stale_apply_replaces_card(window, monkeypatch):
     assert len(replaced) == 1 and replaced[0].id != change.id
 
 
-def test_model_change_with_unsaved_edits_asks_first(window, monkeypatch):
+def test_card_model_change_does_not_ask_and_can_be_undone(window, monkeypatch):
     _open_assistant(window)
     window.document.dirty = True
     asked = []
@@ -182,7 +192,9 @@ def test_model_change_with_unsaved_edits_asks_first(window, monkeypatch):
                         lambda *a, **k: asked.append(1) or QMessageBox.No)
     change = build_changeset(window.assistant_deps(), 'sheet', [Op('set_model', value='sheetonsheet')])
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
-    assert asked and window.document.model == 'afm'
+    assert not asked and window.document.model == 'sheetonsheet'
+    window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    assert window.document.model == 'afm' and window.document.dirty
 
 
 def test_model_change_resyncs_selectors(window, monkeypatch):
@@ -195,65 +207,77 @@ def test_model_change_resyncs_selectors(window, monkeypatch):
     assert window.mode_box.currentData() == 'sheetonsheet'
 
 
-def test_fs_apply_creates_folder(window):
+def test_fs_card_applies_and_leaves_the_strip(window):
     from src.agent.changes import build_fs_changeset
-    _open_assistant(window)
-    change = build_fs_changeset(window.assistant_deps(), 'mk', [('mkdir', 'materials')])
-    window._apply_assistant_fs_change(change)  # pylint: disable=protected-access
-    assert (window.workspace.root / 'materials').is_dir()
-
-
-def test_as_new_replaces_document_and_freezes_original_card(window, monkeypatch):
     pane = _open_assistant(window)
+    change = build_fs_changeset(window.assistant_deps(), 'mk', [('mkdir', 'materials')])
+    pane.receive_proposal(change)  # file operations ask even in direct mode
+    assert not pane.pending_box.isHidden()
+    pane.cards[change.id].apply_button.click()
+    assert (window.workspace.root / 'materials').is_dir()
+    assert pane.cards == {} and pane.pending_box.isHidden()
+    assert 'Applied: mk' in pane.chat.toPlainText()
+
+
+def test_as_new_replaces_document_and_removes_the_card(window, monkeypatch):
+    pane = _open_assistant(window)
+    _card_mode(pane)
     window.document.dirty = False
     old = window.document
     change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [7])])
-    marked = []
-    real = pane.mark_applied
-    monkeypatch.setattr(pane, 'mark_applied', lambda c, m: (marked.append(c.id), real(c, m)))
-    window._apply_assistant_change(change, True)  # pylint: disable=protected-access
+    pane.receive_proposal(change)
+    pane.cards[change.id].apply_new_button.click()
     assert window.document is not old
     assert window.document.workspace_dir == window.workspace.configs_dir
     assert window.document.get('general', 'force') == 7
-    assert marked == [change.id]
+    assert pane.cards == {}
+    window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    assert window.document.get('general', 'force') == old.get('general', 'force')
 
 
 def test_as_new_with_unsaved_edits_declined_changes_nothing(window, monkeypatch):
     pane = _open_assistant(window)
+    _card_mode(pane)
     window.document.dirty = True
     old = window.document
     monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: QMessageBox.No)
     change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [7])])
-    marked = []
-    monkeypatch.setattr(pane, 'mark_applied', lambda c, m: marked.append(c.id))
+    pane.receive_proposal(change)
     window._apply_assistant_change(change, True)  # pylint: disable=protected-access
-    assert window.document is old and not marked
+    assert window.document is old and change.id in pane.cards
     assert window.document.get('general', 'force') != 7
 
 
-def test_settings_change_refreshes_live_settings(window):
-    from src.agent.changes import Op as _Op
-    _open_assistant(window)
-    doc = window.settings_document
+def _numeric_setting(doc):
     section = next(k for k, v in doc.values.items() if isinstance(v, dict) and v)
-    key = next(k for k, v in doc.values[section].items() if isinstance(v, (int, float)) and not isinstance(v, bool))
+    key = next(k for k, v in doc.values[section].items()
+               if isinstance(v, (int, float)) and not isinstance(v, bool))
+    return section, key
+
+
+def test_settings_change_refreshes_live_settings(window):
+    pane = _open_assistant(window)
+    doc = window.settings_document
+    section, key = _numeric_setting(doc)
     new = doc.values[section][key] + 1
-    change = build_changeset(window.assistant_deps(), 's', [_Op('settings_set', section, key, new)])
-    window._apply_assistant_change(change, False)  # pylint: disable=protected-access
+    change = build_changeset(window.assistant_deps(), 's', [Op('settings_set', section, key, new)])
+    pane.receive_proposal(change)
     assert getattr(getattr(window.settings, section), key) == new
+    assert (section, key) in window.settings_form.highlights()
 
 
 def test_invalid_settings_apply_anyway_is_refused_cleanly(window):
     pane = _open_assistant(window)
+    _card_mode(pane)
     change = build_changeset(window.assistant_deps(), 's',
                              [Op('settings_set', 'simulation', 'timestep', 'abc')])
     assert not change.ok
-    pane._add_card(change)  # pylint: disable=protected-access
+    pane.receive_proposal(change)
     before = window.settings
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
     assert window.settings is before
     assert window.settings_document.get('simulation', 'timestep') != 'abc'
-    assert 'settings invalid' in pane.cards[change.id].status.text()
+    assert pane.cards == {} and 'settings invalid' in pane.chat.toPlainText()
 
 
 def test_apply_commits_pending_form_edits_first(window, monkeypatch):
@@ -266,6 +290,159 @@ def test_apply_commits_pending_form_edits_first(window, monkeypatch):
     monkeypatch.setattr(pane, 'replace_change', lambda old, new, note: replaced.append(new))
     window._apply_assistant_change(change, False)  # pylint: disable=protected-access
     assert len(replaced) == 1 and window.document.get('general', 'force') != [5]
+
+
+# ------------------------------------------------------------ direct edits
+
+def _editor(form, section, key):
+    return form.sections[section].editors[key]
+
+
+def test_direct_apply_changes_document_and_highlights_exactly_those_fields(window):
+    pane = _open_assistant(window)
+    window.top_tabs.setCurrentIndex(2)
+    before_temp = window.document.get('general', 'temp')
+    change = build_changeset(window.assistant_deps(), 'loads',
+                             [Op('set', 'general', 'force', [5, 10]),
+                              Op('set', 'general', 'temp', 250)])
+    pane.receive_proposal(change)
+    assert window.document.get('general', 'force') == [5, 10]
+    assert window.document.get('general', 'temp') == 250
+    assert window.top_tabs.currentIndex() == 2  # stays where the user is
+    marked = [(s, k) for s, f in window.form.sections.items()
+              for k, e in f.editors.items() if e.highlight()]
+    assert sorted(marked) == [('general', 'force'), ('general', 'temp')]
+    tip = _editor(window.form, 'general', 'temp').toolTip()
+    assert tip.startswith(f'Set by assistant: {before_temp!r} → 250')
+    assert pane.cards == {} and pane.pending_box.isHidden()
+    assert 'Set 2 fields: [general] force, [general] temp' in pane.chat.toPlainText()
+
+
+def test_direct_highlights_survive_rebuild_and_clear_on_user_edit(window):
+    pane = _open_assistant(window)
+    change = build_changeset(window.assistant_deps(), 'loads',
+                             [Op('set', 'general', 'force', [5]), Op('set', 'general', 'temp', 250)])
+    pane.receive_proposal(change)
+    window.form.rebuild()
+    editor = _editor(window.form, 'general', 'temp')
+    assert editor.highlight() is not None
+    editor.edit.setText('260')
+    editor.edit.textEdited.emit('260')
+    assert set(window.form.highlights()) == {('general', 'force')}
+
+
+def test_accept_clears_every_highlight(window):
+    pane = _open_assistant(window)
+    section, key = _numeric_setting(window.settings_document)
+    new = window.settings_document.values[section][key] + 1
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5])]))
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 's',
+                                          [Op('settings_set', section, key, new)]))
+    assert pane.accept_button.isEnabled()
+    pane.accept_button.click()
+    assert window.form.highlights() == {} and window.settings_form.highlights() == {}
+    assert not pane.accept_button.isEnabled()
+
+
+def test_save_clears_highlights_and_ends_undo(window, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+    pane = _open_assistant(window)
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5, 10])]))
+    entry = window._assistant_undo[-1].id  # pylint: disable=protected-access
+    target = tmp_path / 'saved.ini'
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(target), ''))
+    window._save_config()  # pylint: disable=protected-access
+    assert target.is_file()
+    assert window.form.highlights() == {}
+    assert pane.undo_state(entry) == 'locked'
+    window._undo_assistant_change(entry)  # pylint: disable=protected-access
+    assert window.document.get('general', 'force') == [5, 10]
+
+
+def test_undo_restores_document_and_settings_latest_first(window):
+    from PySide6.QtCore import QUrl
+    pane = _open_assistant(window)
+    force_before = window.document.get('general', 'force')
+    section, key = _numeric_setting(window.settings_document)
+    old_setting = window.settings_document.values[section][key]
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 'loads',
+                                          [Op('set', 'general', 'force', [5])]))
+    pane.receive_proposal(build_changeset(window.assistant_deps(), 's',
+                                          [Op('settings_set', section, key, old_setting + 1)]))
+    first, second = (e.id for e in window._assistant_undo)  # pylint: disable=protected-access
+    assert pane.undo_state(first) == 'blocked' and pane.undo_state(second) == 'enabled'
+    pane.chat.anchorClicked.emit(QUrl(f'undo:{first}'))  # older: refused
+    assert window.settings_document.values[section][key] == old_setting + 1
+    pane.chat.anchorClicked.emit(QUrl(f'undo:{second}'))
+    assert window.settings_document.values[section][key] == old_setting
+    assert getattr(getattr(window.settings, section), key) == old_setting
+    assert window.settings_form.document is window.settings_document
+    assert (section, key) not in window.settings_form.highlights()
+    assert pane.undo_state(second) == 'undone' and pane.undo_state(first) == 'enabled'
+    pane.chat.anchorClicked.emit(QUrl(f'undo:{first}'))
+    assert window.document.get('general', 'force') == force_before
+    assert window.form.document is window.document
+    assert window.form.highlights() == {}
+
+
+SW = REPO_ROOT / 'examples' / 'potentials' / 'sw' / 'sw_lammps'
+CIF = REPO_ROOT / 'examples' / 'materials'
+
+
+def _sweep(window):
+    return build_changeset(window.assistant_deps(), 'sweep', [
+        Op('material_dirs', value=(str(CIF), str(SW), '.sw')),
+        Op('materials', value=['h-MoS2', 'h-WS2']),
+        Op('set', '2D', 'pot_type', 'sw')])
+
+
+@pytest.mark.parametrize('existed', [True, False])
+def test_undo_restores_the_material_list_file(window, existed):
+    pane = _open_assistant(window)
+    target = window.workspace.configs_dir / 'materials.txt'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if existed:
+        target.write_bytes(b'old-list\n')
+    pane.receive_proposal(_sweep(window))
+    assert 'h-WS2' in target.read_text()
+    window._undo_assistant_change(window._assistant_undo[-1].id)  # pylint: disable=protected-access
+    if existed:
+        assert target.read_bytes() == b'old-list\n'
+    else:
+        assert not target.exists()
+
+
+def test_stale_direct_apply_is_rechecked_and_applied(window):
+    pane = _open_assistant(window)
+    change = build_changeset(window.assistant_deps(), 'loads', [Op('set', 'general', 'force', [5, 10])])
+    window.document.set('general', 'temp', 123)
+    window.form.rebuild()  # the user edited while the turn ran
+    pane.receive_proposal(change)
+    assert window.document.get('general', 'force') == [5, 10]
+    assert window.document.get('general', 'temp') == 123
+    assert 're-checked' in pane.chat.toPlainText()
+
+
+def test_tool_input_error_is_a_red_line_and_changes_nothing(window):
+    from src.agent.changes import ChangeSet
+    pane = _open_assistant(window)
+    before = dict(window.document.values.get('2D') or {})
+    change = ChangeSet(id='bad001', title='bad path', notes=[], base_fingerprint='stale',
+                       ops=[Op('set', '2D', 'materials_list', '/etc/passwd')])
+    pane.receive_proposal(change)
+    assert dict(window.document.values.get('2D') or {}) == before
+    assert window._assistant_undo == []  # pylint: disable=protected-access
+    assert 'Not applied' in pane.chat.toPlainText() and '#bb0000' in pane.chat.toHtml().lower()
+
+
+def test_ask_switch_is_persisted(window, tmp_path):
+    from src.agent.settings import load_agent_settings
+    pane = _open_assistant(window)
+    pane.ask_box.setChecked(True)
+    assert load_agent_settings().ask_before_apply is True
+    assert load_agent_settings(tmp_path / 'cfg' / 'FrictionSim2D' / 'agent.yaml').ask_before_apply
 
 
 def test_toggle_button_is_visible_on_every_tab(window):
