@@ -33,7 +33,8 @@ from ..config_validation import ConfigIssue, ConfigValidation, validate_config
 from ...run.placeholders import has_template_marker, substitute_materials
 from ...run.expand import (
     ExpansionSummary, count_expansion, expand_config_sweeps,
-    missing_pressure, outer_loop_conflict, read_material_entries, read_material_list,
+    missing_pressure, outer_loop_conflict, preflight_material_pairs,
+    preflight_materials, read_material_entries, read_material_list,
 )
 from ...run.naming import loopability, output_dir_for
 from ...core.utils.paths import _find_existing  # noqa: PLC2701
@@ -673,7 +674,7 @@ class ConfigDocument:
 
     def _probe_issues(self, payload: Dict[str, Any],
                       known: List[ConfigIssue]) -> List[ConfigIssue]:
-        """Issues the templated config has once its first entry is substituted.
+        """Issues the templated config has once its first usable entry is substituted.
 
         The templated payload alone cannot be validated past its paths: the
         literal `{mat}.cif` makes the path validator raise, pydantic abandons
@@ -683,6 +684,13 @@ class ConfigDocument:
         sweep that cannot build reads as one. Sections and keys are unchanged
         by substitution, so each issue already names the templated field.
 
+        The entry probed is the first one expansion's own preflight
+        (`preflight_materials` / `preflight_material_pairs`) would keep: an
+        entry whose files are missing is skipped there with a warning, not
+        failed, so it must not gate Generate here either. Only when no entry is
+        usable is the first one probed -- the sweep then cannot build at all,
+        and its missing files are the issues to show.
+
         Returns nothing new when the list is empty or unreadable -- there is
         then nothing to probe with -- and never an `unexpanded_template` issue
         (a `{mat2}` on a single-material entry), which stays pending.
@@ -690,7 +698,7 @@ class ConfigDocument:
         entries = self.material_entries()
         if not entries:
             return []
-        first = entries[0]
+        first = self._first_usable_entry(entries)
         mat1, mat2 = first[0], (first[1] if len(first) > 1 else None)
 
         def fill(value: Any) -> Any:
@@ -714,6 +722,19 @@ class ConfigDocument:
             seen.add(marker)
             out.append(issue)
         return out
+
+    def _first_usable_entry(self, entries: List[Tuple[str, ...]]) -> Tuple[str, ...]:
+        """The first entry expansion's preflight would build, else the first."""
+        primary = self.values.get('2D') or {}
+        if len(entries[0]) > 1:
+            second = self.values.get(self.SECOND_SHEET) or {}
+            usable = preflight_material_pairs(
+                [e for e in entries if len(e) == 2], primary, second,
+                self.base_dir).usable
+        else:
+            usable = [(m,) for m in preflight_materials(
+                [e[0] for e in entries], primary, self.base_dir).usable]
+        return tuple(usable[0]) if usable else entries[0]
 
     def _issues_for_form(self, issues: List[ConfigIssue]) -> List[ConfigIssue]:
         """Re-address validated-config issues to the sections the form shows.

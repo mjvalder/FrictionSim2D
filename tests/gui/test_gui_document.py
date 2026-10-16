@@ -406,12 +406,26 @@ class TestSweepProbe:
         assert result.ok, result.render()
         assert document.pending_template_issues
 
-    def test_a_pair_sweep_probes_its_first_pair(self, monkeypatch, tmp_path):
-        """The second member of the first line fills `{mat2}`: naming one with
-        no structure file must surface as a `[2D-2]` problem."""
+    def test_a_pair_sweep_probes_its_first_usable_pair(self, monkeypatch, tmp_path):
+        """Expansion's preflight skips a pair whose files are missing (with a
+        warning) and builds the rest, so the probe must too: a bad first pair
+        followed by a good one is a sweep that builds."""
         monkeypatch.chdir(REPO_ROOT)
         pairs = tmp_path / 'pairs.txt'
         pairs.write_text('h-MoS2 + no-such-mat\nh-MoSe2 + h-WSe2\n',
+                         encoding='utf-8')
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
+        document.set('2D', 'materials_list', str(pairs))
+        result = document.validate()
+        assert result.ok, result.render()
+
+    def test_a_pair_sweep_with_no_usable_pair_is_flagged(self, monkeypatch, tmp_path):
+        """Nothing the preflight would keep: the first pair is probed, and its
+        missing second member surfaces as a `[2D-2]` problem."""
+        monkeypatch.chdir(REPO_ROOT)
+        pairs = tmp_path / 'pairs.txt'
+        pairs.write_text('h-MoS2 + no-such-mat\nh-MoSe2 + also-missing\n',
                          encoding='utf-8')
         document = ConfigDocument.from_file(
             EXAMPLES / 'hetero_pair_sweep.ini', 'sheetonsheet')
@@ -421,6 +435,20 @@ class TestSweepProbe:
         flagged = result.issues_for('2D-2', 'cif_path')
         assert flagged and 'no-such-mat' in flagged[0].message, result.render()
         assert not result.issues_for('2D', 'cif_path'), result.render()
+
+    def test_a_single_sweep_skips_a_missing_first_material(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(REPO_ROOT)
+        document = self._afm_sweep(tmp_path, ['no-such-mat', 'h-MoS2'], complete=True)
+        result = document.validate()
+        assert result.ok, result.render()
+
+    def test_a_single_sweep_with_nothing_usable_is_flagged(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(REPO_ROOT)
+        document = self._afm_sweep(tmp_path, ['no-such-mat', 'nor-this'], complete=True)
+        result = document.validate()
+        assert not result.ok
+        flagged = result.issues_for('2D', 'cif_path')
+        assert flagged and 'no-such-mat' in flagged[0].message, result.render()
 
     def test_an_empty_list_validates_as_before(self, monkeypatch, tmp_path):
         """Nothing to probe with: the templates stay pending and nothing else
