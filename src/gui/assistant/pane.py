@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBox
                                QVBoxLayout, QWidget)
 
 from ...agent.changes import FsChangeSet
-from ...agent.ollama_server import OllamaServer
+from ...agent.ollama_server import is_local
 from ...agent.providers import (model_installed, ollama_binary, ollama_models,
                                 ollama_start_command)
 from ...agent.settings import (AgentSettings, fallback_ollama_model, gemini_key,
@@ -42,6 +42,8 @@ CONSENT_TEXT = (
 
 #: How often the idle check runs (a server the pane started stops when idle).
 IDLE_CHECK_MS = 60_000
+#: SIGTERM grace for our Ollama server when the window closes.
+SHUTDOWN_GRACE = 1.0
 #: Characters the model box always shows ("llama3.1:8b" and shorter fit).
 MODEL_BOX_CHARS = 14
 #: Cards shown in the Pending strip before it scrolls.
@@ -75,7 +77,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     #: An Ollama start/check finished: whether it is ready for a turn.
     ollama_checked = Signal(bool)
     _start_turn = Signal(str, object, object, int)
-    _ollama_started = Signal(bool, str, object)  # (ok, message, installed models)
+    #: A pool task finished: (kind, ok, message, installed models).
+    _ollama_result = Signal(str, bool, str, object)
 
     def __init__(self, session, deps_factory: Callable[[], object],
                  settings: AgentSettings, parent=None, *,
@@ -84,7 +87,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                  confirm_consent: Optional[Callable[[], bool]] = None,
                  store_key=store_gemini_key,
                  start_command_fn=ollama_start_command,
-                 ollama_server=None, models_fn=ollama_models) -> None:
+                 ollama_server, models_fn=ollama_models) -> None:
         super().__init__(parent)
         self.session = session
         self.settings = settings
@@ -92,10 +95,12 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._save_settings = save_settings
         self._store_key = store_key
         self._start_command_fn = start_command_fn
-        self._server = ollama_server if ollama_server is not None else OllamaServer()
+        self._server = ollama_server  # an OllamaServer (the window's) or a test fake
         self._models_fn = models_fn
         self._ollama_ready = False
         self._ollama_starting = False
+        self._ollama_checking = False
+        self._idle_checking = False
         self._ollama_problem = ''  # why it is not ready, for Details
         self._installed = []
         self._pending_text: Optional[str] = None  # sent once Ollama is up
@@ -120,7 +125,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._thread.finished.connect(self._worker.close, Qt.DirectConnection)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.start()
-        self._ollama_started.connect(self._on_ollama_started)
+        self._ollama_result.connect(self._on_ollama_result)
         self.idle_timer = QTimer(self)
         self.idle_timer.setInterval(IDLE_CHECK_MS)
         self.idle_timer.timeout.connect(self._check_idle)
@@ -305,9 +310,48 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     # -------------------------------------------------------------- ollama
 
+    def _run_ollama_task(self, kind: str, work: Callable[[], tuple]) -> None:
+        """Run ``work`` -> (ok, message, installed) on a pool thread, never the GUI's."""
+        done = self._ollama_result
+
+        def task() -> None:
+            try:
+                ok, message, installed = work()
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception('Ollama %s failed', kind)
+                ok, message, installed = False, f'Ollama {kind} failed: {exc}', None
+            try:
+                done.emit(kind, ok, message, installed)
+            except RuntimeError:  # the pane is gone (window closed meanwhile)
+                pass
+        QThreadPool.globalInstance().start(task)
+
     def _check_ollama(self) -> None:
-        """Ask a running Ollama for its models (Check again); never starts it."""
-        self._show_ollama(self._models_fn(self.settings))
+        """Ask a running Ollama for its models (start-up, Check again); never starts it."""
+        if self._ollama_starting or self._ollama_checking:
+            return
+        self._ollama_checking = True
+        self._set_status('Checking Ollama…')
+        settings, models_fn = self.settings, self._models_fn
+        self._run_ollama_task('check', lambda: (True, '', models_fn(settings)))
+
+    def _on_ollama_result(self, kind: str, ok: bool, message: str, installed) -> None:
+        if kind == 'start':
+            self._on_ollama_started(ok, message, installed)
+            return
+        if kind == 'check':
+            self._ollama_checking = False
+            if self.settings.provider == 'ollama' and not self._ollama_starting:
+                self._show_ollama(installed)
+        elif kind == 'idle':
+            self._idle_checking = False
+            if not ok:
+                return
+            self._ollama_ready = False
+            if self.settings.provider == 'ollama':
+                self._set_status(f'Ollama stopped after {self.settings.ollama.idle_minutes} '
+                                 'min idle (starts again on your next message)')
+        self.ollama_checked.emit(self._ollama_ready)
 
     def _show_ollama(self, installed) -> None:
         """Status from the installed model list (None: not running)."""
@@ -315,7 +359,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self._ollama_ready = False
             self._ollama_problem = ''
             self._fill_models(self._installed)
-            self._set_status('Ollama not running — starts on your next message')
+            self._set_status('Ollama not running — starts on your next message'
+                             if is_local(self.settings) else
+                             f'Ollama at {self.settings.ollama.base_url} is unreachable')
             return
         self._installed = list(installed)
         note = fallback_ollama_model(self.settings, self._installed)
@@ -346,25 +392,19 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._ollama_starting = True
         self._set_status('Starting Ollama…')
         server, settings, models_fn = self._server, self.settings, self._models_fn
-        done = self._ollama_started
 
-        def task() -> None:
-            try:
-                ok, message = server.ensure_running(settings)
-                installed = models_fn(settings) if ok else None
-                if ok and installed is None:
-                    ok, message = False, 'Ollama started but does not list its models.'
-            except Exception as exc:  # pylint: disable=broad-except
-                logger.exception('starting Ollama failed')
-                ok, message, installed = False, f'Could not start Ollama: {exc}', None
-            try:
-                done.emit(ok, message, installed)
-            except RuntimeError:  # the pane is gone (window closed meanwhile)
-                pass
-        QThreadPool.globalInstance().start(task)
+        def work() -> tuple:
+            ok, message = server.ensure_running(settings)
+            installed = models_fn(settings) if ok else None
+            if ok and installed is None:
+                ok, message = False, 'Ollama started but does not list its models.'
+            return ok, message, installed
+        self._run_ollama_task('start', work)
 
     def _on_ollama_started(self, ok: bool, message: str, installed) -> None:
         self._ollama_starting = False
+        self._ollama_checking = False
+        self._idle_checking = False
         pending, self._pending_text = self._pending_text, None
         if self.settings.provider != 'ollama':
             if pending and not self.input.toPlainText().strip():
@@ -388,13 +428,12 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.ollama_checked.emit(self._ollama_ready)
 
     def _check_idle(self) -> None:
-        if self._busy or self._ollama_starting:
+        """Timer tick: stop our idle server on a pool thread (it waits for the exit)."""
+        if self._busy or self._ollama_starting or self._idle_checking:
             return
-        if self._server.stop_if_idle():
-            self._ollama_ready = False
-            if self.settings.provider == 'ollama':
-                self._set_status(f'Ollama stopped after {self.settings.ollama.idle_minutes} '
-                                 'min idle (starts again on your next message)')
+        self._idle_checking = True
+        server = self._server
+        self._run_ollama_task('idle', lambda: (server.stop_if_idle(), '', None))
 
     def _append(self, text: str, style: str = '') -> None:
         self._text_open = False
@@ -539,6 +578,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self.requests_label.setText(f'requests: {self._requests}')
         elif event.kind == 'error':
             self._append(event.text, 'color:#b00')
+            if event.payload in ('unreachable', 'unavailable') \
+                    and self.settings.provider == 'ollama':
+                self._show_ollama(None)  # not ready: the next Send starts it again
             if event.payload == 'rate_limited':
                 self.retry_button.setEnabled(False)
                 self.retry_button.show()
@@ -715,7 +757,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         """Stop the Ollama server the pane started (never one it did not)."""
         self.idle_timer.stop()
         try:
-            self._server.stop()
+            self._server.stop(grace=SHUTDOWN_GRACE)
         except Exception:  # pylint: disable=broad-except
             logger.exception('stopping Ollama failed')
 

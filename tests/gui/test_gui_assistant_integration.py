@@ -66,6 +66,14 @@ def test_dock_is_hidden_and_unbuilt_at_startup(window):
     assert window._assistant_pane is None  # pylint: disable=protected-access
 
 
+def test_window_hands_the_pane_a_real_ollama_server(window):
+    from src.agent.ollama_server import OllamaServer
+    window.assistant_button.click()
+    pane = window._assistant_pane  # pylint: disable=protected-access
+    assert isinstance(pane._server, OllamaServer)  # pylint: disable=protected-access
+    assert not pane._server.started_by_us  # Gemini default: nothing was started
+
+
 def test_dock_sits_beside_the_tabs_not_inside_them(window):
     assert window.main_splitter.indexOf(window.top_tabs) == 0
     assert window.main_splitter.indexOf(window.assistant_dock) == 1

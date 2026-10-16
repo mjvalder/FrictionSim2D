@@ -417,12 +417,13 @@ class MainWindow(QMainWindow):
                 'The Assistant needs the optional "agent" extra (Python 3.11+):\n'
                 '  pip install -e ".[agent]"')
         # pylint: disable=import-outside-toplevel
+        from ..agent.ollama_server import OllamaServer
         from ..agent.runtime import AgentSession
         from ..agent.settings import load_agent_settings
         from .assistant.pane import AssistantPane
         settings = (self._agent_settings_loader or load_agent_settings)()
         pane = AssistantPane(AgentSession(settings), self.assistant_deps, settings,
-                             self.assistant_dock)
+                             self.assistant_dock, ollama_server=OllamaServer())
         pane.apply_requested.connect(self._apply_assistant_change)
         pane.fs_apply_requested.connect(self._apply_assistant_fs_change)
         pane.change_proposed.connect(self._apply_assistant_change_now)

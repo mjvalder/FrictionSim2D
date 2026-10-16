@@ -53,7 +53,13 @@ OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE=2m` and `OLLAMA_CONTEXT_LENGTH` from
 A server the Assistant started is stopped after `ollama.idle_minutes`
 (default 10) without a reply, and when the window closes; the status then
 reads `Ollama stopped after N min idle (starts again on your next message)`.
-**A server you started yourself is never stopped.**
+It is not stopped while a model is still loaded (another window or client
+used it in the last couple of minutes). It also ends if the GUI crashes or is
+killed; if it survives anyway, its pid is in `~/.cache/FrictionSim2D/ollama.pid`
+and the next session takes it over. **A server you started yourself is never
+stopped.** Only a server on this machine (`localhost`, `127.0.0.1`, `::1` in
+`ollama.base_url`) is ever started; a remote one is reported unreachable. If
+the port answers but is not Ollama, the status says so and nothing is started.
 
 ### Status line
 

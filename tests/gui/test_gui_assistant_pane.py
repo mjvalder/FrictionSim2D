@@ -107,8 +107,9 @@ class FakeServer:
     def stop_if_idle(self, now=None):
         return self.idle
 
-    def stop(self):
+    def stop(self, grace=5.0):
         self.stopped += 1
+        self.grace = grace
 
 
 def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None,
@@ -121,6 +122,8 @@ def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=
                          confirm_consent=lambda: True, ollama_server=server or FakeServer(),
                          models_fn=models_fn, **kwargs)
     _PANES.append(pane)
+    if s.provider == 'ollama':
+        assert _run_until(pane.ollama_checked)  # the status check runs off the GUI thread
     return pane
 
 
@@ -170,7 +173,8 @@ def test_ask_switch_is_saved(qt_app, env):
     s.gemini.consent_given = True
     pane = AssistantPane(FakeSession([]), lambda: object(), s,
                          save_settings=lambda settings: saved.append(settings.ask_before_apply),
-                         ask_key=lambda: None, confirm_consent=lambda: True)
+                         ask_key=lambda: None, confirm_consent=lambda: True,
+                         ollama_server=FakeServer())
     _PANES.append(pane)
     assert not pane.ask_box.isChecked()
     pane.ask_box.setChecked(True)
@@ -195,7 +199,7 @@ def test_send_tells_the_deps_the_apply_mode(qt_app, env, tmp_path, mock_settings
     s.gemini.consent_given = True
     pane = AssistantPane(Recording([]), lambda: make_deps(tmp_path, mock_settings), s,
                          save_settings=lambda *a, **k: None, ask_key=lambda: None,
-                         confirm_consent=lambda: True)
+                         confirm_consent=lambda: True, ollama_server=FakeServer())
     _PANES.append(pane)
     pane.send('a')
     _run_until(pane.turn_finished)
@@ -281,7 +285,8 @@ def test_no_consent_no_turn(qt_app, env):
     session = FakeSession([TurnEvent('done')])
     s = AgentSettings()
     pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
-                         ask_key=lambda: None, confirm_consent=lambda: False)
+                         ask_key=lambda: None, confirm_consent=lambda: False,
+                         ollama_server=FakeServer())
     pane.send('x')
     QApplication.processEvents()
     assert session.texts == [] and not s.gemini.consent_given
@@ -293,7 +298,7 @@ def test_missing_key_declined_no_turn(qt_app, env, monkeypatch):
     session = FakeSession([TurnEvent('done')])
     pane = AssistantPane(session, lambda: object(), AgentSettings(),
                          save_settings=lambda *a, **k: None, ask_key=lambda: None,
-                         confirm_consent=lambda: True)
+                         confirm_consent=lambda: True, ollama_server=FakeServer())
     pane.send('x')
     QApplication.processEvents()
     assert session.texts == []
@@ -390,7 +395,8 @@ def test_key_store_error_shows_in_chat(qt_app, env, monkeypatch):
     s = AgentSettings()
     s.gemini.consent_given = True
     pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
-                         ask_key=lambda: 'k', confirm_consent=lambda: True, store_key=broken)
+                         ask_key=lambda: 'k', confirm_consent=lambda: True, store_key=broken,
+                         ollama_server=FakeServer())
     _PANES.append(pane)
     pane.send('x')
     QApplication.processEvents()
@@ -484,6 +490,7 @@ def test_check_again_reruns_the_status_check(qt_app, env):
     assert pane.status_label.text().startswith('Ollama not running')
     state['models'] = ['qwen3:4b']
     pane.check_button.click()
+    assert _run_until(pane.ollama_checked) == [(True,)]
     assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
     assert server.ensured == 0  # checking never starts anything
 
@@ -551,6 +558,7 @@ def test_idle_timer_stop_updates_the_status(qt_app, env):
     assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
     server.idle = True
     pane.idle_timer.timeout.emit()
+    assert _run_until(pane.ollama_checked) == [(False,)]
     assert pane.status_label.text() == ('Ollama stopped after 7 min idle '
                                         '(starts again on your next message)')
     pane.send('x')  # not ready any more: starting again comes first
@@ -565,7 +573,71 @@ def test_shutdown_stops_our_server(qt_app, env):
                          save_settings=lambda *a, **k: None, ask_key=lambda: None,
                          confirm_consent=lambda: True, ollama_server=server)
     pane.shutdown()
-    assert server.stopped == 1
+    assert server.stopped == 1 and server.grace <= 1.0  # closing never waits 5 s
+
+
+def test_ollama_server_is_a_required_keyword(qt_app, env):
+    with pytest.raises(TypeError):
+        AssistantPane(FakeSession([]), lambda: object(), AgentSettings(),
+                      save_settings=lambda *a, **k: None)
+
+
+class SlowServer(FakeServer):
+    def ensure_running(self, settings):
+        import time
+        time.sleep(0.5)
+        return super().ensure_running(settings)
+
+    def stop_if_idle(self, now=None):
+        import time
+        time.sleep(0.5)
+        return True
+
+
+def _slow_models(_settings):
+    import time
+    time.sleep(0.5)
+    return ['qwen3:4b']
+
+
+def test_ollama_checks_never_block_the_gui(qt_app, env):
+    import time
+    server = SlowServer()
+    t0 = time.monotonic()
+    pane = AssistantPane(FakeSession([]), lambda: object(), AgentSettings(provider='ollama'),
+                         save_settings=lambda *a, **k: None, ollama_server=server,
+                         models_fn=_slow_models)
+    _PANES.append(pane)
+    assert time.monotonic() - t0 < 0.2
+    assert pane.status_label.text() == 'Checking Ollama…'
+    assert _run_until(pane.ollama_checked) == [(True,)]
+    for action in (pane.check_button.click, pane.idle_timer.timeout.emit, pane.new_chat):
+        t0 = time.monotonic()
+        action()
+        assert time.monotonic() - t0 < 0.2, action
+        assert _run_until(pane.ollama_checked)
+
+
+def test_unreachable_turn_resets_ready_so_the_next_send_starts_it(qt_app, env):
+    server = FakeServer()
+    session = FakeSession([TurnEvent('error', 'Could not reach the ollama server.',
+                                     payload='unreachable')])
+    pane = _pane([], settings=AgentSettings(provider='ollama'), session=session,
+                 server=server, models_fn=lambda s: ['qwen3:4b'])
+    pane.send('one')
+    assert _run_until(pane.turn_finished) and session.texts == ['one']
+    assert pane.status_label.text().startswith('Ollama not running')
+    session.events = [TurnEvent('done', payload=1)]
+    pane.send('two')
+    assert _run_until(pane.turn_finished)
+    assert server.ensured == 1 and session.texts == ['one', 'two']
+
+
+def test_remote_server_status_says_unreachable(qt_app, env):
+    s = AgentSettings(provider='ollama')
+    s.ollama.base_url = 'http://gpu-box.lan:11434'
+    pane = _pane([], settings=s)
+    assert pane.status_label.text() == 'Ollama at http://gpu-box.lan:11434 is unreachable'
 
 
 def test_model_combo_lists_installed_models_and_fits(qt_app, env):
