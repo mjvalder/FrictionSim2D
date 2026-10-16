@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_DIR = REPO / 'tests' / 'agent' / 'evals' / '.results'
@@ -63,8 +63,33 @@ def model_name(env: EvalEnv) -> str:
     return defaults.ollama.model if env.provider == 'ollama' else defaults.gemini.model
 
 
-def build_session(env: EvalEnv):
-    """An `AgentSession` for ``env``; raises `ProviderUnavailable` when it cannot run."""
+#: Models already warmed up in this process (a cold Ollama load is not a turn).
+_WARMED: set = set()
+WARM_UP_PROMPT = 'Reply with the single word OK.'
+
+
+def warm_up(session, deps) -> bool:
+    """Run one unrecorded turn, once per process and model, then forget it.
+
+    Returns whether it ran. ``deps`` is left as it was found (no pending changes).
+    """
+    key = (session.settings.provider, getattr(session.agent.model, 'model_name', ''))
+    if key in _WARMED:
+        return False
+    _WARMED.add(key)
+    asyncio.run(session.run_turn(WARM_UP_PROMPT, deps, lambda event: None,
+                                 session.new_token()))
+    session.new_chat()
+    deps.pending.clear()
+    return True
+
+
+def build_session(env: EvalEnv, deps=None):
+    """An `AgentSession` for ``env``; raises `ProviderUnavailable` when it cannot run.
+
+    For Ollama with ``deps`` given, the first session of the process runs one
+    unrecorded warm-up turn (`warm_up`), so the model load is not timed.
+    """
     # pylint: disable=import-outside-toplevel
     from src.agent.providers import ProviderUnavailable, build_model, ollama_status
     from src.agent.runtime import AgentSession
@@ -85,7 +110,10 @@ def build_session(env: EvalEnv):
         ok, message = ollama_status(settings)
         if not ok:
             raise ProviderUnavailable(message)
-        return AgentSession(settings)
+        session = AgentSession(settings)
+        if deps is not None:
+            warm_up(session, deps)
+        return session
     return AgentSession(settings, model=build_model(settings))
 
 
@@ -99,7 +127,13 @@ class EvalResult:
     events: List[Any] = field(default_factory=list)
     latency_s: float = 0.0
     requests: int = 0
-    tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    @property
+    def tokens(self) -> int:
+        """Input plus output tokens."""
+        return self.input_tokens + self.output_tokens
 
     @property
     def pending(self) -> List[Any]:
@@ -122,8 +156,8 @@ class EvalResult:
         return [e for e in self.events if e.kind == 'error']
 
 
-def turn_tokens(history: Sequence[Any]) -> int:
-    """Input + output tokens of the model responses in the latest turn."""
+def turn_tokens(history: Sequence[Any]) -> Tuple[int, int]:
+    """``(input, output)`` tokens of the model responses in the latest turn."""
     # pylint: disable=import-outside-toplevel
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart
     start = 0
@@ -131,11 +165,12 @@ def turn_tokens(history: Sequence[Any]) -> int:
         if isinstance(message, ModelRequest) and any(
                 isinstance(p, UserPromptPart) for p in message.parts):
             start = index
-    total = 0
+    tokens_in = tokens_out = 0
     for message in history[start:]:
         if isinstance(message, ModelResponse) and message.usage is not None:
-            total += (message.usage.input_tokens or 0) + (message.usage.output_tokens or 0)
-    return total
+            tokens_in += message.usage.input_tokens or 0
+            tokens_out += message.usage.output_tokens or 0
+    return tokens_in, tokens_out
 
 
 def run_eval_turn(session, prompt: str, deps) -> EvalResult:
@@ -146,7 +181,8 @@ def run_eval_turn(session, prompt: str, deps) -> EvalResult:
     result.latency_s = time.perf_counter() - start
     done = [e for e in result.events if e.kind == 'done']
     result.requests = int(done[-1].payload or 0) if done else 0
-    result.tokens = turn_tokens(session.history) if done else 0
+    if done:
+        result.input_tokens, result.output_tokens = turn_tokens(session.history)
     return result
 
 
@@ -169,27 +205,38 @@ def _mean(values: Sequence[float]) -> Optional[float]:
     return sum(values) / len(values) if values else None
 
 
-def summarise(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Pass rate per case and overall (skips excluded), latency and usage."""
-    cases: Dict[str, Dict[str, Any]] = {}
+def _tally(records: Sequence[Dict[str, Any]], key: str) -> Dict[str, Dict[str, Any]]:
+    rows: Dict[str, Dict[str, Any]] = {}
     for record in records:
-        row = cases.setdefault(record['case'], {'runs': 0, 'passed': 0, 'failed': 0,
-                                                'skipped': 0})
+        row = rows.setdefault(record.get(key) or '-', {'runs': 0, 'passed': 0, 'failed': 0,
+                                                       'skipped': 0})
         row['runs'] += 1
         row[record['outcome']] += 1
-    for row in cases.values():
+    for row in rows.values():
         row['pass_rate'] = _rate(row['passed'], row['failed'])
+    return dict(sorted(rows.items()))
+
+
+def summarise(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pass rate per case, per group and overall (skips excluded), latency
+    (all turns, and warm: without each session's cold first turn) and usage."""
+    cases = _tally(records, 'case')
     passed = sum(r['passed'] for r in cases.values())
     failed = sum(r['failed'] for r in cases.values())
     ran = [r for r in records if r['outcome'] != 'skipped']
     latencies = [r['latency_s'] for r in ran]
-    return {'cases': dict(sorted(cases.items())),
+    warm = [r['latency_s'] for r in ran if not r.get('cold')]
+    return {'cases': cases, 'groups': _tally(records, 'group'),
             'overall': {'runs': len(records), 'passed': passed, 'failed': failed,
                         'skipped': len(records) - len(ran), 'pass_rate': _rate(passed, failed)},
             'latency_p50_s': percentile(latencies, 50),
             'latency_p95_s': percentile(latencies, 95),
+            'latency_p50_warm_s': percentile(warm, 50),
+            'latency_p95_warm_s': percentile(warm, 95),
             'mean_requests': _mean([r['requests'] for r in ran]),
-            'mean_tokens': _mean([r['tokens'] for r in ran])}
+            'mean_tokens': _mean([r['tokens'] for r in ran]),
+            'mean_input_tokens': _mean([r.get('input_tokens', 0) for r in ran]),
+            'mean_output_tokens': _mean([r.get('output_tokens', 0) for r in ran])}
 
 
 def _pct(rate: Optional[float]) -> str:
@@ -201,18 +248,27 @@ def _num(value: Optional[float], spec: str) -> str:
 
 
 def format_table(summary: Dict[str, Any], provider: str, model: str) -> str:
-    """The session-end table: one line per case, then the totals."""
-    width = max([len('overall')] + [len(name) for name in summary['cases']])
+    """The session-end table: cases, groups, overall, then latency and usage."""
+    groups = summary.get('groups', {})
+    width = max([len('overall')] + [len(name) for name in summary['cases']]
+                + [len(f'[{name}]') for name in groups])
     lines = [f'agent eval: {provider} / {model}',
              f"{'case':<{width}}  {'pass':>5}  {'runs':>4}  {'skip':>4}"]
-    rows = list(summary['cases'].items()) + [('overall', summary['overall'])]
+    rows = (list(summary['cases'].items())
+            + [(f'[{name}]', row) for name, row in groups.items()]
+            + [('overall', summary['overall'])])
     for name, row in rows:
         lines.append(f"{name:<{width}}  {_pct(row['pass_rate']):>5}  {row['runs']:>4}  "
                      f"{row['skipped']:>4}")
-    lines.append(f"latency p50 {_num(summary['latency_p50_s'], '.1f')} s, "
-                 f"p95 {_num(summary['latency_p95_s'], '.1f')} s; per turn: "
-                 f"{_num(summary['mean_requests'], '.1f')} requests, "
-                 f"{_num(summary['mean_tokens'], '.0f')} tokens")
+    skipped = summary['overall']['skipped']
+    if skipped:
+        lines.append(f'pass rate not comparable: {skipped} skipped')
+    lines.append(f"latency warm p50 {_num(summary.get('latency_p50_warm_s'), '.1f')} s, "
+                 f"warm p95 {_num(summary.get('latency_p95_warm_s'), '.1f')} s "
+                 f"(all turns p95 {_num(summary['latency_p95_s'], '.1f')} s)")
+    lines.append(f"per turn: {_num(summary['mean_requests'], '.1f')} requests, "
+                 f"{_num(summary.get('mean_input_tokens'), '.0f')} input tokens, "
+                 f"{_num(summary.get('mean_output_tokens'), '.0f')} output tokens")
     return '\n'.join(lines)
 
 

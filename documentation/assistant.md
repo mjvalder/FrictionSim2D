@@ -175,11 +175,24 @@ and the result is written to the chat.
     pytest tests/agent -q                                  # no network
     pytest tests/agent/evals -m agent_eval                 # live model
 
-The eval tier judges one provider/model on ~60 cases (setup per family,
-parameters, sweeps and reference load bands, materials, workspace, analysis
-and plots, Materials Project against a fake client, and must-ask prompts).
+The eval tier judges one provider/model on ~60 cases in groups (setup,
+params, sweeps, materials, workspace, analysis, materials_db, must_ask,
+declines): setup per family, parameters, sweeps and reference load bands,
+materials, workspace, analysis and plots, Materials Project against a fake
+client, prompts that must be asked back, and requests that must be declined.
 Switches: `AGENT_EVAL_PROVIDER` (`gemini` default, `ollama`), `AGENT_EVAL_MODEL`,
 `AGENT_EVAL_REPEATS` (default 3), `AGENT_EVAL_PAUSE` (seconds between turns).
 Each run writes `tests/agent/evals/.results/<provider>-<model>-<timestamp>.json`
-(gitignored) and prints pass rate per case and overall, p50/p95 latency, and
-mean requests and tokens per turn. A rate-limited turn is skipped, not failed.
+(gitignored; failed runs keep what the model did) and prints pass rates per
+case, per group and overall, warm p50/p95 latency (the first, cold turn left
+out; Ollama also gets one unrecorded warm-up turn), and mean requests and
+input/output tokens per turn. A rate-limited turn is skipped, not failed, and
+the table then says the pass rate is not comparable.
+
+On the Gemini free tier a full run (cases x 3 repeats) exhausts the daily
+quota. Use one repeat, one group at a time, and a pause between turns:
+
+    AGENT_EVAL_REPEATS=1 AGENT_EVAL_PAUSE=20 pytest tests/agent/evals -m agent_eval -k "afm_ or sheet_"
+    AGENT_EVAL_REPEATS=1 AGENT_EVAL_PAUSE=20 pytest tests/agent/evals -m agent_eval -k "plot_ or summarise"
+
+(`-k` matches case names; the group of each case is in `tests/agent/evals/cases.py`.)

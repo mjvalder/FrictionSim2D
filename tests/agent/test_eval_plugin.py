@@ -12,15 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.agent_eval import (eval_env, format_table, percentile, results_path,
-                                      summarise)
+from tests.helpers.agent_eval import (FUNCTION_PROVIDER, EvalEnv, build_session, eval_env,
+                                      format_table, percentile, results_path, summarise,
+                                      warm_up)
+from tests.helpers.agent import make_deps
 
 REPO = Path(__file__).resolve().parents[2]
+FUNCTION_REPLY_SNIPPET = 'which one you mean'
 
 
-def _rec(case, outcome, latency=1.0, requests=2, tokens=100, repeat=0):
-    return {'case': case, 'repeat': repeat, 'outcome': outcome, 'latency_s': latency,
-            'requests': requests, 'tokens': tokens, 'message': ''}
+def _rec(case, outcome, latency=1.0, requests=2, tokens=100, repeat=0, group='g',
+         cold=False, input_tokens=None, output_tokens=0):
+    return {'case': case, 'group': group, 'repeat': repeat, 'outcome': outcome,
+            'latency_s': latency, 'cold': cold, 'requests': requests, 'tokens': tokens,
+            'input_tokens': tokens if input_tokens is None else input_tokens,
+            'output_tokens': output_tokens, 'message': '', 'detail': ''}
 
 
 def test_percentile_is_nearest_rank():
@@ -96,5 +102,46 @@ def test_function_provider_run_writes_results_and_prints_table(tmp_path):
     assert data['summary']['overall']['pass_rate'] == 0.5
     assert data['summary']['mean_requests'] == 1.0
     assert data['summary']['mean_tokens'] > 0
-    assert len(data['records']) == 4
+    assert data['summary']['mean_input_tokens'] > 0
+    assert data['summary']['mean_output_tokens'] > 0
+    records = data['records']
+    assert len(records) == 4
+    assert [r['cold'] for r in records] == [True, False, False, False]
+    assert {r['group'] for r in records} == {'setup', 'must_ask'}
+    failed = [r for r in records if r['outcome'] == 'failed']
+    assert failed and all(FUNCTION_REPLY_SNIPPET in r['detail'] for r in failed)
+    assert all(r['detail'] == '' for r in records if r['outcome'] == 'passed')
     assert 'agent eval: function / function' in out and 'unknown_material' in out
+
+
+def test_warm_latency_leaves_out_the_cold_turn_and_tokens_split():
+    records = [_rec('a', 'passed', latency=60.0, cold=True, input_tokens=900, output_tokens=10),
+               _rec('a', 'passed', latency=2.0, input_tokens=500, output_tokens=30),
+               _rec('b', 'failed', latency=4.0, input_tokens=700, output_tokens=50)]
+    summary = summarise(records)
+    assert summary['latency_p50_warm_s'] == 2.0 and summary['latency_p95_warm_s'] == 4.0
+    assert summary['latency_p95_s'] == 60.0
+    assert summary['mean_input_tokens'] == 700 and summary['mean_output_tokens'] == 30
+
+
+def test_group_pass_rates_and_skip_warning_in_the_table():
+    records = [_rec('a', 'passed', group='setup'), _rec('b', 'failed', group='setup'),
+               _rec('c', 'passed', group='analysis'), _rec('d', 'skipped', group='analysis')]
+    summary = summarise(records)
+    assert summary['groups']['setup']['pass_rate'] == 0.5
+    assert summary['groups']['analysis']['pass_rate'] == 1.0
+    table = format_table(summary, 'gemini', 'm1')
+    assert 'setup' in table and 'analysis' in table
+    assert 'pass rate not comparable: 1 skipped' in table
+    assert 'warm' in table and 'input' in table and 'output' in table
+    assert 'not comparable' not in format_table(summarise(records[:3]), 'gemini', 'm1')
+
+
+def test_warm_up_runs_one_turn_and_leaves_nothing_behind(tmp_path, mock_settings):
+    pytest.importorskip('pydantic_ai')
+    env = EvalEnv(FUNCTION_PROVIDER, None, 1, 0.0, tmp_path)
+    session = build_session(env)
+    deps = make_deps(tmp_path, mock_settings)
+    assert warm_up(session, deps) is True
+    assert session.history == [] and deps.pending == []
+    assert warm_up(session, deps) is False  # once per process and provider

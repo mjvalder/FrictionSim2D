@@ -5,9 +5,11 @@ Every expected value comes from code -- `make_sweep`, `scale`,
 materials client's rows -- never typed by hand. Values the user states in a
 prompt are module constants used both to write the prompt and to check it.
 
-`verdict` is the single pass/fail rule. Must-ask cases (``ask=True``) pass only
-with no proposal AND a question mark in the reply (plus their own check, if
-any). Every other case has a positive check, and
+`verdict` is the single pass/fail rule. Must-ask cases (``kind='ask'``) pass
+only with no proposal AND a question mark in the reply (plus their own check,
+if any); declining cases (``kind='declines'``: a request the assistant must
+refuse) need no proposal and their check, but no question. Every other case
+has a positive check, and
 ``tests/agent/test_eval_cases.py`` proves none of them passes on a turn that
 proposed nothing and only asked back.
 """
@@ -140,15 +142,34 @@ def plots(result) -> List[PlotChange]:
     return [p for p in result.pending if isinstance(p, PlotChange)]
 
 
+#: Relative tolerance for numbers: a model may round to 3 significant figures,
+#: which still tells a linear sweep from a log one and one band from another.
+REL_TOL = 2e-3
+_NUMBER = re.compile(r'(?<![\w.])\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w.]*\d)')
+
+
+def numbers_in(text: str) -> List[float]:
+    """The standalone numbers in ``text`` ('MoS2' and '2026' give no 2 or 20)."""
+    return [float(m) for m in _NUMBER.findall(text)]
+
+
+def has_numbers(text: str, expected: Iterable[float]) -> bool:
+    """Whether every expected value is one of the numbers in ``text``."""
+    found = numbers_in(text)
+    expected = list(expected)
+    return bool(expected) and all(any(math.isclose(f, float(e), rel_tol=REL_TOL)
+                                      for f in found) for e in expected)
+
+
 def same(value: Any, expected: Iterable[float]) -> bool:
-    """``value`` is a list matching ``expected`` to 4 significant figures
-    (make_sweep's tool text prints 6, the function returns 9)."""
+    """``value`` is a list matching ``expected`` within `REL_TOL`
+    (make_sweep's tool text prints 6 figures, the function returns 9)."""
     expected = list(expected)
     if not isinstance(value, (list, tuple)):
         value = [value]
     try:
         return len(value) == len(expected) and all(
-            math.isclose(float(v), float(e), rel_tol=1e-4) for v, e in zip(value, expected))
+            math.isclose(float(v), float(e), rel_tol=REL_TOL) for v, e in zip(value, expected))
     except (TypeError, ValueError):
         return False
 
@@ -180,8 +201,7 @@ def proposed_or_asked(result, key: Tuple[str, str], values: List[float]) -> bool
     """Either ``key`` set to ``values``, or no proposal and a question quoting them."""
     if same(sets(result).get(key), values):
         return True
-    return (not result.pending and '?' in result.text
-            and all(f'{v:g}' in result.text for v in values))
+    return not result.pending and '?' in result.text and has_numbers(result.text, values)
 
 
 def raises(func: Callable, *args) -> bool:
@@ -203,16 +223,21 @@ class Case:
     check: Optional[Callable[[Any], bool]] = None
     #: Tools a good answer uses (documents intent; the coverage test reads it).
     tools: Tuple[str, ...] = ()
-    ask: bool = False
+    #: 'act' (a positive check), 'ask' (no proposal + '?') or 'declines'
+    #: (no proposal + the check).
+    kind: str = 'act'
     model: str = 'afm'
     prepare: Tuple[Callable[[Any], None], ...] = ()
 
 
 def verdict(case: Case, result) -> bool:
-    """Pass or fail. A must-ask case needs no proposal and a '?'."""
-    if case.ask:
+    """Pass or fail. A must-ask case needs no proposal and a '?'; a declining
+    one no proposal and its check."""
+    if case.kind == 'ask':
         return (not result.pending and '?' in result.text
                 and (case.check is None or bool(case.check(result))))
+    if case.kind == 'declines':
+        return not result.pending and case.check is not None and bool(case.check(result))
     return case.check is not None and bool(case.check(result))
 
 
@@ -225,13 +250,31 @@ SPEED, RADIUS, TEMP, SIDE, GRID, SPRING = 1, 30, 150, 150, 12, 8
 TIMESTEP, THERMO = 0.0005, 500
 
 
-def _plot(result, plot_type: str) -> bool:
+def _plot(result, plot_type: str, y_axis: str = '') -> bool:
     return any(p.plot['plot_type'] == plot_type
-               and DATASET in [folder for folder, _ in p.folders] for p in plots(result))
+               and DATASET in [folder for folder, _ in p.folders]
+               and y_axis in str(p.plot.get('y_axis') or '').lower() for p in plots(result))
 
 
 def _fs(result, kind: str, suffix: str) -> bool:
     return any(op[0] == kind and op[-1].endswith(suffix) for op in fs_ops(result))
+
+
+def material_core(name: str) -> str:
+    """A material without its structure prefix: 'h_MoS2' -> 'MoS2'."""
+    return re.sub(r'^[a-z][_-]', '', str(name))
+
+
+def mentions_materials(result, names: Iterable[str]) -> bool:
+    """Every material named, with or without its structure prefix."""
+    return mentions(result, *{material_core(n) for n in names})
+
+
+def count_by(result, number: int, word: str = 'complet') -> bool:
+    """``number`` within four words before ``word``, or right after it."""
+    n = rf'(?<![\w.]){number}(?![\w.]*\d)'
+    return re.search(rf'{n}\s+(?:[\w-]+\s+){{0,4}}{word}|{word}\w*\W+(?:\w+\W+)?{n}',
+                     result.text, re.IGNORECASE) is not None
 
 
 def _complete_ws2(result) -> int:
@@ -425,7 +468,7 @@ WORKSPACE = {
     'describe_folder': Case(
         f'What files are in the workspace folder {DATASET}?',
         lambda r: called(r, 'describe_run', 'summarise_results')
-        and (mentions(r, 'output_full') or mentions(r, *DATASET_MATERIALS)),
+        and (mentions(r, 'output_full') or mentions_materials(r, DATASET_MATERIALS)),
         tools=('describe_run',), prepare=(results_dataset,)),
 }
 
@@ -437,12 +480,11 @@ ANALYSIS = {
     'summarise_dataset': Case(
         f'Summarise the results in {DATASET}: which materials are in it?',
         lambda r: called(r, 'summarise_results')
-        and mentions(r, *{run['material'] for run in dataset_runs(r.deps)}),
+        and mentions_materials(r, {run['material'] for run in dataset_runs(r.deps)}),
         tools=('summarise_results',), prepare=(results_dataset,)),
     'count_complete_runs': Case(
         f'How many h-WS2 runs in {DATASET} completed?',
-        lambda r: called(r, 'summarise_results')
-        and re.search(rf'\b{_complete_ws2(r)}\b', r.text) is not None,
+        lambda r: called(r, 'summarise_results') and count_by(r, _complete_ws2(r)),
         tools=('summarise_results',), prepare=(results_dataset,)),
     'plot_types': Case(
         'What kinds of plots can you make? Just list them.',
@@ -451,10 +493,13 @@ ANALYSIS = {
         tools=('plot_types',)),
     'plot_cof_vs_load': Case(
         f'Plot COF against normal load for the {DATASET} dataset.',
-        lambda r: _plot(r, 'summary'),
+        lambda r: _plot(r, 'summary', y_axis='cof'),
         tools=('find_result_sets', 'plot_schema', 'propose_plot'), prepare=(results_dataset,)),
-    'plot_histogram': Case(
-        f'Make a histogram of the friction coefficients in {DATASET}.',
+    # cof_histogram draws a bar per dataset of the lateral-vs-normal force slope
+    # (plot_config.CofHistogramPlot), not a histogram of COF values; the prompt
+    # asks for exactly that, so only cof_histogram is right.
+    'plot_slope_bars': Case(
+        f'Make a bar chart of the COF-vs-load slope per dataset for {DATASET}.',
         lambda r: _plot(r, 'cof_histogram'),
         tools=('plot_schema', 'propose_plot'), prepare=(results_dataset,)),
     'plot_timeseries': Case(
@@ -477,7 +522,7 @@ MATERIALS_DB = {
     'mp_band_gap': Case(
         'What band gap does Materials Project give for the most stable MoS2 entry?',
         lambda r: called(r, 'query_materials_project')
-        and f"{_stable_mp()['band_gap']:.2f}" in r.text,
+        and has_numbers(r.text, [_stable_mp()['band_gap']]),
         tools=('query_materials_project',)),
     'mp_most_stable': Case(
         'Which MoS2 entry on Materials Project is the most stable? Give its id.',
@@ -502,36 +547,44 @@ MATERIALS_DB = {
 
 MUST_ASK = {
     'ambiguous_unit': Case('Set up AFM on h-MoS2 with sw at loads from 10 to 50 nm.',
-                           ask=True, tools=('setup_afm',)),
-    'unknown_material': Case('Set up an AFM simulation on unobtainium.', ask=True,
+                           kind='ask', tools=('setup_afm',)),
+    'unknown_material': Case('Set up an AFM simulation on unobtainium.', kind='ask',
                              tools=('search_structures',)),
     'unknown_potential': Case(
-        'Set up AFM on h-MoS2 with a tersoff potential at 20 nN.', ask=True,
+        'Set up AFM on h-MoS2 with a tersoff potential at 20 nN.', kind='ask',
         check=lambda r: raises(resolve_material, r.deps, 'h-MoS2', 'tersoff'),
         tools=('search_potentials',)),
-    'executed_setting_walltime': Case('Set the HPC walltime to 48 hours.', ask=True,
-                                      tools=('set_fields',)),
-    'executed_setting_minimize': Case(
-        "In the settings, change the minimization command to 'minimize 0 1e-8 1000 10000'.",
-        ask=True, tools=('set_fields',)),
-    'ambiguous_family': Case('Set up a friction simulation of h-MoS2 with sw.', ask=True,
+    'ambiguous_family': Case('Set up a friction simulation of h-MoS2 with sw.', kind='ask',
                              tools=('list_modes',)),
     'sheet_force_unit': Case('Set up sheet-on-sheet sliding of h-MoS2 with sw at 10 nN.',
-                             ask=True, tools=('setup_sheet',)),
+                             kind='ask', tools=('setup_sheet',)),
     'sheet_low_pressure': Case(
-        'Set up sheet-on-sheet sliding of h-MoS2 with sw at 3 low pressures.', ask=True,
+        'Set up sheet-on-sheet sliding of h-MoS2 with sw at 3 low pressures.', kind='ask',
         check=lambda r: scale('pressure', 'low', ScaleContext(model='sheetonsheet')) is None,
         tools=('suggest_values',), model='sheetonsheet'),
-    'negative_load': Case('Set up AFM on h-MoS2 with sw at -5 nN.', ask=True,
-                          tools=('setup_afm',)),
-    'missing_dataset': Case('Plot COF against load for my experiment_x dataset.', ask=True,
+    'missing_dataset': Case('Plot COF against load for my experiment_x dataset.', kind='ask',
                             tools=('find_result_sets',)),
+}
+
+DECLINES = {
+    'executed_setting_walltime': Case(
+        'Set the HPC walltime to 48 hours.', kind='declines',
+        check=lambda r: mentions(r, 'walltime') or mentions(r, 'settings'),
+        tools=('set_fields',)),
+    'executed_setting_minimize': Case(
+        "In the settings, change the minimization command to 'minimize 0 1e-8 1000 10000'.",
+        kind='declines', check=lambda r: mentions(r, 'minimiz'), tools=('set_fields',)),
+    'negative_load': Case(
+        'Set up AFM on h-MoS2 with sw at -5 nN.', kind='declines',
+        check=lambda r: 'positive' in r.text.lower() or '?' in r.text,
+        tools=('setup_afm',)),
 }
 
 GROUPS = {'setup': SETUP, 'params': PARAMS, 'sweeps': SWEEPS, 'materials': MATERIALS,
           'workspace': WORKSPACE, 'analysis': ANALYSIS, 'materials_db': MATERIALS_DB,
-          'must_ask': MUST_ASK}
+          'must_ask': MUST_ASK, 'declines': DECLINES}
 CASES = {name: case for group in GROUPS.values() for name, case in group.items()}
+GROUP_OF = {name: group for group, cases in GROUPS.items() for name in cases}
 
 
 def prepare_deps(case: Case, deps) -> None:

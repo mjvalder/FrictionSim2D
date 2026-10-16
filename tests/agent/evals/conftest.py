@@ -1,7 +1,8 @@
 """Results plugin for the eval tier.
 
 Each eval test leaves an ``('agent_eval', {...})`` user property (case,
-repeat, latency, requests, tokens). At session end the outcomes are written
+group, repeat, latency, cold, requests, input/output tokens, and the failure
+detail, kept only when the run failed). At session end the outcomes are written
 to ``<AGENT_EVAL_RESULTS_DIR or tests/agent/evals/.results>/<provider>-<model>-
 <timestamp>.json`` and a summary table is printed. Without eval runs (the
 default: the tier is deselected) it does nothing.
@@ -25,7 +26,9 @@ def pytest_runtest_logreport(report):
     message = ''
     if report.skipped and isinstance(report.longrepr, tuple):
         message = str(report.longrepr[2])
-    _RECORDS.append({**props, 'outcome': report.outcome, 'message': message})
+    detail = props.get('detail', '') if report.failed else ''
+    _RECORDS.append({**props, 'outcome': report.outcome, 'message': message,
+                     'detail': detail})
 
 
 def pytest_sessionfinish(session):  # pylint: disable=unused-argument
