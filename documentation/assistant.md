@@ -146,19 +146,23 @@ Asked for a "low", "mid" or "high" load (also small/light, moderate/medium/
 intermediate, large/heavy), the Assistant takes the values from reference
 bands in `src/core/scaling.py`, spread linearly over the band:
 
-| band | AFM, indent, PES tip | where the numbers come from |
-|---|---|---|
-| low | 10-20 nN | the ML_taxonomy baseline loads (10, 20, 30 nN), chosen for good contact; 2-5 nN give poor contact |
-| mid | 20-50 nN | the ML_taxonomy mid-load core window its reference trends are fitted on |
-| high | 50-100 nN | from the top of the mid window to the example campaign's maximum (100 nN) |
+| band | nominal pressure F/R² | at R = 25 Å | where the numbers come from |
+|---|---|---|---|
+| low | 1.6-3.2 GPa | 10-20 nN | the ML_taxonomy baseline loads (10, 20, 30 nN), chosen for good contact; 2-5 nN give poor contact |
+| mid | 3.2-8 GPa | 20-50 nN | the ML_taxonomy mid-load core window its reference trends are fitted on |
+| high | 8-16 GPa | 50-100 nN | from the top of the mid window to the example campaign's maximum (100 nN) |
 
-These are reference bands, **not a contact model** and not measured regimes:
-they come from an R = 25 Å Si tip at 300 K with an 8 or 50 N/m driving
-spring. A config whose tip radius, temperature or driving spring differs gets
-the same numbers plus a warning to treat them as a starting point -- never a
-rescaling. The Assistant says where the numbers come from and asks you to
-confirm. Sheet-on-sheet pressure, speed and temperature have no band yet: it
-offers the example config's values and asks for a range instead.
+For the AFM family (AFM, indent, PES tip) the band is a **nominal pressure,
+F/R²**, calibrated on the reference R = 25 Å tip, so the load scales with the
+tip radius squared: a 50 Å tip gets 40-80 nN for "low". With no tip radius
+set, 25 Å is assumed (and said); a swept radius uses the first value and lists
+the others. This is simple tip-size scaling, **not a contact model** and not
+measured regimes: stiffness, sheet size and contact area are ignored. A
+temperature or driving spring that differs from the reference (300 K, 8 or
+50 N/m) keeps the numbers and adds a warning. The Assistant says where the
+numbers come from and asks you to confirm. Sheet-on-sheet pressure, speed and
+temperature have no band yet: it offers the example config's values and asks
+for a range instead.
 
 ### Result sets and analysis
 

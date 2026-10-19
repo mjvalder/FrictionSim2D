@@ -1,9 +1,13 @@
-"""Descriptors such as 'low load' turned into reference load bands.
+"""Descriptors such as 'low load' turned into load bands for the current tip.
 
-These are reference bands from the ML_taxonomy work and the example campaign,
-not a contact model and not measured regimes: each band's ``source`` says what
-its numbers are. A context that differs from the reference setup gets the
-same numbers plus a warning, never a rescaling.
+AFM-family bands are kept as a nominal pressure, F/R^2, calibrated so the
+reference tip (R = 25 A) reproduces the reference load bands from the
+ML_taxonomy work and the example campaign; a different tip radius rescales the
+load by (R/25)^2. This is not a contact model and not measured regimes: each
+band's ``source`` says what its numbers are, and stiffness, sheet size and the
+contact itself are ignored (a sensitivity study is in future-works). Other
+differences from the reference setup (temperature, driving spring) keep the
+numbers and add a warning.
 
 Stdlib only, and nothing from ``run``/``agent``/``gui``: the GUI assistant
 imports this at startup.
@@ -58,26 +62,36 @@ class Regime:
 
 #: The reference AFM setup the bands come from.
 REFERENCE_SETUP = 'R = 25 A Si tip at 300 K, driving spring 8 or 50 N/m'
-#: (context field, reference values, tolerance, unit, what to call it).
-REFERENCE_VALUES = (('tip_radius_A', (25.0,), 0.5, 'A', 'tip radius'),
-                    ('temperature_K', (300.0,), 1.0, 'K', 'temperature'),
+#: Tip radius the nominal-pressure bands are calibrated on, in Angstrom.
+REFERENCE_RADIUS_A = 25.0
+#: 1 nN/A^2 expressed in GPa.
+GPA_PER_NN_PER_A2 = 100.0
+#: (context field, reference values, tolerance, unit, what to call it). The tip
+#: radius is not here: it rescales the band instead of warning.
+REFERENCE_VALUES = (('temperature_K', (300.0,), 1.0, 'K', 'temperature'),
                     ('driving_spring_N_m', (8.0, 50.0), 0.5, 'N/m', 'driving spring'))
 
 _AFM_FAMILY = ('afm', 'indent', 'pes_tip')
 
-#: The reference bands. Sheet-on-sheet pressure, speed and temperature have
-#: none yet, so `scale` returns None for them.
+def _nominal(load_nN: float) -> float:
+    """Reference load -> nominal pressure F/R^2 in GPa at the reference radius."""
+    return load_nN / REFERENCE_RADIUS_A ** 2 * GPA_PER_NN_PER_A2
+
+
+#: The reference bands, as nominal pressure F/R^2 (GPa) calibrated on the
+#: reference tip. Sheet-on-sheet pressure, speed and temperature have none yet,
+#: so `scale` returns None for them.
 REGIMES = (
-    Regime(_AFM_FAMILY, 'load', 'low', 'nN', 10.0, 20.0,
+    Regime(_AFM_FAMILY, 'load', 'low', 'GPa', _nominal(10.0), _nominal(20.0),
            'baseline loads chosen for good contact (user ruling 2026-10-16: 2-5 nN '
            'give poor contact) -- ML_taxonomy taxlib BASELINE_LOADS = (10, 20, 30); '
-           'this band takes its lower part'),
-    Regime(_AFM_FAMILY, 'load', 'mid', 'nN', 20.0, 50.0,
+           'this band takes its lower part (10-20 nN at R = 25 A)'),
+    Regime(_AFM_FAMILY, 'load', 'mid', 'GPa', _nominal(20.0), _nominal(50.0),
            'the mid-load core window the ML_taxonomy analysis fits its reference '
-           'trends on (runtax MID_LOAD_CORE = [20, 50])'),
-    Regime(_AFM_FAMILY, 'load', 'high', 'nN', 50.0, 100.0,
+           'trends on (runtax MID_LOAD_CORE = [20, 50] nN at R = 25 A)'),
+    Regime(_AFM_FAMILY, 'load', 'high', 'GPa', _nominal(50.0), _nominal(100.0),
            "from the top of the mid window to the example campaign's maximum "
-           '(100 nN); no dedicated constant'),
+           '(100 nN at R = 25 A); no dedicated constant'),
 )
 
 _DESCRIPTORS = {
@@ -122,8 +136,14 @@ def _reference_warnings(context: ScaleContext) -> Tuple[str, ...]:
     return tuple(warnings)
 
 
+def _load_band(regime: Regime, radius: float) -> Tuple[float, float]:
+    """Nominal-pressure band -> load band (nN) for a tip of ``radius`` Angstrom."""
+    factor = radius ** 2 / GPA_PER_NN_PER_A2
+    return regime.low * factor, regime.high * factor
+
+
 def scale(quantity: str, descriptor: str, context: ScaleContext) -> Optional[ScaledRange]:
-    """The reference band for ``descriptor quantity`` on ``context.model``, or None."""
+    """The load band for ``descriptor quantity`` on ``context``'s tip, or None."""
     name = _QUANTITIES.get(quantity.strip().lower())
     level = _descriptor(descriptor)
     if name is None or level is None:
@@ -131,8 +151,19 @@ def scale(quantity: str, descriptor: str, context: ScaleContext) -> Optional[Sca
     for regime in REGIMES:
         if (context.model in regime.models and regime.quantity == name
                 and regime.descriptor == level):
-            working = (f'{level} {name} = {regime.low:g}-{regime.high:g} {regime.unit}: '
-                       f'{regime.source}')
-            return ScaledRange(name, regime.unit, regime.low, regime.high, working,
-                               _reference_warnings(context))
+            warnings = list(_reference_warnings(context))
+            radii = [r for r in _values(context.tip_radius_A) if r > 0]
+            if not radii:
+                radii = [REFERENCE_RADIUS_A]
+                warnings.insert(0, f'no tip radius set; assumed the reference '
+                                   f'{REFERENCE_RADIUS_A:g} A')
+            low, high = _load_band(regime, radii[0])
+            for other in radii[1:]:
+                other_low, other_high = _load_band(regime, other)
+                warnings.append(f'swept tip radius: R = {other:g} A would give '
+                                f'{other_low:.3g}-{other_high:.3g} nN')
+            working = (f'{level} {name} = {regime.low:.3g}-{regime.high:.3g} GPa nominal '
+                       f'pressure (F/R^2) -> {low:.3g}-{high:.3g} nN at R = {radii[0]:g} A; '
+                       f'simple tip-size scaling, no contact model. Band: {regime.source}')
+            return ScaledRange(name, 'nN', low, high, working, tuple(warnings))
     return None

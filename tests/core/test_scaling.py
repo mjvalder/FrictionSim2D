@@ -1,4 +1,4 @@
-"""Descriptor -> measured range (src.core.scaling)."""
+"""Descriptor -> load band scaled by nominal pressure F/R^2 (src.core.scaling)."""
 import pytest
 
 from src.core.scaling import REGIMES, ScaleContext, ScaledRange, scale
@@ -10,11 +10,41 @@ AFM = ScaleContext(model='afm', tip_radius_A=25, driving_spring_N_m=8, temperatu
 @pytest.mark.parametrize('descriptor, low, high', [
     ('low', 10, 20), ('mid', 20, 50), ('high', 50, 100)])
 @pytest.mark.parametrize('model', ['afm', 'indent', 'pes_tip'])
-def test_afm_family_load_regimes(model, descriptor, low, high):
-    result = scale('load', descriptor, ScaleContext(model=model))
+def test_reference_tip_reproduces_the_reference_bands(model, descriptor, low, high):
+    result = scale('load', descriptor, ScaleContext(model=model, tip_radius_A=25))
     assert isinstance(result, ScaledRange)
-    assert (result.quantity, result.unit, result.low, result.high) == ('load', 'nN', low, high)
+    assert (result.quantity, result.unit) == ('load', 'nN')
+    assert result.low == pytest.approx(low) and result.high == pytest.approx(high)
     assert result.warnings == ()
+
+
+@pytest.mark.parametrize('radius, factor', [(50, 4.0), (12.5, 0.25), (40, 2.56)])
+def test_load_scales_with_tip_radius_squared(radius, factor):
+    result = scale('load', 'low', ScaleContext('afm', tip_radius_A=radius))
+    assert result.low == pytest.approx(10 * factor) and result.high == pytest.approx(20 * factor)
+    assert result.warnings == ()
+    assert 'GPa' in result.working and 'F/R' in result.working
+    assert f'R = {radius:g} A' in result.working
+
+
+def test_bands_are_nominal_pressures():
+    by_level = {r.descriptor: r for r in REGIMES}
+    assert by_level['low'].unit == 'GPa'
+    assert (by_level['low'].low, by_level['low'].high) == pytest.approx((1.6, 3.2))
+    assert (by_level['mid'].low, by_level['mid'].high) == pytest.approx((3.2, 8.0))
+    assert (by_level['high'].low, by_level['high'].high) == pytest.approx((8.0, 16.0))
+
+
+def test_no_tip_radius_assumes_the_reference_and_says_so():
+    result = scale('load', 'low', ScaleContext('afm'))
+    assert (result.low, result.high) == pytest.approx((10, 20))
+    assert any('no tip radius' in w and '25' in w for w in result.warnings)
+
+
+def test_swept_tip_radius_uses_the_first_and_lists_the_rest():
+    result = scale('load', 'low', ScaleContext('afm', tip_radius_A=[25, 50]))
+    assert (result.low, result.high) == pytest.approx((10, 20))
+    assert any('R = 50 A' in w and '40-80' in w for w in result.warnings)
 
 
 @pytest.mark.parametrize('descriptor, expected', [
@@ -58,31 +88,21 @@ def test_module_docstring_disclaims_measurement():
 @pytest.mark.parametrize('context', [
     AFM,
     ScaleContext('afm', tip_radius_A=25.4, driving_spring_N_m=50.3, temperature_K=300.8),
-    ScaleContext('afm'),
-    ScaleContext('afm', driving_spring_N_m=[8, 50]),
+    ScaleContext('afm', tip_radius_A=25, driving_spring_N_m=[8, 50]),
 ])
 def test_reference_setup_no_warning(context):
     assert scale('load', 'low', context).warnings == ()
 
 
-def test_tip_radius_differs_warns_same_numbers():
-    result = scale('load', 'low', ScaleContext('afm', tip_radius_A=22))
-    assert (result.low, result.high) == (10, 20)
-    assert len(result.warnings) == 1
-    warning = result.warnings[0]
-    assert 'reference setup is' in warning and 'R = 25' in warning
-    assert 'tip radius' in warning and '22' in warning and 'starting point' in warning
-
-
 def test_spring_and_temperature_differ_warn():
-    result = scale('load', 'mid', ScaleContext('afm', driving_spring_N_m=20, temperature_K=310))
+    result = scale('load', 'mid', ScaleContext('afm', tip_radius_A=25, driving_spring_N_m=20, temperature_K=310))
     assert len(result.warnings) == 2
     assert any('driving spring' in w and '20 N/m' in w for w in result.warnings)
     assert any('temperature' in w and '310 K' in w for w in result.warnings)
 
 
 def test_swept_temperature_checks_every_value():
-    result = scale('load', 'low', ScaleContext('afm', temperature_K=[300, 400]))
+    result = scale('load', 'low', ScaleContext('afm', tip_radius_A=25, temperature_K=[300, 400]))
     assert len(result.warnings) == 1 and '400' in result.warnings[0]
     assert '300,' not in result.warnings[0].split('differs')[0].split('your')[-1]
 

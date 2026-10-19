@@ -95,6 +95,7 @@ def test_make_sweep_tool_text(deps):
 
 
 def test_suggest_values_low_load_uses_reference_band(deps):
+    deps.document.set('tip', 'r', 25)
     text = suggest_values(deps, 'load', 'low', 5)
     assert 'values: 10, 12.5, 15, 17.5, 20' in text
     assert 'nN' in text and 'ML_taxonomy' in text and 'BASELINE_LOADS' in text
@@ -110,14 +111,15 @@ def test_suggest_values_has_no_spacing_argument_and_lists_synonyms():
 
 
 def test_suggest_values_accepts_synonyms(deps):
+    deps.document.set('tip', 'r', 25)
     assert 'values: 20, 35, 50' in suggest_values(deps, 'load', 'moderate', 3)
 
 
-def test_suggest_values_warns_outside_validity(deps):
-    deps.document.set('tip', 'r', 60)
+def test_suggest_values_scales_with_the_tip_radius(deps):
+    deps.document.set('tip', 'r', 50)
     text = suggest_values(deps, 'load', 'low', 5)
-    assert 'values: 10, 12.5, 15, 17.5, 20' in text
-    assert 'warning' in text.lower() and 'tip radius 60' in text and 'starting point' in text
+    assert 'values: 40, 50, 60, 70, 80' in text
+    assert 'R = 50 A' in text and 'GPa' in text
 
 
 def test_suggest_values_without_rule_offers_examples(tmp_path, mock_settings):
