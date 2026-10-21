@@ -36,6 +36,10 @@ class AgentDeps:
     #: `MaterialsDBError` when off or without a key). The GUI passes
     #: `materials_db.default_materials_db`; tests a fake; None: unavailable.
     materials_db: Optional[Callable[..., Any]] = None
+    #: Returns the knowledge corpus index (`knowledge_index.KnowledgeIndex`), or
+    #: None when no corpus is installed. The GUI passes
+    #: `knowledge_index.load_knowledge`; tests a fixture corpus; None: unavailable.
+    knowledge: Optional[Callable[[], Any]] = None
     #: Whether the user pressed Stop on this turn; `AgentSession.run_turn`
     #: points it at the turn's token. Long downloads check it between requests.
     cancelled: Callable[[], bool] = field(default=lambda: False)
@@ -63,10 +67,11 @@ class AgentDeps:
 def snapshot_deps(document: ConfigDocument, settings_document: SettingsDocument,
                   settings: GlobalSettings, roots: SearchRoots,
                   plot_document: Optional[dict] = None,
-                  materials_db: Optional[Callable[..., Any]] = None) -> AgentDeps:
+                  materials_db: Optional[Callable[..., Any]] = None,
+                  knowledge: Optional[Callable[[], Any]] = None) -> AgentDeps:
     """Deps for one turn, holding copies of the live documents."""
     return AgentDeps(document=copy.deepcopy(document),
                      settings_document=copy.deepcopy(settings_document),
                      settings=settings, roots=roots,
                      plot_document=copy.deepcopy(plot_document),
-                     materials_db=materials_db)
+                     materials_db=materials_db, knowledge=knowledge)

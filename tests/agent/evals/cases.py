@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, List, Optional, Tuple
 
 from src.agent.changes import ChangeSet, FsChangeSet, ToolInputError
+from src.agent.knowledge_index import load_knowledge
 from src.agent.materials_db import NO_KEY, MaterialsDBError
 from src.agent.plot_changes import PlotChange
 from src.agent.tools.materials import index_for, resolve_material
@@ -61,6 +62,32 @@ def fake_materials_db(deps) -> None:
     """Every case gets this: the fake client, so no case reaches Materials Project."""
     deps.materials_db = materials_factory(FakeMaterialsClient(mp_rows=MP_ROWS,
                                                               dm_rows=DM_ROWS))
+
+
+#: The fixture knowledge corpus: eval-only text (never trained on), with a title
+#: a reply can only know from the search result.
+KNOWLEDGE = (
+    {'id': 'k:1', 'title': 'Structural lubricity', 'section': 'Mechanism',
+     'url': 'https://example.org/structural-lubricity', 'licence': 'CC-BY-4.0',
+     'text': 'Superlubricity between crystalline surfaces arises when the two lattices '
+             'are incommensurate: the lateral forces on individual atoms point in many '
+             'directions and largely cancel, so the energy barrier to sliding nearly '
+             'vanishes. Twisting one layer can switch a commensurate contact into an '
+             'incommensurate one.'},
+    {'id': 'k:2', 'title': 'Puckering of thin sheets', 'section': 'Layer dependence',
+     'url': 'https://example.org/puckering', 'licence': 'CC-BY-4.0',
+     'text': 'Friction on atomically thin sheets often decreases as layers are added, '
+             'because a thin, weakly bound sheet puckers in front of a sliding tip and '
+             'increases the contact area.'},
+)
+
+
+def knowledge_corpus(deps) -> None:
+    """Every case gets this: a two-passage corpus beside the workspace."""
+    path = deps.roots.workspace.parent / 'knowledge' / 'passages.jsonl'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(json.dumps(p) + '\n' for p in KNOWLEDGE), encoding='utf-8')
+    deps.knowledge = lambda: load_knowledge(path)
 
 
 def no_key_materials_db(deps) -> None:
@@ -701,6 +728,12 @@ DOMAIN = {
         lambda r: called(r, 'lattice_mismatch') and grounded(r)
         and quotes(r, _lattice_a(r, 'h-WS2')),
         tools=('lattice_mismatch',)),
+    'cite_knowledge': Case(
+        'Why does friction on thin sheets often drop as layers are added? '
+        'Name the source you used.',
+        lambda r: called(r, 'search_knowledge') and grounded(r) and not r.pending
+        and mentions(r, KNOWLEDGE[1]['title']),
+        tools=('search_knowledge',)),
     'cof_guess': Case(
         'Roughly what friction coefficient will I get for h-MoS2 under an AFM tip?',
         kind='declines',
@@ -715,7 +748,8 @@ GROUP_OF = {name: group for group, cases in GROUPS.items() for name in cases}
 
 
 def prepare_deps(case: Case, deps) -> None:
-    """The fake materials client first, then the case's own fixture."""
+    """The fake materials client and the fixture corpus, then the case's own fixture."""
     fake_materials_db(deps)
+    knowledge_corpus(deps)
     for step in case.prepare:
         step(deps)

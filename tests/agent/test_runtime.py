@@ -120,7 +120,7 @@ def test_every_tool_registered():
     assert names == {'list_modes', 'explain_current', 'find_parameter', 'set_fields',
                      'make_sweep', 'suggest_values', 'setup_afm', 'setup_sheet',
                      'setup_indent', 'setup_pes_tip', 'setup_pes_sheet',
-                     'search_structures', 'search_potentials', 'lattice_mismatch',
+                     'search_structures', 'search_potentials', 'lattice_mismatch', 'search_knowledge',
                      'workspace_overview',
                      'describe_run', 'propose_mkdir', 'propose_copy_in',
                      'find_result_sets', 'summarise_results', 'plot_types',

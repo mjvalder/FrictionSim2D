@@ -27,7 +27,7 @@ from .providers import ProviderUnavailable, build_model
 from .sandbox import SandboxError, redact
 from .settings import AgentSettings
 from .tools import analysis, compact, materials, plots, setup, workspace
-from .tools import materials_db
+from .tools import knowledge, materials_db
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,11 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
                           potential_type: Optional[str] = None) -> str:
         """Find interatomic potential files for a material."""
         return _call(ctx, materials.search_potentials, material, potential_type)
+
+    @agent.tool
+    def search_knowledge(ctx: RunContext[AgentDeps], query: str) -> str:
+        """Search the local 2D-materials and tribology corpus; cite what it returns."""
+        return _call(ctx, knowledge.search_knowledge, query)
 
     @agent.tool
     def lattice_mismatch(ctx: RunContext[AgentDeps], material_a: str,

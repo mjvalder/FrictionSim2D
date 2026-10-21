@@ -10,6 +10,7 @@ from src.agent.changes import build_changeset  # noqa: E402
 from src.agent.events import TurnEvent  # noqa: E402
 from src.agent.runtime import AgentSession  # noqa: E402
 from src.agent.settings import AgentSettings  # noqa: E402
+from src.agent.tools.knowledge import search_knowledge  # noqa: E402
 from src.agent.tools.materials import lattice_mismatch  # noqa: E402
 from src.agent.tools.materials_db import fetch_2dmatpedia_structure  # noqa: E402
 from src.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot  # noqa: E402
@@ -327,3 +328,15 @@ def test_lattice_constant_case_accepts_the_rounded_cif_value(tmp_path, mock_sett
         assert verdict(CASES['lattice_constant'], result)
     assert not verdict(CASES['lattice_constant'],
                        _result(deps, 'a = 3.32 Angstrom.', tools=['lattice_mismatch']))
+
+
+def test_cite_knowledge_needs_the_passage_title(tmp_path, mock_settings):
+    deps = _deps('cite_knowledge', tmp_path, mock_settings)
+    hit = search_knowledge(deps, 'friction thin sheets layers added')
+    assert 'Puckering of thin sheets' in hit.splitlines()[0]
+    tools = ['search_knowledge']
+    assert verdict(CASES['cite_knowledge'],
+                   _result(deps, 'Thin sheets pucker (source: Puckering of thin sheets).',
+                           tools=tools))
+    assert not verdict(CASES['cite_knowledge'], _result(deps, 'Thin sheets pucker.',
+                                                        tools=tools))
