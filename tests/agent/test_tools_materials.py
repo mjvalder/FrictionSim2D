@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 
 from src.agent.changes import ToolInputError
-from src.agent.tools.materials import (build_index, elements_of, material_ops,
-                                       potential_type_of, resolve_material,
+from src.agent.tools.materials import (build_index, elements_of, lattice_mismatch,
+                                       material_ops, potential_type_of, resolve_material,
                                        search_potentials, search_structures)
+from src.core.utils.structures import cifread
 from tests.helpers.agent import EXAMPLES, make_deps
 
 
@@ -116,3 +117,43 @@ def test_cap_truncation_reported_and_examples_walked(deps):
     text = search_structures(deps, 'WS2')
     assert 'examples:/materials/h-WS2.cif' in text
     assert 'workspace search stopped after 400 files' in text
+
+
+# ---- lattice_mismatch ------------------------------------------------------------
+
+def _cell(name):
+    return cifread(EXAMPLES / 'materials' / f'{name}.cif')
+
+
+def test_lattice_mismatch_reports_both_cells_and_the_mismatch(deps):
+    text = lattice_mismatch(deps, 'h-MoS2', 'h-WS2')
+    mos2, ws2 = _cell('h-MoS2'), _cell('h-WS2')
+    expected = abs(mos2['lat_a'] - ws2['lat_a']) / ((mos2['lat_a'] + ws2['lat_a']) / 2) * 100
+    first = text.splitlines()[0]
+    assert 'h-MoS2' in first and 'h-WS2' in first and f'{expected:.2f} %' in first
+    assert f"a {mos2['lat_a']:.3f}" in text and f"a {ws2['lat_a']:.3f}" in text
+    assert 'coincidence cell' in text and '[[1, 0], [0, 1]]' in text
+    assert '/home' not in text and len(text) <= 1500
+
+
+def test_lattice_mismatch_numbers_fit_in_the_first_200_chars(deps):
+    """The eval's grounding check sees tool results cut to 200 characters."""
+    text = lattice_mismatch(deps, 'h-MoS2', 'h-WS2')
+    mos2 = _cell('h-MoS2')
+    assert f"{mos2['lat_a']:.3f}" in text[:200] and ' %' in text[:200]
+
+
+def test_lattice_mismatch_one_material_reports_its_cell(deps):
+    text = lattice_mismatch(deps, 'h-WS2')
+    ws2 = _cell('h-WS2')
+    assert f"a {ws2['lat_a']:.3f}" in text and 'mismatch' not in text
+
+
+def test_lattice_mismatch_different_lattices_say_so(deps):
+    text = lattice_mismatch(deps, 'h-MoS2', 'black_phosphorus')
+    assert 'gamma' in text and 'different in-plane lattice' in text
+
+
+def test_lattice_mismatch_unknown_material_is_input_error(deps):
+    with pytest.raises(ToolInputError, match='search_structures'):
+        lattice_mismatch(deps, 'h-MoS2', 'unobtainium')

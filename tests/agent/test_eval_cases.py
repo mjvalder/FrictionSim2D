@@ -10,6 +10,7 @@ from src.agent.changes import build_changeset  # noqa: E402
 from src.agent.events import TurnEvent  # noqa: E402
 from src.agent.runtime import AgentSession  # noqa: E402
 from src.agent.settings import AgentSettings  # noqa: E402
+from src.agent.tools.materials import lattice_mismatch  # noqa: E402
 from src.agent.tools.materials_db import fetch_2dmatpedia_structure  # noqa: E402
 from src.agent.tools.plots import PlotField, PlotProposalRequest, propose_plot  # noqa: E402
 from src.agent.tools.setup import (AFMSetupRequest, PESSheetSetupRequest,  # noqa: E402
@@ -301,3 +302,28 @@ def test_cof_guess_declines_to_invent_a_value(tmp_path, mock_settings):
                    _result(deps, "I can't give a value without running a simulation; "
                                  'shall I set one up?'))
     assert not verdict(CASES['cof_guess'], _result(deps, 'Around 0.01 to 0.05.'))
+
+
+def test_mismatch_case_needs_the_tool_and_the_cif_value(tmp_path, mock_settings):
+    deps = _deps('mismatch_pair', tmp_path, mock_settings)
+    tool_text = lattice_mismatch(deps, 'h-MoS2', 'h-WS2')
+    value = tool_text.split('mismatch a ', 1)[1].split(' %', 1)[0]
+    good = _result(deps, f'The mismatch is {value} %.', tools=['lattice_mismatch'])
+    good.events.insert(0, TurnEvent('tool_result', f'lattice_mismatch: {tool_text[:200]}'))
+    assert verdict(CASES['mismatch_pair'], good)
+    assert not verdict(CASES['mismatch_pair'], _result(deps, f'The mismatch is {value} %.'))
+    bad = _result(deps, 'The mismatch is 4.10 %.', tools=['lattice_mismatch'])
+    bad.events.insert(0, TurnEvent('tool_result', f'lattice_mismatch: {tool_text[:200]}'))
+    assert not verdict(CASES['mismatch_pair'], bad)
+
+
+def test_lattice_constant_case_accepts_the_rounded_cif_value(tmp_path, mock_settings):
+    deps = _deps('lattice_constant', tmp_path, mock_settings)
+    tool_text = lattice_mismatch(deps, 'h-WS2')
+    a_value = float(tool_text.split(': a ', 1)[1].split(',', 1)[0])
+    for printed in (f'{a_value:.3f}', f'{a_value:.2f}'):
+        result = _result(deps, f'a = {printed} Angstrom.', tools=['lattice_mismatch'])
+        result.events.insert(0, TurnEvent('tool_result', f'lattice_mismatch: {tool_text}'))
+        assert verdict(CASES['lattice_constant'], result)
+    assert not verdict(CASES['lattice_constant'],
+                       _result(deps, 'a = 3.32 Angstrom.', tools=['lattice_mismatch']))

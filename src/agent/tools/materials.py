@@ -172,6 +172,68 @@ def resolve_material(deps, name: str,
     return structures[0], potentials[0]
 
 
+#: Coincidence search bounds: 6 repeats a side takes ~0.1 s; 10 takes ~2 s.
+COINCIDENCE_REPEATS = 6
+COINCIDENCE_STRAIN = 0.02
+#: In-plane angles further apart than this are different lattices.
+GAMMA_TOL_DEG = 1.0
+
+
+def _structure(deps, name: str) -> FoundFile:
+    """The structure file named exactly ``name``."""
+    for found in index_for(deps).structures:
+        if found.name.casefold() == name.casefold():
+            return found
+    raise ToolInputError(f"no structure file named '{name}'; call search_structures "
+                         'and use a name exactly as it returns')
+
+
+def _cell_line(name: str, cell: dict) -> str:
+    return (f"{name}: a {cell['lat_a']:.3f}, b {cell['lat_b']:.3f} Angstrom, "
+            f"gamma {cell['ang_g']:.1f} deg")
+
+
+def _percent(x: float, y: float) -> float:
+    return abs(x - y) / ((x + y) / 2) * 100
+
+
+def lattice_mismatch(deps, material_a: str, material_b: Optional[str] = None) -> str:
+    """In-plane cell of one material; for two, their mismatch and smallest coincidence cell."""
+    # pylint: disable=import-outside-toplevel
+    from ...core.utils.structures import cifread  # reaches ASE (~270 ms): only when called
+    from ...lattice.matching import cell_from_params, find_coincidence_lattice
+    found_a = _structure(deps, material_a)
+    cell_a = cifread(found_a.path)
+    source_a = f'(from {display_path(found_a.path, deps.roots)})'
+    if material_b is None:
+        return compact(f'{_cell_line(found_a.name, cell_a)} {source_a}')
+    found_b = _structure(deps, material_b)
+    cell_b = cifread(found_b.path)
+    lines = [f"{found_a.name} / {found_b.name}: in-plane mismatch "
+             f"a {_percent(cell_a['lat_a'], cell_b['lat_a']):.2f} %, "
+             f"b {_percent(cell_a['lat_b'], cell_b['lat_b']):.2f} % (|x1 - x2| / mean)",
+             _cell_line(found_a.name, cell_a), _cell_line(found_b.name, cell_b)]
+    if abs(cell_a['ang_g'] - cell_b['ang_g']) > GAMMA_TOL_DEG:
+        lines.append('different in-plane lattice (gamma differs): the a/b mismatch does '
+                     'not describe the interface; the coincidence cell does')
+    match = find_coincidence_lattice(
+        cell_from_params(cell_a['lat_a'], cell_a['lat_b'], cell_a['ang_g']),
+        cell_from_params(cell_b['lat_a'], cell_b['lat_b'], cell_b['ang_g']),
+        strain_tol=COINCIDENCE_STRAIN, max_supercell=COINCIDENCE_REPEATS)
+    bounds = (f'<= {COINCIDENCE_REPEATS} repeats a side, strain <= '
+              f'{COINCIDENCE_STRAIN * 100:g} %')
+    if match is None:
+        lines.append(f'no coincidence cell within {bounds}')
+    else:
+        lines.append(f'smallest coincidence cell ({bounds}): '
+                     f'{found_a.name} {match.matrix_a.tolist()}, '
+                     f'{found_b.name} {match.matrix_b.tolist()}, area {match.area:.2f} A^2, '
+                     f'strain {match.strain_a * 100:.2f} % / {match.strain_b * 100:.2f} %')
+    lines.append(f'files: {display_path(found_a.path, deps.roots)}, '
+                 f'{display_path(found_b.path, deps.roots)}')
+    return compact('\n'.join(lines))
+
+
 def config_path(deps, path: Path) -> str:
     """``path`` as a config value: relative to the config's folder when it can be."""
     base = deps.document.base_dir

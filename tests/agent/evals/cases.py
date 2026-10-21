@@ -27,6 +27,7 @@ from src.agent.plot_changes import PlotChange
 from src.agent.tools.materials import index_for, resolve_material
 from src.agent.tools.setup import make_sweep
 from src.core.scaling import ScaleContext, scale
+from src.core.utils.structures import cifread
 from src.postprocessing.plot_config import PLOT_TYPES
 from src.postprocessing.read_data import DataReader
 from tests.helpers.agent import FakeMaterialsClient, materials_factory
@@ -615,6 +616,24 @@ DECLINES = {
         tools=('setup_afm',)),
 }
 
+def _lattice_a(result, name: str) -> float:
+    """In-plane ``a`` of ``name``, read from the CIF the material index finds."""
+    found = next(f for f in index_for(result.deps).structures if f.name == name)
+    return cifread(found.path)['lat_a']
+
+
+def _mismatch_a(result, first: str, second: str) -> float:
+    a_1, a_2 = _lattice_a(result, first), _lattice_a(result, second)
+    return abs(a_1 - a_2) / ((a_1 + a_2) / 2) * 100
+
+
+def quotes(result, value: float) -> bool:
+    """Whether the reply states ``value``, possibly rounded to the precision it prints."""
+    return any(math.isclose(v, value, rel_tol=REL_TOL)
+               or round(value, len(t.split('.')[1])) == v
+               for t in _DECIMAL.findall(result.text) for v in [float(t)])
+
+
 def _concept(*stem_groups: Tuple[str, ...]):
     """A concept answer: no proposal, nothing invented, one stem from every group."""
     return lambda r: (not r.pending and grounded(r) and bool(r.text.strip())
@@ -672,6 +691,16 @@ DOMAIN = {
         lambda r: called(r, 'query_materials_project', 'query_2dmatpedia') and grounded(r)
         and mentions_any(r, _stable_mp()['material_id'], _stable_mp()['spacegroup']),
         tools=('query_materials_project',)),
+    'mismatch_pair': Case(
+        'What is the lattice mismatch between h-MoS2 and h-WS2?',
+        lambda r: called(r, 'lattice_mismatch') and grounded(r)
+        and quotes(r, _mismatch_a(r, 'h-MoS2', 'h-WS2')),
+        tools=('lattice_mismatch',)),
+    'lattice_constant': Case(
+        'What is the in-plane lattice constant of h-WS2?',
+        lambda r: called(r, 'lattice_mismatch') and grounded(r)
+        and quotes(r, _lattice_a(r, 'h-WS2')),
+        tools=('lattice_mismatch',)),
     'cof_guess': Case(
         'Roughly what friction coefficient will I get for h-MoS2 under an AFM tip?',
         kind='declines',

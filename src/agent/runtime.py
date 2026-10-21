@@ -121,6 +121,13 @@ def _register_tools(agent: Agent) -> None:  # pylint: disable=too-many-locals
         return _call(ctx, materials.search_potentials, material, potential_type)
 
     @agent.tool
+    def lattice_mismatch(ctx: RunContext[AgentDeps], material_a: str,
+                         material_b: Optional[str] = None) -> str:
+        """In-plane lattice constants of a material; for two, their mismatch and
+        smallest coincidence cell."""
+        return _call(ctx, materials.lattice_mismatch, material_a, material_b)
+
+    @agent.tool
     def workspace_overview(ctx: RunContext[AgentDeps], depth: int = 2) -> str:
         """List the workspace's folders."""
         return _call(ctx, workspace.workspace_overview, depth)
