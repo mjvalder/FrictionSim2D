@@ -1,2 +1,4 @@
 .cache/
 corpus/
+data/
+runs/

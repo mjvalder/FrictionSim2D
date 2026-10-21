@@ -20,6 +20,15 @@ papers:
   version: publishedVersion
   host: Advanced Materials
   landing_url: https://doi.org/10.1002/adma.202207757
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1002/adma.202207757
+    licence: cc-by
+    host: Advanced Materials
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11585/907603
+    licence: cc-by
+    host: Archivio istituzionale della ricerca (Alma Mater Studiorum Università di Bologna)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4312094227
 - key: Marian2022
@@ -36,6 +45,11 @@ papers:
   version: submittedVersion
   host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   landing_url: http://hdl.handle.net/11380/1265003
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11380/1265003
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: green
   openalex_id: https://openalex.org/W4200159770
 - key: Cheng2023
@@ -52,6 +66,15 @@ papers:
   host: Advanced Materials Interfaces
   pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/admi.202202062
   landing_url: https://doi.org/10.1002/admi.202202062
+  copies:
+  - pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/admi.202202062
+    landing_url: https://doi.org/10.1002/admi.202202062
+    licence: cc-by
+    host: Advanced Materials Interfaces
+  - pdf_url: null
+    landing_url: https://doaj.org/article/b9601369f3d8468088de411fc60a52a2
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4323075399
 - key: Fronzi2020
@@ -67,6 +90,15 @@ papers:
   version: submittedVersion
   host: Figshare
   landing_url: https://figshare.com/articles/journal_contribution/High_Throughput_Screening_of_Millions_of_van_der_Waals_Heterostructures_for_Superlubricant_Applications/20660220
+  copies:
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/High_Throughput_Screening_of_Millions_of_van_der_Waals_Heterostructures_for_Superlubricant_Applications/20660220
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/High_Throughput_Screening_of_Millions_of_van_der_Waals_Heterostructures_for_Superlubricant_Applications/27537321
+    licence: cc-by
+    host: Figshare
   oa_status: green
   openalex_id: https://openalex.org/W3084974337
 - key: Li2018
@@ -83,6 +115,19 @@ papers:
   host: Advanced Science
   pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/advs.201800810
   landing_url: https://doi.org/10.1002/advs.201800810
+  copies:
+  - pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/advs.201800810
+    landing_url: https://doi.org/10.1002/advs.201800810
+    licence: cc-by
+    host: Advanced Science
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6247022
+    licence: cc-by
+    host: Europe PMC (PubMed Central)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6247022
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W2888943969
 - key: Zhai2021
@@ -99,6 +144,19 @@ papers:
   version: publishedVersion
   host: Advanced Science
   landing_url: https://doi.org/10.1002/advs.202003739
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1002/advs.202003739
+    licence: cc-by
+    host: Advanced Science
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/8188226
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/267bc1da252f46d7adaaa4c99926b4c6
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W3136728280
 - key: Lu2024
@@ -115,6 +173,31 @@ papers:
   version: publishedVersion
   host: Advanced Science
   landing_url: https://doi.org/10.1002/advs.202305277
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1002/advs.202305277
+    licence: cc-by
+    host: Advanced Science
+  - pdf_url: null
+    landing_url: https://research.utwente.nl/en/publications/d56f50a8-bc11-4713-be1f-aa23fd0d06be
+    licence: cc-by
+    host: University of Twente Research Information
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10987159
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/1865e96db26f4555aad5b60714b4c987
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
+  - pdf_url: null
+    landing_url: https://doi.org/10.5281/zenodo.12623231
+    licence: cc-by
+    host: Zenodo (CERN European Organization for Nuclear Research)
+  - pdf_url: null
+    landing_url: https://doi.org/10.5281/zenodo.12623232
+    licence: cc-by
+    host: Zenodo (CERN European Organization for Nuclear Research)
   oa_status: gold
   openalex_id: https://openalex.org/W4391281165
 - key: Ru2024
@@ -131,6 +214,15 @@ papers:
   host: Advanced Science
   pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/advs.202400395
   landing_url: https://doi.org/10.1002/advs.202400395
+  copies:
+  - pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/advs.202400395
+    landing_url: https://doi.org/10.1002/advs.202400395
+    licence: cc-by
+    host: Advanced Science
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11425967/pdf/ADVS-11-2400395.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11425967
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W4400368862
 - key: Shanmugam2022
@@ -149,6 +241,11 @@ papers:
   host: Particle & Particle Systems Characterization
   pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/ppsc.202200031
   landing_url: https://doi.org/10.1002/ppsc.202200031
+  copies:
+  - pdf_url: https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/ppsc.202200031
+    landing_url: https://doi.org/10.1002/ppsc.202200031
+    licence: cc-by
+    host: Particle & Particle Systems Characterization
   oa_status: hybrid
   openalex_id: https://openalex.org/W4229369310
 - key: Ewen2016
@@ -167,6 +264,15 @@ papers:
   host: Tribology Letters
   pdf_url: https://link.springer.com/content/pdf/10.1007%2Fs11249-016-0722-7.pdf
   landing_url: https://doi.org/10.1007/s11249-016-0722-7
+  copies:
+  - pdf_url: https://link.springer.com/content/pdf/10.1007%2Fs11249-016-0722-7.pdf
+    landing_url: https://doi.org/10.1007/s11249-016-0722-7
+    licence: cc-by
+    host: Tribology Letters
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/10044/1/37413
+    licence: cc-by
+    host: Spiral (Imperial College London)
   oa_status: hybrid
   openalex_id: https://openalex.org/W2482816461
 - key: Marchetto2015
@@ -183,6 +289,15 @@ papers:
   host: Friction
   pdf_url: https://link.springer.com/content/pdf/10.1007/s40544-015-0080-8.pdf
   landing_url: https://doi.org/10.1007/s40544-015-0080-8
+  copies:
+  - pdf_url: https://link.springer.com/content/pdf/10.1007/s40544-015-0080-8.pdf
+    landing_url: https://doi.org/10.1007/s40544-015-0080-8
+    licence: cc-by
+    host: Friction
+  - pdf_url: https://iris.unimore.it/bitstream/11380/1109064/2/Marchetto10.1007%252Fs40544-015-0080-8.pdf
+    landing_url: http://hdl.handle.net/11380/1109064
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: diamond
   openalex_id: https://openalex.org/W1769768242
 - key: Holmberg2017
@@ -198,6 +313,15 @@ papers:
   host: Friction
   pdf_url: https://link.springer.com/content/pdf/10.1007%2Fs40544-017-0183-5.pdf
   landing_url: https://doi.org/10.1007/s40544-017-0183-5
+  copies:
+  - pdf_url: https://link.springer.com/content/pdf/10.1007%2Fs40544-017-0183-5.pdf
+    landing_url: https://doi.org/10.1007/s40544-017-0183-5
+    licence: cc-by
+    host: Friction
+  - pdf_url: null
+    landing_url: https://doaj.org/article/98f5680bf8ea43979bf3167998ece1ff
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: diamond
   openalex_id: https://openalex.org/W2750857672
 - key: Ewen2018
@@ -213,6 +337,15 @@ papers:
   host: Friction
   pdf_url: https://link.springer.com/content/pdf/10.1007%2Fs40544-018-0207-9.pdf
   landing_url: https://doi.org/10.1007/s40544-018-0207-9
+  copies:
+  - pdf_url: https://link.springer.com/content/pdf/10.1007%2Fs40544-018-0207-9.pdf
+    landing_url: https://doi.org/10.1007/s40544-018-0207-9
+    licence: cc-by
+    host: Friction
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/10044/1/56095
+    licence: cc-by
+    host: Spiral (Imperial College London)
   oa_status: diamond
   openalex_id: https://openalex.org/W2788124719
 - key: Zhang2023
@@ -230,6 +363,15 @@ papers:
   host: Friction
   pdf_url: https://link.springer.com/content/pdf/10.1007/s40544-023-0738-6.pdf
   landing_url: https://doi.org/10.1007/s40544-023-0738-6
+  copies:
+  - pdf_url: https://link.springer.com/content/pdf/10.1007/s40544-023-0738-6.pdf
+    landing_url: https://doi.org/10.1007/s40544-023-0738-6
+    licence: cc-by
+    host: Friction
+  - pdf_url: null
+    landing_url: https://doaj.org/article/65fcef2fbd494ffb881ede50a32f79e4
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: diamond
   openalex_id: https://openalex.org/W4366998628
 - key: Tang2024
@@ -245,6 +387,11 @@ papers:
   version: publishedVersion
   host: Friction
   landing_url: https://doi.org/10.1007/s40544-024-0901-8
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1007/s40544-024-0901-8
+    licence: cc-by
+    host: Friction
   oa_status: diamond
   openalex_id: https://openalex.org/W4398249330
 - key: Wei2023
@@ -261,6 +408,11 @@ papers:
   version: submittedVersion
   host: Figshare
   landing_url: https://figshare.com/articles/journal_contribution/Effect_of_five_typical_vacancy_defects_on_the_tribological_behaviors_of_MoS2_sheet_A_molecular_dynamics_study/27819981
+  copies:
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/Effect_of_five_typical_vacancy_defects_on_the_tribological_behaviors_of_MoS2_sheet_A_molecular_dynamics_study/27819981
+    licence: cc-by
+    host: Figshare
   oa_status: green
   openalex_id: https://openalex.org/W4385605118
 - key: Restuccia2020
@@ -278,6 +430,11 @@ papers:
   host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   pdf_url: https://iris.unimore.it/bitstream/11380/1185715/4/1-s2.0-S0008622319309455-accepted_manuscript-compresso.pdf
   landing_url: http://hdl.handle.net/11380/1185715
+  copies:
+  - pdf_url: https://iris.unimore.it/bitstream/11380/1185715/4/1-s2.0-S0008622319309455-accepted_manuscript-compresso.pdf
+    landing_url: http://hdl.handle.net/11380/1185715
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: green
   openalex_id: https://openalex.org/W2973750914
 - key: Janssen2019
@@ -295,6 +452,11 @@ papers:
   host: Computational Materials Science
   pdf_url: https://www.sciencedirect.com/science/article/pii/S0927025618304786/pdf
   landing_url: https://doi.org/10.1016/j.commatsci.2018.07.043
+  copies:
+  - pdf_url: https://www.sciencedirect.com/science/article/pii/S0927025618304786/pdf
+    landing_url: https://doi.org/10.1016/j.commatsci.2018.07.043
+    licence: cc-by
+    host: Computational Materials Science
   oa_status: hybrid
   openalex_id: https://openalex.org/W2921869462
 - key: Restuccia2018
@@ -310,6 +472,11 @@ papers:
   version: submittedVersion
   host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   landing_url: http://hdl.handle.net/11380/1165347
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11380/1165347
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: green
   openalex_id: https://openalex.org/W2886584991
 - key: Wolloch2022
@@ -326,6 +493,15 @@ papers:
   host: Computational Materials Science
   pdf_url: https://www.sciencedirect.com/science/article/pii/S0927025622000969/pdf
   landing_url: https://doi.org/10.1016/j.commatsci.2022.111302
+  copies:
+  - pdf_url: https://www.sciencedirect.com/science/article/pii/S0927025622000969/pdf
+    landing_url: https://doi.org/10.1016/j.commatsci.2022.111302
+    licence: cc-by
+    host: Computational Materials Science
+  - pdf_url: https://iris.unimore.it/bitstream/11380/1271021/1/1-s2.0-S0927025622000969-main.pdf
+    landing_url: http://hdl.handle.net/11380/1271021
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4214906274
 - key: Zhang2022
@@ -342,6 +518,15 @@ papers:
   host: Materials Today Physics
   pdf_url: https://ars.els-cdn.com/content/image/1-s2.0-S2542529322001699-ga1_lrg.jpg
   landing_url: https://doi.org/10.1016/j.mtphys.2022.100771
+  copies:
+  - pdf_url: https://ars.els-cdn.com/content/image/1-s2.0-S2542529322001699-ga1_lrg.jpg
+    landing_url: https://doi.org/10.1016/j.mtphys.2022.100771
+    licence: cc-by
+    host: Materials Today Physics
+  - pdf_url: null
+    landing_url: https://pure.au.dk/portal/en/publications/2bcf3447-e27a-4621-90f2-ca6a156e75d1
+    licence: cc-by
+    host: null
   oa_status: hybrid
   openalex_id: https://openalex.org/W4283779000
 - key: Serpini2019
@@ -359,6 +544,11 @@ papers:
   host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   pdf_url: https://iris.unimore.it/bitstream/11380/1182975/3/POST_PRINT_j.triboint.2019.03.004.pdf
   landing_url: http://hdl.handle.net/11380/1182975
+  copies:
+  - pdf_url: https://iris.unimore.it/bitstream/11380/1182975/3/POST_PRINT_j.triboint.2019.03.004.pdf
+    landing_url: http://hdl.handle.net/11380/1182975
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: green
   openalex_id: https://openalex.org/W2921605109
 - key: Pastewka2025
@@ -377,6 +567,40 @@ papers:
   version: publishedVersion
   host: Tribology International
   landing_url: https://doi.org/10.1016/j.triboint.2025.111326
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.triboint.2025.111326
+    licence: cc-by
+    host: Tribology International
+  - pdf_url: null
+    landing_url: https://research.rug.nl/en/publications/d54de31f-7589-47b0-9c69-6f50bdf839d7
+    licence: cc-by
+    host: University of Groningen research database (University of Groningen / Centre for Information
+      Technology)
+  - pdf_url: https://hal.science/hal-05397999/document
+    landing_url: https://hal.science/hal-05397999
+    licence: cc-by
+    host: HAL (Le Centre pour la Communication Scientifique Directe)
+  - pdf_url: null
+    landing_url: http://urn.kb.se/resolve?urn=urn:nbn:se:ltu:diva-116309
+    licence: cc-by
+    host: Diva portal (Dalarna University Library)
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11587/568566
+    licence: cc-by
+    host: AIRUS
+  - pdf_url: null
+    landing_url: https://www.scopus.com/pages/publications/105028154290
+    licence: cc-by
+    host: Scopus (Elsevier)
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/10044/1/125105
+    licence: cc-by
+    host: Spiral (Imperial College London)
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11577/3581978
+    licence: cc-by
+    host: Padua Research Archive (University of Padova)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4415679868
 - key: Garg2025
@@ -392,6 +616,11 @@ papers:
   version: submittedVersion
   host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   landing_url: https://doaj.org/article/8268315d591843dbbbadf748492dd108
+  copies:
+  - pdf_url: null
+    landing_url: https://doaj.org/article/8268315d591843dbbbadf748492dd108
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4406563725
 - key: Craven2025
@@ -413,6 +642,15 @@ papers:
   host: Journal of Chemical & Engineering Data
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jced.5c00010?ref=article_openPDF
   landing_url: https://doi.org/10.1021/acs.jced.5c00010
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jced.5c00010?ref=article_openPDF
+    landing_url: https://doi.org/10.1021/acs.jced.5c00010
+    licence: cc-by
+    host: Journal of Chemical & Engineering Data
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/12169611
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4410764935
 - key: Bernal2025
@@ -429,6 +667,15 @@ papers:
   host: Journal of Chemical Information and Modeling
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jcim.5c02015?ref=article_openPDF
   landing_url: https://doi.org/10.1021/acs.jcim.5c02015
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jcim.5c02015?ref=article_openPDF
+    landing_url: https://doi.org/10.1021/acs.jcim.5c02015
+    licence: cc-by
+    host: Journal of Chemical Information and Modeling
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/12606625
+    licence: cc-by
+    host: Europe PMC (PubMed Central)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4415356635
 - key: Abraham2019
@@ -447,6 +694,11 @@ papers:
   version: submittedVersion
   host: Qucosa (Saxon State and University Library Dresden)
   landing_url: https://ul.qucosa.de/id/qucosa%3A72400
+  copies:
+  - pdf_url: null
+    landing_url: https://ul.qucosa.de/id/qucosa%3A72400
+    licence: cc-by-sa
+    host: Qucosa (Saxon State and University Library Dresden)
   oa_status: green
   openalex_id: https://openalex.org/W2974666250
 - key: Losi2023
@@ -463,6 +715,19 @@ papers:
   host: Journal of Chemical Theory and Computation
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jctc.3c00459
   landing_url: https://doi.org/10.1021/acs.jctc.3c00459
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jctc.3c00459
+    landing_url: https://doi.org/10.1021/acs.jctc.3c00459
+    licence: cc-by
+    host: Journal of Chemical Theory and Computation
+  - pdf_url: https://cris.unibo.it/bitstream/11585/965032/1/23_JCTC_Tribchem.pdf
+    landing_url: https://pubs.acs.org/doi/10.1021/acs.jctc.3c00459
+    licence: cc-by
+    host: Archivio istituzionale della ricerca (Alma Mater Studiorum Università di Bologna)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10413857/pdf/ct3c00459.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10413857
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4383066533
 - key: Suter2025
@@ -480,6 +745,23 @@ papers:
   version: publishedVersion
   host: Journal of Chemical Theory and Computation
   landing_url: https://doi.org/10.1021/acs.jctc.4c01364
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1021/acs.jctc.4c01364
+    licence: cc-by
+    host: Journal of Chemical Theory and Computation
+  - pdf_url: null
+    landing_url: https://handle.uba.uva.nl/personal/pure/en/publications/rapid-accurate-and-reproducible-prediction-of-the-glass-transition-temperature-using-ensemblebased-molecular-dynamics-simulation(67c943dc-2e16-4d2f-a99c-830ee53f85af).html
+    licence: cc-by
+    host: UvA-DARE (University of Amsterdam)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11823416/pdf/ct4c01364.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11823416
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://hal.science/hal-04923316
+    licence: cc-by
+    host: INRIA a CCSD electronic archive server
   oa_status: hybrid
   openalex_id: https://openalex.org/W4406932774
 - key: Abdurakhmonov2026
@@ -496,6 +778,15 @@ papers:
   version: acceptedVersion
   host: ChemRxiv
   landing_url: https://doi.org/10.26434/chemrxiv-2025-kvl69
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.26434/chemrxiv-2025-kvl69
+    licence: cc-by
+    host: ChemRxiv
+  - pdf_url: null
+    landing_url: https://doi.org/10.26434/chemrxiv-2025-kvl69-v2
+    licence: cc-by
+    host: ChemRxiv
   oa_status: green
   openalex_id: https://openalex.org/W7118178641
 - key: Ponomarev2022
@@ -511,6 +802,15 @@ papers:
   version: publishedVersion
   host: The Journal of Physical Chemistry C
   landing_url: https://doi.org/10.1021/acs.jpcc.2c01075
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1021/acs.jpcc.2c01075
+    licence: cc-by
+    host: The Journal of Physical Chemistry C
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/9189924
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4281557117
 - key: Deringer2018
@@ -527,6 +827,23 @@ papers:
   host: The Journal of Physical Chemistry Letters
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jpclett.8b00902
   landing_url: https://doi.org/10.1021/acs.jpclett.8b00902
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.jpclett.8b00902
+    landing_url: https://doi.org/10.1021/acs.jpclett.8b00902
+    licence: cc-by
+    host: The Journal of Physical Chemistry Letters
+  - pdf_url: https://www.repository.cam.ac.uk/bitstreams/91d81ab2-b35b-4c4f-80bf-7928d0c31d54/download
+    landing_url: https://www.repository.cam.ac.uk/handle/1810/280679
+    licence: cc-by
+    host: Apollo (University of Cambridge)
+  - pdf_url: null
+    landing_url: https://nottingham-repository.worktribe.com/output/1430902
+    licence: cc-by
+    host: Repository@Nottingham (University of Nottingham)
+  - pdf_url: null
+    landing_url: https://doi.org/10.17863/cam.28044
+    licence: cc-by
+    host: Apollo
   oa_status: hybrid
   openalex_id: https://openalex.org/W2792137452
 - key: Song2023
@@ -544,6 +861,15 @@ papers:
   host: Langmuir
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.langmuir.3c01546
   landing_url: https://doi.org/10.1021/acs.langmuir.3c01546
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.langmuir.3c01546
+    landing_url: https://doi.org/10.1021/acs.langmuir.3c01546
+    licence: cc-by
+    host: Langmuir
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10634352/pdf/la3c01546.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10634352
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4387950332
 - key: Oo2024
@@ -560,6 +886,19 @@ papers:
   host: Nano Letters
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.nanolett.4c02883?ref=article_openPDF
   landing_url: https://doi.org/10.1021/acs.nanolett.4c02883
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acs.nanolett.4c02883?ref=article_openPDF
+    landing_url: https://doi.org/10.1021/acs.nanolett.4c02883
+    licence: cc-by
+    host: Nano Letters
+  - pdf_url: https://escholarship.org/content/qt9c88b6d4/qt9c88b6d4.pdf
+    landing_url: https://escholarship.org/uc/item/9c88b6d4
+    licence: cc-by
+    host: eScholarship (California Digital Library)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11450813/pdf/nl4c02883.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11450813
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4402729866
 - key: Bondarev2022
@@ -576,6 +915,15 @@ papers:
   version: publishedVersion
   host: ACS Applied Materials & Interfaces
   landing_url: https://doi.org/10.1021/acsami.2c15706
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1021/acsami.2c15706
+    licence: cc-by
+    host: ACS Applied Materials & Interfaces
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/9756294
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4311518636
 - key: Restuccia2023
@@ -592,6 +940,19 @@ papers:
   host: ACS Applied Materials & Interfaces
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsami.3c00662
   landing_url: https://doi.org/10.1021/acsami.3c00662
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsami.3c00662
+    landing_url: https://doi.org/10.1021/acsami.3c00662
+    licence: cc-by
+    host: ACS Applied Materials & Interfaces
+  - pdf_url: https://cris.unibo.it/bitstream/11585/924237/1/acsami.3c00662.pdf
+    landing_url: https://pubs.acs.org/doi/full/10.1021/acsami.3c00662
+    licence: cc-by
+    host: Archivio istituzionale della ricerca (Alma Mater Studiorum Università di Bologna)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10119859/pdf/am3c00662.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10119859
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4362546140
 - key: Ahmed2025
@@ -608,6 +969,15 @@ papers:
   host: arXiv (Cornell University)
   pdf_url: https://arxiv.org/pdf/2501.05328
   landing_url: http://arxiv.org/abs/2501.05328
+  copies:
+  - pdf_url: https://arxiv.org/pdf/2501.05328
+    landing_url: http://arxiv.org/abs/2501.05328
+    licence: cc-by
+    host: arXiv (Cornell University)
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2501.05328
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: green
   openalex_id: https://openalex.org/W4410225551
 - key: Shabani2025
@@ -625,6 +995,15 @@ papers:
   host: ACS Applied Materials & Interfaces
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsami.5c09866?ref=article_openPDF
   landing_url: https://doi.org/10.1021/acsami.5c09866
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsami.5c09866?ref=article_openPDF
+    landing_url: https://doi.org/10.1021/acsami.5c09866
+    licence: cc-by
+    host: ACS Applied Materials & Interfaces
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/12291085
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4412127204
 - key: Ho2025
@@ -643,6 +1022,15 @@ papers:
   host: ACS Applied Materials & Interfaces
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsami.5c16288?ref=article_openPDF
   landing_url: https://doi.org/10.1021/acsami.5c16288
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsami.5c16288?ref=article_openPDF
+    landing_url: https://doi.org/10.1021/acsami.5c16288
+    licence: cc-by
+    host: ACS Applied Materials & Interfaces
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/12516681
+    licence: cc-by
+    host: Europe PMC (PubMed Central)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4414564351
 - key: Marquis2022
@@ -660,6 +1048,19 @@ papers:
   version: publishedVersion
   host: ACS Applied Nano Materials
   landing_url: https://doi.org/10.1021/acsanm.2c01847
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1021/acsanm.2c01847
+    licence: cc-by
+    host: ACS Applied Nano Materials
+  - pdf_url: https://scholarworks.indianapolis.iu.edu/bitstreams/6313142b-d154-44df-b6bc-73a6945b3783/download
+    landing_url: https://hdl.handle.net/1805/34773
+    licence: cc-by
+    host: IUScholarWorks (Indiana University)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/9425433
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4290674663
 - key: Garcia2023
@@ -675,6 +1076,19 @@ papers:
   version: publishedVersion
   host: ACS Nano
   landing_url: https://doi.org/10.1021/acsnano.2c10215
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1021/acsnano.2c10215
+    licence: cc-by
+    host: ACS Nano
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10664075/pdf/nn2c10215.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10664075
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/10261/343949
+    licence: cc-by
+    host: DIGITAL.CSIC (Spanish National Research Council (CSIC))
   oa_status: hybrid
   openalex_id: https://openalex.org/W4311204042
 - key: Campi2023
@@ -690,6 +1104,23 @@ papers:
   host: ACS Nano
   pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsnano.2c11510
   landing_url: https://doi.org/10.1021/acsnano.2c11510
+  copies:
+  - pdf_url: https://pubs.acs.org/doi/pdf/10.1021/acsnano.2c11510
+    landing_url: https://doi.org/10.1021/acsnano.2c11510
+    licence: cc-by
+    host: ACS Nano
+  - pdf_url: https://boa.unimib.it/bitstream/10281/472972/2/Campi-2023-ACSNano-VoR.pdf
+    landing_url: https://hdl.handle.net/10281/472972
+    licence: cc-by
+    host: BOA (University of Milano-Bicocca)
+  - pdf_url: https://iris.unimore.it/bitstream/11380/1330967/2/campi-et-al-2023-expansion-of-the-materials-cloud-2d-database.pdf
+    landing_url: https://hdl.handle.net/11380/1330967
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10403156/pdf/nn2c11510.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10403156
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4380434237
 - key: Ying2024
@@ -705,6 +1136,15 @@ papers:
   version: publishedVersion
   host: ACS Nano
   landing_url: https://doi.org/10.1021/acsnano.3c13099
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1021/acsnano.3c13099
+    licence: cc-by
+    host: ACS Nano
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11008353/pdf/nn3c13099.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11008353
+    licence: cc-by
+    host: PubMed Central
   oa_status: hybrid
   openalex_id: https://openalex.org/W4393277820
 - key: Vilhena2016
@@ -720,6 +1160,15 @@ papers:
   licence: cc-by
   host: Zenodo (CERN European Organization for Nuclear Research)
   landing_url: https://doi.org/10.5281/zenodo.10630284
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.5281/zenodo.10630284
+    licence: cc-by
+    host: Zenodo (CERN European Organization for Nuclear Research)
+  - pdf_url: null
+    landing_url: https://doi.org/10.5281/zenodo.10630285
+    licence: cc-by
+    host: Zenodo (CERN European Organization for Nuclear Research)
   oa_status: green
   openalex_id: https://openalex.org/W2296919452
 - key: Levita2014
@@ -735,6 +1184,11 @@ papers:
   version: submittedVersion
   host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   landing_url: http://hdl.handle.net/11380/1062708
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11380/1062708
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: green
   openalex_id: https://openalex.org/W2070014589
 - key: Senftle2016
@@ -752,6 +1206,19 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/npjcompumats201511.pdf
   landing_url: https://doi.org/10.1038/npjcompumats.2015.11
+  copies:
+  - pdf_url: https://www.nature.com/articles/npjcompumats201511.pdf
+    landing_url: https://doi.org/10.1038/npjcompumats.2015.11
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: https://biblio.ugent.be/publication/8514189/file/8514192.pdf
+    landing_url: http://hdl.handle.net/1854/LU-8514189
+    licence: cc-by
+    host: Ghent University Academic Bibliography (Ghent University)
+  - pdf_url: https://www.osti.gov/servlets/purl/1261375
+    landing_url: https://www.osti.gov/biblio/1261375
+    licence: cc-by
+    host: OSTI OAI (U.S. Department of Energy Office of Scientific and Technical Information)
   oa_status: gold
   openalex_id: https://openalex.org/W2333787883
 - key: Xiong2016
@@ -768,6 +1235,11 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/npjcompumats20159.pdf
   landing_url: https://doi.org/10.1038/npjcompumats.2015.9
+  copies:
+  - pdf_url: https://www.nature.com/articles/npjcompumats20159.pdf
+    landing_url: https://doi.org/10.1038/npjcompumats.2015.9
+    licence: cc-by
+    host: npj Computational Materials
   oa_status: gold
   openalex_id: https://openalex.org/W2609059410
 - key: Andersson2020
@@ -784,6 +1256,23 @@ papers:
   host: Nature Communications
   pdf_url: https://www.nature.com/articles/s41467-019-14239-2.pdf
   landing_url: https://doi.org/10.1038/s41467-019-14239-2
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41467-019-14239-2.pdf
+    landing_url: https://doi.org/10.1038/s41467-019-14239-2
+    licence: cc-by
+    host: Nature Communications
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6972962
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/967cd657ca4449b19618fd6ef44dfb87
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11250/2723866
+    licence: cc-by
+    host: NORA - Norwegian Open Research Archives
   oa_status: gold
   openalex_id: https://openalex.org/W3002565242
 - key: Androulidakis2020
@@ -801,6 +1290,23 @@ papers:
   host: Nature Communications
   pdf_url: https://www.nature.com/articles/s41467-020-15446-y.pdf
   landing_url: https://doi.org/10.1038/s41467-020-15446-y
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41467-020-15446-y.pdf
+    landing_url: https://doi.org/10.1038/s41467-020-15446-y
+    licence: cc-by
+    host: Nature Communications
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/7101365
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/98b87df96404472ead34819619465f34
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2004.01936
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: gold
   openalex_id: https://openalex.org/W3012993953
 - key: Vanossi2020
@@ -817,6 +1323,19 @@ papers:
   host: Nature Communications
   pdf_url: https://www.nature.com/articles/s41467-020-18429-1.pdf
   landing_url: https://doi.org/10.1038/s41467-020-18429-1
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41467-020-18429-1.pdf
+    landing_url: https://doi.org/10.1038/s41467-020-18429-1
+    licence: cc-by
+    host: Nature Communications
+  - pdf_url: https://kops.uni-konstanz.de/server/api/core/bitstreams/a3c15d80-59fe-4195-b1ad-0d7c0cb1ab80/content
+    landing_url: http://nbn-resolving.de/urn:nbn:de:bsz:352-2-lse2i379b1ua8
+    licence: cc-by
+    host: KOPS (University of Konstanz)
+  - pdf_url: null
+    landing_url: https://doaj.org/article/eed4679950a64ea189d0f1f89cc69f69
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W3087429898
 - key: Rokni2020
@@ -834,6 +1353,19 @@ papers:
   host: Nature Communications
   pdf_url: https://www.nature.com/articles/s41467-020-19411-7.pdf
   landing_url: https://doi.org/10.1038/s41467-020-19411-7
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41467-020-19411-7.pdf
+    landing_url: https://doi.org/10.1038/s41467-020-19411-7
+    licence: cc-by
+    host: Nature Communications
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/7645779
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/6bd261e4164346c29141ea91f3dae5be
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W3096372094
 - key: Wang2025a
@@ -850,6 +1382,11 @@ papers:
   version: submittedVersion
   host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   landing_url: https://doaj.org/article/75184da022bb416ca5775f6d5c9cd467
+  copies:
+  - pdf_url: null
+    landing_url: https://doaj.org/article/75184da022bb416ca5775f6d5c9cd467
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4406016620
 - key: Han2025
@@ -866,6 +1403,11 @@ papers:
   version: submittedVersion
   host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   landing_url: https://doaj.org/article/484b5427dd29411a8b91a85a56197d7e
+  copies:
+  - pdf_url: null
+    landing_url: https://doaj.org/article/484b5427dd29411a8b91a85a56197d7e
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4410458896
 - key: Du2025
@@ -884,6 +1426,11 @@ papers:
   version: submittedVersion
   host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   landing_url: https://doaj.org/article/bd4c760f3a464594996e317b8a34d2b5
+  copies:
+  - pdf_url: null
+    landing_url: https://doaj.org/article/bd4c760f3a464594996e317b8a34d2b5
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4410762042
 - key: Montoya2017
@@ -900,6 +1447,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-017-0017-z.pdf
   landing_url: https://doi.org/10.1038/s41524-017-0017-z
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-017-0017-z.pdf
+    landing_url: https://doi.org/10.1038/s41524-017-0017-z
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/6d7647d87d2a454fb1658f93bad3f11d
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W2601140549
 - key: Ghiringhelli2017
@@ -918,6 +1474,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-017-0048-5.pdf
   landing_url: https://doi.org/10.1038/s41524-017-0048-5
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-017-0048-5.pdf
+    landing_url: https://doi.org/10.1038/s41524-017-0048-5
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/21.11116/0000-0001-A499-9
+    licence: cc-by
+    host: MPG.PuRe (Max Planck Society)
   oa_status: gold
   openalex_id: https://openalex.org/W2765766406
 - key: Li2018
@@ -934,6 +1499,11 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-018-0111-x.pdf
   landing_url: https://doi.org/10.1038/s41524-018-0111-x
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-018-0111-x.pdf
+    landing_url: https://doi.org/10.1038/s41524-018-0111-x
+    licence: cc-by
+    host: npj Computational Materials
   oa_status: gold
   openalex_id: https://openalex.org/W2891196718
 - key: DePablo2019
@@ -954,6 +1524,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-019-0173-4.pdf
   landing_url: https://doi.org/10.1038/s41524-019-0173-4
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-019-0173-4.pdf
+    landing_url: https://doi.org/10.1038/s41524-019-0173-4
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC13576042/pdf/nihms-1588384.pdf
+    landing_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC13576042/
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W2929465105
 - key: Jennings2019
@@ -970,6 +1549,23 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-019-0181-4.pdf
   landing_url: https://doi.org/10.1038/s41524-019-0181-4
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-019-0181-4.pdf
+    landing_url: https://doi.org/10.1038/s41524-019-0181-4
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doi.org/10.26434/chemrxiv.7411172.v2
+    licence: cc-by
+    host: ChemRxiv
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/Machine_Learning_Accelerated_Genetic_Algorithms_for_Computational_Materials_Search/7411172
+    licence: cc-by
+    host: Royal College of Surgeons in Ireland
+  - pdf_url: null
+    landing_url: https://orbit.dtu.dk/en/publications/c7e59393-7f64-4bca-942d-b63b74fa0cfa
+    licence: cc-by
+    host: Technical University of Denmark, DTU Orbit (Technical University of Denmark, DTU)
   oa_status: gold
   openalex_id: https://openalex.org/W2939893088
 - key: Sorkun2020
@@ -986,6 +1582,11 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-020-00375-7.pdf
   landing_url: https://doi.org/10.1038/s41524-020-00375-7
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-020-00375-7.pdf
+    landing_url: https://doi.org/10.1038/s41524-020-00375-7
+    licence: cc-by
+    host: npj Computational Materials
   oa_status: gold
   openalex_id: https://openalex.org/W3044514114
 - key: Choudhary2020
@@ -1008,6 +1609,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-020-00440-1.pdf
   landing_url: https://doi.org/10.1038/s41524-020-00440-1
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-020-00440-1.pdf
+    landing_url: https://doi.org/10.1038/s41524-020-00440-1
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2007.01831
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: gold
   openalex_id: https://openalex.org/W3039596418
 - key: Hayashi2022
@@ -1025,6 +1635,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-022-00906-4.pdf
   landing_url: https://doi.org/10.1038/s41524-022-00906-4
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-022-00906-4.pdf
+    landing_url: https://doi.org/10.1038/s41524-022-00906-4
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/c9960d2342504cb39bd18ac129b53210
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4308586705
 - key: Lyngby2022
@@ -1041,6 +1660,23 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-022-00923-3.pdf
   landing_url: https://doi.org/10.1038/s41524-022-00923-3
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-022-00923-3.pdf
+    landing_url: https://doi.org/10.1038/s41524-022-00923-3
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/ef7ab35130de4dd0b804976c4c3baaa2
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
+  - pdf_url: null
+    landing_url: https://orbit.dtu.dk/en/publications/54c0eff8-0af8-4226-8fd8-8158b2d74204
+    licence: cc-by
+    host: Technical University of Denmark, DTU Orbit (Technical University of Denmark, DTU)
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2206.12159
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: gold
   openalex_id: https://openalex.org/W4308799019
 - key: Sbail2022
@@ -1058,6 +1694,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-022-00935-z.pdf
   landing_url: https://doi.org/10.1038/s41524-022-00935-z
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-022-00935-z.pdf
+    landing_url: https://doi.org/10.1038/s41524-022-00935-z
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/deeae415044a454ab92b29a22d1900d1
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4311623819
 - key: Islamov2023
@@ -1075,6 +1720,19 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-022-00961-x.pdf
   landing_url: https://doi.org/10.1038/s41524-022-00961-x
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-022-00961-x.pdf
+    landing_url: https://doi.org/10.1038/s41524-022-00961-x
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: https://escholarship.org/content/qt60x2k1tv/qt60x2k1tv.pdf?t=rtb44u
+    landing_url: https://escholarship.org/uc/item/60x2k1tv
+    licence: cc-by
+    host: eScholarship (California Digital Library)
+  - pdf_url: null
+    landing_url: https://doaj.org/article/9f78b2ebb7d84e65b840b1f3b3640449
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4317569428
 - key: Manica2023
@@ -1095,6 +1753,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-023-01028-1.pdf
   landing_url: https://doi.org/10.1038/s41524-023-01028-1
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-023-01028-1.pdf
+    landing_url: https://doi.org/10.1038/s41524-023-01028-1
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/d563c21247234f54b23d37c88d05e3d1
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4367627709
 - key: Jung2023
@@ -1111,6 +1778,15 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-023-01065-w.pdf
   landing_url: https://doi.org/10.1038/s41524-023-01065-w
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-023-01065-w.pdf
+    landing_url: https://doi.org/10.1038/s41524-023-01065-w
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/9f084306f16c4a529078f1efb6724486
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4382139659
 - key: Butler2024
@@ -1128,6 +1804,19 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-024-01411-6.pdf
   landing_url: https://doi.org/10.1038/s41524-024-01411-6
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-024-01411-6.pdf
+    landing_url: https://doi.org/10.1038/s41524-024-01411-6
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: https://www.repository.cam.ac.uk/bitstreams/d31b67d1-02ff-4e4e-8cad-4effa586289b/download
+    landing_url: https://www.repository.cam.ac.uk/handle/1810/374353
+    licence: cc-by
+    host: Apollo (University of Cambridge)
+  - pdf_url: null
+    landing_url: https://doaj.org/article/2726a1b90a034c2faa1d2e4239b5794c
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4403006324
 - key: Vazquez-Salazar2025
@@ -1144,6 +1833,19 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-024-01473-6.pdf
   landing_url: https://doi.org/10.1038/s41524-024-01473-6
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-024-01473-6.pdf
+    landing_url: https://doi.org/10.1038/s41524-024-01473-6
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11829830/pdf/41524_2024_Article_1473.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11829830
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/c0564129a73946279158fc43c28dca91
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4407602147
 - key: Zhou2025
@@ -1159,6 +1861,11 @@ papers:
   version: submittedVersion
   host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   landing_url: https://doaj.org/article/1f1e4d8be13e409284103630cb4c1036
+  copies:
+  - pdf_url: null
+    landing_url: https://doaj.org/article/1f1e4d8be13e409284103630cb4c1036
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4408076907
 - key: Chew2025
@@ -1176,6 +1883,11 @@ papers:
   version: submittedVersion
   host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   landing_url: https://doaj.org/article/4ef67c1d8e944ef4a54ea7b841771a69
+  copies:
+  - pdf_url: null
+    landing_url: https://doaj.org/article/4ef67c1d8e944ef4a54ea7b841771a69
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4408503357
 - key: Hormann2025
@@ -1192,6 +1904,19 @@ papers:
   host: npj Computational Materials
   pdf_url: https://www.nature.com/articles/s41524-025-01691-6.pdf
   landing_url: https://doi.org/10.1038/s41524-025-01691-6
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41524-025-01691-6.pdf
+    landing_url: https://doi.org/10.1038/s41524-025-01691-6
+    licence: cc-by
+    host: npj Computational Materials
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC12213647/pdf/41524_2025_Article_1691.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/12213647
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/ddea0f06fe444c9d9aeefd9ece3af92d
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4411886920
 - key: Zhang2026
@@ -1210,6 +1935,15 @@ papers:
   host: arXiv (Cornell University)
   pdf_url: https://arxiv.org/pdf/2506.01686
   landing_url: http://arxiv.org/abs/2506.01686
+  copies:
+  - pdf_url: https://arxiv.org/pdf/2506.01686
+    landing_url: http://arxiv.org/abs/2506.01686
+    licence: cc-by
+    host: arXiv (Cornell University)
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2506.01686
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: gold
   openalex_id: https://openalex.org/W4417114399
 - key: Yang2023
@@ -1226,6 +1960,19 @@ papers:
   host: npj Materials Degradation
   pdf_url: https://www.nature.com/articles/s41529-023-00326-9.pdf
   landing_url: https://doi.org/10.1038/s41529-023-00326-9
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41529-023-00326-9.pdf
+    landing_url: https://doi.org/10.1038/s41529-023-00326-9
+    licence: cc-by
+    host: npj Materials Degradation
+  - pdf_url: https://www.researchsquare.com/article/rs-2130945/latest.pdf
+    landing_url: https://doi.org/10.21203/rs.3.rs-2130945/v1
+    licence: cc-by
+    host: Research Square
+  - pdf_url: null
+    landing_url: https://doaj.org/article/922cade43c044f3ca7f54b68ec70a271
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4317000454
 - key: Mounet2018
@@ -1244,6 +1991,11 @@ papers:
   version: submittedVersion
   host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   landing_url: http://hdl.handle.net/11380/1201635
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11380/1201635
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: green
   openalex_id: https://openalex.org/W2551377153
 - key: Rejhon2022
@@ -1261,6 +2013,11 @@ papers:
   host: Research Square
   pdf_url: https://www.researchsquare.com/article/rs-1051183/latest.pdf
   landing_url: https://doi.org/10.21203/rs.3.rs-1051183/v1
+  copies:
+  - pdf_url: https://www.researchsquare.com/article/rs-1051183/latest.pdf
+    landing_url: https://doi.org/10.21203/rs.3.rs-1051183/v1
+    licence: cc-by
+    host: Research Square
   oa_status: green
   openalex_id: https://openalex.org/W4307716640
 - key: Zhou2019
@@ -1280,6 +2037,23 @@ papers:
   host: Scientific Data
   pdf_url: https://www.nature.com/articles/s41597-019-0097-3.pdf
   landing_url: https://doi.org/10.1038/s41597-019-0097-3
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41597-019-0097-3.pdf
+    landing_url: https://doi.org/10.1038/s41597-019-0097-3
+    licence: cc-by
+    host: Scientific Data
+  - pdf_url: https://escholarship.org/content/qt1dk2n54s/qt1dk2n54s.pdf
+    landing_url: https://escholarship.org/uc/item/1dk2n54s
+    licence: cc-by
+    host: eScholarship (California Digital Library)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6561947
+    licence: cc-by
+    host: Europe PMC (PubMed Central)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6561947
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W2952587573
 - key: Huber2020
@@ -1300,6 +2074,19 @@ papers:
   host: Scientific Data
   pdf_url: https://www.nature.com/articles/s41597-020-00638-4.pdf
   landing_url: https://doi.org/10.1038/s41597-020-00638-4
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41597-020-00638-4.pdf
+    landing_url: https://doi.org/10.1038/s41597-020-00638-4
+    licence: cc-by
+    host: Scientific Data
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/7479590
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://pure.qub.ac.uk/en/publications/6b3a8dc3-76a1-4ee5-bcd4-6311a1c8057f
+    licence: cc-by
+    host: Research Portal (Queen's University Belfast)
   oa_status: gold
   openalex_id: https://openalex.org/W3013285202
 - key: Garabedian2022
@@ -1318,6 +2105,27 @@ papers:
   host: Scientific Data
   pdf_url: https://www.nature.com/articles/s41597-022-01429-9.pdf
   landing_url: https://doi.org/10.1038/s41597-022-01429-9
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41597-022-01429-9.pdf
+    landing_url: https://doi.org/10.1038/s41597-022-01429-9
+    licence: cc-by
+    host: Scientific Data
+  - pdf_url: null
+    landing_url: https://publikationen.bibliothek.kit.edu/1000148643
+    licence: cc-by
+    host: Repository KITopen (Karlsruhe Institute of Technology)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/9203546
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/3456662c3cb54006a016bb2daca2ff28
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
+  - pdf_url: null
+    landing_url: https://doi.org/10.5445/ir/1000148643
+    licence: cc-by
+    host: KITopen
   oa_status: gold
   openalex_id: https://openalex.org/W4282965407
 - key: Gong2022
@@ -1336,6 +2144,15 @@ papers:
   host: Scientific Data
   pdf_url: https://www.nature.com/articles/s41597-022-01897-z.pdf
   landing_url: https://doi.org/10.1038/s41597-022-01897-z
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41597-022-01897-z.pdf
+    landing_url: https://doi.org/10.1038/s41597-022-01897-z
+    licence: cc-by
+    host: Scientific Data
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/9794830
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W4313251561
 - key: Wolloch2019
@@ -1351,6 +2168,19 @@ papers:
   host: Scientific Reports
   pdf_url: https://www.nature.com/articles/s41598-019-49907-2.pdf
   landing_url: https://doi.org/10.1038/s41598-019-49907-2
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41598-019-49907-2.pdf
+    landing_url: https://doi.org/10.1038/s41598-019-49907-2
+    licence: cc-by
+    host: Scientific Reports
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6863866
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11380/1187130
+    licence: cc-by
+    host: IRIS UNIMORE (University of Modena and Reggio Emilia)
   oa_status: gold
   openalex_id: https://openalex.org/W2990191338
 - key: Jia2019
@@ -1368,6 +2198,19 @@ papers:
   host: Scientific Reports
   pdf_url: https://www.nature.com/articles/s41598-019-56776-2.pdf
   landing_url: https://doi.org/10.1038/s41598-019-56776-2
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41598-019-56776-2.pdf
+    landing_url: https://doi.org/10.1038/s41598-019-56776-2
+    licence: cc-by
+    host: Scientific Reports
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6937319
+    licence: cc-by
+    host: Europe PMC (PubMed Central)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/6937319
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W2998040492
 - key: Ren2021
@@ -1387,6 +2230,15 @@ papers:
   host: npj 2D Materials and Applications
   pdf_url: https://www.nature.com/articles/s41699-021-00225-0.pdf
   landing_url: https://doi.org/10.1038/s41699-021-00225-0
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41699-021-00225-0.pdf
+    landing_url: https://doi.org/10.1038/s41699-021-00225-0
+    licence: cc-by
+    host: npj 2D Materials and Applications
+  - pdf_url: null
+    landing_url: https://doaj.org/article/3eaf6f805a29453f82a5e83d0b2e4833
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W3152970694
 - key: Shi2022
@@ -1403,6 +2255,15 @@ papers:
   host: npj 2D Materials and Applications
   pdf_url: https://www.nature.com/articles/s41699-022-00316-6.pdf
   landing_url: https://doi.org/10.1038/s41699-022-00316-6
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41699-022-00316-6.pdf
+    landing_url: https://doi.org/10.1038/s41699-022-00316-6
+    licence: cc-by
+    host: npj 2D Materials and Applications
+  - pdf_url: null
+    landing_url: https://doaj.org/article/4f217143a56743fba2e4b7a1a6d55bd9
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4281757317
 - key: Xu2023
@@ -1420,6 +2281,15 @@ papers:
   host: npj 2D Materials and Applications
   pdf_url: https://www.nature.com/articles/s41699-022-00363-z.pdf
   landing_url: https://doi.org/10.1038/s41699-022-00363-z
+  copies:
+  - pdf_url: https://www.nature.com/articles/s41699-022-00363-z.pdf
+    landing_url: https://doi.org/10.1038/s41699-022-00363-z
+    licence: cc-by
+    host: npj 2D Materials and Applications
+  - pdf_url: null
+    landing_url: https://doaj.org/article/6ca2057658e444db8a404dc2e1e71820
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4313413295
 - key: Mohamed2023
@@ -1436,6 +2306,15 @@ papers:
   host: Communications Materials
   pdf_url: https://www.nature.com/articles/s43246-023-00409-9.pdf
   landing_url: https://doi.org/10.1038/s43246-023-00409-9
+  copies:
+  - pdf_url: https://www.nature.com/articles/s43246-023-00409-9.pdf
+    landing_url: https://doi.org/10.1038/s43246-023-00409-9
+    licence: cc-by
+    host: Communications Materials
+  - pdf_url: null
+    landing_url: https://doaj.org/article/2be8d4d688074bb691497aea31d2055e
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4387299412
 - key: Wilkinson2016
@@ -1461,6 +2340,49 @@ papers:
   host: Scientific Data
   pdf_url: https://www.nature.com/articles/sdata201618.pdf
   landing_url: https://doi.org/10.1038/sdata.2016.18
+  copies:
+  - pdf_url: https://www.nature.com/articles/sdata201618.pdf
+    landing_url: https://doi.org/10.1038/sdata.2016.18
+    licence: cc-by
+    host: Scientific Data
+  - pdf_url: null
+    landing_url: https://cris.maastrichtuniversity.nl/en/publications/e7d82549-3369-4186-bc3c-5817554e56d7
+    licence: cc-by
+    host: Research Publications (Maastricht University)
+  - pdf_url: null
+    landing_url: https://research.wur.nl/en/publications/the-fair-guiding-principles-for-scientific-data-management-and-st
+    licence: cc-by
+    host: Socio-Environmental Systems Modeling
+  - pdf_url: https://escholarship.org/content/qt55x7k3p6/qt55x7k3p6.pdf
+    landing_url: https://escholarship.org/uc/item/55x7k3p6
+    licence: cc-by
+    host: eScholarship (California Digital Library)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/4792175
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: http://nrs.harvard.edu/urn-3:HUL.InstRepos:26860037
+    licence: cc-by
+    host: Digital Access to Scholarship at Harvard (DASH) (Harvard University)
+  - pdf_url: null
+    landing_url: https://www.nature.com/articles/sdata201618
+    licence: cc-by
+    host: Leicester Research Archive (University of Leicester)
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11370/375ea45c-c996-42c3-82a5-830444f2f270
+    licence: cc-by
+    host: University of Groningen research database (University of Groningen / Centre for Information
+      Technology)
+  - pdf_url: null
+    landing_url: https://research.rug.nl/en/publications/375ea45c-c996-42c3-82a5-830444f2f270
+    licence: cc-by
+    host: University of Groningen research database (University of Groningen / Centre for Information
+      Technology)
+  - pdf_url: null
+    landing_url: https://research.wur.nl/en/publications/the-fair-guiding-principles-for-scientific-data-management-and-st
+    licence: cc-by
+    host: Data Archiving and Networked Services (DANS)
   oa_status: gold
   openalex_id: https://openalex.org/W2302501749
 - key: Ganose2025
@@ -1488,6 +2410,19 @@ papers:
   host: Digital Discovery
   pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/dd/d5dd00019j
   landing_url: https://doi.org/10.1039/d5dd00019j
+  copies:
+  - pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/dd/d5dd00019j
+    landing_url: https://doi.org/10.1039/d5dd00019j
+    licence: cc-by
+    host: Digital Discovery
+  - pdf_url: https://escholarship.org/content/qt9d78f7qc/qt9d78f7qc.pdf
+    landing_url: https://escholarship.org/uc/item/9d78f7qc
+    licence: cc-by
+    host: eScholarship (California Digital Library)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/12210224
+    licence: cc-by
+    host: PubMed Central
   oa_status: diamond
   openalex_id: https://openalex.org/W4411845957
 - key: Vriza2026
@@ -1504,6 +2439,11 @@ papers:
   host: Digital Discovery
   pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/dd/d5dd00435g
   landing_url: https://doi.org/10.1039/d5dd00435g
+  copies:
+  - pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/dd/d5dd00435g
+    landing_url: https://doi.org/10.1039/d5dd00435g
+    licence: cc-by
+    host: Digital Discovery
   oa_status: diamond
   openalex_id: https://openalex.org/W7111352005
 - key: Ding2026
@@ -1520,6 +2460,11 @@ papers:
   host: Digital Discovery
   pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/dd/d5dd00471c
   landing_url: https://doi.org/10.1039/d5dd00471c
+  copies:
+  - pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/dd/d5dd00471c
+    landing_url: https://doi.org/10.1039/d5dd00471c
+    licence: cc-by
+    host: Digital Discovery
   oa_status: diamond
   openalex_id: https://openalex.org/W4415270367
 - key: Mahamudujjaman2022
@@ -1536,6 +2481,15 @@ papers:
   version: publishedVersion
   host: AIP Advances
   landing_url: https://doi.org/10.1063/5.0073631
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1063/5.0073631
+    licence: cc-by
+    host: AIP Advances
+  - pdf_url: null
+    landing_url: https://doaj.org/article/6ea29baad77b4b91b364453950a64777
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4210501948
 - key: Quach2022
@@ -1553,6 +2507,19 @@ papers:
   host: Figshare
   pdf_url: https://figshare.com/articles/preprint/High-Throughput_Screening_of_Tribological_Properties_of_Monolayer_Films_using_Molecular_Dynamics_and_Machine_Learning/16777936
   landing_url: https://figshare.com/articles/preprint/High-Throughput_Screening_of_Tribological_Properties_of_Monolayer_Films_using_Molecular_Dynamics_and_Machine_Learning/16777936
+  copies:
+  - pdf_url: https://figshare.com/articles/preprint/High-Throughput_Screening_of_Tribological_Properties_of_Monolayer_Films_using_Molecular_Dynamics_and_Machine_Learning/16777936
+    landing_url: https://figshare.com/articles/preprint/High-Throughput_Screening_of_Tribological_Properties_of_Monolayer_Films_using_Molecular_Dynamics_and_Machine_Learning/16777936
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://doi.org/10.6084/m9.figshare.16777936.v1
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://doi.org/10.6084/m9.figshare.16777936.v2
+    licence: cc-by
+    host: Figshare
   oa_status: green
   openalex_id: https://openalex.org/W4213374788
 - key: Zeng2023
@@ -1575,6 +2542,23 @@ papers:
   version: publishedVersion
   host: Research Portal (Queen's University Belfast)
   landing_url: https://pure.qub.ac.uk/en/publications/a85cef37-77ba-4151-b422-598af628e1f2
+  copies:
+  - pdf_url: null
+    landing_url: https://pure.qub.ac.uk/en/publications/a85cef37-77ba-4151-b422-598af628e1f2
+    licence: cc-by
+    host: Research Portal (Queen's University Belfast)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10445636/pdf/JCPSA6-000159-054801_1.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10445636
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://scholarship.libraries.rutgers.edu/esploro/outputs/journalArticle/DeePMD-kit-v2-A-software-package-for/991031866789204646
+    licence: cc-by
+    host: Rutgers University Community Repository (Rutgers University)
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/10852/109671
+    licence: cc-by
+    host: NORA - Norwegian Open Research Archives
   oa_status: bronze
   openalex_id: https://openalex.org/W4383995031
 - key: Wines2023
@@ -1592,6 +2576,19 @@ papers:
   host: Applied Physics Reviews
   pdf_url: https://pubs.aip.org/aip/apr/article-pdf/doi/10.1063/5.0159299/18175176/041302_1_5.0159299.pdf
   landing_url: https://doi.org/10.1063/5.0159299
+  copies:
+  - pdf_url: https://pubs.aip.org/aip/apr/article-pdf/doi/10.1063/5.0159299/18175176/041302_1_5.0159299.pdf
+    landing_url: https://doi.org/10.1063/5.0159299
+    licence: public-domain
+    host: Applied Physics Reviews
+  - pdf_url: https://arxiv.org/pdf/2305.11842
+    landing_url: http://arxiv.org/abs/2305.11842
+    licence: cc-by
+    host: arXiv (Cornell University)
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2305.11842
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4387742883
 - key: Pan2024
@@ -1608,6 +2605,11 @@ papers:
   version: publishedVersion
   host: Journal of Applied Physics
   landing_url: https://doi.org/10.1063/5.0213582
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1063/5.0213582
+    licence: cc-by
+    host: Journal of Applied Physics
   oa_status: hybrid
   openalex_id: https://openalex.org/W4398209204
 - key: Gao2025
@@ -1622,6 +2624,11 @@ papers:
   version: publishedVersion
   host: The Journal of Chemical Physics
   landing_url: https://doi.org/10.1063/5.0273079
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1063/5.0273079
+    licence: cc-by
+    host: The Journal of Chemical Physics
   oa_status: hybrid
   openalex_id: https://openalex.org/W4412654243
 - key: Thompson2020
@@ -1639,6 +2646,23 @@ papers:
   version: submittedVersion
   host: Figshare
   landing_url: https://figshare.com/articles/journal_contribution/Towards_molecular_simulations_that_are_transparent_reproducible_usable_by_others_and_extensible_TRUE_sup_sup_/12098175
+  copies:
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/Towards_molecular_simulations_that_are_transparent_reproducible_usable_by_others_and_extensible_TRUE_sup_sup_/12098175
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://doi.org/10.6084/m9.figshare.12098175
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://doi.org/10.6084/m9.figshare.12098175.v1
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://doi.org/10.6084/m9.figshare.12098175.v2
+    licence: cc-by
+    host: Figshare
   oa_status: hybrid
   openalex_id: https://openalex.org/W3009112274
 - key: Stephan2021
@@ -1655,6 +2679,19 @@ papers:
   version: submittedVersion
   host: Figshare
   landing_url: https://figshare.com/articles/journal_contribution/Reproducibility_of_atomistic_friction_computer_experiments_a_molecular_dynamics_simulation_study/16801601
+  copies:
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/Reproducibility_of_atomistic_friction_computer_experiments_a_molecular_dynamics_simulation_study/16801601
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://osf.io/2fbpz
+    licence: cc-by
+    host: OSF Preprints (OSF Preprints)
+  - pdf_url: null
+    landing_url: https://doi.org/10.6084/m9.figshare.16801601.v2
+    licence: cc-by
+    host: Figshare
   oa_status: gold
   openalex_id: https://openalex.org/W3207351601
 - key: Muser2023
@@ -1669,6 +2706,19 @@ papers:
   version: publishedVersion
   host: Advances in Physics X
   landing_url: https://doi.org/10.1080/23746149.2022.2093129
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1080/23746149.2022.2093129
+    licence: cc-by
+    host: Advances in Physics X
+  - pdf_url: null
+    landing_url: https://doaj.org/article/ba24824c464f4ef2a06970a3e1eebd10
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2204.09563
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: gold
   openalex_id: https://openalex.org/W4308197773
 - key: Nicolini2026
@@ -1685,6 +2735,11 @@ papers:
   host: Advances in Physics X
   pdf_url: https://www.tandfonline.com/doi/pdf/10.1080/23746149.2026.2642924?needAccess=true
   landing_url: https://doi.org/10.1080/23746149.2026.2642924
+  copies:
+  - pdf_url: https://www.tandfonline.com/doi/pdf/10.1080/23746149.2026.2642924?needAccess=true
+    landing_url: https://doi.org/10.1080/23746149.2026.2642924
+    licence: cc-by
+    host: Advances in Physics X
   oa_status: gold
   openalex_id: https://openalex.org/W7138332910
 - key: Wang2023
@@ -1702,6 +2757,11 @@ papers:
   host: Research Square
   pdf_url: https://www.researchsquare.com/article/rs-2383562/latest.pdf
   landing_url: https://doi.org/10.21203/rs.3.rs-2383562/v1
+  copies:
+  - pdf_url: https://www.researchsquare.com/article/rs-2383562/latest.pdf
+    landing_url: https://doi.org/10.21203/rs.3.rs-2383562/v1
+    licence: cc-by
+    host: Research Square
   oa_status: hybrid
   openalex_id: https://openalex.org/W4362596260
 - key: Haastrup2018
@@ -1720,6 +2780,15 @@ papers:
   host: 2D Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/aacfc1/pdf
   landing_url: https://doi.org/10.1088/2053-1583/aacfc1
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/aacfc1/pdf
+    landing_url: https://doi.org/10.1088/2053-1583/aacfc1
+    licence: cc-by
+    host: 2D Materials
+  - pdf_url: null
+    landing_url: https://orbit.dtu.dk/en/publications/2b9e92d2-68b0-4955-9796-d8c58b2b2404
+    licence: cc-by
+    host: Technical University of Denmark, DTU Orbit (Technical University of Denmark, DTU)
   oa_status: hybrid
   openalex_id: https://openalex.org/W2806275814
 - key: Williams2020
@@ -1736,6 +2805,15 @@ papers:
   host: 2D Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ab6f0c/pdf
   landing_url: https://doi.org/10.1088/2053-1583/ab6f0c
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ab6f0c/pdf
+    landing_url: https://doi.org/10.1088/2053-1583/ab6f0c
+    licence: cc-by
+    host: 2D Materials
+  - pdf_url: null
+    landing_url: https://research.manchester.ac.uk/en/publications/72603d77-9496-4d9c-a49b-ef2c6a5f5b31
+    licence: cc-by
+    host: Research Explorer (The University of Manchester)
   oa_status: hybrid
   openalex_id: https://openalex.org/W3001626243
 - key: Losi2020
@@ -1753,6 +2831,11 @@ papers:
   host: 2D Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ab72d7/pdf
   landing_url: https://doi.org/10.1088/2053-1583/ab72d7
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ab72d7/pdf
+    landing_url: https://doi.org/10.1088/2053-1583/ab72d7
+    licence: cc-by
+    host: 2D Materials
   oa_status: hybrid
   openalex_id: https://openalex.org/W3005500287
 - key: Stella2021
@@ -1771,6 +2854,15 @@ papers:
   host: 2D Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ac07ed/pdf
   landing_url: https://doi.org/10.1088/2053-1583/ac07ed
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ac07ed/pdf
+    landing_url: https://doi.org/10.1088/2053-1583/ac07ed
+    licence: cc-by
+    host: 2D Materials
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11585/889652
+    licence: cc-by
+    host: Archivio istituzionale della ricerca (Alma Mater Studiorum Università di Bologna)
   oa_status: hybrid
   openalex_id: https://openalex.org/W3170113900
 - key: Gjerding2021
@@ -1788,6 +2880,15 @@ papers:
   version: publishedVersion
   host: 2D Materials
   landing_url: https://doi.org/10.1088/2053-1583/ac1059
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1088/2053-1583/ac1059
+    licence: cc-by
+    host: 2D Materials
+  - pdf_url: null
+    landing_url: https://vbn.aau.dk/da/publications/2fb5b6f4-a87b-401d-88d6-7c6c928be4ad
+    licence: cc-by
+    host: VBN Forskningsportal (Aalborg Universitet)
   oa_status: hybrid
   openalex_id: https://openalex.org/W3129006275
 - key: Nayir2023
@@ -1804,6 +2905,11 @@ papers:
   host: 2D Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/acd7fd/pdf
   landing_url: https://doi.org/10.1088/2053-1583/acd7fd
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/acd7fd/pdf
+    landing_url: https://doi.org/10.1088/2053-1583/acd7fd
+    licence: cc-by
+    host: 2D Materials
   oa_status: hybrid
   openalex_id: https://openalex.org/W4377694237
 - key: Al-Maeeni2024
@@ -1820,6 +2926,11 @@ papers:
   version: publishedVersion
   host: 2D Materials
   landing_url: https://doi.org/10.1088/2053-1583/ad4661
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1088/2053-1583/ad4661
+    licence: cc-by
+    host: 2D Materials
   oa_status: hybrid
   openalex_id: https://openalex.org/W4396571338
 - key: Lyngby2024
@@ -1836,6 +2947,19 @@ papers:
   host: 2D Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ad53dc/pdf
   landing_url: https://doi.org/10.1088/2053-1583/ad53dc
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2053-1583/ad53dc/pdf
+    landing_url: https://doi.org/10.1088/2053-1583/ad53dc
+    licence: cc-by
+    host: 2D Materials
+  - pdf_url: https://arxiv.org/pdf/2402.02783
+    landing_url: http://arxiv.org/abs/2402.02783
+    licence: cc-by
+    host: arXiv (Cornell University)
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2402.02783
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4391621437
 - key: Draxl2019
@@ -1852,6 +2976,19 @@ papers:
   host: Journal of Physics Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2515-7639/ab13bb/pdf
   landing_url: https://doi.org/10.1088/2515-7639/ab13bb
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2515-7639/ab13bb/pdf
+    landing_url: https://doi.org/10.1088/2515-7639/ab13bb
+    licence: cc-by
+    host: Journal of Physics Materials
+  - pdf_url: null
+    landing_url: https://edoc.hu-berlin.de/18452/24749
+    licence: cc-by
+    host: edoc Publication server (Humboldt University of Berlin)
+  - pdf_url: null
+    landing_url: https://doi.org/10.18452/24107
+    licence: cc-by
+    host: edoc Publication server (Humboldt University of Berlin)
   oa_status: gold
   openalex_id: https://openalex.org/W2924281192
 - key: Mortazavi2020
@@ -1869,6 +3006,23 @@ papers:
   host: Journal of Physics Materials
   pdf_url: https://iopscience.iop.org/article/10.1088/2515-7639/ab7cbb/pdf
   landing_url: https://doi.org/10.1088/2515-7639/ab7cbb
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/2515-7639/ab7cbb/pdf
+    landing_url: https://doi.org/10.1088/2515-7639/ab7cbb
+    licence: cc-by
+    host: Journal of Physics Materials
+  - pdf_url: null
+    landing_url: https://ddd.uab.cat/record/250141
+    licence: cc-by
+    host: Dipòsit Digital de Documents de la UAB (Universitat Autònoma de Barcelona)
+  - pdf_url: null
+    landing_url: https://www.repo.uni-hannover.de/handle/123456789/16562
+    licence: cc-by
+    host: Institutional Repository of Leibniz Universität Hannover (Leibniz Universität Hannover)
+  - pdf_url: null
+    landing_url: https://doi.org/10.15488/16435
+    licence: cc-by
+    host: Leibniz Universität Hannover
   oa_status: gold
   openalex_id: https://openalex.org/W3010382286
 - key: Guo2025
@@ -1884,6 +3038,15 @@ papers:
   version: publishedVersion
   host: Physical Review Research
   landing_url: https://doi.org/10.1103/kzyy-7b15
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1103/kzyy-7b15
+    licence: cc-by
+    host: Physical Review Research
+  - pdf_url: null
+    landing_url: https://doaj.org/article/a753560c1c2e4293902ac11f0b8eae45
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4416718849
 - key: Brilliantov2023
@@ -1902,6 +3065,23 @@ papers:
   host: Physical Review Letters
   pdf_url: http://link.aps.org/pdf/10.1103/PhysRevLett.131.266201
   landing_url: https://doi.org/10.1103/physrevlett.131.266201
+  copies:
+  - pdf_url: http://link.aps.org/pdf/10.1103/PhysRevLett.131.266201
+    landing_url: https://doi.org/10.1103/physrevlett.131.266201
+    licence: cc-by
+    host: Physical Review Letters
+  - pdf_url: https://arxiv.org/pdf/2311.11173
+    landing_url: http://arxiv.org/abs/2311.11173
+    licence: cc-by
+    host: arXiv (Cornell University)
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/Atomistic_Mechanism_of_Friction-Force_Independence_on_the_Normal_Load_and_Other_Friction_Laws_for_Dynamic_Structural_Superlubricity/25021166
+    licence: cc-by
+    host: Figshare
+  - pdf_url: null
+    landing_url: https://doi.org/10.48550/arxiv.2311.11173
+    licence: cc-by
+    host: arXiv (Cornell University)
   oa_status: hybrid
   openalex_id: https://openalex.org/W4390228920
 - key: Szczefanowicz2023
@@ -1920,6 +3100,15 @@ papers:
   host: Physical Review Research
   pdf_url: http://link.aps.org/pdf/10.1103/PhysRevResearch.5.L012049
   landing_url: https://doi.org/10.1103/physrevresearch.5.l012049
+  copies:
+  - pdf_url: http://link.aps.org/pdf/10.1103/PhysRevResearch.5.L012049
+    landing_url: https://doi.org/10.1103/physrevresearch.5.l012049
+    licence: cc-by
+    host: Physical Review Research
+  - pdf_url: null
+    landing_url: https://doaj.org/article/f59675331b014411ae0427753da2571a
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4361270231
 - key: Marquis2023
@@ -1937,6 +3126,27 @@ papers:
   host: Nano Convergence
   pdf_url: https://nanoconvergencejournal.springeropen.com/counter/pdf/10.1186/s40580-023-00364-8
   landing_url: https://doi.org/10.1186/s40580-023-00364-8
+  copies:
+  - pdf_url: https://nanoconvergencejournal.springeropen.com/counter/pdf/10.1186/s40580-023-00364-8
+    landing_url: https://doi.org/10.1186/s40580-023-00364-8
+    licence: cc-by
+    host: Nano Convergence
+  - pdf_url: https://scholarworks.indianapolis.iu.edu/bitstreams/dccf5929-66bb-4598-ae9e-bea423b139d5/download
+    landing_url: https://hdl.handle.net/1805/37371
+    licence: cc-by
+    host: IUScholarWorks (Indiana University)
+  - pdf_url: https://link.springer.com/content/pdf/10.1186/s40580-023-00364-8.pdf
+    landing_url: https://nanoconvergencejournal.springeropen.com/articles/10.1186/s40580-023-00364-8
+    licence: cc-by
+    host: Archivio istituzionale della ricerca (Alma Mater Studiorum Università di Bologna)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC10067785/pdf/40580_2023_Article_364.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/10067785
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/d850a26db1b6429e8c1f31bc54b4e085
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4362506265
 - key: McInnes2017
@@ -1952,6 +3162,11 @@ papers:
   version: publishedVersion
   host: The Journal of Open Source Software
   landing_url: https://doi.org/10.21105/joss.00205
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.21105/joss.00205
+    licence: cc-by
+    host: The Journal of Open Source Software
   oa_status: diamond
   openalex_id: https://openalex.org/W2601243251
 - key: Jung2025
@@ -1968,6 +3183,11 @@ papers:
   version: publishedVersion
   host: The Journal of Open Source Software
   landing_url: https://doi.org/10.21105/joss.08321
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.21105/joss.08321
+    licence: cc-by
+    host: The Journal of Open Source Software
   oa_status: diamond
   openalex_id: https://openalex.org/W7128249724
 - key: Claerbout2021
@@ -1985,6 +3205,19 @@ papers:
   host: Frontiers in Chemistry
   pdf_url: https://www.frontiersin.org/articles/10.3389/fchem.2021.684441/pdf
   landing_url: https://doi.org/10.3389/fchem.2021.684441
+  copies:
+  - pdf_url: https://www.frontiersin.org/articles/10.3389/fchem.2021.684441/pdf
+    landing_url: https://doi.org/10.3389/fchem.2021.684441
+    licence: cc-by
+    host: Frontiers in Chemistry
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/8265273
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/0a9c25d2ac5547deb20333c35a27def2
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W3177419053
 - key: Wang2022
@@ -2001,6 +3234,19 @@ papers:
   version: publishedVersion
   host: Frontiers in Chemistry
   landing_url: https://doi.org/10.3389/fchem.2021.807630
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.3389/fchem.2021.807630
+    licence: cc-by
+    host: Frontiers in Chemistry
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/8844525
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://doaj.org/article/22609769612445dca76855c2f57124e4
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4210368388
 - key: Ye2024
@@ -2016,6 +3262,15 @@ papers:
   version: publishedVersion
   host: Lubricants
   landing_url: https://doi.org/10.3390/lubricants12070245
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.3390/lubricants12070245
+    licence: cc-by
+    host: Lubricants
+  - pdf_url: null
+    landing_url: https://doaj.org/article/9942dc9169c14de595a61b6737a2718a
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4400322477
 - key: Liu2018
@@ -2032,6 +3287,15 @@ papers:
   host: Materials
   pdf_url: https://www.mdpi.com/1996-1944/11/5/683/pdf?version=1525350073
   landing_url: https://doi.org/10.3390/ma11050683
+  copies:
+  - pdf_url: https://www.mdpi.com/1996-1944/11/5/683/pdf?version=1525350073
+    landing_url: https://doi.org/10.3390/ma11050683
+    licence: cc-by
+    host: Materials
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/5978060
+    licence: cc-by
+    host: PubMed Central
   oa_status: gold
   openalex_id: https://openalex.org/W2801496473
 - key: Dedkov2021
@@ -2049,6 +3313,15 @@ papers:
   host: Universe
   pdf_url: https://www.mdpi.com/2218-1997/7/11/427/pdf?version=1636592946
   landing_url: https://doi.org/10.3390/universe7110427
+  copies:
+  - pdf_url: https://www.mdpi.com/2218-1997/7/11/427/pdf?version=1636592946
+    landing_url: https://doi.org/10.3390/universe7110427
+    licence: cc-by
+    host: Universe
+  - pdf_url: null
+    landing_url: https://doaj.org/article/55af98fa9650477382f27aaea637f1cd
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W3212533977
 - key: Jiang2017
@@ -2062,6 +3335,11 @@ papers:
   version: submittedVersion
   host: BiblioBoard Library Catalog (Open Research Library)
   landing_url: https://openresearchlibrary.org/viewer/0dc89112-0c21-45dd-9415-43985abc1044
+  copies:
+  - pdf_url: null
+    landing_url: https://openresearchlibrary.org/viewer/0dc89112-0c21-45dd-9415-43985abc1044
+    licence: cc-by
+    host: BiblioBoard Library Catalog (Open Research Library)
   oa_status: hybrid
   openalex_id: https://openalex.org/W2612651190
 - key: Cui2023
@@ -2078,6 +3356,11 @@ papers:
   host: Acta Physica Sinica
   pdf_url: https://wulixb.iphy.ac.cn/pdf-content/10.7498/aps.72.20221676.pdf
   landing_url: https://doi.org/10.7498/aps.72.20221676
+  copies:
+  - pdf_url: https://wulixb.iphy.ac.cn/pdf-content/10.7498/aps.72.20221676.pdf
+    landing_url: https://doi.org/10.7498/aps.72.20221676
+    licence: cc-by
+    host: Acta Physica Sinica
   oa_status: diamond
   openalex_id: https://openalex.org/W4306775015
 - key: Tiemann2024
@@ -2096,6 +3379,27 @@ papers:
   host: eLife
   pdf_url: https://elifesciences.org/reviewed-preprints/90061.pdf
   landing_url: https://doi.org/10.7554/elife.90061
+  copies:
+  - pdf_url: https://elifesciences.org/reviewed-preprints/90061.pdf
+    landing_url: https://doi.org/10.7554/elife.90061
+    licence: cc-by
+    host: eLife
+  - pdf_url: https://hal.science/hal-04254566v2/file/elife-90061-v1.pdf
+    landing_url: https://hal.science/hal-04254566
+    licence: cc-by
+    host: HAL (Le Centre pour la Communication Scientifique Directe)
+  - pdf_url: https://pmc.ncbi.nlm.nih.gov/articles/PMC11364437/pdf/elife-90061.pdf
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11364437
+    licence: cc-by
+    host: PubMed Central
+  - pdf_url: https://curis.ku.dk/ws/files/409983870/elife_90061_v1.pdf
+    landing_url: https://researchprofiles.ku.dk/da/publications/f2e803e2-2830-4824-b733-ad3e31f7a61c
+    licence: cc-by
+    host: Research at the University of Copenhagen (University of Copenhagen)
+  - pdf_url: null
+    landing_url: https://doaj.org/article/c3061f03d4e2413684cd2f2b1b6d8754
+    licence: cc-by-sa
+    host: 'DOAJ (DOAJ: Directory of Open Access Journals)'
   oa_status: gold
   openalex_id: https://openalex.org/W4386897003
 - key: Liao2023
@@ -2113,6 +3417,11 @@ papers:
   host: arXiv (Cornell University)
   pdf_url: https://arxiv.org/pdf/2410.15382
   landing_url: http://arxiv.org/abs/2410.15382
+  copies:
+  - pdf_url: https://arxiv.org/pdf/2410.15382
+    landing_url: http://arxiv.org/abs/2410.15382
+    licence: cc-by-nc-sa
+    host: arXiv (Cornell University)
   oa_status: green
   openalex_id: https://openalex.org/W4362657974
 - key: Moore2026
@@ -2130,6 +3439,11 @@ papers:
   host: Nanoscale
   pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/nr/d5nr03362d
   landing_url: https://doi.org/10.1039/d5nr03362d
+  copies:
+  - pdf_url: https://pubs.rsc.org/en/content/articlepdf/2025/nr/d5nr03362d
+    landing_url: https://doi.org/10.1039/d5nr03362d
+    licence: cc-by-nc
+    host: Nanoscale
   oa_status: hybrid
   openalex_id: https://openalex.org/W4417184159
 - key: Deringer2019
@@ -2144,6 +3458,11 @@ papers:
   version: submittedVersion
   host: Aaltodoc (Aalto University)
   landing_url: https://research.aalto.fi/en/publications/027c624a-0934-4e71-96f8-064f3ad82f80
+  copies:
+  - pdf_url: null
+    landing_url: https://research.aalto.fi/en/publications/027c624a-0934-4e71-96f8-064f3ad82f80
+    licence: other-oa
+    host: Aaltodoc (Aalto University)
   oa_status: bronze
   openalex_id: https://openalex.org/W2971894235
 - key: AlMotasem2023
@@ -2160,6 +3479,11 @@ papers:
   version: publishedVersion
   host: Acta Materialia
   landing_url: https://doi.org/10.1016/j.actamat.2023.118832
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.actamat.2023.118832
+    licence: cc-by-nc-nd
+    host: Acta Materialia
   oa_status: hybrid
   openalex_id: https://openalex.org/W4324132612
 - key: Pizzi2016
@@ -2174,6 +3498,11 @@ papers:
   version: submittedVersion
   host: Infoscience (Ecole Polytechnique Fédérale de Lausanne)
   landing_url: https://infoscience.epfl.ch/handle/20.500.14299/123859
+  copies:
+  - pdf_url: null
+    landing_url: https://infoscience.epfl.ch/handle/20.500.14299/123859
+    licence: cc-by-nc-nd
+    host: Infoscience (Ecole Polytechnique Fédérale de Lausanne)
   oa_status: bronze
   openalex_id: https://openalex.org/W1952152691
 - key: Mobaraki2018
@@ -2189,6 +3518,19 @@ papers:
   version: submittedVersion
   host: IYTE GCRIS Database (Izmir Institute of Technology)
   landing_url: https://doi.org/10.1016/j.commatsci.2017.12.005
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.commatsci.2017.12.005
+    licence: other-oa
+    host: IYTE GCRIS Database (Izmir Institute of Technology)
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11147/7548
+    licence: other-oa
+    host: IYTE GCRIS Database (Izmir Institute of Technology)
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.commatsci.2017.12.005
+    licence: other-oa
+    host: IYTE GCRIS Database (Izmir Institute of Technology)
   oa_status: green
   openalex_id: https://openalex.org/W2773332058
 - key: Thompson2022
@@ -2208,6 +3550,19 @@ papers:
   host: Computer Physics Communications
   pdf_url: https://www.sciencedirect.com/science/article/pii/S0010465521002836/pdf
   landing_url: https://doi.org/10.1016/j.cpc.2021.108171
+  copies:
+  - pdf_url: https://www.sciencedirect.com/science/article/pii/S0010465521002836/pdf
+    landing_url: https://doi.org/10.1016/j.cpc.2021.108171
+    licence: cc-by-nc-nd
+    host: Computer Physics Communications
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.cpc.2021.108171.
+    licence: cc-by-nc-nd
+    host: TUScholarShare (Temple University)
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/20.500.12613/10406
+    licence: cc-by-nc-nd
+    host: TUScholarShare (Temple University)
   oa_status: hybrid
   openalex_id: https://openalex.org/W3201073812
 - key: Ding2020
@@ -2223,6 +3578,11 @@ papers:
   version: submittedVersion
   host: HAL (Le Centre pour la Communication Scientifique Directe)
   landing_url: https://hal.science/hal-03267984
+  copies:
+  - pdf_url: null
+    landing_url: https://hal.science/hal-03267984
+    licence: other-oa
+    host: HAL (Le Centre pour la Communication Scientifique Directe)
   oa_status: green
   openalex_id: https://openalex.org/W3084564167
 - key: Abhiram2025
@@ -2239,6 +3599,11 @@ papers:
   version: acceptedVersion
   host: Cvut DSpace (Czech Technical University)
   landing_url: http://hdl.handle.net/10467/124627
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/10467/124627
+    licence: other-oa
+    host: Cvut DSpace (Czech Technical University)
   oa_status: green
   openalex_id: https://openalex.org/W4407057707
 - key: Santos2019
@@ -2254,6 +3619,23 @@ papers:
   version: submittedVersion
   host: UVaDOC UVaDOC University of Valladolid Documentary Repository (University of Valladolid)
   landing_url: http://uvadoc.uva.es/handle/10324/32400
+  copies:
+  - pdf_url: null
+    landing_url: http://uvadoc.uva.es/handle/10324/32400
+    licence: other-oa
+    host: UVaDOC UVaDOC University of Valladolid Documentary Repository (University of Valladolid)
+  - pdf_url: null
+    landing_url: http://uvadoc.uva.es/handle/10324/32400
+    licence: cc-by-nc-nd
+    host: LA Referencia (Red Federada de Repositorios Institucionales de Publicaciones Científicas)
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.jnoncrysol.2018.09.024
+    licence: cc-by-nc-nd
+    host: Hispana
+  - pdf_url: null
+    landing_url: https://doi.org/10.1016/j.jnoncrysol.2018.09.024
+    licence: cc-by-nc-nd
+    host: University of Valladolid Documentary Repository (University of Valladolid)
   oa_status: green
   openalex_id: https://openalex.org/W2892610865
 - key: Nayir2021
@@ -2270,6 +3652,11 @@ papers:
   version: submittedVersion
   host: eArşiv - KMÜ (Karamanoğlu Mehmetbey University)
   landing_url: https://hdl.handle.net/11492/5065
+  copies:
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11492/5065
+    licence: cc-by-nc-nd
+    host: eArşiv - KMÜ (Karamanoğlu Mehmetbey University)
   oa_status: bronze
   openalex_id: https://openalex.org/W3174441491
 - key: Truong2020
@@ -2285,6 +3672,11 @@ papers:
   version: submittedVersion
   host: HAL (Le Centre pour la Communication Scientifique Directe)
   landing_url: https://hal.science/hal-02442692
+  copies:
+  - pdf_url: null
+    landing_url: https://hal.science/hal-02442692
+    licence: other-oa
+    host: HAL (Le Centre pour la Communication Scientifique Directe)
   oa_status: green
   openalex_id: https://openalex.org/W2909693411
 - key: Dong2018
@@ -2301,6 +3693,11 @@ papers:
   version: submittedVersion
   host: Zenodo (CERN European Organization for Nuclear Research)
   landing_url: https://zenodo.org/record/3505464
+  copies:
+  - pdf_url: null
+    landing_url: https://zenodo.org/record/3505464
+    licence: other-oa
+    host: Zenodo (CERN European Organization for Nuclear Research)
   oa_status: green
   openalex_id: https://openalex.org/W2807962003
 - key: Liu2023
@@ -2318,6 +3715,15 @@ papers:
   host: edoc (University of Basel)
   pdf_url: https://edoc.unibas.ch/94138/1/manuscript.pdf
   landing_url: https://edoc.unibas.ch/94138/1/manuscript.pdf
+  copies:
+  - pdf_url: https://edoc.unibas.ch/94138/1/manuscript.pdf
+    landing_url: https://edoc.unibas.ch/94138/1/manuscript.pdf
+    licence: other-oa
+    host: edoc (University of Basel)
+  - pdf_url: null
+    landing_url: https://ruj.uj.edu.pl/xmlui/handle/item/326210
+    licence: cc-by-nc-nd
+    host: Jagiellonian University Repository (Jagiellonian University)
   oa_status: green
   openalex_id: https://openalex.org/W4324128725
 - key: Vazirisereshk2019
@@ -2337,6 +3743,11 @@ papers:
   version: submittedVersion
   host: Consultation of the Doctoral Thesis Database (TESEO) (Ministerio de Educación, Cultura y Deporte)
   landing_url: http://hdl.handle.net/10651/53242
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/10651/53242
+    licence: cc-by-nc-nd
+    host: Consultation of the Doctoral Thesis Database (TESEO) (Ministerio de Educación, Cultura y Deporte)
   oa_status: green
   openalex_id: https://openalex.org/W2955397831
 - key: Liao2022
@@ -2356,6 +3767,11 @@ papers:
   version: submittedVersion
   host: Aaltodoc (Aalto University)
   landing_url: https://research.aalto.fi/en/publications/14c42b9c-4386-4039-9843-983be3419ccd
+  copies:
+  - pdf_url: null
+    landing_url: https://research.aalto.fi/en/publications/14c42b9c-4386-4039-9843-983be3419ccd
+    licence: other-oa
+    host: Aaltodoc (Aalto University)
   oa_status: green
   openalex_id: https://openalex.org/W3191734237
 - key: Wilkinson2025
@@ -2374,6 +3790,27 @@ papers:
   version: publishedVersion
   host: Scientific Data
   landing_url: https://doi.org/10.1038/s41597-025-04451-9
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1038/s41597-025-04451-9
+    licence: cc-by-nc-nd
+    host: Scientific Data
+  - pdf_url: https://www.osti.gov/servlets/purl/2530828
+    landing_url: https://www.osti.gov/biblio/2538236
+    licence: other-oa
+    host: OSTI OAI (U.S. Department of Energy Office of Scientific and Technical Information)
+  - pdf_url: null
+    landing_url: https://www.ncbi.nlm.nih.gov/pmc/articles/11850811
+    licence: cc-by-nc-nd
+    host: PubMed Central
+  - pdf_url: null
+    landing_url: https://handle.uba.uva.nl/personal/pure/en/publications/applying-the-fair-principles-to-computational-workflows(93c1ab5b-33ba-4d5b-9bc4-a176d7cf6ded).html
+    licence: cc-by-nc-nd
+    host: UvA-DARE (University of Amsterdam)
+  - pdf_url: null
+    landing_url: https://hdl.handle.net/11343/365417
+    licence: cc-by-nc-nd
+    host: Minerva Access (University of Melbourne)
   oa_status: gold
   openalex_id: https://openalex.org/W4407877295
 - key: Kandemir2016
@@ -2388,6 +3825,15 @@ papers:
   version: submittedVersion
   host: IYTE GCRIS Database (Izmir Institute of Technology)
   landing_url: http://hdl.handle.net/11147/6136
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11147/6136
+    licence: other-oa
+    host: IYTE GCRIS Database (Izmir Institute of Technology)
+  - pdf_url: null
+    landing_url: http://doi.org/10.1088/0957-4484/27/5/055703
+    licence: other-oa
+    host: İYTE (İZMİR YÜKSEK TEKNOLOJİ ENSTİTÜSÜ)
   oa_status: bronze
   openalex_id: https://openalex.org/W2237078251
 - key: Wu2024
@@ -2403,6 +3849,11 @@ papers:
   host: Journal of Physics D Applied Physics
   pdf_url: https://iopscience.iop.org/article/10.1088/1361-6463/ad365c/pdf
   landing_url: https://doi.org/10.1088/1361-6463/ad365c
+  copies:
+  - pdf_url: https://iopscience.iop.org/article/10.1088/1361-6463/ad365c/pdf
+    landing_url: https://doi.org/10.1088/1361-6463/ad365c
+    licence: cc-by-nc-nd
+    host: Journal of Physics D Applied Physics
   oa_status: hybrid
   openalex_id: https://openalex.org/W4393029659
 - key: Slathia2024
@@ -2419,6 +3870,11 @@ papers:
   version: publishedVersion
   host: 2D Materials
   landing_url: https://doi.org/10.1088/2053-1583/ad3cec
+  copies:
+  - pdf_url: null
+    landing_url: https://doi.org/10.1088/2053-1583/ad3cec
+    licence: cc-by-nc-nd
+    host: 2D Materials
   oa_status: hybrid
   openalex_id: https://openalex.org/W4394673816
 - key: Fan2017
@@ -2435,6 +3891,19 @@ papers:
   version: submittedVersion
   host: Aaltodoc (Aalto University)
   landing_url: https://research.aalto.fi/en/publications/38b49ff7-033d-4975-bd74-6a3172559976
+  copies:
+  - pdf_url: null
+    landing_url: https://research.aalto.fi/en/publications/38b49ff7-033d-4975-bd74-6a3172559976
+    licence: other-oa
+    host: Aaltodoc (Aalto University)
+  - pdf_url: null
+    landing_url: https://dspace.lboro.ac.uk/2134/25719
+    licence: cc-by-nc-nd
+    host: Loughborough University Institutional Repository (Loughborough University)
+  - pdf_url: null
+    landing_url: https://figshare.com/articles/journal_contribution/Thermal_conductivity_decomposition_in_two-dimensional_materials_Application_to_graphene/9387998
+    licence: cc-by-nc-nd
+    host: Loughborough University Research Repository (Loughborough University)
   oa_status: bronze
   openalex_id: https://openalex.org/W2573984145
 - key: Filleter2009
@@ -2451,6 +3920,15 @@ papers:
   version: submittedVersion
   host: Max Planck Digital Library
   landing_url: http://hdl.handle.net/11858/00-001M-0000-0010-F9E2-2
+  copies:
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11858/00-001M-0000-0010-F9E2-2
+    licence: other-oa
+    host: Max Planck Digital Library
+  - pdf_url: null
+    landing_url: http://hdl.handle.net/11858/00-001M-0000-0010-F9E2-2
+    licence: other-oa
+    host: MPG.PuRe (Max Planck Society)
   oa_status: green
   openalex_id: https://openalex.org/W2017757591
 - key: Song2024
@@ -2468,6 +3946,11 @@ papers:
   host: edoc (University of Basel)
   pdf_url: https://edoc.unibas.ch/96713/1/LY17226-2.pdf
   landing_url: https://edoc.unibas.ch/96713/1/LY17226-2.pdf
+  copies:
+  - pdf_url: https://edoc.unibas.ch/96713/1/LY17226-2.pdf
+    landing_url: https://edoc.unibas.ch/96713/1/LY17226-2.pdf
+    licence: other-oa
+    host: edoc (University of Basel)
   oa_status: green
   openalex_id: https://openalex.org/W4402762630
 - key: Lee2010
@@ -2484,6 +3967,11 @@ papers:
   version: submittedVersion
   host: Infoscience (Ecole Polytechnique Fédérale de Lausanne)
   landing_url: https://infoscience.epfl.ch/handle/20.500.14299/75646
+  copies:
+  - pdf_url: null
+    landing_url: https://infoscience.epfl.ch/handle/20.500.14299/75646
+    licence: cc-by-nc-nd
+    host: Infoscience (Ecole Polytechnique Fédérale de Lausanne)
   oa_status: green
   openalex_id: https://openalex.org/W2160842288
 - key: Huang2022

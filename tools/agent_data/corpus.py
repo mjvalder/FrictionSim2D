@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import html.parser
 import io
 import json
 import os
@@ -47,6 +48,11 @@ CACHE = HERE / '.cache'
 OUT_DIR = HERE / 'corpus'
 
 WIKI_API = 'https://en.wikipedia.org/w/api.php'
+EUROPE_PMC = 'https://www.ebi.ac.uk/europepmc/webservices/rest/{}/fullTextXML'
+EUROPE_PMC_SEARCH = ('https://www.ebi.ac.uk/europepmc/webservices/rest/search?format=json&'
+                     'resultType=lite&query=')
+#: An HTML or XML page counts as the article's full text from this many words.
+MIN_ARTICLE_WORDS = 800
 USER_AGENT = 'FrictionSim2D-agent-data/0.1 (private research corpus; python-urllib)'
 REQUEST_GAP = 2.0  # seconds between network requests
 RETRIES = 5  # on HTTP 429/503, honouring Retry-After, else 10, 20, 40 ... s
@@ -195,8 +201,6 @@ def pdf_text(body: bytes) -> str:
     """Plain text of a PDF, cut before its references/acknowledgements."""
     # pylint: disable=import-outside-toplevel
     from pypdf import PdfReader
-    if not body.startswith(b'%PDF'):
-        raise ValueError('not a PDF (publisher returned a web page)')
     reader = PdfReader(io.BytesIO(body))
     text = '\n'.join(page.extract_text() or '' for page in reader.pages)
     ends = [m.start() for m in _PAPER_END.finditer(text) if m.start() > len(text) // 3]
@@ -218,15 +222,108 @@ def paper_paragraphs(text: str) -> List[str]:
     return paragraphs
 
 
+class _Paragraphs(html.parser.HTMLParser):
+    """Text of ``<p>`` elements, outside navigation, scripts and reference lists."""
+
+    SKIP = {'script', 'style', 'nav', 'header', 'footer', 'aside', 'ref-list', 'back',
+            'figure', 'table-wrap', 'fig'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.paragraphs: List[str] = []
+        self._skip = 0
+        self._current: Optional[List[str]] = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag == 'p' and not self._skip:
+            self._current = []
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip = max(0, self._skip - 1)
+        elif tag == 'p' and self._current is not None:
+            self.paragraphs.append(' '.join(''.join(self._current).split()))
+            self._current = None
+
+    def handle_data(self, data):
+        if self._current is not None and not self._skip:
+            self._current.append(data)
+
+
+def markup_text(body: bytes) -> str:
+    """Article text of an HTML page or a JATS XML document, one paragraph per block."""
+    parser = _Paragraphs()
+    parser.feed(body.decode('utf-8', errors='replace'))
+    text = '\n\n'.join(parser.paragraphs)
+    if len(text.split()) < MIN_ARTICLE_WORDS:
+        raise ValueError('web page without the article text')
+    return text
+
+
+def body_text(body: bytes) -> str:
+    """Article text of a PDF, a JATS XML document or an HTML article page."""
+    return pdf_text(body) if body.startswith(b'%PDF') else markup_text(body)
+
+
+def _pmcid(urls: List[str]) -> Optional[str]:
+    for url in urls:
+        found = re.search(r'PMC\d+', url or '')
+        if found:
+            return found.group(0)
+    return None
+
+
+def pmcid_for_doi(doi: str) -> Optional[str]:
+    """The PubMed Central id Europe PMC has for ``doi``, if its full text is open there."""
+    query = urllib.parse.quote(f'DOI:"{doi}" AND OPEN_ACCESS:y')
+    try:
+        found = json.loads(_get(EUROPE_PMC_SEARCH + query, CACHE / 'europepmc' / _key(doi)))
+    except (IOError, ValueError):
+        return None
+    hits = found.get('resultList', {}).get('result', [])
+    return next((h['pmcid'] for h in hits if h.get('pmcid')), None)
+
+
+def candidate_urls(paper: Dict) -> List[Tuple[str, str]]:
+    """``(url, licence)`` to try in order: Europe PMC's open XML, then each open
+    copy's PDF, then its HTML page. Only copies under a train-tier licence."""
+    copies = paper.get('copies') or [{'pdf_url': paper.get('pdf_url'),
+                                      'landing_url': paper.get('landing_url'),
+                                      'licence': paper['licence']}]
+    urls: List[Tuple[str, str]] = []
+    pmcid = _pmcid([u for c in copies for u in (c.get('pdf_url'), c.get('landing_url'))])
+    if pmcid:
+        pmc_licence = next(c['licence'] for c in copies
+                           if pmcid in f"{c.get('pdf_url')}{c.get('landing_url')}")
+        urls.append((EUROPE_PMC.format(pmcid), pmc_licence))
+    elif any('ncbi.nlm.nih.gov' in f"{c.get('pdf_url')}{c.get('landing_url')}"
+             for c in copies):
+        pmcid = pmcid_for_doi(paper['doi'])  # a PMC copy whose URL hides its id
+        if pmcid:
+            urls.append((EUROPE_PMC.format(pmcid), next(
+                c['licence'] for c in copies
+                if 'ncbi.nlm.nih.gov' in f"{c.get('pdf_url')}{c.get('landing_url')}")))
+    urls += [(c['pdf_url'], c['licence']) for c in copies if c.get('pdf_url')]
+    urls += [(c['landing_url'], c['licence']) for c in copies if c.get('landing_url')]
+    seen = set()
+    return [(u, lic) for u, lic in urls if not (u in seen or seen.add(u))]
+
+
 def paper_passages(paper: Dict, retrieved: str) -> List[Dict]:
-    url = paper.get('pdf_url')
-    if not url:
-        raise LookupError('no open PDF URL')
-    body = _get(url, CACHE / 'papers' / f"{_key(paper['doi'])}.pdf")
-    return [{'source': 'G', 'kind': 'paper', 'title': paper.get('title', paper['doi']),
-             'section': '', 'url': url, 'doi': paper['doi'], 'licence': paper['licence'],
-             'retrieved': retrieved, 'text': text}
-            for text in chunk(paper_paragraphs(pdf_text(body)))]
+    reasons = []
+    for url, licence in candidate_urls(paper):
+        try:
+            text = body_text(_get(url, CACHE / 'papers' / _key(url)))
+        except (IOError, ValueError) as err:
+            reasons.append(f'{urllib.parse.urlsplit(url).netloc}: {str(err)[:60]}')
+            continue
+        return [{'source': 'G', 'kind': 'paper', 'title': paper.get('title', paper['doi']),
+                 'section': '', 'url': url, 'doi': paper['doi'], 'licence': licence,
+                 'retrieved': retrieved, 'text': passage}
+                for passage in chunk(paper_paragraphs(text))]
+    raise LookupError('; '.join(reasons) or 'no open copy')
 
 
 def train_papers(path: Path = PAPERS) -> List[Dict]:
@@ -268,6 +365,11 @@ def build(only: Optional[str] = None) -> Dict:
         if sys.stderr.isatty():
             print(f'\r{i}/{len(jobs)}', end='', file=sys.stderr)
     OUT_DIR.mkdir(exist_ok=True)
+    previous = OUT_DIR / 'passages.jsonl'
+    if only and previous.exists():  # keep the source that was not rebuilt
+        kept_kind = 'paper' if only == 'wikipedia' else 'wikipedia'
+        with previous.open(encoding='utf-8') as source:
+            passages = [p for p in map(json.loads, source) if p['kind'] == kept_kind] + passages
     with (OUT_DIR / 'passages.jsonl').open('w', encoding='utf-8') as out:
         for passage in passages:
             out.write(json.dumps(passage, ensure_ascii=False) + '\n')

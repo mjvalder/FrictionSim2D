@@ -139,6 +139,10 @@ def classify(work: Optional[dict]) -> Dict[str, object]:
     ranked = [(tier_of(loc.get('license')), loc) for loc in work.get('locations') or []]
     tier, location = min(ranked, key=lambda pair: TIER_RANK[pair[0]], default=('closed', {}))
     source = (location.get('source') or {}).get('display_name')
+    # Every copy under a licence of the same tier, best location first: a
+    # repository or PMC copy when the publisher refuses scripted downloads.
+    same_tier = [loc for t, loc in ranked if t == tier and tier != 'closed']
+    same_tier.sort(key=lambda loc: loc is not location)
     return {
         'tier': tier,
         'licence': location.get('license'),
@@ -146,6 +150,11 @@ def classify(work: Optional[dict]) -> Dict[str, object]:
         'host': source,
         'pdf_url': location.get('pdf_url') if tier != 'closed' else None,
         'landing_url': location.get('landing_page_url') if tier != 'closed' else None,
+        'copies': [{'pdf_url': loc.get('pdf_url'), 'landing_url': loc.get('landing_page_url'),
+                    'licence': loc.get('license'),
+                    'host': (loc.get('source') or {}).get('display_name')}
+                   for loc in same_tier if loc.get('pdf_url') or loc.get('landing_page_url')]
+        or None,
         'oa_status': (work.get('open_access') or {}).get('oa_status'),
         'openalex_id': work.get('id'),
     }
