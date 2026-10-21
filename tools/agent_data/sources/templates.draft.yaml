@@ -1,0 +1,1120 @@
+source: B
+teacher: qwen3:14b
+teacher_licence: Apache-2.0
+status: draft -- review, then copy what you keep into templates.yaml
+categories:
+- category: afm_setup
+  kind: act
+  slots:
+  - material
+  - potential
+  - loads
+  rejected: 11
+  templates:
+  - Set up an AFM tip-sliding simulation for {material} using the {potential} potential at normal loads
+    of {loads} nN.
+  - I need an AFM simulation of {material} with the {potential} potential at normal loads {loads} nN.
+    Please set it up.
+  - Please generate an AFM tip sliding simulation for {material} with {potential} at normal loads {loads}
+    nN.
+  - I'm researching friction in {material}. Could you simulate AFM tip sliding with the {potential} potential
+    and normal loads {loads} nN?
+  - Could you run an AFM tip sliding simulation for {material} at {loads} nN using the {potential} potential?
+  - Simulate AFM tip sliding for {material} at {loads} nN using {potential} potential.
+  - I would like to test {material} under various normal loads. Use the {potential} potential for the
+    AFM tip sliding simulation at {loads} nN.
+  - Need an AFM tip sliding simulation of {material} with {potential} potential at {loads} nN. Can you
+    help?
+  - I'm analyzing the tribological behavior of {material}. Run an AFM tip simulation at {loads} nN with
+    {potential} potential.
+  - Set up an AFM tip simulation for {material} using the {potential} potential at normal loads {loads}
+    nN.
+  - Run an AFM tip sliding simulation for {material} with {potential} potential at {loads} nN.
+  - Prepare an AFM tip sliding simulation for {material} with the {potential} potential at {loads} nN.
+  - Please generate an AFM tip simulation for {material} using {potential} potential at normal loads {loads}
+    nN.
+  - I need AFM tip sliding simulations of {material} with {potential} potential at {loads} nN for my research.
+  - Simulate AFM tip sliding on {material} with {potential} potential and normal loads {loads} nN.
+  - Could you set up a simulation of {material} with the {potential} potential and normal loads {loads}
+    nN for AFM tip sliding?
+  - Please run an AFM tip simulation for {material} under normal loads of {loads} nN using the {potential}
+    potential.
+  - Set up AFM tip sliding on {material} using {potential} potential at {loads} nN.
+  - For my thesis, I need AFM tip sliding simulations of {material} using {potential} potential at {loads}
+    nN.
+  - Can you generate an AFM simulation for {material} with {potential} potential at {loads} nN?
+  - I'd like an AFM tip sliding simulation of {material} at {loads} nN using the {potential} potential.
+    Please create it.
+  - Could you set up an AFM tip sliding simulation for {material} with the {potential} potential and normal
+    loads {loads} nN?
+  - Run a simulation for {material} using the {potential} potential under normal loads of {loads} nN with
+    AFM tip sliding.
+  - Set up an AFM tip simulation on {material} using {potential} potential at normal loads {loads} nN.
+  - I need an AFM tip simulation of {material} using {potential} potential at {loads} nN. Please generate
+    it.
+  - Can you create a simulation for {material} with the {potential} potential and normal loads {loads}
+    nN for AFM tip sliding?
+  - Prepare an AFM tip sliding simulation for {material} with {potential} potential at normal loads {loads}
+    nN.
+  - Please simulate AFM tip sliding for {material} using the {potential} potential and normal loads {loads}
+    nN.
+  - Set up an AFM tip-sliding friction simulation for {material} using the {potential} potential at normal
+    loads of {loads} nN.
+  - 'I need an AFM tip simulation for {material} with {potential} potential at various normal loads: {loads}
+    nN. Can you assist?'
+- category: afm_setup_temperature
+  kind: act
+  slots:
+  - material
+  - potential
+  - load
+  - temperature
+  rejected: 19
+  templates:
+  - Set up an AFM sliding simulation for {material} using the {potential} potential under a load of {load}
+    nN at {temperature} K.
+  - Can you create an AFM sliding simulation for {material} with the {potential} potential at {load} nN
+    and {temperature} K?
+  - I need an AFM simulation of {material} with the {potential} potential at {load} nN and {temperature}
+    K for my tribology research.
+  - Run an AFM sliding test on {material} with {potential} at {load} nN and {temperature} K.
+  - I need to model AFM sliding on {material} using {potential} at {load} nN and {temperature} K for surface
+    analysis.
+  - Simulate AFM sliding for {material} using {potential} at a normal load of {load} nN and a temperature
+    of {temperature} K.
+  - Could you please set up an AFM simulation for {material} with the {potential} potential under {load}
+    nN and at {temperature} K?
+  - Set up an AFM sliding simulation for {material} with the {potential} potential at {load} nN and {temperature}
+    K for my project.
+  - I want to simulate AFM sliding of {material} using {potential} at {load} nN and {temperature} K. Can
+    you do that?
+  - Please generate an AFM sliding simulation for {material} with the {potential} potential at {load}
+    nN and {temperature} K.
+  - Simulate the AFM sliding of {material} using {potential} at a normal load of {load} nN and temperature
+    of {temperature} K.
+  - Could you run an AFM sliding simulation for {material} using {potential} at {load} nN and {temperature}
+    K?
+  - Set up a simulation of {material} with {potential} at {load} nN and {temperature} K for AFM sliding
+    analysis.
+  - I need to model the AFM sliding of {material} with {potential} at {load} nN and {temperature} K for
+    my thesis.
+  - Run an AFM sliding test for {material} with the {potential} potential at {load} nN and {temperature}
+    K.
+  - Please simulate AFM sliding for {material} with the {potential} potential under {load} nN and at {temperature}
+    K.
+  - Simulate the AFM sliding of {material} under a normal load of {load} nN using the {potential} potential
+    at {temperature} K.
+  - I need to perform an AFM simulation on {material} with {potential} at {load} nN and {temperature}
+    K for surface studies.
+  - Set up an AFM simulation for {material} at {load} nN with the {potential} potential and {temperature}
+    K.
+  - I want to simulate the AFM sliding of {material} using the {potential} potential at {load} nN and
+    {temperature} K.
+  - Simulate AFM sliding on {material} with {potential} at {load} nN and {temperature} K for my research.
+  - Could you help me set up an AFM sliding simulation for {material} using {potential} at {load} nN and
+    {temperature} K?
+  - Set up an AFM sliding simulation for {material} using the {potential} potential at a load of {load}
+    nN and a temperature of {temperature} K.
+  - I need a simulation of {material} under AFM sliding with {potential} at {load} nN and {temperature}
+    K. Can you help?
+  - Run an AFM sliding simulation for {material} with interatomic potential {potential}, normal load {load}
+    nN and temperature {temperature} K.
+  - I'm studying friction in {material}. Could you set up an AFM sliding simulation using {potential}
+    at {load} nN and {temperature} K?
+  - Set up a simulation for {material} at {temperature} K with {potential} and {load} nN for AFM sliding.
+  - I would like to perform an AFM sliding experiment on {material} with {potential} at a load of {load}
+    nN and temperature of {temperature} K.
+  - Could you create a setup for AFM sliding on {material} with {potential}, at {load} nN and {temperature}
+    K?
+  - Run an AFM simulation with {material}, {potential}, {load} nN, and {temperature} K.
+- category: afm_two_materials
+  kind: act
+  slots:
+  - material
+  - material_b
+  - potential
+  - loads
+  rejected: 2
+  templates:
+  - Set up AFM sliding simulations for {material} and {material_b} using the {potential} potential at
+    loads of {loads} nN.
+  - Can you run AFM sliding simulations for {material} and {material_b} with the same {potential} potential
+    under {loads} nN normal loads?
+  - I need AFM sliding simulations comparing {material} and {material_b} with the {potential} potential
+    at {loads} nN.
+  - 'Please perform AFM sliding tests on {material} and {material_b} with the {potential} potential for
+    the following loads: {loads} nN.'
+  - Could you set up AFM sliding simulations for {material} and {material_b} using the {potential} potential
+    at {loads} nN?
+  - 'Run AFM sliding simulations for {material} and {material_b} with the {potential} potential at the
+    following normal loads: {loads} nN.'
+  - Need AFM simulations for {material} vs {material_b} at {loads} nN using the {potential} potential.
+  - Please generate AFM sliding simulations for {material} and {material_b} using {potential} at {loads}
+    nN.
+  - Can you create AFM sliding simulations for {material} and {material_b} using the same {potential}
+    potential across loads {loads} nN?
+  - Set up AFM simulations for {material} and {material_b} using {potential} potential at {loads} nN for
+    my study on tribology.
+  - I'm investigating the friction between {material} and {material_b}. Please simulate AFM sliding at
+    {loads} nN with the {potential} potential.
+  - Run AFM sliding simulations for {material} and {material_b} with {potential} potential under {loads}
+    nN.
+  - I need AFM sliding simulations for {material} and {material_b} at loads {loads} nN using {potential}
+    potential.
+  - Could you simulate AFM sliding between {material} and {material_b} with {potential} at {loads} nN?
+  - Please perform AFM sliding simulations for {material} and {material_b} with {potential} potential
+    for normal loads of {loads} nN.
+  - I would like AFM sliding simulations for {material} and {material_b} with the {potential} potential
+    at {loads} nN.
+  - Set up AFM sliding simulations comparing {material} and {material_b} using the {potential} potential
+    at {loads} nN.
+  - Can you run AFM sliding simulations for {material} and {material_b} at {loads} nN using {potential}
+    potential?
+  - Simulate AFM sliding on {material} and {material_b} using the {potential} potential at {loads} nN.
+  - Could you create AFM sliding simulations for {material} and {material_b} using {potential} at the
+    loads {loads} nN?
+  - Please set up AFM sliding simulations for {material} and {material_b} using {potential} at {loads}
+    nN.
+  - Run AFM simulations for {material} and {material_b} with {potential} potential under {loads} nN normal
+    load.
+  - Simulate AFM sliding on {material} and {material_b} at {loads} nN with the same {potential} potential.
+  - I'm working on tribology and need AFM sliding simulations for {material} and {material_b} using {potential}
+    at {loads} nN.
+  - Can you perform AFM sliding simulations for {material} and {material_b} using the {potential} potential
+    under {loads} nN?
+  - Set up AFM sliding simulations for {material} and {material_b} at {loads} nN using the {potential}
+    potential.
+  - Need AFM sliding simulations for {material} and {material_b} with the {potential} potential at {loads}
+    nN.
+  - Could you simulate AFM sliding on {material} and {material_b} using {potential} potential at {loads}
+    nN?
+  - I would like AFM sliding simulations of {material} and {material_b} with {potential} potential at
+    {loads} nN for my research.
+  - Set up AFM sliding tests for {material} and {material_b} using the {potential} potential at {loads}
+    nN.
+- category: sheet_setup
+  kind: act
+  slots:
+  - material
+  - potential
+  - pressures
+  rejected: 95
+  templates:
+  - Set up a sheet-on-sheet sliding simulation of {material} using the {potential} potential at {pressures}
+    GPa.
+  - Could you configure a sheet-on-sheet simulation for {material} with the {potential} potential under
+    {pressures} GPa?
+  - I require a sheet-on-sheet simulation for {material} at {pressures} GPa with the {potential} potential
+    applied.
+  - Set up a sheet-on-sheet simulation of {material} with the {potential} potential and pressures {pressures}
+    GPa.
+  - Could you run a sheet-on-sheet simulation for {material} with the {potential} potential at {pressures}
+    GPa?
+  - Run a sheet-on-sheet sliding simulation of {material} using the {potential} potential at normal pressures
+    of {pressures} GPa.
+  - Could you run a sheet-on-sheet simulation of {material} with the {potential} potential and pressures
+    {pressures} GPa?
+  - Please generate a LAMMPS input for a sheet-on-sheet simulation of {material} with {potential} and
+    pressures {pressures} GPa.
+  - Set up a sheet-on-sheet simulation for {material} with the {potential} potential and normal pressures
+    {pressures} GPa.
+  - Set up a sheet-on-sheet simulation of {material} with the {potential} potential and normal pressures
+    {pressures} GPa.
+  - Set up a sheet-on-sheet sliding simulation for {material} using the {potential} potential at {pressures}
+    GPa normal pressure.
+  - 'Run a sheet-on-sheet simulation of {material} with the {potential} potential at normal pressures:
+    {pressures} GPa.'
+  - I want to study friction of {material} with {potential} at {pressures} GPa. Setup a sheet-on-sheet
+    sliding simulation.
+  - Would you mind running a sheet-on-sheet simulation of {material} using the {potential} potential at
+    {pressures} GPa normal pressure?
+  - Could you generate a sheet-on-sheet simulation of {material} with {potential} at normal pressures
+    of {pressures} GPa?
+  - I want to test the friction of {material} with {potential} at {pressures} GPa. Please set up a sheet-on-sheet
+    simulation.
+  - Can you help me set up a sheet-on-sheet simulation of {material} using {potential} at {pressures}
+    GPa normal pressure?
+  - Set up a sheet-on-sheet sliding simulation for {material} with {potential} potential at {pressures}
+    GPa.
+  - Please run a sheet-on-sheet simulation for {material} with {potential} at {pressures} GPa normal pressures.
+- category: indent_setup
+  kind: act
+  slots:
+  - material
+  - potential
+  - loads
+  rejected: 0
+  templates:
+  - Set up an indentation simulation for {material} using the {potential} potential with loads of {loads}
+    nN.
+  - Could you create a simulation where {material} is indented with {loads} nN, using {potential}?
+  - I need to simulate indentation of {material} with the {potential} potential at {loads} nN. Press,
+    hold, retract, no sliding.
+  - Please create a LAMMPS simulation for indentation of {material} at {loads} nN using {potential} potential.
+  - 'I want to run indentation simulations on {material} with {potential}, at the following loads: {loads}
+    nN.'
+  - Could you set up a press-and-hold indentation test on {material} with {potential} at {loads} nN?
+  - I need a simulation for {material} under indentation with {potential} and loads of {loads} nN.
+  - Set up a no-sliding indentation simulation for {material} using {potential} at {loads} nN.
+  - Run a simulation of {material} indentation with {potential} at {loads} nN. Press, hold, retract.
+  - I'm studying the mechanical response of {material}. Please simulate indentation with {potential} at
+    {loads} nN.
+  - 'Could you generate a simulation of {material} indentation using {potential} with the following normal
+    loads: {loads} nN?'
+  - Please set up an indentation test on {material} with {potential}, with normal loads of {loads} nN.
+  - I need to analyze indentation behavior for {material} using {potential} at {loads} nN. Press, hold,
+    retract.
+  - Could you create an indentation simulation with no sliding for {material} using {potential} and loads
+    of {loads} nN?
+  - Set up a simulation of {material} indentation with {potential} at {loads} nN. Press, hold, retract.
+  - Could you help me set up a simulation of {material} being indented with {potential} at {loads} nN?
+  - I need to run indentation tests on {material} with {potential} for loads of {loads} nN.
+  - Please simulate indentation of {material} using {potential} at {loads} nN. Include press, hold, and
+    retract steps.
+  - I'm investigating the mechanical properties of {material}. Set up an indentation simulation with {potential}
+    at {loads} nN.
+  - Create a simulation for indentation of {material} using {potential} with normal loads {loads} nN.
+  - I want to simulate indentation on {material} with {potential} at {loads} nN. Press, hold, and retract.
+  - Could you set up an indentation simulation with {material}, {potential}, and loads {loads} nN?
+  - Run an indentation simulation for {material} with the {potential} potential and normal loads of {loads}
+    nN.
+  - I need a no-sliding indentation simulation for {material} using {potential} at {loads} nN.
+  - 'Set up a simulation for {material} indentation with {potential} at the following normal loads: {loads}
+    nN.'
+  - Please run an indentation simulation for {material} with {potential} and loads {loads} nN.
+  - I'm working on indentation behavior of {material}. Can you simulate this with {potential} at {loads}
+    nN?
+  - Could you generate a simulation of {material} being indented using {potential} at {loads} nN?
+  - Set up a simulation for indentation of {material} with {potential} at {loads} nN. Include press, hold,
+    and retract.
+  - I need to simulate indentation of {material} using {potential} with normal loads of {loads} nN.
+- category: pes_tip_setup
+  kind: act
+  slots:
+  - material
+  - potential
+  rejected: 1
+  templates:
+  - Set up a static potential-energy-surface scan for an AFM tip moving over {material} using the {potential}
+    potential.
+  - I need a simulation of the AFM tip scanning {material} at a fixed height with the {potential} potential.
+    Can you generate the input file?
+  - Please create a LAMMPS input for a static scan of the AFM tip above {material} using the {potential}
+    potential.
+  - I want to simulate the potential energy changes of an AFM tip over {material} with the {potential}
+    potential. Can you help?
+  - Generate a script for a static potential-energy-surface scan of an AFM tip over {material} with {potential}
+    interatomic potential.
+  - Could you set up a LAMMPS simulation to compute the potential energy surface for an AFM tip over {material}
+    using {potential}?
+  - I need a static scan of the AFM tip over {material} with {potential}. Please provide the LAMMPS input.
+  - Please help me set up a simulation to scan the potential energy surface of {material} under an AFM
+    tip using the {potential} potential.
+  - Can you create a static simulation of the AFM tip moving over {material} with the {potential} interatomic
+    potential?
+  - I'm studying friction between an AFM tip and {material}. Can you set up a static scan using the {potential}
+    potential?
+  - Please generate a LAMMPS input for a static scan of an AFM tip over {material} with {potential} interatomic
+    potential.
+  - I need a simulation to visualize the potential energy of an AFM tip over {material} using the {potential}
+    potential. Could you set it up?
+  - Could you run a static potential scan for an AFM tip on {material} with {potential} as the interatomic
+    model?
+  - I would like to simulate the interaction of the AFM tip with {material} using the {potential} potential.
+    Please set up a static scan.
+  - Can you create a LAMMPS simulation that scans the AFM tip over {material} using the {potential} potential
+    for interatomic forces?
+  - Set up a static scan of the AFM tip above {material} using the {potential} interatomic potential for
+    my research on friction.
+  - Please generate the input file for a static AFM tip scan over {material} with the {potential} potential
+    for LAMMPS.
+  - I'm investigating the interaction of AFM tips with {material}. Can you help with a static scan using
+    {potential}?
+  - I need a LAMMPS setup for a static scan of an AFM tip over {material} using the {potential} potential.
+    Can you assist?
+  - Could you generate a simulation script for a static scan of an AFM tip on {material} using the {potential}
+    potential?
+  - I need to study the potential energy of an AFM tip above {material} with the {potential} potential.
+    Please help set up the simulation.
+  - Can you create a LAMMPS script for a static scan of an AFM tip over {material} with interatomic potential
+    {potential}?
+  - Please help with setting up a static simulation of the AFM tip moving over {material} using {potential}
+    interatomic potential.
+  - Set up a static scan for the AFM tip over {material} using the {potential} potential for my friction
+    study.
+  - Could you generate a LAMMPS input for a static scan of an AFM tip over {material} with {potential}
+    interatomic potential?
+  - Can you create a simulation that maps the potential energy surface of {material} under an AFM tip
+    with {potential}?
+  - I need a script for a static scan of the AFM tip over {material} using the {potential} potential for
+    LAMMPS.
+  - Please set up a LAMMPS simulation for a static scan of the AFM tip over {material} using the {potential}
+    potential.
+  - Could you assist me in creating a static scan of the AFM tip over {material} with the {potential}
+    interatomic model?
+  - I would like a LAMMPS setup for a static scan of the AFM tip over {material} using the {potential}
+    potential.
+- category: linear_sweep
+  kind: act
+  slots:
+  - material
+  - potential
+  - n
+  - start
+  - stop
+  rejected: 2
+  templates:
+  - Could you set up AFM simulations for {material} using the {potential} potential with {n} loads between
+    {start} and {stop} nN?
+  - I need AFM data for {material} at {n} different loads from {start} to {stop} nN with {potential} potential.
+  - Please generate AFM simulations for {material} with {n} evenly spaced loads starting at {start} nN
+    and ending at {stop} nN using {potential}.
+  - Run AFM simulations for {material} with {potential} potential at {n} loads spaced between {start}
+    and {stop} nN.
+  - Set up AFM on {material} using {potential} with {n} loads evenly distributed from {start} to {stop}
+    nN.
+  - I want to test {material} under {n} different loads from {start} to {stop} nN using {potential} for
+    AFM.
+  - Could you run AFM on {material} with {potential} and {n} loads between {start} and {stop} nN?
+  - Run AFM simulations for {material} with {potential} at {n} loads starting at {start} nN and increasing
+    to {stop} nN.
+  - I need AFM data on {material} with {potential} for {n} loads spaced between {start} and {stop} nN.
+  - Set up AFM on {material} using {potential} for {n} loads between {start} and {stop} nN.
+  - Please simulate AFM for {material} with {potential} potential at {n} loads from {start} to {stop}
+    nN.
+  - Could you perform AFM simulations on {material} with {potential} at {n} evenly spaced loads from {start}
+    to {stop} nN?
+  - I need to test {material} under varying AFM loads using {potential}, with {n} loads from {start} to
+    {stop} nN.
+  - Set up AFM for {material} with {potential} at {n} loads evenly spaced between {start} and {stop} nN.
+  - Can you simulate AFM on {material} using {potential} for {n} loads between {start} and {stop} nN?
+  - Run AFM simulations for {material} with {potential} at {n} load values from {start} to {stop} nN.
+  - Please generate AFM simulations for {material} with {potential} using {n} evenly distributed loads
+    from {start} to {stop} nN.
+  - I need to set up AFM simulations for {material} with {potential} at {n} loads between {start} and
+    {stop} nN.
+  - Could you run AFM on {material} with {potential} and {n} loads spaced from {start} to {stop} nN?
+  - I am studying {material} and would like AFM simulations with {potential} at {n} loads from {start}
+    to {stop} nN.
+  - Please simulate AFM for {material} with {potential} and {n} loads from {start} to {stop} nN.
+  - Could you generate AFM simulations for {material} with {potential} using {n} loads between {start}
+    and {stop} nN?
+  - I need to run AFM simulations on {material} with {potential} at {n} loads from {start} to {stop} nN.
+  - Run AFM on {material} using {potential} potential at {n} loads between {start} and {stop} nN.
+  - Set up AFM simulations for {material} with {potential} at {n} evenly spaced loads between {start}
+    and {stop} nN.
+  - I want to perform AFM on {material} with {potential} for {n} loads from {start} to {stop} nN.
+  - Could you run AFM for {material} using {potential} at {n} loads between {start} and {stop} nN?
+  - Please simulate AFM on {material} with {potential} for {n} loads from {start} to {stop} nN.
+  - I need to test {material} under AFM loads using {potential} with {n} values between {start} and {stop}
+    nN.
+  - Set up AFM simulations for {material} with {potential} at {n} loads from {start} to {stop} nN.
+- category: param_change
+  kind: act
+  slots:
+  - parameter
+  - value
+  rejected: 0
+  templates:
+  - Please change the {parameter} to {value}.
+  - Could you set the {parameter} to {value}?
+  - I need to adjust the {parameter} to {value} for my analysis.
+  - Modify the {parameter} in the current simulation to {value}.
+  - Set the {parameter} value to {value} in the ongoing simulation.
+  - Adjust the {parameter} to {value} for better convergence.
+  - Can the {parameter} be updated to {value}?
+  - I would like to change the {parameter} to {value} for my experiment.
+  - Change the {parameter} to {value} as part of my parameter sweep.
+  - Please update the {parameter} to {value} in the simulation setup.
+  - For the next simulation run, set {parameter} to {value}.
+  - I need the {parameter} to be {value} for accurate results.
+  - Change the {parameter} to {value} immediately.
+  - Would you mind adjusting the {parameter} to {value}?
+  - Set {parameter} to {value} to match the experimental conditions.
+  - Update the {parameter} to {value} in the current simulation.
+  - Modify the {parameter} in the simulation to {value} for testing purposes.
+  - Change the {parameter} value to {value} for my research.
+  - Set the {parameter} to {value} in the configuration file.
+  - I want to change the {parameter} to {value} and re-run the simulation.
+  - Adjust the {parameter} to {value} for the next phase of my study.
+  - Could you please set {parameter} to {value} in the simulation?
+  - For consistency with the literature, change the {parameter} to {value}.
+  - Change the {parameter} to {value} so that the simulation reflects the real-world scenario.
+  - Update the {parameter} in the simulation to {value} as requested.
+  - Set the {parameter} value to {value} for the upcoming simulation.
+  - Modify the {parameter} to {value} for the purpose of this analysis.
+  - I need to change {parameter} to {value} to refine the model.
+  - Please set the {parameter} to {value} for the current simulation run.
+  - Change the {parameter} to {value} for better energy minimization.
+- category: find_parameter
+  kind: act
+  slots:
+  - parameter
+  rejected: 2
+  templates:
+  - Which {parameter} determines the interlayer spacing in the simulation?
+  - Can you tell me which {parameter} is responsible for setting the system's temperature?
+  - I need to know which {parameter} defines the size of the simulation box.
+  - What {parameter} affects the friction coefficient between the two layers?
+  - Which {parameter} sets the type of interatomic potential used?
+  - How is the {parameter} related to the number of atoms in the system?
+  - Tell me which {parameter} dictates the boundary conditions for the simulation.
+  - Could you clarify which {parameter} is used to specify the material type?
+  - I'm trying to understand which {parameter} controls the simulation time step.
+  - What {parameter} is responsible for defining the strain applied to the material?
+  - Which {parameter} sets the initial velocity distribution of the atoms?
+  - I need to know which {parameter} allows me to specify the simulation's duration.
+  - Can you point out which {parameter} is used to adjust the friction interface?
+  - Which {parameter} defines the interaction between the sliding surfaces?
+  - How is the {parameter} used to determine the system's periodicity?
+  - Tell me which {parameter} is used to specify the lattice constants of the material.
+  - Could you explain which {parameter} determines the number of layers in the simulation?
+  - What {parameter} is responsible for setting the simulation's pressure?
+  - Which {parameter} allows me to adjust the interaction cutoff distance?
+  - I need to know which {parameter} defines the simulation's time units.
+  - Can you clarify which {parameter} is used to control the system's energy minimization?
+  - What {parameter} is used to specify the type of force field in the simulation?
+  - Which {parameter} controls the amplitude of the applied oscillatory motion?
+  - How is the {parameter} related to the simulation's computational domain?
+  - Tell me which {parameter} is used to define the direction of sliding in the simulation.
+  - Could you explain which {parameter} controls the system's thermal coupling?
+  - What {parameter} is responsible for setting the simulation's damping coefficient?
+  - Which {parameter} is used to specify the type of boundary condition in the x-direction?
+  - I need to know which {parameter} defines the material's shear modulus in the simulation.
+  - Can you point out which {parameter} controls the number of atoms per unit cell?
+- category: search_structures
+  kind: act
+  slots:
+  - formula
+  rejected: 0
+  templates:
+  - What structure files are available for {formula}?
+  - Can you list the existing structure files for {formula}?
+  - I need to know which structure files exist for {formula}.
+  - Are there any structure files for {formula} in the database?
+  - Please tell me which structure files are available for {formula}.
+  - Do you have structure files for {formula}?
+  - I'm looking for structure files for {formula}. Could you show me which ones are available?
+  - Could you check which structure files exist for {formula}?
+  - I want to confirm if structure files are available for {formula}.
+  - Is there a structure file for {formula}?
+  - I need to select a structure for {formula}. Could you list the available ones?
+  - Could you provide a list of structure files for {formula}?
+  - I'm trying to set up a simulation with {formula}. First, I need to know which structure files are
+    available.
+  - What are the available structures for {formula}?
+  - I need to know the available structure files for {formula} in order to proceed.
+  - Are there multiple structure files for {formula}?
+  - I'm working on a project involving {formula} and need the existing structure files.
+  - Please list the structure files that exist for {formula}.
+  - Could you help me find the structure files for {formula}?
+  - I'm looking for existing structure files for {formula}. Could you assist?
+  - I want to know which structure files are present for {formula}.
+  - I need to choose a structure for {formula}. Please list the available ones.
+  - Can you provide information on the structure files available for {formula}?
+  - I would appreciate it if you could list the structure files for {formula}.
+  - I need to verify if structure files for {formula} are available.
+  - Could you check and tell me which structure files are available for {formula}?
+  - I'm trying to model {formula} and need to know the available structure files.
+  - Please show me the structure files that are available for {formula}.
+  - What structure files can I use for {formula}?
+  - I need to know which structure files exist for {formula} in order to start the simulation.
+- category: search_potentials
+  kind: act
+  slots:
+  - material
+  - potential
+  rejected: 10
+  templates:
+  - Are there any {potential} potential files available for {material}?
+  - Could you list all existing {potential} files for {material}?
+  - I need to set up a simulation with {material}—do you have any {potential} files for it?
+  - What {potential} files are available for {material}?
+  - I'm working with {material} and need to confirm if {potential} potentials are available.
+  - Do you support the {potential} type for {material} in your simulation setup?
+  - I want to use {potential} for my {material} simulation—can you check if it's available?
+  - Could you check if there are {potential} files for {material} in the database?
+  - I'm trying to use {potential} with {material}—do you have the required files?
+  - Is the {potential} potential available for the {material} material in your system?
+  - I need to run a friction test with {material}—are there any {potential} files I can use?
+  - Can you check if there are any {potential} potential files for {material}?
+  - I need to confirm the availability of {potential} files for {material} in your tool.
+  - Could you provide a list of {potential} files that work with {material}?
+  - I'm using {material} in my research—do you have {potential} files for it?
+  - Is there a {potential} potential available for {material} in your simulation framework?
+  - I need to select a potential for {material}—could you show me the available {potential} options?
+  - Do you have any {potential} files for {material} that I can use in my LAMMPS setup?
+  - I'm setting up a friction simulation with {material}—are there any {potential} files I can use?
+  - Could you check if {potential} is among the supported potentials for {material}?
+  - I want to ensure that {potential} is applicable for {material}—can you confirm?
+  - Please check if the {potential} type is available for {material} in your system.
+  - Are there {potential} potential files for {material} that I can use in my simulation?
+  - Can you tell me which {potential} files are supported for {material}?
+  - I'm planning to use {material}—do you have any {potential} files I can use?
+  - Could you confirm the presence of {potential} potential files for {material}?
+  - I need to choose a potential for {material}—could you list the available {potential} files?
+  - I want to use {potential} with {material}—do you have the appropriate files available?
+  - I'm setting up a simulation and need to know which {potential} files are supported for {material}.
+    Could you list them?
+  - Could you show me the available {potential} files for {material}?
+- category: copy_structure
+  kind: act
+  slots:
+  - material
+  rejected: 1
+  templates:
+  - Copy the structure file for {material} into the workspace, please.
+  - I need to work with {material}. Can you copy its structure file to the workspace?
+  - Could you please import the structure file for {material} into the current workspace?
+  - Please copy the {material} structure file into the workspace so I can begin my simulation.
+  - I'm starting a new project with {material}. Could you copy its structure file into the workspace?
+  - I need the {material} structure file. Can you move it into the workspace for me?
+  - Would you mind copying the {material} structure into the workspace? That would be very helpful.
+  - I'm working on a study involving {material}. Please transfer its structure file to the workspace.
+  - Could you take the structure file for {material} and place it in the workspace?
+  - I want to simulate {material}. First, I need its structure file in the workspace. Can you copy it
+    over?
+  - I'm trying to set up a simulation with {material}. Could you copy its structure file into the workspace?
+  - Let me know when you've copied the structure file for {material} into the workspace.
+  - To proceed, I need the {material} structure file copied into the workspace. Please do that.
+  - Kindly copy the structure file for {material} into the workspace for me.
+  - I'd like to work with {material}. Please copy its structure file to the workspace.
+  - I need to start my simulation with {material}. Could you copy the structure file into the workspace?
+  - I'm beginning a new simulation with {material}. Please ensure its structure file is in the workspace.
+  - Could you copy the {material} structure file into the workspace for my upcoming simulation?
+  - I'm working on friction analysis of {material}. First, I need the structure file in the workspace.
+    Can you copy it?
+  - Please copy the {material} structure into the workspace so I can prepare the simulation.
+  - Can you help by copying the structure file for {material} into the workspace?
+  - I need to load {material} into the simulation. Could you copy its structure file into the workspace?
+  - For my research on {material}, please copy its structure file into the workspace.
+  - I'm preparing a simulation using {material}. Could you copy its structure file into the workspace
+    now?
+  - I want to begin my analysis with {material}. Can you copy the structure file into the workspace?
+  - Kindly move the structure file for {material} into the workspace for my use.
+  - To get started, I need the {material} structure file in the workspace. Please copy it over.
+  - I'm running a friction study with {material}. Could you copy its structure file to the workspace?
+  - Could you please copy the {material} structure into the workspace for my simulation setup?
+  - I need the {material} structure file copied into the workspace so I can run my simulation.
+- category: make_folder
+  kind: act
+  slots:
+  - folder
+  rejected: 1
+  templates:
+  - Can you create a folder named {folder} for my simulation project?
+  - Please make a new folder called {folder} in the workspace.
+  - I need to organize my simulations; could you create a folder named {folder}?
+  - Create a directory named {folder} for storing my simulation data.
+  - I would like to set up a new simulation; first, can you make a folder called {folder}?
+  - Would you mind creating a folder named {folder} to keep my simulation files?
+  - I need a new folder in the workspace. The name should be {folder}.
+  - Please set up a new folder with the name {folder}.
+  - Could you make a folder called {folder} for my upcoming LAMMPS simulations?
+  - I'm starting a new project; can you create a folder named {folder} for me?
+  - To keep my data organized, I need a folder named {folder}. Could you make it?
+  - I want to store my simulation outputs in {folder}; please create that folder.
+  - Can you create a new workspace folder named {folder}?
+  - Is it possible to create a folder named {folder} in the current directory?
+  - I need to create a directory named {folder} for my simulation runs. Can you help?
+  - I'm preparing a new experiment. First, can you create a folder called {folder}?
+  - Could you create a new folder called {folder} to hold my simulation scripts?
+  - I want to start organizing my data. Please create a folder named {folder}.
+  - I need to set up a workspace; create a folder named {folder} for me.
+  - Please create a folder named {folder} so I can begin my simulation setup.
+  - I'm working on a new study. Can you create a folder named {folder} for my project?
+  - Could you create a new folder with the exact name {folder} in the workspace?
+  - I'm setting up a new simulation. First, please make a folder called {folder}.
+  - To manage my files better, I'd like a folder named {folder}. Please create it.
+  - I'm preparing my simulation inputs. Could you create a folder called {folder}?
+  - For better organization, I need a folder named {folder}. Can you make it?
+  - I want to store all my simulation outputs in {folder}. Please create the folder.
+  - Could you help me create a new folder named {folder} in the workspace?
+  - I need a new directory named {folder}. Please create it for my simulations.
+  - To keep my simulation data together, can you make a folder called {folder}?
+- category: list_workspace
+  kind: act
+  slots: []
+  rejected: 1
+  templates:
+  - What folders are currently in the workspace?
+  - I need to locate some simulation data. Can you tell me what folders are available?
+  - Could you list the folders in the workspace for me?
+  - I'm trying to organize my project. Are there any folders already present in the workspace?
+  - Please show me the current folder structure of the workspace.
+  - I need to check the workspace structure. What folders are there?
+  - What's the current folder layout in the workspace?
+  - I want to make sure I'm working in the right directory. Can you list the folders in the workspace?
+  - What directories are present in the current workspace?
+  - I'm looking for saved simulation setups. Could you list the folders available in the workspace?
+  - I need to know which folders exist in the workspace to proceed with my simulation setup.
+  - Could you please show me the folders in the workspace?
+  - I want to verify the workspace structure. What folders are in the workspace?
+  - I need to check the workspace for existing folders. Could you list them?
+  - What folders are in the workspace so I can navigate to the correct one?
+  - I'm setting up a new project. Could you tell me what folders are already in the workspace?
+  - I'm trying to locate some previous work. What folders are available in the workspace?
+  - Could you help me by listing the folders currently in the workspace?
+  - I need to know the current folder names in the workspace to continue with my simulation.
+  - What folders are available in the workspace at the moment?
+  - I need to find some data. Could you list the folders in the workspace?
+  - I want to see the current folder structure in the workspace. What folders are there?
+  - I'm looking to organize my simulations. What folders are in the workspace?
+  - Could you please provide a list of the folders in the workspace?
+  - I need to confirm the workspace contents. What folders are available?
+  - I'm trying to understand the workspace structure. Could you show me the folders present?
+  - I want to ensure I'm working in the correct directory. What folders are in the workspace?
+  - Could you list the folders that are currently in the workspace?
+  - I need to know which folders exist in the workspace to avoid duplication.
+  - What folders are located in the current workspace?
+- category: summarise_dataset
+  kind: act
+  slots:
+  - dataset
+  rejected: 0
+  templates:
+  - What materials and loads are included in {dataset}?
+  - Can you tell me which materials and applied loads are in the {dataset} folder?
+  - I need to know the materials and load conditions for the simulation results in {dataset}.
+  - What was the combination of materials and load used for {dataset}?
+  - Could you list the materials and the loads associated with {dataset}?
+  - I'm reviewing {dataset}—what materials and loads were tested there?
+  - In {dataset}, what materials and loading conditions were simulated?
+  - Please inform me about the materials and applied loads in the {dataset} dataset.
+  - Which materials and loads are part of the results in {dataset}?
+  - Could you check which materials and loads are in {dataset}?
+  - I'm trying to understand the setup of {dataset}—what materials and loads are involved?
+  - What materials and loads are covered by the results in {dataset}?
+  - Could you show me the materials and load information for {dataset}?
+  - What combination of materials and loads was used in the {dataset} results?
+  - I'd like to know the materials and load parameters in {dataset}.
+  - Can you extract the materials and load data from {dataset}?
+  - What materials and loads were tested in the dataset named {dataset}?
+  - I need a summary of the materials and loads in {dataset}.
+  - What are the materials and load conditions for the simulation results stored in {dataset}?
+  - Could you provide a list of the materials and loads used in {dataset}?
+  - For {dataset}, what materials and loads were part of the simulation?
+  - I'm analyzing {dataset}—can you tell me the materials and loads involved?
+  - What materials and loads were included in the simulation results of {dataset}?
+  - What materials and loads were used for the experiments in {dataset}?
+  - Can you confirm the materials and load conditions for {dataset}?
+  - I want to know the materials and load details of {dataset}.
+  - Could you list the materials and applied loads in the {dataset} dataset?
+  - What materials and loads are present in the results folder {dataset}?
+  - I need to know which materials and loads are associated with the {dataset} dataset.
+  - What is the composition of materials and loads in the {dataset} results?
+- category: plot_cof_load
+  kind: act
+  slots:
+  - dataset
+  rejected: 0
+  templates:
+  - Can you plot the friction coefficient versus normal load for the dataset {dataset}?
+  - I need a graph showing friction coefficient against normal load from {dataset}.
+  - Please generate a plot of friction coefficient vs. normal load using {dataset} results.
+  - Could you make a plot for the friction coefficient vs. normal load from {dataset}?
+  - Show me a plot of friction coefficient against normal load for the dataset {dataset}.
+  - I would like to see the friction coefficient plotted against the normal load for {dataset}.
+  - Make a plot of friction coefficient vs. normal load for the results in {dataset}.
+  - Please generate a plot for the friction coefficient and normal load relationship in {dataset}.
+  - Plot the friction coefficient against the normal load for the dataset {dataset}.
+  - I need to visualize the friction coefficient versus normal load for {dataset}.
+  - Could you create a graph of friction coefficient vs. normal load from {dataset}?
+  - Generate a plot of friction coefficient vs. normal load from the dataset {dataset}.
+  - I'm working on a paper and need a plot of friction coefficient against normal load from {dataset}.
+  - Can you make a graph of the friction coefficient vs. normal load for {dataset}?
+  - I need a visual representation of friction coefficient vs. normal load from {dataset} results.
+  - Would you please plot the friction coefficient against the normal load using {dataset}?
+  - I want to compare friction coefficient vs. normal load for {dataset}, can you plot it?
+  - Please generate a plot showing how friction coefficient varies with normal load for {dataset}.
+  - Could you make a plot of friction coefficient vs. normal load for the dataset {dataset}?
+  - Plot the relationship between friction coefficient and normal load from {dataset} for me.
+  - I need a quick plot of friction coefficient vs. normal load for the dataset {dataset}.
+  - Please create a graph of friction coefficient and normal load from {dataset} results.
+  - I'm analyzing the data from {dataset}; can you plot friction coefficient vs. normal load?
+  - I would appreciate a plot of friction coefficient versus normal load for {dataset}.
+  - Could you produce a plot of friction coefficient vs. normal load based on the dataset {dataset}?
+  - Please show me a plot of friction coefficient against normal load for the dataset {dataset}.
+  - I'm trying to understand the trend in friction coefficient vs. normal load for {dataset}; could you
+    plot it?
+  - I need a plot to help interpret the friction coefficient vs. normal load from {dataset}.
+  - Please generate a plot of friction coefficient vs. normal load for the dataset {dataset} results.
+  - Could you create a graph of friction coefficient versus normal load for {dataset}?
+- category: materials_project
+  kind: act
+  slots:
+  - formula
+  - property
+  rejected: 0
+  templates:
+  - What does Materials Project list for {property} of {formula}?
+  - Can you check {property} for {formula} in Materials Project?
+  - I need to know the {property} of {formula} from Materials Project. Please help.
+  - Look up {property} of {formula} using Materials Project.
+  - I'm studying {formula} and need the {property} from Materials Project. Could you retrieve it?
+  - What is the {property} of {formula} according to Materials Project?
+  - Please find the {property} of {formula} from the Materials Project database.
+  - I'm working on a simulation and require the {property} for {formula} from Materials Project.
+  - Could you check Materials Project for the {property} of {formula}?
+  - What does Materials Project have on {property} for {formula}?
+  - I need the {property} of {formula} as listed in Materials Project. Please assist.
+  - Do you know what value Materials Project assigns to {property} for {formula}?
+  - I want to confirm the {property} of {formula} using Materials Project. Can you do that?
+  - Looking for {property} information on {formula} from Materials Project. Any data available?
+  - Please provide the {property} of {formula} from the Materials Project database.
+  - 'Materials Project: What is the {property} of {formula}?'
+  - I'm interested in the {property} of {formula} from Materials Project. Could you retrieve it?
+  - Can you tell me the {property} of {formula} that Materials Project lists?
+  - I need to know the {property} of {formula} from Materials Project for my research.
+  - What is the {property} of {formula} as listed in Materials Project?
+  - I would like to have the {property} of {formula} from Materials Project. Please look it up.
+  - 'Materials Project: Could you find the {property} for {formula}?'
+  - For my simulation, I need the {property} of {formula} from Materials Project. Please help.
+  - Could you query Materials Project for {property} of {formula}?
+  - I need the {property} of {formula} from the Materials Project database. Can you check?
+  - What is the {property} for {formula} according to Materials Project?
+  - Please find the {property} of {formula} in Materials Project and provide it.
+  - I'm researching {formula} and need the {property} from Materials Project. Any data available?
+  - Looking up the {property} of {formula} in Materials Project. Can you assist?
+  - Could you check what value Materials Project gives for {property} of {formula}?
+- category: lattice_pair
+  kind: act
+  slots:
+  - material
+  - material_b
+  rejected: 3
+  templates:
+  - Can you calculate the lattice mismatch between {material} and {material_b}?
+  - How well do the lattices of {material} and {material_b} align?
+  - What is the lattice matching between {material} and {material_b}?
+  - I need to know the lattice mismatch for {material} and {material_b}.
+  - Could you help me determine the lattice mismatch between {material} and {material_b}?
+  - I'm studying the friction between {material} and {material_b}. Could you check their lattice compatibility?
+  - What is the interfacial lattice mismatch for {material} and {material_b}?
+  - Could you provide the lattice mismatch between {material} and {material_b} for my simulation setup?
+  - Please compute the lattice mismatch between {material} and {material_b}.
+  - I'm trying to model the sliding of {material} over {material_b}. What is their lattice mismatch?
+  - How compatible are the lattices of {material} and {material_b}?
+  - Can you show me the lattice mismatch between {material} and {material_b}?
+  - I need to know if {material} and {material_b} have a good lattice match for my simulation.
+  - Is there a way to compare the lattices of {material} and {material_b} in this software?
+  - I want to simulate friction between {material} and {material_b}. First, I need their lattice mismatch.
+  - Could you calculate the lattice mismatch between {material} and {material_b} for me?
+  - I need to check the lattice matching of {material} with {material_b} for my research.
+  - What is the degree of lattice mismatch between {material} and {material_b}?
+  - Please analyze the lattice compatibility between {material} and {material_b}.
+  - Can you tell me how well {material} and {material_b} lattices match?
+  - I'm trying to understand the interface between {material} and {material_b}. What is the lattice mismatch?
+  - Could you compute the lattice mismatch between {material} and {material_b} using LAMMPS settings?
+  - I'm working on a friction model. Please calculate the lattice mismatch for {material} and {material_b}.
+  - How does the lattice of {material} match with that of {material_b}?
+  - Please provide the lattice mismatch for {material} and {material_b} in the simulation setup.
+  - What is the lattice mismatch for {material} and {material_b} in the context of friction simulations?
+  - I need to know if there's a lattice match between {material} and {material_b} for my study.
+  - Can you compare the lattice structures of {material} and {material_b} and report the mismatch?
+  - I'm modeling interfacial friction. Could you compute the lattice mismatch between {material} and {material_b}?
+  - What's the lattice mismatch when {material} is placed on top of {material_b}?
+- category: lattice_one
+  kind: act
+  slots:
+  - material
+  rejected: 2
+  templates:
+  - What is the in-plane lattice constant for {material}?
+  - Can you provide the in-plane lattice constant of {material}?
+  - I need the in-plane lattice constant for {material} for my simulation setup.
+  - Please retrieve the in-plane lattice constant for {material} from the database.
+  - Could you tell me the in-plane lattice parameter for {material}?
+  - I'm setting up a simulation; could you give me the in-plane lattice constant for {material}?
+  - I'm working with {material} and require its in-plane lattice constant for accurate modeling.
+  - What's the in-plane lattice constant of {material}? I need it for my LAMMPS input.
+  - Looking for the in-plane lattice constant of {material} to proceed with my research.
+  - Could you fetch the in-plane lattice constant of {material} for me?
+  - I need to know the in-plane lattice constant of {material} for my current project.
+  - Please provide the in-plane lattice constant of {material} immediately.
+  - For my simulation, I need the in-plane lattice constant of {material}. Can you help?
+  - What is the in-plane lattice constant for {material} in your database?
+  - I need the in-plane lattice constant of {material} for the simulation parameters.
+  - Could you list the in-plane lattice constant for {material}?
+  - For accuracy, I must use the correct in-plane lattice constant of {material}. Can you provide it?
+  - I'm trying to model {material} and require its in-plane lattice constant.
+  - Could you check the in-plane lattice constant for {material} and share it with me?
+  - I need the in-plane lattice constant of {material} as part of my materials characterization study.
+  - Please tell me the in-plane lattice constant for {material}; I'm working on a friction simulation.
+  - I'm setting up a system involving {material} and need the in-plane lattice constant for the simulation.
+  - Could you retrieve the in-plane lattice constant of {material} for my simulation setup?
+  - What is the in-plane lattice constant for the material {material} used in your simulations?
+  - I'm simulating {material} and need the in-plane lattice constant for correct modeling.
+  - Could you give me the in-plane lattice constant of {material} for my current research?
+  - I need the in-plane lattice constant for {material} to ensure correct simulation geometry.
+  - For my study on friction in {material}, I need the in-plane lattice constant.
+  - Could you please share the in-plane lattice constant of {material} with me?
+  - Please provide the in-plane lattice constant of {material} for my LAMMPS simulation.
+- category: ask_wrong_unit
+  kind: ask
+  slots:
+  - material
+  - potential
+  - loads
+  - wrong_unit
+  rejected: 6
+  templates:
+  - Set up an AFM simulation for {material} using the {potential} potential with loads of {loads} in {wrong_unit}.
+  - Run AFM on {material} with the {potential} interatomic potential and normal loads of {loads} {wrong_unit}.
+  - I'm trying to model AFM on {material} using {potential}. The loads I have are {loads} {wrong_unit}.
+    Please adjust the units.
+  - Please perform AFM on {material} under {loads} {wrong_unit} normal loads with the {potential} potential.
+  - Could you set up an AFM simulation for {material}? The loads are {loads} {wrong_unit}, and I'm using
+    the {potential} potential.
+  - Can you convert {loads} {wrong_unit} to newtons and set up an AFM simulation for {material} with {potential}?
+  - I want an AFM simulation for {material} using the {potential} potential. The loads are {loads} {wrong_unit}.
+  - Set up an AFM simulation with {material} under {loads} {wrong_unit} normal loads using the {potential}
+    potential.
+  - I need to simulate AFM on {material} with normal loads of {loads} {wrong_unit}. Please use the {potential}
+    potential.
+  - Please adjust the unit for me. I want to run AFM on {material} with loads of {loads} {wrong_unit}
+    using {potential}.
+  - Could you set up an AFM simulation for {material} with {loads} {wrong_unit} loads and the {potential}
+    potential?
+  - I have {loads} {wrong_unit} loads for AFM on {material}. Please simulate using {potential} and handle
+    the unit conversion.
+  - Run AFM on {material} with loads {loads} {wrong_unit}. I'll be using the {potential} potential in
+    my study.
+  - Can you create an AFM simulation for {material} with the {potential} potential and {loads} {wrong_unit}
+    normal loads?
+  - 'I want to simulate AFM on {material} using {potential}, but my loads are in {wrong_unit}: {loads}.
+    Please help.'
+  - I need an AFM simulation of {material} with the {potential} potential and loads of {loads} {wrong_unit}.
+  - Please set up AFM for {material} using the {potential} potential with normal loads {loads} {wrong_unit}.
+  - Could you run an AFM simulation on {material} with loads of {loads} {wrong_unit}? I'm using the {potential}
+    potential.
+  - I'm simulating AFM on {material}. The loads are {loads} {wrong_unit}. Please use the {potential} potential.
+  - I require an AFM simulation for {material} under {loads} {wrong_unit} loads. Use the {potential} potential.
+  - Set up an AFM simulation for {material} using {potential} with normal loads of {loads} {wrong_unit}.
+  - I need to convert {loads} {wrong_unit} to force units for AFM on {material}. Use the {potential} potential.
+  - Please simulate AFM on {material} with normal loads {loads} {wrong_unit} using the {potential} potential.
+  - Could you help me set up an AFM simulation for {material}? The loads are {loads} {wrong_unit}, and
+    I'm using {potential}.
+  - I need to simulate AFM on {material} with {loads} {wrong_unit} normal loads. Please use the {potential}
+    potential.
+  - Please run an AFM simulation on {material} using the {potential} potential with loads of {loads} {wrong_unit}.
+  - Set up AFM for {material} with {loads} {wrong_unit} loads. I'm using the {potential} potential for
+    this study.
+  - I want an AFM simulation for {material} using {potential}. The loads are {loads} {wrong_unit}.
+  - Could you adjust the unit conversion for {loads} {wrong_unit} and set up AFM on {material} with {potential}?
+  - I'm working on {material} and need an AFM simulation with loads {loads} {wrong_unit}. Use the {potential}
+    potential.
+- category: ask_which_family
+  kind: ask
+  slots:
+  - material
+  - potential
+  rejected: 2
+  templates:
+  - Set up a friction simulation for {material} using the {potential} potential.
+  - I need a friction simulation of {material} with {potential} for my research.
+  - Could you create a LAMMPS friction simulation for {material} using {potential}?
+  - Please prepare a friction simulation of {material} with {potential} as the interatomic model.
+  - I want to study sliding behavior of {material}—can you set up a friction simulation using {potential}?
+  - Run a friction simulation on {material} with {potential} for me.
+  - I need to run a LAMMPS simulation for {material} with {potential} to analyze friction.
+  - Set up a simulation for {material} with {potential} to examine frictional properties.
+  - Can you help me create a friction simulation for {material} using {potential}?
+  - I need to simulate friction in {material}—please use {potential} for the interactions.
+  - A friction simulation of {material} with {potential} would be useful for my work.
+  - Please prepare a simulation for {material} with {potential} to investigate friction.
+  - Could you generate a friction simulation of {material} using {potential}?
+  - I need to study the frictional behavior of {material}—use {potential} in the setup.
+  - Create a simulation for {material} with {potential} to analyze sliding effects.
+  - Set up a LAMMPS simulation for {material} with {potential} to test friction.
+  - I’m researching {material}—please simulate its friction using {potential}.
+  - Can you configure a friction simulation for {material} using {potential}?
+  - I need a setup for {material} with {potential} to study its frictional properties.
+  - Please run a simulation of {material} with {potential} to explore friction.
+  - Set up a simulation of {material} using {potential} for friction analysis.
+  - I need to run a simulation for {material} using {potential} to understand friction.
+  - Generate a friction simulation for {material} with {potential} potential.
+  - Could you create a LAMMPS setup for {material} with {potential} to study friction?
+  - I want to simulate the friction of {material} using {potential}—can you help?
+  - Set up a simulation to analyze friction in {material} using {potential}.
+  - Please prepare a LAMMPS friction simulation of {material} with {potential} as the interaction model.
+  - I need to investigate the sliding behavior of {material}—use {potential} in the simulation.
+  - Can you set up a simulation for {material} with {potential} to look into friction?
+  - Run a friction simulation for {material} using {potential} for my project.
+- category: decline_execution_setting
+  kind: declines
+  slots:
+  - setting
+  rejected: 6
+  templates:
+  - Can you adjust the {setting} to allow for longer simulations?
+  - I need to increase the {setting} so that the energy minimisation runs more thoroughly.
+  - I want to tweak the {setting} to better suit my system's convergence needs.
+  - Let me know how to set the {setting} for a more accurate energy minimisation.
+  - I need the {setting} to be extended in order to complete the simulation without interruption.
+  - Update the {setting} to use a conjugate gradient algorithm for minimisation.
+  - I'm running into time limits—can you increase the {setting} walltime?
+  - I would like to change the {setting} for better performance on the HPC cluster.
+  - Could you adjust the {setting} to reduce the number of steps in the minimisation?
+  - Please change the {setting} so that the simulation can run for a full day.
+  - I need the {setting} to be modified to ensure the energy is fully minimised.
+  - Can the {setting} be updated to use a different minimisation command?
+  - I want to increase the {setting} to avoid premature termination of the job.
+  - Could you help me change the {setting} for the energy minimisation command?
+  - I need to tweak the {setting} in order to meet the requirements of my research project.
+  - Please adjust the {setting} so that the energy minimisation is more precise.
+  - Can you modify the {setting} to improve the stability of the simulation?
+  - I need the {setting} changed to a higher value to allow for more accurate results.
+  - I need to change the {setting} to ensure the job doesn't get killed due to time limits.
+  - Please modify the {setting} for the simulation to run with a more accurate minimisation.
+  - I want to change the {setting} to include a more sophisticated minimisation protocol.
+  - Could you adjust the {setting} so the job runs for longer without interruption?
+  - Please update the {setting} to use a different minimisation technique.
+  - I need to change the {setting} in order to complete the simulation properly.
+  - Can you modify the {setting} to allow for a more thorough energy minimisation?
+  - Could you help me tweak the {setting} for better performance on the HPC?
+  - I want the {setting} to be adjusted to allow for a more precise simulation.
+  - I need to increase the {setting} to ensure the simulation can complete successfully.
+  - Could you update the {setting} to improve the accuracy of my results?
+  - Can you modify the {setting} to ensure the job runs without being terminated early?
+- category: sheet_angles
+  kind: act
+  slots:
+  - material
+  - potential
+  - pressure
+  - angles
+  rejected: 115
+  reasons:
+    slots ['material', 'pressure', 'potential'] != ['material', 'potential', 'pressure', 'angles']: 2
+    names none of ('sheet', 'layer', 'bilayer'): 99
+    contains a digit: 6
+    slots ['material', 'pressure', 'angles'] != ['material', 'potential', 'pressure', 'angles']: 8
+  templates:
+  - How does the sliding direction affect friction in {material}? Run sheet-on-sheet sliding at {pressure}
+    GPa and angles {angles} degrees with {potential}.
+  - Could you run a simulation of {material} sheet-on-sheet sliding at {pressure} GPa with angles {angles}
+    degrees and {potential} potential?
+  - Please model {material} sheet-on-sheet sliding with normal load {pressure} GPa and sliding angles
+    {angles} degrees using the {potential} potential.
+  - I need to study the anisotropy of friction in {material}. Please set up a sheet-on-sheet simulation
+    with {potential} potential, {pressure} GPa normal force, and sliding angles {angles} degrees.
+  - Please perform a simulation to see if the sliding direction impacts the friction between {material}
+    sheets. Use {potential}, {pressure} GPa, and angles {angles} degrees.
+  - I need to see how the friction between {material} sheets changes with sliding direction. Set up the
+    simulation with {potential}, {pressure} GPa, and angles {angles} degrees.
+  - I want to see if the friction between {material} sheets is directional. Could you simulate that with
+    {potential}, {pressure} GPa, and angles {angles} degrees?
+  - Run a simulation of {material} sheet sliding on another {material} sheet using {potential} at {pressure}
+    GPa and angles {angles} degrees.
+  - Could you set up sheet-on-sheet sliding for {material} using {potential} at {pressure} GPa and angles
+    {angles}? I want to see direction dependence.
+  - Simulate sheet-on-sheet sliding for {material} at {pressure} GPa with angles {angles} using {potential}
+    potential. Is friction direction-dependent?
+  - Is the friction between {material} sheets direction-dependent? Please simulate with {potential} at
+    {pressure} GPa and angles {angles}.
+- category: pes_sheet_setup
+  kind: act
+  slots:
+  - material
+  - potential
+  - grid
+  rejected: 125
+  reasons:
+    names none of ('sheet', 'layer', 'bilayer'): 124
+    contains a digit: 1
+  templates:
+  - I'm studying the adhesion of {material} layers. Can you perform a corrugation scan using {potential}
+    and {grid} points?
+  - I'm investigating the energy landscape of {material} layers. Could you perform a corrugation scan
+    with {grid} points and {potential}?
+  - I'm studying the friction behavior of {material} layers. Can you run a corrugation scan with {grid}
+    points and {potential}?
+  - I want to study the interaction between {material} layers. Please set up a corrugation scan with {potential}
+    and {grid} grid points.
+  - I'm studying the adhesion of {material} layers. Could you set up a static corrugation scan of {material}
+    on {material} using {potential} with {grid} grid points?
+  - Set up a static corrugation scan of a single layer of {material} on another single layer of {material}
+    using {potential} and {grid} grid points per side.
+  - I'd like to analyze the potential energy landscape between {material} layers with {potential} and
+    {grid} grid points.
+- category: load_band
+  kind: act
+  slots:
+  - material
+  - potential
+  - n
+  - band
+  rejected: 1
+  reasons:
+    names none of ('afm', 'tip'): 1
+  templates:
+  - Set up AFM simulations for {material} using {potential} at {n} loads in the {band} load level.
+  - Run AFM tests on {material} with {potential} under {n} different {band} load conditions.
+  - I need AFM simulations of {material} with {potential} at {n} {band} loads. Please set that up.
+  - Could you run AFM on {material} with {potential} at {n} loads in the {band} range?
+  - Please simulate AFM for {material} using {potential} with {n} {band} load points.
+  - I'm studying {material} under {band} loads. Can you set up {n} AFM simulations with {potential}?
+  - For my research, I need {n} AFM simulations of {material} at {band} loads with {potential} potential.
+  - Simulate AFM on {material} with {potential} at {n} {band} loads.
+  - Generate {n} AFM simulations for {material} with {potential} under {band} load conditions.
+  - Could you prepare {n} AFM simulations for {material} with {potential} at {band} load levels?
+  - I need to analyze {material} at {n} {band} loads. Set up AFM with {potential}.
+  - Set up {n} AFM simulations for {material} at {band} load levels using {potential}.
+  - Can you run AFM on {material} with {potential} at {n} {band} load points?
+  - I want to test {material} under {band} loads. Please simulate {n} AFM cases with {potential}.
+  - Simulate AFM for {material} using {potential} with {n} loads in the {band} regime.
+  - I need {n} AFM runs for {material} with {potential} at {band} load levels.
+  - For my project, I need {n} AFM simulations of {material} using {potential} at {band} loads.
+  - Could you perform AFM on {material} with {potential} at {n} {band} loads?
+  - Please simulate {n} AFM cases for {material} with {potential} at {band} load levels.
+  - I want to run AFM on {material} under {band} loads. Use {potential} for {n} simulations.
+  - Could you set up {n} AFM simulations of {material} with {potential} at {band} loads?
+  - I need to study {material} under {band} conditions. Can you simulate {n} AFM cases with {potential}?
+  - Simulate AFM on {material} at {n} {band} loads using {potential} potential.
+  - Run {n} AFM simulations for {material} with {potential} at {band} load levels.
+  - Could you prepare {n} AFM tests for {material} using {potential} at {band} loads?
+  - I need to analyze the tribological properties of {material} under {band} loads. Set up {n} AFM simulations
+    with {potential}.
+  - Please simulate AFM on {material} with {potential} under {n} {band} load conditions.
+  - For my research, I need {n} AFM simulations for {material} with {potential} at {band} loads.
+  - Can you generate {n} AFM simulations for {material} using {potential} at {band} load levels?
+  - Simulate AFM on {material} with {potential} at {n} loads within the {band} range.
+- category: ask_unknown_material
+  kind: ask
+  slots:
+  - material
+  rejected: 6
+  reasons:
+    contains a digit: 6
+  templates:
+  - Set up a friction simulation for {material}.
+  - Can you create a friction simulation using {material}?
+  - I need a simulation of {material} under friction conditions.
+  - Please run a LAMMPS friction simulation with {material} as the material.
+  - I want to study the friction of {material}—could you set that up?
+  - Could you simulate the sliding friction of {material}?
+  - I would like to run a friction test on {material}.
+  - Set up a friction simulation with {material} as the sliding layer.
+  - Run a friction simulation of {material} using default settings.
+  - I need to model the tribological behavior of {material}—please assist.
+  - Please create a setup for a friction simulation with {material}.
+  - I'd like to run a LAMMPS simulation for {material} under friction.
+  - Could you simulate the frictional properties of {material}?
+  - I want to analyze the sliding friction of {material}—could you help?
+  - Can you generate a simulation of {material} being dragged across a surface?
+  - I need to simulate the interaction of {material} under friction—please do so.
+  - Please run a friction simulation of {material} as the primary component.
+  - Is it possible to simulate the friction of {material} in this software?
+  - Could you create a friction simulation using {material}?
+  - I would like to investigate the friction of {material}—could you set that up?
+  - Set up a LAMMPS simulation for {material} with friction enabled.
+  - Can you assist me in running a simulation of {material} under friction?
+  - I need to test the tribological properties of {material}—please help.
+  - Could you configure a friction simulation with {material} as the material?
+  - I want to simulate how {material} behaves under friction—could you do that?
+  - Is there a way to simulate the sliding of {material} under load?
+  - I need to model the friction of {material} in my research—could you help?
+  - Set up a simulation where {material} is in contact with another surface.
+  - I want to study the interaction of {material} under friction—please assist.
+  - Can you create a simulation for {material} with frictional forces applied?

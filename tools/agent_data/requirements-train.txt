@@ -5,6 +5,8 @@
 # Call the env's python by path: the repo's .conda/bin is first on PATH and
 # makes `conda run -n fs2d-train pip` pick a broken interpreter.
 # Verified 2026-10-16: torch 2.11.0+cu128, CUDA on the RTX A4000.
+# unsloth pulls a PyPI torchvision built for another CUDA; then reinstall:
+#   ... -m pip install --force-reinstall --no-deps --index-url https://download.pytorch.org/whl/cu128 torchvision==0.26.0
 unsloth==2026.10.6
 pyyaml
 rank-bm25
