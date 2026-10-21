@@ -8,3 +8,5 @@
 unsloth==2026.10.6
 pyyaml
 rank-bm25
+pypdf
+fonttools
