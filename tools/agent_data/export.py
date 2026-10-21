@@ -41,17 +41,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--quant', default='q4_k_m')
     args = parser.parse_args(argv)
 
-    # pylint: disable=import-outside-toplevel
-    from unsloth import FastLanguageModel
     run = RUNS / args.run
     metrics = json.loads((run / 'metrics.json').read_text())
-    model, tokenizer = FastLanguageModel.from_pretrained(str(run / 'adapter'),
-                                                         max_seq_length=8192,
-                                                         load_in_4bit=False)
-    gguf_dir = run / 'gguf'
-    model.save_pretrained_gguf(str(gguf_dir), tokenizer, quantization_method=args.quant)
-    ggufs = sorted(gguf_dir.rglob('*.gguf'), key=lambda p: p.stat().st_size)
-    quantised = [p for p in ggufs if args.quant.lower() in p.name.lower()] or ggufs[:1]
+    ggufs = sorted(run.rglob(f'*{args.quant.upper()}*.gguf'))
+    if not ggufs:  # convert once; Unsloth appends '_gguf' to the folder it is given
+        from unsloth import FastLanguageModel  # pylint: disable=import-outside-toplevel
+        model, tokenizer = FastLanguageModel.from_pretrained(str(run / 'adapter'),
+                                                             max_seq_length=8192,
+                                                             load_in_4bit=False)
+        model.save_pretrained_gguf(str(run / 'gguf'), tokenizer,
+                                   quantization_method=args.quant)
+        ggufs = sorted(run.rglob(f'*{args.quant.upper()}*.gguf'))
+    quantised = ggufs
     env = {**os.environ, 'OLLAMA_HOST': os.environ.get('OLLAMA_HOST', '127.0.0.1:11434')}
     template = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[metrics['base']], '--template'],
                               check=True, capture_output=True, text=True, env=env).stdout
