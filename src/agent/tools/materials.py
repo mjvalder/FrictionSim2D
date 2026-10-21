@@ -172,9 +172,6 @@ def resolve_material(deps, name: str,
     return structures[0], potentials[0]
 
 
-#: Coincidence search bounds: 6 repeats a side takes ~0.1 s; 10 takes ~2 s.
-COINCIDENCE_REPEATS = 6
-COINCIDENCE_STRAIN = 0.02
 #: In-plane angles further apart than this are different lattices.
 GAMMA_TOL_DEG = 1.0
 
@@ -200,6 +197,7 @@ def _percent(x: float, y: float) -> float:
 def lattice_mismatch(deps, material_a: str, material_b: Optional[str] = None) -> str:
     """In-plane cell of one material; for two, their mismatch and smallest coincidence cell."""
     # pylint: disable=import-outside-toplevel
+    from ...core.config import LatticeMatchConfig
     from ...core.utils.structures import cifread  # reaches ASE (~270 ms): only when called
     from ...lattice.matching import cell_from_params, find_coincidence_lattice
     found_a = _structure(deps, material_a)
@@ -216,12 +214,16 @@ def lattice_mismatch(deps, material_a: str, material_b: Optional[str] = None) ->
     if abs(cell_a['ang_g'] - cell_b['ang_g']) > GAMMA_TOL_DEG:
         lines.append('different in-plane lattice (gamma differs): the a/b mismatch does '
                      'not describe the interface; the coincidence cell does')
+    # The hetero builder's own defaults, so this never contradicts what it builds
+    # (10 repeats: ~2 s for a pair with no match).
+    search = LatticeMatchConfig()
     match = find_coincidence_lattice(
         cell_from_params(cell_a['lat_a'], cell_a['lat_b'], cell_a['ang_g']),
         cell_from_params(cell_b['lat_a'], cell_b['lat_b'], cell_b['ang_g']),
-        strain_tol=COINCIDENCE_STRAIN, max_supercell=COINCIDENCE_REPEATS)
-    bounds = (f'<= {COINCIDENCE_REPEATS} repeats a side, strain <= '
-              f'{COINCIDENCE_STRAIN * 100:g} %')
+        strain_tol=search.strain_tol, max_supercell=search.max_supercell,
+        area_tol=search.area_tol)
+    bounds = (f'<= {search.max_supercell} repeats a side, strain <= '
+              f'{search.strain_tol * 100:g} %, as the hetero builder searches')
     if match is None:
         lines.append(f'no coincidence cell within {bounds}')
     else:

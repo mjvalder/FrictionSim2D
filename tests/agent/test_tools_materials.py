@@ -7,6 +7,7 @@ from src.agent.changes import ToolInputError
 from src.agent.tools.materials import (build_index, elements_of, lattice_mismatch,
                                        material_ops, potential_type_of, resolve_material,
                                        search_potentials, search_structures)
+from src.core.config import LatticeMatchConfig
 from src.core.utils.structures import cifread
 from tests.helpers.agent import EXAMPLES, make_deps
 
@@ -157,3 +158,12 @@ def test_lattice_mismatch_different_lattices_say_so(deps):
 def test_lattice_mismatch_unknown_material_is_input_error(deps):
     with pytest.raises(ToolInputError, match='search_structures'):
         lattice_mismatch(deps, 'h-MoS2', 'unobtainium')
+
+
+def test_lattice_mismatch_searches_as_the_hetero_builder_does(deps):
+    """Same bounds as LatticeMatchConfig, so the tool never reports 'no cell' for a
+    pair the builder would match."""
+    defaults = LatticeMatchConfig()
+    text = lattice_mismatch(deps, 'h-MoS2', 'black_phosphorus')
+    assert f'<= {defaults.max_supercell} repeats' in text
+    assert f'strain <= {defaults.strain_tol * 100:g} %' in text
