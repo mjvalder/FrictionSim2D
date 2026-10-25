@@ -42,7 +42,8 @@ def render(tokenizer, record: dict, tools: List[dict]) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-locals
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--data', type=Path, required=True)
+    parser.add_argument('--data', type=Path, nargs='+', required=True,
+                        help='one or more generator outputs (shards of one build)')
     parser.add_argument('--run', required=True)
     parser.add_argument('--base', choices=sorted(BASES), default='1.7b')
     parser.add_argument('--rank', type=int, default=16)
@@ -63,8 +64,11 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
     from datasets import Dataset
     from trl import SFTConfig, SFTTrainer
 
-    card = json.loads(args.data.with_suffix('.card.json').read_text())
-    records = load(args.data)
+    cards = [json.loads(path.with_suffix('.card.json').read_text()) for path in args.data]
+    if len({c['schema_hash'] for c in cards}) != 1:
+        raise SystemExit('the shards were generated for different tool schemas')
+    card = cards[0]
+    records = [r for path in args.data for r in load(path)]
     model, tokenizer = FastLanguageModel.from_pretrained(
         BASES[args.base], max_seq_length=args.max_len, load_in_4bit=args.four_bit,
         dtype=None if args.four_bit else torch.bfloat16)
@@ -109,7 +113,8 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
         'tokens_per_second': round(trained_tokens / seconds),
         'peak_vram_gb': round(torch.cuda.max_memory_allocated() / 2 ** 30, 2),
         'final_loss': stats.training_loss,
-        'data': str(args.data), 'data_sha256': hashlib.sha256(args.data.read_bytes())
+        'data': [str(p) for p in args.data],
+        'data_sha256': hashlib.sha256(b''.join(p.read_bytes() for p in args.data))
         .hexdigest()[:16], 'schema_hash': card['schema_hash'],
         'knowledge_hash': card['knowledge_hash'],
         'log': trainer.state.log_history}

@@ -51,6 +51,10 @@ SLOTS: Dict[str, str] = {
     'property': 'a material property a database lists',
     'wrong_unit': 'a unit that does not fit the quantity asked for',
     'setting': 'an HPC or LAMMPS execution setting in plain words',
+    'global_setting': 'the name of one global MD setting in plain words',
+    'layers': 'a range of layer counts written as two small integers joined by "to"',
+    'negative_load': 'a negative normal load, a number only',
+    'quantity': 'a friction-related quantity a user might want predicted',
 }
 
 AFM = ('afm', 'tip')
@@ -120,6 +124,58 @@ CATEGORIES: Tuple[Category, ...] = (
     Category('ask_which_family', 'Ask for "a friction simulation" of a material without '
              'saying whether a tip or a second sheet slides.', ('material', 'potential'),
              'ask', must_not=AFM + SHEET + ('indent', 'pes', 'potential energy surface')),
+    Category('explain_config', 'Ask what is wrong with, or what is in, the simulation '
+             'configuration currently open.', ()),
+    Category('list_modes', 'Ask which kinds of friction simulation the program can set up.',
+             ()),
+    Category('plot_types', 'Ask which kinds of plots can be made of results.', ()),
+    Category('plot_timeseries', 'Ask for a plot of lateral (friction) force against time '
+             'for the runs of a results dataset.', ('dataset',)),
+    Category('plot_rank', 'Ask for a plot ranking the materials of a results dataset by '
+             'friction.', ('dataset',)),
+    Category('plot_slope_bars', 'Ask for a bar chart of the slope of friction force '
+             'against normal load for a results dataset.', ('dataset',)),
+    Category('plot_filtered', 'Ask for a plot of friction coefficient against load for '
+             'only one material of a results dataset.', ('dataset', 'material')),
+    Category('settings_change', 'Ask to change one global MD setting (not the open '
+             'configuration) to a value.', ('global_setting', 'value')),
+    Category('speed_sweep', 'For the configuration currently open, ask to sweep the '
+             'sliding speed over N evenly spaced values between two speeds in m/s.',
+             ('n', 'start', 'stop')),
+    Category('log_sweep', 'Ask for AFM on one material at N loads spaced logarithmically '
+             'between two values in nN.', ('material', 'potential', 'n', 'start', 'stop'),
+             must_mention=AFM + ('log',)),
+    Category('find_datasets', 'Ask which results datasets exist in the workspace.', ()),
+    Category('describe_folder', 'Ask what files a workspace folder holds.', ('dataset',)),
+    Category('count_runs', 'Ask how many runs of one material in a results dataset '
+             'completed.', ('dataset', 'material')),
+    Category('copy_potential', "Ask to copy a material's potential file of a given type "
+             'into the workspace.', ('material', 'potential')),
+    Category('recommend_corrugation', 'Ask for a cheap way to compare how corrugated the '
+             'sliding energy landscape is for two materials, each sliding on itself, '
+             'before running any sliding dynamics, and to set it up.',
+             ('material', 'material_b', 'potential')),
+    Category('recommend_layers', 'Ask whether friction under an AFM tip depends on the '
+             'number of layers of a material, and to set up a run at one load that tests '
+             'a range of layer counts.', ('material', 'potential', 'load', 'layers'),
+             must_mention=AFM),
+    Category('ask_sheet_force', 'Ask for sheet-on-sheet sliding of a material with the '
+             'normal load given as forces in nN instead of a pressure.',
+             ('material', 'potential', 'loads'), 'ask', must_mention=SHEET),
+    Category('ask_sheet_band', 'Ask for sheet-on-sheet sliding of a material at N '
+             'pressures described only as low or high, without numbers.',
+             ('material', 'potential', 'n', 'band'), 'ask', must_mention=SHEET),
+    Category('ask_unknown_potential', 'Ask for AFM on a material with a potential type '
+             'that may not exist for it.', ('material', 'potential', 'load'), 'ask',
+             must_mention=AFM),
+    Category('ask_missing_dataset', 'Ask for a plot of friction against load for a named '
+             'results dataset.', ('dataset',), 'ask'),
+    Category('decline_negative_load', 'Ask for AFM on a material at a single negative '
+             'normal load in nN.', ('material', 'potential', 'negative_load'), 'declines',
+             must_mention=AFM),
+    Category('decline_guess', 'Ask roughly what value of a friction quantity a material '
+             'will show, without asking for any simulation.', ('material', 'quantity'),
+             'declines'),
     Category('decline_execution_setting', 'Ask to change an execution setting such as '
              'the job walltime or the energy minimisation command.', ('setting',),
              'declines'),

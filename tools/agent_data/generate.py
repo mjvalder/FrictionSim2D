@@ -18,6 +18,7 @@ Run with the aiida env (it imports the app and its test helpers).
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import random
@@ -41,17 +42,19 @@ sys.path.insert(0, str(HERE))
 # pylint: disable=wrong-import-position,wrong-import-order
 from src.agent.changes import ToolInputError  # noqa: E402
 from src.agent.events import TurnEvent  # noqa: E402
+from src.agent.knowledge_index import load_knowledge  # noqa: E402
+from src.potentials.utils import KNOWN_TYPES  # noqa: E402
 from src.agent.prompts import KNOWLEDGE_DIR, ROLE  # noqa: E402
 from src.agent.tools.materials import index_for, resolve_material  # noqa: E402
 from src.agent.tools.setup import make_sweep  # noqa: E402
 from src.core.config import GlobalSettings  # noqa: E402
 from src.core.scaling import ScaleContext, scale  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
-from tests.agent.evals.cases import grounded, numbers_in, quotes  # noqa: E402
+from tests.agent.evals.cases import CASES, count_by, grounded, numbers_in, quotes  # noqa: E402
 from tests.helpers.agent import make_deps  # noqa: E402
 from tests.helpers.agent_eval import EvalResult  # noqa: E402
 from tests.helpers.results_tree import make_family_run  # noqa: E402
-from categories import BY_NAME  # noqa: E402
+from categories import BY_NAME, Category  # noqa: E402
 
 TEMPLATES = HERE / 'sources' / 'templates.yaml'
 DRAFTS = HERE / 'sources' / 'templates.draft.yaml'
@@ -62,6 +65,21 @@ TEACHER_LICENCE = 'Apache-2.0'
 #: Categories the generator cannot build yet: Materials Project answers need real
 #: database rows (no key here, and invented rows would teach invented facts).
 UNSUPPORTED = {'materials_project'}
+#: Sampling weight per category (default 1): concepts are the domain layer (spec §4.4).
+WEIGHTS = {'concept': 8}
+#: A request this similar to an eval prompt is dropped: the evals stay held out.
+EVAL_SIMILARITY = 0.75
+EVAL_PROMPTS = [case.prompt.lower() for case in CASES.values()]
+#: The model each category's Builder document is on (default afm).
+DOCUMENT_MODEL = {'ask_sheet_band': 'sheetonsheet', 'ask_sheet_force': 'sheetonsheet'}
+
+QUESTION_BRIEF = """Below is a passage from "{title}". Write one question that a materials
+scientist working on friction simulations of 2D materials might type into a chat
+assistant, which this passage answers. Do not mention the passage, its authors or
+any study; do not put numbers in the question. Return JSON: {{"question": "..."}}
+
+Passage:
+{text}"""
 
 REPLY_BRIEF = """You are the FrictionSim2D assistant writing your final chat reply after
 using tools. Rules:
@@ -196,6 +214,15 @@ def fill(scene: Scene, pairs: List[Tuple[str, str]]) -> None:
     s['wrong_unit'] = v['wrong_unit']
     v['unknown'] = rng.choice(['zr', 'qu', 'vex', 'plor', 'myth']) + rng.choice(
         ['onium', 'idite', 'ane', 'ex'])
+    first = rng.randint(1, 2)
+    v['layers'] = list(range(first, first + rng.randint(2, 3)))
+    s['layers'] = f"{v['layers'][0]} to {v['layers'][-1]}"
+    v['negative_load'] = -rng.choice(range(5, 55, 5))
+    s['negative_load'] = f"{v['negative_load']:g}"
+    s['quantity'] = rng.choice(['friction coefficient', 'friction force', 'shear strength',
+                                'energy barrier for sliding'])
+    v['speeds'] = (rng.choice([0.5, 1]), rng.choice([2, 5, 10]))
+    v['log_start'], v['log_stop'] = rng.choice([1, 2, 5]), rng.choice([50, 100, 200])
     s.update({k: v[k] for k in ('parameter', 'value', 'setting') if k in v})
 
 
@@ -209,6 +236,29 @@ def parameter_slot(scene: Scene) -> None:
     value = scene.rng.choice(values)
     scene.values.update(parameter=label, section=section, key=key, value=value, unit=unit)
     scene.slots.update(parameter=label, value=f'{value:g}')
+
+
+def global_setting_slot(scene: Scene) -> None:
+    """A real global MD setting, as the user would name it, and a value."""
+    choices = [('MD timestep', 'simulation', 'timestep', [0.0005, 0.001, 0.002]),
+               ('thermo output interval', 'simulation', 'thermo', [100, 500, 1000, 2000]),
+               ('neighbour list skin', 'simulation', 'neighbor_list', [1.0, 2.0, 3.0])]
+    label, section, key, values = scene.rng.choice(choices)
+    value = scene.rng.choice(values)
+    scene.values.update(global_setting=label, section=section, key=key, value=value)
+    scene.slots.update(global_setting=label, value=f'{value:g}')
+
+
+def missing_potential(scene: Scene) -> bool:
+    """Point the potential slot at a type the material has no file for."""
+    # pylint: disable=import-outside-toplevel
+    from src.agent.tools.materials import _potentials_for  # same lookup as the tool
+    have = {f.pot_type for f in _potentials_for(scene.deps, scene.values['material'], None)}
+    absent = sorted(t for t in KNOWN_TYPES if t not in have)
+    if not absent:
+        return False
+    scene.values['potential'] = scene.slots['potential'] = scene.rng.choice(absent)
+    return True
 
 
 SETTINGS_TO_DECLINE = ['HPC walltime', 'minimization command', 'number of MPI processes',
@@ -287,9 +337,77 @@ def plan_for(category: str, scene: Scene) -> Callable[[Callable[[str, dict], str
         return static([('workspace_overview', {})])
     if category == 'summarise_dataset':
         return static([('summarise_results', {'path': f"workspace:/{v['dataset']}"})])
+    dataset = f"workspace:/{v['dataset']}"
+
+    def plot(plot_type: str, fields=()) -> Plan:
+        return [('plot_schema', {'plot_type': plot_type}),
+                ('propose_plot', {'request': {'plot_type': plot_type, 'datasets': [dataset],
+                                              'fields': [{'key': k, 'value': x}
+                                                         for k, x in fields]}})]
+    cof_axes = (('x_axis', 'force'), ('y_axis', 'cof'))
     if category == 'plot_cof_load':
-        return static([('find_result_sets', {}), ('plot_schema', {'plot_type': 'summary'}),
-                       ('propose_plot', {'request': None})])
+        return static([('find_result_sets', {}), *plot('summary', cof_axes)])
+    if category == 'plot_timeseries':
+        return static(plot('timeseries'))
+    if category == 'plot_rank':
+        return static(plot('rank_friction'))
+    if category == 'plot_slope_bars':
+        return static(plot('cof_histogram'))
+    if category == 'plot_filtered':
+        return static(plot('summary', cof_axes + (('filter_materials', [v['material']]),)))
+    if category == 'explain_config':
+        return static([('explain_current', {})])
+    if category in ('list_modes', 'ask_which_family'):
+        return static([('list_modes', {})])
+    if category == 'plot_types':
+        return static([('plot_types', {})])
+    if category == 'settings_change':
+        return static([('find_parameter', {'query': v['global_setting']}),
+                       ('set_fields', {'changes': [{'scope': 'settings', 'section': v['section'],
+                                                    'key': v['key'], 'value': v['value']}]})])
+    if category == 'speed_sweep':
+        start, stop = (float(scene.slots['start']), float(scene.slots['stop']))
+        values = [float(f'{x:g}') for x in make_sweep(start, stop, v['n'])]
+        v['expected'] = values
+        return static([('make_sweep', {'start': start, 'stop': stop, 'n': v['n']}),
+                       ('set_fields', {'changes': [{'section': 'general', 'key': 'scan_speed',
+                                                    'value': values}]})])
+    if category == 'log_sweep':
+        start, stop = float(scene.slots['start']), float(scene.slots['stop'])
+        values = make_sweep(start, stop, v['n'], 'log')
+        v['expected'] = values
+        return static([('make_sweep', {'start': start, 'stop': stop, 'n': v['n'],
+                                       'spacing': 'log'}),
+                       *_setup('setup_afm', scene, loads_nN=[float(f'{x:g}') for x in values])])
+    if category == 'find_datasets':
+        return static([('find_result_sets', {})])
+    if category == 'describe_folder':
+        return static([('describe_run', {'path': dataset})])
+    if category == 'count_runs':
+        return static([('summarise_results', {'path': dataset, 'material': v['material']})])
+    if category == 'copy_potential':
+        _, potential = resolve_material(scene.deps, v['material'], v['potential'])
+        source = 'examples:/' + potential.path.relative_to(
+            scene.deps.roots.examples).as_posix()
+        return static([('search_potentials', {'material': v['material'],
+                                              'potential_type': v['potential']}),
+                       ('propose_copy_in', {'source': source, 'dest_dir': 'potentials'})])
+    if category == 'recommend_corrugation':
+        plan = _setup('setup_pes_sheet', scene)
+        plan[0][1]['materials'].append(v['material_b'])
+        return static(plan)
+    if category == 'recommend_layers':
+        return static(_setup('setup_afm', scene, loads_nN=[v['load']], layers=v['layers']))
+    if category == 'ask_sheet_band':
+        return static([('suggest_values', {'quantity': 'pressure', 'descriptor': v['band'],
+                                           'n': v['n']})])
+    if category == 'ask_unknown_potential':
+        return static([('search_potentials', {'material': v['material'],
+                                              'potential_type': v['potential']})])
+    if category == 'ask_missing_dataset':
+        return static([('find_result_sets', {})])
+    if category == 'concept':
+        return static([('search_knowledge', {'query': v['question']})])
     if category == 'lattice_pair':
         return static([('lattice_mismatch', {'material_a': v['material'],
                                              'material_b': v['material_b']})])
@@ -297,17 +415,18 @@ def plan_for(category: str, scene: Scene) -> Callable[[Callable[[str, dict], str
         return static([('lattice_mismatch', {'material_a': v['material']})])
     if category == 'ask_unknown_material':
         return static([('search_structures', {'query': v['unknown']})])
-    if category == 'ask_which_family':
-        return static([('list_modes', {})])
-    return static([])  # ask_wrong_unit, decline_execution_setting: no tool
+    return static([])  # the remaining asks and declines need no tool
 
 
 def prepare_world(category: str, scene: Scene) -> None:
     """Workspace fixtures a category needs before its tools run."""
-    if category in ('summarise_dataset', 'plot_cof_load'):
+    if category in ('summarise_dataset', 'plot_cof_load', 'plot_timeseries', 'plot_rank',
+                    'plot_slope_bars', 'plot_filtered', 'find_datasets', 'describe_folder',
+                    'count_runs'):
         root = scene.deps.roots.workspace / scene.values['dataset']
         for material in (scene.values['material'], scene.values['material_b']):
             make_family_run(root, 'afm', material=material, loads=(10.0, 30.0))
+        scene.values['complete'] = 2  # make_family_run: one complete run per load
         DataReader(results_dir=str(root)).export_full_data_to_json()
     if category == 'list_workspace':
         for name in scene.rng.sample(['campaign_a', 'notes', 'runs_2026', 'old_tests',
@@ -346,6 +465,31 @@ def status_error(reply: str, trace: List[Tuple[str, dict, str]]) -> Optional[str
     return 'says a waiting change is applied' if _DONE.search(reply) else None
 
 
+def domain_error(category: str, scene: Scene, reply: str,
+                 trace: List[Tuple[str, dict, str]]) -> Optional[str]:
+    """Category-specific content checks for the Phase 4 categories."""
+    v, low = scene.values, reply.lower()
+    needs = {
+        'ask_sheet_force': ('gpa', 'pressure'), 'ask_sheet_band': ('gpa', 'pressure', 'range'),
+        'ask_unknown_potential': (v['potential'].lower(),),
+        'ask_missing_dataset': (v['dataset'].lower(),),
+        'decline_negative_load': ('positive', 'greater than'),
+        'decline_guess': ('simulat', 'run'),
+        'plot_types': ('summary', 'timeseries', 'rank'),
+    }.get(category)
+    if needs and not any(n in low for n in needs):
+        return f'reply names none of {needs}'
+    if category == 'count_runs' and not count_by(SimpleNamespace(text=reply), v['complete']):
+        return 'count not stated'
+    if category == 'concept':
+        titles = re.findall(r'^\[\d\] (.+?)(?: -- | \()', trace[0][2], re.MULTILINE)
+        if not any(t.lower()[:40] in low for t in titles):
+            return 'no source title named'
+    if category == 'decline_guess' and re.search(r'\d', reply):
+        return 'guessed a number'
+    return None
+
+
 def check(category: str, kind: str, scene: Scene, request: str, reply: str,
           trace: List[Tuple[str, dict, str]]) -> Optional[str]:
     """None if the conversation is right, else why it is dropped."""
@@ -361,15 +505,16 @@ def check(category: str, kind: str, scene: Scene, request: str, reply: str,
         return 'question misses the unit'
     if category == 'ask_unknown_material' and scene.values['unknown'] not in reply:
         return 'question misses the material'
-    why = status_error(reply, trace)
+    why = status_error(reply, trace) or domain_error(category, scene, reply, trace)
     if why:
         return why
     if kind == 'ask':
         return None if '?' in reply and not scene.deps.pending else 'did not ask'
     if kind == 'declines':
         return None if not scene.deps.pending else 'proposed on a decline'
-    if category.endswith('_setup') or category in ('afm_two_materials', 'sheet_angles',
-                                                    'linear_sweep', 'load_band'):
+    if category.endswith('_setup') or category in (
+            'afm_two_materials', 'sheet_angles', 'linear_sweep', 'load_band', 'log_sweep',
+            'recommend_corrugation', 'recommend_layers', 'speed_sweep', 'settings_change'):
         if not scene.deps.pending:
             return 'no proposal'
     if 'expected' in scene.values and not all(quotes(result, x) or f'{x:g}' in reply
@@ -382,30 +527,72 @@ def check(category: str, kind: str, scene: Scene, request: str, reply: str,
 
 # ---- one conversation ------------------------------------------------------------
 
-def conversation(category: str, template: str, rng: random.Random, toolbox: Toolbox,
-                 pairs, settings) -> Tuple[Optional[dict], Optional[str]]:
+CONCEPT = Category('concept', 'A question about 2D materials or friction.', ())
+
+
+def teacher_json(prompt: str, temperature: float = 0.8) -> dict:
+    payload = {'model': TEACHER, 'stream': False, 'think': False, 'format': 'json',
+               'options': {'temperature': temperature, 'num_ctx': 4096},
+               'messages': [{'role': 'user', 'content': prompt}]}
+    http = urllib.request.Request(OLLAMA, data=json.dumps(payload).encode(),
+                                  headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(http, timeout=600) as response:
+        return json.loads(json.load(response)['message']['content'])
+
+
+def concept_question(rng: random.Random, index) -> Tuple[str, str]:
+    """``(question, source title)``: the teacher asks what a random passage answers."""
+    passage = rng.choice(index.passages)
+    question = teacher_json(QUESTION_BRIEF.format(title=passage.title, text=passage.text))
+    return ' '.join(str(question.get('question', '')).split()), passage.title
+
+
+def too_close_to_eval(request: str) -> bool:
+    low = request.lower()
+    return any(difflib.SequenceMatcher(None, low, p).ratio() > EVAL_SIMILARITY
+               for p in EVAL_PROMPTS)
+
+
+def conversation(category: str, template: Optional[str], rng: random.Random,
+                 toolbox: Toolbox, pairs, settings) -> Tuple[Optional[dict], Optional[str]]:
+    # pylint: disable=too-many-locals,too-many-branches,too-many-return-statements
     with tempfile.TemporaryDirectory() as tmp:
-        deps = make_deps(Path(tmp), settings)
+        deps = make_deps(Path(tmp), settings, model=DOCUMENT_MODEL.get(category, 'afm'))
         deps.direct_apply = rng.random() < 0.5
+        deps.knowledge = load_knowledge  # the installed corpus, as the GUI passes it
         scene = Scene(rng, deps)
-        cat = BY_NAME[category]
+        cat = BY_NAME.get(category, CONCEPT)
         fill(scene, pairs)
         if 'parameter' in cat.slots:
             parameter_slot(scene)
+        if 'global_setting' in cat.slots:
+            global_setting_slot(scene)
         if 'setting' in cat.slots:
             scene.slots['setting'] = rng.choice(SETTINGS_TO_DECLINE)
         if category == 'ask_unknown_material':
             scene.slots['material'] = scene.values['unknown']
-        request = template.format(**scene.slots)
+        if category == 'ask_unknown_potential' and not missing_potential(scene):
+            return None, 'material has every potential type'
+        if category == 'speed_sweep':
+            scene.slots['start'], scene.slots['stop'] = (f'{x:g}'
+                                                         for x in scene.values['speeds'])
+        if category == 'log_sweep':
+            scene.slots['start'] = str(scene.values['log_start'])
+            scene.slots['stop'] = str(scene.values['log_stop'])
+        source = ''
+        if category == 'concept':
+            request, source = concept_question(rng, load_knowledge())
+            scene.values['question'] = request
+            if len(request.split()) < 4:
+                return None, 'no question'
+        else:
+            request = template.format(**scene.slots)
+        if too_close_to_eval(request):
+            return None, 'too close to an eval prompt'
         prepare_world(category, scene)
         trace: List[Tuple[str, dict, str]] = []
 
         def run(name: str, args: dict) -> str:
-            if name == 'propose_plot':
-                dataset = f"workspace:/{scene.values['dataset']}"
-                args = {'plot_type': 'summary', 'datasets': [dataset],
-                        'fields': [{'key': 'x_axis', 'value': 'force'},
-                                   {'key': 'y_axis', 'value': 'cof'}]}
             result = toolbox.call(deps, name, args)
             trace.append((name, args, result))
             return result
@@ -414,6 +601,8 @@ def conversation(category: str, template: str, rng: random.Random, toolbox: Tool
             plan_for(category, scene)(run)
         except (ToolInputError, ValueError) as exc:
             return None, f'tool failed: {str(exc)[:80]}'
+        if category == 'concept' and source not in trace[0][2]:
+            return None, 'search missed the source passage'
         reply = teacher_reply(request, cat.kind, trace)
         why = check(category, cat.kind, scene, request, reply, trace)
         if why:
@@ -430,14 +619,18 @@ def conversation(category: str, template: str, rng: random.Random, toolbox: Tool
                              'content': result})
         messages.append({'role': 'assistant', 'content': reply})
         return {'messages': messages, 'category': category, 'kind': cat.kind,
-                'template': template, 'source': 'B', 'teacher': TEACHER,
+                'template': template or f'concept from: {source}', 'source': 'B',
+                'teacher': TEACHER,
                 'teacher_licence': TEACHER_LICENCE}, None
 
 
 def load_templates(drafts: bool) -> Dict[str, List[str]]:
     data = yaml.safe_load((DRAFTS if drafts else TEMPLATES).read_text())
-    return {c['category']: c['templates'] for c in data['categories']
-            if c['templates'] and c['category'] not in UNSUPPORTED}
+    templates = {c['category']: c['templates'] for c in data['categories']
+                 if c['templates'] and c['category'] not in UNSUPPORTED}
+    if load_knowledge() is not None:
+        templates['concept'] = [None]  # questions come from corpus passages
+    return templates
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -461,11 +654,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         attempts = 0
         while kept < args.n and attempts < args.n * 3:
             attempts += 1
-            category = rng.choice(sorted(templates))
+            names = sorted(templates)
+            category = rng.choices(names, weights=[WEIGHTS.get(n, 1) for n in names])[0]
             template = rng.choice(templates[category])
             try:
                 record, why = conversation(category, template, rng, toolbox, pairs, settings)
-            except (KeyError, IndexError, OSError) as exc:  # a bad template or teacher timeout
+            except (KeyError, IndexError, OSError, json.JSONDecodeError) as exc:
+                # a bad template, a teacher timeout or unparseable teacher JSON
                 record, why = None, f'{type(exc).__name__}: {str(exc)[:60]}'
             if record is None:
                 rejects[f'{category}: {why}'] += 1

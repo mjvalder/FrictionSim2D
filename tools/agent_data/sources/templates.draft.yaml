@@ -977,67 +977,6 @@ categories:
   - I need to increase the {setting} to ensure the simulation can complete successfully.
   - Could you update the {setting} to improve the accuracy of my results?
   - Can you modify the {setting} to ensure the job runs without being terminated early?
-- category: sheet_angles
-  kind: act
-  slots:
-  - material
-  - potential
-  - pressure
-  - angles
-  rejected: 115
-  reasons:
-    slots ['material', 'pressure', 'potential'] != ['material', 'potential', 'pressure', 'angles']: 2
-    names none of ('sheet', 'layer', 'bilayer'): 99
-    contains a digit: 6
-    slots ['material', 'pressure', 'angles'] != ['material', 'potential', 'pressure', 'angles']: 8
-  templates:
-  - How does the sliding direction affect friction in {material}? Run sheet-on-sheet sliding at {pressure}
-    GPa and angles {angles} degrees with {potential}.
-  - Could you run a simulation of {material} sheet-on-sheet sliding at {pressure} GPa with angles {angles}
-    degrees and {potential} potential?
-  - Please model {material} sheet-on-sheet sliding with normal load {pressure} GPa and sliding angles
-    {angles} degrees using the {potential} potential.
-  - I need to study the anisotropy of friction in {material}. Please set up a sheet-on-sheet simulation
-    with {potential} potential, {pressure} GPa normal force, and sliding angles {angles} degrees.
-  - Please perform a simulation to see if the sliding direction impacts the friction between {material}
-    sheets. Use {potential}, {pressure} GPa, and angles {angles} degrees.
-  - I need to see how the friction between {material} sheets changes with sliding direction. Set up the
-    simulation with {potential}, {pressure} GPa, and angles {angles} degrees.
-  - I want to see if the friction between {material} sheets is directional. Could you simulate that with
-    {potential}, {pressure} GPa, and angles {angles} degrees?
-  - Run a simulation of {material} sheet sliding on another {material} sheet using {potential} at {pressure}
-    GPa and angles {angles} degrees.
-  - Could you set up sheet-on-sheet sliding for {material} using {potential} at {pressure} GPa and angles
-    {angles}? I want to see direction dependence.
-  - Simulate sheet-on-sheet sliding for {material} at {pressure} GPa with angles {angles} using {potential}
-    potential. Is friction direction-dependent?
-  - Is the friction between {material} sheets direction-dependent? Please simulate with {potential} at
-    {pressure} GPa and angles {angles}.
-- category: pes_sheet_setup
-  kind: act
-  slots:
-  - material
-  - potential
-  - grid
-  rejected: 125
-  reasons:
-    names none of ('sheet', 'layer', 'bilayer'): 124
-    contains a digit: 1
-  templates:
-  - I'm studying the adhesion of {material} layers. Can you perform a corrugation scan using {potential}
-    and {grid} points?
-  - I'm investigating the energy landscape of {material} layers. Could you perform a corrugation scan
-    with {grid} points and {potential}?
-  - I'm studying the friction behavior of {material} layers. Can you run a corrugation scan with {grid}
-    points and {potential}?
-  - I want to study the interaction between {material} layers. Please set up a corrugation scan with {potential}
-    and {grid} grid points.
-  - I'm studying the adhesion of {material} layers. Could you set up a static corrugation scan of {material}
-    on {material} using {potential} with {grid} grid points?
-  - Set up a static corrugation scan of a single layer of {material} on another single layer of {material}
-    using {potential} and {grid} grid points per side.
-  - I'd like to analyze the potential energy landscape between {material} layers with {potential} and
-    {grid} grid points.
 - category: load_band
   kind: act
   slots:
@@ -1118,3 +1057,1148 @@ categories:
   - Set up a simulation where {material} is in contact with another surface.
   - I want to study the interaction of {material} under friction—please assist.
   - Can you create a simulation for {material} with frictional forces applied?
+- category: explain_config
+  kind: act
+  slots: []
+  rejected: 2
+  reasons:
+    contains a digit: 2
+  templates:
+  - What is the current interatomic potential being used in the simulation setup?
+  - Is there an error in the current configuration that might prevent the simulation from running?
+  - Could you check if the current system has any defects or imperfections defined?
+  - What is the current value of the friction coefficient in the simulation?
+  - Can you tell me what the current boundary conditions are for the system?
+  - I'm trying to simulate sliding friction between two layers—what is the current setup for that?
+  - What is the current lattice structure of the material being simulated?
+  - Is the current configuration using the correct number of atoms per unit cell?
+  - What is the current energy minimization protocol being applied?
+  - I noticed the simulation isn't running—could there be an issue with the current configuration?
+  - Is there a defined surface roughness in the current simulation setup?
+  - What is the current value of the applied load in the simulation?
+  - Could you explain what the current interlayer interaction model is?
+  - Is the current simulation using a proper thermostat or barostat?
+  - What is the current temperature and pressure setting in the simulation?
+  - I'm trying to model dry friction—does the current setup include any lubricants or adsorbates?
+  - Can you check if the current simulation includes any defects or impurities?
+  - Is the current system set up for a sliding or static friction test?
+  - What is the current value of the friction force being calculated?
+  - Could you explain the current setup for the displacement or velocity control in the simulation?
+  - I noticed the simulation is not converging—what might be wrong with the current setup?
+  - What is the current value of the shear strain applied to the system?
+  - Is the current simulation using a periodic boundary condition in the x-direction?
+  - What is the current interatomic potential parameter file being used?
+  - Could you check if the current simulation has any issues with overlapping atoms?
+  - Is the current configuration using the correct interlayer spacing?
+  - What is the current value of the friction coefficient between the two layers?
+  - I'm trying to simulate a nanoscale contact—does the current setup include any atomic-scale features?
+  - What is the current value of the applied velocity in the simulation?
+  - Is the current system set up for a molecular dynamics or energy minimization simulation?
+- category: list_modes
+  kind: act
+  slots: []
+  rejected: 74
+  reasons:
+    contains a digit: 74
+  templates:
+  - What are the different kinds of sliding friction simulations supported by this tool?
+  - Are there options for both static and dynamic friction in the simulations?
+  - I need to set up a simulation for a nanoscale sliding contact — which type should I choose?
+  - Can the program handle both lateral and normal force measurements in friction simulations?
+  - I'm looking to study adhesion and friction simultaneously — what setups are available?
+  - I want to simulate friction at different temperatures — is that supported?
+  - What are the main differences between the available friction simulation types in LAMMPS?
+  - I want to simulate the friction of a monolayer material on another monolayer — what options are there?
+  - Is it possible to simulate multiple sliding directions with this program?
+  - Can the tool support simulations with periodic boundary conditions?
+  - I'm interested in simulating the effect of strain on friction — what options are available?
+  - I need to simulate friction between two materials with different lattice structures — can you help?
+  - I want to simulate the evolution of friction over time — is that possible?
+  - Can the program simulate dry and lubricated friction scenarios?
+  - What types of contact geometries can be modeled for friction simulations?
+  - I want to study the role of van der Waals forces in interfacial friction — is that possible?
+  - Are there options for varying the sliding velocity in the simulation setup?
+  - Can the program handle simulations with applied normal loads and varying sliding velocities?
+  - I need to set up a friction simulation between WS₂ and a substrate. What options are available?
+  - Which kinds of interfacial friction scenarios can I model with this tool?
+  - Are there different friction modes, like static or dynamic, that can be simulated?
+  - Could you tell me which kinds of friction simulations are compatible with LAMMPS through this program?
+  - I need a simulation that accounts for adhesion and friction. What options are available?
+  - Is it possible to simulate both shear and normal friction with this tool?
+  - Are there built-in options for simulating friction under different environmental conditions?
+  - What are the different kinds of interfacial friction models available in the program?
+  - I need to model sliding friction between two monolayers. Can you set that up?
+  - I want to simulate friction between graphene and a substrate. What options are available?
+- category: plot_types
+  kind: act
+  slots: []
+  rejected: 5
+  reasons:
+    contains a digit: 5
+  templates:
+  - What types of plots can I generate from the simulation results?
+  - Are there standard visualization options for the friction data?
+  - I need to show the evolution of friction force over time. Which plot type is best suited for this?
+  - I would like to visualize the shear stress vs. displacement. What plots are available for that?
+  - I'm trying to understand the energy dissipation. What kind of plots can I use to represent that?
+  - What options are available for plotting the interfacial stress distribution?
+  - How can I visualize the contact area between the sliding surfaces in my simulation?
+  - Can I generate a plot that shows the velocity vs. time for the sliding atoms?
+  - I need to present my findings to a non-expert audience. What are the most informative plots I can
+    make?
+  - I want to track the temperature evolution during sliding. Which plot type is appropriate for that?
+  - I need to show the displacement of the top layer relative to the bottom layer. What plot types are
+    available?
+  - Could you explain which plots are best for showing the stick-slip behavior observed in my simulation?
+  - I'm looking to visualize the trajectory of a single atom during sliding. What plot options are available?
+  - What kinds of plots can I use to display the distribution of forces between atoms?
+  - What are the standard plots for analyzing the normal and shear forces in a sliding interface?
+  - I need to present a time-dependent analysis of the contact forces. What kind of plots can I use?
+  - What is the best way to plot the energy loss during each cycle of sliding motion?
+  - Could you suggest some plots that can highlight the periodicity of the stick-slip motion?
+  - I want to visualize the strain distribution in my material. What plots are available for that?
+  - What plot options are available to show the stress distribution along the sliding direction?
+  - I need to analyze the variation of the friction coefficient under different applied loads. What plots
+    can I use?
+  - What kinds of plots can help me understand the effect of temperature on friction in my simulation?
+  - I want to track the movement of multiple atoms simultaneously. Are there specific plots that support
+    this?
+  - What plots can be used to visualize the deformation of the material during sliding?
+  - I need to show the evolution of the interfacial potential energy during the simulation. What plot
+    options are available?
+  - What are the most effective plots to show the variation in velocity between the two sliding surfaces?
+  - I would like to generate a plot that shows the distribution of contact points between the two surfaces.
+    Can that be done?
+  - What kind of plots are available for analyzing the phonon contributions to friction in my simulation?
+  - I want to display the atomic displacement as a function of time. What is the best way to do that?
+  - What plots can I make to illustrate the relationship between surface roughness and friction?
+- category: plot_timeseries
+  kind: act
+  slots:
+  - dataset
+  rejected: 0
+  reasons: {}
+  templates:
+  - Can you plot the lateral force over time for the dataset {dataset}?
+  - I need a graph showing friction force vs. time from the {dataset} results folder.
+  - Please generate a plot of lateral force versus time for the {dataset} simulation.
+  - Could you make a time series plot of lateral force from {dataset}?
+  - I’d like to see how the lateral force changes over time in {dataset}.
+  - Plot the friction force against time for the results in {dataset}.
+  - Show me a plot of lateral force vs. time for the dataset named {dataset}.
+  - I need to analyze the friction behavior from {dataset}; can you plot lateral force over time?
+  - Please produce a time-dependent lateral force plot using the data from {dataset}.
+  - I’m looking at friction trends in {dataset}; could you plot lateral force against time?
+  - For the dataset {dataset}, can you show me a lateral force vs. time graph?
+  - I require a visualization of lateral force over time for the {dataset} dataset.
+  - Can you create a time series plot of the lateral force from the {dataset} run?
+  - Please generate a graph with time on the x-axis and lateral force on the y-axis for {dataset}.
+  - I need to plot the lateral friction force as a function of time for the dataset {dataset}.
+  - Is it possible to get a plot of lateral force vs. time for the {dataset} results?
+  - Could you make a time-dependent graph of the lateral force from {dataset}?
+  - I want to see the lateral force over time for the {dataset} simulation results.
+  - Please plot the lateral force against time for the {dataset} dataset.
+  - Can you visualize the lateral force variation with time from {dataset}?
+  - I need to see a time series of lateral force from {dataset} to understand the friction behavior.
+  - Could you generate a lateral force vs. time plot from the dataset {dataset}?
+  - For the {dataset} dataset, can you provide a plot of lateral force over time?
+  - I’m analyzing the friction data from {dataset}; could you plot lateral force vs. time?
+  - Please show me a graph of lateral force as a function of time for the dataset {dataset}.
+  - I want to analyze the time evolution of lateral force in {dataset}; can you plot it?
+  - Can you make a plot that shows the lateral force varying with time for {dataset}?
+  - I need a plot of lateral force versus time for the results stored in {dataset}.
+  - Could you create a time series plot of the lateral force from the {dataset} simulation?
+  - Is there a way to get a graph of lateral force against time from {dataset}?
+- category: plot_rank
+  kind: act
+  slots:
+  - dataset
+  rejected: 0
+  reasons: {}
+  templates:
+  - Plot a ranking of materials in {dataset} based on their friction coefficients.
+  - Can you generate a plot showing which material in {dataset} has the lowest friction?
+  - I need a visual comparison of friction values across all materials in {dataset}. Please make a ranking
+    plot.
+  - Please rank the materials in {dataset} by their friction coefficient and display the result as a bar
+    chart.
+  - I want to see a bar plot that ranks the materials in {dataset} from least to most friction.
+  - Could you create a histogram that ranks the materials in {dataset} by friction coefficient?
+  - Make a plot that shows the friction ranking of materials in {dataset} for quick comparison.
+  - Please sort the materials in {dataset} by friction and display them in a clear visual format.
+  - I need to quickly identify the material with the lowest friction in {dataset}. Can you plot the ranking?
+  - What's the best way to compare friction values across materials in {dataset}? A ranking plot would
+    be great.
+  - Is there a way to visualize the friction ranking of the materials in {dataset}?
+  - Could you generate a bar chart that ranks the friction of materials in {dataset} from highest to lowest?
+  - I'm preparing a presentation and need a plot that ranks the materials in {dataset} by their friction
+    coefficients.
+  - Please make a visual representation of the friction ranking for the materials in {dataset}.
+  - I want a clear plot that lists the materials in {dataset} in order of increasing friction.
+  - Could you produce a ranking plot for the friction values in {dataset}?
+  - I need to analyze the friction data from {dataset}. Please generate a plot that ranks the materials
+    by friction.
+  - For my research, I require a plot that ranks the friction of materials in {dataset} in descending
+    order.
+  - Please display the friction ranking of materials in {dataset} as a bar chart for easy interpretation.
+  - Could you generate a ranked plot of the friction values for the materials in {dataset}?
+  - I want a visual that compares the friction of all materials in {dataset} by ranking them.
+  - Can you make a chart that shows the friction ranking of the materials in {dataset}?
+  - I need to understand which material in {dataset} has the highest friction. Please plot the ranking.
+  - Could you generate a plot that visually ranks the friction of each material in {dataset}?
+  - I want to see a visual comparison of friction values in {dataset} in the form of a ranked plot.
+  - Is there a way to plot the friction ranking of the materials in {dataset} in a clear format?
+  - Please sort the friction data from {dataset} and present it as a ranked plot.
+  - I'm looking to identify the lowest friction material in {dataset}. Can you plot the ranking?
+  - Could you create a ranked bar chart of the friction values from the materials in {dataset}?
+  - I need a quick visual reference for the friction ranking of materials in {dataset}. Please generate
+    a plot.
+- category: plot_slope_bars
+  kind: act
+  slots:
+  - dataset
+  rejected: 0
+  reasons: {}
+  templates:
+  - Please generate a bar chart showing the slope of friction force versus normal load from the {dataset}
+    dataset.
+  - I need a bar chart of the friction slope vs normal load using the {dataset} data. Can you help?
+  - Could you plot the slope of friction force against normal load from the {dataset} results as a bar
+    chart?
+  - Make a bar chart for the {dataset} dataset that shows the relationship between normal load and friction
+    slope.
+  - I would like to visualize the slope of the friction force as a function of normal load from {dataset}
+    using a bar chart.
+  - Can you create a bar chart comparing the friction slope across different normal loads in {dataset}?
+  - Please produce a bar chart displaying the friction slope for {dataset} in relation to the normal load.
+  - I need to analyze the friction slope for {dataset}. Could you plot a bar chart of this data against
+    the normal load?
+  - For the {dataset} dataset, can you generate a bar chart showing the friction slope as a function of
+    normal load?
+  - I'm working on a paper and need a bar chart of the friction slope versus normal load for the {dataset}
+    dataset. Can you do that?
+  - Could you make a bar chart from the {dataset} results that shows the slope of friction force against
+    normal load?
+  - I need a visual of the friction slope for {dataset} in the form of a bar chart compared to normal
+    load.
+  - Is it possible to create a bar chart for the {dataset} dataset that plots the slope of friction force
+    against normal load?
+  - Please generate a bar chart that compares the friction slope across different normal loads for the
+    {dataset} dataset.
+  - I want to see the slope of friction force versus normal load for {dataset} in a bar chart. Can you
+    assist?
+  - Can you create a bar chart of the friction slope against normal load for the dataset {dataset}?
+  - I'm analyzing the {dataset} dataset and would like a bar chart showing the slope of friction force
+    as a function of normal load.
+  - Could you make a bar chart with the {dataset} data to illustrate the slope of friction force versus
+    normal load?
+  - Please provide a bar chart for the {dataset} dataset that displays friction slope against normal load.
+  - I need to present the friction slope for {dataset} in a bar chart. Could you plot this against normal
+    load?
+  - Could you generate a bar chart for the {dataset} dataset where the x-axis is normal load and the y-axis
+    is friction slope?
+  - I want to visualize the relationship between friction slope and normal load from the {dataset} dataset
+    using a bar chart. Can you do this?
+  - Please create a bar chart from the {dataset} data that shows the slope of friction force as a function
+    of normal load.
+  - I need a bar chart to compare the friction slope for different normal loads in {dataset}. Can you
+    make one?
+  - Could you produce a bar chart that illustrates the slope of friction force against normal load for
+    the {dataset} results?
+  - Can you make a bar chart for {dataset} that plots the friction slope versus normal load?
+  - I'm preparing a report and need a bar chart of the friction slope against normal load from the {dataset}
+    dataset. Could you create it?
+  - Please generate a bar chart for {dataset} that shows the friction slope as a function of normal load.
+  - Could you make a bar chart of the {dataset} results with normal load on the x-axis and friction slope
+    on the y-axis?
+  - I need to display the slope of friction force against normal load from {dataset} in a bar chart. Can
+    you help with this?
+- category: plot_filtered
+  kind: act
+  slots:
+  - dataset
+  - material
+  rejected: 0
+  reasons: {}
+  templates:
+  - Plot the friction coefficient versus load for {material} in {dataset}.
+  - Can you generate a graph showing friction coefficient against load for {material} from {dataset}?
+  - I need a plot of friction coefficient vs. load for {material} in the {dataset} dataset.
+  - Show me the friction coefficient vs. load for {material} in {dataset}.
+  - Please make a graph of friction coefficient against load using only {material} from {dataset}.
+  - I need to analyze {material} in {dataset}; can you plot friction coefficient vs. load?
+  - Could you generate a friction vs. load plot for {material} in {dataset}?
+  - Plot the friction coefficient against load for {material} in {dataset}.
+  - I want a graph of friction coefficient vs. load for {material} in {dataset}.
+  - Can you plot the friction coefficient of {material} from {dataset} against load?
+  - For {material} in {dataset}, show me the friction coefficient vs. load curve.
+  - I'm looking at {material} in {dataset}; could you make a friction vs. load plot?
+  - Plot friction coefficient vs. load for {material} in {dataset}.
+  - I want to compare {material} in {dataset}—can you show friction coefficient vs. load?
+  - Please plot friction coefficient against load for the {material} in {dataset}.
+  - I need a graph of friction coefficient vs. load for the {material} from {dataset}.
+  - Make a plot of friction coefficient vs. load for {material} in {dataset}.
+  - For {material} in {dataset}, can you create a plot of friction coefficient against load?
+  - Could you plot the friction coefficient vs. load for {material} in the {dataset} folder?
+  - Please generate a friction vs. load plot for {material} from {dataset}.
+  - I need to see the friction coefficient vs. load for {material} in {dataset}.
+  - Show me a plot of friction coefficient versus load for {material} in {dataset}.
+  - Could you make a plot showing friction coefficient against load for {material} in {dataset}?
+  - I need to analyze {material} in {dataset}—can you plot friction vs. load?
+  - Can you generate a friction coefficient vs. load plot for {material} in {dataset}?
+  - I want a plot of friction coefficient vs. load for {material} in the {dataset} dataset.
+  - Please plot the friction coefficient against load for {material} in {dataset}.
+  - Can you show me a graph of friction coefficient vs. load for {material} in {dataset}?
+  - I need a graph of friction coefficient vs. load for {material} in the {dataset} dataset.
+  - Could you create a friction vs. load plot for {material} in {dataset}?
+- category: settings_change
+  kind: act
+  slots:
+  - global_setting
+  - value
+  rejected: 1
+  reasons:
+    contains a digit: 1
+  templates:
+  - Change the {global_setting} to {value} for better convergence.
+  - Set the {global_setting} parameter to {value} in the simulation.
+  - Please adjust {global_setting} to {value} for my current experiment.
+  - Could you modify the {global_setting} to {value}? It's critical for my study.
+  - Update {global_setting} to {value} in the global settings.
+  - I need to change {global_setting} to {value} to match my lab conditions.
+  - Set {global_setting} equal to {value} in the simulation parameters.
+  - I request that {global_setting} be set to {value} for accurate results.
+  - Can you change {global_setting} to {value}? It's part of my friction model.
+  - Modify the {global_setting} parameter to {value} for the simulation.
+  - Please update the value of {global_setting} to {value} globally.
+  - Set the {global_setting} parameter to {value} as per the latest paper.
+  - Change the {global_setting} to {value} to reflect the experimental setup.
+  - Adjust {global_setting} to {value} for the upcoming simulation run.
+  - Set {global_setting} to {value} to match the reference simulation.
+  - I need to change the {global_setting} to {value} for my current project.
+  - Could you please set {global_setting} to {value} in the global settings?
+  - Modify the {global_setting} to {value} to ensure consistency in results.
+  - Set {global_setting} to {value} so that I can reproduce the simulation.
+  - Please change {global_setting} to {value} for better system stability.
+  - Change the {global_setting} to {value} as part of my parameter optimization.
+  - Update the global parameter {global_setting} to {value} in the simulation.
+  - Could you set the {global_setting} to {value}? It's important for the friction model.
+  - Adjust the {global_setting} parameter to {value} for improved accuracy.
+  - Modify {global_setting} to {value} to match the user-defined conditions.
+  - Set {global_setting} to {value} in the global simulation settings.
+  - Change the {global_setting} to {value} to reflect the correct energy scale.
+  - Please update {global_setting} to {value} as required by the simulation protocol.
+  - I request that the {global_setting} be adjusted to {value} for my analysis.
+  - Set the {global_setting} to {value} for the next set of friction simulations.
+- category: speed_sweep
+  kind: act
+  slots:
+  - n
+  - start
+  - stop
+  rejected: 0
+  reasons: {}
+  templates:
+  - Can you sweep the sliding speed over {n} evenly spaced values between {start} and {stop} m/s?
+  - I need to set up a simulation with {n} sliding speeds from {start} to {stop} m/s. Please do that.
+  - Please create a speed sweep with {n} values between {start} and {stop} m/s for the current configuration.
+  - Could you set the sliding speed to {n} equally spaced values between {start} and {stop} m/s?
+  - I want to run simulations at {n} different sliding speeds from {start} to {stop} m/s. Please generate
+    those.
+  - Generate a sliding speed sweep with {n} values between {start} and {stop} m/s for the current setup.
+  - Set the sliding speed to {n} evenly spaced values between {start} and {stop} m/s for this simulation.
+  - I need to test the effect of sliding speed. Please create a sweep with {n} values between {start}
+    and {stop} m/s.
+  - Please make a sliding speed range of {n} values from {start} to {stop} m/s for the current configuration.
+  - Could you sweep the sliding speed from {start} to {stop} m/s with {n} points?
+  - I'm investigating friction at different speeds. Can you set the sliding speed to {n} evenly spaced
+    values between {start} and {stop} m/s?
+  - Could you generate {n} sliding speeds between {start} and {stop} m/s for the current simulation?
+  - I'd like to analyze the friction behavior over a range of speeds. Please set up {n} values between
+    {start} and {stop} m/s.
+  - Create a speed sweep with {n} values, starting at {start} m/s and ending at {stop} m/s.
+  - I need to sweep the sliding speed for {n} values from {start} m/s to {stop} m/s. Please set that up.
+  - Can you adjust the simulation to use {n} sliding speed values from {start} to {stop} m/s?
+  - Set up a speed range of {n} values from {start} to {stop} m/s for the current simulation.
+  - Could you create a sliding speed configuration with {n} values between {start} and {stop} m/s?
+  - I want to test friction at different sliding speeds. Please make a sweep with {n} values from {start}
+    to {stop} m/s.
+  - Please generate a sliding speed range of {n} values between {start} and {stop} m/s for this simulation.
+  - Could you run a sliding speed sweep with {n} values from {start} m/s to {stop} m/s?
+  - Set the sliding speed to {n} evenly spaced points between {start} and {stop} m/s for the current configuration.
+  - I need to simulate friction at various sliding speeds. Please create a sweep with {n} values between
+    {start} and {stop} m/s.
+  - Please create a speed sweep from {start} to {stop} m/s with {n} values for the current simulation.
+  - Could you generate a sliding speed configuration with {n} values from {start} m/s to {stop} m/s?
+  - I want to analyze how friction changes with sliding speed. Please set up a sweep with {n} values between
+    {start} and {stop} m/s.
+  - Can you create a sliding speed range for the current configuration using {n} evenly spaced values
+    from {start} to {stop} m/s?
+  - Set up {n} sliding speed values from {start} m/s to {stop} m/s for the simulation.
+  - Could you make a sliding speed sweep of {n} values between {start} and {stop} m/s for this configuration?
+  - I need to run simulations at {n} different sliding speeds from {start} to {stop} m/s. Please set that
+    up.
+- category: log_sweep
+  kind: act
+  slots:
+  - material
+  - potential
+  - n
+  - start
+  - stop
+  rejected: 0
+  reasons: {}
+  templates:
+  - Set up AFM simulations for {material} with {n} logarithmically spaced loads between {start} and {stop}
+    nN using the {potential} potential.
+  - I need to perform AFM tests on {material} with {n} loads spaced logarithmically from {start} to {stop}
+    nN. Please use the {potential} potential.
+  - Please run AFM on {material} with {n} logarithmic load points between {start} and {stop} nN under
+    the {potential} potential.
+  - Could you generate AFM simulations for {material} with {n} logarithmic load steps from {start} to
+    {stop} nN using the {potential} potential?
+  - I want to study adhesion of {material} with AFM. Use {n} logarithmically spaced loads from {start}
+    to {stop} nN and the {potential} potential.
+  - Run AFM simulations for {material} with {n} logarithmically spaced normal loads in the range {start}
+    to {stop} nN using {potential} potential.
+  - Please create AFM simulations for {material} at {n} logarithmic load values from {start} to {stop}
+    nN using {potential} potential.
+  - Set up AFM simulations on {material} with {n} logarithmically distributed normal loads from {start}
+    to {stop} nN using {potential} potential.
+  - I need AFM simulations of {material} with {n} logarithmically spaced loads between {start} and {stop}
+    nN. Use the {potential} potential.
+  - Can you set up AFM simulations for {material} with {n} logarithmic load points from {start} to {stop}
+    nN using the {potential} potential?
+  - I'm investigating tribology of {material}. Please simulate AFM with {n} logarithmic loads from {start}
+    to {stop} nN using {potential} potential.
+  - Please run AFM on {material} with {n} logarithmically spaced normal loads between {start} and {stop}
+    nN using the {potential} potential.
+  - Could you generate AFM simulations for {material} with {n} logarithmic load values from {start} to
+    {stop} nN under the {potential} potential?
+  - Set up AFM simulations for {material} with {n} logarithmic load steps between {start} and {stop} nN
+    using {potential} potential.
+  - I need AFM on {material} at {n} logarithmically spaced loads from {start} to {stop} nN using the {potential}
+    potential for my research.
+  - Please simulate AFM on {material} using {n} logarithmically spaced loads from {start} to {stop} nN
+    with the {potential} potential.
+  - I require AFM simulations for {material} with {n} logarithmic load points from {start} to {stop} nN
+    using {potential} potential.
+  - Generate AFM simulations for {material} with {n} logarithmically spaced loads between {start} and
+    {stop} nN using the {potential} potential.
+  - Please set up AFM on {material} with {n} logarithmic load values from {start} to {stop} nN under the
+    {potential} potential.
+  - Could you create AFM simulations for {material} with {n} logarithmic loads from {start} to {stop}
+    nN using the {potential} potential?
+  - I'm analyzing friction on {material}. Please run AFM simulations with {n} logarithmically spaced loads
+    from {start} to {stop} nN using {potential} potential.
+  - I need to test adhesion of {material} with AFM. Use {n} logarithmic loads from {start} to {stop} nN
+    and the {potential} potential.
+  - Set up AFM simulations on {material} with {n} logarithmic load steps between {start} and {stop} nN
+    using the {potential} potential.
+  - Please run AFM on {material} with {n} logarithmically spaced loads between {start} and {stop} nN using
+    {potential} potential for my study.
+  - I'm studying mechanical properties of {material}. Please simulate AFM with {n} logarithmic loads from
+    {start} to {stop} nN using {potential} potential.
+  - Could you generate AFM simulations for {material} with {n} logarithmic loads from {start} to {stop}
+    nN under the {potential} potential?
+  - Set up AFM simulations for {material} with {n} logarithmic load values from {start} to {stop} nN using
+    the {potential} potential.
+  - Please create AFM simulations for {material} with {n} logarithmically spaced loads from {start} to
+    {stop} nN using {potential} potential.
+  - I need AFM simulations of {material} with {n} logarithmic load steps between {start} and {stop} nN
+    using {potential} potential.
+  - Could you run AFM on {material} with {n} logarithmically spaced loads from {start} to {stop} nN using
+    the {potential} potential?
+- category: find_datasets
+  kind: act
+  slots: []
+  rejected: 0
+  reasons: {}
+  templates:
+  - List the available results datasets in the current workspace.
+  - What datasets are currently stored in the simulation workspace?
+  - I need to know which results are already present. Can you show me?
+  - Please display the names of all results datasets in the workspace.
+  - Could you tell me which datasets have been saved so far?
+  - I want to check the existing results datasets. Are they available?
+  - Which simulation results are already present in this workspace?
+  - I'm looking for the datasets that have been generated. Can you list them?
+  - Can you show me the list of results datasets that exist here?
+  - What results have been stored in this workspace?
+  - I need to know the current state of the workspace. Are there any datasets?
+  - Could you list the existing result files in the workspace?
+  - I want to make sure I'm not repeating previous work. What datasets are available?
+  - Are there any existing results datasets that I can reference?
+  - Please list all the datasets that have been saved in the workspace.
+  - I'm trying to find the datasets I've already generated. Can you help?
+  - What are the names of the datasets that have been created here?
+  - Can you show me the existing results datasets in this workspace?
+  - Could you provide a list of the results datasets currently present?
+  - I would like to review the datasets that have already been generated. Are they available?
+  - What results have been saved in this workspace for me to use?
+  - I need to know which datasets are already available. Please list them.
+  - Could you tell me which results have been stored in the workspace so far?
+  - I want to avoid duplicating previous simulations. Are there existing datasets?
+  - Can you display the list of datasets that have been generated here?
+  - What are the names of the datasets currently in the workspace?
+  - I need to check the existing simulation results. Can you list them for me?
+  - Could you show me the datasets that are already available in the workspace?
+  - I want to make sure my current work is not overlapping with previous results. What datasets exist?
+  - Please provide a list of the results datasets in the current workspace.
+- category: describe_folder
+  kind: act
+  slots:
+  - dataset
+  rejected: 1
+  reasons:
+    slots [] != ['dataset']: 1
+  templates:
+  - What files are in the workspace folder for {dataset}?
+  - I need to know what files the workspace folder contains for {dataset}.
+  - What are the contents of the workspace folder for {dataset}?
+  - Could you list the files in the workspace folder for {dataset}?
+  - I'm trying to understand the structure of the workspace folder for {dataset}. What files does it contain?
+  - Please show me the files in the workspace folder for {dataset}.
+  - What types of files are in the workspace folder for {dataset}?
+  - Are there any log files in the workspace folder for {dataset}?
+  - I'm organizing my simulation data. What files are in the workspace for {dataset}?
+  - What are the main files in the workspace folder for {dataset}?
+  - What files should I expect to find in the workspace folder for {dataset}?
+  - I need to locate some simulation outputs. What files are stored in the workspace folder for {dataset}?
+  - Can you provide a list of files in the workspace folder for {dataset}?
+  - Could you clarify what files are part of the workspace folder for {dataset}?
+  - I'm looking for configuration files. What files does the workspace folder for {dataset} contain?
+  - What files are typically found in the workspace folder for {dataset}?
+  - I need to check the workspace folder for {dataset}. What files are there?
+  - Please explain what files are kept in the workspace folder for {dataset}.
+  - What is the file structure of the workspace folder for {dataset}?
+  - I want to verify the contents of the workspace folder for {dataset}. What files are there?
+  - Can you list all the files in the workspace folder for {dataset}?
+  - For my research, I need to know the files stored in the workspace folder for {dataset}.
+  - What are the key files in the workspace folder for {dataset}?
+  - I'm trying to debug my simulation. What files are in the workspace for {dataset}?
+  - Could you provide information about the files in the workspace folder for {dataset}?
+  - What files are associated with the workspace folder for {dataset}?
+  - I need to understand the workspace folder for {dataset}. What files are present?
+  - What files are stored in the workspace for {dataset}?
+  - Could you let me know the files included in the workspace folder for {dataset}?
+  - I need to access some files in the workspace folder for {dataset}. What files are available?
+- category: count_runs
+  kind: act
+  slots:
+  - dataset
+  - material
+  rejected: 0
+  reasons: {}
+  templates:
+  - How many simulation runs for {material} are in the {dataset} dataset?
+  - Can you tell me how many completed runs for {material} are in {dataset}?
+  - I need to know how many simulations of {material} have been completed in the {dataset} folder.
+  - In the {dataset} dataset, how many runs were performed on {material}?
+  - Could you check the {dataset} dataset and report the number of runs for {material}?
+  - How many completed simulations of {material} are there in the {dataset}?
+  - Please count the number of runs for {material} in the {dataset} dataset.
+  - In the {dataset} results folder, how many runs were done on {material}?
+  - I would like to know the number of simulation runs for {material} in the {dataset} dataset.
+  - How many times was {material} simulated in the {dataset} dataset?
+  - Could you let me know the total number of runs for {material} in {dataset}?
+  - I'm working on analyzing {material} data from the {dataset} dataset—how many runs are there?
+  - Tell me how many simulation runs for {material} are in {dataset}.
+  - What's the count of completed runs for {material} in {dataset}?
+  - How many simulations of {material} are stored in the {dataset} dataset?
+  - I'm trying to understand the coverage of {material} in {dataset}—how many runs are there?
+  - Could you please list the number of runs for {material} in {dataset}?
+  - I need the number of simulation runs for {material} in the {dataset} dataset.
+  - How many times did {material} appear in the {dataset} dataset's simulation runs?
+  - Please provide the total number of runs for {material} in the {dataset} dataset.
+  - How many simulations have been completed for {material} in {dataset}?
+  - Could you check and report the number of runs for {material} in {dataset}?
+  - In the {dataset} dataset, how many times was {material} used in the simulations?
+  - How many runs of {material} have been completed in the {dataset} dataset?
+  - I'm looking for the count of simulation runs for {material} in the {dataset} dataset.
+  - Could you tell me how many times {material} was simulated in the {dataset} dataset?
+  - In the {dataset} dataset, how many runs were performed with {material}?
+  - I need to know the number of completed simulations for {material} in the {dataset} dataset.
+  - Please check the {dataset} dataset and tell me how many runs are for {material}.
+  - How many times has {material} been simulated in the {dataset} dataset?
+- category: copy_potential
+  kind: act
+  slots:
+  - material
+  - potential
+  rejected: 0
+  reasons: {}
+  templates:
+  - Please copy the {potential} potential file for {material} into the workspace.
+  - I need the {potential} potential for {material} copied into the current project directory.
+  - Could you place the {potential} file for {material} in the workspace?
+  - I'm setting up a simulation and need the {potential} potential for {material} added to the workspace.
+  - Can you copy the {potential} potential for {material} into the working directory?
+  - I would like to use the {potential} potential for {material}; can you copy the file into the workspace?
+  - I'm working on a study of {material} and need the {potential} potential copied into the workspace.
+  - Please move the {potential} potential file for {material} to the workspace.
+  - I need the {potential} potential for {material} in the workspace for my simulation.
+  - Could you add the {potential} file for {material} to the workspace?
+  - I'm running a simulation of {material} and require the {potential} potential in the workspace.
+  - Kindly copy the {potential} potential file for {material} into the workspace.
+  - I'm preparing a simulation and need the {potential} potential for {material} available in the workspace.
+  - Can you transfer the {potential} potential for {material} into the workspace?
+  - I need to start my simulation with the {potential} potential for {material} copied into the workspace.
+  - Please copy the {potential} potential for {material} into the current working directory.
+  - I'm working on a project involving {material} and require the {potential} potential file in the workspace.
+  - Could you place the {potential} file for {material} in the workspace directory?
+  - I'm running a friction study on {material} and need the {potential} potential in the workspace.
+  - I need the {potential} potential for {material} moved into the workspace for my LAMMPS setup.
+  - Can you ensure the {potential} potential for {material} is in the workspace?
+  - I'm setting up a simulation of {material} and need the {potential} potential file in the workspace.
+  - Please add the {potential} potential for {material} to the workspace for my simulation.
+  - I'm preparing a simulation and would like the {potential} potential for {material} in the workspace.
+  - Kindly make sure the {potential} potential file for {material} is in the workspace.
+  - I need to access the {potential} potential for {material} in the workspace for my research.
+  - Could you copy the {potential} potential for {material} into the workspace folder?
+  - I'm working with {material} and need the {potential} potential file available in the workspace.
+  - Please move the {potential} potential for {material} into the workspace directory.
+  - I'm running a simulation and require the {potential} potential for {material} to be in the workspace.
+- category: recommend_corrugation
+  kind: act
+  slots:
+  - material
+  - material_b
+  - potential
+  rejected: 25
+  reasons:
+    slots ['material', 'material_b'] != ['material', 'material_b', 'potential']: 5
+    contains a digit: 20
+  templates:
+  - How can I cheaply compare the corrugation of the sliding energy landscape for {material} and {material_b}
+    sliding on themselves using {potential}?
+  - What's the simplest method to analyze the corrugation of {material} and {material_b} sliding on themselves
+    with {potential}?
+  - Can you set up a cheap comparison of the corrugation for {material} and {material_b} using {potential}?
+  - Is there a way to compare the corrugation of {material} and {material_b} using {potential} without
+    full sliding simulations?
+  - What's the best approach to compare the corrugation of {material} and {material_b} using {potential}
+    without running simulations?
+  - I'm trying to determine the corrugation of {material} and {material_b} sliding on themselves with
+    {potential}. What's the best approach?
+  - Is there a way to analyze the corrugation of {material} and {material_b} with {potential} without
+    running full dynamics in LAMMPS?
+  - I want to compare the energy landscapes of {material} and {material_b} using {potential}. How can
+    I do that cheaply?
+  - I'm working on a project where I need to compare the corrugation of {material} and {material_b} with
+    {potential}. How can I do it efficiently?
+  - I want to compare the energy landscape corrugation of {material} and {material_b} with {potential}
+    before any dynamics. How?
+  - I need to compare the corrugation of {material} and {material_b} with {potential} before running any
+    simulations. How can I do that?
+  - What is the simplest method to compare the corrugation of {material} and {material_b} sliding on themselves
+    with {potential}?
+  - I need to compare the corrugation of {material} and {material_b} before any sliding simulations using
+    {potential}. How can I do that?
+  - Set up a simulation to compare the corrugation of the sliding energy landscape for {material} and
+    {material_b}, using {potential}, without running dynamics.
+  - I need a low-cost method to check the corrugation of the sliding energy landscape for {material} and
+    {material_b} using {potential}. Can you help set that up?
+  - How can I compare the corrugation of the sliding energy landscape for {material} and {material_b}
+    using {potential}, before running any dynamics?
+  - Please create a simulation configuration to compare the corrugation of {material} and {material_b}
+    under {potential}, without performing any sliding.
+  - I want to evaluate the energy landscape corrugation for {material} and {material_b} using {potential}.
+    What is the easiest way to set this up?
+  - Could you help me configure a simulation to analyze the corrugation of the sliding energy landscape
+    for {material} and {material_b} with {potential}?
+  - I'm looking for an efficient way to assess the corrugation of the sliding energy landscape for {material}
+    and {material_b} using {potential}. Please set this up.
+  - What setup would allow me to compare the corrugation of the sliding energy landscape for {material}
+    and {material_b} using {potential} without running any dynamics?
+  - Set up a simulation that compares the corrugation of {material} and {material_b} using {potential},
+    but only compute the energy landscape.
+  - I need to compare the corrugation of the sliding energy landscape for {material} and {material_b}
+    using {potential}. How can I do this with minimal computational cost?
+  - Can you prepare a simulation to calculate the corrugation of the sliding energy landscape for {material}
+    and {material_b} with {potential}?
+  - Is there a way to set up a simulation that compares the corrugation of {material} and {material_b}
+    using {potential}, without running any dynamics?
+  - I'm trying to compare the corrugation of the energy landscape for {material} and {material_b} using
+    {potential}. Could you help me set up a simulation for that?
+  - Could you create a setup for comparing the corrugation of sliding energy landscapes for {material}
+    and {material_b} using {potential}?
+  - I want to analyze the corrugation of the sliding energy landscape for {material} and {material_b}
+    with {potential}. Please guide me on how to set up the simulation.
+  - Please help me set up a simulation to compare the corrugation of the sliding energy landscape for
+    {material} and {material_b} using {potential} without running any dynamics.
+  - What is the most cost-effective way to compare the corrugation of the sliding energy landscape between
+    {material} and {material_b} using {potential}?
+- category: recommend_layers
+  kind: act
+  slots:
+  - material
+  - potential
+  - load
+  - layers
+  rejected: 162
+  reasons:
+    names none of ('afm', 'tip'): 128
+    contains a digit: 26
+    slots ['material', 'layers', 'load'] != ['material', 'potential', 'load', 'layers']: 1
+    slots ['material', 'load', 'potential'] != ['material', 'potential', 'load', 'layers']: 3
+    slots ['material', 'potential', 'load'] != ['material', 'potential', 'load', 'layers']: 4
+  templates:
+  - I need to test if the number of layers in {material} affects AFM friction at {load} nN. Please simulate
+    {layers} layers with {potential}.
+  - Set up a run for {material} with {layers} layers at {load} nN using {potential} to evaluate AFM friction.
+  - I need to check if friction under an AFM tip depends on the number of layers of {material}. Please
+    simulate with {potential} and {load} load for layers ranging from {layers}?
+  - I'm studying AFM friction on {material} and need to see if layer number matters. Please simulate with
+    {potential}, {load} load, layers {layers}?
+  - I need to see how friction of {material} under AFM changes with layer number. Set up a run with {potential},
+    {load} load, layers from {layers}?
+  - I'm researching how AFM tip friction varies with layer number for {material}. Please simulate using
+    {potential}, {load} load, and layers {layers}?
+  - Can you check if {material} friction changes with layer count under a {load} nN AFM tip? Please test
+    layers from {layers} using {potential}.
+  - Investigating how {material} layer count affects AFM friction. Please set up a run with {potential},
+    {load} nN, and layers {layers}.
+  - Could you test the friction of {material} under an AFM tip with {layers} layers, {potential}, and
+    a load of {load}?
+  - I'm trying to understand how layer number affects AFM tip friction on {material}. Set up runs with
+    {potential}, {load} load, and layers from {layers}.
+  - I'm studying how layer count affects AFM friction on {material}. Please use {potential}, {load} load,
+    and test layers from {layers}.
+  - Please simulate the friction of {material} under an AFM tip for {layers} layers, using {potential}
+    and a load of {load}.
+  - I'm investigating the role of layer number in AFM tip friction. Set up a simulation for {material}
+    with {potential} and {layers} layers at {load} load.
+  - I'm looking at the influence of layer number on AFM friction for {material}. Set up a simulation with
+    {potential} at {load} load and {layers} layers.
+- category: ask_sheet_force
+  kind: ask
+  slots:
+  - material
+  - potential
+  - loads
+  rejected: 96
+  reasons:
+    names none of ('sheet', 'layer', 'bilayer'): 71
+    contains a digit: 25
+  templates:
+  - Set up a sheet-on-sheet sliding simulation for {material} using the {potential} potential with normal
+    loads of {loads} nN.
+  - I need a simulation for {material} with sheet-on-sheet sliding and normal load values {loads} nN using
+    the {potential} interatomic potential.
+  - Can you configure a sheet-on-sheet simulation of {material} with the {potential} and normal forces
+    {loads} nN?
+  - I want to simulate {material} with the {potential} and normal loads of {loads} nN in a sheet-on-sheet
+    configuration.
+  - Generate a simulation with {material} using {potential} and normal forces {loads} nN in a sheet-on-sheet
+    geometry.
+  - Please configure a sheet-on-sheet simulation for {material} with {potential} and normal load {loads}
+    nN.
+  - Run a sheet-on-sheet simulation with {material} and {potential} at normal loads {loads} nN.
+  - Could you assist in creating a sheet-on-sheet setup for {material} with {potential} and {loads} nN
+    normal load?
+  - Can you run a sheet-on-sheet simulation of {material} using {potential} and normal forces {loads}
+    nN?
+  - Run a simulation for {material} with the {potential} and normal loads {loads} nN in a sheet-on-sheet
+    configuration.
+  - Set up a sheet-on-sheet sliding simulation for {material} with {potential} potential and {loads} nN
+    normal loads.
+  - For my research on {material}, I need to set up a sheet-on-sheet friction test using {potential} and
+    {loads} nN normal force.
+  - Could you set up a sheet-on-sheet simulation for {material} with {potential} and {loads} nN normal
+    load?
+  - Please set up a sheet-on-sheet simulation with {material} using {potential} and {loads} nN normal
+    load.
+  - I want to test {material} under {loads} nN normal load. Setup a sheet-on-sheet sliding simulation
+    with {potential} potential.
+  - Setup a sheet-on-sheet simulation for {material} with normal load {loads} nN using the {potential}
+    interatomic potential.
+  - I want to model friction between {material} layers with {loads} nN normal force. Please use {potential}
+    in the setup.
+  - I want to study the friction behavior of {material} under {loads} nN normal force. Setup a sheet-on-sheet
+    simulation using {potential}.
+  - Set up a {material} sheet-on-sheet sliding simulation using the {potential} potential with normal
+    loads of {loads} nN.
+  - I need to simulate {material} sliding on another {material} layer with {potential} potential. Please
+    use normal loads of {loads} nN.
+  - Could you generate a LAMMPS input for {material} sheet sliding with {potential} and normal forces
+    {loads} nN?
+  - Using the {potential} potential, set up a simulation of {material} sheet-on-sheet friction with normal
+    loads of {loads} nN.
+  - Run a sheet-on-sheet sliding simulation for {material} with the {potential} potential, using normal
+    loads of {loads} nN.
+  - Using {potential}, simulate sheet-on-sheet sliding of {material} with normal loads of {loads} nN.
+    Please generate the input files.
+  - 'I need a simulation of {material} sliding on another {material} layer with normal loads specified
+    in nN: {loads}. Please use the {potential} potential.'
+  - Run a sheet-on-sheet sliding simulation with {material} and {potential} at normal loads {loads} nN.
+    Make sure the load is in nN, not pressure.
+  - Could you generate a setup for sheet-on-sheet sliding of {material} with the normal load given in
+    nN, specifically {loads}, using {potential}?
+  - I need to test the frictional properties of {material}. Set up a simulation with sheet-on-sheet sliding,
+    normal load {loads} nN, and interatomic potential {potential}.
+- category: ask_sheet_band
+  kind: ask
+  slots:
+  - material
+  - potential
+  - n
+  - band
+  rejected: 77
+  reasons:
+    names none of ('sheet', 'layer', 'bilayer'): 76
+    slots ['n', 'material', 'material', 'potential'] != ['material', 'potential', 'n', 'band']: 1
+  templates:
+  - Generate {n} {band} pressure {material} sheet-on-sheet sliding simulations with {potential}.
+  - Could you set up {n} sheet-on-sheet {material} sliding simulations with {band} pressure and {potential}?
+  - I need {n} configurations for {material} sheet-on-sheet friction at {band} pressure using {potential}.
+  - Run {n} simulations for {material} sheet sliding on {material} using {potential} at {band} load.
+  - I require {n} simulations of {material} under {band} load with {potential} potential for sheet-on-sheet
+    friction.
+  - Please create {n} simulations for {material} under {band} pressure with {potential} for sheet-on-sheet
+    friction.
+  - Set up {n} simulations of {material} with {band} pressure and {potential} for sheet-on-sheet friction.
+  - I want {n} configurations for {material} sheet-on-sheet friction with {band} load and {potential}.
+  - Could you generate {n} configurations for {material} sheet-on-sheet sliding under {band} pressure
+    with {potential}?
+  - Please set up {n} LAMMPS simulations of {material} with {potential} at {band} pressure for sheet-on-sheet
+    friction.
+  - I want to test {material} under {band} pressure with {potential} for {n} different scenarios of sheet-on-sheet
+    sliding.
+  - Can you run {n} simulations for {material} under {band} pressure using the {potential} interatomic
+    model for sheet-on-sheet friction?
+  - I'm studying {material} friction. Please simulate {n} cases of sheet-on-sheet sliding with {potential}
+    at {band} load.
+  - Please prepare {n} simulations for {material} with {potential} at {band} pressure for sheet-on-sheet
+    contact.
+  - Setup {n} LAMMPS simulations of {material} sheet-on-sheet sliding with {potential} and {band} load.
+  - Set up {n} simulations for {material} using {potential} at {band} pressure for sheet-on-sheet contact.
+  - I want to examine {material} with {potential} at {band} pressure for {n} sheet-on-sheet sliding cases.
+    Can you do that?
+  - Please generate {n} simulation configurations for {material} sheet-on-sheet sliding with {potential}
+    and {band} pressure.
+  - I'm testing {material} under {band} pressure. Could you create {n} simulations with {potential} for
+    sheet-on-sheet sliding?
+  - I need to run {n} simulations of {material} using {potential} at {band} pressure for sheet-on-sheet
+    friction studies.
+  - Could you prepare {n} simulation cases for {material} sheet-on-sheet sliding with {potential} and
+    {band} pressure?
+  - Please create {n} simulation setups for {material} using {potential} at {band} pressure for sheet-on-sheet
+    friction.
+  - I'm analyzing {material} under {band} pressure. Please generate {n} simulations with {potential} for
+    sheet-on-sheet contact.
+  - Set up {n} simulations for {material} sheet-on-sheet sliding with {potential} and {band} load.
+  - Could you run {n} simulations for {material} with {potential} at {band} pressure for sheet-on-sheet
+    contact?
+  - Setup {n} simulations for {material} with {potential} at {band} pressure for sheet-on-sheet friction
+    studies.
+  - I need to test {material} at {band} pressure with {potential}. Can you create {n} simulations for
+    sheet-on-sheet sliding?
+  - Set up {n} simulations for {material} sheet-on-sheet sliding using the {potential} potential with
+    {band} load conditions.
+  - Could you generate {n} LAMMPS input files for {material} sheet-on-sheet friction with {band} pressure
+    and {potential} potential?
+  - I require {n} LAMMPS setups for {material} sheet-on-sheet sliding with {band} pressure. Use the {potential}
+    potential.
+- category: ask_unknown_potential
+  kind: ask
+  slots:
+  - material
+  - potential
+  - load
+  rejected: 11
+  reasons:
+    slots ['material', 'potential'] != ['material', 'potential', 'load']: 6
+    slots ['potential', 'material'] != ['material', 'potential', 'load']: 3
+    names none of ('afm', 'tip'): 2
+  templates:
+  - I need an AFM simulation for {material} with {load} nN normal load and the {potential} potential.
+  - Simulate AFM on {material} with {load} normal load and the {potential} potential, even if it's not
+    standard.
+  - I need to check the effect of {load} on {material} with the {potential} potential for AFM.
+  - Run AFM on {material} with the {potential} potential at {load} load. It's a preliminary test.
+  - Simulate AFM with {potential} on {material} using {load} normal load. I know this is non-standard.
+  - I need to run an AFM simulation on {material} with {potential} potential and a load of {load} nN.
+  - Could you set up an AFM simulation on {material} with {potential} and {load} normal load for me?
+  - Please simulate AFM on {material} using {potential} at {load} nN normal load.
+  - I need to test the {potential} potential on {material} for AFM with a load of {load}.
+  - Run an AFM simulation on {material} using {potential} at {load} normal load. It's for a hypothesis
+    test.
+  - I need to explore {material} with AFM using {potential} at a load of {load}. It's a research trial.
+  - Simulate AFM on {material} with the {potential} potential and a normal load of {load} nN.
+  - Set up AFM simulation for {material} using {potential} at {load} nN. I'm testing compatibility.
+  - Could you create an AFM simulation for {material} with {potential} and a load of {load}?
+  - I want to try a non-standard potential {potential} on {material} for AFM with {load} load.
+  - I'm running AFM simulations for {material} and want to use {potential} at a load of {load}.
+  - Simulate AFM on {material} with {potential} even if it's not the usual choice, at {load} nN.
+  - I need to simulate AFM on {material} using {potential} and {load} nN normal load for my project.
+  - Can you help me set up AFM on {material} using {potential} with a normal load of {load}?
+  - I want to see if {potential} works for {material} in an AFM simulation with {load} load.
+  - Simulate AFM on {material} with the {potential} potential at {load} normal load for exploration.
+  - Set up AFM on {material} using {potential} and {load} normal load, even if it's unconventional.
+  - I need to simulate AFM on {material} with {potential} and a load of {load} for my analysis.
+  - Can you create an AFM simulation for {material} with {potential} and a load of {load} nN?
+  - I want to test {potential} with {material} for AFM at a load of {load}. Please help.
+  - Could you run an AFM simulation on {material} with {potential} and {load} normal load for me?
+  - Set up AFM on {material} with {potential} potential and {load} normal load. It's for research purposes.
+  - Can you set up an AFM simulation for {material} using the {potential} potential? I need to study its
+    tribological behavior under a load of {load} nN.
+  - Set up an AFM simulation for {material} with a load of {load} nN. Use the {potential} potential even
+    if it's not typically used for this material.
+  - I'm researching the adhesion properties of {material}. Could you run an AFM simulation using the {potential}
+    potential and a load of {load} nN? Please confirm if the potential is compatible.
+- category: ask_missing_dataset
+  kind: ask
+  slots:
+  - dataset
+  rejected: 0
+  reasons: {}
+  templates:
+  - Plot friction versus load for the dataset {dataset}.
+  - Can you generate a graph showing friction force against normal load from {dataset}?
+  - I need a plot of friction vs. load for the results in {dataset}.
+  - Please make a friction vs. load plot using data from {dataset}.
+  - Could you show me the friction-load curve for the {dataset} results?
+  - I want to visualize the relationship between friction and load for {dataset}.
+  - Could you plot the friction force against load for the {dataset} dataset?
+  - Generate a friction vs. load graph based on the results in {dataset}.
+  - Please create a plot of friction versus load for the {dataset} dataset.
+  - I need a friction-load curve from the {dataset} dataset for my research.
+  - Is it possible to plot friction against load for the {dataset} dataset?
+  - I'm working on a paper and need a friction vs. load plot for {dataset}.
+  - Could you plot friction against load for {dataset} in a clear format?
+  - Please display the friction force vs. load for the {dataset} results.
+  - I would like to see a graph of friction vs. load for the dataset {dataset}.
+  - Can you make a plot showing how friction varies with load for {dataset}?
+  - I need a quick plot of friction vs. load from the {dataset} dataset.
+  - Could you create a visualization of friction against load for the {dataset} dataset?
+  - I need to compare friction at different loads using {dataset}. Please plot it.
+  - Can you generate a friction vs. load graph from the {dataset} results?
+  - I'm analyzing the friction behavior of a material in {dataset}. Plot friction vs. load.
+  - Could you please plot friction against load for the {dataset} dataset?
+  - Please make a friction vs. load graph for the {dataset} dataset.
+  - I need to see how friction changes with load in {dataset}. Can you plot it?
+  - Can you show me a friction vs. load plot for the {dataset} dataset?
+  - Could you create a plot of friction force against load for the {dataset} dataset?
+  - I want to analyze the data from {dataset}. Please plot friction vs. load.
+  - Please generate a plot showing the relationship between friction and load for {dataset}.
+  - Can you make a friction vs. load graph using the {dataset} results?
+  - I need a clear plot of friction vs. load for the {dataset} dataset.
+- category: decline_negative_load
+  kind: declines
+  slots:
+  - material
+  - potential
+  - negative_load
+  rejected: 1
+  reasons:
+    names none of ('afm', 'tip'): 1
+  templates:
+  - Set up an AFM simulation for {material} under a normal load of {negative_load} nN using the {potential}
+    potential.
+  - Please run an AFM simulation on {material} with a normal load of {negative_load} nN and the {potential}
+    potential.
+  - I need an AFM simulation of {material} at a normal load of {negative_load} nN with the {potential}
+    potential. Can you help?
+  - Could you configure an AFM simulation for {material} at {negative_load} nN using the {potential} potential?
+  - I'm studying {material} under negative normal loads. Can you simulate AFM on it with a load of {negative_load}
+    nN and {potential}?
+  - Please create an AFM simulation for {material} with a {negative_load} nN normal load and {potential}
+    potential.
+  - Run an AFM simulation on {material} using the {potential} potential at a normal load of {negative_load}
+    nN.
+  - Set up a simulation for AFM on {material} with a normal load of {negative_load} nN and interatomic
+    potential {potential}.
+  - Could you set up an AFM simulation for {material} under a normal load of {negative_load} nN with {potential}?
+  - Can you help me simulate AFM on {material} using {potential} at {negative_load} nN normal load?
+  - Please perform an AFM simulation for {material} with a normal load of {negative_load} nN and the {potential}
+    potential.
+  - Set up an AFM simulation for {material} at a normal load of {negative_load} nN using the {potential}
+    potential.
+  - I want to run an AFM simulation on {material} with {potential} and a normal load of {negative_load}
+    nN.
+  - Could you create a simulation of AFM on {material} with a normal load of {negative_load} nN and {potential}
+    potential?
+  - Please simulate AFM on {material} using the {potential} potential at a normal load of {negative_load}
+    nN.
+  - I need a simulation of AFM on {material} with a normal load of {negative_load} nN using {potential}
+    for my research.
+  - Could you set up an AFM simulation for {material} with {potential} and a normal load of {negative_load}
+    nN?
+  - Run AFM on {material} using {potential} and a normal load of {negative_load} nN.
+  - I'm studying the effects of negative normal loads on {material}. Can you simulate AFM with a load
+    of {negative_load} nN and {potential}?
+  - Set up an AFM simulation for {material} under a normal load of {negative_load} nN and {potential}
+    potential.
+  - Can you create an AFM simulation for {material} with a normal load of {negative_load} nN and {potential}
+    interatomic potential?
+  - Please simulate AFM on {material} using the {potential} potential and a normal load of {negative_load}
+    nN.
+  - I need to simulate AFM on {material} at a normal load of {negative_load} nN with the {potential} potential.
+    Help?
+  - Could you run an AFM simulation on {material} with a normal load of {negative_load} nN and {potential}
+    potential?
+  - Set up an AFM simulation for {material} using the {potential} potential and a normal load of {negative_load}
+    nN.
+  - I want to run an AFM simulation on {material} with a normal load of {negative_load} nN and the {potential}
+    potential.
+  - Can you simulate AFM on {material} using the {potential} potential and {negative_load} nN normal load?
+  - I need to set up an AFM simulation for {material} at {negative_load} nN using the {potential} potential.
+  - Could you help me run an AFM simulation on {material} with a normal load of {negative_load} nN and
+    {potential}?
+  - Please set up an AFM simulation for {material} with a normal load of {negative_load} nN and {potential}
+    potential.
+- category: decline_guess
+  kind: declines
+  slots:
+  - material
+  - quantity
+  rejected: 0
+  reasons: {}
+  templates:
+  - What is the approximate {quantity} for {material}?
+  - Can you estimate the {quantity} of {material} without running a simulation?
+  - I need a rough prediction of {quantity} for {material}. Can you help?
+  - Based on known properties, what {quantity} might {material} exhibit?
+  - Without performing a simulation, what value should I expect for {quantity} in {material}?
+  - Could you give me a ballpark figure for {quantity} of {material}?
+  - I'm looking for a quick estimate of {quantity} for {material}—any ideas?
+  - What's the typical {quantity} for {material}?
+  - Can you tell me what {quantity} is likely to be for {material}?
+  - I need a rough idea of the {quantity} for {material} for my project. Can you provide that?
+  - What is the expected {quantity} for {material} in a friction scenario?
+  - I’m trying to select a material. What {quantity} can I expect from {material}?
+  - Could you predict the {quantity} for {material} based on prior data?
+  - I'm working on a model and need an approximate value for {quantity} in {material}. Can you help?
+  - Is there a known range for {quantity} for {material}?
+  - What {quantity} is commonly associated with {material} in friction studies?
+  - I need a general idea of {quantity} for {material}. Can you share it?
+  - Without running a simulation, can you tell me the {quantity} of {material}?
+  - What kind of {quantity} can I expect when using {material} in a friction setup?
+  - What is the rough value for {quantity} in {material}?
+  - I'm looking for an estimate of {quantity} for {material}. Can you provide one?
+  - Can you give me a rough value for {quantity} for {material} without simulation?
+  - What is the typical {quantity} for {material} in a sliding interface?
+  - I'm trying to understand the behavior of {material}. What is the {quantity} likely to be?
+  - Can you approximate the {quantity} for {material} based on prior literature?
+  - I need a quick estimate for {quantity} of {material} for my preliminary calculations.
+  - What is the expected {quantity} for {material} under standard conditions?
+  - Could you help me estimate {quantity} for {material} for my research?
+  - I want to know the approximate {quantity} for {material} without running a simulation.
+  - What is the general range for {quantity} in {material}?
+- category: sheet_angles
+  kind: act
+  slots:
+  - material
+  - potential
+  - pressure
+  - angles
+  rejected: 164
+  reasons:
+    slots ['material', 'material', 'pressure', 'angles'] != ['material', 'potential', 'pressure', 'angles']: 7
+    names none of ('sheet', 'layer', 'bilayer'): 111
+    slots ['material', 'pressure', 'angles'] != ['material', 'potential', 'pressure', 'angles']: 41
+    contains a digit: 4
+    slots ['material', 'material', 'material', 'pressure', 'angles'] != ['material', 'potential', 'pressure', 'angles']: 1
+  templates:
+  - I need to know if the sliding direction affects the friction between {material} sheets. Use {potential},
+    {pressure} GPa, and angles {angles}.
+  - I need to test if the sliding direction impacts the friction between {material} sheets. Use {potential},
+    {pressure} GPa, and angles {angles}.
+  - I want to check if the friction between {material} sheets depends on sliding direction. Simulate at
+    {pressure} GPa with angles {angles} using {potential}.
+  - Could you simulate {material} sheet-on-sheet friction under {pressure} GPa with angles {angles} degrees
+    using {potential}?
+  - I'm studying friction anisotropy in {material}. Please simulate sheet-on-sheet sliding at {pressure}
+    GPa with angles {angles} degrees using {potential}.
+  - 'Set up LAMMPS for {material} sheet-on-sheet sliding. Normal pressure is {pressure} GPa, angles are
+    {angles} degrees. Potential: {potential}.'
+  - Run a simulation for {material} sheet-on-sheet with {pressure} GPa normal pressure and angles {angles}
+    degrees. Use {potential}.
+  - Set up a friction simulation between two {material} sheets using the {potential} potential. Test angles
+    {angles} at {pressure} GPa normal pressure.
+  - Please simulate the friction between two {material} sheets using {potential} at {pressure} GPa and
+    sliding angles {angles}.
+  - Can you use {potential} to simulate the sliding of {material} sheets at {pressure} GPa and angles
+    {angles}?
+  - Set up a simulation with {potential} to test if friction between {material} sheets is direction-dependent.
+    Use {pressure} GPa and angles {angles}.
+  - Simulate sliding between {material} sheets with {potential} at {pressure} GPa and angles {angles}
+    to analyze friction directionality.
+  - Set up sheet-on-sheet friction simulations for {material} with {potential} at {pressure} GPa and angles
+    {angles} degrees.
+  - 'Please set up sheet-on-sheet friction tests for {material} using {potential} and {pressure} GPa normal
+    pressure. Sliding angles: {angles} degrees.'
+  - I need a simulation setup for {material} sheet-on-sheet friction at {pressure} GPa, with angles {angles}
+    degrees and {potential} potential.
+  - I want to simulate sheet-on-sheet friction for {material} using the {potential} potential. Please
+    set normal pressure to {pressure} GPa and test sliding angles {angles} degrees.
+  - Simulate sheet-on-sheet sliding for {material} at {pressure} GPa with angles {angles} degrees. Use
+    {potential} potential and check for directional effects.
+  - Can you set up a simulation to check if the friction between two {material} layers depends on the
+    sliding direction? Use {potential} potential, {pressure} GPa normal pressure, and sliding angles of
+    {angles} degrees.
+  - I want to test the effect of sliding direction on friction between two {material} sheets. Please simulate
+    with {potential} at {pressure} GPa and angles {angles} degrees.
+  - Set up a LAMMPS simulation for {material} sheets with {potential} potential, {pressure} GPa normal
+    load, and sliding angles {angles} degrees. Analyze if friction varies with direction.
+  - What is the effect of sliding direction on friction between {material} layers? Please simulate with
+    {potential}, {pressure} GPa, and angles {angles} degrees.
+  - Could you run a simulation to determine the sliding direction dependence of friction between two {material}
+    sheets using {potential} at {pressure} GPa and {angles} degrees?
+  - I’m studying the mechanical behavior of {material}. Please simulate friction between two layers with
+    {potential}, {pressure} GPa, and angles {angles} degrees. Is friction direction-dependent?
+  - I need to check direction-dependent friction in {material}. Could you use {potential} potential with
+    {pressure} GPa and angles {angles} degrees for sheet-on-sheet sliding?
+  - Using {potential}, simulate two {material} layers under {pressure} GPa normal load with sliding angles
+    {angles} degrees. Is the friction anisotropic?
+  - Can you help me simulate the friction between two {material} sheets using {potential} at {pressure}
+    GPa and sliding angles of {angles} degrees? I want to see direction dependence.
+  - I need to test whether friction between {material} sheets varies with sliding direction. Please use
+    {potential} potential, {pressure} GPa, and angles {angles} degrees.
+  - Please run a simulation to check if the friction between two {material} layers is direction-dependent.
+    Use {potential}, {pressure} GPa, and angles {angles} degrees.
+  - I need to investigate if friction between two {material} sheets is anisotropic. Please set up a simulation
+    with {potential} potential at a normal {pressure} GPa, and sliding angles of {angles} degrees.
+  - Can you determine whether the friction between two {material} layers depends on sliding direction?
+    Set up a simulation using the {potential} potential with a normal pressure of {pressure} GPa and sliding
+    angles of {angles} degrees.
+- category: pes_sheet_setup
+  kind: act
+  slots:
+  - material
+  - potential
+  - grid
+  rejected: 334
+  reasons:
+    names none of ('sheet', 'layer', 'bilayer'): 328
+    contains a digit: 6
+  templates:
+  - I'm studying friction between {material} layers. Please run a static corrugation scan with {grid}
+    grid points using {potential}.
+  - I'm looking to analyze the potential energy landscape between {material} layers. Could you run a scan
+    with {grid} grid points and {potential}?
+  - I'm studying the interaction between {material} layers. Could you perform a corrugation scan with
+    {grid} grid points and {potential}?
+  - Could you generate a corrugation scan for a single layer of {material} over another layer, using {potential}
+    and {grid} points per axis?
+  - I need a scan of the corrugation potential for two {material} layers using {grid} points per side.
+    Please use the {potential} potential.
+  - Run a corrugation scan for two {material} layers with {grid} grid points per side and {potential}
+    potential. I'm analyzing interlayer adhesion.
+  - I need a corrugation scan for two {material} layers. Use {grid} grid points per side and the {potential}
+    potential.
+  - Perform a corrugation scan for two {material} layers with {grid} grid points per side using the {potential}
+    potential function.
+  - I'm modeling the friction between {material} layers and need a corrugation scan with {grid} points
+    using {potential}.
+  - Could you generate a static corrugation scan of {material} over another {material} layer with a {grid}
+    x {grid} grid? The {potential} potential should be applied.
+  - I'm studying the adhesion between {material} layers. Can you do a corrugation scan with {grid} points
+    using {potential}?
+  - I'm investigating the interaction between {material} layers. Please perform a corrugation scan with
+    {grid} points and {potential}.
+  - I'm analyzing the adhesion of {material} layers. Please generate a corrugation scan with {grid} points
+    and {potential}.
+  - I'm investigating the friction between two {material} layers. Please set up a corrugation scan with
+    {grid} points using {potential}.

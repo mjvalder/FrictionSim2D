@@ -114,11 +114,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--per-category', type=int, default=30)
     parser.add_argument('--only', nargs='*', choices=sorted(BY_NAME))
+    parser.add_argument('--rounds', type=int, default=4,
+                        help='teacher requests per category, at most')
     args = parser.parse_args(argv)
     chosen = [BY_NAME[n] for n in args.only] if args.only else list(CATEGORIES)
     drafts = []
     for category in chosen:
-        result = draft(category, args.per_category)
+        result = draft(category, args.per_category, args.rounds)
         drafts.append(result)
         print(f"{category.name}: {len(result['templates'])} kept, "
               f"{result['rejected']} rejected", file=sys.stderr)
