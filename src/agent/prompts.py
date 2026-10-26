@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Optional
 
 KNOWLEDGE_DIR = Path(__file__).with_name('knowledge')
 KNOWLEDGE_FILES = ('conventions', 'families', 'sweeps', 'geometry', 'defaults', 'workspace')
 #: Spec §4.4: the whole prompt for a small local model stays under this.
 OLLAMA_BUDGET_TOKENS = 2500
+#: Ollama models fine-tuned on FrictionSim2D (tools/agent_data): trained on the role
+#: and rules alone, so they get no knowledge files (fine-tune spec §7).
+TRAINED_PREFIX = 'fs2d-assistant'
 
 ROLE = """You are the FrictionSim2D assistant inside its GUI. You help the user set up
 LAMMPS friction simulations of 2D materials, find structures and potentials,
@@ -34,8 +38,11 @@ def estimate_tokens(text: str) -> int:
     return math.ceil(len(text) / 4)
 
 
-def build_system_prompt(provider: str) -> str:
-    """Role, then every knowledge file under its own heading."""
+def build_system_prompt(provider: str, model: Optional[str] = None) -> str:
+    """Role, then every knowledge file under its own heading; a fine-tuned ``model``
+    gets the role and rules alone, the prompt it was trained with."""
+    if provider == 'ollama' and (model or '').startswith(TRAINED_PREFIX):
+        return f'/no_think\n{ROLE}'
     parts = [ROLE]
     for name in KNOWLEDGE_FILES:
         body = (KNOWLEDGE_DIR / f'{name}.md').read_text(encoding='utf-8').strip()

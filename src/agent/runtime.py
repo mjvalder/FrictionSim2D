@@ -258,7 +258,8 @@ class AgentSession:
     def _build_agent(self) -> Agent:
         model = self._model if self._model is not None else build_model(self.settings)
         agent = Agent(model, deps_type=AgentDeps, retries=2,
-                      instructions=build_system_prompt(self.settings.provider))
+                      instructions=build_system_prompt(self.settings.provider,
+                                                       self.settings.ollama.model))
         _register_tools(agent)
         return agent
 
