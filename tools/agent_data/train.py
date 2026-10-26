@@ -1,8 +1,10 @@
 """LoRA fine-tune of a Qwen3 student on generated conversations (spec §5).
 
 Renders each conversation with the student's own chat template (tools included,
-thinking off), trains a LoRA with Unsloth with the loss on assistant tokens
-only, and records throughput, peak VRAM and the dataset/schema hashes in
+thinking off) and trains a LoRA with Unsloth. The loss falls on assistant
+messages only -- tool calls and replies -- and never on one marked
+``train: false`` (an injected mistake kept for the error that follows it).
+Records throughput, peak VRAM and the dataset/schema hashes in
 ``runs/<run>/metrics.json``. Export to GGUF + Ollama is ``export.py``.
 
     python tools/agent_data/train.py --data data/smoke.jsonl --run smoke-1p7b
@@ -15,18 +17,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / 'runs'
 BASES = {'1.7b': 'unsloth/Qwen3-1.7B', '4b': 'unsloth/Qwen3-4B'}
-#: Qwen3's template sends tool results back as user turns, so masking every user
-#: turn masks the tool results too: the loss falls on tool calls and replies.
-USER_PART = '<|im_start|>user\n'
-ASSISTANT_PART = '<|im_start|>assistant\n'
+#: One rendered assistant message: its header, then the trained text through <|im_end|>.
+_ASSISTANT = re.compile(r'<\|im_start\|>assistant\n(.*?<\|im_end\|>)', re.DOTALL)
+IGNORE = -100
 
 
 def load(path: Path) -> List[dict]:
@@ -38,6 +40,40 @@ def render(tokenizer, record: dict, tools: List[dict]) -> str:
     """One conversation as training text in the student's chat format."""
     return tokenizer.apply_chat_template(record['messages'], tools=tools, tokenize=False,
                                          enable_thinking=False)
+
+
+def trained_spans(text: str, record: dict) -> List[Tuple[int, int]]:
+    """Character spans the loss covers: each assistant message not marked
+    ``train: false``. The template renders assistant messages in order, one block each."""
+    flags = [m.get('train', True) for m in record['messages'] if m['role'] == 'assistant']
+    blocks = list(_ASSISTANT.finditer(text))
+    if len(blocks) != len(flags):
+        raise ValueError(f"{record.get('id')}: {len(blocks)} assistant blocks for "
+                         f'{len(flags)} assistant messages')
+    return [block.span(1) for block, keep in zip(blocks, flags) if keep]
+
+
+def tokenize(tokenizer, text: str, spans: List[Tuple[int, int]], max_len: int) -> dict:
+    """input_ids and labels: a token counts only when it lies inside a trained span."""
+    encoded = tokenizer(text, return_offsets_mapping=True, add_special_tokens=False,
+                        truncation=True, max_length=max_len)
+    labels = []
+    for token, (start, end) in zip(encoded['input_ids'], encoded['offset_mapping']):
+        inside = any(lo <= start and end <= hi for lo, hi in spans) and end > start
+        labels.append(token if inside else IGNORE)
+    return {'input_ids': encoded['input_ids'], 'labels': labels}
+
+
+def show_mask(tokenizer, example: dict) -> str:
+    """The text with trained stretches in [[ ]], to check the mask by eye."""
+    out, trained = [], False
+    for token, label in zip(example['input_ids'], example['labels']):
+        now = label != IGNORE
+        if now != trained:
+            out.append('[[' if now else ']]')
+            trained = now
+        out.append(tokenizer.decode([token]))
+    return ''.join(out) + (']]' if trained else '')
 
 
 def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-locals
@@ -59,10 +95,9 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
 
     # pylint: disable=import-outside-toplevel
     from unsloth import FastLanguageModel  # first: it patches transformers
-    from unsloth.chat_templates import train_on_responses_only
     import torch
     from datasets import Dataset
-    from trl import SFTConfig, SFTTrainer
+    from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
     cards = [json.loads(path.with_suffix('.card.json').read_text()) for path in args.data]
     if len({c['schema_hash'] for c in cards}) != 1:
@@ -73,12 +108,14 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
         BASES[args.base], max_seq_length=args.max_len, load_in_4bit=args.four_bit,
         dtype=None if args.four_bit else torch.bfloat16)
     texts = [render(tokenizer, r, card['tools']) for r in records]
+    examples = [tokenize(tokenizer, t, trained_spans(t, r), args.max_len)
+                for t, r in zip(texts, records)]
     if args.render_only:
-        print(texts[0])
-        print(f'\n{len(texts)} conversations; tokens: '
-              f'{[len(tokenizer(t).input_ids) for t in texts[:5]]} ...')
+        shown = next((i for i, r in enumerate(records)
+                      if any(m.get('train') is False for m in r['messages'])), 0)
+        print(show_mask(tokenizer, examples[shown])[-6000:])
         return 0
-    lengths = [len(tokenizer(t).input_ids) for t in texts]
+    lengths = [len(tokenizer(t, add_special_tokens=False).input_ids) for t in texts]
     too_long = sum(n > args.max_len for n in lengths)
 
     model = FastLanguageModel.get_peft_model(
@@ -87,17 +124,17 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
                         'down_proj'],
         use_gradient_checkpointing='unsloth', random_state=0)
     out = RUNS / args.run
-    trainer = SFTTrainer(
-        model=model, processing_class=tokenizer,
-        train_dataset=Dataset.from_dict({'text': texts}),
-        args=SFTConfig(output_dir=str(out), dataset_text_field='text',
-                       max_length=args.max_len, per_device_train_batch_size=args.batch,
-                       gradient_accumulation_steps=args.accum, num_train_epochs=args.epochs,
-                       learning_rate=args.lr, lr_scheduler_type='cosine', warmup_ratio=0.05,
-                       logging_steps=5, save_strategy='no', bf16=True, seed=0,
-                       report_to='none'))
-    trainer = train_on_responses_only(trainer, instruction_part=USER_PART,
-                                      response_part=ASSISTANT_PART)
+    trainer = Trainer(
+        model=model,
+        train_dataset=Dataset.from_list(examples),
+        data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True,
+                                             label_pad_token_id=IGNORE),
+        args=TrainingArguments(output_dir=str(out), per_device_train_batch_size=args.batch,
+                               gradient_accumulation_steps=args.accum,
+                               num_train_epochs=args.epochs, learning_rate=args.lr,
+                               lr_scheduler_type='cosine', warmup_ratio=0.05,
+                               logging_steps=5, save_strategy='no', bf16=True, seed=0,
+                               report_to='none', remove_unused_columns=False))
     torch.cuda.reset_peak_memory_stats()
     start = time.time()
     stats = trainer.train()

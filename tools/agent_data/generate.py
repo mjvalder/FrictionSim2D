@@ -66,7 +66,13 @@ TEACHER_LICENCE = 'Apache-2.0'
 #: database rows (no key here, and invented rows would teach invented facts).
 UNSUPPORTED = {'materials_project'}
 #: Sampling weight per category (default 1): concepts are the domain layer (spec §4.4).
-WEIGHTS = {'concept': 8}
+WEIGHTS = {'concept': 8,
+           # the groups the Phase 4 model failed most (spec §8): argument-heavy tools
+           'param_change': 3, 'settings_change': 3, 'speed_sweep': 3, 'linear_sweep': 2,
+           'log_sweep': 2, 'load_band': 2, 'plot_cof_load': 2, 'plot_timeseries': 2,
+           'plot_rank': 2, 'plot_slope_bars': 2, 'plot_filtered': 2, 'count_runs': 2,
+           'summarise_dataset': 2, 'describe_folder': 2, 'find_datasets': 2,
+           'afm_setup_temperature': 2, 'sheet_angles': 2, 'recommend_layers': 2}
 #: A request this similar to an eval prompt is dropped: the evals stay held out.
 EVAL_SIMILARITY = 0.75
 EVAL_PROMPTS = [case.prompt.lower() for case in CASES.values()]
@@ -131,6 +137,24 @@ class Toolbox:
             for name, tool in sorted(tools.items())]
         digest = hashlib.sha256(json.dumps(schemas, sort_keys=True).encode()).hexdigest()
         return cls(tools, schemas, digest[:16])
+
+    def retry_text(self, deps, name: str, args: dict) -> Optional[str]:
+        """What the runtime sends back for a call it rejects, or None if it is accepted."""
+        # pylint: disable=import-outside-toplevel
+        from pydantic import ValidationError
+        from pydantic_ai.messages import RetryPromptPart
+        try:
+            self.tools[name].function_schema.validator.validate_python(args)
+        except ValidationError as exc:
+            content = exc.errors(include_url=False, include_context=False)
+            return RetryPromptPart(tool_name=name, content=content).model_response()
+        try:
+            self.call(deps, name, args)
+        except ToolInputError as exc:
+            deps.pending.clear()
+            return RetryPromptPart(tool_name=name, content=str(exc)).model_response()
+        deps.pending.clear()  # accepted after all: not a mistake to learn from
+        return None
 
     def call(self, deps, name: str, args: dict) -> str:
         """Validate ``args`` like the model's call and run the tool through runtime._call."""
@@ -341,9 +365,9 @@ def plan_for(category: str, scene: Scene) -> Callable[[Callable[[str, dict], str
 
     def plot(plot_type: str, fields=()) -> Plan:
         return [('plot_schema', {'plot_type': plot_type}),
-                ('propose_plot', {'request': {'plot_type': plot_type, 'datasets': [dataset],
-                                              'fields': [{'key': k, 'value': x}
-                                                         for k, x in fields]}})]
+                # flat, as the tool schema shows it (single-model arguments are inlined)
+                ('propose_plot', {'plot_type': plot_type, 'datasets': [dataset],
+                                  'fields': [{'key': k, 'value': x} for k, x in fields]})]
     cof_axes = (('x_axis', 'force'), ('y_axis', 'cof'))
     if category == 'plot_cof_load':
         return static([('find_result_sets', {}), *plot('summary', cof_axes)])
@@ -553,75 +577,178 @@ def too_close_to_eval(request: str) -> bool:
                for p in EVAL_PROMPTS)
 
 
+#: Share of conversations with one injected tool-call mistake and its recovery.
+MISTAKE_RATE = 0.3
+#: Share of single-turn setups that get a follow-up turn on the same config.
+FOLLOWUP_RATE = 0.25
+FIRST_TURNS = ('afm_setup', 'sheet_setup', 'indent_setup', 'linear_sweep', 'load_band')
+FOLLOWUPS = ('param_change', 'speed_sweep', 'find_parameter', 'explain_config',
+             'settings_change')
+
+
+def mistake(name: str, args: dict, rng: random.Random) -> Optional[dict]:
+    """A plausible wrong version of ``args``: a renamed or dropped key, a list
+    sent as text, or a nested field lifted to the top level. None if no change."""
+    bad = json.loads(json.dumps(args))
+    keys = [k for k in bad if k != 'scope']
+    if not keys:
+        return None
+    key = rng.choice(keys)
+    value = bad[key]
+    choice = rng.choice(['rename', 'drop', 'stringify', 'nest'])
+    if choice == 'stringify' and isinstance(value, list) and value and \
+            all(isinstance(x, (int, float)) for x in value):
+        bad[key] = ', '.join(f'{x:g}' for x in value)
+    elif choice == 'nest' and name in ('set_fields', 'propose_plot') and isinstance(value, list):
+        item = value[0] if value and isinstance(value[0], dict) else None
+        if item is None or 'key' not in item:
+            return None
+        bad = {**{k: v for k, v in bad.items() if k != key},
+               item['key']: item.get('value')}
+    elif choice == 'drop':
+        del bad[key]
+    else:  # rename: a near-miss name a model might guess
+        new = {'loads_nN': 'loads', 'pressures_GPa': 'pressures', 'materials': 'material',
+               'potential_type': 'potential', 'plot_type': 'type', 'datasets': 'dataset',
+               'descriptor': 'level', 'quantity': 'name', 'query': 'q', 'path': 'folder',
+               'material_a': 'materials', 'changes': 'fields', 'start': 'min',
+               'stop': 'max'}.get(key, key + 's')
+        bad[new] = bad.pop(key)
+    return bad if bad != args else None
+
+
+@dataclass
+class Turn:
+    """One user request and the assistant's work on it."""
+
+    category: str
+    request: str
+    trace: List[Tuple[str, dict, str, bool]]  # name, args, result, trained on
+    reply: str = ''
+
+
+def setup_scene(category: str, scene: Scene) -> Optional[str]:
+    """Category-specific slot values; a reason when the scene cannot be built."""
+    rng, cat = scene.rng, BY_NAME.get(category, CONCEPT)
+    if 'parameter' in cat.slots:
+        parameter_slot(scene)
+    if 'global_setting' in cat.slots:
+        global_setting_slot(scene)
+    if 'setting' in cat.slots:
+        scene.slots['setting'] = rng.choice(SETTINGS_TO_DECLINE)
+    if category == 'ask_unknown_material':
+        scene.slots['material'] = scene.values['unknown']
+    if category == 'ask_unknown_potential' and not missing_potential(scene):
+        return 'material has every potential type'
+    if category == 'speed_sweep':
+        scene.slots['start'], scene.slots['stop'] = (f'{x:g}' for x in scene.values['speeds'])
+    if category == 'log_sweep':
+        scene.slots['start'] = str(scene.values['log_start'])
+        scene.slots['stop'] = str(scene.values['log_stop'])
+    return None
+
+
+def play(category: str, template: Optional[str], scene: Scene, toolbox: Toolbox,
+         with_mistake: bool) -> Tuple[Optional[Turn], Optional[str]]:
+    """Run one turn: the request, its tool calls (one perhaps wrong first), the reply."""
+    # pylint: disable=too-many-return-statements
+    why = setup_scene(category, scene)
+    if why:
+        return None, why
+    source = ''
+    if category == 'concept':
+        request, source = concept_question(scene.rng, load_knowledge())
+        scene.values['question'] = request
+        if len(request.split()) < 4:
+            return None, 'no question'
+    else:
+        request = template.format(**scene.slots)
+    if too_close_to_eval(request):
+        return None, 'too close to an eval prompt'
+    prepare_world(category, scene)
+    turn = Turn(category, request, [])
+    calls = []
+
+    def run(name: str, args: dict) -> str:
+        calls.append(name)
+        if with_mistake and len(calls) == 1 + scene.values.get('mistake_at', 0):
+            bad = mistake(name, args, scene.rng)
+            error = toolbox.retry_text(scene.deps, name, bad) if bad else None
+            if error:  # the real rejection the runtime would send back
+                turn.trace.append((name, bad, error, False))
+        result = toolbox.call(scene.deps, name, args)
+        turn.trace.append((name, args, result, True))
+        return result
+
+    try:
+        plan_for(category, scene)(run)
+    except (ToolInputError, ValueError) as exc:
+        return None, f'tool failed: {str(exc)[:80]}'
+    if category == 'concept' and source not in turn.trace[-1][2]:
+        return None, 'search missed the source passage'
+    cat = BY_NAME.get(category, CONCEPT)
+    plain = [(n, a, r) for n, a, r, _ in turn.trace]
+    turn.reply = teacher_reply(request, cat.kind, plain)
+    why = check(category, cat.kind, scene, request, turn.reply,
+                [(n, a, r) for n, a, r, ok in turn.trace if ok])
+    return (None, why) if why else (turn, None)
+
+
+def to_messages(turns: List[Turn]) -> List[dict]:
+    """The conversation in the OpenAI/Qwen format; a rejected call is kept with its
+    error but marked ``train: false``, so the loss never rewards the mistake."""
+    # The prompt the runtime gives Ollama models starts with /no_think (prompts.py).
+    messages = [{'role': 'system', 'content': f'/no_think\n{ROLE}'}]
+    n = 0
+    for turn in turns:
+        messages.append({'role': 'user', 'content': turn.request})
+        for name, args, result, trained in turn.trace:
+            call_id = f'call_{n}'
+            n += 1
+            call = {'role': 'assistant', 'content': '', 'tool_calls': [{
+                'id': call_id, 'type': 'function',
+                'function': {'name': name, 'arguments': args}}]}
+            if not trained:
+                call['train'] = False
+            messages.append(call)
+            messages.append({'role': 'tool', 'tool_call_id': call_id, 'name': name,
+                             'content': result})
+        messages.append({'role': 'assistant', 'content': turn.reply})
+    return messages
+
+
 def conversation(category: str, template: Optional[str], rng: random.Random,
-                 toolbox: Toolbox, pairs, settings) -> Tuple[Optional[dict], Optional[str]]:
-    # pylint: disable=too-many-locals,too-many-branches,too-many-return-statements
+                 toolbox: Toolbox, pairs, settings,
+                 templates: Optional[Dict[str, List[str]]] = None
+                 ) -> Tuple[Optional[dict], Optional[str]]:
+    """One conversation: a turn, sometimes with a mistake, sometimes a follow-up."""
     with tempfile.TemporaryDirectory() as tmp:
         deps = make_deps(Path(tmp), settings, model=DOCUMENT_MODEL.get(category, 'afm'))
         deps.direct_apply = rng.random() < 0.5
         deps.knowledge = load_knowledge  # the installed corpus, as the GUI passes it
         scene = Scene(rng, deps)
-        cat = BY_NAME.get(category, CONCEPT)
         fill(scene, pairs)
-        if 'parameter' in cat.slots:
-            parameter_slot(scene)
-        if 'global_setting' in cat.slots:
-            global_setting_slot(scene)
-        if 'setting' in cat.slots:
-            scene.slots['setting'] = rng.choice(SETTINGS_TO_DECLINE)
-        if category == 'ask_unknown_material':
-            scene.slots['material'] = scene.values['unknown']
-        if category == 'ask_unknown_potential' and not missing_potential(scene):
-            return None, 'material has every potential type'
-        if category == 'speed_sweep':
-            scene.slots['start'], scene.slots['stop'] = (f'{x:g}'
-                                                         for x in scene.values['speeds'])
-        if category == 'log_sweep':
-            scene.slots['start'] = str(scene.values['log_start'])
-            scene.slots['stop'] = str(scene.values['log_stop'])
-        source = ''
-        if category == 'concept':
-            request, source = concept_question(rng, load_knowledge())
-            scene.values['question'] = request
-            if len(request.split()) < 4:
-                return None, 'no question'
-        else:
-            request = template.format(**scene.slots)
-        if too_close_to_eval(request):
-            return None, 'too close to an eval prompt'
-        prepare_world(category, scene)
-        trace: List[Tuple[str, dict, str]] = []
-
-        def run(name: str, args: dict) -> str:
-            result = toolbox.call(deps, name, args)
-            trace.append((name, args, result))
-            return result
-
-        try:
-            plan_for(category, scene)(run)
-        except (ToolInputError, ValueError) as exc:
-            return None, f'tool failed: {str(exc)[:80]}'
-        if category == 'concept' and source not in trace[0][2]:
-            return None, 'search missed the source passage'
-        reply = teacher_reply(request, cat.kind, trace)
-        why = check(category, cat.kind, scene, request, reply, trace)
-        if why:
+        scene.values['mistake_at'] = rng.randint(0, 1)
+        with_mistake = rng.random() < MISTAKE_RATE
+        first, why = play(category, template, scene, toolbox, with_mistake)
+        if first is None:
             return None, why
-        # The prompt the runtime gives Ollama models starts with /no_think (prompts.py).
-        messages = [{'role': 'system', 'content': f'/no_think\n{ROLE}'},
-                    {'role': 'user', 'content': request}]
-        for i, (name, args, result) in enumerate(trace):
-            call_id = f'call_{i}'
-            messages.append({'role': 'assistant', 'content': '', 'tool_calls': [{
-                'id': call_id, 'type': 'function',
-                'function': {'name': name, 'arguments': args}}]})
-            messages.append({'role': 'tool', 'tool_call_id': call_id, 'name': name,
-                             'content': result})
-        messages.append({'role': 'assistant', 'content': reply})
-        return {'messages': messages, 'category': category, 'kind': cat.kind,
-                'template': template or f'concept from: {source}', 'source': 'B',
-                'teacher': TEACHER,
-                'teacher_licence': TEACHER_LICENCE}, None
+        turns = [first]
+        followups = [c for c in FOLLOWUPS if templates and templates.get(c)]
+        if category in FIRST_TURNS and followups and rng.random() < FOLLOWUP_RATE:
+            follow = rng.choice(followups)
+            scene.deps.pending.clear()  # the first proposal was shown; judge the second alone
+            second, why = play(follow, rng.choice(templates[follow]), scene, toolbox,
+                               rng.random() < MISTAKE_RATE)
+            if second is None:
+                return None, f'follow-up {follow}: {why}'
+            turns.append(second)
+        cat = BY_NAME.get(category, CONCEPT)
+        return {'messages': to_messages(turns), 'category': category, 'kind': cat.kind,
+                'turns': [t.category for t in turns],
+                'mistakes': sum(not ok for t in turns for *_, ok in t.trace),
+                'template': template or f'concept from: {first.trace[-1][1]}',
+                'source': 'B', 'teacher': TEACHER, 'teacher_licence': TEACHER_LICENCE}, None
 
 
 def load_templates(drafts: bool) -> Dict[str, List[str]]:
@@ -658,7 +785,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             category = rng.choices(names, weights=[WEIGHTS.get(n, 1) for n in names])[0]
             template = rng.choice(templates[category])
             try:
-                record, why = conversation(category, template, rng, toolbox, pairs, settings)
+                record, why = conversation(category, template, rng, toolbox, pairs, settings,
+                                           templates)
             except (KeyError, IndexError, OSError, json.JSONDecodeError) as exc:
                 # a bad template, a teacher timeout or unparseable teacher JSON
                 record, why = None, f'{type(exc).__name__}: {str(exc)[:60]}'
