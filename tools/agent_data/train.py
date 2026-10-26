@@ -89,6 +89,7 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
     parser.add_argument('--batch', type=int, default=2)
     parser.add_argument('--accum', type=int, default=4)
     parser.add_argument('--four-bit', action='store_true', help='QLoRA (use for 4b)')
+    parser.add_argument('--log-steps', type=int, default=5)
     parser.add_argument('--render-only', action='store_true',
                         help='print the first rendered conversation and stop')
     args = parser.parse_args(argv)
@@ -132,8 +133,11 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
         args=TrainingArguments(output_dir=str(out), per_device_train_batch_size=args.batch,
                                gradient_accumulation_steps=args.accum,
                                num_train_epochs=args.epochs, learning_rate=args.lr,
-                               lr_scheduler_type='cosine', warmup_ratio=0.05,
-                               logging_steps=5, save_strategy='no', bf16=True, seed=0,
+                               lr_scheduler_type='cosine',
+                               # 5 % warm-up (transformers 5 dropped warmup_ratio)
+                               warmup_steps=max(1, round(0.05 * args.epochs * len(examples)
+                                                         / (args.batch * args.accum))),
+                               logging_steps=args.log_steps, save_strategy='no', bf16=True, seed=0,
                                report_to='none', remove_unused_columns=False))
     torch.cuda.reset_peak_memory_stats()
     start = time.time()
