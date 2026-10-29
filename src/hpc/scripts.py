@@ -716,10 +716,12 @@ class HPCScriptGenerator:
                     f'SYSTEM_JOB_ID=$(sbatch --parsable hpc/{scripts["system"][0].name})',
                     'echo "System job ID: $SYSTEM_JOB_ID"',
                     '',
+                    # afterany, not afterok: a system job that died part-way still
+                    # wrote the loads before the failure, and slide.in skips the rest.
                     'echo "Submitting slide jobs (waiting for system jobs)..."',
                     (
                         f'SLIDE_JOB_ID=$(sbatch --parsable '
-                        f'--dependency=afterok:$SYSTEM_JOB_ID '
+                        f'--dependency=afterany:$SYSTEM_JOB_ID '
                         f'hpc/{scripts["slide"][0].name})'
                     ),
                     'echo "Slide job ID: $SLIDE_JOB_ID"',
@@ -732,10 +734,12 @@ class HPCScriptGenerator:
                     f'SYSTEM_JOB_ID=$({submit_cmd} hpc/{scripts["system"][0].name})',
                     'echo "System job ID: $SYSTEM_JOB_ID"',
                     '',
+                    # afterany, not afterok: a system job that died part-way still
+                    # wrote the loads before the failure, and slide.in skips the rest.
                     'echo "Submitting slide jobs (waiting for system jobs)..."',
                     (
                         f'SLIDE_JOB_ID=$({submit_cmd} '
-                        f'-W depend=afterok:$SYSTEM_JOB_ID '
+                        f'-W depend=afterany:$SYSTEM_JOB_ID '
                         f'hpc/{scripts["slide"][0].name})'
                     ),
                     'echo "Slide job ID: $SLIDE_JOB_ID"',

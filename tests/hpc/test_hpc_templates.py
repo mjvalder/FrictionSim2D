@@ -293,9 +293,11 @@ def test_a_failed_run_still_brings_its_log_home(tmp_path, scheduler, shape, use_
     workdir = _job_tree(tmp_path)
     _run_job(tmp_path, workdir, scheduler, shape, use_tmpdir, fail_on="system.in")
 
-    # Only the system log: `&&` keeps slide.in from starting without load states.
-    assert [p.name for p in (workdir / _SIM_REL / "lammps").glob("run_*.log")] == [
-        "run_system.log"]
+    # The combined job still runs slide.in: it slides the loads system.in wrote
+    # before failing and skips the rest (the array job here is the one deck).
+    phases = ["system"] if shape == "array" else ["slide", "system"]
+    assert sorted(p.name for p in (workdir / _SIM_REL / "lammps").glob("run_*.log")) == [
+        f"run_{p}.log" for p in phases]
     assert list((tmp_path / "scratch").iterdir()) == []
 
 

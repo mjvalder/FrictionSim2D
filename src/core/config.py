@@ -82,9 +82,10 @@ class SimulationSettings(BaseModel):
         default=10.0,
         ge=0.0,
         description=(
-            "Abort a run whose global temperature exceeds this multiple of the "
-            "target temperature -- a blow-up that keeps all its atoms would "
-            "otherwise spend the whole step budget. 0 disables the guard."
+            "Halt the current load point when the global temperature exceeds "
+            "this multiple of the target temperature -- a blow-up that keeps "
+            "all its atoms would otherwise spend the whole step budget. The "
+            "rest of the sweep still runs. 0 disables the guard."
         ),
     )
     ramp_max_iterations: int = Field(

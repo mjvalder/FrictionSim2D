@@ -73,9 +73,21 @@ simulation:
 template that integrates in time emits a `fix halt` that ends the run the first
 time the global temperature crosses `factor x max([general] temp, 300 K)`.
 LAMMPS already aborts on lost atoms; this catches the blow-up that keeps all its
-atoms and would otherwise spend the whole step budget. The abort is hard — the
-job exits non-zero and writes no final state — so a runaway does not quietly
-leave a plausible-looking output directory behind.
+atoms and would otherwise spend the whole step budget. The halt costs only the
+point that blew up, since a blow-up is often specific to one load or pressure:
+
+- **Slide** — that point writes no final state, and the script moves on to the
+  next load, angle or speed.
+- **AFM `system.in` ramp** — the ramp stops at the halted load, since every
+  later load would ramp from the blown-up state. The loads already written
+  still slide; `slide.in` skips any load with no `load_*.data`.
+- Each halt appends a `# HALT stage=… load=… T=… step=…` line to the run's
+  `results/halted.txt`. Postprocessing reads it and exports the point with
+  status `halted`, with its partial frames dropped.
+
+The HPC jobs run `slide.in` even when `system.in` failed (the two-phase
+submission uses `afterany`), so a hard LAMMPS error mid-ramp also keeps the
+loads written before it.
 
 The 300 K floor is not cosmetic: a 1 K-target run legitimately reaches tens of
 K once minimisation strain energy is released (13–119 K measured across the

@@ -49,7 +49,14 @@ thermo          {{ thermo }}
 comm_style      tiled
 
 # The loaded contact state written by the system.in aveforce ramp (fresh seed).
-read_data       {{ output_dir }}/load_$(v_find)N.data
+# A load whose system.in ramp halted (common/halt.lmp) or never ran has no
+# load_*.data: skip it rather than let read_data end the whole script.
+variable        load_file string {{ output_dir }}/load_$(v_find)N.data
+variable        have_load equal is_file(${load_file})
+if              "${have_load} == 0" then &
+                "print '# SKIP no ${load_file}'" &
+                "jump SELF indent_next"
+read_data       ${load_file}
 include         {{ potential_file }}
 
 group           2D type {{ sheet_types }}
@@ -126,6 +133,7 @@ fix             damp {{ tip_fix_group }} viscous $({{ damping_ratio }}*2.0*sqrt(
 
 # --- quasi-static damped hold at the target load (no sliding) ---------------------
 run             {{ hold_steps }}
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'indent', 'load=$(v_find)', 'indent_next') }}
 
 # =====================================================================================
 # PHASE 2 -- displacement-controlled T=0 retract from the held contact (pull-off).
@@ -193,6 +201,9 @@ displace_atoms  tip_all move 0.0 0.0 ${zstep} units box
 print           "$(v_k),$(v_ztip),$(v_fztip),$(v_fxtip),$(v_fytip),$(v_pe_now)" append {{ results_csv }} screen no
 next            k
 jump            SELF retract_loop
+
+# A halted or skipped load jumps here, past its retract.
+label           indent_next
 
 {% if forces is iterable and forces is not string %}
 next            find

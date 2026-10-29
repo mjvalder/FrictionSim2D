@@ -21,9 +21,10 @@ cd "$SCRATCH"
 cd "$PBS_O_WORKDIR"
 {% endif %}
 
-# Run
-{{ mpi_command }} lmp -in "$SIM/lammps/system.in" -log "$SIM/lammps/run_system.log" \
-    && {{ mpi_command }} lmp -in "$SIM/lammps/slide.in" -log "$SIM/lammps/run_slide.log"
+# Run. slide.in runs even when system.in failed: it slides every load whose
+# load_*.data was written and skips the rest.
+{{ mpi_command }} lmp -in "$SIM/lammps/system.in" -log "$SIM/lammps/run_system.log"
+{{ mpi_command }} lmp -in "$SIM/lammps/slide.in" -log "$SIM/lammps/run_slide.log"
 {% if use_tmpdir %}
 
 # Copy results back

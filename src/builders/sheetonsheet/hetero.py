@@ -437,6 +437,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         context = {
             "temp": general.temp,
             "halt_temperature": halt_temperature(settings, general.temp),
+            # Points the guard halted (common/halt.lmp); run_status reads it.
+            "halt_record": self._run_dir_path("results", "halted.txt"),
             # One seed per channel, drawn in the builder like every other
             # family -- see SimulationBase._run_seed for why, and note a
             # template-side `| random` re-draws per occurrence.

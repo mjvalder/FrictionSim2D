@@ -291,6 +291,7 @@
    "truncated": 1,
    "no_output": 0,
    "unreadable": 0,
+   "halted": 0,
    "not_reached": 2
   },
   "summary_definition": {

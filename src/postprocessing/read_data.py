@@ -30,8 +30,9 @@ from .post_channels import post_channels_for
 from .run_provenance import (point_provenance, pool_provenance,
                              run_provenance)
 from .run_status import (GRID_FAMILIES, STATUSES, PointKey, classify,
-                         expected_chains, load_kind_for_family,
-                         mark_not_reached, point_key, read_run_config)
+                         expected_chains, halt_detail, load_kind_for_family,
+                         mark_not_reached, point_key, read_halt_registry,
+                         read_run_config)
 
 logger = logging.getLogger(__name__)
 
@@ -789,6 +790,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             config = read_run_config(locator)
             expected = expected_tier_rows(config, family) if config else {}
             grid = expected_chains(config, family)
+            halts = read_halt_registry(locator)
             on_disk = {point_key(*key): (key, tiers)
                        for key, tiers in _load_points(locator).items()}
             grid_keys = list(dict.fromkeys(
@@ -800,6 +802,11 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 raw_key, tiers = on_disk.get(key, (key, {}))
                 point = self._read_point(locator, raw_key, tiers, n_layers,
                                          expected, config)
+                halted = halt_detail(halts, key)
+                if halted is not None:
+                    # The frames record the blow-up, not friction.
+                    point.tiers, point.source_files, point.post = {}, {}, {}
+                    point.status, point.status_detail = 'halted', halted
                 if grid is not None and key not in in_grid:
                     point.status_detail = _join_detail(
                         'not in configured grid', point.status_detail)

@@ -260,6 +260,7 @@
    "truncated": 0,
    "no_output": 0,
    "unreadable": 0,
+   "halted": 0,
    "not_reached": 0
   },
   "summary_definition": {

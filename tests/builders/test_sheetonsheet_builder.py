@@ -85,7 +85,7 @@ thermo          100000
 
 # --- runaway-temperature guard ----------------------------------------------
 variable        halt_T equal temp
-fix             halt_hot all halt 1000 v_halt_T > 3000.0 error hard message yes
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
 
 # Top layer (layer 3): driven
 fix             fstage_top layer_3 rigid/nve single force * on on on torque * off off off
@@ -151,6 +151,10 @@ variable        yfrict equal c_frict[2]*1.602176565
 variable        e_int_il equal c_frict
 
 run             10000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append out/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
 
 # --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
 # analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
@@ -161,6 +165,10 @@ variable        gap_L1_L2 equal v_comz_L2-v_comz_L1
 variable        gap_L2_L3 equal v_comz_L3-v_comz_L2
 fix             hold_ave all ave/time 1 1000 1000 v_d_shear v_gap_L1_L2 v_gap_L2_L3 v_fz file out/data/hold_p$(v_pressure)GPa.txt
 run             20000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append out/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
 unfix           hold_ave
 
 
@@ -183,9 +191,16 @@ fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file out/results/perat
 
 
 run             500000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append out/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
 
 # Final-state retention (spec §5 F6)
-write_data      out/data/final_p$(v_pressure)GPa_a$(v_a).data"""
+write_data      out/data/final_p$(v_pressure)GPa_a$(v_a).data
+
+# A halted point (common/halt.lmp) jumps here, past the rest of its slide.
+label           slide_next"""
 
 
 def _make_sheetonsheet_config(tmp_path: Path, layers: list[int]) -> SheetOnSheetSimulationConfig:

@@ -773,6 +773,8 @@ class AFMSimulation(SimulationBase):
             'temp': self.config.general.temp,
             'halt_temperature': halt_temperature(
                 self.config.settings, self.config.general.temp),
+            # Points the guard halted (common/halt.lmp); run_status reads it.
+            'halt_record': f"{self.relative_run_dir_layer[n_layers]}/results/halted.txt",
             'forces': self.config.general.force,
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,

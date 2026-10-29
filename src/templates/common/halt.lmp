@@ -6,17 +6,36 @@
   log. `fix halt` ends the run the first time the global temperature crosses
   `settings.simulation.halt_temperature_factor` x the target.
 
-  `error hard` on purpose, matching the atom-loss behaviour: a runaway means
-  the setup is wrong, so the remaining sweep arms would burn budget on the same
-  fault. Nothing is written half-finished -- LAMMPS exits before write_data.
+  `error continue`, not `error hard`: a blow-up is often specific to one load
+  or pressure (unresolved forces at that contact), so it must cost only that
+  point. The halt ends the current `run` and the script goes on; the
+  `emit_halt_check` that follows each dynamic run sees the temperature still
+  over the threshold, appends one line to the run's `halted.txt` registry and
+  jumps past the point's `write_data` to the next loop iteration (a slide) or
+  out of the ramp (system init: later loads ramp from the blown-up state, so
+  they are abandoned, and the loads already written still slide).
 
-  `halt_temperature` is None when the guard is off, and the macro then emits
+  `halt_temperature` is None when the guard is off, and both macros then emit
   nothing at all.
 #}
 {% macro emit_temperature_halt(halt_temperature) %}
 {% if halt_temperature is not none and halt_temperature %}
 # --- runaway-temperature guard ----------------------------------------------
 variable        halt_T equal temp
-fix             halt_hot all halt 1000 v_halt_T > {{ halt_temperature }} error hard message yes
+fix             halt_hot all halt 1000 v_halt_T > {{ halt_temperature }} error continue message yes
+{% endif %}
+{% endmacro %}
+
+{#
+  After a dynamic run: if the guard fired (the run ended hot), record the point
+  in `halt_record` and jump to `target`. `point` is the `key=value` text that
+  names the point (`load=$(v_find) angle=$(v_a) speed=$(v_speed)`), parsed by
+  `postprocessing.run_status.read_halt_registry`.
+#}
+{% macro emit_halt_check(halt_temperature, halt_record, stage, point, target) %}
+{% if halt_temperature is not none and halt_temperature %}
+if              "$(v_halt_T) > {{ halt_temperature }}" then &
+                "print '# HALT stage={{ stage }} {{ point }} T=$(v_halt_T) step=$(step)' append {{ halt_record }} screen yes" &
+                "jump SELF {{ target }}"
 {% endif %}
 {% endmacro %}

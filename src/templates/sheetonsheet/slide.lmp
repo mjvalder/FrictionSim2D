@@ -156,6 +156,7 @@ variable        e_int_il equal c_frict
 {% endif %}
 
 run             10000
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
 
 # --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
 # analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
@@ -167,6 +168,7 @@ variable        gap_L{{ i }}_L{{ i + 1 }} equal v_comz_L{{ i + 1 }}-v_comz_L{{ i
 {% endfor %}
 fix             hold_ave all ave/time 1 1000 1000 v_d_shear {% for i in range(1, n_layers) %}v_gap_L{{ i }}_L{{ i + 1 }} {% endfor %}v_fz file {{ data_dir }}/hold_p$(v_pressure)GPa.txt
 run             {{ hold_steps }}
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
 unfix           hold_ave
 
 {% if constraint_mode == 'atom_bonds' %}
@@ -211,9 +213,13 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 {{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
 
 # Final-state retention (spec §5 F6)
 write_data      {{ data_dir }}/final_p$(v_pressure)GPa_a$(v_a).data
+
+# A halted point (common/halt.lmp) jumps here, past the rest of its slide.
+label           slide_next
 
 {% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
 {% if scan_angle_force is number or scan_angle_force_is_sequence %}

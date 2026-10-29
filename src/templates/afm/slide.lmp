@@ -44,7 +44,14 @@ timestep        {{ timestep }}
 thermo          {{ thermo }}
 comm_style      tiled
 
-read_data       {{ output_dir }}/load_$(v_find)N.data
+# A load whose system.in ramp halted (common/halt.lmp) or never ran has no
+# load_*.data: skip it rather than let read_data end the whole script.
+variable        load_file string {{ output_dir }}/load_$(v_find)N.data
+variable        have_load equal is_file(${load_file})
+if              "${have_load} == 0" then &
+                "print '# SKIP no ${load_file}'" &
+                "jump SELF slide_next"
+read_data       ${load_file}
 include         {{ potential_file }}
 
 group           2D type {{ sheet_types }}
@@ -145,10 +152,14 @@ fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 {{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'load=$(v_find) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
 
 # Final-state retention (spec §5 F6): the post-slide configuration is always
 # available for contact/deflection reconstruction — never lucky again.
 write_data      {{ output_dir }}/final_f$(v_find)N_a$(v_a).data
+
+# A halted or skipped point jumps here, past its write_data.
+label           slide_next
 
 {% if scan_angle_is_sequence %}
 {% if scan_angle_force is number or scan_angle_force_is_sequence %}

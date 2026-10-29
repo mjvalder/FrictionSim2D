@@ -9,12 +9,16 @@ vanished without trace. Here the expected grid comes from the run's own
 * `truncated`   -- the files parse but are short; their frames are kept.
 * `unreadable`  -- the window file (or the only file) exists but fails to parse.
 * `no_output`   -- configured, the run exists, no results file.
+* `halted`      -- stopped by the temperature guard (`common/halt.lmp`);
+                   its frames are dropped, they record the blow-up.
 * `not_reached` -- `no_output` after a non-complete point of the same chain.
 
 A chain is one in-script loop. The slide templates nest `speed` (outer) ->
 load -> `angle` (inner) and ramp each load from the previous one, so a crash
-stops everything after it. `general.outer_loop` splits one axis into separate
-scripts (separate HPC jobs): each value of that axis is its own chain.
+stops everything after it. A guard halt does not: it costs only its own point
+(or, in the AFM system ramp, its load and the loads after it).
+`general.outer_loop` splits one axis into separate scripts (separate HPC
+jobs): each value of that axis is its own chain.
 """
 
 from __future__ import annotations
@@ -27,7 +31,11 @@ from src.core.observables import is_truncated
 
 logger = logging.getLogger(__name__)
 
-STATUSES = ('complete', 'truncated', 'no_output', 'unreadable', 'not_reached')
+STATUSES = ('complete', 'truncated', 'no_output', 'unreadable', 'halted',
+            'not_reached')
+
+#: The guard's registry in a run's `results/` (the builders' `halt_record`).
+HALT_RECORD = 'halted.txt'
 
 #: Families whose load grid is modelled as `speed x load x angle`.
 GRID_FAMILIES = ('afm', 'sheetonsheet', 'hetero', 'flake')
@@ -130,6 +138,55 @@ def classify(n_rows: Dict[str, int], expected: Dict[str, int]) -> Tuple[str, str
              if (tier in n_rows and is_truncated(n_rows[tier], rows))
              or (tier == 'window' and tier not in n_rows)]
     return ('truncated', '; '.join(short)) if short else ('complete', '')
+
+
+def read_halt_registry(locator) -> List[Dict[str, str]]:
+    """The `# HALT stage=... key=value ...` lines of the run's `halted.txt`.
+
+    One dict per line; `[]` when the guard never fired (no file).
+    """
+    path = locator.results_dir / HALT_RECORD
+    try:
+        text = path.read_text(encoding='utf-8', errors='ignore')
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        logger.warning("Unreadable halt registry %s: %s", path, exc)
+        return []
+    return [dict(tok.split('=', 1) for tok in line[len('# HALT'):].split()
+                 if '=' in tok)
+            for line in text.splitlines() if line.startswith('# HALT ')]
+
+
+def halt_detail(entries: Sequence[Mapping[str, str]],
+                key: PointKey) -> Optional[str]:
+    """Why the guard halted the point `key`, or None if it did not.
+
+    A `slide` entry names one point. A `system` entry names the load whose AFM
+    ramp halted: every angle and speed of that load is lost (the later loads
+    were never written, so they come out `not_reached`). `system_equil` halted
+    before any load, which loses the whole run.
+    """
+    kind, load = key[0], key[1]
+    for entry in entries:
+        stage = entry.get('stage')
+        try:
+            if stage == 'system_equil':
+                hit = True
+            elif stage == 'system':
+                hit = round(float(entry['load']), 6) == load
+            elif stage == 'slide':
+                value = entry['load' if kind == 'force' else 'pressure']
+                hit = point_key(kind, value, entry['angle'],
+                                entry['speed']) == key
+            else:
+                hit = False
+        except (KeyError, ValueError):
+            continue
+        if hit:
+            return (f"{stage} halted at T={entry.get('T', '?')} "
+                    f"step={entry.get('step', '?')}")
+    return None
 
 
 def mark_not_reached(chain: List[PointKey], status: Dict[PointKey, str]) -> None:

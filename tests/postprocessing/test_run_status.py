@@ -13,7 +13,8 @@ from pathlib import Path
 
 from src.postprocessing.read_data import DataReader
 from src.postprocessing.run_status import (classify, expected_chains,
-                                           mark_not_reached, point_key)
+                                           halt_detail, mark_not_reached,
+                                           point_key)
 from tests.helpers.results_tree import make_family_run, slide_config
 from tests.helpers.synthetic_results import write_results
 
@@ -277,7 +278,7 @@ def test_status_counts(tmp_path):
 
     assert meta['status_counts'] == {'complete': 2, 'truncated': 1,
                                      'not_reached': 2, 'no_output': 0,
-                                     'unreadable': 0}
+                                     'unreadable': 0, 'halted': 0}
 
 
 def test_legacy_metadata_ignores_empty_entries(tmp_path):
@@ -333,3 +334,70 @@ def test_legacy_rule_compares_within_family_and_size(tmp_path):
     reader = DataReader(results_dir=str(tmp_path))
     short = [p for p in reader.points if p.status == 'truncated']
     assert [(p.family, p.material) for p in short] == [('afm', 'h_WS2')]
+
+
+# --- temperature-guard halts (templates/common/halt.lmp) -------------------
+
+def _halt_line(**fields) -> str:
+    return '# HALT ' + ' '.join(f'{k}={v}' for k, v in fields.items())
+
+
+def test_a_slide_halt_names_one_point():
+    entries = [{'stage': 'slide', 'load': '20', 'angle': '0', 'speed': '2',
+                'T': '9000', 'step': '3000'}]
+    assert halt_detail(entries, point_key('force', 20, 0, 2)) == (
+        'slide halted at T=9000 step=3000')
+    assert halt_detail(entries, point_key('force', 20, 90, 2)) is None
+    assert halt_detail(entries, point_key('force', 10, 0, 2)) is None
+
+
+def test_a_sheet_slide_halt_is_keyed_by_pressure():
+    entries = [{'stage': 'slide', 'pressure': '1.5', 'angle': '0',
+                'speed': '2'}]
+    assert halt_detail(entries, point_key('pressure', 1.5, 0, 2)) is not None
+
+
+def test_a_system_halt_takes_its_whole_load():
+    entries = [{'stage': 'system', 'load': '30'}]
+    assert halt_detail(entries, point_key('force', 30, 0, 1)) is not None
+    assert halt_detail(entries, point_key('force', 30, 90, 2)) is not None
+    assert halt_detail(entries, point_key('force', 20, 0, 1)) is None
+
+
+def test_a_malformed_halt_line_is_ignored():
+    assert halt_detail([{'stage': 'slide', 'load': 'x'}],
+                       point_key('force', 10, 0, 2)) is None
+
+
+def test_a_halted_slide_costs_only_its_own_point(tmp_path):
+    """Load 20 blew up mid-slide: its partial frames are dropped, and loads
+    30..50 -- slid by the same script after it -- stay complete."""
+    run_dir = make_family_run(tmp_path, 'afm', loads=LOADS5,
+                              config=slide_config('afm', loads=LOADS5), n=50)
+    (run_dir / 'results' / 'halted.txt').write_text(
+        _halt_line(stage='slide', load=20, angle=0, speed=2, T=9000,
+                   step=3000) + '\n', encoding='utf-8')
+
+    reader = DataReader(results_dir=str(tmp_path))
+    assert _statuses(reader) == ['complete', 'halted', 'complete', 'complete',
+                                 'complete']
+    halted = reader.points[1]
+    assert halted.tiers == {} and 'T=9000' in halted.status_detail
+    assert reader.metadata['status_counts']['halted'] == 1
+
+
+def test_a_system_ramp_halt_keeps_the_loads_before_it(tmp_path):
+    """The system.in ramp halted at load 30: 10 and 20 slid, 30 is halted,
+    40 and 50 (never written, skipped by slide.in) are not_reached."""
+    run_dir = make_family_run(tmp_path, 'afm', loads=LOADS5,
+                              config=slide_config('afm', loads=LOADS5), n=50)
+    for load in (30, 40, 50):
+        for path in (run_dir / 'results').glob(f'friction_f{load}_*'):
+            path.unlink()
+    (run_dir / 'results' / 'halted.txt').write_text(
+        _halt_line(stage='system', load=30, T=9000, step=120000) + '\n',
+        encoding='utf-8')
+
+    reader = DataReader(results_dir=str(tmp_path))
+    assert _statuses(reader) == ['complete', 'complete', 'halted',
+                                 'not_reached', 'not_reached']

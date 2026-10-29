@@ -98,6 +98,7 @@ fix             corner_hold flake_corner spring/self {{ flake_corner_k }} xy
 
 fix             tip_f {{ tip_fix_group }} rigid/nve single force * off off off torque * off off off
 run             10000
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'system_equil', 'load=none', 'halt_exit') }}
 unfix           tip_f
 
 {% if layer_groups_available %}
@@ -135,6 +136,7 @@ variable        f equal ${f}+${fincr}
 variable        n equal -v_f/(count({{ tip_fix_group }})*{{ ev_a_to_nn }})
 fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
 run             100
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'system', 'load=$(v_find)', 'halt_exit') }}
 unfix           forcetip
 
 next            i
@@ -143,6 +145,7 @@ jump            SELF loop_load
 fix             forcetip {{ tip_fix_group }} aveforce 0.0 0.0 $n
 variable        dispz equal xcm(tip_all,z)
 run             100 pre yes post no
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'system', 'load=$(v_find)', 'halt_exit') }}
 
 # --- Capped settle loop (spec §1.1 defect 4). Previously the outer jump was
 # unbounded and a seized contact spun forever. On exhaustion, `next` deletes
@@ -159,6 +162,7 @@ variable        disploop loop 50
 
 label           disp
 run             100 pre no post no
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'system', 'load=$(v_find)', 'halt_exit') }}
 if              '${dispz}>${disp_h}' then 'variable disp_h equal ${dispz}'
 if              '${dispz}<${disp_l}' then 'variable disp_l equal ${dispz}'
 next            disploop
@@ -185,6 +189,7 @@ variable        hold_tipz equal xcm(tip_all,z)
 variable        hold_shz  equal xcm(2D_all,z)
 fix             hold_ave all ave/time 1 1000 1000 v_hold_fz v_hold_tipz v_hold_shz file {{ output_dir }}/hold_$(v_find)N.txt
 run             {{ afm_hold_steps }}
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'system', 'load=$(v_find)', 'halt_exit') }}
 unfix           hold_ave
 variable        hold_fz delete
 variable        hold_tipz delete
@@ -196,3 +201,8 @@ write_data      {{ output_dir }}/load_$(v_find)N.data
 next            find
 jump            SELF force_loop
 {% endif %}
+
+# A runaway (common/halt.lmp) jumps here: the loads written so far keep their
+# load_*.data and still slide; the later ones would ramp from the blown-up
+# state, so they are abandoned.
+label           halt_exit

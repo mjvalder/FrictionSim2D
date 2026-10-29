@@ -54,7 +54,14 @@ timestep        0.001
 thermo          100000
 comm_style      tiled
 
-read_data       out/L1/data/load_$(v_find)N.data
+# A load whose system.in ramp halted (common/halt.lmp) or never ran has no
+# load_*.data: skip it rather than let read_data end the whole script.
+variable        load_file string out/L1/data/load_$(v_find)N.data
+variable        have_load equal is_file(${load_file})
+if              "${have_load} == 0" then &
+                "print '# SKIP no ${load_file}'" &
+                "jump SELF slide_next"
+read_data       ${load_file}
 include         out/L1/lammps/system.in.settings
 
 group           2D type 3
@@ -82,7 +89,7 @@ fix             nve_all nve_apply nve
 
 # --- runaway-temperature guard ----------------------------------------------
 variable        halt_T equal temp
-fix             halt_hot all halt 1000 v_halt_T > 3000.0 error hard message yes
+fix             halt_hot all halt 1000 v_halt_T > 3000.0 error continue message yes
 
 compute         COM_top 2D_all com
 variable        comx equal c_COM_top[1]
@@ -170,10 +177,17 @@ fix             fc_pa all ave/time 1000 1 1000 v_e_int v_pe_tip_all v_pe_sub_all
 
 
 run             500000
+if              "$(v_halt_T) > 3000.0" then &
+                "print '# HALT stage=slide load=$(v_find) angle=$(v_a) speed=$(v_speed) T=$(v_halt_T) step=$(step)' append out/L1/results/halted.txt screen yes" &
+                "jump SELF slide_next"
+
 
 # Final-state retention (spec §5 F6): the post-slide configuration is always
 # available for contact/deflection reconstruction — never lucky again.
-write_data      out/L1/data/final_f$(v_find)N_a$(v_a).data"""
+write_data      out/L1/data/final_f$(v_find)N_a$(v_a).data
+
+# A halted or skipped point jumps here, past its write_data.
+label           slide_next"""
 
 
 def test_afm_builder_supports_layer_sweep(tmp_path: Path) -> None:
@@ -489,7 +503,7 @@ def test_afm_outer_loop_force_splits_slide_per_load(tmp_path: Path) -> None:
 
     # Each split slide reads its own load and pins a scalar force (no force loop).
     slide_5 = (lammps_dir / "slide_f5N.in").read_text(encoding="utf-8")
-    assert "read_data       out/L1/data/load_$(v_find)N.data" in slide_5
+    assert "variable        load_file string out/L1/data/load_$(v_find)N.data" in slide_5
     assert "variable        find equal 5.0" in slide_5
     assert "label           force_loop" not in slide_5
 

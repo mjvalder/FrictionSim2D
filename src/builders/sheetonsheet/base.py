@@ -726,6 +726,8 @@ class SheetOnSheetSimulation(SimulationBase):
             'temp': self.config.general.temp,
             'halt_temperature': halt_temperature(
                 self.config.settings, self.config.general.temp),
+            # Points the guard halted (common/halt.lmp); run_status reads it.
+            'halt_record': f"{rel_run_dir_str}/results/halted.txt",
             'scan_angle_config': self.config.general.scan_angle,
             'scan_angle_force': self.config.general.scan_angle_force,
             'xlo': self.sheet_dims.get('xlo', 0.0),

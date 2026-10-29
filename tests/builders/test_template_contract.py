@@ -1028,8 +1028,9 @@ def test_hetero_and_flake_interface_layers_substitution_is_correct():
 # --- temperature halt guard (integration spec §3.10) -------------------------
 #
 # A run whose temperature runs away is not recoverable, and without a guard it
-# spends its whole step budget before anyone sees it. Atom loss already aborts
-# LAMMPS; this is the same contract for the blow-up that keeps every atom.
+# spends its whole step budget before anyone sees it. The guard costs only the
+# point that blew up: a blow-up is often specific to one load, so the rest of
+# the sweep must still run (`error continue` + a check after each run).
 
 #: Every template that integrates in time must carry the guard. The PES scans
 #: and the structure-building templates run 0 steps of dynamics and do not.
@@ -1053,7 +1054,64 @@ def test_the_afm_slide_halts_on_a_runaway_temperature(slide_text):
     assert 'variable        halt_T equal temp' in slide_text
     # _make_afm_config runs at 300 K, the default factor is 10
     assert ('fix             halt_hot all halt 1000 v_halt_T > 3000.0 '
-            'error hard message yes') in slide_text
+            'error continue message yes') in slide_text
+
+
+@pytest.mark.parametrize('template', DYNAMIC_TEMPLATES)
+def test_every_halt_check_jumps_to_a_label_the_template_defines(template):
+    """A check whose label is missing would end the script on `jump`: every
+    emit_halt_check target must be a `label` in the same template."""
+    import re
+    from importlib import resources
+    text = (resources.files('src.templates')
+            .joinpath(template).read_text(encoding='utf-8'))
+    targets = set(re.findall(r"emit_halt_check\(.*'(\w+)'\) }}", text))
+    assert targets, template
+    for target in targets:
+        assert re.search(rf'^label\s+{target}$', text, re.M), (template, target)
+
+
+def test_the_afm_slide_skips_a_load_with_no_data(slide_text):
+    """A load whose system.in ramp halted has no load_*.data; read_data on it
+    would end the script, so is_file() guards it."""
+    guard = slide_text.index('variable        have_load equal is_file(${load_file})')
+    assert guard < slide_text.index('read_data       ${load_file}')
+    assert '"jump SELF slide_next"' in slide_text
+
+
+def test_a_slide_halt_is_recorded_and_skips_its_write_data(slide_text):
+    check = slide_text.index('if              "$(v_halt_T) > 3000.0" then')
+    assert ('append out/L1/results/halted.txt screen yes'
+            in slide_text[check:])
+    assert (check < slide_text.index('write_data      out/L1/data/final_f')
+            < slide_text.index('label           slide_next'))
+
+
+def test_the_guard_is_off_means_no_halt_record(tmp_path):
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    config.settings.simulation.halt_temperature_factor = 0.0
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    text = _prepare_builder_for_slide_write(builder, tmp_path).read_text(
+        encoding='utf-8')
+    assert 'halted.txt' not in text
+
+
+def test_a_system_ramp_halt_ends_the_ramp_and_keeps_written_loads(tmp_path):
+    """After a halt the later loads would ramp from the blown-up state: every
+    run in system.in checks, and all jump to the end of the script."""
+    from src.builders.afm import AFMSimulation
+    config = _make_afm_config(tmp_path, layers=[1])
+    builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
+    _prepare_builder_for_slide_write(builder, tmp_path)
+    text = (tmp_path / "out" / "L1" / "lammps" / "system.in").read_text()
+    lines = text.splitlines()
+    runs = [i for i, line in enumerate(lines)
+            if line.startswith('run ') and line.split()[1] != '0']
+    for i in runs:
+        assert lines[i + 1].startswith('if              "$(v_halt_T) > '), lines[i]
+    assert "stage=system load=$(v_find)" in text
+    assert lines[-1] == 'label           halt_exit'
 
 
 def test_system_init_halts_on_a_runaway_temperature(tmp_path):

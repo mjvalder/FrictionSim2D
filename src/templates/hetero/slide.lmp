@@ -147,6 +147,7 @@ variable        yfrict equal c_frict[2]*{{ ev_a_to_nn }}
 {% endif %}
 
 run             10000
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
 
 {% if constraint_mode == 'com_spring' %}
 # COM spring tethering top two layers
@@ -178,6 +179,10 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 {{ obs.emit_output_fixes(obs_ctx) }}
 
 run             {{ run_steps }}
+{{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
+
+# A halted point (common/halt.lmp) jumps here, past the rest of its slide.
+label           slide_next
 
 {% if scan_angle_config is iterable and scan_angle_config is not string and scan_angle_config|length > 0 %}
 {% if scan_angle_force is number or scan_angle_force_is_sequence %}
