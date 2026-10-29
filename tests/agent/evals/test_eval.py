@@ -47,6 +47,8 @@ def test_case(case, repeat, tmp_path, mock_settings, request):
         'latency_s': round(result.latency_s, 3), 'cold': not _RECORDED,
         'requests': result.requests, 'tokens': result.tokens,
         'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens,
+        'cache_read_tokens': result.cache_read_tokens,
+        'cache_write_tokens': result.cache_write_tokens,
         'detail': detail}))
     _RECORDED.append(case)
     if any(e.payload == 'rate_limited' for e in result.errors):

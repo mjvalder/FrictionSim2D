@@ -126,6 +126,9 @@ class EvalResult:
     requests: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    #: Of ``input_tokens``: read from / written to the provider's prompt cache.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     @property
     def tokens(self) -> int:
@@ -153,8 +156,8 @@ class EvalResult:
         return [e for e in self.events if e.kind == 'error']
 
 
-def turn_tokens(history: Sequence[Any]) -> Tuple[int, int]:
-    """``(input, output)`` tokens of the model responses in the latest turn."""
+def _turn_usages(history: Sequence[Any]) -> List[Any]:
+    """Usage of each model response in the latest turn."""
     # pylint: disable=import-outside-toplevel
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart
     start = 0
@@ -162,12 +165,22 @@ def turn_tokens(history: Sequence[Any]) -> Tuple[int, int]:
         if isinstance(message, ModelRequest) and any(
                 isinstance(p, UserPromptPart) for p in message.parts):
             start = index
-    tokens_in = tokens_out = 0
-    for message in history[start:]:
-        if isinstance(message, ModelResponse) and message.usage is not None:
-            tokens_in += message.usage.input_tokens or 0
-            tokens_out += message.usage.output_tokens or 0
-    return tokens_in, tokens_out
+    return [m.usage for m in history[start:]
+            if isinstance(m, ModelResponse) and m.usage is not None]
+
+
+def turn_tokens(history: Sequence[Any]) -> Tuple[int, int]:
+    """``(input, output)`` tokens of the model responses in the latest turn."""
+    usages = _turn_usages(history)
+    return (sum(u.input_tokens or 0 for u in usages),
+            sum(u.output_tokens or 0 for u in usages))
+
+
+def turn_cache_tokens(history: Sequence[Any]) -> Tuple[int, int]:
+    """``(cache read, cache write)`` input tokens in the latest turn."""
+    usages = _turn_usages(history)
+    return (sum(getattr(u, 'cache_read_tokens', 0) or 0 for u in usages),
+            sum(getattr(u, 'cache_write_tokens', 0) or 0 for u in usages))
 
 
 def run_eval_turn(session, prompt: str, deps) -> EvalResult:
@@ -180,6 +193,8 @@ def run_eval_turn(session, prompt: str, deps) -> EvalResult:
     result.requests = int(done[-1].payload or 0) if done else 0
     if done:
         result.input_tokens, result.output_tokens = turn_tokens(session.history)
+        result.cache_read_tokens, result.cache_write_tokens = turn_cache_tokens(
+            session.history)
     return result
 
 
