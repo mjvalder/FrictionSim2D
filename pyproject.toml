@@ -66,6 +66,9 @@ agent = [
   # The GUI assistant. pydantic-ai requires Python >= 3.11; the marker keeps
   # `.[all]` installable on 3.9/3.10, where src.agent._AGENT_AVAILABLE is False.
   "pydantic-ai-slim[openai,google,anthropic]~=2.56; python_version >= '3.11'",
+  # anthropic 2.x made BetaMessageParam a Union; pydantic-ai 2.57 instantiates it
+  # ("TypeError: Cannot instantiate typing.Union" on the first Claude turn).
+  "anthropic>=1.12.1,<2; python_version >= '3.11'",
 ]
 dev = [
   "pytest>=7.0",
