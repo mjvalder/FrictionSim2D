@@ -27,8 +27,8 @@ from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local
 from ...agent.providers import (model_installed, ollama_binary, ollama_models,
                                 ollama_start_command)
-from ...agent.settings import (AgentSettings, api_key, fallback_ollama_model,
-                               save_agent_settings, store_api_key)
+from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key,
+                               fallback_ollama_model, save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
 
@@ -315,9 +315,12 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         QApplication.clipboard().setText(self._start_command_fn(self.settings))
 
     def _fill_models(self, installed) -> None:
-        """Offer the installed models (Ollama) or the current one; keep it selected."""
-        current = getattr(self.settings, self.settings.provider).model
-        names = list(installed) if self.settings.provider == 'ollama' else []
+        """Offer the installed models (Ollama), the Claude family, or the current one;
+        keep it selected."""
+        provider = self.settings.provider
+        current = getattr(self.settings, provider).model
+        names = {'ollama': list(installed),
+                 'anthropic': list(ANTHROPIC_MODELS)}.get(provider, [])
         if current not in names:
             names.append(current)
         self.model_box.blockSignals(True)

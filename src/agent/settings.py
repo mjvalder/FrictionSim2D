@@ -41,6 +41,10 @@ class GeminiSettings(BaseModel):
     consent_given: bool = False
 
 
+#: The Claude models the model box offers (any other name can still be typed).
+ANTHROPIC_MODELS = ('claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5')
+
+
 class AnthropicSettings(BaseModel):
     """Cloud provider: Claude through the Anthropic API (a paid key)."""
 

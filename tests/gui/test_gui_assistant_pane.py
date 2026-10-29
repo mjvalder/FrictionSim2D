@@ -832,3 +832,13 @@ def test_claude_asks_for_and_stores_its_own_key(qt_app, env, monkeypatch):
     pane.send('x')
     QApplication.processEvents()
     assert stored == [('sk-ant', 'anthropic')]
+
+
+def test_claude_offers_opus_sonnet_and_haiku(qt_app, env):
+    s = AgentSettings(provider='anthropic')
+    pane = _pane([], settings=s)
+    assert [pane.model_box.itemText(i) for i in range(pane.model_box.count())] == [
+        'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
+    pane.model_box.setCurrentIndex(2)
+    pane.model_box.activated.emit(2)
+    assert s.anthropic.model == 'claude-haiku-5-5'
