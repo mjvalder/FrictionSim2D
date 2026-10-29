@@ -11,7 +11,7 @@ from typing import Callable, Iterable, List, Optional, Tuple
 
 import httpx
 
-from .settings import AgentSettings, gemini_key
+from .settings import AgentSettings, api_key
 
 #: Where the user-local install (no root) puts the binary, under $HOME.
 OLLAMA_USER_BINARY = Path('.local') / 'ollama' / 'bin' / 'ollama'
@@ -46,20 +46,47 @@ class ProviderUnavailable(RuntimeError):
     """The chosen provider cannot be used right now; the message says why."""
 
 
-def build_model(settings: AgentSettings, key_lookup=gemini_key):
+def build_model(settings: AgentSettings, key_lookup=api_key):
     """A pydantic-ai model for ``settings.provider``."""
+    # pylint: disable=import-outside-toplevel
     if settings.provider == 'gemini':
-        key = key_lookup(settings)
+        key = key_lookup(settings, 'gemini')
         if not key:
             raise ProviderUnavailable('No Gemini API key: set GEMINI_API_KEY or enter '
                                       'it when the Assistant asks.')
-        from pydantic_ai.models.google import GoogleModel  # pylint: disable=import-outside-toplevel
-        from pydantic_ai.providers.google import GoogleProvider  # pylint: disable=import-outside-toplevel
+        from pydantic_ai.models.google import GoogleModel
+        from pydantic_ai.providers.google import GoogleProvider
         return GoogleModel(settings.gemini.model, provider=GoogleProvider(api_key=key))
-    from pydantic_ai.models.openai import OpenAIChatModel  # pylint: disable=import-outside-toplevel
-    from pydantic_ai.providers.ollama import OllamaProvider  # pylint: disable=import-outside-toplevel
+    if settings.provider == 'anthropic':
+        key = key_lookup(settings, 'anthropic')
+        if not key:
+            raise ProviderUnavailable('No Anthropic API key: set ANTHROPIC_API_KEY or '
+                                      'enter it when the Assistant asks.')
+        try:
+            from pydantic_ai.models.anthropic import AnthropicModel
+            from pydantic_ai.providers.anthropic import AnthropicProvider
+        except ImportError as exc:
+            raise ProviderUnavailable('Claude needs the anthropic package: '
+                                      'pip install "pydantic-ai-slim[anthropic]"') from exc
+        return AnthropicModel(settings.anthropic.model,
+                              provider=AnthropicProvider(api_key=key))
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.ollama import OllamaProvider
     base = settings.ollama.base_url.rstrip('/') + '/v1'
     return OpenAIChatModel(settings.ollama.model, provider=OllamaProvider(base_url=base))
+
+
+def run_settings(settings: AgentSettings) -> dict:
+    """Per-request model settings for ``settings.provider``.
+
+    Temperature 0 for Gemini and Ollama. Current Claude models reject sampling
+    parameters; they get an effort level instead, and caching of the long system
+    prompt and tool list plus the growing conversation (re-sent every step).
+    """
+    if settings.provider != 'anthropic':
+        return {'temperature': 0.0}
+    return {'max_tokens': 16000, 'anthropic_effort': settings.anthropic.effort,
+            'anthropic_cache_instructions': True, 'anthropic_cache': True}
 
 
 def model_installed(model: str, installed: Iterable[str]) -> bool:

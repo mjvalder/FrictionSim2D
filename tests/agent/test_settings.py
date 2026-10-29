@@ -4,9 +4,9 @@ import stat
 import pytest
 from pydantic import ValidationError
 
-from src.agent.settings import (AgentSettings, config_dir, gemini_key,
+from src.agent.settings import (AgentSettings, api_key, config_dir, gemini_key,
                                 load_agent_settings, save_agent_settings,
-                                store_gemini_key)
+                                store_api_key, store_gemini_key)
 
 
 def test_defaults_match_phase0():
@@ -64,6 +64,24 @@ def test_secrets_file_is_owner_only_even_if_it_existed(tmp_path):
     store_gemini_key('k', path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert path.read_text() == 'gemini=k\n'
+
+
+def test_each_provider_keeps_its_own_key(monkeypatch, tmp_path):
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    path = store_gemini_key('g', tmp_path / 'agent.secrets')
+    store_api_key('a', 'anthropic', path)
+    store_gemini_key('g2', path)
+    s = AgentSettings()
+    assert (api_key(s, 'gemini', path), api_key(s, 'anthropic', path)) == ('g2', 'a')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'env-a')
+    assert api_key(s, 'anthropic', path) == 'env-a'
+
+
+def test_anthropic_defaults():
+    s = AgentSettings(provider='anthropic')
+    assert (s.anthropic.model, s.anthropic.api_key_env) == ('claude-opus-5-5', 'ANTHROPIC_API_KEY')
+    assert s.anthropic.effort == 'medium' and not s.anthropic.consent_given
 
 
 def test_key_never_written_to_settings_yaml(tmp_path, monkeypatch):

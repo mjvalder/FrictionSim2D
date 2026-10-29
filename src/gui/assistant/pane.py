@@ -27,8 +27,8 @@ from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local
 from ...agent.providers import (model_installed, ollama_binary, ollama_models,
                                 ollama_start_command)
-from ...agent.settings import (AgentSettings, fallback_ollama_model, gemini_key,
-                               save_agent_settings, store_gemini_key)
+from ...agent.settings import (AgentSettings, api_key, fallback_ollama_model,
+                               save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
 
@@ -40,6 +40,14 @@ CONSENT_TEXT = (
     '(config contents, file names, and later unpublished results tables) are sent to '
     'Google. On the free tier Google may use them to improve its products.\n\n'
     'Use Gemini for the Assistant?')
+ANTHROPIC_CONSENT_TEXT = (
+    'Claude runs in Anthropic\'s cloud. Your messages and the assistant\'s tool results '
+    '(config contents, file names, and later unpublished results tables) are sent to '
+    'Anthropic. API use is billed to your Anthropic account.\n\n'
+    'Use Claude for the Assistant?')
+#: Per cloud provider: (name in messages, consent text, where to get a key).
+CLOUD = {'gemini': ('Gemini', CONSENT_TEXT, 'aistudio.google.com/apikey'),
+         'anthropic': ('Claude', ANTHROPIC_CONSENT_TEXT, 'platform.claude.com')}
 
 #: How often the idle check runs (a server the pane started stops when idle).
 IDLE_CHECK_MS = 60_000
@@ -90,7 +98,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                  save_settings=save_agent_settings,
                  ask_key: Optional[Callable[[], Optional[str]]] = None,
                  confirm_consent: Optional[Callable[[], bool]] = None,
-                 store_key=store_gemini_key,
+                 store_key=store_api_key,
                  start_command_fn=ollama_start_command,
                  ollama_server, models_fn=ollama_models) -> None:
         super().__init__(parent)
@@ -173,6 +181,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.provider_box.addItem('Gemini (cloud)', 'gemini')
         self.provider_box.addItem('Ollama (local)', 'ollama')
         self.provider_box.setItemData(1, 'Offline; experimental and slow on a laptop GPU',
+                                      Qt.ToolTipRole)
+        self.provider_box.addItem('Claude (cloud)', 'anthropic')
+        self.provider_box.setItemData(2, 'Anthropic API; needs a paid API key',
                                       Qt.ToolTipRole)
         self.provider_box.setCurrentIndex(self.provider_box.findData(self.settings.provider))
         self.provider_box.currentIndexChanged.connect(self._on_provider_changed)
@@ -280,8 +291,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         if not ollama:
             self.details_button.setChecked(False)
             self._fill_models([])
-            self._set_status('Gemini: key set' if gemini_key(self.settings)
-                             else 'Gemini: no API key yet (you will be asked)')
+            name = CLOUD[provider][0]
+            self._set_status(f'{name}: key set' if api_key(self.settings, provider)
+                             else f'{name}: no API key yet (you will be asked)')
         elif check:
             self._check_ollama()
         else:
@@ -494,37 +506,41 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self._append(f'Could not save the assistant settings: {exc}', 'color:#b00')
 
     def _default_ask_key(self) -> Optional[str]:
-        key, ok = QInputDialog.getText(self, 'Gemini API key',
-                                       'Paste your Gemini API key (stored owner-only in '
+        name = CLOUD[self.settings.provider][0]
+        key, ok = QInputDialog.getText(self, f'{name} API key',
+                                       f'Paste your {name} API key (stored owner-only in '
                                        '~/.config/FrictionSim2D/agent.secrets):',
                                        QLineEdit.Password)
         return key.strip() if ok and key.strip() else None
 
     def _default_confirm_consent(self) -> bool:
-        answer = QMessageBox.question(self, 'Use Gemini?', CONSENT_TEXT,
+        name, text, _ = CLOUD[self.settings.provider]
+        answer = QMessageBox.question(self, f'Use {name}?', text,
                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return answer == QMessageBox.Yes
 
     def _ready(self) -> bool:
-        if self.settings.provider != 'gemini':
+        provider = self.settings.provider
+        if provider not in CLOUD:
             return self._ollama_ready
-        if not self.settings.gemini.consent_given:
+        name, _, key_url = CLOUD[provider]
+        cloud = getattr(self.settings, provider)
+        if not cloud.consent_given:
             if not self._confirm_consent():
-                self._append('Gemini not used: consent declined. Switch to Ollama or ask again.',
-                             'color:gray')
+                self._append(f'{name} not used: consent declined. Switch to Ollama or ask '
+                             'again.', 'color:gray')
                 return False
-            self.settings.gemini.consent_given = True
+            cloud.consent_given = True
             self._save()
-        if not gemini_key(self.settings):
+        if not api_key(self.settings, provider):
             key = self._ask_key()
             if not key:
-                self._append('No Gemini API key: get one at aistudio.google.com/apikey.',
-                             'color:gray')
+                self._append(f'No {name} API key: get one at {key_url}.', 'color:gray')
                 return False
             try:
-                self._store_key(key)
+                self._store_key(key, provider)
             except OSError as exc:
-                self._append(f'Could not store the Gemini API key: {exc}', 'color:#b00')
+                self._append(f'Could not store the {name} API key: {exc}', 'color:#b00')
                 return False
             self.session.switch(self.settings)
             self._refresh_header()

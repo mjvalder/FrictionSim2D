@@ -60,7 +60,7 @@ def model_name(env: EvalEnv) -> str:
     defaults = AgentSettings()
     if env.model:
         return env.model
-    return defaults.ollama.model if env.provider == 'ollama' else defaults.gemini.model
+    return getattr(defaults, env.provider).model
 
 
 #: Models already warmed up in this process (a cold Ollama load is not a turn).
@@ -98,14 +98,11 @@ def build_session(env: EvalEnv, deps=None):
         from pydantic_ai.models.function import FunctionModel
         return AgentSession(AgentSettings(), model=FunctionModel(
             stream_function=_ask_back, model_name=FUNCTION_PROVIDER))
-    if env.provider not in ('gemini', 'ollama'):
+    if env.provider not in ('gemini', 'ollama', 'anthropic'):
         raise ProviderUnavailable(f'unknown AGENT_EVAL_PROVIDER {env.provider!r}')
     settings = AgentSettings(provider=env.provider)
     if env.model:
-        if env.provider == 'ollama':
-            settings.ollama.model = env.model
-        else:
-            settings.gemini.model = env.model
+        getattr(settings, env.provider).model = env.model
     if env.provider == 'ollama':
         ok, message = ollama_status(settings)
         if not ok:

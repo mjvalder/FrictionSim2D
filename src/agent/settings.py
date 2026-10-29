@@ -1,4 +1,4 @@
-"""Assistant settings and the Gemini key, under $XDG_CONFIG_HOME/FrictionSim2D/.
+"""Assistant settings and the cloud API keys, under $XDG_CONFIG_HOME/FrictionSim2D/.
 
 Kept apart from `GlobalSettings` (simulation physics) on purpose: these are a
 user's GUI preferences, and the key must never reach settings.yaml, a workspace
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable, Literal, Optional
+from typing import Dict, Iterable, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -41,6 +41,20 @@ class GeminiSettings(BaseModel):
     consent_given: bool = False
 
 
+class AnthropicSettings(BaseModel):
+    """Cloud provider: Claude through the Anthropic API (a paid key)."""
+
+    model: str = 'claude-opus-5-5'
+    api_key_env: str = 'ANTHROPIC_API_KEY'
+    consent_given: bool = False
+    #: How hard Claude thinks; lower is faster and cheaper per turn.
+    effort: Literal['low', 'medium', 'high', 'xhigh', 'max'] = 'medium'
+
+
+#: The providers that send the conversation to a cloud service and need a key.
+CLOUD_PROVIDERS = ('gemini', 'anthropic')
+
+
 class MaterialsProjectSettings(BaseModel):
     """Materials Project / 2DMatPedia lookups: only formulas and ids are sent."""
 
@@ -50,9 +64,10 @@ class MaterialsProjectSettings(BaseModel):
 class AgentSettings(BaseModel):
     """Everything the Assistant pane remembers between sessions."""
 
-    provider: Literal['gemini', 'ollama'] = 'gemini'
+    provider: Literal['gemini', 'ollama', 'anthropic'] = 'gemini'
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)
     materials_project: MaterialsProjectSettings = Field(
         default_factory=MaterialsProjectSettings)
     #: Off: config/settings changes land in the Builder at once (with Undo).
@@ -101,22 +116,36 @@ def save_agent_settings(settings: AgentSettings, path: Optional[Path] = None) ->
     return path
 
 
-def gemini_key(settings: AgentSettings,
-               secrets_path: Optional[Path] = None) -> Optional[str]:
-    """The Gemini key: the named environment variable first, then agent.secrets."""
-    env = os.environ.get(settings.gemini.api_key_env)
+def api_key(settings: AgentSettings, provider: str,
+            secrets_path: Optional[Path] = None) -> Optional[str]:
+    """A cloud ``provider``'s key: its environment variable first, then agent.secrets."""
+    env = os.environ.get(getattr(settings, provider).api_key_env)
     if env and env.strip():
         return env.strip()
-    path = secrets_path or config_dir() / SECRETS_NAME
-    if path.is_file():
-        for line in path.read_text(encoding='utf-8').splitlines():
-            if line.startswith('gemini='):
-                return line.split('=', 1)[1].strip() or None
-    return None
+    return _read_secrets(secrets_path or config_dir() / SECRETS_NAME).get(provider)
 
 
-def store_gemini_key(key: str, secrets_path: Optional[Path] = None) -> Path:
-    """Write the key to agent.secrets, readable by the owner only.
+def gemini_key(settings: AgentSettings,
+               secrets_path: Optional[Path] = None) -> Optional[str]:
+    """The Gemini key (see `api_key`)."""
+    return api_key(settings, 'gemini', secrets_path)
+
+
+def _read_secrets(path: Path) -> Dict[str, str]:
+    """``provider=key`` lines of agent.secrets; empty keys are left out."""
+    if not path.is_file():
+        return {}
+    keys = {}
+    for line in path.read_text(encoding='utf-8').splitlines():
+        name, sep, value = line.partition('=')
+        if sep and value.strip():
+            keys[name.strip()] = value.strip()
+    return keys
+
+
+def store_api_key(key: str, provider: str, secrets_path: Optional[Path] = None) -> Path:
+    """Write ``provider``'s key to agent.secrets, keeping the other providers' keys,
+    readable by the owner only.
 
     ``os.open`` with mode 0o600 creates the file private from the first byte;
     ``fchmod`` covers a file that already existed with a wider mode, which
@@ -130,8 +159,15 @@ def store_gemini_key(key: str, secrets_path: Optional[Path] = None) -> Path:
     if not path.parent.is_dir():
         path.parent.mkdir(parents=True, mode=0o700)
         os.chmod(path.parent, 0o700)  # mkdir's mode is masked by the umask
+    keys = {} if path.is_symlink() else _read_secrets(path)  # O_NOFOLLOW refuses it below
+    keys[provider] = key
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-        handle.write(f'gemini={key}\n')
+        handle.write(''.join(f'{name}={value}\n' for name, value in keys.items()))
     return path
+
+
+def store_gemini_key(key: str, secrets_path: Optional[Path] = None) -> Path:
+    """Write the Gemini key (see `store_api_key`)."""
+    return store_api_key(key, 'gemini', secrets_path)

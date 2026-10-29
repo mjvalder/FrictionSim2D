@@ -23,7 +23,7 @@ from .changes import ToolInputError
 from .context import AgentDeps
 from .events import TurnEvent
 from .prompts import build_system_prompt, estimate_tokens
-from .providers import ProviderUnavailable, build_model
+from .providers import ProviderUnavailable, build_model, run_settings
 from .sandbox import SandboxError, redact
 from .settings import AgentSettings
 from .tools import analysis, compact, materials, plots, setup, workspace
@@ -31,7 +31,7 @@ from .tools import knowledge, materials_db
 
 logger = logging.getLogger(__name__)
 
-HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000}
+HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000, 'anthropic': 32000}
 _RETRY_IN = re.compile(r'retry in ([\d.]+)\s*s', re.IGNORECASE)
 _RETRY_DELAY = re.compile(r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s")
 
@@ -336,7 +336,7 @@ class AgentSession:
                       token: CancellationToken, generation: int, limit: int) -> None:
         async with self.agent.run_stream_events(
                 text, deps=deps, message_history=self._trimmed_history(),
-                cancellation_token=token, model_settings={'temperature': 0.0},
+                cancellation_token=token, model_settings=run_settings(self.settings),
                 usage_limits=UsageLimits(request_limit=limit)) as events:
             async for event in events:
                 self._dispatch(event, emit, generation)

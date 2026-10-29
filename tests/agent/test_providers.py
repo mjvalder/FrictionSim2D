@@ -5,18 +5,38 @@ import pytest
 pytest.importorskip('pydantic_ai')
 
 from src.agent.providers import (ProviderUnavailable, build_model,  # noqa: E402
-                                 ollama_models, ollama_status)
+                                 ollama_models, ollama_status, run_settings)
 from src.agent.settings import AgentSettings  # noqa: E402
 
 
 def test_gemini_without_key_is_unavailable():
     with pytest.raises(ProviderUnavailable, match='Gemini API key'):
-        build_model(AgentSettings(), key_lookup=lambda s: None)
+        build_model(AgentSettings(), key_lookup=lambda s, p: None)
 
 
 def test_gemini_model_built_with_key():
-    model = build_model(AgentSettings(), key_lookup=lambda s: 'k')
+    model = build_model(AgentSettings(), key_lookup=lambda s, p: 'k')
     assert 'gemini-3.5-flash-lite' in model.model_name
+
+
+def test_anthropic_without_key_is_unavailable():
+    with pytest.raises(ProviderUnavailable, match='Anthropic API key'):
+        build_model(AgentSettings(provider='anthropic'), key_lookup=lambda s, p: None)
+
+
+def test_anthropic_model_built_with_its_own_key():
+    pytest.importorskip('anthropic')
+    asked = []
+    model = build_model(AgentSettings(provider='anthropic'),
+                        key_lookup=lambda s, p: asked.append(p) or 'k')
+    assert asked == ['anthropic'] and model.model_name == 'claude-opus-5-5'
+
+
+def test_run_settings_per_provider():
+    assert run_settings(AgentSettings()) == {'temperature': 0.0}
+    claude = run_settings(AgentSettings(provider='anthropic'))
+    assert 'temperature' not in claude  # current Claude models reject sampling params
+    assert claude['anthropic_effort'] == 'medium' and claude['anthropic_cache_instructions']
 
 
 def test_ollama_model_uses_openai_endpoint():

@@ -2,6 +2,7 @@
 
     pytest tests/agent/evals -m agent_eval                          # Gemini (GEMINI_API_KEY)
     AGENT_EVAL_PROVIDER=ollama AGENT_EVAL_MODEL=qwen3:8b pytest tests/agent/evals -m agent_eval
+    AGENT_EVAL_PROVIDER=anthropic pytest tests/agent/evals -m agent_eval  # ANTHROPIC_API_KEY
     AGENT_EVAL_REPEATS=3 AGENT_EVAL_PAUSE=20 ...                    # free-tier pacing
 
 Cases and their code-computed expectations: ``cases.py``. Results:

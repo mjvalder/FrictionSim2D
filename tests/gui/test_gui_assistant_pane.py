@@ -389,7 +389,7 @@ def test_save_errors_show_in_chat(qt_app, env):
 
 def test_key_store_error_shows_in_chat(qt_app, env, monkeypatch):
     monkeypatch.delenv('GEMINI_API_KEY')
-    def broken(_key):
+    def broken(_key, _provider):
         raise OSError('disk full')
     session = FakeSession([TurnEvent('done')])
     s = AgentSettings()
@@ -813,3 +813,22 @@ def test_applied_line_can_offer_a_show_link(qt_app, env):
     assert shown == ['Plots']
     pane.set_undo_state(1, 'undone')  # the Show link is not the Undo control
     assert 'Show' in pane.chat.toPlainText() and undone == []
+
+
+def test_claude_asks_for_and_stores_its_own_key(qt_app, env, monkeypatch):
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    stored = []
+    session = FakeSession([TurnEvent('done')])
+    s = AgentSettings(provider='anthropic')
+    s.anthropic.consent_given = True
+    pane = AssistantPane(session, lambda: object(), s, save_settings=lambda *a, **k: None,
+                         ask_key=lambda: 'sk-ant', confirm_consent=lambda: True,
+                         store_key=lambda key, provider: stored.append((key, provider)),
+                         ollama_server=FakeServer())
+    _PANES.append(pane)
+    assert pane.provider_box.currentData() == 'anthropic'
+    assert pane.status_label.text() == 'Claude: no API key yet (you will be asked)'
+    assert not pane.cloud_badge.isHidden() and pane.check_button.isHidden()
+    pane.send('x')
+    QApplication.processEvents()
+    assert stored == [('sk-ant', 'anthropic')]
