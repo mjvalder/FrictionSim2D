@@ -8,21 +8,30 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Iterable, Literal, Optional
+from typing import TYPE_CHECKING, Dict, Iterable, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
 
+if TYPE_CHECKING:
+    from .bundles import FineTune
+
 SETTINGS_NAME = 'agent.yaml'
 SECRETS_NAME = 'agent.secrets'
-#: The default local model, used as Ollama ships it (no derived Modelfile).
-OLLAMA_DEFAULT_MODEL = 'qwen3:4b'
-#: The derived model older agent.yaml files name; it was never published.
-OLLAMA_LEGACY_MODEL = 'fs2d-qwen3-4b'
+#: The default local model: the fine-tune, installed from its bundle (src/agent/bundles.py).
+OLLAMA_DEFAULT_MODEL = 'fs2d-assistant:q35-4b'
+#: Used when the fine-tune can be neither found nor installed: stock 71 %, and
+#: unlike qwen3:4b its thinking can be switched off.
+OLLAMA_STOCK_MODEL = 'qwen3.5:4b'
+#: Models older agent.yaml files name: the Phase-0 derived model (never
+#: published) and the old default, whose template forces thinking (48 %, 44 s a turn).
+OLLAMA_LEGACY_MODELS = ('fs2d-qwen3-4b', 'qwen3:4b')
+#: agent.yaml from before the fine-tune default; `fallback_ollama_model` migrates it once.
+SETTINGS_VERSION = 2
 
 
 class OllamaSettings(BaseModel):
-    """Local, experimental provider (Phase 0: ~67 s per cold turn on a 780M)."""
+    """Local provider: a fine-tune by default (Phase 0: ~67 s per cold turn on a 780M)."""
 
     base_url: str = 'http://localhost:11434'
     model: str = OLLAMA_DEFAULT_MODEL
@@ -86,21 +95,38 @@ class AgentSettings(BaseModel):
     ask_before_apply: bool = False
     #: Model requests one turn may make before it stops to save quota.
     max_requests_per_turn: int = Field(50, ge=1)
+    #: Bumped once the legacy model names are migrated (a file without it is version 1).
+    settings_version: int = SETTINGS_VERSION
 
 
-def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str]) -> Optional[str]:
-    """Swap the retired derived model for the default when it is not installed.
+def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str],
+                          installable: Iterable[str] = ()) -> Optional[str]:
+    """Move an old agent.yaml to the fine-tune default, and the default to stock
+    when the fine-tune is neither installed nor installable.
 
-    Only `OLLAMA_LEGACY_MODEL` is rewritten, never a model the user chose.
-    Returns a note for the user when the setting changed, else None.
+    The legacy names are migrated once (``settings_version``), so a user who
+    picks one again afterwards keeps it; any other model is never rewritten.
+    Returns a note for the user when the model changed, else None.
     """
-    names = set(installed)
-    legacy = OLLAMA_LEGACY_MODEL
-    if settings.ollama.model != legacy or {legacy, f'{legacy}:latest'} & names:
+    names, old = set(installed), settings.ollama.model
+    if settings.settings_version < SETTINGS_VERSION:
+        settings.settings_version = SETTINGS_VERSION
+        if old in OLLAMA_LEGACY_MODELS:
+            settings.ollama.model = OLLAMA_DEFAULT_MODEL
+    if (settings.ollama.model == OLLAMA_DEFAULT_MODEL and OLLAMA_DEFAULT_MODEL not in names
+            and OLLAMA_DEFAULT_MODEL not in set(installable)):
+        settings.ollama.model = OLLAMA_STOCK_MODEL
+    if settings.ollama.model == old:
         return None
-    settings.ollama.model = OLLAMA_DEFAULT_MODEL
-    return (f'Model {legacy} is not installed; using {OLLAMA_DEFAULT_MODEL} '
-            '(thinking off, temperature 0, set by the assistant itself).')
+    return f'Model {old} replaced by {settings.ollama.model} (the assistant\'s default).'
+
+
+def apply_finetune(settings: AgentSettings, finetune: Optional['FineTune']) -> bool:
+    """Prompt like ``finetune`` was trained (knowledge files or not); True if changed."""
+    if finetune is None or settings.ollama.trained_knowledge == finetune.trained_knowledge:
+        return False
+    settings.ollama.trained_knowledge = finetune.trained_knowledge
+    return True
 
 
 def config_dir() -> Path:
@@ -115,6 +141,7 @@ def load_agent_settings(path: Optional[Path] = None) -> AgentSettings:
     if not path.is_file():
         return AgentSettings()
     data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    data.setdefault('settings_version', 1)  # written before the version existed
     return AgentSettings.model_validate(data)
 
 

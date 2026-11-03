@@ -14,7 +14,7 @@ def test_defaults_match_phase0():
     assert s.provider == 'gemini'
     assert s.gemini.model == 'gemini-3.5-flash-lite'
     assert s.gemini.api_key_env == 'GEMINI_API_KEY'
-    assert s.ollama.model == 'qwen3:4b'
+    assert s.ollama.model == 'fs2d-assistant:q35-4b'
     assert (s.ollama.max_threads, s.ollama.context_tokens, s.ollama.keep_alive) == (8, 16384, '2m')
     assert s.ollama.idle_minutes == 10
     assert s.max_requests_per_turn == 50
@@ -110,24 +110,66 @@ def test_idle_minutes_and_step_cap_round_trip_and_validate(tmp_path):
         load_agent_settings(path)
 
 
-def test_legacy_derived_model_falls_back_when_not_installed(tmp_path):
-    from src.agent.settings import fallback_ollama_model
+def _legacy(tmp_path, model):
     path = tmp_path / 'agent.yaml'
-    path.write_text('provider: ollama\nollama:\n  model: fs2d-qwen3-4b\n')
-    s = load_agent_settings(path)
-    assert s.ollama.model == 'fs2d-qwen3-4b'  # kept until we know what is installed
-    note = fallback_ollama_model(s, ['qwen3:4b', 'qwen3:8b', 'llama3.1:8b'])
-    assert s.ollama.model == 'qwen3:4b' and 'fs2d-qwen3-4b' in note and 'qwen3:4b' in note
+    path.write_text(f'provider: ollama\nollama:\n  model: {model}\n')
+    return load_agent_settings(path)
 
 
-def test_legacy_model_kept_when_installed_and_others_untouched():
+@pytest.mark.parametrize('legacy', ['fs2d-qwen3-4b', 'qwen3:4b'])
+def test_legacy_maps_to_default_when_installable(tmp_path, legacy):
+    from src.agent.settings import fallback_ollama_model
+    s = _legacy(tmp_path, legacy)
+    assert s.ollama.model == legacy  # kept until we know what is installed
+    note = fallback_ollama_model(s, [legacy, 'qwen3:8b'], ['fs2d-assistant:q35-4b'])
+    assert s.ollama.model == 'fs2d-assistant:q35-4b'
+    assert legacy in note and 'fs2d-assistant:q35-4b' in note
+
+
+def test_legacy_maps_to_stock_when_default_unavailable(tmp_path):
+    from src.agent.settings import fallback_ollama_model
+    s = _legacy(tmp_path, 'fs2d-qwen3-4b')
+    note = fallback_ollama_model(s, ['fs2d-qwen3-4b:latest'], [])
+    assert s.ollama.model == 'qwen3.5:4b' and 'qwen3.5:4b' in note
+
+
+def test_default_falls_back_to_stock_only_when_unavailable():
     from src.agent.settings import fallback_ollama_model
     s = AgentSettings()
-    s.ollama.model = 'fs2d-qwen3-4b'
-    assert fallback_ollama_model(s, ['fs2d-qwen3-4b:latest', 'qwen3:4b']) is None
-    assert s.ollama.model == 'fs2d-qwen3-4b'
-    s.ollama.model = 'mistral:7b'  # a user's own choice is never rewritten
-    assert fallback_ollama_model(s, ['qwen3:4b']) is None and s.ollama.model == 'mistral:7b'
+    assert fallback_ollama_model(s, [], ['fs2d-assistant:q35-4b']) is None
+    assert fallback_ollama_model(s, ['fs2d-assistant:q35-4b'], []) is None
+    assert s.ollama.model == 'fs2d-assistant:q35-4b'
+    assert fallback_ollama_model(s, ['qwen3.5:4b'], []) is not None
+    assert s.ollama.model == 'qwen3.5:4b'
+
+
+def test_migration_runs_once_so_a_later_choice_sticks(tmp_path):
+    from src.agent.settings import fallback_ollama_model
+    s = _legacy(tmp_path, 'qwen3:4b')
+    fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:q35-4b'])
+    save_agent_settings(s, tmp_path / 'agent.yaml')
+    s = load_agent_settings(tmp_path / 'agent.yaml')
+    s.ollama.model = 'qwen3:4b'  # chosen again, on purpose
+    save_agent_settings(s, tmp_path / 'agent.yaml')
+    s = load_agent_settings(tmp_path / 'agent.yaml')
+    assert fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:q35-4b']) is None
+    assert s.ollama.model == 'qwen3:4b'
+
+
+def test_user_choice_untouched(tmp_path):
+    from src.agent.settings import fallback_ollama_model
+    s = _legacy(tmp_path, 'mistral:7b')
+    assert fallback_ollama_model(s, ['qwen3:4b'], []) is None and s.ollama.model == 'mistral:7b'
+
+
+def test_apply_finetune_sets_trained_knowledge():
+    from src.agent.bundles import FineTune
+    from src.agent.settings import apply_finetune
+    s = AgentSettings()
+    tune = FineTune(tag='q35-4b', base='b', schema_hash='s', knowledge_hash='k',
+                    trained_knowledge=True)
+    assert apply_finetune(s, tune) and s.ollama.trained_knowledge is True
+    assert not apply_finetune(s, tune) and not apply_finetune(s, None)
 
 
 @pytest.mark.parametrize('key', ['abc\ndef', 'abc\rdef', 'abc\r\ngemini=evil'])
