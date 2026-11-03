@@ -1,11 +1,19 @@
-"""Merge a trained LoRA, convert to GGUF and register it in Ollama (spec §5).
+"""Merge a trained LoRA, convert to GGUF, register it in Ollama and bundle it (spec §5).
 
-    python tools/agent_data/export.py --run smoke-1p7b --tag smoke
+    python tools/agent_data/export.py --run q35-4b --tag q35-4b --trained-knowledge
+    python tools/agent_data/export.py --run q35-4b --tag q35-4b --trained-knowledge \\
+        --bundle-only --eval tests/agent/evals/.results/ollama-fs2d-assistant_q35-4b-*.json
 
 Writes ``runs/<run>/gguf/`` (Q4_K_M) and a Modelfile carrying temperature 0
 and the tool-schema hash the model was trained for, then runs
 ``ollama create fs2d-assistant:<tag>``. Run with the fs2d-train env; Ollama
 must be on ``$OLLAMA_BIN`` (default ``~/opt/ollama/bin/ollama``).
+
+Either way it also writes the portable bundle ``models/<tag>/`` (weights,
+relative-FROM Modelfile, manifest; `src/agent/bundles.py`), which any machine
+installs with ``ollama create`` or the Assistant's Install button.
+``--bundle-only`` makes just the bundle, from a run already exported: no
+conversion, no Ollama, so it works on a machine without the training stack.
 """
 from __future__ import annotations
 
@@ -15,9 +23,16 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent.parent))
+sys.path.insert(0, str(HERE))
+
+# pylint: disable=wrong-import-position
+import compare  # noqa: E402
+from src.agent.bundles import MODELS_DIR, write_bundle  # noqa: E402
+
 RUNS = HERE / 'runs'
 OLLAMA_BIN = os.environ.get('OLLAMA_BIN', str(Path.home() / 'opt' / 'ollama' / 'bin' / 'ollama'))
 
@@ -47,43 +62,93 @@ PARAMETER num_ctx 16384
 """
 
 
+def find_gguf(run: Path, quant: str) -> List[Path]:
+    """The run's quantised weights, never the multimodal projector."""
+    return [p for p in sorted(run.rglob(f'*{quant.upper()}*.gguf')) if 'mmproj' not in p.name]
+
+
+def template_lines(modelfile: str) -> str:
+    """A Modelfile's template part: everything but FROM, PARAMETER and comments."""
+    keep = [line for line in modelfile.splitlines()
+            if not line.startswith(('FROM', 'PARAMETER', '#'))]
+    return '\n'.join(keep).strip()
+
+
+def eval_scores(paths: Sequence[Path], name: str) -> dict:
+    """pass@1 and median warm latency of ``name`` in the benchmark results."""
+    runs = [r for (_, model), records in compare.load(paths).items()
+            if model == name for r in records]
+    if not runs:
+        raise SystemExit(f'no results for {name} in {", ".join(map(str, paths))}')
+    score = compare.score(name, runs)
+    return {'pass1': score['pass1'], 'latency_p50': score['latency_p50']}
+
+
+def _convert(run: Path, quant: str) -> List[Path]:
+    """Merge the adapter and write the GGUF; Unsloth appends '_gguf' to the folder."""
+    from unsloth import FastLanguageModel  # pylint: disable=import-outside-toplevel
+    model, tokenizer = FastLanguageModel.from_pretrained(str(run / 'adapter'),
+                                                         max_seq_length=8192,
+                                                         load_in_4bit=False)
+    model.save_pretrained_gguf(str(run / 'gguf'), tokenizer, quantization_method=quant)
+    return find_gguf(run, quant)
+
+
+def _served_template(base: str, env: dict) -> str:
+    """The template the stock base model is served with, as the fine-tune needs it."""
+    template = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[base], '--template'],
+                              check=True, capture_output=True, text=True, env=env).stdout
+    stock = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[base], '--modelfile'],
+                           check=True, capture_output=True, text=True, env=env).stdout
+    renderer = [line for line in stock.splitlines() if line.startswith(('RENDERER', 'PARSER'))]
+    if renderer:  # Qwen3.5: Ollama's built-in renderer, the HF template's twin
+        return '\n'.join(renderer)
+    template = template.replace(OPEN_THINK, OPEN_BARE).replace('$.IsThinkSet', 'false')
+    return f'TEMPLATE """{template.strip()}"""'
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--run', required=True)
     parser.add_argument('--tag', required=True)
     parser.add_argument('--quant', default='q4_k_m')
+    parser.add_argument('--trained-knowledge', required=True,
+                        action=argparse.BooleanOptionalAction,
+                        help='whether the model is given the knowledge files in its prompt')
+    parser.add_argument('--bundle-only', action='store_true',
+                        help='only write models/<tag>/ from the run\'s GGUF and Modelfile')
+    parser.add_argument('--eval', nargs='+', type=Path, default=[],
+                        help='benchmark results JSONs to take pass@1 and p50 latency from')
+    parser.add_argument('--models-dir', type=Path, default=MODELS_DIR)
     args = parser.parse_args(argv)
 
     run = RUNS / args.run
     metrics = json.loads((run / 'metrics.json').read_text())
-    ggufs = sorted(run.rglob(f'*{args.quant.upper()}*.gguf'))
-    if not ggufs:  # convert once; Unsloth appends '_gguf' to the folder it is given
-        from unsloth import FastLanguageModel  # pylint: disable=import-outside-toplevel
-        model, tokenizer = FastLanguageModel.from_pretrained(str(run / 'adapter'),
-                                                             max_seq_length=8192,
-                                                             load_in_4bit=False)
-        model.save_pretrained_gguf(str(run / 'gguf'), tokenizer,
-                                   quantization_method=args.quant)
-        ggufs = sorted(run.rglob(f'*{args.quant.upper()}*.gguf'))
-    quantised = ggufs
-    env = {**os.environ, 'OLLAMA_HOST': os.environ.get('OLLAMA_HOST', '127.0.0.1:11434')}
-    template = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[metrics['base']], '--template'],
-                              check=True, capture_output=True, text=True, env=env).stdout
-    stock = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[metrics['base']], '--modelfile'],
-                           check=True, capture_output=True, text=True, env=env).stdout
-    renderer = [line for line in stock.splitlines() if line.startswith(('RENDERER', 'PARSER'))]
-    if renderer:  # Qwen3.5: Ollama's built-in renderer, the HF template's twin
-        template = '\n'.join(renderer)
-    else:
-        template = template.replace(OPEN_THINK, OPEN_BARE).replace('$.IsThinkSet', 'false')
-        template = f'TEMPLATE """{template.strip()}"""'
-    modelfile = run / 'Modelfile'
-    modelfile.write_text(MODELFILE.format(gguf=quantised[0], template=template,
-                                          run=args.run, **{
-        k: metrics[k] for k in ('schema_hash', 'knowledge_hash', 'base')}))
     name = f'fs2d-assistant:{args.tag}'
-    subprocess.run([OLLAMA_BIN, 'create', name, '-f', str(modelfile)], check=True, env=env)
-    print(f'{name} <- {quantised[0]}')
+    scores = (eval_scores(args.eval, name) if args.eval
+              else {'pass1': None, 'latency_p50': None})
+    ggufs = find_gguf(run, args.quant)
+    if args.bundle_only:
+        if not ggufs:
+            raise SystemExit(f'{run} has no {args.quant.upper()} GGUF; export it first')
+        template = template_lines((run / 'Modelfile').read_text())
+    else:
+        ggufs = ggufs or _convert(run, args.quant)
+        env = {**os.environ, 'OLLAMA_HOST': os.environ.get('OLLAMA_HOST', '127.0.0.1:11434')}
+        template = _served_template(metrics['base'], env)
+        modelfile = run / 'Modelfile'
+        modelfile.write_text(MODELFILE.format(gguf=ggufs[0], template=template,
+                                              run=args.run, **{
+            k: metrics[k] for k in ('schema_hash', 'knowledge_hash', 'base')}))
+        subprocess.run([OLLAMA_BIN, 'create', name, '-f', str(modelfile)], check=True, env=env)
+        print(f'{name} <- {ggufs[0]}')
+    bundle = write_bundle(args.models_dir / args.tag, gguf=ggufs[0], template=template,
+                          manifest={'tag': args.tag, 'base': metrics['base'],
+                                    'schema_hash': metrics['schema_hash'],
+                                    'knowledge_hash': metrics['knowledge_hash'],
+                                    'trained_knowledge': args.trained_knowledge,
+                                    **scores, 'registry': None})
+    print(f'bundle {bundle}')
     return 0
 
 
