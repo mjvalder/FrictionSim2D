@@ -34,9 +34,17 @@ def test_anthropic_model_built_with_its_own_key():
 
 def test_run_settings_per_provider():
     assert run_settings(AgentSettings()) == {'temperature': 0.0}
+    assert run_settings(AgentSettings(provider='ollama')) == {
+        'temperature': 0.0, 'max_tokens': 1024, 'openai_reasoning_effort': 'none'}
     claude = run_settings(AgentSettings(provider='anthropic'))
     assert 'temperature' not in claude  # current Claude models reject sampling params
     assert claude['anthropic_effort'] == 'medium' and claude['anthropic_cache_instructions']
+
+
+@pytest.mark.parametrize('model', ['fs2d-assistant:p6-4b-nt', 'qwen3.5:4b'])
+def test_every_ollama_model_is_told_not_to_think(model):
+    settings = AgentSettings(provider='ollama', ollama={'model': model})
+    assert run_settings(settings)['openai_reasoning_effort'] == 'none'
 
 
 def test_ollama_model_uses_openai_endpoint():
@@ -127,7 +135,13 @@ def test_start_command_is_throttled_and_names_the_binary(tmp_path):
     settings = AgentSettings(provider='ollama')
     command = ollama_start_command(settings, which=lambda name: '/opt/x/ollama', home=tmp_path)
     for part in ('OLLAMA_IGPU_ENABLE=1', 'OLLAMA_VULKAN=1', 'OLLAMA_MAX_LOADED_MODELS=1',
-                 'OLLAMA_NUM_PARALLEL=1', 'OLLAMA_KEEP_ALIVE=2m', 'OLLAMA_CONTEXT_LENGTH=8192',
+                 'OLLAMA_NUM_PARALLEL=1', 'OLLAMA_KEEP_ALIVE=2m', 'OLLAMA_CONTEXT_LENGTH=16384',
                  'nice -n 10'):
         assert part in command
     assert command.endswith('/opt/x/ollama serve')
+
+
+def test_ollama_reply_cap_goes_out_as_max_tokens():
+    """Ollama ignores max_completion_tokens (checked against 0.x: a cap of 5 gave 1109)."""
+    model = build_model(AgentSettings(provider='ollama'))
+    assert model.profile.get('openai_chat_supports_max_completion_tokens') is False

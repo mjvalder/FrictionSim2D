@@ -71,18 +71,31 @@ def build_model(settings: AgentSettings, key_lookup=api_key):
         return AnthropicModel(settings.anthropic.model,
                               provider=AnthropicProvider(api_key=key))
     from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
     from pydantic_ai.providers.ollama import OllamaProvider
     base = settings.ollama.base_url.rstrip('/') + '/v1'
-    return OpenAIChatModel(settings.ollama.model, provider=OllamaProvider(base_url=base))
+    provider = OllamaProvider(base_url=base)
+    # Ollama ignores max_completion_tokens and honours only max_tokens, so the
+    # reply cap (run_settings) must go out under that name.
+    profile = OpenAIModelProfile(**(provider.model_profile(settings.ollama.model) or {}),
+                                 openai_chat_supports_max_completion_tokens=False)
+    return OpenAIChatModel(settings.ollama.model, provider=provider, profile=profile)
 
 
 def run_settings(settings: AgentSettings) -> dict:
     """Per-request model settings for ``settings.provider``.
 
-    Temperature 0 for Gemini and Ollama. Current Claude models reject sampling
+    Temperature 0 for Gemini and Ollama, a cap on Ollama's reply length and no
+    thinking for Ollama. Current Claude models reject sampling
     parameters; they get an effort level instead, and caching of the long system
     prompt and tool list plus the growing conversation (re-sent every step).
     """
+    if settings.provider == 'ollama':
+        # Thinking off: a stock model, and a Qwen3.5 fine-tune (trained without it),
+        # think by default and spend the reply cap before they act. A Qwen3 fine-tune's
+        # template ignores the switch (tools/agent_data/export.py).
+        return {'temperature': 0.0, 'max_tokens': settings.ollama.max_output_tokens,
+                'openai_reasoning_effort': 'none'}
     if settings.provider != 'anthropic':
         return {'temperature': 0.0}
     return {'max_tokens': 16000, 'anthropic_effort': settings.anthropic.effort,

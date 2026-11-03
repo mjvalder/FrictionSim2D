@@ -12,12 +12,22 @@ NO_CORPUS = ('No knowledge corpus is installed; answer from the other tools or s
              'you do not know.')
 
 
-def _excerpt(text: str) -> str:
+def excerpt(text: str) -> str:
+    """The start of ``text``, cut at a sentence end where one is near."""
     if len(text) <= EXCERPT:
         return text
     cut = text[:EXCERPT]
     end = cut.rfind('. ')
     return cut[:end + 1] if end > EXCERPT // 2 else cut[:cut.rfind(' ')] + ' ...'
+
+
+def attach_passages(text: str, index: Any, count: int) -> str:
+    """``text`` followed by the ``count`` corpus passages that best match it."""
+    hits = index.search(text, count) if index is not None and count else []
+    if not hits:
+        return text
+    refs = '\n'.join(f'[{p.title}] {excerpt(p.text)}' for p in hits)
+    return f'{text}\n\nReference passages (use them only if they answer this):\n{refs}'
 
 
 def search_knowledge(deps, query: str) -> str:
@@ -33,5 +43,5 @@ def search_knowledge(deps, query: str) -> str:
     for n, passage in enumerate(hits, 1):
         where = f' -- {passage.section}' if passage.section else ''
         blocks.append(f'[{n}] {passage.title}{where} ({passage.licence}; {passage.url})\n'
-                      f'{_excerpt(passage.text)}')
+                      f'{excerpt(passage.text)}')
     return compact('\n'.join(blocks))

@@ -38,10 +38,13 @@ def estimate_tokens(text: str) -> int:
     return math.ceil(len(text) / 4)
 
 
-def build_system_prompt(provider: str, model: Optional[str] = None) -> str:
+def build_system_prompt(provider: str, model: Optional[str] = None,
+                        trained_knowledge: bool = False) -> str:
     """Role, then every knowledge file under its own heading; a fine-tuned ``model``
-    gets the role and rules alone, the prompt it was trained with."""
-    if provider == 'ollama' and (model or '').startswith(TRAINED_PREFIX):
+    gets the role and rules alone, the prompt it was trained with, unless
+    ``trained_knowledge``."""
+    if (provider == 'ollama' and (model or '').startswith(TRAINED_PREFIX)
+            and not trained_knowledge):
         return f'/no_think\n{ROLE}'
     parts = [ROLE]
     for name in KNOWLEDGE_FILES:

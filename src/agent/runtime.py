@@ -32,6 +32,8 @@ from .tools import knowledge, materials_db
 logger = logging.getLogger(__name__)
 
 HISTORY_BUDGET = {'ollama': 6000, 'gemini': 32000, 'anthropic': 32000}
+#: Invalid tool calls a turn may correct before giving up; small local models need more.
+TOOL_RETRIES = {'ollama': 4}
 _RETRY_IN = re.compile(r'retry in ([\d.]+)\s*s', re.IGNORECASE)
 _RETRY_DELAY = re.compile(r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s")
 
@@ -257,9 +259,11 @@ class AgentSession:
 
     def _build_agent(self) -> Agent:
         model = self._model if self._model is not None else build_model(self.settings)
-        agent = Agent(model, deps_type=AgentDeps, retries=2,
-                      instructions=build_system_prompt(self.settings.provider,
-                                                       self.settings.ollama.model))
+        agent = Agent(model, deps_type=AgentDeps,
+                      retries=TOOL_RETRIES.get(self.settings.provider, 2),
+                      instructions=build_system_prompt(
+                          self.settings.provider, self.settings.ollama.model,
+                          self.settings.ollama.trained_knowledge))
         _register_tools(agent)
         return agent
 
@@ -332,10 +336,19 @@ class AgentSession:
                 self.history = event.result.all_messages()
             emit(TurnEvent('done', payload=event.result.usage.requests))
 
+    def with_passages(self, text: str, deps: AgentDeps) -> str:
+        """``text`` with the corpus passages that best match it, for a local model
+        (``ollama.prefetch_passages``): a small model often skips search_knowledge."""
+        count = self.settings.ollama.prefetch_passages
+        factory = getattr(deps, 'knowledge', None)
+        if self.settings.provider != 'ollama' or not count or factory is None:
+            return text
+        return knowledge.attach_passages(text, factory(), count)
+
     async def _stream(self, text: str, deps: AgentDeps, emit: Callable[[TurnEvent], None],
                       token: CancellationToken, generation: int, limit: int) -> None:
         async with self.agent.run_stream_events(
-                text, deps=deps, message_history=self._trimmed_history(),
+                self.with_passages(text, deps), deps=deps, message_history=self._trimmed_history(),
                 cancellation_token=token, model_settings=run_settings(self.settings),
                 usage_limits=UsageLimits(request_limit=limit)) as events:
             async for event in events:

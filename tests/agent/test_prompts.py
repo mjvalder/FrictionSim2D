@@ -53,3 +53,9 @@ def test_trained_model_gets_the_short_prompt_it_was_trained_on():
     assert prompt == f'/no_think\n{ROLE}'
     assert '## conventions' in build_system_prompt('ollama', model='qwen3:4b')
     assert '## conventions' in build_system_prompt('ollama')
+
+
+def test_trained_model_can_be_given_the_knowledge_files():
+    from src.agent.prompts import TRAINED_PREFIX  # pylint: disable=import-outside-toplevel
+    prompt = build_system_prompt('ollama', model=f'{TRAINED_PREFIX}:p4', trained_knowledge=True)
+    assert prompt == build_system_prompt('ollama')

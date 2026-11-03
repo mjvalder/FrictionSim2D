@@ -6,7 +6,6 @@ functions that need it, so the aggregation helpers stay importable without it.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import os
@@ -26,7 +25,8 @@ FUNCTION_REPLY = 'Could you tell me which one you mean?'
 
 @dataclass(frozen=True)
 class EvalEnv:
-    """The env switches: AGENT_EVAL_PROVIDER, _MODEL, _REPEATS, _PAUSE, _RESULTS_DIR."""
+    """The env switches: AGENT_EVAL_PROVIDER, _MODEL, _REPEATS, _PAUSE, _RESULTS_DIR;
+    for Ollama also _PREFETCH (passages per request) and _TRAINED_KNOWLEDGE (1: on)."""
 
     provider: str
     model: Optional[str]
@@ -65,7 +65,19 @@ def model_name(env: EvalEnv) -> str:
 
 #: Models already warmed up in this process (a cold Ollama load is not a turn).
 _WARMED: set = set()
+#: One event loop for every turn of the process: the model's HTTP client is cached
+#: on the agent, and a turn on a fresh ``asyncio.run`` loop finds its pool closed.
+_RUNNER = None
 WARM_UP_PROMPT = 'Reply with the single word OK.'
+
+
+def _run(coro):
+    """Run ``coro`` on the process's one event loop (see `src.agent.loop`)."""
+    global _RUNNER  # pylint: disable=global-statement
+    if _RUNNER is None:
+        from src.agent.loop import TurnRunner  # pylint: disable=import-outside-toplevel
+        _RUNNER = TurnRunner()
+    return _RUNNER.run(coro)
 
 
 def warm_up(session, deps) -> bool:
@@ -77,8 +89,7 @@ def warm_up(session, deps) -> bool:
     if key in _WARMED:
         return False
     _WARMED.add(key)
-    asyncio.run(session.run_turn(WARM_UP_PROMPT, deps, lambda event: None,
-                                 session.new_token()))
+    _run(session.run_turn(WARM_UP_PROMPT, deps, lambda event: None, session.new_token()))
     session.new_chat()
     deps.pending.clear()
     return True
@@ -104,6 +115,8 @@ def build_session(env: EvalEnv, deps=None):
     if env.model:
         getattr(settings, env.provider).model = env.model
     if env.provider == 'ollama':
+        settings.ollama.prefetch_passages = int(os.environ.get('AGENT_EVAL_PREFETCH', '0'))
+        settings.ollama.trained_knowledge = os.environ.get('AGENT_EVAL_TRAINED_KNOWLEDGE') == '1'
         ok, message = ollama_status(settings)
         if not ok:
             raise ProviderUnavailable(message)
@@ -187,7 +200,7 @@ def run_eval_turn(session, prompt: str, deps) -> EvalResult:
     """Run one turn of ``session`` on ``deps``, timing it and counting its usage."""
     result = EvalResult(deps=deps)
     start = time.perf_counter()
-    asyncio.run(session.run_turn(prompt, deps, result.events.append, session.new_token()))
+    _run(session.run_turn(prompt, deps, result.events.append, session.new_token()))
     result.latency_s = time.perf_counter() - start
     done = [e for e in result.events if e.kind == 'done']
     result.requests = int(done[-1].payload or 0) if done else 0

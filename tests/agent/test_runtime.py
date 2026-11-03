@@ -358,3 +358,42 @@ def test_turn_cancellation_reaches_the_materials_client(deps):
     assert seen[0] is deps.cancelled and seen[1] is False
     token.cancel()
     assert deps.cancelled() is True
+
+
+class _Passage:  # pylint: disable=too-few-public-methods
+    def __init__(self, title, text):
+        self.title, self.text = title, text
+
+
+class _Index:  # pylint: disable=too-few-public-methods
+    def __init__(self):
+        self.queries = []
+
+    def search(self, query, k):
+        self.queries.append((query, k))
+        return [_Passage('Stick-slip phenomenon', 'Stick-slip is a jerking motion.')][:k]
+
+
+@pytest.mark.parametrize('provider,count,attached', [
+    ('ollama', 1, True), ('ollama', 0, False), ('gemini', 1, False)])
+def test_passages_are_attached_only_for_a_local_model_that_asks(tmp_path, mock_settings,
+                                                                provider, count, attached):
+    settings = AgentSettings(provider=provider)
+    settings.ollama.prefetch_passages = count
+    session = AgentSession(settings, model=FunctionModel(scripted('ok')))
+    deps = make_deps(tmp_path, mock_settings)
+    index = _Index()
+    deps.knowledge = lambda: index
+    text = session.with_passages('What is stick-slip?', deps)
+    assert ('[Stick-slip phenomenon] Stick-slip is a jerking motion.' in text) is attached
+    assert text.startswith('What is stick-slip?')
+    assert index.queries == ([('What is stick-slip?', 1)] if attached else [])
+
+
+def test_no_passages_without_a_corpus(tmp_path, mock_settings):
+    settings = AgentSettings(provider='ollama')
+    settings.ollama.prefetch_passages = 2
+    session = AgentSession(settings, model=FunctionModel(scripted('ok')))
+    deps = make_deps(tmp_path, mock_settings)
+    deps.knowledge = lambda: None
+    assert session.with_passages('What is stick-slip?', deps) == 'What is stick-slip?'

@@ -27,10 +27,17 @@ class OllamaSettings(BaseModel):
     base_url: str = 'http://localhost:11434'
     model: str = OLLAMA_DEFAULT_MODEL
     max_threads: int = Field(8, ge=1)
-    context_tokens: int = Field(8192, ge=2048)
+    context_tokens: int = Field(16384, ge=2048)
     keep_alive: str = '2m'
     #: A server the pane started is stopped after this long without a turn.
     idle_minutes: int = Field(10, ge=1)
+    #: Tokens one reply may generate: a small model that loops fails fast instead
+    #: of running until the context fills (18-50 min per turn on the A4000).
+    max_output_tokens: int = Field(1024, ge=64)
+    #: Give a fine-tuned model the knowledge files too (it was trained without them).
+    trained_knowledge: bool = False
+    #: Corpus passages found for the user's message and attached to it (0: none).
+    prefetch_passages: int = Field(0, ge=0, le=3)
 
 
 class GeminiSettings(BaseModel):

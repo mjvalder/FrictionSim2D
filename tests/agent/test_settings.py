@@ -15,7 +15,7 @@ def test_defaults_match_phase0():
     assert s.gemini.model == 'gemini-3.5-flash-lite'
     assert s.gemini.api_key_env == 'GEMINI_API_KEY'
     assert s.ollama.model == 'qwen3:4b'
-    assert (s.ollama.max_threads, s.ollama.context_tokens, s.ollama.keep_alive) == (8, 8192, '2m')
+    assert (s.ollama.max_threads, s.ollama.context_tokens, s.ollama.keep_alive) == (8, 16384, '2m')
     assert s.ollama.idle_minutes == 10
     assert s.max_requests_per_turn == 50
     assert s.materials_project.enabled is True
