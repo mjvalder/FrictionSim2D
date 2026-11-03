@@ -22,18 +22,30 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBox
                                QPlainTextEdit, QPushButton, QScrollArea, QTextBrowser,
                                QVBoxLayout, QWidget)
 
+from ...agent.bundles import catalogue
 from ...agent.changes import FsChangeSet
+from ...agent.ollama_install import install_finetune
 from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local
 from ...agent.providers import (model_installed, ollama_binary, ollama_models,
                                 ollama_start_command)
-from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key,
+from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key, apply_finetune,
                                fallback_ollama_model, save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
 
 logger = logging.getLogger(__name__)
 _ORPHAN_THREADS = []  # keeps a still-running QThread alive past its pane
+
+SCHEMA_WARNING = ('{name} was trained for an older tool set; results may degrade. '
+                  'Retraining is the fix.')
+
+
+def _app_schema_hash() -> str:
+    """The running app's tool-schema hash (imports pydantic-ai, so only when asked)."""
+    from ...agent.runtime import tool_schema_hash  # pylint: disable=import-outside-toplevel
+    return tool_schema_hash()
+
 
 CONSENT_TEXT = (
     'Gemini runs in Google\'s cloud. Your messages and the assistant\'s tool results '
@@ -92,6 +104,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     _start_turn = Signal(str, object, object, int)
     #: A pool task finished: (kind, ok, message, installed models).
     _ollama_result = Signal(str, bool, str, object)
+    #: One output line of a running fine-tune install.
+    _install_progress = Signal(str)
 
     def __init__(self, session, deps_factory: Callable[[], object],
                  settings: AgentSettings, parent=None, *,
@@ -100,7 +114,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                  confirm_consent: Optional[Callable[[], bool]] = None,
                  store_key=store_api_key,
                  start_command_fn=ollama_start_command,
-                 ollama_server, models_fn=ollama_models) -> None:
+                 ollama_server, models_fn=ollama_models,
+                 catalogue_fn=catalogue, install_fn=install_finetune,
+                 schema_hash_fn=_app_schema_hash) -> None:
         super().__init__(parent)
         self.session = session
         self.settings = settings
@@ -110,6 +126,11 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._start_command_fn = start_command_fn
         self._server = ollama_server  # an OllamaServer (the window's) or a test fake
         self._models_fn = models_fn
+        self._finetunes = catalogue_fn()  # Ollama name -> FineTune
+        self._install_fn = install_fn
+        self._schema_hash_fn = schema_hash_fn
+        self._installing = False
+        self._schema_warned = set()  # fine-tunes already warned about this session
         self._ollama_ready = False
         self._ollama_starting = False
         self._ollama_checking = False
@@ -140,6 +161,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.start()
         self._ollama_result.connect(self._on_ollama_result)
+        self._install_progress.connect(self._on_install_progress)
         self.idle_timer = QTimer(self)
         self.idle_timer.setInterval(IDLE_CHECK_MS)
         self.idle_timer.timeout.connect(self._check_idle)
@@ -209,8 +231,13 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.check_button.clicked.connect(self._check_ollama)
         self.details_button = QPushButton('Details', self)
         self.details_button.setCheckable(True)
+        self.install_button = QPushButton('Install', self)
+        self.install_button.setToolTip('Add this FrictionSim2D fine-tune to Ollama')
+        self.install_button.clicked.connect(self._install)
+        self.install_button.hide()
         status.addWidget(self.cloud_badge)
         status.addWidget(self.status_label, 1)
+        status.addWidget(self.install_button)
         status.addWidget(self.check_button)
         status.addWidget(self.details_button)
         layout.addLayout(status)
@@ -290,6 +317,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self.details_button.setVisible(ollama)
         if not ollama:
             self.details_button.setChecked(False)
+            self.install_button.hide()
             self._fill_models([])
             name = CLOUD[provider][0]
             self._set_status(f'{name}: key set' if api_key(self.settings, provider)
@@ -360,6 +388,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         if kind == 'start':
             self._on_ollama_started(ok, message, installed)
             return
+        if kind == 'install':
+            self._on_installed(ok, message, installed)
         if kind == 'check':
             self._ollama_checking = False
             if self.settings.provider == 'ollama' and not self._ollama_starting:
@@ -385,7 +415,8 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                              f'Ollama at {self.settings.ollama.base_url} is unreachable')
             return
         self._installed = list(installed)
-        note = fallback_ollama_model(self.settings, self._installed)
+        installable = [t.name for t in self._finetunes.values() if t.installable]
+        note = fallback_ollama_model(self.settings, self._installed, installable)
         if note:
             self._save()
             self.session.switch(self.settings)
@@ -395,14 +426,86 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _update_ollama_ready(self) -> None:
         model = self.settings.ollama.model
+        tune = self._finetunes.get(model)
+        if apply_finetune(self.settings, tune):
+            self._save()
+            self.session.switch(self.settings)
+        self._warn_schema(tune)
         self._ollama_ready = model_installed(model, self._installed)
+        offer = (not self._ollama_ready and tune is not None and tune.installable
+                 and is_local(self.settings))
+        self.install_button.setVisible(offer)
+        self.install_button.setEnabled(not self._installing)
         if self._ollama_ready:
             self._ollama_problem = ''
             self._set_status(f'Ollama ready ({model})')
+        elif offer:
+            source = tune.bundle if tune.bundle is not None else tune.registry
+            self._ollama_problem = (f'{model} is a FrictionSim2D fine-tune; Install adds it '
+                                    f'to Ollama (from {source}).')
+            self._set_status(f'{model} is not installed')
         else:
             self._ollama_problem = (f'Fetch the model once with: '
                                     f'{ollama_binary()} pull {model}')
             self._set_status(f'Ollama is running but has no model {model} — see Details')
+
+    def _warn_schema(self, tune) -> None:
+        """Once per fine-tune: a note when it learnt another tool set than this app's."""
+        if tune is None or tune.name in self._schema_warned:
+            return
+        try:
+            current = self._schema_hash_fn()
+        except ImportError:  # no pydantic-ai: the assistant cannot run anyway
+            return
+        self._schema_warned.add(tune.name)
+        if tune.schema_hash != current:
+            self.note(SCHEMA_WARNING.format(name=tune.name))
+
+    def _install(self) -> None:
+        """Install the selected fine-tune on a pool thread (the user's click only)."""
+        tune = self._finetunes.get(self.settings.ollama.model)
+        if tune is None or self._installing:
+            return
+        self._installing = True
+        self.install_button.setEnabled(False)
+        self.model_box.setEnabled(False)
+        self._set_status(f'Installing {tune.name}…')
+        server, settings, models_fn = self._server, self.settings, self._models_fn
+        install, signal = self._install_fn, self._install_progress
+
+        def progress(line: str) -> None:
+            try:
+                signal.emit(line)
+            except RuntimeError:  # the pane is gone (window closed meanwhile)
+                pass
+
+        def work() -> tuple:
+            ok, message = server.ensure_running(settings)
+            if not ok:
+                return False, message, None
+            ok, message = install(settings, tune, progress)
+            return ok, message, models_fn(settings)
+        self._run_ollama_task('install', work)
+
+    def _on_install_progress(self, line: str) -> None:
+        if self._installing and self.settings.provider == 'ollama':
+            self.status_label.setText(f'Installing {self.settings.ollama.model}: {line}')
+
+    def _on_installed(self, ok: bool, message: str, installed) -> None:
+        self._installing = False
+        self.install_button.setEnabled(True)
+        self.model_box.setEnabled(True)
+        if self.settings.provider != 'ollama':
+            return
+        if ok:
+            self._ollama_problem = ''
+            self._show_ollama(installed)
+            return
+        if installed is not None:
+            self._installed = list(installed)
+        self._ollama_ready = False
+        self._ollama_problem = message
+        self._set_status('Install failed — see Details')
 
     def _ensure_ollama(self, pending_text: Optional[str] = None) -> None:
         """Start Ollama (if needed) on a pool thread; ``pending_text`` is sent after."""

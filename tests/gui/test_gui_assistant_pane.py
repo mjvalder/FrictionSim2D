@@ -112,15 +112,23 @@ class FakeServer:
         self.grace = grace
 
 
+def _settings(**kwargs):
+    """Settings naming a stock model these tests install: no fine-tune involved."""
+    s = AgentSettings(**kwargs)
+    s.ollama.model = 'qwen3:4b'
+    return s
+
+
 def _pane(events, *, consent=True, settings=None, ask_key=lambda: None, session=None,
           server=None, models_fn=lambda s: None, save_settings=lambda *a, **k: None,
-          **kwargs):
-    s = settings or AgentSettings()
+          catalogue_fn=dict, schema_hash_fn=lambda: 'b8b78921bc6dd497', **kwargs):
+    s = settings or _settings()
     s.gemini.consent_given = consent
     pane = AssistantPane(session or FakeSession(events), lambda: object(), s,
                          save_settings=save_settings, ask_key=ask_key,
                          confirm_consent=lambda: True, ollama_server=server or FakeServer(),
-                         models_fn=models_fn, **kwargs)
+                         models_fn=models_fn, catalogue_fn=catalogue_fn,
+                         schema_hash_fn=schema_hash_fn, **kwargs)
     _PANES.append(pane)
     if s.provider == 'ollama':
         assert _run_until(pane.ollama_checked)  # the status check runs off the GUI thread
@@ -458,7 +466,7 @@ def test_consecutive_turns_share_the_worker_loop(qt_app, env):
 
 def test_ollama_not_running_is_one_line_with_collapsed_details(qt_app, env):
     from PySide6.QtCore import Qt
-    pane = _pane([], settings=AgentSettings(provider='ollama'),
+    pane = _pane([], settings=_settings(provider='ollama'),
                  start_command_fn=lambda _s: 'OLLAMA_IGPU_ENABLE=1 /x/ollama serve')
     status = pane.status_label.text()
     assert status.startswith('Ollama not running') and '\n' not in status
@@ -477,7 +485,7 @@ def test_ollama_not_running_is_one_line_with_collapsed_details(qt_app, env):
 
 
 def test_ollama_ready_status_names_the_model(qt_app, env):
-    pane = _pane([], settings=AgentSettings(provider='ollama'),
+    pane = _pane([], settings=_settings(provider='ollama'),
                  models_fn=lambda s: ['qwen3:4b', 'qwen3:8b'])
     assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
 
@@ -485,7 +493,7 @@ def test_ollama_ready_status_names_the_model(qt_app, env):
 def test_check_again_reruns_the_status_check(qt_app, env):
     state = {'models': None}
     server = FakeServer()
-    pane = _pane([], settings=AgentSettings(provider='ollama'),
+    pane = _pane([], settings=_settings(provider='ollama'),
                  models_fn=lambda s: state['models'], server=server)
     assert pane.status_label.text().startswith('Ollama not running')
     state['models'] = ['qwen3:4b']
@@ -514,7 +522,7 @@ def test_send_while_not_ready_starts_then_sends(qt_app, env):
     state = {'models': None}
     server = FakeServer(on_ensure=lambda: state.update(models=['qwen3:4b']))
     session = FakeSession([TurnEvent('done', payload=1)])
-    pane = _pane([], settings=AgentSettings(provider='ollama'), session=session,
+    pane = _pane([], settings=_settings(provider='ollama'), session=session,
                  server=server, models_fn=lambda s: state['models'])
     pane.input.setPlainText('hello')
     pane.send()
@@ -528,7 +536,7 @@ def test_send_while_not_ready_starts_then_sends(qt_app, env):
 def test_send_when_start_fails_says_why_and_keeps_the_text(qt_app, env):
     server = FakeServer(ok=False, message='Ollama did not answer within 20 s; see /l.log.')
     session = FakeSession([TurnEvent('done')])
-    pane = _pane([], settings=AgentSettings(provider='ollama'), session=session,
+    pane = _pane([], settings=_settings(provider='ollama'), session=session,
                  server=server)
     pane.send('hello')
     assert _run_until(pane.ollama_checked) == [(False,)]
@@ -541,7 +549,7 @@ def test_send_when_start_fails_says_why_and_keeps_the_text(qt_app, env):
 
 def test_new_chat_with_ollama_ensures_it(qt_app, env):
     server = FakeServer()
-    pane = _pane([], settings=AgentSettings(provider='ollama'), server=server,
+    pane = _pane([], settings=_settings(provider='ollama'), server=server,
                  models_fn=lambda s: ['qwen3:4b'])
     pane.new_chat()
     assert _run_until(pane.ollama_checked)
@@ -550,7 +558,7 @@ def test_new_chat_with_ollama_ensures_it(qt_app, env):
 
 def test_idle_timer_stop_updates_the_status(qt_app, env):
     server = FakeServer()
-    s = AgentSettings(provider='ollama')
+    s = _settings(provider='ollama')
     s.ollama.idle_minutes = 7
     pane = _pane([], settings=s, server=server, models_fn=lambda _s: ['qwen3:4b'])
     assert pane.idle_timer.isActive() and pane.idle_timer.interval() == 60_000
@@ -604,7 +612,7 @@ def test_ollama_checks_never_block_the_gui(qt_app, env):
     import time
     server = SlowServer()
     t0 = time.monotonic()
-    pane = AssistantPane(FakeSession([]), lambda: object(), AgentSettings(provider='ollama'),
+    pane = AssistantPane(FakeSession([]), lambda: object(), _settings(provider='ollama'),
                          save_settings=lambda *a, **k: None, ollama_server=server,
                          models_fn=_slow_models)
     _PANES.append(pane)
@@ -622,7 +630,7 @@ def test_unreachable_turn_resets_ready_so_the_next_send_starts_it(qt_app, env):
     server = FakeServer()
     session = FakeSession([TurnEvent('error', 'Could not reach the ollama server.',
                                      payload='unreachable')])
-    pane = _pane([], settings=AgentSettings(provider='ollama'), session=session,
+    pane = _pane([], settings=_settings(provider='ollama'), session=session,
                  server=server, models_fn=lambda s: ['qwen3:4b'])
     pane.send('one')
     assert _run_until(pane.turn_finished) and session.texts == ['one']
@@ -634,7 +642,7 @@ def test_unreachable_turn_resets_ready_so_the_next_send_starts_it(qt_app, env):
 
 
 def test_remote_server_status_says_unreachable(qt_app, env):
-    s = AgentSettings(provider='ollama')
+    s = _settings(provider='ollama')
     s.ollama.base_url = 'http://gpu-box.lan:11434'
     pane = _pane([], settings=s)
     assert pane.status_label.text() == 'Ollama at http://gpu-box.lan:11434 is unreachable'
@@ -643,7 +651,7 @@ def test_remote_server_status_says_unreachable(qt_app, env):
 def test_model_combo_lists_installed_models_and_fits(qt_app, env):
     from PySide6.QtWidgets import QComboBox
     saved = []
-    s = AgentSettings(provider='ollama')
+    s = _settings(provider='ollama')
     pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3:4b', 'qwen3:8b', 'llama3.1:8b'],
                  save_settings=lambda settings: saved.append(settings.ollama.model))
     box = pane.model_box
@@ -675,18 +683,18 @@ def test_typed_model_name_is_kept(qt_app, env):
 
 def test_legacy_model_falls_back_with_a_note(qt_app, env):
     saved = []
-    s = AgentSettings(provider='ollama')
+    s = AgentSettings(provider='ollama', settings_version=1)  # an agent.yaml from before
     s.ollama.model = 'fs2d-qwen3-4b'
-    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3:4b', 'llama3.1:8b'],
+    pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3.5:4b', 'fs2d-qwen3-4b:latest'],
                  save_settings=lambda settings: saved.append(settings.ollama.model))
-    assert s.ollama.model == 'qwen3:4b' and saved == ['qwen3:4b']
-    assert pane.model_box.currentText() == 'qwen3:4b'
-    assert 'fs2d-qwen3-4b is not installed' in pane.chat.toPlainText()
-    assert pane.status_label.text() == 'Ollama ready (qwen3:4b)'
+    assert s.ollama.model == 'qwen3.5:4b' and saved == ['qwen3.5:4b']
+    assert pane.model_box.currentText() == 'qwen3.5:4b'
+    assert 'fs2d-qwen3-4b replaced by qwen3.5:4b' in pane.chat.toPlainText()
+    assert pane.status_label.text() == 'Ollama ready (qwen3.5:4b)'
 
 
 def test_missing_model_is_named_and_details_say_how_to_pull(qt_app, env):
-    s = AgentSettings(provider='ollama')
+    s = _settings(provider='ollama')
     s.ollama.model = 'mistral:7b'
     pane = _pane([], settings=s, models_fn=lambda _s: ['qwen3:4b'])
     assert 'no model mistral:7b' in pane.status_label.text()
@@ -842,3 +850,125 @@ def test_claude_offers_opus_sonnet_and_haiku(qt_app, env):
     pane.model_box.setCurrentIndex(2)
     pane.model_box.activated.emit(2)
     assert s.anthropic.model == 'claude-haiku-5-5'
+
+
+# ---------------------------------------------------------------- fine-tunes
+
+def _tune(tmp_path, schema_hash='b8b78921bc6dd497'):
+    from src.agent.bundles import FineTune
+    bundle = tmp_path / 'models' / 'q35-4b'
+    bundle.mkdir(parents=True)
+    (bundle / 'model.gguf').write_bytes(b'w')
+    return FineTune(tag='q35-4b', base='unsloth/Qwen3.5-4B', schema_hash=schema_hash,
+                    knowledge_hash='k', trained_knowledge=True, bundle=bundle)
+
+
+def _tune_pane(tmp_path, *, tune=None, install=None, models=None, settings=None, **kwargs):
+    """Ollama pane whose selected model is the fine-tune, not yet installed."""
+    tune = tune or _tune(tmp_path)
+    state = {'models': ['qwen3.5:4b'] if models is None else models}
+    s = settings or AgentSettings(provider='ollama')
+
+    def fake_install(settings_, tune_, progress):
+        progress('copying file 50%')
+        ok, message = install(settings_, tune_) if install else (True, f'Installed {tune_.name}')
+        if ok:
+            state['models'] = state['models'] + [tune_.name]
+        return ok, message
+    pane = _pane([], settings=s, models_fn=lambda _s: state['models'],
+                 catalogue_fn=lambda: {tune.name: tune}, install_fn=fake_install, **kwargs)
+    return pane, state
+
+
+def test_missing_finetune_offers_install(qt_app, env, tmp_path):
+    pane, _ = _tune_pane(tmp_path)
+    assert pane.settings.ollama.model == 'fs2d-assistant:q35-4b'
+    assert pane.status_label.text() == 'fs2d-assistant:q35-4b is not installed'
+    assert not pane.install_button.isHidden() and pane.install_button.isEnabled()
+
+
+def test_unknown_model_offers_no_install(qt_app, env):
+    pane = _pane([], settings=_settings(provider='ollama'), models_fn=lambda s: ['qwen3:8b'])
+    assert pane.install_button.isHidden()
+    assert 'see Details' in pane.status_label.text() and 'pull qwen3:4b' in pane.details_label.text()
+
+
+def test_install_success_sets_trained_knowledge_and_ready(qt_app, env, tmp_path):
+    saved = []
+    pane, _ = _tune_pane(tmp_path, save_settings=lambda s: saved.append(s.ollama.model_copy()))
+    assert pane.settings.ollama.trained_knowledge is True  # known fine-tune: prompted as trained
+    pane.install_button.click()
+    assert pane.status_label.text().startswith('Installing fs2d-assistant:q35-4b')
+    assert _run_until(pane.ollama_checked) == [(True,)]
+    assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:q35-4b)'
+    assert pane.install_button.isHidden() and pane.model_box.isEnabled()
+    assert saved and saved[-1].trained_knowledge is True
+
+
+def test_install_failure_keeps_settings(qt_app, env, tmp_path):
+    pane, _ = _tune_pane(tmp_path, install=lambda s, t: (False, 'Error: unknown renderer "qwen3.5"'))
+    before = pane.settings.model_dump()
+    pane.install_button.click()
+    assert _run_until(pane.ollama_checked) == [(False,)]
+    assert pane.status_label.text() == 'Install failed — see Details'
+    assert 'unknown renderer' in pane.details_label.text()
+    assert pane.settings.model_dump() == before
+    assert pane.install_button.isEnabled() and pane.model_box.isEnabled()
+
+
+def test_install_button_disabled_while_running(qt_app, env, tmp_path):
+    import threading
+    gate, calls = threading.Event(), []
+
+    def install(settings_, tune_):
+        calls.append(1)
+        gate.wait(5)
+        return True, 'Installed'
+    pane, _ = _tune_pane(tmp_path, install=install)
+    pane.install_button.click()
+    assert not pane.install_button.isEnabled() and not pane.model_box.isEnabled()
+    pane._install()  # pylint: disable=protected-access  # a second click that got through
+    gate.set()
+    assert _run_until(pane.ollama_checked) == [(True,)]
+    assert calls == [1]
+
+
+def test_install_result_after_provider_switch_changes_nothing(qt_app, env, tmp_path):
+    import threading
+    gate = threading.Event()
+
+    def install(settings_, tune_):
+        gate.wait(5)
+        return False, 'Error: boom'
+    pane, _ = _tune_pane(tmp_path, install=install)
+    pane.install_button.click()
+    pane.provider_box.setCurrentIndex(pane.provider_box.findData('gemini'))
+    gate.set()
+    assert _run_until(pane.ollama_checked) == [(False,)]
+    assert pane.settings.provider == 'gemini' and pane.status_label.text().startswith('Gemini')
+    assert pane.install_button.isHidden() and pane.model_box.isEnabled()
+
+
+def test_remote_base_url_no_install(qt_app, env, tmp_path):
+    s = AgentSettings(provider='ollama')
+    s.ollama.base_url = 'http://gpu-box:11434'
+    pane, _ = _tune_pane(tmp_path, settings=s)
+    assert pane.install_button.isHidden()
+    assert 'pull fs2d-assistant:q35-4b' in pane.details_label.text()
+
+
+def test_schema_mismatch_warns_once(qt_app, env, tmp_path):
+    pane, _ = _tune_pane(tmp_path, tune=_tune(tmp_path, schema_hash='aaaa'),
+                         models=['qwen3.5:4b', 'fs2d-assistant:q35-4b'],
+                         schema_hash_fn=lambda: 'bbbb')
+    pane.model_box.setCurrentText('qwen3.5:4b')
+    pane._on_model_chosen()  # pylint: disable=protected-access
+    pane.model_box.setCurrentText('fs2d-assistant:q35-4b')
+    pane._on_model_chosen()  # pylint: disable=protected-access
+    assert pane.chat.toPlainText().count('older tool set') == 1
+
+
+def test_schema_match_no_warning(qt_app, env, tmp_path):
+    pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:q35-4b'])
+    assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:q35-4b)'
+    assert 'older tool set' not in pane.chat.toPlainText()
