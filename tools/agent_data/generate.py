@@ -135,16 +135,11 @@ class Toolbox:
     def load(cls) -> 'Toolbox':
         # pylint: disable=import-outside-toplevel,protected-access
         from pydantic_ai.models.function import FunctionModel
-        from src.agent.runtime import AgentSession
+        from src.agent.runtime import AgentSession, tool_schema_hash, tool_schemas
         from src.agent.settings import AgentSettings
         session = AgentSession(AgentSettings(), model=FunctionModel(lambda m, i: None))
         tools = dict(session.agent._function_toolset.tools)
-        schemas = [{'type': 'function', 'function': {
-            'name': name, 'description': tool.tool_def.description or '',
-            'parameters': tool.tool_def.parameters_json_schema}}
-            for name, tool in sorted(tools.items())]
-        digest = hashlib.sha256(json.dumps(schemas, sort_keys=True).encode()).hexdigest()
-        return cls(tools, schemas, digest[:16])
+        return cls(tools, tool_schemas(), tool_schema_hash())
 
     def retry_text(self, deps, name: str, args: dict) -> Optional[str]:
         """What the runtime sends back for a call it rejects, or None if it is accepted."""

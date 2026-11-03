@@ -4,6 +4,9 @@ All pydantic-ai *run* APIs live here (spec §3); `providers.py` builds models.
 """
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
 import logging
 import re
 from typing import Any, Callable, List, Optional
@@ -397,3 +400,22 @@ class AgentSession:
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception('assistant turn failed unexpectedly')
             emit(TurnEvent('error', f'{type(exc).__name__}: {exc}', payload='internal'))
+
+
+@functools.lru_cache(maxsize=1)
+def tool_schemas() -> List[dict]:
+    """The registered tools' JSON schemas, as a fine-tune was trained on them."""
+    from pydantic_ai.models.function import FunctionModel  # pylint: disable=import-outside-toplevel
+    session = AgentSession(AgentSettings(), model=FunctionModel(lambda m, i: None))
+    tools = session.agent._function_toolset.tools  # pylint: disable=protected-access
+    return [{'type': 'function', 'function': {
+        'name': name, 'description': tool.tool_def.description or '',
+        'parameters': tool.tool_def.parameters_json_schema}}
+        for name, tool in sorted(tools.items())]
+
+
+@functools.lru_cache(maxsize=1)
+def tool_schema_hash() -> str:
+    """16 hex digits naming the tool set; a fine-tune's manifest records the one it learnt."""
+    text = json.dumps(tool_schemas(), sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
