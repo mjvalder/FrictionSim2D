@@ -31,14 +31,64 @@ files) always wait for you to click Apply.**
   are sent to Google, and free-tier data may be used by Google. The free tier
   limits requests per minute; a reply costs 2-7 requests, and the pane shows a
   Retry button when the limit is hit.
-- **Ollama (local, experimental).** Fully offline but slow on a laptop iGPU
-  (about a minute per reply). The default model is `qwen3:4b`, used as Ollama
-  ships it: the Assistant turns thinking off (`/no_think`) and sets
-  temperature 0 itself, so no Modelfile or `ollama create` is needed. Fetch it
-  once with `ollama pull qwen3:4b` (the user-local install lives at
-  `~/.local/ollama/bin/ollama`). An `agent.yaml` that still names the retired
-  `fs2d-qwen3-4b` falls back to `qwen3:4b` when that model is not installed,
-  with a note in the chat.
+- **Ollama (local).** Fully offline. The default model is the fine-tune
+  `fs2d-assistant:q35-4b` (Qwen3.5-4B trained on this app's tools; a few
+  seconds per short reply on a Radeon 780M). It is not in the Ollama library:
+  the status line offers **Install** (below). When it can be neither found
+  nor installed, the Assistant uses the stock `qwen3.5:4b` instead (fetch it
+  with `ollama pull qwen3.5:4b`). The Assistant turns thinking off and sets
+  temperature 0 itself. An `agent.yaml` from before the fine-tune that names
+  `fs2d-qwen3-4b` or `qwen3:4b` is moved to the new default once, with a note
+  in the chat; choose either again afterwards and it stays.
+
+  Needs Ollama 0.40.7 or newer (older ones do not know the `qwen3.5`
+  renderer, and Install fails with `unknown renderer`). The Assistant uses the
+  `ollama` on `PATH`, else `~/.local/ollama/bin/ollama`. To keep it inside a
+  conda env, `conda remove ollama` (conda-forge stops at 0.34) and unpack the
+  release tarball into the env: `tar -I zstd -xf ollama-linux-amd64.tar.zst
+  -C "$CONDA_PREFIX"`, which gives `bin/ollama` and `lib/ollama/` (CPU, CUDA
+  and Vulkan runners).
+
+### Fine-tuned models
+
+A fine-tune ships as a bundle in `tools/agent_data/models/<tag>/`:
+`model.gguf` (the weights, gitignored), a `Modelfile` whose `FROM
+./model.gguf` is relative, and `manifest.json` (base model, the tool-schema
+hash it was trained for, whether it is given the knowledge files, the
+weights' sha256). Every bundle there is offered by name. When the selected
+one is missing, the status line reads `fs2d-assistant:<tag> is not installed`
+with an **Install** button: it checks the weights against the manifest (a
+bundle still syncing is refused) and runs `ollama create` with the status
+line showing progress. By hand, the same is
+
+    ollama create fs2d-assistant:q35-4b -f tools/agent_data/models/q35-4b/Modelfile
+
+Selecting or installing a fine-tune sets `ollama.trained_knowledge` from its
+manifest. If its tool-schema hash is not this app's (the tools changed since
+it was trained), the chat says so once: results may degrade, and retraining
+is the fix. Install is offered only for a local server.
+
+`tools/agent_data/export.py` writes the bundle after training; `--bundle-only`
+writes it from a run already exported, without the training stack or Ollama.
+
+Syncthing: a repo synced whole would also copy `tools/agent_data/runs/`
+(adapters and checkpoints, tens of GB). Each machine that only uses models
+needs a `.stignore` at the repo root (Syncthing never syncs that file; it is
+also gitignored) with
+
+    tools/agent_data/runs
+    tools/agent_data/data/*.jsonl
+    tests/agent/evals/.results
+
+`models/` stays synced, so a new bundle arrives on its own.
+
+Not done yet, for later: publishing a bundle so a machine without the repo can
+`ollama pull` it. That is `ollama push <namespace>/fs2d-assistant:<tag>` from
+an ollama.com account, then an entry in `PUBLISHED` in `src/agent/bundles.py`
+(the GUI then pulls it), plus a Hugging Face or Zenodo mirror of the GGUF and
+manifest for a citable DOI. A plain `ollama pull hf.co/...` is not enough:
+Ollama would build the chat template from the GGUF, not the bundle's
+Modelfile, which is a known training/serving mismatch.
 
 ### Ollama starts and stops itself
 
@@ -65,7 +115,7 @@ the port answers but is not Ollama, the status says so and nothing is started.
 
 ### Status line
 
-One line under the provider and model pickers: `Ollama ready (qwen3:4b)`,
+One line under the provider and model pickers: `Ollama ready (fs2d-assistant:q35-4b)`,
 `Starting Ollama…`, `Ollama not running — starts on your next message`, or
 why it could not start. **Check again** re-asks Ollama (it never starts it).
 **Details** unfolds the start command, a **Copy start command** button, the
@@ -85,9 +135,10 @@ Settings live in `~/.config/FrictionSim2D/agent.yaml`:
 | `provider` | `gemini` | `gemini` or `ollama` |
 | `ask_before_apply` | `false` | changes wait as cards (below) |
 | `max_requests_per_turn` | `50` | model requests one reply may make |
-| `ollama.model` | `qwen3:4b` | local model |
+| `ollama.model` | `fs2d-assistant:q35-4b` | local model |
+| `ollama.trained_knowledge` | `false` | give the model the knowledge files (set from a fine-tune's manifest) |
 | `ollama.idle_minutes` | `10` | stop a server the Assistant started after this long idle |
-| `ollama.context_tokens` | `8192` | `OLLAMA_CONTEXT_LENGTH` of a started server |
+| `ollama.context_tokens` | `16384` | `OLLAMA_CONTEXT_LENGTH` of a started server |
 | `ollama.keep_alive` | `2m` | `OLLAMA_KEEP_ALIVE` of a started server |
 | `gemini.model` | `gemini-3.5-flash-lite` | cloud model |
 | `materials_project.enabled` | `true` | allow Materials Project / 2DMatPedia lookups |

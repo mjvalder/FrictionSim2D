@@ -1,0 +1,5 @@
+FROM ./model.gguf
+RENDERER qwen3.5
+PARSER qwen3.5
+PARAMETER temperature 0
+PARAMETER num_ctx 16384
