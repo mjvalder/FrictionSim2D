@@ -17,17 +17,26 @@ from .bundles import FineTune, verify
 from .providers import ollama_binary
 from .settings import AgentSettings
 
+#: Where the CLI redraws its line (cursor to column 1 / erase line): a new line.
+_REDRAW = re.compile(r'\x1b\[(?:1G|2K)|[\r\n]+')
+#: Any other ANSI control sequence, and the braille spinner frames.
+_NOISE = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|[\u2800-\u28ff]')
+
 
 def _run(cmd: List[str], env: dict, progress: Callable[[str], None],
          popen: Callable) -> Tuple[int, str]:
-    """Run ``cmd``, passing each output line (``\\r`` too) on; (exit code, last line)."""
+    """Run ``cmd``, passing each new output line on; (exit code, last line).
+
+    The CLI draws a spinner with ANSI codes even into a pipe: each redraw is
+    a line, the codes and spinner frames go, and a repeated line is dropped.
+    """
     process = popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT, text=True)
     last = ''
     for chunk in process.stdout:
-        for line in re.split(r'[\r\n]+', chunk):
-            line = line.strip()
-            if line:
+        for line in _REDRAW.split(chunk):
+            line = _NOISE.sub('', line).strip()
+            if line and line != last:
                 last = line
                 progress(line)
     return process.wait(), last

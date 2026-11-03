@@ -93,3 +93,16 @@ def test_failed_pull_skips_copy():
     ok, message = install_finetune(AgentSettings(), tune, lambda line: None,
                                    popen=popen, binary='ollama')
     assert not ok and 'does not exist' in message and len(popen.calls) == 1
+
+
+def test_progress_drops_the_cli_spinner(tmp_path):
+    """Ollama redraws a spinner with ANSI codes even into a pipe (0.40.7, seen live)."""
+    frame = '\x1b[?2026h\x1b[?25l\x1b[1Ggathering model components {} \x1b[K\x1b[?25h\x1b[?2026l'
+    out = (''.join(frame.format(c) for c in '⠙⠹⠸')
+           + '\x1b[?2026h\x1b[?25l\x1b[1Gcopying file sha256:f2 100% \x1b[K\n'
+           + 'success \x1b[K\x1b[?25h\x1b[?2026l\n')
+    lines = []
+    install_finetune(AgentSettings(), _tune(tmp_path), lines.append,
+                     popen=FakePopen([(out, 0)]), binary='ollama')
+    assert lines == ['checking model.gguf', 'gathering model components',
+                     'copying file sha256:f2 100%', 'success']
