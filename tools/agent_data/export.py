@@ -23,12 +23,25 @@ OLLAMA_BIN = os.environ.get('OLLAMA_BIN', str(Path.home() / 'opt' / 'ollama' / '
 
 #: The stock Ollama model whose chat template (tool calls, thinking switch) the
 #: fine-tune keeps, so it is prompted exactly like the base model.
-OLLAMA_BASE = {'unsloth/Qwen3-1.7B': 'qwen3:1.7b', 'unsloth/Qwen3-4B': 'qwen3:4b'}
+OLLAMA_BASE = {'unsloth/Qwen3-1.7B': 'qwen3:1.7b', 'unsloth/Qwen3-4B': 'qwen3:4b',
+               'unsloth/Qwen3.5-2B': 'qwen3.5:2b', 'unsloth/Qwen3.5-4B': 'qwen3.5:4b',
+               'unsloth/Qwen3.5-9B': 'qwen3.5:9b'}
+
+#: The stock qwen3:4b template opens every reply with ``<think>`` (qwen3:1.7b's
+#: does not). Training (thinking off) put the empty think block only before final
+#: answers, never before a tool call, so that opening steers the fine-tune to
+#: answer instead of calling a tool: 4B 46/73 with it, 58/73 without
+#: (2026-10-31). The reply opens bare, as trained. The thinking switch is cut
+#: out too (``$.IsThinkSet`` -> false): set off, qwen3:1.7b's template appends
+#: ``/no_think`` to the request and an empty think block to the reply, neither of
+#: which training had, and the runtime sends every local model "thinking off".
+OPEN_THINK = '<|im_start|>assistant\n<think>\n{{ end }}'
+OPEN_BARE = '<|im_start|>assistant\n{{ end }}'
 
 MODELFILE = """FROM {gguf}
-TEMPLATE \"\"\"{template}\"\"\"
+{template}
 PARAMETER temperature 0
-PARAMETER num_ctx 8192
+PARAMETER num_ctx 16384
 # fs2d-assistant trained for tool-schema hash {schema_hash}
 # (knowledge {knowledge_hash}; run {run}; base {base})
 """
@@ -56,8 +69,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     env = {**os.environ, 'OLLAMA_HOST': os.environ.get('OLLAMA_HOST', '127.0.0.1:11434')}
     template = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[metrics['base']], '--template'],
                               check=True, capture_output=True, text=True, env=env).stdout
+    stock = subprocess.run([OLLAMA_BIN, 'show', OLLAMA_BASE[metrics['base']], '--modelfile'],
+                           check=True, capture_output=True, text=True, env=env).stdout
+    renderer = [line for line in stock.splitlines() if line.startswith(('RENDERER', 'PARSER'))]
+    if renderer:  # Qwen3.5: Ollama's built-in renderer, the HF template's twin
+        template = '\n'.join(renderer)
+    else:
+        template = template.replace(OPEN_THINK, OPEN_BARE).replace('$.IsThinkSet', 'false')
+        template = f'TEMPLATE """{template.strip()}"""'
     modelfile = run / 'Modelfile'
-    modelfile.write_text(MODELFILE.format(gguf=quantised[0], template=template.strip(),
+    modelfile.write_text(MODELFILE.format(gguf=quantised[0], template=template,
                                           run=args.run, **{
         k: metrics[k] for k in ('schema_hash', 'knowledge_hash', 'base')}))
     name = f'fs2d-assistant:{args.tag}'

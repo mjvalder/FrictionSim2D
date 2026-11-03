@@ -66,13 +66,14 @@ TEACHER_LICENCE = 'Apache-2.0'
 #: database rows (no key here, and invented rows would teach invented facts).
 UNSUPPORTED = {'materials_project'}
 #: Sampling weight per category (default 1): concepts are the domain layer (spec §4.4).
-WEIGHTS = {'concept': 8,
-           # the groups the Phase 4 model failed most (spec §8): argument-heavy tools
-           'param_change': 3, 'settings_change': 3, 'speed_sweep': 3, 'linear_sweep': 2,
-           'log_sweep': 2, 'load_band': 2, 'plot_cof_load': 2, 'plot_timeseries': 2,
-           'plot_rank': 2, 'plot_slope_bars': 2, 'plot_filtered': 2, 'count_runs': 2,
-           'summarise_dataset': 2, 'describe_folder': 2, 'find_datasets': 2,
-           'afm_setup_temperature': 2, 'sheet_angles': 2, 'recommend_layers': 2}
+WEIGHTS = {'concept': 4,
+           # p6: the tool groups the 4B still failed most (parameters, sweeps, plots)
+           'param_change': 6, 'settings_change': 6, 'find_parameter': 3, 'speed_sweep': 4,
+           'linear_sweep': 3, 'log_sweep': 3, 'load_band': 5, 'plot_cof_load': 3,
+           'plot_timeseries': 3, 'plot_rank': 3, 'plot_slope_bars': 3, 'plot_filtered': 3,
+           'plot_types': 2, 'count_runs': 2, 'summarise_dataset': 3, 'describe_folder': 2,
+           'find_datasets': 2, 'explain_config': 2, 'afm_setup_temperature': 2,
+           'sheet_angles': 2, 'recommend_layers': 2}
 #: A request this similar to an eval prompt is dropped: the evals stay held out.
 EVAL_SIMILARITY = 0.75
 EVAL_PROMPTS = [case.prompt.lower() for case in CASES.values()]
@@ -110,6 +111,13 @@ KIND_RULES = {
            'ending with a question mark.',
     'declines': 'explain briefly that you cannot make this change and where the user '
                 'can change it themselves; do not ask a question.',
+}
+#: What a category's reply must say, which domain_error checks for. Without it the
+#: teacher rarely says it: p6 kept 0 of 42 negative-load and 1 of 33 guess declines.
+CATEGORY_RULES = {
+    'decline_negative_load': ' Say that the load must be positive (greater than zero).',
+    'decline_guess': ' Say that the value is only known by running the simulation; write '
+                     'no number.',
 }
 
 
@@ -271,6 +279,43 @@ def global_setting_slot(scene: Scene) -> None:
     value = scene.rng.choice(values)
     scene.values.update(global_setting=label, section=section, key=key, value=value)
     scene.slots.update(global_setting=label, value=f'{value:g}')
+
+
+def field_slot(scene: Scene, scope: str) -> bool:
+    """Any numeric field of the open config (``scope='config'``) or of the global
+    settings, named by its form label, with a new value; False when the label does
+    not find the field first (the trace would then contradict find_parameter)."""
+    # pylint: disable=import-outside-toplevel
+    from src.agent.tools.setup import _entries, find_parameter  # same lookup as the tool
+    fields = []
+    for where, section, spec, override, value in _entries(scene.deps):
+        if where != scope or section in EXECUTION_SECTIONS or isinstance(value, bool) \
+                or not isinstance(value, (int, float)) or not value:
+            continue
+        label = (override.label if override and override.label else spec.name) or spec.key
+        fields.append((section, spec.key, label.replace('_', ' ').lower(), value))
+    if not fields:
+        return False
+    section, key, label, value = scene.rng.choice(fields)
+    new = value * scene.rng.choice([0.5, 1.5, 2])
+    new = int(round(new)) if isinstance(value, int) else float(f'{new:.3g}')
+    if new == value or not find_parameter(scene.deps, label).startswith(
+            f'{scope}:{section}.{key} '):
+        return False
+    if scope == 'config':
+        scene.values.update(parameter=label, section=section, key=key, value=new, unit='')
+        scene.slots.update(parameter=label, value=f'{new:g}')
+    else:
+        scene.values.update(global_setting=label, section=section, key=key, value=new)
+        scene.slots.update(global_setting=label, value=f'{new:g}')
+    return True
+
+
+#: Settings fixed at execution, which the assistant declines (SETTINGS_TO_DECLINE).
+EXECUTION_SECTIONS = {'hpc', 'aiida', 'database'}
+#: Share of parameter requests drawn from every numeric field rather than the
+#: hand-picked few, so the model learns the lookup, not a short list.
+ANY_FIELD_RATE = 0.6
 
 
 def missing_potential(scene: Scene) -> bool:
@@ -460,10 +505,12 @@ def prepare_world(category: str, scene: Scene) -> None:
 
 # ---- teacher reply and checks ----------------------------------------------------
 
-def teacher_reply(request: str, kind: str, trace: List[Tuple[str, dict, str]]) -> str:
+def teacher_reply(request: str, kind: str, trace: List[Tuple[str, dict, str]],
+                  category: str = '') -> str:
     lines = [f'- {name}({json.dumps(args)}) ->\n{result}' for name, args, result in trace]
     prompt = REPLY_BRIEF.format(rules=ROLE.split('Rules:', 1)[1].strip(),
-                                kind_rule=KIND_RULES[kind], request=request,
+                                kind_rule=KIND_RULES[kind] + CATEGORY_RULES.get(category, ''),
+                                request=request,
                                 trace='\n'.join(lines) or '(no tool was needed)')
     payload = {'model': TEACHER, 'stream': False, 'think': False,
                'options': {'temperature': 0.4, 'num_ctx': 8192},
@@ -529,6 +576,9 @@ def check(category: str, kind: str, scene: Scene, request: str, reply: str,
         return 'question misses the unit'
     if category == 'ask_unknown_material' and scene.values['unknown'] not in reply:
         return 'question misses the material'
+    flagged = any(re.search(r'\b[1-9]\d* issue\(s\)', r) for _, _, r in trace)
+    if flagged and re.search(r'\bno (other |further )?issues?\b', reply, re.IGNORECASE):
+        return 'denies the issues the tool flagged'
     why = status_error(reply, trace) or domain_error(category, scene, reply, trace)
     if why:
         return why
@@ -586,6 +636,9 @@ FOLLOWUPS = ('param_change', 'speed_sweep', 'find_parameter', 'explain_config',
              'settings_change')
 
 
+INVENTED_PLOTS = ['cof_vs_load', 'bar_chart', 'friction_vs_load', 'line', 'histogram']
+
+
 def mistake(name: str, args: dict, rng: random.Random) -> Optional[dict]:
     """A plausible wrong version of ``args``: a renamed or dropped key, a list
     sent as text, or a nested field lifted to the top level. None if no change."""
@@ -595,7 +648,17 @@ def mistake(name: str, args: dict, rng: random.Random) -> Optional[dict]:
         return None
     key = rng.choice(keys)
     value = bad[key]
-    choice = rng.choice(['rename', 'drop', 'stringify', 'nest'])
+    choice = rng.choice(['rename', 'drop', 'stringify', 'nest', 'guess'])
+    if choice == 'guess' and name == 'propose_plot' and 'plot_type' in bad:
+        # an invented plot type (none of PLOT_TYPES), then the error and the fix
+        bad['plot_type'] = rng.choice(INVENTED_PLOTS)
+        return bad if bad != args else None
+    if choice == 'guess' and name == 'set_fields' and bad.get('changes'):
+        change = dict(bad['changes'][0])
+        change['key'] = {'temp': 'temperature', 'r': 'radius', 'scan_speed': 'speed',
+                         'timestep': 'dt'}.get(change['key'], change['key'] + '_value')
+        bad['changes'] = [change, *bad['changes'][1:]]
+        return bad if bad != args else None
     if choice == 'stringify' and isinstance(value, list) and value and \
             all(isinstance(x, (int, float)) for x in value):
         bad[key] = ', '.join(f'{x:g}' for x in value)
@@ -631,9 +694,11 @@ def setup_scene(category: str, scene: Scene) -> Optional[str]:
     """Category-specific slot values; a reason when the scene cannot be built."""
     rng, cat = scene.rng, BY_NAME.get(category, CONCEPT)
     if 'parameter' in cat.slots:
-        parameter_slot(scene)
+        if rng.random() >= ANY_FIELD_RATE or not field_slot(scene, 'config'):
+            parameter_slot(scene)
     if 'global_setting' in cat.slots:
-        global_setting_slot(scene)
+        if rng.random() >= ANY_FIELD_RATE or not field_slot(scene, 'settings'):
+            global_setting_slot(scene)
     if 'setting' in cat.slots:
         scene.slots['setting'] = rng.choice(SETTINGS_TO_DECLINE)
     if category == 'ask_unknown_material':
@@ -688,7 +753,7 @@ def play(category: str, template: Optional[str], scene: Scene, toolbox: Toolbox,
         return None, 'search missed the source passage'
     cat = BY_NAME.get(category, CONCEPT)
     plain = [(n, a, r) for n, a, r, _ in turn.trace]
-    turn.reply = teacher_reply(request, cat.kind, plain)
+    turn.reply = teacher_reply(request, cat.kind, plain, category)
     why = check(category, cat.kind, scene, request, turn.reply,
                 [(n, a, r) for n, a, r, ok in turn.trace if ok])
     return (None, why) if why else (turn, None)
@@ -767,7 +832,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--drafts', action='store_true',
                         help='use the unreviewed teacher drafts (smoke runs only)')
+    parser.add_argument('--weights', default='',
+                        help='override sampling weights, e.g. concept=8,lattice_pair=3')
     args = parser.parse_args(argv)
+    for item in filter(None, args.weights.split(',')):
+        name, weight = item.split('=')
+        WEIGHTS[name] = float(weight)
     rng = random.Random(args.seed)
     templates = load_templates(args.drafts)
     toolbox = Toolbox.load()
@@ -803,7 +873,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             'schema_hash': toolbox.schema_hash, 'knowledge_hash': knowledge_hash(),
             'templates': 'drafts (unreviewed)' if args.drafts else 'templates.yaml',
             'sources': {'B': kept}, 'teacher': TEACHER, 'teacher_licence': TEACHER_LICENCE,
-            'per_category': dict(per_category), 'rejects': dict(rejects.most_common()),
+            'weights': dict(WEIGHTS), 'per_category': dict(per_category), 'rejects': dict(rejects.most_common()),
             'tools': toolbox.schemas}
     (DATA / f'{args.name}.card.json').write_text(json.dumps(card, indent=1))
     print(f'{kept} conversations in {attempts} attempts -> {out_path.relative_to(ROOT)}')

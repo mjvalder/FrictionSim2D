@@ -25,7 +25,9 @@ from typing import List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / 'runs'
-BASES = {'1.7b': 'unsloth/Qwen3-1.7B', '4b': 'unsloth/Qwen3-4B'}
+BASES = {'1.7b': 'unsloth/Qwen3-1.7B', '4b': 'unsloth/Qwen3-4B',
+         'q35-2b': 'unsloth/Qwen3.5-2B', 'q35-4b': 'unsloth/Qwen3.5-4B',
+         'q35-9b': 'unsloth/Qwen3.5-9B'}
 #: One rendered assistant message: its header, then the trained text through <|im_end|>.
 _ASSISTANT = re.compile(r'<\|im_start\|>assistant\n(.*?<\|im_end\|>)', re.DOTALL)
 IGNORE = -100
@@ -90,6 +92,7 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
     parser.add_argument('--accum', type=int, default=4)
     parser.add_argument('--four-bit', action='store_true', help='QLoRA (use for 4b)')
     parser.add_argument('--log-steps', type=int, default=5)
+    parser.add_argument('--max-steps', type=int, default=-1, help='stop early (timing runs)')
     parser.add_argument('--render-only', action='store_true',
                         help='print the first rendered conversation and stop')
     args = parser.parse_args(argv)
@@ -105,9 +108,11 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
         raise SystemExit('the shards were generated for different tool schemas')
     card = cards[0]
     records = [r for path in args.data for r in load(path)]
-    model, tokenizer = FastLanguageModel.from_pretrained(
+    model, processor = FastLanguageModel.from_pretrained(
         BASES[args.base], max_seq_length=args.max_len, load_in_4bit=args.four_bit,
         dtype=None if args.four_bit else torch.bfloat16)
+    # Qwen3.5 loads with an image+text processor; the text side is its tokenizer
+    tokenizer = getattr(processor, 'tokenizer', processor)
     texts = [render(tokenizer, r, card['tools']) for r in records]
     examples = [tokenize(tokenizer, t, trained_spans(t, r), args.max_len)
                 for t, r in zip(texts, records)]
@@ -132,7 +137,8 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
                                              label_pad_token_id=IGNORE),
         args=TrainingArguments(output_dir=str(out), per_device_train_batch_size=args.batch,
                                gradient_accumulation_steps=args.accum,
-                               num_train_epochs=args.epochs, learning_rate=args.lr,
+                               num_train_epochs=args.epochs, max_steps=args.max_steps,
+                               learning_rate=args.lr,
                                lr_scheduler_type='cosine',
                                # 5 % warm-up (transformers 5 dropped warmup_ratio)
                                warmup_steps=max(1, round(0.05 * args.epochs * len(examples)
@@ -144,7 +150,7 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
     stats = trainer.train()
     seconds = time.time() - start
     model.save_pretrained(str(out / 'adapter'))
-    tokenizer.save_pretrained(str(out / 'adapter'))
+    processor.save_pretrained(str(out / 'adapter'))
     trained_tokens = sum(min(n, args.max_len) for n in lengths) * args.epochs
     metrics = {
         'run': args.run, 'base': BASES[args.base], 'four_bit': args.four_bit,

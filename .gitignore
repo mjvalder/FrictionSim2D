@@ -21,3 +21,4 @@ MultiplexedPath*
 
 # agent eval results (tests/agent/evals/conftest.py)
 tests/agent/evals/.results/
+unsloth_compiled_cache/
