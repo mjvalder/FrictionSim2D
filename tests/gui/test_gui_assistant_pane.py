@@ -972,3 +972,32 @@ def test_schema_match_no_warning(qt_app, env, tmp_path):
     pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:q35-4b'])
     assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:q35-4b)'
     assert 'older tool set' not in pane.chat.toPlainText()
+
+
+def test_idle_timer_never_stops_ollama_during_an_install(qt_app, env, tmp_path):
+    import threading
+    gate, checks = threading.Event(), []
+
+    class CountingServer(FakeServer):
+        def stop_if_idle(self, now=None):
+            checks.append(1)
+            return True
+
+    def install(settings_, tune_):
+        gate.wait(5)
+        return True, 'Installed'
+    pane, _ = _tune_pane(tmp_path, install=install, server=CountingServer())
+    pane.install_button.click()
+    pane.idle_timer.timeout.emit()
+    gate.set()
+    assert _run_until(pane.ollama_checked) == [(True,)]
+    assert checks == []
+
+
+def test_bundle_still_syncing_keeps_the_default(qt_app, env, tmp_path):
+    tune = _tune(tmp_path)
+    (tune.bundle / 'model.gguf').unlink()  # Syncthing has not renamed it into place yet
+    pane, _ = _tune_pane(tmp_path, tune=tune)
+    assert pane.settings.ollama.model == 'fs2d-assistant:q35-4b'
+    assert pane.install_button.isHidden()
+    assert 'still syncing' in pane.details_label.text()

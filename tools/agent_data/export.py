@@ -68,9 +68,17 @@ def find_gguf(run: Path, quant: str) -> List[Path]:
 
 
 def template_lines(modelfile: str) -> str:
-    """A Modelfile's template part: everything but FROM, PARAMETER and comments."""
-    keep = [line for line in modelfile.splitlines()
-            if not line.startswith(('FROM', 'PARAMETER', '#'))]
+    """A Modelfile's template part: everything but FROM, PARAMETER and comments.
+
+    Lines inside a ``TEMPLATE \"\"\"...\"\"\"`` block are kept whole: Qwen3's
+    template has a ``# Tools`` line that is not a comment.
+    """
+    keep, inside = [], False
+    for line in modelfile.splitlines():
+        if inside or not line.startswith(('FROM', 'PARAMETER', '#')):
+            keep.append(line)
+        if line.count('"""') % 2:
+            inside = not inside
     return '\n'.join(keep).strip()
 
 

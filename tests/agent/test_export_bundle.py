@@ -77,3 +77,11 @@ def test_eval_fills_pass1_and_p50(runs):
 def test_trained_knowledge_required(runs):
     with pytest.raises(SystemExit):
         _main(runs)
+
+
+def test_template_block_keeps_its_hash_lines():
+    """A Qwen3 TEMPLATE contains '# Tools'; only the Modelfile's own comments go."""
+    modelfile = ('FROM /abs/x.gguf\nTEMPLATE """{{- if .Tools }}\n# Tools\n\nYou may call'
+                 '\n{{ end }}"""\nPARAMETER temperature 0\n# fs2d-assistant trained for x\n')
+    assert export.template_lines(modelfile) == ('TEMPLATE """{{- if .Tools }}\n# Tools\n\n'
+                                                'You may call\n{{ end }}"""')

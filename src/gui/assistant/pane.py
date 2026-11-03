@@ -415,7 +415,9 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                              f'Ollama at {self.settings.ollama.base_url} is unreachable')
             return
         self._installed = list(installed)
-        installable = [t.name for t in self._finetunes.values() if t.installable]
+        # A bundle whose weights are still syncing counts: it is installable soon.
+        installable = [t.name for t in self._finetunes.values()
+                       if t.installable or t.bundle is not None]
         note = fallback_ollama_model(self.settings, self._installed, installable)
         if note:
             self._save()
@@ -444,6 +446,10 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
             self._ollama_problem = (f'{model} is a FrictionSim2D fine-tune; Install adds it '
                                     f'to Ollama (from {source}).')
             self._set_status(f'{model} is not installed')
+        elif tune is not None and tune.bundle is not None and is_local(self.settings):
+            self._ollama_problem = (f'{tune.bundle}/model.gguf is not here yet (still '
+                                    'syncing?); Install appears once it is. Check again.')
+            self._set_status(f'{model} is not installed — see Details')
         else:
             self._ollama_problem = (f'Fetch the model once with: '
                                     f'{ollama_binary()} pull {model}')
@@ -553,7 +559,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _check_idle(self) -> None:
         """Timer tick: stop our idle server on a pool thread (it waits for the exit)."""
-        if self._busy or self._ollama_starting or self._idle_checking:
+        if self._busy or self._ollama_starting or self._idle_checking or self._installing:
             return
         self._idle_checking = True
         server = self._server
