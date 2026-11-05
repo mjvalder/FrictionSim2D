@@ -333,7 +333,8 @@ class AgentSession:
             emit(TurnEvent('tool_call', f'{event.part.tool_name}({str(event.part.args)[:120]})'))
         elif isinstance(event, FunctionToolResultEvent):
             name = getattr(event.part, 'tool_name', 'tool')
-            emit(TurnEvent('tool_result', f'{name}: {str(event.part.content)[:200]}'))
+            content = str(event.part.content)
+            emit(TurnEvent('tool_result', f'{name}: {content[:200]}', payload=content))
         elif isinstance(event, AgentRunResultEvent):
             if generation == self._generation:
                 self.history = event.result.all_messages()

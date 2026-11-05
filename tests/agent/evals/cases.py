@@ -215,7 +215,7 @@ def grounded(result, extra: Iterable[float] = ()) -> bool:
     allowed = [*extra, *_fixture_numbers()]
     for event in result.events:
         if event.kind == 'tool_result':
-            allowed.extend(numbers_in(event.text))
+            allowed.extend(numbers_in(event.payload or event.text))
     for token in _DECIMAL.findall(result.text):
         value, places = float(token), len(token.split('.')[1])
         if not any(math.isclose(a, value, rel_tol=REL_TOL) or round(a, places) == value
@@ -336,8 +336,9 @@ def mentions_materials(result, names: Iterable[str]) -> bool:
 def count_by(result, number: int, word: str = 'complet') -> bool:
     """``number`` within four words before ``word``, or right after it."""
     n = rf'(?<![\w.]){number}(?![\w.]*\d)'
-    return re.search(rf'{n}\s+(?:[\w-]+\s+){{0,4}}{word}|{word}\w*\W+(?:\w+\W+)?{n}',
-                     result.text, re.IGNORECASE) is not None
+    text = result.text.replace('*', '')  # markdown bold round the number
+    return re.search(rf'{n},?\s+(?:[\w-]+\s+){{0,4}}{word}|{word}\w*\W+(?:\w+\W+)?{n}',
+                     text, re.IGNORECASE) is not None
 
 
 def _complete_ws2(result) -> int:
@@ -434,8 +435,8 @@ SETUP = {
 
 PARAMS = {
     'change_speed': Case(
-        'Change the sliding speed of the current AFM config to 2 m/s.',
-        lambda r: same(sets(r).get(('general', 'scan_speed')), [2]),
+        'Change the sliding speed of the current AFM config to 5 m/s.',  # 2 is the default
+        lambda r: same(sets(r).get(('general', 'scan_speed')), [5]),
         tools=('find_parameter', 'set_fields')),
     'change_temperature': Case(
         'Set the temperature of the current config to 250 K.',
@@ -499,7 +500,8 @@ SWEEPS = {
 
 MATERIALS = {
     'search_structures': Case(
-        'Which MoS2 structure files do I have? Just list them.',
+        'Which MoS2 structure files can I use? Search the structure library and just '
+        'list them.',
         lambda r: called(r, 'search_structures')
         and any(mentions(r, name) for name in _structure_names(r, 'MoS2')),
         tools=('search_structures',)),

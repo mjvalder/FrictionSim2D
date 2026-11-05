@@ -1,5 +1,7 @@
 """The eval cases themselves, without a model: coverage, no vacuous passes, and
 that a correct turn (built by calling the tools directly) does pass."""
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip('pydantic_ai')
@@ -191,8 +193,17 @@ def test_completed_count_must_sit_by_the_word_completed(tmp_path, mock_settings)
     tools = ['summarise_results']
     assert verdict(CASES['count_complete_runs'],
                    _result(deps, 'h-WS2 has 2 completed runs.', tools=tools))
+    assert verdict(CASES['count_complete_runs'],
+                   _result(deps, 'The h-WS2 runs are **2**, and both completed.', tools=tools))
     assert not verdict(CASES['count_complete_runs'],
                        _result(deps, 'Across 2 materials, 4 runs completed.', tools=tools))
+
+
+def test_a_number_past_the_cut_shown_in_the_chat_is_still_grounded():
+    long_result = TurnEvent('tool_result', 'lattice_mismatch: ' + 'x' * 182,
+                            payload='x' * 200 + ' area 8.79 A^2')
+    reply = SimpleNamespace(events=[long_result], text='The area is 8.79 A^2.')
+    assert grounded(reply)
 
 
 def test_cof_plot_needs_cof_on_the_y_axis(tmp_path, mock_settings):
