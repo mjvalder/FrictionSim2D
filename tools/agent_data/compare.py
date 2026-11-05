@@ -4,7 +4,9 @@ Reads the result files ``pytest tests/agent/evals -m agent_eval`` writes (one
 per run; runs of the same provider/model are pooled, so repeats may be split
 across files) and reports per model:
 
-* pass@1 -- mean success over all runs, with a 95 % Wilson interval;
+* pass@1 -- mean success over all runs, with a 95 % interval from a bootstrap over
+  the cases (repeats of one case are not independent: a local model at temperature
+  0 answers all three alike, so an interval over runs would be too narrow);
 * pass^k -- share of cases passed in all k repeats (tau-bench's consistency
   metric; k is the smallest repeat count among the pooled cases);
 * success per case group;
@@ -18,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import statistics
 import sys
 from collections import defaultdict
@@ -35,14 +38,16 @@ GROUP_ORDER = ('setup', 'analysis', 'domain', 'materials_db', 'materials', 'work
                'declines', 'params', 'sweeps', 'must_ask')
 
 
-def wilson(passed: int, n: int, z: float = 1.96) -> tuple:
-    """95 % Wilson score interval of a binomial proportion."""
-    if not n:
+def case_bootstrap(by_case: Dict[str, List[bool]], z: float = 0.95,
+                   samples: int = 10000, seed: int = 0) -> tuple:
+    """95 % percentile interval of pass@1, resampling cases (with all their runs)."""
+    rates = [sum(v) / len(v) for v in by_case.values()]
+    if not rates:
         return (math.nan, math.nan)
-    p = passed / n
-    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
-    return (centre - half, centre + half)
+    rng = random.Random(seed)
+    means = sorted(statistics.fmean(rng.choices(rates, k=len(rates))) for _ in range(samples))
+    tail = (1 - z) / 2
+    return (means[int(tail * samples)], means[int((1 - tail) * samples) - 1])
 
 
 def cost(record: dict, model: str) -> Optional[float]:
@@ -85,7 +90,7 @@ def score(model: str, runs: List[dict]) -> dict:
     warm = [r['latency_s'] for r in runs if not r.get('cold')]
     costs = [cost(r, model) for r in runs]
     return {'model': model, 'runs': len(runs), 'cases': len(by_case), 'k': k,
-            'pass1': passed / len(runs), 'ci': wilson(passed, len(runs)),
+            'pass1': passed / len(runs), 'ci': case_bootstrap(by_case),
             'passk': sum(all(v[:k]) for v in by_case.values()) / len(by_case),
             'groups': {g: tuple(v) for g, v in groups.items()},
             'latency_p50': statistics.median(warm) if warm else math.nan,
