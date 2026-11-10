@@ -38,9 +38,8 @@ class OllamaSettings(BaseModel):
     #: A server the pane started is stopped after this long without a turn.
     idle_minutes: int = Field(10, ge=1)
     #: Tokens one reply may generate: a small model that loops fails fast instead
-    #: of running until the context fills (18-50 min per turn on the A4000).
-    # One reply's cap: it stops a runaway, but a tool call naming ~150 materials
-    # needs ~1000 tokens alone (2026-11-10, 1024 cut such a setup off).
+    #: of running until the context fills (18-50 min per turn on the A4000). 1024
+    #: cut off a setup naming 156 materials (~1000 tokens for the call alone).
     max_output_tokens: int = Field(4096, ge=64)
     #: Corpus passages found for the user's message and attached to it (0: none).
     prefetch_passages: int = Field(0, ge=0, le=3)
