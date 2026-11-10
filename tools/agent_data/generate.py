@@ -102,16 +102,6 @@ User request: {request}
 Tool calls and results:
 {trace}"""
 
-ANSWER_BRIEF = """You are the FrictionSim2D assistant answering a question about 2D
-materials or friction. Answer in at most three sentences of plain text, stating the facts
-directly. Use the background below only as your own knowledge. Do not mention any passage,
-source, paper, study, corpus, search or tool, and write no numbers.
-
-Question: {request}
-
-Background:
-{text}"""
-
 KIND_RULES = {
     'act': 'report what the tools did. A result that says "Proposed only" or "decides '
            'whether" means the change waits for the user; a result that says "will be '
@@ -128,23 +118,7 @@ CATEGORY_RULES = {
     'decline_negative_load': ' Say that the load must be positive (greater than zero).',
     'decline_guess': ' Say that the value is only known by running the simulation; write '
                      'no number.',
-    'concept': ' Answer from the passage, without naming it or mentioning a passage or '
-               'corpus.',
-    'concept_cite': ' Name the title of the passage you used.',
 }
-#: Concept conversations: searched, answered with no tool, and answered although the
-#: search missed. A citation only when asked for (`CITE_RATE`): p6/p7 always searched and
-#: cited, and the model then trusted a bad search over what it knew.
-CONCEPTS = ('concept', 'concept_direct', 'concept_miss')
-CITE_RATE = 0.4
-#: Share of concept_miss searches that find nothing at all, not an unrelated passage.
-EMPTY_SEARCH_RATE = 0.3
-#: The eval's concept topics stay out of the no-tool answers, so they measure transfer.
-HELD_OUT_TOPICS = re.compile(r'stick.?slip|coefficient of friction|\bcof\b|dichalcogenide|'
-                             r'\btmds?\b|superlubric|incommensura|t.phase|polytype',
-                             re.IGNORECASE)
-_MENTIONS_LOOKUP = re.compile(r'passage|corpus|source|search|\btool|paper|stud(y|ies)|'
-                              r'according to|knowledge', re.IGNORECASE)
 
 
 # ---- the app's tools, called exactly as the runtime calls them ----------------------
@@ -496,7 +470,7 @@ def plan_for(category: str, scene: Scene) -> Callable[[Callable[[str, dict], str
                                               'potential_type': v['potential']})])
     if category == 'ask_missing_dataset':
         return static([('find_result_sets', {})])
-    if category in ('concept', 'concept_miss'):
+    if category == 'concept':
         return static([('search_knowledge', {'query': v['question']})])
     if category == 'lattice_pair':
         return static([('lattice_mismatch', {'material_a': v['material'],
@@ -525,18 +499,6 @@ def prepare_world(category: str, scene: Scene) -> None:
 
 
 # ---- teacher reply and checks ----------------------------------------------------
-
-def teacher_answer(request: str, background: str) -> str:
-    """A reply from what the assistant knows, with no lookup in it."""
-    payload = {'model': TEACHER, 'stream': False, 'think': False,
-               'options': {'temperature': 0.4, 'num_ctx': 8192},
-               'messages': [{'role': 'user',
-                             'content': ANSWER_BRIEF.format(request=request, text=background)}]}
-    http = urllib.request.Request(OLLAMA, data=json.dumps(payload).encode(),
-                                  headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(http, timeout=600) as response:
-        return json.load(response)['message']['content'].strip()
-
 
 def teacher_reply(request: str, kind: str, trace: List[Tuple[str, dict, str]],
                   category: str = '') -> str:
@@ -587,16 +549,8 @@ def domain_error(category: str, scene: Scene, reply: str,
         return 'count not stated'
     if category == 'concept':
         titles = re.findall(r'^\[\d\] (.+?)(?: -- | \()', trace[0][2], re.MULTILINE)
-        named = any(t.lower()[:40] in low for t in titles)
-        if v.get('cite') and not named:
+        if not any(t.lower()[:40] in low for t in titles):
             return 'no source title named'
-        if not v.get('cite') and (named or _MENTIONS_LOOKUP.search(reply)):
-            return 'named a source nobody asked for'
-    if category in ('concept_direct', 'concept_miss'):
-        if _MENTIONS_LOOKUP.search(reply) or re.match(r'you (may |might )?know', low):
-            return 'mentions a lookup'
-        if re.search(r'(?<![A-Za-z])\d', reply):
-            return 'wrote a number'
     if category == 'decline_guess' and re.search(r'\d', reply):
         return 'guessed a number'
     return None
@@ -655,25 +609,11 @@ def teacher_json(prompt: str, temperature: float = 0.8) -> dict:
         return json.loads(json.load(response)['message']['content'])
 
 
-def concept_question(rng: random.Random, index) -> Tuple[str, Any]:
-    """``(question, passage)``: the teacher asks what a random passage answers."""
+def concept_question(rng: random.Random, index) -> Tuple[str, str]:
+    """``(question, source title)``: the teacher asks what a random passage answers."""
     passage = rng.choice(index.passages)
     question = teacher_json(QUESTION_BRIEF.format(title=passage.title, text=passage.text))
-    return ' '.join(str(question.get('question', '')).split()), passage
-
-
-class MissingIndex:
-    """The corpus with one passage's source gone, or nothing found at all: a search
-    that misses, in the real tool's format."""
-
-    def __init__(self, index, title: str, empty: bool):
-        self.index, self.title, self.empty = index, title, empty
-
-    def search(self, query: str, hits: int) -> list:
-        if self.empty:
-            return []
-        found = self.index.search(query, hits + 5)
-        return [p for p in found if p.title != self.title][:hits]
+    return ' '.join(str(question.get('question', '')).split()), passage.title
 
 
 def too_close_to_eval(request: str) -> bool:
@@ -775,22 +715,12 @@ def play(category: str, template: Optional[str], scene: Scene, toolbox: Toolbox,
     why = setup_scene(category, scene)
     if why:
         return None, why
-    source, background = '', ''
-    if category in CONCEPTS:
-        request, passage = concept_question(scene.rng, load_knowledge())
-        source, background = passage.title, passage.text
+    source = ''
+    if category == 'concept':
+        request, source = concept_question(scene.rng, load_knowledge())
         scene.values['question'] = request
         if len(request.split()) < 4:
             return None, 'no question'
-        if category != 'concept' and HELD_OUT_TOPICS.search(request):
-            return None, 'held-out topic'
-        if category == 'concept' and scene.rng.random() < CITE_RATE:
-            scene.values['cite'] = True
-            request = f'{request} Name the source you used.'
-        if category == 'concept_miss':
-            missing = MissingIndex(load_knowledge(), source,
-                                   scene.rng.random() < EMPTY_SEARCH_RATE)
-            scene.deps.knowledge = lambda: missing
     else:
         request = template.format(**scene.slots)
     if too_close_to_eval(request):
@@ -818,11 +748,7 @@ def play(category: str, template: Optional[str], scene: Scene, toolbox: Toolbox,
         return None, 'search missed the source passage'
     cat = BY_NAME.get(category, CONCEPT)
     plain = [(n, a, r) for n, a, r, _ in turn.trace]
-    if category in ('concept_direct', 'concept_miss'):
-        turn.reply = teacher_answer(request, background)
-    else:
-        rule = 'concept_cite' if scene.values.get('cite') else category
-        turn.reply = teacher_reply(request, cat.kind, plain, rule)
+    turn.reply = teacher_reply(request, cat.kind, plain, category)
     why = check(category, cat.kind, scene, request, turn.reply,
                 [(n, a, r) for n, a, r, ok in turn.trace if ok])
     return (None, why) if why else (turn, None)
@@ -881,7 +807,7 @@ def conversation(category: str, template: Optional[str], rng: random.Random,
         return {'messages': to_messages(turns), 'category': category, 'kind': cat.kind,
                 'turns': [t.category for t in turns],
                 'mistakes': sum(not ok for t in turns for *_, ok in t.trace),
-                'template': template or f'concept: {first.request}',
+                'template': template or f'concept from: {first.trace[-1][1]}',
                 'source': 'B', 'teacher': TEACHER, 'teacher_licence': TEACHER_LICENCE}, None
 
 
@@ -890,8 +816,7 @@ def load_templates(drafts: bool) -> Dict[str, List[str]]:
     templates = {c['category']: c['templates'] for c in data['categories']
                  if c['templates'] and c['category'] not in UNSUPPORTED}
     if load_knowledge() is not None:
-        for category in CONCEPTS:  # questions come from corpus passages
-            templates[category] = [None]
+        templates['concept'] = [None]  # questions come from corpus passages
     return templates
 
 
@@ -904,7 +829,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help='use the unreviewed teacher drafts (smoke runs only)')
     parser.add_argument('--weights', default='',
                         help='override sampling weights, e.g. concept=8,lattice_pair=3')
-    parser.add_argument('--only', default='', help='comma-separated categories to draw from')
     args = parser.parse_args(argv)
     for item in filter(None, args.weights.split(',')):
         name, weight = item.split('=')
@@ -922,7 +846,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         attempts = 0
         while kept < args.n and attempts < args.n * 3:
             attempts += 1
-            names = sorted(args.only.split(',') if args.only else templates)
+            names = sorted(templates)
             category = rng.choices(names, weights=[WEIGHTS.get(n, 1) for n in names])[0]
             template = rng.choice(templates[category])
             try:

@@ -8,13 +8,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Iterable, Literal, Optional
+from typing import Dict, Iterable, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from .bundles import FineTune
 
 SETTINGS_NAME = 'agent.yaml'
 SECRETS_NAME = 'agent.secrets'
@@ -42,9 +39,9 @@ class OllamaSettings(BaseModel):
     idle_minutes: int = Field(10, ge=1)
     #: Tokens one reply may generate: a small model that loops fails fast instead
     #: of running until the context fills (18-50 min per turn on the A4000).
-    max_output_tokens: int = Field(1024, ge=64)
-    #: Give a fine-tuned model the knowledge files too (it was trained without them).
-    trained_knowledge: bool = False
+    # One reply's cap: it stops a runaway, but a tool call naming ~150 materials
+    # needs ~1000 tokens alone (2026-11-10, 1024 cut such a setup off).
+    max_output_tokens: int = Field(4096, ge=64)
     #: Corpus passages found for the user's message and attached to it (0: none).
     prefetch_passages: int = Field(0, ge=0, le=3)
 
@@ -119,14 +116,6 @@ def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str],
     if settings.ollama.model == old:
         return None
     return f'Model {old} replaced by {settings.ollama.model} (the assistant\'s default).'
-
-
-def apply_finetune(settings: AgentSettings, finetune: Optional['FineTune']) -> bool:
-    """Prompt like ``finetune`` was trained (knowledge files or not); True if changed."""
-    if finetune is None or settings.ollama.trained_knowledge == finetune.trained_knowledge:
-        return False
-    settings.ollama.trained_knowledge = finetune.trained_knowledge
-    return True
 
 
 def config_dir() -> Path:

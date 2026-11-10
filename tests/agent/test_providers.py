@@ -35,7 +35,7 @@ def test_anthropic_model_built_with_its_own_key():
 def test_run_settings_per_provider():
     assert run_settings(AgentSettings()) == {'temperature': 0.0}
     assert run_settings(AgentSettings(provider='ollama')) == {
-        'temperature': 0.0, 'max_tokens': 1024, 'openai_reasoning_effort': 'none'}
+        'temperature': 0.0, 'max_tokens': 4096, 'openai_reasoning_effort': 'none'}
     claude = run_settings(AgentSettings(provider='anthropic'))
     assert 'temperature' not in claude  # current Claude models reject sampling params
     assert claude['anthropic_effort'] == 'medium' and claude['anthropic_cache_instructions']

@@ -685,7 +685,7 @@ DOMAIN = {
         _concept(('T-phase', 'T phase', 'octahedral', '1T'))),
     'concept_tmd': Case(
         'Is h-WS2 a transition-metal dichalcogenide? Answer in one sentence.',
-        _concept(('dichalcogenide', 'TMD'), ('yes', 'is a '))),
+        _concept(('dichalcogenide', 'TMD'), ('yes',))),
     'concept_cof': Case(
         'In these simulations, what is the coefficient of friction computed from?',
         _concept(('lateral', 'friction force'), ('normal',))),
