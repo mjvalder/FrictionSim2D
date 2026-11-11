@@ -848,7 +848,8 @@ class TestInterlayerStyles:
                             tmp_path, style='kc')
         style_line = next(ln for ln in text.splitlines() if ln.startswith('pair_style'))
         assert style_line.startswith('pair_style hybrid/overlay ')
-        assert 'kolmogorov/crespi/full 16.0 1' in style_line
+        # CC.KC-full is fitted without the taper: tap_flag follows the file.
+        assert 'kolmogorov/crespi/full 16.0 0' in style_line
         kc = _pair_coeff_lines(text, 'kolmogorov/crespi/full')
         assert len(kc) == 1 and 'CC.KC-full' in kc[0]
         emap = _map_of(kc[0], 'CC.KC-full')
@@ -856,6 +857,21 @@ class TestInterlayerStyles:
         assert '(L1)' not in text
         assert pm.interlayer_substyle == 'kolmogorov/crespi/full'
         assert pm.needs_molecule_ids is True
+
+    def test_kc_taper_file_sets_tap_flag(self, mock_settings, si_tip_config,
+                                         potentials_path, tmp_path):
+        """A ``*_taper.KC`` parameter file turns kolmogorov/crespi/full's taper on."""
+        cif = tmp_path / 'graphene.cif'
+        cif.write_text(GRAPHENE_CIF, encoding='utf-8')
+        graphene = ComponentConfig(
+            mat='h-graphene', pot_type='tersoff',
+            pot_path=str(potentials_path / 'tersoff' / 'C.tersoff'),
+            cif_path=str(cif))
+        _, text = _bilayer(mock_settings, si_tip_config, graphene, tmp_path,
+                           style='kc', file='CH_taper.KC')
+        style_line = next(ln for ln in text.splitlines() if ln.startswith('pair_style'))
+        assert 'kolmogorov/crespi/full 16.0 1' in style_line
+        assert 'CH_taper.KC' in _pair_coeff_lines(text, 'kolmogorov/crespi/full')[0]
 
     def test_ljg_emission(self, mock_settings, si_tip_config, mos2_sheet_config,
                           tmp_path):

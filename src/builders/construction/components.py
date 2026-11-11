@@ -60,6 +60,8 @@ from ...potentials.utils import (
 from ...interfaces.atomsk import AtomskWrapper
 from ...interfaces.jinja import PackageLoader
 from ...interfaces.lammps import run_lammps_commands
+# No cycle: builders/utils/interlayer imports only src.potentials.interlayer.
+from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -1804,6 +1806,7 @@ def stack_multilayer_sheet(
     edge_mode: str = 'none',
     info_out: Optional[Dict[str, Any]] = None,
     _lat_c_source: Optional[str] = None,
+    interlayer_general: Any = None,
 ) -> float:
     """Stack multiple 2D material layers with proper atom type renumbering.
     
@@ -1826,6 +1829,10 @@ def stack_multilayer_sheet(
             ``'default'`` (extraction failed, ``lat_c_default`` used).
         _lat_c_source: Internal override used by the recursive call, which
             receives a non-None ``lat_c`` that was minimised one level up.
+        interlayer_general: The run's ``[general]`` config. Its
+            ``interlayer_style`` is used between the layers here too, so a
+            minimised ``lat_c`` is the chosen style's spacing; ``None`` (or
+            ``lj``) is the plain interlayer LJ, as before.
     Returns:
         float: Interlayer distance (lat_c).
     """
@@ -1850,15 +1857,23 @@ def stack_multilayer_sheet(
         / f"sheet_{layers_for_setup}_{uuid.uuid4().hex[:8]}.in.settings"
     )
 
-    pm = PotentialManager(settings)
+    style = interlayer_style(interlayer_general)
+    # A non-lj style may write generated parameter files (LJ-G's KC/z pair);
+    # give them a private directory so concurrent builds cannot share one.
+    work_dir = (Path(tempfile.mkdtemp(prefix='stack_interlayer_'))
+                if style != 'lj' else None)
+    pm = PotentialManager(settings, potentials_dir=work_dir)
     regions = [None, 'edge'] if edge_mode != 'none' else None
     pm.register_component("sheet", config, n_layers=layers_for_setup, regions=regions)
     pm.add_self_interaction("sheet")
 
     if pm.is_sheet_lj(config.pot_type):
-        pm.add_interlayer_interaction("sheet")
+        if interlayer_general is not None:
+            set_interlayer_from_config(pm, interlayer_general, {'sheet': config})
+        pm.add_interlayer(["sheet"])
 
     pm.write_file(pot_file)
+    needs_molecule_ids = pm.needs_molecule_ids
 
     total_types = len(pm.types)
     max_z = initial_guess * (layers_for_setup - 1) + 20.0
@@ -1903,7 +1918,9 @@ def stack_multilayer_sheet(
             settings.simulation.minimization_command if calculate_lat_c else None
         ),
         'timestep': settings.simulation.timestep if calculate_lat_c else None,
-        'output_path': output_path
+        'output_path': output_path,
+        'needs_molecule_ids': needs_molecule_ids,
+        'molecule_groups': [f'layer_{i}' for i in range(1, layers_for_setup + 1)],
     }
 
     template = jinja_env.get_template('common/stack_layers.lmp')
@@ -1941,6 +1958,7 @@ def stack_multilayer_sheet(
                     edge_mode=edge_mode,
                     info_out=info_out,
                     _lat_c_source=lat_c_source,
+                    interlayer_general=interlayer_general,
                 )
 
         lat_c = lat_c or initial_guess
@@ -1954,6 +1972,8 @@ def stack_multilayer_sheet(
         lmp.close()
         if pot_file.exists():
             pot_file.unlink()
+        if work_dir is not None:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     # Re-anchor the stacked sheet so its lowest atom is at z=0.
     # Without this, some stacking/minimization outcomes can leave atoms below
@@ -2370,6 +2390,7 @@ def build_sheet(
     edge_width: float = 0.0,
     unit_cell_out: Optional[Dict[str, float]] = None,
     lat_c_info_out: Optional[Dict[str, Any]] = None,
+    interlayer_general: Any = None,
 ) -> Tuple[Path, dict, Optional[float]]:
     """Build 2D material sheet (single or multi-layer).
 
@@ -2387,6 +2408,8 @@ def build_sheet(
         lat_c_info_out: Optional mutable dict filled with ``lat_c_source``,
             ``atoms_per_layer`` and ``layer_thickness`` (the last two measured
             on the monolayer before stacking).
+        interlayer_general: The run's ``[general]`` config, forwarded to
+            :func:`stack_multilayer_sheet` for its interlayer style.
 
     Returns:
         Tuple of (path, box_dims, lat_c).
@@ -2428,6 +2451,7 @@ def build_sheet(
             stacking_type=stacking_type,
             edge_mode=edge_mode,
             info_out=lat_c_info_out,
+            interlayer_general=interlayer_general,
         )
         return stacked_path, dims, lat_c
 

@@ -824,3 +824,228 @@ def test_sheetonsheet_reaxff_renders_the_charge_atom_style(tmp_path):
     slide = (output_dir / "lammps" / "slide.in").read_text(encoding="utf-8")
     assert "atom_style      charge" in slide
     assert "Atoms # atomic" in sheet_path.read_text(encoding="utf-8")   # untouched
+
+
+# --------------------------------------------------------------------------- #
+# Interlayer styles (interlayer-potential-choice Task 4): molecule IDs and the
+# friction branch. The `lj` snapshot under data/sheet_lj_snapshot/ was captured
+# from `examples/sheet_config.ini` BEFORE any of this was wired in, so the
+# default path is pinned byte-identical to the pre-feature output.
+# --------------------------------------------------------------------------- #
+
+from src.core.config import GlobalSettings, read_config  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SHEET_LJ_SNAPSHOT = Path(__file__).parent / "data" / "sheet_lj_snapshot"
+
+
+def _build_example_sheet(tmp_path: Path, monkeypatch, *, general=None,
+                         sheet=None) -> Path:
+    """Build `examples/sheet_config.ini` (with overrides) and return the run dir.
+
+    Default `GlobalSettings()` (no user settings file), so the output depends
+    only on the code. Absolute run-dir paths and the two per-build seeds are
+    normalised by :func:`_normalised_lammps_files`.
+    """
+    monkeypatch.chdir(REPO_ROOT)
+    raw = read_config(REPO_ROOT / "examples" / "sheet_config.ini")
+    raw["general"].update(general or {})
+    raw["2D"].update(sheet or {})
+    settings = GlobalSettings()
+    settings.hpc.modules = ["lammps"]        # gates HPC generation, which build() runs
+    config = SheetOnSheetSimulationConfig(**raw, settings=settings)
+    out = tmp_path / "out"
+    SheetOnSheetSimulation(config, output_dir=str(out)).build()
+    return out
+
+
+def _normalised_lammps_files(out: Path) -> Dict[str, str]:
+    """`{relative name: text}` for every file under `lammps/`; run dir -> <OUT>, seeds -> SEED."""
+    return {
+        str(p.relative_to(out / "lammps")):
+            _normalize_random_seeds(
+                p.read_text(encoding="utf-8").replace(str(out), "<OUT>"))
+        for p in sorted((out / "lammps").rglob("*")) if p.is_file()
+    }
+
+
+def _small(**general):
+    """Overrides for a fast build: small sheet, given lat_c (no minimisation)."""
+    return dict(general=general, sheet={"x": 12, "y": 12, "lat_c": 6.15})
+
+
+def test_sheet_lj_scripts_byte_identical(tmp_path, monkeypatch):
+    """interlayer_style=lj (the default): every lammps/ file equals the snapshot."""
+    out = _build_example_sheet(tmp_path, monkeypatch)
+    got = _normalised_lammps_files(out)
+    want = {str(p.relative_to(SHEET_LJ_SNAPSHOT)): p.read_text(encoding="utf-8")
+            for p in sorted(SHEET_LJ_SNAPSHOT.rglob("*")) if p.is_file()}
+    assert sorted(got) == sorted(want)
+    for name, text in want.items():
+        assert got[name] == text, name
+
+
+def _ilp_inputs(tmp_path: Path, monkeypatch, **general) -> Path:
+    """Real potentials + write_inputs for an h-MoS2 ilp run, without the stacking.
+
+    `build()` cannot run ilp/tmd on h-MoS2 yet: the stacking `run 0` fails with
+    "too many neighbors for TMD atoms" because ilp/tmd takes a TMD atom's
+    normal from neighbours of the same molecule AND the same atom type, and
+    h-MoS2 has one S type per layer for both S sub-layers. So this drives the
+    real `_generate_potentials` + `write_inputs` on a seeded geometry; the
+    molecule-ID mechanism itself is exercised by the kc build below.
+    """
+    raw = read_config(REPO_ROOT / "examples" / "sheet_config.ini")
+    raw["general"].update({"interlayer_style": "ilp", **general})
+    raw["2D"].update({"x": 12, "y": 12, "lat_c": 6.15,
+                      "cif_path": f"{REPO_ROOT}/{MAT}/h-MoS2.cif",
+                      "pot_path": f"{REPO_ROOT}/{POT}/sw/MoS2_wen.sw"})
+    config = SheetOnSheetSimulationConfig(**raw, settings=GlobalSettings())
+    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
+    builder._create_directories()
+    builder.pm = builder._generate_potentials()
+    sheet = tmp_path / "out" / "build" / "sheet.lmp"
+    sheet.parent.mkdir(parents=True, exist_ok=True)
+    sheet.write_text("# seeded\n", encoding="utf-8")
+    builder.structure_paths["sheet"] = sheet
+    builder.lat_c = 6.15
+    builder.sheet_dims = {"xlo": 0.0, "xhi": 12.0, "ylo": 0.0, "yhi": 12.0,
+                          "zhi": 15.0}
+    builder.write_inputs()
+    return tmp_path / "out"
+
+
+def test_sheet_ilp_scripts(tmp_path, monkeypatch):
+    """ilp: ilp/tmd in the settings, reaction-force friction, ILP energy compute."""
+    out = _ilp_inputs(tmp_path, monkeypatch)
+    settings_text = (out / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    assert "ilp/tmd" in settings_text
+    slide = (out / "lammps" / "slide.in").read_text(encoding="utf-8")
+    assert "variable        xfrict equal v_sx" in slide
+    assert "compute         frict" not in slide
+    assert "compute         e_il all pair ilp/tmd" in slide
+    assert "variable        e_int_il equal c_e_il" in slide
+    assert "fix             mol_ids all property/atom mol ghost yes" in slide
+    assert "atom_style      atomic" in slide     # data files stay atomic
+
+
+def _first_run_index(lines):
+    return next(i for i, ln in enumerate(lines)
+                if ln.split()[:1] in (["run"], ["minimize"]))
+
+
+def _assert_mol_ids_before_first_run(path: Path, n_layers: int) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    head = "\n".join(lines[:_first_run_index(lines)])
+    assert "property/atom mol" in head, path.name
+    for i in range(1, n_layers + 1):
+        assert f"set group layer_{i} mol {i}" in head, path.name
+
+
+def test_molecule_ids_in_every_script(tmp_path, monkeypatch):
+    """Every script that includes the settings sets molecule IDs before it runs."""
+    out = _ilp_inputs(tmp_path, monkeypatch, outer_loop="pressure")
+    scripts = [p for p in (out / "lammps").rglob("*")
+               if p.suffix in (".in", ".lmp")
+               and "system.in.settings" in p.read_text(encoding="utf-8")]
+    assert len(scripts) == 13      # one per pressure of the example
+    for path in scripts:
+        _assert_mol_ids_before_first_run(path, 3)
+
+
+GRAPHENE_CIF = """data_graphene
+_cell_length_a 2.46
+_cell_length_b 2.46
+_cell_length_c 20.0
+_cell_angle_alpha 90.0
+_cell_angle_beta 90.0
+_cell_angle_gamma 120.0
+_space_group_name_H-M_alt 'P 1'
+_space_group_IT_number 1
+loop_
+  _space_group_symop_operation_xyz
+  'x, y, z'
+loop_
+  _atom_site_type_symbol
+  _atom_site_label
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  C C1 0.0 0.0 0.5
+  C C2 0.3333333333 0.6666666667 0.5
+"""
+
+
+def test_kc_graphene_build_runs_the_stacking_with_molecule_ids(tmp_path, monkeypatch):
+    """A real kc build: the in-process stacking `run 0` uses KC-full, which
+    refuses to run without molecule IDs ("requires atom attribute molecule"),
+    so the build completing proves stack_layers.lmp set them; the slide sets
+    them again and its tap_flag follows CC.KC-full (no taper)."""
+    cif = tmp_path / "h-graphene.cif"
+    cif.write_text(GRAPHENE_CIF, encoding="utf-8")
+    out = _build_example_sheet(
+        tmp_path, monkeypatch, general={"interlayer_style": "kc"},
+        sheet={"mat": "h-graphene", "cif_path": str(cif), "pot_type": "tersoff",
+               "pot_path": f"{POT}/tersoff/C.tersoff", "x": 12, "y": 12,
+               "lat_c": 3.4})
+    settings_text = (out / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    assert "kolmogorov/crespi/full 16.0 0" in settings_text
+    slide = out / "lammps" / "slide.in"
+    _assert_mol_ids_before_first_run(slide, 3)
+    text = slide.read_text(encoding="utf-8")
+    assert "compute         e_il all pair kolmogorov/crespi/full" in text
+    # The stacked data file is plain atomic: no Molecules section leaked.
+    stacked = (out / "build" / "h-graphene_3.lmp").read_text(encoding="utf-8")
+    assert "Molecules" not in stacked
+
+
+def test_stack_layers_template_sets_molecule_ids():
+    """common/stack_layers.lmp (the in-process stacking script) gets them too,
+    before its `run 0`, and keeps them out of the written data file."""
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader("src.templates"),
+                      trim_blocks=True, lstrip_blocks=True)
+    ctx = dict(box_xlo=0, box_xhi=10, box_ylo=0, box_yhi=10, box_zhi=30,
+               total_types=4, atom_style="atomic", base_layer_path="base.lmp",
+               n_layers=2, layer_shifts=[0, 6], layer_shifts_x=[0, 0],
+               layer_shifts_y=[0, 0], types_per_layer=2, pot_counts={"Mo": 1, "S": 1},
+               pot_file="pot.in.settings", pot_type="sw", calculate_lat_c=False,
+               output_path="out.lmp")
+    plain = env.get_template("common/stack_layers.lmp").render(ctx)
+    assert "mol" not in plain
+    lines = env.get_template("common/stack_layers.lmp").render(
+        ctx, needs_molecule_ids=True,
+        molecule_groups=["layer_1", "layer_2"]).splitlines()
+    run0 = lines.index("run 0")
+    head = lines[:run0]
+    assert "fix             mol_ids all property/atom mol ghost yes" in head
+    assert "set group layer_2 mol 2" in head
+    write = next(ln for ln in lines if ln.startswith("write_data"))
+    assert write == "write_data out.lmp nofix"      # no Molecules section
+
+
+def test_comparison_mode_lj(tmp_path, monkeypatch):
+    """lj + comparison: reaction-force branch, settings identical to plain lj."""
+    plain = _build_example_sheet(tmp_path / "plain", monkeypatch, **_small())
+    comp = _build_example_sheet(tmp_path / "comp", monkeypatch,
+                                **_small(interlayer_comparison=True))
+    p = _normalised_lammps_files(plain)
+    c = _normalised_lammps_files(comp)
+    assert c["system.in.settings"] == p["system.in.settings"]
+    slide = c["slide.in"]
+    assert "variable        xfrict equal v_sx" in slide
+    assert "compute         frict" not in slide
+    assert "e_int_il" not in slide      # nothing isolates the LJ interlayer term
+    assert "property/atom" not in slide
+
+
+def test_ljg_group_group(tmp_path, monkeypatch):
+    """lj_g without comparison keeps compute group/group (pending Task 8)."""
+    out = _build_example_sheet(tmp_path, monkeypatch,
+                               **_small(interlayer_style="lj_g"))
+    settings_text = (out / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    assert "kolmogorov/crespi/z" in settings_text
+    slide = (out / "lammps" / "slide.in").read_text(encoding="utf-8")
+    assert "compute         frict layer_2 group/group layer_1" in slide
+    assert "property/atom" not in slide

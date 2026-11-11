@@ -1,3 +1,5 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
+{% import 'common/interlayer_energy.lmp' as il_energy %}
 {% import 'common/halt.lmp' as halt_guard %}
 {# The sliding contact. The stack splits into two sheets of equal thickness
    (thinner half below for odd n), so the interface sits at the middle:
@@ -59,6 +61,9 @@ read_data       {{ data_file }} add append group bot
 {% endif %}
 
 include         {{ potential_file }}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 
 {% if pot_type == 'reaxff' %}
 fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
@@ -135,13 +140,27 @@ variable        sx equal f_fsbot[1]*{{ ev_a_to_nn }}
 variable        sy equal f_fsbot[2]*{{ ev_a_to_nn }}
 variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 
+{# compute group/group needs pair->single(): LJ (and, pending Task 8, LJ-G)
+   provide it; a potential with an internal interlayer term, ILP/KC, or the
+   interlayer comparison mode take the reaction-force branch instead.
+   The builder passes `use_group_group` as a real bool; only `false` itself
+   (`sameas`, so a 0 stub or an absent key keeps the old has_internal_lj
+   rule) moves a run without an internal interlayer term off group/group. #}
+{% if has_internal_lj or use_group_group is sameas false %}
 {% if has_internal_lj %}
 # Many-body potential ({{ pot_type }}): compute group/group not supported.
 # Using bottom-layer reaction forces as lateral friction proxy.
 # If friction values look wrong, verify pot_type classification in
 # PotentialManager.is_sheet_lj() (src/core/potential_manager.py).
+{% else %}
+# Interlayer style without compute group/group (ILP/KC, or comparison mode):
+# bottom-layer reaction forces as the lateral friction proxy, in nN.
+{% endif %}
 variable        xfrict equal v_sx
 variable        yfrict equal v_sy
+{% if interlayer_energy_substyle %}
+{{ il_energy.emit_interlayer_energy(interlayer_energy_substyle) -}}
+{% endif %}
 {% else %}
 compute         frict layer_{{ il_top }} group/group layer_{{ il_bot }}
 # compute group/group's VECTOR is a force in eV/A; the many-body branch above

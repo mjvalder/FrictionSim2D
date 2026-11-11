@@ -28,6 +28,8 @@ from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
+from ..utils.interlayer import (interlayer_style, interlayer_template_context,
+                                set_interlayer_from_config)
 from ..construction.hetero_stack import _box_region_cmd, _detect_atom_style, _run_lammps
 from ...interfaces.ase import read_lammps_data
 
@@ -287,6 +289,7 @@ class FlakeSlideSimulation(SimulationBase):
             sheet_cfg, build_dir, stack_if_multi=True, settings=settings,
             n_layers_override=n_sheet_layers,
             stacking_type=getattr(sheet_cfg, "stack_type", "AA"),
+            interlayer_general=self.config.general,
         )
 
         # 2. Flake (single-material reuses [2D]; hetero flake from [Flake-1/2]).
@@ -349,36 +352,11 @@ class FlakeSlideSimulation(SimulationBase):
         settings_path = self.output_dir / "lammps" / "system.in.settings"
 
         def _register(prefix: str) -> PotentialManager:
-            pm = PotentialManager(
-                settings,
-                potentials_dir=self.output_dir / "provenance" / "potentials",
-                potentials_prefix=prefix,
-            )
-            pm.set_lj_overrides(self.config.lj_override)
-            # n_layers MUST match the stacked sheet file's per-layer types.
-            # Registering it as one layer gave the sheet 2 types while the file
-            # held 2*N: the flake's type offset then landed on the sheet's own
-            # upper types, so `group flake` swallowed the sheet's S atoms and
-            # the load, drive and v_fz acted on sheet + flake together.
-            pm.register_component("sheet", sheet_cfg, n_layers=n_sheet_layers)
-            for name, comp in zip(flake_names, flake_components):
-                pm.register_component(name, comp, regions=[None, "corner"])
-            if reserve_virtual_type:
-                pm.register_virtual_atom()
-            pm.add_self_interaction("sheet")
-            if pm.is_sheet_lj(sheet_cfg.pot_type):
-                # One many-body instance per layer, so the layers need the
-                # interlayer LJ explicitly (sheetonsheet/base.py does the same).
-                pm.add_interlayer_interaction("sheet")
-            for name in flake_names:
-                pm.add_self_interaction(name)
-            for name in flake_names:
-                pm.add_cross_interaction("sheet", name)
-            for i, name_i in enumerate(flake_names):
-                for j in range(i + 1, len(flake_names)):
-                    pm.add_cross_interaction(name_i, flake_names[j])
-            pm.write_file(settings_path)
-            return pm
+            return self._register_potentials(
+                prefix, sheet_cfg=sheet_cfg, n_sheet_layers=n_sheet_layers,
+                flake_names=flake_names, flake_components=flake_components,
+                reserve_virtual_type=reserve_virtual_type,
+                settings_path=settings_path)
 
         pm = _register("provenance/potentials")
         n_sheet_types = len(pm.types.ids_by_component("sheet"))
@@ -455,6 +433,15 @@ class FlakeSlideSimulation(SimulationBase):
             "atom_style": _detect_atom_style(combined_path),
             "pot_type": "sw",
             "has_internal_lj": True,
+            # has_internal_lj is pinned True above, so use_group_group is
+            # False under every style: the flake always reads the reaction
+            # force. The flake registers no E_int_interlayer channel, so no
+            # interlayer energy compute either.
+            **{**interlayer_template_context(
+                general, has_internal_lj=True, pm=pm,
+                molecule_groups=self._molecule_groups(
+                    pm, n_sheet_layers, flake_names, in_slide=True)),
+               "interlayer_energy_substyle": None},
             "pressures": general.pressure if general.pressure is not None else 0.0,
             "scan_speed_config": general.scan_speed,
             "scan_angle_config": general.scan_angle,
@@ -508,6 +495,84 @@ class FlakeSlideSimulation(SimulationBase):
         logger.info("Wrote flake slide script to %s/lammps/slide.in", self.output_dir)
 
         self._generate_hpc_scripts()
+
+    def _register_potentials(self, prefix: str, *, sheet_cfg, n_sheet_layers: int,
+                             flake_names: List[str], flake_components: list,
+                             reserve_virtual_type: bool,
+                             settings_path: Path) -> PotentialManager:
+        """Register sheet -> flake(s) -> virtual and write ``settings_path``.
+
+        ``lj`` (the default) emits exactly what it always has. Any other
+        ``interlayer_style`` acts between every 2D layer of the system -- the
+        substrate sheet's layers AND the flake(s), whose interface is the
+        sliding one. ``ilp``/``kc`` therefore replace the sheet-flake (and
+        flake-flake) LJ with their many-body term; ``lj_g`` keeps that LJ and
+        adds the Gaussian over all of them.
+        """
+        settings = self.config.settings
+        style = interlayer_style(self.config.general)
+        pm = PotentialManager(
+            settings,
+            potentials_dir=self.output_dir / "provenance" / "potentials",
+            potentials_prefix=prefix,
+        )
+        pm.set_lj_overrides(self.config.lj_override)
+        # n_layers MUST match the stacked sheet file's per-layer types.
+        # Registering it as one layer gave the sheet 2 types while the file
+        # held 2*N: the flake's type offset then landed on the sheet's own
+        # upper types, so `group flake` swallowed the sheet's S atoms and
+        # the load, drive and v_fz acted on sheet + flake together.
+        pm.register_component("sheet", sheet_cfg, n_layers=n_sheet_layers)
+        for name, comp in zip(flake_names, flake_components):
+            pm.register_component(name, comp, regions=[None, "corner"])
+        if reserve_virtual_type:
+            pm.register_virtual_atom()
+        pm.add_self_interaction("sheet")
+        if style == 'lj':
+            if pm.is_sheet_lj(sheet_cfg.pot_type):
+                # One many-body instance per layer, so the layers need the
+                # interlayer LJ explicitly (sheetonsheet/base.py does the same).
+                pm.add_interlayer_interaction("sheet")
+        for name in flake_names:
+            pm.add_self_interaction(name)
+        if style not in ('ilp', 'kc'):
+            for name in flake_names:
+                pm.add_cross_interaction("sheet", name)
+            for i, name_i in enumerate(flake_names):
+                for j in range(i + 1, len(flake_names)):
+                    pm.add_cross_interaction(name_i, flake_names[j])
+        if style != 'lj':
+            set_interlayer_from_config(
+                pm, self.config.general,
+                dict(zip(["sheet"] + flake_names, [sheet_cfg] + flake_components)))
+            pm.add_interlayer(["sheet"] + flake_names)
+        pm.write_file(settings_path)
+        return pm
+
+    @staticmethod
+    def _molecule_groups(pm: PotentialManager, n_sheet_layers: int,
+                         flake_names: List[str], *, in_slide: bool) -> list:
+        """One molecule per substrate layer and per flake component.
+
+        In the slide script the substrate layers are the z-band groups
+        ``layer_N`` and a single flake is the type group ``flake``. The
+        assembly run has no such groups, so there (and for each component of
+        a hetero flake) the entry carries its type ids for the macro to group.
+        """
+        groups: list = []
+        for layer in range(n_sheet_layers):
+            if in_slide:
+                groups.append(f"layer_{layer + 1}")
+            else:
+                groups.append({"name": f"mol_layer_{layer + 1}",
+                               "types": pm.types.get_layer_group_string("sheet", layer)})
+        if in_slide and len(flake_names) == 1:
+            groups.append("flake")
+        else:
+            for name in flake_names:
+                groups.append({"name": f"mol_{name}",
+                               "types": " ".join(map(str, pm.types.ids_by_component(name)))})
+        return groups
 
     def run_dir(self) -> Path:
         """Return the run directory (where LAMMPS is launched: cwd = output_dir)."""
@@ -627,6 +692,19 @@ class FlakeSlideSimulation(SimulationBase):
         total_types = len(pm.types)
         masses_block = pm.get_masses_string()
         combined_path = self.output_dir / "flake_slide.data"
+        mol_setup, mol_nofix = "", ""
+        if pm.needs_molecule_ids:
+            # ILP/KC need molecule IDs for this run 0 too; the combined file is
+            # read back by a plain read_data, so write_data drops the fix's
+            # Molecules section (`nofix`, see common/stack_layers.lmp).
+            mol_setup = self.jinja_env.from_string(
+                "{% import 'common/molecule_ids.lmp' as m %}"
+                "{{ m.emit_molecule_ids(groups) }}").render(
+                    groups=self._molecule_groups(
+                        pm, pm.components["sheet"]["n_layers"],
+                        [n for n in pm.components if n.startswith("flake")],
+                        in_slide=False))
+            mol_nofix = " nofix"
 
         script = f"""clear
 units           metal
@@ -642,8 +720,8 @@ read_data       {flake_path} add append shift {dx:.6f} {dy:.6f} {dz:.6f} group g
 
 {masses_block}
 include         {settings_path}
-run             0
-write_data      {combined_path}
+{mol_setup}run             0
+write_data      {combined_path}{mol_nofix}
 """
         script_path = self.output_dir / "assemble_flake_slide.lmp"
         script_path.write_text(script, encoding="utf-8")

@@ -27,6 +27,8 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
+from ..utils.interlayer import (interlayer_template_context,
+                                set_interlayer_from_config)
 
 if TYPE_CHECKING:
     from ...data.provenance import BuiltGeometry
@@ -442,6 +444,7 @@ class SheetOnSheetSimulation(SimulationBase):
             edge_width=self.config.settings.geometry.finite_sheet_edge_width,
             unit_cell_out=self.sheet_unit_cell,
             lat_c_info_out=lat_c_info,
+            interlayer_general=self.config.general,
         )
         self.lat_c_info = lat_c_info
         self.structure_paths['sheet'] = sheet_path
@@ -514,10 +517,13 @@ class SheetOnSheetSimulation(SimulationBase):
     def _generate_potentials(self) -> PotentialManager:
         """Configure potential file for the sheet-on-sheet simulation.
 
-        Interlayer LJ handling depends on constraint_mode and potential type:
+        Interlayer handling depends on constraint_mode and potential type:
             - Potentials with internal LJ (ReaxFF, AIREBO, etc.): No explicit LJ.
-            - atom_bonds / com_spring: Ghost LJ for non-adjacent layers.
-            - none: Real LJ for all layer pairs.
+            - atom_bonds / com_spring: Ghost LJ for non-adjacent layers
+              (``interlayer_style`` must be ``lj``; config validation rejects
+              anything else).
+            - none: the configured ``interlayer_style`` between all layers
+              (``lj``: real LJ for every layer pair, as before).
 
         Returns:
             Configured PotentialManager instance.
@@ -553,7 +559,9 @@ class SheetOnSheetSimulation(SimulationBase):
         elif constraint_mode in ('atom_bonds', 'com_spring'):
             pm.add_ghost_lj('sheet', max_real_distance=1)
         else:
-            pm.add_interlayer_interaction('sheet')
+            set_interlayer_from_config(pm, self.config.general,
+                                       {'sheet': self.config.sheet})
+            pm.add_interlayer(['sheet'])
 
         settings_path = self.output_dir / "lammps" / "system.in.settings"
         pm.write_file(settings_path)
@@ -590,7 +598,9 @@ class SheetOnSheetSimulation(SimulationBase):
         return layer_groups
 
     def _build_obs_ctx(self, n_layers: int, results_file_pattern: str,
-                       has_internal_lj: bool) -> Dict[str, object]:
+                       has_internal_lj: bool,
+                       interlayer_ctx: Optional[Dict[str, Any]] = None,
+                       ) -> Dict[str, object]:
         """Observable context for the sheet family.
 
         `extra_filter` drops the interlayer channels for a many-body
@@ -603,8 +613,20 @@ class SheetOnSheetSimulation(SimulationBase):
         `{% set il_bot %}`/`{% set il_top %}`, so the sliding interface has
         one definition shared between Python and Jinja rather than two that
         can drift (see MIDDLE_INTERFACE in tests/builders/test_template_contract.py).
+
+        With an interlayer style (``interlayer_ctx``), ``E_int_interlayer``
+        exists only where the template defines ``v_e_int_il``: the
+        group/group branch, or the ILP/KC ``compute pair``. ``n_contact_il``
+        is a ``coord/atom`` count from the UFF/override sigma, so it stays
+        under every style and the counts remain comparable.
         """
-        interlayer = {'E_int_interlayer', 'n_contact_il'}
+        dropped = set()
+        if has_internal_lj:
+            dropped = {'E_int_interlayer', 'n_contact_il'}
+        elif interlayer_ctx is not None and not (
+                interlayer_ctx['use_group_group']
+                or interlayer_ctx['interlayer_energy_substyle']):
+            dropped = {'E_int_interlayer'}
         return sheet_obs_ctx(
             self.config.settings,
             sim_type=self.FAMILY,
@@ -612,8 +634,8 @@ class SheetOnSheetSimulation(SimulationBase):
             results_file_pattern=results_file_pattern,
             contact_cutoff=self._contact_cutoff(),
             extra_filter=(
-                None if not has_internal_lj
-                else lambda ob: ob.name not in interlayer),
+                None if not dropped
+                else lambda ob: ob.name not in dropped),
         )
 
     def _contact_cutoff(self) -> float:
@@ -715,6 +737,9 @@ class SheetOnSheetSimulation(SimulationBase):
             atomic2molecular(self.structure_paths['sheet'])
 
         has_internal_lj = not self.pm.is_sheet_lj(pot_type)
+        interlayer_ctx = interlayer_template_context(
+            self.config.general, has_internal_lj=has_internal_lj, pm=self.pm,
+            molecule_groups=[f'layer_{i}' for i in range(1, n_layers + 1)])
         results_file_pattern = (
             f"{rel_run_dir_str}/results/"
             f"friction_p${{pressure}}_a${{a}}_s${{speed}}"
@@ -771,7 +796,8 @@ class SheetOnSheetSimulation(SimulationBase):
             'dump_enabled': out.dump.get('slide', False),
             'results_file_pattern': results_file_pattern,
             'obs_ctx': self._build_obs_ctx(
-                n_layers, results_file_pattern, has_internal_lj),
+                n_layers, results_file_pattern, has_internal_lj,
+                interlayer_ctx),
             'results_file_raw': (
                 f"{rel_run_dir_str}/results/"
                 f"raw_p${{pressure}}_a${{a}}_s${{speed}}"
@@ -790,6 +816,7 @@ class SheetOnSheetSimulation(SimulationBase):
             'atom_style': atom_style,
             'pot_type': pot_type,
             'has_internal_lj': has_internal_lj,
+            **interlayer_ctx,
             'ev_a_to_nn': EV_A_TO_NN,
             'ev_a3_to_gpa': EV_A3_TO_GPA,
         }

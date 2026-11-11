@@ -126,7 +126,7 @@ def _sheet_obs_ctx(has_internal_lj: bool, n_layers: int = 4,
 
 
 def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
-                        constraint_mode: str = 'none') -> str:
+                        constraint_mode: str = 'none', **extra) -> str:
     """Render sheetonsheet/slide.lmp directly for the conditional-channel test.
 
     Only the has_internal_lj branch is under test; the non-strict env renders
@@ -157,7 +157,7 @@ def _render_sheet_slide(has_internal_lj: bool, n_layers: int = 4,
         timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
         results_file_pattern='results/friction.txt',
         ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565,
-        driving_spring_ev=3.0,
+        driving_spring_ev=3.0, **extra,
     )
 
 
@@ -405,7 +405,7 @@ def _hetero_obs_ctx(n_layers: int) -> dict:
     )
 
 
-def _render_hetero_slide(n_layers: int) -> str:
+def _render_hetero_slide(n_layers: int, **extra) -> str:
     """Render hetero/slide.lmp, whose layer groups come from z-bands.
 
     has_internal_lj=False exercises the template's non-many-body `compute
@@ -440,6 +440,7 @@ def _render_hetero_slide(n_layers: int) -> str:
         timestep=0.001, thermo=1000, results_freq=1000, run_steps=1000,
         results_file_pattern='results/friction.txt',
         ev_a3_to_gpa=160.2176, ev_a_to_nn=1.602176565, driving_spring_ev=3.0,
+        **extra,
     )
 
 
@@ -1168,3 +1169,60 @@ def test_afm_hold_length_comes_from_the_constant(tmp_path):
     assert AFM_HOLD_STEPS == 10000
     hold = text[text.index('fix             hold_ave'):]
     assert 'run             10000' in hold
+
+
+# --- interlayer styles (interlayer-potential-choice Task 4) -----------------
+# The keys every sheet-family slide template takes: use_group_group,
+# interlayer_energy_substyle, needs_molecule_ids, molecule_groups.
+
+_ILP_KEYS = dict(use_group_group=False, interlayer_energy_substyle='ilp/tmd',
+                 needs_molecule_ids=True,
+                 molecule_groups=['layer_1', 'layer_2', 'layer_3', 'layer_4'])
+
+
+def test_sheet_slide_use_group_group_overrides_has_internal_lj():
+    """`use_group_group`, when given, decides the branch on its own."""
+    rb = _render_sheet_slide(has_internal_lj=False, use_group_group=False)
+    assert 'variable        xfrict equal v_sx' in rb
+    assert 'compute         frict' not in rb
+    gg = _render_sheet_slide(has_internal_lj=False, use_group_group=True)
+    assert 'compute         frict layer_3 group/group layer_2' in gg
+
+
+def test_sheet_slide_ilp_energy_and_molecule_ids():
+    text = _render_sheet_slide(has_internal_lj=False, **_ILP_KEYS)
+    lines = text.splitlines()
+    assert 'compute         e_il all pair ilp/tmd' in lines
+    assert 'variable        e_int_il equal c_e_il' in lines
+    include = lines.index('include         system.in.settings')
+    first_min = next(i for i, ln in enumerate(lines) if ln.startswith('minimize'))
+    fix = lines.index('fix             mol_ids all property/atom mol ghost yes')
+    assert include < fix < first_min
+    assert lines[fix + 1:fix + 5] == [f'set group layer_{i} mol {i}' for i in range(1, 5)]
+
+
+def test_sheet_slide_reaction_branch_without_substyle_defines_no_e_int_il():
+    """lj/lj_g in comparison mode: nothing isolates the interlayer term."""
+    text = _render_sheet_slide(has_internal_lj=False, use_group_group=False,
+                               interlayer_energy_substyle=None)
+    assert 'compute         e_il' not in text
+    assert 'variable        e_int_il' not in text
+
+
+def test_hetero_slide_molecule_ids_follow_the_zband_groups():
+    text = _render_hetero_slide(4, **_ILP_KEYS)
+    lines = text.splitlines()
+    last_group = max(i for i, ln in enumerate(lines)
+                     if ln.startswith('group           layer_'))
+    fix = lines.index('fix             mol_ids all property/atom mol ghost yes')
+    first_min = next(i for i, ln in enumerate(lines) if ln.startswith('minimize'))
+    assert last_group < fix < first_min
+    assert 'variable        xfrict equal v_sx' in text
+    assert 'compute         e_il all pair ilp/tmd' in text
+
+
+def test_molecule_ids_snippet_is_absent_by_default():
+    for text in (_render_sheet_slide(has_internal_lj=False),
+                 _render_hetero_slide(4)):
+        assert 'property/atom' not in text
+        assert ' mol ' not in text

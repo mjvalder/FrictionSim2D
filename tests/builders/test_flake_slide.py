@@ -1093,3 +1093,90 @@ def test_flake_slide_under_load_reports_the_applied_normal_force(tmp_path):
     expected = 5.0 * flake_projected_area("hexagon", 5.0) / 100.0   # nN
     mean_fz = sum(settled) / len(settled)
     assert mean_fz == pytest.approx(expected, rel=0.3), (settled, expected)
+
+
+# --------------------------------------------------------------------------- #
+# Interlayer styles (interlayer-potential-choice Task 4). No LAMMPS: the
+# potential registration and the template are checked directly.
+# --------------------------------------------------------------------------- #
+
+def _flake_pm(tmp_path, monkeypatch, **general):
+    """`_register_potentials` for the single-material flake config."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
+    cfg = _flake_on_sheet_cfg()
+    for key, value in general.items():
+        setattr(cfg.general, key, value)
+    builder = FlakeSlideSimulation(cfg, output_dir=str(tmp_path / "out"))
+    settings_path = tmp_path / "out" / "lammps" / "system.in.settings"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    pm = builder._register_potentials(
+        "provenance/potentials", sheet_cfg=cfg.sheet, n_sheet_layers=2,
+        flake_names=["flake"], flake_components=[builder._filled_flake_config()],
+        reserve_virtual_type=True, settings_path=settings_path)
+    return builder, pm, settings_path.read_text(encoding="utf-8")
+
+
+def test_flake_lj_potentials_match_the_pre_interlayer_sequence(tmp_path, monkeypatch):
+    """lj emits exactly the calls the inline `_register` made before."""
+    from src.potentials.manager import PotentialManager
+    builder, _, text = _flake_pm(tmp_path, monkeypatch)
+    cfg = builder.config
+    pm = PotentialManager(cfg.settings,
+                          potentials_dir=tmp_path / "out" / "provenance" / "potentials",
+                          potentials_prefix="provenance/potentials")
+    pm.set_lj_overrides(cfg.lj_override)
+    pm.register_component("sheet", cfg.sheet, n_layers=2)
+    pm.register_component("flake", builder._filled_flake_config(),
+                          regions=[None, "corner"])
+    pm.register_virtual_atom()
+    pm.add_self_interaction("sheet")
+    pm.add_interlayer_interaction("sheet")
+    pm.add_self_interaction("flake")
+    pm.add_cross_interaction("sheet", "flake")
+    expected = tmp_path / "expected.settings"
+    pm.write_file(expected)
+    assert text == expected.read_text(encoding="utf-8")
+
+
+def test_flake_ilp_covers_sheet_and_flake_without_their_lj(tmp_path, monkeypatch):
+    """ilp: one ilp/tmd pair_coeff over the sheet layers AND the flake (the
+    sliding interface); the sheet-flake lj/cut is gone."""
+    _, pm, text = _flake_pm(tmp_path, monkeypatch, interlayer_style="ilp")
+    ilp = [ln for ln in text.splitlines() if ln.startswith("pair_coeff * * ilp/tmd")]
+    assert len(ilp) == 1
+    emap = ilp[0].split("#")[0].split()[5:]
+    for t in pm.types.ids_by_component("sheet") + pm.types.ids_by_component("flake"):
+        assert emap[t - 1] in ("Mo", "S")
+    assert not [ln for ln in text.splitlines()
+                if "lj/cut" in ln and "(L" in ln and "flake" in ln.lower()]
+    assert pm.needs_molecule_ids
+
+
+def test_flake_template_sets_molecule_ids_before_minimize():
+    ctx = _minimal_flake_slide_context()
+    plain = _render_flake_slide_for_test(dict(ctx))
+    assert "property/atom" not in plain
+    text = _render_flake_slide_for_test({
+        **ctx, "needs_molecule_ids": True, "use_group_group": False,
+        "interlayer_energy_substyle": None,
+        "molecule_groups": ["layer_1", "layer_2", "flake"]})
+    lines = text.splitlines()
+    first_min = next(i for i, ln in enumerate(lines) if ln.startswith("minimize"))
+    head = lines[:first_min]
+    flake_group = head.index("group           flake type 5 6")
+    fix = head.index("fix             mol_ids all property/atom mol ghost yes")
+    assert flake_group < fix
+    assert head[fix + 1:fix + 4] == [
+        "set group layer_1 mol 1", "set group layer_2 mol 2", "set group flake mol 3"]
+    assert "variable        xfrict equal v_sx" in text
+
+
+def test_molecule_groups_for_assembly_and_hetero_flake_carry_types(tmp_path, monkeypatch):
+    """The assembly run has no layer/flake groups, so its entries carry type ids."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+    _, pm, _ = _flake_pm(tmp_path, monkeypatch, interlayer_style="ilp")
+    groups = FlakeSlideSimulation._molecule_groups(pm, 2, ["flake"], in_slide=False)
+    assert [g["name"] for g in groups] == ["mol_layer_1", "mol_layer_2", "mol_flake"]
+    assert groups[0]["types"] == pm.types.get_layer_group_string("sheet", 0)
+    assert groups[2]["types"] == " ".join(map(str, pm.types.ids_by_component("flake")))

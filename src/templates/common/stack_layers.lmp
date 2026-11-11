@@ -1,3 +1,4 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
 # LAMMPS commands for stacking multilayer 2D material sheets
 # Generated from template: stack_layers.lmp
 
@@ -35,6 +36,9 @@ group 2Dtype delete
 {% set i.value = i.value + count %}
 {% endfor %}
 
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 include {{ pot_file }}
 {% if pot_type == 'reaxff' %}
 fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
@@ -53,4 +57,8 @@ variable z2 equal xcm(layer_2,z)
 variable lat_c equal v_z2-v_z1
 {% endif %}
 
-write_data {{ output_path }}
+{# The stacked file is read back by a plain read_data, so with molecule IDs
+   `nofix` keeps fix property/atom's Molecules section out of it. (`unfix`
+   first would not do: write_data re-inits, and ILP/KC then refuse to run
+   without the molecule attribute.) #}
+write_data {{ output_path }}{% if needs_molecule_ids %} nofix{% endif %}

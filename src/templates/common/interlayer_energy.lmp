@@ -1,0 +1,14 @@
+{# Interlayer energy under the reaction-force branch (spec 2026-11-11 §7).
+
+   `compute pair <substyle>` isolates the interlayer term only where it has a
+   pair sub-style of its own (ilp/tmd, ilp/graphene/hbn,
+   kolmogorov/crespi/full); the builder passes None otherwise and the energy
+   is dropped, as for rebomos. Unlike the group/group scalar (the shearing
+   interface only) this is the sum over every layer pair. eV, unscaled. #}
+{% macro emit_interlayer_energy(substyle) %}
+{% if substyle %}
+# Interlayer energy from the interlayer pair sub-style alone (every layer pair).
+compute         e_il all pair {{ substyle }}
+variable        e_int_il equal c_e_il
+{% endif %}
+{% endmacro %}

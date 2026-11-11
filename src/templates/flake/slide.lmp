@@ -1,3 +1,4 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
 {% import 'common/halt.lmp' as halt_guard %}
 {% import 'common/observables.lmp' as obs %}
 # LAMMPS Input Script for Flake-on-Sheet Sliding (D4)
@@ -68,6 +69,9 @@ group           layer_{{ layer.idx }} region reg_layer_{{ layer.idx }}
 
 # ---- Flake group (by type: the driven body) ----
 group           flake type {{ flake_group_types }}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 
 {% if pot_type == 'reaxff' %}
 fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
@@ -154,7 +158,13 @@ variable        sx equal f_fsbot[1]*{{ ev_a_to_nn }}
 variable        sy equal f_fsbot[2]*{{ ev_a_to_nn }}
 variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 
-{% if has_internal_lj %}
+{# compute group/group needs pair->single(): LJ (and, pending Task 8, LJ-G)
+   provide it; a potential with an internal interlayer term, ILP/KC, or the
+   interlayer comparison mode take the reaction-force branch instead.
+   The builder passes `use_group_group` as a real bool; only `false` itself
+   (`sameas`, so a 0 stub or an absent key keeps the old has_internal_lj
+   rule) moves a run without an internal interlayer term off group/group. #}
+{% if has_internal_lj or use_group_group is sameas false %}
 # Many-body potential ({{ pot_type }}): compute group/group not supported.
 # Using bottom-sheet reaction forces as lateral friction proxy.
 variable        xfrict equal v_sx

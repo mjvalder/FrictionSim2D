@@ -1060,8 +1060,13 @@ class PotentialManager:
         if self._gaussian_instances:
             return [f"kolmogorov/crespi/z {self.lj_cutoff}"] * len(self._gaussian_instances)
         if self._interlayer_commands:
-            cutoff = ILP_CUTOFF if self.interlayer_style == 'ilp' else KC_FULL_CUTOFF
-            return [f"{self._interlayer_substyle} {cutoff} {TAPER_FLAG}"]
+            if self.interlayer_style == 'ilp':
+                return [f"{self._interlayer_substyle} {ILP_CUTOFF} {TAPER_FLAG}"]
+            # KC-full's taper flag must match its parameter file: the
+            # `*_taper.KC` files are fitted with the taper, the others without.
+            source = self._interlayer_source
+            tap = 1 if source is not None and source.name.endswith('_taper.KC') else 0
+            return [f"{self._interlayer_substyle} {KC_FULL_CUTOFF} {tap}"]
         return []
 
     def _write_gaussian_commands(self, settings_dir: Path) -> List[str]:

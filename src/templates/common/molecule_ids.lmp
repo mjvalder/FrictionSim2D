@@ -1,0 +1,29 @@
+{# Molecule IDs for the ILP / KC-full interlayer styles.
+
+   Both pair styles compute per-atom normals within a layer and exclude
+   intra-layer pairs by MOLECULE ID, so every 2D layer needs its own ID.
+   `fix property/atom mol` adds the attribute to atom_style atomic/charge
+   (https://docs.lammps.org/fix_property_atom.html), which keeps every data
+   file byte-identical; `ghost yes` because pair styles read the IDs of ghost
+   atoms too. Atoms in no listed group (the virtual drive atom) keep mol 0.
+
+   `groups` lists group names, one molecule each, numbered from 1 in order.
+   An entry may instead be {'name': ..., 'types': '...'}: the type group is
+   created first (the hetero flake's per-material components have none).
+
+   Emit it after the groups exist and before the first run/minimize. A
+   `write_data` with the fix defined writes a `Molecules` section -- harmless
+   for the retained final state, but a data file that is read back with
+   `read_data` and no matching `fix` keyword must `unfix mol_ids` first. #}
+{% macro emit_molecule_ids(groups) %}
+# Molecule IDs: one per 2D layer (ILP/KC exclude intra-layer pairs by them)
+fix             mol_ids all property/atom mol ghost yes
+{% for g in groups %}
+{% if g is mapping %}
+group           {{ g.name }} type {{ g.types }}
+set group {{ g.name }} mol {{ loop.index }}
+{% else %}
+set group {{ g }} mol {{ loop.index }}
+{% endif %}
+{% endfor %}
+{% endmacro %}
