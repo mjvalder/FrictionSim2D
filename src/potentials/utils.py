@@ -21,6 +21,7 @@ from ..core.utils.structures import (  # noqa: PLC2701
     _normalize_element_symbol, cifread, count_atomtypes,
 )
 
+from ..interfaces import lammps as _lammps
 from . import uff as lj
 
 logger = logging.getLogger(__name__)
@@ -244,6 +245,33 @@ class ResolvedPotential:
 # because the legacy fallback is not an error: ``is_sheet_lj`` logs "Unknown
 # potential type, assuming LJ is required" and proceeds — under a sweep that
 # would silently emit the wrong pair_style for an entire arm.
+def _accept_custom_type(normalised: str, raw: str, source: str) -> None:
+    """Allow a pair style outside KNOWN_TYPES iff the installed LAMMPS lists it.
+
+    With no LAMMPS binary to ask, the style is accepted with a warning. Either
+    way it is treated as an unknown-LJ style downstream.
+
+    Raises:
+        PotentialTypeError: If LAMMPS is available and does not list it.
+    """
+    installed = _lammps.lammps_pair_styles()
+    if installed is None:
+        logger.warning(
+            "%s '%s' is not a built-in style and no LAMMPS binary was found to "
+            "check it against; accepting it as written.", source, raw)
+        return
+    if normalised not in installed:  # pylint: disable=unsupported-membership-test
+        raise PotentialTypeError(
+            f"{source} '{raw}' is not a known LAMMPS pair style "
+            f"(known: {sorted(KNOWN_TYPES)}) nor one of the installed "
+            f"LAMMPS. It would be written straight into pair_style and the run "
+            f"would fail at LAMMPS start-up."
+        )
+    logger.warning(
+        "%s '%s' is a custom pair style (installed in LAMMPS, not built in); "
+        "it is not validated further.", source, raw)
+
+
 def validate_pot_type(value: str, *, source: str) -> str:
     """Return ``value`` normalised, or raise if it is not a known LAMMPS style.
 
@@ -268,11 +296,7 @@ def validate_pot_type(value: str, *, source: str) -> str:
     """
     normalised = value.strip().lower()
     if normalised not in KNOWN_TYPES:
-        raise PotentialTypeError(
-            f"{source} '{value}' is not a known LAMMPS pair style "
-            f"(known: {sorted(KNOWN_TYPES)}). It would be written straight into "
-            f"pair_style and the run would fail at LAMMPS start-up."
-        )
+        _accept_custom_type(normalised, value, source)
     return normalised
 
 
@@ -291,9 +315,7 @@ def resolve_pot_type(entry: Union[str, dict],
     if explicit:
         pot_type = explicit.strip().lower()
         if pot_type not in KNOWN_TYPES:
-            raise PotentialTypeError(
-                f"{path}: explicit pot_type '{explicit}' is not a known "
-                f"LAMMPS style (known: {sorted(KNOWN_TYPES)})")
+            _accept_custom_type(pot_type, explicit, f"{path}: explicit pot_type")
         return ResolvedPotential(path, pot_type, 'explicit')
 
     parts = Path(path).parts

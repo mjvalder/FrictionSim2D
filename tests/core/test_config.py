@@ -764,9 +764,11 @@ def test_flake_corner_hold_defaults_off():
     assert FlakeConfig(edge_length=20.0, corner_hold=True).corner_hold is True
 
 
-def test_flake_pot_type_invalid_still_raises():
+def test_flake_pot_type_invalid_still_raises(monkeypatch):
     """The `None` guard only skips the check for `None` -- an actual bad
     pair style must still be refused."""
+    monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles',
+                        lambda: frozenset({'sw'}))
     with pytest.raises(ValidationError, match='not a known LAMMPS pair style'):
         FlakeConfig(edge_length=20.0, pot_type='not-a-real-potential')
 

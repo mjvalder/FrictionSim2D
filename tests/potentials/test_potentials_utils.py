@@ -189,3 +189,31 @@ def test_known_types_contains_the_three_documented_families():
 
 def test_normalize_potential_type_is_case_and_space_insensitive():
     assert normalize_potential_type(' SW ') == 'sw'
+
+
+class TestCustomPotType:
+    """A style the installed LAMMPS lists is accepted even if not in KNOWN_TYPES."""
+
+    def test_custom_type_accepted_with_warning(self, monkeypatch, caplog):
+        from src.potentials import utils
+        monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles',
+                            lambda: frozenset({'sw', 'sw/mod', 'mlip'}))
+        with caplog.at_level('WARNING'):
+            assert utils.validate_pot_type('mlip', source='x') == 'mlip'
+        assert 'mlip' in caplog.text
+        with pytest.raises(PotentialTypeError):
+            utils.validate_pot_type('swx', source='x')
+
+    def test_no_binary_accepts_with_warning(self, monkeypatch, caplog):
+        from src.potentials import utils
+        monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles', lambda: None)
+        with caplog.at_level('WARNING'):
+            assert utils.validate_pot_type('swx', source='x') == 'swx'
+        assert 'swx' in caplog.text
+
+    def test_explicit_sweep_route(self, monkeypatch):
+        from src.potentials import utils
+        monkeypatch.setattr('src.interfaces.lammps.lammps_pair_styles',
+                            lambda: frozenset({'mlip'}))
+        res = utils.resolve_pot_type({'path': 'a.bin', 'pot_type': 'mlip'}, Path('.'))
+        assert res.pot_type == 'mlip'

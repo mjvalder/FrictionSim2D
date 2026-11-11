@@ -484,6 +484,11 @@ class SheetConfig(ComponentConfig):
     layers: List[int]
     stack_type: str = 'AA'
     lat_c: Optional[float] = None
+    interlayer_g: Optional[float] = Field(
+        default=None,
+        description="Gaussian strength g (meV) for interlayer_style = lj_g; "
+                    "overrides the built-in table.",
+    )
     materials_list: Optional[str] = Field(
         default=None,
         description=(
@@ -605,6 +610,22 @@ class GeneralConfig(BaseModel):
             "Layer ordering in a multi-material stack: 'grouped' finishes one "
             "material before the next, 'alternating' interleaves them."
         ),
+    )
+    interlayer_style: Literal['lj', 'lj_g', 'ilp', 'kc'] = Field(
+        default='lj',
+        description=(
+            "Interaction between the layers of the sheet stack: 'lj' (the run's "
+            "normal LJ), 'lj_g' (LJ + Jiang-Park Gaussian), 'ilp' or 'kc'. "
+            "Tip-sheet and substrate-sheet always stay LJ."
+        ),
+    )
+    interlayer_file: Optional[str] = Field(
+        default=None,
+        description="ILP/KC parameter file; None picks a bundled default by element.",
+    )
+    interlayer_comparison: bool = Field(
+        default=False,
+        description="Also record the group/group interlayer force for comparison.",
     )
     twist_angle: Optional[float] = Field(
         default=None,
@@ -1008,6 +1029,14 @@ class AFMSimulationConfig(BaseModel):
             )
         return self
 
+    @model_validator(mode='after')
+    def _check_interlayer_choice(self, info: ValidationInfo):
+        """Reject interlayer settings that cannot produce a valid run."""
+        from ..potentials.interlayer import check_interlayer_choice  # pylint: disable=import-outside-toplevel,cyclic-import
+        base_dir = info.context.get('base_dir') if isinstance(info.context, dict) else None
+        check_interlayer_choice(self, base_dir)
+        return self
+
 class SheetOnSheetSimulationConfig(BaseModel):
     """Master configuration object for a Sheet-on-Sheet simulation run."""
     general: GeneralConfig
@@ -1061,6 +1090,14 @@ class SheetOnSheetSimulationConfig(BaseModel):
             folded['sheets'] = [folded['2D']]
 
         return _fold_flake_sheet_sections(folded)
+
+    @model_validator(mode='after')
+    def _check_interlayer_choice(self, info: ValidationInfo):
+        """Reject interlayer settings that cannot produce a valid run."""
+        from ..potentials.interlayer import check_interlayer_choice  # pylint: disable=import-outside-toplevel,cyclic-import
+        base_dir = info.context.get('base_dir') if isinstance(info.context, dict) else None
+        check_interlayer_choice(self, base_dir)
+        return self
 
 # --- Helper Functions ---
 

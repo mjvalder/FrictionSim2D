@@ -3,12 +3,15 @@
 This module provides utilities for interacting with LAMMPS via its Python interface.
 """
 
+import functools
 import importlib
 import logging
 import re
+import subprocess
 import sys
 import threading
 import time
+from typing import FrozenSet, Optional
 
 logger = logging.getLogger(__name__)
 _IMPORT_LOCK = threading.Lock()
@@ -80,3 +83,29 @@ def run_lammps_commands(commands: list[str]) -> None:
         raise
     finally:
         lmp.close()
+
+
+@functools.lru_cache(maxsize=1)
+def lammps_pair_styles() -> Optional[FrozenSet[str]]:
+    """Pair styles of the installed serial LAMMPS (``lmp -h``), lowercased.
+
+    Returns:
+        The styles from the "Pair styles:" block, or None when the binary is
+        missing or the call fails.
+    """
+    try:
+        out = subprocess.run(["lmp", "-h"], capture_output=True, text=True,
+                             timeout=30, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    styles = []
+    in_block = False
+    for line in out.splitlines():
+        if "styles:" in line:
+            if in_block:
+                break
+            in_block = "Pair styles:" in line
+            continue
+        if in_block:
+            styles.extend(tok.lower() for tok in line.split())
+    return frozenset(styles) if styles else None
