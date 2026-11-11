@@ -31,13 +31,20 @@ from PySide6.QtWidgets import (
 from ...run.placeholders import has_template_marker
 from ..controllers.document import ConfigDocument, DocumentError
 from ..controllers.elements import scan_config_elements
+from ..controllers.interlayer import (
+    interlayer_file_placeholder,
+    interlayer_g_placeholder,
+)
 from ..schema.introspect import FieldKind, FieldSpec, SectionSpec
 from ..schema.overrides import (
+    DOC_PREDICATES,
     ENABLED,
+    INTERLAYER_STYLE_LABELS,
     SET,
     SectionOverride,
     field_override,
     hidden_fields,
+    interlayer_styles,
     override_for_section,
 )
 from .fields import FieldEditor, build_editor
@@ -796,6 +803,7 @@ class SectionForm(QGroupBox):
 
             self._load_stacking()
             self._load_gates()
+            self.apply_visibility()
             self._prefill_required()
         finally:
             self._loading = False
@@ -817,13 +825,72 @@ class SectionForm(QGroupBox):
 
     def _gate_is_open(self, key: str) -> bool:
         """Whether `key`'s row is currently visible, i.e. not hidden behind
-        an unticked gate checkbox. A field with no gate (the common case) is
-        always open."""
+        an unticked gate checkbox or a false `visible_if`. A field with
+        neither (the common case) is always open."""
         key_override = self.override.fields.get(key) if self.override else None
-        if not key_override or not key_override.gate:
+        if not key_override:
+            return True
+        if not self._predicate_holds(key):
+            return False
+        if not key_override.gate:
             return True
         box = self._gate_boxes.get(key_override.gate)
         return box is None or box.isChecked()
+
+    def _predicate_holds(self, key: str) -> bool:
+        """`key`'s `visible_if`, evaluated over the whole document.
+
+        True for a field without one, and for an unknown predicate name --
+        a typo must not hide (and so drop) a field.
+        """
+        key_override = self.override.fields.get(key) if self.override else None
+        name = key_override.visible_if if key_override else None
+        predicate = DOC_PREDICATES.get(name) if name else None
+        return predicate is None or bool(predicate(self.document.values))
+
+    def is_row_visible(self, key: str) -> bool:
+        """Whether `key`'s row is shown (gate and `visible_if` both open)."""
+        label, _cell = self._rows.get(key, (None, None))
+        if label is None:
+            return False
+        row, _role = self.form.getWidgetPosition(label)
+        return row >= 0 and self.form.isRowVisible(row)
+
+    def apply_visibility(self) -> None:
+        """Show or hide each `visible_if` row to match the document, and
+        refresh the interlayer fields' placeholders.
+
+        Called on load and, by `ConfigForm`, after any section's edit: the
+        predicates read other sections (the sheet's potential decides whether
+        Run parameters offers an interlayer style), which this section's own
+        commits never see change.
+        """
+        if not self.override:
+            return
+        for key, key_override in self.override.fields.items():
+            if not key_override.visible_if:
+                continue
+            label, _cell = self._rows.get(key, (None, None))
+            if label is None:
+                continue
+            row, _role = self.form.getWidgetPosition(label)
+            if row >= 0:
+                self.form.setRowVisible(row, self._predicate_holds(key))
+        self._apply_interlayer_placeholders()
+
+    def _apply_interlayer_placeholders(self) -> None:
+        """What an empty interlayer file / Gaussian g will run with."""
+        values = self.document.values
+        file_editor = self.editors.get('interlayer_file')
+        if file_editor is not None and hasattr(file_editor, 'edit'):
+            text = (interlayer_file_placeholder(values, self.document.base_dir)
+                    if self._predicate_holds('interlayer_file') else '')
+            file_editor.edit.setPlaceholderText(text)
+        g_editor = self.editors.get('interlayer_g')
+        if g_editor is not None and hasattr(g_editor, 'edit'):
+            text = (interlayer_g_placeholder(values, self.section.key)
+                    if self._predicate_holds('interlayer_g') else '')
+            g_editor.edit.setPlaceholderText(text)
 
     def _prefill_required(self) -> None:
         """Fill every starred-but-empty editor with its spec default.
@@ -918,9 +985,10 @@ class SectionForm(QGroupBox):
                 continue
 
             key_override = self.override.fields.get(key) if self.override else None
-            if key_override and key_override.gate:
-                gate_box = self._gate_boxes.get(key_override.gate)
-                if gate_box is not None and not gate_box.isChecked():
+            if key_override and (key_override.gate or key_override.visible_if):
+                gate_box = self._gate_boxes.get(key_override.gate or '')
+                gate_off = gate_box is not None and not gate_box.isChecked()
+                if gate_off or not self._predicate_holds(key):
                     # The gate is off: this key must not survive in the
                     # document, or a value typed before unticking (or one
                     # loaded from a hand-written config) would silently
@@ -1626,6 +1694,7 @@ class ConfigForm(QWidget):
                 self._restore_material_sweep()
             self._wire_lj_known_elements_refresh()
             self._wire_second_sheet_to_the_sweep()
+            self.refresh_visibility()
             self._apply_highlights()
 
             self._layout.addStretch(1)
@@ -1635,6 +1704,7 @@ class ConfigForm(QWidget):
     def _add_section(self, section: SectionSpec) -> None:
         """One SectionForm, wired and folded to its remembered state."""
         form = SectionForm(section, self.document, self, settings=self.settings)
+        form.changed.connect(self.refresh_visibility)
         form.changed.connect(self.changed)
         form.collapsed_changed.connect(self._remember_collapsed)
         form.structure_changed.connect(self._on_structure_changed)
@@ -1755,6 +1825,32 @@ class ConfigForm(QWidget):
                 material_editor.changed.connect(self._refresh_lj_known_elements)
             form.section_toggled.connect(
                 lambda _key, _enabled: self._refresh_lj_known_elements())
+
+    def refresh_visibility(self) -> None:
+        """Re-evaluate every cross-section `visible_if`, and the LJ pair
+        table's note on what it covers.
+
+        A section's own commit only ever re-checks its own `enable_if`; the
+        interlayer controls depend on other sections (the sheet potential,
+        the style in Run parameters), so every edit re-asks all of them.
+        """
+        for form in self.sections.values():
+            form.apply_visibility()
+        section_form = self.sections.get('lj_override')
+        pair_editor = section_form.pair_editor if section_form else None
+        if pair_editor is None:
+            return
+        # Only the many-body styles take the layers off this table: LJ +
+        # Gaussian's LJ part *is* the run's normal LJ, overrides included.
+        values = self.document.values
+        all_styles = list(dict.fromkeys(interlayer_styles(values)))
+        many_body = [s for s in all_styles if s in ('ilp', 'kc')]
+        if many_body and DOC_PREDICATES['sheet_needs_external_interlayer'](values):
+            pair_editor.set_interlayer_note(
+                ' / '.join(INTERLAYER_STYLE_LABELS.get(s, s) for s in many_body),
+                partial=len(many_body) < len(all_styles))
+        else:
+            pair_editor.set_interlayer_note(None)
 
     def _refresh_lj_known_elements(self) -> None:
         section_form = self.sections.get('lj_override')

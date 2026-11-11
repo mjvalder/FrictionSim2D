@@ -15,14 +15,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
-from typing import Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from .simulation_types import MODES
 
 __all__ = [
     'FieldOverride', 'SectionOverride', 'overrides_for', 'section_override',
     'override_for_section', 'ENABLED', 'SET', 'field_override',
-    'CAPTION_BUDGET', 'SETTINGS_MODEL', 'PLOT_MODEL',
+    'CAPTION_BUDGET', 'SETTINGS_MODEL', 'PLOT_MODEL', 'DOC_PREDICATES',
+    'INTERLAYER_STYLE_LABELS', 'interlayer_styles', 'sheet_sections',
 ]
 
 #: A numbered sheet section as it is written to disk: ``[2D-1]``, ``[2D-2]``.
@@ -96,6 +97,12 @@ class FieldOverride:
     #: document while the gate is off -- for fields that are actively
     #: confusing to see unless deliberately in use, not merely inert.
     gate: Optional[str] = None
+    #: Name of a predicate in ``DOC_PREDICATES``, evaluated over the whole
+    #: document (every section, unlike ``enable_if``): the field is shown
+    #: only while it holds. Like ``gate``, a hidden field is kept out of the
+    #: document -- e.g. the interlayer style, which does nothing for a sheet
+    #: potential that carries its own interlayer term.
+    visible_if: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,74 @@ class SectionOverride:
     gates: Dict[str, str] = field(default_factory=dict)
 
 
+#: Display text for `[general] interlayer_style`, keyed by the stored value.
+INTERLAYER_STYLE_LABELS: Dict[str, str] = {
+    'lj': 'LJ (UFF / overrides)',
+    'lj_g': 'LJ + Gaussian (Jiang–Park)',
+    'ilp': 'ILP',
+    'kc': 'Kolmogorov–Crespi',
+}
+
+#: Sheet sections the interlayer style acts between: ``[2D]``, its numbered
+#: siblings, and the hetero-flake materials (``[Flake-N]``) -- the same set
+#: `src.potentials.interlayer.check_interlayer_choice` reads.
+_INTERLAYER_SHEET = re.compile(r'^(2D|2D-\d+|Flake-\d+)$')
+
+
+def sheet_sections(values: Mapping[str, Any]) -> Tuple[str, ...]:
+    """Keys of the sheet sections ``values`` holds, in document order."""
+    return tuple(key for key, section in values.items()
+                 if _INTERLAYER_SHEET.match(str(key)) and isinstance(section, Mapping))
+
+
+def _as_list(value: Any) -> Iterable[Any]:
+    return value if isinstance(value, (list, tuple)) else [value]
+
+
+def interlayer_styles(values: Mapping[str, Any]) -> Tuple[str, ...]:
+    """The interlayer style(s) ``values`` selects; ``('lj',)`` when unset.
+
+    A list is a sweep (one run per style), so every member counts.
+    """
+    raw = (values.get('general') or {}).get('interlayer_style')
+    styles = tuple(str(s).strip().lower() for s in _as_list(raw)
+                   if s not in (None, ''))
+    return styles or ('lj',)
+
+
+def _sheet_needs_external_interlayer(values: Mapping[str, Any]) -> bool:
+    """Some sheet's potential has no interlayer term of its own.
+
+    An unset ``pot_type`` counts: it is not yet known to carry one, and
+    hiding the style there would drop it from the document.
+    """
+    # pylint: disable=import-outside-toplevel
+    from ...potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
+    for key in sheet_sections(values):
+        for pot in _as_list(values[key].get('pot_type')):
+            if str(pot or '').strip().lower() not in POTENTIALS_WITH_INTERNAL_LJ:
+                return True
+    return False
+
+
+def _interlayer_needs_file(values: Mapping[str, Any]) -> bool:
+    return (_sheet_needs_external_interlayer(values)
+            and bool({'ilp', 'kc'} & set(interlayer_styles(values))))
+
+
+def _interlayer_is_lj_g(values: Mapping[str, Any]) -> bool:
+    return (_sheet_needs_external_interlayer(values)
+            and 'lj_g' in interlayer_styles(values))
+
+
+#: Whole-document predicates a ``FieldOverride.visible_if`` may name. Each
+#: takes the document's ``values`` (section -> key -> value).
+DOC_PREDICATES: Dict[str, Callable[[Mapping[str, Any]], bool]] = {
+    'sheet_needs_external_interlayer': _sheet_needs_external_interlayer,
+    'interlayer_needs_file': _interlayer_needs_file,
+    'interlayer_is_lj_g': _interlayer_is_lj_g,
+}
+
 A = 'Å'
 
 _COMPONENT_FIELDS = {
@@ -123,7 +198,7 @@ _COMPONENT_FIELDS = {
                          help='Material identifier, e.g. h-MoS2.'),
     'cif_path': FieldOverride(label='Structure file', order=2,
                               help='CIF describing the crystal structure.'),
-    'pot_type': FieldOverride(label='Potential type', order=3),
+    'pot_type': FieldOverride(label='Potential type', order=3, editor='pot_type'),
     'pot_path': FieldOverride(label='Potential file', order=4),
 }
 
@@ -152,6 +227,14 @@ _SHEET_FIELDS = {
                 'for AA and treat every other value as AB.'),
     ),
     'lat_c': FieldOverride(label='Interlayer spacing', unit=A, order=14),
+    'interlayer_g': FieldOverride(
+        label='Gaussian strength g', unit='meV', order=15,
+        visible_if='interlayer_is_lj_g',
+        help='Empty: the built-in value for this material.',
+        detail=('Strength of the Jiang–Park Gaussian added to the interlayer '
+                'LJ. A heterostructure interface uses the geometric mean of '
+                'the two materials\' values.'),
+    ),
     'materials_list': FieldOverride(
         label='Sweep over materials', order=0, editor='material_list',
         detail=('Each material becomes a separate simulation. The structure '
@@ -359,6 +442,25 @@ _COMMON: Dict[str, SectionOverride] = {
                 detail=("'grouped' puts every layer of the first material "
                         "below every layer of the second; 'alternating' "
                         "interleaves them. Only affects multi-layer sheets."),
+            ),
+            'interlayer_style': FieldOverride(
+                label='Interlayer interaction', order=16,
+                visible_if='sheet_needs_external_interlayer',
+                choice_labels=dict(INTERLAYER_STYLE_LABELS),
+                help='Between the sheet layers; tip and substrate stay LJ.',
+                detail=('Hidden for a sheet potential with its own interlayer '
+                        'term (REBOMoS, AIREBO, ReaxFF, COMB). ILP and '
+                        'Kolmogorov–Crespi need constraint_mode = none.'),
+            ),
+            'interlayer_file': FieldOverride(
+                label='Interlayer parameter file', order=17,
+                visible_if='interlayer_needs_file', editor='path',
+                help='Empty: the bundled file for these elements.',
+            ),
+            'interlayer_comparison': FieldOverride(
+                label='Comparison mode', order=18,
+                visible_if='sheet_needs_external_interlayer',
+                help='Every style reports the same reaction-force friction.',
             ),
         },
     ),

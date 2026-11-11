@@ -1347,3 +1347,59 @@ def test_material_list_target_predicts_the_write_location(tmp_path):
 
 def test_material_list_target_is_none_with_nowhere_to_write():
     assert ConfigDocument.blank('afm').material_list_target() is None
+
+
+class TestInterlayerValidation:
+    """An interlayer choice that cannot build is reported on the field to fill."""
+
+    @staticmethod
+    def _sheet(monkeypatch, **general):
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(EXAMPLES / 'sheet_config.ini', 'sheetonsheet')
+        document.values['general'].update(general)
+        return document
+
+    def test_kc_mos2_without_file_blocks(self, monkeypatch):
+        document = self._sheet(monkeypatch, interlayer_style='kc')
+        result = document.validate()
+        assert not result.ok
+        assert result.issues_for('general', 'interlayer_file')
+        # The model's unlocated copy of the same rule is not repeated.
+        assert not [i for i in result.issues
+                    if i.section is None and 'interlayer_file' in i.message]
+
+    def test_kc_with_a_file_is_not_blocked_on_it(self, monkeypatch):
+        document = self._sheet(monkeypatch, interlayer_style='kc',
+                               interlayer_file='CC.KC-full')
+        assert not document.validate().issues_for('general', 'interlayer_file')
+
+    def test_ilp_mos2_has_a_default_file(self, monkeypatch):
+        document = self._sheet(monkeypatch, interlayer_style='ilp')
+        assert not document.validate().issues_for('general', 'interlayer_file')
+
+    def test_ljg_without_g_blocks_on_the_sheet(self, monkeypatch):
+        document = self._sheet(monkeypatch, interlayer_style='lj_g')
+        document.values['2D']['mat'] = 'h-WTe2'
+        result = document.validate()
+        assert result.issues_for('2D', 'interlayer_g')
+
+    def test_ljg_mos2_uses_the_table(self, monkeypatch):
+        document = self._sheet(monkeypatch, interlayer_style='lj_g')
+        assert not document.validate().issues_for('2D', 'interlayer_g')
+
+    def test_a_style_sweep_validates_member_by_member(self, monkeypatch):
+        """`interlayer_style = [lj, lj_g, ilp]` is a sweep, not a bad value."""
+        monkeypatch.chdir(REPO_ROOT)
+        document = ConfigDocument.from_file(
+            EXAMPLES / 'sheet_config_interlayer.ini', 'sheetonsheet')
+        from src.core.config import load_settings
+        settings = load_settings()
+        settings.simulation.constraint_mode = 'none'
+        result = document.validate(settings)
+        assert result.ok, result.render()
+
+    def test_a_style_sweep_member_that_cannot_build_still_blocks(self, monkeypatch):
+        document = self._sheet(monkeypatch, interlayer_style=['lj', 'kc'])
+        result = document.validate()
+        assert result.issues_for('general', 'interlayer_file')
+        assert not result.issues_for('general', 'interlayer_style')

@@ -101,6 +101,14 @@ class PairOverrideEditor(QWidget):
         caption.setStyleSheet(CAPTION_SMALL)
         layout.addWidget(caption)
 
+        #: Shown only under a non-LJ interlayer style: the table then covers
+        #: tip and substrate pairs, while the sheet layers use that style.
+        self.interlayer_note = QLabel('', self)
+        self.interlayer_note.setWordWrap(True)
+        self.interlayer_note.setStyleSheet(CAPTION_SMALL)
+        self.interlayer_note.setVisible(False)
+        layout.addWidget(self.interlayer_note)
+
         file_row = QHBoxLayout()
         file_row.addWidget(QLabel('Shared overrides file:', self))
         self.file_edit = QLineEdit(self)
@@ -220,6 +228,22 @@ class PairOverrideEditor(QWidget):
         return f'{el1}-{el2}'
 
     # -------------------------------------------------------------- elements
+
+    def set_interlayer_note(self, style_label: Optional[str],
+                            partial: bool = False) -> None:
+        """Say the table covers tip/substrate pairs only while the layers use
+        ``style_label`` (a many-body style); None hides the note. ``partial``:
+        a style sweep where only some runs use it."""
+        if style_label and partial:
+            self.interlayer_note.setText(
+                f'Under {style_label}: tip and substrate pairs only — '
+                f'layers use {style_label}')
+        elif style_label:
+            self.interlayer_note.setText(
+                f'Tip and substrate pairs only — layers use {style_label}')
+        else:
+            self.interlayer_note.setText('')
+        self.interlayer_note.setVisible(bool(style_label))
 
     def set_known_elements(self, elements: Optional[List[str]]) -> None:
         """The elements the configured simulation actually places.

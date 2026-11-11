@@ -495,3 +495,42 @@ class TestAssistantHighlight:
         assert len(calls) == 1
         ed.set_highlight(None)
         assert len(calls) == 2
+
+
+class TestPotTypeEditor:
+    """pot_type: the known types in a combo, anything else via Custom…."""
+
+    def _editor(self):
+        from src.gui.widgets.fields import build_editor
+
+        return build_editor(_spec('pot_type'), editor='pot_type')
+
+    def test_pot_type_editor_custom_roundtrip(self, qt_app):
+        from src.potentials.utils import KNOWN_TYPES
+
+        editor = self._editor()
+        offered = [editor.box.itemData(i) for i in range(editor.box.count())]
+        assert [o for o in offered if isinstance(o, str)] == sorted(KNOWN_TYPES)
+        assert editor.box.itemText(editor.box.count() - 1) == 'Custom…'
+
+        editor.set_value('sw')
+        assert editor.value() == 'sw'
+        assert not editor.is_custom() and editor.custom_edit.isHidden()
+
+        # A loaded unknown value shows as Custom with the text filled in.
+        editor.set_value('lj/mdf')
+        assert editor.is_custom() and not editor.custom_edit.isHidden()
+        assert editor.custom_edit.text() == 'lj/mdf'
+        assert editor.value() == 'lj/mdf'
+
+        # Choosing Custom… and typing gives the plain string back.
+        editor.set_value('sw')
+        editor.box.setCurrentIndex(editor.box.count() - 1)
+        assert not editor.custom_edit.isHidden()
+        editor.custom_edit.setText('my/style')
+        assert editor.value() == 'my/style'
+
+    def test_blank_value_selects_unset_not_the_first_type(self, qt_app):
+        editor = self._editor()
+        editor.set_value(None)
+        assert editor.value() is None

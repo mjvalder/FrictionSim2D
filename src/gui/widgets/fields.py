@@ -380,6 +380,81 @@ class _EnumEditor(FieldEditor):
                 f"it is kept as written.")
 
 
+class _PotTypeEditor(FieldEditor):
+    """The known potential types, plus a "Custom…" entry for any other.
+
+    ``pot_type`` accepts any pair style the installed LAMMPS lists, so a closed
+    combo would refuse real configs. "Custom…" reveals a text box; a loaded
+    value outside :data:`KNOWN_TYPES` selects it with the text filled in, so
+    it round-trips exactly as written. The value is always the plain string.
+    """
+
+    CUSTOM_TEXT = 'Custom…'
+    #: itemData of the Custom entry -- not a string any pot_type could be.
+    _CUSTOM = object()
+
+    def __init__(self, spec: FieldSpec, parent=None) -> None:
+        super().__init__(spec, parent)
+        # pylint: disable=import-outside-toplevel
+        from ...potentials.utils import KNOWN_TYPES
+        self._was_string = False
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.box = QComboBox(self)
+        # Always a blank first entry, required or not: without one a blank
+        # config would show (and commit) whichever type sorts first.
+        self.box.addItem('(unset)', None)
+        for name in sorted(KNOWN_TYPES):
+            self.box.addItem(name, name)
+        self.box.addItem(self.CUSTOM_TEXT, self._CUSTOM)
+        self.box.currentIndexChanged.connect(self._on_index_changed)
+        layout.addWidget(self.box)
+        self.custom_edit = QLineEdit(self)
+        self.custom_edit.setPlaceholderText('LAMMPS pair style, e.g. sw/mod')
+        self.custom_edit.textEdited.connect(self.changed)
+        self.custom_edit.setVisible(False)
+        layout.addWidget(self.custom_edit, 1)
+        layout.addStretch(0)
+
+    def is_custom(self) -> bool:
+        """Whether the Custom entry is selected."""
+        return self.box.currentData() is self._CUSTOM
+
+    def _on_index_changed(self) -> None:
+        self.custom_edit.setVisible(self.is_custom())
+        self.changed.emit()
+
+    def value(self) -> Any:
+        if not self.is_custom():
+            return self.box.currentData()
+        text = self.custom_edit.text().strip()
+        if not text:
+            return '' if self._was_string else None
+        if ',' in text:
+            # A hand-written list (a sweep) shown as text; keep it a list.
+            return [part.strip() for part in text.strip('[]').split(',')
+                    if part.strip()]
+        return text
+
+    def set_value(self, value: Any) -> None:
+        self._was_string = isinstance(value, str)
+        self.box.blockSignals(True)
+        try:
+            index = (self.box.findData(value) if isinstance(value, str) and value
+                     else (0 if value in (None, '') else -1))
+            if index >= 0:
+                self.box.setCurrentIndex(index)
+                self.custom_edit.setText('')
+            else:
+                self.box.setCurrentIndex(self.box.count() - 1)
+                text = (', '.join(str(v) for v in value)
+                        if isinstance(value, (list, tuple)) else str(value))
+                self.custom_edit.setText(text)
+            self.custom_edit.setVisible(self.is_custom())
+        finally:
+            self.box.blockSignals(False)
+
+
 class _ListEditor(FieldEditor):
     """A comma-separated list, shown the way it is written in the config."""
 
@@ -565,6 +640,12 @@ EDITOR_REGISTRY: Dict[str, type] = {}
 def register_editor(slug: str, factory: type) -> None:
     """Make a purpose-built editor requestable by slug."""
     EDITOR_REGISTRY[slug] = factory
+
+
+register_editor('pot_type', _PotTypeEditor)
+#: A plain ``Optional[str]`` that names a file (``interlayer_file``):
+#: introspection sees a string, the override asks for the browse button.
+register_editor('path', _PathEditor)
 
 
 def build_editor(spec: FieldSpec, parent: Optional[QWidget] = None,

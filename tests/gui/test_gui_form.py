@@ -959,3 +959,88 @@ class TestAssistantHighlights:
         form.highlight({('general', 'force'): 'a → b'})
         assert not form.sections['general'].is_collapsed()
         form.deleteLater()
+
+
+class TestInterlayerControls:
+    """The interlayer style and its file/g fields follow the sheet potential
+    and the chosen style, across sections."""
+
+    @staticmethod
+    def _sheet_form(monkeypatch, **general):
+        from src.gui.widgets.form import ConfigForm
+
+        monkeypatch.chdir(REPO_ROOT)
+        doc = ConfigDocument.from_file(REPO_ROOT / 'examples' / 'sheet_config.ini',
+                                       'sheetonsheet')
+        doc.values['general'].update(general)
+        return ConfigForm(doc)
+
+    def test_interlayer_hidden_for_rebomos(self, qt_app, monkeypatch):
+        form = self._sheet_form(monkeypatch)
+        general = form.sections['general']
+        assert general.is_row_visible('interlayer_style')
+        assert general.is_row_visible('interlayer_comparison')
+
+        sheet_editor = form.sections['2D'].editors['pot_type']
+        sheet_editor.box.setCurrentIndex(sheet_editor.box.findData('rebomos'))
+        assert form.document.values['2D']['pot_type'] == 'rebomos'
+        assert not general.is_row_visible('interlayer_style')
+        assert not general.is_row_visible('interlayer_comparison')
+        form.deleteLater()
+
+    def test_hidden_style_is_kept_out_of_the_document(self, qt_app, monkeypatch):
+        form = self._sheet_form(monkeypatch, interlayer_style='ilp')
+        sheet_editor = form.sections['2D'].editors['pot_type']
+        sheet_editor.set_value('rebomos')
+        form.commit()
+        assert 'interlayer_style' not in form.document.values['general']
+        form.deleteLater()
+
+    def test_interlayer_file_shown_for_ilp_with_default_placeholder(
+            self, qt_app, monkeypatch):
+        form = self._sheet_form(monkeypatch)
+        general = form.sections['general']
+        assert not general.is_row_visible('interlayer_file')
+
+        style = general.editors['interlayer_style']
+        style.box.setCurrentIndex(style.box.findData('ilp'))
+        assert general.is_row_visible('interlayer_file')
+        assert 'TMD.ILP' in general.editors['interlayer_file'].edit.placeholderText()
+        form.deleteLater()
+
+    def test_ljg_g_placeholder_175_68(self, qt_app, monkeypatch):
+        form = self._sheet_form(monkeypatch)
+        sheet = form.sections['2D']
+        assert not sheet.is_row_visible('interlayer_g')
+
+        style = form.sections['general'].editors['interlayer_style']
+        style.box.setCurrentIndex(style.box.findData('lj_g'))
+        assert sheet.is_row_visible('interlayer_g')
+        assert '175.68' in sheet.editors['interlayer_g'].edit.placeholderText()
+        form.deleteLater()
+
+    def test_style_labels(self, qt_app, monkeypatch):
+        form = self._sheet_form(monkeypatch)
+        box = form.sections['general'].editors['interlayer_style'].box
+        labels = {box.itemData(i): box.itemText(i) for i in range(box.count())}
+        assert labels['lj'] == 'LJ (UFF / overrides)'
+        assert labels['lj_g'] == 'LJ + Gaussian (Jiang–Park)'
+        assert labels['ilp'] == 'ILP'
+        assert labels['kc'] == 'Kolmogorov–Crespi'
+        form.deleteLater()
+
+    def test_pairs_caption_changes(self, qt_app, monkeypatch):
+        form = self._sheet_form(monkeypatch)
+        form.document.enable_section('lj_override', True)
+        form.rebuild()
+        note = form.sections['lj_override'].pair_editor.interlayer_note
+        assert note.isHidden()
+
+        style = form.sections['general'].editors['interlayer_style']
+        style.box.setCurrentIndex(style.box.findData('ilp'))
+        assert not note.isHidden()
+        assert note.text() == 'Tip and substrate pairs only — layers use ILP'
+
+        style.box.setCurrentIndex(style.box.findData('lj'))
+        assert note.isHidden()
+        form.deleteLater()

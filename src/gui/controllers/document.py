@@ -41,6 +41,7 @@ from ...core.utils.paths import _find_existing  # noqa: PLC2701
 from ..schema.introspect import SectionSpec, describe_model, describe_section
 from ..schema.overrides import override_for_section, overrides_for
 from ..schema.simulation_types import MODES, sections_for
+from .interlayer import interlayer_issues
 from .materials import STRUCTURE_EXTENSION
 
 __all__ = ['ConfigDocument', 'DocumentError', 'ExpansionDirs',
@@ -636,10 +637,15 @@ class ConfigDocument:
         missing its `[general] pressure` (`src.run.expand.missing_pressure`).
         They are asked here rather than reimplemented, so the panel refuses
         exactly what `run_simulations` refuses.
+
+        The interlayer choice is located the same way
+        (`controllers.interlayer.interlayer_issues`): a Kolmogorov–Crespi run
+        with no file for its elements, or LJ + Gaussian on a material with no
+        g, lands on the field to fill in rather than as an unlocated message.
         """
         payload = self.normalised_values()
         payload['settings'] = (settings or load_settings()).model_dump()
-        result = self._validate_payload(payload)
+        result = self._validate_styles(payload)
 
         conflict = outer_loop_conflict(self.values, self.model)
         if conflict is not None:
@@ -651,6 +657,16 @@ class ConfigDocument:
             result.issues.append(ConfigIssue(
                 message=no_load, section='general', key='pressure',
             ))
+        located = interlayer_issues(self.values, self.base_dir)
+        if located:
+            # The model raises the same rule unlocated (a model validator has
+            # no field to name); the located copy is the one a form can mark.
+            keys = {issue.key for issue in located}
+            result.issues = [
+                issue for issue in result.issues
+                if issue.section is not None
+                or not any(key in issue.message for key in keys)
+            ] + located
 
         self.pending_template_issues = []
         if not self.has_material_list():
@@ -662,6 +678,33 @@ class ConfigDocument:
         self.pending_template_issues = pending
         hard.extend(self._probe_issues(payload, hard))
         return ConfigValidation(issues=hard, config=result.config)
+
+    def _validate_styles(self, payload: Dict[str, Any]) -> ConfigValidation:
+        """`_validate_payload`, once per style of an `interlayer_style` sweep.
+
+        The model types the style as one value; a list is a sweep that
+        `expand_config_sweeps` splits into one run per style before any model
+        sees it. Validating the list as written would refuse every style
+        sweep, so each member is validated in its place, as expansion would,
+        and the issues are merged.
+        """
+        general = payload.get('general')
+        styles = general.get('interlayer_style') if isinstance(general, dict) else None
+        if not isinstance(styles, list) or not styles:
+            return self._validate_payload(payload)
+        merged: Optional[ConfigValidation] = None
+        seen = set()
+        for style in dict.fromkeys(styles):
+            member = dict(payload, general=dict(general, interlayer_style=style))
+            result = self._validate_payload(member)
+            if merged is None:
+                merged = ConfigValidation(issues=[], config=result.config)
+            for issue in result.issues:
+                marker = (issue.section, issue.key, issue.kind, issue.message)
+                if marker not in seen:
+                    seen.add(marker)
+                    merged.issues.append(issue)
+        return merged
 
     def _validate_payload(self, payload: Dict[str, Any]) -> ConfigValidation:
         """`validate_config` on a written-shape payload, issues re-addressed
@@ -715,7 +758,7 @@ class ConfigDocument:
         }
         seen = {(i.section, i.key, i.kind, i.message) for i in known}
         out: List[ConfigIssue] = []
-        for issue in self._validate_payload(probe).issues:
+        for issue in self._validate_styles(probe).issues:
             marker = (issue.section, issue.key, issue.kind, issue.message)
             if issue.kind == 'unexpanded_template' or marker in seen:
                 continue
