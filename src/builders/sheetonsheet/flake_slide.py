@@ -304,7 +304,8 @@ class FlakeSlideSimulation(SimulationBase):
         else:
             filled_flake = self._filled_flake_config()
             flake_path, _flake_dims = components.build_flake_component(
-                filled_flake, build_dir
+                filled_flake, build_dir,
+                interlayer=interlayer_style(self.config.general),
             )
             flake_names = ["flake"]
             flake_components = [filled_flake]
@@ -517,6 +518,11 @@ class FlakeSlideSimulation(SimulationBase):
             potentials_prefix=prefix,
         )
         pm.set_lj_overrides(self.config.lj_override)
+        if style != 'lj':
+            # Before registration: ilp/tmd's chalcogen split is decided there.
+            set_interlayer_from_config(
+                pm, self.config.general,
+                dict(zip(["sheet"] + flake_names, [sheet_cfg] + flake_components)))
         # n_layers MUST match the stacked sheet file's per-layer types.
         # Registering it as one layer gave the sheet 2 types while the file
         # held 2*N: the flake's type offset then landed on the sheet's own
@@ -542,9 +548,6 @@ class FlakeSlideSimulation(SimulationBase):
                 for j in range(i + 1, len(flake_names)):
                     pm.add_cross_interaction(name_i, flake_names[j])
         if style != 'lj':
-            set_interlayer_from_config(
-                pm, self.config.general,
-                dict(zip(["sheet"] + flake_names, [sheet_cfg] + flake_components)))
             pm.add_interlayer(["sheet"] + flake_names)
         pm.write_file(settings_path)
         return pm

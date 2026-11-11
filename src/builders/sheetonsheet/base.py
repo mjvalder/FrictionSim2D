@@ -539,6 +539,12 @@ class SheetOnSheetSimulation(SimulationBase):
             )
         )
         pm.set_lj_overrides(self.config.lj_override)
+        # Before registration: ilp/tmd's chalcogen sub-layer split is decided
+        # there. Config validation keeps a non-lj style away from the
+        # constraint modes and internal-LJ potentials, so this changes nothing
+        # on those branches.
+        set_interlayer_from_config(pm, self.config.general,
+                                   {'sheet': self.config.sheet})
 
         edge_mode = (
             self.config.settings.geometry.finite_sheet_sheetonsheet_edge_mode
@@ -559,8 +565,6 @@ class SheetOnSheetSimulation(SimulationBase):
         elif constraint_mode in ('atom_bonds', 'com_spring'):
             pm.add_ghost_lj('sheet', max_real_distance=1)
         else:
-            set_interlayer_from_config(pm, self.config.general,
-                                       {'sheet': self.config.sheet})
             pm.add_interlayer(['sheet'])
 
         settings_path = self.output_dir / "lammps" / "system.in.settings"

@@ -35,7 +35,7 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 from importlib import resources
 import re
 import math
@@ -62,6 +62,7 @@ from ...interfaces.jinja import PackageLoader
 from ...interfaces.lammps import run_lammps_commands
 # No cycle: builders/utils/interlayer imports only src.potentials.interlayer.
 from ..utils.interlayer import interlayer_style, set_interlayer_from_config
+from ...potentials.interlayer import CHALCOGENS, chalcogen_split_elements
 
 logger = logging.getLogger(__name__)
 
@@ -617,6 +618,7 @@ def check_flake_pbc_clearance(
 def build_flake_component(
     config: "FlakeConfig",
     build_dir: Path,
+    interlayer: Optional[str] = None,
 ) -> Tuple[Path, dict]:
     """Build a shaped flake (monolayer supercell → cut shape → mark corners).
 
@@ -630,12 +632,14 @@ def build_flake_component(
             ``edge_length``, ``rotation_deg``, ``corner_radius``, supercell
             ``x``/``y``).
         build_dir: Directory to write the final ``flake_*.data`` file into.
+        interlayer: The run's interlayer style, for :func:`build_monolayer`'s
+            ilp/tmd chalcogen split.
 
     Returns:
         Tuple of (flake_path, flake_box_dims).
     """
     base_path, _dims, _pot_counts, _total_types, _supercell = build_monolayer(
-        config, edge_mode='none', edge_width=0.0
+        config, edge_mode='none', edge_width=0.0, interlayer=interlayer,
     )
 
     center_xy: Optional[Tuple[float, float]] = None
@@ -1168,6 +1172,104 @@ def _assign_pot_types_by_order(path: Path, order: List[str],
     }
     positions = [(x, y, z) for (_t, x, y, z) in atoms]
     _write_lammps_typed(path, cell, positions, new_types, new_masses)
+
+
+def split_chalcogen_sublayers(path: Path, elements: List[str],
+                              split: Set[str]) -> Dict[int, Tuple[int, int]]:
+    """Give each split chalcogen's two sub-layers their own type, in place.
+
+    For ilp/tmd (see :func:`src.potentials.interlayer.chalcogen_split_elements`).
+    ``path`` is a MONOLAYER atomic data file whose type ids are contiguous per
+    element. Every type of an element in ``split`` becomes two consecutive ids:
+    atoms above the layer's metal plane (mean z of the non-chalcogen atoms)
+    take the first, those below the second -- decided by position, never by
+    file order -- and every later type shifts up to make room. That is the
+    element-first order :meth:`PotentialManager._assign_types` registers
+    (``S`` -> ``S`` top, ``S`` bottom), so the stacking loop and the
+    potential manager agree on every id.
+
+    Only the type column, the ``Masses`` section and the ``atom types`` count
+    change; geometry and every other line are left byte-for-byte alone.
+
+    Returns:
+        ``{old type: (top type, bottom type)}`` for the split types.
+
+    Raises:
+        ValueError: If a split type has no atom on one side of the metal plane.
+    """
+    # Lazy: ase.data costs ~70-90 ms; see _assign_pot_types_by_order.
+    from ase.data import atomic_masses as _am, atomic_numbers as _an  # pylint: disable=import-outside-toplevel
+
+    text = path.read_text(encoding='utf-8')
+    _cell, atoms, masses = _parse_lammps_cell_atoms_masses(text)
+    el_mass = {el: float(_am[_an[el]]) for el in elements}
+
+    def _element(t: int) -> str:
+        mass, label = masses.get(t, (None, 'X'))
+        if label in el_mass:
+            return label
+        return min(el_mass, key=lambda el: abs(el_mass[el] - mass)) if mass else 'X'
+
+    type_el = {t: _element(t) for t in sorted(masses)}
+    metal_z = [z for (t, _x, _y, z) in atoms if type_el.get(t) not in CHALCOGENS]
+    if not metal_z:
+        raise ValueError(f"{path}: no metal atoms to split the chalcogen sub-layers around.")
+    plane = sum(metal_z) / len(metal_z)
+
+    new_ids: Dict[int, Tuple[int, int]] = {}
+    split_ids: Dict[int, Tuple[int, int]] = {}
+    nxt = 1
+    for t in sorted(type_el):
+        if type_el[t] in split:
+            new_ids[t] = (nxt, nxt + 1)
+            split_ids[t] = new_ids[t]
+            nxt += 2
+        else:
+            new_ids[t] = (nxt, nxt)
+            nxt += 1
+    for t, _x, _y, z in atoms:
+        if t in split_ids and abs(z - plane) < 1e-6:
+            raise ValueError(f"{path}: chalcogen atom on the metal plane (z={z}).")
+    for t in split_ids:
+        zs = [z for (tt, _x, _y, z) in atoms if tt == t]
+        if not (any(z > plane for z in zs) and any(z < plane for z in zs)):
+            raise ValueError(
+                f"{path}: type {t} ({type_el[t]}) does not lie on both sides of "
+                f"the metal plane (z = {plane:.4f}); cannot split its sub-layers.")
+
+    out: List[str] = []
+    section = None
+    for raw in text.splitlines(keepends=True):
+        line = raw.strip()
+        body = line.split('#', 1)[0].strip()
+        if body.endswith('atom types'):
+            out.append(f"{nxt - 1} atom types\n")
+            continue
+        if line == 'Masses' or line.startswith('Atoms'):
+            section = 'Masses' if line == 'Masses' else 'Atoms'
+            out.append(raw)
+            continue
+        if body and body[0].isalpha():
+            section = None
+        parts = body.split()
+        if section == 'Masses' and parts and parts[0].isdigit():
+            old = int(parts[0])
+            for new in sorted(set(new_ids[old])):
+                comment = f"  # {type_el[old]}" if type_el[old] != 'X' else ''
+                out.append(f"{new} {parts[1]}{comment}\n")
+            continue
+        if section == 'Atoms' and len(parts) >= 5 and parts[0].isdigit():
+            old = int(parts[1])
+            top, bottom = new_ids.get(old, (old, old))
+            new = top if float(parts[4]) > plane else bottom
+            parts[1] = str(new)
+            tail = raw[len(raw.rstrip('\n')):]
+            comment = ' #' + line.split('#', 1)[1] if '#' in line else ''
+            out.append(' '.join(parts) + comment + tail)
+            continue
+        out.append(raw)
+    path.write_text(''.join(out), encoding='utf-8')
+    return split_ids
 
 
 def _duplicate_lammps_data(
@@ -1863,13 +1965,14 @@ def stack_multilayer_sheet(
     work_dir = (Path(tempfile.mkdtemp(prefix='stack_interlayer_'))
                 if style != 'lj' else None)
     pm = PotentialManager(settings, potentials_dir=work_dir)
+    # Before registration: ilp/tmd's chalcogen split is decided there.
+    if interlayer_general is not None and pm.is_sheet_lj(config.pot_type):
+        set_interlayer_from_config(pm, interlayer_general, {'sheet': config})
     regions = [None, 'edge'] if edge_mode != 'none' else None
     pm.register_component("sheet", config, n_layers=layers_for_setup, regions=regions)
     pm.add_self_interaction("sheet")
 
     if pm.is_sheet_lj(config.pot_type):
-        if interlayer_general is not None:
-            set_interlayer_from_config(pm, interlayer_general, {'sheet': config})
         pm.add_interlayer(["sheet"])
 
     pm.write_file(pot_file)
@@ -2237,6 +2340,7 @@ def build_monolayer(
     config: SheetConfig,
     edge_mode: str = 'none',
     edge_width: float = 0.0,
+    interlayer: Optional[str] = None,
 ) -> Tuple[Path, dict, dict, int, Dict[str, float]]:
     """Build single-layer 2D material sheet.
     
@@ -2248,7 +2352,12 @@ def build_monolayer(
     
     Args:
         config: Sheet configuration.
-        
+        interlayer: The run's interlayer style. Under ``ilp`` resolving to
+            ilp/tmd, a chalcogen the potential types once is split into a
+            top and a bottom sub-layer type (:func:`split_chalcogen_sublayers`);
+            ``pot_counts`` then reports 2 for it. ``None``/any other style:
+            unchanged.
+
     Returns:
         Tuple of (path, box_dims, pot_counts, total_types, supercell_dims).
         
@@ -2351,6 +2460,13 @@ def build_monolayer(
     shift_atoms_to_z_zero(base_path)
     dims = get_model_dimensions(base_path)
 
+    split = chalcogen_split_elements(interlayer or 'lj', cif_elements, pot_counts)
+    if split:
+        split_chalcogen_sublayers(base_path, cif_elements, split)
+        pot_counts = {el: (2 if el in split else n) for el, n in pot_counts.items()}
+        total_pot_types = sum(pot_counts.values())
+        logger.info("ilp/tmd: split %s into top/bottom sub-layer types", sorted(split))
+
     edge_enabled = edge_mode != 'none'
     if edge_enabled:
         apply_sheet_edge_types(base_path, edge_width=edge_width)
@@ -2418,6 +2534,7 @@ def build_sheet(
         config,
         edge_mode=edge_mode,
         edge_width=edge_width,
+        interlayer=interlayer_style(interlayer_general),
     )
     if unit_cell_out is not None:
         unit_cell_out.update({k: float(v) for k, v in supercell_dims.items()})

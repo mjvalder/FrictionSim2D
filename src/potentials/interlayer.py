@@ -118,6 +118,32 @@ def ilp_substyle(elements: Set[str]) -> str:
     return 'ilp/tmd' if set(elements) <= _ILP_TMD else 'ilp/graphene/hbn'
 
 
+#: Chalcogens whose two sub-layers ilp/tmd must see as different atom types.
+CHALCOGENS = frozenset({'S', 'Se', 'Te'})
+
+#: Components whose data comes from ``build_monolayer`` (``build_sheet`` /
+#: ``build_flake_component``), the only place the split is applied to a data
+#: file; the potential manager splits the same components' types.
+SPLIT_COMPONENTS = ('sheet', 'flake')
+
+
+def chalcogen_split_elements(style: str, elements, pot_counts: Dict[str, int]) -> Set[str]:
+    """Chalcogens to split into a top and a bottom sub-layer type.
+
+    ilp/tmd takes a TMD atom's normal from neighbours of the same molecule AND
+    the same atom type (LAMMPS ``pair_ilp_tmd.cpp``: ``imol == jmol && type[i]
+    == type[j]``), so a chalcogen labelled once by its many-body potential
+    (``Mo S``) would put both sub-layers in one neighbour set and LAMMPS stops
+    with "too many neighbors for TMD atoms". Empty unless the style resolves
+    to ilp/tmd; a chalcogen the potential already splits (``S1 S2``) is left
+    alone, as is a material without a metal plane to split around.
+    """
+    elems = set(elements)
+    if style != 'ilp' or ilp_substyle(elems) != 'ilp/tmd' or not elems - CHALCOGENS:
+        return set()
+    return {el for el in elems & CHALCOGENS if int(pot_counts.get(el, 1)) == 1}
+
+
 def resolve_interlayer_file(name: str, style: str,
                             base_dir: Optional[Path]) -> Path:
     """Find an interlayer parameter file like any other potential.

@@ -1,0 +1,164 @@
+# LAMMPS Input Script for Sheet-vs-Sheet Sliding
+# 3-layer model, constraint_mode: none
+
+variable        speed equal 1.0
+
+variable        pressure index -0.5 -0.1 0.01 0.05 0.1 0.5 0.8 1.0 5.0 10.0 20.0 50.0 100.0
+label           pressure_loop
+
+variable        a index 0.0 30.0 60.0 90.0
+label           angle_loop
+
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify every 1 delay 0 check yes
+
+comm_style      tiled
+
+region          box block 0.0 12.73626585873837 0.0 11.029929783019856 -15.0 25.62711264635152 units box
+create_box      7 box
+
+read_data       <OUT>/build/h-MoS2_3.lmp add append group bot
+
+include         <OUT>/lammps/system.in.settings
+
+
+
+dump            sys all atom 10000 <OUT>/visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+# Thermostat on middle layers (2 through 2)
+group           center union layer_2
+velocity        center create 0.0 SEED
+fix             lang center langevin 0.0 0.0 $(100.0*dt) SEED zero yes tally yes
+fix             nve_center center nve
+
+timestep        0.001
+thermo          100000
+
+
+# Top layer (layer 3): driven
+fix             fstage_top layer_3 rigid/nve single force * on on on torque * off off off
+# Bottom layer (layer 1): fixed
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# COM computes for key layers
+compute         COM_top layer_3 com
+variable        comx_top equal c_COM_top[1]
+variable        comy_top equal c_COM_top[2]
+variable        comz_top equal c_COM_top[3]
+
+# --- observable registry channels (spec §3) ---------------------------------
+compute T_center center temp
+compute T_layer_1 layer_1 temp
+compute T_Ltop layer_3 temp
+compute COM_L1 layer_1 com
+compute COM_L2 layer_2 com
+compute COM_L3 layer_3 com
+variable etot equal etotal
+variable pe_now equal pe
+variable ke_now equal ke
+variable w_lang_center equal f_lang
+variable temp_center_3d equal c_T_center
+variable temp_L1_3d equal c_T_layer_1
+variable temp_Ltop_3d equal c_T_Ltop
+variable comx_L1 equal c_COM_L1[1]
+variable comy_L1 equal c_COM_L1[2]
+variable comz_L1 equal c_COM_L1[3]
+variable comx_L2 equal c_COM_L2[1]
+variable comy_L2 equal c_COM_L2[2]
+variable comz_L2 equal c_COM_L2[3]
+variable comx_L3 equal c_COM_L3[1]
+variable comy_L3 equal c_COM_L3[2]
+variable comz_L3 equal c_COM_L3[3]
+
+
+# Apply Uniform Pressure
+# 1 eV/Å³ = 160.2176565 GPa
+variable        A equal (12.73626585873837-0.0)*(11.029929783019856-0.0)
+variable        p equal v_pressure/160.2176565
+variable        f equal -v_p*v_A/(count(layer_3))
+
+fix             force layer_3 aveforce 0.0 0.0 $f
+
+variable        fx equal f_force[1]*1.602176565
+variable        fy equal f_force[2]*1.602176565
+variable        fz equal f_force[3]*1.602176565
+variable        sx equal f_fsbot[1]*1.602176565
+variable        sy equal f_fsbot[2]*1.602176565
+variable        sz equal f_fsbot[3]*1.602176565
+
+compute         frict layer_2 group/group layer_1
+# compute group/group's VECTOR is a force in eV/A; the many-body branch above
+# reports nN. Scale so both branches -- and v_fz, the load this is divided by --
+# are nN. Unscaled here for the life of the project: see
+# docs/notes/2026-08-27-sheet-cof-unit-correction.md.
+variable        xfrict equal c_frict[1]*1.602176565
+variable        yfrict equal c_frict[2]*1.602176565
+# The group/group scalar IS the interlayer interaction energy of the shearing
+# interface (spec §5 F2, conditional on is_sheet_lj) — free alongside frict.
+variable        e_int_il equal c_frict
+
+run             10000
+
+
+# --- Constant-pressure compression hold (spec §6.1): the sheet's penetration
+# analogue, closing the KEY_RESULTS §5 parity gap. d(P) is defined at the
+# SHEARING interface (layer_2/layer_1); the
+# other gaps are reported alongside. channel_role=diagnostic.
+variable        d_shear equal v_comz_L2-v_comz_L1
+variable        gap_L1_L2 equal v_comz_L2-v_comz_L1
+variable        gap_L2_L3 equal v_comz_L3-v_comz_L2
+fix             hold_ave all ave/time 1 1000 1000 v_d_shear v_gap_L1_L2 v_gap_L2_L3 v_fz file <OUT>/data/hold_p$(v_pressure)GPa.txt
+run             20000
+
+unfix           hold_ave
+
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+create_atoms    7 single $(xcm(layer_3,x)) $(xcm(layer_3,y)) $(xcm(layer_3,z)+10) units box
+group           virtual type 7
+velocity        virtual set 0.0 0.0 0.0
+
+fix             spr layer_3 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
+fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
+
+# Three sampling tiers (spec §4). Column order is registry-driven (Task 14).
+# NB v_xfrict's group/group compute at Nevery=1 is the documented spec-§4
+# exemption: it is the label itself and its cost was already paid campaign-wide.
+fix             fc_win all ave/time 1 1000 1000 v_etot v_pe_now v_ke_now v_w_lang_center v_temp_center_3d v_temp_L1_3d v_temp_Ltop_3d v_xfrict v_yfrict v_fz v_fx v_fy v_comx_top v_comy_top v_comz_top v_sx v_sy v_sz v_comx_L1 v_comy_L1 v_comz_L1 v_comx_L2 v_comy_L2 v_comz_L2 v_comx_L3 v_comy_L3 v_comz_L3 file <OUT>/results/friction_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+fix             fc_raw all ave/time 100 1 100 v_xfrict v_yfrict v_fz v_comx_top v_comy_top file <OUT>/results/raw_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+fix             fc_pa all ave/time 1000 1 1000 v_e_int_il file <OUT>/results/peratom_p${pressure}_a${a}_s${speed} title1 "# schema=2 lf_units=nN family=sheetonsheet"
+
+
+run             500000
+
+
+# Final-state retention (spec §5 F6)
+write_data      <OUT>/data/final_p$(v_pressure)GPa_a$(v_a).data
+
+# A halted point (common/halt.lmp) jumps here, past the rest of its slide.
+label           slide_next
+
+next            a
+clear
+jump            SELF angle_loop
+
+
+next            pressure
+clear
+variable        a delete
+jump            SELF pressure_loop
+

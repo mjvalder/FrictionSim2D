@@ -767,13 +767,15 @@ def _bilayer(mock_settings, tip_cfg, sheet_cfg, tmp_path, style=None,
     pm = PotentialManager(mock_settings, use_langevin=False,
                           potentials_dir=tmp_path / 'potentials',
                           potentials_prefix='potentials')
+    # Before registration: under ilp/tmd the sheet's chalcogen sub-layers get
+    # their own types at register_component (Task 4b).
+    if style is not None:
+        pm.set_interlayer(style, **interlayer_kw)
     pm.register_component('tip', tip_cfg)
     pm.register_component('sheet', sheet_cfg, n_layers=2, regions=regions)
     pm.add_self_interaction('tip')
     pm.add_self_interaction('sheet')
     pm.add_cross_interaction('tip', 'sheet')
-    if style is not None:
-        pm.set_interlayer(style, **interlayer_kw)
     pm.add_interlayer(['sheet'])
     out = tmp_path / 'system.in.settings'
     pm.write_file(out)
@@ -826,9 +828,13 @@ class TestInterlayerStyles:
         assert all(emap[t - 1] == 'NULL' for t in tip_ids)
         # no sheet-sheet lj/cut; tip-sheet lj/cut lines unchanged
         assert '(L1)' not in text and '(L2)' not in text
+        # Tip-sheet lj/cut keeps each element pair's UFF values; only the S
+        # type range widens (two sub-layer types per layer, Task 4b).
+        def _tip_sheet(lines):
+            return sorted((ln.split('#')[1].strip(), ln.split()[4:6])
+                          for ln in lines if '(tip)' in ln and 'lj/cut' in ln)
         snap = LJ_SNAPSHOT.read_text(encoding='utf-8').splitlines()
-        tip_sheet = [ln for ln in snap if '(tip)' in ln and 'lj/cut' in ln]
-        assert tip_sheet and all(ln in text.splitlines() for ln in tip_sheet)
+        assert _tip_sheet(snap) and _tip_sheet(text.splitlines()) == _tip_sheet(snap)
         assert pm.interlayer_substyle == 'ilp/tmd'
         assert pm.needs_molecule_ids is True
         prov = pm.interlayer_provenance()
@@ -929,12 +935,15 @@ class TestInterlayerStyles:
         pm, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
                             tmp_path / 'ilp', style='ilp', regions=[None, 'edge'])
         sheet = pm.types.ids_by_component('sheet')
-        assert len(sheet) == 8
+        # 2 layers x 2 regions x (Mo + S split into two sub-layer types, Task 4b)
+        assert len(sheet) == 12
         emap = _map_of(_pair_coeff_lines(text, 'ilp/tmd')[0], 'TMD.ILP')
         assert all(emap[t - 1] != 'NULL' for t in sheet)
         pm, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
                             tmp_path / 'ljg', style='lj_g', regions=[None, 'edge'],
                             g_by_component={'sheet': 175.68})
+        sheet = pm.types.ids_by_component('sheet')
+        assert len(sheet) == 8          # no split outside ilp/tmd
         plus = _map_of(_pair_coeff_lines(text, 'kolmogorov/crespi/z')[0],
                        'gaussian_plus.KC')
         assert all(plus[t - 1] != 'NULL' for t in sheet)
@@ -989,6 +998,8 @@ class TestInterlayerStyles:
         new.register_component('sheet', mos2_multilayer_config, n_layers=4)
         new.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2), (0, 3), (1, 3)])
         assert new.cross_interaction_commands == old.cross_interaction_commands
-        new.set_interlayer('ilp')
+        ilp = PotentialManager(mock_settings, use_langevin=False)
+        ilp.set_interlayer('ilp')
+        ilp.register_component('sheet', mos2_multilayer_config, n_layers=4)
         with pytest.raises(ValueError, match='ghost'):
-            new.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2)])
+            ilp.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2)])

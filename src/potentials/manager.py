@@ -32,6 +32,8 @@ from .utils import (
 from .interlayer import (
     ILP_CUTOFF,
     INTERLAYER_STYLES,
+    SPLIT_COMPONENTS,
+    chalcogen_split_elements,
     KC_FULL_CUTOFF,
     TAPER_FLAG,
     default_interlayer_file,
@@ -500,6 +502,12 @@ class PotentialManager:
 
         pot_type = self._normalize_potential_type(config.pot_type)
         pot_counts = count_atomtypes(config.pot_path, elements, pot_type=pot_type)
+        # ilp/tmd: one type per chalcogen sub-layer (see chalcogen_split_elements).
+        # The data file gets the same split from build_monolayer.
+        split = (chalcogen_split_elements(self.interlayer_style, elements, pot_counts)
+                 if name in SPLIT_COMPONENTS else set())
+        if split:
+            pot_counts = {el: (2 if el in split else n) for el, n in pot_counts.items()}
 
         self.potential_usage[pot_type] += n_layers if self.is_sheet_lj(pot_type) else 1
 
@@ -507,12 +515,15 @@ class PotentialManager:
 
         if n_layers > 1:
             self._assign_types(
-                name, elements, pot_counts, n_layers, use_layer_ids=True, regions=regions
+                name, elements, pot_counts, n_layers, use_layer_ids=True, regions=regions,
+                shared_label=split,
             )
         elif apply_langevin:
-            self._assign_types(name, elements, pot_counts, regions=[None, 'fix', 'thermo'])
+            self._assign_types(name, elements, pot_counts, regions=[None, 'fix', 'thermo'],
+                               shared_label=split)
         else:
-            self._assign_types(name, elements, pot_counts, regions=regions)
+            self._assign_types(name, elements, pot_counts, regions=regions,
+                               shared_label=split)
 
         component_map = self.types.get_element_map(name)
 
@@ -522,7 +533,8 @@ class PotentialManager:
             'map': component_map,
             'elements': elements,
             'n_layers': n_layers,
-            'use_langevin': self.use_langevin
+            'use_langevin': self.use_langevin,
+            'split_chalcogens': split,
         }
 
         return component_map
@@ -559,7 +571,8 @@ class PotentialManager:
         pot_counts: Dict[str, int],
         n_layers: int = 1,
         use_layer_ids: bool = False,
-        regions: Optional[List[Optional[str]]] = None
+        regions: Optional[List[Optional[str]]] = None,
+        shared_label: Optional[set] = None,
     ) -> None:
         """Assign atom types for components (with optional layer and region support).
 
@@ -576,15 +589,19 @@ class PotentialManager:
             regions: List of region identifiers for Langevin thermostat
                 (e.g., [None, 'fix', 'thermo']). If None, defaults to [None]
                 (standard single type per element).
+            shared_label: Elements whose ``count`` types all keep the bare
+                element label (the ilp/tmd chalcogen split: two types the
+                many-body potential knows as one ``S``).
         """
         if regions is None:
             regions = [None]
+        shared_label = shared_label or set()
 
         for el in elements:
             count = pot_counts.get(el, 1)
             for layer_idx in range(n_layers):
                 for t in range(count):
-                    pot_label = el if count == 1 else f"{el}{t+1}"
+                    pot_label = el if count == 1 or el in shared_label else f"{el}{t+1}"
                     layer = layer_idx if use_layer_ids else None
                     for region in regions:
                         self.types.register(
@@ -882,6 +899,15 @@ class PotentialManager:
             raise ValueError(
                 f"Unknown interlayer_style '{style}'; expected one of "
                 f"{list(INTERLAYER_STYLES)}.")
+        for name, comp in self.components.items():
+            if name in SPLIT_COMPONENTS and comp.get('split_chalcogens', set()) != \
+                    chalcogen_split_elements(style, comp['elements'], count_atomtypes(
+                        comp['config'].pot_path, comp['elements'],
+                        pot_type=self._normalize_potential_type(comp['config'].pot_type))):
+                raise ValueError(
+                    f"set_interlayer('{style}') must be called before register_component"
+                    f"('{name}'): under ilp/tmd its chalcogen sub-layers need their "
+                    "own atom types, which are assigned at registration.")
         self.interlayer_style = style
         self._interlayer_file_name = file
         self._interlayer_base_dir = Path(base_dir) if base_dir is not None else None

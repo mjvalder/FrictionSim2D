@@ -886,33 +886,14 @@ def test_sheet_lj_scripts_byte_identical(tmp_path, monkeypatch):
 
 
 def _ilp_inputs(tmp_path: Path, monkeypatch, **general) -> Path:
-    """Real potentials + write_inputs for an h-MoS2 ilp run, without the stacking.
+    """A real small h-MoS2 ilp build (MoS2_wen.sw, which types S once).
 
-    `build()` cannot run ilp/tmd on h-MoS2 yet: the stacking `run 0` fails with
-    "too many neighbors for TMD atoms" because ilp/tmd takes a TMD atom's
-    normal from neighbours of the same molecule AND the same atom type, and
-    h-MoS2 has one S type per layer for both S sub-layers. So this drives the
-    real `_generate_potentials` + `write_inputs` on a seeded geometry; the
-    molecule-ID mechanism itself is exercised by the kc build below.
+    The in-process stacking `run 0` runs ilp/tmd, which aborts with "too many
+    neighbors for TMD atoms" unless each S sub-layer has its own type (the
+    Task 4b split) -- so the build completing is itself the check.
     """
-    raw = read_config(REPO_ROOT / "examples" / "sheet_config.ini")
-    raw["general"].update({"interlayer_style": "ilp", **general})
-    raw["2D"].update({"x": 12, "y": 12, "lat_c": 6.15,
-                      "cif_path": f"{REPO_ROOT}/{MAT}/h-MoS2.cif",
-                      "pot_path": f"{REPO_ROOT}/{POT}/sw/MoS2_wen.sw"})
-    config = SheetOnSheetSimulationConfig(**raw, settings=GlobalSettings())
-    builder = SheetOnSheetSimulation(config, output_dir=str(tmp_path / "out"))
-    builder._create_directories()
-    builder.pm = builder._generate_potentials()
-    sheet = tmp_path / "out" / "build" / "sheet.lmp"
-    sheet.parent.mkdir(parents=True, exist_ok=True)
-    sheet.write_text("# seeded\n", encoding="utf-8")
-    builder.structure_paths["sheet"] = sheet
-    builder.lat_c = 6.15
-    builder.sheet_dims = {"xlo": 0.0, "xhi": 12.0, "ylo": 0.0, "yhi": 12.0,
-                          "zhi": 15.0}
-    builder.write_inputs()
-    return tmp_path / "out"
+    return _build_example_sheet(tmp_path, monkeypatch,
+                                **_small(interlayer_style="ilp", **general))
 
 
 def test_sheet_ilp_scripts(tmp_path, monkeypatch):
