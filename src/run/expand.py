@@ -604,6 +604,9 @@ def expand_config_sweeps(base_config: Dict[str, Any],
                     "before sweeping it; otherwise every value builds to the "
                     "same output directory and silently overwrites the last."
                 )
+            if key == 'interlayer_style' and len(set(val)) != len(val):
+                raise ValueError(
+                    f"[general] interlayer_style lists a style twice: {val}")
             sweep_params[('general', key)] = val
 
     # Potential sweep (spec §13): a pot_path LIST on the primary sheet sweeps

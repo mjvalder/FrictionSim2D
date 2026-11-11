@@ -56,6 +56,7 @@ LOOPABILITY: Dict[Tuple[str, str], str] = {
     ('2D', 'materials_list'): 'sweep',
     ('2D', 'pot_path'): 'sweep',   # spec §13: one pot_ directory per member
     ('general', 'temp'): 'sweep',
+    ('general', 'interlayer_style'): 'sweep',
     ('2D', 'layers'): 'layer',
     ('general', 'force'): 'in_file',
     ('general', 'scan_angle'): 'in_file',
@@ -235,6 +236,26 @@ def material_token(run_dict: Dict[str, Any], model: Optional[str] = None) -> str
     return base
 
 
+def _truthy(value: Any) -> bool:
+    """A bool as the model reads it; ``.ini`` values arrive as strings."""
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(value)
+
+
+def interlayer_dir_token(style: str, comparison: bool) -> Optional[str]:
+    """Directory segment for a non-default interlayer style, else ``None``.
+
+    ``('lj', False)`` is today's behaviour and keeps today's paths; anything
+    else gets ``il-<style>`` (underscores dropped) plus ``-cmp`` in comparison
+    mode, so a style sweep can never collide.
+    """
+    if style == 'lj' and not comparison:
+        return None
+    token = f"il-{str(style).replace('_', '')}"
+    return f"{token}-cmp" if comparison else token
+
+
 def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     """The output directory a run config builds into, relative to the
     simulation root.
@@ -265,6 +286,13 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
         from ..potentials.utils import pot_dir_token  # pylint: disable=import-outside-toplevel
         # deferred: potentials.utils imports the UFF table; only pot_path-bearing configs pay for it
         pot_segment = pot_dir_token(sheet.get('pot_type', 'sw'), pot_path)
+
+    general = run_dict['general']
+    il_segment = interlayer_dir_token(
+        general.get('interlayer_style', 'lj'),
+        _truthy(general.get('interlayer_comparison', False)))
+    if il_segment:
+        pot_segment = f"{pot_segment}/{il_segment}" if pot_segment else il_segment
 
     top_dir = model  # 'afm' | 'sheetonsheet' | 'pes_tip' | 'pes_sheet'
     if model in AFM_LIKE_MODELS:
@@ -323,6 +351,7 @@ class RunTokens:
     layers: Optional[int]
     pot_token: Optional[str]
     rel_path: str
+    interlayer_token: Optional[str] = None
 
 
 _LEGACY_AMORPH_RE = re.compile(r'^a(?P<mat>[A-Z].*)$')
@@ -416,6 +445,11 @@ def parse_run_path(rel_path: str) -> RunTokens:
         pot_token = parts[idx]
         idx += 1
 
+    interlayer_token = None
+    if idx < len(parts) and parts[idx].startswith('il-'):
+        interlayer_token = parts[idx]
+        idx += 1
+
     layers = None
     if idx < len(parts):
         layer = _LAYER_RE.fullmatch(parts[idx])
@@ -442,4 +476,5 @@ def parse_run_path(rel_path: str) -> RunTokens:
         layers=layers,
         pot_token=pot_token,
         rel_path=text,
+        interlayer_token=interlayer_token,
     )
