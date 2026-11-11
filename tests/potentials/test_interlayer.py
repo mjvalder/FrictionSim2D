@@ -12,6 +12,8 @@ from src.potentials.interlayer import (EXAMPLES_POTENTIALS_DIR,
                                        ilp_substyle, mixed_g,
                                        resolve_interlayer_file)
 
+from src.interfaces.lammps import lammps_pair_styles as REAL_PAIR_STYLES  # before the autouse patch
+
 MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
 
 
@@ -143,16 +145,15 @@ def test_unknown_style_rejected():
 def test_lammps_pair_styles_parses_help(monkeypatch):
     import subprocess
     from types import SimpleNamespace
-    from src.interfaces import lammps as lmpmod
     out = ("* Pair styles:\n\nlj/cut   sw   ilp/tmd\nkolmogorov/crespi/z\n\n"
            "* Bond styles:\n\nharmonic\n")
-    lmpmod.lammps_pair_styles.cache_clear()
+    REAL_PAIR_STYLES.cache_clear()
     monkeypatch.setattr(subprocess, 'run', lambda *a, **k: SimpleNamespace(stdout=out))
-    styles = lmpmod.lammps_pair_styles()
+    styles = REAL_PAIR_STYLES()
     assert styles == frozenset({'lj/cut', 'sw', 'ilp/tmd', 'kolmogorov/crespi/z'})
-    lmpmod.lammps_pair_styles.cache_clear()
+    REAL_PAIR_STYLES.cache_clear()
     def boom(*a, **k):
         raise FileNotFoundError
     monkeypatch.setattr(subprocess, 'run', boom)
-    assert lmpmod.lammps_pair_styles() is None
-    lmpmod.lammps_pair_styles.cache_clear()
+    assert REAL_PAIR_STYLES() is None
+    REAL_PAIR_STYLES.cache_clear()

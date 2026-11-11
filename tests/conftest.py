@@ -39,6 +39,20 @@ def isolated_xdg_config_home(tmp_path_factory):
         os.environ["XDG_CONFIG_HOME"] = previous
 
 
+@pytest.fixture(autouse=True)
+def fixed_lammps_pair_styles(monkeypatch):
+    """Keep pot_type validation independent of the host's ``lmp`` binary.
+
+    ``validate_pot_type`` asks ``src.interfaces.lammps.lammps_pair_styles`` (looked
+    up through the module, so this patch reaches it) for custom styles. Without a
+    fixed answer the result depends on whether ``lmp`` is on PATH. Tests needing
+    ``None`` or the real parse override it.
+    """
+    from src.potentials.utils import KNOWN_TYPES
+    monkeypatch.setattr("src.interfaces.lammps.lammps_pair_styles",
+                        lambda: frozenset(KNOWN_TYPES | {"mlip", "ilp/tmd"}))
+
+
 @pytest.fixture
 def mock_settings() -> GlobalSettings:
     """Creates mock GlobalSettings for testing without loading files."""
