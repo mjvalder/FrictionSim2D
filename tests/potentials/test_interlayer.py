@@ -157,3 +157,14 @@ def test_lammps_pair_styles_parses_help(monkeypatch):
     monkeypatch.setattr(subprocess, 'run', boom)
     assert REAL_PAIR_STYLES() is None
     REAL_PAIR_STYLES.cache_clear()
+
+
+def test_write_gaussian_kc_file(tmp_path):
+    from src.potentials.interlayer import write_gaussian_kc_file
+    path = write_gaussian_kc_file(tmp_path / 'g.KC', {('Mo', 'S'): 175.68}, -1)
+    rows = [ln.split() for ln in path.read_text().splitlines()
+            if ln.strip() and not ln.startswith('#')]
+    assert ['Mo', 'S', '3.0', '-87.84', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '1.0'] in rows
+    assert ['S', 'Mo', '3.0', '-87.84', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '1.0'] in rows
+    with pytest.raises(ValueError):
+        write_gaussian_kc_file(tmp_path / 'h.KC', {('Mo', 'S'): 1.0}, 2)

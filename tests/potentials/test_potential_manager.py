@@ -730,3 +730,249 @@ def test_unknown_element_mass_falls_back_to_one_with_a_warning(
     assert '1.0' in out
     assert '(unknown)' in out
     assert "Could not find mass for element 'Xx'" in caplog.text
+
+
+# =========================================================================
+# Interlayer styles (lj, lj_g, ilp, kc) -- spec 2026-11-11 §4-§5
+# =========================================================================
+
+LJ_SNAPSHOT = Path(__file__).parent / 'data' / 'lj_bilayer_settings.txt'
+
+GRAPHENE_CIF = """data_graphene
+_cell_length_a 2.46
+_cell_length_b 2.46
+_cell_length_c 20.0
+_cell_angle_alpha 90.0
+_cell_angle_beta 90.0
+_cell_angle_gamma 120.0
+_space_group_name_H-M_alt 'P 1'
+_space_group_IT_number 1
+loop_
+  _space_group_symop_operation_xyz
+  'x, y, z'
+loop_
+  _atom_site_type_symbol
+  _atom_site_label
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  C C1 0.0 0.0 0.5
+  C C2 0.3333333333 0.6666666667 0.5
+"""
+
+
+def _bilayer(mock_settings, tip_cfg, sheet_cfg, tmp_path, style=None,
+             regions=None, **interlayer_kw):
+    """Tip + 2-layer sheet, staged like a real build; returns (pm, settings text)."""
+    pm = PotentialManager(mock_settings, use_langevin=False,
+                          potentials_dir=tmp_path / 'potentials',
+                          potentials_prefix='potentials')
+    pm.register_component('tip', tip_cfg)
+    pm.register_component('sheet', sheet_cfg, n_layers=2, regions=regions)
+    pm.add_self_interaction('tip')
+    pm.add_self_interaction('sheet')
+    pm.add_cross_interaction('tip', 'sheet')
+    if style is not None:
+        pm.set_interlayer(style, **interlayer_kw)
+    pm.add_interlayer(['sheet'])
+    out = tmp_path / 'system.in.settings'
+    pm.write_file(out)
+    return pm, out.read_text(encoding='utf-8')
+
+
+def _pair_coeff_lines(text, substyle):
+    return [ln for ln in text.splitlines()
+            if ln.startswith('pair_coeff') and f' {substyle} ' in f'{ln} ']
+
+
+def _map_of(line, file_token_suffix):
+    """Element/NULL map following the parameter-file token of a pair_coeff line."""
+    tokens = line.split('#', 1)[0].split()
+    idx = next(i for i, t in enumerate(tokens) if t.endswith(file_token_suffix))
+    return tokens[idx + 1:]
+
+
+class TestInterlayerStyles:
+    """Emission of the four interlayer styles in system.in.settings."""
+
+    def test_lj_settings_byte_identical(self, mock_settings, si_tip_config,
+                                        mos2_sheet_config, tmp_path):
+        """Default (no set_interlayer) and explicit lj both reproduce today's file."""
+        expected = LJ_SNAPSHOT.read_text(encoding='utf-8')
+        _, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
+                           tmp_path / 'default')
+        assert text == expected
+        _, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
+                           tmp_path / 'lj', style='lj')
+        assert text == expected
+
+    def test_ilp_emission(self, mock_settings, si_tip_config, mos2_sheet_config,
+                          tmp_path):
+        pm, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
+                            tmp_path, style='ilp')
+        style_line = next(ln for ln in text.splitlines() if ln.startswith('pair_style'))
+        assert style_line.startswith('pair_style hybrid/overlay ')
+        assert 'ilp/tmd 16.0 1' in style_line
+        ilp = _pair_coeff_lines(text, 'ilp/tmd')
+        assert len(ilp) == 1
+        assert ilp[0].startswith('pair_coeff * * ilp/tmd ')
+        assert 'TMD.ILP' in ilp[0]
+        assert (tmp_path / 'potentials' / 'TMD.ILP').exists()
+        emap = _map_of(ilp[0], 'TMD.ILP')
+        sheet_ids = pm.types.ids_by_component('sheet')
+        tip_ids = pm.types.ids_by_component('tip')
+        assert len(emap) == len(pm.types)
+        assert all(emap[t - 1] in ('Mo', 'S') for t in sheet_ids)
+        assert all(emap[t - 1] == 'NULL' for t in tip_ids)
+        # no sheet-sheet lj/cut; tip-sheet lj/cut lines unchanged
+        assert '(L1)' not in text and '(L2)' not in text
+        snap = LJ_SNAPSHOT.read_text(encoding='utf-8').splitlines()
+        tip_sheet = [ln for ln in snap if '(tip)' in ln and 'lj/cut' in ln]
+        assert tip_sheet and all(ln in text.splitlines() for ln in tip_sheet)
+        assert pm.interlayer_substyle == 'ilp/tmd'
+        assert pm.needs_molecule_ids is True
+        prov = pm.interlayer_provenance()
+        assert prov['style'] == 'ilp'
+        assert prov['file'] == 'TMD.ILP'
+        assert len(prov['sha256']) == 64
+
+    def test_kc_emission(self, mock_settings, si_tip_config, potentials_path,
+                         tmp_path):
+        cif = tmp_path / 'graphene.cif'
+        cif.write_text(GRAPHENE_CIF, encoding='utf-8')
+        graphene = ComponentConfig(
+            mat='h-graphene', pot_type='tersoff',
+            pot_path=str(potentials_path / 'tersoff' / 'C.tersoff'),
+            cif_path=str(cif))
+        pm, text = _bilayer(mock_settings, si_tip_config, graphene,
+                            tmp_path, style='kc')
+        style_line = next(ln for ln in text.splitlines() if ln.startswith('pair_style'))
+        assert style_line.startswith('pair_style hybrid/overlay ')
+        assert 'kolmogorov/crespi/full 16.0 1' in style_line
+        kc = _pair_coeff_lines(text, 'kolmogorov/crespi/full')
+        assert len(kc) == 1 and 'CC.KC-full' in kc[0]
+        emap = _map_of(kc[0], 'CC.KC-full')
+        assert emap == ['NULL', 'C', 'C']
+        assert '(L1)' not in text
+        assert pm.interlayer_substyle == 'kolmogorov/crespi/full'
+        assert pm.needs_molecule_ids is True
+
+    def test_ljg_emission(self, mock_settings, si_tip_config, mos2_sheet_config,
+                          tmp_path):
+        pm, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
+                            tmp_path, style='lj_g',
+                            g_by_component={'sheet': 175.68})
+        style_line = next(ln for ln in text.splitlines() if ln.startswith('pair_style'))
+        assert style_line.startswith('pair_style hybrid/overlay ')
+        assert style_line.count('kolmogorov/crespi/z 11.0') == 3
+        kcz = _pair_coeff_lines(text, 'kolmogorov/crespi/z')
+        assert len(kcz) == 3
+        assert [ln.split()[4] for ln in kcz] == ['1', '2', '3']
+        assert 'gaussian_plus.KC' in kcz[0]
+        assert all('gaussian_minus.KC' in ln for ln in kcz[1:])
+        sheet = pm.types.ids_by_component('sheet')
+        all_map = _map_of(kcz[0], 'gaussian_plus.KC')
+        assert [all_map[t - 1] for t in sheet] == ['Mo', 'Mo', 'S', 'S']
+        assert all_map[0] == 'NULL'
+        assert _map_of(kcz[1], 'gaussian_minus.KC') == ['NULL', 'Mo', 'NULL', 'S', 'NULL']
+        assert _map_of(kcz[2], 'gaussian_minus.KC') == ['NULL', 'NULL', 'Mo', 'NULL', 'S']
+        plus = tmp_path / 'potentials' / 'gaussian_plus.KC'
+        minus = tmp_path / 'potentials' / 'gaussian_minus.KC'
+        assert plus.exists() and minus.exists()
+        for path, c0 in ((plus, 87.84), (minus, -87.84)):
+            rows = [ln.split() for ln in path.read_text().splitlines()
+                    if ln.strip() and not ln.startswith('#')]
+            assert {(r[0], r[1]) for r in rows} == {
+                ('Mo', 'Mo'), ('Mo', 'S'), ('S', 'Mo'), ('S', 'S')}
+            assert all(float(r[3]) == pytest.approx(c0) for r in rows)
+        # LJ part identical to lj
+        snap = LJ_SNAPSHOT.read_text(encoding='utf-8').splitlines()
+        assert [ln for ln in snap if 'lj/cut' in ln and ln.startswith('pair_coeff')] == \
+            [ln for ln in text.splitlines() if 'lj/cut' in ln and ln.startswith('pair_coeff')]
+        assert pm.interlayer_substyle == 'kolmogorov/crespi/z'
+        assert pm.needs_molecule_ids is False
+        prov = pm.interlayer_provenance()
+        assert prov['g_meV']['sheet'] == {'value': 175.68, 'source': 'table'}
+
+    def test_element_map_ignores_pot_label(self, mock_settings, si_tip_config,
+                                           materials_path, tmp_path):
+        fake = tmp_path / 'fake.sw'
+        fake.write_text('Mo2 S2 S2 1 1 1 1 1 1 1 1 1 1 1\n', encoding='utf-8')
+        sheet = ComponentConfig(mat='h-MoS2', pot_type='sw', pot_path=str(fake),
+                                cif_path=str(materials_path / 'h-MoS2.cif'))
+        pm, text = _bilayer(mock_settings, si_tip_config, sheet, tmp_path,
+                            style='ilp')
+        labels = {t.pot_label for t in pm.types if t.component == 'sheet'}
+        assert {'Mo1', 'Mo2', 'S1', 'S2'} <= labels
+        emap = _map_of(_pair_coeff_lines(text, 'ilp/tmd')[0], 'TMD.ILP')
+        assert set(emap) == {'NULL', 'Mo', 'S'}
+        assert pm.types.build_element_map(['sheet']) == emap
+
+    def test_expanded_types_covered(self, mock_settings, si_tip_config,
+                                    mos2_sheet_config, tmp_path):
+        pm, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
+                            tmp_path / 'ilp', style='ilp', regions=[None, 'edge'])
+        sheet = pm.types.ids_by_component('sheet')
+        assert len(sheet) == 8
+        emap = _map_of(_pair_coeff_lines(text, 'ilp/tmd')[0], 'TMD.ILP')
+        assert all(emap[t - 1] != 'NULL' for t in sheet)
+        pm, text = _bilayer(mock_settings, si_tip_config, mos2_sheet_config,
+                            tmp_path / 'ljg', style='lj_g', regions=[None, 'edge'],
+                            g_by_component={'sheet': 175.68})
+        plus = _map_of(_pair_coeff_lines(text, 'kolmogorov/crespi/z')[0],
+                       'gaussian_plus.KC')
+        assert all(plus[t - 1] != 'NULL' for t in sheet)
+
+    def test_unknown_style_rejected(self, mock_settings):
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        with pytest.raises(ValueError, match='interlayer_style'):
+            pm.set_interlayer('morse')
+
+    def test_ljg_shared_element_with_two_g_rejected(
+            self, mock_settings, mos2_sheet_config, tmp_path):
+        pm = PotentialManager(mock_settings, use_langevin=False,
+                              potentials_dir=tmp_path)
+        pm.register_component('sheet_1', mos2_sheet_config)
+        pm.register_component('sheet_2', mos2_sheet_config)
+        pm.set_interlayer('lj_g', g_by_component={'sheet_1': 175.68, 'sheet_2': 150.0})
+        with pytest.raises(ValueError, match=r"Mo.*sheet_1.*sheet_2|S.*sheet_1.*sheet_2"):
+            pm.add_interlayer(['sheet_1', 'sheet_2'])
+
+    def test_ljg_hetero_mixed_g(self, mock_settings, mos2_sheet_config,
+                                materials_path, potentials_path, tmp_path):
+        """Disjoint elements across components get g12 = sqrt(g1 g2)."""
+        cif = tmp_path / 'graphene.cif'
+        cif.write_text(GRAPHENE_CIF, encoding='utf-8')
+        graphene = ComponentConfig(
+            mat='h-graphene', pot_type='tersoff',
+            pot_path=str(potentials_path / 'tersoff' / 'C.tersoff'), cif_path=str(cif))
+        pm = PotentialManager(mock_settings, use_langevin=False,
+                              potentials_dir=tmp_path / 'pots', potentials_prefix='pots')
+        pm.register_component('sheet_1', mos2_sheet_config)
+        pm.register_component('sheet_2', graphene)
+        pm.add_self_interaction('sheet_1')
+        pm.add_self_interaction('sheet_2')
+        pm.set_interlayer('lj_g', g_by_component={'sheet_1': 175.68, 'sheet_2': 94.87})
+        pm.add_interlayer(['sheet_1', 'sheet_2'])
+        pm.write_file(tmp_path / 'system.in.settings')
+        text = (tmp_path / 'system.in.settings').read_text()
+        assert len(_pair_coeff_lines(text, 'kolmogorov/crespi/z')) == 3
+        rows = {(r[0], r[1]): float(r[3]) for r in (
+            ln.split() for ln in (tmp_path / 'pots' / 'gaussian_plus.KC').read_text().splitlines()
+            if ln.strip() and not ln.startswith('#'))}
+        assert rows[('Mo', 'C')] == pytest.approx((175.68 * 94.87) ** 0.5 / 2)
+        assert rows[('C', 'C')] == pytest.approx(94.87 / 2)
+        assert rows[('S', 'S')] == pytest.approx(175.68 / 2)
+
+    def test_lj_low_interaction_pairs_match_add_ghost_lj(
+            self, mock_settings, mos2_multilayer_config):
+        old = PotentialManager(mock_settings, use_langevin=False)
+        old.register_component('sheet', mos2_multilayer_config, n_layers=4)
+        old.add_ghost_lj('sheet', max_real_distance=1)
+        new = PotentialManager(mock_settings, use_langevin=False)
+        new.register_component('sheet', mos2_multilayer_config, n_layers=4)
+        new.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2), (0, 3), (1, 3)])
+        assert new.cross_interaction_commands == old.cross_interaction_commands
+        new.set_interlayer('ilp')
+        with pytest.raises(ValueError, match='ghost'):
+            new.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2)])

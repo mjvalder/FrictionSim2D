@@ -14,8 +14,9 @@ Supported potentials include:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional, Union, Iterator
+from typing import List, Dict, Any, Tuple, Optional, Union, Iterator, Sequence
 from collections import defaultdict
+import hashlib
 import logging
 import re
 import shutil
@@ -27,6 +28,18 @@ from .utils import (
     POTENTIALS_WITH_INTERNAL_LJ,
     REAXFF_TYPES,
     lj_params,
+)
+from .interlayer import (
+    ILP_CUTOFF,
+    INTERLAYER_STYLES,
+    KC_FULL_CUTOFF,
+    TAPER_FLAG,
+    default_interlayer_file,
+    gaussian_g,
+    ilp_substyle,
+    mixed_g,
+    resolve_interlayer_file,
+    write_gaussian_kc_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +154,27 @@ class TypeRegistry:
             if atype and atype.component == component:
                 if layer is None or atype.layer == layer:
                     result.append(atype.pot_label)
+                    continue
+            result.append("NULL")
+        return result
+
+    def build_element_map(self, components: Sequence[str],
+                          layer: Optional[int] = None) -> List[str]:
+        """NULL-padded *element* list for pair_coeff over several components.
+
+        Like :meth:`build_null_map`, but each matching type contributes its
+        chemical element (``Mo``), never its potential label (``Mo1``):
+        interlayer parameter files are keyed by element. Every type of the
+        listed components matches -- all layers and regions -- unless
+        ``layer`` narrows it to one layer.
+        """
+        wanted = set(components)
+        result = []
+        for tid in range(1, self._next_id):
+            atype = self._types.get(tid)
+            if atype and atype.component in wanted:
+                if layer is None or atype.layer == layer:
+                    result.append(atype.element)
                     continue
             result.append("NULL")
         return result
@@ -284,6 +318,22 @@ class PotentialManager:
         self.lj_overrides: Dict[Tuple[str, str], Tuple[float, float]] = {}
 
         self.virtual_atom_type: Optional[int] = None
+
+        # Interlayer style (spec 2026-11-11). 'lj' keeps every output unchanged.
+        self.interlayer_style: str = 'lj'
+        self._interlayer_file_name: Optional[str] = None
+        self._interlayer_base_dir: Optional[Path] = None
+        self._g_by_component: Dict[str, float] = {}
+        self._interlayer_components: List[str] = []
+        self._interlayer_source: Optional[Path] = None
+        self._interlayer_substyle: Optional[str] = None
+        # Many-body (ilp/kc) pair_coeff lines, ready to write.
+        self._interlayer_commands: List[str] = []
+        # LJ-G: pair table and (sign, element map, comment) per KC/z instance;
+        # the .KC files and their pair_coeff lines are written by write_file.
+        self._gaussian_pairs: Dict[Tuple[str, str], float] = {}
+        self._gaussian_instances: List[Tuple[int, List[str], str]] = []
+        self._generated_files: Dict[str, str] = {}
 
     @property
     def lj_cutoff(self) -> float:
@@ -808,6 +858,256 @@ class PotentialManager:
                 component_name, layer_pairs=ghost_pairs, low_interaction=True
             )
 
+    # === Interlayer styles ===
+
+    def set_interlayer(self, style: str, file: Optional[str] = None,
+                       g_by_component: Optional[Dict[str, float]] = None,
+                       base_dir: Optional[Union[str, Path]] = None) -> None:
+        """Choose the interaction between 2D layers for :meth:`add_interlayer`.
+
+        Args:
+            style: One of ``lj``, ``lj_g``, ``ilp``, ``kc``.
+            file: ILP/KC parameter file (name or path); None picks the bundled
+                default for the sheet elements.
+            g_by_component: LJ-G Gaussian strength (meV) per component name.
+                A missing component falls back to its config's
+                ``interlayer_g`` or the built-in table.
+            base_dir: Directory the parameter file is resolved against
+                (normally the config's directory); None = working directory.
+
+        Raises:
+            ValueError: On an unknown style.
+        """
+        if style not in INTERLAYER_STYLES:
+            raise ValueError(
+                f"Unknown interlayer_style '{style}'; expected one of "
+                f"{list(INTERLAYER_STYLES)}.")
+        self.interlayer_style = style
+        self._interlayer_file_name = file
+        self._interlayer_base_dir = Path(base_dir) if base_dir is not None else None
+        self._g_by_component = dict(g_by_component or {})
+
+    @property
+    def needs_molecule_ids(self) -> bool:
+        """True when the style excludes intra-layer pairs by molecule ID."""
+        return self.interlayer_style in ('ilp', 'kc')
+
+    @property
+    def interlayer_substyle(self) -> Optional[str]:
+        """LAMMPS sub-style carrying the interlayer term; None for ``lj``.
+
+        For ``ilp`` this depends on the sheet elements: those of the
+        components passed to :meth:`add_interlayer`, or -- before that call --
+        of every registered component whose name starts with ``sheet``.
+        """
+        style = self.interlayer_style
+        if style == 'lj':
+            return None
+        if style == 'lj_g':
+            return 'kolmogorov/crespi/z'
+        if style == 'kc':
+            return 'kolmogorov/crespi/full'
+        if self._interlayer_substyle is not None:
+            return self._interlayer_substyle
+        names = self._interlayer_components or [
+            n for n in self.components if n.startswith('sheet')]
+        return ilp_substyle(self._elements_of(names))
+
+    def _elements_of(self, components: Sequence[str]) -> set:
+        """Union of the registered elements of ``components``."""
+        found = set()
+        for name in components:
+            found.update(self.types.elements_in_component(name))
+        return found
+
+    def add_interlayer(
+        self,
+        components: Sequence[str],
+        low_interaction_pairs: Optional[Sequence[Tuple[int, int]]] = None,
+    ) -> None:
+        """Add the interaction between the layers of ``components``.
+
+        The single entry point for every builder:
+
+        - ``lj``: :meth:`add_interlayer_interaction` per component -- the same
+          lines, in the same order, as calling it directly. With
+          ``low_interaction_pairs`` those layer pairs get the ghost epsilon
+          after the real ones, exactly as :meth:`add_ghost_lj` emits them.
+        - ``lj_g``: the same LJ, plus the Gaussian as three or more
+          ``kolmogorov/crespi/z`` instances: +g/2 over every listed sheet
+          type and -g/2 within each layer.
+        - ``ilp``/``kc``: no sheet-sheet ``lj/cut``; one many-body
+          ``pair_coeff * *`` over all listed components.
+
+        Cross-material LJ between hetero components is not touched: callers
+        emit it with :meth:`add_cross_interaction` as before.
+
+        Raises:
+            ValueError: On an unregistered component, ``low_interaction_pairs``
+                with a non-``lj`` style, a missing Gaussian g, an element with
+                two different g, or an ILP/KC file that cannot be defaulted.
+        """
+        components = list(components)
+        for name in components:
+            if name not in self.components:
+                raise ValueError(f"Component '{name}' not registered.")
+        style = self.interlayer_style
+        if low_interaction_pairs and style != 'lj':
+            raise ValueError(
+                f"interlayer_style '{style}' cannot use ghost (low-interaction) "
+                "layer pairs; those belong to the atom_bonds/com_spring "
+                "constraint modes, which need interlayer_style = lj.")
+
+        if style in ('lj', 'lj_g'):
+            for name in components:
+                self._add_lj_interlayer(name, low_interaction_pairs)
+
+        n_layers_total = sum(self.components[n]['n_layers'] for n in components)
+        if style == 'lj' or n_layers_total < 2:
+            return
+        self._interlayer_components = components
+
+        if style == 'lj_g':
+            self._add_gaussian(components)
+        else:
+            self._add_many_body(style, components)
+
+    def _add_lj_interlayer(self, name: str,
+                           low_pairs: Optional[Sequence[Tuple[int, int]]]) -> None:
+        """Today's interlayer LJ for one component (plain or with ghost pairs)."""
+        if not low_pairs:
+            self.add_interlayer_interaction(name)
+            return
+        n_layers = self.components[name]['n_layers']
+        ghost = [tuple(p) for p in low_pairs]
+        real = [(i, j) for i in range(n_layers) for j in range(i + 1, n_layers)
+                if (i, j) not in ghost]
+        if real:
+            self.add_interlayer_interaction(name, layer_pairs=real)
+        self.add_interlayer_interaction(name, layer_pairs=ghost,
+                                        low_interaction=True)
+
+    def _component_g(self, name: str) -> float:
+        """Gaussian g (meV) of one component: explicit, config override, table."""
+        if name in self._g_by_component:
+            return float(self._g_by_component[name])
+        config = self.components[name]['config']
+        g = gaussian_g(config.mat, getattr(config, 'interlayer_g', None))
+        if g is None:
+            raise ValueError(
+                f"interlayer_style 'lj_g' needs a Gaussian strength g (meV) for "
+                f"component '{name}' ({config.mat}): pass g_by_component or set "
+                "interlayer_g.")
+        return g
+
+    def _add_gaussian(self, components: List[str]) -> None:
+        """Record the LJ-G pair table and the KC/z instances (spec §4)."""
+        g_of: Dict[str, float] = {name: self._component_g(name) for name in components}
+        owner: Dict[str, str] = {}
+        el_g: Dict[str, float] = {}
+        for name in components:
+            for el in self.types.elements_in_component(name):
+                if el in el_g and el_g[el] != g_of[name]:
+                    raise ValueError(
+                        f"lj_g: element '{el}' is in components '{owner[el]}' "
+                        f"(g = {el_g[el]} meV) and '{name}' (g = {g_of[name]} meV) "
+                        "with different Gaussian strengths; a KC/z file holds one "
+                        "value per element pair.")
+                owner.setdefault(el, name)
+                el_g[el] = g_of[name]
+
+        pairs: Dict[Tuple[str, str], float] = {}
+        for el1, g1 in el_g.items():
+            for el2, g2 in el_g.items():
+                pairs[(el1, el2)] = g1 if owner[el1] == owner[el2] else mixed_g(g1, g2)
+        self._gaussian_pairs = pairs
+
+        label = ' '.join(components)
+        instances = [(1, self.types.build_element_map(components),
+                      f"{label}: all layers +g/2")]
+        for name in components:
+            n_layers = self.components[name]['n_layers']
+            layers = range(n_layers) if n_layers > 1 else [None]
+            for layer in layers:
+                where = f"{name} layer {layer + 1}" if layer is not None else name
+                instances.append((-1, self.types.build_element_map([name], layer),
+                                  f"{where}: same-layer -g/2"))
+        self._gaussian_instances = instances
+
+    def _add_many_body(self, style: str, components: List[str]) -> None:
+        """One ``pair_coeff * *`` for ILP or KC-full over ``components``."""
+        elements = self._elements_of(components)
+        name = self._interlayer_file_name or default_interlayer_file(style, elements)
+        if name is None:
+            raise ValueError(
+                f"interlayer_style '{style}' has no bundled parameter file for "
+                f"elements {sorted(elements)}: set general interlayer_file.")
+        source = resolve_interlayer_file(name, style, self._interlayer_base_dir)
+        self._interlayer_source = source
+        substyle = ilp_substyle(elements) if style == 'ilp' else 'kolmogorov/crespi/full'
+        self._interlayer_substyle = substyle
+        path = self._get_potential_path(str(source))
+        emap = ' '.join(self.types.build_element_map(components))
+        self._interlayer_commands = [
+            f"pair_coeff * * {substyle} {path} {emap} # {' '.join(components)}"]
+
+    def _interlayer_active(self) -> bool:
+        """True when add_interlayer emitted a non-LJ interlayer term."""
+        return bool(self._interlayer_commands or self._gaussian_instances)
+
+    def _interlayer_style_parts(self) -> List[str]:
+        """pair_style parts appended after the normal ones under overlay."""
+        if self._gaussian_instances:
+            return [f"kolmogorov/crespi/z {self.lj_cutoff}"] * len(self._gaussian_instances)
+        if self._interlayer_commands:
+            cutoff = ILP_CUTOFF if self.interlayer_style == 'ilp' else KC_FULL_CUTOFF
+            return [f"{self._interlayer_substyle} {cutoff} {TAPER_FLAG}"]
+        return []
+
+    def _write_gaussian_commands(self, settings_dir: Path) -> List[str]:
+        """Write gaussian_plus/minus.KC and return the KC/z pair_coeff lines.
+
+        The files go into ``potentials_dir`` (referenced through
+        ``potentials_prefix`` like a copied potential) or, without one, next
+        to the settings file (referenced by absolute path).
+        """
+        target = self.potentials_dir or settings_dir
+        refs: Dict[int, str] = {}
+        for sign, fname in ((1, 'gaussian_plus.KC'), (-1, 'gaussian_minus.KC')):
+            path = write_gaussian_kc_file(target / fname, self._gaussian_pairs, sign)
+            self._generated_files[fname] = hashlib.sha256(path.read_bytes()).hexdigest()
+            if self.potentials_dir and self.potentials_prefix:
+                refs[sign] = f"{self.potentials_prefix}/{fname}"
+            else:
+                refs[sign] = str(path)
+        return [
+            f"pair_coeff * * kolmogorov/crespi/z {i} {refs[sign]} {' '.join(emap)} # {note}"
+            for i, (sign, emap, note) in enumerate(self._gaussian_instances, 1)
+        ]
+
+    def interlayer_provenance(self) -> Dict[str, Any]:
+        """Interlayer choice for provenance; ``comparison`` is the caller's."""
+        sha = None
+        if self._interlayer_source is not None and self._interlayer_source.exists():
+            sha = hashlib.sha256(self._interlayer_source.read_bytes()).hexdigest()
+        g_mev: Dict[str, Dict[str, Any]] = {}
+        if self.interlayer_style == 'lj_g':
+            for name in self._interlayer_components:
+                config = self.components[name]['config']
+                explicit_override = getattr(config, 'interlayer_g', None) is not None
+                g_mev[name] = {
+                    'value': self._component_g(name),
+                    'source': 'override' if explicit_override else 'table',
+                }
+        return {
+            'style': self.interlayer_style,
+            'file': self._interlayer_source.name if self._interlayer_source else None,
+            'sha256': sha,
+            'g_meV': g_mev,
+            'generated_files': dict(self._generated_files),
+            'comparison': None,
+        }
+
     def calculate_gap(self, comp1_name: str, comp2_name: str,
                         buffer: float = 0.5) -> float:
         """Calculate the recommended gap between two components.
@@ -1012,6 +1312,8 @@ class PotentialManager:
         lj_cutoff = self.settings.potential.lj_cutoff
         has_lj = bool(self.cross_interaction_commands) or self.virtual_atom_type is not None
         use_hybrid = (not self._is_single_potential()) or self.virtual_atom_type is not None
+        overlay = self._interlayer_active()
+        use_hybrid = use_hybrid or overlay
 
         # Build pair_style parts; ReaxFF needs NULL + keywords when in hybrid
         style_parts = []
@@ -1028,9 +1330,13 @@ class PotentialManager:
 
         if has_lj:
             style_parts.append(f"lj/cut {lj_cutoff}")
+        style_parts.extend(self._interlayer_style_parts())
 
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        interlayer_cmds = list(self._interlayer_commands)
+        if self._gaussian_instances:
+            interlayer_cmds = self._write_gaussian_commands(output_path.parent.resolve())
 
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(self.get_masses_string())
@@ -1038,7 +1344,9 @@ class PotentialManager:
             f.write(self.get_component_groups_string())
             f.write("\n")
 
-            if use_hybrid:
+            if overlay:
+                f.write(f"pair_style hybrid/overlay {' '.join(style_parts)}\n")
+            elif use_hybrid:
                 f.write(f"pair_style hybrid {' '.join(style_parts)}\n")
             elif style_parts:
                 pot = style_parts[0]
@@ -1065,6 +1373,12 @@ class PotentialManager:
             if self.cross_interaction_commands:
                 f.write("# Cross-interactions (inter-component LJ)\n")
                 for cmd in self.cross_interaction_commands:
+                    f.write(f"{cmd}\n")
+                f.write("\n")
+
+            if interlayer_cmds:
+                f.write(f"# Interlayer ({self.interlayer_style})\n")
+                for cmd in interlayer_cmds:
                     f.write(f"{cmd}\n")
                 f.write("\n")
 
