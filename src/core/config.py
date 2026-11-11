@@ -625,7 +625,11 @@ class GeneralConfig(BaseModel):
     )
     interlayer_comparison: bool = Field(
         default=False,
-        description="Also record the group/group interlayer force for comparison.",
+        description=(
+            "Measure friction by the bottom-layer reaction force under every "
+            "interlayer style (lj included, instead of group/group), so a sweep "
+            "over styles is like for like."
+        ),
     )
     twist_angle: Optional[float] = Field(
         default=None,

@@ -442,6 +442,56 @@ meaningless COF. A `run pes-sheet` scan applies no load and needs none.
 Documented in legacy workflows but not currently merged in the active runtime path.
 Prefer editing global settings directly when reproducibility is required.
 
+## Interlayer interactions
+
+`interlayer_style` (in `[general]`, sheet-on-sheet and AFM) chooses how the 2D layers of a sheet interact with each other. It is sweepable: `interlayer_style = lj, lj_g, ilp`.
+
+| Style | Interaction | Default parameters |
+|---|---|---|
+| `lj` (default) | `lj/cut`, UFF or `[lj_override]` | none needed |
+| `lj_g` | the run's LJ plus the Jiang-Park Gaussian, via `kolmogorov/crespi/z` | g table below |
+| `ilp` | `ilp/tmd` for Mo/W/S/Se (`TMD.ILP`), `ilp/graphene/hbn` for B/N/C/H (`BNCH.ILP`) | bundled |
+| `kc` | `kolmogorov/crespi/full` | carbon only (`CC.KC-full`, `CH.KC`); other materials need `interlayer_file` |
+
+`tap_flag` is 1 only for `*_taper.KC` files.
+
+### Gaussian strength (`lj_g`)
+
+g (meV): MoS2 175.68, graphene 94.87, black phosphorus 123.0. Override per sheet with `interlayer_g` in `[2D]`. In a heterostructure g = sqrt(g1 g2). The LJ part is the run's own LJ, overrides included.
+
+### Parameter files
+
+`interlayer_file` is looked up like `pot_path` (working directory, then relative to the config), then in `examples/potentials/ilp/` and `examples/potentials/kc/`.
+
+### Scope
+
+- Acts only between 2D layers. Tip and substrate stay `lj/cut`; in AFM only between the sheet's own layers. A single layer makes the style a no-op.
+- Not allowed with a potential that has its own interlayer term (`rebomos`, `reaxff`, `airebo`, `comb`, ...), nor with `constraint_mode` `atom_bonds` or `com_spring`.
+- `ilp` and `kc` need an in-plane periodic cell wider than the 16 A cutoff plus the neighbor skin; otherwise the build fails with a message naming the `x`/`y` that pass.
+- `ilp/tmd` splits each layer's chalcogen into top and bottom types automatically when the SW file has a single chalcogen type.
+
+### Friction measurement and comparison mode
+
+- `lj` measures the interlayer force with `compute group/group` at the shearing interface.
+- `lj_g`, `ilp`, `kc` use the bottom-layer reaction force (`group/group` cannot run under them).
+- `interlayer_comparison = true` forces every style, `lj` included, onto the reaction-force measurement, so a style sweep compares like with like. See `examples/sheet_config_interlayer.ini`.
+
+### Output and provenance
+
+- Output directories get an extra `il-<style>` level (`il-<style>-cmp` in comparison mode) after the `pot_` level; plain `lj` adds none.
+- Observables: `E_int_interlayer` (`lj`, shearing interface) vs `E_int_interlayer_all` (`ilp`/`kc`, all layer pairs). The PES CSV gains `e_interlayer_eV` under `ilp`/`kc`.
+- Provenance records an `interlayer` block when the style is not `lj` or comparison is on.
+
+### GUI
+
+The potential type is a drop-down with `Custom...`; a custom `pot_type` is checked against the installed `lmp` pair-style list (accepted with a warning if no binary is found). Interlayer controls appear only for potentials without their own interlayer term.
+
+### Known caveats
+
+- Sevik SW + `TMD.ILP` bilayers relax to Mo-Mo 6.21 A.
+- `mos2_jiang3.sw` (sw/mod parameters in a `.sw` file) collapses under ILP.
+- In-process stacking minimisation under ILP may stop early; prefer giving `lat_c`.
+
 ## Validation notes
 
 Common failures:
