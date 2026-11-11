@@ -57,9 +57,13 @@ variable        have_load equal is_file(${load_file})
 if              "${have_load} == 0" then &
                 "print '# SKIP no ${load_file}'" &
                 "jump SELF indent_next"
-read_data       ${load_file}
+{% if molecule_ids_in_data %}
+{# Hetero stack: system.in wrote the molecule IDs into the load file. #}
+fix             mol_ids all property/atom mol ghost yes
+{% endif %}
+read_data       ${load_file}{{ ' fix mol_ids NULL Molecules' if molecule_ids_in_data else '' }}
 include         {{ potential_file }}
-{% if needs_molecule_ids %}
+{% if needs_molecule_ids and not molecule_ids_in_data %}
 {{ mol_ids.emit_molecule_ids(molecule_groups) -}}
 {% endif %}
 

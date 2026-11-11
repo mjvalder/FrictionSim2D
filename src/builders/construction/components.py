@@ -676,6 +676,7 @@ def build_hetero_flake_component(
     flake_cfg: FlakeConfig,
     workdir: Path,
     hetero_stacking: str = "grouped",
+    interlayer_general: Any = None,
 ) -> Tuple[Path, dict]:
     """Build a shaped flake carved from a matched hetero *bilayer*.
 
@@ -702,6 +703,12 @@ def build_hetero_flake_component(
             ``system.in.settings``, staged potentials, and the carved flake.
         hetero_stacking: Layer ordering for the bilayer (``'grouped'`` default —
             a one-layer-each bilayer is order-insensitive).
+        interlayer_general: The run's ``[general]`` config. Under ilp/tmd its
+            style splits each material's chalcogen sub-layers into their own
+            types (monolayers and assembly spine alike), as the run's
+            ``flake_1``/``flake_2`` registration does. The assembly itself
+            keeps the ``lj`` interactions (see
+            :func:`~src.builders.construction.hetero_stack.register_hetero_potentials`).
 
     Returns:
         Tuple of (flake_path, flake_box_dims).
@@ -730,13 +737,17 @@ def build_hetero_flake_component(
     workdir.mkdir(parents=True, exist_ok=True)
 
     # 1. Monolayer per flake material (build_monolayer returns the path first).
-    mono_paths = [Path(build_monolayer(sheet)[0]) for sheet in flake_sheets]
+    style = interlayer_style(interlayer_general)
+    mono_paths = [Path(build_monolayer(sheet, interlayer=style)[0])
+                  for sheet in flake_sheets]
 
     # 2. Match -> two supercells sharing one in-plane box.
     matched = build_matched_supercells(mono_paths[0], mono_paths[1], workdir)
 
     # 3. Register the flake materials' potential/type spine (geometry-independent).
-    hetero_potentials = register_hetero_potentials(flake_sheets, settings, workdir)
+    hetero_potentials = register_hetero_potentials(
+        flake_sheets, settings, workdir,
+        interlayer_general=interlayer_general, interlayer_terms=False)
 
     # 4. Assemble the two matched supercells into one stacked bilayer hetero.data
     #    (interface z-spacing by real minimization; types aligned to the spine).

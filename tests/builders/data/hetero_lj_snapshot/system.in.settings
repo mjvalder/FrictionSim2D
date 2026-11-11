@@ -1,0 +1,20 @@
+mass 1 95.950000 #Mo
+mass 2 32.060000 #S
+mass 3*6 183.840000 #W
+mass 7*14 78.971000 #Se
+mass 15 1.0 #Virtual atom
+group sheet_1_all type 1 2
+group sheet_2_all type 3 4 5 6 7 8 9 10 11 12 13 14
+pair_style hybrid sw sw lj/cut 11.0
+# Self-interactions (intra-component)
+pair_coeff * * sw 1 run/provenance/potentials/MoS2_wen.sw Mo S NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL # sheet_1
+pair_coeff * * sw 2 run/provenance/potentials/h-WSe2.sw NULL NULL W1 W2 W3 W4 Se1 Se2 Se3 Se4 Se5 Se6 Se7 Se8 NULL # sheet_2
+
+# Cross-interactions (inter-component LJ)
+pair_coeff 1 3*6 lj/cut 0.00265616311477084 3.0605 # Mo(sheet_1)-W(sheet_2)
+pair_coeff 1 7*14 lj/cut 0.00553558896170857 3.6285 # Mo(sheet_1)-Se(sheet_2)
+pair_coeff 2 3*6 lj/cut 0.00587538066074041 3.552 # S(sheet_1)-W(sheet_2)
+pair_coeff 2 7*14 lj/cut 0.0122446141016594 4.12 # S(sheet_1)-Se(sheet_2)
+
+# Virtual atom (minimal LJ)
+pair_coeff * 15 lj/cut 1e-100 1e-100

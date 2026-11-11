@@ -123,8 +123,24 @@ CHALCOGENS = frozenset({'S', 'Se', 'Te'})
 
 #: Components whose data comes from ``build_monolayer`` (``build_sheet`` /
 #: ``build_flake_component``), the only place the split is applied to a data
-#: file; the potential manager splits the same components' types.
+#: file; the potential manager splits the same components' types. The hetero
+#: components numbered after them (``sheet_1``, ``flake_2``, ...; see
+#: :func:`splits_chalcogens`) are built from ``build_monolayer`` too.
 SPLIT_COMPONENTS = ('sheet', 'flake')
+
+
+def splits_chalcogens(component: str) -> bool:
+    """Whether ``component``'s chalcogen sub-layers get their own types under ilp/tmd.
+
+    ``sheet`` and ``flake``, plus the hetero components numbered after them
+    (``sheet_1``/``sheet_2`` from ``register_sheet_block``, ``flake_1``/
+    ``flake_2`` of a hetero flake): every one of them is read from a
+    ``build_monolayer`` file, which applies the same split.
+    """
+    if component in SPLIT_COMPONENTS:
+        return True
+    base, _, index = component.rpartition('_')
+    return base in SPLIT_COMPONENTS and index.isdigit()
 
 
 def chalcogen_split_elements(style: str, elements, pot_counts: Dict[str, int]) -> Set[str]:

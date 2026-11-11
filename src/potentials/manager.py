@@ -32,7 +32,6 @@ from .utils import (
 from .interlayer import (
     ILP_CUTOFF,
     INTERLAYER_STYLES,
-    SPLIT_COMPONENTS,
     chalcogen_split_elements,
     KC_FULL_CUTOFF,
     TAPER_FLAG,
@@ -41,6 +40,7 @@ from .interlayer import (
     ilp_substyle,
     mixed_g,
     resolve_interlayer_file,
+    splits_chalcogens,
     write_gaussian_kc_file,
 )
 
@@ -505,7 +505,7 @@ class PotentialManager:
         # ilp/tmd: one type per chalcogen sub-layer (see chalcogen_split_elements).
         # The data file gets the same split from build_monolayer.
         split = (chalcogen_split_elements(self.interlayer_style, elements, pot_counts)
-                 if name in SPLIT_COMPONENTS else set())
+                 if splits_chalcogens(name) else set())
         if split:
             pot_counts = {el: (2 if el in split else n) for el, n in pot_counts.items()}
 
@@ -900,7 +900,7 @@ class PotentialManager:
                 f"Unknown interlayer_style '{style}'; expected one of "
                 f"{list(INTERLAYER_STYLES)}.")
         for name, comp in self.components.items():
-            if name in SPLIT_COMPONENTS and comp.get('split_chalcogens', set()) != \
+            if splits_chalcogens(name) and comp.get('split_chalcogens', set()) != \
                     chalcogen_split_elements(style, comp['elements'], count_atomtypes(
                         comp['config'].pot_path, comp['elements'],
                         pot_type=self._normalize_potential_type(comp['config'].pot_type))):
@@ -986,7 +986,10 @@ class PotentialManager:
 
         if style in ('lj', 'lj_g'):
             for name in components:
-                self._add_lj_interlayer(name, low_interaction_pairs)
+                # lj_g passes single-layer components (hetero materials,
+                # flakes) for the Gaussian alone: no LJ of their own to add.
+                if style == 'lj' or self.components[name]['n_layers'] > 1:
+                    self._add_lj_interlayer(name, low_interaction_pairs)
 
         n_layers_total = sum(self.components[n]['n_layers'] for n in components)
         if style == 'lj' or n_layers_total < 2:
@@ -1034,11 +1037,13 @@ class PotentialManager:
         for name in components:
             for el in self.types.elements_in_component(name):
                 if el in el_g and el_g[el] != g_of[name]:
+                    first = owner[el]
                     raise ValueError(
-                        f"lj_g: element '{el}' is in components '{owner[el]}' "
-                        f"(g = {el_g[el]} meV) and '{name}' (g = {g_of[name]} meV) "
-                        "with different Gaussian strengths; a KC/z file holds one "
-                        "value per element pair.")
+                        f"lj_g: element '{el}' is in components '{first}' "
+                        f"({self.components[first]['config'].mat}, g = {el_g[el]} meV) "
+                        f"and '{name}' ({self.components[name]['config'].mat}, "
+                        f"g = {g_of[name]} meV) with different Gaussian strengths; "
+                        "a KC/z file holds one value per element pair.")
                 owner.setdefault(el, name)
                 el_g[el] = g_of[name]
 

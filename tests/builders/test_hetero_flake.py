@@ -125,3 +125,28 @@ def test_hetero_flake_run0_smoke(tmp_path):
     combined = out.stdout + out.stderr
     assert out.returncode == 0, combined         # all pair coeffs set (no "All pair coeffs are not set")
     assert "Lost atoms" not in combined
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_flake_ilp_splits_chalcogens_like_its_components(tmp_path):
+    """Under ilp/tmd the carved flake has each material's S top/bottom types,
+    exactly the block flake_1/flake_2 register (both files label S once)."""
+    from types import SimpleNamespace
+    from src.core.config import GlobalSettings, FlakeConfig
+    from src.builders.construction.components import build_hetero_flake_component
+    from src.potentials.manager import PotentialManager
+    settings = GlobalSettings()
+    general = SimpleNamespace(interlayer_style="ilp", interlayer_file=None)
+    sheets = _flake_sheets(settings)
+    flake_cfg = FlakeConfig(shape="hexagon", edge_length=10.0, corner_radius=3.0)
+    path, _dims = build_hetero_flake_component(
+        sheets, settings, flake_cfg, tmp_path, interlayer_general=general)
+    text = Path(path).read_text()
+    assert "12 atom types" in text         # (Mo, S top, S bottom, W, S, S) x core/corner
+
+    pm = PotentialManager(settings)
+    pm.set_interlayer("ilp")
+    for i, sheet in enumerate(sheets):
+        pm.register_component(f"flake_{i + 1}", sheet, regions=[None, "corner"])
+    assert len(pm.types) == 12
+    assert set(_lammps_atom_types(path)) <= set(range(1, 13))

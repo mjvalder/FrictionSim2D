@@ -9,6 +9,7 @@ from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ...interfaces.ase import read_lammps_data
+from ..utils.interlayer import interlayer_style, interlayer_template_context
 from ..construction.hetero_stack import (
     _detect_atom_style,
     build_hetero_structure,
@@ -295,6 +296,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
                 self.output_dir,
                 reserve_virtual_type=True,
                 potentials_prefix=self._potentials_prefix(),
+                interlayer_general=self.config.general,
             )
             # Fail loud on any real-type-layout divergence: never ship an
             # inconsistent settings/data pairing. type_ids covers the REAL
@@ -324,6 +326,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             # register_hetero_potentials already wrote the settings (with the
             # virtual type) to hp.settings_path -- no second write needed.
             num_atom_types = len(hp.pm.types)  # == stack.total_types + 1
+            stack.pm = hp.pm
 
         # Hand the assembled-stack state to the run-phase seam. Everything
         # below this point that a subclass might want to replace lives in
@@ -370,8 +373,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         """
         return self.config.settings.simulation.drive_method == "virtual_atom"
 
-    def _build_obs_ctx(self, n_layers: int,
-                       results_file_pattern: str) -> Dict[str, object]:
+    def _build_obs_ctx(self, n_layers: int, results_file_pattern: str,
+                       interlayer_energy: bool = False) -> Dict[str, object]:
         """Observable context for the hetero family.
 
         Mirrors :meth:`SheetOnSheetSimulation._build_obs_ctx`. This class
@@ -385,6 +388,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         gains the raw tier, not a populated peratom tier. A real hetero
         peratom channel is a later opt-in addition, not something to force
         here by relaxing this filter.
+
+        ``interlayer_energy`` keeps ``E_int_interlayer``: set when the run
+        script computes ``v_e_int_il`` from an ILP/KC sub-style
+        (``interlayer_energy_substyle``; spec 2026-11-11 §7). Its value is the
+        interlayer energy summed over every layer pair.
         """
         # `contact_cutoff` is left to sheet_obs_ctx's fallback default:
         # its only consumer in the registry is n_contact_il, and the
@@ -399,7 +407,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # A real derivation would only be worth adding if a future task made
         # this extra_filter conditional on has_internal_lj (as
         # SheetOnSheetSimulation's already is), making n_contact_il reachable.
-        interlayer = {'E_int_interlayer', 'n_contact_il'}
+        interlayer = {'n_contact_il'} if interlayer_energy else {
+            'E_int_interlayer', 'n_contact_il'}
         return sheet_obs_ctx(
             self.config.settings,
             sim_type=self.FAMILY,
@@ -407,6 +416,27 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             results_file_pattern=results_file_pattern,
             extra_filter=lambda ob: ob.name not in interlayer,
         )
+
+    def _interlayer_context(self, pm, bands: List[Dict]) -> Dict[str, object]:
+        """Friction-branch and molecule-ID keys for ``hetero/slide.lmp``.
+
+        The hetero slide reads friction from the bottom-layer reaction force
+        under every interlayer style -- it never had a ``compute group/group``
+        branch -- so ``use_group_group`` is always False and comparison mode
+        changes nothing here. ``lj`` keeps today's ``has_internal_lj`` branch
+        (its "many-body potential" comment included) so its script is
+        unchanged; other styles take the interlayer-style branch, with
+        molecule IDs per z-band layer (``layer_N``) for ILP/KC and, there, the
+        interlayer energy from the ILP/KC sub-style.
+        """
+        general = self.config.general
+        legacy_lj = interlayer_style(general) == 'lj'
+        ctx = interlayer_template_context(
+            general, has_internal_lj=legacy_lj, pm=pm,
+            molecule_groups=[f"layer_{band['idx']}" for band in bands])
+        ctx['use_group_group'] = False
+        return {'has_internal_lj': legacy_lj, 'interlayer_style': interlayer_style(general),
+                **ctx}
 
     def write_run_scripts(self) -> None:
         """Render and write the run phase (``lammps/slide.in``): the dynamic slide.
@@ -430,6 +460,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         results_file_pattern = self._run_dir_path(
             "results", "friction_p${pressure}_a${a}_s${speed}"
         )
+        interlayer_ctx = self._interlayer_context(getattr(stack, "pm", None), bands)
 
         # Same key set as SheetOnSheetSimulation.write_inputs' base_context (only
         # the keys the template actually references), with hetero-specific values
@@ -458,7 +489,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "n_bond_types": 0,
             "atom_style": self._hetero_atom_style,
             "pot_type": "sw",
-            "has_internal_lj": True,  # hybrid sw -> reaction-force friction proxy
+            **interlayer_ctx,
             # ``run_simulations`` refuses a slide with no pressure
             # (REQUIRES_PRESSURE, src.run.expand.missing_pressure). The 0.0
             # fallback only keeps a raw None out of the template (``variable
@@ -482,7 +513,9 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "dump_freq": out.dump_frequency.get("slide", 1000),
             "dump_enabled": out.dump.get("slide", False),
             "results_file_pattern": results_file_pattern,
-            "obs_ctx": self._build_obs_ctx(n, results_file_pattern),
+            "obs_ctx": self._build_obs_ctx(
+                n, results_file_pattern,
+                interlayer_energy=bool(interlayer_ctx["interlayer_energy_substyle"])),
             "dump_file_pattern": self._run_dir_path(
                 "visuals", "slide_p${pressure}_a${a}_s${speed}.lammpstrj"
             ),

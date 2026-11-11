@@ -10,6 +10,10 @@
    `groups` lists group names, one molecule each, numbered from 1 in order.
    An entry may instead be {'name': ..., 'types': '...'}: the type group is
    created first (the hetero flake's per-material components have none).
+   With 'zlo'/'zhi' too it is the atoms of those types inside that z-band --
+   a hetero stack's layers share their material's types, so only position
+   tells them apart. The two helper groups are deleted again at once, so
+   the band form costs no group slot.
 
    Emit it after the groups exist and before the first run/minimize. A
    `write_data` with the fix defined writes a `Molecules` section -- harmless
@@ -19,7 +23,15 @@
 # Molecule IDs: one per 2D layer (ILP/KC exclude intra-layer pairs by them)
 fix             mol_ids all property/atom mol ghost yes
 {% for g in groups %}
-{% if g is mapping %}
+{% if g is mapping and g.zlo is defined %}
+region          {{ g.name }} block INF INF INF INF {{ '%.4f'|format(g.zlo) }} {{ '%.4f'|format(g.zhi) }} units box
+group           il_band region {{ g.name }}
+group           il_types type {{ g.types }}
+group           {{ g.name }} intersect il_band il_types
+group           il_band delete
+group           il_types delete
+set group {{ g.name }} mol {{ loop.index }}
+{% elif g is mapping %}
 group           {{ g.name }} type {{ g.types }}
 set group {{ g.name }} mol {{ loop.index }}
 {% else %}

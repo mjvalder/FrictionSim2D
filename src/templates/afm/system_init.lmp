@@ -200,8 +200,10 @@ variable        hold_tipz delete
 variable        hold_shz delete
 
 {# nofix: no Molecules section, so slide/indent read it back with a plain
-   read_data and set the molecule IDs again after their include. #}
-write_data      {{ output_dir }}/load_$(v_find)N.data{{ ' nofix' if needs_molecule_ids else '' }}
+   read_data and set the molecule IDs again after their include -- except
+   for a hetero stack (molecule_ids_in_data), whose IDs come from build-time
+   z-bands and so travel in the file. #}
+write_data      {{ output_dir }}/load_$(v_find)N.data{{ ' nofix' if needs_molecule_ids and not molecule_ids_in_data else '' }}
 
 {% if forces is iterable and forces is not string %}
 next            find

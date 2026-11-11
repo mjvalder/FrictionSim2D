@@ -1034,3 +1034,117 @@ def test_finite_hetero_with_prefix_keeps_edge_types(tmp_path):
     paths = _pair_coeff_potential_paths(stack.settings_path)
     assert paths
     assert all(p.startswith(prefix + "/") for p in paths), paths
+
+
+# =============================================================================
+# Interlayer styles in heterostructures (spec 2026-11-11, Task 6)
+# =============================================================================
+
+WSE2_CIF = "examples/materials/h-WSe2.cif"
+WSE2_POT = "examples/potentials/sw/sw_lammps/h-WSe2.sw"
+MOSE2_CIF = "examples/materials/h-MoSe2.cif"
+MOSE2_POT = "examples/potentials/sw/MoSe2_sevik.sw"
+HETERO_LJ_SNAPSHOT = Path(__file__).parent / "data" / "hetero_lj_snapshot"
+
+
+def _general(style, **extra):
+    """A ``[general]`` stand-in: only the interlayer fields are read."""
+    from types import SimpleNamespace
+    return SimpleNamespace(interlayer_style=style, interlayer_file=None,
+                           interlayer_comparison=False, **extra)
+
+
+def _mos2_wse2(wse2_g=None):
+    sheets = [_sheet_config("h-MoS2", MOS2_CIF, MOS2_POT),
+              _sheet_config("h-WSe2", WSE2_CIF, WSE2_POT)]
+    if wse2_g is not None:
+        sheets[1] = sheets[1].model_copy(update={"interlayer_g": wse2_g})
+    return sheets
+
+
+def _register(tmp_path, sheets, style, **kwargs):
+    from src.core.config import GlobalSettings
+    return register_hetero_potentials(
+        sheets, GlobalSettings(), workdir=tmp_path,
+        interlayer_general=None if style is None else _general(style), **kwargs)
+
+
+@pytest.mark.parametrize("style", [None, "lj"])
+def test_hetero_lj_byte_identical(tmp_path, style):
+    """lj (or no [general] at all) writes exactly what 8f6e5c5 wrote.
+
+    The snapshot is register_hetero_potentials' settings for MoS2/WSe2 with
+    the virtual drive type, captured from a ``git archive 8f6e5c5`` tree.
+    """
+    hp = _register(tmp_path, _mos2_wse2(), style, reserve_virtual_type=True,
+                   potentials_prefix="run/provenance/potentials")
+    expected = (HETERO_LJ_SNAPSHOT / "system.in.settings").read_text()
+    assert hp.settings_path.read_text() == expected
+
+
+def test_hetero_ilp_mos2_wse2(tmp_path):
+    """ilp: one ilp/tmd pair_coeff spans both materials, cross LJ dropped.
+
+    MoS2_wen.sw labels S once, so sheet_1's S splits into a top and a bottom
+    type (h-WSe2.sw already labels eight Se sub-lattices, left alone).
+    """
+    hp = _register(tmp_path, _mos2_wse2(), "ilp")
+    text = hp.settings_path.read_text()
+    assert hp.pm.components["sheet_1"]["split_chalcogens"] == {"S"}
+    assert hp.pm.components["sheet_2"]["split_chalcogens"] == set()
+    assert len(hp.type_ids[0]) == 3                    # Mo, S top, S bottom
+    assert "pair_style hybrid/overlay sw sw" in text
+    ilp = [ln for ln in text.splitlines()
+           if ln.startswith("pair_coeff") and " ilp/tmd " in ln]
+    assert len(ilp) == 1
+    assert ilp[0].startswith("pair_coeff * * ilp/tmd ")
+    assert "TMD.ILP Mo S S W W W W Se Se Se Se Se Se Se Se # sheet_1 sheet_2" in ilp[0]
+    assert not re.search(r"^pair_coeff \d", text, re.M)   # no Mo-W/S-Se lj/cut
+    assert hp.pm.needs_molecule_ids
+    assert hp.pm.interlayer_substyle == "ilp/tmd"
+
+
+def test_hetero_ilp_assembly_spine_keeps_lj(tmp_path):
+    """interlayer_terms=False: the ilp type layout, today's lj interactions.
+
+    That is the spine the assembly runs use (lmp_serial, no molecule IDs).
+    """
+    hp = _register(tmp_path, _mos2_wse2(), "ilp", interlayer_terms=False)
+    text = hp.settings_path.read_text()
+    assert len(hp.type_ids[0]) == 3
+    assert "ilp/tmd" not in text and "overlay" not in text
+    assert "pair_coeff 1 4*7 lj/cut" in text          # Mo(sheet_1)-W(sheet_2)
+
+
+def test_hetero_ljg_shared_element_rejected(tmp_path):
+    """MoS2 (g 175.68) on MoSe2 (g 150): Mo would need two Gaussian strengths."""
+    sheets = [_sheet_config("h-MoS2", MOS2_CIF, MOS2_POT),
+              _sheet_config("h-MoSe2", MOSE2_CIF, MOSE2_POT).model_copy(
+                  update={"interlayer_g": 150.0})]
+    with pytest.raises(ValueError, match=r"element 'Mo'.*h-MoS2.*h-MoSe2"):
+        _register(tmp_path, sheets, "lj_g")
+
+
+def test_hetero_ljg_disjoint(tmp_path):
+    """MoS2/WSe2 with g_WSe2 = 120 meV: cross pairs carry sqrt(g1 g2)."""
+    hp = _register(tmp_path, _mos2_wse2(wse2_g=120.0), "lj_g")
+    text = hp.settings_path.read_text()
+    assert "pair_coeff 1 3*6 lj/cut" in text           # the LJ part stays (Mo-W)
+    kcz = [ln for ln in text.splitlines()
+           if ln.startswith("pair_coeff") and " kolmogorov/crespi/z " in ln]
+    assert len(kcz) == 3            # +g/2 over both, -g/2 within each material
+    assert "# sheet_1 sheet_2: all layers +g/2" in kcz[0]
+    plus = (tmp_path / "provenance" / "potentials" / "gaussian_plus.KC").read_text()
+
+    def c0(el1, el2):
+        for line in plus.splitlines():
+            parts = line.split()
+            if parts[:2] == [el1, el2]:
+                return float(parts[3])
+        raise AssertionError(f"no {el1} {el2} line")
+
+    mixed = (175.68 * 120.0) ** 0.5 / 2
+    assert c0("Mo", "W") == pytest.approx(mixed)
+    assert c0("S", "Se") == pytest.approx(mixed)
+    assert c0("Mo", "S") == pytest.approx(175.68 / 2)
+    assert c0("W", "Se") == pytest.approx(60.0)

@@ -905,6 +905,9 @@ class AFMSimulation(SimulationBase):
             'needs_molecule_ids': needs,
             'molecule_groups': ([f'layer_{i}' for i in range(1, n_layers + 1)]
                                 if needs else []),
+            # The layer_N type groups exist in every script, so each one sets
+            # the IDs itself (hetero stacks carry them in load_*.data instead).
+            'molecule_ids_in_data': False,
         }
 
     def _layer_groups_available(self, n_layers: int) -> bool:

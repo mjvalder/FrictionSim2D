@@ -168,3 +168,32 @@ def test_write_gaussian_kc_file(tmp_path):
     assert ['S', 'Mo', '3.0', '-87.84', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '1.0'] in rows
     with pytest.raises(ValueError):
         write_gaussian_kc_file(tmp_path / 'h.KC', {('Mo', 'S'): 1.0}, 2)
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("sheet", True), ("flake", True),
+    ("sheet_1", True), ("sheet_2", True), ("flake_1", True), ("flake_12", True),
+    ("tip", False), ("sub", False), ("virtual", False),
+    ("sheet_", False), ("sheet_x", False), ("my_sheet_1", False),
+])
+def test_splits_chalcogens_covers_hetero_components(name, expected):
+    """The hetero components (register_sheet_block's sheet_N, a hetero
+    flake's flake_N) are build_monolayer data too, so they split as well."""
+    from src.potentials.interlayer import splits_chalcogens
+    assert splits_chalcogens(name) is expected
+
+
+def test_hetero_component_splits_under_ilp(tmp_path):
+    """A registered ``sheet_1`` gets the ilp/tmd S top/bottom types."""
+    from src.core.config import GlobalSettings, SheetConfig
+    from src.potentials.manager import PotentialManager
+    pm = PotentialManager(GlobalSettings())
+    pm.set_interlayer('ilp')
+    sheet = SheetConfig(mat="h-MoS2", pot_type="sw", x=4.0, y=4.0, layers=[1],
+                        cif_path="examples/materials/h-MoS2.cif",
+                        pot_path="examples/potentials/sw/MoS2_wen.sw")
+    pm.register_component("sheet_1", sheet)
+    pm.register_component("tip_1", sheet)
+    assert pm.components["sheet_1"]["split_chalcogens"] == {"S"}
+    assert pm.components["tip_1"]["split_chalcogens"] == set()
+    assert len(pm.types.ids_by_component("sheet_1")) == 3

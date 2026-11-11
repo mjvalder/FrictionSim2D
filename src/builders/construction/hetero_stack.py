@@ -64,7 +64,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from jinja2 import Environment
@@ -82,6 +82,7 @@ from ...lattice.matching import (
 from ...potentials.manager import PotentialManager
 from ...interfaces.jinja import PackageLoader
 from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
+from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 from ...interfaces.ase import element_mass, read_lammps_data
 
 if TYPE_CHECKING:                      # ase.io costs ~270 ms; annotations only
@@ -234,6 +235,8 @@ def register_hetero_potentials(
     reserve_virtual_type: bool = False,
     regions: Optional[List[Optional[str]]] = None,
     potentials_prefix: Optional[str] = None,
+    interlayer_general: Any = None,
+    interlayer_terms: bool = True,
 ) -> HeteroPotentials:
     """Register the stacked materials as PotentialManager components.
 
@@ -292,6 +295,19 @@ def register_hetero_potentials(
             ``provenance/potentials`` -- correct when ``workdir`` IS that
             directory. A builder whose scripts run from a shared simulation
             root passes its own sim-root-relative prefix.
+        interlayer_general: The run's ``[general]`` config, whose
+            ``interlayer_style`` acts between every 2D layer of the stack
+            (spec 2026-11-11 §3). ``None`` or ``lj`` is today's spine,
+            unchanged. Any other style is set before registration, so under
+            ilp/tmd each material's chalcogen sub-layers get their own types
+            -- the split :func:`build_monolayer` applies to its data file.
+        interlayer_terms: Emit the style's interlayer term. ``False`` keeps
+            the non-``lj`` type layout but the ``lj`` interactions: the
+            assembly runs (gap minimization, ``run 0``) use that, because
+            they run the ``lmp_serial`` binary, which need not carry the
+            INTERLAYER package, and they set no molecule IDs. Under ``ilp``
+            / ``kc`` with terms, the cross-material ``lj/cut`` is dropped:
+            one ILP/KC ``pair_coeff`` spans every material.
 
     Note:
         A builder with its own sim-root-relative prefix is
@@ -336,6 +352,12 @@ def register_hetero_potentials(
     #    numbers sheet_1/sheet_2 identically to this data-file spine. When
     #    ``regions`` is given (finite/edge path, [None, 'edge']), every material's
     #    types double into an interleaved core/edge pair through that one call.
+    style = interlayer_style(interlayer_general)
+    if style != 'lj':
+        # Before registration: ilp/tmd's chalcogen split is decided there.
+        set_interlayer_from_config(
+            pm, interlayer_general,
+            {f"sheet_{i + 1}": sheet for i, sheet in enumerate(sheets)})
     component_names = register_sheet_block(pm, sheets, regions=regions)
 
     # 1b. Optionally reserve the dedicated non-interacting virtual type for the
@@ -352,10 +374,15 @@ def register_hetero_potentials(
     for name in component_names:
         pm.add_self_interaction(name)
 
-    # 3. UFF-mixed lj/cut cross-terms for every material pair at the interface.
-    for i, name_i in enumerate(component_names):
-        for j in range(i + 1, len(component_names)):
-            pm.add_cross_interaction(name_i, component_names[j])
+    # 3. UFF-mixed lj/cut cross-terms for every material pair at the interface
+    #    -- replaced by the many-body term under ilp/kc.
+    emit_interlayer = style != 'lj' and interlayer_terms
+    if not (emit_interlayer and style in ('ilp', 'kc')):
+        for i, name_i in enumerate(component_names):
+            for j in range(i + 1, len(component_names)):
+                pm.add_cross_interaction(name_i, component_names[j])
+    if emit_interlayer:
+        pm.add_interlayer(component_names)
 
     settings_path = workdir / "lammps" / "system.in.settings"
     pm.write_file(settings_path)
@@ -1202,6 +1229,10 @@ class HeteroStack:
     # periodicity (Å), logged into the run manifest by the slide builder.
     twist_angle_achieved: Optional[float] = None
     moire_period: Optional[float] = None
+    #: The manager behind the last ``settings_path`` write (set by
+    #: :func:`build_hetero_structure`): its ``needs_molecule_ids`` and
+    #: ``interlayer_substyle`` drive the run script's interlayer keys.
+    pm: Optional[PotentialManager] = None
 
 
 def _run_lammps(workdir: Path, script_path: Path) -> str:
@@ -1691,13 +1722,16 @@ def build_hetero_structure(
         )
 
     # 1. Monolayer per material (build_monolayer returns the path as element 0).
-    mono_paths = [Path(build_monolayer(sheet)[0]) for sheet in sheets]
+    #    Under ilp/tmd each one carries split chalcogen sub-layer types, which
+    #    matching, tiling and assembly all keep.
+    general = config.general
+    style = interlayer_style(general)
+    mono_paths = [Path(build_monolayer(sheet, interlayer=style)[0]) for sheet in sheets]
 
     # 2. Match -> two supercells sharing one shared box.
     if twist_angle is not None:
         # D3 twist path: the nearest commensurate moiré approximant to the
         # user-selected angle, emitted on an orthorhombic box.
-        general = config.general
         matched = build_twisted_supercells(
             mono_paths[0], mono_paths[1], workdir,
             twist_angle=twist_angle,
@@ -1730,7 +1764,14 @@ def build_hetero_structure(
     #    only prefix its own minimization runs can open. A caller-supplied
     #    prefix is for the RUN scripts, which may start elsewhere, and is
     #    applied by re-registering once the assembly is done (step 6).
-    hetero_potentials = register_hetero_potentials(sheets, settings, workdir)
+    #
+    #    A non-lj interlayer style gets its type layout here (the ilp/tmd
+    #    chalcogen split, matching the monolayers) but not its interlayer term:
+    #    the assembly runs need neither molecule IDs nor the INTERLAYER
+    #    package, and the slide relaxes the stack under the real style before
+    #    it drives anything. Step 6 writes the term.
+    hetero_potentials = register_hetero_potentials(
+        sheets, settings, workdir, interlayer_general=general, interlayer_terms=False)
 
     # 4. Assemble into one periodic hetero.data aligned to that spine.
     stack = assemble_hetero_stack(
@@ -1744,6 +1785,7 @@ def build_hetero_structure(
     # Carry the achieved twist + moiré period onto the stack (None for non-twist).
     stack.twist_angle_achieved = matched.twist_angle_achieved
     stack.moire_period = matched.moire_period
+    stack.pm = hetero_potentials.pm
 
     # 5. Finite/edge path (opt-in). Edge typing runs AFTER matching + stacking,
     #    on the ASSEMBLED patch, so the edge band is the patch's TRUE perimeter
@@ -1755,6 +1797,7 @@ def build_hetero_structure(
         edged = _apply_finite_hetero_edges(
             stack, sheets, settings, workdir,
             potentials_prefix=potentials_prefix,
+            interlayer_general=general,
         )
 
     # 6. Re-write the settings so the ``pair_coeff`` lines name the staged
@@ -1768,11 +1811,16 @@ def build_hetero_structure(
     #    write carries the doubled core/edge types and the appended edge groups,
     #    which a plain re-registration here would silently drop. It returns False
     #    when it no-ops (edge_width <= 0), and then this must still run.
-    if potentials_prefix is not None and not edged:
+    #
+    #    A non-lj style always re-registers, prefix or not: the assembly spine
+    #    above left its interlayer term out.
+    if (potentials_prefix is not None or style != 'lj') and not edged:
         retargeted = register_hetero_potentials(
-            sheets, settings, workdir, potentials_prefix=potentials_prefix
+            sheets, settings, workdir, potentials_prefix=potentials_prefix,
+            interlayer_general=general,
         )
         stack.settings_path = Path(retargeted.settings_path)
+        stack.pm = retargeted.pm
 
     return stack
 
@@ -1783,6 +1831,7 @@ def _apply_finite_hetero_edges(
     settings: GlobalSettings,
     workdir: Path,
     potentials_prefix: Optional[str] = None,
+    interlayer_general: Any = None,
 ) -> bool:
     """Edge-type an assembled hetero patch in place and re-register its spine.
 
@@ -1799,7 +1848,8 @@ def _apply_finite_hetero_edges(
     This re-registration is also where a caller-supplied ``potentials_prefix``
     lands on the finite path: it is the last write of the settings file, so it
     is the one the run scripts read. See
-    :func:`register_hetero_potentials` for what the prefix means.
+    :func:`register_hetero_potentials` for what the prefix means, and for
+    ``interlayer_general``, which this write carries for the same reason.
 
     Returns:
         Whether the spine was re-registered. False means this was a no-op
@@ -1841,9 +1891,11 @@ def _apply_finite_hetero_edges(
     hp_edge = register_hetero_potentials(
         sheets, settings, workdir, regions=[None, "edge"],
         potentials_prefix=potentials_prefix,
+        interlayer_general=interlayer_general,
     )
     stack.settings_path = Path(hp_edge.settings_path)
     stack.total_types = len(hp_edge.pm.types)
+    stack.pm = hp_edge.pm
 
     # Emit the edge groups explicitly. get_component_groups_string special-cases
     # only the literal name 'sheet', so sheet_1/sheet_2 fall to the generic

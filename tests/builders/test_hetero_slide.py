@@ -267,9 +267,10 @@ def test_hetero_build_obs_ctx_filters_the_interlayer_channels_unconditionally():
     rather than through the module-level `render_hetero_slide` helper this test
     used to go through (removed as unused -- decision row B4-1). That is the
     stronger form: the builder method is the only obs_ctx production ever
-    builds, and `has_internal_lj` is hardcoded True in `write_run_scripts`, so
-    the filter's unconditionality cannot be observed by varying an argument --
-    only by reading what the method returns.
+    builds. By default (every lj run) the filter drops both channels; only
+    an ILP/KC run, whose script computes `v_e_int_il` from the interlayer
+    sub-style, passes `interlayer_energy=True` -- see
+    `test_hetero_interlayer_context_ilp`.
     """
     cfg = _hetero_2p2_config()
     sim = HeteroSheetOnSheetSimulation(cfg, "unused")
@@ -810,3 +811,125 @@ def test_hetero_n_layers_raises_for_multiple_layer_values():
 
     with pytest.raises(ValueError, match="exactly one value in each material"):
         _ = sim.n_layers
+
+
+# --------------------------------------------------------------------------- #
+# Interlayer styles (spec 2026-11-11, Task 6)
+# --------------------------------------------------------------------------- #
+
+HETERO_LJ_SNAPSHOT = Path(__file__).parent / "data" / "hetero_lj_snapshot"
+_BANDS = [{"idx": i, "zlo": 5.0 * i, "zhi": 5.0 * i + 3.0} for i in range(1, 5)]
+
+
+def _hetero_mos2_wse2_config(style="lj", wse2_g=None, **general):
+    """MoS2/WSe2 2+2; WSe2's lattice is ~3.8% off MoS2's, hence strain_tol."""
+    from src.core.config import GlobalSettings
+    settings = GlobalSettings()
+    settings.hpc.modules = ["lammps"]
+    raw = {
+        "general": {"temp": 300, "scan_speed": 1, "hetero_stacking": "grouped",
+                    "pressure": 0.1, "interlayer_style": style, **general},
+        "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
+                 "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
+                 "x": 12.0, "y": 12.0, "layers": [2]},
+        "2D-2": {"mat": "h-WSe2", "cif_path": f"{MAT}/h-WSe2.cif",
+                 "pot_path": f"{POT}/sw_lammps/h-WSe2.sw", "pot_type": "sw",
+                 "x": 12.0, "y": 12.0, "layers": [2]},
+        "lattice_match": {"strain_tol": 0.04},
+    }
+    if wse2_g is not None:
+        raw["2D-2"]["interlayer_g"] = wse2_g
+    return SheetOnSheetSimulationConfig(**raw, settings=settings)
+
+
+def _hetero_pm(tmp_path, style):
+    from src.builders.construction.hetero_stack import register_hetero_potentials
+    cfg = _hetero_mos2_wse2_config(style)
+    return register_hetero_potentials(cfg.sheets, cfg.settings, tmp_path,
+                                      interlayer_general=cfg.general).pm
+
+
+def test_hetero_interlayer_context_lj_is_todays_branch(tmp_path):
+    """lj: the many-body branch exactly as the hardcoded True rendered it."""
+    sim = HeteroSheetOnSheetSimulation(_hetero_mos2_wse2_config("lj"), "unused")
+    ctx = sim._interlayer_context(_hetero_pm(tmp_path, "lj"), _BANDS)
+    assert ctx["has_internal_lj"] is True
+    assert ctx["use_group_group"] is False
+    assert ctx["needs_molecule_ids"] is False
+    assert ctx["interlayer_energy_substyle"] is None
+    before = _render_hetero_slide_for_test(_minimal_slide_context(_BANDS))
+    after = _render_hetero_slide_for_test({**_minimal_slide_context(_BANDS), **ctx})
+    assert after == before
+
+
+@pytest.mark.parametrize("comparison", [False, True])
+def test_hetero_interlayer_context_ilp(tmp_path, comparison):
+    """ilp: molecule IDs per z-band layer, reaction force, ILP energy."""
+    cfg = _hetero_mos2_wse2_config("ilp", interlayer_comparison=comparison)
+    sim = HeteroSheetOnSheetSimulation(cfg, "unused")
+    ctx = sim._interlayer_context(_hetero_pm(tmp_path, "ilp"), _BANDS)
+    assert ctx["has_internal_lj"] is False
+    assert ctx["use_group_group"] is False
+    assert ctx["molecule_groups"] == ["layer_1", "layer_2", "layer_3", "layer_4"]
+    assert ctx["interlayer_energy_substyle"] == "ilp/tmd"
+
+    obs_ctx = sim._build_obs_ctx(4, "results/friction.txt", interlayer_energy=True)
+    script = _render_hetero_slide_for_test(
+        {**_minimal_slide_context(_BANDS), **ctx, "obs_ctx": obs_ctx})
+    lines = script.splitlines()
+    for i in range(1, 5):
+        assert f"set group layer_{i} mol {i}" in lines
+    # IDs after the layer groups exist, before the first minimize
+    assert script.index("set group layer_4 mol 4") < script.index("minimize")
+    assert script.index("group           layer_4 region") < script.index("fix             mol_ids")
+    assert "variable        xfrict equal v_sx" in lines
+    assert "compute         e_il all pair ilp/tmd" in lines
+    assert "compute         frict" not in script
+    assert "Many-body potential" not in script
+    assert "v_e_int_il" in obs_ctx["peratom_varlist"]
+
+
+def test_hetero_interlayer_context_ljg_reaction_force(tmp_path):
+    """lj_g: no molecule IDs, reaction force like lj, no energy compute."""
+    cfg = _hetero_mos2_wse2_config("lj_g", wse2_g=120.0)
+    sim = HeteroSheetOnSheetSimulation(cfg, "unused")
+    from src.builders.construction.hetero_stack import register_hetero_potentials
+    pm = register_hetero_potentials(cfg.sheets, cfg.settings, tmp_path,
+                                    interlayer_general=cfg.general).pm
+    ctx = sim._interlayer_context(pm, _BANDS)
+    assert (ctx["has_internal_lj"], ctx["use_group_group"],
+            ctx["needs_molecule_ids"], ctx["interlayer_energy_substyle"]) == (
+                False, False, False, None)
+    script = _render_hetero_slide_for_test({**_minimal_slide_context(_BANDS), **ctx})
+    assert "variable        xfrict equal v_sx" in script.splitlines()
+    assert "mol_ids" not in script
+
+
+def _normalised(text, root):
+    text = text.replace(str(root), "ROOT")
+    text = re.sub(r"(velocity        center create \S+ )\d+", r"\1SEED", text)
+    return re.sub(r"(langevin \S+ \S+ \S+ )\d+", r"\1SEED", text)
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
+def test_hetero_lj_full_build_byte_identical(tmp_path):
+    """The whole lj slide.in is 8f6e5c5's, seeds and run dir aside."""
+    out = tmp_path / "run"
+    HeteroSheetOnSheetSimulation(_hetero_mos2_wse2_config("lj"), str(out)).build()
+    got = _normalised((out / "lammps" / "slide.in").read_text(), out)
+    assert got == (HETERO_LJ_SNAPSHOT / "slide.in").read_text()
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
+def test_hetero_ilp_full_build_mos2_wse2(tmp_path):
+    """ilp end to end: split data types, one ILP map, IDs on every layer."""
+    out = tmp_path / "run"
+    HeteroSheetOnSheetSimulation(_hetero_mos2_wse2_config("ilp"), str(out)).build()
+    settings = (out / "lammps" / "system.in.settings").read_text()
+    slide = (out / "lammps" / "slide.in").read_text()
+    assert "15 atom types" in (out / "hetero.data").read_text()   # Mo S S + 12 W/Se
+    assert "pair_coeff * * ilp/tmd" in settings and "TMD.ILP" in settings
+    assert not re.search(r"^pair_coeff \d+\S* \d+\S* lj/cut 0\.0", settings, re.M)
+    for i in range(1, 5):
+        assert f"set group layer_{i} mol {i}" in slide
+    assert "compute         e_il all pair ilp/tmd" in slide

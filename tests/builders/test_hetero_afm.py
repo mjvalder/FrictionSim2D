@@ -1149,3 +1149,117 @@ def test_sheetonsheet_flake_omit_mat_directory_still_byte_identical():
     reused_flake = {**no_flake, "Flake": {"shape": "hexagon", "edge_length": 5.0}}
 
     assert output_dir_for(no_flake, "sheetonsheet") == output_dir_for(reused_flake, "sheetonsheet")
+
+
+# --- Interlayer styles between the hetero stack's layers (spec 2026-11-11) ---
+
+def _hetero_afm_sim(tmp_path, monkeypatch, style, flake=False):
+    """A HeteroAFMSimulation ready for _generate_potentials, without LAMMPS.
+
+    The sheet-block guard reads hetero_rep.data, which only a real stack
+    build writes; it is stubbed (the ilp full build below exercises it).
+    """
+    import src.builders.afm.hetero as ha
+    from src.core.config import GlobalSettings
+    monkeypatch.setattr(ha, "_assert_sheet_block_matches_data", lambda *a, **k: None)
+    raw = _afm_hetero_raw()
+    raw["general"]["interlayer_style"] = style
+    if flake:
+        raw["flake"] = _afm_flake_raw()["flake"]
+    cfg = AFMSimulationConfig(**raw, settings=GlobalSettings())
+    sim = ha.HeteroAFMSimulation(cfg, str(tmp_path))
+    _prep_layer_dirs(sim, 1)
+    return sim
+
+
+def test_hetero_afm_ilp_acts_between_the_stack_layers_only(tmp_path, monkeypatch):
+    sim = _hetero_afm_sim(tmp_path, monkeypatch, "ilp")
+    pm = sim._generate_potentials(1)
+    text = (sim.output_dir_layer[1] / "lammps" / "system.in.settings").read_text()
+    ilp = [ln for ln in text.splitlines() if ln.startswith("pair_coeff * * ilp/tmd")]
+    assert len(ilp) == 1
+    # sub (3) + tip (3) NULL; sheet_1 Mo S S (wen's S split); sheet_2 W S (t-WS2
+    # labels S once too, so it splits as well); virtual NULL
+    assert ilp[0].split("TMD.ILP ")[1].split(" #")[0].split() == (
+        ["NULL"] * 6 + ["Mo", "S", "S", "W", "S", "S", "NULL"])
+    s1 = pm.types.ids_by_component("sheet_1")
+    s2 = pm.types.ids_by_component("sheet_2")
+    lj = [ln.split("# ")[1] for ln in text.splitlines()
+          if ln.startswith("pair_coeff") and " lj/cut " in ln and "# " in ln]
+    # tip/substrate-sheet LJ stays; the sheet_1-sheet_2 LJ is gone
+    for tag in ("Si(tip)-Mo(sheet_1)", "Si(sub)-W(sheet_2)", "Si(tip)-S(sheet_2)"):
+        assert tag in lj
+    assert not [t for t in lj if "(sheet_1)-" in t and t.endswith("(sheet_2)")]
+    assert pm.needs_molecule_ids
+    assert len(s1) == 3 and len(s2) == 3
+
+
+def test_hetero_afm_molecule_ids_by_z_band(tmp_path, monkeypatch):
+    sim = _hetero_afm_sim(tmp_path, monkeypatch, "ilp")
+    sim.pm[1] = sim._generate_potentials(1)
+    sim.z_positions[1] = {"sheet": 2.5}
+    sim._hetero_layer_bands = [{"idx": 1, "zlo": 6.0, "zhi": 11.0},
+                               {"idx": 2, "zlo": 13.0, "zhi": 18.0}]
+    ctx = sim._molecule_id_context(1)
+    types = sim.groups[1]["sheet_types"]
+    assert ctx["needs_molecule_ids"] and ctx["molecule_ids_in_data"]
+    assert ctx["molecule_groups"] == [
+        {"name": "mol_layer_1", "types": types, "zlo": 8.5, "zhi": 13.5},
+        {"name": "mol_layer_2", "types": types, "zlo": 15.5, "zhi": 20.5}]
+
+
+def test_hetero_afm_lj_sets_no_molecule_ids(tmp_path, monkeypatch):
+    sim = _hetero_afm_sim(tmp_path, monkeypatch, "lj")
+    sim.pm[1] = sim._generate_potentials(1)
+    assert sim._molecule_id_context(1) == {
+        "needs_molecule_ids": False, "molecule_groups": [],
+        "molecule_ids_in_data": False}
+
+
+def test_hetero_afm_flake_with_ilp_is_refused(tmp_path, monkeypatch):
+    sim = _hetero_afm_sim(tmp_path, monkeypatch, "ilp", flake=True)
+    with pytest.raises(ValueError, match="flake"):
+        sim._generate_potentials(1)
+
+
+def test_molecule_id_band_entries_render():
+    """common/molecule_ids.lmp's z-band form: types inside the band only."""
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader("src.templates"),
+                      trim_blocks=True, lstrip_blocks=True)
+    out = env.from_string(
+        "{% import 'common/molecule_ids.lmp' as m %}{{ m.emit_molecule_ids(g) }}"
+    ).render(g=[{"name": "mol_layer_1", "types": "7 8 9", "zlo": 1.0, "zhi": 2.5}])
+    assert out.splitlines()[1:] == [
+        "fix             mol_ids all property/atom mol ghost yes",
+        "region          mol_layer_1 block INF INF INF INF 1.0000 2.5000 units box",
+        "group           il_band region mol_layer_1",
+        "group           il_types type 7 8 9",
+        "group           mol_layer_1 intersect il_band il_types",
+        "group           il_band delete",
+        "group           il_types delete",
+        "set group mol_layer_1 mol 1",
+    ]
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
+def test_hetero_afm_ilp_build_carries_molecule_ids_in_the_load_file(tmp_path):
+    """system.in sets the IDs by z-band and keeps them in load_*.data;
+    slide.in reads them back rather than re-banding relaxed positions."""
+    from src.builders.afm.hetero import HeteroAFMSimulation
+    raw = _afm_hetero_raw()
+    raw["general"]["interlayer_style"] = "ilp"
+    cfg = AFMSimulationConfig(**raw, settings=load_settings())
+    cfg.settings.hpc.modules = ["lammps"]
+    sim = HeteroAFMSimulation(cfg, str(tmp_path))
+    sim.build()
+    lmp_dir = sim.output_dir_layer[1] / "lammps"
+    system = (lmp_dir / "system.in").read_text()
+    slide = (lmp_dir / "slide.in").read_text()
+    assert "set group mol_layer_1 mol 1" in system
+    assert "set group mol_layer_2 mol 2" in system
+    assert " nofix" not in system
+    assert "read_data       ${load_file} fix mol_ids NULL Molecules" in slide
+    assert slide.index("fix             mol_ids") < slide.index("read_data       ${load_file}")
+    assert "set group" not in slide

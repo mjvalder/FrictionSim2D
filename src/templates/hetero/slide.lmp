@@ -147,8 +147,8 @@ variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 # If friction values look wrong, verify pot_type classification in
 # PotentialManager.is_sheet_lj() (src/core/potential_manager.py).
 {% else %}
-# Interlayer style without compute group/group (ILP/KC, or comparison mode):
-# bottom-layer reaction forces as the lateral friction proxy, in nN.
+# Hetero stack with interlayer style {{ interlayer_style }}: no compute group/group
+# under any style -- bottom-layer reaction forces as the lateral friction proxy, in nN.
 {% endif %}
 variable        xfrict equal v_sx
 variable        yfrict equal v_sy

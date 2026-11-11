@@ -298,6 +298,7 @@ class FlakeSlideSimulation(SimulationBase):
             flake_path, _flake_dims = components.build_hetero_flake_component(
                 self.config.flake_sheets, settings, self.config.flake, build_dir,
                 hetero_stacking=getattr(self.config.general, "hetero_stacking", "grouped"),
+                interlayer_general=self.config.general,
             )
             flake_names = ["flake_1", "flake_2"]
             flake_components = list(self.config.flake_sheets)

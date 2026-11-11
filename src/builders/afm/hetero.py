@@ -20,6 +20,8 @@ from src.builders.construction.hetero_stack import (
     build_hetero_structure, register_sheet_block, _run_lammps,
 )
 from src.builders.afm.indent import IndentSimulation
+from src.builders.sheetonsheet.hetero import compute_layer_zbands
+from src.builders.utils.interlayer import interlayer_style, set_interlayer_from_config
 from src.potentials.manager import PotentialManager
 from src.builders.utils.lammps_data import get_model_dimensions
 from src.interfaces.ase import element_mass, read_lammps_data
@@ -263,6 +265,9 @@ class HeteroAFMSimulation(AFMSimulation):
         self._hetero_replication = None
         self._hetero_stack_atom_top = None
         self._hetero_stack_atom_bottom = None
+        #: Per-layer z-bands of hetero_rep.data (its own frame), for ILP/KC
+        #: molecule IDs only -- see :meth:`_molecule_id_context`.
+        self._hetero_layer_bands = []
 
     def _material_id(self) -> str:
         """Pair token (``h-MoS2+h-WS2``): every ``self.config.sheets`` entry,
@@ -342,6 +347,10 @@ class HeteroAFMSimulation(AFMSimulation):
         self._hetero_rep_path = rep
         self._hetero_rep_box = (lx, ly, z_extent)
         self._hetero_replication = (nx, ny)
+        if interlayer_style(self.config.general) in ('ilp', 'kc'):
+            # Replication keeps every z, so the stack's layer bands hold for
+            # the replicated file too (compute_layer_zbands checks every atom).
+            self._hetero_layer_bands = compute_layer_zbands(rep, stack.layers)
         # The BOX is not the stack: assemble_hetero_stack pads hetero_rep.data
         # generously in z (measured ~7.5 A below the lowest atom and ~12.5 A
         # above the highest). `read_data ... shift` translates the file's atoms
@@ -368,6 +377,28 @@ class HeteroAFMSimulation(AFMSimulation):
             "%dx%d -> %.2f x %.2f A footprint.", lx_cell, ly_cell, nx, ny, lx, ly,
         )
         return rep
+
+    def _molecule_id_context(self, n_layers):
+        """ILP/KC molecule IDs: one per layer of the hetero stack.
+
+        A material's layers share its types, so each layer is the sheet types
+        inside its z-band (the stack's bands, shifted by the sheet's
+        ``read_data`` z-shift). The bands hold for the build-time placement
+        only, so ``system.in`` sets the IDs and writes them into each
+        ``load_*.data`` (``molecule_ids_in_data``); ``slide.in``/``indent.in``
+        read them back instead of re-deriving bands from relaxed positions.
+        """
+        needs = bool(getattr(self.pm.get(n_layers), 'needs_molecule_ids', False))
+        if not needs:
+            return {'needs_molecule_ids': False, 'molecule_groups': [],
+                    'molecule_ids_in_data': False}
+        dz = float(self.z_positions[n_layers]['sheet'])
+        types = self.groups[n_layers]['sheet_types']
+        groups = [{'name': f"mol_layer_{band['idx']}", 'types': types,
+                   'zlo': band['zlo'] + dz, 'zhi': band['zhi'] + dz}
+                  for band in self._hetero_layer_bands]
+        return {'needs_molecule_ids': True, 'molecule_groups': groups,
+                'molecule_ids_in_data': True}
 
     def _flake_periodic_cell(self) -> tuple[float, float]:
         """The REPLICATED coincidence cell, which is the box the flake sees.
@@ -588,6 +619,14 @@ class HeteroAFMSimulation(AFMSimulation):
             potentials_prefix=str(self.relative_run_dir / "provenance" / "potentials"),
         )
         pm.set_lj_overrides(self.config.lj_override)
+        style = interlayer_style(self.config.general)
+        if style != 'lj':
+            # Between the stack's layers only; tip/sub/flake keep lj/cut (spec
+            # §3). Before registration, where ilp/tmd's chalcogen split is
+            # decided -- the one build_hetero_structure gave hetero_rep.data.
+            set_interlayer_from_config(
+                pm, self.config.general,
+                {f"sheet_{i + 1}": sheet for i, sheet in enumerate(self.config.sheets)})
 
         # sub/tip exactly as the homogeneous path (no regions -> PM langevin split).
         if self.config.sub is not None:
@@ -608,6 +647,13 @@ class HeteroAFMSimulation(AFMSimulation):
         flake_cfg = self.config.flake
         if flake_cfg is not None:
             pm.register_component('flake', flake_cfg, regions=[None, 'corner'])
+            if pm.components['flake'].get('split_chalcogens'):
+                raise ValueError(
+                    f"interlayer_style '{style}' with an AFM [flake] on a hetero "
+                    "stack is not supported: ilp/tmd would give the flake's "
+                    "chalcogen sub-layers their own atom types, which the flake "
+                    "data file does not have. Use interlayer_style = lj, lj_g or "
+                    "kc, or drop the [flake].")
 
         if self.config.settings.simulation.drive_method == 'virtual_atom':
             pm.register_virtual_atom()
@@ -624,10 +670,12 @@ class HeteroAFMSimulation(AFMSimulation):
             if self.config.sub is not None:
                 pm.add_cross_interaction('sub', name)
             pm.add_cross_interaction('tip', name)
-        # every distinct material pair at the interface
-        for i, name_i in enumerate(sheet_names):
-            for name_j in sheet_names[i + 1:]:
-                pm.add_cross_interaction(name_i, name_j)
+        # every distinct material pair at the interface -- the many-body
+        # interlayer term replaces that LJ under ilp/kc
+        if style not in ('ilp', 'kc'):
+            for i, name_i in enumerate(sheet_names):
+                for name_j in sheet_names[i + 1:]:
+                    pm.add_cross_interaction(name_i, name_j)
 
         if flake_cfg is not None:
             pm.add_self_interaction('flake')
@@ -636,6 +684,9 @@ class HeteroAFMSimulation(AFMSimulation):
             pm.add_cross_interaction('tip', 'flake')
             for name in sheet_names:
                 pm.add_cross_interaction(name, 'flake')
+
+        if style != 'lj':
+            pm.add_interlayer(sheet_names)
 
         settings_path = self.output_dir_layer[n_sheet_layers] / "lammps" / "system.in.settings"
         pm.write_file(settings_path)
