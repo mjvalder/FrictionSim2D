@@ -264,7 +264,7 @@ def _accept_custom_type(normalised: str, raw: str, source: str) -> None:
         raise PotentialTypeError(
             f"{source} '{raw}' is not a known LAMMPS pair style "
             f"(known: {sorted(KNOWN_TYPES)}) nor one of the installed "
-            f"LAMMPS. It would be written straight into pair_style and the run "
+            f"LAMMPS pair styles. It would be written straight into pair_style and the run "
             f"would fail at LAMMPS start-up."
         )
     logger.warning(
@@ -292,7 +292,10 @@ def validate_pot_type(value: str, *, source: str) -> str:
         The normalised (stripped, lowercased) type.
 
     Raises:
-        PotentialTypeError: If it is not in :data:`KNOWN_TYPES`.
+        PotentialTypeError: If it is not in :data:`KNOWN_TYPES` and is not
+            listed by the installed LAMMPS either. A type outside
+            :data:`KNOWN_TYPES` is accepted when the installed ``lmp`` lists
+            it, or with a warning when no LAMMPS binary is found.
     """
     normalised = value.strip().lower()
     if normalised not in KNOWN_TYPES:

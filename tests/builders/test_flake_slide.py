@@ -1182,13 +1182,10 @@ def test_molecule_groups_for_assembly_and_hetero_flake_carry_types(tmp_path, mon
     assert groups[2]["types"] == " ".join(map(str, pm.types.ids_by_component("flake")))
 
 
-# Not `lmp_serial` in the reason on purpose: these builds run only the short
-# assembly LAMMPS calls (seconds), so they stay in the fast tier rather than
-# picking up conftest's `lammps` marker; they skip only without the binary.
 _NO_LAMMPS_BINARY = shutil.which("lmp_serial") is None
 
 
-@pytest.mark.skipif(_NO_LAMMPS_BINARY, reason="no LAMMPS binary for the assembly run")
+@pytest.mark.skipif(_NO_LAMMPS_BINARY, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")
 @pytest.mark.parametrize("hetero_flake", [False, True], ids=["homogeneous", "hetero"])
 def test_flake_slide_ilp_builds_with_lj_assembly_settings(tmp_path, hetero_flake):
     """ilp flake slides build end to end: the assembly run 0 includes a

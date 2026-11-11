@@ -1387,13 +1387,12 @@ class TestInterlayerValidation:
         document = self._sheet(monkeypatch, interlayer_style='lj_g')
         assert not document.validate().issues_for('2D', 'interlayer_g')
 
-    def test_a_style_sweep_validates_member_by_member(self, monkeypatch):
+    def test_a_style_sweep_validates_member_by_member(self, monkeypatch, mock_settings):
         """`interlayer_style = [lj, lj_g, ilp]` is a sweep, not a bad value."""
         monkeypatch.chdir(REPO_ROOT)
         document = ConfigDocument.from_file(
             EXAMPLES / 'sheet_config_interlayer.ini', 'sheetonsheet')
-        from src.core.config import load_settings
-        settings = load_settings()
+        settings = mock_settings.model_copy(deep=True)
         settings.simulation.constraint_mode = 'none'
         result = document.validate(settings)
         assert result.ok, result.render()

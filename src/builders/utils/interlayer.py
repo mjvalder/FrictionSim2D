@@ -103,9 +103,10 @@ def interlayer_provenance_block(pm: Any, general: Any) -> Optional[Dict[str, Any
     ``pm.interlayer_provenance()`` (style, parameter file + sha256, LJ-G g
     values with their source, generated files) plus ``comparison``. None --
     so the record carries no ``interlayer`` key -- for the default ``lj``
-    with comparison mode off, which keeps every lj ``provenance.json``
-    byte-identical to one written before the interlayer choice existed; and
-    None without a manager to ask.
+    with comparison mode off. (``provenance/config.json`` and ``config_hash``
+    do include the four new default interlayer fields; only the LAMMPS
+    scripts, data and settings stay byte-identical.) None without a manager
+    to ask.
     """
     comparison = interlayer_comparison(general)
     if pm is None or (interlayer_style(general) == 'lj' and not comparison):

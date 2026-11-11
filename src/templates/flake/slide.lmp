@@ -167,8 +167,13 @@ variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
    (`sameas`, so a 0 stub or an absent key keeps the old has_internal_lj
    rule) moves a run without an internal interlayer term off group/group. #}
 {% if has_internal_lj or use_group_group is sameas false %}
+{% if has_internal_lj %}
 # Many-body potential ({{ pot_type }}): compute group/group not supported.
 # Using bottom-sheet reaction forces as lateral friction proxy.
+{% else %}
+# Interlayer style without compute group/group (LJ-G/ILP/KC, or comparison mode):
+# bottom-sheet reaction forces as the lateral friction proxy.
+{% endif %}
 variable        xfrict equal v_sx
 variable        yfrict equal v_sy
 {% else %}

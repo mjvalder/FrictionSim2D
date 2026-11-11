@@ -393,6 +393,11 @@ class HeteroAFMSimulation(AFMSimulation):
         if not needs:
             return {'needs_molecule_ids': False, 'molecule_groups': [],
                     'molecule_ids_in_data': False}
+        if not self._hetero_layer_bands:
+            raise RuntimeError(
+                "interlayer style needs molecule IDs but the hetero stack "
+                "recorded no layer bands; every atom would keep molecule 0 and "
+                "ILP/KC would drop all interlayer interaction")
         dz = float(self.z_positions[n_layers]['sheet'])
         types = self.groups[n_layers]['sheet_types']
         groups = [{'name': f"mol_layer_{band['idx']}", 'types': types,

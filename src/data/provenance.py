@@ -125,7 +125,9 @@ class ProvenanceRecord(BaseModel):
     # interlayer-style choice (spec 2026-11-11 §7): PotentialManager
     # .interlayer_provenance() plus 'comparison'. None -- and then absent from
     # the file, see write_provenance -- for the default lj without comparison
-    # mode, so an lj record is byte-identical to one written before the field.
+    # mode, so an lj record has no new key (config.json and config_hash still carry
+    # the four new default interlayer fields; only the LAMMPS inputs are
+    # byte-identical to before).
     interlayer: Optional[Dict[str, Any]] = None
 
     # per-load diagnostics, keyed f'{load:g}' (enriched post-run)
@@ -176,7 +178,7 @@ def write_provenance(run_dir: Path, record: ProvenanceRecord) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     out = run_dir / 'provenance.json'
     # An unset interlayer block is left out rather than written as null:
-    # every lj run's record stays byte-identical to the pre-field schema.
+    # every lj run's record gains no new key (its config snapshot does).
     exclude = {'interlayer'} if record.interlayer is None else None
     out.write_text(record.model_dump_json(indent=2, exclude=exclude),
                    encoding='utf-8')

@@ -37,7 +37,7 @@ AFM_EXAMPLES = {
 BUILDABLE_EXAMPLES = [
     'afm_config.ini', 'afm_flake_config.ini', 'afm_freestanding_pes_config.ini',
     'indent_config.ini', 'pes_sheet_config.ini', 'pes_tip_config.ini',
-    'sheet_config.ini',
+    'sheet_config.ini', 'sheet_config_interlayer.ini',
 ]
 
 #: Configs that cannot construct: a missing file, or an unexpanded {mat}.
@@ -68,9 +68,15 @@ def test_the_two_example_lists_cover_every_config():
 @pytest.mark.parametrize('name', BUILDABLE_EXAMPLES)
 def test_buildable_examples_validate(name, monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
-    result = validate_config(_raw(name), _model_for(name))
-    assert result.ok, result.render()
-    assert result.config is not None
+    # A sweep example (interlayer_style = [lj, lj_g, ilp]) is validated member
+    # by member, as the builder sees it; a plain config expands to itself.
+    from src.run.expand import expand_config_sweeps
+    members = expand_config_sweeps(_raw(name))
+    assert members
+    for member in members:
+        result = validate_config(member, _model_for(name))
+        assert result.ok, result.render()
+        assert result.config is not None
 
 
 @pytest.mark.parametrize('name', UNRESOLVABLE_EXAMPLES)

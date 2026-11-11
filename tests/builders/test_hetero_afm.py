@@ -1208,6 +1208,15 @@ def test_hetero_afm_molecule_ids_by_z_band(tmp_path, monkeypatch):
         {"name": "mol_layer_2", "types": types, "zlo": 15.5, "zhi": 20.5}]
 
 
+def test_hetero_afm_molecule_ids_without_layer_bands_raises(tmp_path, monkeypatch):
+    sim = _hetero_afm_sim(tmp_path, monkeypatch, "ilp")
+    sim.pm[1] = sim._generate_potentials(1)
+    sim.z_positions[1] = {"sheet": 2.5}
+    sim._hetero_layer_bands = []
+    with pytest.raises(RuntimeError, match="layer bands"):
+        sim._molecule_id_context(1)
+
+
 def test_hetero_afm_lj_sets_no_molecule_ids(tmp_path, monkeypatch):
     sim = _hetero_afm_sim(tmp_path, monkeypatch, "lj")
     sim.pm[1] = sim._generate_potentials(1)

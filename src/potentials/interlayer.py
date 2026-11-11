@@ -241,6 +241,17 @@ def check_interlayer_choice(config: Any, base_dir: Optional[Path] = None) -> Non
                 f"(built in: {sorted(GAUSSIAN_G_MEV)}).")
         return
 
+    file = general.interlayer_file
+    if file is not None:
+        name = Path(str(file)).name
+        ok = name.endswith('.ILP') if style == 'ilp' else '.KC' in name
+        if not ok:
+            raise ValueError(
+                f"interlayer_file '{file}' does not match interlayer_style "
+                f"'{style}' (ilp needs a *.ILP file, kc a *.KC / *.KC-full / "
+                "*_taper.KC file). One interlayer_file serves a whole style "
+                "sweep, so sweep styles that need different files as "
+                "separate configs.")
     if general.interlayer_file is None:
         elements = _sheet_elements(sheets, base_dir)
         if elements is not None and default_interlayer_file(style, elements) is None:

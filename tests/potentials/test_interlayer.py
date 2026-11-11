@@ -93,12 +93,23 @@ def test_config_interlayer_defaults(tmp_path, mock_settings):
     assert cfg.sheet.interlayer_g is None
 
 
-def test_nonlj_with_constraint_mode_rejected(tmp_path):
-    settings = load_settings().model_copy(deep=True)
+def test_nonlj_with_constraint_mode_rejected(tmp_path, mock_settings):
+    settings = mock_settings.model_copy(deep=True)
     settings.simulation.constraint_mode = 'atom_bonds'
     raw = _sos_raw(tmp_path, general={'interlayer_style': 'ilp'})
     with pytest.raises(ValidationError, match='constraint_mode'):
         SheetOnSheetSimulationConfig(**raw, settings=settings)
+
+
+def test_interlayer_file_must_match_style(tmp_path, mock_settings):
+    raw = _afm_raw(tmp_path, general={'interlayer_style': 'ilp',
+                                      'interlayer_file': 'CC.KC-full'})
+    with pytest.raises(ValidationError, match='separate configs'):
+        AFMSimulationConfig(**raw, settings=mock_settings)
+    raw = _afm_raw(tmp_path, general={'interlayer_style': 'kc',
+                                      'interlayer_file': 'TMD.ILP'})
+    with pytest.raises(ValidationError, match='separate configs'):
+        AFMSimulationConfig(**raw, settings=mock_settings)
 
 
 def test_kc_on_mos2_needs_file(tmp_path, mock_settings):
@@ -148,15 +159,19 @@ def test_lammps_pair_styles_parses_help(monkeypatch):
     out = ("* Pair styles:\n\nlj/cut   sw   ilp/tmd\nkolmogorov/crespi/z\n\n"
            "* Bond styles:\n\nharmonic\n")
     REAL_PAIR_STYLES.cache_clear()
-    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: SimpleNamespace(stdout=out))
-    styles = REAL_PAIR_STYLES()
-    assert styles == frozenset({'lj/cut', 'sw', 'ilp/tmd', 'kolmogorov/crespi/z'})
-    REAL_PAIR_STYLES.cache_clear()
-    def boom(*a, **k):
-        raise FileNotFoundError
-    monkeypatch.setattr(subprocess, 'run', boom)
-    assert REAL_PAIR_STYLES() is None
-    REAL_PAIR_STYLES.cache_clear()
+    try:
+        monkeypatch.setattr(subprocess, 'run',
+                            lambda *a, **k: SimpleNamespace(stdout=out))
+        styles = REAL_PAIR_STYLES()
+        assert styles == frozenset({'lj/cut', 'sw', 'ilp/tmd', 'kolmogorov/crespi/z'})
+        REAL_PAIR_STYLES.cache_clear()
+
+        def boom(*a, **k):
+            raise FileNotFoundError
+        monkeypatch.setattr(subprocess, 'run', boom)
+        assert REAL_PAIR_STYLES() is None
+    finally:
+        REAL_PAIR_STYLES.cache_clear()
 
 
 def test_write_gaussian_kc_file(tmp_path):
