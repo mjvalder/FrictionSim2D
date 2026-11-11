@@ -444,7 +444,7 @@ Prefer editing global settings directly when reproducibility is required.
 
 ## Interlayer interactions
 
-`interlayer_style` (in `[general]`, sheet-on-sheet and AFM) chooses how the 2D layers of a sheet interact with each other. It is sweepable: `interlayer_style = lj, lj_g, ilp`.
+`interlayer_style` (in `[general]`, sheet-on-sheet and AFM) chooses how the 2D layers of a sheet interact with each other. It is sweepable: `interlayer_style = [lj, lj_g, ilp]`.
 
 | Style | Interaction | Default parameters |
 |---|---|---|
@@ -453,7 +453,7 @@ Prefer editing global settings directly when reproducibility is required.
 | `ilp` | `ilp/tmd` for Mo/W/S/Se (`TMD.ILP`), `ilp/graphene/hbn` for B/N/C/H (`BNCH.ILP`) | bundled |
 | `kc` | `kolmogorov/crespi/full` | carbon only (`CC.KC-full`, `CH.KC`); other materials need `interlayer_file` |
 
-`tap_flag` is 1 only for `*_taper.KC` files.
+For `kc`, `tap_flag` is 1 only for `*_taper.KC` files; `ilp` always uses 1.
 
 ### Gaussian strength (`lj_g`)
 
@@ -466,7 +466,7 @@ g (meV): MoS2 175.68, graphene 94.87, black phosphorus 123.0. Override per sheet
 ### Scope
 
 - Acts only between 2D layers. Tip and substrate stay `lj/cut`; in AFM only between the sheet's own layers. A single layer makes the style a no-op.
-- Not allowed with a potential that has its own interlayer term (`rebomos`, `reaxff`, `airebo`, `comb`, ...), nor with `constraint_mode` `atom_bonds` or `com_spring`.
+- Not allowed with a potential that has its own interlayer term (`rebomos`, `reaxff`, `airebo`, `comb`, ...), nor with a `constraint_mode` (set in `settings.simulation.constraint_mode`) other than `none`.
 - `ilp` and `kc` need an in-plane periodic cell wider than the 16 A cutoff plus the neighbor skin; otherwise the build fails with a message naming the `x`/`y` that pass.
 - `ilp/tmd` splits each layer's chalcogen into top and bottom types automatically when the SW file has a single chalcogen type.
 
