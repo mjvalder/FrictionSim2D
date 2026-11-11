@@ -21,7 +21,8 @@ from src.builders.construction.hetero_stack import (
 )
 from src.builders.afm.indent import IndentSimulation
 from src.builders.sheetonsheet.hetero import compute_layer_zbands
-from src.builders.utils.interlayer import interlayer_style, set_interlayer_from_config
+from src.builders.utils.interlayer import (check_interlayer_box_from_data,
+                                           interlayer_style, set_interlayer_from_config)
 from src.potentials.manager import PotentialManager
 from src.builders.utils.lammps_data import get_model_dimensions
 from src.interfaces.ase import element_mass, read_lammps_data
@@ -493,6 +494,11 @@ class HeteroAFMSimulation(AFMSimulation):
         """
         self._build_hetero_sheet(Path(build_dir))
         self.sheet_paths[n_layers] = self._hetero_rep_path
+        # The replicated cell is the one the run tiles; the style acts between
+        # the stack's own layers even though it is read as one (n_layers=1).
+        check_interlayer_box_from_data(
+            self.config.general, self._hetero_rep_path,
+            skin=self.config.settings.simulation.neighbor_list)
 
     def _built_geometry(self, n_layers):
         """Hetero stack: no interlayer distance, no single unit cell."""

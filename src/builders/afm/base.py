@@ -23,7 +23,8 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type, lj_params
 from ...data.models import EV_A_TO_NN
 from ..construction import components
-from ..utils.interlayer import (interlayer_provenance_block, interlayer_style,
+from ..utils.interlayer import (check_interlayer_box_from_data,
+                                interlayer_provenance_block, interlayer_style,
                                 set_interlayer_from_config)
 
 logger = logging.getLogger(__name__)
@@ -258,6 +259,9 @@ class AFMSimulation(SimulationBase):
                 interlayer_general=self._sheet_interlayer_general(n_layers),
         )
         self.sheet_paths[n_layers] = sheet_path
+        check_interlayer_box_from_data(
+            self._sheet_interlayer_general(n_layers), sheet_path,
+            skin=self.config.settings.simulation.neighbor_list)
         if self.lat_c is None:
             self.lat_c = lat_c
             self.lat_c_source = info.get('lat_c_source')

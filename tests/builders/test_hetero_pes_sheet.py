@@ -512,6 +512,8 @@ def test_hetero_pes_sheet_ilp_molecule_ids_and_energy(tmp_path):
     """ilp: IDs on the z-band layers before the first minimize, ILP energy column."""
     raw = _hetero_pes_raw()
     raw["general"]["interlayer_style"] = "ilp"
+    for sheet in ("2D-1", "2D-2"):      # > the 16 A ILP cutoff + skin (box guard)
+        raw[sheet].update({"x": 20.0, "y": 20.0})
     cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())
     out = tmp_path / "run"
     from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation

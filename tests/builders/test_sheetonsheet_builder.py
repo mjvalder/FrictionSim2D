@@ -891,9 +891,12 @@ def _ilp_inputs(tmp_path: Path, monkeypatch, **general) -> Path:
     The in-process stacking `run 0` runs ilp/tmd, which aborts with "too many
     neighbors for TMD atoms" unless each S sub-layer has its own type (the
     Task 4b split) -- so the build completing is itself the check.
+    20 x 20 (a 19.1 x 22.1 A cell): the build refuses a cell narrower than the
+    16 A ILP cutoff + skin (tests/builders/test_interlayer_box_guard.py).
     """
     return _build_example_sheet(tmp_path, monkeypatch,
-                                **_small(interlayer_style="ilp", **general))
+                                general={"interlayer_style": "ilp", **general},
+                                sheet={"x": 20, "y": 20, "lat_c": 6.15})
 
 
 def test_sheet_ilp_scripts(tmp_path, monkeypatch):
@@ -968,8 +971,8 @@ def test_kc_graphene_build_runs_the_stacking_with_molecule_ids(tmp_path, monkeyp
     out = _build_example_sheet(
         tmp_path, monkeypatch, general={"interlayer_style": "kc"},
         sheet={"mat": "h-graphene", "cif_path": str(cif), "pot_type": "tersoff",
-               "pot_path": f"{POT}/tersoff/C.tersoff", "x": 12, "y": 12,
-               "lat_c": 3.4})
+               "pot_path": f"{POT}/tersoff/C.tersoff", "x": 20, "y": 20,
+               "lat_c": 3.4})      # > the 16 A KC cutoff + skin (box guard)
     settings_text = (out / "lammps" / "system.in.settings").read_text(encoding="utf-8")
     assert "kolmogorov/crespi/full 16.0 0" in settings_text
     slide = out / "lammps" / "slide.in"

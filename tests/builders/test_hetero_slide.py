@@ -822,8 +822,13 @@ _BANDS = [{"idx": i, "zlo": 5.0 * i, "zhi": 5.0 * i + 3.0} for i in range(1, 5)]
 
 
 def _hetero_mos2_wse2_config(style="lj", wse2_g=None, **general):
-    """MoS2/WSe2 2+2; WSe2's lattice is ~3.8% off MoS2's, hence strain_tol."""
+    """MoS2/WSe2 2+2; WSe2's lattice is ~3.8% off MoS2's, hence strain_tol.
+
+    12 x 12, or 20 x 20 under ilp/kc: the build refuses a cell narrower than
+    their 16 A cutoff + skin (tests/builders/test_interlayer_box_guard.py).
+    """
     from src.core.config import GlobalSettings
+    size = 20.0 if style in ("ilp", "kc") else 12.0
     settings = GlobalSettings()
     settings.hpc.modules = ["lammps"]
     raw = {
@@ -831,10 +836,10 @@ def _hetero_mos2_wse2_config(style="lj", wse2_g=None, **general):
                     "pressure": 0.1, "interlayer_style": style, **general},
         "2D-1": {"mat": "h-MoS2", "cif_path": f"{MAT}/h-MoS2.cif",
                  "pot_path": f"{POT}/MoS2_wen.sw", "pot_type": "sw",
-                 "x": 12.0, "y": 12.0, "layers": [2]},
+                 "x": size, "y": size, "layers": [2]},
         "2D-2": {"mat": "h-WSe2", "cif_path": f"{MAT}/h-WSe2.cif",
                  "pot_path": f"{POT}/sw_lammps/h-WSe2.sw", "pot_type": "sw",
-                 "x": 12.0, "y": 12.0, "layers": [2]},
+                 "x": size, "y": size, "layers": [2]},
         "lattice_match": {"strain_tol": 0.04},
     }
     if wse2_g is not None:

@@ -10,16 +10,23 @@ Helpers every family shares:
   ``interlayer_energy_substyle``).
 * :func:`interlayer_provenance_block` is the provenance record's
   ``interlayer`` block.
+* :func:`check_interlayer_box` / :func:`check_interlayer_box_from_data`
+  refuse an ILP/KC build whose periodic cell is narrower than the
+  interlayer cutoff plus the neighbor skin.
 """
+import math
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-from ...potentials.interlayer import gaussian_g
+from ...potentials.interlayer import ILP_CUTOFF, KC_FULL_CUTOFF, gaussian_g
 
 #: Styles whose interlayer term ``compute group/group`` can evaluate (it
 #: needs ``pair->single()``). ``lj_g`` is provisional: Task 8 checks it
 #: under ``kolmogorov/crespi/z``.
 GROUP_GROUP_STYLES = ('lj', 'lj_g')
+
+#: Interlayer cutoff (Angstrom) of the styles the periodic cell must exceed.
+INTERLAYER_CUTOFFS: Dict[str, float] = {'ilp': ILP_CUTOFF, 'kc': KC_FULL_CUTOFF}
 
 
 def interlayer_style(general: Any) -> str:
@@ -103,3 +110,81 @@ def interlayer_provenance_block(pm: Any, general: Any) -> Optional[Dict[str, Any
     block = dict(pm.interlayer_provenance())
     block['comparison'] = comparison
     return block
+
+
+def periodic_widths(lx: float, ly: float, xy: float = 0.0) -> Tuple[float, float]:
+    """Perpendicular widths of the in-plane periodic cell ``a=(lx,0)``, ``b=(xy,ly)``.
+
+    The distance between the two faces spanned by ``b`` (``lx*ly/|b|``) and
+    between the two spanned by ``a`` (``ly``). A tilted cell is narrower
+    than its ``lx``: this is the length LAMMPS compares the ghost cutoff with.
+    """
+    return lx * ly / math.hypot(xy, ly), ly
+
+
+def check_interlayer_box(general: Any, *, lx: float, ly: float, xy: float = 0.0,
+                         skin: float) -> None:
+    """Refuse an ``ilp``/``kc`` cell narrower than the cutoff plus the skin.
+
+    The run scripts use ``comm_style tiled``, which cannot reach more than one
+    periodic image, so every perpendicular in-plane width of the cell must
+    exceed the interlayer cutoff plus the neighbor skin
+    (``settings.simulation.neighbor_list``). ILP/KC also need every ghost
+    atom's own neighbours for the layer normals. Other styles pass untouched.
+
+    Args:
+        general: The run's ``[general]`` config (``None``: plain LJ).
+        lx, ly, xy: The periodic cell (Angstrom), ``xy`` the LAMMPS tilt.
+        skin: The neighbor skin (Angstrom).
+
+    Raises:
+        ValueError: Naming the cell, its widths and the x/y that would pass.
+    """
+    style = interlayer_style(general)
+    cutoff = INTERLAYER_CUTOFFS.get(style)
+    if cutoff is None:
+        return
+    need = cutoff + skin
+    width_x, width_y = periodic_widths(lx, ly, xy)
+    if min(width_x, width_y) > need:
+        return
+    # Replicating the cell keeps xy/ly fixed, so width_x = lx / sqrt(1 + (xy/ly)^2).
+    x_needed = need * math.hypot(xy, ly) / ly
+    tilt = f", xy tilt {xy:.2f}" if xy else ""
+    raise ValueError(
+        f"interlayer_style = {style}: the periodic cell is {lx:.2f} x {ly:.2f} A"
+        f"{tilt} (perpendicular widths {width_x:.2f} and {width_y:.2f} A), but "
+        f"every width must exceed the {style} cutoff {cutoff:g} A + neighbor "
+        f"skin {skin:g} A = {need:g} A (comm_style tiled reaches one periodic "
+        f"image only). Use x > {x_needed:.1f} A and y > {need:.1f} A; the built "
+        f"cell rounds down to whole unit cells, so allow one more.")
+
+
+def read_data_cell(path: Union[str, Path]) -> Tuple[float, float, float]:
+    """``(lx, ly, xy)`` from a LAMMPS data file's header (tilt 0 if absent)."""
+    lx = ly = None
+    xy = 0.0
+    with open(path, 'r', encoding='utf-8') as handle:
+        for raw in handle:
+            line = raw.split('#', 1)[0].strip()
+            if line in ('Masses', 'Atoms') or line.startswith('Atoms'):
+                break
+            parts = line.split()
+            if line.endswith('xlo xhi'):
+                lx = float(parts[1]) - float(parts[0])
+            elif line.endswith('ylo yhi'):
+                ly = float(parts[1]) - float(parts[0])
+            elif line.endswith('xy xz yz'):
+                xy = float(parts[0])
+    if lx is None or ly is None:
+        raise ValueError(f"{path}: no xlo xhi / ylo yhi box lines in the header")
+    return lx, ly, xy
+
+
+def check_interlayer_box_from_data(general: Any, data_path: Union[str, Path], *,
+                                   skin: float) -> None:
+    """:func:`check_interlayer_box` on the periodic cell of a built data file."""
+    if INTERLAYER_CUTOFFS.get(interlayer_style(general)) is None:
+        return
+    lx, ly, xy = read_data_cell(data_path)
+    check_interlayer_box(general, lx=lx, ly=ly, xy=xy, skin=skin)

@@ -28,8 +28,8 @@ from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
-from ..utils.interlayer import (interlayer_style, interlayer_template_context,
-                                set_interlayer_from_config)
+from ..utils.interlayer import (check_interlayer_box_from_data, interlayer_style,
+                                interlayer_template_context, set_interlayer_from_config)
 from ..construction.hetero_stack import _box_region_cmd, _detect_atom_style, _run_lammps
 from ...interfaces.ase import read_lammps_data
 
@@ -291,6 +291,8 @@ class FlakeSlideSimulation(SimulationBase):
             stacking_type=getattr(sheet_cfg, "stack_type", "AA"),
             interlayer_general=self.config.general,
         )
+        check_interlayer_box_from_data(self.config.general, sheet_path,
+                                       skin=settings.simulation.neighbor_list)
 
         # 2. Flake (single-material reuses [2D]; hetero flake from [Flake-1/2]).
         hetero_flake = len(self.config.flake_sheets) == 2

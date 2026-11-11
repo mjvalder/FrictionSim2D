@@ -27,7 +27,7 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
-from ..utils.interlayer import (interlayer_provenance_block,
+from ..utils.interlayer import (check_interlayer_box_from_data, interlayer_provenance_block,
                                 interlayer_template_context,
                                 set_interlayer_from_config)
 
@@ -458,6 +458,9 @@ class SheetOnSheetSimulation(SimulationBase):
         )
         self.lat_c_info = lat_c_info
         self.structure_paths['sheet'] = sheet_path
+        check_interlayer_box_from_data(
+            self.config.general, sheet_path,
+            skin=self.config.settings.simulation.neighbor_list)
 
         self.pm = self._generate_potentials()
         assert lat_c is not None

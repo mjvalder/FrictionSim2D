@@ -310,13 +310,18 @@ def test_pes_tip_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
 # --- interlayer styles (spec 2026-11-11 §7, Task 7) -------------------------
 
 def _build_example_pes_sheet(tmp_path, monkeypatch, **general) -> Path:
-    """Build ``examples/pes_sheet_config.ini`` small (12x12, lat_c given)."""
+    """Build ``examples/pes_sheet_config.ini`` small (lat_c given).
+
+    12 x 12, or 20 x 20 under ilp/kc: the build refuses a cell narrower than
+    their 16 A cutoff + skin (tests/builders/test_interlayer_box_guard.py).
+    """
     from src.core.config import GlobalSettings, read_config
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.chdir(repo)
     raw = read_config(repo / "examples" / "pes_sheet_config.ini")
     raw["general"].update(general)
-    raw["2D"].update({"x": 12, "y": 12, "lat_c": 6.15})
+    size = 20 if general.get("interlayer_style") in ("ilp", "kc") else 12
+    raw["2D"].update({"x": size, "y": size, "lat_c": 6.15})
     settings = GlobalSettings()
     settings.hpc.modules = ["lammps"]
     config = SheetOnSheetSimulationConfig(**raw, settings=settings)

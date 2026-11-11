@@ -9,7 +9,8 @@ from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ...interfaces.ase import read_lammps_data
-from ..utils.interlayer import interlayer_style, interlayer_template_context
+from ..utils.interlayer import (check_interlayer_box, interlayer_style,
+                                interlayer_template_context)
 from ..construction.hetero_stack import (
     _detect_atom_style,
     build_hetero_structure,
@@ -259,6 +260,9 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         zhi = float(at.positions[:, 2].max())
 
         settings = self.config.settings
+        check_interlayer_box(self.config.general, lx=xhi - xlo, ly=yhi - ylo,
+                             xy=float(cell[1, 0]),
+                             skin=settings.simulation.neighbor_list)
 
         atom_style = _detect_atom_style(stack.data_path)  # 'atomic' for sw
         lat_c = stack.interface_spacing or settings.geometry.lat_c_default
