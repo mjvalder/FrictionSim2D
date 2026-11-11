@@ -363,6 +363,21 @@ class FlakeSlideSimulation(SimulationBase):
         pm = _register("provenance/potentials")
         n_sheet_types = len(pm.types.ids_by_component("sheet"))
 
+        # 3b. The assembly run 0 (step 4) gets the same type layout -- ilp/tmd's
+        #     chalcogen split included -- but today's lj interactions, in a
+        #     settings file of its own: it runs the lmp_serial binary, which
+        #     need not carry the INTERLAYER package. lj assembles on the run
+        #     settings exactly as before.
+        assembly_pm, assembly_settings = pm, settings_path
+        if interlayer_style(self.config.general) != 'lj':
+            assembly_settings = build_dir / "assembly.in.settings"
+            assembly_pm = self._register_potentials(
+                "provenance/potentials", sheet_cfg=sheet_cfg,
+                n_sheet_layers=n_sheet_layers, flake_names=flake_names,
+                flake_components=flake_components,
+                reserve_virtual_type=reserve_virtual_type,
+                settings_path=assembly_settings, interlayer_terms=False)
+
         # Flake type-groups (combined) + corner type-ids, read back from the PM.
         flake_group_ids: List[int] = []
         flake_corner_ids: List[int] = []
@@ -378,8 +393,8 @@ class FlakeSlideSimulation(SimulationBase):
             sheet_path=sheet_path,
             flake_path=flake_path,
             n_sheet_types=n_sheet_types,
-            pm=pm,
-            settings_path=settings_path,
+            pm=assembly_pm,
+            settings_path=assembly_settings,
             bottom_flake_component=flake_names[0],
         )
 
@@ -501,7 +516,8 @@ class FlakeSlideSimulation(SimulationBase):
     def _register_potentials(self, prefix: str, *, sheet_cfg, n_sheet_layers: int,
                              flake_names: List[str], flake_components: list,
                              reserve_virtual_type: bool,
-                             settings_path: Path) -> PotentialManager:
+                             settings_path: Path,
+                             interlayer_terms: bool = True) -> PotentialManager:
         """Register sheet -> flake(s) -> virtual and write ``settings_path``.
 
         ``lj`` (the default) emits exactly what it always has. Any other
@@ -510,6 +526,10 @@ class FlakeSlideSimulation(SimulationBase):
         sliding one. ``ilp``/``kc`` therefore replace the sheet-flake (and
         flake-flake) LJ with their many-body term; ``lj_g`` keeps that LJ and
         adds the Gaussian over all of them.
+
+        ``interlayer_terms=False`` keeps the style's type layout (the ilp/tmd
+        chalcogen split) but emits the ``lj`` interactions -- the settings the
+        assembly run uses.
         """
         settings = self.config.settings
         style = interlayer_style(self.config.general)
@@ -535,20 +555,21 @@ class FlakeSlideSimulation(SimulationBase):
         if reserve_virtual_type:
             pm.register_virtual_atom()
         pm.add_self_interaction("sheet")
-        if style == 'lj':
+        lj_terms = style == 'lj' or not interlayer_terms
+        if lj_terms:
             if pm.is_sheet_lj(sheet_cfg.pot_type):
                 # One many-body instance per layer, so the layers need the
                 # interlayer LJ explicitly (sheetonsheet/base.py does the same).
                 pm.add_interlayer_interaction("sheet")
         for name in flake_names:
             pm.add_self_interaction(name)
-        if style not in ('ilp', 'kc'):
+        if lj_terms or style not in ('ilp', 'kc'):
             for name in flake_names:
                 pm.add_cross_interaction("sheet", name)
             for i, name_i in enumerate(flake_names):
                 for j in range(i + 1, len(flake_names)):
                     pm.add_cross_interaction(name_i, flake_names[j])
-        if style != 'lj':
+        if not lj_terms:
             pm.add_interlayer(["sheet"] + flake_names)
         pm.write_file(settings_path)
         return pm

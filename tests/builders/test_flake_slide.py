@@ -1180,3 +1180,36 @@ def test_molecule_groups_for_assembly_and_hetero_flake_carry_types(tmp_path, mon
     assert [g["name"] for g in groups] == ["mol_layer_1", "mol_layer_2", "mol_flake"]
     assert groups[0]["types"] == pm.types.get_layer_group_string("sheet", 0)
     assert groups[2]["types"] == " ".join(map(str, pm.types.ids_by_component("flake")))
+
+
+# Not `lmp_serial` in the reason on purpose: these builds run only the short
+# assembly LAMMPS calls (seconds), so they stay in the fast tier rather than
+# picking up conftest's `lammps` marker; they skip only without the binary.
+_NO_LAMMPS_BINARY = shutil.which("lmp_serial") is None
+
+
+@pytest.mark.skipif(_NO_LAMMPS_BINARY, reason="no LAMMPS binary for the assembly run")
+@pytest.mark.parametrize("hetero_flake", [False, True], ids=["homogeneous", "hetero"])
+def test_flake_slide_ilp_builds_with_lj_assembly_settings(tmp_path, hetero_flake):
+    """ilp flake slides build end to end: the assembly run 0 includes a
+    settings file with the ilp type layout but no ilp/tmd (lmp_serial need
+    not have INTERLAYER); the slide's own settings carry the ILP term."""
+    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation
+
+    cfg = _flake_on_sheet_cfg(hetero_flake=hetero_flake)
+    cfg.general.interlayer_style = "ilp"
+    out = tmp_path / "run"
+    FlakeSlideSimulation(cfg, str(out)).build()
+
+    assembly_script = (out / "assemble_flake_slide.lmp").read_text()
+    assembly_settings = out / "build" / "assembly.in.settings"
+    assert f"include         {assembly_settings}" in assembly_script
+    run_settings = (out / "lammps" / "system.in.settings").read_text()
+    assembly_text = assembly_settings.read_text()
+    assert "ilp/tmd" not in assembly_text and "overlay" not in assembly_text
+    assert "pair_coeff * * ilp/tmd" in run_settings
+    # identical type layout (split chalcogens) on both sides
+    masses = lambda t: [ln for ln in t.splitlines() if ln.startswith("mass ")]
+    assert masses(assembly_text) == masses(run_settings)
+    slide = (out / "lammps" / "slide.in").read_text()
+    assert "fix             mol_ids all property/atom mol ghost yes" in slide
