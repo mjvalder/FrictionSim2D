@@ -389,10 +389,11 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         peratom channel is a later opt-in addition, not something to force
         here by relaxing this filter.
 
-        ``interlayer_energy`` keeps ``E_int_interlayer``: set when the run
-        script computes ``v_e_int_il`` from an ILP/KC sub-style
-        (``interlayer_energy_substyle``; spec 2026-11-11 §7). Its value is the
-        interlayer energy summed over every layer pair.
+        ``interlayer_energy`` requests ``E_int_interlayer_all`` instead: set
+        when the run script computes ``v_e_int_il_all`` from an ILP/KC
+        sub-style (``interlayer_energy_substyle``; spec 2026-11-11 §7). Its
+        value is the interlayer energy summed over EVERY layer pair, not the
+        shearing interface ``E_int_interlayer`` names, hence its own channel.
         """
         # `contact_cutoff` is left to sheet_obs_ctx's fallback default:
         # its only consumer in the registry is n_contact_il, and the
@@ -407,14 +408,16 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # A real derivation would only be worth adding if a future task made
         # this extra_filter conditional on has_internal_lj (as
         # SheetOnSheetSimulation's already is), making n_contact_il reachable.
-        interlayer = {'n_contact_il'} if interlayer_energy else {
-            'E_int_interlayer', 'n_contact_il'}
+        interlayer = {'E_int_interlayer', 'n_contact_il'}
+        if not interlayer_energy:
+            interlayer.add('E_int_interlayer_all')
         return sheet_obs_ctx(
             self.config.settings,
             sim_type=self.FAMILY,
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
             extra_filter=lambda ob: ob.name not in interlayer,
+            requested_channels=('E_int_interlayer_all',) if interlayer_energy else (),
         )
 
     def _interlayer_context(self, pm, bands: List[Dict]) -> Dict[str, object]:
@@ -543,6 +546,7 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
             drive_k=drive_k,
             drive_rest_length=drive_rest_length,
+            pm=getattr(stack, "pm", None),
         )
         logger.info("Wrote hetero slide script to %s/lammps/slide.in", self.output_dir)
 

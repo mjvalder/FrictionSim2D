@@ -77,6 +77,7 @@ ROLE_LABELS: Dict[str, str] = {
     'group_temperature_layer_n': 'Group Temperature (top layer)',
     'tip_sheet_interaction': 'Tip-Sheet Interaction Energy',
     'interlayer_interaction': 'Interlayer Interaction Energy',
+    'interlayer_interaction_all_pairs': 'Interlayer Energy (all layer pairs)',
     'contact_count': 'Contact Count',
     'min_gap': 'Minimum Gap',
     'max_deflection': 'Maximum Deflection',

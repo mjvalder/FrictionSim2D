@@ -1,3 +1,5 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
+{% import 'common/interlayer_energy.lmp' as il_energy %}
 # LAMMPS input script for heterostructure interlayer PES scan
 # Static energy-vs-lateral-position map over the matched interface's MINIMAL
 # in-plane repeat unit -- measured off the assembled stack by
@@ -42,6 +44,9 @@ include         {{ potential_file }}
 region          reg_layer_{{ layer.idx }} block INF INF INF INF {{ '%.4f'|format(layer.zlo) }} {{ '%.4f'|format(layer.zhi) }} units box
 group           layer_{{ layer.idx }} region reg_layer_{{ layer.idx }}
 {% endfor %}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 
 {% if pot_type == 'reaxff' %}
 fix             qeq all qeq/reaxff 1 0.0 10.0 1.0e-6 reaxff
@@ -76,10 +81,18 @@ variable        dystep equal v_Ly/v_Ny
 
 # Energy per interface repeat unit: ncell of them tile the box.
 variable        pe_cell equal pe/v_ncell
+{% if interlayer_energy_substyle %}
+{{ il_energy.emit_interlayer_energy(interlayer_energy_substyle) -}}
+# Interlayer term alone, per cell like energy_eV. A bilayer has one layer
+# pair, so here "every layer pair" is the scanned interface. In thermo_style
+# so c_e_il is current when the print below evaluates it between runs.
+variable        e_il_cell equal v_e_int_il_all/v_ncell
+thermo_style    custom step pe c_e_il
+{% endif %}
 
 # CSV: dx, dy in Angstrom (top-layer displacement); energy_eV per surface cell.
 print           "# family=pes_sheet" file {{ results_csv }} screen no
-print           "dx,dy,energy_eV" append {{ results_csv }} screen no
+print           "dx,dy,energy_eV{{ ',e_interlayer_eV' if interlayer_energy_substyle else '' }}" append {{ results_csv }} screen no
 
 # We only ever move the top layer by the delta from the previous grid point to
 # the current one, so the xy positions stay exactly on the grid (z relaxation
@@ -103,7 +116,7 @@ variable        prev_dy equal $(v_dy)
 {% else %}
 run             0
 {% endif %}
-print           "$(v_dx),$(v_dy),$(v_pe_cell)" append {{ results_csv }} screen no
+print           "$(v_dx),$(v_dy),$(v_pe_cell){{ ',$(v_e_il_cell)' if interlayer_energy_substyle else '' }}" append {{ results_csv }} screen no
 next            iy
 jump            SELF loop_iy
 next            ix

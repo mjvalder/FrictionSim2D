@@ -12,6 +12,8 @@ hetero data file, z-band layer groups, and a scan period equal to the matched
 interface's **minimal in-plane repeat** -- not the assembled box, which is a
 4x2 superlattice of it here, and whose use also mis-normalized the energy.
 """
+import json
+import re
 import shutil
 from pathlib import Path
 
@@ -501,3 +503,92 @@ def test_the_same_config_no_longer_routes_two_different_ways(tmp_path):
     scan_cls = _select_sheet_builder_cls("pes_sheet", cfg)
     with pytest.raises(ValueError, match="silently report"):
         scan_cls(cfg, str(tmp_path))
+
+
+# --- interlayer styles (spec 2026-11-11 §7, Task 7) -------------------------
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
+def test_hetero_pes_sheet_ilp_molecule_ids_and_energy(tmp_path):
+    """ilp: IDs on the z-band layers before the first minimize, ILP energy column."""
+    raw = _hetero_pes_raw()
+    raw["general"]["interlayer_style"] = "ilp"
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())
+    out = tmp_path / "run"
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    HeteroPESSheetSimulation(cfg, str(out)).build()
+    assert "pair_coeff * * ilp/tmd" in (out / "lammps" / "system.in.settings").read_text()
+    lines = (out / "lammps" / "slide.in").read_text().splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.split()[:1] in (["minimize"], ["run"]))
+    group2 = lines.index(next(ln for ln in lines if ln.startswith("group           layer_2 region")))
+    fix = lines.index("fix             mol_ids all property/atom mol ghost yes")
+    assert group2 < fix < first
+    assert lines[fix + 1:fix + 3] == ["set group layer_1 mol 1", "set group layer_2 mol 2"]
+    assert "compute         e_il all pair ilp/tmd" in lines[:first]
+    assert any('"dx,dy,energy_eV,e_interlayer_eV"' in ln for ln in lines)
+
+    record = json.loads((out / "provenance.json").read_text())
+    block = record["interlayer"]
+    assert block["style"] == "ilp" and block["file"] == "TMD.ILP"
+    assert re.fullmatch(r"[0-9a-f]{64}", block["sha256"])
+    assert block["comparison"] is False
+
+
+@pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (build_hetero_structure minimises the interface)")
+def test_hetero_pes_sheet_lj_has_no_interlayer_block(tmp_path):
+    out = tmp_path / "run"
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    HeteroPESSheetSimulation(_hetero_pes_config(), str(out)).build()
+    slide = (out / "lammps" / "slide.in").read_text()
+    assert "mol_ids" not in slide and "e_il" not in slide
+    assert "interlayer" not in json.loads((out / "provenance.json").read_text())
+
+
+def _hetero_pes_scan_written(tmp_path, monkeypatch, style):
+    """Run the hetero PES scan-writing phase over a registered (not built) stack.
+
+    No LAMMPS: the manager comes from ``register_hetero_potentials`` and the
+    stack geometry is stubbed, so this runs in the fast suite.
+    """
+    from types import SimpleNamespace
+    from src.builders.construction.hetero_stack import register_hetero_potentials
+    from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    raw = _hetero_pes_raw()
+    raw["general"]["interlayer_style"] = style
+    cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())
+    out = tmp_path / "run"
+    sim = HeteroPESSheetSimulation(cfg, str(out))
+    pm = register_hetero_potentials(cfg.sheets, cfg.settings, tmp_path / "pm",
+                                    interlayer_general=cfg.general).pm
+    sim._stack = SimpleNamespace(pm=pm)
+    sim._layer_bands = [{"idx": 1, "zlo": 0.0, "zhi": 4.0},
+                        {"idx": 2, "zlo": 5.0, "zhi": 9.0}]
+    sim._hetero_box = {"xlo": 0.0, "xhi": 12.0, "ylo": 0.0, "yhi": 12.0, "zhi": 20.0}
+    sim._hetero_atom_style = "atomic"
+    monkeypatch.setattr(HeteroPESSheetSimulation, "_scan_periods", lambda self: (3.2, 5.5))
+    monkeypatch.setattr(HeteroPESSheetSimulation, "_scan_n_cells", lambda self: 8)
+    sim.write_scan_scripts()
+    return out
+
+
+def test_hetero_pes_sheet_ilp_scan_script_without_lammps(tmp_path, monkeypatch):
+    out = _hetero_pes_scan_written(tmp_path, monkeypatch, "ilp")
+    lines = (out / "lammps" / "slide.in").read_text().splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.split()[:1] in (["minimize"], ["run"]))
+    group2 = next(i for i, ln in enumerate(lines)
+                  if ln.startswith("group           layer_2 region"))
+    fix = lines.index("fix             mol_ids all property/atom mol ghost yes")
+    assert group2 < fix < first
+    assert lines[fix + 1:fix + 3] == ["set group layer_1 mol 1", "set group layer_2 mol 2"]
+    assert "compute         e_il all pair ilp/tmd" in lines[:first]
+    assert any('"dx,dy,energy_eV,e_interlayer_eV"' in ln for ln in lines)
+    block = json.loads((out / "provenance.json").read_text())["interlayer"]
+    assert block["style"] == "ilp" and block["file"] == "TMD.ILP"
+    assert re.fullmatch(r"[0-9a-f]{64}", block["sha256"])
+    assert block["comparison"] is False
+
+
+def test_hetero_pes_sheet_lj_scan_script_without_lammps(tmp_path, monkeypatch):
+    out = _hetero_pes_scan_written(tmp_path, monkeypatch, "lj")
+    slide = (out / "lammps" / "slide.in").read_text()
+    assert "mol_ids" not in slide and "e_il" not in slide
+    assert "interlayer" not in json.loads((out / "provenance.json").read_text())

@@ -508,6 +508,7 @@ class FlakeSlideSimulation(SimulationBase):
             thermostat_scheme=sheet_thermostat_scheme(self.config.settings),
             drive_k=drive_k,
             drive_rest_length=drive_rest_length,
+            pm=pm,
         )
         logger.info("Wrote flake slide script to %s/lammps/slide.in", self.output_dir)
 

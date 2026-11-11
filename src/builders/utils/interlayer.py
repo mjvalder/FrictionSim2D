@@ -1,6 +1,6 @@
 """Builder-side glue for the interlayer-style choice (spec 2026-11-11 §5, §7).
 
-Two helpers every family shares:
+Helpers every family shares:
 
 * :func:`set_interlayer_from_config` hands the run's ``[general]``
   interlayer fields and each sheet's ``interlayer_g`` to
@@ -8,6 +8,8 @@ Two helpers every family shares:
 * :func:`interlayer_template_context` builds the slide-template keys
   (``needs_molecule_ids``, ``molecule_groups``, ``use_group_group``,
   ``interlayer_energy_substyle``).
+* :func:`interlayer_provenance_block` is the provenance record's
+  ``interlayer`` block.
 """
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
@@ -83,3 +85,21 @@ def interlayer_template_context(general: Any, *, has_internal_lj: bool,
         'use_group_group': use_group_group,
         'interlayer_energy_substyle': substyle,
     }
+
+
+def interlayer_provenance_block(pm: Any, general: Any) -> Optional[Dict[str, Any]]:
+    """The provenance ``interlayer`` block, or None where it is not recorded.
+
+    ``pm.interlayer_provenance()`` (style, parameter file + sha256, LJ-G g
+    values with their source, generated files) plus ``comparison``. None --
+    so the record carries no ``interlayer`` key -- for the default ``lj``
+    with comparison mode off, which keeps every lj ``provenance.json``
+    byte-identical to one written before the interlayer choice existed; and
+    None without a manager to ask.
+    """
+    comparison = interlayer_comparison(general)
+    if pm is None or (interlayer_style(general) == 'lj' and not comparison):
+        return None
+    block = dict(pm.interlayer_provenance())
+    block['comparison'] = comparison
+    return block

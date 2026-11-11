@@ -1193,7 +1193,8 @@ def test_sheet_slide_ilp_energy_and_molecule_ids():
     text = _render_sheet_slide(has_internal_lj=False, **_ILP_KEYS)
     lines = text.splitlines()
     assert 'compute         e_il all pair ilp/tmd' in lines
-    assert 'variable        e_int_il equal c_e_il' in lines
+    assert 'variable        e_int_il_all equal c_e_il' in lines
+    assert not any(ln.startswith('variable        e_int_il ') for ln in lines)
     include = lines.index('include         system.in.settings')
     first_min = next(i for i, ln in enumerate(lines) if ln.startswith('minimize'))
     fix = lines.index('fix             mol_ids all property/atom mol ghost yes')

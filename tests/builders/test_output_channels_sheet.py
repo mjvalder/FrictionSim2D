@@ -232,3 +232,47 @@ def test_the_shared_group_group_compute_survives_disabling_peratom():
     out = _render_sheetonsheet(peratom=False)
     assert "compute         frict" in out
     assert not _fix_emitted(out, "fc_pa")
+
+
+# --- interlayer styles (spec 2026-11-11 §7, Task 7) -------------------------
+
+def _sheet_obs_ctx(tmp_path, interlayer_ctx, has_internal_lj=False, optional=()):
+    from src.builders.sheetonsheet import SheetOnSheetSimulation
+    from tests.builders.test_sheetonsheet_builder import _make_sheetonsheet_config
+    cfg = _make_sheetonsheet_config(tmp_path, layers=[3])
+    cfg.settings.output.optional_channels = list(optional)
+    sim = SheetOnSheetSimulation(cfg, str(tmp_path / "out"))
+    return sim._build_obs_ctx(3, "results/friction.txt", has_internal_lj, interlayer_ctx)
+
+
+_ILP_CTX = {"use_group_group": False, "interlayer_energy_substyle": "ilp/tmd"}
+_LJ_CTX = {"use_group_group": True, "interlayer_energy_substyle": None}
+
+
+def test_observables_ilp_keeps_n_contact(tmp_path):
+    """ilp: n_contact_il stays (UFF sigma cutoff); the energy is the all-pairs channel."""
+    ctx = _sheet_obs_ctx(tmp_path, _ILP_CTX, optional=["n_contact_il"])
+    names = ctx["peratom_varlist"].split()
+    assert "v_n_contact_il" in names
+    assert "v_e_int_il_all" in names
+    assert "v_e_int_il" not in names       # never the shearing-interface name
+
+
+def test_observables_lj_keeps_the_interface_energy_name(tmp_path):
+    ctx = _sheet_obs_ctx(tmp_path, _LJ_CTX)
+    assert ctx["peratom_varlist"].split() == ["v_e_int_il"]
+
+
+def test_observables_lj_drops_a_requested_all_pairs_channel(tmp_path):
+    """Nothing defines v_e_int_il_all under lj, so a user request is filtered out."""
+    ctx = _sheet_obs_ctx(tmp_path, _LJ_CTX, optional=["E_int_interlayer_all"])
+    assert "v_e_int_il_all" not in ctx["peratom_varlist"]
+
+
+def test_the_two_interlayer_energies_are_distinct_observables():
+    from src.core.observables import REGISTRY
+    from src.postprocessing.labels import ROLE_LABELS
+    iface, every = REGISTRY["E_int_interlayer"], REGISTRY["E_int_interlayer_all"]
+    assert iface.rename_to != every.rename_to
+    assert iface.role_key != every.role_key
+    assert ROLE_LABELS[every.role_key] != ROLE_LABELS[iface.role_key]

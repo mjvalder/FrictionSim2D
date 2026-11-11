@@ -268,7 +268,7 @@ def test_hetero_build_obs_ctx_filters_the_interlayer_channels_unconditionally():
     used to go through (removed as unused -- decision row B4-1). That is the
     stronger form: the builder method is the only obs_ctx production ever
     builds. By default (every lj run) the filter drops both channels; only
-    an ILP/KC run, whose script computes `v_e_int_il` from the interlayer
+    an ILP/KC run, whose script computes `v_e_int_il_all` from the interlayer
     sub-style, passes `interlayer_energy=True` -- see
     `test_hetero_interlayer_context_ilp`.
     """
@@ -886,7 +886,7 @@ def test_hetero_interlayer_context_ilp(tmp_path, comparison):
     assert "compute         e_il all pair ilp/tmd" in lines
     assert "compute         frict" not in script
     assert "Many-body potential" not in script
-    assert "v_e_int_il" in obs_ctx["peratom_varlist"]
+    assert obs_ctx["peratom_varlist"].split() == ["v_e_int_il_all"]
 
 
 def test_hetero_interlayer_context_ljg_reaction_force(tmp_path):

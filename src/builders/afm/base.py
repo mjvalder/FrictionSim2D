@@ -23,7 +23,8 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type, lj_params
 from ...data.models import EV_A_TO_NN
 from ..construction import components
-from ..utils.interlayer import interlayer_style, set_interlayer_from_config
+from ..utils.interlayer import (interlayer_provenance_block, interlayer_style,
+                                set_interlayer_from_config)
 
 logger = logging.getLogger(__name__)
 
@@ -1139,6 +1140,7 @@ class AFMSimulation(SimulationBase):
             drive_k=drive_k,
             drive_rest_length=drive_rest_length,
             geometry=self._built_geometry(n_layers),
+            interlayer=interlayer_provenance_block(pm, self.config.general),
         )
         write_provenance(output_root, record)
 

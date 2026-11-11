@@ -412,3 +412,85 @@ def test_pes_sheet_records_no_drive(tmp_path):
     assert record.drive_k is None
     assert record.drive_rest_length is None
     assert record.geometry is None
+
+
+# --------------------------------------------------------------------------
+# The interlayer block (spec 2026-11-11 §7, Task 7)
+# --------------------------------------------------------------------------
+
+def _raw_provenance(run_dir: Path) -> dict:
+    return json.loads((Path(run_dir) / "provenance.json").read_text(encoding="utf-8"))
+
+
+def test_provenance_interlayer_block(tmp_path, monkeypatch):
+    """ilp: style, the bundled file by name, its sha256, comparison off."""
+    from tests.builders.test_sheetonsheet_builder import _ilp_inputs
+    out = _ilp_inputs(tmp_path, monkeypatch)
+    block = _raw_provenance(out)["interlayer"]
+    assert block["style"] == "ilp"
+    assert block["file"] == "TMD.ILP"
+    assert re.fullmatch(r"[0-9a-f]{64}", block["sha256"])
+    assert block["comparison"] is False
+    assert _record(out).interlayer == block       # round-trips through the model
+
+
+def test_provenance_interlayer_block_records_comparison_mode(tmp_path, monkeypatch):
+    from tests.builders.test_sheetonsheet_builder import _ilp_inputs
+    out = _ilp_inputs(tmp_path, monkeypatch, interlayer_comparison=True)
+    assert _raw_provenance(out)["interlayer"]["comparison"] is True
+
+
+def test_lj_provenance_has_no_interlayer_key(tmp_path, monkeypatch):
+    """lj without comparison: the record is byte-for-byte the pre-field one."""
+    from tests.builders.test_sheetonsheet_builder import _build_example_sheet, _small
+    out = _build_example_sheet(tmp_path, monkeypatch, **_small())
+    assert "interlayer" not in _raw_provenance(out)
+    assert _record(out).interlayer is None
+
+
+def test_lj_comparison_mode_records_the_block(tmp_path, monkeypatch):
+    """lj in comparison mode reports the reaction force, so the choice is recorded."""
+    from tests.builders.test_sheetonsheet_builder import _build_example_sheet, _small
+    out = _build_example_sheet(tmp_path, monkeypatch,
+                               **_small(interlayer_comparison=True))
+    block = _raw_provenance(out)["interlayer"]
+    assert block["style"] == "lj" and block["comparison"] is True
+    assert block["file"] is None and block["sha256"] is None
+
+
+@pytest.mark.parametrize("override, source", [(None, "table"), (150.0, "override")])
+def test_lj_g_provenance_g_source(tmp_path, monkeypatch, override, source):
+    """lj_g: 'override' exactly when the sheet's interlayer_g was set."""
+    from tests.builders.test_sheetonsheet_builder import _build_example_sheet, _small
+    kwargs = _small(interlayer_style="lj_g")
+    if override is not None:
+        kwargs["sheet"]["interlayer_g"] = override
+    out = _build_example_sheet(tmp_path, monkeypatch, **kwargs)
+    g = _raw_provenance(out)["interlayer"]["g_meV"]
+    assert g == {"sheet": {"value": override or 175.68, "source": source}}
+
+
+def test_afm_provenance_interlayer_block(tmp_path, monkeypatch):
+    """The AFM family records the choice too (ILP between the sheet layers)."""
+    from tests.helpers.afm import build_example_afm
+    out = build_example_afm(tmp_path, monkeypatch, "afm_config.ini",
+                            general={"interlayer_style": "ilp"},
+                            **{"2D": {"layers": [2], "lat_c": 6.15}})
+    block = _raw_provenance(out / "L2")["interlayer"]
+    assert block["style"] == "ilp" and block["file"] == "TMD.ILP"
+    assert re.fullmatch(r"[0-9a-f]{64}", block["sha256"])
+    assert block["comparison"] is False
+
+
+def test_interlayer_provenance_block_rules():
+    from src.builders.utils.interlayer import interlayer_provenance_block
+
+    class _PM:
+        def interlayer_provenance(self):
+            return {"style": "ilp", "comparison": None}
+
+    lj = SimpleNamespace(interlayer_style="lj", interlayer_comparison=False)
+    ilp = SimpleNamespace(interlayer_style="ilp", interlayer_comparison=False)
+    assert interlayer_provenance_block(_PM(), lj) is None
+    assert interlayer_provenance_block(None, ilp) is None
+    assert interlayer_provenance_block(_PM(), ilp) == {"style": "ilp", "comparison": False}

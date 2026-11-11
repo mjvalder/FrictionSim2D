@@ -100,6 +100,10 @@ def run_provenance(locator, config: Optional[Mapping]) -> dict:
         return {'error': str(exc), 'provenance_sha256': sha,
                 'config': settings}
     block = record.model_dump(mode='json')
+    # Absent from an lj record's file (write_provenance), so absent here too:
+    # an lj export is unchanged, a non-lj one carries the interlayer choice.
+    if block.get('interlayer') is None:
+        block.pop('interlayer', None)
     block['execution'] = {name: block.pop(name) for name in EXECUTION_FIELDS}
     for material in block['materials']:
         if material.get('pot_path'):

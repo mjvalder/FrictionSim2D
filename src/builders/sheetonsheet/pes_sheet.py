@@ -13,6 +13,7 @@ from typing import Dict, List
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ..construction.hetero_stack import detect_inplane_repeat
+from ..utils.interlayer import interlayer_template_context
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import (CUTOFF_NOT_APPLICABLE, SheetOnSheetSimulation,
                    write_sheet_provenance)
@@ -85,6 +86,10 @@ class PESGridMixin:
       data file (``_detect_atom_style``) for hetero.
     * :meth:`_scan_extra_context` — extra template variables; ``{}``
       homogeneously, the box + z-band layer list for hetero.
+    * :meth:`_scan_pm` / :meth:`_scan_interlayer_context` — the potential
+      manager (``self.pm`` vs the hetero stack's) and the interlayer-style
+      keys (molecule IDs over type-based vs z-band ``layer_N`` groups, the
+      ILP/KC energy sub-style); spec 2026-11-11 §7.
     * :meth:`_material_id` — the job-name token (``pes_sheet_<mat>`` vs
       ``pes_sheet_<mat1>+<mat2>``). Defined on
       :class:`~src.builders.sheetonsheet.SheetOnSheetSimulation` and overridden
@@ -201,6 +206,14 @@ class PESGridMixin:
         """Template variables beyond the shared scan set (default: none)."""
         return {}
 
+    def _scan_pm(self):
+        """The run's :class:`PotentialManager`, or None if there is none."""
+        raise NotImplementedError
+
+    def _scan_interlayer_context(self) -> Dict:
+        """``interlayer_template_context`` for the two scanned layers."""
+        raise NotImplementedError
+
     # ------------------------------------------------------------ shared --
 
     def _layer_count_hint(self) -> str:
@@ -267,6 +280,15 @@ class PESGridMixin:
             'z_relax': self._z_relax(),
         }
         base_context.update(self._scan_extra_context())
+        # Interlayer style (spec 2026-11-11 §7): molecule IDs for ILP/KC, and
+        # the interlayer term alone as an extra CSV column where an ILP/KC
+        # sub-style isolates it. Both falsy under lj, so its scripts are
+        # unchanged.
+        interlayer = self._scan_interlayer_context()
+        base_context.update({
+            key: interlayer[key] for key in (
+                'needs_molecule_ids', 'molecule_groups',
+                'interlayer_energy_substyle')})
 
         template = self._scan_template()
         for script_name, csv_name, grid_n in self._grid_variants():
@@ -290,6 +312,7 @@ class PESGridMixin:
             contact_cutoff=0.0,
             cutoff_source=CUTOFF_NOT_APPLICABLE,
             thermostat_scheme='none_static_scan',
+            pm=self._scan_pm(),
         )
 
         logger.info(
@@ -356,6 +379,18 @@ class PESSheetSimulation(PESGridMixin, SheetOnSheetSimulation):
 
     def _scan_atom_style(self) -> str:
         return 'charge' if self._scan_pot_type() in ('reaxff', 'reax/c') else 'atomic'
+
+    def _scan_pm(self):
+        return self.pm
+
+    def _scan_interlayer_context(self) -> Dict:
+        """The slide's interlayer keys over the type-based ``layer_1``/``layer_2``."""
+        # hasattr: unit tests drive write_inputs with a bare manager stand-in.
+        has_internal_lj = (hasattr(self.pm, 'is_sheet_lj')
+                           and not self.pm.is_sheet_lj(self._scan_pot_type()))
+        return interlayer_template_context(
+            self.config.general, has_internal_lj=has_internal_lj, pm=self.pm,
+            molecule_groups=[f'layer_{i}' for i in range(1, PES_SHEET_LAYERS + 1)])
 
 
 class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
@@ -555,3 +590,10 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
         context = dict(self._hetero_box)
         context['layers'] = self._layer_bands
         return context
+
+    def _scan_pm(self):
+        return getattr(self._stack, 'pm', None)
+
+    def _scan_interlayer_context(self) -> Dict:
+        """The hetero slide's interlayer keys over the z-band ``layer_N`` groups."""
+        return self._interlayer_context(self._scan_pm(), self._layer_bands)

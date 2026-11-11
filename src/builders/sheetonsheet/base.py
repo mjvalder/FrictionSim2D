@@ -16,7 +16,7 @@ Constraint modes control interlayer bonding and ghost interactions:
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, List, Union, TYPE_CHECKING
+from typing import Any, Dict, Optional, List, Sequence, Union, TYPE_CHECKING
 
 from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from ...core.config import SheetOnSheetSimulationConfig
@@ -27,7 +27,8 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
-from ..utils.interlayer import (interlayer_template_context,
+from ..utils.interlayer import (interlayer_provenance_block,
+                                interlayer_template_context,
                                 set_interlayer_from_config)
 
 if TYPE_CHECKING:
@@ -93,7 +94,8 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
                            output_root: Optional[Path] = None,
                            drive_k: Optional[float] = None,
                            drive_rest_length: Optional[float] = None,
-                           geometry: Optional['BuiltGeometry'] = None) -> Path:
+                           geometry: Optional['BuiltGeometry'] = None,
+                           pm: Optional[PotentialManager] = None) -> Path:
     """Write ``provenance.json`` for one sheet-family run.
 
     The sheet family's counterpart to
@@ -156,6 +158,9 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
         drive_k: drive spring constant (eV/A^2), None when there is no spring.
         drive_rest_length: drive spring rest length (A).
         geometry: built geometry to record, if the builder tracks it.
+        pm: the run's potential manager; its interlayer choice is recorded
+            (:func:`~src.builders.utils.interlayer.interlayer_provenance_block`
+            -- absent for plain ``lj``).
 
     Returns:
         The path written.
@@ -227,6 +232,7 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
         drive_k=drive_k,
         drive_rest_length=drive_rest_length,
         geometry=geometry,
+        interlayer=interlayer_provenance_block(pm, config.general),
     )
     return write_provenance(output_root or builder.output_dir, record)
 
@@ -234,7 +240,8 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
 def sheet_obs_ctx(settings, *, sim_type: str, n_layers: int,
                   results_file_pattern: str,
                   contact_cutoff: Optional[float] = None,
-                  extra_filter=None) -> Dict[str, object]:
+                  extra_filter=None,
+                  requested_channels: Sequence[str] = ()) -> Dict[str, object]:
     """Build the observable context shared by every sheet-family builder.
 
     The three ``_build_obs_ctx`` methods in this package -- this module's,
@@ -274,6 +281,9 @@ def sheet_obs_ctx(settings, *, sim_type: str, n_layers: int,
             builder passes its real derivation.
         extra_filter: an optional predicate dropping channels the family's
             template cannot support. ``None`` keeps every registered channel.
+        requested_channels: opt-in channels the builder itself turns on
+            because its template defines them (``E_int_interlayer_all`` under
+            ILP/KC), added to the user's ``output.optional_channels``.
     """
     # Both deferred, for two different reasons, stated once here rather than
     # repeated at each call site:
@@ -307,7 +317,7 @@ def sheet_obs_ctx(settings, *, sim_type: str, n_layers: int,
         enabled_tiers=dict(out.channels),
         contact_cutoff=contact_cutoff,
         results_freq=out.results_frequency,
-        optional_channels=out.optional_channels,
+        optional_channels=(*out.optional_channels, *requested_channels),
         interface_layers=(n_layers // 2, n_layers // 2 + 1),
         extra_filter=extra_filter,
     )
@@ -618,28 +628,29 @@ class SheetOnSheetSimulation(SimulationBase):
         one definition shared between Python and Jinja rather than two that
         can drift (see MIDDLE_INTERFACE in tests/builders/test_template_contract.py).
 
-        With an interlayer style (``interlayer_ctx``), ``E_int_interlayer``
-        exists only where the template defines ``v_e_int_il``: the
-        group/group branch, or the ILP/KC ``compute pair``. ``n_contact_il``
-        is a ``coord/atom`` count from the UFF/override sigma, so it stays
-        under every style and the counts remain comparable.
+        With an interlayer style (``interlayer_ctx``) the energy channel
+        follows what the template defines: ``E_int_interlayer``
+        (``v_e_int_il``, the shearing interface) on the group/group branch,
+        ``E_int_interlayer_all`` (``v_e_int_il_all``, every layer pair) where
+        an ILP/KC ``compute pair`` is emitted -- requested here, since it is
+        opt-in -- and neither otherwise. ``n_contact_il`` is a ``coord/atom``
+        count from the UFF/override sigma, so it stays under every style and
+        the counts remain comparable.
         """
-        dropped = set()
+        substyle = (interlayer_ctx or {}).get('interlayer_energy_substyle')
+        dropped = set() if substyle else {'E_int_interlayer_all'}
         if has_internal_lj:
-            dropped = {'E_int_interlayer', 'n_contact_il'}
-        elif interlayer_ctx is not None and not (
-                interlayer_ctx['use_group_group']
-                or interlayer_ctx['interlayer_energy_substyle']):
-            dropped = {'E_int_interlayer'}
+            dropped |= {'E_int_interlayer', 'n_contact_il'}
+        elif interlayer_ctx is not None and not interlayer_ctx['use_group_group']:
+            dropped |= {'E_int_interlayer'}
         return sheet_obs_ctx(
             self.config.settings,
             sim_type=self.FAMILY,
             n_layers=n_layers,
             results_file_pattern=results_file_pattern,
             contact_cutoff=self._contact_cutoff(),
-            extra_filter=(
-                None if not dropped
-                else lambda ob: ob.name not in dropped),
+            extra_filter=lambda ob: ob.name not in dropped,
+            requested_channels=('E_int_interlayer_all',) if substyle else (),
         )
 
     def _contact_cutoff(self) -> float:
@@ -840,6 +851,7 @@ class SheetOnSheetSimulation(SimulationBase):
             drive_k=drive_k,
             drive_rest_length=drive_rest_length,
             geometry=self._built_geometry(n_layers),
+            pm=self.pm,
         )
 
         outer_loop = getattr(self.config.general, 'outer_loop', None)

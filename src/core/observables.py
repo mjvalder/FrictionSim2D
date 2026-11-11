@@ -197,6 +197,8 @@ PARITY_EXEMPT: dict = {
         'temperature per body (interior, fixed bottom, driven top)',
     ('afm', 'interlayer_interaction'):
         'AFM measures the tip-sheet interaction, a different pair of bodies',
+    ('afm', 'interlayer_interaction_all_pairs'):
+        'AFM measures the tip-sheet interaction, a different pair of bodies',
     ('afm', 'drive_force_x'):
         'the AFM tip is driven by a spring, not a constant applied force',
     ('afm', 'drive_force_y'):
@@ -404,11 +406,25 @@ _add(Observable(name='E_int_tip_sheet', sim_types=('afm', 'indent'),
                 rename_to='v_e_int', units='eV',
                 role_key='tip_sheet_interaction'))
 # Template-owned: the compute sits in sheetonsheet's slide template, behind its
-# has_internal_lj branch, with real per-material group names.
+# has_internal_lj branch, with real per-material group names. The value is
+# the `compute group/group` scalar: the interaction energy of the SHEARING
+# INTERFACE only (layer il_top against layer il_bot) -- lj / lj_g runs.
 _add(Observable(name='E_int_interlayer', sim_types=('sheetonsheet', 'hetero'),
                 group='layer_n', tier='peratom', stream='results',
                 rename_to='v_e_int_il', units='eV',
                 role_key='interlayer_interaction'))
+# The ilp / kc counterpart (spec 2026-11-11 §7), deliberately a DIFFERENT
+# channel: `compute pair <ilp/kc sub-style>` (common/interlayer_energy.lmp)
+# sums the interlayer term over EVERY layer pair of the stack, not just the
+# shearing interface, so it is not the quantity E_int_interlayer reports and
+# must never be read as one -- equal only on a bilayer. opt_in so it is never
+# emitted by default: the builders request it themselves exactly when the
+# template defines v_e_int_il_all (an ilp/kc sub-style is set) and their
+# extra_filter drops it everywhere else.
+_add(Observable(name='E_int_interlayer_all', sim_types=('sheetonsheet', 'hetero'),
+                group='all', tier='peratom', stream='results', opt_in=True,
+                rename_to='v_e_int_il_all', units='eV',
+                role_key='interlayer_interaction_all_pairs'))
 # --- sheet window channels: every native below is already emitted by
 # sheetonsheet/slide.lmp's fc_win. Declaring them is what lets the registry
 # own the renames -- DataReader._SHEET_COLUMN_RENAME was deleted once it did.

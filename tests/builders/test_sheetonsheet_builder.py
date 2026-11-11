@@ -905,7 +905,8 @@ def test_sheet_ilp_scripts(tmp_path, monkeypatch):
     assert "variable        xfrict equal v_sx" in slide
     assert "compute         frict" not in slide
     assert "compute         e_il all pair ilp/tmd" in slide
-    assert "variable        e_int_il equal c_e_il" in slide
+    assert "variable        e_int_il_all equal c_e_il" in slide
+    assert "variable        e_int_il equal" not in slide
     assert "fix             mol_ids all property/atom mol ghost yes" in slide
     assert "atom_style      atomic" in slide     # data files stay atomic
 

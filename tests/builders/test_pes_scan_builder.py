@@ -305,3 +305,59 @@ def test_pes_tip_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
     slide = (out / "L2" / "lammps" / "slide.in").read_text(encoding="utf-8")
     assert re.findall(r"^set group (\S+) mol (\d+)$", slide, re.M) == [
         ("layer_1", "1"), ("layer_2", "2")]
+
+
+# --- interlayer styles (spec 2026-11-11 §7, Task 7) -------------------------
+
+def _build_example_pes_sheet(tmp_path, monkeypatch, **general) -> Path:
+    """Build ``examples/pes_sheet_config.ini`` small (12x12, lat_c given)."""
+    from src.core.config import GlobalSettings, read_config
+    repo = Path(__file__).resolve().parents[2]
+    monkeypatch.chdir(repo)
+    raw = read_config(repo / "examples" / "pes_sheet_config.ini")
+    raw["general"].update(general)
+    raw["2D"].update({"x": 12, "y": 12, "lat_c": 6.15})
+    settings = GlobalSettings()
+    settings.hpc.modules = ["lammps"]
+    config = SheetOnSheetSimulationConfig(**raw, settings=settings)
+    out = tmp_path / "out"
+    PESSheetSimulation(config, output_dir=str(out)).build()
+    return out
+
+
+def _first_run(lines):
+    return next(i for i, ln in enumerate(lines)
+                if ln.split()[:1] in (["run"], ["minimize"]))
+
+
+def test_pes_sheet_ilp_energy_channel(tmp_path, monkeypatch):
+    """ilp: molecule IDs before the first minimize, ILP energy as an extra column."""
+    out = _build_example_pes_sheet(tmp_path, monkeypatch, interlayer_style="ilp")
+    assert "pair_coeff * * ilp/tmd" in (
+        out / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    for name in ("slide.in", "slide_refine.in"):
+        lines = (out / "lammps" / name).read_text(encoding="utf-8").splitlines()
+        head = lines[:_first_run(lines)]
+        include = next(i for i, ln in enumerate(lines) if ln.startswith("include"))
+        fix = lines.index("fix             mol_ids all property/atom mol ghost yes")
+        assert include < fix < _first_run(lines), name
+        assert lines[fix + 1:fix + 3] == ["set group layer_1 mol 1",
+                                          "set group layer_2 mol 2"], name
+        assert "compute         e_il all pair ilp/tmd" in head, name
+        assert "variable        e_int_il_all equal c_e_il" in head, name
+        assert "variable        e_il_cell equal v_e_int_il_all/v_ncell" in head, name
+        # c_e_il must be current when the print evaluates it between runs.
+        assert "thermo_style    custom step pe c_e_il" in head, name
+        text = "\n".join(lines)
+        assert '"dx,dy,energy_eV,e_interlayer_eV"' in text, name
+        assert '"$(v_dx),$(v_dy),$(v_pe_cell),$(v_e_il_cell)"' in text, name
+
+
+def test_pes_sheet_lj_scan_has_no_interlayer_keys(tmp_path, monkeypatch):
+    """lj: no molecule IDs, no energy compute, the three-column CSV of before."""
+    out = _build_example_pes_sheet(tmp_path, monkeypatch)
+    slide = (out / "lammps" / "slide.in").read_text(encoding="utf-8")
+    assert "mol_ids" not in slide
+    assert "e_il" not in slide
+    assert "thermo_style" not in slide
+    assert '"dx,dy,energy_eV"' in slide
