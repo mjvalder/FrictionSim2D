@@ -26,6 +26,7 @@ CASES: List[Tuple[str, str, int]] = [
     ('pes_sheet_config.ini', 'pes_sheet', 1),
     ('pes_tip_config.ini', 'pes_tip', 1),
     ('sheet_config.ini', 'sheetonsheet', 1),
+    ('sheet_config_interlayer.ini', 'sheetonsheet', 3),
 ]
 
 #: (config file, model, members of the REAL file). Built one-material: 156 real

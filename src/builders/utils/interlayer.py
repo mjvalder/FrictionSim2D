@@ -21,9 +21,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from ...potentials.interlayer import ILP_CUTOFF, KC_FULL_CUTOFF, gaussian_g
 
 #: Styles whose interlayer term ``compute group/group`` can evaluate (it
-#: needs ``pair->single()``). ``lj_g`` is provisional: Task 8 checks it
-#: under ``kolmogorov/crespi/z``.
-GROUP_GROUP_STYLES = ('lj', 'lj_g')
+#: needs ``pair->single()``). Not ``lj_g``: ``kolmogorov/crespi/z`` has no
+#: ``single()``, and LAMMPS aborts the run with "Pair hybrid sub-style does
+#: not support single call" (measured, tests/integration/
+#: test_interlayer_lammps.py), so LJ-G takes the reaction-force branch.
+GROUP_GROUP_STYLES = ('lj',)
 
 #: Interlayer cutoff (Angstrom) of the styles the periodic cell must exceed.
 INTERLAYER_CUTOFFS: Dict[str, float] = {'ilp': ILP_CUTOFF, 'kc': KC_FULL_CUTOFF}
@@ -71,12 +73,13 @@ def interlayer_template_context(general: Any, *, has_internal_lj: bool,
     """Slide-template keys for the interlayer choice.
 
     ``use_group_group`` is False for a potential with its own interlayer term,
-    for ``ilp``/``kc``, and whenever comparison mode is on, so every style of
-    a comparison sweep reports the same reaction-force friction (spec §7).
+    for ``lj_g``/``ilp``/``kc`` (``lj_g``'s KC/z has no ``pair->single()``),
+    and whenever comparison mode is on, so every style of a comparison sweep
+    reports the same reaction-force friction (spec §7).
     ``interlayer_energy_substyle`` is set only where ``compute pair`` isolates
-    the interlayer term (``ilp``/``kc``); under ``lj``/``lj_g`` in comparison
-    mode the LJ part shares ``lj/cut`` with the tip/virtual pairs, so the
-    energy is dropped there as it is for rebomos.
+    the interlayer term (``ilp``/``kc``); under ``lj_g``, and ``lj`` in
+    comparison mode, the LJ part shares ``lj/cut`` with the tip/virtual pairs,
+    so the energy is dropped there as it is for rebomos.
     """
     style = interlayer_style(general)
     use_group_group = (not has_internal_lj and style in GROUP_GROUP_STYLES

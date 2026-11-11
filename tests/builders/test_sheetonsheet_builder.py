@@ -1026,11 +1026,15 @@ def test_comparison_mode_lj(tmp_path, monkeypatch):
 
 
 def test_ljg_group_group(tmp_path, monkeypatch):
-    """lj_g without comparison keeps compute group/group (pending Task 8)."""
+    """lj_g takes the reaction-force branch: compute group/group aborts under
+    the KC/z overlay ("Pair hybrid sub-style does not support single call",
+    tests/integration/test_interlayer_lammps.py::test_ljg_group_group_runs)."""
     out = _build_example_sheet(tmp_path, monkeypatch,
                                **_small(interlayer_style="lj_g"))
     settings_text = (out / "lammps" / "system.in.settings").read_text(encoding="utf-8")
     assert "kolmogorov/crespi/z" in settings_text
     slide = (out / "lammps" / "slide.in").read_text(encoding="utf-8")
-    assert "compute         frict layer_2 group/group layer_1" in slide
+    assert "compute         frict" not in slide
+    assert "variable        xfrict equal v_sx" in slide
+    assert "e_int_il" not in slide      # LJ part shares lj/cut: nothing isolates it
     assert "property/atom" not in slide

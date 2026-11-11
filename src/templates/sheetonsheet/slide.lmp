@@ -140,8 +140,10 @@ variable        sx equal f_fsbot[1]*{{ ev_a_to_nn }}
 variable        sy equal f_fsbot[2]*{{ ev_a_to_nn }}
 variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 
-{# compute group/group needs pair->single(): LJ (and, pending Task 8, LJ-G)
-   provide it; a potential with an internal interlayer term, ILP/KC, or the
+{# compute group/group needs pair->single(): only LJ provides it (LJ-G's
+   kolmogorov/crespi/z has none: LAMMPS aborts with "Pair hybrid sub-style
+   does not support single call"); a potential with an internal interlayer
+   term, LJ-G/ILP/KC, or the
    interlayer comparison mode take the reaction-force branch instead.
    The builder passes `use_group_group` as a real bool; only `false` itself
    (`sameas`, so a 0 stub or an absent key keeps the old has_internal_lj
@@ -153,7 +155,7 @@ variable        sz equal f_fsbot[3]*{{ ev_a_to_nn }}
 # If friction values look wrong, verify pot_type classification in
 # PotentialManager.is_sheet_lj() (src/core/potential_manager.py).
 {% else %}
-# Interlayer style without compute group/group (ILP/KC, or comparison mode):
+# Interlayer style without compute group/group (LJ-G/ILP/KC, or comparison mode):
 # bottom-layer reaction forces as the lateral friction proxy, in nN.
 {% endif %}
 variable        xfrict equal v_sx
