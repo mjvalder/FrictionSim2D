@@ -799,3 +799,134 @@ def test_a_monolayer_has_no_interlayer_distance(tmp_path):
     assert geometry["lat_c"] is None
     assert geometry["lat_c_source"] == "not_applicable"
     assert geometry["tip_r"] == 20.0
+
+
+# --------------------------------------------------------------------------- #
+# Interlayer styles between the AFM sheet's own layers (interlayer-potential-
+# choice Task 5). data/afm_lj_snapshot/ was captured from examples/afm_config.ini
+# at 956989a, before any of this was wired into the AFM family.
+# --------------------------------------------------------------------------- #
+
+from tests.helpers.afm import REPO_ROOT, build_example_afm, normalised_lammps_files  # noqa: E402
+
+AFM_LJ_SNAPSHOT = Path(__file__).parent / "data" / "afm_lj_snapshot"
+
+
+def test_afm_lj_byte_identical(tmp_path, monkeypatch):
+    """interlayer_style=lj (the default): every L*/lammps/ file equals the snapshot."""
+    got = normalised_lammps_files(
+        build_example_afm(tmp_path, monkeypatch, "afm_config.ini"))
+    want = {str(p.relative_to(AFM_LJ_SNAPSHOT)): p.read_text(encoding="utf-8")
+            for p in sorted(AFM_LJ_SNAPSHOT.rglob("*")) if p.is_file()}
+    assert sorted(got) == sorted(want)
+    for name, text in want.items():
+        assert got[name] == text, name
+
+
+def _small_afm(tmp_path, monkeypatch, layers, style, builder_cls=AFMSimulation,
+               ini="indent_config.ini", **general):
+    """examples/indent_config.ini geometry (60x60 sheet, r15 tip) as a plain AFM run."""
+    return build_example_afm(
+        tmp_path, monkeypatch, ini, builder_cls,
+        general={"interlayer_style": style, "force": [5], "outer_loop": None, **general},
+        **{"2D": {"layers": layers, "lat_c": 6.15}})
+
+
+def _settings_lines(out: Path, n: int):
+    text = (out / f"L{n}" / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    return text.splitlines()
+
+
+def _data_atom_types(path: Path) -> int:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip().endswith("atom types"):
+            return int(line.split()[0])
+    raise AssertionError(f"no 'atom types' line in {path}")
+
+
+def test_afm_ilp_trilayer(tmp_path, monkeypatch):
+    """3-layer MoS2 + ilp: ILP over the sheet only, tip/sub NULL, lj/cut to the tip."""
+    out = _small_afm(tmp_path, monkeypatch, [3], "ilp")
+    lines = _settings_lines(out, 3)
+    ilp = [ln for ln in lines if ln.startswith("pair_coeff * * ilp/tmd")]
+    assert len(ilp) == 1
+    emap = ilp[0].split("#")[0].split()[5:]
+    # sub (Si, 3 Langevin types) + tip (Si, 3) and the virtual drive atom ->
+    # NULL; the sheet: 3 layers x (Mo, S top, S bottom).
+    assert emap[:6] == ["NULL"] * 6
+    assert sorted(emap[6:15]) == ["Mo"] * 3 + ["S"] * 6
+    assert emap[15:] == ["NULL"] * (len(emap) - 15)
+    assert any(ln.startswith("pair_style hybrid/overlay") and "ilp/tmd" in ln
+               for ln in lines)
+    # The sheet's layers meet through ILP only; tip-sheet and sub-sheet stay lj/cut.
+    lj = [ln for ln in lines if " lj/cut " in ln and ln.startswith("pair_coeff")]
+    assert not [ln for ln in lj if "(L" in ln]
+    tip_ids = set(range(4, 7))
+    sheet_ids = set(range(7, 16))
+
+    def _ids(tok):
+        lo, _, hi = tok.partition("*")
+        return set(range(int(lo), int(hi or lo) + 1))
+    assert any(_ids(ln.split()[1]) & tip_ids and _ids(ln.split()[2]) & sheet_ids
+               for ln in lj)
+
+    # Data file and potential manager agree on the split types.
+    assert _data_atom_types(out / "build" / "h-MoS2_3.lmp") == 9
+
+    system = (out / "L3" / "lammps" / "system.in").read_text(encoding="utf-8")
+    slide = (out / "L3" / "lammps" / "slide.in").read_text(encoding="utf-8")
+    for script in (system, slide):
+        assert "fix             mol_ids all property/atom mol ghost yes" in script
+        sets = re.findall(r"^set group (\S+) mol (\d+)$", script, re.M)
+        assert sets == [("layer_1", "1"), ("layer_2", "2"), ("layer_3", "3")]
+        # Molecule IDs come after the include that defines the layer groups.
+        assert script.index("include ") < script.index("fix             mol_ids")
+    # load_*.data is read back with a plain read_data: no Molecules section.
+    assert re.search(r"^write_data\s+\S+/load_\$\(v_find\)N\.data nofix$", system, re.M)
+
+
+def test_afm_single_layer_ilp_noop(tmp_path, monkeypatch, caplog):
+    """A monolayer has no sheet layers to couple: ilp builds exactly like lj, one log line."""
+    lj = normalised_lammps_files(_small_afm(tmp_path / "lj", monkeypatch, [1], "lj"))
+    with caplog.at_level(logging.INFO, logger="src.builders.afm.base"):
+        ilp_out = _small_afm(tmp_path / "ilp", monkeypatch, [1], "ilp")
+    ilp = normalised_lammps_files(ilp_out)
+    assert ilp == lj
+    notes = [r for r in caplog.records if "single-layer sheet" in r.getMessage()]
+    assert len(notes) == 1
+
+
+@pytest.mark.parametrize("style", ["lj_g", "kc"])
+def test_afm_bilayer_other_styles(tmp_path, monkeypatch, style):
+    """lj_g keeps the layer lj/cut plus KC/z; kc swaps it for KC-full. Both leave the tip lj/cut."""
+    extra = {}
+    if style == "kc":
+        # No KC-full parametrisation ships for MoS2: the carbon one, relabelled.
+        cc = (REPO_ROOT / "examples" / "potentials" / "kc" / "CC.KC-full").read_text(
+            encoding="utf-8").splitlines()
+        params = next(ln for ln in cc if ln.strip() and not ln.startswith("#")).split()[2:]
+        kc = tmp_path / "MoS2.KC-full"
+        kc.write_text("".join(f"{a} {b} {' '.join(params)}\n"
+                              for a in ("Mo", "S") for b in ("Mo", "S")), encoding="utf-8")
+        extra["interlayer_file"] = str(kc)
+    out = _small_afm(tmp_path, monkeypatch, [2], style, **extra)
+    lines = _settings_lines(out, 2)
+    layer_lj = [ln for ln in lines if " lj/cut " in ln and "(L" in ln]
+    slide = (out / "L2" / "lammps" / "slide.in").read_text(encoding="utf-8")
+    if style == "lj_g":
+        assert layer_lj
+        assert sum("kolmogorov/crespi/z" in ln for ln in lines if ln.startswith("pair_coeff")) == 3
+        assert "mol_ids" not in slide
+    else:
+        assert not layer_lj
+        assert any(ln.startswith("pair_coeff * * kolmogorov/crespi/full") for ln in lines)
+        assert "set group layer_2 mol 2" in slide
+
+
+def test_afm_flake_with_ilp_is_refused(tmp_path, monkeypatch):
+    """The flake would get split ilp/tmd types its data file does not have."""
+    with pytest.raises(ValueError, match="flake"):
+        build_example_afm(
+            tmp_path, monkeypatch, "afm_flake_config.ini",
+            general={"interlayer_style": "ilp"},
+            **{"2D": {"layers": [2], "lat_c": 6.15}})

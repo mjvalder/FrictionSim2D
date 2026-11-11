@@ -1,3 +1,4 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
 # LAMMPS input script for tip-on-sheet (AFM) surface PES scan (self-contained).
 # Assembles the tip + sheet + substrate, places the rigid tip at a fixed firm
 # contact gap above the sheet (stable, unlike the dynamic indentation), then holds
@@ -28,6 +29,9 @@ read_data       {{ sub_file }} add append group sub
 read_data       {{ tip_file }} add append shift {{ tip_x }} {{ tip_y }} {{ tip_z }} group tip offset {{ sub_natypes }} 0 0 0 0
 read_data       {{ sheet_file }} add append shift {{ sheet_shift_x }} {{ sheet_shift_y }} {{ sheet_z }} group 2D offset {{ offset_2d }} 0 0 0 0
 include         {{ potential_file }}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 balance         1.0 rcb
 
 min_style       {{ min_style }}

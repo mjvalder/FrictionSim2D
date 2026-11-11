@@ -1,3 +1,4 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
 # Freestanding tip-on-slab surface PES scan (self-contained, no substrate).
 # A self-supported N-layer slab of the sheet material: layer_1 is held fixed
 # (the anchor that removes amorphous-substrate noise), the upper layers relax.
@@ -20,6 +21,9 @@ create_box      {{ ngroups }} box
 read_data       {{ tip_file }} add append shift {{ tip_x }} {{ tip_y }} {{ tip_z }} group tip offset 0 0 0 0 0
 read_data       {{ sheet_file }} add append shift {{ sheet_shift_x }} {{ sheet_shift_y }} {{ sheet_z }} group 2D offset {{ offset_2d }} 0 0 0 0
 include         {{ potential_file }}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 balance         1.0 rcb
 
 min_style       {{ min_style }}

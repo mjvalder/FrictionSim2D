@@ -338,3 +338,21 @@ def test_system_init_seed_always_comes_from_the_builder(tmp_path: Path):
                                      _system_init_context(velocity_seed=seed))
     line = next(l for l in script.splitlines() if "system create" in l)
     assert line.split()[-1] == str(seed)
+
+
+def test_indent_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
+    """ilp between the sheet's layers: system.in and the indent script both set mol IDs."""
+    import re
+    from tests.helpers.afm import build_example_afm
+    out = build_example_afm(
+        tmp_path, monkeypatch, "indent_config.ini", IndentSimulation,
+        general={"interlayer_style": "ilp", "force": [5]},
+        **{"2D": {"layers": [2], "lat_c": 6.15}})
+    settings = (out / "L2" / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    assert "pair_coeff * * ilp/tmd" in settings
+    scripts = sorted((out / "L2" / "lammps").glob("*.in"))
+    assert len(scripts) >= 2          # system.in + the indent run
+    for script in scripts:
+        text = script.read_text(encoding="utf-8")
+        assert re.findall(r"^set group (\S+) mol (\d+)$", text, re.M) == [
+            ("layer_1", "1"), ("layer_2", "2")], script.name

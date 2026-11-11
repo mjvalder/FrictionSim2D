@@ -1,4 +1,5 @@
 """AFM builder fixtures shared across builder, template and provenance tests."""
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -118,3 +119,45 @@ def _prepare_builder_for_slide_write(builder: AFMSimulation, tmp_path: Path) -> 
     layer_dir = _seed_builder_state(builder, tmp_path)
     builder.write_inputs(1)
     return layer_dir / "lammps" / "slide.in"
+
+
+# --- interlayer-potential-choice Task 5: real builds of the example configs ---
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_SEED_PATTERNS = (
+    (re.compile(r'(langevin [\d.]+ [\d.]+ \$\(100\.0\*dt\) )\d+( zero yes)'), r'\1SEED\2'),
+    (re.compile(r'(velocity        system create [\d.]+ )\d+'), r'\1SEED'),
+)
+
+
+def build_example_afm(tmp_path: Path, monkeypatch, ini: str, builder_cls=AFMSimulation,
+                      **sections) -> Path:
+    """Build ``examples/<ini>`` with per-section overrides; return the run dir.
+
+    Default ``GlobalSettings()`` (no user settings file), so the output depends
+    only on the code. ``sections`` maps an .ini section (``general``, ``2D``,
+    ``tip``, ...) to the keys it overrides.
+    """
+    from src.core.config import GlobalSettings, read_config  # pylint: disable=import-outside-toplevel
+    monkeypatch.chdir(REPO_ROOT)
+    raw = read_config(REPO_ROOT / "examples" / ini)
+    for section, values in sections.items():
+        raw.setdefault(section, {}).update(values)
+    settings = GlobalSettings()
+    settings.hpc.modules = ["lammps"]        # gates HPC generation, which build() runs
+    config = AFMSimulationConfig(**raw, settings=settings)
+    out = tmp_path / "out"
+    builder_cls(config, output_dir=str(out)).build()
+    return out
+
+
+def normalised_lammps_files(out: Path) -> dict:
+    """``{L<n>/lammps/<name>: text}``; run dir -> <OUT>, per-build seeds -> SEED."""
+    files = {}
+    for p in sorted(out.glob("L*/lammps/*")):
+        text = p.read_text(encoding="utf-8").replace(str(out), "<OUT>")
+        for pattern, repl in _SEED_PATTERNS:
+            text = pattern.sub(repl, text)
+        files[str(p.relative_to(out))] = text
+    return files

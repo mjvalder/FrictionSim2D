@@ -23,6 +23,7 @@ from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type, lj_params
 from ...data.models import EV_A_TO_NN
 from ..construction import components
+from ..utils.interlayer import interlayer_style, set_interlayer_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +254,7 @@ class AFMSimulation(SimulationBase):
                 edge_width=self.config.settings.geometry.finite_sheet_edge_width,
                 unit_cell_out=self.sheet_unit_cell,
                 lat_c_info_out=info,
+                interlayer_general=self._sheet_interlayer_general(n_layers),
         )
         self.sheet_paths[n_layers] = sheet_path
         if self.lat_c is None:
@@ -260,6 +262,15 @@ class AFMSimulation(SimulationBase):
             self.lat_c_source = info.get('lat_c_source')
             self.sheet_build_info = dict(info)
             self.sheet_dims = dict(sheet_dims)
+
+    def _sheet_interlayer_general(self, n_layers: int) -> Any:
+        """The ``[general]`` config whose interlayer style the sheet's layers use.
+
+        ``None`` (plain interlayer LJ) for a monolayer: it has no layers of its
+        own to couple, so the style is accepted and changes nothing (spec
+        2026-11-11 §3) -- not even the ilp/tmd chalcogen type split.
+        """
+        return self.config.general if n_layers > 1 else None
 
     def _material_id(self) -> str:
         """Material token used in the HPC job name.
@@ -605,6 +616,16 @@ class AFMSimulation(SimulationBase):
             n_sheet_layers > 1 and
             pm.is_sheet_lj(self.config.sheet.pot_type)
         )
+        style = interlayer_style(self.config.general)
+        if sheet_needs_layer_types:
+            # Between the sheet's own layers only; tip/sub keep lj/cut (spec
+            # §3). Before the sheet's registration: ilp/tmd's chalcogen
+            # sub-layer split is decided there, matching build_sheet's.
+            set_interlayer_from_config(pm, self.config.general,
+                                       {'sheet': self.config.sheet})
+        elif style != 'lj' and n_sheet_layers == 1:
+            logger.info("interlayer_style '%s' has no effect on a single-layer "
+                        "sheet: there are no sheet layers to couple.", style)
         sheet_edge_regions = (
             [None, 'edge']
             if self.config.general.finite_sheet
@@ -624,6 +645,13 @@ class AFMSimulation(SimulationBase):
             # regions=[None, 'corner'] interleaves core/corner types to match the
             # type splitting done by components.apply_flake_corner_types.
             pm.register_component('flake', flake_cfg, regions=[None, 'corner'])
+            if pm.components['flake'].get('split_chalcogens'):
+                raise ValueError(
+                    f"interlayer_style '{style}' with an AFM [flake] on a "
+                    f"{n_sheet_layers}-layer sheet is not supported: ilp/tmd "
+                    "would give the flake's chalcogen sub-layers their own atom "
+                    "types, which the flake data file does not have. Use "
+                    "interlayer_style = lj, lj_g or kc, or drop the [flake].")
 
         if self.config.settings.simulation.drive_method == 'virtual_atom':
             pm.register_virtual_atom()
@@ -645,8 +673,8 @@ class AFMSimulation(SimulationBase):
             pm.add_cross_interaction('tip', 'flake')
             pm.add_cross_interaction('sheet', 'flake')
 
-        if sheet_needs_layer_types and n_sheet_layers > 1:
-            pm.add_interlayer_interaction('sheet')
+        if sheet_needs_layer_types:
+            pm.add_interlayer(['sheet'])
 
         settings_path = self.output_dir_layer[n_sheet_layers] / "lammps" / "system.in.settings"
         pm.write_file(settings_path)
@@ -856,6 +884,7 @@ class AFMSimulation(SimulationBase):
             'seed_thermal_sub': self._run_seed('thermal_sub'),
         }
         context.update(flake_ctx)
+        context.update(self._molecule_id_context(n_layers))
         context['layer_groups_available'] = \
             self._layer_groups_available(n_layers)
         context['obs_ctx'] = self._build_obs_ctx(
@@ -863,6 +892,20 @@ class AFMSimulation(SimulationBase):
             use_langevin=context['use_langevin'],
             layer_groups_available=context['layer_groups_available'])
         return context
+
+    def _molecule_id_context(self, n_layers: int) -> Dict[str, object]:
+        """Template keys for ``common/molecule_ids.lmp`` (ILP/KC only).
+
+        One molecule per sheet layer (``layer_1`` .. ``layer_n``, from the
+        potential include); tip, substrate and flake keep molecule 0. AFM
+        friction is the tip force, so no friction-branch keys are needed.
+        """
+        needs = bool(getattr(self.pm.get(n_layers), 'needs_molecule_ids', False))
+        return {
+            'needs_molecule_ids': needs,
+            'molecule_groups': ([f'layer_{i}' for i in range(1, n_layers + 1)]
+                                if needs else []),
+        }
 
     def _layer_groups_available(self, n_layers: int) -> bool:
         """Whether layer_{1..n} groups will exist in the rendered system.

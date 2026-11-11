@@ -1,3 +1,4 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
 {% import 'common/halt.lmp' as halt_guard %}
 # LAMMPS input script for the AFM indentation "indent" run: hold + pull-off retract.
 #
@@ -58,6 +59,9 @@ if              "${have_load} == 0" then &
                 "jump SELF indent_next"
 read_data       ${load_file}
 include         {{ potential_file }}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 
 group           2D type {{ sheet_types }}
 velocity        2D zero angular

@@ -291,3 +291,17 @@ def test_warn_if_footprint_too_small_swallows_missing_box_dims(tmp_path, caplog)
     with caplog.at_level(logging.WARNING):
         builder._warn_if_footprint_too_small(2, 5.0, 5.0)
     assert not caplog.records
+
+
+def test_pes_tip_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
+    """The tip PES on a substrate: ILP between the sheet layers, molecule IDs in the scan."""
+    import re
+    from tests.helpers.afm import build_example_afm
+    out = build_example_afm(
+        tmp_path, monkeypatch, "pes_tip_config.ini", PESTipSimulation,
+        general={"interlayer_style": "ilp"}, **{"2D": {"layers": [2], "lat_c": 6.15}})
+    settings = (out / "L2" / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    assert "pair_coeff * * ilp/tmd" in settings
+    slide = (out / "L2" / "lammps" / "slide.in").read_text(encoding="utf-8")
+    assert re.findall(r"^set group (\S+) mol (\d+)$", slide, re.M) == [
+        ("layer_1", "1"), ("layer_2", "2")]

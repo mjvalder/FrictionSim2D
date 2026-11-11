@@ -133,3 +133,20 @@ def test_freestanding_logs_resolved_config(tmp_path, caplog):
         and "contact gap" in r.message and "not enforced" in r.message
         for r in caplog.records
     )
+
+
+def test_freestanding_ilp_slab_sets_molecule_ids(tmp_path, monkeypatch):
+    """ilp in the slab: one molecule per layer after the include; the tip keeps mol 0."""
+    import re
+    from tests.helpers.afm import build_example_afm
+    out = build_example_afm(
+        tmp_path, monkeypatch, "afm_freestanding_pes_config.ini",
+        FreestandingPESTipSimulation,
+        general={"interlayer_style": "ilp"}, **{"2D": {"layers": [2], "lat_c": 6.15}})
+    settings = (out / "L2" / "lammps" / "system.in.settings").read_text(encoding="utf-8")
+    ilp = [ln for ln in settings.splitlines() if ln.startswith("pair_coeff * * ilp/tmd")]
+    assert len(ilp) == 1
+    slide = (out / "L2" / "lammps" / "slide.in").read_text(encoding="utf-8")
+    assert re.findall(r"^set group (\S+) mol (\d+)$", slide, re.M) == [
+        ("layer_1", "1"), ("layer_2", "2")]
+    assert slide.index("include ") < slide.index("fix             mol_ids")

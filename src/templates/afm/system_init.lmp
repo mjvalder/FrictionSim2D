@@ -1,3 +1,4 @@
+{% import 'common/molecule_ids.lmp' as mol_ids %}
 {% import 'common/halt.lmp' as halt_guard %}
 # LAMMPS input script for AFM System Initialization and Indentation
 
@@ -21,6 +22,9 @@ read_data       {{ flake_file }} add append shift {{ flake_shift_x }} {{ flake_s
 {% endif %}
 
 include         {{ potential_file }}
+{% if needs_molecule_ids %}
+{{ mol_ids.emit_molecule_ids(molecule_groups) -}}
+{% endif %}
 
 balance         1.0 rcb
 
@@ -195,7 +199,9 @@ variable        hold_fz delete
 variable        hold_tipz delete
 variable        hold_shz delete
 
-write_data      {{ output_dir }}/load_$(v_find)N.data
+{# nofix: no Molecules section, so slide/indent read it back with a plain
+   read_data and set the molecule IDs again after their include. #}
+write_data      {{ output_dir }}/load_$(v_find)N.data{{ ' nofix' if needs_molecule_ids else '' }}
 
 {% if forces is iterable and forces is not string %}
 next            find
