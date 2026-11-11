@@ -214,15 +214,25 @@ def _mean_z_by_type(lmp) -> dict:
 @needs_module
 def test_ilp_mos2_bilayer_spacing(tmp_path):
     """SW (Sevik) + ilp/tmd (TMD.ILP) 2H MoS2 bilayer, relaxed in-plane and
-    out: the Mo-Mo interlayer spacing lands at the 2H value.
+    out from a 6.8 A start (the stack is built at 6.15 A).
 
-    Measured 6.21 A from 5.6, 6.15 and 6.8 A starts. That is 0.06 A above the
-    bulk c/2 = 6.15 A: Sevik's SW makes the layer 0.13 A thicker (Mo-S height
-    1.65 vs 1.59 A), which the ILP S-S gap (2.92 A) only partly takes back.
-    The band is 6.10-6.25 A, not the 6.1-6.2 A first planned.
+    Starts at 5.6, 6.15 and 6.8 A all reach the same minimum (gap 2.9237 A,
+    Mo-Mo 6.2110 A). Only 6.8 runs here: it takes 4 s, the other two ~15 s each.
+
+    Two quantities. The S-S interlayer gap (top S of layer 1 to bottom S of
+    layer 2) is the one ILP owns: 2.92 A measured, against ~2.98 A implied by
+    bulk c/2 = 6.15 A minus a DFT layer thickness of ~3.17 A. Band 2.85-3.00 A,
+    whatever SW file holds the layers together.
+
+    The Mo-Mo spacing (6.21 A) also carries the SW
+    layer thickness: Sevik's layer is ~0.13 A thicker than DFT's (Mo-S height
+    1.65 vs ~1.59 A), and ILP was fitted with REBO layers, so the total
+    inherits that error. Its band, 6.10-6.25 A, is the 2H value widened by
+    that SW offset -- not the 6.1-6.2 A first planned.
     """
     from types import SimpleNamespace
     from src.builders.construction import components
+    start = 6.8
     _, settings, layers = _bilayer_settings(tmp_path, "ilp")
     general = SimpleNamespace(interlayer_style="ilp", interlayer_file=None,
                               interlayer_comparison=False)
@@ -238,8 +248,8 @@ def test_ilp_mos2_bilayer_spacing(tmp_path):
                     "fix mol_ids all property/atom mol ghost yes",
                     f"include {settings}",
                     "set group layer_1 mol 1", "set group layer_2 mol 2",
-                    # Start away from 6.15 so the test sees the minimiser move.
-                    "displace_atoms layer_2 move 0 0 0.5 units box",
+                    # The data file is stacked at lat_c = 6.15 A.
+                    f"displace_atoms layer_2 move 0 0 {start - 6.15:.4f} units box",
                     "fix relax all box/relax x 0.0 y 0.0 couple xy vmax 0.001",
                     "min_style cg",
                     "minimize 0 1e-8 20000 200000"):
@@ -247,8 +257,10 @@ def test_ilp_mos2_bilayer_spacing(tmp_path):
         z = _mean_z_by_type(lmp)
     finally:
         lmp.close()
-    mo_1, mo_2 = layers[0][0], layers[1][0]
+    (mo_1, *s_1), (mo_2, *s_2) = layers
     spacing = z[mo_2] - z[mo_1]
+    gap = min(z[t] for t in s_2) - max(z[t] for t in s_1)
+    assert 2.85 <= gap <= 3.00, gap
     assert 6.10 <= spacing <= 6.25, spacing
 
 
