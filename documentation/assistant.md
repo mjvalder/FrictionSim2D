@@ -32,7 +32,7 @@ files) always wait for you to click Apply.**
   limits requests per minute; a reply costs 2-7 requests, and the pane shows a
   Retry button when the limit is hit.
 - **Ollama (local).** Fully offline. The default model is the fine-tune
-  `fs2d-assistant:q35-4b` (Qwen3.5-4B trained on this app's tools; a few
+  `fs2d-assistant:qwen3.5-4b` (Qwen3.5-4B trained on this app's tools; a few
   seconds per short reply on a Radeon 780M). It is not in the Ollama library:
   the status line offers **Install** (below). When it can be neither found
   nor installed, the Assistant uses the stock `qwen3.5:4b` instead (fetch it
@@ -54,15 +54,15 @@ files) always wait for you to click Apply.**
 A fine-tune ships as a bundle in `assistant_models/<tag>/`:
 `model.gguf` (the weights, gitignored), a `Modelfile` whose `FROM
 ./model.gguf` is relative, and `manifest.json` (base model, the tool-schema
-hash it was trained for, the weights' sha256). Three ship: `q35-2b`, `q35-4b`
-(the default) and `q35-9b`, Qwen3.5 fine-tunes given the same prompt as the
+hash it was trained for, the weights' sha256). Three ship: `qwen3.5-2b`, `qwen3.5-4b`
+(the default) and `qwen3.5-9b`, Qwen3.5 fine-tunes given the same prompt as the
 hosted models, reference text included. Every bundle there is offered by name. When the selected
 one is missing, the status line reads `fs2d-assistant:<tag> is not installed`
 with an **Install** button: it checks the weights against the manifest (a
 bundle still syncing is refused) and runs `ollama create` with the status
 line showing progress. By hand, the same is
 
-    ollama create fs2d-assistant:q35-4b -f assistant_models/q35-4b/Modelfile
+    ollama create fs2d-assistant:qwen3.5-4b -f assistant_models/qwen3.5-4b/Modelfile
 
 If its tool-schema hash is not this app's (the tools changed since
 it was trained), the chat says so once: results may degrade, and retraining
@@ -110,7 +110,7 @@ the port answers but is not Ollama, the status says so and nothing is started.
 
 ### Status line
 
-One line under the provider and model pickers: `Ollama ready (fs2d-assistant:q35-4b)`,
+One line under the provider and model pickers: `Ollama ready (fs2d-assistant:qwen3.5-4b)`,
 `Starting Ollama…`, `Ollama not running — starts on your next message`, or
 why it could not start. **Check again** re-asks Ollama (it never starts it).
 **Details** unfolds the start command, a **Copy start command** button, the
@@ -130,7 +130,7 @@ Settings live in `~/.config/FrictionSim2D/agent.yaml`:
 | `provider` | `gemini` | `gemini` or `ollama` |
 | `ask_before_apply` | `false` | changes wait as cards (below) |
 | `max_requests_per_turn` | `50` | model requests one reply may make |
-| `ollama.model` | `fs2d-assistant:q35-4b` | local model |
+| `ollama.model` | `fs2d-assistant:qwen3.5-4b` | local model |
 | `ollama.trained_knowledge` | `false` | give the model the knowledge files (set from a fine-tune's manifest) |
 | `ollama.idle_minutes` | `10` | stop a server the Assistant started after this long idle |
 | `ollama.context_tokens` | `16384` | `OLLAMA_CONTEXT_LENGTH` of a started server |

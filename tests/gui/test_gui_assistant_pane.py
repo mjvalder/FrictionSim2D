@@ -856,10 +856,10 @@ def test_claude_offers_opus_sonnet_and_haiku(qt_app, env):
 
 def _tune(tmp_path, schema_hash='b8b78921bc6dd497'):
     from src.agent.bundles import FineTune
-    bundle = tmp_path / 'models' / 'q35-4b'
+    bundle = tmp_path / 'models' / 'qwen3.5-4b'
     bundle.mkdir(parents=True)
     (bundle / 'model.gguf').write_bytes(b'w')
-    return FineTune(tag='q35-4b', base='unsloth/Qwen3.5-4B', schema_hash=schema_hash,
+    return FineTune(tag='qwen3.5-4b', base='unsloth/Qwen3.5-4B', schema_hash=schema_hash,
                     knowledge_hash='k', bundle=bundle)
 
 
@@ -882,8 +882,8 @@ def _tune_pane(tmp_path, *, tune=None, install=None, models=None, settings=None,
 
 def test_missing_finetune_offers_install(qt_app, env, tmp_path):
     pane, _ = _tune_pane(tmp_path)
-    assert pane.settings.ollama.model == 'fs2d-assistant:q35-4b'
-    assert pane.status_label.text() == 'fs2d-assistant:q35-4b is not installed'
+    assert pane.settings.ollama.model == 'fs2d-assistant:qwen3.5-4b'
+    assert pane.status_label.text() == 'fs2d-assistant:qwen3.5-4b is not installed'
     assert not pane.install_button.isHidden() and pane.install_button.isEnabled()
 
 
@@ -897,9 +897,9 @@ def test_install_success_is_ready(qt_app, env, tmp_path):
     saved = []
     pane, _ = _tune_pane(tmp_path, save_settings=lambda s: saved.append(s.ollama.model_copy()))
     pane.install_button.click()
-    assert pane.status_label.text().startswith('Installing fs2d-assistant:q35-4b')
+    assert pane.status_label.text().startswith('Installing fs2d-assistant:qwen3.5-4b')
     assert _run_until(pane.ollama_checked) == [(True,)]
-    assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:q35-4b)'
+    assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:qwen3.5-4b)'
     assert pane.install_button.isHidden() and pane.model_box.isEnabled()
 
 
@@ -952,23 +952,23 @@ def test_remote_base_url_no_install(qt_app, env, tmp_path):
     s.ollama.base_url = 'http://gpu-box:11434'
     pane, _ = _tune_pane(tmp_path, settings=s)
     assert pane.install_button.isHidden()
-    assert 'pull fs2d-assistant:q35-4b' in pane.details_label.text()
+    assert 'pull fs2d-assistant:qwen3.5-4b' in pane.details_label.text()
 
 
 def test_schema_mismatch_warns_once(qt_app, env, tmp_path):
     pane, _ = _tune_pane(tmp_path, tune=_tune(tmp_path, schema_hash='aaaa'),
-                         models=['qwen3.5:4b', 'fs2d-assistant:q35-4b'],
+                         models=['qwen3.5:4b', 'fs2d-assistant:qwen3.5-4b'],
                          schema_hash_fn=lambda: 'bbbb')
     pane.model_box.setCurrentText('qwen3.5:4b')
     pane._on_model_chosen()  # pylint: disable=protected-access
-    pane.model_box.setCurrentText('fs2d-assistant:q35-4b')
+    pane.model_box.setCurrentText('fs2d-assistant:qwen3.5-4b')
     pane._on_model_chosen()  # pylint: disable=protected-access
     assert pane.chat.toPlainText().count('older tool set') == 1
 
 
 def test_schema_match_no_warning(qt_app, env, tmp_path):
-    pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:q35-4b'])
-    assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:q35-4b)'
+    pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:qwen3.5-4b'])
+    assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:qwen3.5-4b)'
     assert 'older tool set' not in pane.chat.toPlainText()
 
 
@@ -996,6 +996,6 @@ def test_bundle_still_syncing_keeps_the_default(qt_app, env, tmp_path):
     tune = _tune(tmp_path)
     (tune.bundle / 'model.gguf').unlink()  # Syncthing has not renamed it into place yet
     pane, _ = _tune_pane(tmp_path, tune=tune)
-    assert pane.settings.ollama.model == 'fs2d-assistant:q35-4b'
+    assert pane.settings.ollama.model == 'fs2d-assistant:qwen3.5-4b'
     assert pane.install_button.isHidden()
     assert 'still syncing' in pane.details_label.text()

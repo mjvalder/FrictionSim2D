@@ -5,7 +5,7 @@ from src.agent.bundles import FineTune, catalogue, write_bundle
 from src.agent.ollama_install import install_finetune
 from src.agent.settings import AgentSettings
 
-MANIFEST = {'tag': 'q35-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
+MANIFEST = {'tag': 'qwen3.5-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
             'knowledge_hash': 'ea92'}
 
 
@@ -28,9 +28,9 @@ class FakePopen:
 def _tune(tmp_path):
     gguf = tmp_path / 'w.gguf'
     gguf.write_bytes(b'weights')
-    write_bundle(tmp_path / 'models' / 'q35-4b', gguf=gguf, template='RENDERER qwen3.5',
+    write_bundle(tmp_path / 'models' / 'qwen3.5-4b', gguf=gguf, template='RENDERER qwen3.5',
                  manifest=MANIFEST)
-    return catalogue(tmp_path / 'models')['fs2d-assistant:q35-4b']
+    return catalogue(tmp_path / 'models')['fs2d-assistant:qwen3.5-4b']
 
 
 def test_install_from_bundle_runs_create(tmp_path):
@@ -38,9 +38,9 @@ def test_install_from_bundle_runs_create(tmp_path):
     tune = _tune(tmp_path)
     ok, message = install_finetune(AgentSettings(), tune, lambda line: None,
                                    popen=popen, binary='/bin/ollama')
-    assert ok and message == 'Installed fs2d-assistant:q35-4b'
+    assert ok and message == 'Installed fs2d-assistant:qwen3.5-4b'
     cmd, kwargs = popen.calls[0]
-    assert cmd == ['/bin/ollama', 'create', 'fs2d-assistant:q35-4b', '-f',
+    assert cmd == ['/bin/ollama', 'create', 'fs2d-assistant:qwen3.5-4b', '-f',
                    str(tune.bundle / 'Modelfile')]
     assert kwargs['env']['OLLAMA_HOST'] == 'localhost:11434'
 

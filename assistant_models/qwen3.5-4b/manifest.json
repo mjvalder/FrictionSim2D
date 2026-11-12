@@ -1,5 +1,5 @@
 {
-  "tag": "q35-4b",
+  "tag": "qwen3.5-4b",
   "base": "unsloth/Qwen3.5-4B",
   "schema_hash": "b8b78921bc6dd497",
   "knowledge_hash": "ea92dc8b1bc8424b",

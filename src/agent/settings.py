@@ -16,13 +16,16 @@ from pydantic import BaseModel, Field
 SETTINGS_NAME = 'agent.yaml'
 SECRETS_NAME = 'agent.secrets'
 #: The default local model: the fine-tune, installed from its bundle (src/agent/bundles.py).
-OLLAMA_DEFAULT_MODEL = 'fs2d-assistant:q35-4b'
+OLLAMA_DEFAULT_MODEL = 'fs2d-assistant:qwen3.5-4b'
 #: Used when the fine-tune can be neither found nor installed: stock 71 %, and
 #: unlike qwen3:4b its thinking can be switched off.
 OLLAMA_STOCK_MODEL = 'qwen3.5:4b'
 #: Models older agent.yaml files name: the Phase-0 derived model (never
 #: published) and the old default, whose template forces thinking (48 %, 44 s a turn).
 OLLAMA_LEGACY_MODELS = ('fs2d-qwen3-4b', 'qwen3:4b')
+#: The fine-tunes' first names (2026-11, before 'qwen3.5-<size>'): always renamed.
+OLLAMA_RENAMED = {f'fs2d-assistant:q35-{size}': f'fs2d-assistant:qwen3.5-{size}'
+                  for size in ('2b', '4b', '9b')}
 #: agent.yaml from before the fine-tune default; `fallback_ollama_model` migrates it once.
 SETTINGS_VERSION = 2
 
@@ -100,11 +103,12 @@ def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str],
     """Move an old agent.yaml to the fine-tune default, and the default to stock
     when the fine-tune is neither installed nor installable.
 
-    The legacy names are migrated once (``settings_version``), so a user who
+    A fine-tune's first name is always renamed. The legacy names are migrated once (``settings_version``), so a user who
     picks one again afterwards keeps it; any other model is never rewritten.
     Returns a note for the user when the model changed, else None.
     """
     names, old = set(installed), settings.ollama.model
+    settings.ollama.model = OLLAMA_RENAMED.get(old, old)
     if settings.settings_version < SETTINGS_VERSION:
         settings.settings_version = SETTINGS_VERSION
         if old in OLLAMA_LEGACY_MODELS:
@@ -114,6 +118,8 @@ def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str],
         settings.ollama.model = OLLAMA_STOCK_MODEL
     if settings.ollama.model == old:
         return None
+    if OLLAMA_RENAMED.get(old) == settings.ollama.model:
+        return f'Model {old} is now called {settings.ollama.model}.'
     return f'Model {old} replaced by {settings.ollama.model} (the assistant\'s default).'
 
 

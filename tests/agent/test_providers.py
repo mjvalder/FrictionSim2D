@@ -49,7 +49,7 @@ def test_every_ollama_model_is_told_not_to_think(model):
 
 def test_ollama_model_uses_openai_endpoint():
     model = build_model(AgentSettings(provider='ollama'))
-    assert model.model_name == 'fs2d-assistant:q35-4b'
+    assert model.model_name == 'fs2d-assistant:qwen3.5-4b'
 
 
 def test_ollama_status_unreachable(monkeypatch):
@@ -68,7 +68,7 @@ def test_ollama_status_model_missing(monkeypatch):
             return {'models': [{'name': 'qwen3:8b'}]}
     monkeypatch.setattr(httpx, 'get', lambda *a, **k: Resp())
     ok, message = ollama_status(AgentSettings(provider='ollama'))
-    assert not ok and 'fs2d-assistant:q35-4b' in message  # qwen3:8b is not it
+    assert not ok and 'fs2d-assistant:qwen3.5-4b' in message  # qwen3:8b is not it
 
 
 def _tags(*names):
@@ -91,9 +91,9 @@ def test_ollama_models_none_when_down():
 
 
 def test_ollama_status_ready_with_exact_model(monkeypatch):
-    monkeypatch.setattr(httpx, 'get', _tags('fs2d-assistant:q35-4b'))
+    monkeypatch.setattr(httpx, 'get', _tags('fs2d-assistant:qwen3.5-4b'))
     assert ollama_status(AgentSettings(provider='ollama')) == (
-        True, 'Ollama ready (fs2d-assistant:q35-4b)')
+        True, 'Ollama ready (fs2d-assistant:qwen3.5-4b)')
 
 
 def test_untagged_model_matches_latest():

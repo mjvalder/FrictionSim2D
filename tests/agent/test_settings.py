@@ -14,7 +14,7 @@ def test_defaults_match_phase0():
     assert s.provider == 'gemini'
     assert s.gemini.model == 'gemini-3.5-flash-lite'
     assert s.gemini.api_key_env == 'GEMINI_API_KEY'
-    assert s.ollama.model == 'fs2d-assistant:q35-4b'
+    assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b'
     assert (s.ollama.max_threads, s.ollama.context_tokens, s.ollama.keep_alive) == (8, 16384, '2m')
     assert s.ollama.idle_minutes == 10
     assert s.max_requests_per_turn == 50
@@ -121,9 +121,9 @@ def test_legacy_maps_to_default_when_installable(tmp_path, legacy):
     from src.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, legacy)
     assert s.ollama.model == legacy  # kept until we know what is installed
-    note = fallback_ollama_model(s, [legacy, 'qwen3:8b'], ['fs2d-assistant:q35-4b'])
-    assert s.ollama.model == 'fs2d-assistant:q35-4b'
-    assert legacy in note and 'fs2d-assistant:q35-4b' in note
+    note = fallback_ollama_model(s, [legacy, 'qwen3:8b'], ['fs2d-assistant:qwen3.5-4b'])
+    assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b'
+    assert legacy in note and 'fs2d-assistant:qwen3.5-4b' in note
 
 
 def test_legacy_maps_to_stock_when_default_unavailable(tmp_path):
@@ -136,9 +136,9 @@ def test_legacy_maps_to_stock_when_default_unavailable(tmp_path):
 def test_default_falls_back_to_stock_only_when_unavailable():
     from src.agent.settings import fallback_ollama_model
     s = AgentSettings()
-    assert fallback_ollama_model(s, [], ['fs2d-assistant:q35-4b']) is None
-    assert fallback_ollama_model(s, ['fs2d-assistant:q35-4b'], []) is None
-    assert s.ollama.model == 'fs2d-assistant:q35-4b'
+    assert fallback_ollama_model(s, [], ['fs2d-assistant:qwen3.5-4b']) is None
+    assert fallback_ollama_model(s, ['fs2d-assistant:qwen3.5-4b'], []) is None
+    assert s.ollama.model == 'fs2d-assistant:qwen3.5-4b'
     assert fallback_ollama_model(s, ['qwen3.5:4b'], []) is not None
     assert s.ollama.model == 'qwen3.5:4b'
 
@@ -146,13 +146,13 @@ def test_default_falls_back_to_stock_only_when_unavailable():
 def test_migration_runs_once_so_a_later_choice_sticks(tmp_path):
     from src.agent.settings import fallback_ollama_model
     s = _legacy(tmp_path, 'qwen3:4b')
-    fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:q35-4b'])
+    fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:qwen3.5-4b'])
     save_agent_settings(s, tmp_path / 'agent.yaml')
     s = load_agent_settings(tmp_path / 'agent.yaml')
     s.ollama.model = 'qwen3:4b'  # chosen again, on purpose
     save_agent_settings(s, tmp_path / 'agent.yaml')
     s = load_agent_settings(tmp_path / 'agent.yaml')
-    assert fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:q35-4b']) is None
+    assert fallback_ollama_model(s, ['qwen3:4b'], ['fs2d-assistant:qwen3.5-4b']) is None
     assert s.ollama.model == 'qwen3:4b'
 
 
@@ -184,3 +184,12 @@ def test_new_config_dir_is_owner_only(tmp_path):
     path = tmp_path / 'cfg' / 'FrictionSim2D' / 'agent.secrets'
     store_gemini_key('k', path)
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize('size', ['2b', '4b', '9b'])
+def test_a_fine_tunes_first_name_is_renamed(tmp_path, size):
+    from src.agent.settings import fallback_ollama_model
+    s = _legacy(tmp_path, f'fs2d-assistant:q35-{size}')
+    new = f'fs2d-assistant:qwen3.5-{size}'
+    note = fallback_ollama_model(s, [new], [])
+    assert s.ollama.model == new and 'now called' in note
