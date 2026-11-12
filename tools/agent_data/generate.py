@@ -360,6 +360,27 @@ SETTINGS_TO_DECLINE = ['HPC walltime', 'minimization command', 'number of MPI pr
 Plan = List[Tuple[str, dict]]
 
 
+#: Folders a screen names, and how many structures one holds (the user's own screen
+#: was 156; the examples hold that many with an sw potential).
+SCREEN_FOLDERS = ('materials', 'candidates', 'tmds', 'screening_set', 'cifs', 'batch1',
+                  'structures', 'monolayers')
+SCREEN_SIZES = (5, 40)
+
+
+def screen_folder(scene: Scene) -> None:
+    """``workspace/<folder>``: example structures with an sw potential of their name,
+    and sometimes one without, which the setup skips."""
+    rng, examples = scene.rng, scene.deps.roots.examples
+    potentials = {p.stem for p in (examples / 'potentials/sw/sw_lammps').glob('*.sw')}
+    cifs = sorted(p for p in (examples / 'materials').glob('*.cif') if p.stem in potentials)
+    folder = scene.deps.roots.workspace / scene.values['folder']
+    folder.mkdir(parents=True)
+    for cif in rng.sample(cifs, rng.randint(*SCREEN_SIZES)):
+        (folder / cif.name).write_bytes(cif.read_bytes())
+    if rng.random() < 0.3:
+        (folder / 'x-Custom.cif').write_bytes(cifs[0].read_bytes())
+
+
 def _setup(name: str, scene: Scene, **extra) -> Plan:
     v = scene.values
     args = {'materials': [v['material']], 'potential_type': v['potential'], **extra}
@@ -382,6 +403,11 @@ def plan_for(category: str, scene: Scene) -> Callable[[Callable[[str, dict], str
         plan = _setup('setup_afm', scene, loads_nN=v['loads'])
         plan[0][1]['materials'].append(v['material_b'])
         return static(plan)
+    if category in ('afm_folder', 'sheet_folder'):
+        name, extra = (('setup_afm', {'loads_nN': v['loads']}) if category == 'afm_folder'
+                       else ('setup_sheet', {'pressures_GPa': v['pressures']}))
+        return static([(name, {'materials_folder': f"workspace:/{v['folder']}",
+                               'potential_type': 'sw', **extra})])
     if category == 'sheet_setup':
         return static(_setup('setup_sheet', scene, pressures_GPa=v['pressures']))
     if category == 'sheet_angles':
@@ -518,6 +544,8 @@ def prepare_world(category: str, scene: Scene) -> None:
             make_family_run(root, 'afm', material=material, loads=(10.0, 30.0))
         scene.values['complete'] = 2  # make_family_run: one complete run per load
         DataReader(results_dir=str(root)).export_full_data_to_json()
+    if category in ('afm_folder', 'sheet_folder'):
+        screen_folder(scene)
     if category == 'list_workspace':
         for name in scene.rng.sample(['campaign_a', 'notes', 'runs_2026', 'old_tests',
                                       'mos2_loads', 'figures'], 3):
@@ -628,8 +656,9 @@ def check(category: str, kind: str, scene: Scene, request: str, reply: str,
     if kind == 'declines':
         return None if not scene.deps.pending else 'proposed on a decline'
     if category.endswith('_setup') or category in (
-            'afm_two_materials', 'sheet_angles', 'linear_sweep', 'load_band', 'log_sweep',
-            'recommend_corrugation', 'recommend_layers', 'speed_sweep', 'settings_change'):
+            'afm_two_materials', 'afm_folder', 'sheet_folder', 'sheet_angles', 'linear_sweep',
+            'load_band', 'log_sweep', 'recommend_corrugation', 'recommend_layers', 'speed_sweep',
+            'settings_change'):
         if not scene.deps.pending:
             return 'no proposal'
     if 'expected' in scene.values and not all(quotes(result, x) or f'{x:g}' in reply
@@ -758,6 +787,11 @@ def setup_scene(category: str, scene: Scene) -> Optional[str]:
         scene.slots['setting'] = rng.choice(SETTINGS_TO_DECLINE)
     if category == 'ask_unknown_material':
         scene.slots['material'] = scene.values['unknown']
+    if 'folder' in cat.slots:
+        folder = rng.choice(SCREEN_FOLDERS)
+        scene.values.update(folder=folder, potential='sw')
+        scene.slots.update(folder=rng.choice([folder, f'{folder}/', f'workspace:/{folder}']),
+                           potential='sw')
     if category == 'ask_unknown_potential' and not missing_potential(scene):
         return 'material has every potential type'
     if category == 'speed_sweep':

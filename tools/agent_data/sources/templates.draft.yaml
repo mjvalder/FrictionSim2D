@@ -2202,3 +2202,37 @@ categories:
     and {potential}.
   - I'm investigating the friction between two {material} layers. Please set up a corrugation scan with
     {grid} points using {potential}.
+- category: afm_folder
+  kind: act
+  slots:
+  - folder
+  - potential
+  - loads
+  rejected: 0
+  templates:
+  - Set up AFM sliding simulations for every material in my {folder} folder with the {potential} potential at {loads} nN.
+  - I want to screen all the structures in {folder} with AFM sliding at {loads} nN, using {potential} potentials.
+  - Run an AFM friction screen over all the materials in {folder} at loads of {loads} nN with {potential}.
+  - Can you set up AFM tip-sliding simulations for all the CIFs in {folder}? Use {potential} at {loads} nN.
+  - Screen every material in the {folder} folder with AFM sliding simulations at {loads} nN ({potential} potentials).
+  - Please prepare AFM sliding runs for all of the materials in {folder}, {potential} potential, normal loads {loads} nN.
+  - I have a folder of structures, {folder}. Set up AFM sliding for each of them at {loads} nN with {potential}.
+  - AFM screen of everything in {folder} at {loads} nN, {potential} potentials please.
+  - Set up an AFM friction study of all the 2D materials in {folder} using the {potential} potential at {loads} nN.
+  - Could you sweep AFM sliding simulations over every structure file in {folder} at {loads} nN with {potential}?
+- category: sheet_folder
+  kind: act
+  slots:
+  - folder
+  - potential
+  - pressures
+  rejected: 0
+  templates:
+  - Set up sheet-on-sheet sliding simulations for every material in my {folder} folder with the {potential} potential at {pressures} GPa.
+  - I want to screen all the structures in {folder} with sheet-on-sheet sliding at {pressures} GPa, using {potential} potentials.
+  - Run a bilayer sliding screen over all the materials in {folder} at {pressures} GPa with {potential}.
+  - Can you set up sheet-on-sheet friction simulations for all the CIFs in {folder}? Use {potential} at {pressures} GPa.
+  - Screen every material in the {folder} folder with bilayer sliding simulations at normal pressures of {pressures} GPa ({potential}).
+  - Please prepare sheet-on-sheet sliding runs for all of the materials in {folder}, {potential} potential, {pressures} GPa.
+  - I have a folder of structures, {folder}. Set up sheet sliding for each of them at {pressures} GPa with {potential}.
+  - Bilayer friction screen of everything in {folder} at {pressures} GPa, {potential} potentials please.

@@ -70,6 +70,14 @@ CATEGORIES: Tuple[Category, ...] = (
     Category('afm_two_materials', 'Ask for AFM sliding simulations on two materials with '
              'the same potential type at several loads in nN.',
              ('material', 'material_b', 'potential', 'loads'), must_mention=AFM),
+    Category('afm_folder', 'Ask for AFM sliding simulations of every material in a named '
+             'folder of structure files (a screen of many materials) with a given potential '
+             'at several normal loads in nN.',
+             ('folder', 'potential', 'loads'), must_mention=AFM),
+    Category('sheet_folder', 'Ask for sheet-on-sheet sliding simulations of every material '
+             'in a named folder of structure files with a given potential at several normal '
+             'pressures in GPa.',
+             ('folder', 'potential', 'pressures'), must_mention=SHEET),
     Category('sheet_setup', 'Ask for a sheet-on-sheet sliding simulation of one material '
              'on itself with a given potential at several normal pressures in GPa.',
              ('material', 'potential', 'pressures'), must_mention=SHEET),
