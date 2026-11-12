@@ -1,0 +1,11 @@
+{
+  "tag": "q35-9b",
+  "base": "unsloth/Qwen3.5-9B",
+  "schema_hash": "b8b78921bc6dd497",
+  "knowledge_hash": "ea92dc8b1bc8424b",
+  "pass1": null,
+  "latency_p50": null,
+  "registry": null,
+  "sha256": "b821d3b298f8206eeaf886292ad8ae8275651fbad27180198281e7db49653ecf",
+  "size": 5780090720
+}
