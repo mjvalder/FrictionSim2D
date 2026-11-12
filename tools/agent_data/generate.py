@@ -44,7 +44,7 @@ from src.agent.changes import ToolInputError  # noqa: E402
 from src.agent.events import TurnEvent  # noqa: E402
 from src.agent.knowledge_index import load_knowledge  # noqa: E402
 from src.potentials.utils import KNOWN_TYPES  # noqa: E402
-from src.agent.prompts import KNOWLEDGE_DIR, ROLE  # noqa: E402
+from src.agent.prompts import KNOWLEDGE_DIR, ROLE, build_system_prompt  # noqa: E402
 from src.agent.tools.materials import index_for, resolve_material  # noqa: E402
 from src.agent.tools.setup import make_sweep  # noqa: E402
 from src.core.config import GlobalSettings  # noqa: E402
@@ -831,8 +831,8 @@ def play(category: str, template: Optional[str], scene: Scene, toolbox: Toolbox,
 def to_messages(turns: List[Turn]) -> List[dict]:
     """The conversation in the OpenAI/Qwen format; a rejected call is kept with its
     error but marked ``train: false``, so the loss never rewards the mistake."""
-    # The prompt the runtime gives Ollama models starts with /no_think (prompts.py).
-    messages = [{'role': 'system', 'content': f'/no_think\n{ROLE}'}]
+    # The prompt the runtime gives every Ollama model, knowledge files included.
+    messages = [{'role': 'system', 'content': build_system_prompt('ollama')}]
     n = 0
     for turn in turns:
         messages.append({'role': 'user', 'content': turn.request})

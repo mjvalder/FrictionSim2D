@@ -46,16 +46,7 @@ def test_materials_project_privacy_rule():
     assert 'only formulas and ids are sent to Materials Project' in prompt
 
 
-def test_trained_model_gets_the_short_prompt_it_was_trained_on():
-    """Fine-tuned models learned the knowledge; they get role + rules only (spec §7)."""
-    from src.agent.prompts import ROLE, TRAINED_PREFIX  # pylint: disable=import-outside-toplevel
-    prompt = build_system_prompt('ollama', model=f'{TRAINED_PREFIX}:p4')
-    assert prompt == f'/no_think\n{ROLE}'
-    assert '## conventions' in build_system_prompt('ollama', model='qwen3:4b')
+def test_every_model_gets_the_knowledge_files():
+    """Fine-tunes too: they are trained on this prompt (86 % -> 93 % for the 4B)."""
     assert '## conventions' in build_system_prompt('ollama')
-
-
-def test_trained_model_can_be_given_the_knowledge_files():
-    from src.agent.prompts import TRAINED_PREFIX  # pylint: disable=import-outside-toplevel
-    prompt = build_system_prompt('ollama', model=f'{TRAINED_PREFIX}:p4', trained_knowledge=True)
-    assert prompt == build_system_prompt('ollama')
+    assert '## conventions' in build_system_prompt('gemini')

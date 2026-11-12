@@ -860,7 +860,7 @@ def _tune(tmp_path, schema_hash='b8b78921bc6dd497'):
     bundle.mkdir(parents=True)
     (bundle / 'model.gguf').write_bytes(b'w')
     return FineTune(tag='q35-4b', base='unsloth/Qwen3.5-4B', schema_hash=schema_hash,
-                    knowledge_hash='k', trained_knowledge=True, bundle=bundle)
+                    knowledge_hash='k', bundle=bundle)
 
 
 def _tune_pane(tmp_path, *, tune=None, install=None, models=None, settings=None, **kwargs):
@@ -893,16 +893,14 @@ def test_unknown_model_offers_no_install(qt_app, env):
     assert 'see Details' in pane.status_label.text() and 'pull qwen3:4b' in pane.details_label.text()
 
 
-def test_install_success_sets_trained_knowledge_and_ready(qt_app, env, tmp_path):
+def test_install_success_is_ready(qt_app, env, tmp_path):
     saved = []
     pane, _ = _tune_pane(tmp_path, save_settings=lambda s: saved.append(s.ollama.model_copy()))
-    assert pane.settings.ollama.trained_knowledge is True  # known fine-tune: prompted as trained
     pane.install_button.click()
     assert pane.status_label.text().startswith('Installing fs2d-assistant:q35-4b')
     assert _run_until(pane.ollama_checked) == [(True,)]
     assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:q35-4b)'
     assert pane.install_button.isHidden() and pane.model_box.isEnabled()
-    assert saved and saved[-1].trained_knowledge is True
 
 
 def test_install_failure_keeps_settings(qt_app, env, tmp_path):

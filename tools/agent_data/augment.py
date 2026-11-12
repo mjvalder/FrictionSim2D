@@ -1,10 +1,9 @@
 """Re-render generated conversations for the prompt a local model now gets.
 
-The generator writes the trained short prompt (role and rules) and bare user
-requests. When the runtime also gives a fine-tuned model the knowledge files
-(``ollama.trained_knowledge``) or attaches corpus passages to each request
-(``ollama.prefetch_passages``), training should see the same: this rewrites the
-system message and the user messages to match, without calling the teacher.
+Conversations generated before the knowledge files were part of every model's
+prompt (p8 and earlier) carry the role and rules alone; ``--knowledge`` rewrites
+their system message to the current prompt. ``--prefetch`` attaches corpus
+passages to each request (``ollama.prefetch_passages``). The teacher is not called.
 
     python tools/agent_data/augment.py data/p5-shard*.jsonl --name p6-aug --knowledge --prefetch 2
 

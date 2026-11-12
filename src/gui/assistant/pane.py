@@ -29,7 +29,7 @@ from ...agent.plot_changes import PlotChange
 from ...agent.ollama_server import is_local
 from ...agent.providers import (model_installed, ollama_binary, ollama_models,
                                 ollama_start_command)
-from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key, apply_finetune,
+from ...agent.settings import (ANTHROPIC_MODELS, AgentSettings, api_key,
                                fallback_ollama_model, save_agent_settings, store_api_key)
 from .cards import ChangeCard, FsCard, PlotCard
 from .worker import AgentWorker
@@ -429,9 +429,6 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     def _update_ollama_ready(self) -> None:
         model = self.settings.ollama.model
         tune = self._finetunes.get(model)
-        if apply_finetune(self.settings, tune):
-            self._save()
-            self.session.switch(self.settings)
         self._warn_schema(tune)
         self._ollama_ready = model_installed(model, self._installed)
         offer = (not self._ollama_ready and tune is not None and tune.installable

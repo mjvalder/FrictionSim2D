@@ -1,7 +1,7 @@
 """Merge a trained LoRA, convert to GGUF, register it in Ollama and bundle it (spec §5).
 
-    python tools/agent_data/export.py --run q35-4b --tag q35-4b --trained-knowledge
-    python tools/agent_data/export.py --run q35-4b --tag q35-4b --trained-knowledge \\
+    python tools/agent_data/export.py --run q35-4b --tag q35-4b
+    python tools/agent_data/export.py --run q35-4b --tag q35-4b \\
         --bundle-only --eval tests/agent/evals/.results/ollama-fs2d-assistant_q35-4b-*.json
 
 Writes ``runs/<run>/gguf/`` (Q4_K_M) and a Modelfile carrying temperature 0
@@ -120,9 +120,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--run', required=True)
     parser.add_argument('--tag', required=True)
     parser.add_argument('--quant', default='q4_k_m')
-    parser.add_argument('--trained-knowledge', required=True,
-                        action=argparse.BooleanOptionalAction,
-                        help='whether the model is given the knowledge files in its prompt')
     parser.add_argument('--bundle-only', action='store_true',
                         help='only write models/<tag>/ from the run\'s GGUF and Modelfile')
     parser.add_argument('--eval', nargs='+', type=Path, default=[],
@@ -154,7 +151,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                           manifest={'tag': args.tag, 'base': metrics['base'],
                                     'schema_hash': metrics['schema_hash'],
                                     'knowledge_hash': metrics['knowledge_hash'],
-                                    'trained_knowledge': args.trained_knowledge,
                                     **scores, 'registry': None})
     print(f'bundle {bundle}')
     return 0

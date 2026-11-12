@@ -7,7 +7,7 @@ from src.agent.bundles import (FineTune, catalogue, sha256_file, verify,
                                write_bundle)
 
 MANIFEST = {'tag': 'q35-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
-            'knowledge_hash': 'ea92', 'trained_knowledge': True}
+            'knowledge_hash': 'ea92'}
 
 
 def _bundle(tmp_path, data=b'weights'):
@@ -32,7 +32,7 @@ def test_catalogue_reads_bundles(tmp_path):
     _bundle(tmp_path)
     found = catalogue(tmp_path / 'models')
     tune = found['fs2d-assistant:q35-4b']
-    assert tune.installable and tune.trained_knowledge is True
+    assert tune.installable
     assert tune.bundle == tmp_path / 'models' / 'q35-4b' and tune.schema_hash == 'b8b7'
 
 
@@ -70,7 +70,7 @@ def test_verify_detects_partial_gguf(tmp_path):
 
 def test_published_entry_installable_without_bundle(monkeypatch, tmp_path):
     tune = FineTune(tag='x', base='b', schema_hash='s', knowledge_hash='k',
-                    trained_knowledge=False, registry='ns/fs2d-assistant:x')
+                    registry='ns/fs2d-assistant:x')
     monkeypatch.setattr(bundles, 'PUBLISHED', {'x': tune})
     found = catalogue(tmp_path / 'models')
     assert found['fs2d-assistant:x'].installable and found['fs2d-assistant:x'].bundle is None
@@ -79,7 +79,7 @@ def test_published_entry_installable_without_bundle(monkeypatch, tmp_path):
 def test_local_bundle_keeps_published_registry(monkeypatch, tmp_path):
     _bundle(tmp_path)
     tune = FineTune(tag='q35-4b', base='b', schema_hash='s', knowledge_hash='k',
-                    trained_knowledge=False, registry='ns/fs2d-assistant:q35-4b')
+                    registry='ns/fs2d-assistant:q35-4b')
     monkeypatch.setattr(bundles, 'PUBLISHED', {'q35-4b': tune})
     found = catalogue(tmp_path / 'models')['fs2d-assistant:q35-4b']
     assert found.registry == 'ns/fs2d-assistant:q35-4b' and found.bundle is not None

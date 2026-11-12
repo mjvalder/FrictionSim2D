@@ -39,7 +39,7 @@ def _main(runs, *extra):
 
 
 def test_bundle_only_writes_portable_bundle(runs):
-    assert _main(runs, '--trained-knowledge') == 0
+    assert _main(runs) == 0
     bundle = runs / 'models' / 'q35-4b'
     text = (bundle / 'Modelfile').read_text()
     assert text.splitlines()[0] == 'FROM ./model.gguf'
@@ -48,7 +48,7 @@ def test_bundle_only_writes_portable_bundle(runs):
     manifest = json.loads((bundle / 'manifest.json').read_text())
     assert manifest['schema_hash'] == METRICS['schema_hash']
     assert manifest['knowledge_hash'] == METRICS['knowledge_hash']
-    assert manifest['trained_knowledge'] is True and manifest['registry'] is None
+    assert 'trained_knowledge' not in manifest and manifest['registry'] is None
     assert manifest['pass1'] is None and manifest['latency_p50'] is None
     assert (bundle / 'model.gguf').read_bytes() == b'weights'
     assert not any('mmproj' in p.name for p in bundle.iterdir())
@@ -58,7 +58,7 @@ def test_bundle_only_runs_no_subprocess(runs, monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError(f'subprocess called: {args}')
     monkeypatch.setattr(subprocess, 'run', refuse)
-    assert _main(runs, '--no-trained-knowledge') == 0
+    assert _main(runs) == 0
 
 
 def test_eval_fills_pass1_and_p50(runs):
@@ -69,14 +69,9 @@ def test_eval_fills_pass1_and_p50(runs):
     results = runs / 'bench.json'
     results.write_text(json.dumps({'provider': 'ollama', 'model': 'fs2d-assistant:q35-4b',
                                    'records': records}))
-    assert _main(runs, '--trained-knowledge', '--eval', str(results)) == 0
+    assert _main(runs, '--eval', str(results)) == 0
     manifest = json.loads((runs / 'models' / 'q35-4b' / 'manifest.json').read_text())
     assert manifest['pass1'] == 0.75 and manifest['latency_p50'] == 5.0
-
-
-def test_trained_knowledge_required(runs):
-    with pytest.raises(SystemExit):
-        _main(runs)
 
 
 def test_template_block_keeps_its_hash_lines():

@@ -162,16 +162,6 @@ def test_user_choice_untouched(tmp_path):
     assert fallback_ollama_model(s, ['qwen3:4b'], []) is None and s.ollama.model == 'mistral:7b'
 
 
-def test_apply_finetune_sets_trained_knowledge():
-    from src.agent.bundles import FineTune
-    from src.agent.settings import apply_finetune
-    s = AgentSettings()
-    tune = FineTune(tag='q35-4b', base='b', schema_hash='s', knowledge_hash='k',
-                    trained_knowledge=True)
-    assert apply_finetune(s, tune) and s.ollama.trained_knowledge is True
-    assert not apply_finetune(s, tune) and not apply_finetune(s, None)
-
-
 @pytest.mark.parametrize('key', ['abc\ndef', 'abc\rdef', 'abc\r\ngemini=evil'])
 def test_key_with_line_break_refused(tmp_path, key):
     path = tmp_path / 'agent.secrets'

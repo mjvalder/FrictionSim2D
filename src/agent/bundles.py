@@ -31,7 +31,7 @@ PARAMETER temperature 0
 PARAMETER num_ctx 16384
 """
 
-_REQUIRED = ('tag', 'base', 'schema_hash', 'knowledge_hash', 'trained_knowledge')
+_REQUIRED = ('tag', 'base', 'schema_hash', 'knowledge_hash')
 _OPTIONAL = ('sha256', 'size', 'pass1', 'latency_p50', 'registry')
 
 
@@ -43,8 +43,6 @@ class FineTune:  # pylint: disable=too-many-instance-attributes
     base: str
     schema_hash: str
     knowledge_hash: str
-    #: Whether the model is given the knowledge files in its prompt.
-    trained_knowledge: bool
     sha256: Optional[str] = None
     size: Optional[int] = None
     pass1: Optional[float] = None

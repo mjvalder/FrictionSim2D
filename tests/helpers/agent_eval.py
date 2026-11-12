@@ -26,7 +26,7 @@ FUNCTION_REPLY = 'Could you tell me which one you mean?'
 @dataclass(frozen=True)
 class EvalEnv:
     """The env switches: AGENT_EVAL_PROVIDER, _MODEL, _REPEATS, _PAUSE, _RESULTS_DIR;
-    for Ollama also _PREFETCH (passages per request) and _TRAINED_KNOWLEDGE (1: on)."""
+    for Ollama also _PREFETCH (passages per request)."""
 
     provider: str
     model: Optional[str]
@@ -116,7 +116,6 @@ def build_session(env: EvalEnv, deps=None):
         getattr(settings, env.provider).model = env.model
     if env.provider == 'ollama':
         settings.ollama.prefetch_passages = int(os.environ.get('AGENT_EVAL_PREFETCH', '0'))
-        settings.ollama.trained_knowledge = os.environ.get('AGENT_EVAL_TRAINED_KNOWLEDGE') == '1'
         ok, message = ollama_status(settings)
         if not ok:
             raise ProviderUnavailable(message)

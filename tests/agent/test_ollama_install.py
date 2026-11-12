@@ -6,7 +6,7 @@ from src.agent.ollama_install import install_finetune
 from src.agent.settings import AgentSettings
 
 MANIFEST = {'tag': 'q35-4b', 'base': 'unsloth/Qwen3.5-4B', 'schema_hash': 'b8b7',
-            'knowledge_hash': 'ea92', 'trained_knowledge': True}
+            'knowledge_hash': 'ea92'}
 
 
 class FakePopen:
@@ -77,7 +77,7 @@ def test_install_reports_old_ollama(tmp_path):
 def test_install_from_registry_pulls_then_copies():
     popen = FakePopen()
     tune = FineTune(tag='x', base='b', schema_hash='s', knowledge_hash='k',
-                    trained_knowledge=False, registry='ns/fs2d-assistant:x')
+                    registry='ns/fs2d-assistant:x')
     ok, _ = install_finetune(AgentSettings(), tune, lambda line: None,
                              popen=popen, binary='ollama')
     assert ok
@@ -89,7 +89,7 @@ def test_install_from_registry_pulls_then_copies():
 def test_failed_pull_skips_copy():
     popen = FakePopen([('Error: pull model manifest: file does not exist\n', 1)])
     tune = FineTune(tag='x', base='b', schema_hash='s', knowledge_hash='k',
-                    trained_knowledge=False, registry='ns/fs2d-assistant:x')
+                    registry='ns/fs2d-assistant:x')
     ok, message = install_finetune(AgentSettings(), tune, lambda line: None,
                                    popen=popen, binary='ollama')
     assert not ok and 'does not exist' in message and len(popen.calls) == 1
