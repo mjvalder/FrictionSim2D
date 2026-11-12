@@ -20,6 +20,7 @@ import json
 import re
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -28,6 +29,14 @@ RUNS = HERE / 'runs'
 BASES = {'1.7b': 'unsloth/Qwen3-1.7B', '4b': 'unsloth/Qwen3-4B',
          'q35-2b': 'unsloth/Qwen3.5-2B', 'q35-4b': 'unsloth/Qwen3.5-4B',
          'q35-9b': 'unsloth/Qwen3.5-9B'}
+#: The stock Ollama model whose renderer serves a fine-tune of each base (export.py
+#: copies its RENDERER). Ollama renders the tool list its own way -- reduced schemas,
+#: its key order -- so training takes the <tools> block from Ollama, not from the
+#: Hugging Face template (5309 tokens vs Ollama's 4443 for one prompt, 2026-11-04).
+#: Qwen3 bases are absent: their Ollama template prints tools as Go structs.
+SERVED_BY = {'q35-2b': 'qwen3.5:2b', 'q35-4b': 'qwen3.5:4b', 'q35-9b': 'qwen3.5:9b'}
+OLLAMA_CHAT = 'http://127.0.0.1:11434/api/chat'
+_TOOLS = re.compile(r'<tools>\n.*?\n</tools>', re.DOTALL)
 #: One rendered assistant message: its header, then the trained text through <|im_end|>.
 _ASSISTANT = re.compile(r'<\|im_start\|>assistant\n(.*?<\|im_end\|>)', re.DOTALL)
 IGNORE = -100
@@ -38,10 +47,27 @@ def load(path: Path) -> List[dict]:
         return [json.loads(line) for line in source if line.strip()]
 
 
-def render(tokenizer, record: dict, tools: List[dict]) -> str:
-    """One conversation as training text in the student's chat format."""
-    return tokenizer.apply_chat_template(record['messages'], tools=tools, tokenize=False,
+def served_tools(model: str, tools: List[dict]) -> str:
+    """The <tools> block exactly as Ollama renders it for ``model``."""
+    body = {'model': model, 'messages': [{'role': 'user', 'content': '.'}], 'tools': tools,
+            'think': False, 'stream': False, '_debug_render_only': True}
+    request = urllib.request.Request(OLLAMA_CHAT, data=json.dumps(body).encode(),
+                                     headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=300) as response:
+        text = json.load(response)['_debug_info']['rendered_template']
+    return _TOOLS.search(text).group(0)
+
+
+def render(tokenizer, record: dict, tools: List[dict], served: Optional[str] = None) -> str:
+    """One conversation as training text in the student's chat format, with the
+    tool list as Ollama serves it when ``served`` is given."""
+    text = tokenizer.apply_chat_template(record['messages'], tools=tools, tokenize=False,
                                          enable_thinking=False)
+    if served is not None:
+        text, count = _TOOLS.subn(lambda _: served, text, count=1)
+        if count != 1:
+            raise ValueError(f"{record.get('id')}: no <tools> block to replace")
+    return text
 
 
 def trained_spans(text: str, record: dict) -> List[Tuple[int, int]]:
@@ -113,7 +139,8 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
         dtype=None if args.four_bit else torch.bfloat16)
     # Qwen3.5 loads with an image+text processor; the text side is its tokenizer
     tokenizer = getattr(processor, 'tokenizer', processor)
-    texts = [render(tokenizer, r, card['tools']) for r in records]
+    served = served_tools(SERVED_BY[args.base], card['tools']) if args.base in SERVED_BY else None
+    texts = [render(tokenizer, r, card['tools'], served) for r in records]
     examples = [tokenize(tokenizer, t, trained_spans(t, r), args.max_len)
                 for t, r in zip(texts, records)]
     if args.render_only:
@@ -155,6 +182,7 @@ def main(argv: Optional[List[str]] = None) -> int:  # pylint: disable=too-many-l
     metrics = {
         'run': args.run, 'base': BASES[args.base], 'four_bit': args.four_bit,
         'rank': args.rank, 'epochs': args.epochs, 'lr': args.lr,
+        'served_tools': served is not None,
         'conversations': len(texts), 'too_long': too_long,
         'tokens_per_epoch': sum(lengths), 'seconds': round(seconds, 1),
         'tokens_per_second': round(trained_tokens / seconds),

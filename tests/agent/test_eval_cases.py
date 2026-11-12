@@ -199,6 +199,14 @@ def test_completed_count_must_sit_by_the_word_completed(tmp_path, mock_settings)
                        _result(deps, 'Across 2 materials, 4 runs completed.', tools=tools))
 
 
+def test_a_plain_statement_answers_the_yes_or_no_concept(tmp_path, mock_settings):
+    deps = _deps('concept_tmd', tmp_path, mock_settings)
+    assert verdict(CASES['concept_tmd'],
+                   _result(deps, 'h-WS2 is a transition-metal dichalcogenide.'))
+    assert not verdict(CASES['concept_tmd'],
+                       _result(deps, 'h-WS2 is not a transition-metal dichalcogenide.'))
+
+
 def test_a_number_past_the_cut_shown_in_the_chat_is_still_grounded():
     long_result = TurnEvent('tool_result', 'lattice_mismatch: ' + 'x' * 182,
                             payload='x' * 200 + ' area 8.79 A^2')
