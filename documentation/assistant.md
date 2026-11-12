@@ -51,36 +51,31 @@ files) always wait for you to click Apply.**
 
 ### Fine-tuned models
 
-A fine-tune ships as a bundle in `tools/agent_data/models/<tag>/`:
+A fine-tune ships as a bundle in `assistant_models/<tag>/`:
 `model.gguf` (the weights, gitignored), a `Modelfile` whose `FROM
 ./model.gguf` is relative, and `manifest.json` (base model, the tool-schema
-hash it was trained for, whether it is given the knowledge files, the
-weights' sha256). Every bundle there is offered by name. When the selected
+hash it was trained for, the weights' sha256). Three ship: `q35-2b`, `q35-4b`
+(the default) and `q35-9b`, Qwen3.5 fine-tunes given the same prompt as the
+hosted models, reference text included. Every bundle there is offered by name. When the selected
 one is missing, the status line reads `fs2d-assistant:<tag> is not installed`
 with an **Install** button: it checks the weights against the manifest (a
 bundle still syncing is refused) and runs `ollama create` with the status
 line showing progress. By hand, the same is
 
-    ollama create fs2d-assistant:q35-4b -f tools/agent_data/models/q35-4b/Modelfile
+    ollama create fs2d-assistant:q35-4b -f assistant_models/q35-4b/Modelfile
 
-Selecting or installing a fine-tune sets `ollama.trained_knowledge` from its
-manifest. If its tool-schema hash is not this app's (the tools changed since
+If its tool-schema hash is not this app's (the tools changed since
 it was trained), the chat says so once: results may degrade, and retraining
 is the fix. Install is offered only for a local server.
 
-`tools/agent_data/export.py` writes the bundle after training; `--bundle-only`
-writes it from a run already exported, without the training stack or Ollama.
+Training data, training and export live in a separate repository
+(`FrictionSim2D-agent-training`); its `export.py` writes the bundles here.
+The knowledge corpus is built there too (`corpus.py`) and installed to
+`~/.local/share/FrictionSim2D/knowledge`.
 
-Syncthing: a repo synced whole would also copy `tools/agent_data/runs/`
-(adapters and checkpoints, tens of GB). Each machine that only uses models
-needs a `.stignore` at the repo root (Syncthing never syncs that file; it is
-also gitignored) with
-
-    tools/agent_data/runs
-    tools/agent_data/data/*.jsonl
-    tests/agent/evals/.results
-
-`models/` stays synced, so a new bundle arrives on its own.
+Syncthing: `assistant_models/` stays synced, so a new bundle arrives on its
+own; a `.stignore` at the repo root (never synced, gitignored) can exclude
+`tests/agent/evals/.results`.
 
 Not done yet, for later: publishing a bundle so a machine without the repo can
 `ollama pull` it. That is `ollama push <namespace>/fs2d-assistant:<tag>` from

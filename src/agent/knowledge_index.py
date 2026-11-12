@@ -1,6 +1,6 @@
 """BM25 search over the installed knowledge corpus.
 
-The corpus is ``passages.jsonl`` built by ``tools/agent_data/corpus.py``:
+The corpus is ``passages.jsonl`` built by ``corpus.py`` in the training repository:
 attributed passages from Wikipedia and openly licensed papers. It is not
 shipped with the package (CC-BY-SA share-alike, size); it is installed to
 `knowledge_dir` and the assistant works without it.

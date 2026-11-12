@@ -21,6 +21,7 @@ MultiplexedPath*
 
 # agent eval results (tests/agent/evals/conftest.py)
 tests/agent/evals/.results/
-unsloth_compiled_cache/
+# fine-tune weights: installed from the bundle, never committed
+assistant_models/*/model.gguf
 # Syncthing ignore patterns: per machine, never synced or committed
 .stignore

@@ -1,6 +1,0 @@
-.cache/
-corpus/
-data/
-runs/
-logs/
-models/*/model.gguf

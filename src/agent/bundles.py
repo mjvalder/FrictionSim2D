@@ -1,9 +1,9 @@
-"""Portable fine-tune bundles: ``tools/agent_data/models/<tag>/``.
+"""Portable fine-tune bundles: ``assistant_models/<tag>/`` at the repository root.
 
 A bundle is ``model.gguf`` (the Q4_K_M weights), a ``Modelfile`` whose ``FROM``
 is relative (so ``ollama create`` works from any copy of it) and a
-``manifest.json`` saying what the model was trained for. `export.py` writes
-bundles; the Assistant pane reads them to offer Install.
+``manifest.json`` saying what the model was trained for. The training repository's
+`export.py` writes bundles; the Assistant pane reads them to offer Install.
 
 `PUBLISHED` is for models pushed to a registry (none yet): an entry there is
 installable with ``ollama pull`` on a machine without the bundle.
@@ -21,7 +21,7 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-MODELS_DIR = Path(__file__).resolve().parents[2] / 'tools' / 'agent_data' / 'models'
+MODELS_DIR = Path(__file__).resolve().parents[2] / 'assistant_models'
 MODEL_PREFIX = 'fs2d-assistant'
 GGUF_NAME = 'model.gguf'
 

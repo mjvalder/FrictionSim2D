@@ -93,7 +93,7 @@ def run_settings(settings: AgentSettings) -> dict:
     if settings.provider == 'ollama':
         # Thinking off: a stock model, and a Qwen3.5 fine-tune (trained without it),
         # think by default and spend the reply cap before they act. A Qwen3 fine-tune's
-        # template ignores the switch (tools/agent_data/export.py).
+        # template ignores the switch (the training repository's export.py).
         return {'temperature': 0.0, 'max_tokens': settings.ollama.max_output_tokens,
                 'openai_reasoning_effort': 'none'}
     if settings.provider != 'anthropic':

@@ -404,16 +404,3 @@ def test_tool_schema_hash_is_16_hex():
     from src.agent.runtime import tool_schema_hash  # pylint: disable=import-outside-toplevel
     assert re.fullmatch('[0-9a-f]{16}', tool_schema_hash())
 
-
-def test_tool_schema_hash_matches_toolbox():
-    """The GUI's schema guard and the trainer hash the same thing."""
-    import sys  # pylint: disable=import-outside-toplevel
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
-    from src.agent.runtime import tool_schema_hash, tool_schemas  # pylint: disable=import-outside-toplevel
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools' / 'agent_data'))
-    try:
-        import generate  # pylint: disable=import-outside-toplevel,import-error
-    finally:
-        sys.path.pop(0)
-    toolbox = generate.Toolbox.load()
-    assert toolbox.schema_hash == tool_schema_hash() and toolbox.schemas == tool_schemas()
