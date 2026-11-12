@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 
 from ...potentials.utils import EXTENSION_MAP, KNOWN_TYPES
 from ..changes import Op, ToolInputError
-from ..sandbox import display_path
+from ..sandbox import SandboxError, display_path, resolve_readable
 from . import compact
 
 STRUCTURE_SUFFIX = '.cif'
@@ -245,6 +245,46 @@ def config_path(deps, path: Path) -> str:
         except ValueError:
             pass
     return str(path)
+
+
+def folder_material_ops(deps, folder: str,
+                        potential_type: Optional[str] = None) -> Tuple[List[Op], List[str]]:
+    """Operations that sweep every structure in ``folder`` that has a potential named
+    after it, all from the one potential folder that covers the most of them."""
+    try:
+        path = resolve_readable(folder, deps.roots)
+    except SandboxError as exc:
+        raise ToolInputError(str(exc)) from exc
+    if not path.is_dir():
+        raise ToolInputError(f'{folder}: not a folder')
+    structures = sorted((f for f in index_for(deps).structures if f.path.parent == path),
+                        key=lambda f: f.name.casefold())
+    if not structures:
+        raise ToolInputError(f'no structure (CIF) files directly in {folder}')
+    by_folder = {}
+    for structure in structures:
+        for potential in _potentials_for(deps, structure.name, potential_type):
+            if potential.name.casefold() == structure.name.casefold():
+                key = (potential.path.parent, potential.path.suffix)
+                by_folder.setdefault(key, {}).setdefault(structure.name, potential)
+    if not by_folder:
+        kind = f'{potential_type} ' if potential_type else ''
+        raise ToolInputError(f'no {kind}potential named after the structures in {folder}; '
+                             'call search_potentials or ask the user')
+    (potential_dir, suffix), found = max(by_folder.items(), key=lambda item: len(item[1]))
+    names = [s.name for s in structures if s.name in found]
+    skipped = [s.name for s in structures if s.name not in found]
+    if len(names) == 1:
+        return material_ops(deps, names, potential_type)
+    pot_type = next(iter(found.values())).pot_type
+    notes = [f'{len(names)} materials from {display_path(path, deps.roots)} with {pot_type} '
+             f'potentials from {display_path(potential_dir, deps.roots)}']
+    if skipped:
+        notes.append(f'skipped {len(skipped)} without a matching potential: '
+                     + ', '.join(skipped[:20]) + (', ...' if len(skipped) > 20 else ''))
+    ops = [Op('material_dirs', value=(str(path), str(potential_dir), suffix)),
+           Op('materials', value=names), Op('set', '2D', 'pot_type', pot_type)]
+    return ops, notes
 
 
 def material_ops(deps, names: List[str],

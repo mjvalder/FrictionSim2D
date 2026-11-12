@@ -7,7 +7,7 @@ import math
 import re
 from typing import Any, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat, conint
+from pydantic import BaseModel, Field, NonNegativeFloat, PositiveFloat, conint, model_validator
 
 from ...core.scaling import ScaleContext, scale
 from ...gui.schema.overrides import override_for_section
@@ -16,7 +16,7 @@ from ...gui.controllers.document import DocumentError
 from ..changes import Op, ToolInputError, build_changeset
 from ..sandbox import display_path
 from . import compact
-from .materials import config_path, material_ops, resolve_material
+from .materials import config_path, folder_material_ops, material_ops, resolve_material
 
 #: Fields `explain_current` reports when set, in this order.
 KEY_FIELDS = (('2D', 'x'), ('2D', 'y'), ('2D', 'layers'), ('2D', 'pot_type'),
@@ -241,14 +241,27 @@ def suggest_values(deps, quantity: str, descriptor: str, n: int) -> str:
 
 
 class _SetupBase(BaseModel):
-    materials: List[str] = Field(min_length=1, description='Material names exactly as '
-                                 'search_structures returns them, e.g. h-MoS2')
+    materials: List[str] = Field(default_factory=list, description='Material names exactly '
+                                 'as search_structures returns them, e.g. h-MoS2')
+    materials_folder: Optional[str] = Field(
+        None, description="Instead of materials: every structure in this folder, e.g. "
+                          "'workspace:/materials' (for many materials or 'all of them')")
     potential_type: Optional[str] = Field(
         None, description="e.g. 'sw', 'tersoff', 'rebomos', 'reaxff'")
     size_A: Optional[Tuple[PositiveFloat, PositiveFloat]] = Field(
         None, description='Sheet x, y in Angstrom')
     layers: Optional[List[conint(ge=1)]] = Field(  # type: ignore[valid-type]
         None, description='Layer counts to sweep, e.g. [1, 2, 3]')
+
+    @model_validator(mode='after')
+    def _one_source(self):
+        if bool(self.materials) == bool(self.materials_folder):
+            raise ValueError('give either materials or materials_folder, not both or neither')
+        return self
+
+    def describe(self) -> str:
+        """The materials as a card title names them."""
+        return ', '.join(self.materials) or f'every material in {self.materials_folder}'
 
 
 _TIP = Field('Si', description='Tip material, a structure name as search_structures '
@@ -432,7 +445,11 @@ def _example_default_ops(probe, model: str, ops: List[Op]) -> Tuple[List[Op], Li
 
 def _setup(deps, model: str, request: _SetupBase, title: str) -> str:
     ops = [] if deps.document.model == model else [Op('set_model', value=model)]
-    material, notes = material_ops(deps, request.materials, request.potential_type)
+    if request.materials_folder:
+        material, notes = folder_material_ops(deps, request.materials_folder,
+                                              request.potential_type)
+    else:
+        material, notes = material_ops(deps, request.materials, request.potential_type)
     ops += material
     probe = _probe(deps, model)
     tip_ops, tip_notes = _tip_and_substrate_ops(deps, probe, request)
@@ -454,24 +471,24 @@ def _setup(deps, model: str, request: _SetupBase, title: str) -> str:
 
 def setup_afm(deps, request: AFMSetupRequest) -> str:
     """Propose an AFM sliding simulation."""
-    return _setup(deps, 'afm', request, 'AFM: ' + ', '.join(request.materials))
+    return _setup(deps, 'afm', request, 'AFM: ' + request.describe())
 
 
 def setup_sheet(deps, request: SheetSetupRequest) -> str:
     """Propose a sheet-on-sheet sliding simulation."""
-    return _setup(deps, 'sheetonsheet', request, 'Sheet on sheet: ' + ', '.join(request.materials))
+    return _setup(deps, 'sheetonsheet', request, 'Sheet on sheet: ' + request.describe())
 
 
 def setup_indent(deps, request: IndentSetupRequest) -> str:
     """Propose an indentation (hold and retract) simulation."""
-    return _setup(deps, 'indent', request, 'Indent: ' + ', '.join(request.materials))
+    return _setup(deps, 'indent', request, 'Indent: ' + request.describe())
 
 
 def setup_pes_tip(deps, request: PESTipSetupRequest) -> str:
     """Propose a static PES scan of the tip over a sheet."""
-    return _setup(deps, 'pes_tip', request, 'PES tip scan: ' + ', '.join(request.materials))
+    return _setup(deps, 'pes_tip', request, 'PES tip scan: ' + request.describe())
 
 
 def setup_pes_sheet(deps, request: PESSheetSetupRequest) -> str:
     """Propose a static PES scan of a sheet over a sheet."""
-    return _setup(deps, 'pes_sheet', request, 'PES sheet scan: ' + ', '.join(request.materials))
+    return _setup(deps, 'pes_sheet', request, 'PES sheet scan: ' + request.describe())

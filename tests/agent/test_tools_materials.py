@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 
 from src.agent.changes import ToolInputError
-from src.agent.tools.materials import (build_index, elements_of, lattice_mismatch,
+from src.agent.tools.materials import (build_index, elements_of, folder_material_ops, lattice_mismatch,
                                        material_ops, potential_type_of, resolve_material,
                                        search_potentials, search_structures)
+from src.agent.tools.setup import AFMSetupRequest, setup_afm
 from src.core.config import LatticeMatchConfig
 from src.core.utils.structures import cifread
 from tests.helpers.agent import EXAMPLES, make_deps
@@ -167,3 +168,46 @@ def test_lattice_mismatch_searches_as_the_hetero_builder_does(deps):
     text = lattice_mismatch(deps, 'h-MoS2', 'black_phosphorus')
     assert f'<= {defaults.max_supercell} repeats' in text
     assert f'strain <= {defaults.strain_tol * 100:g} %' in text
+
+
+def test_a_folder_sweeps_every_structure_with_a_matching_potential(deps):
+    ops, notes = folder_material_ops(deps, 'examples:/materials', 'sw')
+    kinds = [op.kind for op in ops]
+    assert kinds[:2] == ['material_dirs', 'materials']
+    names = ops[1].value
+    potentials = {p.stem for p in (deps.roots.examples / 'potentials/sw/sw_lammps').glob('*.sw')}
+    assert set(names) == {p.stem for p in (deps.roots.examples / 'materials').glob('*.cif')} & potentials
+    assert len(names) > 100 and ops[0].value[2] == '.sw'
+    assert f'{len(names)} materials from examples:/materials' in notes[0]
+
+
+def test_a_folder_names_what_it_skipped(deps):
+    folder = deps.roots.workspace / 'mats'
+    folder.mkdir()
+    for name in ('h-MoS2', 'h-WS2', 'x-Unknown'):
+        (folder / f'{name}.cif').write_text((deps.roots.examples / 'materials/h-MoS2.cif').read_text())
+    ops, notes = folder_material_ops(deps, 'workspace:/mats', 'sw')
+    assert ops[1].value == ['h-MoS2', 'h-WS2']
+    assert 'x-Unknown' in notes[-1]
+
+
+@pytest.mark.parametrize('folder, message', [('workspace:/', 'no structure'),
+                                             ('/etc', '.'), ('workspace:/nothere', '.')])
+def test_a_folder_that_cannot_be_swept_is_refused(deps, folder, message):
+    with pytest.raises(ToolInputError, match=message):
+        folder_material_ops(deps, folder, 'sw')
+
+
+def test_setup_takes_materials_or_a_folder_not_both():
+    with pytest.raises(ValueError):
+        AFMSetupRequest(materials=['h-MoS2'], materials_folder='workspace:/m')
+    with pytest.raises(ValueError):
+        AFMSetupRequest()
+    assert AFMSetupRequest(materials_folder='workspace:/m').describe() == \
+        'every material in workspace:/m'
+
+
+def test_setup_afm_over_a_folder_proposes_the_sweep(deps):
+    text = setup_afm(deps, AFMSetupRequest(materials_folder='examples:/materials',
+                                           potential_type='sw'))
+    assert 'proposed' in text and 'every material in examples:/materials' in text
