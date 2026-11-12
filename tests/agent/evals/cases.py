@@ -111,6 +111,27 @@ def workspace_folders(deps) -> None:
         (deps.roots.workspace / name / 'run1').mkdir(parents=True)
 
 
+#: The workspace folder a screen sweeps, and how many example structures it holds.
+SCREEN_FOLDER = 'screen'
+SCREEN_SIZE = 12
+
+
+def screen_folder(deps) -> None:
+    """``workspace/screen``: example structures that have an sw potential of their name."""
+    potentials = {p.stem for p in (deps.roots.examples / 'potentials/sw/sw_lammps').glob('*.sw')}
+    cifs = sorted(p for p in (deps.roots.examples / 'materials').glob('*.cif')
+                  if p.stem in potentials)[:SCREEN_SIZE]
+    folder = deps.roots.workspace / SCREEN_FOLDER
+    folder.mkdir()
+    for cif in cifs:
+        (folder / cif.name).write_bytes(cif.read_bytes())
+
+
+def screen_names(deps) -> List[str]:
+    """The structures the screen fixture holds."""
+    return sorted(p.stem for p in (deps.roots.workspace / SCREEN_FOLDER).glob('*.cif'))
+
+
 def dataset_runs(deps) -> List[dict]:
     """The fixture dataset's runs, read back from its JSON."""
     files = sorted((deps.roots.workspace / DATASET / 'outputs').glob('output_full_*.json'))
@@ -402,6 +423,12 @@ SETUP = {
         lambda r: setup_ok(r, 'afm', ['h-MoS2'])
         and any(op.kind == 'set_model' for p in config_changes(r) for op in p.ops),
         tools=('setup_afm',), model='sheetonsheet'),
+    'afm_folder_screen': Case(
+        f"Screen every material in my {SCREEN_FOLDER} folder: an AFM simulation of each "
+        f"with sw potentials at {LOADS[0]} nN.",
+        lambda r: setup_ok(r, 'afm', screen_names(r.deps))
+        and same(sets(r).get(('general', 'force')), LOADS[:1]),
+        tools=('setup_afm',), prepare=(screen_folder,)),
     'list_modes': Case(
         'What kinds of simulation can you set up for me? Just list them.',
         lambda r: called(r, 'list_modes') and mentions(r, 'AFM', 'sheet', 'indent', 'PES'),
