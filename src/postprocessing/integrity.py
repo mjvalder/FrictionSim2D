@@ -311,6 +311,8 @@ class IntegrityVerdict:  # pylint: disable=too-many-instance-attributes
     not_applicable: List[str] = field(default_factory=list)
     measures: Dict[str, float] = field(default_factory=dict)
     thresholds_version: str = ''
+    #: Set by `integrity_rulings.apply_rulings` when the user decided it.
+    ruled_by_user: bool = False
 
     def as_dict(self) -> dict:
         """JSON-safe form: NaN and infinite measures become ``None``."""

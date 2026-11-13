@@ -29,6 +29,7 @@ from src.core.observables import FAMILIES, expected_tier_rows, rename_map
 
 from .integrity import (SKIP_DETAILS, IntegrityVerdict, check_point,
                         writes_end_snapshot)
+from .integrity_rulings import apply_rulings, load_rulings
 from .post_channels import post_channels_for
 from .run_provenance import (point_provenance, pool_provenance,
                              run_provenance)
@@ -660,6 +661,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         self.integrity_settings: Optional[IntegritySettings] = (
             (integrity_settings or IntegritySettings()) if integrity else None)
         self._run_blocks: Dict[Path, dict] = {}
+        #: Why a line of `integrity_rulings.yaml` did not apply.
+        self.ruling_warnings: List[str] = []
 
         #: Every expected load point, any status. `runs` keeps its old meaning
         #: -- the points with frames -- for `indent.py` and existing callers.
@@ -675,6 +678,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 point.status = status[key]
         if self.integrity_settings is not None:
             self._check_integrity(self.integrity_settings)
+            self.ruling_warnings = apply_rulings(
+                self.points, load_rulings(self.results_dir), self.results_dir)
         if complete_only:
             self.runs = [run for run in self.runs if run.status == 'complete']
         self.ntimestep: int = max((len(r.window) for r in self.runs), default=0)

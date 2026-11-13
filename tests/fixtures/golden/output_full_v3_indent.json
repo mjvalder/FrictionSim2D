@@ -642,7 +642,8 @@
      "gap_rise": null,
      "gap_min_any": null
     },
-    "thresholds_version": "1.0.0"
+    "thresholds_version": "1.0.0",
+    "ruled_by_user": false
    }
   }
  ]
