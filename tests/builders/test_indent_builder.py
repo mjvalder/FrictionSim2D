@@ -356,3 +356,17 @@ def test_indent_ilp_bilayer_sets_molecule_ids(tmp_path, monkeypatch):
         text = script.read_text(encoding="utf-8")
         assert re.findall(r"^set group (\S+) mol (\d+)$", text, re.M) == [
             ("layer_1", "1"), ("layer_2", "2")], script.name
+
+
+def test_indent_deck_writes_end_snapshot_before_indent_next(tmp_path: Path):
+    from src.postprocessing.integrity import writes_end_snapshot
+    builder = IndentSimulation(_afm_cfg(tmp_path, force=[10, 30]),
+                               output_dir=str(tmp_path / "o"))
+    script = builder.render_template("afm/indent.lmp", _indent_context())
+    snap = "final_f$(v_find)N_a$(v_a).data"
+    assert snap in script
+    assert (script.index("retract_loop\n") < script.index(snap)
+            < script.index("label           indent_next"))
+    (tmp_path / "lammps").mkdir()
+    (tmp_path / "lammps" / "slide.in").write_text(script, encoding="utf-8")
+    assert writes_end_snapshot(tmp_path / "lammps")

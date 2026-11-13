@@ -501,9 +501,9 @@ def writes_end_snapshot(lammps_dir, data_dir=None) -> bool:
 
     That is: a ``final_*.data`` is in ``data_dir`` (a tree copied without its
     ``lammps/`` still counts), or any deck in ``lammps_dir`` has a
-    ``write_data ... final_`` line. PES and indent decks never do, nor do
-    hetero and flake runs built before end snapshots existed; their snapshot
-    rules are not applicable.
+    ``write_data ... final_`` line. Runs built before end snapshots existed
+    (hetero, flake, indent, PES) have neither; their snapshot rules are not
+    applicable.
     """
     if data_dir is not None and Path(data_dir).is_dir() and any(
             Path(data_dir).glob('final_*.data')):

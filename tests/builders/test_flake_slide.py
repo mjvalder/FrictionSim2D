@@ -234,6 +234,7 @@ def test_flake_slide_builder_places_flake_and_reserves_virtual(tmp_path):
     assert re.search(r"fix\s+spr flake spring couple virtual", text)   # driven group is the flake
     assert "fsbot" in text and "setforce 0.0 0.0 0.0" in text          # sheet bottom fixed
     assert "corner_hold" not in text                                   # default OFF (follow-up E)
+    assert re.search(r"^write_data\s+\S+/data/final_p\$\(v_pressure\)GPa", text, re.M)
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH (builder assembles via LAMMPS)")

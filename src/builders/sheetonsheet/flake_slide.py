@@ -428,6 +428,7 @@ class FlakeSlideSimulation(SimulationBase):
         context = {
             "temp": general.temp,
             "halt_temperature": halt_temperature(settings, general.temp),
+            "data_dir": self._run_dir_path("data"),   # final-state retention
             # Points the guard halted (common/halt.lmp); run_status reads it.
             "halt_record": self._run_dir_path("results", "halted.txt"),
             # One seed per channel, drawn in the builder like every other

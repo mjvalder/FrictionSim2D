@@ -278,6 +278,7 @@ class PESGridMixin:
             'period_y': period_y,
             'n_cells': n_cells,
             'z_relax': self._z_relax(),
+            'data_dir': f"{self.relative_run_dir}/data",   # final_pes.data
         }
         base_context.update(self._scan_extra_context())
         # Interlayer style (spec 2026-11-11 §7): molecule IDs for ILP/KC, and

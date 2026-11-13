@@ -210,6 +210,9 @@ print           "$(v_k),$(v_ztip),$(v_fztip),$(v_fxtip),$(v_fytip),$(v_pe_now)" 
 next            k
 jump            SELF retract_loop
 
+# End-of-point snapshot (integrity stage 3); a skipped load jumps past it.
+write_data      {{ output_dir }}/final_f$(v_find)N_a$(v_a).data
+
 # A halted or skipped load jumps here, past its retract.
 label           indent_next
 

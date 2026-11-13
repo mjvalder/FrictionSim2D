@@ -1227,3 +1227,44 @@ def test_molecule_ids_snippet_is_absent_by_default():
                  _render_hetero_slide(4)):
         assert 'property/atom' not in text
         assert ' mol ' not in text
+
+
+# --- end-of-point snapshots (integrity stage 3) -----------------------------
+
+def _writes_snapshot(text, tmp_path):
+    from src.postprocessing.integrity import writes_end_snapshot
+    lammps = tmp_path / 'lammps'
+    lammps.mkdir()
+    (lammps / 'slide.in').write_text(text, encoding='utf-8')
+    return writes_end_snapshot(lammps)
+
+
+@pytest.mark.parametrize('render', [_render_hetero_slide, _render_flake_slide])
+def test_hetero_and_flake_write_final_snapshot_after_halt_check(render, tmp_path):
+    text = render(4)
+    snap = 'final_p$(v_pressure)GPa_a$(v_a).data'
+    assert sum(snap in ln for ln in text.splitlines()
+               if ln.startswith('write_data')) == 1
+    halt = text.rindex('jump SELF slide_next', 0, text.index(snap))
+    assert halt < text.index(snap) < text.index('label           slide_next')
+    assert _writes_snapshot(text, tmp_path)
+
+
+def _render_raw(template, **ctx):
+    from jinja2 import Environment
+    from src.interfaces.jinja import PackageLoader
+    env = Environment(loader=PackageLoader('src.templates'),
+                      trim_blocks=True, lstrip_blocks=True)
+    return env.get_template(template).render(**ctx)
+
+
+@pytest.mark.parametrize('template', [
+    'afm/pes_scan.lmp', 'afm_freestanding/pes_scan.lmp',
+    'sheetonsheet/pes_scan.lmp', 'hetero/pes_scan.lmp'])
+def test_pes_decks_end_with_final_pes_snapshot(template, tmp_path):
+    text = _render_raw(template, output_dir='sim/data', data_dir='sim/data',
+                       grid_n=3, period_x=3.0, period_y=3.0, zhi=10.0,
+                       xlo=0.0, xhi=1.0, ylo=0.0, yhi=1.0)
+    last = text.rstrip().splitlines()[-1]
+    assert last.split() == ['write_data', 'sim/data/final_pes.data']
+    assert _writes_snapshot(text, tmp_path)

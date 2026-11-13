@@ -121,3 +121,6 @@ next            iy
 jump            SELF loop_iy
 next            ix
 jump            SELF loop_ix
+
+# End-of-scan snapshot (integrity stage 3).
+write_data      {{ data_dir }}/final_pes.data

@@ -275,3 +275,13 @@ def test_retrieve_list_includes_hpc_run_logs():
     """R30: the CalcJob retrieve_list must pull back lammps/run_*.log too."""
     remotes = {remote for remote, _local, _d in RETRIEVE_LIST}
     assert 'lammps/run_*.log' in remotes
+
+
+def test_keeps_build_structure(tmp_path):
+    """Integrity needs the as-built structure as its bond reference."""
+    _touch(tmp_path, 'provenance.json', 'build/h_MoS2_4.lmp', 'build/tip.data')
+
+    kept = {p.relative_to(tmp_path).as_posix() for p in retained_paths(tmp_path)}
+
+    assert kept == {'provenance.json', 'build/h_MoS2_4.lmp'}
+    assert ('build/*.lmp', '.', None) in RETRIEVE_LIST

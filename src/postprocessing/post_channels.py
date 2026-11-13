@@ -38,6 +38,9 @@ _FINAL_RE = re.compile(
     r'^final_(?P<kind>[fp])(?P<load>-?\d+\.?\d*(?:[eE][+-]?\d+)?)'
     r'(?P<unit>N|GPa)_a(?P<angle>-?\d+\.?\d*(?:[eE][+-]?\d+)?)\.data$')
 
+#: The static PES scans write ONE `final_pes.data` at the end of the grid.
+_FINAL_PES = 'final_pes.data'
+
 _SECTION_RE = re.compile(r'^[A-Z][A-Za-z ]*$')
 
 
@@ -84,6 +87,10 @@ def final_data_path(data_dir: Path, load_kind: str, load: float,
     data_dir = Path(data_dir)
     if not data_dir.is_dir():
         return None
+    if load_kind == 'none':
+        # PES point: one end-of-scan file, load and angle do not apply.
+        pes = data_dir / _FINAL_PES
+        return pes if pes.is_file() else None
     for path in sorted(data_dir.iterdir()):
         match = _FINAL_RE.match(path.name)
         if match is None:

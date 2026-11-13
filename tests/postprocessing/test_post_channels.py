@@ -133,3 +133,13 @@ def test_post_channels_for_reads_the_locator(tmp_path):
     out = post_channels_for(locator, 'force', 30.0, 0.0)
 
     assert set(out) == {'gap_min', 'deflect_max'}
+
+
+def test_final_data_path_finds_the_pes_end_snapshot(tmp_path):
+    data = tmp_path / 'data'
+    data.mkdir()
+    assert final_data_path(data, 'none', 0.0, 0.0) is None
+    (data / 'final_pes.data').write_text('x', encoding='utf-8')
+    assert final_data_path(data, 'none', 0.0, 0.0) == data / 'final_pes.data'
+    assert final_data_path(data, 'none', 5.0, 45.0) == data / 'final_pes.data'
+    assert final_data_path(data, 'force', 0.0, 0.0) is None

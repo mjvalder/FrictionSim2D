@@ -32,6 +32,7 @@ RETAINED_GLOBS: Tuple[str, ...] = (
     'data/hold_*.txt',
     'data/final_*.data',
     'data/load_*.data',
+    'build/*.lmp',
     'log*.lammps',
     '*.out',
 )
@@ -87,6 +88,7 @@ RETRIEVE_LIST: Tuple[Tuple[str, str, Optional[int]], ...] = (
     ('data/hold_*.txt', '.', None),
     ('data/final_*.data', '.', None),
     ('data/load_*.data', '.', None),
+    ('build/*.lmp', '.', None),
     ('log*.lammps', '.', None),
     ('*.out', '.', None),
 )

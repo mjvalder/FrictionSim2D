@@ -222,6 +222,9 @@ fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_sp
 run             {{ run_steps }}
 {{ halt_guard.emit_halt_check(halt_temperature, halt_record, 'slide', 'pressure=$(v_pressure) angle=$(v_a) speed=$(v_speed)', 'slide_next') }}
 
+# End-of-point snapshot (integrity stage 3); a halted point jumps past it.
+write_data      {{ data_dir }}/final_p$(v_pressure)GPa_a$(v_a).data
+
 # A halted point (common/halt.lmp) jumps here, past the rest of its slide.
 label           slide_next
 
