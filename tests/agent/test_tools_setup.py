@@ -98,7 +98,7 @@ def test_suggest_values_low_load_uses_reference_band(deps):
     deps.document.set('tip', 'r', 25)
     text = suggest_values(deps, 'load', 'low', 5)
     assert 'values: 10, 12.5, 15, 17.5, 20' in text
-    assert 'nN' in text and 'ML_taxonomy' in text and 'BASELINE_LOADS' in text
+    assert 'nN' in text and 'baseline loads' in text and 'taxonomy' not in text
     assert 'warning' not in text.lower() and 'measured' not in text.lower()
     assert len(text) <= 1500
 

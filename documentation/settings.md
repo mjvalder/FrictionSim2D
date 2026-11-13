@@ -50,6 +50,7 @@ FrictionSim2D settings reset
 - `hpc`
 - `aiida`
 - `database`
+- `integrity`
 
 ## simulation
 
@@ -348,8 +349,39 @@ and the `api_host`/`api_port` fields, are gone — there is only ever one
 database to talk to now, and `FrictionSim2D api serve --host/--port` takes
 the server bind address directly instead of duplicating it here.
 
+## integrity
+
+Thresholds of the post-run integrity check (stage 3 of `postprocess read`). Every threshold is
+optional; `null` turns that rule off. The rules, statuses and quarantine are described in
+[integrity.md](integrity.md).
+
+Defaults:
+
+```yaml
+integrity:
+  hole_bonds: 1.5               # largest atom-free disk, in bond lengths
+  isolated_radius_bonds: 1.5    # neighbour radius for "isolated"
+  isolated_atoms: 2             # atoms with no neighbour
+  ejected_atoms: 2              # atoms off the layer's median plane
+  ejected_bonds: 8.0            # distance that counts as ejected
+  heating_sigma: 8.0            # peak sheet temperature, in sigma_T
+  gap_rise: 0.05                # interlayer gap change, fraction of its start
+  collapse: true                # fail when layers pass through each other
+  frozen_std: 1.0e-6            # a channel with a smaller standard deviation is frozen
+  gap_start_samples: 25         # samples averaged for the starting gap
+  sheet_heating_skip_samples: 5 # leading samples skipped (sheet-on-sheet heating peak)
+  sheet_gap_end_samples: 50     # samples averaged for the end-of-slide gap (sheet-on-sheet)
+  margins: {}                   # rule name -> fraction of its threshold; empty = none
+  version: "1.0.0"              # version of the rule set, stamped into exports
+```
+
+`margins` is empty by default. A rule with margin `m` quarantines a passing point whose value
+is in `[m * threshold, threshold)`. `postprocess read --integrity-settings <file>` replaces this
+block for one read; `--no-integrity` skips the check.
+
 ## Related docs
 
 - [configuration.md](configuration.md)
 - [commands.md](commands.md)
 - [aiida.md](aiida.md)
+- [integrity.md](integrity.md)

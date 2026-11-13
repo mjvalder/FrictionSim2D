@@ -62,10 +62,10 @@ def test_quantity_synonyms(quantity):
 
 def test_working_says_what_each_band_is():
     low = scale('load', 'low', AFM).working
-    assert 'baseline loads' in low and 'BASELINE_LOADS' in low and 'poor contact' in low
+    assert 'baseline loads' in low and '10, 20 and 30 nN' in low and 'poor contact' in low
     assert 'lower part' in low
     mid = scale('load', 'mid', AFM).working
-    assert 'MID_LOAD_CORE' in mid and 'reference trends' in mid
+    assert '20-50 nN' in mid and 'reference trends' in mid
     high = scale('load', 'high', AFM).working
     assert '100 nN' in high and 'no dedicated constant' in high
     for text in (low, mid, high):

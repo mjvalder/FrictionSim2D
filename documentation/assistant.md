@@ -194,8 +194,8 @@ bands in `src/core/scaling.py`, spread linearly over the band:
 
 | band | nominal pressure F/R² | at R = 25 Å | where the numbers come from |
 |---|---|---|---|
-| low | 1.6-3.2 GPa | 10-20 nN | the ML_taxonomy baseline loads (10, 20, 30 nN), chosen for good contact; 2-5 nN give poor contact |
-| mid | 3.2-8 GPa | 20-50 nN | the ML_taxonomy mid-load core window its reference trends are fitted on |
+| low | 1.6-3.2 GPa | 10-20 nN | the baseline loads (10, 20, 30 nN), chosen for good contact; 2-5 nN give poor contact |
+| mid | 3.2-8 GPa | 20-50 nN | the mid-load core window the reference trends are fitted on |
 | high | 8-16 GPa | 50-100 nN | from the top of the mid window to the example campaign's maximum (100 nN) |
 
 For the AFM family (AFM, indent, PES tip) the band is a **nominal pressure,

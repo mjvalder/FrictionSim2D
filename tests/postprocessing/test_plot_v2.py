@@ -658,17 +658,14 @@ def test_an_unknown_plot_type_raises(tmp_path):
         plotter.generate_plot({'plot_type': 'sunburst', 'filename': 'x.png'})
 
 
-def test_the_taxonomy_types_are_still_dispatchable(tmp_path):
-    """They have no model in plot_config, so they cannot appear in a
-    validated document -- but they are reachable from a dict, and the
-    stricter dispatch must not turn them into an error."""
+def test_the_taxonomy_types_are_gone(tmp_path):
+    """The ML anomaly-mode plots left with the taxonomy: they are unknown types."""
     root = _dataset(tmp_path, 'afm')
     plotter = Plotter(data_dirs=[str(root)], labels=['ds'],
                       output_dir=str(tmp_path / 'out'))
 
-    for plot_type in ('taxonomy_signature_heatmap', 'taxonomy_prevalence',
-                      'taxonomy_exemplar', 'taxonomy_regime_map'):
-        plotter.generate_plot({'plot_type': plot_type, 'filename': 'x.png'})
+    with pytest.raises(PlotDataError, match='taxonomy_prevalence'):
+        plotter.generate_plot({'plot_type': 'taxonomy_prevalence', 'filename': 'x.png'})
 
 
 def test_plot_stack_reads_schema_3_and_still_reads_schema_2(tmp_path):

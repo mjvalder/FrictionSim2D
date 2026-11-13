@@ -747,6 +747,7 @@ needs a shorter axis than the honest one.
 
 ```bash
 FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT] [--complete-only]
+                                [--integrity-settings FILE] [--no-integrity]
 ```
 
 - `RESULTS_DIR` — a simulation root, the directory holding `afm/`, `sheetonsheet/`,
@@ -757,6 +758,9 @@ FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT] [-
   summary statistics, forwarded to `summarise_run`.
 - `--complete-only` — export and summarise only `complete` load points (the
   pre-schema-3 behaviour); `metadata.status_counts` still counts every point.
+- `--integrity-settings FILE` — YAML with an `integrity:` mapping that replaces the user
+  settings' thresholds for this read; `--no-integrity` skips the check. See
+  [integrity.md](integrity.md).
 
 The completeness reports are written either way.
 

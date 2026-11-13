@@ -1,8 +1,8 @@
 """Descriptors such as 'low load' turned into load bands for the current tip.
 
 AFM-family bands are kept as a nominal pressure, F/R^2, calibrated so the
-reference tip (R = 25 A) reproduces the reference load bands from the
-ML_taxonomy work and the example campaign; a different tip radius rescales the
+reference tip (R = 25 A) reproduces the reference load bands of the example
+campaign; a different tip radius rescales the
 load by (R/25)^2. This is not a contact model and not measured regimes: each
 band's ``source`` says what its numbers are, and stiffness, sheet size and the
 contact itself are ignored (a sensitivity study is in future-works). Other
@@ -73,9 +73,9 @@ REFERENCE_VALUES = (('temperature_K', (300.0,), 1.0, 'K', 'temperature'),
 
 _AFM_FAMILY = ('afm', 'indent', 'pes_tip')
 
-def _nominal(load_nN: float) -> float:
+def _nominal(load_nn: float) -> float:
     """Reference load -> nominal pressure F/R^2 in GPa at the reference radius."""
-    return load_nN / REFERENCE_RADIUS_A ** 2 * GPA_PER_NN_PER_A2
+    return load_nn / REFERENCE_RADIUS_A ** 2 * GPA_PER_NN_PER_A2
 
 
 #: The reference bands, as nominal pressure F/R^2 (GPa) calibrated on the
@@ -84,11 +84,12 @@ def _nominal(load_nN: float) -> float:
 REGIMES = (
     Regime(_AFM_FAMILY, 'load', 'low', 'GPa', _nominal(10.0), _nominal(20.0),
            'baseline loads chosen for good contact (user ruling 2026-10-16: 2-5 nN '
-           'give poor contact) -- ML_taxonomy taxlib BASELINE_LOADS = (10, 20, 30); '
-           'this band takes its lower part (10-20 nN at R = 25 A)'),
+           'give poor contact) -- the baseline '
+           'loads are 10, 20 and 30 nN; this band takes their lower part '
+           '(10-20 nN at R = 25 A)'),
     Regime(_AFM_FAMILY, 'load', 'mid', 'GPa', _nominal(20.0), _nominal(50.0),
-           'the mid-load core window the ML_taxonomy analysis fits its reference '
-           'trends on (runtax MID_LOAD_CORE = [20, 50] nN at R = 25 A)'),
+           'the mid-load core window the reference trends are fitted on '
+           '(20-50 nN at R = 25 A)'),
     Regime(_AFM_FAMILY, 'load', 'high', 'GPa', _nominal(50.0), _nominal(100.0),
            "from the top of the mid window to the example campaign's maximum "
            '(100 nN at R = 25 A); no dedicated constant'),

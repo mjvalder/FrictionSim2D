@@ -424,6 +424,7 @@ Walk a simulation root and export its runs:
 
 ```bash
 FrictionSim2D postprocess read RESULTS_DIR [--export] [--skip-fraction FLOAT]
+                                [--integrity-settings FILE] [--no-integrity]
 ```
 
 Options:
@@ -432,6 +433,9 @@ Options:
   `outputs/summary_<size>.csv`
 - `--skip-fraction FLOAT` (default `0.2`) — transient fraction dropped before the
   summary statistics
+- `--integrity-settings FILE` — YAML with an `integrity:` mapping that replaces the
+  thresholds of the user settings for this read
+- `--no-integrity` — skip the integrity check ([integrity.md](integrity.md))
 
 See [postprocessing.md](postprocessing.md) for both schemas.
 

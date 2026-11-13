@@ -22,6 +22,7 @@ Read in this order if you are new; each document also stands alone.
 | 13 | [python_api.md](python_api.md) | Driving the package from Python instead of the CLI |
 | 14 | [postprocessing.md](postprocessing.md) | The `outputs/` schemas, plot documents, the plot schema, settings presets |
 | 15 | [testing.md](testing.md) | Test tiers and how to run them, markers, layout, the integration tier |
+| 16 | [integrity.md](integrity.md) | The post-run integrity check: rules, statuses, quarantine and rulings, thresholds |
 
 If your goal is simply to generate and run simulations, documents 1 through 6 are
 sufficient. Documents 12 to 15 matter for development and reproducibility work.

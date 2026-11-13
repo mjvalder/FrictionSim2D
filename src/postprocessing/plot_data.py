@@ -19,7 +19,6 @@ from .plot_ranking import PlotRankingMixin
 from .plot_style import DEFAULT_SETTINGS
 from .plot_stick_slip import PlotStickSlipMixin
 from .plot_summary import PlotSummaryMixin
-from .plot_taxonomy import PlotTaxonomyMixin
 from .plot_timeseries import PlotTimeseriesMixin
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,6 @@ class Plotter(
     PlotStickSlipMixin,
     PlotCorrelationMixin,
     PlotRankingMixin,
-    PlotTaxonomyMixin,
 ):
     """Generate plots from friction simulation data."""
 
@@ -101,7 +99,7 @@ class Plotter(
 
         One place, so every mixin gets both without each repeating the
         `plt.subplots` keyword or touching rcParams itself. `nrows`/`ncols`
-        and the passthrough kwargs exist so the multi-panel taxonomy plots go
+        and the passthrough kwargs exist so multi-panel plots go
         through here too -- a setting that reached only the single-axes plots
         would be half a setting.
         """
@@ -120,9 +118,6 @@ class Plotter(
         defaults document them. Dumping defaults instead would change every
         plot in the corpus at once, silently.
 
-        The four ``taxonomy_*`` types have no model in `plot_config` and so
-        cannot appear in a validated document; they are dispatched here
-        because they are reachable from a plain dict and from the Python API.
         """
         from .plot_config import PlotBase  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
@@ -141,10 +136,6 @@ class Plotter(
             'rank_friction': self.rank_friction,
             'correlation': self._generate_correlation_plots,
             'cof_histogram': self._generate_cof_histogram,
-            'taxonomy_signature_heatmap': self._generate_taxonomy_signature_heatmap,
-            'taxonomy_prevalence': self._generate_taxonomy_prevalence,
-            'taxonomy_exemplar': self._generate_taxonomy_exemplar,
-            'taxonomy_regime_map': self._generate_taxonomy_regime_map,
         }
         if plot_type not in dispatch:
             raise PlotDataError(
