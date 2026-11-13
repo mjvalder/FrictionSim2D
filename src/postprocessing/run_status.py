@@ -10,8 +10,16 @@ vanished without trace. Here the expected grid comes from the run's own
 * `unreadable`  -- the window file (or the only file) exists but fails to parse.
 * `no_output`   -- configured, the run exists, no results file.
 * `halted`      -- stopped by the temperature guard (`common/halt.lmp`);
-                   its frames are dropped, they record the blow-up.
+                   its frames are kept (they record the blow-up), but no
+                   summary statistic is computed from them.
+* `failed_integrity` -- complete, but a stage-3 integrity rule fired
+                   (`postprocessing/integrity.py`).
+* `quarantined` -- complete, but stage 3 could not judge it (missing
+                   snapshot, unresolved layers) or a value is within a margin.
 * `not_reached` -- `no_output` after a non-complete point of the same chain.
+                   Set from the file-level statuses only: stage 3 runs after
+                   it, so a failed integrity check never makes a later point
+                   `not_reached`.
 
 A chain is one in-script loop. The slide templates nest `speed` (outer) ->
 load -> `angle` (inner) and ramp each load from the previous one, so a crash
@@ -32,7 +40,10 @@ from src.core.observables import is_truncated
 logger = logging.getLogger(__name__)
 
 STATUSES = ('complete', 'truncated', 'no_output', 'unreadable', 'halted',
-            'not_reached')
+            'failed_integrity', 'quarantined', 'not_reached')
+
+#: Statuses whose point produced no frames at all.
+UNOBSERVED = ('no_output', 'not_reached')
 
 #: The guard's registry in a run's `results/` (the builders' `halt_record`).
 HALT_RECORD = 'halted.txt'

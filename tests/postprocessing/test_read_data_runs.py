@@ -28,8 +28,8 @@ GOLDEN_DIR = Path(__file__).resolve().parents[1] / 'fixtures' / 'golden'
 #: Keys schema 3 adds to each `runs[]` entry and to `metadata`. Removing them
 #: from a v3 document must give back the v2 golden exactly: v3 is additive.
 V3_RUN_KEYS = {'status', 'status_detail', 'n_rows', 'expected_rows',
-               'provenance'}
-V3_META_KEYS = {'provenance', 'status_counts'}
+               'provenance', 'integrity'}
+V3_META_KEYS = {'provenance', 'status_counts', 'integrity_thresholds'}
 
 
 def as_v2(doc):
@@ -381,7 +381,8 @@ def test_v2_document_shape(tmp_path):
         'size_x', 'size_y', 'substrate', 'substrate_amorphous', 'tip_material',
         'tip_radius', 'temperature', 'layers', 'potential', 'rel_path',
         'load_kind', 'load', 'angle', 'speed', 'n_layers', 'tiers', 'post',
-        'status', 'status_detail', 'n_rows', 'expected_rows', 'provenance'}
+        'status', 'status_detail', 'n_rows', 'expected_rows', 'provenance',
+        'integrity'}
     assert run['load_kind'] == 'force'
     assert set(run['tiers']) == {'window', 'raw'}
     assert run['tiers']['window']['columns'][0] == 'time'

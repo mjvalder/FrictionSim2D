@@ -34,6 +34,8 @@ import pandas as pd
 
 from src.core.config import IntegritySettings
 
+from .run_status import UNOBSERVED
+
 AFM_LIKE = ('afm', 'indent', 'pes_tip')
 SHEET_LIKE = ('sheetonsheet', 'hetero', 'flake', 'pes_sheet')
 
@@ -267,7 +269,7 @@ def series_measures(window: pd.DataFrame, family: str, n_layers: int, T_target: 
 # --------------------------------------------------------------------------
 
 #: Statuses whose point never produced a window: failed, and nothing observed.
-_UNOBSERVED = ('no_output', 'not_reached')
+_UNOBSERVED = UNOBSERVED
 
 #: (rule, measure key, IntegritySettings attribute, unit), in s48's order
 #: (:159-172) with s51's ``collapse`` (:157) last. ``None`` attribute: the
@@ -286,6 +288,7 @@ _RULES = (
 _BOOLEAN_RULES = ('non_finite', 'frozen')
 
 MULTI_SPEED_DETAIL = 'snapshot rules skipped: multi-speed run'
+NO_SNAPSHOT_DETAIL = 'snapshot rules not applicable: run writes no end snapshot'
 
 
 @dataclass
@@ -457,14 +460,19 @@ def _zband_layers(ref_path: Optional[Path], n_layers: int) -> Dict[str, Set[int]
     return out
 
 
-def resolve_layers(locator, record, ref_path: Optional[Path],
-                   n_layers: int) -> Dict[str, Set[int]]:
+def resolve_layers(locator, record, ref_path: Optional[Path], n_layers: int,
+                   *, family: Optional[str] = None) -> Dict[str, Set[int]]:
     """``{layer name: atom types}``, or ``{}`` when the layers cannot be told.
 
     Tries the provenance ``layer_type_map``, then the ``group layer_N type``
-    lines of ``lammps/system.in.settings`` (s48 :110, s51 :110), then z bands
-    of the reference structure; overlapping band types give ``{}``.
+    lines of ``lammps/system.in.settings`` (s48 :110, s51 :110), then -- for
+    the sheet-like families only -- z bands of the reference structure;
+    overlapping band types give ``{}``. An AFM reference also holds the tip
+    and the substrate, so its z bands are not the sheet layers. ``family``
+    defaults to the locator's.
     """
+    if family is None:
+        family = locator.tokens.family
     mapped = _record_map(record)
     if mapped:
         return _ordered({str(k): {int(t) for t in v} for k, v in mapped.items()})
@@ -476,7 +484,33 @@ def resolve_layers(locator, record, ref_path: Optional[Path],
     groups = _GROUP_RE.findall(text)
     if groups:
         return _ordered({name: expand(spec) for name, spec in groups})
+    if family not in SHEET_LIKE:
+        return {}
     return _zband_layers(ref_path, n_layers)
+
+
+_END_SNAPSHOT_RE = re.compile(r'^\s*write_data\s+\S*final_', re.MULTILINE)
+
+
+def writes_end_snapshot(lammps_dir) -> bool:
+    """True when any deck in ``lammps_dir`` writes a ``final_*`` snapshot.
+
+    PES and indent decks never do, nor do hetero and flake runs built before
+    end snapshots existed; their snapshot rules are not applicable.
+    """
+    lammps_dir = Path(lammps_dir)
+    if not lammps_dir.is_dir():
+        return False
+    for path in sorted(lammps_dir.iterdir()):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding='utf-8', errors='ignore')
+        except OSError:
+            continue
+        if _END_SNAPSHOT_RE.search(text):
+            return True
+    return False
 
 
 def _first_build(*dirs: Path) -> Optional[Path]:
@@ -529,14 +563,17 @@ def _count_layers(path: Path, layers: Dict[str, Set[int]]) -> Dict[str, int]:
 def check_files(status: str, window: Optional[pd.DataFrame], family: str,  # pylint: disable=too-many-arguments
                 n_layers: int, T_target: float, final_path: Optional[Path],  # pylint: disable=invalid-name
                 ref_path: Optional[Path], layers: Dict[str, Set[int]],
-                settings: IntegritySettings, *, multi_speed: bool = False) -> IntegrityVerdict:
+                settings: IntegritySettings, *, multi_speed: bool = False,
+                writes_snapshot: bool = True) -> IntegrityVerdict:
     """Stage 3 on files alone -- no ``RunFrames``, no locator.
 
     Snapshot rules run only on a complete point (s51 :105); a missing or
     unreadable snapshot or reference, or unresolved layers, quarantines it.
-    With ``multi_speed`` the snapshot rules are skipped (one final file per
-    load and angle cannot tell the speeds apart); the reference still gives
-    the atom counts for ``n_heat``.
+    Without ``writes_snapshot`` (the run's decks write no ``final_*``) or with
+    ``multi_speed`` (one final file per load and angle cannot tell the speeds
+    apart) the snapshot rules are not applicable instead. Whatever the
+    status, the reference gives the atom counts for ``n_heat`` when there is
+    no snapshot (s48 :191, s51 :169).
     """
     if family not in AFM_LIKE + SHEET_LIKE:
         raise ValueError(f"unknown family {family!r}; known: {AFM_LIKE + SHEET_LIKE}")
@@ -545,7 +582,9 @@ def check_files(status: str, window: Optional[pd.DataFrame], family: str,  # pyl
     measures: Dict[str, float] = {}
     n_by_layer: Dict[str, int] = {}
     if status == 'complete':
-        if not layers:
+        if not writes_snapshot:
+            skipped.append(NO_SNAPSHOT_DETAIL)
+        elif not layers:
             quarantine.append('no layer types: provenance map, group lines and '
                               'z bands all failed')
         elif multi_speed:
@@ -562,11 +601,11 @@ def check_files(status: str, window: Optional[pd.DataFrame], family: str,  # pyl
             else:
                 n_by_layer = snap.pop('n_by_layer')
                 measures.update(snap)
-        if layers and not n_by_layer and ref_path is not None:
-            try:
-                n_by_layer = _count_layers(ref_path, layers)
-            except (OSError, ValueError):
-                n_by_layer = {}
+    if layers and not n_by_layer and ref_path is not None:
+        try:
+            n_by_layer = _count_layers(ref_path, layers)
+        except (OSError, ValueError):
+            n_by_layer = {}
     n_heat = _n_heat(family, n_by_layer)
     measures['n_heat'] = float('nan') if n_heat is None else n_heat
     if window is not None and len(window.columns):
@@ -577,16 +616,19 @@ def check_files(status: str, window: Optional[pd.DataFrame], family: str,  # pyl
 
 
 def check_point(point, record, settings: IntegritySettings, *,
-                multi_speed: bool) -> IntegrityVerdict:
+                multi_speed: bool, writes_snapshot: bool = True) -> IntegrityVerdict:
     """Stage 3 for one ``RunFrames``: resolve the files and layers, then
-    :func:`check_files`. ``T_target`` is the run's temperature token."""
+    :func:`check_files`. ``T_target`` is the run's temperature token;
+    ``point.n_layers`` is the sheet layer count."""
     from .post_channels import final_data_path  # pylint: disable=import-outside-toplevel
 
     locator, family = point.locator, point.family
+    n_layers = point.n_layers
     final = final_data_path(locator.data_dir, point.load_kind, point.load, point.angle)
     ref = bond_reference(locator, family, point)
-    layers = resolve_layers(locator, record, ref, point.n_layers)
+    layers = resolve_layers(locator, record, ref, n_layers, family=family)
     window = point.window if point.tiers else None
-    return check_files(point.status, window, family, point.n_layers,
+    return check_files(point.status, window, family, n_layers,
                        float(point.tokens.temperature), final, ref, layers,
-                       settings, multi_speed=multi_speed)
+                       settings, multi_speed=multi_speed,
+                       writes_snapshot=writes_snapshot)

@@ -312,7 +312,9 @@ def test_a_per_layer_channel_is_plottable_by_name(tmp_path):
     path.write_text(
         '# schema=2 lf_units=nN family=sheetonsheet\n'
         '# TimeStep ' + ' '.join(natives) + '\n'
-        + '\n'.join(f'{(i + 1) * 1000} 1.0 2.0 0.0 {6.5 + i * 0.1:g} -12.0'
+        # Every force channel varies: a constant one is `frozen` to stage 3.
+        + '\n'.join(f'{(i + 1) * 1000} {1.0 + i * 0.01:g} {2.0 + i * 0.01:g} '
+                    f'{i * 0.01:g} {6.5 + i * 0.1:g} -12.0'
                     for i in range(10)) + '\n', encoding='utf-8')
     reader = DataReader(results_dir=str(root))
     reader.export_full_data_to_json()

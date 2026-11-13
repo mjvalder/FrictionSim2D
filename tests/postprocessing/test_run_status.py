@@ -278,7 +278,8 @@ def test_status_counts(tmp_path):
 
     assert meta['status_counts'] == {'complete': 2, 'truncated': 1,
                                      'not_reached': 2, 'no_output': 0,
-                                     'unreadable': 0, 'halted': 0}
+                                     'unreadable': 0, 'halted': 0,
+                                     'failed_integrity': 0, 'quarantined': 0}
 
 
 def test_legacy_metadata_ignores_empty_entries(tmp_path):
@@ -370,8 +371,8 @@ def test_a_malformed_halt_line_is_ignored():
 
 
 def test_a_halted_slide_costs_only_its_own_point(tmp_path):
-    """Load 20 blew up mid-slide: its partial frames are dropped, and loads
-    30..50 -- slid by the same script after it -- stay complete."""
+    """Load 20 blew up mid-slide: its partial frames are kept but tagged, and
+    loads 30..50 -- slid by the same script after it -- stay complete."""
     run_dir = make_family_run(tmp_path, 'afm', loads=LOADS5,
                               config=slide_config('afm', loads=LOADS5), n=50)
     (run_dir / 'results' / 'halted.txt').write_text(
@@ -382,7 +383,8 @@ def test_a_halted_slide_costs_only_its_own_point(tmp_path):
     assert _statuses(reader) == ['complete', 'halted', 'complete', 'complete',
                                  'complete']
     halted = reader.points[1]
-    assert halted.tiers == {} and 'T=9000' in halted.status_detail
+    assert halted.tiers and 'T=9000' in halted.status_detail
+    assert halted in reader.runs
     assert reader.metadata['status_counts']['halted'] == 1
 
 

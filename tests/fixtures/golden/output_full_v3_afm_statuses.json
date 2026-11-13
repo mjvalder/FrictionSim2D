@@ -292,7 +292,25 @@
    "no_output": 0,
    "unreadable": 0,
    "halted": 0,
+   "failed_integrity": 0,
+   "quarantined": 0,
    "not_reached": 2
+  },
+  "integrity_thresholds": {
+   "hole_bonds": 1.5,
+   "isolated_radius_bonds": 1.5,
+   "isolated_atoms": 2,
+   "ejected_atoms": 2,
+   "ejected_bonds": 8.0,
+   "heating_sigma": 8.0,
+   "gap_rise": 0.05,
+   "collapse": true,
+   "frozen_std": 1e-06,
+   "gap_start_samples": 25,
+   "sheet_heating_skip_samples": 5,
+   "sheet_gap_end_samples": 50,
+   "margins": {},
+   "version": "1.0.0"
   },
   "summary_definition": {
    "cof": "ratio_of_means: mean(LF)/mean(NF)",
@@ -472,7 +490,7 @@
    },
    "post": {},
    "status": "complete",
-   "status_detail": "",
+   "status_detail": "integrity: snapshot rules not applicable: run writes no end snapshot",
    "provenance": {
     "schema_version": "2.0.0",
     "family": "afm",
@@ -589,6 +607,31 @@
    },
    "expected_rows": {
     "window": 4
+   },
+   "integrity": {
+    "status": "complete",
+    "failed": false,
+    "observed": true,
+    "reasons": [],
+    "quarantine": [],
+    "not_applicable": [
+     "hole",
+     "isolated_atoms",
+     "ejected_atoms",
+     "sheet_heating",
+     "gap_rise",
+     "collapse",
+     "snapshot rules not applicable: run writes no end snapshot"
+    ],
+    "measures": {
+     "n_heat": null,
+     "non_finite": false,
+     "frozen": false,
+     "T_sigma": null,
+     "gap_rise": null,
+     "gap_min_any": null
+    },
+    "thresholds_version": "1.0.0"
    }
   },
   {
@@ -762,7 +805,7 @@
    },
    "post": {},
    "status": "complete",
-   "status_detail": "",
+   "status_detail": "integrity: snapshot rules not applicable: run writes no end snapshot",
    "provenance": {
     "schema_version": "2.0.0",
     "family": "afm",
@@ -879,6 +922,31 @@
    },
    "expected_rows": {
     "window": 4
+   },
+   "integrity": {
+    "status": "complete",
+    "failed": false,
+    "observed": true,
+    "reasons": [],
+    "quarantine": [],
+    "not_applicable": [
+     "hole",
+     "isolated_atoms",
+     "ejected_atoms",
+     "sheet_heating",
+     "gap_rise",
+     "collapse",
+     "snapshot rules not applicable: run writes no end snapshot"
+    ],
+    "measures": {
+     "n_heat": null,
+     "non_finite": false,
+     "frozen": false,
+     "T_sigma": null,
+     "gap_rise": null,
+     "gap_min_any": null
+    },
+    "thresholds_version": "1.0.0"
    }
   },
   {
@@ -1088,7 +1156,8 @@
    },
    "expected_rows": {
     "window": 4
-   }
+   },
+   "integrity": null
   },
   {
    "model": "afm",
@@ -1232,7 +1301,8 @@
    "n_rows": {},
    "expected_rows": {
     "window": 4
-   }
+   },
+   "integrity": null
   },
   {
    "model": "afm",
@@ -1376,7 +1446,8 @@
    "n_rows": {},
    "expected_rows": {
     "window": 4
-   }
+   },
+   "integrity": null
   }
  ]
 }

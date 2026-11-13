@@ -24,8 +24,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from src.core.config import IntegritySettings
 from src.core.observables import FAMILIES, expected_tier_rows, rename_map
 
+from .integrity import IntegrityVerdict, check_point, writes_end_snapshot
 from .post_channels import post_channels_for
 from .run_provenance import (point_provenance, pool_provenance,
                              run_provenance)
@@ -379,6 +381,8 @@ class RunFrames:
     status_detail: str = ''
     expected_rows: Dict[str, int] = field(default_factory=dict)
     config: Optional[dict] = None
+    #: The stage-3 verdict; set on points that were `complete` before it ran.
+    integrity: Optional[IntegrityVerdict] = None
 
     @property
     def n_rows(self) -> Dict[str, int]:
@@ -494,7 +498,26 @@ def material_types(materials) -> Dict[str, List[str]]:
     return {key: sorted(values) for key, values in out.items()}
 
 
-def resolve_n_layers(locator) -> int:
+def _config_sheet_layers(config: Optional[dict], family: str) -> Optional[int]:
+    """The sheet layer count the run's `config.json` built, or None.
+
+    hetero stacks `sheets[i].layers[0]` (`HeteroSheetOnSheetSimulation.
+    n_layers`); sheetonsheet, flake and pes_sheet take `sheet.layers[0]`
+    (the flake sits on top of a substrate of that many layers).
+    """
+    if not isinstance(config, dict):
+        return None
+    try:
+        sheets = config.get('sheets') if family == 'hetero' else None
+        if sheets:
+            return sum(int(sheet['layers'][0]) for sheet in sheets)
+        sheet = config.get('sheet')
+        return int(sheet['layers'][0]) if isinstance(sheet, dict) else None
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def resolve_n_layers(locator, config: Optional[dict] = None) -> int:
     """How many sheet layers this run has.
 
     `RunTokens.layers` is the `L{n}` path level, and `output_dir_for` emits one
@@ -509,8 +532,9 @@ def resolve_n_layers(locator) -> int:
     `layer_1 ... layer_n` (`src/builders/sheetonsheet/base.py:62-83`,
     `src/builders/afm/base.py:961-969`), and `discover_runs` already opens that
     file to read `family`. It is `{}` for hetero and flake, whose layers are
-    z-band regions rather than atom-type groups; those log and fall back to 2,
-    which is what they have always assumed.
+    z-band regions rather than atom-type groups; those read the count off the
+    run's `config` (`_config_sheet_layers`), and only without one log and fall
+    back to 2, which is what they have always assumed.
     """
     if locator.tokens.layers is not None:
         return int(locator.tokens.layers)
@@ -524,6 +548,9 @@ def resolve_n_layers(locator) -> int:
         return 2
     if count:
         return count
+    configured = _config_sheet_layers(config, locator.tokens.family)
+    if configured:
+        return configured
     logger.info("%s has an empty layer_type_map (z-band layers); assuming 2",
                 locator.tokens.rel_path)
     return 2
@@ -606,7 +633,9 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
     _is_lj_branch = staticmethod(is_lj_branch)
     def __init__(self, results_dir: str = 'results_110725_test', *,
                  skip_fraction: float = 0.2,
-                 complete_only: bool = False) -> None:
+                 complete_only: bool = False, integrity: bool = True,
+                 integrity_settings: Optional[IntegritySettings] = None
+                 ) -> None:
         """Initialise the DataReader.
 
         Args:
@@ -614,13 +643,20 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 `sheetonsheet/`, `indent/`, `pes_tip/`, `pes_sheet/`.
             skip_fraction: Transient fraction `summarise_run` discards.
             complete_only: Export and summarise only `complete` points (the
-                old behaviour); by default every status is written.
+                old behaviour); by default every status is written. Also
+                narrows `runs` to them.
+            integrity: Run the stage-3 integrity check on every `complete`
+                point (`postprocessing.integrity`); off leaves the file-level
+                statuses alone.
+            integrity_settings: Its thresholds; default `IntegritySettings()`.
         """
         self.results_dir = Path(results_dir)
         self.output_dir = self.results_dir / 'outputs'
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.skip_fraction = skip_fraction
         self.complete_only = complete_only
+        self.integrity_settings: Optional[IntegritySettings] = (
+            (integrity_settings or IntegritySettings()) if integrity else None)
         self._run_blocks: Dict[Path, dict] = {}
 
         #: Every expected load point, any status. `runs` keeps its old meaning
@@ -636,11 +672,45 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             mark_not_reached(chain, status)
             for key, point in by_key.items():
                 point.status = status[key]
+        if self.integrity_settings is not None:
+            self._check_integrity(self.integrity_settings)
+        if complete_only:
+            self.runs = [run for run in self.runs if run.status == 'complete']
         self.time_series: List[int] = self._time_series()
         self.incomplete_files: Dict[str, List[str]] = {}
         self.incomplete_materials: Dict[str, set] = {}
         self._flag_incomplete()
         self.metadata: Dict[str, Any] = self._build_metadata()
+
+    def _check_integrity(self, settings: IntegritySettings) -> None:
+        """Stage 3 on every `complete` point; its verdict becomes the status.
+
+        Runs after `mark_not_reached`, so a point that fails here never turns
+        a later point of its chain `not_reached`: the chain did reach it.
+        `multi_speed` is per run -- more than one distinct speed among its
+        points. Whether the decks write an end snapshot is read once per run.
+        """
+        by_run: Dict[Path, List[RunFrames]] = {}
+        for point in self.points:
+            by_run.setdefault(Path(point.locator.run_dir), []).append(point)
+        for points in by_run.values():
+            todo = [p for p in points if p.status == 'complete']
+            if not todo:
+                continue
+            record = self._run_block(todo[0])
+            multi_speed = len({p.speed for p in points}) > 1
+            writes = writes_end_snapshot(todo[0].locator.lammps_dir)
+            for point in todo:
+                verdict = check_point(point, record, settings,
+                                      multi_speed=multi_speed,
+                                      writes_snapshot=writes)
+                point.integrity = verdict
+                point.status = verdict.status
+                notes = [d for d in verdict.not_applicable if ' ' in d]
+                parts = verdict.reasons + verdict.quarantine + notes
+                if parts:
+                    point.status_detail = _join_detail(
+                        point.status_detail, 'integrity: ' + '; '.join(parts))
 
     def _time_series(self) -> List[int]:
         """The `time` column of the first full-length window frame."""
@@ -760,6 +830,9 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'status_counts': {
                 status: sum(1 for run in counted if run.status == status)
                 for status in STATUSES},
+            'integrity_thresholds': (
+                None if self.integrity_settings is None
+                else self.integrity_settings.model_dump()),
             # Which COF definition produced the summary numbers beside this
             # export. v1 files carried no such statement and the definition
             # changed under readers with no way to tell; this is that way.
@@ -786,8 +859,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         chains: List[Tuple[List[PointKey], Dict[PointKey, RunFrames]]] = []
         for locator in discover_runs(self.results_dir):
             family = locator.tokens.family
-            n_layers = resolve_n_layers(locator)
             config = read_run_config(locator)
+            n_layers = resolve_n_layers(locator, config)
             expected = expected_tier_rows(config, family) if config else {}
             grid = expected_chains(config, family)
             halts = read_halt_registry(locator)
@@ -804,8 +877,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                                          expected, config)
                 halted = halt_detail(halts, key)
                 if halted is not None:
-                    # The frames record the blow-up, not friction.
-                    point.tiers, point.source_files, point.post = {}, {}, {}
+                    # The frames record the blow-up, not friction: kept for
+                    # inspection, never summarised (`summary_rows`).
                     point.status, point.status_detail = 'halted', halted
                 if grid is not None and key not in in_grid:
                     point.status_detail = _join_detail(
@@ -989,6 +1062,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             'status': run.status, 'status_detail': detail,
             'provenance': point_provenance(block, run.load),
             'n_rows': run.n_rows, 'expected_rows': dict(run.expected_rows),
+            'integrity': (None if run.integrity is None
+                          else run.integrity.as_dict()),
         }
 
     def export_payload(self, size: str, runs: List[RunFrames]) -> Dict[str, Any]:
@@ -1021,7 +1096,12 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             if self.complete_only and run.status != 'complete':
                 continue
             tokens = run.tokens
-            summary = summarise_run(run.frames_by_tier(), run.family,
+            # Only a complete point's frames describe friction: a halted one
+            # records a blow-up, a failed or quarantined one a broken or
+            # unjudged system. The others keep their row, with no statistics.
+            usable = run.status == 'complete'
+            summary = summarise_run(run.frames_by_tier() if usable else {},
+                                    run.family,
                                     skip_fraction=self.skip_fraction,
                                     post=run.post)
             row: Dict[str, Any] = {
@@ -1051,7 +1131,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             row.update(summary.as_dict())
             row['is_complete'] = (run.status == 'complete'
                                   and bool(summary.is_complete))
-            window = run.window
+            window = run.window if usable else pd.DataFrame()
             for name, (x_col, y_col) in _LF_PAIRS.items():
                 if x_col in window.columns and y_col in window.columns:
                     row[name] = float(np.mean(np.hypot(

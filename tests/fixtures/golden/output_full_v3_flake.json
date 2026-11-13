@@ -251,7 +251,25 @@
    "no_output": 0,
    "unreadable": 0,
    "halted": 0,
+   "failed_integrity": 0,
+   "quarantined": 0,
    "not_reached": 0
+  },
+  "integrity_thresholds": {
+   "hole_bonds": 1.5,
+   "isolated_radius_bonds": 1.5,
+   "isolated_atoms": 2,
+   "ejected_atoms": 2,
+   "ejected_bonds": 8.0,
+   "heating_sigma": 8.0,
+   "gap_rise": 0.05,
+   "collapse": true,
+   "frozen_std": 1e-06,
+   "gap_start_samples": 25,
+   "sheet_heating_skip_samples": 5,
+   "sheet_gap_end_samples": 50,
+   "margins": {},
+   "version": "1.0.0"
   },
   "summary_definition": {
    "cof": "ratio_of_means: mean(LF)/mean(NF)",
@@ -442,7 +460,7 @@
     "corrugation_max": 0.40000000000000036
    },
    "status": "complete",
-   "status_detail": "grid unknown: config has no general.pressure",
+   "status_detail": "grid unknown: config has no general.pressure; integrity: snapshot rules not applicable: run writes no end snapshot",
    "provenance": {
     "schema_version": "2.0.0",
     "family": "flake",
@@ -539,7 +557,31 @@
     "raw": 4,
     "window": 4
    },
-   "expected_rows": {}
+   "expected_rows": {},
+   "integrity": {
+    "status": "complete",
+    "failed": false,
+    "observed": true,
+    "reasons": [],
+    "quarantine": [],
+    "not_applicable": [
+     "hole",
+     "isolated_atoms",
+     "ejected_atoms",
+     "sheet_heating",
+     "gap_rise",
+     "snapshot rules not applicable: run writes no end snapshot"
+    ],
+    "measures": {
+     "n_heat": null,
+     "non_finite": false,
+     "frozen": false,
+     "T_sigma": null,
+     "gap_rise": null,
+     "gap_min_any": 0.0
+    },
+    "thresholds_version": "1.0.0"
+   }
   }
  ]
 }

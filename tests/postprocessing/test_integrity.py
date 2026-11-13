@@ -481,7 +481,9 @@ def _sheet_tree(root, n_layers=4, final=True, ref=True, layer_map=True, **kw):
 
 
 def _point_and_record(root):
-    reader = DataReader(results_dir=str(root))
+    # integrity=False: these tests run check_point themselves, on the
+    # file-level status DataReader gives before stage 3.
+    reader = DataReader(results_dir=str(root), integrity=False)
     point = reader.runs[0]
     tok = point.tokens
     record = read_provenance(point.locator.provenance_file, family=tok.family,
