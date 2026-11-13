@@ -294,3 +294,349 @@ def test_sheet_frozen_ignores_fixed_layer_1():
 def test_unknown_family_raises():
     with pytest.raises(ValueError):
         series_measures(_afm_window(), 'nope', 1, 300.0, 1000, S)
+
+
+# --------------------------------------------------------------------------
+# s51 window guard (Task 2 review carry-over a)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize('rows', [0, 1])
+def test_sheet_short_window_skips_gate_checks(rows):
+    """s51 :89 evaluates the series only when the window has >1 row."""
+    import warnings  # pylint: disable=import-outside-toplevel
+    w = _sheet_window().head(rows)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        m = series_measures(w, 'sheetonsheet', 4, 300.0, 1000, S)
+    assert m['frozen'] is not True and m['non_finite'] is not True
+    assert all(np.isnan(m[k]) for k in ('non_finite', 'frozen', 'T_sigma',
+                                         'gap_rise', 'gap_min_any'))
+
+
+# --------------------------------------------------------------------------
+# Task 3: verdict, quarantine, layer resolution
+# --------------------------------------------------------------------------
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from src.core.observables import rename_map  # noqa: E402
+from src.data.provenance import read_provenance  # noqa: E402
+from src.postprocessing.integrity import (  # noqa: E402
+    IntegrityVerdict, bond_reference, check_files, check_point,
+    resolve_layers, verdict)
+from src.postprocessing.read_data import DataReader  # noqa: E402
+from src.run.tree import discover_runs  # noqa: E402
+from tests.helpers.results_tree import make_family_run  # noqa: E402
+
+CLEAN = {'non_finite': False, 'frozen': False, 'hole': 1.0, 'isolated': 0,
+         'ejected': 0, 'T_sigma': 1.0, 'gap_rise': 0.01, 'gap_min_any': 3.0}
+
+BAD = {'hole': 2.0, 'isolated': 5, 'ejected': 5, 'T_sigma': 10.0,
+       'gap_rise': 0.1, 'gap_min_any': -0.5, 'non_finite': True, 'frozen': True}
+
+RULE_OF = {'hole': 'hole', 'isolated': 'isolated_atoms', 'ejected': 'ejected_atoms',
+           'T_sigma': 'sheet_heating', 'gap_rise': 'gap_rise',
+           'gap_min_any': 'collapse', 'non_finite': 'non_finite', 'frozen': 'frozen'}
+
+
+@pytest.mark.parametrize('status,failed,observed', [
+    ('no_output', True, False), ('not_reached', True, False),
+    ('truncated', True, True), ('halted', True, True), ('unreadable', True, True)])
+def test_status_mapping(status, failed, observed):
+    v = verdict(status, {}, IntegritySettings())
+    assert (v.status, v.failed, v.observed) == (status, failed, observed)
+
+
+def test_clean_complete_point():
+    v = verdict('complete', CLEAN, IntegritySettings())
+    assert (v.status, v.failed, v.observed, v.reasons) == ('complete', False, True, [])
+    assert v.quarantine == [] and v.not_applicable == []
+    assert v.thresholds_version == IntegritySettings().version
+
+
+@pytest.mark.parametrize('key', sorted(BAD))
+def test_each_rule_fires(key):
+    v = verdict('complete', {**CLEAN, key: BAD[key]}, IntegritySettings())
+    assert v.status == 'failed_integrity' and v.failed and v.observed
+    assert len(v.reasons) == 1 and v.reasons[0].split()[0] == RULE_OF[key]
+
+
+def test_reason_text_and_order():
+    v = verdict('complete', {**CLEAN, **BAD, 'hole': 3.6}, IntegritySettings())
+    assert v.reasons == ['non_finite', 'frozen', 'hole 3.6 bonds', 'isolated_atoms 5',
+                         'ejected_atoms 5', 'sheet_heating 10 sigma_T', 'gap_rise 0.1',
+                         'collapse -0.5']
+
+
+def test_threshold_is_inclusive():
+    """s48 fires on `>=`."""
+    assert verdict('complete', {**CLEAN, 'hole': 1.5}, IntegritySettings()).failed
+
+
+def test_gate_status_keeps_status_and_rules():
+    v = verdict('halted', {**CLEAN, 'non_finite': True}, IntegritySettings())
+    assert v.status == 'halted' and v.reasons == ['halted', 'non_finite']
+
+
+def test_rule_off_never_fires():
+    v = verdict('complete', {**CLEAN, 'hole': 9.0}, IntegritySettings(hole_bonds=None))
+    assert v.status == 'complete' and 'hole' not in v.not_applicable
+    off = IntegritySettings(collapse=False, frozen_std=None)
+    assert verdict('complete', {**CLEAN, 'gap_min_any': -1.0, 'frozen': True},
+                   off).status == 'complete'
+
+
+def test_nan_measure_is_not_applicable_not_pass():
+    v = verdict('complete', {**CLEAN, 'hole': float('nan')}, IntegritySettings())
+    assert 'hole' in v.not_applicable and v.status == 'complete'
+    assert 'non_finite' in verdict('complete', {}, IntegritySettings()).not_applicable
+
+
+def test_margin_quarantines():
+    s = IntegritySettings(margins={'hole': 0.9})
+    v = verdict('complete', {**CLEAN, 'hole': 1.40}, s)
+    assert v.status == 'quarantined' and not v.failed and v.observed
+    assert v.quarantine and v.quarantine[0].startswith('hole')
+    assert verdict('complete', {**CLEAN, 'hole': 1.20}, s).status == 'complete'
+    assert verdict('complete', {**CLEAN, 'hole': 1.60}, s).status == 'failed_integrity'
+
+
+def test_as_dict_is_json_safe():
+    v = verdict('complete', {**CLEAN, 'hole': float('nan')}, IntegritySettings())
+    d = v.as_dict()
+    assert d['measures']['hole'] is None
+    json.dumps(d, allow_nan=False)
+    assert isinstance(v, IntegrityVerdict)
+
+
+# --- trees ------------------------------------------------------------------
+
+def _write_data(path, layers, box, style='atomic'):
+    """LAMMPS data file from [(type, xyz), ...]."""
+    rows, k = [], 0
+    for t, xyz in layers:
+        for x, y, z in xyz:
+            k += 1
+            rows.append(f'{k} {t} {x:.6f} {y:.6f} {z:.6f}' if style == 'atomic'
+                        else f'{k} 1 {t} {x:.6f} {y:.6f} {z:.6f}')
+    ntypes = max(t for t, _ in layers)
+    body = ['LAMMPS data file', '', f'{k} atoms', f'{ntypes} atom types', '',
+            f"{box['x'][0]} {box['x'][1]} xlo xhi", f"{box['y'][0]} {box['y'][1]} ylo yhi",
+            '-10.0 60.0 zlo zhi', '', f'Atoms # {style}', '', *rows, '']
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('\n'.join(body), encoding='utf-8')
+    return path
+
+
+def _stack(n_layers, n=8, spacing=6.0):
+    out = []
+    for i in range(n_layers):
+        xyz, box = _hex_layer(i * spacing, n=n)
+        out.append((i + 1, xyz))
+    return out, box
+
+
+def _set_layer_map(run_dir, layer_map):
+    prov = run_dir / 'provenance.json'
+    data = json.loads(prov.read_text(encoding='utf-8'))
+    data['layer_type_map'] = layer_map
+    prov.write_text(json.dumps(data), encoding='utf-8')
+
+
+def _sheet_results(run_dir, n_layers=4, n=120, pressure=1.0, rise=0.0, seed=0):
+    """A realistic window file: noisy channels, layers 6 A apart."""
+    for f in (run_dir / 'results').glob('friction_*'):
+        f.unlink()
+    rng = np.random.default_rng(seed)
+    natives = sorted(rename_map('sheetonsheet', 'window', n_layers))
+    cols = {}
+    for nat in natives:
+        cols[nat] = rng.normal(0.0, 0.1, n)
+    for i in range(1, n_layers + 1):
+        z = np.full(n, 6.0 * (i - 1)) + (rng.normal(0.0, 0.01, n) if i > 1 else 0.0)
+        if i > n_layers // 2:
+            z = z + np.linspace(0.0, rise, n)
+        cols[f'v_comz_L{i}'] = z
+    cols['v_temp_center_3d'] = 300.0 + rng.normal(0.0, 2.0, n)
+    lines = ['# schema=2 lf_units=nN family=sheetonsheet',
+             '# TimeStep ' + ' '.join(natives)]
+    lines += [f'{(k + 1) * 1000} ' + ' '.join(f'{cols[c][k]:.6f}' for c in natives)
+              for k in range(n)]
+    path = run_dir / 'results' / f'friction_p{pressure:g}_a0_s2.txt'
+    path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    return path
+
+
+def _sheet_tree(root, n_layers=4, final=True, ref=True, layer_map=True, **kw):
+    run_dir = make_family_run(root, 'sheetonsheet', loads=(1.0,))
+    _set_layer_map(run_dir, {f'layer_{i}': [i] for i in range(1, n_layers + 1)}
+                   if layer_map else {})
+    _sheet_results(run_dir, n_layers=n_layers, **kw)
+    stack, box = _stack(n_layers)
+    if ref:
+        _write_data(run_dir / 'build' / 'stack_4.lmp', stack, box, style='molecular')
+    if final:
+        _write_data(run_dir / 'data' / 'final_p1GPa_a0.data', stack, box, style='molecular')
+    return run_dir
+
+
+def _point_and_record(root):
+    reader = DataReader(results_dir=str(root))
+    point = reader.runs[0]
+    tok = point.tokens
+    record = read_provenance(point.locator.provenance_file, family=tok.family,
+                             model=tok.model, material_name=tok.materials[0])
+    return point, record
+
+
+def test_sheet_window_channels_reach_series(tmp_path):
+    """Carry-over b: every channel name the checker keys on arrives from DataReader."""
+    _sheet_tree(tmp_path)
+    point, _ = _point_and_record(tmp_path)
+    assert point.n_layers == 4
+    for col in ('lfx', 'lfy', 'nf', 'temp_center_3d', 'etotal',
+                *[f'comz_L{i}' for i in range(1, 5)]):
+        assert col in point.window.columns, col
+    m = series_measures(point.window, 'sheetonsheet', 4, 300.0, 512, S)
+    assert np.isfinite(m['gap_rise']) and np.isfinite(m['gap_min_any'])
+    assert np.isfinite(m['T_sigma'])
+    assert m['non_finite'] is False and m['frozen'] is False
+
+
+def test_afm_window_channels_reach_series(tmp_path):
+    make_family_run(tmp_path, 'afm', n=50)
+    point, _ = _point_and_record(tmp_path)
+    for col in ('nf', 'lfx', 'lfy', 'comx', 'comy', 'comz', 'tipx', 'tipy', 'tipz',
+                'temp_sheet_3d', 'comz_L1', 'comz_L2', 'etotal'):
+        assert col in point.window.columns, col
+
+
+def test_clean_sheet_point_is_complete(tmp_path):
+    _sheet_tree(tmp_path)
+    point, record = _point_and_record(tmp_path)
+    v = check_point(point, record, S, multi_speed=False)
+    assert v.status == 'complete', v
+    assert v.measures['n_heat'] == 2 * 256          # layers 2-3 of the 4
+    assert np.isfinite(v.measures['gap_rise']) and v.measures['hole'] < 1.5
+
+
+def test_sheet_gap_shift_fails_through_check_point(tmp_path):
+    _sheet_tree(tmp_path, rise=1.0)                  # 6 A gap opens by 1 A
+    point, record = _point_and_record(tmp_path)
+    v = check_point(point, record, S, multi_speed=False)
+    assert v.status == 'failed_integrity' and v.reasons[0].startswith('gap_rise')
+
+
+def test_missing_snapshot_quarantines(tmp_path):
+    _sheet_tree(tmp_path, final=False)
+    point, record = _point_and_record(tmp_path)
+    v = check_point(point, record, IntegritySettings(), multi_speed=False)
+    assert v.status == 'quarantined' and 'snapshot' in v.quarantine[0]
+
+
+def test_missing_reference_quarantines(tmp_path):
+    _sheet_tree(tmp_path, ref=False)
+    point, record = _point_and_record(tmp_path)
+    v = check_point(point, record, IntegritySettings(), multi_speed=False)
+    assert v.status == 'quarantined' and 'reference' in v.quarantine[0]
+
+
+def test_unreadable_snapshot_quarantines(tmp_path):
+    run_dir = _sheet_tree(tmp_path)
+    (run_dir / 'data' / 'final_p1GPa_a0.data').write_text('garbage\n', encoding='utf-8')
+    point, record = _point_and_record(tmp_path)
+    v = check_point(point, record, S, multi_speed=False)
+    assert v.status == 'quarantined' and 'unreadable' in v.quarantine[0]
+
+
+def test_multi_speed_skips_snapshot_rules(tmp_path):
+    _sheet_tree(tmp_path, final=False)
+    point, record = _point_and_record(tmp_path)
+    v = check_point(point, record, S, multi_speed=True)
+    assert v.status == 'complete'
+    assert {'hole', 'isolated_atoms', 'ejected_atoms'} <= set(v.not_applicable)
+    assert 'snapshot rules skipped: multi-speed run' in v.not_applicable
+    assert np.isfinite(v.measures['T_sigma'])       # n_heat still counted from the reference
+
+
+def test_unresolvable_layers_quarantine(tmp_path):
+    """Review Focus 1: empty map, no group lines, overlapping z-band types."""
+    run_dir = _sheet_tree(tmp_path, layer_map=False)
+    stack, box = _stack(2)
+    mixed = [(1, stack[0][1][::2]), (2, stack[0][1][1::2]),
+             (1, stack[1][1][::2]), (2, stack[1][1][1::2])]
+    _write_data(run_dir / 'build' / 'stack_4.lmp', mixed, box)
+    _write_data(run_dir / 'data' / 'final_p1GPa_a0.data', mixed, box)
+    point, record = _point_and_record(tmp_path)
+    assert record.layer_type_map == {}
+    v = check_point(point, record, S, multi_speed=False)
+    assert v.status == 'quarantined' and 'no layer types' in v.quarantine[0]
+
+
+def _hetero_ref(path):
+    stack, box = _stack(2)
+    a, b = stack[0][1], stack[1][1]
+    layers = [(1, a[::2]), (2, a[1::2] + [0, 0, 1.5]), (3, b[::2]), (4, b[1::2] + [0, 0, 1.5])]
+    return _write_data(path, layers, box)
+
+
+def test_zband_fallback_for_hetero(tmp_path):
+    run_dir = make_family_run(tmp_path, 'hetero', material='h-MoS2', second_material='h-WS2')
+    _set_layer_map(run_dir, {})
+    ref = _hetero_ref(run_dir / 'build' / 'hetero.lmp')
+    loc = discover_runs(tmp_path)[0]
+    rec = read_provenance(loc.provenance_file, family='hetero', model='sheetonsheet')
+    assert resolve_layers(loc, rec, ref, 2) == {'layer_1': {1, 2}, 'layer_2': {3, 4}}
+
+
+def test_resolve_layers_order(tmp_path):
+    run_dir = make_family_run(tmp_path, 'sheetonsheet')
+    loc = discover_runs(tmp_path)[0]
+    rec = read_provenance(loc.provenance_file, family='sheetonsheet', model='sheetonsheet')
+    ref = _hetero_ref(run_dir / 'build' / 'x.lmp')
+    # 1. provenance map wins
+    assert resolve_layers(loc, rec, ref, 2) == {'layer_1': {1}, 'layer_2': {2}}
+    # 2. then the group lines, with s48's `a*b` expansion
+    _set_layer_map(run_dir, {})
+    rec = read_provenance(loc.provenance_file, family='sheetonsheet', model='sheetonsheet')
+    (run_dir / 'lammps' / 'system.in.settings').write_text(
+        'group layer_1 type 1*2 5\ngroup layer_2 type 3 4\n', encoding='utf-8')
+    assert resolve_layers(loc, rec, ref, 2) == {'layer_1': {1, 2, 5}, 'layer_2': {3, 4}}
+    # 3. no map, no groups, no reference -> {}
+    (run_dir / 'lammps' / 'system.in.settings').unlink()
+    assert resolve_layers(loc, rec, None, 2) == {}
+
+
+def test_bond_reference_afm_prefers_load_snapshot(tmp_path):
+    run_dir = make_family_run(tmp_path, 'afm', final_data=True)
+    (run_dir / 'data' / 'load_30N.data').write_text('x', encoding='utf-8')
+    (run_dir / 'data' / 'load_3N.data').write_text('x', encoding='utf-8')
+    (run_dir.parent / 'build').mkdir()
+    (run_dir.parent / 'build' / 'sheet.lmp').write_text('x', encoding='utf-8')
+    point, _ = _point_and_record(tmp_path)
+    assert bond_reference(point.locator, 'afm', point) == run_dir / 'data' / 'load_30N.data'
+    (run_dir / 'data' / 'load_30N.data').unlink()
+    assert bond_reference(point.locator, 'afm', point) == run_dir.parent / 'build' / 'sheet.lmp'
+
+
+def test_bond_reference_sheet_is_build(tmp_path):
+    run_dir = _sheet_tree(tmp_path)
+    point, _ = _point_and_record(tmp_path)
+    assert bond_reference(point.locator, 'sheetonsheet', point) == run_dir / 'build' / 'stack_4.lmp'
+    (run_dir / 'build' / 'stack_4.lmp').unlink()
+    assert bond_reference(point.locator, 'sheetonsheet', point) is None
+
+
+def test_check_files_without_window_or_files():
+    v = check_files('no_output', None, 'afm', 2, 300.0, None, None, {}, S)
+    assert (v.status, v.failed, v.observed) == ('no_output', True, False)
+    assert v.quarantine == []
+
+
+def test_check_files_afm_n_heat_sums_all_sheet_layers(tmp_path):
+    stack, box = _stack(2)
+    f = _write_data(tmp_path / 'final.data', stack + [(3, stack[1][1][:4] + [0, 0, 5])], box)
+    r = _write_data(tmp_path / 'load.data', stack + [(3, stack[1][1][:4] + [0, 0, 5])], box)
+    v = check_files('complete', None, 'afm', 2, 300.0, f, r,
+                    {'layer_1': {1}, 'layer_2': {2}}, S)
+    assert v.measures['n_heat'] == 512 and v.measures['hole'] < 1.5
