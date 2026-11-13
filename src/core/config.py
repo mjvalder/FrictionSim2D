@@ -178,6 +178,62 @@ class PotentialSettings(BaseModel):
     )
     model_config = {'validate_by_name': True}
 
+class IntegritySettings(BaseModel):
+    """Thresholds of the post-run integrity check (a faithful port of ML_taxonomy s48).
+
+    Every threshold is ``Optional``; ``None`` turns that rule off. Bond lengths
+    are each layer's median nearest-neighbour distance at the loaded state.
+    """
+    hole_bonds: Optional[float] = Field(
+        default=1.5,
+        description="Fail when the largest atom-free disk in either layer's xy "
+                    "projection, end of the slide, is >= this many bond lengths")
+    isolated_radius_bonds: Optional[float] = Field(
+        default=1.5,
+        description="Radius, in bond lengths, within which a sheet atom needs a "
+                    "sheet neighbour to count as not isolated")
+    isolated_atoms: Optional[int] = Field(
+        default=2,
+        description="Fail when >= this many sheet atoms have no neighbour within "
+                    "isolated_radius_bonds (end of the slide)")
+    ejected_atoms: Optional[int] = Field(
+        default=2,
+        description="Fail when >= this many sheet atoms lie more than ejected_bonds "
+                    "bond lengths from their layer's median plane")
+    ejected_bonds: Optional[float] = Field(
+        default=8.0,
+        description="Distance, in bond lengths, from the layer's median plane "
+                    "beyond which an atom counts as ejected")
+    heating_sigma: Optional[float] = Field(
+        default=8.0,
+        description="Fail when the peak sheet temperature is >= this many sigma_T "
+                    "above the target, sigma_T = T sqrt(2 / 3N), N = sheet atoms")
+    gap_rise: Optional[float] = Field(
+        default=0.05,
+        description="Fail when the interlayer gap rises >= this fraction above "
+                    "its own starting value (bilayers)")
+    collapse: bool = Field(
+        default=True,
+        description="Fail a run whose tip has collapsed into the sheet")
+    frozen_std: Optional[float] = Field(
+        default=1e-6,
+        description="Fail when an output channel's standard deviation is below "
+                    "this (a frozen channel)")
+    gap_start_samples: int = Field(
+        default=25, description="Samples averaged for the starting interlayer gap")
+    sheet_heating_skip_samples: int = Field(
+        default=5,
+        description="Leading samples skipped before taking the peak sheet temperature")
+    sheet_gap_end_samples: int = Field(
+        default=50, description="Samples averaged for the end-of-slide sheet gap")
+    margins: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Rule name -> fraction of its threshold below which a "
+                    "non-firing value quarantines the run")
+    version: str = Field(
+        default='1.0.0', description="Version of the integrity rule set")
+    model_config = {'validate_by_name': True}
+
 class HPCSettings(BaseModel):
     """HPC cluster and job submission settings."""
     scheduler_type: Literal['pbs', 'slurm'] = 'pbs'
@@ -255,6 +311,7 @@ class GlobalSettings(BaseModel):
     hpc: HPCSettings = Field(default_factory=HPCSettings)
     aiida: AiidaSettings = Field(default_factory=AiidaSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    integrity: IntegritySettings = Field(default_factory=IntegritySettings)
 
 #: `DatabaseSettings` fields that are credentials. Never written into a run
 #: tree: `provenance/settings.yaml` and `config.json` are stored in the AiiDA

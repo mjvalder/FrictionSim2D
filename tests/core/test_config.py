@@ -13,6 +13,7 @@ from src.core.config import (
     SubstrateConfig,
     GeneralConfig,
     GlobalSettings,
+    IntegritySettings,
     parse_config,
     load_settings,
     settings_origin,
@@ -847,3 +848,18 @@ def test_old_settings_file_with_removed_aiida_and_database_keys_still_loads(
         'database.active_profile' in rec.message or 'central' in rec.message
         for rec in caplog.records
     ), "load_settings must warn when it silently drops an old nested database block"
+
+
+def test_integrity_defaults_match_s48():
+    s = IntegritySettings()
+    assert (s.hole_bonds, s.isolated_radius_bonds, s.isolated_atoms) == (1.5, 1.5, 2)
+    assert (s.ejected_atoms, s.ejected_bonds, s.heating_sigma, s.gap_rise) == (2, 8.0, 8.0, 0.05)
+    assert s.frozen_std == 1e-6 and s.collapse is True and s.margins == {}
+
+
+def test_integrity_rule_off_with_none():
+    assert IntegritySettings(hole_bonds=None).hole_bonds is None
+
+
+def test_global_settings_has_integrity(mock_settings):
+    assert isinstance(mock_settings.integrity, IntegritySettings)
