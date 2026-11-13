@@ -264,3 +264,57 @@ def test_a_tree_with_only_missing_output_still_exports(runner, tmp_path):
     doc = json.loads((tmp_path / 'outputs'
                       / 'output_full_100x100y.json').read_text())
     assert [r['status'] for r in doc['runs']] == ['no_output', 'not_reached']
+
+
+def _integrity_tree(root):
+    pytest.importorskip('scipy')
+    from tests.postprocessing.test_read_data_integrity import _afm_tree
+    run_dir = _afm_tree(root, loads=(10.0, 30.0), eject=(10.0,))
+    for path in (run_dir / 'data').glob('final_f30N*'):
+        path.unlink()
+    return run_dir
+
+
+def test_read_reports_integrity_and_stubs(runner, tmp_path):
+    _integrity_tree(tmp_path)
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert 'Integrity: 1 failed, 1 quarantined (thresholds v1.0.0)' in result.output
+    assert 'point: "' in result.output and 'ruling:' in result.output
+
+
+def test_read_no_integrity_prints_no_tally(runner, tmp_path):
+    _integrity_tree(tmp_path)
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path),
+                                 '--no-integrity'])
+
+    assert result.exit_code == 0, result.output
+    assert 'Integrity:' not in result.output
+
+
+def test_integrity_settings_file_overrides_thresholds(runner, tmp_path):
+    _integrity_tree(tmp_path)
+    cfg = tmp_path.parent / f'{tmp_path.name}_thr.yaml'
+    cfg.write_text('integrity:\n  version: "9.9"\n  ejected_atoms: null\n')
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path),
+                                 '--integrity-settings', str(cfg)])
+
+    assert result.exit_code == 0, result.output
+    assert '(thresholds v9.9)' in result.output
+    assert '0 failed, 1 quarantined' in result.output
+
+
+def test_read_uses_user_settings_thresholds(runner, tmp_path, monkeypatch):
+    _integrity_tree(tmp_path)
+    cfg = tmp_path / 'xdg' / 'FrictionSim2D'
+    cfg.mkdir(parents=True)
+    (cfg / 'settings.yaml').write_text('integrity:\n  version: "7.7"\n')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path)])
+
+    assert '(thresholds v7.7)' in result.output, result.output

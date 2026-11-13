@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ...gui.datasets import DATASETS_DIRNAME, dataset_files, is_dataset
 from ...postprocessing import plot_config
+from ...postprocessing.integrity_rulings import format_point_id
 from ...postprocessing.run_status import STATUSES, expected_chains, read_run_config
 from ...run.naming import MODELS
 from ...run.tree import discover_runs
@@ -238,10 +239,22 @@ def _file_header(path: Path, doc: dict) -> List[str]:
     return lines
 
 
+def _ruling_line(run: dict) -> str:
+    """A quarantined point: its ruling id, then why."""
+    try:
+        pid = format_point_id(str(run.get('rel_path')), str(run.get('load_kind')),
+                              run.get('load'), run.get('angle'), run.get('speed'))
+    except (TypeError, ValueError):
+        pid = _row(run)
+    reason = ' '.join(str(run.get('status_detail') or '').split())
+    return f'{pid} -- {reason}' if reason else pid
+
+
 def _summarise_dataset(deps, folder: Path, files: List[Path], filters: Dict[str, Any],
                        max_rows: int, max_json_mb: float, budget_mb: float) -> str:
     lines = [f'{display_path(folder, deps.roots)} — dataset, {len(files)} file(s)']
     rows: List[Tuple[int, str]] = []
+    awaiting: List[str] = []
     for path in files:
         if filters['size'] and _norm_size(_size_of(path)) != _norm_size(filters['size']):
             continue
@@ -261,8 +274,13 @@ def _summarise_dataset(deps, folder: Path, files: List[Path], filters: Dict[str,
                 status = run.get('status')
                 rank = STATUSES.index(status) if status in STATUSES else len(STATUSES)
                 rows.append((rank, _row(run)))
+                if status == 'quarantined':
+                    awaiting.append(_ruling_line(run))
     if not rows:
         return '\n'.join(lines + [_no_match(filters)])
+    if awaiting:
+        lines += ['awaiting your ruling (add to integrity_rulings.yaml):'] + [
+            f'  {a}' for a in awaiting]
     rows.sort(key=lambda r: r[0])  # stable: complete first, file order kept
     max_rows = max(1, int(max_rows))
     return _fit(lines, [row for _, row in rows[:max_rows]], len(rows[max_rows:]), 'rows')

@@ -50,7 +50,14 @@ def format_point_id(rel_path: str, load_kind: str, load: float,
 
 def point_id(point, root: Path) -> str:
     """The ruling key of a `RunFrames`: its run's path under `root`."""
-    rel = Path(point.locator.run_dir).relative_to(root).as_posix()
+    run_dir, base = Path(point.locator.run_dir), Path(root)
+    try:
+        rel = run_dir.resolve().relative_to(base.resolve()).as_posix()
+    except (ValueError, OSError, RuntimeError):
+        try:
+            rel = run_dir.relative_to(base).as_posix()
+        except ValueError:
+            rel = run_dir.as_posix()
     return format_point_id(rel, point.load_kind, point.load, point.angle,
                            point.speed)
 
@@ -95,13 +102,19 @@ def load_rulings(root: Path) -> Dict[str, Ruling]:
         return {'<file>': Ruling(
             error=f'{RULINGS_FILE}: top level must be a list of entries')}
     out: Dict[str, Ruling] = {}
+    duplicates: List[str] = []
     for i, raw in enumerate(data):
         try:
             key, ruling = _entry(raw)
         except (ValueError, TypeError) as exc:
             out[f'<malformed #{i}>'] = Ruling(error=f'entry {i}: {exc}')
             continue
+        if key in out:
+            duplicates.append(key)
         out[key] = ruling
+    for n, key in enumerate(dict.fromkeys(duplicates)):
+        out[f'<duplicate #{n}>'] = Ruling(
+            error=f'{key} is ruled more than once; the last entry is used')
     return out
 
 

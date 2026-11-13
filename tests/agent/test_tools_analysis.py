@@ -272,3 +272,13 @@ def test_summarise_parse_budget_is_aggregate(deps):
     assert 'output_full_2x2y.json: not read (budget)' in text
     assert 'output_full_3x3y.json: not read (budget)' in text
     assert 'm2x2y' not in text and 'm3x3y' not in text
+
+
+def test_summarise_lists_quarantined_points_awaiting_ruling(deps):
+    doc = json.loads(_doc(deps).read_text())
+    doc['runs'][1]['status'] = 'quarantined'
+    doc['runs'][1]['status_detail'] = 'missing final snapshot'
+    _doc(deps).write_text(json.dumps(doc))
+    text = summarise_results(deps, 'campaign')
+    assert 'awaiting your ruling' in text
+    assert 'missing final snapshot' in text and '|angle=' in text

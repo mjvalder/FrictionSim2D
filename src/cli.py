@@ -1252,6 +1252,39 @@ def _merge_settings(base: dict, overlay: dict) -> None:
             base[key] = value
 
 
+def _integrity_thresholds(path):
+    """`IntegritySettings` from `path`, else from the user's settings."""
+    import yaml  # noqa: PLC0415
+    from .core.config import IntegritySettings  # noqa: PLC0415
+    if path is None:
+        return load_settings().integrity
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = yaml.safe_load(handle) or {}
+        block = data.get('integrity', {}) if isinstance(data, dict) else None
+        if not isinstance(block, dict):
+            raise ValueError('expected an `integrity:` mapping')
+        return IntegritySettings(**block)
+    except (OSError, yaml.YAMLError, ValueError, TypeError) as exc:
+        raise click.ClickException(
+            f'cannot read integrity settings {path}: {exc}') from exc
+
+
+def _echo_integrity(reader) -> None:
+    """The integrity tally, a ruling stub per quarantined point, warnings."""
+    from .postprocessing.integrity_rulings import point_id  # noqa: PLC0415
+    failed = [p for p in reader.points if p.status == 'failed_integrity']
+    held = [p for p in reader.points if p.status == 'quarantined']
+    click.echo(f"Integrity: {len(failed)} failed, {len(held)} quarantined "
+               f"(thresholds v{reader.integrity_settings.version})")
+    for point in held:
+        reason = ' '.join(str(point.status_detail or '').split())
+        click.echo(f'- point: "{point_id(point, reader.results_dir)}"\n'
+                   f'  ruling:   # pass or fail -- {reason}')
+    for warning in reader.ruling_warnings:
+        click.echo(f"Warning: {warning}")
+
+
 @postprocess_group.command('read')
 @click.argument('results_dir', type=click.Path(exists=True))
 @click.option('--export', 'do_export', is_flag=True,
@@ -1262,8 +1295,16 @@ def _merge_settings(base: dict, overlay: dict) -> None:
 @click.option('--complete-only', is_flag=True,
               help='Export only load points whose status is complete '
                    '(the pre-schema-3 behaviour).')
+@click.option('--integrity-settings', 'integrity_settings_path',
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help='YAML file with an `integrity:` mapping; overrides the '
+                   'thresholds of the user settings.')
+@click.option('--no-integrity', is_flag=True,
+              help='Skip the stage-3 integrity check.')
 def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float,
-                     complete_only: bool):
+                     complete_only: bool, integrity_settings_path,
+                     no_integrity: bool):
     """Read and process simulation result data.
 
     RESULTS_DIR is a simulation root -- the directory holding afm/,
@@ -1271,8 +1312,13 @@ def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float,
     """
     from .postprocessing import DataReader  # noqa: PLC0415
 
+    thresholds = None
+    if not no_integrity:
+        thresholds = _integrity_thresholds(integrity_settings_path)
     reader = DataReader(results_dir=results_dir, skip_fraction=skip_fraction,
-                        complete_only=complete_only)
+                        complete_only=complete_only,
+                        integrity=not no_integrity,
+                        integrity_settings=thresholds)
     reader.export_issue_reports()
     if not reader.points:
         click.echo(f"No runs found under {results_dir}.", err=True)
@@ -1283,6 +1329,8 @@ def postprocess_read(results_dir: str, do_export: bool, skip_fraction: float,
     summary = ', '.join(f'{k}={v}' for k, v in sorted(counts.items()) if v)
     click.echo(f"Found {len(reader.points)} load point(s) ({summary}) "
                f"across {len({p.size for p in reader.points})} size(s).")
+    if reader.integrity_settings is not None:
+        _echo_integrity(reader)
     if do_export:
         for path in reader.export_full_data_to_json():
             click.echo(f"✅ {path}")

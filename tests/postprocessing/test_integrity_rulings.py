@@ -109,3 +109,25 @@ def test_no_file_no_change(tmp_path):
     assert r.ruling_warnings == []
     assert _point(r, 30.0).status == 'quarantined'
     assert apply_rulings(r.points, {}, tmp_path) == []
+
+
+def test_point_id_survives_relative_results_dir(tmp_path, monkeypatch):
+    run_dir = _quarantined_tree(tmp_path)
+    monkeypatch.chdir(tmp_path.parent)
+    rel_root = tmp_path.relative_to(tmp_path.parent)
+    reader = DataReader(str(rel_root))
+    pid = point_id(_point(reader, 30.0, points=True), rel_root)
+    rel = run_dir.relative_to(tmp_path).as_posix()
+    assert pid == f'{rel}|force=30|angle=0|speed=2'
+    mixed = point_id(_point(reader, 30.0, points=True), tmp_path)
+    assert mixed == pid
+
+
+def test_duplicate_rulings_warn_and_keep_last(tmp_path):
+    _quarantined_tree(tmp_path)
+    pid = _id(tmp_path, 30.0)
+    _write(tmp_path, _ruling(pid, 'pass') + _ruling(pid.replace('=30|', '=30.0|'), 'fail'))
+    r = DataReader(str(tmp_path))
+    dup = [w for w in r.ruling_warnings if 'more than once' in w]
+    assert len(dup) == 1
+    assert _point(r, 30.0).status == 'failed_integrity'
