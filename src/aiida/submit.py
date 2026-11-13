@@ -398,55 +398,35 @@ def _ensure_profile_loaded(profile: Optional[str] = None) -> None:
 
 
 def _get_code(code_label: Optional[str], interactive: bool = False,
-              settings_file=None) -> orm.Code:
-    """Resolve the LAMMPS code: explicit label, then settings, then discovery.
+              settings_file=None) -> orm.Code:  # pylint: disable=unused-argument
+    """Resolve the LAMMPS code: explicit label, then discovery.
 
     An EXPLICITLY passed `code_label` is authoritative: if it isn't
-    registered, that's an error, full stop. A label that came from
-    `settings.aiida.lammps_code_label` instead is only a best-effort
-    default -- `AiidaSettings.lammps_code_label` always has a value (it is
-    not `Optional`), so treating it the same as an explicit label would make
-    the `%lammps%` discovery scan below unreachable for anyone who has not
-    edited settings.yaml to match whatever `aiida setup` actually registered.
-    A settings-provided label that isn't registered falls through to
-    discovery instead of raising.
+    registered, that's an error, full stop. Without one, the `%lammps%`
+    discovery scan below runs (`AiidaSettings.lammps_code_label` is gone).
 
     Args:
-        code_label: Code label (e.g. ``'lammps@hpc'``). If ``None``, falls
-            back to ``settings.aiida.lammps_code_label`` before scanning.
+        code_label: Code label (e.g. ``'lammps@hpc'``). If ``None``, scan for a
+            registered LAMMPS code.
         interactive: If ``True``, prompt user to select when ambiguous (CLI mode).
             If ``False``, raise ``ValueError`` on ambiguity (API mode).
-        settings_file: Explicit settings.yaml path for the fallback lookup.
+        settings_file: Unused; kept for caller compatibility.
 
     Returns:
         AiiDA Code node.
     """
-    explicit = bool(code_label)
-    if not code_label:
-        # `load_settings` is already imported at module scope (line 23);
-        # re-importing it locally here would just shadow it.
-        try:
-            code_label = load_settings(settings_file=settings_file).aiida.lammps_code_label
-        except (OSError, ValueError, AttributeError):
-            code_label = None
-
     if code_label:
         try:
             return orm.load_code(code_label)
         except NotExistent as exc:
-            if not explicit:
-                logger.debug(
-                    "Settings code label '%s' is not registered; falling "
-                    "back to discovery.", code_label)
-            else:
-                msg = (
-                    f"Code '{code_label}' not found. "
-                    "Run 'FrictionSim2D aiida setup' to configure codes."
-                )
-                if interactive:
-                    import click  # pylint: disable=import-outside-toplevel
-                    raise click.ClickException(msg) from exc
-                raise ValueError(msg) from exc
+            msg = (
+                f"Code '{code_label}' not found. "
+                "Run 'FrictionSim2D aiida setup' to configure codes."
+            )
+            if interactive:
+                import click  # pylint: disable=import-outside-toplevel
+                raise click.ClickException(msg) from exc
+            raise ValueError(msg) from exc
 
     qb = QueryBuilder()
     qb.append(orm.Code, filters={'label': {'like': '%lammps%'}})

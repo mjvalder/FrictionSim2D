@@ -263,25 +263,26 @@ class HPCSettings(BaseModel):
 
 
 class AiidaSettings(BaseModel):
-    """AiiDA workflow settings.
+    """AiiDA import settings.
 
-    Five fields, all reachable. The SSH-connected HPC mode is gone (spec U5):
-    the HPC blocks direct connections, so the supported modes are local,
-    remote-manual (rsync out, `aiida import` on return) and hpc-direct (AiiDA in
-    the HPC conda env, archive brought home).
+    AiiDA is import-only: simulations never touch it, results are ingested
+    afterwards. `enabled` and `lammps_code_label` belonged to the old
+    run-time submission path and are gone (an old settings.yaml that still
+    names them loads, with a warning).
     """
-    enabled: bool = False
     #: The profile every profile-taking function falls back to when its own
-    #: `profile: Optional[str] = None` argument is omitted (`ingest_root`,
-    #: `export_results`, `rebuild_set`, `export_archive`, `import_archive`,
-    #: `list_simulation_sets`, `delete_simulation_set`, `clear_all_nodes`, and
-    #: the CLI commands built on them). `None` here means "AiiDA's own
-    #: default profile". New in schema 3 -- it used to be a CLI flag only.
+    #: `profile: Optional[str] = None` argument is omitted. `None` here means
+    #: "AiiDA's own default profile".
     profile: Optional[str] = None
-    lammps_code_label: str = 'lammps@localhost'
+    #: Computer used when `machine` resolves to 'localhost'.
     computer_label: str = 'localhost'
     #: Files larger than this are recorded by sha256 + path instead of stored.
     max_stored_file_mb: int = 20
+    #: Leading fraction of each run's friction trace discarded as transient
+    #: before the COF statistics are taken.
+    skip_fraction: float = 0.2
+    #: The machine a run tree was produced on; `None` lets ingest resolve it.
+    machine: Optional[str] = None
 
 
 class DatabaseSettings(BaseModel):
@@ -1192,6 +1193,27 @@ def _settings_paths_in_precedence_order(
 #: a user's central-DB credentials with them, so `load_settings` warns instead.
 _OLD_DATABASE_PROFILE_KEYS = frozenset({'active_profile', 'local', 'central'})
 
+#: `AiidaSettings` keys removed when AiiDA became import-only.
+_REMOVED_AIIDA_KEYS = ('enabled', 'lammps_code_label')
+
+
+def _warn_dropped_settings_keys(path: Path, data: Mapping[str, Any]) -> None:
+    """Log ONE warning naming every removed key a settings file still carries."""
+    dropped = []
+    db_block = data.get('database')
+    if isinstance(db_block, dict) and _OLD_DATABASE_PROFILE_KEYS & db_block.keys():
+        dropped.append(
+            "the old database.active_profile/local/central block (DatabaseSettings "
+            "is central-only and flat; its host/port/dbname/user/password/api_key "
+            "are IGNORED -- flatten them to database.host, database.port, ...)")
+    aiida_block = data.get('aiida')
+    if isinstance(aiida_block, dict):
+        dropped.extend(f"aiida.{key}" for key in _REMOVED_AIIDA_KEYS
+                       if key in aiida_block)
+    if dropped:
+        logger.warning("settings file %s carries keys that no longer exist and "
+                       "are being ignored: %s", path, "; ".join(dropped))
+
 
 def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSettings:
     """Load the first readable settings file onto the hardcoded defaults.
@@ -1206,17 +1228,7 @@ def load_settings(settings_file: Optional[Union[str, Path]] = None) -> GlobalSet
             with path.open('r', encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
             if data:
-                db_block = data.get('database')
-                if isinstance(db_block, dict) and _OLD_DATABASE_PROFILE_KEYS & db_block.keys():
-                    logger.warning(
-                        "settings file %s uses the old database.active_profile/"
-                        "local/central shape, which no longer exists -- "
-                        "DatabaseSettings is central-only and flat now. Its host/"
-                        "port/dbname/user/password/api_key are being IGNORED. "
-                        "Flatten them to top-level database.* keys, e.g. "
-                        "database.host, database.port, database.api_key.",
-                        path,
-                    )
+                _warn_dropped_settings_keys(path, data)
                 return cast(GlobalSettings, GlobalSettings.model_validate(data))
         except (FileNotFoundError, OSError, yaml.YAMLError) as exc:
             logger.warning("skipping settings file %s: %s", path, exc)

@@ -774,18 +774,34 @@ def test_flake_pot_type_invalid_still_raises(monkeypatch):
         FlakeConfig(edge_length=20.0, pot_type='not-a-real-potential')
 
 
-def test_aiida_settings_is_five_fields():
+def test_aiida_settings_fields():
     from src.core.config import AiidaSettings
 
     assert set(AiidaSettings.model_fields) == {
-        'enabled', 'profile', 'lammps_code_label', 'computer_label',
-        'max_stored_file_mb'}
+        'profile', 'computer_label', 'max_stored_file_mb', 'skip_fraction',
+        'machine'}
+    assert 'enabled' not in AiidaSettings.model_fields
+    assert 'lammps_code_label' not in AiidaSettings.model_fields
     defaults = AiidaSettings()
-    assert defaults.enabled is False
     assert defaults.profile is None
-    assert defaults.lammps_code_label == 'lammps@localhost'
     assert defaults.computer_label == 'localhost'
     assert defaults.max_stored_file_mb == 20
+    assert defaults.skip_fraction == 0.2
+    assert defaults.machine is None
+
+
+def test_removed_aiida_and_database_keys_warn_once(tmp_path, caplog):
+    settings_file = tmp_path / 'settings.yaml'
+    settings_file.write_text(
+        'aiida:\n  enabled: true\n  lammps_code_label: lammps@x\n'
+        'database:\n  active_profile: central\n  central:\n    host: h\n',
+        encoding='utf-8')
+    with caplog.at_level('WARNING', logger='src.core.config'):
+        settings = load_settings(settings_file=settings_file)
+    assert not hasattr(settings.aiida, 'enabled')
+    warnings = [r for r in caplog.records if r.levelname == 'WARNING']
+    assert len(warnings) == 1
+    assert 'aiida.enabled' in warnings[0].getMessage()
 
 
 def test_database_settings_is_central_only():
@@ -838,7 +854,7 @@ def test_old_settings_file_with_removed_aiida_and_database_keys_still_loads(
 
     # Loads without error; the removed aiida.* keys are dropped, the five
     # reachable fields keep their defaults since none of them were spelled here.
-    assert settings.aiida.enabled is True
+    assert not hasattr(settings.aiida, 'enabled')
     assert not hasattr(settings.aiida, 'transport')
 
     # The nested database.central block is now silently ignored --

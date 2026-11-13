@@ -260,24 +260,27 @@ Defaults:
 
 ```yaml
 aiida:
-  enabled: false
   profile: null                     # null = AiiDA's own default profile
-  lammps_code_label: lammps@localhost
   computer_label: localhost
   max_stored_file_mb: 20
+  skip_fraction: 0.2
+  machine: null                     # null = resolved at ingest
 ```
 
-- `enabled` — turn on AiiDA provenance tracking for `run ... --aiida`.
 - `profile` — the AiiDA profile every profile-taking function falls back to
   when its own `profile` argument (Python) or `--profile` option (CLI) is
   omitted. `null` means "AiiDA's own default profile."
-- `lammps_code_label` — the `<code>@<computer>` label `aiida submit` looks
-  for before falling back to an ambiguous `%lammps%` search.
 - `computer_label` — the AiiDA computer label `aiida setup` registers
   (`localhost` by default; every supported mode runs its CalcJobs on
   `localhost`, even hpc-direct, because that *is* the HPC in that mode).
 - `max_stored_file_mb` — files larger than this are recorded by sha256 + path
   instead of being copied into the AiiDA repository.
+- `skip_fraction` — leading fraction of each friction trace discarded as
+  transient before the COF statistics.
+- `machine` — the machine a run tree was produced on; `null` lets ingest
+  resolve it.
+- `enabled` and `lammps_code_label` are removed (AiiDA is import-only); an
+  old settings file naming them loads with one warning.
 
 Several fields that used to live here are gone: the settings that named a
 second CalcJob for postprocessing on the HPC (never built — postprocessing

@@ -169,7 +169,7 @@ def run_simulations(
     settings_file: Optional[Union[str, Path]] = None,
     output_root: Optional[Union[str, Path]] = None,
     ensure_hpc_settings=None,
-    use_aiida: bool = False,
+    use_aiida: bool = False,  # pylint: disable=unused-argument
     generate_hpc: bool = False,
     simulation_root_name: Optional[str] = None,
     on_failure: Optional[Callable[[Path, Dict[str, Any], Exception], None]] = None,
@@ -194,9 +194,6 @@ def run_simulations(
 
     base_dict = parse_config(config_path)
     defaults = load_settings(settings_file=settings_file)
-
-    if use_aiida:
-        defaults.aiida.enabled = True
 
     # Carried on the settings rather than threaded through every builder: the
     # builders already pass `settings` down to make_amorphous.

@@ -97,7 +97,7 @@ def mock_settings() -> GlobalSettings:
             LJ_cutoff=11.0,
             LJ_type='lj/cut',
         ),
-        aiida=AiidaSettings(lammps_code_label='lammps@localhost'),
+        aiida=AiidaSettings(),
     )
 
 

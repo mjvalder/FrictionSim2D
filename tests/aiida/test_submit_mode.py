@@ -43,42 +43,10 @@ def test_array_submission_is_removed():
     assert not hasattr(calcjob_mod, '_build_array_wrapper')
 
 
-def test_get_code_falls_back_to_the_settings_label(aiida_profile_clean, monkeypatch,
-                                                   tmp_path):
-    settings_file = tmp_path / 'settings.yaml'
-    settings_file.write_text('aiida:\n  lammps_code_label: lammps@localhost\n',
-                             encoding='utf-8')
-    seen = {}
-    # Not `seen.setdefault('label', label) or 'CODE'`: that returns `label`
-    # itself whenever `label` is truthy (which it always is here), so the
-    # test would pass even if `_get_code` fed the wrong string into
-    # `load_code` -- it only ever inspects what `seen` recorded, never what
-    # `_get_code` actually returned.
-    monkeypatch.setattr('aiida.orm.load_code',
-                        lambda label: (seen.update(label=label), 'CODE')[1])
-
-    code = submit_mod._get_code(None, settings_file=settings_file)
-
-    assert seen['label'] == 'lammps@localhost'
-    assert code == 'CODE'
-
-
-def test_get_code_falls_through_to_discovery_when_settings_label_is_stale(
+def test_get_code_discovers_a_lammps_code_without_a_label(
         aiida_profile_clean, tmp_path):
-    """Fix round 1, finding 1: `AiidaSettings.lammps_code_label` always has a
-    value (it defaults to `'lammps@my_hpc'`, not `None`) -- unlike an
-    explicit `--code`, it is not authoritative. Treating it as authoritative
-    made the `%lammps%` discovery scan below unreachable for anyone who had
-    not hand-edited settings.yaml to match whatever `aiida setup` actually
-    registered, so `aiida submit` (no `--code`) failed right after `aiida
-    setup` with "Code 'lammps@my_hpc' not found" even though a real LAMMPS
-    code was registered under a different label.
-    """
+    """With no explicit label, the `%lammps%` discovery scan finds the code."""
     from aiida import orm
-
-    settings_file = tmp_path / 'settings.yaml'
-    settings_file.write_text('aiida:\n  lammps_code_label: lammps@nowhere\n',
-                             encoding='utf-8')
 
     computer = orm.Computer(label='localhost-test', hostname='localhost',
                             transport_type='core.local', scheduler_type='core.direct',
@@ -90,7 +58,7 @@ def test_get_code_falls_through_to_discovery_when_settings_label_is_stale(
                              default_calc_job_plugin='core.arithmetic.add')
     code.store()
 
-    result = submit_mod._get_code(None, settings_file=settings_file)
+    result = submit_mod._get_code(None)
 
     assert result.pk == code.pk
 
