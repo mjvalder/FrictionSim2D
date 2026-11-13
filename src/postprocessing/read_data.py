@@ -296,13 +296,15 @@ class LoadPoint:
 #: `fc_ave_slide_` forms carry their unit as a suffix instead. Angles are
 #: SIGNED: LAMMPS substitutes the scan angle verbatim, so a -15 deg scan writes
 #: `friction_f5_a-15_s1_...` and an unsigned pattern drops the run in silence.
+#: `.txt` is optional: the sheet, hetero and flake builders write
+#: `friction_p${pressure}_a${a}_s${speed}` with no extension.
 _RESULTS_RE = re.compile(
     r'^(?:(?P<tier>friction|raw|peratom)_(?P<kind>[fp])(?P<load>-?\d+\.?\d*)'
     r'_a(?P<angle>-?\d+\.?\d*)_s(?P<speed>-?\d+\.?\d*)'
     r'(?:_layer(?P<layer>\d+))?'
     r'|fc_ave_slide_(?P<lload>\d+\.?\d*)(?P<lunit>nN|GPa)'
     r'_(?P<langle>-?\d+\.?\d*)angle_(?P<lspeed>\d+\.?\d*)ms'
-    r'(?:_l(?P<llayer>\d+))?)\.txt$')
+    r'(?:_l(?P<llayer>\d+))?)(?:\.txt)?$')
 
 _TIER_BY_PREFIX = {'friction': 'window', 'raw': 'raw', 'peratom': 'peratom'}
 

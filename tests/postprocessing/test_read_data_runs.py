@@ -65,9 +65,24 @@ def test_parse_results_name_reads_pressure_raw_and_legacy():
         tier='window', layer=None)
 
 
+def test_parse_results_name_reads_a_name_without_txt():
+    """The sheet, hetero and flake builders write `friction_p${pressure}_a${a}
+    _s${speed}` with no extension (sheetonsheet/base.py results_file_pattern);
+    a `.txt`-only pattern read a whole sheet campaign as 0 points."""
+    assert parse_results_name('friction_p0.01_a90.0_s10') == LoadPoint(
+        load_kind='pressure', load=0.01, angle=90.0, speed=10.0,
+        tier='window', layer=None)
+    assert parse_results_name('raw_p20.0_a0.0_s10').tier == 'raw'
+    assert parse_results_name('peratom_p20.0_a0.0_s10').tier == 'peratom'
+
+
 def test_parse_results_name_refuses_anything_else():
     assert parse_results_name('log.lammps') is None
     assert parse_results_name('final_f30N_a0.data') is None
+    assert parse_results_name('halted.txt') is None
+    assert parse_results_name('friction_p1_a0_s2.csv') is None
+    assert parse_results_name('friction_p1_a0_s2.txt.bak') is None
+    assert parse_results_name('friction_p1_a0_s2_extra') is None
 
 
 def test_a_potential_sweep_keeps_both_arms(tmp_path):
