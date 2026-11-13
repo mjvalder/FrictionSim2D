@@ -289,6 +289,8 @@ _BOOLEAN_RULES = ('non_finite', 'frozen')
 
 MULTI_SPEED_DETAIL = 'snapshot rules skipped: multi-speed run'
 NO_SNAPSHOT_DETAIL = 'snapshot rules not applicable: run writes no end snapshot'
+#: The descriptive (non-rule-name) entries ``check_files`` puts in ``not_applicable``.
+SKIP_DETAILS = (MULTI_SPEED_DETAIL, NO_SNAPSHOT_DETAIL)
 
 
 @dataclass
@@ -492,12 +494,18 @@ def resolve_layers(locator, record, ref_path: Optional[Path], n_layers: int,
 _END_SNAPSHOT_RE = re.compile(r'^\s*write_data\s+\S*final_', re.MULTILINE)
 
 
-def writes_end_snapshot(lammps_dir) -> bool:
-    """True when any deck in ``lammps_dir`` writes a ``final_*`` snapshot.
+def writes_end_snapshot(lammps_dir, data_dir=None) -> bool:
+    """True when the run writes an end snapshot.
 
-    PES and indent decks never do, nor do hetero and flake runs built before
-    end snapshots existed; their snapshot rules are not applicable.
+    That is: a ``final_*.data`` is in ``data_dir`` (a tree copied without its
+    ``lammps/`` still counts), or any deck in ``lammps_dir`` has a
+    ``write_data ... final_`` line. PES and indent decks never do, nor do
+    hetero and flake runs built before end snapshots existed; their snapshot
+    rules are not applicable.
     """
+    if data_dir is not None and Path(data_dir).is_dir() and any(
+            Path(data_dir).glob('final_*.data')):
+        return True
     lammps_dir = Path(lammps_dir)
     if not lammps_dir.is_dir():
         return False

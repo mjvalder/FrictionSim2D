@@ -45,6 +45,10 @@ STATUSES = ('complete', 'truncated', 'no_output', 'unreadable', 'halted',
 #: Statuses whose point produced no frames at all.
 UNOBSERVED = ('no_output', 'not_reached')
 
+#: Statuses whose frames are delivered downstream (plots, indent JSON).
+#: `plot_common.PLOT_STATUSES` is this tuple.
+DELIVERED_STATUSES = ('complete',)
+
 #: The guard's registry in a run's `results/` (the builders' `halt_record`).
 HALT_RECORD = 'halted.txt'
 

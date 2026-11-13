@@ -12,7 +12,8 @@ pytest.importorskip('scipy')
 from src.core.config import IntegritySettings  # noqa: E402
 from src.postprocessing.integrity import (  # noqa: E402
     NO_SNAPSHOT_DETAIL, check_files, resolve_layers, writes_end_snapshot)
-from src.postprocessing.read_data import DataReader, resolve_n_layers  # noqa: E402
+from src.postprocessing.read_data import (  # noqa: E402
+    SUMMARY_POST_COLUMNS, DataReader, resolve_n_layers)
 from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
 from tests.postprocessing.test_integrity import (  # noqa: E402
@@ -70,14 +71,51 @@ def test_halted_point_keeps_frames(tmp_path):            # Review Focus 3
     p = _point(r, load=30.0)
     assert p.status == 'halted' and p.tiers and p in r.runs
     assert 'T=9000' in p.status_detail and len(p.window) == 50
-    assert p.integrity is None                       # stage 3 runs on complete only
+    v = p.integrity                                  # R8: every point has a verdict
+    assert (v.status, v.failed, v.observed) == ('halted', True, True)
+    assert v.reasons[0] == 'halted'
+    assert v.measures['n_heat'] == 512 and np.isfinite(v.measures['T_sigma'])
     assert p not in DataReader(str(root), complete_only=True).runs
+
+
+def test_no_output_point_payload_is_failed_and_unobserved(tmp_path):
+    """R8: a configured point with no file still carries failed/observed."""
+    run_dir = _afm_tree(tmp_path, loads=(10.0, 30.0))
+    for path in (run_dir / 'results').glob('friction_f30_*'):
+        path.unlink()
+    r = DataReader(str(tmp_path))
+    p = _point(r, 30.0, points=True)
+    assert p.status == 'no_output'
+    pay = r.run_payload(p)['integrity']
+    assert pay['status'] == 'no_output'
+    assert pay['failed'] is True and pay['observed'] is False
+    assert _point(r, 10.0).integrity.status == 'complete'
+
+
+def test_truncated_point_gets_t_sigma(tmp_path):
+    """R8 makes the reference atom-count fallback reachable for truncated."""
+    from tests.helpers.synthetic_results import write_results
+    run_dir = _afm_tree(tmp_path)
+    write_results(run_dir, 'afm', load_kind='force', loads=(30.0,), layers=2, n=10)
+    p = _point(DataReader(str(tmp_path)), 30.0)
+    assert p.status == 'truncated'
+    assert p.integrity.status == 'truncated' and p.integrity.failed
+    assert p.integrity.measures['n_heat'] == 512
+
+
+def test_final_file_without_deck_counts_as_writing_a_snapshot(tmp_path):
+    """R9: a tree copied without lammps/ still runs the snapshot rules."""
+    _afm_tree(tmp_path, eject=(30.0,), deck=False)
+    p = _point(DataReader(str(tmp_path)), 30.0)
+    assert p.status == 'failed_integrity' and 'ejected_atoms' in p.status_detail
+    assert NO_SNAPSHOT_DETAIL not in p.integrity.not_applicable
 
 
 def test_halted_frames_give_no_summary_stats(tmp_path):
     root = _tree_with_halt(tmp_path)
     rows = {row['load']: row for row in DataReader(str(root)).summary_rows()}
     assert rows[30.0]['status'] == 'halted' and rows[30.0]['mean_cof'] is None
+    assert all(np.isnan(rows[30.0][name]) for name in SUMMARY_POST_COLUMNS)
     assert rows[10.0]['mean_cof'] is not None
 
 
@@ -223,3 +261,19 @@ def test_writes_end_snapshot(tmp_path):
         'write_data      /abs/data/final_p$(v_pressure)GPa_a$(v_a).data\n',
         encoding='utf-8')
     assert writes_end_snapshot(lammps) is True
+    (lammps / 'slide.in').unlink()
+    data = tmp_path / 'data'
+    assert writes_end_snapshot(lammps, data) is False
+    data.mkdir()
+    (data / 'final_f30N_a0.data').write_text('x', encoding='utf-8')
+    assert writes_end_snapshot(lammps, data) is True   # R9: the file is enough
+
+
+def test_complete_only_time_series_from_complete_runs(tmp_path):
+    """ntimestep is taken after complete_only narrows runs."""
+    from tests.helpers.synthetic_results import write_results
+    run_dir = _afm_tree(tmp_path, loads=(30.0, 40.0), eject=(30.0,))
+    write_results(run_dir, 'afm', load_kind='force', loads=(30.0,), layers=2, n=60)
+    r = DataReader(str(tmp_path), complete_only=True)
+    assert [p.load for p in r.runs] == [40.0]
+    assert r.ntimestep == 50 and len(r.time_series) == 50

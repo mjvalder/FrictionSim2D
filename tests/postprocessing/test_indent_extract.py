@@ -97,9 +97,13 @@ _HOLD_HEADER = ("# Time-averaged data for fix fc_ave\n"
 
 def _write_hold(dir_: Path, load: int, layer: int, tipz: float, comz: float):
     dir_.mkdir(parents=True, exist_ok=True)
+    # Every channel fluctuates a little: a constant one is `frozen` to the
+    # integrity check, and the point would not be delivered.
     rows = "".join(
-        f"{step} 30.0 0.0 0.0 30.0 30.0 {comz} 30.0 30.0 {tipz}\n"
-        for step in (1000, 2000, 3000, 4000, 5000)
+        f"{step} {30.0 + d} {d} {-d} {30.0 + d} {30.0 - d} {comz + d} "
+        f"{30.0 + d} {30.0 - d} {tipz + d}\n"
+        for step, d in zip((1000, 2000, 3000, 4000, 5000),
+                           (0.01, -0.02, 0.015, -0.005, 0.0))
     )
     (dir_ / f"friction_f{load}_a0_s2_layer{layer}.txt").write_text(
         _HOLD_HEADER + rows, encoding="utf-8")
@@ -220,3 +224,24 @@ def test_discover_curves_ignores_a_curve_outside_a_run(tmp_path: Path):
     conds = {(m, l, ld) for m, l, ld, _p in indent.discover_curves(tmp_path)}
 
     assert 99.0 not in {ld for _m, _l, ld in conds}
+
+
+def test_halted_hold_is_not_delivered(tmp_path: Path):
+    """A halted hold keeps its frames in DataReader, but never reaches the
+    penetration JSON, the hold conditions or the manifest."""
+    root = _make_run(tmp_path)
+    run_dir = next(p.parent for p in root.rglob('results') if p.parent.name == 'L1')
+    (run_dir / 'results' / 'halted.txt').write_text(
+        '# HALT stage=slide load=30 angle=0 speed=2 T=9000 step=3000\n',
+        encoding='utf-8')
+    out = tmp_path / "outputs" / "indent_sims"
+    indent.run(root, out)
+
+    payload = json.loads(
+        (out / "output_indent_f30_s20260710.json").read_text(encoding="utf-8"))
+    assert {r["layers"] for r in payload["runs"]} == {2}
+    assert {r["status"] for r in payload["runs"]} == {"complete"}
+    meta = indent.load_indent_meta(root)
+    (tmp_path / "o2").mkdir()
+    _written, holds = indent._deliver_penetration(root, tmp_path / "o2", meta)  # pylint: disable=protected-access
+    assert ("h_MoS2", 1, 30.0) not in holds and ("h_MoS2", 2, 30.0) in holds

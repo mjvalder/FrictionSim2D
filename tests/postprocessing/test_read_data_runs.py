@@ -531,7 +531,9 @@ def test_the_summary_row_layers_column_is_the_resolved_count(tmp_path):
 def test_post_channels_reach_the_row(tmp_path):
     make_family_run(tmp_path, 'afm', final_data=True)
 
-    row, = DataReader(results_dir=str(tmp_path)).summary_rows()
+    # integrity=False: the fixture has a final snapshot but no bond
+    # reference, so stage 3 quarantines it and its row carries no post values.
+    row, = DataReader(results_dir=str(tmp_path), integrity=False).summary_rows()
 
     assert row['gap_min'] == pytest.approx(3.1)
     assert math.isnan(row['gap_min_il'])

@@ -27,7 +27,8 @@ import pandas as pd
 from src.core.config import IntegritySettings
 from src.core.observables import FAMILIES, expected_tier_rows, rename_map
 
-from .integrity import IntegrityVerdict, check_point, writes_end_snapshot
+from .integrity import (SKIP_DETAILS, IntegrityVerdict, check_point,
+                        writes_end_snapshot)
 from .post_channels import post_channels_for
 from .run_provenance import (point_provenance, pool_provenance,
                              run_provenance)
@@ -381,7 +382,8 @@ class RunFrames:
     status_detail: str = ''
     expected_rows: Dict[str, int] = field(default_factory=dict)
     config: Optional[dict] = None
-    #: The stage-3 verdict; set on points that were `complete` before it ran.
+    #: The stage-3 verdict, on every point when the check is on. It changes
+    #: only a `complete` point's status; the others pass through.
     integrity: Optional[IntegrityVerdict] = None
 
     @property
@@ -665,7 +667,6 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         chains: List[Tuple[List[PointKey], Dict[PointKey, RunFrames]]]
         self.points, chains = self._read_runs()
         self.runs: List[RunFrames] = [p for p in self.points if p.tiers]
-        self.ntimestep: int = max((len(r.window) for r in self.runs), default=0)
         self._apply_legacy_truncation()
         for chain, by_key in chains:
             status = {key: point.status for key, point in by_key.items()}
@@ -676,6 +677,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             self._check_integrity(self.integrity_settings)
         if complete_only:
             self.runs = [run for run in self.runs if run.status == 'complete']
+        self.ntimestep: int = max((len(r.window) for r in self.runs), default=0)
         self.time_series: List[int] = self._time_series()
         self.incomplete_files: Dict[str, List[str]] = {}
         self.incomplete_materials: Dict[str, set] = {}
@@ -683,31 +685,33 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         self.metadata: Dict[str, Any] = self._build_metadata()
 
     def _check_integrity(self, settings: IntegritySettings) -> None:
-        """Stage 3 on every `complete` point; its verdict becomes the status.
+        """Stage 3 on every point; on a `complete` one the verdict becomes
+        the status, every other status passes through (`verdict`).
 
         Runs after `mark_not_reached`, so a point that fails here never turns
         a later point of its chain `not_reached`: the chain did reach it.
         `multi_speed` is per run -- more than one distinct speed among its
-        points. Whether the decks write an end snapshot is read once per run.
+        points. Whether the run writes an end snapshot is read once per run.
         """
         by_run: Dict[Path, List[RunFrames]] = {}
         for point in self.points:
             by_run.setdefault(Path(point.locator.run_dir), []).append(point)
         for points in by_run.values():
-            todo = [p for p in points if p.status == 'complete']
-            if not todo:
-                continue
-            record = self._run_block(todo[0])
+            locator = points[0].locator
+            record = self._run_block(points[0])
             multi_speed = len({p.speed for p in points}) > 1
-            writes = writes_end_snapshot(todo[0].locator.lammps_dir)
-            for point in todo:
+            writes = writes_end_snapshot(locator.lammps_dir, locator.data_dir)
+            for point in points:
+                before = point.status
                 verdict = check_point(point, record, settings,
                                       multi_speed=multi_speed,
                                       writes_snapshot=writes)
                 point.integrity = verdict
                 point.status = verdict.status
-                notes = [d for d in verdict.not_applicable if ' ' in d]
-                parts = verdict.reasons + verdict.quarantine + notes
+                notes = [d for d in verdict.not_applicable if d in SKIP_DETAILS]
+                # A non-complete verdict's reasons open with its own status.
+                parts = ([r for r in verdict.reasons if r != before]
+                         + verdict.quarantine + notes)
                 if parts:
                     point.status_detail = _join_detail(
                         point.status_detail, 'integrity: ' + '; '.join(parts))
@@ -1103,7 +1107,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             summary = summarise_run(run.frames_by_tier() if usable else {},
                                     run.family,
                                     skip_fraction=self.skip_fraction,
-                                    post=run.post)
+                                    post=run.post if usable else {})
             row: Dict[str, Any] = {
                 'model': tokens.model, 'family': run.family,
                 'material': run.material,
@@ -1140,7 +1144,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 else:
                     row[name] = float('nan')
             for name in SUMMARY_POST_COLUMNS:
-                row[name] = float(run.post.get(name, float('nan')))
+                row[name] = (float(run.post.get(name, float('nan'))) if usable
+                             else float('nan'))
             rows.append(row)
         return rows
 

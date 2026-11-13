@@ -20,12 +20,13 @@ from ..data import get_client
 from .plot_mixin_base import PlotDataError, PlotterMixinBase
 from .plot_derived import add_plot_derived_columns
 from .plot_style import GEM24_COLORS
+from .run_status import DELIVERED_STATUSES
 
 logger = logging.getLogger(__name__)
 
 #: Statuses the plot stack draws. A v2 record has no status and counts as
 #: complete; truncated and missing points never reach a plot.
-PLOT_STATUSES = ("complete",)
+PLOT_STATUSES = DELIVERED_STATUSES
 
 
 #: Scalar query parameters forwarded to the v3 client verbatim.

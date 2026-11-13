@@ -256,13 +256,13 @@
    "seeds_shared_across_runs": 0
   },
   "status_counts": {
-   "complete": 1,
+   "complete": 0,
    "truncated": 0,
    "no_output": 0,
    "unreadable": 0,
    "halted": 0,
    "failed_integrity": 0,
-   "quarantined": 0,
+   "quarantined": 1,
    "not_reached": 0
   },
   "integrity_thresholds": {
@@ -519,8 +519,8 @@
     "gap_min_il": 6.1,
     "corrugation_max": 0.40000000000000036
    },
-   "status": "complete",
-   "status_detail": "grid unknown: config has no general.pressure; integrity: snapshot rules not applicable: run writes no end snapshot",
+   "status": "quarantined",
+   "status_detail": "grid unknown: config has no general.pressure; integrity: missing bond reference structure",
    "provenance": {
     "schema_version": "2.0.0",
     "family": "hetero",
@@ -619,18 +619,19 @@
    },
    "expected_rows": {},
    "integrity": {
-    "status": "complete",
+    "status": "quarantined",
     "failed": false,
     "observed": true,
     "reasons": [],
-    "quarantine": [],
+    "quarantine": [
+     "missing bond reference structure"
+    ],
     "not_applicable": [
      "hole",
      "isolated_atoms",
      "ejected_atoms",
      "sheet_heating",
-     "gap_rise",
-     "snapshot rules not applicable: run writes no end snapshot"
+     "gap_rise"
     ],
     "measures": {
      "n_heat": null,

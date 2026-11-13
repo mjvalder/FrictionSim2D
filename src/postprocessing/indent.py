@@ -195,9 +195,13 @@ def _deliver_penetration(run_root: Path, out_dir: Path,
     deletes -- one export schema, not two.
     """
     from .read_data import DataReader, _NpEncoder  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+    from .run_status import DELIVERED_STATUSES  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
     reader = DataReader(results_dir=str(run_root))
-    indent_runs = [r for r in reader.runs if r.family == 'indent']
+    # Only delivered statuses: a halted or failed_integrity hold still has
+    # frames, but they describe a blow-up or a broken sheet, not an indent.
+    indent_runs = [r for r in reader.runs if r.family == 'indent'
+                   and r.status in DELIVERED_STATUSES]
     if not indent_runs:
         logger.info("No indent hold results found under %s", run_root)
         return {}, set()
