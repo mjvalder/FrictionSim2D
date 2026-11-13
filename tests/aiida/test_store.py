@@ -68,6 +68,30 @@ def test_stored_file_goes_through_redaction(aiida_profile_clean, tmp_path):
     assert 'hunter2' not in node.get_content()
 
 
+def test_provenance_location_triggers_redaction(aiida_profile_clean, tmp_path):
+    """A file under provenance/ is checked whatever its name (redact's location rule)."""
+    prov = tmp_path / 'run' / 'provenance'
+    prov.mkdir(parents=True)
+    notes = prov / 'notes.yaml'
+    notes.write_text('central:\n  password: hunter2\n', encoding='utf-8')
+    node = get_or_create_file(notes)
+    assert node.filename == 'notes.yaml'
+    assert 'hunter2' not in node.get_content()
+
+
+def test_explicit_name_and_cif_exemption(aiida_profile_clean, tmp_path):
+    cif = tmp_path / 'run' / 'provenance' / 'cif' / 'MoS2.cif'
+    cif.parent.mkdir(parents=True)
+    cif.write_text('data_MoS2\n_cell_length_a 3.16\n', encoding='utf-8')
+    node = get_or_create_file(cif)
+    assert node.get_content() == 'data_MoS2\n_cell_length_a 3.16\n'
+    other = tmp_path / 'loose.txt'
+    other.write_text('password: hunter2\n', encoding='utf-8')
+    named = get_or_create_file(other, name='provenance/loose.txt')
+    assert named.filename == 'loose.txt'
+    assert 'hunter2' not in named.get_content()
+
+
 def test_machine_computer_get_or_create(aiida_profile_clean):
     comp = machine_computer('archer2')
     assert comp.label == 'archer2'

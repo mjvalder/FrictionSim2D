@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import numbers
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Union, get_args, get_origin
@@ -29,6 +30,9 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Union, get_args
 from pydantic import BaseModel
 
 from ..data.provenance import MATERIAL_ROLES, sha256_file
+from ..run.tree import provenance_dir_for
+
+logger = logging.getLogger(__name__)
 
 BLOCK_KINDS = ('material', 'potential', 'thermostat', 'geometry', 'drive',
                'protocol', 'output')
@@ -45,11 +49,12 @@ def _fields(kind: str, *names: str) -> Dict[str, str]:
 
 # --- per-section field tables -------------------------------------------------
 
-_COMPONENT = {
-    **_fields(_MATERIAL, 'mat', 'cif_path'),
-    # Read from provenance (what the build resolved), see _potential_block.
-    **_fields(_POTENTIAL, 'pot_type', 'pot_path'),
-}
+_COMPONENT = _fields(_MATERIAL, 'mat', 'cif_path')
+
+#: Component fields whose block content comes from the provenance entry, not
+#: from config.json: ``pot_type``/``pot_path`` -> ``materials.pot_type``/
+#: ``pot_file_sha256`` (what the build resolved, see _potential_block).
+_COMPONENT_FROM_PROVENANCE = _fields(_POTENTIAL, 'pot_type', 'pot_path')
 
 _SHEET = {
     **_COMPONENT,
@@ -141,6 +146,15 @@ FIELD_MAP: Dict[str, str] = {
        for section, table in _SETTINGS.items() for name, kind in table.items()},
 }
 
+#: Config field path -> block kind for the component fields a block takes
+#: from provenance.json instead (see _COMPONENT_FROM_PROVENANCE). Assigned,
+#: but not read by split_blocks from config.json.
+PROVENANCE_SOURCED: Dict[str, str] = {
+    f'{section}.{name}': kind
+    for section in _COMPONENT_SECTIONS
+    for name, kind in _COMPONENT_FROM_PROVENANCE.items()
+}
+
 #: provenance.json fields each block reads. ``materials.*`` is per entry,
 #: ``geometry.*`` is ``BuiltGeometry`` (sheet-role material blocks only).
 PROVENANCE_MAP: Dict[str, str] = {
@@ -224,8 +238,9 @@ def leaf_field_paths(model: type, prefix: str = '') -> Iterator[str]:
 
 
 def assigned(path: str) -> bool:
-    """Is the field at ``path`` (see :data:`FIELD_MAP`) part of a block?"""
-    return path in FIELD_MAP
+    """Is the field at ``path`` part of a block (:data:`FIELD_MAP` or
+    :data:`PROVENANCE_SOURCED`)?"""
+    return path in FIELD_MAP or path in PROVENANCE_SOURCED
 
 
 # --- hashing --------------------------------------------------------------------
@@ -269,23 +284,38 @@ def block_hash(kind: str, content: Mapping[str, Any]) -> str:
 
 # --- the split ------------------------------------------------------------------
 
-def _file_sha(path: Optional[str], field: str, run_dir: Optional[Path]) -> Optional[str]:
-    """sha256 of the file at ``path``, else of its copy under ``<run_dir>/provenance/``."""
+#: Prefix of the value recorded for a file that could not be found.
+UNRESOLVED = 'unresolved:'
+
+
+def _file_sha(path: Optional[str], field: str,
+              prov_dir: Optional[Path]) -> Optional[str]:
+    """sha256 of the file a run used for ``path``.
+
+    The build-time copy under ``prov_dir`` (``<prov>/cif/``, ``<prov>/potentials/``
+    or ``<prov>/`` itself) wins: it is what the run read, while the config path
+    may have been edited since or point at another machine. The config path is
+    the fallback. A non-empty path found nowhere is logged and recorded as
+    ``'unresolved:<basename>'``, so two different missing files with different
+    names stay distinct instead of both becoming ``None``.
+    """
     if not path:
         return None
-    candidates = [Path(path)]
-    if run_dir is not None:
-        name = Path(path).name
-        candidates += [Path(run_dir) / 'provenance' / _PROVENANCE_SUBDIR[field] / name,
-                       Path(run_dir) / 'provenance' / name]
+    name = Path(path).name
+    candidates: List[Path] = []
+    if prov_dir is not None:
+        candidates += [prov_dir / _PROVENANCE_SUBDIR[field] / name, prov_dir / name]
+    candidates.append(Path(path))
     for candidate in candidates:
         if candidate.is_file():
             return sha256_file(candidate)
-    return None
+    logger.warning('%s %r not found (looked in %s); recorded as %s%s',
+                   field, path, [str(c) for c in candidates], UNRESOLVED, name)
+    return f'{UNRESOLVED}{name}'
 
 
 def _pick(section: Mapping[str, Any], table: Mapping[str, str], kind: str,
-          run_dir: Optional[Path]) -> Dict[str, Any]:
+          prov_dir: Optional[Path]) -> Dict[str, Any]:
     """The fields of ``section`` that ``table`` assigns to ``kind``, paths hashed."""
     out: Dict[str, Any] = {}
     for name, field_kind in table.items():
@@ -293,7 +323,7 @@ def _pick(section: Mapping[str, Any], table: Mapping[str, str], kind: str,
             continue
         value = section.get(name)
         if name in _PATH_FIELDS:
-            out[_PATH_FIELDS[name]] = _file_sha(value, name, run_dir)
+            out[_PATH_FIELDS[name]] = _file_sha(value, name, prov_dir)
         else:
             out[name] = value
     return out
@@ -308,7 +338,7 @@ def _sections(config: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _generic_block(kind: str, config: Mapping[str, Any], settings: Mapping[str, Any],
-                   run_dir: Optional[Path], components: bool = True) -> Dict[str, Any]:
+                   prov_dir: Optional[Path], components: bool = True) -> Dict[str, Any]:
     """Every config/settings field of ``kind``, nested as section -> field."""
     content: Dict[str, Any] = {}
     tables = {**(_COMPONENT_SECTIONS if components else {}), **_OTHER_SECTIONS}
@@ -319,10 +349,10 @@ def _generic_block(kind: str, config: Mapping[str, Any], settings: Mapping[str, 
         if not any(k == kind for k in table.values()):
             continue
         if isinstance(value, list):
-            content[name] = [_pick(item, table, kind, run_dir) for item in value]
+            content[name] = [_pick(item, table, kind, prov_dir) for item in value]
         else:
-            content[name] = _pick(value, table, kind, run_dir)
-    picked = {section: _pick(settings.get(section) or {}, table, kind, run_dir)
+            content[name] = _pick(value, table, kind, prov_dir)
+    picked = {section: _pick(settings.get(section) or {}, table, kind, prov_dir)
               for section, table in _SETTINGS.items()
               if any(k == kind for k in table.values())}
     if picked:
@@ -334,27 +364,36 @@ def _role_components(config: Mapping[str, Any]) -> Dict[str, List[Optional[Mappi
     """The config component behind each provenance entry, per role, in builder order.
 
     Mirrors ``AFMSimulation._write_provenance`` / the sheet family's
-    ``_sheet_provenance``: sheets, then the hetero-flake materials and a
-    ``[flake]`` naming its own material, then tip, then substrate. A sheet-
-    family single-material flake (no ``mat`` of its own) is filled from
-    ``[2D]`` by the builder, so it falls back to the first sheet here.
+    ``_sheet_provenance``: sheets, then the hetero-flake materials, then a
+    ``[flake]`` -- recorded only when it has a ``mat`` -- then tip, then
+    substrate. Unless there are two hetero-flake materials, the sheet family
+    fills each missing ``mat``/``cif_path``/``pot_path``/``pot_type`` of
+    ``[Flake]`` from ``[2D]`` (``FlakeSlideSimulation._filled_flake_config``)
+    before recording it, field by field; the same fill is applied here. An
+    AFM ``[flake]`` must name all four, so the fill never changes it.
     """
     sheets = list(config.get('sheets') or []) or [config.get('sheet')]
-    flakes = list(config.get('flake_sheets') or [])
+    flake_sheets = list(config.get('flake_sheets') or [])
+    flakes = list(flake_sheets)
     flake = config.get('flake')
-    if flake is not None:
-        flakes.append(flake if flake.get('mat') else sheets[0])
+    if flake is not None and len(flake_sheets) != 2:
+        base = config.get('sheet') or sheets[0] or {}
+        flake = {**flake, **{k: base.get(k) for k in ('mat', 'cif_path', 'pot_path',
+                                                       'pot_type')
+                             if flake.get(k) is None}}
+    if flake is not None and flake.get('mat'):
+        flakes.append(flake)
     return {'sheet': sheets, 'flake': flakes, 'tip': [config.get('tip')],
             'substrate': [config.get('sub')]}
 
 
 def _material_block(entry: Mapping[str, Any], component: Optional[Mapping[str, Any]],
-                    provenance: Mapping[str, Any], run_dir: Optional[Path]) -> Dict:
+                    provenance: Mapping[str, Any], prov_dir: Optional[Path]) -> Dict:
     component = component or {}
     role = entry['role']
     # A hetero-flake material is a SheetConfig too, and has a lat_c.
     table = _SHEET if 'lat_c' in component else _COMPONENT
-    block = _pick(component, table, _MATERIAL, run_dir)
+    block = _pick(component, table, _MATERIAL, prov_dir)
     block.pop('mat', None)
     block = {'name': component.get('mat') or entry.get('name'), **block}
     if role == 'sheet':
@@ -373,9 +412,9 @@ def _potential_block(entry: Mapping[str, Any], shared: Mapping[str, Any]) -> Dic
 
 
 def _shared_potential(config: Mapping[str, Any], settings: Mapping[str, Any],
-                      provenance: Mapping[str, Any], run_dir: Optional[Path]) -> Dict:
+                      provenance: Mapping[str, Any], prov_dir: Optional[Path]) -> Dict:
     """Run-wide potential fields: settings.potential, interlayer, lj_override."""
-    shared = _generic_block(_POTENTIAL, config, settings, run_dir, components=False)
+    shared = _generic_block(_POTENTIAL, config, settings, prov_dir, components=False)
     interlayer = provenance.get('interlayer') or {}
     if interlayer.get('sha256'):
         # The builder resolved the file (a bundled default when the config
@@ -387,7 +426,9 @@ def _shared_potential(config: Mapping[str, Any], settings: Mapping[str, Any],
 
 def split_blocks(config: Mapping[str, Any], settings: Mapping[str, Any],
                  provenance: Mapping[str, Any], *,
-                 run_dir: Optional[Union[str, Path]] = None) -> Dict[str, Dict[str, Any]]:
+                 run_dir: Optional[Union[str, Path]] = None,
+                 provenance_dir: Optional[Union[str, Path]] = None,
+                 ) -> Dict[str, Dict[str, Any]]:
     """Split one run's parameters into named, content-hashable blocks.
 
     Args:
@@ -395,9 +436,12 @@ def split_blocks(config: Mapping[str, Any], settings: Mapping[str, Any],
         settings: ``provenance/settings.yaml``; empty falls back to
             ``config['settings']``.
         provenance: ``provenance.json`` (``ProvenanceRecord.model_dump``).
-        run_dir: The run directory. When a config path no longer exists (a
-            tree read on another machine), its copy under
-            ``<run_dir>/provenance/`` is hashed instead.
+        run_dir: The run directory (the one holding ``provenance.json``; for
+            AFM the ``L{n}`` level). Its ``provenance/`` directory is found
+            with :func:`src.run.tree.provenance_dir_for`, and the build-time
+            file copies there are hashed in preference to config paths.
+        provenance_dir: The ``provenance/`` directory itself; overrides
+            ``run_dir``. With neither, config paths are hashed as they are.
 
     Returns:
         ``material__<role>_<i>`` and ``potential__<role>_<i>`` per entry of
@@ -405,11 +449,16 @@ def split_blocks(config: Mapping[str, Any], settings: Mapping[str, Any],
         ``thermostat``, ``geometry``, ``drive``, ``protocol`` and ``output``.
     """
     settings = settings or config.get('settings') or {}
-    run_dir = Path(run_dir) if run_dir is not None else None
+    if provenance_dir is not None:
+        prov_dir: Optional[Path] = Path(provenance_dir)
+    elif run_dir is not None:
+        prov_dir = provenance_dir_for(Path(run_dir))
+    else:
+        prov_dir = None
     blocks: Dict[str, Dict[str, Any]] = {}
 
     components = _role_components(config)
-    shared_potential = _shared_potential(config, settings, provenance, run_dir)
+    shared_potential = _shared_potential(config, settings, provenance, prov_dir)
     seen = {role: 0 for role in MATERIAL_ROLES}
     for entry in provenance.get('materials') or []:
         role = entry['role']
@@ -420,12 +469,12 @@ def split_blocks(config: Mapping[str, Any], settings: Mapping[str, Any],
         candidates = components[role]
         component = candidates[i] if i < len(candidates) else None
         blocks[f'{_MATERIAL}{NAME_SEP}{role}_{i}'] = _material_block(
-            entry, component, provenance, run_dir)
+            entry, component, provenance, prov_dir)
         blocks[f'{_POTENTIAL}{NAME_SEP}{role}_{i}'] = _potential_block(
             entry, shared_potential)
 
     for kind in (_THERMOSTAT, _GEOMETRY, _DRIVE, _PROTOCOL, _OUTPUT):
-        blocks[kind] = _generic_block(kind, config, settings, run_dir)
+        blocks[kind] = _generic_block(kind, config, settings, prov_dir)
     blocks[_THERMOSTAT]['provenance'] = {
         k: provenance.get(k) for k in ('damping_ratio', 'damp_ev', 'thermostat_scheme')}
     blocks[_DRIVE]['provenance'] = {'drive_k': provenance.get('drive_k')}

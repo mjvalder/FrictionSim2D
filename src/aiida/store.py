@@ -10,7 +10,7 @@ extras: ``friction2d_block_hash`` / ``friction2d_block_kind`` on blocks,
 from __future__ import annotations
 
 import io
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Optional, Type
 
 from aiida import orm
@@ -45,28 +45,60 @@ def get_or_create_block(kind: str, content: Mapping[str, Any]) -> orm.Dict:
     found = _find(orm.Dict, BLOCK_HASH_EXTRA, digest)
     if found is not None:
         return found
-    node = orm.Dict(dict(content)).store()
+    node = orm.Dict(dict(content))
     node.base.extras.set_many({BLOCK_HASH_EXTRA: digest, BLOCK_KIND_EXTRA: kind})
-    return node
+    return node.store()
 
 
-def get_or_create_file(path: Path) -> orm.SinglefileData:
+class _AsBasename:
+    """A repository view that stores every object under its basename.
+
+    ``stage_file`` decides whether to sanitise from the full name it is given
+    (a ``provenance/`` component counts), while a ``SinglefileData`` holds
+    exactly one top-level object.
+    """
+
+    def __init__(self, repository: Any) -> None:
+        self._repository = repository
+
+    def put_object_from_file(self, source: str, name: str) -> None:
+        """Store the file at ``source`` under ``name``'s basename."""
+        self._repository.put_object_from_file(source, PurePosixPath(name).name)
+
+    def put_object_from_bytes(self, content: bytes, name: str) -> None:
+        """Store ``content`` under ``name``'s basename."""
+        self._repository.put_object_from_bytes(content, PurePosixPath(name).name)
+
+
+def _staging_name(path: Path) -> str:
+    """``path`` from its last ``provenance`` component on, else its basename."""
+    parts = path.parts
+    lowered = [p.lower() for p in parts[:-1]]
+    if 'provenance' in lowered:
+        start = len(lowered) - 1 - lowered[::-1].index('provenance')
+        return PurePosixPath(*parts[start:]).as_posix()
+    return path.name
+
+
+def get_or_create_file(path: Path, name: Optional[str] = None) -> orm.SinglefileData:
     """The stored ``SinglefileData`` for this file's content, created on first sight.
 
     Keyed by the sha256 of the file on disk. The content goes in through
-    :func:`~src.aiida.data.redact.stage_file`, so a settings/config document
-    is sanitised before it is stored.
+    :func:`~src.aiida.data.redact.stage_file` under ``name`` -- by default the
+    path from its last ``provenance/`` component on (``provenance/cif/x.cif``),
+    else the basename -- so redaction's name- and location-based detection
+    both apply. The node's single file is the basename of ``name``.
     """
     path = Path(path)
+    name = name or _staging_name(path)
     digest = sha256_file(path)
     found = _find(orm.SinglefileData, FILE_SHA_EXTRA, digest)
     if found is not None:
         return found
-    node = orm.SinglefileData(io.BytesIO(b''), filename=path.name)
-    stage_file(node.base.repository, path, path.name)
-    node.store()
+    node = orm.SinglefileData(io.BytesIO(b''), filename=PurePosixPath(name).name)
+    stage_file(_AsBasename(node.base.repository), path, name)
     node.base.extras.set(FILE_SHA_EXTRA, digest)
-    return node
+    return node.store()
 
 
 def machine_computer(name: str) -> orm.Computer:

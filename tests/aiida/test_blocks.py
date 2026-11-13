@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 
 from src.aiida.blocks import (
-    BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_MAP, assigned, block_hash,
+    BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_MAP, PROVENANCE_SOURCED,
+    UNRESOLVED, assigned, block_hash,
     block_kind, leaf_field_paths, split_blocks,
 )
 from src.core.config import (
@@ -173,6 +174,102 @@ def test_moved_files_keep_their_hash(afm, tmp_path):
     assert _diff(original, split_blocks(moved, st, prov, run_dir=run_dir)) == set()
 
 
+def _afm_tree(tmp_path, cfg):
+    """An AFM-shaped run: provenance/ at the run level, provenance.json in L1/."""
+    run = tmp_path / 'afm' / 'h-MoS2' / 'K300'
+    (run / 'provenance' / 'cif').mkdir(parents=True)
+    (run / 'L1').mkdir()
+    name = Path(cfg['sheet']['cif_path']).name
+    copy_path = run / 'provenance' / 'cif' / name
+    return run, copy_path
+
+
+def test_afm_layout_finds_provenance_one_level_up(afm, tmp_path):
+    cfg, st, prov = afm
+    run, copy_path = _afm_tree(tmp_path, cfg)
+    copy_path.write_text('# dummy cif', encoding='utf-8')
+    moved = copy.deepcopy(cfg)
+    for item in [moved[k] for k in ('tip', 'sub', 'sheet', 'flake')] + \
+            moved['sheets'] + moved['flake_sheets']:
+        item['cif_path'] = '/gone/dummy.cif'
+    assert _diff(split_blocks(cfg, st, prov),
+                 split_blocks(moved, st, prov, run_dir=run / 'L1')) == set()
+    assert _diff(split_blocks(cfg, st, prov),
+                 split_blocks(moved, st, prov,
+                              provenance_dir=run / 'provenance')) == set()
+
+
+def test_provenance_copy_wins_over_config_path(afm, tmp_path):
+    """The build-time copy is what the run read; the config path may have changed since."""
+    from src.data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
+    cfg, st, prov = afm
+    run, copy_path = _afm_tree(tmp_path, cfg)
+    copy_path.write_text('# the cif the build used', encoding='utf-8')
+    live = Path(cfg['sheet']['cif_path'])
+    assert live.is_file() and live.read_bytes() != copy_path.read_bytes()
+    sheet = split_blocks(cfg, st, prov, run_dir=run / 'L1')['material__sheet_0']
+    assert sheet['cif_sha256'] == sha256_file(copy_path)
+    assert split_blocks(cfg, st, prov)['material__sheet_0']['cif_sha256'] == \
+        sha256_file(live)
+
+
+def test_unresolved_file_is_recorded_and_logged(afm, caplog):
+    cfg, st, prov = afm
+    moved = copy.deepcopy(cfg)
+    moved['sheets'][0]['cif_path'] = '/gone/a.cif'
+    moved['tip']['cif_path'] = '/gone/b.cif'
+    with caplog.at_level('WARNING', logger='src.aiida.blocks'):
+        blocks = split_blocks(moved, st, prov)
+    assert blocks['material__sheet_0']['cif_sha256'] == f'{UNRESOLVED}a.cif'
+    assert blocks['material__tip_0']['cif_sha256'] == f'{UNRESOLVED}b.cif'
+    assert '/gone/a.cif' in caplog.text and '/gone/b.cif' in caplog.text
+
+
+def test_sheet_family_flake_without_material_is_filled_from_2d(tmp_path, mock_settings):
+    """FlakeSlideSimulation._filled_flake_config fills [Flake] from [2D] field by field."""
+    from types import SimpleNamespace  # pylint: disable=import-outside-toplevel
+    from src.builders.sheetonsheet.flake_slide import (  # pylint: disable=import-outside-toplevel
+        FlakeSlideSimulation)
+    pot, cif = _files(tmp_path)
+    obj = SheetOnSheetSimulationConfig(**{
+        'general': {'temp': 300.0, 'pressure': 1.0},
+        '2D': {**_component(pot, cif, 'h-MoS2'), 'x': 100.0, 'y': 100.0,
+               'layers': [1]},
+        'Flake': {'edge_length': 10.0},
+        'settings': mock_settings.model_dump(),
+    })
+    filled = FlakeSlideSimulation._filled_flake_config(  # pylint: disable=protected-access
+        SimpleNamespace(config=obj))
+    record = _provenance(obj.model_copy(update={'flake': filled}))
+    assert [m['role'] for m in record['materials']] == ['sheet', 'flake']
+    blocks = split_blocks(obj.model_dump(), mock_settings.model_dump(), record)
+    assert blocks['material__flake_0']['name'] == 'h-MoS2'
+    assert blocks['material__flake_0']['cif_sha256'] == \
+        blocks['material__sheet_0']['cif_sha256']
+
+    # Partial: a flake naming its own mat but no structure takes [2D]'s cif.
+    partial = obj.model_copy(update={'flake': obj.flake.model_copy(update={'mat': 'h-WS2'})})
+    filled = FlakeSlideSimulation._filled_flake_config(  # pylint: disable=protected-access
+        SimpleNamespace(config=partial))
+    record = _provenance(partial.model_copy(update={'flake': filled}))
+    blocks = split_blocks(partial.model_dump(), mock_settings.model_dump(), record)
+    assert blocks['material__flake_0']['name'] == 'h-WS2'
+    assert blocks['material__flake_0']['cif_sha256'] == \
+        blocks['material__sheet_0']['cif_sha256']
+
+
+def test_provenance_sourced_fields_are_not_read_from_config(afm, tmp_path):
+    """pot_type/pot_path enter the potential block from provenance, by design."""
+    cfg, st, prov = afm
+    assert set(PROVENANCE_SOURCED) == {
+        f'{s}.{f}' for s in ('sheet', 'sheets', 'flake_sheets', 'tip', 'sub', 'flake')
+        for f in ('pot_type', 'pot_path')}
+    for path in PROVENANCE_SOURCED:
+        cfg2 = copy.deepcopy(cfg)
+        _set(cfg2, path, tmp_path)
+        assert _diff(split_blocks(cfg, st, prov), split_blocks(cfg2, st, prov)) == set()
+
+
 # --- the hash -----------------------------------------------------------------
 
 def test_block_hash_ignores_key_order_and_float_repr():
@@ -248,6 +345,9 @@ def test_a_new_field_is_caught():
 def test_map_and_exclusions_name_only_real_fields():
     real = _all_paths()
     assert set(FIELD_MAP) <= real, sorted(set(FIELD_MAP) - real)
+    assert set(PROVENANCE_SOURCED) <= real
+    assert not set(FIELD_MAP) & set(PROVENANCE_SOURCED)
+    assert not set(PROVENANCE_SOURCED) & set(EXCLUDED)
     assert set(EXCLUDED) <= real, sorted(set(EXCLUDED) - real)
     assert not set(FIELD_MAP) & set(EXCLUDED)
     assert set(FIELD_MAP.values()) <= set(BLOCK_KINDS)
@@ -293,19 +393,12 @@ def _set(doc, path, tmp_path):
     target[rest[-1]] = _perturb(target[rest[-1]], tmp_path, rest[-1])
 
 
-# Component potential fields the block reads from provenance (pot_type,
-# pot_file_sha256) rather than from config.json, by design: provenance is
-# what the build resolved, config.json is what was asked for.
-_FROM_PROVENANCE = ('pot_path', 'pot_type')
-# `sheet` mirrors `sheets[0]`; the split reads `sheets`.
-_MIRROR = 'sheet.'
-
-
 @pytest.mark.parametrize('path', sorted(FIELD_MAP))
 def test_each_mapped_field_changes_only_its_block(afm, tmp_path, path):
     cfg, st, prov = afm
-    if path.startswith(_MIRROR) or path.rsplit('.', 1)[-1] in _FROM_PROVENANCE:
-        pytest.skip('read from sheets / provenance')
+    if path.startswith('sheet.'):
+        # `sheet` mirrors `sheets[0]`; the split reads it when `sheets` is empty.
+        cfg = {**copy.deepcopy(cfg), 'sheets': []}
     kind = FIELD_MAP[path]
     cfg2, st2 = copy.deepcopy(cfg), copy.deepcopy(st)
     if path.startswith('settings.'):
