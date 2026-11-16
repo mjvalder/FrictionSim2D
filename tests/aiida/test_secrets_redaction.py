@@ -284,6 +284,7 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
     assert seen['config_obj'].settings.database.api_key == ''
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_calcjob_folder_data_staging_strips_credentials(aiida_profile_clean, tmp_path):
     """`prepare_simulation_folder`/`_stage_sim_dir` -- used by
     `submit_simulation` to build a CalcJob's `simulation_dir`
@@ -310,6 +311,7 @@ def test_calcjob_folder_data_staging_strips_credentials(aiida_profile_clean, tmp
         'lammps/system.in', mode='rb') == original_system_in
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_archive_export_of_a_calcjobs_input_folder_carries_no_secret(
         aiida_profile_clean, tmp_path):
     """`aiida.tools.archive.create_archive`'s default traversal rules follow

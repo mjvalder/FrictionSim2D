@@ -1,64 +1,93 @@
-"""AiiDA CalcJob and Parser for LAMMPS friction simulations.
+"""Import-only CalcJob and Parser for finished FrictionSim2D runs (spec §5.1).
 
-Provides :class:`LammpsFrictionCalcJob`, which submits pre-built
-FrictionSim2D simulation directories to an HPC cluster via AiiDA's
-job scheduling infrastructure, and :class:`LammpsFrictionParser`,
-which extracts results from the retrieved outputs.
+One :class:`LammpsFrictionCalcJob` per LAMMPS deck of a run. It is launched
+with ``engine.run`` and a ``remote_folder`` pointing at the run directory, so
+aiida-core skips upload and submit and only retrieves and parses: LAMMPS is
+never launched through AiiDA. The import path hard-codes ``LocalTransport``
+(``CalcJob._perform_import``), so the run directory must be readable on this
+machine; the ``RemoteData``'s Computer (a ``core.local`` one, see
+:func:`src.aiida.store.machine_computer`) only records where it came from.
+
+What each deck's node carries:
+
+* inputs -- the deck itself, the run's ``provenance/`` + ``provenance.json``,
+  its parameter blocks and potential files (all content-addressed through
+  :mod:`src.aiida.store`, so runs share them), and ``structures``: the
+  ``build/*.lmp`` files the first deck reads and, for a slide deck, the very
+  ``load_*.data`` nodes the system deck output. That last link is the
+  system -> slide handoff in the graph.
+* outputs -- ``points`` (one ``FolderData`` per configured or present load
+  point), ``structures`` and ``aux`` (system decks), ``run_info`` and ``log``.
+
+Retrieval goes through ``retrieve_temporary_list`` and the parser builds the
+stored nodes itself, so it can drop Syncthing ``*.sync-conflict-*`` copies
+and always keep the original file -- a plain ``retrieve_list`` glob cannot.
 """
-
 from __future__ import annotations
 
 import io
+import json
 import logging
 import re
-import shlex
-from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Any
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from aiida import orm
-from aiida.common.datastructures import CalcInfo, CodeInfo
+from aiida.common.datastructures import CalcInfo
 from aiida.common.folders import Folder
 from aiida.engine import CalcJob
 from aiida.parsers.parser import Parser
 
-from .data.redact import stage_file
+from .data_keys import TIER_KEYS, content_hash
+from .decks import Deck, discover_decks, points_for
 from .retention import retrieve_patterns
 
 logger = logging.getLogger(__name__)
 
-_SIM_SUBDIRS = (
-    'lammps', 'data', 'potentials', 'results', 'visuals', 'build', 'provenance',
-)
+__all__ = ['LammpsFrictionCalcJob', 'LammpsFrictionParser', 'deck_inputs',
+           'import_deck', 'import_run', 'point_label']
 
-#: Attribute key on a staged `simulation_dir` FolderData listing which of
-#: `_SIM_SUBDIRS` were sourced from the run directory's PARENT rather than the
-#: run directory itself -- see `_stage_sim_dir`'s docstring. `None`, never
-#: `()`, is the "not present" default wherever this is read back:
-#: `NodeAttributes.get`'s own "no default given" sentinel IS the empty tuple
-#: (CPython interns it), so passing `()` there is silently indistinguishable
-#: from omitting the default and raises instead of falling back.
-_SHARED_SUBDIRS_ATTR = '_frictionsim2d_shared_subdirs'
+_CONFLICT = '.sync-conflict-'
+_PES_FAMILIES = ('pes_tip', 'pes_sheet')
+_PES_REFINE_NAME = 'pes_scan_refine.csv'
 
-#: Only these two `_SIM_SUBDIRS` are ever looked for at `sim_dir.parent` when
-#: missing at `sim_dir` -- `_stage_sim_dir`'s docstring has the AFM-nesting
-#: reason. Restricted (fix round 1, finding 2) so an unrelated directory that
-#: happens to sit next to the run (e.g. a stray `results/` from a differently
-#: named sibling run) is never picked up as this run's own.
-_SHAREABLE_SUBDIRS = ('build', 'provenance')
+#: What each kind of deck retrieves, as remote globs of
+#: :func:`~src.aiida.retention.retrieve_patterns`: a system deck writes the
+#: loaded structures (and the AFM hold traces), a slide-like deck the results
+#: and end snapshots.
+_SYSTEM_RETRIEVE = ('data/load_*.data', 'data/hold_*.txt')
+_SLIDE_RETRIEVE = ('results/*', 'data/final_*.data')
 
-#: Attribute key recording the run directory's own basename (`sim_dir.name`,
-#: e.g. `'L2'`) on a `simulation_dir` FolderData built by
-#: `prepare_simulation_folder`. Fix round 1, finding 2: without a
-#: `simulation_node` input, `_sim_prefix_for` had no way to recover the run's
-#: own level -- only `_detect_sim_prefix`'s shared-ancestor guess -- so a
-#: `smart_submit`/`aiida submit` call (which never sets `simulation_node`,
-#: see `smart_submit`/`submit_batch(config_path=None)`) staged both the run's
-#: own files AND the shared `build`/`provenance` ones a level off. Combined
-#: with `_SHARED_SUBDIRS_ATTR` in `_sim_prefix_for`, this reconstructs the
-#: run's full prefix (`<shared ancestor>/<leaf name>`) without needing
-#: `simulation_node` at all.
-_LEAF_NAME_ATTR = '_frictionsim2d_leaf_name'
+_WALL_RE = re.compile(r'^Total wall time:\s*(\d+):(\d+):(\d+)', re.M)
+_PROCS_RE = re.compile(r'^Loop time of \S+ on (\d+) procs', re.M)
+
+
+# ---------------------------------------------------------------------------
+# Labels
+# ---------------------------------------------------------------------------
+
+def _num(value: float) -> str:
+    """``f'{value:g}'`` with ``-`` -> ``m`` and ``.`` -> ``p``."""
+    return f'{float(value):g}'.replace('-', 'm').replace('.', 'p')
+
+
+def point_label(point: Any) -> str:
+    """The ``points`` key of one load point, e.g. ``force10_a0_s2``.
+
+    The load-condition half of :func:`src.aiida.ingest._point_key`, spelled
+    as a valid link label (alphanumerics and single underscores).
+    """
+    return (f'{point.load_kind}{_num(point.load)}'
+            f'_a{_num(point.angle)}_s{_num(point.speed)}')
+
+
+def _file_label(name: str) -> str:
+    """A link-label-safe key for a file: its stem, ``.``/``-`` respelled."""
+    stem = PurePosixPath(name).stem.replace('-', 'm').replace('.', 'p')
+    label = re.sub(r'_+', '_', re.sub(r'\W', '_', stem)).strip('_') or 'file'
+    return label if label[0].isalpha() else f'f_{label}'
 
 
 # ---------------------------------------------------------------------------
@@ -66,588 +95,437 @@ _LEAF_NAME_ATTR = '_frictionsim2d_leaf_name'
 # ---------------------------------------------------------------------------
 
 class LammpsFrictionCalcJob(CalcJob):
-    """AiiDA CalcJob that runs a FrictionSim2D LAMMPS simulation."""
-
-    _DEFAULT_LAMMPS_SCRIPTS = ['system.in', 'slide.in']
+    """One LAMMPS deck of a finished run, imported -- never executed."""
 
     @classmethod
     def define(cls, spec):
-        """Define the CalcJob input/output specification."""
+        """Inputs, outputs and exit codes of an imported deck."""
         super().define(spec)
 
-        spec.input('code', valid_type=orm.AbstractCode,
-                   help='LAMMPS executable code node.')
-        spec.input('simulation_dir', valid_type=orm.FolderData,
-                   help='FolderData with the simulation directory contents.')
-        spec.input('simulation_node', valid_type=orm.Data, required=False,
-                   help='FrictionSimulationData node for status tracking.')
-        spec.input('parameters', valid_type=orm.Dict, required=False,
-                   default=lambda: orm.Dict({}),
-                   help='Optional runtime parameters.')
+        spec.input('deck', valid_type=orm.SinglefileData,
+                   help='The LAMMPS input deck (lammps/<name>.in).')
+        spec.input('provenance', valid_type=orm.FolderData, required=False,
+                   help="The run's provenance/ directory plus provenance.json.")
+        spec.input_namespace('blocks', valid_type=orm.Dict, dynamic=True,
+                             required=False, help='Parameter blocks (spec §5.2).')
+        spec.input_namespace('potentials', valid_type=orm.SinglefileData,
+                             dynamic=True, required=False,
+                             help='Potential files the run used.')
+        spec.input_namespace('structures', valid_type=orm.SinglefileData,
+                             dynamic=True, required=False,
+                             help='Structure files the deck reads: build/*.lmp, '
+                                  "and the system deck's load_*.data outputs.")
+        spec.input('parameters', valid_type=orm.Dict,
+                   help='deck_name, rel_path, point_filter, family, n_layers, '
+                        'log_name, writes_structures.')
 
         spec.input('metadata.options.resources', valid_type=dict,
-                   default={'num_machines': 1, 'num_mpiprocs_per_machine': 32})
-        spec.input('metadata.options.max_wallclock_seconds', valid_type=int,
-                   default=72000)
+                   default={'num_machines': 1, 'num_mpiprocs_per_machine': 1})
         spec.input('metadata.options.parser_name', valid_type=str,
                    default='friction2d.lammps')
 
-        spec.output_namespace('results', valid_type=orm.Data, dynamic=True,
+        spec.output_namespace('points', valid_type=orm.FolderData, dynamic=True,
                               required=False,
-                              help='One FrictionResultsData per load point.')
-        spec.output('log_file', valid_type=orm.SinglefileData, required=False,
-                    help='LAMMPS log file.')
-        spec.output('stdout_folder', valid_type=orm.FolderData, required=False,
-                    help='FolderData with LAMMPS stdout files (*.out).')
+                              help='One FolderData per load point.')
+        spec.output_namespace('structures', valid_type=orm.SinglefileData,
+                              dynamic=True, required=False,
+                              help='load_*.data written by a system deck.')
+        spec.output_namespace('aux', valid_type=orm.SinglefileData,
+                              dynamic=True, required=False,
+                              help='Other retained files of a system deck '
+                                   '(hold_*.txt).')
+        spec.output('run_info', valid_type=orm.Dict, required=False,
+                    help='lammps_version, wall_time_s, n_procs, log_missing.')
+        spec.output('log', valid_type=orm.SinglefileData, required=False,
+                    help="The deck's LAMMPS log.")
 
-        spec.exit_code(300, 'ERROR_NO_LAMMPS_SCRIPTS',
-                       message='No LAMMPS input scripts found in simulation directory.')
-        spec.exit_code(310, 'ERROR_LAMMPS_FAILED',
-                       message='LAMMPS returned a non-zero exit code.')
         spec.exit_code(320, 'ERROR_NO_RESULTS',
-                       message='No results files were produced.')
-        spec.exit_code(321, 'ERROR_NO_SIMULATION_NODE',
-                       message='No simulation_node input was given, so the '
-                               'parser has no rel_path to locate this run\'s '
-                               'results in the retrieved folder.')
-        spec.exit_code(330, 'ERROR_NO_LOAD_POINTS',
-                       message='Results were retrieved but no load point could '
-                               'be formed from them.')
+                       message='The deck produced neither load points nor structures.')
 
     def prepare_for_submission(self, folder: Folder) -> CalcInfo:
-        """Prepare the calculation for submission."""
-        inputs = self.inputs  # type: ignore[attr-defined]
-        sim_folder = inputs.simulation_dir
-        repo = sim_folder.base.repository
-
-        params = (inputs.get('parameters', None) or orm.Dict({})).get_dict()
-        scripts_override = params.get('lammps_scripts')
-        lammps_flags = params.get('lammps_flags', '-l none')
-        lammps_flag_list = (
-            shlex.split(lammps_flags) if isinstance(lammps_flags, str)
-            else list(lammps_flags)
-        )
-
-        lammps_scripts = (
-            _collect_lammps_scripts(sim_folder, scripts_override)
-            or self._DEFAULT_LAMMPS_SCRIPTS
-        )
-        sim_prefix = _sim_prefix_for(inputs, repo, lammps_scripts)
-        shared_subdirs = frozenset(
-            sim_folder.base.attributes.get(_SHARED_SUBDIRS_ATTR, None) or ())
-
-        _stage_files_into_sandbox(folder, repo, sim_prefix, shared_subdirs)
-
-        code_infos = [
-            _make_code_info(inputs.code.uuid, lammps_flag_list, script)
-            for script in lammps_scripts
-        ]
-
+        """Only the retrieve lists: nothing is uploaded and nothing runs."""
+        params = self.inputs.parameters.get_dict()  # type: ignore[attr-defined]
         calcinfo = CalcInfo()
-        calcinfo.uuid = self.uuid
-        calcinfo.codes_info = code_infos
-        calcinfo.retrieve_list = _retrieve_list_for(sim_prefix)
+        calcinfo.uuid = str(self.uuid)
+        calcinfo.codes_info = []
+        calcinfo.local_copy_list = []
+        calcinfo.remote_copy_list = []
+        log_name = params.get('log_name')
+        calcinfo.retrieve_list = ([(log_name, '.', len(log_name.split('/')))]
+                                  if log_name else [])
+        calcinfo.retrieve_temporary_list = _temporary_list(
+            bool(params.get('writes_structures')))
         return calcinfo
 
-    def on_terminated(self) -> None:
-        """Once this CalcJob reaches a terminal state, file its parser's
-        `results.*` outputs into the run's set group.
-
-        The engine attaches `Parser.out()`'s nodes to this calculation node
-        with real provenance links and stores them, but it never adds
-        anything to an AiiDA `Group` on its own -- `create_results` does that
-        itself for the import path; this is the CalcJob-native counterpart,
-        run once there is a finished node with real output links to read.
-        """
-        super().on_terminated()
-        _group_results_from_node_safely(self.node)
-        _supersede_older_results_safely(self.node)
+    def parse_scheduler_output(self, retrieved: orm.Node):
+        """An imported deck has no scheduler output; skip it, warning-free."""
+        return None
 
 
-def _sim_prefix_for(inputs, repo, lammps_scripts) -> str | None:
-    """Where this run's own directory sits under the remote working directory.
+def _temporary_list(writes_structures: bool) -> List[Tuple[str, str, Optional[int]]]:
+    """The retention rule, narrowed to what this kind of deck writes.
 
-    `simulation_node.rel_path`, when the input is given, IS that directory --
-    the CalcJob stages `simulation_dir` rooted at exactly the run's own
-    directory (`prepare_simulation_folder(sim_dir=run_dir)`). It is
-    authoritative and preferred over `_detect_sim_prefix`'s heuristic: that
-    heuristic reads a `read_data <path>` line containing `/build/` and returns
-    everything before it, which for an AFM-family run recovers only the
-    shared K-level ancestor of the per-layer `build/` directory
-    (`self.relative_run_dir` in `builders/afm/base.py`) -- ONE level shallower
-    than the run's actual directory (`.../K300/L{n}`, where `results/`,
-    `data/` and `provenance.json` actually live).
-
-    Without `simulation_node` (fix round 1, finding 2: `smart_submit`'s
-    `config_path=None` path never sets one), that shallower guess used to be
-    returned as-is, landing every staged path -- the run's own AND the shared
-    ones -- one level off from what the rendered scripts actually read. If
-    `simulation_dir` carries `_LEAF_NAME_ATTR`/`_SHARED_SUBDIRS_ATTR` (set by
-    `prepare_simulation_folder`), the shallower guess is the shared ancestor
-    and the leaf name is the missing last segment, so joining them recovers
-    the same prefix `simulation_node.rel_path` would have given.
-    `_detect_sim_prefix` alone is still the answer for a sheet-like family
-    (no such nesting, so the guess is already the run's own directory).
+    Narrowed by category only, not by load: result filenames spell loads with
+    LAMMPS' own number formatting, so a per-load glob could silently miss a
+    file. The parser selects this deck's points (:func:`decks.points_for`).
     """
-    sim_node = inputs.get('simulation_node', None)
-    if sim_node is not None:
-        return sim_node.rel_path
-
-    ancestor = _detect_sim_prefix(repo, lammps_scripts)
-    sim_folder = inputs.get('simulation_dir', None)
-    if sim_folder is not None and ancestor:
-        shared = sim_folder.base.attributes.get(_SHARED_SUBDIRS_ATTR, None)
-        leaf_name = sim_folder.base.attributes.get(_LEAF_NAME_ATTR, None)
-        if shared and leaf_name:
-            return f"{ancestor}/{leaf_name}"
-    return ancestor
-
-
-#: The root-level LAMMPS stdout files of a prefixed submission.
-STDOUT_RETRIEVE = ('*.out', '.', None)
-
-
-def _retrieve_list_for(sim_prefix: str | None) -> list:
-    """The CalcJob's `retrieve_list`: the retention rule, unmodified.
-
-    `retrieve_patterns` (Task 13, verified against the real aiida-core
-    execmanager; widened for a prefix by the Task 22 fix round so every entry
-    nests consistently under it -- see `retention.py`) IS the retention
-    guarantee for everything `ingest` reads -- it is used here as-is, never
-    re-derived.
-    """
-    if not sim_prefix:
-        return list(retrieve_patterns())
-    # LAMMPS stdout (`_make_code_info`'s `stdout_name`) is written to the
-    # remote working-directory ROOT, not under the run's prefix, so the
-    # prefixed `*.out` entry alone never matches it.
-    return list(retrieve_patterns(sim_prefix)) + [STDOUT_RETRIEVE]
-
-
-def _run_dir_in_retrieved(tmp_root: Path, run_node) -> Path:
-    """Where the run's own directory landed inside the rebuilt retrieved tree.
-
-    `prepare_for_submission` nests the ENTIRE retrieval under
-    `run_node.rel_path` whenever `simulation_node` is given (`_sim_prefix_for`
-    -- which is every real submission that can be ingested at all, since the
-    parser itself requires `simulation_node`) -- `results/`, `data/` and
-    everything else then sit at `tmp_root/<rel_path>/`, not at `tmp_root`
-    itself. Falls back to `tmp_root` only for a run retrieved unprefixed
-    (nothing to nest under -- a caller that never gave `simulation_node` at
-    submission time either, so `_sim_prefix_for` fell back to
-    `_detect_sim_prefix` and found nothing).
-
-    NOT keyed on `provenance.json`: `prepare_simulation_folder`/`_stage_sim_dir`
-    only walks `_SIM_SUBDIRS` (`lammps`, `data`, `results`, `provenance`, ...)
-    under the run directory, and `provenance.json` is a bare FILE sitting
-    directly in the run directory, not inside any of those -- it is never
-    staged into `simulation_dir` at all, so a real prefixed retrieval never
-    has one to check for. Checking for the directory itself is enough: the
-    only thing that could put `tmp_root/<rel_path>` there is
-    `prepare_for_submission` having prefixed everything under it.
-    """
-    prefixed = tmp_root / run_node.rel_path
-    if prefixed.is_dir():
-        return prefixed
-    return tmp_root
-
-
-def _group_results_from_node_safely(node) -> None:
-    """`_group_results_from_node`, but never lets a failure escape.
-
-    Filing a finished run's results into its set `Group` is bookkeeping on
-    top of an already-successful calculation -- plumpy's `transition_failed`
-    turns an exception raised from `on_terminated` into an EXCEPTED state for
-    a calculation that otherwise finished (and parsed) correctly, which would
-    misrepresent good results as failed over what is, at worst, a `Group`
-    write hiccup. The results stay fully queryable by `run_uuid`/`set_uuid`
-    either way (`create_results`'s own import path already tolerates the
-    equivalent per-point failure, R3 of this task's first fix round); only
-    `export_archive`'s group-based listing would miss this run, which is a
-    much smaller problem than relabelling a finished calculation as failed.
-    """
-    try:
-        _group_results_from_node(node)
-    except Exception:  # pylint: disable=broad-except
-        logger.exception(
-            "Could not file %s's results into its set group; the "
-            "calculation itself finished successfully.", node.pk)
-
-
-def _supersede_older_results_safely(node) -> None:
-    """`_supersede_older_results`, but never lets a failure escape -- the same
-    reasoning as `_group_results_from_node_safely`: marking an older node
-    stale is bookkeeping on top of a calculation that already finished."""
-    try:
-        _supersede_older_results(node)
-    except Exception:  # pylint: disable=broad-except
-        logger.exception(
-            "Could not supersede older results for %s; the calculation "
-            "itself finished successfully.", node.pk)
-
-
-def _calc_results(node):
-    """`(simulation_node, [results outputs])` of a finished CalcJob node."""
-    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
-
-    sim_node = getattr(node.inputs, 'simulation_node', None)
-    if sim_node is None:
-        return None, []
-    outgoing = node.base.links.get_outgoing(link_type=LinkType.CREATE)
-    return sim_node, [triple.node for triple in outgoing.all()
-                      if triple.link_label.startswith('results__')]
-
-
-def _supersede_older_results(node) -> None:
-    """Mark every older live results node at the conditions this CalcJob just
-    produced as superseded, so a resubmitted run keeps ONE live node per load
-    point -- exactly what `ingest_run` does on the import path."""
-    sim_node, results = _calc_results(node)
-    if sim_node is None or not results:
-        return
-    from .ingest import supersede_older  # pylint: disable=import-outside-toplevel
-    supersede_older(sim_node, results)
-
-
-def _group_results_from_node(node) -> None:
-    """File a finished CalcJob node's `results.*` outputs into its set group.
-
-    Free function, not a method: it only reads `node`'s own inputs/outgoing
-    links, so it can be exercised directly against a plain, manually-built
-    `CalcJobNode` in a test, with no live `Process` (engine, runner, broker)
-    required -- exactly the granularity `LammpsFrictionCalcJob.on_terminated`
-    needs to delegate to.
-
-    The link label to match is `results__point_0`, NOT `results.point_0`: a
-    dotted string is only the developer-facing spelling accepted by
-    `self.out()` (`Process.out` splits it on `spec().namespace_separator`,
-    `'.'`, to nest it under the `results` output namespace); AiiDA link labels
-    themselves allow only alphanumerics and underscores, so once the engine
-    actually stores the output (`Process.update_outputs` -> `_flat_outputs`,
-    `PORT_NAMESPACE_SEPARATOR = '__'`) the real link label is joined with a
-    double underscore instead.
-    """
-    sim_node, results = _calc_results(node)
-    if sim_node is None or not results:
-        return
-    from .ingest import add_results_to_group  # pylint: disable=import-outside-toplevel
-    add_results_to_group(sim_node.set_label or sim_node.set_uuid, results)
+    wanted = _SYSTEM_RETRIEVE if writes_structures else _SLIDE_RETRIEVE
+    return [entry for entry in retrieve_patterns() if entry[0] in wanted]
 
 
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
 
-class LammpsFrictionParser(Parser):
-    """Parse retrieved outputs for FrictionSim2D LAMMPS runs."""
+def _drop_conflict_copies(root: Path) -> None:
+    """Delete Syncthing conflict copies from the scratch retrieval."""
+    for path in list(root.rglob(f'*{_CONFLICT}*')):
+        if path.is_file():
+            logger.info('Ignoring Syncthing conflict copy %s', path.name)
+            path.unlink()
 
-    def parse(self, **kwargs):  # type: ignore[override]
-        """Parse retrieved files: rebuild the run tree, then ingest it.
 
-        The retrieved `FolderData` reproduces the run directory's own shape
-        (that IS the retention rule -- see `src.aiida.retention`), so it is
-        written to a scratch directory and handed to `ingest_retrieved`
-        exactly as a directory on disk would be. `Parser.out()` requires
-        UNSTORED nodes so the engine can attach them to this calculation with
-        real provenance links -- `ingest_retrieved` returns exactly those.
+def _scratch_locator(root: Path, rel_path: str, family: str):
+    """A ``RunLocator`` over the scratch retrieval of one run."""
+    from dataclasses import replace  # pylint: disable=import-outside-toplevel
 
-        The retrieved files are copied back into the local run directory
-        (`parameters.local_sim_dir`) and the log/stdout outputs attached
-        BEFORE `simulation_node` is checked: a run submitted untracked still
-        ran, and its results must land in the tree for a later `aiida import`
-        instead of being stranded in the retrieved folder. Only the ingest
-        itself needs `simulation_node` -- without it there is no `rel_path` to
-        locate the run by and no run node to attach results to.
-        """
-        retrieved = self.retrieved
-        if retrieved is None:
-            return self.exit_codes.ERROR_NO_RESULTS
+    from ..run.naming import parse_run_path  # pylint: disable=import-outside-toplevel
+    from ..run.tree import RunLocator  # pylint: disable=import-outside-toplevel
 
-        repo = retrieved.base.repository
-        top_names = repo.list_object_names()
-        all_names = [(root / name).as_posix()
-                     for root, _dirs, files in repo.walk() for name in files]
+    return RunLocator(
+        tokens=replace(parse_run_path(rel_path), family=family), run_dir=root,
+        provenance_file=root / 'provenance.json',
+        provenance_dir=root / 'provenance', results_dir=root / 'results',
+        data_dir=root / 'data', lammps_dir=root / 'lammps')
 
-        self._store_log(repo, 'log.lammps' in top_names)
-        self._store_stdout(repo, [n for n in all_names if n.endswith('.out')])
-        self._copy_local(repo, all_names)
 
-        run_node = getattr(self.node.inputs, 'simulation_node', None)
-        if run_node is None:
-            return self.exit_codes.ERROR_NO_SIMULATION_NODE
+def _read_frame(path: Path, family: str, n_layers: int):
+    """One tier file as a frame, the way the DataReader reads it."""
+    import pandas as pd  # pylint: disable=import-outside-toplevel
 
-        with TemporaryDirectory() as tmp:
-            tmp_root = Path(tmp)
-            for rel in all_names:
-                out = tmp_root / rel
-                out.parent.mkdir(parents=True, exist_ok=True)
-                with repo.open(rel, 'rb') as src:
-                    out.write_bytes(src.read())
+    from ..postprocessing.read_data import read_results_file  # pylint: disable=import-outside-toplevel
 
-            run_dir = _run_dir_in_retrieved(tmp_root, run_node)
-            from .ingest import ingest_retrieved  # pylint: disable=import-outside-toplevel
-            nodes = ingest_retrieved(run_dir, run_node.rel_path, run_node)
+    if path.suffix == '.csv':
+        return pd.read_csv(path, comment='#')
+    return read_results_file(path, family, n_layers)
 
-        if not nodes:
-            return self.exit_codes.ERROR_NO_LOAD_POINTS
-        for index, node in enumerate(nodes):
-            self.out(f'results.point_{index}', node)
+
+def _status(tiers: Mapping[str, Path], family: str, n_layers: int,
+            expected: Mapping[str, int]) -> Tuple[str, str]:
+    """``(status, detail)`` of a point that left files, as the DataReader
+    gives it: ``unreadable`` when the window (or every file) fails to parse,
+    else :func:`run_status.classify` on the rows read."""
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+
+    from ..postprocessing.run_status import classify  # pylint: disable=import-outside-toplevel
+
+    n_rows: Dict[str, int] = {}
+    failures: List[str] = []
+    window_error = None
+    for tier, path in sorted(tiers.items()):
+        if tier not in TIER_KEYS:
+            continue
+        try:
+            n_rows[tier] = len(_read_frame(path, family, n_layers))
+        except (ValueError, OSError, pd.errors.EmptyDataError) as exc:
+            failures.append(f'{tier} unreadable: {exc}')
+            if tier == 'window':
+                window_error = str(exc)
+    if window_error is not None or not n_rows:
+        return 'unreadable', window_error or '; '.join(failures)
+    status, detail = classify(n_rows, dict(expected))
+    return status, '; '.join(x for x in (*failures, detail) if x)
+
+
+def _folder(files: Mapping[str, Path]) -> orm.FolderData:
+    node = orm.FolderData()
+    for name, path in files.items():
+        node.base.repository.put_object_from_file(str(path), name)
+    return node
+
+
+def _log_text(retrieved: Optional[orm.Node], log_name: Optional[str]) -> Optional[str]:
+    if retrieved is None or not log_name:
+        return None
+    try:
+        return retrieved.base.repository.get_object_content(log_name, mode='r')
+    except (FileNotFoundError, OSError):
         return None
 
-    def _store_log(self, repo, has_log):
-        """Store LAMMPS log file as SinglefileData."""
-        if not has_log:
-            return
-        with repo.open('log.lammps', 'rb') as handle:
-            with NamedTemporaryFile(prefix='lammps_log_', suffix='.log',
-                                    delete=True) as tmp:
-                tmp.write(handle.read())
-                tmp.flush()
-                log_file = orm.SinglefileData(file=tmp.name)
-        log_file.store()
-        self.out('log_file', log_file)
 
-    def _store_stdout(self, repo, stdout_names):
-        """Store stdout files as FolderData."""
-        if not stdout_names:
-            return
-        stdout_folder = orm.FolderData()
-        for name in stdout_names:
-            with repo.open(name, 'rb') as handle:
-                stdout_folder.base.repository.put_object_from_filelike(handle, name)
-        stdout_folder.store()
-        self.out('stdout_folder', stdout_folder)
+def _provenance_input(node) -> Tuple[Optional[dict], dict]:
+    """``(config.json, provenance.json)`` from the ``provenance`` input."""
+    folder = node.inputs.provenance if 'provenance' in node.inputs else None
+    if folder is None:
+        return None, {}
 
-    def _copy_local(self, repo, names):
-        """Copy outputs to local simulation directory if configured."""
-        params = getattr(self.node.inputs, 'parameters', None)
-        if params is None:
-            return
-        local_sim_dir = params.get_dict().get('local_sim_dir')
-        if not local_sim_dir:
-            return
-        _copy_outputs_to_local(repo, names, Path(local_sim_dir))
-
-
-# ---------------------------------------------------------------------------
-# Preparation helpers (public API)
-# ---------------------------------------------------------------------------
-
-def prepare_simulation_folder(sim_dir: Path) -> orm.FolderData:
-    """Create an AiiDA ``FolderData`` from a simulation directory.
-
-    Args:
-        sim_dir: Path to the simulation directory (must contain ``lammps/``).
-
-    Returns:
-        A new (unstored) ``FolderData`` node.
-    """
-    sim_dir = Path(sim_dir)
-    if not (sim_dir / 'lammps').exists():
-        raise FileNotFoundError(f"No lammps/ directory in {sim_dir}")
-
-    folder_data = orm.FolderData()
-    shared_subdirs = _stage_sim_dir(folder_data, sim_dir, relative_to=sim_dir)
-    # Always recorded, even when nothing was shared (sheet-like families):
-    # `_sim_prefix_for` only acts on it once `_SHARED_SUBDIRS_ATTR` is ALSO
-    # set, so a harmless leaf name sitting unused on that path costs nothing.
-    folder_data.base.attributes.set(_LEAF_NAME_ATTR, sim_dir.name)
-    if shared_subdirs:
-        folder_data.base.attributes.set(_SHARED_SUBDIRS_ATTR, sorted(shared_subdirs))
-    return folder_data
-
-
-def apply_options(builder, options: dict[str, Any] | None) -> None:
-    """Apply metadata options to a CalcJob builder."""
-    if not options:
-        return
-    for key in ('resources', 'max_wallclock_seconds', 'queue_name',
-                'account', 'custom_scheduler_commands', 'prepend_text'):
-        if key in options:
-            setattr(builder.metadata.options, key, options[key])
-
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
-                   relative_to: Path) -> set[str]:
-    """Stage simulation subdirectories into a FolderData node.
-
-    Most `_SIM_SUBDIRS` live directly under `sim_dir`. AFM-family runs are
-    nested one level deeper (`.../K<temp>/L<layers>`, see
-    `AFMSimulation.build`/`write_inputs`): the run's own `lammps/`, `data/`,
-    `results/` and `visuals/` sit at that leaf, but `build/` and
-    `provenance/` (the built tip/sheet geometry and the potential files
-    `pair_coeff` reads) are shared across every layer count and sit one level
-    up, at `sim_dir.parent` -- exactly what `run/tree.py`'s
-    `provenance_dir_for` already falls back to for the same reason. Only
-    those two (`_SHAREABLE_SUBDIRS`, fix round 1 finding 2) are ever looked
-    for at `sim_dir.parent` when missing at `sim_dir` -- restricted so an
-    unrelated directory that happens to sit beside the run is never picked up
-    as this run's own. Sheet-like families have no such nesting: `build`/
-    `provenance` sit beside `lammps` at `sim_dir` itself, taken by the first
-    branch below like everything else, so the parent fallback never triggers
-    for them.
-
-    Returns the names of the subdirs actually sourced from `sim_dir.parent`,
-    for `prepare_simulation_folder` to persist as `folder_data`'s
-    `_SHARED_SUBDIRS_ATTR`.
-
-    A settings/config document among `provenance/**` -- a pre-redaction
-    tree's `provenance/settings.yaml`/`provenance/config.json` -- is
-    sanitised before it is staged (`redact.stage_file`, the same choke point
-    `FrictionSimulationData.add_run_files` goes through): this `FolderData`
-    becomes a real `CalcJobNode` input, and `aiida.tools.archive.
-    create_archive`'s default traversal rules follow a results node's
-    provenance BACKWARD through the calculation that created it to its
-    inputs, so an unsanitised copy here would reach an archive even though
-    `export_archive` never names this node directly. Every other staged file
-    (LAMMPS inputs, CIFs, potentials) is stored verbatim, unchanged.
-    """
-    shared_subdirs = set()
-    for subdir in _SIM_SUBDIRS:
-        sub_path = sim_dir / subdir
-        if not sub_path.exists():
-            if subdir not in _SHAREABLE_SUBDIRS or sim_dir.parent == sim_dir:
-                continue
-            sub_path = sim_dir.parent / subdir
-            if not sub_path.exists():
-                continue
-        for file_path in sub_path.rglob('*'):
-            if not file_path.is_file():
-                continue
-            try:
-                rel = file_path.relative_to(relative_to)
-            except ValueError:
-                rel = file_path.relative_to(sim_dir.parent)
-                shared_subdirs.add(subdir)
-            stage_file(folder_data.base.repository, file_path, str(rel))
-    return shared_subdirs
-
-
-def _stage_files_into_sandbox(folder: Folder, repo, sim_prefix: str | None,
-                              shared_subdirs: frozenset[str] = frozenset()) -> None:
-    """Copy all repository files into the AiiDA sandbox folder.
-
-    Every file is written twice: once at its own repository-relative path (so
-    the fixed `-in lammps/{script}` entry point in `_make_code_info` always
-    resolves), and once nested under a prefix (so the LAMMPS scripts' own
-    sim-root-relative `read_data`/`include`/`pair_coeff` paths resolve too --
-    see `_sim_prefix_for`). `shared_subdirs` are the top-level directories
-    `_stage_sim_dir` sourced from the run directory's PARENT rather than the
-    run directory itself (AFM's `build/` and `provenance/`): those nest under
-    the PARENT of `sim_prefix` instead of `sim_prefix` itself, matching
-    `relative_run_dir` rather than `relative_run_dir_layer` in the rendered
-    scripts.
-    """
-    def _prefix_root(top_dir: str | None) -> str | None:
-        if not sim_prefix:
-            return None
-        if top_dir in shared_subdirs:
-            parent = Path(sim_prefix).parent
-            return None if parent == Path('.') else str(parent)
-        return sim_prefix
-
-    for subdir in _SIM_SUBDIRS:
-        folder.get_subfolder(subdir, create=True)
-        prefix_root = _prefix_root(subdir)
-        if prefix_root:
-            folder.get_subfolder(f"{prefix_root}/{subdir}", create=True)
-
-    for root, _dirs, files in repo.walk():
-        top_dir = root.parts[0] if root.parts else None
-        prefix_root = _prefix_root(top_dir)
-        for file_name in files:
-            rel_path = (root / file_name).as_posix()
-            with repo.open(rel_path, 'rb') as src:
-                payload = src.read()
-
-            if root.as_posix() == '.':
-                folder.create_file_from_filelike(io.BytesIO(payload), file_name)
-            else:
-                sub = folder.get_subfolder(root.as_posix(), create=True)
-                sub.create_file_from_filelike(io.BytesIO(payload), file_name)
-
-            if prefix_root:
-                pref_root = (Path(prefix_root) / root).as_posix()
-                pref = folder.get_subfolder(pref_root, create=True)
-                pref.create_file_from_filelike(io.BytesIO(payload), file_name)
-
-
-def _make_code_info(code_uuid: str, flag_list: list, script: str) -> CodeInfo:
-    """Build a CodeInfo for a single LAMMPS script."""
-    codeinfo = CodeInfo()
-    codeinfo.code_uuid = code_uuid
-    codeinfo.cmdline_params = flag_list + ['-in', f'lammps/{script}']
-    codeinfo.stdout_name = f'{script}.out'
-    codeinfo.withmpi = True
-    return codeinfo
-
-
-def _collect_lammps_scripts(sim_folder, scripts_override):
-    """Return ordered LAMMPS scripts, or override list if provided."""
-    if scripts_override:
-        if isinstance(scripts_override, str):
-            return [scripts_override]
-        return [str(script) for script in scripts_override]
-
-    repo = sim_folder.base.repository
-    discovered = [
-        name for name in repo.list_object_names('lammps')
-        if name.endswith('.in')
-    ]
-    system = [s for s in discovered if s.lower() == 'system.in']
-    slides = sorted(s for s in discovered
-                    if s.lower() != 'system.in' and 'slide' in s.lower())
-    others = sorted(s for s in discovered
-                    if s.lower() != 'system.in' and 'slide' not in s.lower())
-    return system + slides + others
-
-def _detect_sim_prefix(repo, lammps_scripts):
-    """Infer the simulation path prefix from LAMMPS scripts, if any."""
-    pattern = re.compile(r"\bread_data\s+(\S+)")
-    for script in lammps_scripts:
-        path = f"lammps/{script}"
+    def load(name):
         try:
-            with repo.open(path, 'r') as handle:
-                for line in handle:
-                    match = pattern.search(line)
-                    if match and '/build/' in match.group(1):
-                        return match.group(1).split('/build/', 1)[0]
-        except FileNotFoundError:
-            continue
-    return None
+            value = json.loads(folder.base.repository.get_object_content(name, mode='r'))
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    return load('provenance/config.json'), load('provenance.json') or {}
 
 
-def _copy_outputs_to_local(repo, names, local_sim_dir: Path) -> None:
-    """Copy results and visuals into the local simulation directory."""
-    results_dir = local_sim_dir / 'results'
-    visuals_dir = local_sim_dir / 'visuals'
-    results_dir.mkdir(parents=True, exist_ok=True)
-    visuals_dir.mkdir(parents=True, exist_ok=True)
+class LammpsFrictionParser(Parser):
+    """Turn one deck's retrieved files into point, structure and info nodes."""
 
-    for name in names:
-        kind, rel_name = _categorize_output(name)
-        if kind is None:
-            continue
-        target_dir = results_dir if kind == 'results' else visuals_dir
-        target_path = target_dir / rel_name
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        with repo.open(name, 'rb') as handle:
-            target_path.write_bytes(handle.read())
+    def parse(self, **kwargs):  # type: ignore[override]
+        """Parse the scratch retrieval and the retrieved log."""
+        params = self.node.inputs.parameters.get_dict()
+        config, record = _provenance_input(self.node)
+        self._run_info(params, record)
+
+        scratch = kwargs.get('retrieved_temporary_folder')
+        root = Path(scratch) if scratch else None
+        if root is not None:
+            _drop_conflict_copies(root)
+
+        if params.get('writes_structures'):
+            produced = self._structures(root)
+        else:
+            produced = self._points(root, params, config)
+        if not produced:
+            return self.exit_codes.ERROR_NO_RESULTS
+        return None
+
+    # -- run_info and log ------------------------------------------------------
+
+    def _run_info(self, params: Mapping[str, Any], record: Mapping[str, Any]) -> None:
+        from ..data.provenance import parse_log_extras  # pylint: disable=import-outside-toplevel
+
+        log_name = params.get('log_name')
+        text = _log_text(self.retrieved, log_name)
+        info: Dict[str, Any] = {
+            'lammps_version': record.get('lammps_version'),
+            'wall_time_s': record.get('wall_time_s'),
+            'n_procs': record.get('n_procs'),
+            'log_missing': text is None,
+        }
+        if text is not None:
+            with TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'log.lammps'
+                path.write_text(text, encoding='utf-8')
+                info.update(parse_log_extras(path))
+            wall = _WALL_RE.findall(text)
+            if wall:
+                hours, minutes, seconds = (int(x) for x in wall[-1])
+                info['wall_time_s'] = float(hours * 3600 + minutes * 60 + seconds)
+            procs = _PROCS_RE.findall(text)
+            if procs:
+                info['n_procs'] = int(procs[-1])
+            self.out('log', orm.SinglefileData(
+                io.BytesIO(text.encode('utf-8')),
+                filename=PurePosixPath(log_name).name))
+        self.out('run_info', orm.Dict(info))
+
+    # -- system decks ----------------------------------------------------------
+
+    def _structures(self, root: Optional[Path]) -> int:
+        """``load_*.data`` as ``structures``, ``hold_*.txt`` as ``aux``."""
+        if root is None or not (root / 'data').is_dir():
+            return 0
+        count = 0
+        for path in sorted((root / 'data').iterdir()):
+            if not path.is_file():
+                continue
+            if path.name.startswith('load_') and path.suffix == '.data':
+                namespace = 'structures'
+                count += 1
+            elif path.name.startswith('hold_'):
+                namespace = 'aux'
+            else:
+                continue
+            self.out(f'{namespace}.{_file_label(path.name)}',
+                     orm.SinglefileData(str(path)))
+        return count
+
+    # -- slide-like decks ------------------------------------------------------
+
+    def _points(self, root: Optional[Path], params: Mapping[str, Any],
+                config: Optional[dict]) -> int:
+        """One ``FolderData`` per point this deck covers, configured or present."""
+        # pylint: disable=import-outside-toplevel
+        from ..core.observables import expected_tier_rows
+        from ..postprocessing.post_channels import final_data_path
+        from ..postprocessing.run_status import (expected_chains, halt_detail,
+                                                 point_key, read_halt_registry)
+        from .ingest import LoadPoint, load_points
+
+        family = params['family']
+        rel_path = params['rel_path']
+        n_layers = int(params.get('n_layers') or 2)
+        deck = Deck(name=params['deck_name'], path=Path(params['deck_name']),
+                    log_path=None, point_filter=dict(params.get('point_filter') or {}))
+        locator = _scratch_locator(root or Path('/nonexistent'), rel_path, family)
+
+        found: List[LoadPoint] = points_for(deck, load_points(locator)) if root else []
+        if family in _PES_FAMILIES and deck.name.endswith('_refine'):
+            found = _refine_points(found, locator)
+        on_disk = {point_key(p.load_kind, p.load, p.angle, p.speed): p for p in found}
+
+        configured = [key for chain in (expected_chains(config, family) or [])
+                      for key in chain]
+        configured = [key for key in configured
+                      if points_for(deck, [SimpleNamespace(load=key[1], angle=key[2],
+                                                           speed=key[3])])]
+        expected = expected_tier_rows(config, family) if config else {}
+        halts = read_halt_registry(locator) if root else []
+
+        count = 0
+        for key in dict.fromkeys(configured + list(on_disk)):
+            point = on_disk.get(key)
+            if point is None:
+                files: Dict[str, Path] = {}
+                status, detail = 'no_output', ''
+                ident = SimpleNamespace(load_kind=key[0], load=key[1], angle=key[2],
+                                        speed=key[3], layers=locator.tokens.layers)
+            else:
+                ident = point
+                files = {f'results/{p.name}': p for p in point.tiers.values()}
+                final = final_data_path(locator.data_dir, point.load_kind,
+                                        point.load, point.angle)
+                if final is not None:
+                    files[f'data/{final.name}'] = final
+                status, detail = _status(point.tiers, family, n_layers, expected)
+                halted = halt_detail(halts, key)
+                if halted is not None:
+                    status, detail = 'halted', halted
+            node = _folder(files)
+            node.base.attributes.set_many({
+                'family': family, 'load_kind': ident.load_kind,
+                'load': float(ident.load), 'angle': float(ident.angle),
+                'speed': float(ident.speed), 'layers': ident.layers,
+                'status': status, 'status_detail': detail,
+                'content_sha256': content_hash(list(files.values())),
+                'rel_path': rel_path, 'deck_name': deck.name,
+            })
+            self.out(f'points.{point_label(ident)}', node)
+            count += 1
+        return count
 
 
-def _categorize_output(name: str) -> tuple[str | None, str]:
-    """Categorize a retrieved file as 'results', 'visuals', or None."""
-    for kind, sep in (('results', '/results/'), ('visuals', '/visuals/')):
-        if sep in name:
-            return kind, name.split(sep, 1)[1]
-        if name.startswith(f'{kind}/'):
-            return kind, name.split(f'{kind}/', 1)[1]
-    if name.startswith('friction_'):
-        return 'results', name
-    if name.endswith('.lammpstrj'):
-        return 'visuals', name
-    return None, name
+def _refine_points(found, locator):
+    """A PES ``*_refine`` deck's point: its own refine grid, not the base grid."""
+    from dataclasses import replace  # pylint: disable=import-outside-toplevel
+
+    refine = locator.results_dir / _PES_REFINE_NAME
+    if not found or not refine.is_file():
+        return []
+    return [replace(found[0], tiers={'window': refine},
+                    content_sha256=content_hash([refine]))]
+
+
+# ---------------------------------------------------------------------------
+# Launching
+# ---------------------------------------------------------------------------
+
+def _read_yaml(path: Path) -> dict:
+    import yaml  # pylint: disable=import-outside-toplevel
+    try:
+        value = yaml.safe_load(path.read_text(encoding='utf-8'))
+    except (OSError, yaml.YAMLError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        value = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _files(directory: Path, pattern: str) -> List[Path]:
+    if not directory.is_dir():
+        return []
+    return [p for p in sorted(directory.glob(pattern))
+            if p.is_file() and _CONFLICT not in p.name]
+
+
+def _build_dir(locator) -> Path:
+    """``build/`` of the run, or of the level above ``L{n}`` (AFM)."""
+    here = Path(locator.run_dir) / 'build'
+    return here if here.is_dir() else Path(locator.run_dir).parent / 'build'
+
+
+def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
+                structures: Optional[Mapping[str, orm.SinglefileData]] = None
+                ) -> Dict[str, Any]:
+    """The inputs of one deck's import-only CalcJob.
+
+    ``structures`` are the system deck's ``structures`` outputs, handed to a
+    slide deck. The ``build/*.lmp`` files go to the system deck, or to every
+    deck of a run that has none.
+    """
+    # pylint: disable=import-outside-toplevel
+    from ..postprocessing.read_data import resolve_n_layers
+    from ..postprocessing.run_status import read_run_config
+    from .blocks import split_blocks
+    from .store import get_or_create_block, get_or_create_file, get_or_create_provenance
+
+    run_dir = Path(locator.run_dir)
+    prov_dir = Path(locator.provenance_dir)
+    config = read_run_config(locator) or {}
+    record = _read_json(locator.provenance_file)
+    settings = _read_yaml(prov_dir / 'settings.yaml')
+    blocks = split_blocks(config, settings, record, provenance_dir=prov_dir)
+
+    reads_build = deck.writes_structures or not any(
+        d.writes_structures for d in discover_decks(locator))
+    handed = {f'build_{_file_label(p.name)}': get_or_create_file(p)
+              for p in (_files(_build_dir(locator), '*.lmp') if reads_build else [])}
+    handed.update(structures or {})
+
+    log_name = (Path(deck.log_path).relative_to(run_dir).as_posix()
+                if deck.log_path is not None else None)
+    inputs: Dict[str, Any] = {
+        'remote_folder': orm.RemoteData(computer=computer,
+                                        remote_path=str(run_dir.resolve())),
+        'deck': get_or_create_file(deck.path),
+        'provenance': get_or_create_provenance(locator.provenance_file, prov_dir),
+        'blocks': {name.replace('__', '_'): get_or_create_block(name, content)
+                   for name, content in blocks.items()},
+        'potentials': {_file_label(p.name): get_or_create_file(p)
+                       for p in _files(prov_dir / 'potentials', '*')},
+        'parameters': orm.Dict({
+            'deck_name': deck.name, 'rel_path': locator.tokens.rel_path,
+            'point_filter': dict(deck.point_filter),
+            'family': locator.tokens.family,
+            'n_layers': resolve_n_layers(locator, config or None),
+            'log_name': log_name, 'writes_structures': deck.writes_structures,
+        }),
+        'metadata': {'computer': computer,
+                     'label': f'{locator.tokens.rel_path}:{deck.name}'},
+    }
+    if handed:
+        inputs['structures'] = handed
+    return inputs
+
+
+def import_deck(locator, deck: Deck, *, computer: orm.Computer,
+                structures: Optional[Mapping[str, orm.SinglefileData]] = None):
+    """Run one deck's import-only CalcJob in-process: ``(outputs, node)``."""
+    from aiida.engine import run_get_node  # pylint: disable=import-outside-toplevel
+
+    return run_get_node(LammpsFrictionCalcJob,
+                        **deck_inputs(locator, deck, computer=computer,
+                                      structures=structures))
+
+
+def import_run(locator, *, computer: orm.Computer) -> List[orm.CalcJobNode]:
+    """Every deck of one run, system decks first; their ``structures``
+    outputs become the following decks' ``structures`` inputs."""
+    nodes: List[orm.CalcJobNode] = []
+    handed: Dict[str, orm.SinglefileData] = {}
+    for deck in discover_decks(locator):
+        _outputs, node = import_deck(locator, deck, computer=computer,
+                                     structures=None if deck.writes_structures
+                                     else handed)
+        if deck.writes_structures and 'structures' in node.outputs:
+            handed.update(dict(node.outputs.structures.items()))
+        nodes.append(node)
+    return nodes

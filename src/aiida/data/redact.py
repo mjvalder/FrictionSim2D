@@ -7,7 +7,7 @@ root-level `settings.yaml`/`.yml` a user wrote by hand (`settings init` run in
 the simulation root, which `FrictionSimulationSetData.set_from_root` also
 stages), never went through it. `stage_file` is the second, independent gate:
 every path staged into a `FrictionSimulationSetData`, `FrictionSimulationData`
-or `FrictionResultsData` repository -- and, via `src.aiida.calcjob.
+or `FrictionResultsData` repository -- and, via `src.aiida.submit.
 _stage_sim_dir`, a CalcJob's `simulation_dir` input -- goes through it instead
 of calling `repository.put_object_from_file` directly, so a credential cannot
 reach the store, an archive or an export bundle regardless of what write-time
@@ -57,7 +57,7 @@ def _is_provenance_candidate(name: str) -> bool:
     """True when `name` sits inside a `provenance` path component, other
     than under its `cif/`/`potentials/` subdirectories.
 
-    The `provenance` component need not be first: `src.aiida.calcjob.
+    The `provenance` component need not be first: `src.aiida.submit.
     _stage_sim_dir` (a CalcJob's `simulation_dir` input) can stage the very
     same file several directories deep, e.g. `afm/h-MoS2/.../K300/provenance/
     settings.yaml` -- `provenance` a middle component, not the first.

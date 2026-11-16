@@ -11,6 +11,7 @@ The point filter inverts `core.utils.tokens.format_numeric_token` exactly as
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,11 @@ _STEM_PATTERNS = (
     (re.compile(rf'^slide_a(?P<v>{_NUM})$'), 'angle'),
     (re.compile(rf'^slide_(?P<v>{_NUM})ms$'), 'speed'),
 )
+
+logger = logging.getLogger(__name__)
+
+#: Stems that legitimately cover every point of the run, so get `{}` silently.
+_UNFILTERED_STEMS = ('slide', 'slide_refine')
 
 _CONFLICT = '.sync-conflict-'
 _TOL = 1e-9
@@ -63,6 +69,9 @@ def _parse_filter(stem: str) -> Dict[str, float]:
         match = pattern.match(stem)
         if match:
             return {key: _token_to_float(match.group('v'))}
+    if stem.startswith('slide_') and stem not in _UNFILTERED_STEMS:
+        logger.warning("Deck stem %r is unrecognised; its CalcJob will cover "
+                       "every load point of the run.", stem)
     return {}
 
 

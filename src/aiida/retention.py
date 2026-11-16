@@ -4,10 +4,11 @@ One rule, two consumers: `ingest.py` derives what it stores from
 `retained_paths` -- the run node keeps its inputs and provenance, each load
 point its tier files, and every other retained file rides along as that
 point's aux (`ingest._aux_files`) -- and
-`LammpsFrictionCalcJob.prepare_for_submission` builds its `retrieve_list` from
-`retrieve_patterns`. So an imported run and a CalcJob-retrieved run store the
-same files. AiiDA content-addresses whatever lands in the repository, so this
-list IS the retention guarantee and nothing re-checksums it. Files over
+`LammpsFrictionCalcJob.prepare_for_submission` builds its retrieve lists from
+`retrieve_patterns`, narrowed per deck. So an imported run and a
+CalcJob-retrieved run store the same files. AiiDA content-addresses whatever
+lands in the repository, so this list IS the retention guarantee and nothing
+re-checksums it. Files over
 `aiida.max_stored_file_mb` are recorded by sha256 instead of stored.
 
 Trajectories (`visuals/`, `*.lammpstrj`) and build scratch (`build/`) are

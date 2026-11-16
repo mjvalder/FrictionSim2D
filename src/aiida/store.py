@@ -5,13 +5,15 @@ and found again by its hash, so every run with an identical block links to
 the same node. A file (a potential, a CIF) is stored once as an
 ``orm.SinglefileData`` and found again by its sha256. Lookups go through node
 extras: ``friction2d_block_hash`` / ``friction2d_block_kind`` on blocks,
-``friction2d_sha256`` on files.
+``friction2d_sha256`` on files, ``friction2d_folder_sha256`` on a run's
+provenance folder.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Optional, Type
+from typing import Any, List, Mapping, Optional, Tuple, Type
 
 from aiida import orm
 from aiida.common.exceptions import NotExistent
@@ -23,6 +25,9 @@ from .data.redact import stage_file
 BLOCK_HASH_EXTRA = 'friction2d_block_hash'
 BLOCK_KIND_EXTRA = 'friction2d_block_kind'
 FILE_SHA_EXTRA = 'friction2d_sha256'
+FOLDER_SHA_EXTRA = 'friction2d_folder_sha256'
+
+_CONFLICT = '.sync-conflict-'
 
 
 def _find(node_class: Type[orm.Node], extra: str, value: str) -> Optional[orm.Node]:
@@ -98,6 +103,49 @@ def get_or_create_file(path: Path, name: Optional[str] = None) -> orm.Singlefile
     node = orm.SinglefileData(io.BytesIO(b''), filename=PurePosixPath(name).name)
     stage_file(_AsBasename(node.base.repository), path, name)
     node.base.extras.set(FILE_SHA_EXTRA, digest)
+    return node.store()
+
+
+def _provenance_members(provenance_file: Optional[Path],
+                         provenance_dir: Optional[Path]) -> List[Tuple[str, Path]]:
+    """``(stored name, path)`` of every provenance file, sorted by name.
+
+    Syncthing ``*.sync-conflict-*`` copies are left out: the original is the
+    record.
+    """
+    members: List[Tuple[str, Path]] = []
+    if provenance_file is not None and Path(provenance_file).is_file():
+        members.append(('provenance.json', Path(provenance_file)))
+    if provenance_dir is not None and Path(provenance_dir).is_dir():
+        root = Path(provenance_dir)
+        for path in root.rglob('*'):
+            if path.is_file() and _CONFLICT not in path.name:
+                rel = path.relative_to(root).as_posix()
+                members.append((f'provenance/{rel}', path))
+    return sorted(members)
+
+
+def get_or_create_provenance(provenance_file: Optional[Path],
+                             provenance_dir: Optional[Path]) -> orm.FolderData:
+    """The stored ``FolderData`` of a run's ``provenance.json`` + ``provenance/``.
+
+    Keyed by a sha256 over every member's stored name and file sha256, so two
+    runs with byte-identical provenance share one node. Every member goes in
+    through :func:`~src.aiida.data.redact.stage_file` under its stored name
+    (``provenance/settings.yaml``), so a credential never reaches the store.
+    """
+    members = _provenance_members(provenance_file, provenance_dir)
+    digest = hashlib.sha256()
+    for name, path in members:
+        digest.update(f'{name}\0{sha256_file(path)}\n'.encode('utf-8'))
+    key = digest.hexdigest()
+    found = _find(orm.FolderData, FOLDER_SHA_EXTRA, key)
+    if found is not None:
+        return found
+    node = orm.FolderData()
+    for name, path in members:
+        stage_file(node.base.repository, path, name)
+    node.base.extras.set(FOLDER_SHA_EXTRA, key)
     return node.store()
 
 

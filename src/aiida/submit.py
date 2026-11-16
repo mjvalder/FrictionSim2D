@@ -24,11 +24,8 @@ from aiida.engine import submit as aiida_submit
 
 from ..core.config import GlobalSettings, load_settings
 from ..run.simulate import run_simulations
-from .calcjob import (
-    LammpsFrictionCalcJob,
-    prepare_simulation_folder,
-    apply_options,
-)
+from .calcjob import LammpsFrictionCalcJob
+from .data.redact import stage_file
 
 logger = logging.getLogger(__name__)
 
@@ -642,3 +639,133 @@ def _preview_submission(
         click.echo(f"  ... and {len(simulation_dirs) - 5} more")
 
     click.echo("=" * 60)
+
+
+# ---------------------------------------------------------------------------
+# Submission staging -- moved here from calcjob.py when the CalcJob became
+# import-only (Task 5). Only this module's submission path uses it; both go
+# in Task 11.
+# ---------------------------------------------------------------------------
+
+_SIM_SUBDIRS = (
+    'lammps', 'data', 'potentials', 'results', 'visuals', 'build', 'provenance',
+)
+
+#: Attribute key on a staged `simulation_dir` FolderData listing which of
+#: `_SIM_SUBDIRS` were sourced from the run directory's PARENT rather than the
+#: run directory itself -- see `_stage_sim_dir`'s docstring. `None`, never
+#: `()`, is the "not present" default wherever this is read back:
+#: `NodeAttributes.get`'s own "no default given" sentinel IS the empty tuple
+#: (CPython interns it), so passing `()` there is silently indistinguishable
+#: from omitting the default and raises instead of falling back.
+_SHARED_SUBDIRS_ATTR = '_frictionsim2d_shared_subdirs'
+
+#: Only these two `_SIM_SUBDIRS` are ever looked for at `sim_dir.parent` when
+#: missing at `sim_dir` -- `_stage_sim_dir`'s docstring has the AFM-nesting
+#: reason. Restricted (fix round 1, finding 2) so an unrelated directory that
+#: happens to sit next to the run (e.g. a stray `results/` from a differently
+#: named sibling run) is never picked up as this run's own.
+_SHAREABLE_SUBDIRS = ('build', 'provenance')
+
+#: Attribute key recording the run directory's own basename (`sim_dir.name`,
+#: e.g. `'L2'`) on a `simulation_dir` FolderData built by
+#: `prepare_simulation_folder`. Fix round 1, finding 2: without a
+#: `simulation_node` input, `_sim_prefix_for` had no way to recover the run's
+#: own level -- only `_detect_sim_prefix`'s shared-ancestor guess -- so a
+#: `smart_submit`/`aiida submit` call (which never sets `simulation_node`,
+#: see `smart_submit`/`submit_batch(config_path=None)`) staged both the run's
+#: own files AND the shared `build`/`provenance` ones a level off. Combined
+#: with `_SHARED_SUBDIRS_ATTR` in `_sim_prefix_for`, this reconstructs the
+#: run's full prefix (`<shared ancestor>/<leaf name>`) without needing
+#: `simulation_node` at all.
+_LEAF_NAME_ATTR = '_frictionsim2d_leaf_name'
+
+
+def prepare_simulation_folder(sim_dir: Path) -> orm.FolderData:
+    """Create an AiiDA ``FolderData`` from a simulation directory.
+
+    Args:
+        sim_dir: Path to the simulation directory (must contain ``lammps/``).
+
+    Returns:
+        A new (unstored) ``FolderData`` node.
+    """
+    sim_dir = Path(sim_dir)
+    if not (sim_dir / 'lammps').exists():
+        raise FileNotFoundError(f"No lammps/ directory in {sim_dir}")
+
+    folder_data = orm.FolderData()
+    shared_subdirs = _stage_sim_dir(folder_data, sim_dir, relative_to=sim_dir)
+    # Always recorded, even when nothing was shared (sheet-like families):
+    # `_sim_prefix_for` only acts on it once `_SHARED_SUBDIRS_ATTR` is ALSO
+    # set, so a harmless leaf name sitting unused on that path costs nothing.
+    folder_data.base.attributes.set(_LEAF_NAME_ATTR, sim_dir.name)
+    if shared_subdirs:
+        folder_data.base.attributes.set(_SHARED_SUBDIRS_ATTR, sorted(shared_subdirs))
+    return folder_data
+
+
+def apply_options(builder, options: dict[str, Any] | None) -> None:
+    """Apply metadata options to a CalcJob builder."""
+    if not options:
+        return
+    for key in ('resources', 'max_wallclock_seconds', 'queue_name',
+                'account', 'custom_scheduler_commands', 'prepend_text'):
+        if key in options:
+            setattr(builder.metadata.options, key, options[key])
+
+
+def _stage_sim_dir(folder_data: orm.FolderData, sim_dir: Path,
+                   relative_to: Path) -> set[str]:
+    """Stage simulation subdirectories into a FolderData node.
+
+    Most `_SIM_SUBDIRS` live directly under `sim_dir`. AFM-family runs are
+    nested one level deeper (`.../K<temp>/L<layers>`, see
+    `AFMSimulation.build`/`write_inputs`): the run's own `lammps/`, `data/`,
+    `results/` and `visuals/` sit at that leaf, but `build/` and
+    `provenance/` (the built tip/sheet geometry and the potential files
+    `pair_coeff` reads) are shared across every layer count and sit one level
+    up, at `sim_dir.parent` -- exactly what `run/tree.py`'s
+    `provenance_dir_for` already falls back to for the same reason. Only
+    those two (`_SHAREABLE_SUBDIRS`, fix round 1 finding 2) are ever looked
+    for at `sim_dir.parent` when missing at `sim_dir` -- restricted so an
+    unrelated directory that happens to sit beside the run is never picked up
+    as this run's own. Sheet-like families have no such nesting: `build`/
+    `provenance` sit beside `lammps` at `sim_dir` itself, taken by the first
+    branch below like everything else, so the parent fallback never triggers
+    for them.
+
+    Returns the names of the subdirs actually sourced from `sim_dir.parent`,
+    for `prepare_simulation_folder` to persist as `folder_data`'s
+    `_SHARED_SUBDIRS_ATTR`.
+
+    A settings/config document among `provenance/**` -- a pre-redaction
+    tree's `provenance/settings.yaml`/`provenance/config.json` -- is
+    sanitised before it is staged (`redact.stage_file`, the same choke point
+    `FrictionSimulationData.add_run_files` goes through): this `FolderData`
+    becomes a real `CalcJobNode` input, and `aiida.tools.archive.
+    create_archive`'s default traversal rules follow a results node's
+    provenance BACKWARD through the calculation that created it to its
+    inputs, so an unsanitised copy here would reach an archive even though
+    `export_archive` never names this node directly. Every other staged file
+    (LAMMPS inputs, CIFs, potentials) is stored verbatim, unchanged.
+    """
+    shared_subdirs = set()
+    for subdir in _SIM_SUBDIRS:
+        sub_path = sim_dir / subdir
+        if not sub_path.exists():
+            if subdir not in _SHAREABLE_SUBDIRS or sim_dir.parent == sim_dir:
+                continue
+            sub_path = sim_dir.parent / subdir
+            if not sub_path.exists():
+                continue
+        for file_path in sub_path.rglob('*'):
+            if not file_path.is_file():
+                continue
+            try:
+                rel = file_path.relative_to(relative_to)
+            except ValueError:
+                rel = file_path.relative_to(sim_dir.parent)
+                shared_subdirs.add(subdir)
+            stage_file(folder_data.base.repository, file_path, str(rel))
+    return shared_subdirs

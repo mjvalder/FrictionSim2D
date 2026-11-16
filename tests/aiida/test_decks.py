@@ -130,3 +130,23 @@ def test_sync_conflict_copies_ignored(tmp_path):
     _touch(only.lammps_dir / 'slide.in')
     _touch(only.run_dir / 'log_slide.sync-conflict-1.lammps')
     assert deck_log(only, 'slide') is None
+
+
+@pytest.mark.parametrize('stem', ['slide_x7', 'slide_f30', 'slide_foo'])
+def test_unrecognised_slide_stem_warns(tmp_path, caplog, stem):
+    """An odd `slide_*` stem still covers every point, but says so."""
+    loc = _locator(tmp_path, 'afm')
+    _touch(loc.lammps_dir / f'{stem}.in')
+    with caplog.at_level('WARNING', logger='src.aiida.decks'):
+        deck = [d for d in discover_decks(loc) if d.name == stem][0]
+    assert deck.point_filter == {}
+    assert stem in caplog.text
+
+
+@pytest.mark.parametrize('stem', ['system', 'system_2', 'slide', 'slide_refine'])
+def test_known_unfiltered_stems_do_not_warn(tmp_path, caplog, stem):
+    loc = _locator(tmp_path, 'pes_sheet')
+    _touch(loc.lammps_dir / f'{stem}.in')
+    with caplog.at_level('WARNING', logger='src.aiida.decks'):
+        discover_decks(loc)
+    assert 'unrecognised' not in caplog.text

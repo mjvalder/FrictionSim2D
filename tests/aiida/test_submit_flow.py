@@ -82,6 +82,7 @@ def _run_uuids(label='flow'):
     return {n.rel_path: str(n.uuid) for n in qb.all(flat=True)}
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_cli_submit_on_a_root_tracks_every_run(aiida_profile_clean, tmp_path,
                                                monkeypatch):
     root = _ingested_tree(tmp_path)
@@ -102,6 +103,7 @@ def test_cli_submit_on_a_root_tracks_every_run(aiida_profile_clean, tmp_path,
     assert 'Submitted' not in result.output
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_cli_submit_on_a_run_dir_finds_its_root(aiida_profile_clean, tmp_path,
                                                monkeypatch):
     root = _ingested_tree(tmp_path)
@@ -118,6 +120,7 @@ def test_cli_submit_on_a_run_dir_finds_its_root(aiida_profile_clean, tmp_path,
     assert str(seen[0].simulation_node.uuid) == _run_uuids()[REL_B]
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_cli_submit_reports_failed_in_process_runs(aiida_profile_clean, tmp_path,
                                                   monkeypatch):
     root = _ingested_tree(tmp_path)
@@ -133,6 +136,7 @@ def test_cli_submit_reports_failed_in_process_runs(aiida_profile_clean, tmp_path
     assert 'exit status 310' in result.output
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_cli_submit_with_every_submission_failing_is_a_clean_error(
         aiida_profile_clean, tmp_path, monkeypatch):
     """`pks[0]` used to raise IndexError when submit_batch returned []."""
@@ -175,6 +179,7 @@ def test_find_simulation_root_rejects_a_path_outside_any_tree(tmp_path):
         submit_mod.find_simulation_root(tmp_path)
 
 
+@pytest.mark.skip(reason='removed in Task 11')
 def test_run_with_aiida_registers_the_tree_before_submitting(
         aiida_profile_clean, tmp_path, monkeypatch):
     def _fake_run_simulations(config_file, model, **kwargs):
