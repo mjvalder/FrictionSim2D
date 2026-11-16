@@ -523,16 +523,72 @@ def test_stage2_failure_falls_back_to_parser_status(aiida_profile_clean,
     assert any('stage-2 status failed' in w for w in report.warnings)
 
 
+@pytest.mark.parametrize('form', ['default', 'file', 'directory'])
 def test_unreachable_root_withdraws_nothing(aiida_profile_clean, no_profile_switch,
-                                            tmp_path):
+                                            tmp_path, form):
     _tree(tmp_path, eject=(30.0,))
     import_root(tmp_path, label='camp')
     _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass', note='ok', override=True)
     assert apply_rulings('camp').applied == 1
     group = orm.Group.collection.get(label='friction2d/camp')
-    group.base.extras.set('source_root', str(tmp_path / 'unmounted'))
+    unmounted = tmp_path / 'unmounted'
+    group.base.extras.set('source_root', str(unmounted))
 
-    report = apply_rulings('camp')
+    path = {'default': None, 'file': unmounted / RULINGS_FILE,
+            'directory': unmounted}[form]
+    report = apply_rulings('camp', path)
 
     assert report.withdrawn == [] and len(report.overrides) == 1
     assert any('not reachable' in w for w in report.warnings)
+
+
+def test_provisional_recheck_to_the_same_status_is_not_reported(
+        aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
+    import src.aiida.steps as steps
+
+    _legacy_run(tmp_path, 'h-MoS2', n=50)
+    _legacy_run(tmp_path, 'h-WS2', n=40)
+    import_root(tmp_path, label='camp')
+    real = steps._window_rows
+
+    def flaky(point, directory):
+        if 'h-WS2' in point.base.attributes.get('rel_path'):
+            raise OSError('disk gone')
+        return real(point, directory)
+    monkeypatch.setattr(steps, '_window_rows', flaky)
+    _legacy_run(tmp_path, 'h-NbSe2', n=50)
+    import_root(tmp_path, label='camp')
+    nbse2 = next(orm.load_node(u) for u in _uuids()
+                 if 'h-NbSe2' in orm.load_node(u).base.attributes.get('rel_path'))
+    assert _live_verdict(nbse2).base.extras.get('friction2d_provisional') is True
+
+    monkeypatch.setattr(steps, '_window_rows', real)
+    healthy = import_root(tmp_path, label='camp')
+
+    assert healthy.rechecked == []                      # complete -> complete
+    assert healthy.verdict_counts == {'complete': 1}    # but it was re-checked
+    assert not _live_verdict(nbse2).base.extras.get('friction2d_provisional')
+    assert _live_verdict(nbse2)['status'] == 'complete'
+
+
+def test_ruling_that_stops_applying_after_a_recheck_says_why(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    """A quarantined point's plain ruling stops applying once a re-check
+    moves the point out of quarantine; the warning must say so."""
+    run_dir = _legacy_run(tmp_path, 'h-MoS2', n=40)
+    for path in (run_dir / 'data').glob('final_f10N*'):
+        path.unlink()
+    first = import_root(tmp_path, label='camp')
+    assert first.verdict_counts == {'quarantined': 1}
+    pid = _pid(tmp_path, 10.0)
+    _write_ruling(tmp_path, pid, 'pass')
+    assert apply_rulings('camp').applied == 1
+
+    _legacy_run(tmp_path, 'h-WS2', n=50)
+    again = import_root(tmp_path, label='camp')
+
+    assert again.rechecked == [(pid, 'quarantined', 'truncated')]
+    assert _ruled_live() == []
+    msgs = [w for w in again.warnings + again.rulings.warnings if pid in w]
+    assert any('no longer quarantined' in w and 'override: true' in w
+               and 'quarantined to truncated' in w for w in msgs), msgs

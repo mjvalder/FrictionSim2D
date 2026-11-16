@@ -522,7 +522,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     ``multi_speed``, ``writes_snapshot``, snapshot and reference -- differs
     from its live verdict's: the old verdict is superseded with its ruled and
     withdrawn successors, and ``(point id, old status, new status)`` goes to
-    ``rechecked``. ``settings`` is an ``IntegritySettings`` dump (default:
+    ``rechecked`` when the status changed. ``settings`` is an ``IntegritySettings`` dump (default:
     the settings file's; a fallback to the defaults goes to ``warnings``). A
     point whose check raises goes to ``failures`` as ``(point uuid,
     message)`` and the others go on.
@@ -574,7 +574,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 for successor in _successors(dead):
                     _supersede(successor)
                 _supersede(dead)
-            if old and rechecked is not None:
+            if old and rechecked is not None and old[-1]['status'] != verdict['status']:
                 rechecked.append((_pid(point), old[-1]['status'], verdict['status']))
     if warnings is not None:
         warnings += problems
@@ -703,6 +703,16 @@ def _tag(node: orm.Dict, kind: str, verdict: orm.Dict, **extra: Any) -> None:
                                POINT_UUID_EXTRA: verdict.get('point_uuid'), **extra})
 
 
+def _was_ruled_quarantined(verdict: orm.Dict) -> bool:
+    """Whether an earlier, now superseded, ruled verdict of ``verdict``'s
+    point was ruled while the point was quarantined."""
+    qb = orm.QueryBuilder().append(orm.Dict, filters={
+        f'extras.{KIND_EXTRA}': 'ruled_verdict',
+        f'extras.{POINT_UUID_EXTRA}': verdict.get('point_uuid'),
+        'attributes.original_status': 'quarantined'})
+    return any(not _live(n) for n in qb.all(flat=True))
+
+
 def _rule(report: RulingReport, pid: str, ruling, verdict: orm.Dict) -> bool:
     """One (ruling, verdict) pair: decide, skip or apply. True when the
     ruling applies to the verdict (applied now or already)."""
@@ -713,7 +723,14 @@ def _rule(report: RulingReport, pid: str, ruling, verdict: orm.Dict) -> bool:
     if why is not None:
         if original != 'quarantined' and pid not in report.not_quarantined:
             report.not_quarantined.append(pid)
-        report.warnings.append(f'integrity ruling ignored: {pid}: {why}')
+        if (original != 'quarantined' and not ruling.override
+                and _was_ruled_quarantined(verdict)):
+            report.warnings.append(
+                f'integrity ruling no longer applies: {pid}: re-checked from '
+                f'quarantined to {original}; the point is no longer quarantined, '
+                f'so its ruling now needs `override: true` and a note')
+        else:
+            report.warnings.append(f'integrity ruling ignored: {pid}: {why}')
         return False
     content = {'point': pid, 'ruling': ruling.ruling, 'note': ruling.note,
                'date': ruling.date, 'override': ruling.override}
@@ -768,7 +785,6 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     from ..postprocessing.integrity_rulings import RULINGS_FILE, load_rulings
     from .ingest import GROUP_PREFIX
 
-    explicit = rulings_path is not None
     if rulings_path is None:
         root = group.base.extras.get('source_root', None)
         rulings_path = Path(root) / RULINGS_FILE if root else None
@@ -793,14 +809,20 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
             report.unmatched.append(pid)
         else:
             ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v)}
-    missing = not Path(rulings_path).exists()
-    foreign = explicit and not _authoritative(group, Path(rulings_path))
-    if withdraw and missing and (foreign or not Path(rulings_path).parent.is_dir()):
+    own = _authoritative(group, Path(rulings_path))
+    if own:
+        # The own file lives in source_root, whichever form named it.
+        rulings_dir = Path(group.base.extras.get('source_root'))
+        reachable = rulings_dir.is_dir()
+    else:
+        given = Path(rulings_path)
+        reachable = (given / RULINGS_FILE if given.is_dir() else given).is_file()
+    if withdraw and not reachable:
         # An absent file inside an existing campaign root means "no rulings";
         # an unreachable root (an unmounted drive) or a mistyped path does not.
         report.warnings.append(f'no ruling withdrawn: {rulings_path} is not '
-                               f'reachable (its directory is missing)'
-                               if not foreign else
+                               f'reachable (its directory {rulings_dir} is missing)'
+                               if own else
                                f'no ruling withdrawn: {rulings_path} does not exist')
     elif withdraw and _unreadable(rulings):
         report.warnings.append('no ruling withdrawn: the rulings file has entries '
