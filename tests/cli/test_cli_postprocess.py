@@ -285,6 +285,23 @@ def test_read_reports_integrity_and_stubs(runner, tmp_path):
     assert 'point: "' in result.output and 'ruling:' in result.output
 
 
+def test_read_reports_overrides(runner, tmp_path):
+    from src.postprocessing.integrity_rulings import RULINGS_FILE, point_id
+    from src.postprocessing.read_data import DataReader
+    _integrity_tree(tmp_path)
+    failed = next(p for p in DataReader(str(tmp_path)).points
+                  if p.status == 'failed_integrity')
+    (tmp_path / RULINGS_FILE).write_text(
+        f'- point: "{point_id(failed, tmp_path)}"\n  ruling: pass\n'
+        '  override: true\n  note: fine\n  date: 2026-11-16\n')
+
+    result = runner.invoke(cli, ['postprocess', 'read', str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert 'Overrides: 1' in result.output
+    assert 'failed_integrity -> complete' in result.output
+
+
 def test_read_no_integrity_prints_no_tally(runner, tmp_path):
     _integrity_tree(tmp_path)
 

@@ -282,3 +282,13 @@ def test_summarise_lists_quarantined_points_awaiting_ruling(deps):
     text = summarise_results(deps, 'campaign')
     assert 'awaiting your ruling' in text
     assert 'missing final snapshot' in text and '|angle=' in text
+
+
+def test_summarise_lists_overridden_points(deps):
+    doc = json.loads(_doc(deps).read_text())
+    doc['runs'][1]['integrity'] = {'overridden': True,
+                                   'original_status': 'failed_integrity'}
+    doc['runs'][1]['status_detail'] = 'overridden by user 2026-11-16: ok'
+    _doc(deps).write_text(json.dumps(doc))
+    text = summarise_results(deps, 'campaign')
+    assert 'overridden by you' in text and 'failed_integrity ->' in text

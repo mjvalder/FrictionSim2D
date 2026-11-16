@@ -313,6 +313,10 @@ class IntegrityVerdict:  # pylint: disable=too-many-instance-attributes
     thresholds_version: str = ''
     #: Set by `integrity_rulings.apply_rulings` when the user decided it.
     ruled_by_user: bool = False
+    #: Set with it when the point was not `quarantined` (an expert override).
+    overridden: bool = False
+    #: The status before a ruling; empty when no ruling touched the point.
+    original_status: str = ''
 
     def as_dict(self) -> dict:
         """JSON-safe form: NaN and infinite measures become ``None``."""

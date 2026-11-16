@@ -119,10 +119,34 @@ Copy the stubs into `<results_dir>/integrity_rulings.yaml` and fill them in:
 ```
 
 On the next read, `pass` makes the point `complete` and `fail` makes it `failed_integrity`. Its
-verdict is marked `ruled_by_user` and the status detail records the note. A ruling decides only
-a quarantined point. On any other status, or on a point that does not exist, it changes nothing
-and `postprocess read` prints a warning. Unreadable or duplicate entries also give a warning; for
-a duplicate, the last entry wins.
+verdict is marked `ruled_by_user` and the status detail records the note.
+
+### Overriding any verdict
+
+You are the expert, so a ruling can also overrule a point the checker did not quarantine. Add
+`override: true` and a non-empty `note`:
+
+```yaml
+- point: "afm/h_MoS2/.../L1|force=30|angle=0|speed=2"
+  ruling: pass
+  override: true          # required unless the point is quarantined
+  note: the ejected atoms are a known thermostat artefact
+  date: 2026-11-16
+```
+
+- `failed_integrity` or `complete`: `pass` gives `complete`, `fail` gives `failed_integrity`.
+- `truncated`, `halted`, `unreadable`: `pass` gives `complete` (you accept the point); `fail` keeps the status.
+- `no_output`, `not_reached`: `pass` is refused, there is no data to accept; `fail` keeps the status.
+- Without `override: true`, or with an empty `note`, the ruling changes nothing and `postprocess read`
+  prints one warning naming what is missing.
+
+An overridden verdict has `overridden: true` and `original_status` (also in the export's `integrity`
+block); its status detail reads `overridden by user <date>: <note>`. `postprocess read` prints
+`Overrides: N` and one line per point (id, original -> new status, note); the assistant lists them
+under `overridden by you`.
+
+A ruling on a point that does not exist gives a warning. Unreadable or duplicate entries also give
+a warning; for a duplicate, the last entry wins.
 
 ## Changing thresholds
 

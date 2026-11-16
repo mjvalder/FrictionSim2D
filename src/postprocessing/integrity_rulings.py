@@ -7,15 +7,17 @@
       note: looked at the snapshot, the hole is a viewer artefact
       date: 2026-11-12
 
-A ruling only decides a `quarantined` point. On any other status, or on a
-point that does not exist, it changes nothing and yields one warning.
+A ruling decides a `quarantined` point outright. On any other status it needs
+`override: true` and a non-empty `note` (the expert may overrule any verdict);
+without them, or on a point that does not exist, it changes nothing and yields
+one warning. `decide` is the pure decision, shared with other appliers.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import yaml
 
@@ -32,6 +34,7 @@ class Ruling:
     ruling: str = ''
     note: str = ''
     date: str = ''
+    override: bool = False
     error: str = ''
 
 
@@ -79,8 +82,11 @@ def _entry(raw) -> tuple:
     ruling = str(raw.get('ruling', '')).strip().lower()
     if ruling not in _VALID:
         raise ValueError(f'ruling must be pass or fail, got {raw.get("ruling")!r}')
+    override = raw.get('override', False)
+    if not isinstance(override, bool):
+        raise ValueError(f'override must be true or false, got {override!r}')
     return key, Ruling(ruling=ruling, note=str(raw.get('note') or ''),
-                       date=str(raw.get('date') or ''))
+                       date=str(raw.get('date') or ''), override=override)
 
 
 def load_rulings(root: Path) -> Dict[str, Ruling]:
@@ -118,12 +124,44 @@ def load_rulings(root: Path) -> Dict[str, Ruling]:
     return out
 
 
+#: Statuses with no frames to accept: a `pass` has nothing to stand on.
+_NO_DATA = ('no_output', 'not_reached')
+
+
+def decide(status: str, ruling: Ruling) -> Tuple[Optional[str], Optional[str]]:
+    """What `ruling` does to a point of `status`: `(new_status, warning)`.
+
+    Exactly one is not None. `quarantined` takes either ruling. Any other
+    status needs `override` and a non-empty note. `pass` -> `complete`; `fail`
+    -> `failed_integrity` on a stage-3 verdict (`complete`, `failed_integrity`)
+    and the status unchanged on a gate status. A `pass` on a point with no
+    data is refused.
+    """
+    if status != 'quarantined':
+        missing = []
+        if not ruling.override:
+            missing.append('`override: true`')
+        if not ruling.note.strip():
+            missing.append('a non-empty `note`')
+        if missing:
+            return None, (f'{status} point needs {" and ".join(missing)} '
+                          'to be overruled')
+        if ruling.ruling == 'pass' and status in _NO_DATA:
+            return None, f'{status} point has no data to accept as pass'
+    if ruling.ruling == 'pass':
+        return 'complete', None
+    if status in ('quarantined', 'complete', 'failed_integrity'):
+        return 'failed_integrity', None
+    return status, None
+
+
 def apply_rulings(points: Iterable, rulings: Dict[str, Ruling],
                   root: Path) -> List[str]:
-    """Apply rulings to `quarantined` points in place; return the warnings.
+    """Apply rulings to points in place (see `decide`); return the warnings.
 
-    `pass` -> `complete`, `fail` -> `failed_integrity`; the verdict gains
-    `ruled_by_user`. One warning per ruling that could not apply.
+    The verdict gains `ruled_by_user`, `original_status` and, when the point
+    was not quarantined, `overridden`. One warning per ruling that could not
+    apply.
     """
     warnings: List[str] = []
     by_id = {point_id(p, root): p for p in points}
@@ -135,17 +173,24 @@ def apply_rulings(points: Iterable, rulings: Dict[str, Ruling],
         if point is None:
             warnings.append(f'integrity ruling ignored: no such point {key}')
             continue
-        if point.status != 'quarantined':
-            warnings.append(f'integrity ruling ignored: {key} is '
-                            f'{point.status}, not quarantined')
+        original = point.status
+        status, why = decide(original, ruling)
+        if why is not None:
+            warnings.append(f'integrity ruling ignored: {key}: {why}')
             continue
-        status = 'complete' if ruling.ruling == 'pass' else 'failed_integrity'
-        text = f'ruled {ruling.ruling} by user {ruling.date}: {ruling.note}'
+        overridden = original != 'quarantined'
+        if overridden:
+            text = f'overridden by user {ruling.date}: {ruling.note}'
+        else:
+            text = f'ruled {ruling.ruling} by user {ruling.date}: {ruling.note}'
         point.status = status
         point.status_detail = '; '.join(
             part for part in (point.status_detail, text) if part)
         if point.integrity is not None:
             point.integrity = replace(
-                point.integrity, status=status, failed=status != 'complete',
-                ruled_by_user=True)
+                point.integrity, status=status,
+                failed=(point.integrity.failed if status == original
+                        else status != 'complete'),
+                ruled_by_user=True, overridden=overridden,
+                original_status=original)
     return warnings

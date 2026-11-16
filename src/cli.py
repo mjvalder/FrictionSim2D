@@ -1281,6 +1281,15 @@ def _echo_integrity(reader) -> None:
         reason = ' '.join(str(point.status_detail or '').split())
         click.echo(f'- point: "{point_id(point, reader.results_dir)}"\n'
                    f'  ruling:   # pass or fail -- {reason}')
+    overridden = [p for p in reader.points
+                  if p.integrity is not None and p.integrity.overridden]
+    click.echo(f"Overrides: {len(overridden)}")
+    for point in overridden:
+        note = ' '.join(str(point.status_detail or '').split())
+        note = note.rsplit('overridden by user', 1)[-1].strip()
+        click.echo(f"- {point_id(point, reader.results_dir)}: "
+                   f"{point.integrity.original_status} -> {point.status}"
+                   f" ({note})")
     for warning in reader.ruling_warnings:
         click.echo(f"Warning: {warning}")
 

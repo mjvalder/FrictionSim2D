@@ -632,7 +632,9 @@
      "gap_min_any": null
     },
     "thresholds_version": "1.0.0",
-    "ruled_by_user": false
+    "ruled_by_user": false,
+    "overridden": false,
+    "original_status": ""
    }
   },
   {
@@ -948,7 +950,9 @@
      "gap_min_any": null
     },
     "thresholds_version": "1.0.0",
-    "ruled_by_user": false
+    "ruled_by_user": false,
+    "overridden": false,
+    "original_status": ""
    }
   },
   {
@@ -1184,7 +1188,9 @@
      "gap_min_any": null
     },
     "thresholds_version": "1.0.0",
-    "ruled_by_user": false
+    "ruled_by_user": false,
+    "overridden": false,
+    "original_status": ""
    }
   },
   {
@@ -1352,7 +1358,9 @@
      "n_heat": null
     },
     "thresholds_version": "1.0.0",
-    "ruled_by_user": false
+    "ruled_by_user": false,
+    "overridden": false,
+    "original_status": ""
    }
   },
   {
@@ -1520,7 +1528,9 @@
      "n_heat": null
     },
     "thresholds_version": "1.0.0",
-    "ruled_by_user": false
+    "ruled_by_user": false,
+    "overridden": false,
+    "original_status": ""
    }
   }
  ]

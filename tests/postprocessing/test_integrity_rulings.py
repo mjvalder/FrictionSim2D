@@ -131,3 +131,74 @@ def test_duplicate_rulings_warn_and_keep_last(tmp_path):
     dup = [w for w in r.ruling_warnings if 'more than once' in w]
     assert len(dup) == 1
     assert _point(r, 30.0).status == 'failed_integrity'
+
+
+def _ov(pid, ruling, note='expert call', override=True):
+    text = _ruling(pid, ruling, note)
+    return text + (f'  override: true\n' if override else '')
+
+
+def test_override_pass_on_failed_integrity(tmp_path):
+    _afm_tree(tmp_path, loads=(10.0, 30.0), eject=(30.0,))
+    _write(tmp_path, _ov(_id(tmp_path, 30.0), 'pass'))
+    r = DataReader(str(tmp_path))
+    p = _point(r, 30.0)
+    assert p.status == 'complete' and not p.integrity.failed
+    assert p.integrity.overridden and p.integrity.ruled_by_user
+    assert p.integrity.original_status == 'failed_integrity'
+    assert 'overridden by user 2026-11-12: expert call' in p.status_detail
+    assert r.ruling_warnings == []
+    assert p.integrity.as_dict()['overridden'] is True
+
+
+def test_override_fail_on_complete(tmp_path):
+    _afm_tree(tmp_path, loads=(10.0, 30.0))
+    _write(tmp_path, _ov(_id(tmp_path, 10.0), 'fail'))
+    p = _point(DataReader(str(tmp_path)), 10.0)
+    assert p.status == 'failed_integrity' and p.integrity.failed
+    assert p.integrity.original_status == 'complete'
+
+
+def test_no_override_flag_warns(tmp_path):
+    _afm_tree(tmp_path, loads=(10.0, 30.0), eject=(30.0,))
+    _write(tmp_path, _ov(_id(tmp_path, 30.0), 'pass', override=False))
+    r = DataReader(str(tmp_path))
+    assert _point(r, 30.0).status == 'failed_integrity'
+    assert len(r.ruling_warnings) == 1 and 'override: true' in r.ruling_warnings[0]
+
+
+def test_override_empty_note_warns(tmp_path):
+    _afm_tree(tmp_path, loads=(10.0, 30.0), eject=(30.0,))
+    _write(tmp_path, _ov(_id(tmp_path, 30.0), 'pass', note="''"))
+    r = DataReader(str(tmp_path))
+    assert _point(r, 30.0).status == 'failed_integrity'
+    assert len(r.ruling_warnings) == 1 and 'note' in r.ruling_warnings[0]
+
+
+def test_quarantined_pass_is_not_an_override(tmp_path):
+    _quarantined_tree(tmp_path)
+    _write(tmp_path, _ruling(_id(tmp_path, 30.0), 'pass'))
+    p = _point(DataReader(str(tmp_path)), 30.0)
+    assert p.status == 'complete' and not p.integrity.overridden
+    assert p.integrity.original_status == 'quarantined'
+
+
+from src.postprocessing.integrity_rulings import Ruling, decide  # noqa: E402
+
+
+@pytest.mark.parametrize('status,ruling,expect', [
+    ('truncated', 'pass', 'complete'),
+    ('truncated', 'fail', 'truncated'),
+    ('halted', 'pass', 'complete'),
+    ('no_output', 'fail', 'no_output'),
+    ('no_output', 'pass', None),
+    ('not_reached', 'pass', None),
+    ('quarantined', 'fail', 'failed_integrity'),
+])
+def test_decide_with_override(status, ruling, expect):
+    new, why = decide(status, Ruling(ruling=ruling, note='n', override=True))
+    assert new == expect and (why is None) == (expect is not None)
+
+
+def test_decide_refuses_without_override():
+    assert decide('complete', Ruling(ruling='fail', note='n')) [0] is None

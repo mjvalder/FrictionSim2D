@@ -255,6 +255,7 @@ def _summarise_dataset(deps, folder: Path, files: List[Path], filters: Dict[str,
     lines = [f'{display_path(folder, deps.roots)} — dataset, {len(files)} file(s)']
     rows: List[Tuple[int, str]] = []
     awaiting: List[str] = []
+    overridden: List[str] = []
     for path in files:
         if filters['size'] and _norm_size(_size_of(path)) != _norm_size(filters['size']):
             continue
@@ -276,11 +277,19 @@ def _summarise_dataset(deps, folder: Path, files: List[Path], filters: Dict[str,
                 rows.append((rank, _row(run)))
                 if status == 'quarantined':
                     awaiting.append(_ruling_line(run))
+                integrity = run.get('integrity')
+                if isinstance(integrity, dict) and integrity.get('overridden'):
+                    overridden.append(
+                        f"{_ruling_line(run)} ({integrity.get('original_status')}"
+                        f" -> {status})")
     if not rows:
         return '\n'.join(lines + [_no_match(filters)])
     if awaiting:
         lines += ['awaiting your ruling (add to integrity_rulings.yaml):'] + [
             f'  {a}' for a in awaiting]
+    if overridden:
+        lines += ['overridden by you (integrity_rulings.yaml):'] + [
+            f'  {o}' for o in overridden]
     rows.sort(key=lambda r: r[0])  # stable: complete first, file order kept
     max_rows = max(1, int(max_rows))
     return _fit(lines, [row for _, row in rows[:max_rows]], len(rows[max_rows:]), 'rows')
