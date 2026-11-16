@@ -127,3 +127,14 @@ def test_merge_refills_each_member_from_its_own_defaults():
                ({'thermostat': {}}, {}, {'general.temp': 250.0})]
     blocks, _ = merge_varying(members, kinds=kinds)
     assert blocks['thermostat'] == {'general.temp': VARIES}
+
+
+def test_real_key_matches_compare_tolerance():
+    from src.core.compare import real_key, same_value
+    assert real_key(0.1 + 0.2) == real_key(0.3)
+    assert real_key(1.0) != real_key(1.001)
+    assert same_value([0.1 + 0.2, 'x'], [0.3, 'x']) and not same_value(1.0, 1.001)
+    report = compare_blocks({'integration': {'settings.simulation.timestep': 0.1 + 0.2}},
+                            {'integration': {'settings.simulation.timestep': 0.3}},
+                            units={})
+    assert report.identical == ['integration'] and report.differs == {}

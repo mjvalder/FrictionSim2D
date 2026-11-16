@@ -26,14 +26,14 @@ from __future__ import annotations
 import json
 import logging
 import math
-import numbers
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import (Any, Dict, Iterable, List, Literal, Mapping, Optional, Sequence,
                     Set, Tuple, Union)
 
-from ..core.compare import refill
+from ..core.compare import canonical, refill
 from .block_schema import BLOCK_KINDS, FIELD_MAP, REALIZATION_FIELDS, unindexed
 from .blocks import NAME_SEP, block_kind
 from .compare import block_name, schema_tables
@@ -358,7 +358,7 @@ def _block_links(include_superseded: bool):
     rows, one per point and block (or schema) link of its CalcJob."""
     from .store import BLOCK_HASH_EXTRA, RUN_UUID_EXTRA, SCHEMA_HASH_EXTRA  # pylint: disable=import-outside-toplevel
     point_attrs = ('point_uuid', 'family', 'load_kind', 'load', 'angle', 'speed',
-                   'rel_path', 'deck_name')
+                   'rel_path', 'deck_name', 'units')
     qb = orm.QueryBuilder()
     qb.append(orm.CalcJobNode, tag='c', filters={'process_type': _process_type()},
               project=['uuid', 'extras.superseded', f'extras.{RUN_UUID_EXTRA}'])
@@ -379,8 +379,10 @@ def _block_links(include_superseded: bool):
         superseded = _dead(calc_dead) or _dead(point_dead)
         if superseded and not include_superseded:
             continue
+        units = attrs.pop('units') or {}
         entry = points.setdefault(str(node_uuid), {
-            'meta': {**attrs, 'node_uuid': str(node_uuid), 'calc_uuid': str(calc_uuid),
+            'meta': {**attrs, **{f'{axis}_unit': units.get(axis) for axis in AXES},
+                     'node_uuid': str(node_uuid), 'calc_uuid': str(calc_uuid),
                      'run_uuid': run_uuid, 'superseded': superseded},
             'blocks': [], 'schema': None})
         if label == _SCHEMA_LINK:
@@ -445,14 +447,16 @@ def point_table(*, include_superseded: bool = False):
     each elided field refilled from the default of the run's own stored
     schema; the swept axes ``load``, ``angle``, ``speed``; and ``point_uuid``,
     ``node_uuid``, ``calc_uuid``, ``run_uuid``, ``family``, ``load_kind``,
-    ``rel_path``, ``deck_name``, ``superseded``, ``schema_hash``.
+    ``load_unit``, ``angle_unit``, ``speed_unit``, ``rel_path``, ``deck_name``,
+    ``superseded``, ``schema_hash``.
     ``table.attrs['units']`` maps each schema hash to its ``{schema path:
     unit}``.
 
     Built from one projection of (point, CalcJob, block link label, block
     hash) and one fetch of the distinct block contents by hash, so the cost
-    does not grow with a query per point or per block (critique I8). A point
-    whose CalcJob's blocks carry no hash extra is left out, with a warning
+    does not grow with a query per point or per block (critique I8). The
+    points of a CalcJob whose blocks carry no hash extra, or that has no
+    schema to refill from, are left out, with one warning per run
     (``FrictionSim2D aiida reindex`` restores the extras).
     """
     import pandas as pd  # pylint: disable=import-outside-toplevel
@@ -464,16 +468,24 @@ def point_table(*, include_superseded: bool = False):
     blocks, schemas = (_contents(block_hashes, schema_hashes) if points else ({}, {}))
     refiller = _Refiller(schemas)
     rows = []
-    for uuid, entry in points.items():
-        row = {**entry['meta'], 'schema_hash': entry['schema']}
-        missing = [label for label, h in entry['blocks'] if h not in blocks]
+    left_out: Dict[Tuple[Optional[str], str], Set[str]] = {}
+    for entry in points.values():
+        meta = entry['meta']
+        missing = sorted(label for label, h in entry['blocks'] if h not in blocks)
+        if entry['schema'] not in schemas:
+            missing.append(_SCHEMA_LINK)
         if missing:
-            logger.warning('point %s: blocks %s have no stored content by hash; left '
-                           'out (run `FrictionSim2D aiida reindex`)', uuid, missing)
+            left_out.setdefault((meta['run_uuid'], meta['rel_path']), set()).update(missing)
             continue
+        row = {**meta, 'schema_hash': entry['schema']}
         for label, digest in entry['blocks']:
             row.update(refiller.columns(label, digest, blocks[digest], entry['schema']))
         rows.append(row)
+    for (run_uuid, rel_path), labels in sorted(left_out.items(), key=str):
+        logger.warning('run %s (%s): its points are left out of the point table: %s '
+                       'have no stored content by hash, or no schema link (run '
+                       '`FrictionSim2D aiida reindex`)', run_uuid, rel_path,
+                       ', '.join(sorted(labels)))
     rows.sort(key=_default_order)
     table = pd.DataFrame(rows)
     table.attrs['units'] = {h: tables[0] for h, tables in refiller.tables.items()}
@@ -497,9 +509,22 @@ def _column_path(column: str) -> str:
     return column.split('.', 1)[1]
 
 
+#: Non-field columns of :func:`point_table`: identity and bookkeeping, never
+#: something ``related`` can vary.
+_META_COLUMNS = ('point_uuid', 'node_uuid', 'calc_uuid', 'run_uuid', 'family',
+                 'load_kind', 'rel_path', 'deck_name', 'superseded', 'schema_hash',
+                 'load_unit', 'angle_unit', 'speed_unit')
+
+#: Axis units, compared whether or not the axis varies: a load in nN and one
+#: in GPa are not two values of one quantity.
+_UNIT_COLUMNS = tuple(f'{axis}_unit' for axis in AXES)
+
+
 def _vary_columns(vary: Sequence[str], columns: Sequence[str]) -> Set[str]:
-    """The table columns ``vary`` names; ``ValueError`` for a name that is not
-    a swept axis, a block kind, a block name, a column or a field path."""
+    """The table columns ``vary`` names: a swept axis, a block kind
+    (``realization`` among them), a block name, or a field path (bare, or
+    with its block). ``ValueError`` for anything else, the identity and
+    bookkeeping columns (``family``, ``rel_path``, ...) included."""
     fields = [c for c in columns if _is_field_column(c)]
     out: Set[str] = set()
     for name in vary:
@@ -507,10 +532,14 @@ def _vary_columns(vary: Sequence[str], columns: Sequence[str]) -> Set[str]:
             out.add(name)
         elif name in BLOCK_KINDS:
             out |= {c for c in fields if _column_kind(c) == name}
+        elif name in _META_COLUMNS:
+            raise ValueError(f'cannot vary {name!r}: it is point identity, not a '
+                             f'parameter; vary a swept axis {AXES}, a block kind, a '
+                             f'block name or a field path')
         elif NAME_SEP in name and '.' not in name:
             block_kind(name)
             out |= {c for c in fields if c.split('.', 1)[0] == name}
-        elif name in columns:
+        elif name in fields:
             out.add(name)
         else:
             found = {c for c in fields
@@ -523,21 +552,27 @@ def _vary_columns(vary: Sequence[str], columns: Sequence[str]) -> Set[str]:
     return out
 
 
+_ABSENT = '\0absent'
+
+
+def _absent(value: Any) -> bool:
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
 def _key(value: Any) -> str:
-    """One canonical string per value: equal values, equal keys; absent alike.
+    """One canonical string per value (:func:`src.core.compare.canonical`:
+    reals to the significant figures ``compare`` resolves), absent alike.
     numpy scalars (pandas hands them back) count as their Python value."""
     if hasattr(value, 'item') and not isinstance(value, (list, dict)):
         value = value.item()
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return '\0absent'
-    if isinstance(value, numbers.Real) and not isinstance(value, bool):
-        value = float(value)
-    return json.dumps(value, sort_keys=True)
+    if _absent(value):
+        return _ABSENT
+    return json.dumps(canonical(value), sort_keys=True)
 
 
 def _axis_key(value: Any) -> str:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return '\0absent'
+    if _absent(value):
+        return _ABSENT
     return repr(round(float(value), _AXIS_DECIMALS))
 
 
@@ -557,25 +592,48 @@ def _reference_row(table, point):
     return rows.iloc[0]
 
 
-def _unit_clash(table, compared: Sequence[str], reference_schema: Optional[str]):
-    """A mask of the rows whose schema states another unit than the
-    reference's for any compared field: those values cannot be equal."""
+def _narrow(table, mask, columns: Sequence[str], reference):
+    """``mask`` narrowed, column by column, to the rows equal to
+    ``reference`` there: each column is keyed on the surviving rows only."""
+    mask = mask.copy()
+    for column in columns:
+        if not mask.any():
+            break
+        if column not in table.columns:
+            continue
+        to_key = _axis_key if column in AXES else _key
+        rows = mask[mask].index
+        mask.loc[rows] = (table.loc[rows, column].map(to_key)
+                          == to_key(reference.get(column))).to_numpy()
+    return mask
+
+
+def _unit_clash(table, mask, compared: Sequence[str], reference):
+    """The rows of ``mask`` whose schema states another unit than the
+    reference's for a compared field the reference carries (rows that
+    survived :func:`_narrow` carry it too); a field both leave absent never
+    clashes. Those values cannot be equal."""
     units = table.attrs.get('units', {})
-    ref = units.get(reference_schema, {})
-    paths = {unindexed(_column_path(c)) for c in compared if _is_field_column(c)}
-    clashing = [schema for schema in set(table['schema_hash']) - {reference_schema}
+    ref_schema = reference.get('schema_hash')
+    ref = units.get(ref_schema, {})
+    paths = {unindexed(_column_path(c)) for c in compared
+             if _is_field_column(c) and not _absent(reference.get(c))}
+    schemas = set(table.loc[mask, 'schema_hash']) - {ref_schema}
+    clashing = [schema for schema in schemas
                 if any(ref.get(p) != units.get(schema, {}).get(p) for p in paths)]
-    return table['schema_hash'].isin(clashing)
+    return mask & table['schema_hash'].isin(clashing)
 
 
 def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
-            policy: Policy = Policy(), table=None) -> List[Any]:
+            table=None) -> List[Any]:
     """The current points that differ from ``point`` only along ``vary``.
 
     A point relates when it equals ``point`` on every requested field column
     of :func:`point_table` outside ``vary`` (elided fields refilled from each
-    run's own schema; a field stored in another unit is never equal), on its
-    family, and on every swept axis outside ``vary``. Deck shape is not
+    run's own schema; reals equal to the significant figures
+    :func:`src.core.compare.real_key` resolves, as ``compare`` judges them;
+    a field stored in another unit is never equal), on its family, on every
+    swept axis outside ``vary``, and on the axes' units. Deck shape is not
     identity, so an array-mode point and a combined-mode point of the same
     physics relate; groups do not matter either.
 
@@ -593,9 +651,6 @@ def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
     Args:
         point: The point ``FolderData``, or its ``point_uuid``.
         vary: What may differ.
-        policy: The verdict/summary policy the caller reads the points under;
-            the selection itself is by parameters only and does not filter
-            on verdicts.
         table: A :func:`point_table` to reuse (several ``related`` calls over
             one table cost one projection).
 
@@ -605,9 +660,8 @@ def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
 
     Raises:
         LookupError: ``point`` is not a current point.
-        ValueError: ``vary`` names nothing ``related`` knows.
+        ValueError: ``vary`` names nothing ``related`` can vary.
     """
-    del policy  # selection by parameters only; see Args
     _require_aiida()
     table = point_table() if table is None else table
     reference = _reference_row(table, point)
@@ -615,28 +669,20 @@ def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
     varied = _vary_columns(names, list(table.columns))
     fields = [c for c in table.columns if _is_field_column(c)]
     realization = {c for c in fields if _column_kind(c) == REALIZATION}
-    identity = ['family'] + fields + list(AXES)
-    if 'load' not in varied:
-        identity.append('load_kind')
+    # Cheap, selective columns first: each later one is keyed on fewer rows.
+    identity = list(AXES) + ['family', 'load_kind'] + list(_UNIT_COLUMNS) + fields
+    if 'load' in varied:
+        identity.remove('load_kind')
     compared = [c for c in identity if c not in varied and c not in realization]
-    free = [c for c in varied if c not in realization]
+    free = [c for c in identity if c in varied and c not in realization]
 
-    def equal(columns: Sequence[str]):
-        mask = table['node_uuid'].notna()
-        for column in columns:
-            to_key = _axis_key if column in AXES else _key
-            mask &= table[column].map(to_key) == to_key(reference[column])
-        return mask
-
-    same = equal(compared)
-    replicate = same & equal(free)
-    keep = same & ~_unit_clash(table, compared, reference['schema_hash'])
+    start = (table['point_uuid'] != reference['point_uuid']) & \
+            (table['node_uuid'] != reference['node_uuid'])
+    same = _narrow(table, start, compared, reference)
+    keep = same & ~_unit_clash(table, same, compared, reference)
     if REALIZATION not in names:
-        keep &= ~replicate
-    keep &= table['point_uuid'] != reference['point_uuid']
-    keep &= table['node_uuid'] != reference['node_uuid']
-    uuids = list(table.loc[keep, 'node_uuid'])
-    return _nodes_by_uuid(uuids)
+        keep &= ~_narrow(table, keep, free, reference)
+    return _nodes_by_uuid(list(table.loc[keep, 'node_uuid']))
 
 
 def _nodes_by_uuid(uuids: Sequence[str]) -> List[Any]:
@@ -706,6 +752,21 @@ class Friction2DDB:
 
     def __init__(self):
         _require_aiida()
+        self._snapshot: Optional[_Points] = None
+
+    @contextmanager
+    def snapshot(self):
+        """Within it, :meth:`query`, :meth:`get_available_conditions`,
+        :meth:`get_available_materials` and :meth:`get_statistics` share one
+        projection of the live points (one refresh of the GUI list costs one)."""
+        self._snapshot = _points()
+        try:
+            yield self
+        finally:
+            self._snapshot = None
+
+    def _live(self) -> _Points:
+        return self._snapshot if self._snapshot is not None else _points()
 
     # -- sets ------------------------------------------------------------------
 
@@ -795,8 +856,8 @@ class Friction2DDB:
         """
         params = {k: v for k, v in locals().items()
                   if k not in ('self', 'policy', 'summary_options')}
-        found = _points()
-        rows = [row for row in found.rows if _matches(row, params)]
+        found = self._live()
+        rows = [dict(row) for row in found.rows if _matches(row, params)]
         params.update(policy=policy.as_dict(), summary_options=summary_options)
         selected = _selected([found.nodes[r['node_uuid']] for r in rows], policy,
                              _summary_digest(summary_options)) if rows else {}
@@ -828,9 +889,9 @@ class Friction2DDB:
 
     @staticmethod
     def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
-                policy: Policy = Policy(), table=None) -> List[Any]:
+                table=None) -> List[Any]:
         """See :func:`related`."""
-        return related(point, vary, policy=policy, table=table)
+        return related(point, vary, table=table)
 
     @staticmethod
     def latest(point: Union[str, Any], kind: Literal['verdict', 'summary'],
@@ -850,7 +911,7 @@ class Friction2DDB:
         values: Dict[str, Set[Any]] = {k: set() for k in (
             'forces', 'pressures', 'angles', 'speeds', 'temperatures', 'layers',
             'families', 'models', 'potentials')}
-        for row in _points().rows:
+        for row in self._live().rows:
             kind = row.get('load_kind')
             if kind in ('force', 'pressure'):
                 values['forces' if kind == 'force' else 'pressures'].add(row['load'])
@@ -868,7 +929,7 @@ class Friction2DDB:
 
     def get_available_materials(self) -> List[str]:
         """Every material named by a live point's run, sorted."""
-        return sorted({m for row in _points().rows for m in (row.get('materials') or ())})
+        return sorted({m for row in self._live().rows for m in (row.get('materials') or ())})
 
     def get_statistics(self, policy: Policy = Policy()) -> Dict[str, Any]:
         """Counts: ``n_groups`` (sets), ``n_decks`` (live CalcJobs),
@@ -876,7 +937,7 @@ class Friction2DDB:
         the verdict ``policy`` selects; ``'unchecked'`` without one),
         ``by_family``, ``by_model``, ``by_material``, ``n_materials``."""
         from .steps import latest_verdicts  # pylint: disable=import-outside-toplevel
-        found = _points()
+        found = self._live()
         nodes = [found.nodes[r['node_uuid']] for r in found.rows]
         verdicts: Dict[int, Any] = {}
         for batch in _chunks(nodes):

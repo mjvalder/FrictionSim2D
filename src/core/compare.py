@@ -11,13 +11,15 @@ of identity and are compared separately, to a relative tolerance.
 """
 from __future__ import annotations
 
+import math
 import numbers
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 __all__ = ['DEFAULT_ATOL', 'DEFAULT_RTOL', 'VARIES', 'CompareReport', 'compare_blocks',
-           'merge_varying', 'refill']
+           'canonical', 'merge_varying', 'real_key', 'refill',
+           'same_value']
 
 #: Stands for a field that takes several values within a campaign.
 VARIES = '<varies>'
@@ -105,10 +107,46 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, numbers.Real) and not isinstance(value, bool)
 
 
+def real_key(value: float, rtol: float = DEFAULT_RTOL) -> float:
+    """``value`` rounded to the significant figures ``rtol`` resolves
+    (``1e-6`` -> 6): one canonical number per tolerance class, so
+    ``0.1 + 0.2`` and ``0.3`` key alike while ``1.0`` and ``1.001`` do not.
+
+    :func:`src.aiida.query.related` keys reals with this, and
+    :func:`compare_blocks` treats two reals with one key as equal, so the two
+    never disagree on whether a value changed.
+    """
+    value = float(value)
+    if value == 0.0 or not math.isfinite(value):
+        return value
+    digits = max(1, math.ceil(-math.log10(rtol)))
+    return float(f'{value:.{digits}g}')
+
+
+def canonical(value: Any, rtol: float = DEFAULT_RTOL) -> Any:
+    """``value`` with every real (inside lists and dicts too) replaced by its
+    :func:`real_key`: the form two requested values are equal in."""
+    if _is_number(value):
+        return real_key(value, rtol)
+    if isinstance(value, Mapping):
+        return {k: canonical(v, rtol) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [canonical(v, rtol) for v in value]
+    return value
+
+
+def same_value(a: Any, b: Any, rtol: float = DEFAULT_RTOL) -> bool:
+    """Equal after :func:`canonical`: the equality of a requested field in
+    :func:`compare_blocks`, :func:`merge_varying` and ``related()``."""
+    return canonical(a, rtol) == canonical(b, rtol)
+
+
 def _close(a: Any, b: Any, rtol: float, atol: float = DEFAULT_ATOL) -> bool:
-    """Equal, or numbers within ``max(atol, rtol * max(|a|, |b|))``."""
+    """Equal, numbers within ``max(atol, rtol * max(|a|, |b|))``, or numbers
+    with one :func:`real_key`."""
     if _is_number(a) and _is_number(b):
-        return abs(a - b) <= max(atol, rtol * max(abs(a), abs(b)))
+        return (abs(a - b) <= max(atol, rtol * max(abs(a), abs(b)))
+                or real_key(a, rtol) == real_key(b, rtol))
     return a == b
 
 
@@ -164,7 +202,8 @@ def compare_blocks(a: Mapping[str, dict], b: Mapping[str, dict], *,
             as ``derived.geometry.lat_c``) -> unit / default. Side B's too,
             unless ``units_b`` / ``defaults_b`` are given.
         derived_a, derived_b: Derived values, flat.
-        rtol, atol: Tolerance for derived values (blocks compare exactly):
+        rtol, atol: Tolerance for derived values (block fields compare by
+            :func:`same_value`, to the default rtol):
             ``|a-b| <= max(atol, rtol * max(|a|, |b|))``.
         kinds: Schema path -> block kind, to see fields both sides elide
             at different defaults.
@@ -186,7 +225,7 @@ def compare_blocks(a: Mapping[str, dict], b: Mapping[str, dict], *,
                 continue
             va = fa[path] if path in fa else defaults.get(sp)
             vb = fb[path] if path in fb else defaults_b.get(sp)
-            if va != vb:
+            if not same_value(va, vb):
                 diffs.append((path, va, vb, ua))
         if diffs:
             report.differs[name] = diffs
@@ -231,7 +270,8 @@ def merge_varying(members: Iterable[Tuple[Mapping[str, dict], Mapping[str, Any],
         for path in _visible(name, [f for f, _ in have], [t for _, t in have], kinds):
             sp = _unindexed(path)
             values = [f[path] if path in f else t.get(sp) for f, t in have]
-            out[path] = values[0] if all(v == values[0] for v in values) else VARIES
+            out[path] = (values[0] if all(same_value(v, values[0]) for v in values)
+                         else VARIES)
         merged[name] = out
     derived: Dict[str, Any] = {}
     for key in sorted({k for _, d, _ in listed for k in d}):

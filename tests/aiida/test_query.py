@@ -251,6 +251,9 @@ def test_query_filters(campaigns):
     assert db.query(materials=['h-MoS2', 'no-such']).total_count == 0
     assert db.query(temperature_range=(299.0, 301.0)).total_count == 7
     assert db.query(size_y=999.0).total_count == 0
+    with db.snapshot():
+        assert db.query(set_label='B').total_count == 4
+        assert db.get_available_materials() == ['h-MoS2']
     limited = db.query(limit=2, order_by='-load')
     assert limited.total_count == 7
     assert list(limited.to_dataframe()['load']) == [40.0, 30.0]
@@ -316,3 +319,99 @@ def test_aiida_query_cli_prints_point_rows(campaigns, no_profile_switch):
     header = next(line for line in result.output.splitlines() if 'point_uuid' in line)
     assert 'load_unit' in header and 'status' in header
     assert 'Found 3 results' in result.output
+    assert 'Showing' not in result.output
+    limited = CliRunner().invoke(cli, ['aiida', 'query', '--limit', '2'])
+    assert limited.exit_code == 0, limited.output
+    assert 'Showing 2 of 7' in limited.output
+
+
+# --- related over a hand-made table: tolerance, units, vary names ---------------
+
+def _row(uuid, **fields):
+    row = {'point_uuid': uuid, 'node_uuid': f'n-{uuid}', 'family': 'afm',
+           'load_kind': 'force', 'load': 10.0, 'angle': 0.0, 'speed': 2.0,
+           'load_unit': 'nN', 'angle_unit': 'deg', 'speed_unit': 'm/s',
+           'schema_hash': 'S1', TIMESTEP: 0.001, 'thermostat.general.temp': 300.0}
+    row.update(fields)
+    return row
+
+
+def _hand_table(rows, units=None):
+    import pandas as pd
+    table = pd.DataFrame(rows)
+    table.attrs['units'] = units or {'S1': {}, 'S2': {}}
+    return table
+
+
+@pytest.fixture
+def uuids_back(monkeypatch):
+    """`related` returns the node uuids it would load."""
+    monkeypatch.setattr(query_mod, '_nodes_by_uuid', lambda uuids: list(uuids))
+
+
+def test_reals_equal_to_compare_tolerance(uuids_back):
+    table = _hand_table([_row('p', **{TIMESTEP: 0.3}),
+                         _row('q', **{TIMESTEP: 0.1 + 0.2}),
+                         _row('r', **{TIMESTEP: 0.3, 'thermostat.general.temp': 300.3})])
+    assert related('p', 'thermostat', table=table) == ['n-r']
+    table = _hand_table([_row('p', **{TIMESTEP: 1.0}), _row('q', **{TIMESTEP: 1.001})])
+    assert related('p', 'thermostat', table=table) == []
+    assert related('p', 'integration', table=table) == ['n-q']
+
+
+def test_unit_clash_on_a_compared_field_excludes(uuids_back):
+    units = {'S1': {'general.temp': 'K'}, 'S2': {'general.temp': 'degC'}}
+    table = _hand_table([_row('p'), _row('q', schema_hash='S2', **{TIMESTEP: 0.002})],
+                        units)
+    assert related('p', 'integration', table=table) == []
+    # The clashing field varies: not compared, so no clash.
+    assert related('p', ('integration', 'thermostat'), table=table) == ['n-q']
+
+
+def test_unit_clash_on_a_field_both_leave_absent_does_not_exclude(uuids_back):
+    units = {'S1': {'tip.r': 'angstrom'}, 'S2': {'tip.r': 'nm'}}
+    table = _hand_table([_row('p', **{'geometry.tip.r': None}),
+                         _row('q', schema_hash='S2',
+                              **{'geometry.tip.r': None, TIMESTEP: 0.002})], units)
+    assert related('p', 'integration', table=table) == ['n-q']
+
+
+def test_axis_units_are_compared(uuids_back):
+    table = _hand_table([_row('p'), _row('q', load=20.0, load_unit='GPa')])
+    assert related('p', 'load', table=table) == []
+    table = _hand_table([_row('p'), _row('q', load=20.0)])
+    assert related('p', 'load', table=table) == ['n-q']
+
+
+@pytest.mark.parametrize('name', ['family', 'rel_path', 'deck_name', 'run_uuid',
+                                  'point_uuid', 'load_unit'])
+def test_vary_rejects_identity_columns(uuids_back, name):
+    with pytest.raises(ValueError, match='identity'):
+        related('p', name, table=_hand_table([_row('p'), _row('q')]))
+
+
+def test_points_without_schema_warn_once_per_run(campaigns, monkeypatch, caplog):
+    real = query_mod._contents
+    monkeypatch.setattr(query_mod, '_contents',
+                        lambda blocks, schemas: (real(blocks, schemas)[0], {}))
+    with caplog.at_level('WARNING', logger='src.aiida.query'):
+        assert point_table().empty
+    lines = [r.getMessage() for r in caplog.records if 'left out' in r.getMessage()]
+    assert len(lines) == 2                       # runs A and B, not 7 points
+    assert all('schema' in line for line in lines)
+
+
+def test_snapshot_shares_one_points_projection(campaigns, monkeypatch):
+    calls = []
+    real = query_mod._points
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(query_mod, '_points', counting)
+    db = Friction2DDB()
+    with db.snapshot():
+        db.query()
+        db.get_available_materials()
+        db.get_available_conditions()
+    assert len(calls) == 1

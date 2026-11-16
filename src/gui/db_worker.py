@@ -18,6 +18,7 @@ import json
 import sys
 import time
 import traceback
+from contextlib import nullcontext
 from typing import Any, Callable, Dict, List
 
 #: The kwargs `Friction2DDB.query` accepts. Anything else in a request's
@@ -172,11 +173,14 @@ def _list(request: Dict[str, Any]) -> Dict[str, Any]:
     limit = filters.get('limit')
     db = _local_db(request)
     _emit('progress', message='querying the local store')
-    result = db.query(**filters)
-    records = _records(result.to_dataframe())
-    _add_imported_at(records)
-    facets = {'materials': list(db.get_available_materials()),
-              **_facet_lists(db.get_available_conditions())}
+    # One projection of the store's points serves the rows and the facets.
+    snapshot = getattr(db, 'snapshot', None)
+    with snapshot() if snapshot is not None else nullcontext():
+        result = db.query(**filters)
+        records = _records(result.to_dataframe())
+        _add_imported_at(records)
+        facets = {'materials': list(db.get_available_materials()),
+                  **_facet_lists(db.get_available_conditions())}
     total = result.total_count
     # Only the local source can export a whole set, so only it needs the
     # run counts the run_tree confirmation quotes.

@@ -1031,6 +1031,9 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
     try:
         results = db.query(**query_kwargs)
         click.echo(f"📊 Found {results.total_count} results")
+        shown_rows = getattr(results, 'rows', None)
+        if shown_rows is not None and len(shown_rows) < results.total_count:
+            click.echo(f"Showing {len(shown_rows)} of {results.total_count}")
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA query failed")
         _raise_abort(f"❌ Query failed: {exc}", exc)
