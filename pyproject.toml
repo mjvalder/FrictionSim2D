@@ -34,7 +34,7 @@ FrictionSim2D = "src.cli:main"
 
 [project.optional-dependencies]
 aiida = [
-  "aiida-core>=2.0",
+  "aiida-core>=2.7,<3",
   "typing_extensions>=4.0",
   # rabbitmq-server and postgresql are system / conda dependencies.
   # Install via:  conda install -c conda-forge aiida-core aiida-core.services

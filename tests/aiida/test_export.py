@@ -7,6 +7,7 @@ gated on verdicts, closed over the campaign [I6], anonymised by default
 README [M4]. A second profile is `aiida_profile_clean.reset_storage()`.
 """
 import json
+import socket
 import sqlite3
 import zipfile
 
@@ -32,7 +33,7 @@ from src.aiida.query import related  # noqa: E402
 from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
 from src.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
-from tests.aiida.test_steps_integrity import _pid, _write_ruling  # noqa: E402
+from src.postprocessing.integrity_rulings import RULINGS_FILE, format_point_id  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
 from tests.postprocessing.test_read_data_integrity import DECK, _afm_snapshots  # noqa: E402
 
@@ -109,16 +110,30 @@ def _archive_text(path):
 
 def test_round_trip_gives_the_source_statuses(aiida_profile_clean, no_profile_switch,
                                               tmp_path):
+    """Slide and system-stage halts, a quarantine ruling and an override
+    ruling all come back."""
     root = tmp_path / 'sim'
-    run_dir = _run(root, eject=(10.0,), quarantine=(50.0,), loads=(10.0, 30.0, 50.0, 70.0))
+    run_dir = _run(root, eject=(10.0, 30.0), quarantine=(50.0,),
+                   loads=(10.0, 30.0, 50.0, 70.0))
     (run_dir / 'results' / 'halted.txt').write_text(
         '# HALT stage=slide load=70 angle=0 speed=2 T=9000 step=3000\n', encoding='utf-8')
-    _write_ruling(root, _pid(root, 50.0), 'pass')
+    other = _run(root, 'h-WS2', loads=(10.0, 30.0, 50.0))
+    (other / 'results' / 'halted.txt').write_text(
+        '# HALT stage=system load=30 T=9100 step=400\n', encoding='utf-8')
+    rel = run_dir.relative_to(root).as_posix()
+    (root / RULINGS_FILE).write_text(yaml.safe_dump([
+        {'point': format_point_id(rel, 'force', 50.0, 0.0, 2.0), 'ruling': 'pass',
+         'note': 'looked at it', 'date': '2026-11-16'},
+        {'point': format_point_id(rel, 'force', 10.0, 0.0, 2.0), 'ruling': 'pass',
+         'note': 'ejection is a viewer artefact', 'date': '2026-11-16', 'override': True},
+    ]), encoding='utf-8')
     report = import_root(root, label='camp')
     assert report.ok(), report.render()
-    assert report.rulings.applied == 1           # import_root applies the rulings
+    assert report.rulings.applied == 2           # import_root applies the rulings
     source = _statuses(root)
     assert set(source.values()) >= {'complete', 'failed_integrity', 'halted'}
+    assert source[(other.relative_to(root).as_posix(), 'force', 30.0, 0.0, 2.0)] == 'halted'
+    assert source[(rel, 'force', 10.0, 0.0, 2.0)] != source[(rel, 'force', 30.0, 0.0, 2.0)]
 
     written = export_results('camp', tmp_path / 'out')
 
@@ -385,20 +400,25 @@ SECRETS = {
     'log_dir': '/logs/secretuser',
     'conda_env': '/envs/secretuser/lammps',
     'hpc_host': 'login.secret-cluster.example',
+    'account': 'secretacct',
 }
+DATABASE = {'user': 'secretdbuser', 'host': 'db.secret.example'}
 JOB_EXECUTABLE = '/apps/secret/bin/lmp_mpi'
 JOB_CD = '/rds/secretuser/runs'
 
 
-def _hpc_tree(root):
-    run_dir = _run(root, loads=(10.0,))
+def _hpc_tree(root, material='h-MoS2', **kwargs):
+    run_dir = _run(root, material, loads=(10.0,), **kwargs)
     prov = run_dir.parent / 'provenance'
     hpc = {'scheduler_type': 'pbs', **SECRETS}
-    (prov / 'settings.yaml').write_text(yaml.safe_dump({'hpc': hpc}), encoding='utf-8')
+    (prov / 'settings.yaml').write_text(
+        yaml.safe_dump({'hpc': hpc, 'database': dict(DATABASE),
+                        'output': {'dir': f'{root.resolve()}/out'}}), encoding='utf-8')
     config = json.loads((prov / 'config.json').read_text(encoding='utf-8'))
     config['settings']['hpc'] = dict(hpc)
+    config['settings']['database'] = dict(DATABASE)
     (prov / 'config.json').write_text(json.dumps(config), encoding='utf-8')
-    (root / 'hpc').mkdir()
+    (root / 'hpc').mkdir(exist_ok=True)
     (root / 'hpc' / 'job.pbs').write_text(
         f'#!/bin/bash\ncd {JOB_CD}\nmpirun -np 4 {JOB_EXECUTABLE} -in lammps/slide.in\n',
         encoding='utf-8')
@@ -417,9 +437,9 @@ def test_archive_anonymises_hpc_details_by_default(aiida_profile_clean, no_profi
 
     path = export_archive('camp', tmp_path / 'camp.aiida')
 
-    text = _archive_text(path)
-    for secret in (*SECRETS.values(), JOB_EXECUTABLE, JOB_CD):
-        assert secret not in text, secret
+    _assert_scrubbed(_archive_text(path), tmp_path)
+    readme = (tmp_path / 'camp.aiida.README.md').read_text(encoding='utf-8')
+    assert 'email' in readme and 'UUIDs' in readme
     # The local store keeps everything.
     assert calc.inputs.code.filepath_executable.as_posix() == JOB_EXECUTABLE
     assert calc.computer.hostname == SECRETS['hpc_host']
@@ -428,7 +448,8 @@ def test_archive_anonymises_hpc_details_by_default(aiida_profile_clean, no_profi
 
     kept = export_archive('camp', tmp_path / 'kept.aiida', keep_hpc_paths=True)
     text = _archive_text(kept)
-    for secret in (*SECRETS.values(), JOB_EXECUTABLE, JOB_CD):
+    for secret in (*SECRETS.values(), *DATABASE.values(), JOB_EXECUTABLE, JOB_CD,
+                   str(tmp_path)):
         assert secret in text, secret
 
     aiida_profile_clean.reset_storage()
@@ -440,5 +461,139 @@ def test_archive_anonymises_hpc_details_by_default(aiida_profile_clean, no_profi
     settings = yaml.safe_load(calc.inputs.provenance.base.repository.get_object_content(
         'provenance/settings.yaml', mode='r'))
     assert settings['hpc'] == {'scheduler_type': 'pbs', 'hpc_host': 'mycluster'}
+    assert 'user' not in settings['database'] and 'host' not in settings['database']
+    assert settings['output']['dir'] == 'out'
+    assert calc.inputs.remote_folder.get_remote_path() == f"mycluster:{calc.inputs.parameters['rel_path']}"
+    assert calc.get_remote_workdir() == calc.inputs.remote_folder.get_remote_path()
+    group = orm.Group.collection.get(label='friction2d/camp')
+    assert group.base.extras.get('source_root') == 'sim'
+    assert group.base.extras.get('source_host') == 'unknown'
     assert calc.inputs.provenance.base.extras.get('friction2d_anonymised') is True
     assert verify().ok, verify().render()
+
+
+def _secrets(tmp_path):
+    return (*SECRETS.values(), *DATABASE.values(), JOB_EXECUTABLE, JOB_CD,
+            str(tmp_path), socket.gethostname())
+
+
+def _assert_scrubbed(text, tmp_path):
+    for secret in _secrets(tmp_path):
+        assert secret not in text, secret
+
+
+def test_no_scrubbed_byte_survives_in_a_free_page(aiida_profile_clean, no_profile_switch,
+                                                  tmp_path, monkeypatch):
+    """Even with ``secure_delete`` off on the connection, the rewrite turns it on
+    and vacuums: the raw db file holds none of the scrubbed strings."""
+    root = tmp_path / 'sim'
+    _hpc_tree(root)
+    assert import_root(root, label='camp', machine='mycluster').ok()
+
+    def connect_insecurely(path):
+        con = sqlite3.connect(path)
+        con.execute('PRAGMA secure_delete=OFF')
+        return con
+    monkeypatch.setattr(export_mod, '_connect', connect_insecurely)
+    path = export_archive('camp', tmp_path / 'camp.aiida')
+
+    with zipfile.ZipFile(path) as archive:
+        raw = archive.read('db.sqlite3')
+    for secret in _secrets(tmp_path):
+        assert secret.encode('utf-8') not in raw, secret
+
+
+def test_a_failed_rewrite_leaves_no_archive(aiida_profile_clean, no_profile_switch,
+                                            tmp_path, monkeypatch):
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+
+    def boom(archive):
+        raise RuntimeError('rewrite failed')
+    monkeypatch.setattr(export_mod, '_anonymise', boom)
+    with pytest.raises(RuntimeError, match='rewrite failed'):
+        export_archive('camp', tmp_path / 'out' / 'camp.aiida')
+    assert list((tmp_path / 'out').iterdir()) == []
+
+
+def test_an_unknown_archive_layout_is_refused(aiida_profile_clean, no_profile_switch,
+                                              tmp_path, monkeypatch):
+    import aiida.storage.sqlite_zip.migrator as migrator
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+    monkeypatch.setattr(migrator, 'get_schema_version_head', lambda: 'main_9999')
+    with pytest.raises(export_mod.ArchiveFormatError, match='main_9999'):
+        export_archive('camp', tmp_path / 'camp.aiida')
+    assert not (tmp_path / 'camp.aiida').exists()
+
+
+def test_a_dataset_archive_is_gated_judged_and_anonymised(aiida_profile_clean,
+                                                          no_profile_switch, tmp_path):
+    from src.aiida.steps import latest_verdict
+    _hpc_tree(tmp_path / 'a', tiers=('window', 'peratom'))
+    _run(tmp_path / 'b', 'h-WS2', loads=(10.0,))
+    assert import_root(tmp_path / 'a', label='A', machine='mycluster').ok()
+    assert import_root(tmp_path / 'b', label='B').ok()
+    postprocess_group('A', options=OPTIONS)
+    postprocess_group('B', options=OPTIONS)
+    rows = build_dataset('both', ['A', 'B'], options=OPTIONS)['rows']
+    assert {row['set'] for row in rows} == {'A', 'B'}
+    member = orm.load_node(rows[0]['summary_uuid']).creator.inputs.point
+    verdict = latest_verdict(member)
+    verdict.base.extras.set('superseded', True)
+    with pytest.raises(UncheckedPointsError, match="dataset 'both'"):
+        export_dataset('both', tmp_path / 'both.aiida')
+    assert not (tmp_path / 'both.aiida').exists()
+    verdict.base.extras.delete('superseded')
+
+    path = export_dataset('both', tmp_path / 'both.aiida')
+
+    _assert_scrubbed(_archive_text(path), tmp_path)
+    readme = (tmp_path / 'both.aiida.README.md').read_text(encoding='utf-8')
+    assert 'friction2d/datasets/both' in readme and 'email' in readme
+    point_uuids = [row['point_uuid'] for row in rows]
+    aiida_profile_clean.reset_storage()
+    import_archive(path)
+    for puuid in point_uuids:
+        (point,) = orm.QueryBuilder().append(
+            orm.FolderData, filters={'attributes.point_uuid': puuid}).all(flat=True)
+        assert latest_verdict(point) is not None, puuid
+    assert orm.QueryBuilder().append(orm.CalcJobNode, tag='c').append(
+        orm.FolderData, with_incoming='c',
+        edge_filters={'label': {'like': 'peratom__%'}}).count() == 0
+
+
+def test_deleted_rows_leave_no_bytes_behind(aiida_profile_clean, no_profile_switch,
+                                            tmp_path, monkeypatch):
+    """The rewrite's own deletions (a per-atom node and its log) are zeroed and
+    vacuumed away, even with ``secure_delete`` off on the connection first."""
+    import uuid
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0,), tiers=('window', 'peratom'))
+    assert import_root(root, label='camp').ok()
+    path = export_archive('camp', tmp_path / 'camp.aiida', include_peratom=True,
+                          keep_hpc_paths=True)
+    db = tmp_path / 'edit.sqlite3'
+    with zipfile.ZipFile(path) as archive:
+        db.write_bytes(archive.read('db.sqlite3'))
+    secret = 'PERATOM-LOG-SECRET-' * 40
+    con = sqlite3.connect(db)
+    ((peratom,),) = con.execute("SELECT output_id FROM db_dblink WHERE label LIKE 'peratom%'")
+    con.execute('INSERT INTO db_dblog (uuid, time, loggername, levelname, dbnode_id, '
+                "message, metadata) VALUES (?, '2026-11-16 00:00:00', 'x', 'INFO', ?, ?, '{}')",
+                (str(uuid.uuid4()), peratom, secret))
+    con.commit()
+    con.close()
+    assert secret.encode() in db.read_bytes()
+
+    def connect_insecurely(path):
+        con = sqlite3.connect(path)
+        con.execute('PRAGMA secure_delete=OFF')
+        return con
+    monkeypatch.setattr(export_mod, '_connect', connect_insecurely)
+    counts, _keep, _blobs = export_mod._edit_db(db, lambda key: b'', anonymise=False,
+                                                drop_peratom=True)
+    assert counts['peratom_dropped'] == 1
+    assert b'PERATOM-LOG-SECRET' not in db.read_bytes()

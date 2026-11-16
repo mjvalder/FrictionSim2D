@@ -19,11 +19,18 @@ Every aiida import is deferred, so importing this module needs no aiida-core.
 **Anonymisation is a rewrite of the written archive**, not of the store:
 nodes are immutable once stored and the local store keeps everything. After
 ``create_archive``, :func:`_rewrite_archive` edits the archive's own
-``db.sqlite3`` and repository blobs: the Computer hostname becomes its label,
-a Code's ``filepath_executable`` its basename, ``hpc_run_path`` leaves the
-CalcJob ``parameters``, and the provenance documents lose
-``hpc.hpc_home``/``scratch_dir``/``log_dir``/``conda_env`` (``hpc.hpc_host``
-becomes the machine label). A rewritten provenance folder keeps its UUID, so a
+``db.sqlite3`` (``secure_delete`` on, then ``VACUUM``, so nothing scrubbed
+survives in a free page) and repository blobs: the Computer hostname becomes
+its label, a Code's ``filepath_executable`` its basename, ``remote_workdir`` and
+``RemoteData.remote_path`` ``<machine label>:<rel_path>``, ``hpc_run_path``
+leaves the CalcJob ``parameters``, the set Group's ``source_root`` becomes its
+basename and ``source_host`` the machine label (or ``unknown``), and the
+provenance documents lose ``hpc.hpc_home``/``scratch_dir``/``log_dir``/
+``conda_env``/``account`` and ``database.user``/``host`` (``hpc.hpc_host``
+becomes the machine label; every absolute path its basename). The AiiDA User
+email stays (attribution). The archive is written to a partial file beside
+the target and moved into place only once rewritten. A rewritten provenance
+folder keeps its UUID, so a
 re-import into the source profile still deduplicates onto the full local node
 (its link labels already exist there, which a new UUID would collide with); its
 ``friction2d_folder_sha256`` extra is recomputed from the rewritten content and
@@ -44,9 +51,9 @@ import sqlite3
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import (
-    Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Type,
+    Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Type,
     get_args, get_origin,
 )
 
@@ -59,14 +66,16 @@ from ..run.tree import provenance_dir_for
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['ExportClosureError', 'UncheckedPointsError', 'export_archive',
+__all__ = ['ArchiveFormatError', 'ExportClosureError', 'UncheckedPointsError', 'export_archive',
            'export_dataset', 'export_provenance_bundle', 'export_results',
            'import_archive', 'rebuild_set', 'resolve_set', 'write_sidecars']
 
 #: The extra a rewritten (anonymised) node carries in the archive.
 ANONYMISED_EXTRA = 'friction2d_anonymised'
-#: ``settings.hpc`` keys that are paths on the HPC machine: dropped on export.
-HPC_PATH_KEYS = ('hpc_home', 'scratch_dir', 'log_dir', 'conda_env')
+#: ``settings.hpc`` keys dropped on export: paths on the HPC machine, and the account.
+HPC_SCRUBBED_KEYS = ('hpc_home', 'scratch_dir', 'log_dir', 'conda_env', 'account')
+#: Keys dropped anywhere under a ``database`` mapping on export.
+DATABASE_SCRUBBED_KEYS = ('user', 'host')
 
 _CHUNK = 500
 _HALT_DETAIL_RE = re.compile(r'^(?P<stage>\S+) halted at T=(?P<T>\S+) step=(?P<step>\S+)$')
@@ -79,11 +88,11 @@ class UncheckedPointsError(ValueError):
         points: ``'<rel_path>:<deck> <point label> (<point_uuid>)'`` per point.
     """
 
-    def __init__(self, label: str, points: List[str]) -> None:
+    def __init__(self, what: str, points: List[str]) -> None:
         self.points = points
         super().__init__(
-            f'set {label!r}: {len(points)} live point(s) have no verdict (import '
-            f'the set again, or pass force=True):\n  ' + '\n  '.join(points))
+            f'{what}: {len(points)} live point(s) have no verdict (import the set '
+            f'again, or pass force=True):\n  ' + '\n  '.join(points))
 
 
 class ExportClosureError(ValueError):
@@ -238,11 +247,12 @@ def _halt_line(point) -> Optional[str]:
         return None
     stage = match['stage']
     tokens = [f'stage={stage}']
-    if stage != 'system_equil':
+    if stage != 'system_equil' and attrs.get('load') is not None:
         key = 'load' if stage == 'system' or attrs.get('load_kind') == 'force' else 'pressure'
-        tokens.append(f"{key}={attrs.get('load'):g}")
+        tokens.append(f"{key}={float(attrs.get('load')):g}")
     if stage == 'slide':
-        tokens += [f"angle={attrs.get('angle'):g}", f"speed={attrs.get('speed'):g}"]
+        tokens += [f"{name}={float(attrs.get(name)):g}" for name in ('angle', 'speed')
+                   if attrs.get(name) is not None]
     tokens += [f"T={match['T']}", f"step={match['step']}"]
     return '# HALT ' + ' '.join(tokens)
 
@@ -261,19 +271,50 @@ def _write_halts(tree: _Tree, points: List[Tuple[Any, str, Any]]) -> None:
         tree.put(path, text.encode('utf-8'))
 
 
+def _live_rulings(points: List[Any]) -> Dict[str, List[Any]]:
+    """point_uuid -> its live ruled verdicts (every generation), oldest first."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from .steps import KIND_EXTRA, POINT_UUID_EXTRA  # pylint: disable=import-outside-toplevel
+
+    uuids = sorted({p.base.attributes.get('point_uuid') for p in points} - {None})
+    out: Dict[str, List[Any]] = {}
+    for begin in range(0, len(uuids), _CHUNK):
+        qb = orm.QueryBuilder().append(orm.Dict, tag='v', project='*', filters={
+            f'extras.{KIND_EXTRA}': 'ruled_verdict',
+            f'extras.{POINT_UUID_EXTRA}': {'in': uuids[begin:begin + _CHUNK]}})
+        qb.order_by({'v': {'id': 'asc'}})
+        for node in qb.all(flat=True):
+            if _live(node):
+                out.setdefault(node.base.extras.get(POINT_UUID_EXTRA), []).append(node)
+    return out
+
+
 def _write_rulings(tree: _Tree, points: List[Tuple[Any, str, Any]]) -> None:
-    """``integrity_rulings.yaml`` from every point whose selected verdict is a
-    user ruling, so the DataReader applies the same rulings again."""
+    """``integrity_rulings.yaml`` from the live user rulings of the points, so
+    the DataReader applies the same rulings again.
+
+    A point's entry is the ruling the policy selects when that is a ruled
+    verdict; otherwise its newest live ruled verdict of any generation (a
+    ruling on an older thresholds generation is still in force for it). A
+    withdrawn ruling is superseded, so it is never written.
+    """
     import yaml  # pylint: disable=import-outside-toplevel
 
     from ..postprocessing.integrity_rulings import RULINGS_FILE  # pylint: disable=import-outside-toplevel
-    from .steps import KIND_EXTRA, latest_verdicts  # pylint: disable=import-outside-toplevel
+    from .steps import latest_verdicts  # pylint: disable=import-outside-toplevel
 
-    verdicts = latest_verdicts([point for _c, _k, point in points])
+    nodes = [point for _c, _k, point in points]
+    selected = latest_verdicts(nodes)
+    rulings = _live_rulings(nodes)
     entries = []
-    for verdict in verdicts.values():
-        if verdict is None or verdict.base.extras.get(KIND_EXTRA, None) != 'ruled_verdict':
+    for point in nodes:
+        ruled = rulings.get(point.base.attributes.get('point_uuid'), [])
+        if not ruled:
             continue
+        chosen = selected.get(point.pk)
+        verdict = chosen if chosen is not None and chosen.pk in {r.pk for r in ruled} \
+            else ruled[-1]
         content = verdict.creator.inputs.ruling.get_dict()
         entries.append({k: content[k] for k in ('point', 'ruling', 'note', 'date', 'override')
                         if k in content})
@@ -440,20 +481,28 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
 # export_archive: entities, gate, closure
 # ---------------------------------------------------------------------------
 
-def _point_name(calc, key: str, point) -> str:
-    params = calc.inputs.parameters
-    return (f"{params['rel_path']}:{params['deck_name']} {key} "
-            f"({point.base.attributes.get('point_uuid')})")
+def _point_name(point) -> str:
+    """``'<rel_path>:<deck> points__<key> (<point_uuid>)'``."""
+    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
+
+    attrs = point.base.attributes
+    links = point.base.links.get_incoming(link_type=LinkType.CREATE).all()
+    key = links[0].link_label if links else '?'
+    return (f"{attrs.get('rel_path')}:{attrs.get('deck_name')} {key} "
+            f"({attrs.get('point_uuid')})")
+
+
+def _without_verdict(points: List[Any]) -> List[str]:
+    """``points`` that have no live verdict, named."""
+    from .steps import latest_verdicts  # pylint: disable=import-outside-toplevel
+
+    verdicts = latest_verdicts(points)
+    return [_point_name(point) for point in points if verdicts.get(point.pk) is None]
 
 
 def _unchecked(group) -> List[str]:
     """Every live point of the set without a live verdict."""
-    from .steps import latest_verdicts  # pylint: disable=import-outside-toplevel
-
-    points = _live_points(_live_calcjobs(group))
-    verdicts = latest_verdicts([point for _c, _k, point in points])
-    return [_point_name(calc, key, point) for calc, key, point in points
-            if verdicts.get(point.pk) is None]
+    return _without_verdict([point for _c, _k, point in _live_points(_live_calcjobs(group))])
 
 
 def _created_by(pks: Iterable[int], source) -> Set[int]:
@@ -472,20 +521,38 @@ def _created_by(pks: Iterable[int], source) -> Set[int]:
     return out
 
 
-def _consumers(pks: Iterable[int]) -> Set[int]:
-    """pks of the calcfunctions with an input among ``pks``."""
+def _consumers(pks: Iterable[int], labels: Optional[Sequence[str]] = None) -> Set[int]:
+    """pks of the calcfunctions with an input among ``pks`` (only those whose
+    ``process_label`` is in ``labels``, when given)."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
     from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
 
+    filters = {} if labels is None else {'attributes.process_label': {'in': list(labels)}}
     out: Set[int] = set()
     ordered = sorted(pks)
     for start in range(0, len(ordered), _CHUNK):
         qb = orm.QueryBuilder().append(
             orm.Data, filters={'id': {'in': ordered[start:start + _CHUNK]}}, tag='d')
-        qb.append(orm.CalcFunctionNode, with_incoming='d', project='id',
+        qb.append(orm.CalcFunctionNode, with_incoming='d', project='id', filters=filters,
                   edge_filters={'type': LinkType.INPUT_CALC.value})
         out.update(qb.all(flat=True))
     return out
+
+
+def _reachable_functions(frontier: Set[int],
+                         labels: Optional[Sequence[str]] = None) -> Set[int]:
+    """Every calcfunction reached from ``frontier`` through calcfunction
+    inputs and outputs, transitively."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    functions: Set[int] = set()
+    seen = set(frontier)
+    while frontier:
+        new = _consumers(frontier, labels) - functions
+        functions |= new
+        frontier = _created_by(new, orm.CalcFunctionNode) - seen
+        seen |= frontier
+    return functions
 
 
 def _peratom_pks(calc_pks: Iterable[int]) -> Set[int]:
@@ -512,24 +579,17 @@ def _start_pks(group, *, include_peratom: bool = False) -> Set[int]:
     frontier = _created_by(calcs, orm.CalcJobNode)
     if not include_peratom:
         frontier -= _peratom_pks(calcs)
-    functions: Set[int] = set()
-    seen = set(frontier)
-    while frontier:
-        new = _consumers(frontier) - functions
-        functions |= new
-        frontier = _created_by(new, orm.CalcFunctionNode) - seen
-        seen |= frontier
-    return calcs | functions
+    return calcs | _reachable_functions(frontier)
 
 
 def _check_closure(label: str, group, start: Set[int]) -> None:
     """Raise :class:`ExportClosureError` when the default export closure of
-    ``start`` holds a CalcJob that is not in ``group`` [I6]."""
+    ``start`` and the group's own nodes holds a CalcJob not in ``group`` [I6]."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
     from aiida.tools.graph.graph_traversers import get_nodes_export  # pylint: disable=import-outside-toplevel
 
-    closure = get_nodes_export(sorted(start))['nodes']
-    members = {calc.pk for calc in _calcjobs(group)}
+    members = {node.pk for node in group.nodes}
+    closure = get_nodes_export(sorted(start | members))['nodes']
     foreign = []
     ordered = sorted(closure)
     for begin in range(0, len(ordered), _CHUNK):
@@ -548,35 +608,78 @@ def _check_closure(label: str, group, start: Set[int]) -> None:
 _DB = 'db.sqlite3'
 _META = 'metadata.json'
 _REPO = 'repo/'
+_CALCJOB_TYPE = 'process.calculation.calcjob.CalcJobNode.'
+_WINDOWS_ABS = re.compile(r'^[A-Za-z]:[\\/]')
+
+
+class ArchiveFormatError(RuntimeError):
+    """The written archive is not the format :func:`_rewrite_archive` edits."""
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    """The archive database connection (a seam for the secure-delete test)."""
+    return sqlite3.connect(path)
 
 
 def _blob_key(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def _scrub_hpc(value: Any, hosts: Mapping[str, str]) -> bool:
-    """Drop :data:`HPC_PATH_KEYS` from every ``hpc`` mapping in ``value`` and
-    turn its ``hpc_host`` into the machine label (dropped when unknown)."""
+def _abs_basename(value: Any) -> Optional[str]:
+    """The basename of an absolute path string, or None for anything else."""
+    if not isinstance(value, str) or not (value.startswith(('/', '~/'))
+                                          or _WINDOWS_ABS.match(value)):
+        return None
+    name = (PureWindowsPath(value) if '\\' in value else PurePosixPath(value)).name
+    return name if name and name != value else None
+
+
+def _scrub_hpc(hpc: Dict[str, Any], hosts: Mapping[str, str]) -> bool:
+    """Drop :data:`HPC_SCRUBBED_KEYS` from one ``hpc`` mapping and turn its
+    ``hpc_host`` into the machine label (dropped when unknown)."""
+    changed = False
+    for key in HPC_SCRUBBED_KEYS:
+        if hpc.get(key) not in (None, ''):
+            hpc.pop(key)
+            changed = True
+    host = hpc.get('hpc_host')
+    if host is not None and hosts.get(host) != host:
+        if host in hosts:
+            hpc['hpc_host'] = hosts[host]
+        else:
+            hpc.pop('hpc_host')
+        changed = True
+    return changed
+
+
+def _scrub(value: Any, hosts: Mapping[str, str], in_database: bool = False) -> bool:
+    """Anonymise one parsed provenance document in place: every ``hpc``
+    mapping (:func:`_scrub_hpc`), ``user``/``host`` under ``database``, and
+    every absolute path string -> its basename."""
     changed = False
     if isinstance(value, dict):
-        hpc = value.get('hpc')
-        if isinstance(hpc, dict):
-            for key in HPC_PATH_KEYS:
-                if hpc.get(key) is not None:
-                    hpc.pop(key)
-                    changed = True
-            host = hpc.get('hpc_host')
-            if host is not None and hosts.get(host) != host:
-                if host in hosts:
-                    hpc['hpc_host'] = hosts[host]
-                else:
-                    hpc.pop('hpc_host')
+        for key in list(value):
+            item = value[key]
+            if key == 'hpc' and isinstance(item, dict):
+                changed = _scrub_hpc(item, hosts) or changed
+            if in_database and key in DATABASE_SCRUBBED_KEYS and item not in (None, ''):
+                value.pop(key)
                 changed = True
-        for item in value.values():
-            changed = _scrub_hpc(item, hosts) or changed
+                continue
+            name = _abs_basename(item)
+            if name is not None:
+                value[key] = name
+                changed = True
+                continue
+            changed = _scrub(item, hosts, in_database or key == 'database') or changed
     elif isinstance(value, list):
-        for item in value:
-            changed = _scrub_hpc(item, hosts) or changed
+        for i, item in enumerate(value):
+            name = _abs_basename(item)
+            if name is not None:
+                value[i] = name
+                changed = True
+            else:
+                changed = _scrub(item, hosts, in_database) or changed
     return changed
 
 
@@ -594,7 +697,7 @@ def _scrub_document(name: str, content: bytes, hosts: Mapping[str, str]) -> Opti
             return None
     except (UnicodeDecodeError, ValueError, yaml.YAMLError):
         return None
-    if not _scrub_hpc(data, hosts):
+    if not _scrub(data, hosts):
         return None
     if suffix == '.json':
         return json.dumps(data, indent=2).encode('utf-8')
@@ -622,11 +725,12 @@ class _Archive:
         """All rows of one query."""
         return self.con.execute(sql, args).fetchall()
 
-    def set_json(self, pk: int, column: str, value: Any) -> None:
-        """Write one JSON column of a node row."""
-        if column not in ('attributes', 'extras', 'repository_metadata'):
-            raise ValueError(column)
-        self.con.execute(f'UPDATE db_dbnode SET {column} = ? WHERE id = ?',
+    def set_json(self, pk: int, column: str, value: Any, table: str = 'db_dbnode') -> None:
+        """Write one JSON column of a node (or group) row."""
+        if column not in ('attributes', 'extras', 'repository_metadata') or \
+                table not in ('db_dbnode', 'db_dbgroup'):
+            raise ValueError(f'{table}.{column}')
+        self.con.execute(f'UPDATE {table} SET {column} = ? WHERE id = ?',
                          (json.dumps(value), pk))
 
 
@@ -672,17 +776,21 @@ def _mark(archive: _Archive, pk: int, extras: Optional[str], attributes: Dict[st
     archive.set_json(pk, 'extras', content)
 
 
-def _anonymise(archive: _Archive) -> int:
-    """Rewrite the archive's HPC details (see the module docstring); returns
-    the number of rows changed."""
-    changed = 0
+def _anonymise_computers(archive: _Archive) -> Tuple[int, Dict[str, str], Dict[int, str]]:
+    """Hostname -> label on every Computer: ``(changed, hostname -> label, id -> label)``."""
     computers = archive.rows('SELECT id, label, hostname FROM db_dbcomputer')
-    hosts = {hostname: label for _pk, label, hostname in computers}
+    changed = 0
     for pk, label, hostname in computers:
         if hostname != label:
             archive.con.execute('UPDATE db_dbcomputer SET hostname = ? WHERE id = ?',
                                 (label, pk))
             changed += 1
+    return (changed, {hostname: label for _pk, label, hostname in computers},
+            {pk: label for pk, label, _hostname in computers})
+
+
+def _anonymise_codes(archive: _Archive) -> int:
+    changed = 0
     for pk, attributes, extras in archive.rows(
             "SELECT id, attributes, extras FROM db_dbnode WHERE node_type LIKE 'data.core.code.%'"):
         attributes = json.loads(attributes or '{}')
@@ -691,12 +799,73 @@ def _anonymise(archive: _Archive) -> int:
             attributes['filepath_executable'] = PurePosixPath(executable).name
             _mark(archive, pk, extras, attributes)
             changed += 1
+    return changed
+
+
+def _anonymise_parameters(archive: _Archive) -> int:
+    changed = 0
     for pk, attributes, extras, _meta in _inputs_labelled(archive, 'parameters'):
         attributes = json.loads(attributes or '{}')
         if 'hpc_run_path' in attributes:
             attributes.pop('hpc_run_path')
             _mark(archive, pk, extras, attributes)
             changed += 1
+    return changed
+
+
+def _anonymise_remote(archive: _Archive, labels: Mapping[int, str]) -> int:
+    """``remote_workdir`` of each CalcJob and ``remote_path`` of its
+    ``RemoteData`` -> ``<machine label>:<rel_path>``."""
+    changed = 0
+    for pk, attributes, extras, computer in archive.rows(
+            'SELECT id, attributes, extras, dbcomputer_id FROM db_dbnode WHERE node_type = ?',
+            (_CALCJOB_TYPE,)):
+        params = archive.rows(
+            'SELECT n.attributes FROM db_dbnode n JOIN db_dblink l ON l.input_id = n.id '
+            "WHERE l.output_id = ? AND l.label = 'parameters'", (pk,))
+        rel_path = json.loads(params[0][0] or '{}').get('rel_path') if params else None
+        where = f"{labels.get(computer, 'unknown')}:{rel_path or '?'}"
+        attributes = json.loads(attributes or '{}')
+        if attributes.get('remote_workdir') not in (None, where):
+            attributes['remote_workdir'] = where
+            _mark(archive, pk, extras, attributes)
+            changed += 1
+        for rpk, rattributes, rextras in archive.rows(
+                'SELECT n.id, n.attributes, n.extras FROM db_dbnode n JOIN db_dblink l '
+                'ON (l.input_id = n.id AND l.output_id = ?) OR (l.output_id = n.id AND '
+                "l.input_id = ?) WHERE n.node_type = 'data.core.remote.RemoteData.'",
+                (pk, pk)):
+            rattributes = json.loads(rattributes or '{}')
+            if rattributes.get('remote_path') not in (None, where):
+                rattributes['remote_path'] = where
+                _mark(archive, rpk, rextras, rattributes)
+                changed += 1
+    return changed
+
+
+def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
+    """A set Group's ``source_root`` -> its basename, ``source_host`` -> the
+    machine label, or ``'unknown'``."""
+    changed = 0
+    for pk, extras in archive.rows('SELECT id, extras FROM db_dbgroup'):
+        content = json.loads(extras or '{}')
+        before = dict(content)
+        if content.get('source_root'):
+            content['source_root'] = PurePosixPath(str(content['source_root'])).name
+        if content.get('source_host'):
+            content['source_host'] = hosts.get(content['source_host'], 'unknown')
+        if content != before:
+            archive.set_json(pk, 'extras', content, table='db_dbgroup')
+            changed += 1
+    return changed
+
+
+def _anonymise(archive: _Archive) -> int:
+    """Rewrite the archive's HPC and local details (see the module
+    docstring); returns the number of rows changed."""
+    changed, hosts, labels = _anonymise_computers(archive)
+    changed += _anonymise_codes(archive) + _anonymise_parameters(archive)
+    changed += _anonymise_remote(archive, labels) + _anonymise_groups(archive, hosts)
     for row in _inputs_labelled(archive, 'provenance'):
         changed += _anonymise_folder(archive, row, hosts)
     return changed
@@ -751,30 +920,85 @@ def _write_zip(source: zipfile.ZipFile, target: Path, db_path: Path,
                 out.writestr(f'{_REPO}{key}', content)
 
 
+def _check_format(source: zipfile.ZipFile) -> None:
+    """Refuse an archive whose layout :func:`_rewrite_archive` does not know."""
+    from aiida.storage.sqlite_zip.migrator import get_schema_version_head  # pylint: disable=import-outside-toplevel
+
+    try:
+        metadata = json.loads(source.read(_META))
+    except (KeyError, ValueError) as exc:
+        raise ArchiveFormatError(f'archive has no readable {_META}: {exc}') from exc
+    expected = get_schema_version_head()
+    if metadata.get('export_version') != expected or metadata.get('key_format') != 'sha256':
+        raise ArchiveFormatError(
+            f"archive export_version {metadata.get('export_version')!r} / key_format "
+            f"{metadata.get('key_format')!r}; the anonymising rewrite knows only "
+            f"{expected!r} / 'sha256' -- update src/aiida/export.py for this aiida-core")
+
+
+def _edit_db(db_path: Path, read: Callable[[str], bytes], *, anonymise: bool,
+             drop_peratom: bool) -> Tuple[Dict[str, int], Set[str], Dict[str, bytes]]:
+    """Edit the extracted archive db: ``(counts, blob keys kept, new blobs)``.
+
+    ``secure_delete`` zeroes what is deleted or overwritten, and ``VACUUM``
+    rebuilds the file, so no scrubbed byte survives in a free page."""
+    counts = {'anonymised': 0, 'peratom_dropped': 0}
+    con = _connect(db_path)
+    try:
+        con.execute('PRAGMA secure_delete=ON')
+        archive = _Archive(con, read)
+        if drop_peratom:
+            counts['peratom_dropped'] = _drop_peratom(archive)
+        if anonymise:
+            counts['anonymised'] = _anonymise(archive)
+        con.commit()
+        keep = _referenced(archive)
+        con.execute('VACUUM')
+    finally:
+        con.close()
+    return counts, keep, archive.blobs
+
+
 def _rewrite_archive(path: Path, *, anonymise: bool, drop_peratom: bool) -> Dict[str, int]:
     """Anonymise and/or drop the per-atom nodes of a written archive, in place.
     Returns the counts of what changed."""
-    counts = {'anonymised': 0, 'peratom_dropped': 0}
     with tempfile.TemporaryDirectory(prefix='frictionsim2d-archive-') as tmp:
         work = Path(tmp)
         db_path = work / _DB
         with zipfile.ZipFile(path) as source:
+            _check_format(source)
+            if not (anonymise or drop_peratom):
+                return {'anonymised': 0, 'peratom_dropped': 0}
             db_path.write_bytes(source.read(_DB))
-            con = sqlite3.connect(db_path)
-            try:
-                archive = _Archive(con, lambda key: source.read(f'{_REPO}{key}'))
-                if drop_peratom:
-                    counts['peratom_dropped'] = _drop_peratom(archive)
-                if anonymise:
-                    counts['anonymised'] = _anonymise(archive)
-                if not any(counts.values()):
-                    return counts
-                con.commit()
-                keep = _referenced(archive)
-            finally:
-                con.close()
-            _write_zip(source, work / 'new.aiida', db_path, keep, archive.blobs)
+            counts, keep, blobs = _edit_db(
+                db_path, lambda key: source.read(f'{_REPO}{key}'),
+                anonymise=anonymise, drop_peratom=drop_peratom)
+            if not any(counts.values()):
+                return counts
+            _write_zip(source, work / 'new.aiida', db_path, keep, blobs)
         shutil.move(str(work / 'new.aiida'), str(path))
+    return counts
+
+
+def _write_archive(entities: List[Any], output_path: Path, *, anonymise: bool,
+                   drop_peratom: bool) -> Dict[str, int]:
+    """``create_archive`` into a partial file beside ``output_path``, rewrite
+    it, then move it into place: on any failure nothing is left at
+    ``output_path`` (and the partial file is removed)."""
+    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
+
+    if output_path.exists():
+        raise FileExistsError(f'{output_path} exists; remove it or choose another path')
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    partial = output_path.with_name(f'.{output_path.name}.partial')
+    partial.unlink(missing_ok=True)
+    try:
+        create_archive(entities, filename=partial)
+        counts = _rewrite_archive(partial, anonymise=anonymise, drop_peratom=drop_peratom)
+        partial.replace(output_path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     return counts
 
 
@@ -798,8 +1022,9 @@ def _sidecar(calc) -> Dict[str, Any]:
 
 def _merge_schemas(documents: Iterable[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """block_schema version -> one schema document over every family exported
-    at that version (``fields`` united; a path two families define differently
-    keeps the first, with a warning)."""
+    at that version (``fields`` united). ``compare``'s loader picks a schema by
+    version alone, so two families that define one path differently at one
+    version raise ``ValueError`` rather than lose a definition."""
     merged: Dict[str, Dict[str, Any]] = {}
     for doc in documents:
         version = str(doc.get('block_schema'))
@@ -808,8 +1033,10 @@ def _merge_schemas(documents: Iterable[Mapping[str, Any]]) -> Dict[str, Dict[str
             into['family'].append(doc.get('family'))
         for path, spec in (doc.get('fields') or {}).items():
             if into['fields'].setdefault(path, spec) != spec:
-                logger.warning('schema %s: %s differs between families; the sidecar '
-                               'keeps the first definition', version, path)
+                raise ValueError(
+                    f'block_schema {version}: field {path!r} differs between families '
+                    f'{sorted(str(f) for f in into["family"])}; one schema-{version}.json '
+                    f'cannot hold both')
     for doc in merged.values():
         doc['family'] = sorted(str(f) for f in doc['family'])
     return merged
@@ -848,7 +1075,7 @@ def _schema_nodes(calcs: Iterable[Any]) -> List[str]:
 
 _README = """# FrictionSim2D archive `{name}`
 
-Set `{group}`: {n_calcs} CalcJob(s), one per LAMMPS deck of a finished run, imported
+{title}: {n_calcs} CalcJob(s), one per LAMMPS deck of a finished run, imported
 with the FrictionSim2D plugin (`aiida.calculations:friction2d.lammps`). Archive size:
 {size}.
 
@@ -875,38 +1102,50 @@ so the archive imports and its data loads without FrictionSim2D installed; only
 
 Schema node(s), giving the unit, kind and default of every field:
 {schemas}
-
-The same blocks are in `{name}.params/<rel_path>/<deck>.json`, with
-`schema-<version>.json`, readable by `FrictionSim2D compare` without AiiDA.
-
+{sidecars}
 ## Personal data
 
-* The AiiDA User (name and email) of whoever imported the runs.
-* Local absolute paths of the importing machine: `RemoteData.remote_path` and the
-  CalcJobs' `remote_workdir`, and the set Group's `source_root`/`source_host` extras.
-* HPC details: {hpc}
+* Included, for attribution: the AiiDA User (name and email) of whoever imported
+  the runs, on every node.
+* {details}
+* Anonymised nodes keep their UUIDs. An anonymised archive and a
+  `keep_hpc_paths=True` archive of the same runs therefore carry the same nodes:
+  whichever is imported into a profile first is the version that profile keeps; the
+  other adds only nodes the first lacked.
 """
 
-_ANONYMISED = ('anonymised: Computer hostnames are their machine labels, Code '
-               'executables their basenames, `hpc_run_path` is dropped from '
-               '`parameters`, and `hpc.hpc_home`/`scratch_dir`/`log_dir`/`conda_env` '
-               'from the provenance documents (`hpc.hpc_host` is the machine '
-               'label). Rewritten nodes carry the extra `friction2d_anonymised`.')
-_KEPT = ('kept as recorded (`keep_hpc_paths=True`): Computer hostnames, Code '
-         'executable paths, `hpc_run_path` and the `settings.hpc` paths.')
+_SIDECARS = """
+The same blocks are in `{name}.params/<rel_path>/<deck>.json`, with
+`schema-<version>.json`, readable by `FrictionSim2D compare` without AiiDA.
+"""
+
+_ANONYMISED = (
+    'Anonymised: Computer hostnames are their machine labels; Code executables their '
+    'basenames; `RemoteData.remote_path` and the CalcJobs\' `remote_workdir` are '
+    '`<machine label>:<rel_path>`; `hpc_run_path` is dropped from `parameters`; the '
+    'set Group\'s `source_root` is its basename and `source_host` the machine label '
+    '(or `unknown`). In the provenance documents `hpc.hpc_home`/`scratch_dir`/'
+    '`log_dir`/`conda_env`/`account` and `database.user`/`host` are dropped, '
+    '`hpc.hpc_host` is the machine label, and every absolute path is its basename. '
+    'Rewritten nodes carry the extra `friction2d_anonymised`.')
+_KEPT = ('Kept as recorded (`keep_hpc_paths=True`): Computer hostnames, Code '
+         'executable paths, local `RemoteData` paths and `remote_workdir`, '
+         '`hpc_run_path`, the Group\'s `source_root`/`source_host`, and every path, '
+         'account and database host/user in the provenance documents.')
 
 
-def _write_readme(path: Path, *, group: str, calcs: List[Any],
-                  include_peratom: bool, keep_hpc_paths: bool) -> Path:
+def _write_readme(path: Path, *, title: str, calcs: List[Any], include_peratom: bool,
+                  keep_hpc_paths: bool, sidecars: bool = True) -> Path:
     size = path.stat().st_size
     readme = Path(f'{path}.README.md')
     readme.write_text(_README.format(
-        name=path.name, group=group, n_calcs=len(calcs),
+        name=path.name, title=title, n_calcs=len(calcs),
         size=f'{size / 1e6:.1f} MB ({size} bytes)',
         peratom=('Included.' if include_peratom
                  else 'Left out of this archive (`include_peratom=False`).'),
         schemas='\n'.join(f'* {line}' for line in _schema_nodes(calcs)) or '* none',
-        hpc=_KEPT if keep_hpc_paths else _ANONYMISED), encoding='utf-8')
+        sidecars=_SIDECARS.format(name=path.name) if sidecars else '',
+        details=_KEPT if keep_hpc_paths else _ANONYMISED), encoding='utf-8')
     return readme
 
 
@@ -924,7 +1163,8 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
     and every calcfunction reached from their outputs (verdicts, rulings,
     summaries); aiida's export closure adds their inputs and created outputs.
     Dataset Groups and their table Dicts are never included
-    (:func:`export_dataset`).
+    (:func:`export_dataset`). The archive is written beside ``output_path``
+    and moved into place only once rewritten.
 
     Args:
         label: The set.
@@ -933,46 +1173,61 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
         profile: The AiiDA profile (default: the configured one).
         force: Write even when live points have no verdict.
         include_peratom: Keep the ``peratom.<key>`` nodes (dropped by default).
-        keep_hpc_paths: Do not anonymise the HPC details (module docstring).
+        keep_hpc_paths: Do not anonymise (module docstring).
 
     Raises:
         LookupError: No such set.
+        FileExistsError: ``output_path`` exists.
         UncheckedPointsError: A live point has no live verdict (unless ``force``).
         ExportClosureError: The closure holds a CalcJob of another set [I6].
+        ArchiveFormatError: aiida-core wrote an archive layout this module
+            does not know how to rewrite.
     """
     from aiida import orm  # pylint: disable=import-outside-toplevel
-    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
 
     _load_profile(profile)
     group = resolve_set(label)
     if not force:
         unchecked = _unchecked(group)
         if unchecked:
-            raise UncheckedPointsError(label, unchecked)
+            raise UncheckedPointsError(f'set {label!r}', unchecked)
     start = _start_pks(group, include_peratom=include_peratom)
     _check_closure(label, group, start)
     calcs = _calcjobs(group)
     members = {calc.pk for calc in calcs}
     output_path = Path(output_path)
-    create_archive([group, *(orm.load_node(pk) for pk in sorted(start - members))],
-                   filename=output_path)
-    counts = _rewrite_archive(output_path, anonymise=not keep_hpc_paths,
-                              drop_peratom=not include_peratom)
+    counts = _write_archive([group, *(orm.load_node(pk) for pk in sorted(start - members))],
+                            output_path, anonymise=not keep_hpc_paths,
+                            drop_peratom=not include_peratom)
     write_sidecars(calcs, Path(f'{output_path}.params'))
-    _write_readme(output_path, group=group.label, calcs=calcs,
+    _write_readme(output_path, title=f'Set `{group.label}`', calcs=calcs,
                   include_peratom=include_peratom, keep_hpc_paths=keep_hpc_paths)
     _log_size(output_path, f'set {label!r} ({len(start)} start nodes, {counts})')
     return output_path
 
 
+#: The calcfunctions that make, rule or withdraw a point's verdict.
+_VERDICT_FUNCTIONS = ('check_integrity', 'apply_ruling', 'withdraw_ruling')
+
+
 def export_dataset(name: str, output_path: Path, *, profile: Optional[str] = None,
-                   include_peratom: bool = False, keep_hpc_paths: bool = False) -> Path:
-    """Archive the dataset ``friction2d/datasets/<name>`` on its own: its Group,
-    its table Dict and the closure of its summaries (their points, CalcJobs and
-    inputs, across every set it was built from). Anonymised and per-atom-free
-    by default, like :func:`export_archive`."""
+                   force: bool = False, include_peratom: bool = False,
+                   keep_hpc_paths: bool = False) -> Path:
+    """Archive the dataset ``friction2d/datasets/<name>`` on its own.
+
+    The entities are its Group, its table Dict and summaries, and the verdict
+    calcfunctions of every member point (``check_integrity``,
+    ``apply_ruling``, ``withdraw_ruling``), so the far side can select each
+    point's verdict; the closure adds the points, their CalcJobs and inputs,
+    across every set the dataset was built from. Gated, anonymised,
+    per-atom-free and documented (``<output_path>.README.md``) like
+    :func:`export_archive`.
+
+    Raises:
+        LookupError: No such dataset.
+        UncheckedPointsError: A member point has no live verdict (unless ``force``).
+    """
     from aiida import orm  # pylint: disable=import-outside-toplevel
-    from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
 
     from .steps import DATASET_PREFIX  # pylint: disable=import-outside-toplevel
 
@@ -980,10 +1235,22 @@ def export_dataset(name: str, output_path: Path, *, profile: Optional[str] = Non
     found = orm.Group.collection.find(filters={'label': f'{DATASET_PREFIX}/{name}'})
     if not found:
         raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}/{name})')
+    group = found[0]
+    points = list({node.creator.inputs.point.pk: node.creator.inputs.point
+                   for node in group.nodes
+                   if node.creator is not None and 'point' in node.creator.inputs}.values())
+    if not force:
+        unchecked = _without_verdict(points)
+        if unchecked:
+            raise UncheckedPointsError(f'dataset {name!r}', unchecked)
+    functions = _reachable_functions({p.pk for p in points}, _VERDICT_FUNCTIONS)
     output_path = Path(output_path)
-    create_archive([found[0]], filename=output_path)
-    _rewrite_archive(output_path, anonymise=not keep_hpc_paths,
-                     drop_peratom=not include_peratom)
+    _write_archive([group, *(orm.load_node(pk) for pk in sorted(functions))], output_path,
+                   anonymise=not keep_hpc_paths, drop_peratom=not include_peratom)
+    calcs = list({p.creator.pk: p.creator for p in points}.values())
+    _write_readme(output_path, title=f'Dataset `{group.label}`', calcs=calcs,
+                  include_peratom=include_peratom, keep_hpc_paths=keep_hpc_paths,
+                  sidecars=False)
     _log_size(output_path, f'dataset {name!r}')
     return output_path
 
