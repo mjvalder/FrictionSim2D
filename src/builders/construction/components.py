@@ -1762,8 +1762,14 @@ def make_amorphous(
     pm = PotentialManager(settings, use_langevin=False)
     pot_commands = pm.get_single_component_commands(temp_config, elements)
 
-    quench_rate = float(quench.quench_rate) * 1e-12 / float(quench.timestep)
-    quench_nsteps = max(int((quench.melt_temp - quench.quench_temp) * quench_rate), 1)
+    # quench_rate is K/s and timestep is ps, so the quench takes
+    # dT / (rate * dt * 1e-12) steps: doubling the rate halves the run.
+    if float(quench.quench_rate) <= 0:
+        raise ValueError(
+            f"quench.quench_rate must be positive (K/s), got {quench.quench_rate}")
+    quench_nsteps = max(round(
+        (quench.melt_temp - quench.quench_temp)
+        / (float(quench.quench_rate) * float(quench.timestep) * 1e-12)), 1)
 
     lmp_input_path = output_dir / f"lmp_input_amorphous_{mat_name}.in"
 
