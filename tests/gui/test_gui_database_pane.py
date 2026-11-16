@@ -60,18 +60,18 @@ def _window(qt_app, tmp_path):
 
 class TestPaneLayout:
 
-    def test_the_sources_are_local_and_central(self, pane):
-        assert SOURCES == ('local', 'central')
+    def test_local_is_the_only_source(self, pane):
+        assert SOURCES == ('local',)
         assert pane.source == 'local'
 
-    def test_switching_source_announces_it(self, pane):
+    def test_the_removed_central_source_cannot_be_selected(self, pane):
         seen = []
         pane.source_changed.connect(seen.append)
 
         pane.set_source('central')
 
-        assert pane.source == 'central'
-        assert seen == ['central']
+        assert pane.source == 'local'
+        assert seen == []
 
     def test_search_asks_for_a_query_with_the_current_filters(self, pane):
         seen = []
@@ -144,56 +144,6 @@ class TestPaneLayout:
         pane.cancel_button.click()
 
         assert seen == [1]
-
-
-class TestSourceSwitchClearsTheRows:
-    """A row belongs to the store it came from.
-
-    The two stores identify a row differently -- local by the run/result
-    uuids, central by an integer `id` -- and every action reads the *current*
-    source. Left on screen across a switch, one click on a stale row asks the
-    central API for `result_id: None` (the worker does `int(...)`) or hands a
-    central uuid to `load_node`, and Summary CSV exports the local rows as if
-    they were the central store's.
-    """
-
-    def test_switching_source_empties_the_table_and_the_detail(self, pane):
-        pane.set_set_sizes({'s1': 37})
-        pane.table.selectRow(0)
-        pane.show_detail({'run': {'uuid': '1a2b', 'node_type': '',
-                                  'attributes': {'layers': 2}},
-                          'result': {'uuid': '9f8e', 'node_type': '',
-                                     'attributes': {}},
-                          'files': [], 'total_bytes': 4096})
-
-        pane.set_source('central')
-
-        assert pane.model.rowCount() == 0
-        assert pane.visible_records() == []
-        assert pane.selected_records() == []
-        assert pane.detail.rows() == []
-        assert pane.set_sizes == {}
-        assert pane.last_detail_bytes is None
-
-    def test_no_detail_is_requested_for_the_selection_it_drops(self, pane):
-        pane.table.selectRow(0)
-        seen = []
-        pane.detail_requested.connect(lambda source, payload: seen.append(payload))
-
-        pane.set_source('central')
-
-        assert seen == []
-
-    def test_the_summary_csv_of_a_switched_source_exports_nothing_stale(
-            self, pane, tmp_path, monkeypatch):
-        monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
-        seen = []
-        pane.export_requested.connect(lambda source, payload: seen.append(payload))
-
-        pane.set_source('central')
-        pane.download_buttons['summary_csv'].click()
-
-        assert seen[0]['records'] == []
 
 
 class TestDownloads:
@@ -318,17 +268,16 @@ class TestDownloads:
         assert [r['load'] for r in payload['records']] == [30.0, 10.0]
         assert set(payload['records'][0]) == set(payload['columns'])
 
-    def test_summary_csv_exports_the_central_fallback_columns(
+    def test_summary_csv_exports_the_fallback_columns(
             self, pane, tmp_path, monkeypatch):
         """The Summary CSV promises the visible rows "with the columns shown"
-        (D6), and what Load/Angle/Speed show for a central row comes from
+        (D6), and what Load/Angle/Speed show for a row without those keys comes from
         `force_nN`, `scan_angle` and `scan_speed` -- the columns' fallbacks.
         The worker writes `record[key]` and knows nothing of them, so an
         unresolved payload exported three blank columns the table had filled.
         """
         from src.gui import db_worker
         monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
-        pane.set_source('central')
         pane.set_records([{'id': 41, 'set_label': 's1', 'family': 'afm',
                            'material': 'h-MoS2', 'force_nN': 30.0,
                            'scan_angle': 15.0, 'scan_speed': 5.0,
@@ -338,7 +287,7 @@ class TestDownloads:
 
         pane.download_buttons['summary_csv'].click()
         result = db_worker.dispatch({
-            'kind': 'export', 'source': 'central', 'what': 'summary_csv',
+            'kind': 'export', 'source': 'local', 'what': 'summary_csv',
             'dest': str(tmp_path / 'dl'), 'records': seen[0]['records'],
             'columns': seen[0]['columns']})
 
@@ -379,15 +328,6 @@ class TestDownloads:
 
         assert seen == []
 
-    def test_the_central_source_offers_only_the_summary_csv(self, pane):
-        pane.set_source('central')
-
-        assert pane.download_buttons['summary_csv'].isEnabled()
-        assert not pane.download_buttons['results'].isEnabled()
-        assert not pane.download_buttons['provenance'].isEnabled()
-        assert not pane.download_buttons['run_tree'].isEnabled()
-
-
 class TestModalSeams:
     """The only modal reachable from this package is `_ask_directory`.
 
@@ -422,48 +362,6 @@ class TestModalSeams:
         end = text.find('\n    def ', start + 1)
         body = text[start:len(text) if end == -1 else end]
         assert body.count('QFileDialog.') == 1
-
-
-class TestOwnerContact:
-    """The central database holds summaries, not files. Reaching the person
-    who ran it is the only way to get the rest, so it is one click (D6)."""
-
-    @pytest.fixture(name='central')
-    def _central(self, pane, monkeypatch):
-        copied = []
-        monkeypatch.setattr(pane, '_set_clipboard', copied.append)
-        pane.set_source('central')
-        pane.set_records([dict(RECORDS[0], contact='someone@example.org'),
-                          dict(RECORDS[1], contact=None)])
-        pane._copied = copied
-        return pane
-
-    def test_the_button_is_central_only(self, pane):
-        assert not pane.copy_contact_button.isEnabled()
-        pane.set_source('central')
-        assert pane.copy_contact_button.isEnabled()
-
-    def test_it_copies_the_selected_row_contact(self, central):
-        central.table.selectRow(0)
-
-        central.copy_contact_button.click()
-
-        assert central._copied == ['someone@example.org']
-        assert 'someone@example.org' in central.messages.toPlainText()
-
-    def test_a_row_with_no_contact_says_so_rather_than_copying_nothing(self, central):
-        central.table.selectRow(1)
-
-        central.copy_contact_button.click()
-
-        assert central._copied == []
-        assert 'no owner contact' in central.messages.toPlainText()
-
-    def test_it_refuses_an_empty_selection(self, central):
-        central.copy_contact_button.click()
-
-        assert central._copied == []
-        assert 'Select a row' in central.messages.toPlainText()
 
 
 class TestExportReachesTheController:
@@ -581,13 +479,13 @@ class TestWindowWiring:
 
         assert 'cached' not in window.database_pane.messages.toPlainText()
 
-    def test_a_truncated_central_list_reports_the_limit_not_a_bogus_total(self, window):
-        """`total_count` is None whenever the central client's own `limit`
-        cut the rows short (see `_list` in db_worker.py) -- the message must
+    def test_a_truncated_list_reports_the_limit_not_a_bogus_total(self, window):
+        """`total_count` is None whenever a `limit` cut the rows short --
+        the message must
         not read "N of None results", which looks like a broken query rather
         than a truncated one."""
         window._on_db_finished('list', {
-            'ok': True, 'kind': 'list', 'source': 'central', 'records': RECORDS,
+            'ok': True, 'kind': 'list', 'source': 'local', 'records': RECORDS,
             'facets': {}, 'total_count': None, 'returned': 2, 'limit': 2,
             'elapsed_s': 0.4, 'warnings': []})
 
@@ -714,11 +612,6 @@ class TestImport:
 
         assert seen == []
 
-    def test_import_is_disabled_for_the_central_source(self, pane):
-        pane.set_source('central')
-
-        assert not pane.import_button.isEnabled()
-
     def test_a_finished_import_shows_the_report(self, window):
         window._on_db_finished('import', {
             'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
@@ -779,10 +672,9 @@ class TestConnectionCheck:
         seen = []
         pane.check_requested.connect(seen.append)
 
-        pane.set_source('central')
         pane.check_button.click()
 
-        assert seen == ['central']
+        assert seen == ['local']
 
     def test_the_report_renders_in_the_message_panel(self, window):
         window._on_db_finished('check', {
@@ -811,16 +703,6 @@ class TestWorkspaceMemory:
         assert window.workspace.state['db_source'] == 'local'
         assert window.workspace.state['db_filters']['family'] == 'afm'
 
-    def test_switching_source_is_recorded_immediately(self, window):
-        # D11 disables central by default; configure it first so the switch
-        # this test is actually about (not D11) has somewhere to land.
-        window.settings.database.api_url = 'https://db.example.org'
-        window._apply_database_availability()
-
-        window.database_pane.set_source('central')
-
-        assert window.workspace.state['db_source'] == 'central'
-
     def test_a_download_records_its_destination(self, window, tmp_path, monkeypatch):
         monkeypatch.setattr(window.database, 'start', lambda request, **kwargs: None)
         pane = window.database_pane
@@ -835,20 +717,15 @@ class TestWorkspaceMemory:
     def test_a_new_window_restores_what_the_last_one_left(
             self, qt_app, tmp_path, monkeypatch):
         del qt_app
-        import src.gui.app as app_module
         from src.gui.app import MainWindow
-        # D11 disables central by default (no central database is configured);
-        # this test is about restoring the remembered source, not about D11,
-        # so pretend it is configured.
-        monkeypatch.setattr(app_module, 'central_configured', lambda s: True)
         workspace = Workspace.open(tmp_path / 'ws')
-        workspace.remember('db_source', 'central')
+        workspace.remember('db_source', 'local')
         workspace.remember('db_filters', dict(EMPTY_FILTERS, family='hetero'))
         workspace.remember('db_dest', str(tmp_path / 'dl'))
 
         window = MainWindow(workspace)
         try:
-            assert window.database_pane.source == 'central'
+            assert window.database_pane.source == 'local'
             assert window.database_pane.filters.value()['family'] == 'hetero'
             assert window.database_pane.last_dest == str(tmp_path / 'dl')
         finally:
@@ -858,13 +735,8 @@ class TestWorkspaceMemory:
 
     def test_changing_workspace_re_points_the_controller_and_restores(
             self, window, tmp_path, monkeypatch):
-        import src.gui.app as app_module
-        # D11 disables central by default; this test is about restoring the
-        # remembered source on a workspace switch, not about D11, so pretend
-        # central is configured.
-        monkeypatch.setattr(app_module, 'central_configured', lambda s: True)
         other = Workspace.open(tmp_path / 'other')
-        other.remember('db_source', 'central')
+        other.remember('db_source', 'local')
         monkeypatch.setattr(RecentWorkspaces, 'add', lambda self, root: [])
         monkeypatch.setattr(QFileDialog, 'getExistingDirectory',
                             lambda *args, **kwargs: str(other.root))
@@ -872,7 +744,7 @@ class TestWorkspaceMemory:
         window._choose_workspace()
 
         assert window.database.workspace.root == other.root
-        assert window.database_pane.source == 'central'
+        assert window.database_pane.source == 'local'
 
     def test_switching_workspace_does_not_clobber_the_new_workspaces_filters(
             self, window, tmp_path, monkeypatch):
@@ -912,16 +784,15 @@ class TestDegradation:
         assert pane_module.missing_backend('local') == ['aiida']
         assert pane_module.missing_backend('central') == []
 
-    def test_a_missing_backend_disables_its_source_and_says_why(
+    def test_a_missing_backend_says_what_to_install(
             self, qt_app, monkeypatch):
         del qt_app
         import src.gui.widgets.database.pane as pane_module
         monkeypatch.setattr(pane_module, 'missing_backend',
-                            lambda source: ['aiida'] if source == 'local' else [])
+                            lambda source: ['aiida'])
 
         pane = pane_module.DatabasePane()
 
-        assert pane.source == 'central', 'a disabled source must not stay selected'
         assert not pane._source_buttons.button(0).isEnabled()
         text = pane.messages.toPlainText()
         assert 'aiida' in text
@@ -944,144 +815,12 @@ class TestDegradation:
         assert pane.search_button.isEnabled()
 
 
-class TestNotConfigured:
-    """Installed is not the same as configured, and today there is no central
-    database at all."""
+class TestRemovedCentralSourceIsNeverReachable:
+    """The central database is gone. A workspace that still remembers
+    `db_source == 'central'` must fall back to the local store, and no
+    request may target the removed source."""
 
-    def test_the_default_url_alone_is_not_a_configured_database(self):
-        from types import SimpleNamespace
-        from src.gui.controllers.database import DEFAULT_API_URL, central_configured
-
-        bare = SimpleNamespace(database=SimpleNamespace(
-            api_url=DEFAULT_API_URL, api_key='', host=''))
-        keyed = SimpleNamespace(database=SimpleNamespace(
-            api_url=DEFAULT_API_URL, api_key='k', host=''))
-        elsewhere = SimpleNamespace(database=SimpleNamespace(
-            api_url='https://db.example.org', api_key='', host=''))
-        empty = SimpleNamespace(database=SimpleNamespace(
-            api_url='', api_key='', host=''))
-
-        assert central_configured(bare) is False
-        assert central_configured(keyed) is True
-        assert central_configured(elsewhere) is True
-        assert central_configured(empty) is False
-
-    def test_an_unconfigured_central_source_is_disabled_with_a_reason(self, window):
-        window.settings.database.api_url = ''
-        window._apply_database_availability()
-
-        text = window.database_pane.messages.toPlainText()
-        assert not window.database_pane._source_buttons.button(1).isEnabled()
-        assert 'not configured' in text
-        assert 'Local store' in text
-
-    def test_configuring_it_enables_the_source(self, window):
-        window.settings.database.api_url = 'https://db.example.org'
-        window._apply_database_availability()
-
-        assert window.database_pane._source_buttons.button(1).isEnabled()
-
-    def test_configuring_it_also_clears_the_stale_note(self, window):
-        """The note is an instruction to go and configure something. Once
-        that is done it is not just out of date, it is wrong."""
-        window.settings.database.api_url = ''
-        window._apply_database_availability()
-        assert 'not configured' in window.database_pane.messages.toPlainText()
-
-        window.settings.database.api_url = 'https://db.example.org'
-        window._apply_database_availability()
-
-        assert window.database_pane.messages.toPlainText() == ''
-
-    def test_re_enabling_an_enabled_source_leaves_the_panel_alone(self, window):
-        """`_apply_database_availability` runs on every Settings apply: an
-        unconditional clear would wipe the query result out of the panel."""
-        window.settings.database.api_url = 'https://db.example.org'
-        window._apply_database_availability()
-        window.database_pane.message('2 of 2 results in 0.4 s')
-
-        window._apply_database_availability()
-
-        assert '2 of 2 results' in window.database_pane.messages.toPlainText()
-
-
-class TestAvailabilityChangeDoesNotClobberMemory:
-    """Regression: `_apply_settings` calls `_apply_database_availability()`
-    live, unguarded, any time Settings is applied -- not only at startup or
-    on a workspace switch, which already ran it under `_restoring_db_state`
-    (see `_restore_database_state`). Clearing `database.api_url` while
-    Central was selected disabled the source, `set_source_enabled` fell back
-    to Local, and the resulting `source_changed` -> `_remember_database_state`
-    wrote 'local' over the workspace's remembered 'central' -- exactly the
-    write the D11 fallback promises never to make ("only the on-screen
-    selection falls back")."""
-
-    def test_a_live_availability_change_does_not_overwrite_the_remembered_source(
-            self, window):
-        window.settings.database.api_url = 'https://db.example.org'
-        window._apply_database_availability()
-        window.database_pane.set_source('central')
-        assert window.workspace.state['db_source'] == 'central'
-
-        window.settings.database.api_url = ''
-        window._apply_database_availability()
-
-        assert window.database_pane.source == 'local'
-        assert window.workspace.state['db_source'] == 'central'
-
-        window.settings.database.api_url = 'https://db.example.org'
-        window._apply_database_availability()
-
-        assert window.database_pane.source == 'central'
-        assert window.workspace.state['db_source'] == 'central'
-
-
-class TestDisabledSourceIsNeverReachable:
-    """Regression: a disabled-but-selected 'central' fired real central
-    requests, because `set_source` did not consult the button's enabled
-    state. `_restore_database_state` could put the pane on a source that
-    D11 had just disabled (not installed, or not configured), and every
-    action gated on `self._source` -- Search, Refresh, Check connection --
-    would then target it anyway with no button ever having been clickable
-    to get there. Fixed in `DatabasePane.set_source`; these drive it through
-    `MainWindow`, not a bare pane, because the bug was in how a *window*
-    restores a remembered source, not in the pane in isolation."""
-
-    def test_a_missing_backend_beats_a_remembered_central_source(
-            self, qt_app, tmp_path, monkeypatch):
-        del qt_app
-        import src.gui.widgets.database.pane as pane_module
-        from src.gui.app import MainWindow
-        # The probe, not `missing_backend` itself: `missing_backend` is one
-        # function object shared by the pane's own construction-time check
-        # and the window's `_apply_database_availability` -- patching the
-        # probe it calls affects both call sites the way a real missing
-        # package would, rather than only whichever one imported the name.
-        monkeypatch.setattr(pane_module, 'find_spec',
-                            lambda name: None if name == 'httpx' else object())
-        workspace = Workspace.open(tmp_path / 'ws')
-        workspace.remember('db_source', 'central')
-
-        window = MainWindow(workspace)
-        try:
-            assert window.database_pane.source == 'local'
-            # The fallback is on-screen only: the remembered choice on disk
-            # survives it untouched.
-            assert window.workspace.state['db_source'] == 'central'
-
-            seen = []
-            monkeypatch.setattr(
-                window.database, 'start',
-                lambda request, **kwargs: seen.append(request))
-            window.database_pane.search_button.click()
-
-            assert seen and seen[0].source == 'local'
-        finally:
-            window.document.dirty = False
-            window.settings_document.dirty = False
-            window.close()
-
-    def test_an_unconfigured_central_beats_a_remembered_central_source_on_switch(
+    def test_a_remembered_central_source_is_ignored_on_switch(
             self, window, tmp_path, monkeypatch):
         other = Workspace.open(tmp_path / 'other')
         other.remember('db_source', 'central')
@@ -1101,13 +840,11 @@ class TestDisabledSourceIsNeverReachable:
 
         assert seen and seen[0].source == 'local'
 
-    def test_set_source_refuses_a_disabled_button(self, window):
-        # Simulate a stray call (a future regression, a test) reaching
-        # `set_source('central')` directly while D11 has it disabled: it
-        # must not select it, and must not be able to write it to disk
-        # either, since no signal fires for a selection that never happened.
+    def test_set_source_refuses_the_removed_source(self, window):
+        # A stray call reaching `set_source('central')` must not select it,
+        # and must not write it to disk either, since no signal fires for a
+        # selection that never happened.
         window.workspace.remember('db_source', 'central')
-        assert not window.database_pane._source_buttons.button(1).isEnabled()
 
         window.database_pane.set_source('central')
 

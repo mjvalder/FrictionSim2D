@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..data import get_client
 from .plot_mixin_base import PlotDataError, PlotterMixinBase
 from .plot_derived import add_plot_derived_columns
 from .plot_style import GEM24_COLORS
@@ -28,14 +27,6 @@ logger = logging.getLogger(__name__)
 #: complete; truncated and missing points never reach a plot.
 PLOT_STATUSES = DELIVERED_STATUSES
 
-
-#: Scalar query parameters forwarded to the v3 client verbatim.
-DB_QUERY_KEYS = ('material', 'family', 'model', 'set_label', 'potential_type',
-                 'layers', 'uploader', 'status', 'limit')
-
-#: `<name>_min`/`<name>_max` URI pairs -> the client's range keyword.
-DB_RANGE_KEYS = {'force': 'force_range', 'pressure': 'pressure_range',
-                 'temperature': 'temperature_range', 'angle': 'angle_range'}
 
 #: summary_<size>.csv column -> the name the plot specs use.
 SUMMARY_COLUMN_ALIASES = {
@@ -249,8 +240,8 @@ class PlotCommonMixin(PlotterMixinBase):
     def _discover_data_files(self) -> None:
         """Find all ``output_full_*.json`` files in each data directory.
 
-        Entries whose ``data_dir`` starts with ``db://`` are DB-backed datasets
-        and are skipped here — they are loaded by :meth:`_load_db_labels`.
+        Entries whose ``data_dir`` starts with ``db://`` are skipped here;
+        :meth:`_load_db_labels` refuses them (the central database is gone).
         """
         for label, data_dir in zip(self.labels, self.data_dirs):
             if str(data_dir).startswith('db://'):
@@ -294,64 +285,16 @@ class PlotCommonMixin(PlotterMixinBase):
                     f"`FrictionSim2D postprocess read <root> --export`.")
 
     # =====================================================================
-    # DB-BACKED DATA SOURCE  (db:// URI scheme)
+    # DB-BACKED DATA SOURCE  (db:// is removed; aiida://dataset/<name> is Task 12)
     # =====================================================================
 
     @staticmethod
-    def _parse_db_uri(data_dir: str) -> dict | None:
-        """Parse a ``db://`` URI into v3 query parameters.
-
-        URI format::
-
-            db://central?family=hetero&model=sheetonsheet&potential_type=sw
-                        &layers=2&force_min=10&force_max=40&limit=500
-
-        `simulation_type` is gone: schema 3 splits it into `family` (what the
-        run IS) and `model` (where it lives), and silently accepting the old
-        spelling would filter on neither.
-
-        Returns ``None`` if *data_dir* is not a ``db://`` URI.
-        """
-        if not str(data_dir).startswith('db://'):
-            return None
-        from urllib.parse import parse_qs, urlparse  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
-
-        parsed = urlparse(str(data_dir))
-        # There is exactly ONE database now: the database-profile concept is
-        # gone and the local store is AiiDA nodes, not SQL. Accepting
-        # `db://local` and quietly querying the central DB would be a URL that
-        # lies about where its numbers came from.
-        if parsed.netloc not in ('', 'central'):
-            raise PlotDataError(
-                f"db://{parsed.netloc}: the only database is 'central'. "
-                f"The local store is an AiiDA profile, not a SQL database -- "
-                f"export it to a tree first with `FrictionSim2D aiida "
-                f"export-results <label> --output-dir <dir>` and use that "
-                f"directory as the data_dir.")
-        raw = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-        params: dict = {'profile': 'central'}
-        for key in DB_QUERY_KEYS:
-            if key in raw:
-                params[key] = (int(raw[key]) if key in ('layers', 'limit')
-                               else raw[key])
-        for name, keyword in DB_RANGE_KEYS.items():
-            low, high = raw.get(f'{name}_min'), raw.get(f'{name}_max')
-            if low is not None and high is not None:
-                params[keyword] = (float(low), float(high))
-        unknown = set(raw) - set(DB_QUERY_KEYS) - {
-            f'{n}_{b}' for n in DB_RANGE_KEYS for b in ('min', 'max')}
-        if unknown:
-            logger.warning("Ignoring unknown db:// query keys: %s",
-                           sorted(unknown))
-        return params
-
-    @staticmethod
     def _db_df_to_summary_rows(label: str, db_df: pd.DataFrame) -> list[dict]:
-        """Convert a v3 query result to summary rows.
+        """Convert a query-result frame to summary rows.
 
-        The three `lf_*` variants are NOT emitted. The central DB stores one
+        The three `lf_*` variants are NOT emitted. The frame carries one
         lateral force (`mean_lf`); aliasing it to `lf_as_was`, `lf_sx_sy` and
-        `lf_fx_fy` made `lf_source` silently a no-op on DB-backed datasets --
+        `lf_fx_fy` made `lf_source` silently a no-op on query-backed datasets --
         the plot claimed a definition it did not have. Without the columns,
         `_resolve_lf_axis` warns and falls back, which is the honest answer.
         """
@@ -391,37 +334,18 @@ class PlotCommonMixin(PlotterMixinBase):
         return rows
 
     def _load_db_labels(self) -> None:
-        """Query the DB for any label whose ``data_dir`` is a ``db://`` URI.
+        """Refuse any label whose ``data_dir`` is a ``db://`` URI.
 
-        Results are stored in ``self._db_summary_rows`` and merged into
-        :attr:`summary_df_cache` on the next call to
-        :meth:`_get_summary_data_df`.
+        The central database and its REST client were removed; the local
+        AiiDA store is read through ``aiida://dataset/<name>`` (added in
+        Task 12).
         """
         for label, data_dir in zip(self.labels, self.data_dirs):
-            db_params = self._parse_db_uri(str(data_dir))
-            if db_params is None:
-                continue
-
-            profile = db_params.pop('profile', 'central')
-            try:
-                # No `profile=` kwarg: `src.data.get_client` forwards
-                # everything but `settings_file` to `FrictionHTTPClient(
-                # api_url, api_key, timeout)`, which has no such parameter.
-                # The client resolves its URL and key from settings; the URI's
-                # profile segment reaches the log line and nothing else.
-                client = get_client(mode='api')
-                db_df = client.query(**db_params)
-                rows = self._db_df_to_summary_rows(label, db_df)
-                self._db_summary_rows.extend(rows)
-                logger.info(
-                    "Loaded %d rows for DB-backed label '%s' "
-                    "(profile=%s, filters=%s)",
-                    len(rows), label, profile, db_params,
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                logger.error(
-                    "DB query failed for label '%s': %s", label, exc
-                )
+            if str(data_dir).startswith('db://'):
+                raise PlotDataError(
+                    f"{label}: {data_dir} -- the central database was "
+                    f"removed. Read the local AiiDA store with "
+                    f"`aiida://dataset/<name>` instead.")
 
     def _load_all_metadata(self) -> None:
         """Load and merge metadata from all available data files."""
@@ -588,8 +512,7 @@ class PlotCommonMixin(PlotterMixinBase):
         """One row per load point, read from `summary_<size>.csv`.
 
         The CSV is `summarise_run`'s own output (`DataReader.summary_rows`),
-        so `cof` here is the ratio-of-means the store and the central DB
-        carry. `df.mean()` over an element-wise cof column -- what this used
+        so `cof` here is the ratio-of-means the store carries. `df.mean()` over an element-wise cof column -- what this used
         to do -- is a different number, and putting both on one axis is how
         the same run reported two COFs.
         """

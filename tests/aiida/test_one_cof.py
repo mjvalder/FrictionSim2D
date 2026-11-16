@@ -27,10 +27,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.aiida]
 AFM = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
 SHEET = 'sheetonsheet/h-MoS2/100x_100y/K300'
 
-#: The four readers agree, but not to the exact bit pattern: a value that
+#: The readers agree, but not to the exact bit pattern: a value that
 #: round-trips through an AiiDA node attribute (`stored_attr`, `reparsed` via
-#: the node's own re-parse of its stored copy, `record.mean_cof` via
-#: `to_record`'s `attrs.get('mean_cof')`) comes back rounded to ~14
+#: the node's own re-parse of its stored copy) comes back rounded to ~14
 #: significant digits by the storage backend -- observed directly:
 #: `psql_dos` gave back `1.4142135623731` for a freshly computed
 #: `1.4142135623730947`, a ~3.8e-14 relative difference. `direct.mean_cof`
@@ -46,51 +45,6 @@ def _stored_result(label):
     found = Friction2DDB().query(set_label=label)
     assert found.total_count == 1, found.total_count
     return found.runs[0], found.results[0]
-
-
-@pytest.mark.parametrize('rel, family, load_kind', [
-    (AFM, 'afm', 'force'),
-    (SHEET, 'sheetonsheet', 'pressure'),
-])
-def test_one_cof(aiida_profile_clean, tmp_path, rel, family, load_kind):
-    root = tmp_path / 'simulation_cof'
-    run_dir = make_run(root, rel, family, loads=(30.0,), tiers=('window',), n=60)
-    locator, = discover_runs(root)
-    window_file = next((run_dir / 'results').glob('friction_*.txt'))
-
-    report = ingest_root(root, label='cof')
-    assert report.ok(), report.render()
-    run_node, result_node = _stored_result('cof')
-
-    # 1. the kernel, straight off the file
-    frame = read_results_file(window_file, family,
-                              n_layers=locator.tokens.layers or 2)
-    kernel = compute_friction_stats(frame['nf'].to_numpy(),
-                                    frame['lfx'].to_numpy(),
-                                    frame['lfy'].to_numpy(), 0.2)
-
-    # 2. summarise_run over the same frame
-    direct = summarise_run({'window': frame}, family)
-
-    # 3. the stored node's attribute, and the node re-parsing its OWN copy
-    stored_attr = result_node.base.attributes.get('mean_cof')
-    reparsed = summarise_run(result_node.frames_by_tier(), family)
-
-    # 4. the central row -- the real SET node (R26): `to_record`'s second
-    # argument reads `.source_host`/`.label` off it, which only the
-    # `FrictionSimulationSetData` `resolve_set` returns carries. A run node
-    # from `Friction2DDB().query(...).runs` has neither and would AttributeError.
-    set_node = resolve_set('cof')
-    record = result_node.to_record(run_node, set_node,
-                                   uploader='m', contact='m@example.org')
-
-    assert kernel['mean_cof'] is not None
-    assert direct.mean_cof == pytest.approx(kernel['mean_cof'], rel=COF_TOL)
-    assert stored_attr == pytest.approx(kernel['mean_cof'], rel=COF_TOL)
-    assert reparsed.mean_cof == pytest.approx(kernel['mean_cof'], rel=COF_TOL)
-    assert record.mean_cof == pytest.approx(kernel['mean_cof'], rel=COF_TOL)
-    assert record.time_series_hash == result_node.base.attributes.get(
-        'time_series_hash')
 
 
 @pytest.mark.parametrize('rel, family', [(AFM, 'afm'), (SHEET, 'sheetonsheet')])
@@ -154,28 +108,3 @@ def test_a_legacy_sheet_file_is_corrected_on_both_paths(aiida_profile_clean,
     mean_cof = result_node.base.attributes.get('mean_cof')
     assert mean_cof is not None
     assert mean_cof == pytest.approx(expected)
-
-
-def test_an_indent_row_publishes_no_cof(aiida_profile_clean, tmp_path):
-    """m3: an indent window is a static hold; its "COF" is noise and must not
-    reach the central table. The normal force and retract features do."""
-    root = tmp_path / 'simulation_indent'
-    run_dir = make_run(root, 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1',
-                       'indent', loads=(30.0,), n=60)
-    (run_dir / 'results' / 'indent_f30N_l1.csv').write_text(
-        '# family=indent\nstep,z_tip,fz_tip,fx_tip,fy_tip,pe\n'
-        '0,0,5.0,0,0,-1\n1,1,-2.0,0,0,-1\n2,2,-1.0,0,0,-1\n', encoding='utf-8')
-    assert ingest_root(root, label='indent-cof').ok()
-    run_node, result_node = _stored_result('indent-cof')
-
-    record = result_node.to_record(run_node, resolve_set('indent-cof'))
-
-    for stat in ('mean_cof', 'std_cof', 'mean_lf', 'std_lf',
-                 'mean_lfx', 'std_lfx', 'mean_lfy', 'std_lfy'):
-        assert getattr(record, stat) is None, stat
-    assert record.mean_nf == result_node.base.attributes.get('mean_nf')
-    assert record.force_nN == 30.0
-    assert record.extras['pulloff_force'] == pytest.approx(2.0)
-    assert 'work_of_adhesion_nnA' in record.extras
-    # the local store keeps what summarise_run computed; only publishing drops it
-    assert result_node.base.attributes.get('mean_cof') is not None

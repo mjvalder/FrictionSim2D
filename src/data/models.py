@@ -1,23 +1,20 @@
 """Canonical data models and friction statistics for FrictionSim2D.
 
-Provides :class:`ResultRecord`, the single source-of-truth Pydantic model
-for a simulation result, and :func:`compute_friction_stats`, the canonical
-function for computing friction statistics from time-series data.
+Provides :func:`compute_friction_stats`, the canonical function for computing
+friction statistics from time-series data, and :class:`RunSummary` /
+:func:`summarise_run`, the per-load-point summary the AiiDA store keeps.
 
-Every code path that computes COF or uploads results MUST use
-:func:`compute_friction_stats` to guarantee consistency.
+Every code path that computes COF MUST use :func:`compute_friction_stats`
+to guarantee consistency.
 """
 
 from __future__ import annotations
 
-import enum
 import hashlib
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
-from pydantic import BaseModel, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -218,16 +215,15 @@ def _finite(value):
 
 @dataclass
 class RunSummary:
-    """Every number the local store and the central DB keep for one load point.
+    """Every number the local AiiDA store keeps for one load point.
 
     The ten friction statistics are exactly `compute_friction_stats`' output,
     or `None` when this load point has no COF to report -- an empty frame, a
     family whose role columns do not resolve, or a PES grid. `None`, not `0.0`:
     a zero here is indistinguishable from real superlubricity on a COF-vs-load
-    plot, `validation._VALID_RANGES['mean_cof'] = (0.0, 5.0)` accepts it as
-    valid so staging would publish it, and AiiDA attributes are immutable while
-    `results_exist` hash-skips on re-import, so the wrong number would be
-    permanent.
+    plot, nothing downstream would flag it as invalid, and AiiDA attributes
+    are immutable while `results_exist` hash-skips on re-import, so the wrong
+    number would be permanent.
 
     `extras` carries the family-specific scalars (PES descriptors, indent
     retract features, slip counts). Every value in it passes through `_finite`.
@@ -270,9 +266,9 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
                   post: Optional[Dict[str, float]] = None) -> RunSummary:
     """Reduce one load point's frames to the store's summary row.
 
-    The single COF computation on the store path: `FrictionResultsData`,
-    `db upload` and the API all read this, so a number can never differ
-    between them. `compute_friction_stats` stays the kernel.
+    The single COF computation on the store path: `FrictionResultsData`
+    and the postprocessing summary rows read this, so a number can never
+    differ between them. `compute_friction_stats` stays the kernel.
 
     `post` carries the post-stream channels (P6), which are derived from
     the retained final state rather than emitted by LAMMPS and so arrive
@@ -339,182 +335,8 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
     # P6: the post-stream channels are derived from the retained final
     # state rather than emitted by LAMMPS, so they arrive from the caller.
     # They go into extras like every other family-specific scalar, which
-    # is what carries them to the store and the central DB.
+    # is what carries them to the store.
     if post:
         summary.extras.update({k: float(v) for k, v in post.items()})
 
     return summary
-
-
-# ---------------------------------------------------------------------------
-# Status enum for staging pipeline
-# ---------------------------------------------------------------------------
-
-
-class ResultStatus(str, enum.Enum):
-    """Status of a result in the local → central staging pipeline."""
-
-    LOCAL = 'local'
-    STAGED = 'staged'
-    VALIDATED = 'validated'
-    PUBLISHED = 'published'
-    REJECTED = 'rejected'
-
-
-# ---------------------------------------------------------------------------
-# Canonical ResultRecord
-# ---------------------------------------------------------------------------
-
-
-class ResultRecord(BaseModel):
-    """Canonical representation of a friction simulation result.
-
-    This is the **single source of truth** for what constitutes a complete
-    simulation result. All upload paths (CLI, AiiDA, API) convert to this
-    model before writing to the database.
-
-    Fields are the union of everything stored in:
-    - ``database.py`` SQL schema
-    - ``FrictionResultsData`` AiiDA node attributes
-    - ``FrictionSimulationData`` AiiDA node attributes
-    - ``DataReader`` JSON export metadata
-    """
-
-    # -- Database identity (set by DB, not by user) ---------------------------
-    id: Optional[int] = None
-    uploaded_at: Optional[datetime] = None
-
-    # -- Contributor / pointers -------------------------------------------------
-    uploader: Optional[str] = None
-    contact: Optional[str] = None
-    run_uuid: Optional[str] = None
-    result_uuid: Optional[str] = None
-    set_label: Optional[str] = None
-    source_host: Optional[str] = None
-
-    # -- Simulation identity ----------------------------------------------------
-    model: Optional[str] = None
-    family: Optional[str] = None
-
-    # -- Material & geometry --------------------------------------------------
-    materials: List[str] = []
-    material: str
-    stack_type: Optional[str] = None  # 'AA' or 'AB'
-    layers: Optional[int] = None
-    size_x: Optional[float] = None
-    size_y: Optional[float] = None
-    temperature: Optional[float] = None
-
-    # -- Tip / substrate (AFM-specific) ---------------------------------------
-    tip_material: Optional[str] = None
-    tip_radius: Optional[float] = None
-    substrate_material: Optional[str] = None
-    substrate_amorphous: Optional[bool] = None
-
-    # -- Potential ------------------------------------------------------------
-    potential_type: Optional[str] = None
-    potential_name: Optional[str] = None
-    pot_sha256: Optional[str] = None
-    git_commit: Optional[str] = None
-
-    # -- Loading conditions ---------------------------------------------------
-    force_nN: Optional[float] = None          # AFM: normal force (nN)
-    pressure_gpa: Optional[float] = None      # Sheet-on-sheet: pressure (GPa)
-    scan_angle: Optional[float] = None
-    scan_speed: Optional[float] = None
-
-    # -- Results (canonical, from compute_friction_stats) ----------------------
-    mean_cof: Optional[float] = None
-    std_cof: Optional[float] = None
-    mean_lf: Optional[float] = None
-    std_lf: Optional[float] = None
-    mean_nf: Optional[float] = None
-    std_nf: Optional[float] = None
-    mean_lfx: Optional[float] = None
-    std_lfx: Optional[float] = None
-    mean_lfy: Optional[float] = None
-    std_lfy: Optional[float] = None
-
-    # -- Data provenance ------------------------------------------------------
-    ntimesteps: Optional[int] = None
-    time_series_hash: Optional[str] = None
-    is_complete: bool = True
-
-    # -- Free-form --------------------------------------------------------------
-    extras: Dict[str, Any] = {}
-
-    # -- Staging pipeline -----------------------------------------------------
-    status: ResultStatus = ResultStatus.STAGED
-
-    notes: Optional[str] = None
-
-    # -- File archive (federated storage) -------------------------------------
-    data_url: Optional[str] = None  # URL to full time-series (Zenodo, etc.)
-
-    model_config = {'use_enum_values': True}
-
-    @field_validator('time_series_hash', mode='before')
-    @classmethod
-    def _empty_hash_is_none(cls, value: Any) -> Any:
-        """`''` (no hash: an incomplete row whose roles did not resolve)
-        becomes None. The column is UNIQUE, and '' would occupy that one slot
-        so every later hashless row was silently skipped as a duplicate;
-        NULLs never collide."""
-        return None if value == '' else value
-
-    @model_validator(mode='after')
-    def _check_force_or_pressure(self) -> 'ResultRecord':
-        """Warn if neither force nor pressure is set."""
-        # Both can be None for incomplete records; just don't set both.
-        if self.force_nN is not None and self.pressure_gpa is not None:
-            raise ValueError("Set force_nN (AFM) OR pressure_gpa (sheet), not both")
-        return self
-
-    def populate_stats(
-        self,
-        nf: np.ndarray,
-        lfx: np.ndarray,
-        lfy: np.ndarray,
-        skip_fraction: float = 0.2,
-    ) -> None:
-        """Compute and set all friction statistics from raw time-series.
-
-        Also computes the ``time_series_hash`` for deduplication and sets
-        ``ntimesteps``.
-
-        Args:
-            nf: Normal force array.
-            lfx: Lateral force x array.
-            lfy: Lateral force y array.
-            skip_fraction: Transient skip fraction.
-        """
-        stats = compute_friction_stats(nf, lfx, lfy, skip_fraction)
-        for key, val in stats.items():
-            setattr(self, key, val)
-        self.ntimesteps = len(nf)
-        self.time_series_hash = compute_time_series_hash(nf, lfx, lfy)
-
-    def to_upload_dict(self) -> Dict[str, Any]:
-        """Convert to a dict suitable for ``FrictionDB.upload_result()``.
-
-        Excludes ``id``, ``uploaded_at``, and ``None`` values.
-        """
-        exclude = {'id', 'uploaded_at'}
-        return {
-            k: v for k, v in self.model_dump().items()
-            if k not in exclude and v is not None
-        }
-
-    def to_json(self) -> str:
-        """Serialize to JSON string."""
-        return self.model_dump_json()
-
-    @classmethod
-    def from_json(cls, json_str: str) -> 'ResultRecord':
-        """Deserialize from JSON string."""
-        return cls.model_validate_json(json_str)
-
-    @classmethod
-    def from_db_row(cls, row: Dict[str, Any]) -> 'ResultRecord':
-        """Create from a database row dict."""
-        return cls.model_validate(row)

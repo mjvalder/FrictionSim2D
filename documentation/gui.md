@@ -578,16 +578,12 @@ generated config.
 The window has two top-level tabs. **Builder** is everything above; **Database**
 browses what has already been run.
 
-**Source.** Two stores, one toggle. *Local store* is this machine's AiiDA
-store — every run generated or imported here, files included. *Central* is
-the shared summary database over its REST API: numbers only, no files. A
-source whose backend is not installed, or — for Central — that has not been
-pointed at a real API, cannot be selected: its radio button is disabled and
-the message panel says what to install or configure. Disabling the source
-currently on screen hands the pane to the other one; the workspace still
-remembers the source you actually chose, so it comes back once the missing
-piece is fixed. Both sources are filtered by the same form, because both
-expose the same run fields.
+**Source.** The Local store is this machine's AiiDA store — every run
+generated or imported here, files included. The former *Central* source (the
+shared summary database over its REST API) was removed; a workspace that
+remembered it falls back to the Local store. A store whose backend is not
+installed cannot be selected: its radio button is disabled and the message
+panel says what to install.
 
 **Filters.** Family, model, material, potential, layers, a load range (force
 in nN or pressure in GPa — a run carries one or the other, never both),
@@ -625,12 +621,6 @@ second dialog, a warning naming the affected sets and their run counts is
 written to the message panel before the destination chooser opens; cancelling
 that chooser is how you back out.
 
-The central source holds no files, so only **Summary CSV** is available
-there — and **Copy owner contact** instead, which puts the e-mail of whoever
-uploaded the selected rows on the clipboard. That, with the `source_host`
-shown in the detail panel, is how you ask for the files behind a summary row
-that was run on someone else's machine.
-
 **Import run directory…** ingests a simulation directory into the local store
 and prints the ingest report in the message panel, including any results
 still incomplete, any run directory with no results at all, and any path it
@@ -638,16 +628,15 @@ could not even parse. It is the only write action here — deleting and
 submitting stay in the CLI.
 
 **Connection settings are not edited in this pane.** The local store uses
-`settings.aiida.profile` and the central database uses `database.api_url` and
-`database.api_key`, both from the Settings tab. **Check connection** reports
-what it found — profile loaded, API reachable, how many sets are stored — in
+`settings.aiida.profile` from the Settings tab. **Check connection** reports
+what it found — profile loaded, how many sets are stored — in
 the message panel, which is where every message from this pane appears;
 nothing here opens a dialog except the destination chooser. A local profile
 that fails to load points you at `FrictionSim2D aiida setup`.
 
 A **list** query's result is cached, keyed on the filters plus the connection
-it ran against — the AiiDA profile, or the API URL and a hash of the API
-key — since the same filters against a different store are a different
+it ran against — the AiiDA profile —
+since the same filters against a different store are a different
 answer. A result served from the cache says so in the message panel — its
 timing is the original query's, not a fresh one's. **Refresh** bypasses the
 cache, and a successful **Import run directory…** clears every cached list,

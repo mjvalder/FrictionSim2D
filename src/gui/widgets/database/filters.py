@@ -1,8 +1,7 @@
 """The filter controls above the results table.
 
 The field names are the local store's (`materials`, `potential`,
-`force_range`); `db_worker._central_filters` translates them for the REST
-surface, so one form serves both sources.
+`force_range`).
 """
 
 from __future__ import annotations

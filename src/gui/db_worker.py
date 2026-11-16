@@ -2,13 +2,13 @@
 
 Everything the Database pane asks for runs here, for the reason the preview
 worker exists: ``import aiida`` plus ``load_profile`` is slow and
-process-global, and psycopg2/httpx can hang. A hung or crashed query kills
+process-global, and psycopg2 can hang. A hung or crashed query kills
 this process, not the window.
 
 Invoked as ``python -m src.gui.db_worker <request.json>``. Progress lines go to
 stdout as JSON; the result is written to ``request['result_file']``.
 
-Every heavy import (aiida, httpx, pandas) is inside a function: ``src.gui``
+Every heavy import (aiida, pandas) is inside a function: ``src.gui``
 must stay importable on a machine that has none of them.
 """
 
@@ -95,8 +95,8 @@ def _facet_lists(conditions: Dict[str, Any]) -> Dict[str, List[Any]]:
 
 
 #: Which record field(s) each facet is the distinct values of. The potential
-#: axis is `pot_token` in the local store and `potential_type` in the central
-#: one, so a facet may read more than one field.
+#: axis is `pot_token` in the local store and `potential_type` in older
+#: records, so a facet may read more than one field.
 _FACET_FIELDS = (('families', ('family',)), ('models', ('model',)),
                  ('potentials', ('pot_token', 'potential_type')),
                  ('set_labels', ('set_label',)), ('layers', ('layers',)),
@@ -106,11 +106,9 @@ _FACET_FIELDS = (('families', ('family',)), ('models', ('model',)),
 def _facets_from_records(records: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
     """Choices read off the rows just fetched.
 
-    The whole answer for the central source -- its `/conditions` endpoint
-    replies with ranges and count maps rather than choice lists, and knows
-    nothing of potentials or sets -- and the fallback for any facet the local
-    store does not offer. Only as complete as the last query, which is why it
-    is a fallback and not the primary source.
+    The fallback for any facet the local store does not offer. Only as
+    complete as the last query, which is why it is a fallback and not the
+    primary source.
     """
     out: Dict[str, List[Any]] = {}
     for facet, fields in _FACET_FIELDS:
@@ -164,46 +162,6 @@ def _set_sizes(sets: Any) -> Dict[str, int]:
     return out
 
 
-def _central_client(request: Dict[str, Any]):
-    """The central summary DB's HTTP client.
-
-    The API key comes from the environment, never from the request file: that
-    file is written into the workspace and kept as the D13 cache, and a secret
-    written there outlives the session in a directory the user may sync.
-    """
-    import os  # pylint: disable=import-outside-toplevel
-    from ..api.client import FrictionHTTPClient  # pylint: disable=import-outside-toplevel
-    return FrictionHTTPClient(api_url=request.get('api_url') or '',
-                              api_key=os.environ.get('FRICTIONSIM2D_API_KEY') or None)
-
-
-def _central_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
-    """FilterBar keys as `FrictionHTTPClient.query` kwargs.
-
-    The REST surface takes one `material` and calls the potential axis
-    `potential_type`; the local store takes a `materials` list and calls it
-    `potential`. One filter form serves both sources, so the translation
-    happens here rather than in the pane. Only kwargs
-    `FrictionHTTPClient.query` actually accepts are produced here -- there is
-    no `is_complete` (the pane has no Completeness filter) and no
-    `substrate`/`tip_material`/`angle_range`/`speed_range`/`order_by`, none of
-    which the REST surface takes either.
-    """
-    materials = filters.get('materials') or []
-    return {
-        'material': materials[0] if materials else None,
-        'family': filters.get('family'),
-        'model': filters.get('model'),
-        'set_label': filters.get('set_label'),
-        'potential_type': filters.get('potential'),
-        'layers': filters.get('layers'),
-        'force_range': filters.get('force_range'),
-        'pressure_range': filters.get('pressure_range'),
-        'temperature_range': filters.get('temperature_range'),
-        'limit': filters.get('limit'),
-    }
-
-
 def _list(request: Dict[str, Any]) -> Dict[str, Any]:
     """Rows for the table, plus the choices the filter combos offer."""
     filters = {k: v for k, v in (request.get('filters') or {}).items()
@@ -212,36 +170,17 @@ def _list(request: Dict[str, Any]) -> Dict[str, Any]:
 
     sizes: Dict[str, int] = {}
     limit = filters.get('limit')
-    if request.get('source') == 'central':
-        client = _central_client(request)
-        _emit('progress', message='querying the central database')
-        try:
-            records = _records(client.query(**_central_filters(filters)))
-            facets = {'materials': list(client.list_materials()),
-                      **_facet_lists({})}
-        finally:
-            client.close()
-        # The REST client has no way to ask the store for a true total: it
-        # only ever returns the rows the query matched, up to `limit`. When
-        # the returned count reaches that cap, treating it as the total would
-        # claim a store size that may just be where the client stopped
-        # asking, so the total is reported unknown and `limit` goes along
-        # with it -- the pane can still say "N results (limit L)" using
-        # `returned`.
-        truncated = bool(limit) and len(records) >= limit
-        total = None if truncated else len(records)
-    else:
-        db = _local_db(request)
-        _emit('progress', message='querying the local store')
-        result = db.query(**filters)
-        records = _records(result.to_dataframe())
-        _add_imported_at(records)
-        facets = {'materials': list(db.get_available_materials()),
-                  **_facet_lists(db.get_available_conditions())}
-        total = result.total_count
-        # Only the local source can export a whole set, so only it needs the
-        # run counts the run_tree confirmation quotes.
-        sizes = _set_sizes(db.list_sets())
+    db = _local_db(request)
+    _emit('progress', message='querying the local store')
+    result = db.query(**filters)
+    records = _records(result.to_dataframe())
+    _add_imported_at(records)
+    facets = {'materials': list(db.get_available_materials()),
+              **_facet_lists(db.get_available_conditions())}
+    total = result.total_count
+    # Only the local source can export a whole set, so only it needs the
+    # run counts the run_tree confirmation quotes.
+    sizes = _set_sizes(db.list_sets())
 
     filled = _backfill_facets(facets, records)
     return {
@@ -278,21 +217,6 @@ def _repository_files(node, which: str) -> List[Dict[str, Any]]:
 
 def _detail(request: Dict[str, Any]) -> Dict[str, Any]:
     """Everything about one selected row -- without downloading anything."""
-    if request.get('source') == 'central':
-        client = _central_client(request)
-        try:
-            record = client.get_result(int(request['result_id']))
-        finally:
-            client.close()
-        return {
-            'ok': True, 'kind': 'detail', 'source': 'central',
-            'run': {'uuid': record.get('run_uuid') or '', 'node_type': '',
-                    'attributes': {}},
-            'result': {'uuid': record.get('result_uuid') or '', 'node_type': '',
-                       'attributes': record},
-            'files': [], 'total_bytes': 0,
-        }
-
     _load_profile(request)
     from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
     run = load_node(uuid=request['run_uuid'])
@@ -422,10 +346,6 @@ def _export(request: Dict[str, Any]) -> Dict[str, Any]:
 
     if what == 'summary_csv':
         return _export_summary_csv(request, dest)
-    if request.get('source') == 'central':
-        raise ValueError(
-            f"the central database holds summaries only: it cannot export {what!r}")
-
     _load_profile(request)
     if what == 'results':
         return _export_result_files(request, dest)
@@ -448,10 +368,6 @@ def _import(request: Dict[str, Any]) -> Dict[str, Any]:
     ran clean -- a report with failures is still a report worth reading.
     """
     from pathlib import Path  # pylint: disable=import-outside-toplevel
-    if request.get('source') == 'central':
-        raise ValueError('import writes to the local store; '
-                         'the central database is read-only from this pane')
-
     _load_profile(request)
     root = Path(request['root']).expanduser()
     _emit('progress', message=f"ingesting {root}")
@@ -491,54 +407,30 @@ def _check(request: Dict[str, Any]) -> Dict[str, Any]:
     checks: List[Dict[str, Any]] = []
     notes: List[str] = []
 
-    if source == 'central':
-        url = (request.get('api_url') or '').strip()
-        has_httpx = find_spec('httpx') is not None
-        checks.append({'name': 'httpx installed', 'ok': has_httpx,
-                       'detail': '' if has_httpx else "pip install -e '.[api]'"})
-        configured = bool(request.get('configured', bool(url)))
-        checks.append({
-            'name': 'api url', 'ok': configured,
-            'detail': url if configured else
-            'not configured -- set database.api_url (and database.api_key) in '
-            'Settings; there is no central database at the built-in default'})
-        if not configured:
-            notes.append('Until a central database exists, use the Local store.')
-        if has_httpx and configured:
-            try:
-                client = _central_client(request)
-                try:
-                    stats = client.get_statistics()
-                finally:
-                    client.close()
-                checks.append({'name': 'GET /statistics', 'ok': True,
-                               'detail': f"{stats.get('total_rows', '?')} results"})
-            except Exception as exc:  # pylint: disable=broad-except
-                checks.append({'name': 'GET /statistics', 'ok': False,
-                               'detail': f"{type(exc).__name__}: {exc}"})
-                notes.append('Start the API with: FrictionSim2D api serve')
+    has_aiida = find_spec('aiida') is not None
+    checks.append({'name': 'aiida installed', 'ok': has_aiida,
+                   'detail': '' if has_aiida else "pip install -e '.[aiida]'"})
+    if not has_aiida:
+        notes.append("The local store needs aiida-core: pip install -e '.[aiida]'")
     else:
-        has_aiida = find_spec('aiida') is not None
-        checks.append({'name': 'aiida installed', 'ok': has_aiida,
-                       'detail': '' if has_aiida else "pip install -e '.[aiida]'"})
-        if not has_aiida:
-            notes.append("The local store needs aiida-core: pip install -e '.[aiida]'")
-        else:
-            try:
-                profile = _load_profile(request)
-                checks.append({'name': 'profile loaded', 'ok': True,
-                               'detail': str(profile)})
-                checks.append({'name': 'sets in the store', 'ok': True,
-                               'detail': str(len(_local_db(request).list_sets()))})
-            except Exception as exc:  # pylint: disable=broad-except
-                checks.append({'name': 'profile loaded', 'ok': False,
-                               'detail': f"{type(exc).__name__}: {exc}"})
-                notes.append('Check settings.aiida.profile, or run: '
-                             'FrictionSim2D aiida setup')
+        try:
+            profile = _load_profile(request)
+            checks.append({'name': 'profile loaded', 'ok': True,
+                           'detail': str(profile)})
+            checks.append({'name': 'sets in the store', 'ok': True,
+                           'detail': str(len(_local_db(request).list_sets()))})
+        except Exception as exc:  # pylint: disable=broad-except
+            checks.append({'name': 'profile loaded', 'ok': False,
+                           'detail': f"{type(exc).__name__}: {exc}"})
+            notes.append('Check settings.aiida.profile, or run: '
+                         'FrictionSim2D aiida setup')
 
     return {'ok': True, 'kind': 'check', 'source': source, 'checks': checks,
             'notes': notes, 'ready': all(c['ok'] for c in checks)}
 
+
+#: What a request for the removed 'central' source answers.
+CENTRAL_REMOVED = 'central database removed; use the local AiiDA store'
 
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     'list': _list,
@@ -563,6 +455,9 @@ def dispatch(request: Dict[str, Any]) -> Dict[str, Any]:
     identically.
     """
     kind = request.get('kind') or ''
+    if request.get('source') == 'central':
+        return {'ok': False, 'kind': kind, 'error': CENTRAL_REMOVED,
+                'traceback': ''}
     handler = HANDLERS.get(kind)
     if handler is None:
         return {'ok': False, 'kind': kind,

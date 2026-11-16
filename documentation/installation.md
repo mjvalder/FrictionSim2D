@@ -11,9 +11,7 @@ Environment setup, optional extras, verification, and troubleshooting.
 Optional features require extra dependencies:
 
 - AiiDA workflows: `aiida-core`
-- Database commands: `psycopg2-binary`
 - Plotting: `matplotlib`, `seaborn`, `scipy`
-- API server: `fastapi`, `uvicorn`, `httpx`
 
 ## Install from source
 
@@ -28,9 +26,7 @@ brackets:
 
 ```bash
 pip install -e ".[aiida]"
-pip install -e ".[db]"
 pip install -e ".[plotting]"
-pip install -e ".[api]"
 pip install -e ".[all]"
 ```
 
@@ -76,20 +72,6 @@ inbound AiiDA connections. Two workflows cover a remote cluster instead:
   `FrictionSim2D aiida import-archive` on your workstation.
 
 See [aiida.md](aiida.md) for both in full.
-
-## Database and API setup (optional)
-
-Initialize schema:
-
-```bash
-FrictionSim2D db init
-```
-
-Start the API server:
-
-```bash
-FrictionSim2D api serve --host 0.0.0.0 --port 8000
-```
 
 ## Troubleshooting
 

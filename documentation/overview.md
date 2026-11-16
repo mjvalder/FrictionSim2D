@@ -40,9 +40,8 @@ registration, submission, and import workflows.
 4. Run the LAMMPS jobs locally or on a cluster.
 5. Import completed results into the local AiiDA database — full timeseries plus
    provenance: `FrictionSim2D aiida import`.
-6. Optionally upload summary statistics to the shared central database, reading
-   the local AiiDA store directly by set label:
-   `FrictionSim2D db upload SET_LABEL --uploader NAME --contact EMAIL`.
+6. Share results as AiiDA archives (`FrictionSim2D aiida import`); the central
+   database was removed.
 
 ## Quick start
 
@@ -110,22 +109,15 @@ per expanded parameter set.
 | `hpc` | Build scheduler scripts from generated simulations |
 | `aiida` | Setup, submit, import, query, export archives |
 | `postprocess` | Read results and produce plots or descriptor tables |
-| `db` | Manage keys and records in the shared database |
-| `api` | Serve a REST API on top of the database |
 
 Full reference in [commands.md](commands.md).
 
-## Two-database architecture
+## Storage
 
-FrictionSim2D uses two separate databases with different roles.
-
-| | Local (AiiDA) | Central (remote) |
-|---|---|---|
-| **Backend** | AiiDA-managed | PostgreSQL on a remote server |
-| **Contents** | Full time-series data, complete provenance | Summary statistics only (mean COF, forces, conditions) |
-| **CLI** | `FrictionSim2D aiida ...` | `FrictionSim2D db ...` |
-| **Setup** | `FrictionSim2D aiida setup` | `FrictionSim2D db setup` (connection from `settings.database` or `--host/--port/...`) |
-| **Use for** | Analysis, plotting, rebuilding simulations | Cross-study comparison, sharing results |
+Results live in the local AiiDA store (`FrictionSim2D aiida ...`): full
+time-series data and complete provenance. The former central PostgreSQL database
+and REST API were removed; exchange results as AiiDA archives
+(`FrictionSim2D aiida import`).
 
 ## Reproducibility
 

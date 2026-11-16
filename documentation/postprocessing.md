@@ -208,7 +208,7 @@ One row per load point. Column order:
    `NaN` where the family has none.
 
 **Every number in this file comes from `src.data.models.summarise_run`**, the single COF
-on the store path — the same function the AiiDA node and the central database read. In
+on the store path — the same function the AiiDA node reads. In
 particular `mean_cof` is `mean(LF)/mean(NF)`, computed after discarding the first
 `skip_fraction` (0.2 by default) of the run as transient.
 
@@ -225,7 +225,7 @@ histogram plots `cof_slope`, and its axis says so.
 element-wise `cof` column over *all* samples (`df.mean()`); it now reads
 `summary_<size>.csv`, whose `mean_cof` is `ratio_of_means` — `mean(LF)/mean(NF)` after
 dropping the first `skip_fraction`. The new definition is the tribology convention and
-is what the central database has always stored, but the two disagree by more than
+is the one the store keeps, but the two disagree by more than
 rounding wherever a run has a load ramp or a slow start.
 
 **Any figure already in a paper or a talk must be regenerated and re-read, not assumed
@@ -273,28 +273,15 @@ with:
 FrictionSim2D postprocess plot --init plots.json --data-dir /data/campaign_a
 ```
 
-### Reading from the central database
+### `db://` data directories (removed)
 
-A `data_dir` may instead be a `db://` URI:
-
-```
-db://central?family=hetero&potential_type=sw&layers=2&force_min=10&force_max=40&limit=500
-```
-
-Scalar filters: `material`, `family`, `model`, `set_label`, `potential_type`, `layers`,
-`uploader`, `status`, `limit`. Range filters come in `<name>_min`/`<name>_max` pairs for
-`force`, `pressure`, `temperature` and `angle`. Unknown keys are logged and ignored.
-
-`central` is the only database. The local AiiDA store is a set of nodes, not SQL; export
-it to a tree first and use that directory:
+`db://` URIs were removed with the central database; a `data_dir` that starts with
+`db://` raises `PlotDataError`. Read the local AiiDA store with
+`aiida://dataset/<name>` (added in Task 12), or export a tree and use that directory:
 
 ```bash
 FrictionSim2D aiida export-results <label> --output-dir <dir>
 ```
-
-**`lf_source` does not apply to `db://` rows.** The central database stores one lateral
-force, so `sx_sy` and `fx_fy` have nothing to select; the axis falls back to `lf` and
-logs a warning rather than plotting one definition under another's name.
 
 ---
 
@@ -309,7 +296,7 @@ against.
 
 | field | type | meaning |
 |---|---|---|
-| `data_dirs` | `List[str]` | Directories holding outputs/, or db:// URIs |
+| `data_dirs` | `List[str]` | Directories holding outputs/ |
 | `labels` | `List[str]` | One per data_dir |
 | `dataset_display_labels` | `Dict[str, str]` |  |
 | `series_color_map` | `Dict[str, Optional[str]]` |  |

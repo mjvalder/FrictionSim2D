@@ -37,15 +37,16 @@ def test_it_names_the_write_action_and_the_check(text):
     assert 'Check connection' in section
 
 
-def test_it_explains_how_to_reach_the_owner_of_a_central_row(text):
+def test_it_says_the_central_source_was_removed(text):
     section = text.split('\n## Database\n', 1)[1]
-    assert 'Copy owner contact' in section
+    assert 'Copy owner contact' not in section
+    assert 'removed' in section
 
 
 def test_it_says_where_the_connection_settings_come_from(text):
     section = text.split('\n## Database\n', 1)[1]
     assert 'settings.aiida.profile' in section
-    assert 'database.api_url' in section
+    assert 'database.api_url' not in section
 
 
 def test_not_included_no_longer_claims_the_database_is_missing(text):

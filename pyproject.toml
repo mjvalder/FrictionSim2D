@@ -41,18 +41,10 @@ aiida = [
   # Then run:     rabbitmq-server -detached
   #               verdi presto --use-postgres
 ]
-db = [
-  "psycopg2-binary>=2.9",
-]
 plotting = [
   "matplotlib>=3.5",
   "seaborn>=0.12",
   "scipy>=1.8",
-]
-api = [
-  "fastapi>=0.100",
-  "uvicorn[standard]>=0.20",
-  "httpx>=0.24",
 ]
 gui = [
   # ovito supplies the embedded interactive viewport (Viewport.create_qt_widget).
@@ -74,11 +66,10 @@ dev = [
   "pytest>=7.0",
   "pytest-cov>=4.0",
   "pylint>=2.15",
-  "httpx>=0.24",
   "pytest-qt>=4.2",
 ]
 all = [
-  "FrictionSim2D[aiida,db,plotting,api,gui,agent]",
+  "FrictionSim2D[aiida,plotting,gui,agent]",
 ]
 
 # ---------------------------------------------------------------------------
@@ -125,9 +116,9 @@ include = ["src/**"]
 # Gate command (codebase review; extended by the AiiDA data rework, Task 35,
 # 2026-09-22): pylint src/cli.py src/__init__.py src/core src/run
 # src/potentials src/lattice src/builders src/interfaces src/hpc src/aiida
-# src/data src/api
-# src/aiida, src/data and src/api joined the gate at Task 35: this plan
-# rewrites all three, so leaving them ungated would have exempted exactly the
+# src/data
+# src/aiida and src/data joined the gate at Task 35: this plan
+# rewrites both, so leaving them ungated would have exempted exactly the
 # code it produced. They were excluded before only because the 2026-09
 # codebase review scoped them out as "linted ad hoc"; nothing legacy is left
 # in them to grandfather.

@@ -1095,7 +1095,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         }
 
     def summary_rows(self) -> List[Dict[str, Any]]:
-        """One flat row per load point -- the rows `db upload` sends.
+        """One flat row per load point -- the rows the AiiDA store summarises.
 
         Every statistic comes from `summarise_run`, the single COF on the
         store path. Nothing here computes a mean of its own.
@@ -1128,7 +1128,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 'temperature': tokens.temperature,
                 # The RESOLVED count, not `tokens.layers`: the sheet-like
                 # models emit no `L{n}` path level, and `layers` is a headline
-                # filter in the central DB, the API and the GUI. NULL there for
+                # filter in the store and the GUI. NULL there for
                 # every sheet, hetero, flake and pes_sheet row is worse than a
                 # number read from provenance.
                 'layers': run.n_layers,
