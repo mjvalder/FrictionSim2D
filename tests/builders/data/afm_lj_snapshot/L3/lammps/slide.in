@@ -139,7 +139,7 @@ create_atoms    13 single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
 group           virtual type 13
 velocity        virtual set 0.0 0.0 0.0
 
-fix             spr tip_fix spring couple virtual 3.1210986267166043 0.0 0.0 NULL 37.5
+fix             spr tip_fix spring couple virtual 3.12075467163009 0.0 0.0 NULL 37.5
 fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 
 # Output fixes AFTER the drive block: fix spr must exist before any tier can

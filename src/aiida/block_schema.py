@@ -319,7 +319,7 @@ UNITS: Dict[str, str] = {
     # general
     'general.temp': 'K',  # overrides.py:341; afm/slide.lmp:85 langevin T
     'general.bond_spring': 'N/m',  # overrides.py:400; sheetonsheet/base.py:798 / NM_TO_EV_A2
-    'general.driving_spring': 'N/m',  # overrides.py:405; afm/base.py:864 / 16.02
+    'general.driving_spring': 'N/m',  # overrides.py:405; afm/base.py:864 / NM_TO_EV_A2
     'general.twist_angle': 'deg',  # overrides.py:411
     'general.twist_angle_tol': 'deg',  # overrides.py:418
     'general.twist_strain_tol': '1',  # fractional strain, core/config.py:708
@@ -599,17 +599,15 @@ class UnitMismatch(ValueError):
 SPRING_METHODS = frozenset({'smd', 'virtual_atom'})
 
 
-def _spring_conversion(family: str) -> Tuple[float, float]:
-    """(N/m per eV/A^2, fallback N/m) the family's builder uses for driving_spring.
-
-    AFM divides by 16.02 with an 8.0 fallback (``afm/base.py:864``); the sheet
-    families by ``NM_TO_EV_A2`` with 50.0 (``sheetonsheet/base.py:803``,
-    ``hetero.py:530``, ``flake_slide.py:485``).
-    """
+def _spring_fallback(family: str) -> float:
+    """The N/m a blank ``driving_spring`` falls back to in the family's builder:
+    8.0 for AFM (``afm/base.py``), 50.0 for the sheet families
+    (``sheetonsheet/base.py``, ``hetero.py``, ``flake_slide.py``). Every one of
+    them converts with :data:`~src.data.models.NM_TO_EV_A2`."""
     if family in AFM_FAMILIES:
-        return 16.02, 8.0
+        return 8.0
     family_model(family)
-    return NM_TO_EV_A2, 50.0
+    return 50.0
 
 
 def check_units(blocks: RunBlocks) -> None:
@@ -627,9 +625,8 @@ def check_units(blocks: RunBlocks) -> None:
     drive_k = blocks.derived.get('drive_k')
     if method not in SPRING_METHODS or drive_k is None:
         return
-    factor, fallback = _spring_conversion(blocks.family)
     spring = fields.get('general.driving_spring', defaults.get('general.driving_spring'))
-    expected = (spring or fallback) / factor
+    expected = (spring or _spring_fallback(blocks.family)) / NM_TO_EV_A2
     if abs(float(drive_k) - expected) > 1e-9 * max(1.0, abs(float(drive_k))):
         raise UnitMismatch(
             f'derived.drive_k = {drive_k} {UNITS["derived.drive_k"]}, but '

@@ -75,26 +75,30 @@ def _run(*, family='afm', drive_k, **drive_fields):
 
 
 def test_drive_k_unit_and_cross_check():                      # I7
-    check_units(_run(driving_spring=16.02, drive_method='virtual_atom', drive_k=1.0))
+    check_units(_run(driving_spring=NM_TO_EV_A2, drive_method='virtual_atom', drive_k=1.0))
     with pytest.raises(UnitMismatch):
-        check_units(_run(driving_spring=16.02, drive_method='virtual_atom',
-                         drive_k=16.02))
+        check_units(_run(driving_spring=NM_TO_EV_A2, drive_method='virtual_atom',
+                         drive_k=NM_TO_EV_A2))
 
 
-def test_cross_check_uses_the_family_conversion():
-    """Sheet builders divide by NM_TO_EV_A2, not 16.02 (sheetonsheet/base.py:803)."""
-    check_units(_run(family='sheetonsheet', driving_spring=50.0, drive_method='smd',
+@pytest.mark.parametrize('family', ['afm', 'sheetonsheet'])
+def test_cross_check_uses_the_one_exact_constant(family):
+    """Every builder divides by NM_TO_EV_A2 (afm/base.py, sheetonsheet/base.py,
+    hetero.py, flake_slide.py); the old AFM 16.02 no longer passes."""
+    check_units(_run(family=family, driving_spring=50.0, drive_method='smd',
                      drive_k=50.0 / NM_TO_EV_A2))
     with pytest.raises(UnitMismatch):
-        check_units(_run(family='sheetonsheet', driving_spring=50.0, drive_method='smd',
+        check_units(_run(family=family, driving_spring=50.0, drive_method='smd',
                          drive_k=50.0 / 16.02))
 
 
 def test_cross_check_reads_elided_defaults_and_fallbacks():
     # Both fields elided: virtual_atom and 50 N/m are the defaults.
-    check_units(_run(drive_k=50.0 / 16.02))
-    # A blanked spring takes the builder's fallback (afm/base.py:864: or 8.0).
-    check_units(_run(driving_spring=None, drive_k=8.0 / 16.02))
+    check_units(_run(drive_k=50.0 / NM_TO_EV_A2))
+    # A blanked spring takes the family's builder fallback: AFM 8.0, sheet 50.0.
+    check_units(_run(driving_spring=None, drive_k=8.0 / NM_TO_EV_A2))
+    check_units(_run(family='sheetonsheet', driving_spring=None,
+                     drive_k=50.0 / NM_TO_EV_A2))
     with pytest.raises(UnitMismatch):
         check_units(_run(drive_k=50.0))
 

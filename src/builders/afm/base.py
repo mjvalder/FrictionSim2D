@@ -21,7 +21,7 @@ from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import get_model_dimensions
 from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type, lj_params
-from ...data.models import EV_A_TO_NN
+from ...data.models import EV_A_TO_NN, NM_TO_EV_A2
 from ..construction import components
 from ..utils.interlayer import (check_interlayer_box_from_data,
                                 interlayer_provenance_block, interlayer_style,
@@ -861,7 +861,7 @@ class AFMSimulation(SimulationBase):
             'drive_method': sim.drive_method,
             'damp_ev': damp_ev,
             'damping_ratio': damping_ratio,
-            'spring_ev': (self.config.general.driving_spring or 8.0) / 16.02,
+            'spring_ev': (self.config.general.driving_spring or 8.0) / NM_TO_EV_A2,
             'afm_hold_steps': AFM_HOLD_STEPS,
             'virtual_offset': self.config.tip.r * 1.5, 
             'results_freq': out.results_frequency,

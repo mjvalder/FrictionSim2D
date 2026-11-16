@@ -13,6 +13,7 @@ import pytest
 from src.builders.afm import AFMSimulation
 from src.builders.construction import components
 from src.potentials.utils import normalize_potential_type
+from src.data.models import NM_TO_EV_A2
 from tests.builders.test_builders import MOS2_CIF, MOS2_POT
 from tests.helpers.afm import _make_afm_config, _prepare_builder_for_slide_write, _seed_builder_state
 
@@ -162,7 +163,7 @@ create_atoms    3 single $(v_virtual_x) $(v_virtual_y) $(v_virtual_z) units box
 group           virtual type 3
 velocity        virtual set 0.0 0.0 0.0
 
-fix             spr tip_fix spring couple virtual 3.1210986267166043 0.0 0.0 NULL 30.0
+fix             spr tip_fix spring couple virtual 3.12075467163009 0.0 0.0 NULL 30.0
 fix             move_virtual virtual move linear $(v_drive_vx) $(v_drive_vy) 0.0
 
 # Output fixes AFTER the drive block: fix spr must exist before any tier can
@@ -702,8 +703,8 @@ def _afm_provenance(layer_dir: Path) -> dict:
 
 
 @pytest.mark.parametrize("method, expected", [
-    ("virtual_atom", (8.0 / 16.02, 37.5)),
-    ("smd", (8.0 / 16.02, 0.0)),
+    ("virtual_atom", (8.0 / NM_TO_EV_A2, 37.5)),
+    ("smd", (8.0 / NM_TO_EV_A2, 0.0)),
     ("fix_move", (None, None)),
 ])
 def test_afm_provenance_records_the_drive_spring(tmp_path, method, expected):
@@ -718,7 +719,8 @@ def test_afm_provenance_records_the_drive_spring(tmp_path, method, expected):
     assert prov["drive_k"] == pytest.approx(expected[0])
     assert prov["drive_rest_length"] == pytest.approx(expected[1])
     if method == "virtual_atom":
-        assert prov["drive_k"] == pytest.approx(0.4994, abs=1e-4)
+        # the exact N/m -> eV/A^2 constant, not the old literal 16.02 (0.49938)
+        assert prov["drive_k"] == pytest.approx(0.499321, abs=1e-6)
 
 
 @pytest.mark.skipif(LMP is None, reason="lmp_serial not on PATH")
