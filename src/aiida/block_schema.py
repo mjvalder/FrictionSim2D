@@ -412,6 +412,90 @@ POINT_UNITS: Dict[str, Dict[str, str]] = {
 }
 
 
+# --- summary units --------------------------------------------------------------
+
+_NN = 'nN'
+
+#: The ``RunSummary`` dataclass fields, the same for every family. The ten
+#: statistics average the window's ``nf``/``lfx``/``lfy`` channels, which are
+#: nN in every family: AFM ``afm/slide.lmp:115-117`` and the sheet family
+#: ``sheetonsheet/slide.lmp:136-141,172-173`` (and ``hetero/slide.lmp:166-167``,
+#: ``flake/slide.lmp:112,157-159``) all scale by ``ev_a_to_nn``.
+_SUMMARY_BASE: Dict[str, str] = {
+    'mean_cof': '1', 'std_cof': '1',  # lf / nf, data/models.py compute_friction_stats
+    **{f'{stat}_{ch}': _NN for stat in ('mean', 'std')
+       for ch in ('lf', 'nf', 'lfx', 'lfy')},
+    'skip_fraction': '1',  # leading fraction of the window dropped
+    'ntimesteps': 'count',  # window rows, data/models.py summarise_run
+}
+
+#: The driven body's COM (``driven_com_*`` roles, Angstrom in the registry).
+_SUMMARY_DRIVEN = {'slide_distance': _A, 'driven_com_z_mean': _A,
+                   'driven_com_z_drift': _A}
+
+#: ``slip_analysis.SlipEvents.summary`` over ``raw_lfx`` (nN).
+_SUMMARY_SLIP = {'slip_n_events': 'count', 'slip_amplitude_mean': _NN,
+                 'slip_amplitude_std': _NN, 'slip_mean_interval_samples': 'samples'}
+
+#: ``indent.retract_features`` over ``z_tip`` (A) and ``fz_tip`` (nN).
+_SUMMARY_RETRACT = {
+    'n_points': 'count', 'z_span': _A, 'f_adh_min': _NN, 'pulloff_force': _NN,
+    'snapoff_z': _A, 'work_of_adhesion_nnA': 'nN*angstrom',
+    'work_of_adhesion': 'eV',  # indent.py: w_nnA / EV_A_TO_NN
+    'contact_stiffness': 'nN/angstrom', 'detached': '1',
+}
+
+#: ``post_channels.post_channels``: lengths in Angstrom, by family branch.
+_SUMMARY_POST_AFM = {'gap_min': _A, 'deflect_max': _A}
+_SUMMARY_POST_SHEET = {'gap_min_il': _A, 'corrugation_max': _A}
+
+#: ``pes_scan.grid_descriptors``: ``energy_eV`` is the total PE in eV
+#: (``afm/pes_scan.lmp:87``), the grid axes are Angstrom, the tip forces nN
+#: (``afm/pes_scan.lmp:72-74`` scale by ``ev_a_to_nn``).
+_SUMMARY_PES = {
+    'pes_barrier_U': 'eV', 'pes_barrier_mep': 'eV', 'pes_corr_rms': 'eV',
+    'pes_barrier_aniso': '1', 'pes_curv_min': 'eV/angstrom^2',
+    'pes_eta': '1',  # 2 pi^2 U / (K a^2): eV / (eV/A^2 * A^2)
+    'pes_grid_n': 'count',
+}
+_SUMMARY_PES_TIP = {'pes_fmax': _NN, 'pes_flat_rms': _NN, 'pes_load_mean': _NN,
+                    'pes_load_std': _NN}
+
+#: family -> ``RunSummary.as_dict()`` key -> unit, for every number
+#: :func:`src.data.models.summarise_run` can put in a family's summary.
+#: ``tests/aiida/test_summary_units.py`` fails on a key it emits without one,
+#: and :func:`summary_units` refuses it at summarise time.
+SUMMARY_UNITS: Dict[str, Dict[str, str]] = {
+    'afm': {**_SUMMARY_BASE, **_SUMMARY_DRIVEN, **_SUMMARY_SLIP, **_SUMMARY_POST_AFM},
+    'indent': {**_SUMMARY_BASE, **_SUMMARY_DRIVEN, **_SUMMARY_SLIP,
+               **_SUMMARY_RETRACT, **_SUMMARY_POST_AFM},
+    **{family: {**_SUMMARY_BASE, **_SUMMARY_DRIVEN, **_SUMMARY_SLIP,
+                **_SUMMARY_POST_SHEET}
+       for family in ('sheetonsheet', 'hetero', 'flake')},
+    'pes_sheet': {**_SUMMARY_BASE, **_SUMMARY_PES},
+    'pes_tip': {**_SUMMARY_BASE, **_SUMMARY_PES, **_SUMMARY_PES_TIP},
+}
+
+
+def summary_units(family: str, content: Mapping[str, Any]) -> Dict[str, str]:
+    """``{key: unit}`` for every number (or ``None``, a number not measurable
+    here) in a summary's ``content``. Strings and booleans carry no unit.
+
+    Raises ``ValueError`` for an unknown family or a numeric key with no
+    :data:`SUMMARY_UNITS` entry: a summary is never stored unit-less.
+    """
+    if family not in SUMMARY_UNITS:
+        raise ValueError(f'no summary units for family {family!r}')
+    table = SUMMARY_UNITS[family]
+    keys = [k for k, v in content.items() if v is None
+            or (isinstance(v, numbers.Number) and not isinstance(v, bool))]
+    missing = sorted(k for k in keys if k not in table)
+    if missing:
+        raise ValueError(f'summary fields without a unit for family {family!r}: '
+                         f'{missing} (add them to block_schema.SUMMARY_UNITS)')
+    return {k: table[k] for k in keys}
+
+
 # --- model introspection --------------------------------------------------------
 
 def model_in(annotation: Any) -> Optional[type]:

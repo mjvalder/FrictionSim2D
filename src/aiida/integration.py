@@ -92,6 +92,23 @@ def _held_elsewhere(group) -> Set[int]:
             for calc in _calcjobs_of(other)}
 
 
+def _dataset_held() -> Dict[int, Set[str]]:
+    """node pk -> names of the datasets (``friction2d/datasets/<name>``)
+    whose Group holds it."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from .steps import DATASET_PREFIX  # pylint: disable=import-outside-toplevel
+
+    qb = orm.QueryBuilder().append(
+        orm.Group, filters={'label': {'like': f'{DATASET_PREFIX}/%'}}, tag='g',
+        project='label')
+    qb.append(orm.Node, with_group='g', project='id')
+    held: Dict[int, Set[str]] = {}
+    for label, pk in qb.all():
+        held.setdefault(pk, set()).add(label[len(DATASET_PREFIX) + 1:])
+    return held
+
+
 def _delete_closure(pks: Iterable[int]) -> Set[int]:
     """What ``delete_nodes`` would remove with ``pks``: their outputs and every
     process consuming those, forward only -- inputs are never followed."""
@@ -112,8 +129,15 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
     Shared inputs (blocks, files, provenance, schema, Codes, Computers) are
     never deleted; neither is a CalcJob another set holds, nor one whose
     deletion would cascade into such a CalcJob. The input Dicts of the steps
-    it deletes (integrity context and settings, rulings) go with them when no
-    remaining process uses them. Returns the number of nodes deleted.
+    it deletes (integrity context and settings, rulings, summary options) go
+    with them when no remaining process uses them. Returns the number of
+    nodes deleted.
+
+    A set a dataset draws on is refused whole, before anything is deleted:
+    deleting its CalcJobs would cascade (``input_calc_forward``) into the
+    summaries a ``friction2d/datasets/<name>`` Group holds, leaving that
+    dataset's rows pointing at nothing. ``ValueError`` names the datasets;
+    delete those Groups first if the set must go.
     """
     _require_aiida()
     _ensure_aiida_profile(profile)
@@ -124,6 +148,7 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
 
     group = orm.Group.collection.get(label=group_label(label))
     protected = _held_elsewhere(group)
+    in_datasets = _dataset_held()
     doomed: Set[int] = set()
     for calc in _calcjobs_of(group):
         if calc.pk in protected:
@@ -134,6 +159,13 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
                            'CalcJobs another set holds', calc.pk, label)
             continue
         doomed |= closure
+    datasets = sorted({name for pk in doomed & set(in_datasets)
+                       for name in in_datasets[pk]})
+    if datasets:
+        raise ValueError(
+            f'set {label!r} is not deleted: dataset(s) {", ".join(map(repr, datasets))} '
+            f'hold summaries of its points, which deleting it would delete too. '
+            f'Delete those dataset Groups first.')
     stranded = _stranded_sets(group, doomed)
     step_inputs = _step_inputs(doomed)
     if doomed:
@@ -227,6 +259,17 @@ def _step_inputs(within: Optional[Set[int]] = None) -> Set[int]:
     return set(qb.all(flat=True))
 
 
+def _dataset_tables() -> Set[int]:
+    """pks of the datasets' table Dicts (``steps.DATASET_EXTRA``)."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from .steps import DATASET_EXTRA  # pylint: disable=import-outside-toplevel
+
+    return set(orm.QueryBuilder().append(
+        orm.Dict, filters={'extras': {'has_key': DATASET_EXTRA}},
+        project='id').all(flat=True))
+
+
 def _content_addressed() -> Set[int]:
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
@@ -258,8 +301,9 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
 
     That is every friction2d CalcJob with its descendants, then the inputs
     they leave unused -- content-addressed blocks, files, provenance, schema,
-    LAMMPS Codes, ``derived`` Dicts, remote folders, the integrity and
-    ruling steps' input Dicts -- so a re-import builds
+    LAMMPS Codes, ``derived`` Dicts, remote folders, the integrity, ruling
+    and summary steps' input Dicts, the datasets' table Dicts (their summaries
+    go with the CalcJobs' descendants) -- so a re-import builds
     everything afresh. Computers are kept. Returns the number of nodes deleted.
     """
     _require_aiida()
@@ -270,7 +314,8 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
     from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
 
     calcs = _friction2d_calcjobs()
-    inputs = _inputs_of(calcs) | _content_addressed() | _step_inputs()
+    inputs = (_inputs_of(calcs) | _content_addressed() | _step_inputs()
+              | _dataset_tables())
     doomed = _delete_closure(calcs + _legacy_nodes())
     if doomed:
         delete_nodes(sorted(doomed), dry_run=False)

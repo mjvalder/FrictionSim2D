@@ -13,8 +13,17 @@
 * :func:`apply_rulings` -- the idempotent pass over a set's
   ``integrity_rulings.yaml``: one ``apply_ruling`` per (verdict, ruling)
   pair, keyed by the extra ``friction2d_ruling_key``.
+* :func:`latest_verdict` -- the verdict a :class:`~src.aiida.policy.Policy`
+  selects for a point, by declared version (never ctime); provisional or
+  not is :func:`is_provisional`.
+* :func:`summarise` -- a calcfunction: one point's ``RunSummary`` with units;
+  :func:`postprocess_group` runs it on every point whose selected verdict is
+  ``complete``.
+* :func:`build_dataset` -- a Group ``friction2d/datasets/<name>`` of the
+  selected summaries plus one table Dict naming the policy.
 
-Every Dict made only to feed a step (``context``, ``settings``, ``ruling``)
+Every Dict made only to feed a step (``context``, ``settings``, ``ruling``,
+``options``)
 carries the extra ``friction2d_step_input``, so deleting a set or clearing
 the store can collect them once their step is gone.
 """
@@ -29,17 +38,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from aiida import orm
 from aiida.engine import calcfunction
 
 from .. import __version__ as CODE_VERSION
+from .policy import Policy, select
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['CODE_VERSION', 'RulingReport', 'apply_ruling', 'apply_rulings',
-           'check_group', 'check_integrity', 'rule_group', 'withdraw_ruling']
+__all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'RulingReport', 'apply_ruling',
+           'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
+           'is_provisional', 'latest_verdict', 'latest_verdicts', 'postprocess_group',
+           'rule_group', 'summarise', 'withdraw_ruling']
 
 #: Marks every Dict made only as a step's input (value: what it is).
 STEP_INPUT_EXTRA = 'friction2d_step_input'
@@ -56,6 +68,13 @@ VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
 PROVISIONAL_EXTRA = 'friction2d_provisional'
 #: ``'user'`` on a ruling Dict: a human, not the checker, decided it.
 AUTHOR_EXTRA = 'friction2d_author'
+#: The uuid of the verdict a summary was made under (not
+#: ``friction2d_verdict_uuid``: that one marks a verdict's successors).
+SUMMARY_VERDICT_EXTRA = 'friction2d_summary_verdict'
+#: The dataset name on a dataset's table Dict.
+DATASET_EXTRA = 'friction2d_dataset'
+#: Datasets are the Groups ``friction2d/datasets/<name>``.
+DATASET_PREFIX = 'friction2d/datasets'
 
 #: Statuses with no frames in the DataReader: the checker gets no window.
 _NO_FRAMES = ('no_output', 'unreadable', 'not_reached')
@@ -867,3 +886,378 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
 
     load_aiida_profile(profile)
     return rule_group(_set_group(label), rulings_path, withdraw=withdraw)
+
+
+# ---------------------------------------------------------------------------
+# The latest verdict (by policy, never by ctime)
+# ---------------------------------------------------------------------------
+
+def _verdict_candidates(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
+    """point pk -> its live checker verdicts plus their live ruled and
+    withdrawn verdicts, in two queries."""
+    checker = _live_verdicts(points)
+    uuids = sorted({v.uuid for nodes in checker.values() for v in nodes})
+    successors: Dict[str, List[orm.Dict]] = {}
+    if uuids:
+        qb = orm.QueryBuilder().append(orm.Dict, filters={
+            f'extras.{KIND_EXTRA}': {'in': ['ruled_verdict', 'withdrawn_verdict']},
+            f'extras.{VERDICT_UUID_EXTRA}': {'in': uuids}})
+        for node in qb.all(flat=True):
+            if _live(node):
+                successors.setdefault(node.base.extras.get(VERDICT_UUID_EXTRA, None),
+                                      []).append(node)
+    return {pk: nodes + [s for v in nodes for s in successors.get(v.uuid, [])]
+            for pk, nodes in checker.items()}
+
+
+def _select_node(nodes: List[orm.Dict], kind: str, policy: Policy) -> Optional[orm.Dict]:
+    """The node of ``nodes`` that :func:`policy.select` picks (on the
+    versions, the ``friction2d_kind`` extra and the uuid)."""
+    by_uuid = {n.uuid: n for n in nodes}
+    candidates = [{'uuid': n.uuid, 'kind': n.base.extras.get(KIND_EXTRA, 'verdict'),
+                   'thresholds_version': n.get('thresholds_version'),
+                   'code_version': n.get('code_version')} for n in nodes]
+    chosen = select(candidates, kind, policy)
+    return None if chosen is None else by_uuid[chosen['uuid']]
+
+
+def latest_verdicts(points: List[orm.FolderData],
+                    policy: Policy = Policy()) -> Dict[int, Optional[orm.Dict]]:
+    """point pk -> :func:`latest_verdict` of each point, in bulk."""
+    return {pk: _select_node(nodes, 'verdict', policy)
+            for pk, nodes in _verdict_candidates(points).items()}
+
+
+def latest_verdict(point: orm.FolderData, policy: Policy = Policy()) -> Optional[orm.Dict]:
+    """The verdict ``policy`` selects for ``point``, or None.
+
+    Among the point's live verdicts -- the checker's (``check_integrity``),
+    the ruled (``apply_ruling``) and the withdrawn (``withdraw_ruling``) --
+    :func:`src.aiida.policy.select` takes the newest ``thresholds_version``
+    (or the pinned one), then the newest ``code_version``; within one
+    generation a ruled verdict beats a withdrawn one, which beats the
+    checker's; then the uuid. Never the creation time. Whether the choice is
+    provisional is :func:`is_provisional`.
+    """
+    return latest_verdicts([point], policy)[point.pk]
+
+
+def is_provisional(verdict: orm.Dict) -> bool:
+    """Whether ``verdict`` rests on a check made while stage 2 was unknown:
+    its own ``friction2d_provisional`` extra, or (a ruled or withdrawn
+    verdict) that of the checker verdict it stands for."""
+    if verdict.base.extras.get(PROVISIONAL_EXTRA, False):
+        return True
+    source = verdict.base.extras.get(VERDICT_UUID_EXTRA, None)
+    if not source:
+        return False
+    return bool(orm.load_node(source).base.extras.get(PROVISIONAL_EXTRA, False))
+
+
+# ---------------------------------------------------------------------------
+# summarise
+# ---------------------------------------------------------------------------
+
+def _point_frames(point: orm.FolderData, directory: Path, family: str,
+                  n_layers: int) -> Dict[str, Any]:
+    """The point's stored tiers as frames, the way the DataReader reads them:
+    ``indent_f*N_l*.csv`` is the retract tier, the rest by filename."""
+    # pylint: disable=import-outside-toplevel
+    from ..postprocessing.read_data import tier_of
+    from .calcjob import _read_frame  # pylint: disable=protected-access
+    from .ingest import _INDENT_RE  # pylint: disable=protected-access
+
+    repo = point.base.repository
+    if 'results' not in repo.list_object_names():
+        return {}
+    directory.mkdir(parents=True, exist_ok=True)
+    frames: Dict[str, Any] = {}
+    for name in sorted(repo.list_object_names('results')):
+        tier = 'retract' if _INDENT_RE.match(name) else tier_of(name)
+        path = directory / name
+        path.write_bytes(repo.get_object_content(f'results/{name}', mode='rb'))
+        frames.setdefault(tier, _read_frame(path, family, n_layers))
+    return frames
+
+
+def _post(point: orm.FolderData, snapshot: Optional[orm.SinglefileData],
+          provenance: Optional[orm.FolderData], directory: Path) -> Dict[str, float]:
+    """``post_channels`` of the point's end snapshot, as
+    ``post_channels_for`` gives them to the DataReader; ``{}`` without a
+    snapshot or a provenance record."""
+    # pylint: disable=import-outside-toplevel
+    from ..data.provenance import read_provenance
+    from ..postprocessing.post_channels import post_channels
+    from ..run.naming import parse_run_path
+
+    if snapshot is None or provenance is None:
+        return {}
+    try:
+        text = provenance.base.repository.get_object_content('provenance.json', mode='rb')
+    except (FileNotFoundError, OSError):
+        return {}
+    record_path = directory / 'provenance.json'
+    record_path.write_bytes(text)
+    attrs = point.base.attributes.all
+    tokens = parse_run_path(attrs['rel_path'])
+    try:
+        record = read_provenance(record_path, family=attrs['family'], model=tokens.model,
+                                 material_name=tokens.materials[0] if tokens.materials
+                                 else '')
+    except (OSError, ValueError) as exc:
+        logger.warning('No provenance for %s (%s); post channels skipped',
+                       attrs['rel_path'], exc)
+        return {}
+    return post_channels(_materialise(snapshot, directory / 'final'), record,
+                         attrs['family'])
+
+
+@calcfunction
+def summarise(point: orm.FolderData, options: orm.Dict,
+              snapshot: Optional[orm.SinglefileData] = None,
+              provenance: Optional[orm.FolderData] = None) -> orm.Dict:
+    """One point's summary: ``summarise_run`` over its stored tiers.
+
+    ``options``: ``skip_fraction`` (the leading fraction of the window
+    dropped) and ``n_layers`` (how the tier files are parsed). ``snapshot``
+    (the end state) and ``provenance`` (the run's record) give the
+    post-stream channels, as the DataReader computes them. The result is
+    ``RunSummary.as_dict()`` plus ``units`` (``block_schema.summary_units``:
+    it refuses a number without a unit), ``code_version`` and ``point_uuid``.
+    """
+    # pylint: disable=import-outside-toplevel
+    from ..data.models import summarise_run
+    from .block_schema import summary_units
+
+    opts = options.get_dict()
+    family = point.base.attributes.get('family')
+    with TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        frames = _point_frames(point, tmp_dir / 'results', family, int(opts['n_layers']))
+        post = _post(point, snapshot, provenance, tmp_dir)
+    summary = summarise_run(frames, family, skip_fraction=float(opts['skip_fraction']),
+                            post=post).as_dict()
+    return orm.Dict({**summary, 'units': summary_units(family, summary),
+                     'code_version': CODE_VERSION,
+                     'point_uuid': point.base.attributes.get('point_uuid')})
+
+
+def _skip_fraction() -> float:
+    """``settings.aiida.skip_fraction`` of the settings file in effect."""
+    from ..core.config import AiidaSettings, load_settings  # pylint: disable=import-outside-toplevel
+    try:
+        return float(load_settings().aiida.skip_fraction)
+    except Exception:  # pylint: disable=broad-except
+        return float(AiidaSettings().skip_fraction)
+
+
+def _live_summaries(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
+    """point pk -> its live ``summarise`` outputs, oldest first."""
+    out: Dict[int, List[orm.Dict]] = {p.pk: [] for p in points}
+    if not points:
+        return out
+    qb = orm.QueryBuilder().append(
+        orm.FolderData, filters={'id': {'in': sorted(out)}}, tag='p', project='id')
+    qb.append(orm.CalcFunctionNode, with_incoming='p', tag='f',
+              filters={'attributes.process_label': 'summarise'})
+    qb.append(orm.Dict, with_incoming='f', project='*')
+    qb.order_by({orm.Dict: {'id': 'asc'}})
+    for pk, summary in qb.all():
+        if _live(summary):
+            out[pk].append(summary)
+    return out
+
+
+def _summary_inputs(point: orm.FolderData, options: Dict[Tuple[float, int], orm.Dict],
+                    skip_fraction: float) -> Dict[str, Any]:
+    """``summarise``'s inputs for ``point``; ``options`` caches the options
+    Dicts by (skip_fraction, n_layers)."""
+    calc = _creator(point)
+    n_layers = int(calc.inputs.parameters.get_dict()['n_layers'])
+    if (skip_fraction, n_layers) not in options:
+        options[(skip_fraction, n_layers)] = _step_input(
+            {'skip_fraction': skip_fraction, 'n_layers': n_layers}, 'summary_options')
+    inputs: Dict[str, Any] = {'point': point, 'options': options[(skip_fraction, n_layers)]}
+    key = _output_key(calc, point)
+    if 'snapshots' in calc.outputs and key in calc.outputs.snapshots:
+        inputs['snapshot'] = calc.outputs.snapshots[key]
+    if 'provenance' in calc.inputs:
+        inputs['provenance'] = calc.inputs.provenance
+    return inputs
+
+
+def _report_versions(label: str, verdicts: Dict[int, Optional[orm.Dict]],
+                     current: str, warnings: List[str]) -> None:
+    """One warning per thresholds version, other than ``current``, that a
+    selected verdict of the set was checked with."""
+    stale: Counter = Counter(v.get('thresholds_version') for v in verdicts.values()
+                             if v is not None and v.get('thresholds_version') != current)
+    for version, count in sorted(stale.items(), key=lambda kv: str(kv[0])):
+        warnings.append(
+            f'set {label!r}: {count} point(s) have verdicts checked with integrity '
+            f'thresholds v{version}, not the current v{current}; summaries and '
+            f'datasets use those verdicts until the points are re-checked')
+
+
+def postprocess_group(label: str, *, policy: Policy = Policy(), skip_failed: bool = True,
+                      warnings: Optional[List[str]] = None,
+                      profile: Optional[str] = None) -> int:
+    """Summarise every live point of ``friction2d/<label>`` whose selected
+    verdict (:func:`latest_verdict` under ``policy``) is ``complete`` --
+    checked, ruled or overridden so; return the number of new summaries.
+
+    A point that already has a live summary at the current ``code_version``
+    is skipped, so a second pass makes none; a ``code_version`` bump makes
+    new summaries beside the old ones, which stay live (``policy`` chooses
+    between them). Each summary carries the extras ``friction2d_kind=
+    'summary'``, ``friction2d_point_uuid``, ``friction2d_summary_verdict``
+    (the verdict it was made under) and ``friction2d_provisional``.
+
+    To ``warnings``: every point summarised on a provisional verdict, every
+    thresholds version other than the current ``IntegritySettings.version``
+    a selected verdict was checked with (reported, not re-checked), and,
+    with ``skip_failed``, every point whose summary raised (otherwise the
+    error propagates).
+    """
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+
+    load_aiida_profile(profile)
+    problems: List[str] = []
+    points = _live_points(_set_group(label))
+    verdicts = latest_verdicts(points, policy)
+    _report_versions(label, verdicts, _settings_dump(problems)['version'], problems)
+    existing = _live_summaries(points)
+    options: Dict[Tuple[float, int], orm.Dict] = {}
+    skip_fraction = _skip_fraction()
+    made = 0
+    for point in points:
+        verdict = verdicts[point.pk]
+        if verdict is None or verdict['status'] != 'complete':
+            continue
+        provisional = is_provisional(verdict)
+        if provisional:
+            problems.append(f'point {_pid(point)}: summarised on a provisional verdict '
+                            f'(stage 2 was unknown at its check); its summary is '
+                            f'marked friction2d_provisional')
+        if any(s.get('code_version') == CODE_VERSION for s in existing[point.pk]):
+            continue
+        try:
+            summary = summarise(**_summary_inputs(point, options, skip_fraction))
+        except Exception as exc:  # pylint: disable=broad-except
+            if not skip_failed:
+                raise
+            logger.exception('Summary failed for point %s', point.uuid)
+            problems.append(f'point {_pid(point)}: summary failed '
+                            f'({type(exc).__name__}: {exc})')
+            continue
+        summary.base.extras.set_many({
+            KIND_EXTRA: 'summary', POINT_UUID_EXTRA: point.base.attributes.get('point_uuid'),
+            SUMMARY_VERDICT_EXTRA: verdict.uuid, PROVISIONAL_EXTRA: provisional})
+        made += 1
+    for line in problems:
+        logger.warning('%s', line)
+    if warnings is not None:
+        warnings += problems
+    return made
+
+
+# ---------------------------------------------------------------------------
+# Datasets: a Group of selected summaries plus one table Dict (critique M3)
+# ---------------------------------------------------------------------------
+
+#: What each key of a dataset row holds.
+DATASET_COLUMNS: Dict[str, str] = {
+    'set': 'label of the set (friction2d/<label>) the point was taken from',
+    'family': 'the point family; its units are units[family]',
+    'point_uuid': 'the point (FolderData) uuid',
+    'calc_uuid': 'uuid of the CalcJob whose points output it is',
+    'summary_uuid': 'uuid of the summary Dict the policy selected',
+    'code_version': "the summary's code_version",
+    'verdict_uuid': 'uuid of the verdict the policy selected',
+    'verdict_status': "that verdict's status (always complete)",
+    'thresholds_version': "that verdict's integrity thresholds version",
+    'provisional': 'whether that verdict was checked while stage 2 was unknown',
+    'block_hashes': "CalcJob blocks namespace key -> the block's friction2d_block_hash",
+}
+
+
+def merge_units(units: Dict[str, Dict[str, str]], family: str,
+                summary_units: Dict[str, str]) -> None:
+    """Fold one summary's ``units`` into ``units[family]``; a key whose unit
+    differs between two summaries of a family raises ``ValueError``."""
+    table = units.setdefault(family, {})
+    for key, unit in summary_units.items():
+        if table.setdefault(key, unit) != unit:
+            raise ValueError(f'family {family!r}: summaries disagree on the unit of '
+                             f'{key!r} ({table[key]!r} vs {unit!r}); a dataset never '
+                             f'mixes units')
+
+
+def _block_hashes(calc: orm.CalcJobNode) -> Dict[str, Optional[str]]:
+    from .store import BLOCK_HASH_EXTRA  # pylint: disable=import-outside-toplevel
+    if 'blocks' not in calc.inputs:
+        return {}
+    return {name: node.base.extras.get(BLOCK_HASH_EXTRA, None)
+            for name, node in sorted(calc.inputs.blocks.items())}
+
+
+def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy(),
+                  profile: Optional[str] = None) -> orm.Dict:
+    """Make the dataset ``friction2d/datasets/<name>`` from the sets
+    ``labels``: a Group holding, for every live point whose selected verdict
+    is ``complete``, the summary ``policy`` selects, plus one table ``Dict``
+    (also in the Group, extra ``friction2d_kind='dataset'``).
+
+    The Dict holds ``name``, ``labels``, ``policy`` (``Policy.as_dict()``),
+    ``units`` (family -> key -> unit, from the summaries; disagreeing units
+    raise), ``columns`` (:data:`DATASET_COLUMNS`) and ``rows``, one per
+    point. No calcfunction: the Group, not thousands of input links, ties the
+    rows to their summaries. A point with no summary the policy selects is
+    left out (logged). An existing dataset of that name raises ``ValueError``.
+    """
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+
+    load_aiida_profile(profile)
+    group_label = f'{DATASET_PREFIX}/{name}'
+    if orm.QueryBuilder().append(orm.Group, filters={'label': group_label}).count():
+        raise ValueError(f'dataset {name!r} exists ({group_label}); datasets are '
+                         f'not rewritten -- build it under a new name')
+    rows: List[Dict[str, Any]] = []
+    members: List[orm.Node] = []
+    units: Dict[str, Dict[str, str]] = {}
+    seen: Set[int] = set()
+    for label in labels:
+        points = [p for p in _live_points(_set_group(label)) if p.pk not in seen]
+        verdicts = latest_verdicts(points, policy)
+        summaries = _live_summaries(points)
+        for point in points:
+            verdict = verdicts[point.pk]
+            if verdict is None or verdict['status'] != 'complete':
+                continue
+            summary = _select_node(summaries[point.pk], 'summary', policy)
+            if summary is None:
+                logger.info('dataset %r: point %s has no summary under %s', name,
+                            point.uuid, policy.as_dict())
+                continue
+            seen.add(point.pk)
+            family = point.base.attributes.get('family')
+            merge_units(units, family, summary.get('units', {}))
+            calc = _creator(point)
+            rows.append({
+                'set': label, 'family': family,
+                'point_uuid': point.base.attributes.get('point_uuid'),
+                'calc_uuid': calc.uuid, 'summary_uuid': summary.uuid,
+                'code_version': summary.get('code_version'),
+                'verdict_uuid': verdict.uuid, 'verdict_status': verdict['status'],
+                'thresholds_version': verdict.get('thresholds_version'),
+                'provisional': is_provisional(verdict),
+                'block_hashes': _block_hashes(calc),
+            })
+            members.append(summary)
+    table = orm.Dict({'name': name, 'labels': list(labels), 'policy': policy.as_dict(),
+                      'units': units, 'columns': dict(DATASET_COLUMNS),
+                      'rows': rows}).store()
+    table.base.extras.set_many({KIND_EXTRA: 'dataset', DATASET_EXTRA: name})
+    group = orm.Group(label=group_label).store()
+    group.add_nodes(members + [table])
+    return table
