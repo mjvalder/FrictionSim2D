@@ -562,3 +562,104 @@ def test_a_non_uuid_run_uuid_raises_clearly(computer, tmp_path):
     with pytest.raises(MissingRunUUID, match='is not a UUID') as info:
         deck_inputs(loc, discover_decks(loc)[0], computer=computer)
     assert str(loc.provenance_file) in str(info.value)
+
+
+# --- the store rework (Task 5c) --------------------------------------------------
+
+def _three_deck_afm_run(root):
+    """An AFM run with a system deck and one slide deck per load."""
+    loc = _afm_run(root)
+    lammps = loc.lammps_dir
+    slide = (lammps / 'slide.in').read_text(encoding='utf-8')
+    (lammps / 'slide.in').unlink()
+    for stem in ('slide_f10N', 'slide_f30N'):
+        (lammps / f'{stem}.in').write_text(slide, encoding='utf-8')
+    (loc,) = [r for r in discover_runs(root) if r.run_dir == loc.run_dir]
+    return loc
+
+
+def test_a_run_is_split_once_and_indexed_once(computer, tmp_path, monkeypatch):
+    from src.aiida import blocks, calcjob
+    loc = _three_deck_afm_run(tmp_path / 'sim')
+    assert len(discover_decks(loc)) == 3
+
+    splits, loads = [], []
+    real_split, real_load = blocks.split_blocks, calcjob.StoreIndex.load
+
+    def counting_split(*args, **kwargs):
+        splits.append(1)
+        return real_split(*args, **kwargs)
+
+    def counting_load():
+        loads.append(1)
+        return real_load()
+
+    monkeypatch.setattr(blocks, 'split_blocks', counting_split)
+    monkeypatch.setattr(calcjob.StoreIndex, 'load', staticmethod(counting_load))
+    nodes = import_run(loc, computer=computer)
+    assert [n.inputs.parameters['deck_name'] for n in nodes] == \
+        ['system', 'slide_f10N', 'slide_f30N']
+    assert all(n.is_finished_ok for n in nodes)
+    assert splits == [1] and loads == [1]
+    # the run's shared inputs are one node each
+    for port in ('derived', 'schema', 'provenance'):
+        assert len({n.inputs[port].uuid for n in nodes}) == 1, port
+
+
+def test_every_calcjob_carries_the_schema_and_derived(computer, tmp_path):
+    from src.aiida.store import node_uuid, schema_hash
+    nodes = import_run(_afm_run(tmp_path / 'sim'), computer=computer)
+    for node in nodes:
+        schema = node.inputs.schema
+        assert schema.get_dict()['fields']['derived.drive_k']['unit'] == 'eV/angstrom^2'
+        assert schema.uuid == node_uuid(schema_hash(schema.get_dict()))
+        assert 'drive_k' in node.inputs.derived.get_dict()['fields']
+
+
+def test_block_names_record_the_unambiguous_name(computer, tmp_path):
+    from src.aiida.blocks import block_hash
+    from src.aiida.store import node_uuid
+    (system, _slide) = import_run(_afm_run(tmp_path / 'sim'), computer=computer)
+    names = system.inputs.parameters['block_names']
+    assert set(names) == set(system.inputs.blocks)
+    assert names['material_sheet_0'] == 'material__sheet_0'
+    for label, block in system.inputs.blocks.items():
+        assert block.get_dict()['kind'] == names[label].split('__')[0]
+        assert block.uuid == node_uuid(block_hash(block.get_dict()))
+
+
+def _legacy_spring(loc, *, schema_version):
+    from src.aiida.block_schema import LEGACY_AFM_SPRING_FACTOR
+    config = json.loads((loc.provenance_dir / 'config.json').read_text(encoding='utf-8'))
+    spring = (config.get('general') or {}).get('driving_spring') or 50.0
+    _set_record(loc, schema_version=schema_version,
+                drive_k=spring / LEGACY_AFM_SPRING_FACTOR)
+
+
+def test_a_legacy_afm_run_imports(computer, tmp_path):
+    """A pre-2.2.0 AFM run's drive_k used / 16.02: check_units accepts it from the record."""
+    loc = _afm_run(tmp_path / 'sim')
+    _legacy_spring(loc, schema_version='2.0.0')
+    nodes = import_run(loc, computer=computer)
+    assert all(n.is_finished_ok for n in nodes)
+
+
+def test_a_current_run_with_the_legacy_factor_is_refused(computer, tmp_path):
+    from src.aiida.block_schema import UnitMismatch
+    loc = _afm_run(tmp_path / 'sim')
+    _legacy_spring(loc, schema_version='2.2.0')
+    with pytest.raises(UnitMismatch, match='drive_k'):
+        import_run(loc, computer=computer)
+
+
+def test_reindex_restores_the_run_extra(computer, tmp_path):
+    from src.aiida.store import reindex, verify
+    nodes = import_run(_afm_run(tmp_path / 'sim'), computer=computer)
+    run_uuid = nodes[0].inputs.parameters['run_uuid']
+    for node in nodes:
+        node.base.extras.clear()
+    nodes[0].inputs.deck.base.extras.clear()
+    assert reindex() == len(nodes) + 1
+    assert all(n.base.extras.get('friction2d_run_uuid') == run_uuid for n in nodes)
+    assert nodes[0].inputs.deck.base.extras.get('friction2d_sha256')
+    assert verify().ok, verify().render()

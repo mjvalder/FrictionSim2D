@@ -13,10 +13,11 @@ What each deck's node carries:
 * inputs -- the deck itself, the files it ``include``\\ s (``includes``:
   ``lammps/system.in.settings``), the run's ``provenance/`` +
   ``provenance.json``, its parameter blocks and potential files (all
-  content-addressed through :mod:`src.aiida.store`, so runs share them), and
-  ``structures``: the ``build/*.lmp`` files the first deck reads and, for a
-  slide deck, the very ``load_*.data`` nodes the system deck output for its
-  loads. That last link is the system -> slide handoff in the graph.
+  content-addressed through :mod:`src.aiida.store`, so runs share them), the
+  run's ``derived`` values and the family's ``schema`` (units, kinds,
+  defaults), and ``structures``: the ``build/*.lmp`` files the first deck
+  reads and, for a slide deck, the very ``load_*.data`` nodes the system
+  deck output for its loads. That last link is the system -> slide handoff in the graph.
 * outputs -- per load point ``points.<key>`` (window + raw tiers, and the
   indent retract curve), ``peratom.<key>`` (the per-atom tier) and
   ``snapshots.<key>`` (the end ``final_*.data``); ``structures`` and ``aux``
@@ -33,10 +34,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple,
+)
 from uuid import UUID, uuid5
 
 from aiida import orm
@@ -48,17 +52,13 @@ from aiida.parsers.parser import Parser
 from .data_keys import content_hash
 from .decks import Deck, discover_decks, points_for
 from .retention import retrieve_patterns
-from .store import new_file, new_folder
+from .store import RUN_UUID_EXTRA, StoreIndex, get_or_create_file, new_file, new_folder
 
 logger = logging.getLogger(__name__)
 
 __all__ = ['LammpsFrictionCalcJob', 'LammpsFrictionParser', 'MissingRunUUID',
-           'deck_inputs', 'import_deck', 'import_run', 'point_label', 'point_uuid',
-           'structures_for']
-
-#: The CalcJob extra that carries the run's identity (``provenance.json``
-#: ``run_uuid``), so every deck of one run is found by one value.
-RUN_UUID_EXTRA = 'friction2d_run_uuid'
+           'RunInputs', 'deck_inputs', 'import_deck', 'import_run', 'point_label',
+           'point_uuid', 'run_inputs', 'structures_for']
 
 
 class MissingRunUUID(ValueError):
@@ -154,6 +154,10 @@ class LammpsFrictionCalcJob(CalcJob):
                    help="The run's provenance/ directory plus provenance.json.")
         spec.input_namespace('blocks', valid_type=orm.Dict, dynamic=True,
                              required=False, help='Parameter blocks (spec §5.2).')
+        spec.input('derived', valid_type=orm.Dict, required=False,
+                   help="The run's derived values (drive_k, lat_c, ...), not hashed.")
+        spec.input('schema', valid_type=orm.Dict, required=False,
+                   help='The block schema: kind, unit and default of every field.')
         spec.input_namespace('potentials', valid_type=orm.SinglefileData,
                              dynamic=True, required=False,
                              help='Potential files the run used.')
@@ -163,7 +167,7 @@ class LammpsFrictionCalcJob(CalcJob):
                                   "and the system deck's load_*.data outputs.")
         spec.input('parameters', valid_type=orm.Dict,
                    help='deck_name, rel_path, run_uuid, point_filter, family, '
-                        'n_layers, log_name, writes_structures.')
+                        'n_layers, log_name, writes_structures, block_names.')
 
         spec.input('metadata.options.resources', valid_type=dict,
                    default={'num_machines': 1, 'num_mpiprocs_per_machine': 1})
@@ -631,83 +635,160 @@ def _included_files(locator, deck: Deck) -> List[Path]:
     return found
 
 
-def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
-                structures: Optional[Mapping[str, orm.SinglefileData]] = None,
-                decks: Optional[Sequence[Deck]] = None) -> Dict[str, Any]:
-    """The inputs of one deck's import-only CalcJob.
+@dataclass(frozen=True)
+class RunInputs:
+    """What every deck of one run shares, computed once per run (:func:`run_inputs`).
 
-    ``structures`` are the system deck's ``structures`` outputs, handed to a
-    slide deck. The ``build/*.lmp`` files go to the system deck, or to every
-    deck of a run that has none. ``decks`` is the run's deck list, when the
-    caller already has it.
+    Attributes:
+        blocks: Block name (``material__sheet_0``) -> stored block ``Dict``.
+        derived: The run's derived values (``drive_k``, ``geometry.lat_c``,
+            ...) under ``'fields'`` (a top-level attribute key cannot hold a
+            ``.``), never hashed. Unstored until the first deck uses it; then
+            that same stored node is every deck's input.
+        schema: The stored schema document (units, kinds, defaults) of the family.
+        provenance: The stored ``provenance.json`` + ``provenance/`` folder.
+        potentials: Link label -> stored potential file.
+        run_uuid: ``provenance.json`` ``run_uuid``.
+        config, record, settings: ``provenance/config.json``,
+            ``provenance.json``, ``provenance/settings.yaml``.
+    """
+    blocks: Dict[str, orm.Dict]
+    derived: orm.Dict
+    schema: orm.Dict
+    provenance: orm.FolderData
+    potentials: Dict[str, orm.SinglefileData]
+    run_uuid: str
+    config: dict
+    record: dict
+    settings: dict
+
+
+def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
+    """The inputs every deck of the run at ``locator`` shares.
+
+    Splits the run into blocks once, checks ``derived.drive_k`` against its
+    unit with the run's own record (a legacy AFM run used ``/ 16.02``), and
+    stores the blocks, the schema node, the provenance folder and the
+    potentials through ``index`` (loaded here when absent).
 
     Raises:
         MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
+        UnitMismatch: ``derived.drive_k`` is not ``driving_spring`` in eV/A^2.
     """
     # pylint: disable=import-outside-toplevel
     from ..postprocessing.read_data import resolve_n_layers
     from ..postprocessing.run_status import read_run_config
-    from .blocks import split_blocks
-    from .store import get_or_create_block, get_or_create_file, get_or_create_provenance
+    from . import blocks as _blocks
+    from .block_schema import check_units, schema_document
+    from .store import get_or_create_block, get_or_create_provenance, get_or_create_schema
 
-    run_dir = Path(locator.run_dir)
+    index = index if index is not None else StoreIndex.load()
     prov_dir = Path(locator.provenance_dir)
     config = read_run_config(locator) or {}
     record = _read_json(locator.provenance_file)
     run_uuid = _run_uuid(locator, record)
     settings = _read_yaml(prov_dir / 'settings.yaml')
-    n_layers = resolve_n_layers(locator, config or None)
-    blocks = split_blocks(config, settings, record, family=locator.tokens.family,
-                          n_layers=n_layers, provenance_dir=prov_dir).blocks
+    split = _blocks.split_blocks(config, settings, record, family=locator.tokens.family,
+                                 n_layers=resolve_n_layers(locator, config or None),
+                                 provenance_dir=prov_dir)
+    check_units(split, record=record)
+    return RunInputs(
+        blocks={name: get_or_create_block(content, index=index)
+                for name, content in split.blocks.items()},
+        derived=orm.Dict({'fields': dict(split.derived)}),
+        schema=get_or_create_schema(schema_document(split.family), index=index),
+        provenance=get_or_create_provenance(locator.provenance_file, prov_dir,
+                                            index=index),
+        potentials=_unique(((_file_label(p.name), get_or_create_file(p, index=index))
+                            for p in _files(prov_dir / 'potentials', '*')),
+                           'potentials'),
+        run_uuid=run_uuid, config=config, record=record, settings=settings)
+
+
+def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
+                run: Optional[RunInputs] = None,
+                structures: Optional[Mapping[str, orm.SinglefileData]] = None,
+                decks: Optional[Sequence[Deck]] = None,
+                code: Optional[orm.AbstractCode] = None,
+                index: Optional[StoreIndex] = None) -> Dict[str, Any]:
+    """The inputs of one deck's import-only CalcJob.
+
+    ``run`` is the run's shared inputs (:func:`run_inputs`, computed here when
+    absent, through ``index``). ``structures`` are the system deck's
+    ``structures`` outputs, handed to a slide deck. The ``build/*.lmp`` files
+    go to the system deck, or to every deck of a run that has none.
+    ``decks`` is the run's deck list, when the caller already has it.
+
+    Block link labels are the block names with ``__`` -> ``_`` (``__`` is
+    AiiDA's namespace separator); ``parameters['block_names']`` maps each
+    label back to the unambiguous name [C2].
+
+    Raises:
+        MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
+    """
+    from ..postprocessing.read_data import resolve_n_layers  # pylint: disable=import-outside-toplevel
+
+    if run is None:
+        index = index if index is not None else StoreIndex.load()
+        run = run_inputs(locator, index=index)
+    run_dir = Path(locator.run_dir)
+    n_layers = resolve_n_layers(locator, run.config or None)
     decks = list(decks) if decks is not None else discover_decks(locator)
 
     reads_build = deck.writes_structures or not any(d.writes_structures for d in decks)
     builds = _files(_build_dir(locator), '*.lmp') if reads_build else []
-    handed = _unique([(f'build_{_file_label(p.name)}', get_or_create_file(p))
+    handed = _unique([(f'build_{_file_label(p.name)}', get_or_create_file(p, index=index))
                       for p in builds]
                      + list((structures or {}).items()), 'structures')
+    labels = _unique(((name.replace('__', '_'), name) for name in run.blocks), 'blocks')
 
     log_name = (Path(deck.log_path).relative_to(run_dir).as_posix()
                 if deck.log_path is not None else None)
     inputs: Dict[str, Any] = {
         'remote_folder': orm.RemoteData(computer=computer,
                                         remote_path=str(run_dir.resolve())),
-        'deck': get_or_create_file(deck.path),
-        'provenance': get_or_create_provenance(locator.provenance_file, prov_dir),
-        'blocks': _unique(((name.replace('__', '_'), get_or_create_block(name, content))
-                           for name, content in blocks.items()), 'blocks'),
-        'potentials': _unique(((_file_label(p.name), get_or_create_file(p))
-                               for p in _files(prov_dir / 'potentials', '*')),
-                              'potentials'),
+        'deck': get_or_create_file(deck.path, index=index),
+        'provenance': run.provenance,
+        'blocks': {label: run.blocks[name] for label, name in labels.items()},
+        'derived': run.derived,
+        'schema': run.schema,
+        'potentials': dict(run.potentials),
         'parameters': orm.Dict({
             'deck_name': deck.name, 'rel_path': locator.tokens.rel_path,
-            'run_uuid': run_uuid,
+            'run_uuid': run.run_uuid,
             'point_filter': dict(deck.point_filter),
             'family': locator.tokens.family,
             'n_layers': n_layers,
             'log_name': log_name, 'writes_structures': deck.writes_structures,
+            'block_names': labels,
         }),
         'metadata': {'computer': computer,
                      'label': f'{locator.tokens.rel_path}:{deck.name}'},
     }
-    includes = _unique(((_file_label(p.name), get_or_create_file(p))
+    includes = _unique(((_file_label(p.name), get_or_create_file(p, index=index))
                         for p in _included_files(locator, deck)), 'includes')
     if includes:
         inputs['includes'] = includes
     if handed:
         inputs['structures'] = handed
+    if code is not None:
+        inputs['code'] = code
     return inputs
 
 
 def import_deck(locator, deck: Deck, *, computer: orm.Computer,
+                run: Optional[RunInputs] = None,
                 structures: Optional[Mapping[str, orm.SinglefileData]] = None,
-                decks: Optional[Sequence[Deck]] = None):
+                decks: Optional[Sequence[Deck]] = None,
+                code: Optional[orm.AbstractCode] = None,
+                index: Optional[StoreIndex] = None):
     """Run one deck's import-only CalcJob in-process: ``(outputs, node)``."""
     from aiida.engine import run_get_node  # pylint: disable=import-outside-toplevel
 
     return run_get_node(LammpsFrictionCalcJob,
-                        **deck_inputs(locator, deck, computer=computer,
-                                      structures=structures, decks=decks))
+                        **deck_inputs(locator, deck, computer=computer, run=run,
+                                      structures=structures, decks=decks,
+                                      code=code, index=index))
 
 
 def structures_for(deck: Deck, structures: Mapping[str, orm.SinglefileData]
@@ -725,16 +806,29 @@ def structures_for(deck: Deck, structures: Mapping[str, orm.SinglefileData]
     return out
 
 
-def import_run(locator, *, computer: orm.Computer) -> List[orm.CalcJobNode]:
+def import_run(locator, *, computer: orm.Computer,
+               index: Optional[StoreIndex] = None,
+               code_for: Optional[Callable[[Deck], Optional[orm.AbstractCode]]] = None,
+               ) -> List[orm.CalcJobNode]:
     """Every deck of one run, system decks first; their ``structures``
-    outputs become the following decks' ``structures`` inputs."""
+    outputs become the following decks' ``structures`` inputs.
+
+    The run's blocks, schema, provenance and potentials are computed once
+    (:func:`run_inputs`); ``index`` is the import's lookup memo (loaded here
+    when absent -- pass one to share it across runs). ``code_for(deck)``
+    gives a deck's ``code`` input, if any.
+    """
+    index = index if index is not None else StoreIndex.load()
+    run = run_inputs(locator, index=index)
     nodes: List[orm.CalcJobNode] = []
     handed: Dict[str, orm.SinglefileData] = {}
     decks = discover_decks(locator)
     for deck in decks:
         given = None if deck.writes_structures else structures_for(deck, handed)
-        _outputs, node = import_deck(locator, deck, computer=computer,
-                                     structures=given, decks=decks)
+        _outputs, node = import_deck(locator, deck, computer=computer, run=run,
+                                     structures=given, decks=decks,
+                                     code=code_for(deck) if code_for else None,
+                                     index=index)
         if deck.writes_structures and 'structures' in node.outputs:
             handed.update(dict(node.outputs.structures.items()))
         nodes.append(node)
