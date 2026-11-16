@@ -205,6 +205,8 @@ class LammpsFrictionCalcJob(CalcJob):
 
         spec.exit_code(320, 'ERROR_NO_RESULTS',
                        message='The deck produced neither load points nor structures.')
+        spec.exit_code(330, 'ERROR_PARSING_FAILED',
+                       message='Parsing the deck outputs failed: {error}')
         spec.exit_code(410, 'ERROR_LAMMPS_NOT_FINISHED',
                        message='LAMMPS did not finish (no Total wall time in the log).')
 
@@ -392,13 +394,22 @@ class LammpsFrictionParser(Parser):
         if root is not None:
             _drop_conflict_copies(root)
 
-        if params.get('writes_structures'):
-            produced = self._structures(root)
-        else:
-            produced = self._points(root, params, config, record)
+        failure = None
+        try:
+            if params.get('writes_structures'):
+                produced = self._structures(root)
+            else:
+                produced = self._points(root, params, config, record)
+        except Exception as exc:  # pylint: disable=broad-except
+            # Caught, not raised: an exception would discard every output
+            # (the log and run_info included) with the excepted process.
+            self.logger.exception('Parsing the outputs of %s failed', params.get('deck_name'))
+            failure, produced = f'{type(exc).__name__}: {exc}', 0
         if self._not_stored:
             info['not_stored'] = list(self._not_stored)
         self.out('run_info', orm.Dict(info))
+        if failure is not None:
+            return self.exit_codes.ERROR_PARSING_FAILED.format(error=failure)
         if not produced:
             return self.exit_codes.ERROR_NO_RESULTS
         if finished is False:
@@ -447,15 +458,19 @@ class LammpsFrictionParser(Parser):
 
     # -- the stored-file cap ---------------------------------------------------
 
-    def _over_cap(self, name: str, path: Path) -> bool:
+    def _over_cap(self, name: str, path: Path, point: Optional[str] = None) -> bool:
         """Whether ``path`` exceeds ``max_stored_file_mb``; if so it is recorded
-        (name, sha256, size) in ``self._not_stored`` instead of stored."""
+        in ``self._not_stored`` instead of stored: ``name`` (its path inside the
+        node it would have gone to), ``size_bytes``, ``sha256`` and, for a
+        point's file, the ``point`` label."""
         size = Path(path).stat().st_size
         if self._cap is None or size <= self._cap:
             return False
         from ..data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
-        self._not_stored.append({'name': name, 'size_bytes': size,
-                                 'sha256': sha256_file(path)})
+        entry = {'name': name, 'size_bytes': size, 'sha256': sha256_file(path)}
+        if point is not None:
+            entry['point'] = point
+        self._not_stored.append(entry)
         logger.info('%s is %d bytes, over max_stored_file_mb: recorded, not stored',
                     name, size)
         return True
@@ -544,7 +559,12 @@ class LammpsFrictionParser(Parser):
                 halted = halt_detail(halts, key)
                 if halted is not None:
                     status, detail = 'halted', halted
+            kept = {name: path for name, path in peratom.items()
+                    if not self._over_cap(name, path, point=label)}
+            skipped = [n for n in self._not_stored if n.get('point') == label]
             node = new_folder(files)
+            if skipped:
+                node.base.attributes.set('not_stored', skipped)
             node.base.attributes.set_many({
                 **_point_identity(params.get('run_uuid'), label, ident, record,
                                   POINT_UNITS),
@@ -554,14 +574,11 @@ class LammpsFrictionParser(Parser):
                 'status': status, 'status_detail': detail,
                 'content_sha256': content_hash(list(files.values())),
                 'rel_path': rel_path, 'deck_name': deck.name,
-                'has_snapshot': final is not None, 'has_peratom': bool(peratom),
+                'has_snapshot': final is not None, 'has_peratom': bool(kept),
             })
             self.out(f'points.{label}', node)
-            if peratom:
-                kept = {name: path for name, path in peratom.items()
-                        if not self._over_cap(name, path)}
+            if kept:
                 folder = new_folder(kept)
-                skipped = [n for n in self._not_stored if n['name'] in peratom]
                 if skipped:
                     folder.base.attributes.set('not_stored', skipped)
                 self.out(f'peratom.{label}', folder)
@@ -733,7 +750,9 @@ class RunInputs:
             ``provenance.json``, ``provenance/settings.yaml``.
         max_stored_file_mb: ``settings.aiida.max_stored_file_mb``: an aux or
             per-atom file over it is recorded (name, sha256, size) in
-            ``run_info['not_stored']`` -- and on the ``peratom`` node -- not stored.
+            ``run_info['not_stored']`` -- and, for a point's per-atom file, on
+            the point node (and its ``peratom`` node, if any file was kept) --
+            not stored.
     """
     blocks: Dict[str, orm.Dict]
     derived: orm.Dict

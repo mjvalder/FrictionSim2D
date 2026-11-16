@@ -692,8 +692,8 @@ def machine_mismatch(name: str, hpc: Mapping[str, Any]) -> Optional[str]:
     if not problems:
         return None
     return (f'machine {name!r} is already registered with {", ".join(problems)}; '
-            f'reusing it (set settings.aiida.machine or the run\'s hpc_host to record '
-            f'these runs under another label)')
+            f'reusing it. To record these runs under another label, set '
+            f'settings.aiida.machine (it overrides each run\'s hpc_host)')
 
 
 VERSION_EXTRA = 'friction2d_lammps_version'

@@ -587,10 +587,24 @@ def _open_group(label: str, root: Path, records: Sequence[dict]):
     return group
 
 
+def _load_settings():
+    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
+    return load_settings()
+
+
+def _settings_machine() -> Optional[str]:
+    """``settings.aiida.machine`` of the global settings (None when unset)."""
+    try:
+        return _load_settings().aiida.machine or None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def _computer(state: _Import, settings: dict):
-    """The machine Computer of a run: ``--machine`` > ``settings.hpc.hpc_host``
-    > ``'localhost'``. A label already registered with another host or
-    scheduler is reused, with a warning in the report."""
+    """The machine Computer of a run: ``import_root(machine=)`` >
+    ``settings.aiida.machine`` (both in ``state.machine``) > the run's
+    ``settings.hpc.hpc_host`` > ``'localhost'``. A label already registered
+    with another host or scheduler is reused, with a warning in the report."""
     from .store import machine_computer, machine_mismatch  # pylint: disable=import-outside-toplevel
 
     hpc = settings.get('hpc') if isinstance(settings.get('hpc'), dict) else {}
@@ -670,6 +684,10 @@ def _reuse(state: _Import, run: _RunState, deck, name: str, live: _Known) -> Non
         run.handed.update(dict(calc.outputs.structures.items()))
 
 
+#: ``LammpsFrictionCalcJob``'s ``ERROR_PARSING_FAILED``.
+_PARSING_FAILED = 330
+
+
 def _import_deck(state: _Import, run: _RunState, deck, decks,
                  fingerprint: str, stale: List[_Known]) -> bool:
     """Import one deck as a new CalcJob; supersede ``stale``. False on failure."""
@@ -695,10 +713,16 @@ def _import_deck(state: _Import, run: _RunState, deck, decks,
     if node.is_excepted or not node.is_finished:
         state.report.failures.append((name, f'CalcJob {node.pk} did not finish'))
         return False
-    node.base.extras.set_many({DECK_KEY_EXTRA: deck_key(run.run_uuid, deck.name),
-                               DECK_SHA_EXTRA: fingerprint})
+    key = {DECK_KEY_EXTRA: deck_key(run.run_uuid, deck.name)}
     state.group.add_nodes([node])
     state.group_pks.add(node.pk)
+    if node.exit_status == _PARSING_FAILED:
+        # No fingerprint and nothing superseded: the next import retries the
+        # deck, and a good earlier CalcJob stays live meanwhile.
+        node.base.extras.set_many(key)
+        state.report.failures.append((name, node.exit_message or 'parsing failed'))
+        return not deck.writes_structures
+    node.base.extras.set_many({**key, DECK_SHA_EXTRA: fingerprint})
     for old in stale:
         supersede(orm.load_node(old.pk))
         state.report.superseded_elsewhere += [
@@ -714,9 +738,13 @@ def _import_deck(state: _Import, run: _RunState, deck, decks,
 
 def _plan_deck(state: _Import, run: _RunState, deck, stale: List[_Known]) -> None:
     """Dry run: classify a deck that would get a new CalcJob."""
-    state.report.created_decks.append(_deck_name(run.locator, deck))
+    name = _deck_name(run.locator, deck)
+    state.report.created_decks.append(name)
+    for old in stale:
+        state.report.superseded_elsewhere += [
+            (name, other) for other in _other_labels(old.pk, state.report.label)]
     if stale:
-        state.report.superseded_decks.append(_deck_name(run.locator, deck))
+        state.report.superseded_decks.append(name)
         run.system_replaced = run.system_replaced or deck.writes_structures
 
 
@@ -805,8 +833,8 @@ def import_root(root: Path, label: Optional[str] = None, *,
     Args:
         root: The simulation root (``simulation_<stamp>/``).
         label: The set's name (default: ``root``'s name).
-        machine: The machine label; default ``settings.hpc.hpc_host`` of each
-            run, else ``'localhost'``.
+        machine: The machine label; default ``settings.aiida.machine``, else
+            each run's ``settings.hpc.hpc_host``, else ``'localhost'``.
         profile: The AiiDA profile (default: the configured one).
         dry_run: Classify every deck against the store; create nothing.
         on_point: Called as ``on_point(calcjob, point_label, point)`` for
@@ -835,7 +863,8 @@ def import_root(root: Path, label: Optional[str] = None, *,
     group, group_pks, held = _group_runs(label)
     _check_root(label, group, held, {u for _loc, u, _r in runs})
 
-    state = _Import(report=report, machine=machine, group_pks=group_pks,
+    state = _Import(report=report, machine=machine or _settings_machine(),
+                    group_pks=group_pks,
                     known=_known_decks(u for _loc, u, _r in runs), on_point=on_point)
     if not dry_run:
         state.group = _open_group(label, root, [r for _loc, _u, r in runs])

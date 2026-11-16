@@ -361,8 +361,8 @@ def test_files_over_max_stored_file_mb_are_recorded_not_stored(aiida_profile_cle
     from src.aiida import calcjob
     monkeypatch.setattr(calcjob, '_max_stored_file_mb', lambda: 0)   # every byte is over
     root = tmp_path / 'sim'
-    run_dir = make_family_run(root, 'afm', loads=(10.0,), tiers=('window', 'peratom'),
-                              config=slide_config('afm', loads=(10.0,)))
+    run_dir = make_family_run(root, 'afm', loads=(10.0, 30.0), tiers=('window', 'peratom'),
+                              config=slide_config('afm', loads=(10.0, 30.0)))
     (run_dir / 'lammps' / 'slide.in').write_text('# slide\n', encoding='utf-8')
     (run_dir / 'data').mkdir(exist_ok=True)
     (run_dir / 'data' / 'load_10N.data').write_text('LAMMPS data\n', encoding='utf-8')
@@ -378,13 +378,18 @@ def test_files_over_max_stored_file_mb_are_recorded_not_stored(aiida_profile_cle
     assert hold['name'] == 'data/hold_10N.txt' and hold['size_bytes'] > 0
     assert len(hold['sha256']) == 64
     assert 'structures' in system.outputs          # structures are never capped
-    peratom = slide.outputs.peratom['force10_a0_s2']
-    assert peratom.base.repository.list_object_names() == []
-    (note,) = peratom.base.attributes.get('not_stored')
-    assert note['name'].startswith('results/peratom_')
-    assert slide.outputs.run_info['not_stored'] == [note]
-    assert slide.outputs.points['force10_a0_s2'].base.repository.list_object_names(
-        'results')                                 # point tiers are never capped
+    assert 'peratom' not in slide.outputs          # nothing per-atom was kept
+    notes = []
+    for label, load in (('force10_a0_s2', '10'), ('force30_a0_s2', '30')):
+        point = slide.outputs.points[label]
+        attrs = point.base.attributes
+        assert attrs.get('has_peratom') is False
+        (note,) = attrs.get('not_stored')          # its own file only
+        assert note['point'] == label
+        assert note['name'] == f'results/peratom_f{load}_a0_s2_layer2.txt'
+        assert point.base.repository.list_object_names('results')   # tiers never capped
+        notes.append(note)
+    assert sorted(slide.outputs.run_info['not_stored'], key=lambda n: n['point']) == notes
 
 
 def test_files_under_the_cap_are_stored(aiida_profile_clean, tmp_path):
@@ -405,6 +410,8 @@ def test_superseding_a_deck_another_set_holds_is_reported(aiida_profile_clean, t
     (loc,) = discover_runs(root)
     write_results(loc.run_dir, 'afm', loads=(10.0,), tiers=('raw',), layers=2)
 
+    plan = import_root(root, label='second', dry_run=True)
+    assert plan.superseded_elsewhere == [(f'{loc.tokens.rel_path}:slide', 'first')]
     report = import_root(root, label='second')
 
     assert report.superseded_elsewhere == [(f'{loc.tokens.rel_path}:slide', 'first')]
@@ -505,6 +512,32 @@ def test_a_machine_label_with_another_host_is_reused_with_a_warning(aiida_profil
     assert all(n.computer.pk == existing.pk for n in _calcjobs())
 
 
+def _with_settings_machine(monkeypatch, machine):
+    """settings.aiida.machine = `machine`, as `ingest._settings_machine` reads it."""
+    from types import SimpleNamespace
+    settings = SimpleNamespace(aiida=SimpleNamespace(machine=machine))
+    monkeypatch.setattr('src.aiida.ingest._load_settings', lambda: settings)
+
+
+def test_settings_aiida_machine_names_the_computer(aiida_profile_clean, tmp_path,
+                                                   monkeypatch):
+    """`machine=` > settings.aiida.machine > the run's hpc_host > 'localhost'."""
+    import yaml
+
+    _with_settings_machine(monkeypatch, 'cluster9')
+    root = tmp_path / 'sim'
+    run_dir = _afm_run(root, 'h-MoS2')
+    (run_dir.parent / 'provenance' / 'settings.yaml').write_text(
+        yaml.safe_dump({'hpc': {'hpc_host': 'login.cluster.org'}}), encoding='utf-8')
+
+    assert import_root(root, label='camp').ok()
+    assert {n.computer.label for n in _calcjobs()} == {'cluster9'}
+
+    _afm_run(root, 'h-WS2')
+    import_root(root, label='camp', machine='explicit')
+    assert {n.computer.label for n in _by_deck('h-WS2').values()} == {'explicit'}
+
+
 def test_the_machine_defaults_to_the_runs_hpc_host(aiida_profile_clean, tmp_path):
     import yaml
 
@@ -517,6 +550,31 @@ def test_the_machine_defaults_to_the_runs_hpc_host(aiida_profile_clean, tmp_path
     assert report.ok() and not report.warnings
     assert {n.computer.label for n in _calcjobs()} == {'login.cluster.org'}
     assert {n.computer.scheduler_type for n in _calcjobs()} == {'core.pbspro'}
+
+
+def test_a_parse_failure_keeps_run_info_and_is_retried(aiida_profile_clean, tmp_path,
+                                                      monkeypatch):
+    from src.aiida import calcjob
+
+    def boom(self, *args, **kwargs):
+        raise RuntimeError('boom')
+
+    root = _tree(tmp_path / 'sim', materials=('h-MoS2',))
+    with monkeypatch.context() as patch:
+        patch.setattr(calcjob.LammpsFrictionParser, '_points', boom)
+        report = import_root(root, label='camp')
+    assert [m for _w, m in report.failures] and 'boom' in report.failures[0][1]
+    slide = _by_deck('h-MoS2')['slide']
+    assert slide.exit_status == 330
+    assert slide.outputs.run_info['log_has_version'] is True
+    assert 'log' in slide.outputs
+    assert DECK_SHA_EXTRA not in slide.base.extras.all
+
+    again = import_root(root, label='camp')
+    assert again.ok(), again.render()
+    assert [d.rsplit(':', 1)[1] for d in again.created_decks] == ['slide']
+    assert slide.base.extras.get('superseded') is True
+    assert _by_deck('h-MoS2')['slide'].is_finished_ok
 
 
 def test_on_point_sees_every_new_point(aiida_profile_clean, tmp_path):

@@ -133,10 +133,40 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
                            'CalcJobs another set holds', calc.pk, label)
             continue
         doomed |= closure
+    stranded = _stranded_sets(group, doomed)
     if doomed:
         delete_nodes(sorted(doomed), dry_run=False)
     orm.Group.collection.delete(group.pk)
+    if stranded:
+        logger.warning(
+            'Deleting set %r removed the live CalcJobs of %d deck(s) that set(s) %s '
+            'hold only as superseded copies. Recover by re-importing the tree under '
+            'each surviving label (FrictionSim2D aiida import <root> --label <label>).',
+            label, len(stranded), ', '.join(repr(s) for s in sorted(
+                {other for others in stranded.values() for other in others})))
     return len(doomed)
+
+
+def _stranded_sets(group, doomed: Set[int]) -> Dict[str, Set[str]]:
+    """deck key -> labels of the other sets that hold that deck only as a
+    superseded CalcJob, once the live CalcJobs in ``doomed`` are deleted."""
+    from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
+    from .store import DECK_KEY_EXTRA  # pylint: disable=import-outside-toplevel
+
+    removed = {c.base.extras.get(DECK_KEY_EXTRA) for c in _live(_calcjobs_of(group))
+               if c.pk in doomed}
+    removed.discard(None)
+    stranded: Dict[str, Set[str]] = {}
+    for other in _set_groups():
+        if other.pk == group.pk:
+            continue
+        calcs = _calcjobs_of(other)
+        live = {c.base.extras.get(DECK_KEY_EXTRA) for c in _live(calcs)}
+        for calc in calcs:
+            key = calc.base.extras.get(DECK_KEY_EXTRA)
+            if key in removed and key not in live:
+                stranded.setdefault(key, set()).add(other.label[len(GROUP_PREFIX) + 1:])
+    return stranded
 
 
 def _friction2d_calcjobs() -> List[int]:

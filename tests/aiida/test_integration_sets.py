@@ -120,3 +120,28 @@ def test_clear_removes_everything_and_a_reimport_recreates_it(aiida_profile_clea
     assert again.ok(), again.render()
     assert len(again.created_decks) == len(first.created_decks) == 4
     assert again.already_imported == [] and again.skipped_decks == []
+
+
+def test_delete_warns_about_sets_left_with_only_superseded_copies(
+        aiida_profile_clean, no_profile_switch, tmp_path, caplog):
+    root = _tree(tmp_path / 'sim', materials=('h-MoS2',))
+    import_root(root, label='first')
+    import_root(root, label='second')
+    (loc,) = discover_runs(root)
+    write_results(loc.run_dir, 'afm', loads=(10.0,), tiers=('raw',), layers=2)
+    import_root(root, label='second')          # second's new slide supersedes first's
+
+    with caplog.at_level('WARNING'):
+        delete_simulation_set('second')
+
+    (record,) = [r for r in caplog.records if 'superseded copies' in r.getMessage()]
+    assert "'first'" in record.getMessage()
+    assert 're-importing' in record.getMessage()
+
+
+def test_delete_of_an_unshared_set_warns_nothing(aiida_profile_clean, no_profile_switch,
+                                                 tmp_path, caplog):
+    import_root(_tree(tmp_path / 'sim'), label='camp')
+    with caplog.at_level('WARNING'):
+        delete_simulation_set('camp')
+    assert not [r for r in caplog.records if 'superseded copies' in r.getMessage()]
