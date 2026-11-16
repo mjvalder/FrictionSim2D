@@ -319,16 +319,23 @@ def parse_hold_files(data_dir: Path) -> Dict[str, float]:
 
 @dataclass
 class StampReport:
-    """What :func:`stamp_run_uuids` did, as lists of ``provenance.json`` paths."""
+    """What :func:`stamp_run_uuids` did, as lists of ``provenance.json`` paths.
+
+    ``invalid`` holds files whose ``run_uuid`` is set but is not a UUID: they
+    are listed for a human to fix, never overwritten.
+    """
     stamped: List[Path] = field(default_factory=list)
     already: List[Path] = field(default_factory=list)
     unreadable: List[Path] = field(default_factory=list)
+    invalid: List[Path] = field(default_factory=list)
 
-    def render(self) -> str:
-        """One summary line, then each unreadable file."""
-        lines = [f'stamped {len(self.stamped)}, already {len(self.already)}, '
-                 f'unreadable {len(self.unreadable)}']
+    def render(self, dry_run: bool = False) -> str:
+        """One summary line, then each unreadable and invalid file."""
+        verb = 'would stamp' if dry_run else 'stamped'
+        lines = [f'{verb} {len(self.stamped)}, already {len(self.already)}, '
+                 f'unreadable {len(self.unreadable)}, invalid {len(self.invalid)}']
         lines += [f'  unreadable: {path}' for path in self.unreadable]
+        lines += [f'  invalid run_uuid: {path}' for path in self.invalid]
         return '\n'.join(lines)
 
 
@@ -354,9 +361,10 @@ def stamp_run_uuids(root: Path, *, dry_run: bool = False) -> StampReport:
     AFM ``L{n}`` record gets its own -- plus ``run_uuid_stamped_at`` (today, ISO),
     which keeps a stamped legacy run distinguishable from a 2.2 build. An
     existing ``run_uuid`` is never overwritten, so a second pass stamps
-    nothing. Every other key keeps its value (``schema_version`` included);
-    the write is atomic. A file that is not a JSON object is reported in
-    ``unreadable``, never raised. ``dry_run`` reports without writing.
+    nothing; one that is not a UUID is reported in ``invalid``. Every other
+    key keeps its value (``schema_version`` included); the write is atomic.
+    A file that is not a JSON object is reported in ``unreadable``, never
+    raised. ``dry_run`` reports without writing.
     """
     report = StampReport()
     today = datetime.date.today().isoformat()
@@ -374,7 +382,14 @@ def stamp_run_uuids(root: Path, *, dry_run: bool = False) -> StampReport:
             report.unreadable.append(path)
             continue
         if data.get('run_uuid'):
-            report.already.append(path)
+            try:
+                uuid.UUID(str(data['run_uuid']))
+            except ValueError:
+                logger.warning('%s: run_uuid %r is not a UUID; left as is.',
+                               path, data['run_uuid'])
+                report.invalid.append(path)
+            else:
+                report.already.append(path)
             continue
         report.stamped.append(path)
         if dry_run:

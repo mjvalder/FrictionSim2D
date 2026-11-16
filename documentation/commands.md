@@ -285,7 +285,10 @@ FrictionSim2D aiida stamp-uuid ROOT [--dry-run]
   distinguishable. Every other key keeps its value; the write is atomic.
 - An existing `run_uuid` is never overwritten: a second pass stamps nothing.
 - `--dry-run` reports what would be stamped and writes nothing.
-- Exit code 1 if any `provenance.json` was unreadable (listed, not raised).
+- Stamping rewrites `provenance.json`, so a run imported before stamping
+  re-imports as changed.
+- Exit code 1 if any `provenance.json` was unreadable, or holds a `run_uuid`
+  that is not a UUID (listed under `invalid`, never overwritten).
 
 ### aiida list-sets
 

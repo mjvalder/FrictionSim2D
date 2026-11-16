@@ -698,7 +698,7 @@ def aiida_stamp_uuid(root: Path, dry_run: bool):
     import refuses them. Each one gets a fresh uuid4 plus
     ``run_uuid_stamped_at``; an existing run_uuid is never touched, so a
     second pass stamps nothing. Needs no aiida-core. Exits 1 if any
-    provenance.json was unreadable.
+    provenance.json was unreadable or holds a run_uuid that is not a UUID.
 
     Example:
         FrictionSim2D aiida stamp-uuid ./simulation_20260421_173546 --dry-run
@@ -706,9 +706,8 @@ def aiida_stamp_uuid(root: Path, dry_run: bool):
     from .data.provenance import stamp_run_uuids  # noqa: PLC0415
 
     report = stamp_run_uuids(root, dry_run=dry_run)
-    text = report.render()
-    click.echo(text.replace('stamped', 'would stamp', 1) if dry_run else text)
-    if report.unreadable:
+    click.echo(report.render(dry_run=dry_run))
+    if report.unreadable or report.invalid:
         raise SystemExit(1)
 
 

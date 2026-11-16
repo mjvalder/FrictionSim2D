@@ -233,3 +233,13 @@ def test_stamp_uuid_imports_no_aiida(tmp_path):
     done = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
                           cwd=Path(__file__).resolve().parents[2], check=False)
     assert done.returncode == 0, done.stderr
+
+
+def test_stamp_uuid_exits_1_on_a_non_uuid_run_uuid(tmp_path):
+    import json
+    prov = tmp_path / 'provenance.json'
+    prov.write_text(json.dumps({'run_uuid': 'run-42'}), encoding='utf-8')
+    result = CliRunner().invoke(cli, ['aiida', 'stamp-uuid', str(tmp_path)])
+    assert result.exit_code == 1
+    assert 'invalid run_uuid' in result.output
+    assert json.loads(prov.read_text(encoding='utf-8'))['run_uuid'] == 'run-42'

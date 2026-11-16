@@ -599,6 +599,31 @@ class UnitMismatch(ValueError):
 SPRING_METHODS = frozenset({'smd', 'virtual_atom'})
 
 
+#: The N/m -> eV/A^2 factor AFM builds used before ``b501bf5`` (a literal
+#: ``/ 16.02`` in ``afm/base.py``; exact is NM_TO_EV_A2 = 16.02176565). Their
+#: ``drive_k`` is 1.1e-4 relative off the exact constant, so the cross-check
+#: accepts it for legacy AFM-family records only (:func:`_legacy_afm_spring`).
+LEGACY_AFM_SPRING_FACTOR = 16.02
+
+#: The provenance schema of the first builds with the exact AFM factor.
+_EXACT_SPRING_SCHEMA = '2.2.0'
+
+
+def _legacy_afm_spring(family: str, record: Optional[Mapping[str, Any]]) -> bool:
+    """True for an AFM-family record built before ``b501bf5``: provenance
+    ``schema_version`` < 2.2.0, or a ``run_uuid_stamped_at`` (a legacy run the
+    stamper gave an identity). No record means a current build."""
+    if family not in AFM_FAMILIES or not record:
+        return False
+    if record.get('run_uuid_stamped_at'):
+        return True
+    try:
+        return version_key(record.get('schema_version', '1.0.0')) < \
+            version_key(_EXACT_SPRING_SCHEMA)
+    except (TypeError, ValueError):
+        return False
+
+
 def _spring_fallback(family: str) -> float:
     """The N/m a blank ``driving_spring`` falls back to in the family's builder:
     8.0 for AFM (``afm/base.py``), 50.0 for the sheet families
@@ -610,13 +635,15 @@ def _spring_fallback(family: str) -> float:
     return 50.0
 
 
-def check_units(blocks: RunBlocks) -> None:
+def check_units(blocks: RunBlocks, *, record: Optional[Mapping[str, Any]] = None) -> None:
     """Raise :class:`UnitMismatch` when ``derived.drive_k`` is not the requested
     ``general.driving_spring`` (N/m) in eV/A^2.
 
     Pins the convention that ``drive_k`` is eV/A^2: a drive spring recorded in
     N/m (or converted twice) fails the import. Runs without a spring, or
-    without a recorded ``drive_k``, pass.
+    without a recorded ``drive_k``, pass. ``record`` is the run's
+    ``provenance.json``: a legacy AFM-family record may also match
+    :data:`LEGACY_AFM_SPRING_FACTOR`; every other run uses only NM_TO_EV_A2.
     """
     defaults = defaults_for(blocks.family)
     fields = (blocks.blocks.get(_DRIVE) or {}).get('fields') or {}
@@ -626,8 +653,13 @@ def check_units(blocks: RunBlocks) -> None:
     if method not in SPRING_METHODS or drive_k is None:
         return
     spring = fields.get('general.driving_spring', defaults.get('general.driving_spring'))
-    expected = (spring or _spring_fallback(blocks.family)) / NM_TO_EV_A2
-    if abs(float(drive_k) - expected) > 1e-9 * max(1.0, abs(float(drive_k))):
+    factors = [NM_TO_EV_A2]
+    if _legacy_afm_spring(blocks.family, record):
+        factors.append(LEGACY_AFM_SPRING_FACTOR)
+    candidates = [(spring or _spring_fallback(blocks.family)) / f for f in factors]
+    tolerance = 1e-9 * max(1.0, abs(float(drive_k)))
+    expected = candidates[0]
+    if all(abs(float(drive_k) - c) > tolerance for c in candidates):
         raise UnitMismatch(
             f'derived.drive_k = {drive_k} {UNITS["derived.drive_k"]}, but '
             f'general.driving_spring = {spring} {UNITS["general.driving_spring"]} '

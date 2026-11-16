@@ -247,3 +247,34 @@ def test_point_units_match_the_point_paths():
     assert POINT_UNITS['force'] == {'load': 'nN', 'angle': 'deg', 'speed': 'm/s'}
     assert POINT_UNITS['pressure']['load'] == 'GPa'
     assert POINT_UNITS['none'] == {}
+
+
+# --- legacy AFM spring factor (fix round 1) -------------------------------------
+
+def test_a_legacy_afm_record_may_carry_the_old_16_02_factor():
+    from src.aiida.block_schema import LEGACY_AFM_SPRING_FACTOR
+    assert LEGACY_AFM_SPRING_FACTOR == 16.02
+    run = _run(driving_spring=50.0, drive_k=50.0 / 16.02)
+    check_units(run, record={'schema_version': '2.1.0'})
+    check_units(run, record={'schema_version': '2.2.0',
+                             'run_uuid_stamped_at': '2026-11-16'})
+    check_units(_run(driving_spring=50.0, drive_k=50.0 / NM_TO_EV_A2),
+                record={'schema_version': '2.1.0'})       # exact still passes
+    with pytest.raises(UnitMismatch):
+        check_units(_run(driving_spring=50.0, drive_k=50.0),
+                    record={'schema_version': '2.1.0'})
+
+
+def test_a_current_afm_record_with_16_02_raises():
+    run = _run(driving_spring=50.0, drive_k=50.0 / 16.02)
+    with pytest.raises(UnitMismatch):
+        check_units(run, record={'schema_version': '2.2.0'})
+    with pytest.raises(UnitMismatch):
+        check_units(run)                                   # no record: current
+
+
+def test_a_legacy_sheet_record_with_16_02_still_raises():
+    with pytest.raises(UnitMismatch):
+        check_units(_run(family='sheetonsheet', driving_spring=50.0,
+                         drive_method='smd', drive_k=50.0 / 16.02),
+                    record={'schema_version': '2.1.0', 'run_uuid_stamped_at': 'x'})

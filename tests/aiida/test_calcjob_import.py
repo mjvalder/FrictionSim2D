@@ -554,3 +554,11 @@ def test_a_run_without_run_uuid_raises(computer, tmp_path):
         deck_inputs(loc, discover_decks(loc)[0], computer=computer)
     assert str(loc.provenance_file) in str(info.value)
     assert isinstance(info.value, ValueError)
+
+
+def test_a_non_uuid_run_uuid_raises_clearly(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    _set_record(loc, run_uuid='run-42')
+    with pytest.raises(MissingRunUUID, match='is not a UUID') as info:
+        deck_inputs(loc, discover_decks(loc)[0], computer=computer)
+    assert str(loc.provenance_file) in str(info.value)

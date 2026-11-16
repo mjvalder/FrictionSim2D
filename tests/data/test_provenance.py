@@ -338,7 +338,8 @@ def test_stamp_is_idempotent(tmp_path):
 
 def test_stamp_never_overwrites_an_existing_uuid(tmp_path):
     from src.data.provenance import stamp_run_uuids
-    path = write_provenance(tmp_path / 'run', _record(run_uuid='keep-me'))
+    path = write_provenance(tmp_path / 'run',
+                            _record(run_uuid='3f0c2a7e-1b7d-4c4e-9a51-6d2f0e8b9c11'))
     text = path.read_bytes()
 
     report = stamp_run_uuids(tmp_path)
@@ -382,3 +383,52 @@ def test_stamp_keeps_the_file_mode(tmp_path):
     path.chmod(0o644)
     stamp_run_uuids(tmp_path)
     assert path.stat().st_mode & 0o777 == 0o644
+
+
+def test_stamp_lists_a_non_uuid_run_uuid_as_invalid(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    path = write_provenance(tmp_path / 'run', _record(run_uuid='keep-me'))
+    text = path.read_bytes()
+
+    report = stamp_run_uuids(tmp_path)
+
+    assert report.invalid == [path]
+    assert report.stamped == [] and report.already == []
+    assert path.read_bytes() == text
+    assert 'invalid run_uuid: ' + str(path) in report.render()
+
+
+def test_stamp_treats_a_null_run_uuid_as_missing(tmp_path):
+    from uuid import UUID
+    from src.data.provenance import stamp_run_uuids
+    path = _legacy_file(tmp_path / 'provenance.json', run_uuid=None)
+
+    report = stamp_run_uuids(tmp_path)
+
+    assert report.stamped == [path]
+    assert UUID(json.loads(path.read_text(encoding='utf-8'))['run_uuid']).version == 4
+
+
+def test_a_failed_rename_leaves_the_original_and_no_temp_file(tmp_path, monkeypatch):
+    import os
+    from src.data.provenance import stamp_run_uuids
+    path = _legacy_file(tmp_path / 'provenance.json')
+    text = path.read_bytes()
+
+    def boom(*_a, **_k):
+        raise OSError('disk full')
+    monkeypatch.setattr(os, 'replace', boom)
+
+    report = stamp_run_uuids(tmp_path)
+
+    assert report.unreadable == [path] and report.stamped == []
+    assert path.read_bytes() == text
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['provenance.json']
+
+
+def test_render_says_would_stamp_on_a_dry_run():
+    from pathlib import Path
+    from src.data.provenance import StampReport
+    report = StampReport(stamped=[Path('a')])
+    assert report.render(dry_run=True).startswith('would stamp 1,')
+    assert report.render().startswith('stamped 1,')
