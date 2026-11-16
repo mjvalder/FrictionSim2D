@@ -300,6 +300,7 @@ def test_read_reports_overrides(runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert 'Overrides: 1' in result.output
     assert 'failed_integrity -> complete' in result.output
+    assert 'failed_integrity -> complete (2026-11-16: fine)' in result.output
 
 
 def test_read_no_integrity_prints_no_tally(runner, tmp_path):

@@ -642,7 +642,9 @@
     "thresholds_version": "1.0.0",
     "ruled_by_user": false,
     "overridden": false,
-    "original_status": ""
+    "original_status": "",
+    "note": "",
+    "date": ""
    }
   },
   {
@@ -962,7 +964,9 @@
     "thresholds_version": "1.0.0",
     "ruled_by_user": false,
     "overridden": false,
-    "original_status": ""
+    "original_status": "",
+    "note": "",
+    "date": ""
    }
   },
   {
@@ -1202,7 +1206,9 @@
     "thresholds_version": "1.0.0",
     "ruled_by_user": false,
     "overridden": false,
-    "original_status": ""
+    "original_status": "",
+    "note": "",
+    "date": ""
    }
   },
   {
@@ -1374,7 +1380,9 @@
     "thresholds_version": "1.0.0",
     "ruled_by_user": false,
     "overridden": false,
-    "original_status": ""
+    "original_status": "",
+    "note": "",
+    "date": ""
    }
   },
   {
@@ -1546,7 +1554,9 @@
     "thresholds_version": "1.0.0",
     "ruled_by_user": false,
     "overridden": false,
-    "original_status": ""
+    "original_status": "",
+    "note": "",
+    "date": ""
    }
   }
  ]

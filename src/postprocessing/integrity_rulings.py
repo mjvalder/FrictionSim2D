@@ -92,10 +92,11 @@ def _entry(raw) -> tuple:
 def load_rulings(root: Path) -> Dict[str, Ruling]:
     """Rulings by canonical point id; `{}` when there is no file.
 
+    `root` is the directory holding `RULINGS_FILE`, or a rulings file itself.
     Entries that cannot be read are kept under `<malformed #n>` (or `<file>`)
     with `error` set, so `apply_rulings` reports each one; nothing raises.
     """
-    path = Path(root) / RULINGS_FILE
+    path = Path(root) if Path(root).is_file() else Path(root) / RULINGS_FILE
     if not path.is_file():
         return {}
     try:
@@ -155,13 +156,31 @@ def decide(status: str, ruling: Ruling) -> Tuple[Optional[str], Optional[str]]:
     return status, None
 
 
+def rule_verdict(verdict, ruling: Ruling):
+    """`verdict` (an `IntegrityVerdict`) as `ruling` decides it, or
+    `(None, warning)` when the ruling cannot apply (see `decide`).
+
+    The new verdict gains `ruled_by_user`, `original_status`, the ruling's
+    `note` and `date` and, when the point was not quarantined, `overridden`.
+    `failed` follows the new status, or stays when the status is unchanged.
+    """
+    original = verdict.status
+    status, why = decide(original, ruling)
+    if why is not None:
+        return None, why
+    return replace(
+        verdict, status=status,
+        failed=verdict.failed if status == original else status != 'complete',
+        ruled_by_user=True, overridden=original != 'quarantined',
+        original_status=original, note=ruling.note, date=ruling.date), None
+
+
 def apply_rulings(points: Iterable, rulings: Dict[str, Ruling],
                   root: Path) -> List[str]:
     """Apply rulings to points in place (see `decide`); return the warnings.
 
-    The verdict gains `ruled_by_user`, `original_status` and, when the point
-    was not quarantined, `overridden`. One warning per ruling that could not
-    apply.
+    The verdict is replaced by `rule_verdict`'s. One warning per ruling that
+    could not apply.
     """
     warnings: List[str] = []
     by_id = {point_id(p, root): p for p in points}
@@ -178,8 +197,7 @@ def apply_rulings(points: Iterable, rulings: Dict[str, Ruling],
         if why is not None:
             warnings.append(f'integrity ruling ignored: {key}: {why}')
             continue
-        overridden = original != 'quarantined'
-        if overridden:
+        if original != 'quarantined':
             text = f'overridden by user {ruling.date}: {ruling.note}'
         else:
             text = f'ruled {ruling.ruling} by user {ruling.date}: {ruling.note}'
@@ -187,10 +205,7 @@ def apply_rulings(points: Iterable, rulings: Dict[str, Ruling],
         point.status_detail = '; '.join(
             part for part in (point.status_detail, text) if part)
         if point.integrity is not None:
-            point.integrity = replace(
-                point.integrity, status=status,
-                failed=(point.integrity.failed if status == original
-                        else status != 'complete'),
-                ruled_by_user=True, overridden=overridden,
-                original_status=original)
+            # Decided on the point's status, as above, whatever the verdict says.
+            point.integrity = rule_verdict(
+                replace(point.integrity, status=original), ruling)[0]
     return warnings

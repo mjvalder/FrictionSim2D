@@ -1315,8 +1315,9 @@ def _echo_integrity(reader) -> None:
                   if p.integrity is not None and p.integrity.overridden]
     click.echo(f"Overrides: {len(overridden)}")
     for point in overridden:
-        note = ' '.join(str(point.status_detail or '').split())
-        note = note.rsplit('overridden by user', 1)[-1].strip()
+        note = ': '.join(part for part in (point.integrity.date,
+                                           ' '.join(point.integrity.note.split()))
+                         if part)
         click.echo(f"- {point_id(point, reader.results_dir)}: "
                    f"{point.integrity.original_status} -> {point.status}"
                    f" ({note})")

@@ -149,6 +149,7 @@ def test_override_pass_on_failed_integrity(tmp_path):
     assert 'overridden by user 2026-11-12: expert call' in p.status_detail
     assert r.ruling_warnings == []
     assert p.integrity.as_dict()['overridden'] is True
+    assert (p.integrity.note, p.integrity.date) == ('expert call', '2026-11-12')
 
 
 def test_override_fail_on_complete(tmp_path):

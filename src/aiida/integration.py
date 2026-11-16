@@ -111,8 +111,9 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
 
     Shared inputs (blocks, files, provenance, schema, Codes, Computers) are
     never deleted; neither is a CalcJob another set holds, nor one whose
-    deletion would cascade into such a CalcJob. Returns the number of nodes
-    deleted.
+    deletion would cascade into such a CalcJob. The input Dicts of the steps
+    it deletes (integrity context and settings, rulings) go with them when no
+    remaining process uses them. Returns the number of nodes deleted.
     """
     _require_aiida()
     _ensure_aiida_profile(profile)
@@ -134,8 +135,12 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
             continue
         doomed |= closure
     stranded = _stranded_sets(group, doomed)
+    step_inputs = _step_inputs(doomed)
     if doomed:
         delete_nodes(sorted(doomed), dry_run=False)
+    orphans = _orphans(step_inputs - doomed)
+    if orphans:
+        delete_nodes(orphans, dry_run=False)
     orm.Group.collection.delete(group.pk)
     if stranded:
         logger.warning(
@@ -144,7 +149,7 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
             'each surviving label (FrictionSim2D aiida import <root> --label <label>).',
             label, len(stranded), ', '.join(repr(s) for s in sorted(
                 {other for others in stranded.values() for other in others})))
-    return len(doomed)
+    return len(doomed) + len(orphans)
 
 
 def _stranded_sets(group, doomed: Set[int]) -> Dict[str, Set[str]]:
@@ -204,6 +209,24 @@ def _orphans(candidates: Set[int]) -> List[int]:
     return sorted(existing - set(qb.all(flat=True)))
 
 
+def _step_inputs(within: Optional[Set[int]] = None) -> Set[int]:
+    """pks of the Dicts made only to feed a step (``steps.STEP_INPUT_EXTRA``:
+    integrity context and settings, user rulings); with ``within``, only
+    those some process in ``within`` takes as an input."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from .steps import STEP_INPUT_EXTRA  # pylint: disable=import-outside-toplevel
+
+    qb = orm.QueryBuilder().append(
+        orm.Dict, filters={'extras': {'has_key': STEP_INPUT_EXTRA}}, tag='d', project='id')
+    if within is not None:
+        if not within:
+            return set()
+        qb.append(orm.ProcessNode, with_incoming='d',
+                  filters={'id': {'in': sorted(within)}})
+    return set(qb.all(flat=True))
+
+
 def _content_addressed() -> Set[int]:
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
@@ -235,7 +258,8 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
 
     That is every friction2d CalcJob with its descendants, then the inputs
     they leave unused -- content-addressed blocks, files, provenance, schema,
-    LAMMPS Codes, ``derived`` Dicts, remote folders -- so a re-import builds
+    LAMMPS Codes, ``derived`` Dicts, remote folders, the integrity and
+    ruling steps' input Dicts -- so a re-import builds
     everything afresh. Computers are kept. Returns the number of nodes deleted.
     """
     _require_aiida()
@@ -246,7 +270,7 @@ def clear_all_nodes(profile: Optional[str] = None) -> int:
     from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
 
     calcs = _friction2d_calcjobs()
-    inputs = _inputs_of(calcs) | _content_addressed()
+    inputs = _inputs_of(calcs) | _content_addressed() | _step_inputs()
     doomed = _delete_closure(calcs + _legacy_nodes())
     if doomed:
         delete_nodes(sorted(doomed), dry_run=False)

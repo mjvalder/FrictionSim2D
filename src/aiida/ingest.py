@@ -25,6 +25,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import (
@@ -260,7 +261,11 @@ class ImportReport:
     of every point node a new CalcJob created (the hook integrity uses).
     ``failures`` are ``(rel_path or deck, message)``: a :class:`MissingRunUUID`
     or :class:`UnitMismatch` for one run lands here and the other runs go on.
-    ``verdict_counts`` is filled by the integrity pass (Task 6a).
+    ``verdict_counts`` are the status counts of the verdicts this import's
+    integrity pass made (:func:`src.aiida.steps.check_group`); ``rulings`` is
+    the rulings pass that follows (:class:`~src.aiida.steps.RulingReport`)
+    and ``overrides`` its expert overrides in effect,
+    ``(point id, original status, new status, note)``.
     ``superseded_elsewhere`` are ``(deck, other label)``: a CalcJob this
     import superseded that another set also holds -- that set now holds a
     superseded deck.
@@ -279,6 +284,8 @@ class ImportReport:
     failures: List[Tuple[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     superseded_elsewhere: List[Tuple[str, str]] = field(default_factory=list)
+    overrides: List[Tuple[str, str, str, str]] = field(default_factory=list)
+    rulings: Any = None
     dry_run: bool = False
 
     def ok(self) -> bool:
@@ -302,6 +309,14 @@ class ImportReport:
             f'  unparseable runs:    {len(self.unparseable)}',
         ]
         lines += [f'  verdict {k}: {v}' for k, v in sorted(self.verdict_counts.items())]
+        if self.rulings is not None:
+            lines.append(f'  rulings applied:     {self.rulings.applied}')
+            lines.append(f'  rulings skipped:     {self.rulings.skipped}')
+            lines += [f'  ruling unmatched: {pid}' for pid in self.rulings.unmatched]
+            lines += [f'  ruling on a point not quarantined (needs override: true '
+                      f'and a note): {pid}' for pid in self.rulings.not_quarantined]
+        lines += [f'  override {pid}: {old} -> {new} ({note})'
+                  for pid, old, new, note in self.overrides]
         lines += [f'  already imported elsewhere: {d}' for d in self.already_imported]
         lines += [f'  no LAMMPS version (no Code): {d}' for d in self.no_version]
         lines += [f'  log missing: {d}' for d in self.log_missing]
@@ -881,4 +896,24 @@ def import_root(root: Path, label: Optional[str] = None, *,
             logger.exception('Import failed for run %s', locator.tokens.rel_path)
             report.failures.append((locator.tokens.rel_path,
                                     f'{type(exc).__name__}: {exc}'))
+    if not dry_run:
+        _integrity_pass(state)
     return report
+
+
+def _integrity_pass(state: _Import) -> None:
+    """A verdict for every live point of the set that has none, then the
+    set's rulings (:mod:`src.aiida.steps`)."""
+    # `steps` reads this module's labels; looked up at call time so the two
+    # do not form an import cycle (as `calcjob` does with `load_points`).
+    steps = import_module(f'{__package__}.steps')
+    check_group, rule_group = steps.check_group, steps.rule_group
+
+    report = state.report
+    failed: List[Tuple[str, str]] = []
+    report.verdict_counts = check_group(state.group, failures=failed)
+    report.failures += [(f'point {uuid}', f'integrity check: {message}')
+                        for uuid, message in failed]
+    report.rulings = rule_group(state.group)
+    report.overrides = list(report.rulings.overrides)
+    report.warnings += report.rulings.warnings

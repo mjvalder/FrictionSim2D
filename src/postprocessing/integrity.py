@@ -317,6 +317,9 @@ class IntegrityVerdict:  # pylint: disable=too-many-instance-attributes
     overridden: bool = False
     #: The status before a ruling; empty when no ruling touched the point.
     original_status: str = ''
+    #: The ruling's note and date (`integrity_rulings`); empty without one.
+    note: str = ''
+    date: str = ''
 
     def as_dict(self) -> dict:
         """JSON-safe form: NaN and infinite measures become ``None``."""
