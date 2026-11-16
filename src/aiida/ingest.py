@@ -264,8 +264,8 @@ class ImportReport:
     ``verdict_counts`` are the status counts of the verdicts this import's
     integrity pass made (:func:`src.aiida.steps.check_group`); ``rulings`` is
     the rulings pass that follows (:class:`~src.aiida.steps.RulingReport`)
-    and ``overrides`` its expert overrides in effect,
-    ``(point id, original status, new status, note)``.
+    and ``overrides`` every live expert override of the set, read from the
+    store, ``(point id, original status, new status, note)``.
     ``superseded_elsewhere`` are ``(deck, other label)``: a CalcJob this
     import superseded that another set also holds -- that set now holds a
     superseded deck.
@@ -312,6 +312,8 @@ class ImportReport:
         if self.rulings is not None:
             lines.append(f'  rulings applied:     {self.rulings.applied}')
             lines.append(f'  rulings skipped:     {self.rulings.skipped}')
+            lines.append(f'  rulings withdrawn:   {len(self.rulings.withdrawn)}')
+            lines += [f'  ruling withdrawn: {pid}' for pid in self.rulings.withdrawn]
             lines += [f'  ruling unmatched: {pid}' for pid in self.rulings.unmatched]
             lines += [f'  ruling on a point not quarantined (needs override: true '
                       f'and a note): {pid}' for pid in self.rulings.not_quarantined]
@@ -911,7 +913,8 @@ def _integrity_pass(state: _Import) -> None:
 
     report = state.report
     failed: List[Tuple[str, str]] = []
-    report.verdict_counts = check_group(state.group, failures=failed)
+    report.verdict_counts = check_group(state.group, failures=failed,
+                                        warnings=report.warnings)
     report.failures += [(f'point {uuid}', f'integrity check: {message}')
                         for uuid, message in failed]
     report.rulings = rule_group(state.group)

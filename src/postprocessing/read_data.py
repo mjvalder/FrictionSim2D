@@ -33,10 +33,11 @@ from .integrity_rulings import apply_rulings, load_rulings
 from .post_channels import post_channels_for
 from .run_provenance import (point_provenance, pool_provenance,
                              run_provenance)
-from .run_status import (GRID_FAMILIES, STATUSES, PointKey, classify,
-                         expected_chains, halt_detail, load_kind_for_family,
-                         mark_not_reached, point_key, read_halt_registry,
-                         read_run_config)
+from .run_status import (GRID_FAMILIES, LEGACY_TRUNCATION_DETAIL, STATUSES,
+                         PointKey, classify,
+                         expected_chains, halt_detail, legacy_truncated,
+                         load_kind_for_family, mark_not_reached, point_key,
+                         read_halt_registry, read_run_config)
 
 logger = logging.getLogger(__name__)
 
@@ -313,10 +314,6 @@ _TIER_BY_PREFIX = {'friction': 'window', 'raw': 'raw', 'peratom': 'peratom'}
 #: files `pes_scan` under `'window'`; two readers, one rule.
 _PES_GRID_NAME = 'pes_scan.csv'
 
-#: Families whose row count is set by a scan grid or an indent protocol, not
-#: by a run length shared with their neighbours: the legacy truncation rule
-#: has no reference to judge them against.
-_UNWINDOWED_FAMILIES = ('pes_tip', 'pes_sheet', 'indent')
 _PES_POINT = LoadPoint(load_kind='none', load=0.0, angle=0.0, speed=0.0,
                        tier='window', layer=None)
 
@@ -731,30 +728,16 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         return []
 
     def _apply_legacy_truncation(self) -> None:
-        """The old rule, for points whose config gives no expected length.
-
-        Short by more than three samples against the longest window of the
-        same (family, size): a window tier can legitimately miss its final
-        block. Only a slide-family point with frames and no `expected_rows`
-        is judged this way -- every existing tree whose `config.json` carries
-        no `settings`. PES and indent are never judged: their row counts are
-        set by the scan grid and the indent protocol, which vary per run.
+        """The old rule (`run_status.legacy_truncated`), for points whose
+        config gives no expected length: every existing tree whose
+        `config.json` carries no `settings`. PES and indent are never judged.
         """
-        judged = [run for run in self.runs
-                  if run.family not in _UNWINDOWED_FAMILIES]
-        longest: Dict[Tuple[str, str], int] = {}
-        for run in judged:
-            key = (run.family, run.size)
-            longest[key] = max(longest.get(key, 0), len(run.window))
-        for run in judged:
-            if (run.expected_rows or run.status != 'complete'
-                    or longest[(run.family, run.size)] - len(run.window) <= 3):
-                continue
-            run.status = 'truncated'
-            run.status_detail = _join_detail(
-                run.status_detail,
-                'short vs longest window of its family and size; '
-                'no configured length')
+        runs = self.runs
+        for i in legacy_truncated([(r.family, r.size, len(r.window),
+                                    bool(r.expected_rows), r.status) for r in runs]):
+            runs[i].status = 'truncated'
+            runs[i].status_detail = _join_detail(runs[i].status_detail,
+                                                 LEGACY_TRUNCATION_DETAIL)
 
     def _flag_incomplete(self) -> None:
         """Record every point whose status is not `complete`.

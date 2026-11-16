@@ -174,7 +174,8 @@ class LammpsFrictionCalcJob(CalcJob):
                                   "and the system deck's load_*.data outputs.")
         spec.input('parameters', valid_type=orm.Dict,
                    help='deck_name, rel_path, run_uuid, point_filter, family, '
-                        'n_layers, log_name, writes_structures, block_names.')
+                        'n_layers, log_name, writes_structures, block_names, '
+                        'build_level.')
 
         spec.input('metadata.options.resources', valid_type=dict,
                    default={'num_machines': 1, 'num_mpiprocs_per_machine': 1})
@@ -980,6 +981,9 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
             'block_names': labels,
             'hpc_run_path': _hpc_run_path(locator),
             'max_stored_file_mb': run.max_stored_file_mb,
+            # Where the run's build/ sits: the integrity step looks the bond
+            # reference up where the DataReader would (`bond_reference`).
+            'build_level': 'run' if (run_dir / 'build').is_dir() else 'parent',
         }),
         'metadata': {'computer': computer,
                      'label': f'{locator.tokens.rel_path}:{deck.name}',

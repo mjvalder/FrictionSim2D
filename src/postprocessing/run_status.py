@@ -204,6 +204,35 @@ def halt_detail(entries: Sequence[Mapping[str, str]],
     return None
 
 
+#: Families whose row counts are set by a scan grid or an indent protocol,
+#: which vary per run: never judged short against each other.
+UNWINDOWED_FAMILIES = ('pes_tip', 'pes_sheet', 'indent')
+
+LEGACY_TRUNCATION_DETAIL = ('short vs longest window of its family and size; '
+                            'no configured length')
+
+
+def legacy_truncated(points: Sequence[Tuple[str, Any, int, bool, str]]) -> List[int]:
+    """The old truncation rule, for points whose config gives no expected length.
+
+    `points` are `(family, size, window rows, has expected rows, status)` of
+    every point WITH frames; returns the indices to mark `truncated`: a
+    `complete` point without expected rows whose window is short by more than
+    three samples against the longest window of the same (family, size) -- a
+    window tier can legitimately miss its final block. The unwindowed
+    families are never judged. Shared by the DataReader and the store's
+    integrity step (`src.aiida.steps`), so the two cannot drift.
+    """
+    judged = [i for i, p in enumerate(points) if p[0] not in UNWINDOWED_FAMILIES]
+    longest: Dict[Tuple[str, Any], int] = {}
+    for i in judged:
+        family, size, rows = points[i][:3]
+        longest[(family, size)] = max(longest.get((family, size), 0), rows)
+    return [i for i in judged
+            if not points[i][3] and points[i][4] == 'complete'
+            and longest[points[i][:2]] - points[i][2] > 3]
+
+
 def mark_not_reached(chain: List[PointKey], status: Dict[PointKey, str]) -> None:
     """In chain order: a 'no_output' point after any non-complete point becomes 'not_reached'."""
     failed = False

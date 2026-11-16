@@ -19,7 +19,11 @@ from src.aiida.integration import clear_all_nodes, delete_simulation_set  # noqa
 from src.aiida.steps import apply_rulings  # noqa: E402
 from src.postprocessing.integrity_rulings import RULINGS_FILE, point_id  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
-from tests.postprocessing.test_read_data_integrity import _afm_tree, _point  # noqa: E402
+from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
+from tests.helpers.synthetic_results import write_results  # noqa: E402
+from tests.postprocessing.test_integrity import _stack, _write_data  # noqa: E402
+from tests.postprocessing.test_read_data_integrity import (  # noqa: E402
+    DECK, _afm_snapshots, _afm_tree, _point)
 
 LOG = """LAMMPS (29 Aug 2024 - Update 1)
 Loop time of 12.5 on 4 procs for 1000 steps with 600 atoms
@@ -107,17 +111,17 @@ def test_every_point_gets_exactly_one_verdict(aiida_profile_clean, no_profile_sw
     no_output = next(p for p in points if p.base.attributes.get('load') == 50.0)
     (func,) = [link.node for link in no_output.base.links.get_outgoing(
         node_class=orm.CalcFunctionNode).all()]
+    # No snapshot, but the bond reference the DataReader uses too (n_heat).
     assert set(func.base.links.get_incoming().all_link_labels()) == {
-        'point', 'context', 'settings'}
+        'point', 'reference', 'context', 'settings'}
+    assert func.inputs.context['status'] == 'no_output'
 
 
-def test_verdicts_match_the_datareader(aiida_profile_clean, no_profile_switch, tmp_path):
-    """The store's verdict is the one `postprocess read` gives the same tree."""
-    _tree(tmp_path, eject=(10.0,), quarantine=(30.0,), no_output=(50.0,))
-    report = import_root(tmp_path, label='camp')
+def _assert_matches_reader(report, root):
+    """Every point's store verdict is the one `postprocess read` gives."""
     assert report.ok(), report.render()
-
-    reader = DataReader(str(tmp_path))
+    reader = DataReader(str(root))
+    statuses = {}
     for uuid in report.points:
         point = orm.load_node(uuid)
         (verdict,) = _verdicts_of(point)
@@ -127,14 +131,66 @@ def test_verdicts_match_the_datareader(aiida_profile_clean, no_profile_switch, t
         for key in ('status', 'failed', 'observed', 'reasons', 'quarantine',
                     'not_applicable', 'thresholds_version'):
             assert got[key] == expected[key], key
-        if got['status'] == 'no_output':
-            # The plan gives a no_output point no reference, so no n_heat;
-            # the DataReader counts it from the load structure anyway.
-            assert got['measures'] == {'n_heat': None}
-            continue
         assert got['measures'].keys() == expected['measures'].keys()
         for key, value in expected['measures'].items():
-            assert got['measures'][key] == pytest.approx(value, nan_ok=True), key
+            if value is None:
+                assert got['measures'][key] is None, key
+            else:
+                assert got['measures'][key] == pytest.approx(value), key
+        statuses[point.base.attributes.get('load')] = got['status']
+    return statuses
+
+
+def test_verdicts_match_the_datareader(aiida_profile_clean, no_profile_switch, tmp_path):
+    _tree(tmp_path, eject=(10.0,), quarantine=(30.0,), no_output=(50.0,))
+    report = import_root(tmp_path, label='camp')
+    statuses = _assert_matches_reader(report, tmp_path)
+    assert statuses == {10.0: 'failed_integrity', 30.0: 'quarantined', 50.0: 'no_output'}
+
+
+def test_chain_after_a_truncated_load_is_not_reached(aiida_profile_clean,
+                                                    no_profile_switch, tmp_path):
+    """Stage-2 parity: the template ramps each load from the last, so a
+    no-output load after a truncated one was never reached."""
+    run_dir = _tree(tmp_path, no_output=(50.0,))
+    write_results(run_dir, 'afm', load_kind='force', loads=(30.0,), layers=2, n=10)
+    report = import_root(tmp_path, label='camp')
+    statuses = _assert_matches_reader(report, tmp_path)
+    assert statuses == {10.0: 'complete', 30.0: 'truncated', 50.0: 'not_reached'}
+
+
+def test_legacy_short_window_is_truncated(aiida_profile_clean, no_profile_switch,
+                                          tmp_path):
+    """A config without output settings has no expected rows: the old rule
+    judges the window against the longest of its family and size."""
+    config = {'general': {'temp': 300, 'force': [10.0, 30.0], 'scan_angle': [0.0],
+                          'scan_speed': [2.0]}}
+    run_dir = make_family_run(tmp_path, 'afm', loads=(10.0, 30.0), n=50, config=config)
+    (run_dir / 'lammps' / 'slide.in').write_text(DECK, encoding='utf-8')
+    for load in (10.0, 30.0):
+        _afm_snapshots(run_dir, load)
+    write_results(run_dir, 'afm', load_kind='force', loads=(30.0,), layers=2, n=40)
+    report = import_root(tmp_path, label='camp')
+    statuses = _assert_matches_reader(report, tmp_path)
+    assert statuses == {10.0: 'complete', 30.0: 'truncated'}
+
+
+@pytest.mark.parametrize('level', ['run', 'parent'])
+def test_sheet_bond_reference_is_looked_up_where_the_reader_looks(
+        aiida_profile_clean, no_profile_switch, tmp_path, level):
+    """Sheet families take the reference from the run's own build/ only: a
+    build one level up is no reference (the point is quarantined)."""
+    run_dir = make_family_run(tmp_path, 'sheetonsheet', loads=(1.0,), n=50,
+                              config=slide_config('sheetonsheet', loads=(1.0,)))
+    (run_dir / 'lammps' / 'slide.in').write_text(
+        'write_data ./data/final_p$(v_p)GPa_a$(v_a).data\n', encoding='utf-8')
+    stack, box = _stack(2)
+    build = (run_dir if level == 'run' else run_dir.parent) / 'build'
+    _write_data(build / 'sheet.lmp', stack, box)
+    _write_data(run_dir / 'data' / 'final_p1GPa_a0.data', stack, box)
+    report = import_root(tmp_path, label='camp')
+    (status,) = _assert_matches_reader(report, tmp_path).values()
+    assert (status == 'quarantined') == (level == 'parent')
 
 
 def test_reimport_runs_no_new_check(aiida_profile_clean, no_profile_switch, tmp_path):
@@ -215,6 +271,53 @@ def test_expert_override_applies_and_is_listed(aiida_profile_clean, no_profile_s
     assert ruled['status'] == 'complete' and not ruled['failed']
 
 
+def _ruled_live():
+    return [n for n in _ruled_outputs() if not n.base.extras.get('superseded', False)]
+
+
+@pytest.mark.parametrize('edit', ['delete', 'no_override'])
+def test_withdrawn_override_returns_the_checker_verdict(
+        aiida_profile_clean, no_profile_switch, tmp_path, edit):
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'pass', note='viewer artefact', override=True)
+    assert apply_rulings('camp').overrides == [
+        (pid, 'failed_integrity', 'complete', 'viewer artefact')]
+
+    if edit == 'delete':
+        (tmp_path / RULINGS_FILE).unlink()
+    else:
+        _write_ruling(tmp_path, pid, 'pass', note='viewer artefact')
+    report = import_root(tmp_path, label='camp')
+
+    assert report.rulings.withdrawn == [pid]
+    assert report.overrides == [] and report.rulings.overrides == []
+    assert _ruled_live() == []
+    (back,) = _nodes('withdraw_ruling')
+    out = back.outputs.result
+    assert out['status'] == 'failed_integrity' and not out.get('overridden')
+    assert out['withdrawn_ruling'] == back.inputs.ruled.uuid
+    assert apply_rulings('camp').withdrawn == []          # idempotent
+
+
+def test_partial_explicit_file_withdraws_nothing(aiida_profile_clean, no_profile_switch,
+                                                 tmp_path):
+    _tree(tmp_path, eject=(30.0,), quarantine=(10.0,))
+    import_root(tmp_path, label='camp')
+    _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass', note='ok', override=True)
+    assert apply_rulings('camp').applied == 1
+    partial = tmp_path / 'partial.yaml'
+    partial.write_text(f'- point: "{_pid(tmp_path, 10.0)}"\n  ruling: pass\n',
+                       encoding='utf-8')
+
+    report = apply_rulings('camp', partial)
+
+    assert report.applied == 1 and report.withdrawn == []
+    assert len(_ruled_live()) == 2 and len(report.overrides) == 1
+    assert apply_rulings('camp', partial, withdraw=True).withdrawn == [_pid(tmp_path, 30.0)]
+
+
 def test_unmatched_ruling_and_explicit_path(aiida_profile_clean, no_profile_switch,
                                             tmp_path):
     _tree(tmp_path, quarantine=(30.0,))
@@ -253,3 +356,15 @@ def test_delete_leaves_no_step_inputs(aiida_profile_clean, no_profile_switch, tm
     assert orm.QueryBuilder().append(orm.ProcessNode).count() == 0
     assert orm.QueryBuilder().append(
         orm.Dict, filters={'extras': {'has_key': 'friction2d_step_input'}}).count() == 0
+
+
+def test_unreadable_settings_warn(aiida_profile_clean, no_profile_switch, tmp_path,
+                                  monkeypatch):
+    import src.core.config as config
+
+    def broken(*_args, **_kwargs):
+        raise ValueError('bad yaml')
+    monkeypatch.setattr(config, 'load_settings', broken)
+    _tree(tmp_path)
+    report = import_root(tmp_path, label='camp')
+    assert any('default thresholds' in w for w in report.warnings), report.warnings
