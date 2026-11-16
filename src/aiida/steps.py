@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 __all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'RulingReport', 'apply_ruling',
            'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
            'delete_dataset', 'is_provisional', 'latest_verdict', 'latest_verdicts',
-           'options_hash', 'postprocess_group', 'rule_group', 'summarise',
+           'normalise_options', 'options_hash', 'postprocess_group', 'rule_group', 'summarise',
            'summary_options', 'withdraw_ruling']
 
 #: Marks every Dict made only as a step's input (value: what it is).
@@ -338,8 +338,8 @@ def _live_verdicts(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
 def _strict_settings(warnings: Optional[List[str]], fallback: str):
     """The ``GlobalSettings`` of the settings file in effect, validated
     strictly; None without a file, or -- with ``f'settings file <path>
-    unreadable (<error>); {fallback}'`` in ``warnings`` -- when it cannot be
-    read.
+    unreadable (<error>); {fallback}'`` in ``warnings``, or logged as a
+    WARNING when ``warnings`` is None -- when it cannot be read.
 
     ``load_settings`` skips an unreadable file silently (a log line), so the
     file it would use (``settings_origin``) is read and validated here.
@@ -355,9 +355,11 @@ def _strict_settings(warnings: Optional[List[str]], fallback: str):
         data = yaml.safe_load(Path(path).read_text(encoding='utf-8')) or {}
         return GlobalSettings.model_validate(data)
     except Exception as exc:  # pylint: disable=broad-except
-        if warnings is not None:
-            warnings.append(f'settings file {path} unreadable ({type(exc).__name__}: '
-                            f'{exc}); {fallback}')
+        line = f'settings file {path} unreadable ({type(exc).__name__}: {exc}); {fallback}'
+        if warnings is None:
+            logger.warning('%s', line)
+        else:
+            warnings.append(line)
         return None
 
 
@@ -1093,9 +1095,28 @@ def summary_options(warnings: Optional[List[str]] = None) -> Dict[str, Any]:
                                    else settings.aiida.skip_fraction)}
 
 
+#: Summary option -> how it is normalised before hashing.
+_OPTION_TYPES = {'skip_fraction': float}
+
+
+def normalise_options(options: Dict[str, Any]) -> Dict[str, Any]:
+    """``options`` with known keys only, each of its type
+    (``skip_fraction`` a float), so ``{'skip_fraction': 1}`` and
+    ``{'skip_fraction': 1.0}`` are one identity. An unknown key, or a
+    missing one, raises ``ValueError``."""
+    unknown = sorted(set(options) - set(_OPTION_TYPES))
+    if unknown:
+        raise ValueError(f'unknown summary options {unknown}; known: '
+                         f'{sorted(_OPTION_TYPES)}')
+    missing = sorted(set(_OPTION_TYPES) - set(options))
+    if missing:
+        raise ValueError(f'summary options lack {missing}')
+    return {key: kind(options[key]) for key, kind in _OPTION_TYPES.items()}
+
+
 def options_hash(options: Dict[str, Any]) -> str:
-    """sha256 of the canonical JSON of a summary's ``options``."""
-    return _canonical(dict(options))
+    """sha256 of the canonical JSON of a summary's normalised ``options``."""
+    return _canonical(normalise_options(options))
 
 
 def _live_summaries(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
@@ -1191,7 +1212,7 @@ def postprocess_group(label: str, *, policy: Policy = Policy(), skip_failed: boo
     points = _live_points(_set_group(label))
     verdicts = _latest(points, policy)
     _report_versions(label, verdicts, _settings_dump(problems)['version'], problems)
-    opts = dict(options) if options is not None else summary_options(problems)
+    opts = normalise_options(options if options is not None else summary_options(problems))
     digest = options_hash(opts)
     existing = _live_summaries(points)
     inputs_of = _SummaryInputs(opts)
@@ -1312,6 +1333,7 @@ def _dataset_rows(name: str, labels: Sequence[str], policy: Policy, digest: str
 
 def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy(),
                   options: Optional[Dict[str, Any]] = None,
+                  warnings: Optional[List[str]] = None,
                   profile: Optional[str] = None) -> orm.Dict:
     """Make the dataset ``friction2d/datasets/<name>`` from the sets
     ``labels``: a Group holding, for every live point whose selected verdict
@@ -1329,6 +1351,10 @@ def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy()
     rows are computed before anything is stored; the Group is stored first,
     then the table, and a failure while storing removes both again, so
     nothing is left orphaned. :func:`delete_dataset` undoes a dataset.
+
+    ``options`` are normalised (:func:`normalise_options`; unknown keys
+    raise). An unreadable settings file, when ``options`` default, goes to
+    ``warnings`` (logged as a WARNING without a list).
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
@@ -1338,7 +1364,8 @@ def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy()
         raise ValueError(f'dataset {name!r} exists ({group_label}); datasets are '
                          f'not rewritten -- build it under a new name, or '
                          f'delete_dataset({name!r}) first')
-    opts = dict(options) if options is not None else summary_options()
+    opts = normalise_options(options if options is not None
+                             else summary_options(warnings))
     digest = options_hash(opts)
     rows, members, units = _dataset_rows(name, labels, policy, digest)
     group = orm.Group(label=group_label).store()
@@ -1371,7 +1398,11 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> int:
     from . import load_aiida_profile
 
     load_aiida_profile(profile)
-    group = orm.Group.collection.get(label=f'{DATASET_PREFIX}/{name}')
+    found = orm.QueryBuilder().append(
+        orm.Group, filters={'label': f'{DATASET_PREFIX}/{name}'}).all(flat=True)
+    if not found:
+        raise ValueError(f'no dataset {name!r} ({DATASET_PREFIX}/{name})')
+    (group,) = found
     tables = [n.pk for n in group.nodes
               if isinstance(n, orm.Dict) and n.base.extras.get(DATASET_EXTRA, None) == name]
     orm.Group.collection.delete(group.pk)

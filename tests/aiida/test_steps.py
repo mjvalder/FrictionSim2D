@@ -6,6 +6,7 @@ gathers the selected summaries into `friction2d/datasets/<name>` with one
 Dict naming the policy. Selection is `policy.select`: by declared version,
 never by ctime (critique I4).
 """
+import logging
 import numbers
 import re
 
@@ -24,8 +25,8 @@ from src.aiida.integration import clear_all_nodes, delete_simulation_set  # noqa
 from src.aiida.policy import Policy  # noqa: E402
 from src.aiida.steps import (DATASET_PREFIX, apply_rulings, build_dataset,  # noqa: E402
                              delete_dataset, is_provisional, latest_verdict,
-                             merge_units, options_hash, postprocess_group,
-                             summary_options)
+                             merge_units, normalise_options, options_hash,
+                             postprocess_group, summary_options)
 from src.postprocessing.read_data import DataReader  # noqa: E402
 from tests.aiida.test_steps_integrity import (  # noqa: E402
     _pid, _tree, _verdicts_of, _write_ruling)
@@ -333,7 +334,7 @@ def test_a_new_skip_fraction_makes_new_summaries_and_datasets_pick_theirs(
 
 
 def test_settings_skip_fraction_is_read_strictly(aiida_profile_clean, no_profile_switch,
-                                                 tmp_path, monkeypatch):
+                                                 tmp_path, monkeypatch, caplog):
     config = tmp_path / 'xdg'
     (config / 'FrictionSim2D').mkdir(parents=True)
     settings = config / 'FrictionSim2D' / 'settings.yaml'
@@ -356,6 +357,16 @@ def test_settings_skip_fraction_is_read_strictly(aiida_profile_clean, no_profile
     assert sum('default thresholds' in w for w in warnings) == 1
     assert {s['skip_fraction'] for s in _summaries()} == {0.2}
 
+    # build_dataset says so too: into its list, or as a logged WARNING.
+    warnings = []
+    table = build_dataset('d', ['camp'], warnings=warnings)
+    assert sum('default skip_fraction' in w for w in warnings) == 1
+    assert table['policy']['summary_options'] == {'skip_fraction': 0.2}
+    with caplog.at_level(logging.WARNING, logger='src.aiida.steps'):
+        build_dataset('d2', ['camp'])
+    assert any('default skip_fraction' in r.getMessage() and r.levelno == logging.WARNING
+               for r in caplog.records)
+
 
 def test_a_failing_summary_is_skipped_or_raised(aiida_profile_clean, no_profile_switch,
                                                 tmp_path, monkeypatch):
@@ -370,6 +381,32 @@ def test_a_failing_summary_is_skipped_or_raised(aiida_profile_clean, no_profile_
     assert sum('broken frame' in w for w in warnings) == 3
     with pytest.raises(RuntimeError, match='broken frame'):
         postprocess_group('camp', skip_failed=False)
+
+
+def test_options_are_normalised_before_hashing():
+    assert options_hash({'skip_fraction': 1}) == options_hash({'skip_fraction': 1.0})
+    assert normalise_options({'skip_fraction': 1}) == {'skip_fraction': 1.0}
+    assert isinstance(normalise_options({'skip_fraction': 1})['skip_fraction'], float)
+    assert options_hash({'skip_fraction': 0.2}) != options_hash({'skip_fraction': 0.3})
+    with pytest.raises(ValueError, match='unknown.*bogus'):
+        normalise_options({'skip_fraction': 0.2, 'bogus': 1})
+    with pytest.raises(ValueError, match='lack'):
+        normalise_options({})
+
+
+def test_int_and_float_options_are_one_summary(aiida_profile_clean, no_profile_switch,
+                                               tmp_path):
+    _tree(tmp_path, eject=(10.0,))
+    import_root(tmp_path, label='camp')
+    assert postprocess_group('camp', options={'skip_fraction': 0.5}) == 2
+    assert postprocess_group('camp', options={'skip_fraction': 0.5}) == 0
+    assert postprocess_group('camp', options={'skip_fraction': 0}) == 2
+    assert postprocess_group('camp', options={'skip_fraction': 0.0}) == 0
+    assert len(build_dataset('one', ['camp'], options={'skip_fraction': 0.0})['rows']) == 2
+    with pytest.raises(ValueError, match='bogus'):
+        postprocess_group('camp', options={'skip_fraction': 0.5, 'bogus': True})
+    with pytest.raises(ValueError, match='bogus'):
+        build_dataset('bad', ['camp'], options={'skip_fraction': 0.5, 'bogus': True})
 
 
 # --- datasets -----------------------------------------------------------------
@@ -482,6 +519,8 @@ def test_delete_refuses_a_set_a_dataset_draws_on(aiida_profile_clean, no_profile
     assert orm.QueryBuilder().append(orm.Node).count() == before
     assert orm.Group.collection.get(label='friction2d/camp')
 
+    with pytest.raises(ValueError, match="no dataset 'nope'"):
+        delete_dataset('nope')
     assert delete_dataset('paper') == 1
     assert orm.QueryBuilder().append(orm.Node).count() == before - 1
     assert len(_summaries()) == 2                           # the set still owns them
