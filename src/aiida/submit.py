@@ -291,7 +291,11 @@ def submit_simulation(
     Returns:
         The submitted (or, without ``daemon``, already-finished) ``ProcessNode``.
     """
-    code = orm.load_code(code_label) if isinstance(code_label, str) else code_label
+    raise RuntimeError(
+        "`aiida submit` is removed: AiiDA no longer runs LAMMPS. Run the "
+        "simulations (locally or with `FrictionSim2D hpc generate`), then "
+        "record them with `FrictionSim2D aiida import`.")
+    code = orm.load_code(code_label) if isinstance(code_label, str) else code_label  # pylint: disable=unreachable
     folder = prepare_simulation_folder(sim_dir)
     folder.store()
 

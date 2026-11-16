@@ -106,6 +106,29 @@ def get_or_create_file(path: Path, name: Optional[str] = None) -> orm.Singlefile
     return node.store()
 
 
+def new_file(path: Path, name: Optional[str] = None) -> orm.SinglefileData:
+    """An UNSTORED ``SinglefileData`` of ``path``, staged through redaction.
+
+    For process outputs, which must be new nodes. ``name`` (default: the
+    basename) is what redaction judges the file by; the node's file is its
+    basename.
+    """
+    path = Path(path)
+    name = name or path.name
+    node = orm.SinglefileData(io.BytesIO(b''), filename=PurePosixPath(name).name)
+    stage_file(_AsBasename(node.base.repository), path, name)
+    return node
+
+
+def new_folder(files: Mapping[str, Path]) -> orm.FolderData:
+    """An UNSTORED ``FolderData`` of ``{stored name: path}``, staged through
+    redaction."""
+    node = orm.FolderData()
+    for name, path in files.items():
+        stage_file(node.base.repository, Path(path), name)
+    return node
+
+
 def _provenance_members(provenance_file: Optional[Path],
                          provenance_dir: Optional[Path]) -> List[Tuple[str, Path]]:
     """``(stored name, path)`` of every provenance file, sorted by name.

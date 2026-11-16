@@ -44,14 +44,19 @@ SECRET = 'hunter2-central-db-password'
 
 
 def _afm_run(root, *, loads=(10.0, 30.0), written=(10.0, 30.0), logs=True,
-             conflict=False):
+             conflict=False, snapshots=None, tiers=('window',)):
     """An AFM run with `system.in` + `slide.in`, `loads` configured, results
     for `written` only, `load_*.data` from the system deck and a shared build."""
     run_dir = make_family_run(root, 'afm', loads=written, final_data=False,
+                              tiers=tiers,
                               config=slide_config('afm', loads=loads, steps=50_000,
                                                   freq=1000))
     lammps = run_dir / 'lammps'
-    (lammps / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    rel = run_dir.relative_to(root).as_posix()
+    include = f'include         {rel}/lammps/system.in.settings\n'
+    (lammps / 'system.in').write_text('# system\n' + include, encoding='utf-8')
+    (lammps / 'slide.in').write_text('# slide\n' + include, encoding='utf-8')
+    (lammps / 'system.in.settings').write_text('mass 1 95.95\n', encoding='utf-8')
     if logs:
         (lammps / 'run_system.log').write_text(SYSTEM_LOG, encoding='utf-8')
         (lammps / 'run_slide.log').write_text(SLIDE_LOG, encoding='utf-8')
@@ -61,7 +66,7 @@ def _afm_run(root, *, loads=(10.0, 30.0), written=(10.0, 30.0), logs=True,
         (data / f'load_{load:g}N.data').write_text(f'LAMMPS data {load}\n',
                                                    encoding='utf-8')
         (data / f'hold_{load:g}N.txt').write_text('# hold\n', encoding='utf-8')
-    for load in written:
+    for load in (written if snapshots is None else snapshots):
         write_final_data(run_dir, 'afm', load=load)
     build = run_dir.parent / 'build'
     build.mkdir(exist_ok=True)
@@ -138,9 +143,19 @@ def test_afm_system_and_slide_hand_off_structures(computer, tmp_path):
     assert attrs['status'] == 'complete'
     assert attrs['rel_path'] == loc.tokens.rel_path
     assert attrs['deck_name'] == 'slide'
+    assert p10.base.repository.list_object_names() == ['results']
     names = set(p10.base.repository.list_object_names('results'))
     assert names == {'friction_f10_a0_s2_layer2.txt'}
-    assert p10.base.repository.list_object_names('data') == ['final_f10N_a0.data']
+    assert attrs['has_snapshot'] is True and attrs['has_peratom'] is False
+    snapshot = slide.outputs.snapshots['force10_a0_s2']
+    assert snapshot.filename == 'final_f10N_a0.data'
+    assert snapshot.get_content() == (loc.data_dir / 'final_f10N_a0.data').read_text()
+    assert 'peratom' not in slide.outputs
+
+    # every deck that includes system.in.settings carries it, as ONE node
+    settings_nodes = {n.inputs.includes['system_in_settings'].uuid for n in nodes}
+    assert len(settings_nodes) == 1
+    assert nodes[0].inputs.includes['system_in_settings'].get_content() == 'mass 1 95.95\n'
 
 
 def test_retrieve_lists_come_from_the_retention_rule(computer, tmp_path):
@@ -165,6 +180,10 @@ def test_array_mode_decks_split_points_by_load(computer, tmp_path):
     nodes = import_run(loc, computer=computer)
     by_deck = {n.inputs.parameters['deck_name']: n for n in nodes}
     assert set(_points(by_deck['slide_f10N'])) == {'force10_a0_s2'}
+    produced = {n.filename: n.uuid for n in by_deck['system'].outputs.structures.values()}
+    for deck, name in (('slide_f10N', 'load_10N.data'), ('slide_f30N', 'load_30N.data')):
+        given = {n.filename: n.uuid for n in by_deck[deck].inputs.structures.values()}
+        assert given == {name: produced[name]}, deck
     assert set(_points(by_deck['slide_f30N'])) == {'force30_a0_s2'}
 
 
@@ -206,6 +225,82 @@ def test_pes_refine_deck_holds_the_refine_grid(computer, tmp_path):
         'results') == ['pes_scan_refine.csv']
 
 
+def test_peratom_tier_is_its_own_node(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim', tiers=('window', 'peratom'))
+    _system, slide = import_run(loc, computer=computer)
+    p10 = _points(slide)['force10_a0_s2']
+    assert p10.base.repository.list_object_names('results') == \
+        ['friction_f10_a0_s2_layer2.txt']
+    assert p10.base.attributes.get('has_peratom') is True
+    peratom = slide.outputs.peratom['force10_a0_s2']
+    assert peratom.base.repository.list_object_names('results') == \
+        ['peratom_f10_a0_s2_layer2.txt']
+
+
+def test_a_point_with_results_but_no_snapshot(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim', snapshots=(30.0,))
+    _system, slide = import_run(loc, computer=computer)
+    p10 = _points(slide)['force10_a0_s2']
+    assert p10.base.attributes.get('status') == 'complete'
+    assert p10.base.attributes.get('has_snapshot') is False
+    assert set(slide.outputs.snapshots) == {'force30_a0_s2'}
+
+
+def test_configured_indent_load_without_results_gets_a_node(computer, tmp_path):
+    root = tmp_path / 'sim'
+    config = {'general': {'temp': 300, 'force': [10.0, 30.0], 'scan_angle': 0.0,
+                          'scan_speed': [2.0]}}
+    run_dir = make_family_run(root, 'indent', loads=(10.0,), config=config)
+    (run_dir / 'results' / 'indent_f10N_l2.csv').write_text('z_tip,fz_tip\n0,1\n',
+                                                            encoding='utf-8')
+    (run_dir / 'lammps' / 'indent.in').write_text('# indent\n', encoding='utf-8')
+    (loc,) = discover_runs(root)
+    deck = [d for d in discover_decks(loc) if d.name == 'indent'][0]
+    _result, node = import_deck(loc, deck, computer=computer)
+    points = _points(node)
+    assert set(points) == {'force10_a0_s2', 'force30_a0_s2'}
+    assert points['force30_a0_s2'].base.attributes.get('status') == 'no_output'
+    assert points['force10_a0_s2'].base.repository.list_object_names('results') == \
+        ['friction_f10_a0_s2_layer2.txt', 'indent_f10N_l2.csv']
+
+
+def test_every_output_file_goes_through_redaction(computer, tmp_path, monkeypatch):
+    import src.aiida.store as store_mod
+    staged = []
+    real = store_mod.stage_file
+
+    def spy(repository, source, name):
+        staged.append(name)
+        return real(repository, source, name)
+
+    monkeypatch.setattr(store_mod, 'stage_file', spy)
+    loc = _afm_run(tmp_path / 'sim')
+    system, slide = import_run(loc, computer=computer)
+    outputs = [n for calc in (system, slide)
+               for n in calc.base.links.get_outgoing().all_nodes()
+               if isinstance(n, (orm.SinglefileData, orm.FolderData))
+               and n.uuid != calc.outputs.retrieved.uuid]
+    n_files = sum(len(list(n.base.repository.walk())[0][2]) if isinstance(n, orm.SinglefileData)
+                  else sum(len(f) for _r, _d, f in n.base.repository.walk())
+                  for n in outputs)
+    assert n_files and len([x for x in staged
+                            if x.startswith(('results/', 'data/', 'lammps/run_'))]) >= n_files
+
+
+def test_log_without_version_keeps_the_recorded_version(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    (loc.lammps_dir / 'run_slide.log').write_bytes(
+        b'Loop time of 1.0 on 2 procs for 10 steps\n\xff\xfe bad bytes\n')
+    record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
+    record['lammps_version'] = '2 Aug 2023'
+    loc.provenance_file.write_text(json.dumps(record), encoding='utf-8')
+    _system, slide = import_run(loc, computer=computer)
+    info = slide.outputs.run_info.get_dict()
+    assert info['lammps_version'] == '2 Aug 2023'
+    assert info['log_has_version'] is False and info['log_missing'] is False
+    assert info['n_procs'] == 2
+
+
 # --- configured but absent ------------------------------------------------------
 
 def test_configured_load_without_results_is_an_empty_no_output_point(computer, tmp_path):
@@ -216,6 +311,8 @@ def test_configured_load_without_results_is_an_empty_no_output_point(computer, t
     assert missing.base.attributes.get('status') == 'no_output'
     assert missing.base.attributes.get('load') == 30.0
     assert missing.base.repository.list_object_names() == []
+    assert missing.base.attributes.get('has_snapshot') is False
+    assert set(slide.outputs.snapshots) == {'force10_a0_s2'}
     assert points['force10_a0_s2'].base.attributes.get('status') == 'complete'
 
 
@@ -241,7 +338,7 @@ def test_run_info_reads_the_log(computer, tmp_path):
     assert info['lammps_version'] == VERSION
     assert info['wall_time_s'] == 3610.0
     assert info['n_procs'] == 8
-    assert info['log_missing'] is False
+    assert info['log_missing'] is False and info['log_has_version'] is True
     assert system.outputs.run_info['n_procs'] == 4
     assert slide.outputs.log.get_content() == SLIDE_LOG
 
@@ -285,23 +382,58 @@ def test_inputs_are_content_addressed(computer, tmp_path):
     """Two layer counts of one AFM build share the provenance/ dir, build and
     blocks; the provenance FolderData differs only by provenance.json."""
     root = tmp_path / 'sim'
-    loc = _afm_run(root)
-    deck = discover_decks(loc)[0]
-    first = deck_inputs(loc, deck, computer=computer)
-    second = deck_inputs(loc, deck, computer=computer)
-    assert first['provenance'].uuid == second['provenance'].uuid
-    assert first['deck'].uuid == second['deck'].uuid
-    assert {k: v.uuid for k, v in first['blocks'].items()} == \
-        {k: v.uuid for k, v in second['blocks'].items()}
-    assert all('__' not in key for key in first['blocks'])
-    prov = first['provenance'].base.repository
-    assert 'provenance.json' in prov.list_object_names()
-    assert 'config.json' in prov.list_object_names('provenance')
-    params = first['parameters'].get_dict()
+    loc2 = _afm_run(root)
+    run1 = make_family_run(root, 'afm', layers=1, loads=(10.0, 30.0),
+                           config=slide_config('afm', loads=(10.0, 30.0),
+                                               steps=50_000, freq=1000))
+    record = json.loads((run1 / 'provenance.json').read_text(encoding='utf-8'))
+    record['layer_type_map'] = {'layer_1': [1]}
+    (run1 / 'provenance.json').write_text(json.dumps(record), encoding='utf-8')
+    (loc1,) = [r for r in discover_runs(root) if r.run_dir == run1]
+    assert loc1.provenance_dir == loc2.provenance_dir
+
+    def system_inputs(loc):
+        return deck_inputs(loc, discover_decks(loc)[0], computer=computer)
+
+    one, two = system_inputs(loc1), system_inputs(loc2)
+    assert one['structures']['build_sheet_lmp'].uuid == two['structures']['build_sheet_lmp'].uuid
+    shared = set(one['blocks']) & set(two['blocks'])
+    assert shared and all(one['blocks'][k].uuid == two['blocks'][k].uuid
+                          for k in shared if not k.startswith('geometry'))
+    assert one['provenance'].uuid != two['provenance'].uuid
+    p1, p2 = one['provenance'].base.repository, two['provenance'].base.repository
+    assert p1.list_object_names('provenance') == p2.list_object_names('provenance')
+    for name in p1.list_object_names('provenance'):
+        assert p1.get_object_content(f'provenance/{name}') == \
+            p2.get_object_content(f'provenance/{name}')
+    assert p1.get_object_content('provenance.json') != p2.get_object_content('provenance.json')
+    # importing the same run twice reuses every input node
+    again = system_inputs(loc2)
+    assert again['provenance'].uuid == two['provenance'].uuid
+    assert again['deck'].uuid == two['deck'].uuid
+    assert all('__' not in key for key in two['blocks'])
+    params = two['parameters'].get_dict()
     assert params['deck_name'] == 'system'
-    assert params['rel_path'] == loc.tokens.rel_path
+    assert params['rel_path'] == loc2.tokens.rel_path
     assert params['family'] == 'afm' and params['n_layers'] == 2
     assert params['point_filter'] == {}
+
+
+def test_potentials_sharing_a_stem_both_survive(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    pots = loc.provenance_dir / 'potentials'
+    pots.mkdir(exist_ok=True)
+    (pots / 'MoS.sw').write_text('sw\n', encoding='utf-8')
+    (pots / 'MoS.ILP').write_text('ilp\n', encoding='utf-8')
+    inputs = deck_inputs(loc, discover_decks(loc)[0], computer=computer)
+    assert {k: v.filename for k, v in inputs['potentials'].items()} == \
+        {'MoS_sw': 'MoS.sw', 'MoS_ILP': 'MoS.ILP'}
+
+
+def test_a_label_collision_raises():
+    from src.aiida.calcjob import _unique
+    with pytest.raises(ValueError, match='a_b'):
+        _unique([('a_b', 1), ('a_b', 2)], 'potentials')
 
 
 def test_point_label_is_a_valid_link_label():

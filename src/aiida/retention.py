@@ -1,18 +1,19 @@
 """What a finished run keeps.
 
-One rule, two consumers: `ingest.py` derives what it stores from
-`retained_paths` -- the run node keeps its inputs and provenance, each load
-point its tier files, and every other retained file rides along as that
-point's aux (`ingest._aux_files`) -- and
-`LammpsFrictionCalcJob.prepare_for_submission` builds its retrieve lists from
-`retrieve_patterns`, narrowed per deck. So an imported run and a
-CalcJob-retrieved run store the same files. AiiDA content-addresses whatever
-lands in the repository, so this list IS the retention guarantee and nothing
-re-checksums it. Files over
-`aiida.max_stored_file_mb` are recorded by sha256 instead of stored.
+One rule, two consumers. `ingest.py` (until its Task 6 rewrite) derives what
+it stores from `retained_paths`; files over `aiida.max_stored_file_mb` are
+recorded there by sha256 instead of stored. The import-only
+`LammpsFrictionCalcJob` retrieves from `retrieve_patterns`, narrowed per deck
+kind (`calcjob._temporary_list`): results, end snapshots, loaded structures
+and hold traces are retrieved and stored as outputs, while the run's inputs
+(decks, `system.in.settings`, `provenance/`, `build/*.lmp`, potentials) are
+stored as content-addressed CalcJob inputs read straight from the run
+directory. Root-level `*.out` and `log*.lammps` of a multi-deck local run are
+retained here but not yet stored by the CalcJob path.
 
-Trajectories (`visuals/`, `*.lammpstrj`) and build scratch (`build/`) are
-deliberately excluded: spec U3 keeps visual files on disk for verification only.
+Trajectories (`visuals/`, `*.lammpstrj`) are deliberately excluded: spec U3
+keeps visual files on disk for verification only. Of `build/`, only the
+`*.lmp` structures are kept.
 """
 from __future__ import annotations
 
