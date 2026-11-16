@@ -1,285 +1,752 @@
-"""Database query interface for FrictionSim2D (spec §4.4).
+"""The query layer over the CalcJob graph (spec §5.2, plan Task 8).
 
-`Friction2DDB.query` filters on `RunTokens` (Tasks 3-4) plus `family`,
-`model`, `set_label` and `potential`, and returns a `QueryResult` of matching
-run nodes and their (non-superseded) result nodes -- the summary scalars a
-`FrictionResultsData` carries are `RunSummary.as_dict()`'s fields (Task 8),
-written as attributes by `FrictionResultsData.set_summary` (Task 11).
+Every point is a ``FolderData`` output (``points__<label>``) of one deck
+CalcJob; the CalcJob holds the run's parameter blocks (``blocks__<name>``)
+and the family's ``schema``. Everything here is read through bulk
+projections and reduced in pandas (critique I8), never node by node:
 
-Runs and results are linked by a `run_uuid` ATTRIBUTE, not a provenance edge
-(spec §4.1 -- import does not fake process nodes), so this is two
-`QueryBuilder` passes, not one chained `append(..., with_X=...)`: the runs are
-found first, then the results are found among `attributes.run_uuid in
-<those runs>`. A single `append` of both classes with no link would be a
-cross product -- every run paired with every result -- and the run-level
-filters would not scope the returned rows at all.
+* :meth:`Friction2DDB.query` -- one row per live point: the run tokens (the
+  CalcJob extra ``friction2d_tokens``), the point's own attributes with
+  units, the verdict and the summary the :class:`~src.aiida.policy.Policy`
+  selects.
+* :func:`point_table` -- one row per point, one column per requested field
+  (``<block name>.<field path>``, elided fields refilled from the run's own
+  schema) plus the swept axes ``load``, ``angle``, ``speed``.
+* :func:`related` -- the points that differ from one point only along
+  ``vary``: point-level and field-level, whatever deck shape (array or
+  combined mode) carried them (critique C1a, C1b). Joined on block hash
+  values, never on node identity (C2).
+* :func:`latest` -- the verdict or summary the policy selects for a point.
+
+Superseded nodes (extra ``superseded=True``, on the point or its CalcJob)
+are left out everywhere unless asked for.
 """
+from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import logging
+import math
+import numbers
+from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import (Any, Dict, Iterable, List, Literal, Mapping, Optional, Sequence,
+                    Set, Tuple, Union)
 
-from .data_keys import is_superseded
+from ..core.compare import refill
+from .block_schema import BLOCK_KINDS, FIELD_MAP, REALIZATION_FIELDS, unindexed
+from .blocks import NAME_SEP, block_kind
+from .compare import block_name, schema_tables
+from .policy import Policy
 
 try:
-    from aiida.orm import QueryBuilder as _QueryBuilder
-    from aiida.orm import load_node as _load_node
+    from aiida import orm
     AIIDA_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - the aiida tier skips without it
+    orm = None  # type: ignore[assignment]
     AIIDA_AVAILABLE = False
-    _QueryBuilder = None  # type: ignore[assignment]
-    _load_node = None  # type: ignore[assignment]
 
+logger = logging.getLogger(__name__)
+
+__all__ = ['AXES', 'Friction2DDB', 'QueryResult', 'latest', 'point_table', 'related']
+
+#: The swept axes: point attributes, never block content (``SWEPT``).
+AXES = ('load', 'angle', 'speed')
+
+#: The block kind ``related`` ignores unless it is named (seeds differ
+#: between every pair of runs).
+REALIZATION = 'realization'
+
+_GROUP_PREFIX = 'friction2d/'
+_DATASET_PREFIX = 'friction2d/datasets/'
+_POINTS_LINK = 'points__%'
+_BLOCKS_LINK = 'blocks__'
+_SCHEMA_LINK = 'schema'
+
+#: Batch size of an ``IN`` filter (SQLite caps the variables of a statement).
+_CHUNK = 500
+
+#: Swept-axis values equal to this many decimals are one value (calcjob._TOL).
+_AXIS_DECIMALS = 9
+
+#: RunTokens fields, in column order (``family`` comes from the point).
+_TOKEN_FIELDS = ('model', 'materials', 'flake_material', 'size_x', 'size_y',
+                 'substrate', 'substrate_amorphous', 'tip_material', 'tip_radius',
+                 'temperature', 'pot_token', 'interlayer_token')
+
+#: Point attributes copied into a ``query`` row (``status`` as ``point_status``).
+_POINT_FIELDS = ('family', 'layers', 'rel_path', 'deck_name', 'point_uuid', 'load_kind',
+                 'load', 'angle', 'speed', 'status', 'status_detail', 'load_achieved',
+                 'ramp_converged', 'has_snapshot', 'has_peratom')
+
+#: Summary keys that are metadata, not scalars.
+_SUMMARY_META = ('units', 'options', 'options_hash', 'code_version', 'point_uuid')
+
+#: ``query`` keyword -> the row column it filters on by equality.
+_EQ_FILTERS = {
+    'family': 'family', 'model': 'model', 'potential': 'pot_token',
+    'substrate': 'substrate', 'substrate_amorphous': 'substrate_amorphous',
+    'tip_material': 'tip_material', 'tip_radius': 'tip_radius',
+    'flake_material': 'flake_material', 'size_x': 'size_x', 'size_y': 'size_y',
+    'rel_path': 'rel_path',
+}
+
+Range = Tuple[Optional[float], Optional[float]]
+
+
+def _require_aiida() -> None:
+    if not AIIDA_AVAILABLE:
+        raise RuntimeError(
+            "AiiDA is not available. Install with: pip install 'FrictionSim2D[aiida]'")
+
+
+def _chunks(values: Sequence[Any]) -> Iterable[List[Any]]:
+    for start in range(0, len(values), _CHUNK):
+        yield list(values[start:start + _CHUNK])
+
+
+def _process_type() -> str:
+    from .store import CALCJOB_PROCESS_TYPE  # pylint: disable=import-outside-toplevel
+    return CALCJOB_PROCESS_TYPE
+
+
+@lru_cache(maxsize=None)
+def _parsed_tokens(rel_path: str, family: Optional[str]) -> Optional[str]:
+    from .store import run_tokens  # pylint: disable=import-outside-toplevel
+    tokens = run_tokens(rel_path, family)
+    return None if tokens is None else json.dumps(tokens)
+
+
+def _tokens(extras: Mapping[str, Any], rel_path: Optional[str],
+            family: Optional[str]) -> Dict[str, Any]:
+    """The CalcJob's ``friction2d_tokens``; parsed from ``rel_path`` for a
+    CalcJob imported before the extra existed (``aiida reindex`` writes it)."""
+    from .store import TOKENS_EXTRA  # pylint: disable=import-outside-toplevel
+    tokens = extras.get(TOKENS_EXTRA)
+    if tokens is None and rel_path:
+        text = _parsed_tokens(rel_path, family)
+        tokens = json.loads(text) if text else None
+    return dict(tokens or {})
+
+
+def _set_groups() -> List[Tuple[str, str, int, Dict[str, Any]]]:
+    """``(label, uuid, pk, extras)`` of every ``friction2d/<label>`` set Group."""
+    qb = orm.QueryBuilder().append(
+        orm.Group, filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
+        project=['label', 'uuid', 'id', 'extras'])
+    return [(label, uuid, pk, extras or {}) for label, uuid, pk, extras in qb.all()
+            if not label.startswith(_DATASET_PREFIX)]
+
+
+def _labels_of_calcs() -> Dict[str, List[str]]:
+    """CalcJob uuid -> the set labels (``friction2d/`` stripped) holding it."""
+    qb = orm.QueryBuilder().append(
+        orm.Group, tag='g', filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
+        project='label')
+    qb.append(orm.CalcJobNode, with_group='g', project='uuid')
+    out: Dict[str, Set[str]] = {}
+    for label, uuid in qb.all():
+        if not label.startswith(_DATASET_PREFIX):
+            out.setdefault(str(uuid), set()).add(label[len(_GROUP_PREFIX):])
+    return {uuid: sorted(labels) for uuid, labels in out.items()}
+
+
+def _dead(value: Any) -> bool:
+    return bool(value)
+
+
+# ---------------------------------------------------------------------------
+# Points with their identity: one projection
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Points:
+    """Live points (rows) and their nodes, from one projection."""
+    rows: List[Dict[str, Any]]
+    nodes: Dict[str, Any]
+
+
+def _points(include_superseded: bool = False) -> _Points:
+    """Every point of a friction2d CalcJob with its identity columns."""
+    from .block_schema import POINT_UNITS  # pylint: disable=import-outside-toplevel
+    from .store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
+
+    qb = orm.QueryBuilder()
+    qb.append(orm.CalcJobNode, tag='c', filters={'process_type': _process_type()},
+              project=['uuid', 'extras'])
+    qb.append(orm.FolderData, tag='p', with_incoming='c',
+              edge_filters={'label': {'like': _POINTS_LINK}}, project=['*'])
+    labels = _labels_of_calcs()
+    rows: List[Dict[str, Any]] = []
+    nodes: Dict[str, Any] = {}
+    for calc_uuid, calc_extras, point in qb.all():
+        calc_extras = calc_extras or {}
+        superseded = (_dead(calc_extras.get('superseded'))
+                      or _dead(point.base.extras.get('superseded', False)))
+        if superseded and not include_superseded:
+            continue
+        attrs = point.base.attributes.all
+        units = attrs.get('units') or POINT_UNITS.get(attrs.get('load_kind'), {})
+        sets = labels.get(str(calc_uuid), [])
+        row: Dict[str, Any] = {'set_label': sets[0] if sets else None, 'set_labels': sets}
+        tokens = _tokens(calc_extras, attrs.get('rel_path'), attrs.get('family'))
+        row.update({name: tokens.get(name) for name in _TOKEN_FIELDS})
+        row.update({('point_status' if name == 'status' else name): attrs.get(name)
+                    for name in _POINT_FIELDS})
+        if row['layers'] is None:
+            row['layers'] = tokens.get('layers')
+        for axis in AXES:
+            row[f'{axis}_unit'] = units.get(axis)
+        row.update({'run_uuid': calc_extras.get(RUN_UUID_EXTRA), 'calc_uuid': str(calc_uuid),
+                    'node_uuid': point.uuid, 'superseded': superseded})
+        rows.append(row)
+        nodes[point.uuid] = point
+    return _Points(rows, nodes)
+
+
+def _in_range(value: Any, span: Range) -> bool:
+    if value is None:
+        return False
+    lo, hi = span
+    return (lo is None or value >= lo) and (hi is None or value <= hi)
+
+
+def _matches(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Whether one ``query`` row passes every given filter (None: not given)."""
+    # pylint: disable=too-many-return-statements
+    materials = filters.get('materials')
+    if materials and not set(materials) <= set(row.get('materials') or ()):
+        return False
+    for name, column in _EQ_FILTERS.items():
+        wanted = filters.get(name)
+        if wanted is not None and row.get(column) != wanted:
+            return False
+    if filters.get('set_label') is not None and \
+            filters['set_label'] not in row.get('set_labels', ()):
+        return False
+    layers = filters.get('layers')
+    if layers is not None:
+        allowed = [layers] if isinstance(layers, int) else list(layers)
+        if row.get('layers') not in allowed:
+            return False
+    if filters.get('temperature_range') is not None and \
+            not _in_range(row.get('temperature'), filters['temperature_range']):
+        return False
+    for kind in ('force', 'pressure'):
+        span = filters.get(f'{kind}_range')
+        if span is not None and not (row.get('load_kind') == kind
+                                     and _in_range(row.get('load'), span)):
+            return False
+    for axis in ('angle', 'speed'):
+        span = filters.get(f'{axis}_range')
+        if span is not None and not _in_range(row.get(axis), span):
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Verdicts and summaries, in bulk
+# ---------------------------------------------------------------------------
+
+def _summary_digest(options: Optional[Mapping[str, Any]]) -> str:
+    # pylint: disable=import-outside-toplevel
+    from .steps import normalise_options, options_hash, summary_options
+    return options_hash(normalise_options(dict(options) if options is not None
+                                          else summary_options()))
+
+
+def _selected(points: List[Any], policy: Policy, digest: str
+              ) -> Dict[int, Tuple[Optional[Any], Optional[Any]]]:
+    """point pk -> (selected verdict, selected summary), a few queries per
+    batch of points (:func:`src.aiida.steps.latest_verdicts` and
+    :func:`~src.aiida.steps.latest_summaries`)."""
+    from .steps import latest_summaries, latest_verdicts  # pylint: disable=import-outside-toplevel
+    out: Dict[int, Tuple[Optional[Any], Optional[Any]]] = {}
+    for batch in _chunks(points):
+        verdicts = latest_verdicts(batch, policy)
+        summaries = latest_summaries(batch, policy, digest=digest)
+        out.update({p.pk: (verdicts[p.pk], summaries[p.pk]) for p in batch})
+    return out
+
+
+def _verdict_columns(verdict: Optional[Any]) -> Dict[str, Any]:
+    from .steps import KIND_EXTRA, is_provisional  # pylint: disable=import-outside-toplevel
+    if verdict is None:
+        return {'status': None, 'reasons': None, 'verdict_uuid': None,
+                'verdict_kind': None, 'thresholds_version': None, 'provisional': None}
+    return {'status': verdict.get('status'),
+            'reasons': '; '.join(verdict.get('reasons') or []),
+            'verdict_uuid': verdict.uuid,
+            'verdict_kind': verdict.base.extras.get(KIND_EXTRA, 'verdict'),
+            'thresholds_version': verdict.get('thresholds_version'),
+            'provisional': is_provisional(verdict)}
+
+
+def _summary_columns(summary: Optional[Any], taken: Iterable[str]) -> Dict[str, Any]:
+    if summary is None:
+        return {'summary_uuid': None}
+    taken = set(taken)
+    out: Dict[str, Any] = {'summary_uuid': summary.uuid,
+                           'summary_code_version': summary.get('code_version')}
+    for key, value in summary.get_dict().items():
+        if key in _SUMMARY_META or isinstance(value, (dict, list)):
+            continue
+        out[f'summary_{key}' if key in taken else key] = value
+    return out
+
+
+# ---------------------------------------------------------------------------
+# QueryResult
+# ---------------------------------------------------------------------------
 
 @dataclass
 class QueryResult:
-    """Matching runs and their results. One row per RESULT, not per run.
+    """The points a query matched: one row per point.
 
-    `runs` and `results` are aligned by `run_uuid` -- not index-parallel, and
-    not necessarily the same length: a run with no matching result (every
-    load point excluded by a range filter) is dropped from `runs` too, so
-    every run in this list has at least one result in it.
+    Attributes:
+        rows: One dict per point (see :meth:`Friction2DDB.query`).
+        total_count: Matching points before ``limit``.
+        query_params: The arguments the query was called with.
     """
-
-    runs: List[Any]
-    results: List[Any]
+    rows: List[Dict[str, Any]]
     total_count: int
-    query_params: Dict[str, Any]
+    query_params: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def point_uuids(self) -> List[str]:
+        """The ``point_uuid`` of every returned row, in order."""
+        return [row.get('point_uuid') for row in self.rows]
 
     def to_dataframe(self):
-        """One row per result: the run's `to_dict()` plus the result's own
-        attributes (the `RunSummary` scalars among them), never a
-        hand-written subset -- a column this misses is a column the GUI
-        table and every CSV/JSON export miss too.
-        """
+        """The rows as a ``pandas.DataFrame``."""
         import pandas as pd  # pylint: disable=import-outside-toplevel
-
-        by_uuid = {str(run.uuid): run for run in self.runs}
-        records = []
-        for result in self.results:
-            run = by_uuid.get(result.run_uuid)
-            record = run.to_dict() if run is not None else {}
-            # The raw stored attributes go in FIRST: they include the result's
-            # own `tiers` (a plain list, e.g. `['window', 'raw']`) and `layers`
-            # (may differ from the run's if that ever became possible), which
-            # the explicit identity/derived fields below must be allowed to
-            # override -- most importantly `tiers`, joined into a single
-            # ``'window;raw'`` string. Applying `attributes.all` LAST would
-            # silently put the raw list back and undo that join.
-            record.update(result.base.attributes.all)
-            record.update({
-                'run_uuid': result.run_uuid,
-                'result_uuid': str(result.uuid),
-                'set_label': run.set_label if run is not None else '',
-                'load_kind': result.load_kind, 'load': result.load,
-                'angle': result.angle, 'speed': result.speed,
-                'tiers': ';'.join(result.tiers),
-            })
-            records.append(record)
-        return pd.DataFrame(records)
+        return pd.DataFrame(self.rows)
 
     def export_csv(self, filepath: Path) -> Path:
-        """Export the one-row-per-result table to a CSV file."""
+        """The rows as CSV."""
         filepath = Path(filepath)
         self.to_dataframe().to_csv(filepath, index=False)
         return filepath
 
     def export_json(self, filepath: Path) -> Path:
-        """Export the query params and the matching RUNS (not results) as JSON."""
+        """The query parameters, the count and the rows as JSON."""
         filepath = Path(filepath)
         filepath.write_text(json.dumps({
-            'query_params': self.query_params,
-            'total_count': self.total_count,
-            'runs': [run.to_dict() for run in self.runs],
-        }, indent=2, default=str), encoding='utf-8')
+            'query_params': self.query_params, 'total_count': self.total_count,
+            'rows': self.rows}, indent=2, default=str), encoding='utf-8')
         return filepath
 
 
-#: RunTokens field (plus family/model/set_label/potential) -> the run-node
-#: attribute it filters on. Equality filters only; the temperature range is
-#: handled separately below, and `layers`/`materials` need their own
-#: `{'in': ...}`/`{'contains': ...}` shape so they are not in this table.
-_RUN_EQ_FILTERS = {
-    'family': 'family', 'model': 'model', 'set_label': 'set_label',
-    'potential': 'pot_token', 'substrate': 'substrate',
-    'substrate_amorphous': 'substrate_amorphous', 'tip_material': 'tip_material',
-    'tip_radius': 'tip_radius', 'flake_material': 'flake_material',
-    'size_x': 'size_x', 'size_y': 'size_y', 'rel_path': 'rel_path',
-}
-
-#: Batch size for the `attributes.run_uuid IN (...)` filter in `_fetch_results`.
-#: Results are ALWAYS scoped to the run uuids `query()` just found -- an
-#: orphaned `FrictionResultsData` (a `run_uuid` naming no live run: the run was
-#: deleted, or the node predates a rename) must never leak into a query just
-#: because no run-level filter happened to be given. A single `{'in': [...]}`
-#: over the whole list would do that safely, but a real store's run count can
-#: run into the thousands (13k rows is the scale this store replaces) and
-#: SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` is 999 -- well under that, so
-#: one IN-clause over every run can fail the query outright rather than merely
-#: being slow. Kept comfortably under that limit; a test may monkeypatch this
-#: down to exercise the chunking loop itself without building 500+ runs.
-_RUN_UUID_CHUNK_SIZE = 500
+def _sort_key(column: str):
+    def key(row: Mapping[str, Any]):
+        value = row.get(column)
+        return (value is None, value if value is not None else 0)
+    return key
 
 
-def _range_filter(span: Tuple[Optional[float], Optional[float]]) -> Optional[Dict[str, Any]]:
-    """One QueryBuilder operator dict for a `(lo, hi)` range, never two calls.
+def _default_order(row: Mapping[str, Any]):
+    return tuple(_sort_key(c)(row) for c in ('rel_path', 'load', 'angle', 'speed',
+                                             'point_uuid'))
 
-    R5: two `add_filter` calls on the SAME key overwrite each other on this
-    backend -- the second call replaces the first rather than ANDing with it,
-    so a naive `add_filter(lo); add_filter(hi)` silently drops the lower
-    bound. Every range in this module goes through this helper instead, which
-    folds both bounds into a single `{'and': [...]}` filter (or a single
-    operator when one side of the range is open-ended, e.g. `(10.0, None)`).
 
-    Returns `None` for a fully-open range (`(None, None)`) -- there is no
-    constraint to express, and callers must skip `add_filter` entirely rather
-    than pass `None` as a QueryBuilder operator value (which is exactly the
-    `{'attributes.x': None}` shape R4 says never to construct).
+# ---------------------------------------------------------------------------
+# The point table: block fields, flat
+# ---------------------------------------------------------------------------
+
+def _block_links(include_superseded: bool):
+    """Query 1: (point identity, block link label, block hash, schema hash)
+    rows, one per point and block (or schema) link of its CalcJob."""
+    from .store import BLOCK_HASH_EXTRA, RUN_UUID_EXTRA, SCHEMA_HASH_EXTRA  # pylint: disable=import-outside-toplevel
+    point_attrs = ('point_uuid', 'family', 'load_kind', 'load', 'angle', 'speed',
+                   'rel_path', 'deck_name')
+    qb = orm.QueryBuilder()
+    qb.append(orm.CalcJobNode, tag='c', filters={'process_type': _process_type()},
+              project=['uuid', 'extras.superseded', f'extras.{RUN_UUID_EXTRA}'])
+    qb.append(orm.FolderData, tag='p', with_incoming='c',
+              edge_filters={'label': {'like': _POINTS_LINK}},
+              project=['uuid', 'extras.superseded']
+              + [f'attributes.{name}' for name in point_attrs])
+    qb.append(orm.Dict, tag='b', with_outgoing='c', edge_tag='link',
+              edge_filters={'or': [{'label': {'like': f'{_BLOCKS_LINK}%'}},
+                                   {'label': _SCHEMA_LINK}]},
+              edge_project=['label'],
+              project=[f'extras.{BLOCK_HASH_EXTRA}', f'extras.{SCHEMA_HASH_EXTRA}'])
+    points: Dict[str, Dict[str, Any]] = {}
+    for row in qb.all():
+        calc_uuid, calc_dead, run_uuid, node_uuid, point_dead = row[:5]
+        attrs = dict(zip(point_attrs, row[5:5 + len(point_attrs)]))
+        block, schema, label = row[5 + len(point_attrs):]
+        superseded = _dead(calc_dead) or _dead(point_dead)
+        if superseded and not include_superseded:
+            continue
+        entry = points.setdefault(str(node_uuid), {
+            'meta': {**attrs, 'node_uuid': str(node_uuid), 'calc_uuid': str(calc_uuid),
+                     'run_uuid': run_uuid, 'superseded': superseded},
+            'blocks': [], 'schema': None})
+        if label == _SCHEMA_LINK:
+            entry['schema'] = schema
+        else:
+            entry['blocks'].append((label[len(_BLOCKS_LINK):], block))
+    return points
+
+
+def _contents(block_hashes: Set[str], schema_hashes: Set[str]
+              ) -> Tuple[Dict[str, dict], Dict[str, dict]]:
+    """Query 2: the block and schema contents, by hash (one query per
+    :data:`_CHUNK` hashes; twins of one hash hold one content)."""
+    from .store import BLOCK_HASH_EXTRA, SCHEMA_HASH_EXTRA  # pylint: disable=import-outside-toplevel
+    wanted = [(BLOCK_HASH_EXTRA, h) for h in sorted(block_hashes)] + \
+             [(SCHEMA_HASH_EXTRA, h) for h in sorted(schema_hashes)]
+    blocks: Dict[str, dict] = {}
+    schemas: Dict[str, dict] = {}
+    for batch in _chunks(wanted):
+        ors = []
+        for extra in (BLOCK_HASH_EXTRA, SCHEMA_HASH_EXTRA):
+            values = [h for e, h in batch if e == extra]
+            if values:
+                ors.append({f'extras.{extra}': {'in': values}})
+        qb = orm.QueryBuilder().append(
+            orm.Dict, filters={'or': ors},
+            project=[f'extras.{BLOCK_HASH_EXTRA}', f'extras.{SCHEMA_HASH_EXTRA}',
+                     'attributes'])
+        for block, schema, content in qb.all():
+            if block is not None:
+                blocks.setdefault(block, content)
+            if schema is not None:
+                schemas.setdefault(schema, content)
+    return blocks, schemas
+
+
+class _Refiller:  # pylint: disable=too-few-public-methods
+    """Flat ``<block name>.<path>`` columns of one block, refilled from its
+    run's schema defaults (:func:`src.core.compare.refill`), memoised."""
+
+    def __init__(self, schemas: Mapping[str, dict]) -> None:
+        self.tables = {h: schema_tables(doc) for h, doc in schemas.items()}
+        self._memo: Dict[Tuple[str, str, Optional[str]], Dict[str, Any]] = {}
+
+    def columns(self, label: str, digest: str, content: Mapping[str, Any],
+                schema: Optional[str]) -> Dict[str, Any]:
+        """The columns of block ``label`` (hash ``digest``) under ``schema``."""
+        key = (label, digest, schema)
+        if key not in self._memo:
+            name = block_name(label, str(content.get('kind')))
+            _units, defaults, kinds = self.tables.get(schema, ({}, {}, {}))
+            fields = refill(name, content.get('fields') or {}, defaults, kinds)
+            self._memo[key] = {f'{name}.{path}': value for path, value in fields.items()}
+        return self._memo[key]
+
+
+def point_table(*, include_superseded: bool = False):
+    """One row per point, one column per requested field.
+
+    Columns: ``<block name>.<field path>`` (``integration.settings.simulation.
+    timestep``, ``material__sheet_0.name``, ``realization.seed_thermal_tip``),
+    each elided field refilled from the default of the run's own stored
+    schema; the swept axes ``load``, ``angle``, ``speed``; and ``point_uuid``,
+    ``node_uuid``, ``calc_uuid``, ``run_uuid``, ``family``, ``load_kind``,
+    ``rel_path``, ``deck_name``, ``superseded``, ``schema_hash``.
+    ``table.attrs['units']`` maps each schema hash to its ``{schema path:
+    unit}``.
+
+    Built from one projection of (point, CalcJob, block link label, block
+    hash) and one fetch of the distinct block contents by hash, so the cost
+    does not grow with a query per point or per block (critique I8). A point
+    whose CalcJob's blocks carry no hash extra is left out, with a warning
+    (``FrictionSim2D aiida reindex`` restores the extras).
     """
-    lo, hi = span
-    if lo is None and hi is None:
-        return None
-    if lo is not None and hi is not None:
-        return {'and': [{'>=': lo}, {'<=': hi}]}
-    if lo is not None:
-        return {'>=': lo}
-    return {'<=': hi}
+    import pandas as pd  # pylint: disable=import-outside-toplevel
+
+    _require_aiida()
+    points = _block_links(include_superseded)
+    block_hashes = {h for e in points.values() for _l, h in e['blocks'] if h}
+    schema_hashes = {e['schema'] for e in points.values() if e['schema']}
+    blocks, schemas = (_contents(block_hashes, schema_hashes) if points else ({}, {}))
+    refiller = _Refiller(schemas)
+    rows = []
+    for uuid, entry in points.items():
+        row = {**entry['meta'], 'schema_hash': entry['schema']}
+        missing = [label for label, h in entry['blocks'] if h not in blocks]
+        if missing:
+            logger.warning('point %s: blocks %s have no stored content by hash; left '
+                           'out (run `FrictionSim2D aiida reindex`)', uuid, missing)
+            continue
+        for label, digest in entry['blocks']:
+            row.update(refiller.columns(label, digest, blocks[digest], entry['schema']))
+        rows.append(row)
+    rows.sort(key=_default_order)
+    table = pd.DataFrame(rows)
+    table.attrs['units'] = {h: tables[0] for h, tables in refiller.tables.items()}
+    return table
 
 
-def _result_sort_key(result, key: str) -> Any:
-    """`order_by`'s raw sort value for one result node.
+# ---------------------------------------------------------------------------
+# related()
+# ---------------------------------------------------------------------------
 
-    `key` is usually a `FrictionResultsData` property (`load`, `angle`,
-    `speed`, ...), but `order_by` may also name a bare `RunSummary` scalar
-    (`mean_cof`) that has no property of its own -- those are read straight
-    off the stored attribute instead.
+def _is_field_column(column: str) -> bool:
+    return '.' in column
+
+
+def _column_kind(column: str) -> str:
+    return block_kind(column.split('.', 1)[0])
+
+
+def _column_path(column: str) -> str:
+    """``integration.settings.simulation.timestep`` -> ``settings.simulation.timestep``."""
+    return column.split('.', 1)[1]
+
+
+def _vary_columns(vary: Sequence[str], columns: Sequence[str]) -> Set[str]:
+    """The table columns ``vary`` names; ``ValueError`` for a name that is not
+    a swept axis, a block kind, a block name, a column or a field path."""
+    fields = [c for c in columns if _is_field_column(c)]
+    out: Set[str] = set()
+    for name in vary:
+        if name in AXES:
+            out.add(name)
+        elif name in BLOCK_KINDS:
+            out |= {c for c in fields if _column_kind(c) == name}
+        elif NAME_SEP in name and '.' not in name:
+            block_kind(name)
+            out |= {c for c in fields if c.split('.', 1)[0] == name}
+        elif name in columns:
+            out.add(name)
+        else:
+            found = {c for c in fields
+                     if _column_path(c) == name or unindexed(_column_path(c)) == name}
+            if not found and unindexed(name) not in FIELD_MAP \
+                    and name not in REALIZATION_FIELDS:
+                raise ValueError(f'cannot vary {name!r}: not a swept axis {AXES}, a block '
+                                 f'kind {BLOCK_KINDS}, a block name or a field path')
+            out |= found
+    return out
+
+
+def _key(value: Any) -> str:
+    """One canonical string per value: equal values, equal keys; absent alike.
+    numpy scalars (pandas hands them back) count as their Python value."""
+    if hasattr(value, 'item') and not isinstance(value, (list, dict)):
+        value = value.item()
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return '\0absent'
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+        value = float(value)
+    return json.dumps(value, sort_keys=True)
+
+
+def _axis_key(value: Any) -> str:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return '\0absent'
+    return repr(round(float(value), _AXIS_DECIMALS))
+
+
+def _reference_row(table, point):
+    """The table row of ``point`` (a point node, a ``point_uuid`` or a node uuid)."""
+    if isinstance(point, str):
+        rows = table[table['point_uuid'] == point]
+        if rows.empty:
+            rows = table[table['node_uuid'] == point]
+    else:
+        rows = table[table['node_uuid'] == point.uuid]
+    if rows.empty:
+        raise LookupError(f'{point!r} is not a current point of this profile')
+    if len(rows) > 1:
+        raise LookupError(f'point uuid {point!r} names {len(rows)} current nodes; '
+                          'pass the point node')
+    return rows.iloc[0]
+
+
+def _unit_clash(table, compared: Sequence[str], reference_schema: Optional[str]):
+    """A mask of the rows whose schema states another unit than the
+    reference's for any compared field: those values cannot be equal."""
+    units = table.attrs.get('units', {})
+    ref = units.get(reference_schema, {})
+    paths = {unindexed(_column_path(c)) for c in compared if _is_field_column(c)}
+    clashing = [schema for schema in set(table['schema_hash']) - {reference_schema}
+                if any(ref.get(p) != units.get(schema, {}).get(p) for p in paths)]
+    return table['schema_hash'].isin(clashing)
+
+
+def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
+            policy: Policy = Policy(), table=None) -> List[Any]:
+    """The current points that differ from ``point`` only along ``vary``.
+
+    A point relates when it equals ``point`` on every requested field column
+    of :func:`point_table` outside ``vary`` (elided fields refilled from each
+    run's own schema; a field stored in another unit is never equal), on its
+    family, and on every swept axis outside ``vary``. Deck shape is not
+    identity, so an array-mode point and a combined-mode point of the same
+    physics relate; groups do not matter either.
+
+    ``vary`` is one name or several: a block kind (``'thermostat'``), a block
+    name (``'material__sheet_0'``), a dotted field path
+    (``'settings.simulation.timestep'``, or with its block,
+    ``'integration.settings.simulation.timestep'``), a swept axis
+    (``'load'``, ``'angle'``, ``'speed'``), or ``'realization'``.
+
+    The ``realization`` block (seeds) is ignored: seeds differ between every
+    pair of runs, so comparing them would relate nothing. A *replicate* -- a
+    point equal to ``point`` on every field but the seeds, ``vary`` included
+    -- is returned only when ``'realization'`` is in ``vary``.
+
+    Args:
+        point: The point ``FolderData``, or its ``point_uuid``.
+        vary: What may differ.
+        policy: The verdict/summary policy the caller reads the points under;
+            the selection itself is by parameters only and does not filter
+            on verdicts.
+        table: A :func:`point_table` to reuse (several ``related`` calls over
+            one table cost one projection).
+
+    Returns:
+        The related point nodes (``point`` and its own ``point_uuid`` never),
+        ordered by ``rel_path``, ``load``, ``angle``, ``speed``.
+
+    Raises:
+        LookupError: ``point`` is not a current point.
+        ValueError: ``vary`` names nothing ``related`` knows.
     """
-    if hasattr(type(result), key):
-        return getattr(result, key)
-    return result.base.attributes.get(key)
+    del policy  # selection by parameters only; see Args
+    _require_aiida()
+    table = point_table() if table is None else table
+    reference = _reference_row(table, point)
+    names = [vary] if isinstance(vary, str) else list(vary)
+    varied = _vary_columns(names, list(table.columns))
+    fields = [c for c in table.columns if _is_field_column(c)]
+    realization = {c for c in fields if _column_kind(c) == REALIZATION}
+    identity = ['family'] + fields + list(AXES)
+    if 'load' not in varied:
+        identity.append('load_kind')
+    compared = [c for c in identity if c not in varied and c not in realization]
+    free = [c for c in varied if c not in realization]
+
+    def equal(columns: Sequence[str]):
+        mask = table['node_uuid'].notna()
+        for column in columns:
+            to_key = _axis_key if column in AXES else _key
+            mask &= table[column].map(to_key) == to_key(reference[column])
+        return mask
+
+    same = equal(compared)
+    replicate = same & equal(free)
+    keep = same & ~_unit_clash(table, compared, reference['schema_hash'])
+    if REALIZATION not in names:
+        keep &= ~replicate
+    keep &= table['point_uuid'] != reference['point_uuid']
+    keep &= table['node_uuid'] != reference['node_uuid']
+    uuids = list(table.loc[keep, 'node_uuid'])
+    return _nodes_by_uuid(uuids)
 
 
-def _none_safe(value: Any) -> Tuple[bool, Any]:
-    """A sort key that never compares `None` against a real value.
+def _nodes_by_uuid(uuids: Sequence[str]) -> List[Any]:
+    """The nodes of ``uuids``, in that order, in one query per batch."""
+    found: Dict[str, Any] = {}
+    for batch in _chunks(list(uuids)):
+        qb = orm.QueryBuilder().append(orm.Node, filters={'uuid': {'in': batch}},
+                                       project=['*'])
+        found.update({n.uuid: n for n in qb.all(flat=True)})
+    return [found[u] for u in uuids if u in found]
 
-    `sorted()`/`list.sort()` raise `TypeError` comparing `None` to a float or
-    a string -- a real risk here since several `RunSummary` extras and a
-    sheet run's `layers`/`tip_radius`/etc. are legitimately `None`. Wrapping
-    every key in `(value is None, value_or_placeholder)` sorts on the first
-    element whenever the two values disagree on nullness, so the real second
-    element is only ever compared against another real value of the same
-    kind (or another placeholder of the same kind), never against `None`.
+
+# ---------------------------------------------------------------------------
+# latest()
+# ---------------------------------------------------------------------------
+
+def _point_node(point: Union[str, Any]):
+    if not isinstance(point, str):
+        return point
+    qb = orm.QueryBuilder().append(
+        orm.FolderData, filters={'attributes.point_uuid': point}, project=['*'])
+    found = [n for n in qb.all(flat=True) if not n.base.extras.get('superseded', False)]
+    if not found:
+        found = _nodes_by_uuid([point])
+    if len(found) != 1:
+        raise LookupError(f'{point!r} names {len(found)} current points')
+    return found[0]
+
+
+def latest(point: Union[str, Any], kind: Literal['verdict', 'summary'],
+           policy: Policy = Policy(), *,
+           options: Optional[Mapping[str, Any]] = None) -> Optional[Any]:
+    """The verdict or summary ``policy`` selects for ``point``, or None.
+
+    ``kind='verdict'``: :func:`src.aiida.steps.latest_verdict` (generation
+    first, then ruled > withdrawn > checker, then the uuid). ``kind=
+    'summary'``: among the summaries made with ``options`` (default: the
+    settings in effect, :func:`src.aiida.steps.summary_options`), the highest
+    ``code_version``, then the uuid. Never by creation time.
     """
-    return (value is None, value if value is not None else 0)
+    from .steps import latest_summaries, latest_verdict  # pylint: disable=import-outside-toplevel
+    if kind not in ('verdict', 'summary'):
+        raise ValueError(f'unknown kind {kind!r} (verdict or summary)')
+    _require_aiida()
+    node = _point_node(point)
+    if kind == 'verdict':
+        return latest_verdict(node, policy)
+    return latest_summaries([node], policy, digest=_summary_digest(options))[node.pk]
 
 
-def _default_sort_key(result, run_by_uuid: Dict[str, Any]) -> Tuple[Any, ...]:
-    """Deterministic order for a `query()` with no `order_by`: by the owning
-    run's `rel_path`, then `load`, `angle`, `speed` -- so two calls with the
-    same filters always return results in the same order, instead of
-    whatever order the backend happens to return them in.
-    """
-    run = run_by_uuid.get(result.run_uuid)
-    rel_path = run.rel_path if run is not None else ''
-    return (_none_safe(rel_path), _none_safe(result.load),
-            _none_safe(result.angle), _none_safe(result.speed))
-
+# ---------------------------------------------------------------------------
+# Friction2DDB
+# ---------------------------------------------------------------------------
 
 class Friction2DDB:
-    """Query interface for the Friction2D simulation database.
-
-    Wraps AiiDA's ``QueryBuilder`` with domain-specific methods for querying
-    friction simulation data.
+    """Query interface for the friction2d store (a loaded AiiDA profile).
 
     Example::
 
         db = Friction2DDB()
-        results = db.query(materials=['h-MoS2'], force_range=(5.0, 15.0))
-        for run in results.runs:
-            print(f"{run.materials} L{run.layers}: {run.rel_path}")
+        rows = db.query(materials=['h-MoS2'], force_range=(5.0, 15.0)).to_dataframe()
+        siblings = db.related(rows.point_uuid[0], 'settings.simulation.timestep')
 
     Raises:
-        RuntimeError: If AiiDA is not available or no profile is loaded.
+        RuntimeError: If AiiDA is not available.
     """
 
     def __init__(self):
-        if not AIIDA_AVAILABLE:
-            raise RuntimeError(
-                "AiiDA is not available. Install with: pip install 'FrictionSim2D[aiida]'"
-            )
-        if _QueryBuilder is None or _load_node is None:
-            raise RuntimeError("AiiDA ORM is not available")
-        self._query_builder_cls = _QueryBuilder
-        self._load_node = _load_node
-        # Lazy import to avoid circular dependencies
-        from .data import (  # pylint: disable=import-outside-toplevel
-            FrictionSimulationData,
-            FrictionResultsData,
-        )
-        self._simulation_data_cls = FrictionSimulationData
-        self._results_data_cls = FrictionResultsData
-        from .data import FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
-        self._simulation_set_cls = FrictionSimulationSetData
+        _require_aiida()
 
-    # -- Simulation set queries -----------------------------------------------
+    # -- sets ------------------------------------------------------------------
 
     def list_sets(self) -> List[Dict[str, Any]]:
-        """Every `FrictionSimulationSetData` node, newest first, as dicts."""
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_set_cls, project=['*'])
-        qb.order_by({self._simulation_set_cls: [{'ctime': 'desc'}]})
-        return [node.to_dict() for node in qb.all(flat=True)]
+        """One dict per set Group: ``label``, ``uuid``, ``pk``, the Group
+        extras (``model``, ``materials``, ``created``, ``git_commit``,
+        ``source_host``, ``source_root``), ``n_decks`` (live CalcJobs),
+        ``n_runs`` (their distinct ``run_uuid``), ``n_points`` and
+        ``n_results`` (live points). Sorted by label."""
+        from .store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
+        decks: Dict[str, Dict[str, Optional[str]]] = {}
+        qb = orm.QueryBuilder().append(
+            orm.Group, tag='g', filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
+            project='label')
+        qb.append(orm.CalcJobNode, with_group='g', tag='c',
+                  project=['uuid', 'extras.superseded', f'extras.{RUN_UUID_EXTRA}'])
+        for label, uuid, dead, run_uuid in qb.all():
+            if not _dead(dead):
+                decks.setdefault(label, {})[str(uuid)] = run_uuid
+        qb.append(orm.FolderData, with_incoming='c', edge_filters={
+            'label': {'like': _POINTS_LINK}}, project=['uuid', 'extras.superseded'])
+        points: Dict[str, Set[str]] = {}
+        for label, _uuid, calc_dead, _run, point_uuid, dead in qb.all():
+            if not _dead(calc_dead) and not _dead(dead):
+                points.setdefault(label, set()).add(str(point_uuid))
+        rows = []
+        for label, uuid, pk, extras in _set_groups():
+            live = decks.get(label, {})
+            n_points = len(points.get(label, ()))
+            rows.append({
+                'label': label[len(_GROUP_PREFIX):], 'uuid': uuid, 'pk': pk,
+                **{key: extras.get(key) for key in ('model', 'materials', 'created',
+                                                    'git_commit', 'source_host',
+                                                    'source_root')},
+                'n_decks': len(live), 'n_runs': len(set(live.values())),
+                'n_points': n_points, 'n_results': n_points})
+        return sorted(rows, key=lambda r: r['label'])
 
-    # -- The query --------------------------------------------------------
+    # -- the query -------------------------------------------------------------
 
-    def _fetch_results(self, run_uuids: List[str], *,
-                       force_range: Optional[Tuple[Optional[float], Optional[float]]],
-                       pressure_range: Optional[Tuple[Optional[float], Optional[float]]],
-                       angle_range: Optional[Tuple[Optional[float], Optional[float]]],
-                       speed_range: Optional[Tuple[Optional[float], Optional[float]]],
-                       ) -> List[Any]:
-        """Every result node (superseded ones included) whose `run_uuid` is in
-        `run_uuids`, plus the four result-level range filters.
-
-        ALWAYS filters on `run_uuid` -- never called with "skip the filter,
-        every run matched anyway", because a result node whose `run_uuid`
-        names no live run (orphaned: the run was deleted, or predates a
-        rename) would otherwise be returned regardless of what `query()` was
-        actually asked for. `run_uuids` is chunked into batches of
-        `_RUN_UUID_CHUNK_SIZE` -- one QueryBuilder query per batch, results
-        concatenated -- so this stays correct however large the run count
-        gets, per-key range filters unchanged (see `query()`'s docstring for
-        why `force_range`/`pressure_range` also gate on `load_kind`).
-        """
-        results: List[Any] = []
-        for start in range(0, len(run_uuids), _RUN_UUID_CHUNK_SIZE):
-            chunk = run_uuids[start:start + _RUN_UUID_CHUNK_SIZE]
-            res_qb = self._query_builder_cls()
-            res_qb.append(self._results_data_cls, tag='res', project=['*'],
-                          filters={'attributes.run_uuid': {'in': chunk}})
-            if force_range is not None:
-                res_qb.add_filter('res', {'attributes.load_kind': 'force'})
-                force_filter = _range_filter(force_range)
-                if force_filter is not None:
-                    res_qb.add_filter('res', {'attributes.load': force_filter})
-            if pressure_range is not None:
-                res_qb.add_filter('res', {'attributes.load_kind': 'pressure'})
-                pressure_filter = _range_filter(pressure_range)
-                if pressure_filter is not None:
-                    res_qb.add_filter('res', {'attributes.load': pressure_filter})
-            if angle_range is not None:
-                angle_filter = _range_filter(angle_range)
-                if angle_filter is not None:
-                    res_qb.add_filter('res', {'attributes.angle': angle_filter})
-            if speed_range is not None:
-                speed_filter = _range_filter(speed_range)
-                if speed_filter is not None:
-                    res_qb.add_filter('res', {'attributes.speed': speed_filter})
-            results.extend(res_qb.all(flat=True))
-        return results
-
-    def query(  # pylint: disable=too-many-arguments,too-many-locals
+    def query(  # pylint: disable=too-many-arguments,too-many-locals,unused-argument
         self, *, materials: Optional[List[str]] = None,
         family: Optional[str] = None, model: Optional[str] = None,
         set_label: Optional[str] = None, potential: Optional[str] = None,
@@ -290,212 +757,146 @@ class Friction2DDB:
         flake_material: Optional[str] = None,
         size_x: Optional[float] = None, size_y: Optional[float] = None,
         rel_path: Optional[str] = None,
-        temperature_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
-        force_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
-        pressure_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
-        angle_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
-        speed_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        temperature_range: Optional[Range] = None,
+        force_range: Optional[Range] = None,
+        pressure_range: Optional[Range] = None,
+        angle_range: Optional[Range] = None,
+        speed_range: Optional[Range] = None,
         limit: Optional[int] = None, order_by: Optional[str] = None,
+        policy: Policy = Policy(),
+        summary_options: Optional[Mapping[str, Any]] = None,
     ) -> QueryResult:
-        """Filter on every RunTokens axis plus family, model, set and potential.
+        """One row per live point matching every given filter.
 
-        Every parameter defaults to `None`, meaning "do not filter on this" --
-        this API never builds a QueryBuilder filter for an explicit `None`
-        (R4: `{'attributes.x': None}` raises `TypeError` on SQLite), so a
-        sheet-family run -- whose `layers`/`tip_radius`/`substrate`/
-        `flake_material` attributes ARE `None` -- is never the target of a
-        crashing filter; it is simply unaffected by an axis nobody asked to
-        filter on.
+        Every filter defaults to None, "not filtered". ``materials`` needs all
+        of them in the run's materials; ``layers`` is a count or a list of
+        counts; the ``*_range`` filters are ``(lo, hi)``, either side open
+        (None). ``force_range``/``pressure_range`` also keep only points of
+        that load kind. ``set_label`` names a ``friction2d/<label>`` Group;
+        ``potential`` is the run's ``pot_token``.
 
-        `force_range`/`pressure_range`/`angle_range`/`speed_range` filter the
-        RESULT nodes; every other filter (including `set_label`, which is an
-        attribute of the run, not a provenance edge to the set) filters the
-        RUN nodes first, and only results of a matching run are considered
-        (R9 also drops any result marked `is_superseded`). `limit`/`order_by`
-        apply to the final result list, so a superseded row is never counted
-        against `limit`.
+        A row holds the run tokens (``model``, ``materials``, ``size_x``,
+        ``temperature``, ``pot_token``, ...), ``set_label`` (the first set
+        holding the deck) and ``set_labels``, the point's identity
+        (``point_uuid``, ``node_uuid``, ``calc_uuid``, ``run_uuid``,
+        ``rel_path``, ``deck_name``, ``family``, ``layers``), ``load``,
+        ``angle``, ``speed`` with ``load_unit``, ``angle_unit``,
+        ``speed_unit``, the parser's ``point_status``, the verdict ``policy``
+        selects (``status``, ``reasons``, ``verdict_uuid``, ``verdict_kind``,
+        ``thresholds_version``, ``provisional``) and the summary it selects
+        among those made with ``summary_options`` (default: the settings in
+        effect) -- ``summary_uuid`` and every summary scalar (``mean_cof``,
+        ...). A point with no verdict or summary has None there.
+
+        ``order_by`` names a column (``-`` prefix: descending; default
+        ``rel_path``, ``load``, ``angle``, ``speed``); ``limit`` keeps the
+        first rows. ``total_count`` counts the matches before ``limit``.
+        Superseded points never match.
         """
-        run_eq = {
-            'family': family, 'model': model, 'set_label': set_label,
-            'potential': potential, 'substrate': substrate,
-            'substrate_amorphous': substrate_amorphous,
-            'tip_material': tip_material, 'tip_radius': tip_radius,
-            'flake_material': flake_material, 'size_x': size_x,
-            'size_y': size_y, 'rel_path': rel_path,
-        }
-
-        run_qb = self._query_builder_cls()
-        run_qb.append(self._simulation_data_cls, tag='run', project=['*'])
-        if materials:
-            # ALL semantics (spec): a run matches only if it names EVERY
-            # material given, not merely one of them -- `'contains'` is a
-            # containment check (the run's own `materials` list is a
-            # superset of `materials`), not a `{'in': ...}` any-of check.
-            run_qb.add_filter('run',
-                              {'attributes.materials': {'contains': materials}})
-        for name, value in run_eq.items():
-            if value is not None:
-                run_qb.add_filter('run',
-                                  {f'attributes.{_RUN_EQ_FILTERS[name]}': value})
-        if layers is not None:
-            run_qb.add_filter('run', {'attributes.layers':
-                                      layers if isinstance(layers, int)
-                                      else {'in': list(layers)}})
-        if temperature_range is not None:
-            temp_filter = _range_filter(temperature_range)
-            if temp_filter is not None:
-                run_qb.add_filter('run', {'attributes.temperature': temp_filter})
-        runs = sorted(run_qb.all(flat=True), key=lambda n: n.rel_path)
-        run_uuids = [str(run.uuid) for run in runs]
-        run_by_uuid = dict(zip(run_uuids, runs))
-
-        results: List[Any] = []
-        if runs:
-            fetched = self._fetch_results(
-                run_uuids, force_range=force_range, pressure_range=pressure_range,
-                angle_range=angle_range, speed_range=speed_range)
-            # R9: a superseded result must never be returned by a query --
-            # excluded here, in Python, the same way `export._results_of`
-            # and `ingest.find_results` do (the one shared `is_superseded`
-            # predicate, not a second QueryBuilder JSONB-extras filter).
-            results = [r for r in fetched if not is_superseded(r)]
-
+        params = {k: v for k, v in locals().items()
+                  if k not in ('self', 'policy', 'summary_options')}
+        found = _points()
+        rows = [row for row in found.rows if _matches(row, params)]
+        params.update(policy=policy.as_dict(), summary_options=summary_options)
+        selected = _selected([found.nodes[r['node_uuid']] for r in rows], policy,
+                             _summary_digest(summary_options)) if rows else {}
+        for row in rows:
+            verdict, summary = selected[found.nodes[row['node_uuid']].pk]
+            row.update(_verdict_columns(verdict))
+            row.update(_summary_columns(summary, row))
+            row.pop('superseded', None)
         if order_by:
-            key = order_by[1:] if order_by.startswith('-') else order_by
-            results.sort(key=lambda r: _none_safe(_result_sort_key(r, key)),
-                        reverse=order_by.startswith('-'))
+            column = order_by.lstrip('-')
+            rows.sort(key=_sort_key(column), reverse=order_by.startswith('-'))
         else:
-            # Deterministic even with no explicit order_by -- two identical
-            # queries never return results in a different order just because
-            # the backend felt like it.
-            results.sort(key=lambda r: _default_sort_key(r, run_by_uuid))
+            rows.sort(key=_default_order)
+        total = len(rows)
         if limit:
-            results = results[:limit]
-
-        kept_run_uuids = {r.run_uuid for r in results}
-        return QueryResult(
-            runs=[run for run in runs if str(run.uuid) in kept_run_uuids],
-            results=results, total_count=len(results),
-            query_params={
-                'materials': materials, 'family': family, 'model': model,
-                'set_label': set_label, 'potential': potential,
-                'layers': layers, 'substrate': substrate,
-                'substrate_amorphous': substrate_amorphous,
-                'tip_material': tip_material, 'tip_radius': tip_radius,
-                'flake_material': flake_material, 'size_x': size_x,
-                'size_y': size_y, 'rel_path': rel_path,
-                'temperature_range': temperature_range,
-                'force_range': force_range, 'pressure_range': pressure_range,
-                'angle_range': angle_range, 'speed_range': speed_range,
-                'limit': limit, 'order_by': order_by})
+            rows = rows[:limit]
+        return QueryResult(rows=rows, total_count=total, query_params=params)
 
     def query_by_set(self, label: str) -> QueryResult:
-        """Every run (and result) of one set, by its label."""
+        """Every live point of one set."""
         return self.query(set_label=label)
 
-    # -- Aggregation ----------------------------------------------------------
+    # -- parameters ------------------------------------------------------------
+
+    @staticmethod
+    def point_table(*, include_superseded: bool = False):
+        """See :func:`point_table`."""
+        return point_table(include_superseded=include_superseded)
+
+    @staticmethod
+    def related(point: Union[str, Any], vary: Union[str, Sequence[str]], *,
+                policy: Policy = Policy(), table=None) -> List[Any]:
+        """See :func:`related`."""
+        return related(point, vary, policy=policy, table=table)
+
+    @staticmethod
+    def latest(point: Union[str, Any], kind: Literal['verdict', 'summary'],
+               policy: Policy = Policy(), *,
+               options: Optional[Mapping[str, Any]] = None) -> Optional[Any]:
+        """See :func:`latest`."""
+        return latest(point, kind, policy, options=options)
+
+    # -- aggregation -----------------------------------------------------------
 
     def get_available_conditions(self) -> Dict[str, List[Any]]:
-        """Distinct values behind each GUI filter dropdown.
-
-        Ten keys, one per combo in the GUI's filter bar (its database-pane
-        spec D3 populates the whole bar from this ONE call, so a filter with
-        no key here has no way to be populated). `potentials` are the
-        `pot_token` values carried on the run nodes; `set_labels` are the
-        labels of the `friction2d/<label>` groups, which is the authoritative
-        list -- a set exists as a group even before any run is attached to
-        it. A superseded result (R9) never contributes a value here, the same
-        way it is never returned by `query()`.
-        """
-        from aiida.orm import Group  # pylint: disable=import-outside-toplevel
-
-        from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
-
-        qb = self._query_builder_cls()
-        qb.append(self._results_data_cls, project=['*'])
-        forces, pressures, angles, speeds, families = (set(), set(), set(),
-                                                        set(), set())
-        for (node,) in qb.all():
-            if is_superseded(node):
-                continue
-            # A PES grid's `load_kind` is 'none' and its load/angle/speed are
-            # placeholder zeros, not conditions anyone ran at: they must not
-            # show up as a 0 GPa pressure (or a 0 deg / 0 speed) option.
-            if node.load_kind == 'force':
-                forces.add(node.load)
-            elif node.load_kind == 'pressure':
-                pressures.add(node.load)
-            if node.load_kind in ('force', 'pressure'):
-                angles.add(node.angle)
-                speeds.add(node.speed)
-            if node.family:
-                families.add(node.family)
-
-        qb2 = self._query_builder_cls()
-        qb2.append(self._simulation_data_cls, project=['*'])
-        temps, layers, models, potentials = set(), set(), set(), set()
-        for (node,) in qb2.all():
-            temps.add(node.temperature)
-            if node.layers is not None:
-                layers.add(node.layers)
-            if node.model:
-                models.add(node.model)
-            if node.pot_token:
-                potentials.add(node.pot_token)
-
-        qb3 = self._query_builder_cls()
-        qb3.append(Group, filters={'label': {'like': f'{GROUP_PREFIX}/%'}},
-                  project=['label'])
-        prefix = f'{GROUP_PREFIX}/'
-        set_labels = {label[len(prefix):] for (label,) in qb3.all() if label}
-
-        return {'forces': sorted(forces), 'pressures': sorted(pressures),
-                'angles': sorted(angles), 'speeds': sorted(speeds),
-                'temperatures': sorted(temps), 'layers': sorted(layers),
-                'families': sorted(families), 'models': sorted(models),
-                'potentials': sorted(potentials),
-                'set_labels': sorted(set_labels)}
+        """Distinct values behind each GUI filter dropdown, over live points:
+        ``forces``, ``pressures``, ``angles``, ``speeds`` (a PES grid's
+        placeholder zeros left out), ``temperatures``, ``layers``,
+        ``families``, ``models``, ``potentials`` (``pot_token``) and
+        ``set_labels`` (every set Group, empty ones included)."""
+        values: Dict[str, Set[Any]] = {k: set() for k in (
+            'forces', 'pressures', 'angles', 'speeds', 'temperatures', 'layers',
+            'families', 'models', 'potentials')}
+        for row in _points().rows:
+            kind = row.get('load_kind')
+            if kind in ('force', 'pressure'):
+                values['forces' if kind == 'force' else 'pressures'].add(row['load'])
+                values['angles'].add(row['angle'])
+                values['speeds'].add(row['speed'])
+            for key, column in (('temperatures', 'temperature'), ('layers', 'layers'),
+                                ('families', 'family'), ('models', 'model'),
+                                ('potentials', 'pot_token')):
+                if row.get(column) is not None:
+                    values[key].add(row[column])
+        out = {key: sorted(found) for key, found in values.items()}
+        out['set_labels'] = sorted(label[len(_GROUP_PREFIX):]
+                                   for label, *_rest in _set_groups())
+        return out
 
     def get_available_materials(self) -> List[str]:
-        """Sorted, deduplicated list of every material named on a run."""
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, project=['attributes.materials'])
-        return sorted({m for (mats,) in qb.all() for m in (mats or [])})
+        """Every material named by a live point's run, sorted."""
+        return sorted({m for row in _points().rows for m in (row.get('materials') or ())})
 
-    def get_statistics(self) -> Dict[str, Any]:
-        """Counts by status, model, family and material across every run."""
+    def get_statistics(self, policy: Policy = Policy()) -> Dict[str, Any]:
+        """Counts: ``n_groups`` (sets), ``n_decks`` (live CalcJobs),
+        ``n_runs``, ``n_points`` (live points), ``by_verdict`` (the status of
+        the verdict ``policy`` selects; ``'unchecked'`` without one),
+        ``by_family``, ``by_model``, ``by_material``, ``n_materials``."""
+        from .steps import latest_verdicts  # pylint: disable=import-outside-toplevel
+        found = _points()
+        nodes = [found.nodes[r['node_uuid']] for r in found.rows]
+        verdicts: Dict[int, Any] = {}
+        for batch in _chunks(nodes):
+            verdicts.update(latest_verdicts(batch, policy))
+        qb = orm.QueryBuilder().append(
+            orm.CalcJobNode, filters={'process_type': _process_type()},
+            project=['extras.superseded'])
         stats: Dict[str, Any] = {
-            'total_simulations': 0, 'by_status': {}, 'by_model': {},
-            'by_family': {}, 'by_material': {}, 'n_materials': 0,
-        }
-        qb = self._query_builder_cls()
-        qb.append(self._simulation_data_cls, project=['*'])
-        for (node,) in qb.all():
-            stats['total_simulations'] += 1
-            stats['by_status'][node.status] = stats['by_status'].get(
-                node.status, 0) + 1
-            stats['by_model'][node.model] = stats['by_model'].get(
-                node.model, 0) + 1
-            stats['by_family'][node.family] = stats['by_family'].get(
-                node.family, 0) + 1
-            for material in node.materials:
-                stats['by_material'][material] = stats['by_material'].get(
-                    material, 0) + 1
+            'n_groups': len(_set_groups()),
+            'n_decks': sum(1 for (dead,) in qb.all() if not _dead(dead)),
+            'n_runs': len({r['run_uuid'] for r in found.rows}),
+            'n_points': len(found.rows),
+            'by_verdict': {}, 'by_family': {}, 'by_model': {}, 'by_material': {}}
+        for row, node in zip(found.rows, nodes):
+            verdict = verdicts.get(node.pk)
+            status = verdict.get('status') if verdict is not None else 'unchecked'
+            for key, value in (('by_verdict', status), ('by_family', row.get('family')),
+                               ('by_model', row.get('model'))):
+                stats[key][value] = stats[key].get(value, 0) + 1
+            for material in row.get('materials') or ():
+                stats['by_material'][material] = stats['by_material'].get(material, 0) + 1
         stats['n_materials'] = len(stats['by_material'])
         return stats
-
-    # -- Provenance and reproducibility ---------------------------------------
-
-    def export_for_reproduction(self, run, output_dir: Path) -> Path:
-        """Export one run's WHOLE SET back to a tree.
-
-        Every run of the set and every results file, not just `run` -- this
-        is the "recreate the run tree" action. For one run's provenance files
-        alone, use `src.aiida.export.export_provenance_bundle(run, dest)`.
-        """
-        from .export import export_results  # pylint: disable=import-outside-toplevel
-
-        if isinstance(run, str):
-            run = self._load_node(run)
-        export_results(run.set_label, Path(output_dir))
-        return Path(output_dir)

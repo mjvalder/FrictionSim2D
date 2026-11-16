@@ -56,8 +56,7 @@ from .data_keys import content_hash
 from .decks import Deck, discover_decks, points_for
 from .retention import retrieve_patterns
 from .store import (
-    DECK_KEY_EXTRA, RUN_UUID_EXTRA, StoreIndex, deck_key, get_or_create_file,
-    lammps_code, new_file, new_folder,
+    StoreIndex, calcjob_extras, get_or_create_file, lammps_code, new_file, new_folder,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,13 +213,11 @@ class LammpsFrictionCalcJob(CalcJob):
     def prepare_for_submission(self, folder: Folder) -> CalcInfo:
         """Only the retrieve lists: nothing is uploaded and nothing runs."""
         params = self.inputs.parameters.get_dict()  # type: ignore[attr-defined]
-        # The run's and the deck's identity, as extras: found without
-        # loading `parameters`.
+        # The run's and the deck's identity and the run's path tokens, as
+        # extras: found and filtered on without loading `parameters`.
         # Set here (presubmit runs on import too) so every launch route has it.
-        if params.get('run_uuid'):
-            extras = {RUN_UUID_EXTRA: params['run_uuid']}
-            if params.get('deck_name'):
-                extras[DECK_KEY_EXTRA] = deck_key(params['run_uuid'], params['deck_name'])
+        extras = calcjob_extras(params)
+        if extras:
             self.node.base.extras.set_many(extras)
         calcinfo = CalcInfo()
         calcinfo.uuid = str(self.uuid)

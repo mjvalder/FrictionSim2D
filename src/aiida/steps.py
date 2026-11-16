@@ -50,9 +50,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'RulingReport', 'apply_ruling',
            'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
-           'delete_dataset', 'is_provisional', 'latest_verdict', 'latest_verdicts',
-           'normalise_options', 'options_hash', 'postprocess_group', 'rule_group', 'summarise',
-           'summary_options', 'withdraw_ruling']
+           'delete_dataset', 'is_provisional', 'latest_summaries', 'latest_verdict',
+           'latest_verdicts', 'normalise_options', 'options_hash', 'postprocess_group',
+           'rule_group', 'summarise', 'summary_options', 'withdraw_ruling']
 
 #: Marks every Dict made only as a step's input (value: what it is).
 STEP_INPUT_EXTRA = 'friction2d_step_input'
@@ -1134,6 +1134,16 @@ def _live_summaries(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
         if _live(summary):
             out[pk].append(summary)
     return out
+
+
+def latest_summaries(points: List[orm.FolderData], policy: Policy = Policy(), *,
+                     digest: Optional[str] = None) -> Dict[int, Optional[orm.Dict]]:
+    """point pk -> the summary ``policy`` selects among the point's live
+    summaries (:func:`src.aiida.policy.select`): only those made with the
+    options whose :func:`options_hash` is ``digest`` (any, when None), then
+    the highest ``code_version``, then the uuid. In one query."""
+    return {pk: _select_node(nodes, 'summary', policy, digest)
+            for pk, nodes in _live_summaries(points).items()}
 
 
 class _SummaryInputs:  # pylint: disable=too-few-public-methods

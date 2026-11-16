@@ -17,7 +17,7 @@ from types import MappingProxyType
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 __all__ = ['DEFAULT_ATOL', 'DEFAULT_RTOL', 'VARIES', 'CompareReport', 'compare_blocks',
-           'merge_varying']
+           'merge_varying', 'refill']
 
 #: Stands for a field that takes several values within a campaign.
 VARIES = '<varies>'
@@ -126,6 +126,21 @@ def _visible(name: str, fields: Iterable[Mapping[str, Any]],
                     and path.partition('.')[0] not in _LIST_SECTIONS):
                 paths.add(path)
     return sorted(paths)
+
+
+def refill(name: str, fields: Mapping[str, Any], defaults: Mapping[str, Any],
+           kinds: Mapping[str, str]) -> Dict[str, Any]:
+    """Block ``name``'s ``fields`` with every elided field of its kind written
+    back from ``defaults``: the values :func:`compare_blocks` diffs.
+
+    :mod:`src.aiida.query` builds its point table from this, so ``related()``
+    and ``compare`` read "absent" as "default" by one rule.
+    """
+    out = dict(_fields(fields))
+    for path in _visible(name, (out,), (defaults,), kinds):
+        if path not in out:
+            out[path] = defaults.get(_unindexed(path))
+    return out
 
 
 def compare_blocks(a: Mapping[str, dict], b: Mapping[str, dict], *,

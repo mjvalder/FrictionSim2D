@@ -63,9 +63,51 @@ DECK_KEY_EXTRA = 'friction2d_deck_key'
 DECK_SHA_EXTRA = 'friction2d_deck_sha256'
 
 
+#: The CalcJob extra that carries the run's directory tokens
+#: (:class:`src.run.naming.RunTokens` as a dict, ``family`` from
+#: ``parameters``) -- what :mod:`src.aiida.query` filters on.
+TOKENS_EXTRA = 'friction2d_tokens'
+
+
 def deck_key(run_uuid: str, deck_name: str) -> str:
     """A deck's identity: ``f'{run_uuid}|{deck_name}'``."""
     return f'{run_uuid}|{deck_name}'
+
+
+def run_tokens(rel_path: Optional[str], family: Optional[str] = None
+               ) -> Optional[Dict[str, Any]]:
+    """``RunTokens`` of ``rel_path`` as a JSON dict, ``family`` replacing the
+    path's guess; None for a path :func:`src.run.naming.parse_run_path`
+    cannot read."""
+    from dataclasses import asdict  # pylint: disable=import-outside-toplevel
+
+    from ..run.naming import parse_run_path  # pylint: disable=import-outside-toplevel
+
+    if not rel_path:
+        return None
+    try:
+        tokens = asdict(parse_run_path(rel_path))
+    except ValueError:
+        return None
+    tokens['materials'] = list(tokens['materials'])
+    if family:
+        tokens['family'] = family
+    return tokens
+
+
+def calcjob_extras(params: Mapping[str, Any]) -> Dict[str, Any]:
+    """The run, deck and token extras of a friction2d CalcJob, recomputed from
+    its ``parameters``: :data:`RUN_UUID_EXTRA`, :data:`DECK_KEY_EXTRA`,
+    :data:`TOKENS_EXTRA` (each only when its source is there)."""
+    out: Dict[str, Any] = {}
+    if params.get('run_uuid'):
+        out[RUN_UUID_EXTRA] = params['run_uuid']
+        if params.get('deck_name'):
+            out[DECK_KEY_EXTRA] = deck_key(params['run_uuid'], params['deck_name'])
+    tokens = run_tokens(params.get('rel_path'), params.get('family'))
+    if tokens is not None:
+        out[TOKENS_EXTRA] = tokens
+    return out
 
 #: The uuid5 namespace of every content-addressed FrictionSim2D node. Fixed
 #: once (``uuid5(NAMESPACE_URL, 'https://frictionsim2d/aiida/node')``) and
@@ -564,9 +606,9 @@ def reindex() -> int:
       (``'kind' in content``), ``friction2d_schema_hash`` from each schema;
     * ``friction2d_sha256`` from each friction2d ``SinglefileData``'s stored
       bytes, ``friction2d_folder_sha256`` from each provenance folder's;
-    * the run and deck extras (``friction2d_run_uuid``,
-      ``friction2d_deck_key``) of each friction2d CalcJob from its
-      ``parameters``.
+    * the run, deck and token extras (``friction2d_run_uuid``,
+      ``friction2d_deck_key``, ``friction2d_tokens``) of each friction2d
+      CalcJob from its ``parameters``.
 
     Run after an archive import that dropped or edited extras. Returns the
     number of nodes whose extras changed.
@@ -581,11 +623,7 @@ def reindex() -> int:
         orm.CalcJobNode, filters={'process_type': CALCJOB_PROCESS_TYPE})
     for calc in qb.all(flat=True):
         params = calc.inputs.parameters.get_dict() if 'parameters' in calc.inputs else {}
-        wanted = {}
-        if params.get('run_uuid'):
-            wanted[RUN_UUID_EXTRA] = params['run_uuid']
-            if params.get('deck_name'):
-                wanted[DECK_KEY_EXTRA] = deck_key(params['run_uuid'], params['deck_name'])
+        wanted = calcjob_extras(params)
         current = calc.base.extras.all
         if any(current.get(k) != v for k, v in wanted.items()):
             calc.base.extras.set_many(wanted)

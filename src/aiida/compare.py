@@ -20,7 +20,8 @@ from ..core.compare import DEFAULT_ATOL, DEFAULT_RTOL, merge_varying
 from .data_keys import is_superseded
 from .block_schema import version_key
 
-__all__ = ['LoadedBlocks', 'load_blocks', 'load_blocks_from_sidecar']
+__all__ = ['LoadedBlocks', 'block_name', 'load_blocks', 'load_blocks_from_sidecar',
+           'schema_tables']
 
 _NAMED_PER_ENTRY = ('material', 'potential')
 
@@ -43,7 +44,8 @@ class LoadedBlocks:
     kinds: Dict[str, str] = field(default_factory=dict)
 
 
-def _from_schema(document: Mapping[str, Any]):
+def schema_tables(document: Mapping[str, Any]):
+    """``(units, defaults, kinds)`` of a stored schema document, by schema path."""
     fields = document.get('fields') or {}
     units = {p: f['unit'] for p, f in fields.items() if f.get('unit')}
     defaults = {p: f['default'] for p, f in fields.items() if f.get('default') is not None}
@@ -51,7 +53,7 @@ def _from_schema(document: Mapping[str, Any]):
     return units, defaults, kinds
 
 
-def _block_name(label: str, kind: str) -> str:
+def block_name(label: str, kind: str) -> str:
     """``material_sheet_0`` (a link label) -> ``material__sheet_0``."""
     if kind in _NAMED_PER_ENTRY and label.startswith(f'{kind}_'):
         return f'{kind}__{label[len(kind) + 1:]}'
@@ -65,10 +67,10 @@ def _loaded_from_calcjob(node) -> LoadedBlocks:
     blocks = {}
     for label, block in inputs.blocks.items():
         content = block.get_dict()
-        blocks[_block_name(label, str(content.get('kind')))] = dict(content['fields'])
+        blocks[block_name(label, str(content.get('kind')))] = dict(content['fields'])
     derived = dict(inputs.derived.get_dict().get('fields') or {}) \
         if 'derived' in inputs else {}
-    units, defaults, kinds = (_from_schema(inputs.schema.get_dict()) if 'schema' in inputs
+    units, defaults, kinds = (schema_tables(inputs.schema.get_dict()) if 'schema' in inputs
                               else ({}, {}, {}))
     return LoadedBlocks(blocks, derived, units, defaults, kinds)
 
@@ -216,7 +218,7 @@ def _loaded_from_sidecar_file(path: Path, root: Path) -> LoadedBlocks:
     derived = derived.get('fields', derived)
     contents = {name: content for name, content in document.items() if name != 'derived'}
     schema = _schema_for(root, sorted({str(c.get('block_schema')) for c in contents.values()}))
-    units, defaults, kinds = (_from_schema(json.loads(schema.read_text(encoding='utf-8')))
+    units, defaults, kinds = (schema_tables(json.loads(schema.read_text(encoding='utf-8')))
                               if schema else ({}, {}, {}))
     return LoadedBlocks({n: dict(c['fields']) for n, c in contents.items()},
                         dict(derived), units, defaults, kinds)
