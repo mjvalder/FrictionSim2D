@@ -221,6 +221,13 @@ def test_a_new_results_file_supersedes_only_that_deck(aiida_profile_clean, tmp_p
     for node in [*other, *other_outputs]:
         assert not node.base.extras.get('superseded', False), node
     assert not _by_deck('h-MoS2')['system'].base.extras.get('superseded', False)
+    incoming = [(t.link_label, t.node) for t in old.base.links.get_incoming().all()]
+    assert any(label.startswith('blocks') for label, _n in incoming)
+    for label, node in incoming:     # blocks, provenance, schema, derived, Code, ...
+        assert not node.base.extras.get('superseded', False), label
+    assert 'code' in old.inputs and not old.inputs.code.base.extras.get('superseded', False)
+    build = _by_deck('h-MoS2')['system'].inputs.structures['build_sheet_lmp']
+    assert not build.base.extras.get('superseded', False)
     names = new[0].outputs.points['force10_a0_s2'].base.repository.list_object_names('results')
     assert any(name.startswith('raw_') for name in names)
 
@@ -312,6 +319,96 @@ def test_supersede_follows_calcfunction_outputs_not_calcjob_consumers(
     assert point.base.extras.get('superseded') is True
     assert first.base.extras.get('superseded') is True
     assert second.base.extras.get('superseded') is True
+
+
+def test_a_config_edit_reimports_every_deck_of_the_run(aiida_profile_clean, tmp_path):
+    """The provenance folder is in every deck's fingerprint: a changed config
+    changes the blocks, so the run's decks re-import (the dry run says so)."""
+    root = _tree(tmp_path / 'sim')
+    import_root(root, label='camp')
+    (loc,) = [r for r in discover_runs(root) if 'h-MoS2' in r.tokens.rel_path]
+    config_path = loc.provenance_dir / 'config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config['general']['temp'] = 350
+    config_path.write_text(json.dumps(config), encoding='utf-8')
+
+    plan = import_root(root, label='camp', dry_run=True)
+    assert len(plan.superseded_decks) == 2 and len(plan.skipped_decks) == 2
+
+    report = import_root(root, label='camp')
+    assert report.ok(), report.render()
+    assert sorted(d.rsplit(':', 1)[1] for d in report.superseded_decks) == ['slide', 'system']
+    assert len(report.skipped_decks) == 2
+
+
+def test_a_truncated_slide_trace_is_a_truncated_point(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = make_family_run(root, 'afm', loads=(10.0,), n=20,
+                              config=slide_config('afm', loads=(10.0,), steps=50_000,
+                                                  freq=1000))
+    (run_dir / 'lammps' / 'system.in').unlink()
+    (run_dir / 'lammps' / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    report = import_root(root, label='camp')
+    assert report.ok(), report.render()
+    (calc,) = _calcjobs()
+    point = calc.outputs.points['force10_a0_s2']
+    assert point.base.attributes.get('status') == 'truncated'
+    assert 'window 20/50 rows' in point.base.attributes.get('status_detail')
+
+
+def test_files_over_max_stored_file_mb_are_recorded_not_stored(aiida_profile_clean,
+                                                              tmp_path, monkeypatch):
+    from src.aiida import calcjob
+    monkeypatch.setattr(calcjob, '_max_stored_file_mb', lambda: 0)   # every byte is over
+    root = tmp_path / 'sim'
+    run_dir = make_family_run(root, 'afm', loads=(10.0,), tiers=('window', 'peratom'),
+                              config=slide_config('afm', loads=(10.0,)))
+    (run_dir / 'lammps' / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    (run_dir / 'data').mkdir(exist_ok=True)
+    (run_dir / 'data' / 'load_10N.data').write_text('LAMMPS data\n', encoding='utf-8')
+    (run_dir / 'data' / 'hold_10N.txt').write_text('# hold\n', encoding='utf-8')
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    decks = _by_deck('h-MoS2')
+    system, slide = decks['system'], decks['slide']
+    assert 'aux' not in system.outputs
+    (hold,) = system.outputs.run_info['not_stored']
+    assert hold['name'] == 'data/hold_10N.txt' and hold['size_bytes'] > 0
+    assert len(hold['sha256']) == 64
+    assert 'structures' in system.outputs          # structures are never capped
+    peratom = slide.outputs.peratom['force10_a0_s2']
+    assert peratom.base.repository.list_object_names() == []
+    (note,) = peratom.base.attributes.get('not_stored')
+    assert note['name'].startswith('results/peratom_')
+    assert slide.outputs.run_info['not_stored'] == [note]
+    assert slide.outputs.points['force10_a0_s2'].base.repository.list_object_names(
+        'results')                                 # point tiers are never capped
+
+
+def test_files_under_the_cap_are_stored(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = _afm_run(root, 'h-MoS2')
+    (run_dir / 'data' / 'hold_10N.txt').write_text('# hold\n', encoding='utf-8')
+    import_root(root, label='camp')
+    system = _by_deck('h-MoS2')['system']
+    assert 'hold_10N_txt' in system.outputs.aux
+    assert 'not_stored' not in system.outputs.run_info.get_dict()
+    assert system.inputs.parameters['max_stored_file_mb'] > 0
+
+
+def test_superseding_a_deck_another_set_holds_is_reported(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim', materials=('h-MoS2',))
+    import_root(root, label='first')
+    import_root(root, label='second')
+    (loc,) = discover_runs(root)
+    write_results(loc.run_dir, 'afm', loads=(10.0,), tiers=('raw',), layers=2)
+
+    report = import_root(root, label='second')
+
+    assert report.superseded_elsewhere == [(f'{loc.tokens.rel_path}:slide', 'first')]
+    assert "also held by set 'first'" in report.render()
 
 
 # --- per-run failures, logs, versions, machines --------------------------------

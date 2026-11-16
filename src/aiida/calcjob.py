@@ -199,7 +199,7 @@ class LammpsFrictionCalcJob(CalcJob):
                                    '(hold_*.txt).')
         spec.output('run_info', valid_type=orm.Dict, required=False,
                     help='lammps_version, wall_time_s, n_procs, log_missing, '
-                         'log_has_version.')
+                         'log_has_version, not_stored (files over the cap).')
         spec.output('log', valid_type=orm.SinglefileData, required=False,
                     help="The deck's LAMMPS log.")
 
@@ -374,11 +374,18 @@ def _provenance_input(node) -> Tuple[Optional[dict], dict]:
 class LammpsFrictionParser(Parser):
     """Turn one deck's retrieved files into point, structure and info nodes."""
 
+    def __init__(self, node):
+        super().__init__(node)
+        self._cap: Optional[int] = None
+        self._not_stored: List[Dict[str, Any]] = []
+
     def parse(self, **kwargs):  # type: ignore[override]
         """Parse the scratch retrieval and the retrieved log."""
         params = self.node.inputs.parameters.get_dict()
         config, record = _provenance_input(self.node)
-        finished = self._run_info(params, record)
+        finished, info = self._run_info(params, record)
+        self._cap = _cap_bytes(params.get('max_stored_file_mb'))
+        self._not_stored = []
 
         scratch = kwargs.get('retrieved_temporary_folder')
         root = Path(scratch) if scratch else None
@@ -389,6 +396,9 @@ class LammpsFrictionParser(Parser):
             produced = self._structures(root)
         else:
             produced = self._points(root, params, config, record)
+        if self._not_stored:
+            info['not_stored'] = list(self._not_stored)
+        self.out('run_info', orm.Dict(info))
         if not produced:
             return self.exit_codes.ERROR_NO_RESULTS
         if finished is False:
@@ -398,14 +408,15 @@ class LammpsFrictionParser(Parser):
     # -- run_info and log ------------------------------------------------------
 
     def _run_info(self, params: Mapping[str, Any],
-                  record: Mapping[str, Any]) -> Optional[bool]:
+                  record: Mapping[str, Any]) -> Tuple[Optional[bool], Dict[str, Any]]:
         """``run_info`` from the log, each field falling back to
         ``provenance.json``. A log without a version line never blanks the
         recorded version: ``parse_log_extras`` only sets keys it found, and
         ``log_has_version`` keeps the gap visible.
 
-        Returns whether LAMMPS finished (a ``Total wall time`` line), None
-        without a log."""
+        Returns ``(finished, run_info)``: whether LAMMPS finished (a ``Total
+        wall time`` line; None without a log) and the ``run_info`` content,
+        which :meth:`parse` outputs once the other outputs are known."""
         from ..data.provenance import parse_log_extras  # pylint: disable=import-outside-toplevel
 
         log_name = params.get('log_name')
@@ -432,8 +443,22 @@ class LammpsFrictionParser(Parser):
             procs = _PROCS_RE.findall(text)
             if procs:
                 info['n_procs'] = int(procs[-1])
-        self.out('run_info', orm.Dict(info))
-        return None if text is None else bool(_WALL_RE.search(text))
+        return (None if text is None else bool(_WALL_RE.search(text))), info
+
+    # -- the stored-file cap ---------------------------------------------------
+
+    def _over_cap(self, name: str, path: Path) -> bool:
+        """Whether ``path`` exceeds ``max_stored_file_mb``; if so it is recorded
+        (name, sha256, size) in ``self._not_stored`` instead of stored."""
+        size = Path(path).stat().st_size
+        if self._cap is None or size <= self._cap:
+            return False
+        from ..data.provenance import sha256_file  # pylint: disable=import-outside-toplevel
+        self._not_stored.append({'name': name, 'size_bytes': size,
+                                 'sha256': sha256_file(path)})
+        logger.info('%s is %d bytes, over max_stored_file_mb: recorded, not stored',
+                    name, size)
+        return True
 
     # -- system decks ----------------------------------------------------------
 
@@ -451,6 +476,8 @@ class LammpsFrictionParser(Parser):
                 outputs['aux'].append((_file_label(path.name), path))
         for namespace, pairs in outputs.items():
             for label, path in _unique(pairs, namespace).items():
+                if namespace == 'aux' and self._over_cap(f'data/{path.name}', path):
+                    continue
                 self.out(f'{namespace}.{label}', new_file(path, name=f'data/{path.name}'))
         return len(outputs['structures'])
 
@@ -531,10 +558,32 @@ class LammpsFrictionParser(Parser):
             })
             self.out(f'points.{label}', node)
             if peratom:
-                self.out(f'peratom.{label}', new_folder(peratom))
+                kept = {name: path for name, path in peratom.items()
+                        if not self._over_cap(name, path)}
+                folder = new_folder(kept)
+                skipped = [n for n in self._not_stored if n['name'] in peratom]
+                if skipped:
+                    folder.base.attributes.set('not_stored', skipped)
+                self.out(f'peratom.{label}', folder)
             if final is not None:
                 self.out(f'snapshots.{label}', new_file(final, name=f'data/{final.name}'))
         return len(labels)
+
+
+def _cap_bytes(max_mb: Any) -> Optional[int]:
+    """``max_stored_file_mb`` in bytes; None (no cap) when unset."""
+    if max_mb is None:
+        return None
+    return int(float(max_mb) * 1024 * 1024)
+
+
+def _max_stored_file_mb() -> int:
+    """``settings.aiida.max_stored_file_mb`` (default 20)."""
+    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
+    try:
+        return int(load_settings().aiida.max_stored_file_mb)
+    except (OSError, ValueError, AttributeError):
+        return 20
 
 
 def _point_identity(run_uuid: Optional[str], label: str, ident: Any,
@@ -682,6 +731,9 @@ class RunInputs:
         run_uuid: ``provenance.json`` ``run_uuid``.
         config, record, settings: ``provenance/config.json``,
             ``provenance.json``, ``provenance/settings.yaml``.
+        max_stored_file_mb: ``settings.aiida.max_stored_file_mb``: an aux or
+            per-atom file over it is recorded (name, sha256, size) in
+            ``run_info['not_stored']`` -- and on the ``peratom`` node -- not stored.
     """
     blocks: Dict[str, orm.Dict]
     derived: orm.Dict
@@ -692,6 +744,7 @@ class RunInputs:
     config: dict
     record: dict
     settings: dict
+    max_stored_file_mb: int = 20
 
 
 def _split_run(locator) -> Tuple[Any, dict, dict, dict, str]:
@@ -754,7 +807,8 @@ def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
         potentials=_unique(((_file_label(p.name), get_or_create_file(p, index=index))
                             for p in _files(prov_dir / 'potentials', '*')),
                            'potentials'),
-        run_uuid=run_uuid, config=config, record=record, settings=settings)
+        run_uuid=run_uuid, config=config, record=record, settings=settings,
+        max_stored_file_mb=_max_stored_file_mb())
 
 
 _LMP_TOKEN_RE = re.compile(r'(?:^|\s)(\S*/)?(lmp\S*)(?=\s|$)')
@@ -906,6 +960,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
             'log_name': log_name, 'writes_structures': deck.writes_structures,
             'block_names': labels,
             'hpc_run_path': _hpc_run_path(locator),
+            'max_stored_file_mb': run.max_stored_file_mb,
         }),
         'metadata': {'computer': computer,
                      'label': f'{locator.tokens.rel_path}:{deck.name}',

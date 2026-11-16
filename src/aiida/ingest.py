@@ -261,6 +261,9 @@ class ImportReport:
     ``failures`` are ``(rel_path or deck, message)``: a :class:`MissingRunUUID`
     or :class:`UnitMismatch` for one run lands here and the other runs go on.
     ``verdict_counts`` is filled by the integrity pass (Task 6a).
+    ``superseded_elsewhere`` are ``(deck, other label)``: a CalcJob this
+    import superseded that another set also holds -- that set now holds a
+    superseded deck.
     """
     label: str
     group_uuid: str = ''
@@ -275,6 +278,7 @@ class ImportReport:
     unparseable: List[str] = field(default_factory=list)
     failures: List[Tuple[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    superseded_elsewhere: List[Tuple[str, str]] = field(default_factory=list)
     dry_run: bool = False
 
     def ok(self) -> bool:
@@ -302,6 +306,8 @@ class ImportReport:
         lines += [f'  no LAMMPS version (no Code): {d}' for d in self.no_version]
         lines += [f'  log missing: {d}' for d in self.log_missing]
         lines += [f'  unparseable: {d}' for d in self.unparseable]
+        lines += [f'  superseded {deck}, also held by set {other!r}'
+                  for deck, other in self.superseded_elsewhere]
         lines += [f'  WARNING {w}' for w in self.warnings]
         lines += [f'  FAILED {where}: {message}' for where, message in self.failures]
         return '\n'.join(lines)
@@ -597,6 +603,18 @@ def _computer(state: _Import, settings: dict):
     return state.computers[name]
 
 
+def _other_labels(pk: int, label: str) -> List[str]:
+    """The other ``friction2d/*`` set labels holding node ``pk``."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    qb = orm.QueryBuilder().append(orm.Node, filters={'id': pk}, tag='n')
+    qb.append(orm.Group, with_node='n', project='label',
+              filters={'label': {'like': f'{GROUP_PREFIX}/%'}})
+    prefix = f'{GROUP_PREFIX}/'
+    return sorted(g[len(prefix):] for g in qb.all(flat=True)
+                  if g != group_label(label))
+
+
 def _has_dead_structures(calc) -> bool:
     """Whether any of ``calc``'s ``structures`` inputs is superseded."""
     if 'structures' not in calc.inputs:
@@ -683,6 +701,8 @@ def _import_deck(state: _Import, run: _RunState, deck, decks,
     state.group_pks.add(node.pk)
     for old in stale:
         supersede(orm.load_node(old.pk))
+        state.report.superseded_elsewhere += [
+            (name, other) for other in _other_labels(old.pk, state.report.label)]
     if stale:
         state.report.superseded_decks.append(name)
         run.system_replaced = run.system_replaced or deck.writes_structures

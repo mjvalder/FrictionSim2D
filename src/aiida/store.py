@@ -76,7 +76,6 @@ FRICTION2D_NAMESPACE = UUID('e1ff2212-fbb6-5980-a513-7e1d9d76aa12')
 
 #: The process type of the import-only CalcJob (entry point ``friction2d.lammps``).
 CALCJOB_PROCESS_TYPE = 'aiida.calculations:friction2d.lammps'
-_CALCJOB_PROCESS_TYPE = CALCJOB_PROCESS_TYPE
 
 _CONFLICT = '.sync-conflict-'
 _CHUNK = 1 << 20
@@ -521,7 +520,7 @@ def _dict_extras(node: orm.Dict) -> Dict[str, str]:
 def _calcjob_inputs(node_class: Type[orm.Node]) -> List[orm.Node]:
     """``node_class`` inputs of every friction2d CalcJob that no process created."""
     qb = orm.QueryBuilder().append(
-        orm.CalcJobNode, tag='c', filters={'process_type': _CALCJOB_PROCESS_TYPE})
+        orm.CalcJobNode, tag='c', filters={'process_type': CALCJOB_PROCESS_TYPE})
     qb.append(node_class, with_outgoing='c', project='*')
     seen: Dict[int, orm.Node] = {}
     for (node,) in qb.iterall():
@@ -579,7 +578,7 @@ def reindex() -> int:
             node.base.extras.set_many(wanted)
             touched += 1
     qb = orm.QueryBuilder().append(
-        orm.CalcJobNode, filters={'process_type': _CALCJOB_PROCESS_TYPE})
+        orm.CalcJobNode, filters={'process_type': CALCJOB_PROCESS_TYPE})
     for calc in qb.all(flat=True):
         params = calc.inputs.parameters.get_dict() if 'parameters' in calc.inputs else {}
         wanted = {}
@@ -693,7 +692,8 @@ def machine_mismatch(name: str, hpc: Mapping[str, Any]) -> Optional[str]:
     if not problems:
         return None
     return (f'machine {name!r} is already registered with {", ".join(problems)}; '
-            f'reusing it (pass --machine to record these runs under another label)')
+            f'reusing it (set settings.aiida.machine or the run\'s hpc_host to record '
+            f'these runs under another label)')
 
 
 VERSION_EXTRA = 'friction2d_lammps_version'
