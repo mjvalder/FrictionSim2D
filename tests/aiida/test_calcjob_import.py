@@ -612,7 +612,7 @@ def test_every_calcjob_carries_the_schema_and_derived(computer, tmp_path):
     for node in nodes:
         schema = node.inputs.schema
         assert schema.get_dict()['fields']['derived.drive_k']['unit'] == 'eV/angstrom^2'
-        assert schema.uuid == node_uuid(schema_hash(schema.get_dict()))
+        assert schema.uuid == node_uuid('schema', schema_hash(schema.get_dict()))
         assert 'drive_k' in node.inputs.derived.get_dict()['fields']
 
 
@@ -625,7 +625,7 @@ def test_block_names_record_the_unambiguous_name(computer, tmp_path):
     assert names['material_sheet_0'] == 'material__sheet_0'
     for label, block in system.inputs.blocks.items():
         assert block.get_dict()['kind'] == names[label].split('__')[0]
-        assert block.uuid == node_uuid(block_hash(block.get_dict()))
+        assert block.uuid == node_uuid('block', block_hash(block.get_dict()))
 
 
 def _legacy_spring(loc, *, schema_version):

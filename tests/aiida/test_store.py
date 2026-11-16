@@ -1,5 +1,6 @@
 """Content-addressed parameter blocks and files in the AiiDA store (spec §5.2)."""
 import hashlib
+import io
 from pathlib import Path
 
 import pytest
@@ -88,7 +89,7 @@ def test_file_hash_covers_the_stored_redacted_bytes(aiida_profile_clean, tmp_pat
     digest = node.base.extras.get('friction2d_sha256')
     assert digest == hashlib.sha256(stored).hexdigest()
     assert digest != sha256_file(settings)
-    assert node.uuid == node_uuid(digest)
+    assert node.uuid == node_uuid('file', digest)
     # a second file redacting to the same bytes is the same node
     other = tmp_path / 'b' / 'settings.yaml'
     other.parent.mkdir()
@@ -109,7 +110,7 @@ def test_provenance_key_covers_the_staged_bytes(aiida_profile_clean, tmp_path):
 
     first, second = run('hunter2'), run('swordfish')
     assert first.pk == second.pk
-    assert first.uuid == node_uuid(first.base.extras.get('friction2d_folder_sha256'))
+    assert first.uuid == node_uuid('folder', first.base.extras.get('friction2d_folder_sha256'))
     assert 'hunter2' not in first.base.repository.get_object_content(
         'provenance/settings.yaml')
 
@@ -150,16 +151,34 @@ def test_machine_computer_get_or_create(aiida_profile_clean):
 
 # --- deterministic uuids (critique C2) ------------------------------------------
 
-def test_node_uuid_is_uuid5_of_the_hash():
+def test_node_uuid_is_uuid5_of_slot_and_hash():
+    """Frozen: the namespace, the slot strings and the name format."""
     from uuid import UUID, uuid5
     digest = block_hash(THERMOSTAT)
-    assert node_uuid(digest) == str(uuid5(FRICTION2D_NAMESPACE, digest))
+    assert node_uuid('block', digest) == str(uuid5(FRICTION2D_NAMESPACE, f'block:{digest}'))
     assert FRICTION2D_NAMESPACE == UUID('e1ff2212-fbb6-5980-a513-7e1d9d76aa12')
+    assert store.UUID_SLOTS == ('block', 'file', 'folder', 'schema')
+    assert node_uuid('file', '0' * 64) == 'f15ec894-3e6e-5f5b-bc38-bb58c1d206af'
+    assert len({node_uuid(s, digest) for s in store.UUID_SLOTS}) == 4
+    with pytest.raises(ValueError, match='slot'):
+        node_uuid('blocks', digest)
+
+
+def test_a_file_holding_a_blocks_json_is_not_that_block(aiida_profile_clean, tmp_path):
+    import json
+    from src.aiida.blocks import _normalise
+    payload = json.dumps(_normalise(THERMOSTAT), sort_keys=True, separators=(',', ':'))
+    path = tmp_path / 'block.json'
+    path.write_text(payload, encoding='utf-8')
+    block, file = get_or_create_block(THERMOSTAT), get_or_create_file(path)
+    assert file.base.extras.get('friction2d_sha256') == block_hash(THERMOSTAT)
+    assert block.uuid == node_uuid('block', block_hash(THERMOSTAT))
+    assert file.uuid == node_uuid('file', block_hash(THERMOSTAT)) != block.uuid
 
 
 def test_block_uuid_is_the_same_in_two_fresh_profiles(aiida_profile_clean):
     first = get_or_create_block(THERMOSTAT).uuid
-    assert first == node_uuid(block_hash(THERMOSTAT))
+    assert first == node_uuid('block', block_hash(THERMOSTAT))
     aiida_profile_clean.reset_storage()
     assert orm.QueryBuilder().append(orm.Dict).count() == 0
     second = get_or_create_block(dict(THERMOSTAT))
@@ -172,7 +191,7 @@ def test_schema_node_is_content_addressed(aiida_profile_clean):
     node = get_or_create_schema(doc)
     assert node.get_dict() == doc
     assert node.base.extras.get('friction2d_schema_hash') == schema_hash(doc)
-    assert node.uuid == node_uuid(schema_hash(doc))
+    assert node.uuid == node_uuid('schema', schema_hash(doc))
     assert get_or_create_schema(schema_document('afm')).pk == node.pk
     assert get_or_create_schema(schema_document('sheetonsheet')).pk != node.pk
 
@@ -187,6 +206,18 @@ def _same_hash(digest):
         orm.Dict, filters={'extras.friction2d_block_hash': digest}).all(flat=True)
 
 
+#: aiida-core's own warning, not ours: ``_make_import_group``
+#: (aiida/tools/archive/imports.py:1143) builds an unstored
+#: ``orm.ImportGroup(label, backend=backend_to)`` only to read its type string
+#: and user; the user relationship's ``DbUser.dbgroups`` backref attaches that
+#: unsaved DbGroup, and the ``bulk_insert`` on the next line
+#: (storage/psql_dos/backend.py:338) autoflushes and warns that it will not
+#: add it. Raised by every ``import_archive`` that creates an import group.
+_IMPORT_GROUP_WARNING = pytest.mark.filterwarnings(
+    'ignore:Object of type <DbGroup> not in session:sqlalchemy.exc.SAWarning')
+
+
+@_IMPORT_GROUP_WARNING
 def test_an_imported_block_is_the_local_node(aiida_profile_clean, tmp_path):
     """Review Focus 3: A's block imported into B, where it already exists, is one node."""
     from aiida.tools.archive import import_archive
@@ -199,6 +230,7 @@ def test_an_imported_block_is_the_local_node(aiida_profile_clean, tmp_path):
     assert verify().duplicate_hashes == {}
 
 
+@_IMPORT_GROUP_WARNING
 def test_random_uuids_duplicate_and_verify_says_so(aiida_profile_clean, tmp_path,
                                                    monkeypatch):
     """Without _set_uuid, B ends with two nodes; the hash-value join still finds both."""
@@ -221,8 +253,8 @@ def test_set_uuid_without_the_private_api_warns_once(aiida_profile_clean, caplog
         backend_entity = object()
     monkeypatch.setattr(store, '_warned_uuid', False)
     with caplog.at_level('WARNING', logger='src.aiida.store'):
-        store._set_uuid(Bare(), node_uuid('a'))
-        store._set_uuid(Bare(), node_uuid('b'))
+        store._set_uuid(Bare(), node_uuid('block', 'a'))
+        store._set_uuid(Bare(), node_uuid('block', 'b'))
     assert len([r for r in caplog.records if 'deterministic' in r.message]) == 1
 
 
@@ -232,6 +264,49 @@ def test_a_block_whose_extras_were_dropped_is_found_by_uuid(aiida_profile_clean)
     again = get_or_create_block(dict(THERMOSTAT))
     assert again.pk == node.pk
     assert again.base.extras.get('friction2d_block_hash') == block_hash(THERMOSTAT)
+
+
+def _stored_under(node, uuid, extras=None):
+    if extras:
+        node.base.extras.set_many(extras)
+    store._set_uuid(node, uuid)
+    return node.store()
+
+
+def test_a_uuid_twin_with_other_content_is_not_labelled(aiida_profile_clean, tmp_path,
+                                                        caplog):
+    digest = block_hash(THERMOSTAT)
+    impostor = _stored_under(orm.Dict({'kind': 'thermostat', 'fields': {}}),
+                             node_uuid('block', digest))
+    with caplog.at_level('WARNING', logger='src.aiida.store'):
+        node = get_or_create_block(THERMOSTAT)
+    assert node.pk != impostor.pk and node.get_dict() == THERMOSTAT
+    assert node.uuid != node_uuid('block', digest)               # random fallback
+    assert 'friction2d_block_hash' not in impostor.base.extras.all
+    assert any('does not match' in r.message for r in caplog.records)
+
+    pot = tmp_path / 'MoS.sw'
+    pot.write_text('sw\n', encoding='utf-8')
+    fake = orm.SinglefileData(io.BytesIO(b'other\n'), filename='MoS.sw')
+    fake = _stored_under(fake, node_uuid('file', sha256_file(pot)))
+    real = get_or_create_file(pot)
+    assert real.pk != fake.pk and real.get_content() == 'sw\n'
+    assert 'friction2d_sha256' not in fake.base.extras.all
+
+
+def test_the_deterministic_node_wins_over_an_older_duplicate(aiida_profile_clean,
+                                                             monkeypatch):
+    digest = block_hash(THERMOSTAT)
+    extras = {'friction2d_block_hash': digest, 'friction2d_block_kind': 'thermostat'}
+    older = orm.Dict(dict(THERMOSTAT))
+    older.base.extras.set_many(extras)
+    older.store()                                                 # random uuid
+    canonical = _stored_under(orm.Dict(dict(THERMOSTAT)), node_uuid('block', digest),
+                              extras)
+    assert older.pk < canonical.pk
+    assert get_or_create_block(dict(THERMOSTAT)).pk == canonical.pk
+    assert StoreIndex.load().blocks[digest] == canonical.pk
+    assert get_or_create_block(dict(THERMOSTAT), index=StoreIndex.load()).pk == canonical.pk
 
 
 # --- the memo, reindex and verify ------------------------------------------------

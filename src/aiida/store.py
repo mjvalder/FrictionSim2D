@@ -15,7 +15,8 @@ provenance folder, ``friction2d_schema_hash`` on a schema. Each is
 recomputable from the node itself (:func:`reindex`).
 
 Every content-addressed node gets the deterministic UUID :func:`node_uuid` of
-its hash (critique C2). ``import_archive`` matches nodes by UUID
+its slot (block, file, folder, schema) and hash (critique C2).
+``import_archive`` matches nodes by UUID
 (``aiida/tools/archive/imports.py``, ``_import_nodes``: archive nodes whose
 uuid already exists in the profile are not added, only their extras merged),
 so the same block built by two scientists in two profiles is ONE node after an
@@ -56,8 +57,9 @@ RUN_UUID_EXTRA = 'friction2d_run_uuid'
 
 #: The uuid5 namespace of every content-addressed FrictionSim2D node. Fixed
 #: once (``uuid5(NAMESPACE_URL, 'https://frictionsim2d/aiida/node')``) and
-#: NEVER to be changed: changing it splits every stored node from its twin
-#: in every other profile.
+#: NEVER to be changed -- nor are the slot strings of :data:`UUID_SLOTS`, nor
+#: the ``f'{slot}:{digest}'`` name format of :func:`node_uuid`: changing any
+#: of them splits every stored node from its twin in every other profile.
 FRICTION2D_NAMESPACE = UUID('e1ff2212-fbb6-5980-a513-7e1d9d76aa12')
 
 #: The process type of the import-only CalcJob (entry point ``friction2d.lammps``).
@@ -69,9 +71,18 @@ _CHUNK = 1 << 20
 _warned_uuid = False   # pylint: disable=invalid-name
 
 
-def node_uuid(digest: str) -> str:
-    """The deterministic node UUID of a content hash: ``uuid5(FRICTION2D_NAMESPACE, digest)``."""
-    return str(uuid5(FRICTION2D_NAMESPACE, digest))
+#: The kinds of content-addressed node, each its own uuid name space, so a
+#: file whose bytes are a block's canonical JSON is not that block's node.
+#: Frozen with :data:`FRICTION2D_NAMESPACE`.
+UUID_SLOTS = ('block', 'file', 'folder', 'schema')
+
+
+def node_uuid(slot: str, digest: str) -> str:
+    """The deterministic UUID of a ``slot`` node with content hash ``digest``:
+    ``uuid5(FRICTION2D_NAMESPACE, f'{slot}:{digest}')``."""
+    if slot not in UUID_SLOTS:
+        raise ValueError(f'unknown node slot {slot!r}; expected one of {UUID_SLOTS}')
+    return str(uuid5(FRICTION2D_NAMESPACE, f'{slot}:{digest}'))
 
 
 def _set_uuid(node: orm.Node, value: str) -> None:
@@ -121,27 +132,32 @@ class StoreIndex:
     def load(cls) -> 'StoreIndex':
         """The index of the loaded profile: one projection query per extra.
 
-        Where two nodes share a hash (see :func:`verify`), the oldest wins,
-        as in an unindexed lookup.
+        Where two nodes share a hash (see :func:`verify`), the one under the
+        deterministic uuid wins, else the oldest -- as in an unindexed lookup.
         """
         index = cls()
-        for slot, node_class, extra in _SLOTS:
+        for attr, node_class, extra, slot in _SLOTS:
             qb = orm.QueryBuilder().append(
                 node_class, tag='n', filters={'extras': {'has_key': extra}},
-                project=[f'extras.{extra}', 'id'])
+                project=[f'extras.{extra}', 'id', 'uuid'])
             qb.order_by({'n': {'id': 'asc'}})
-            mapping = getattr(index, slot)
-            for digest, pk in qb.iterall():
-                mapping.setdefault(digest, pk)
+            mapping = getattr(index, attr)
+            for digest, pk, uuid in qb.iterall():
+                if str(uuid) == node_uuid(slot, digest):
+                    mapping[digest] = pk
+                else:
+                    mapping.setdefault(digest, pk)
         return index
 
 
-_SLOTS: Tuple[Tuple[str, Type[orm.Node], str], ...] = (
-    ('blocks', orm.Dict, BLOCK_HASH_EXTRA),
-    ('files', orm.SinglefileData, FILE_SHA_EXTRA),
-    ('folders', orm.FolderData, FOLDER_SHA_EXTRA),
-    ('schemas', orm.Dict, SCHEMA_HASH_EXTRA),
+#: (StoreIndex attribute, node class, hash extra, uuid slot).
+_SLOTS: Tuple[Tuple[str, Type[orm.Node], str, str], ...] = (
+    ('blocks', orm.Dict, BLOCK_HASH_EXTRA, 'block'),
+    ('files', orm.SinglefileData, FILE_SHA_EXTRA, 'file'),
+    ('folders', orm.FolderData, FOLDER_SHA_EXTRA, 'folder'),
+    ('schemas', orm.Dict, SCHEMA_HASH_EXTRA, 'schema'),
 )
+_SLOT_OF = {attr: (node_class, extra, slot) for attr, node_class, extra, slot in _SLOTS}
 
 
 def _find(node_class: Type[orm.Node], extra: str, value: str) -> Optional[orm.Node]:
@@ -159,30 +175,56 @@ def _find_by_uuid(value: str) -> Optional[orm.Node]:
     return found[0] if found else None
 
 
-def _get_or_create(node_class: Type[orm.Node], slot: str, digest: str,
-                   extras: Mapping[str, str], build: Callable[[], orm.Node],
+def _content_digest(slot: str, node: orm.Node) -> Optional[str]:
+    """``node``'s hash recomputed from its stored content (None if unreadable)."""
+    try:
+        if slot == 'block':
+            return block_hash(node.get_dict())
+        if slot == 'schema':
+            return schema_hash(node.get_dict())
+        if slot == 'file':
+            return _file_sha(node)
+        return _stored_folder_key(node)
+    except (TypeError, ValueError, OSError, AttributeError):
+        return None
+
+
+def _get_or_create(attr: str, digest: str, extras: Mapping[str, str],
+                   build: Callable[[], orm.Node],
                    index: Optional[StoreIndex]) -> orm.Node:
     """The stored node for ``digest``, else ``build()`` stored under :func:`node_uuid`.
 
-    Lookup order: the memo ``index`` (whose miss is trusted: it was loaded
-    for this import), else the hash extra; then the deterministic UUID, which
-    finds a node whose extras were dropped (``import_new_extras=False``) and
-    repairs them.
+    Lookup order:
+
+    1. the memo ``index``, whose miss is trusted (it was loaded for this import);
+    2. without a memo, the node under the deterministic uuid if it carries the
+       hash extra, else the oldest node carrying it;
+    3. the node under the deterministic uuid whose extras were dropped
+       (``import_new_extras=False``): its content is checked against
+       ``digest`` before the extras are written back. A uuid held by any
+       other node -- other class, or content that does not hash to
+       ``digest`` -- is left alone, and the new node gets a random uuid.
     """
-    extra = next(iter(extras))
-    mapping = getattr(index, slot) if index is not None else None
+    node_class, extra, slot = _SLOT_OF[attr]
+    mapping = getattr(index, attr) if index is not None else None
     if mapping is not None and digest in mapping:
         return orm.load_node(mapping[digest])
-    found = None if mapping is not None else _find(node_class, extra, digest)
-    wanted = node_uuid(digest)
-    if found is None:
-        twin = _find_by_uuid(wanted)
-        if isinstance(twin, node_class):
+    wanted = node_uuid(slot, digest)
+    twin = _find_by_uuid(wanted)
+    found = None
+    if (mapping is None and isinstance(twin, node_class)
+            and twin.base.extras.get(extra, None) == digest):
+        found = twin
+    elif mapping is None:
+        found = _find(node_class, extra, digest)
+    if found is None and twin is not None:
+        if isinstance(twin, node_class) and _content_digest(slot, twin) == digest:
             twin.base.extras.set_many(dict(extras))
             found = twin
-        elif twin is not None:
-            logger.warning('Node %s holds the uuid of %s %s; storing the new node '
-                           'under a random uuid', twin.pk, extra, digest)
+        else:
+            logger.warning('Node %s holds the uuid of %s %s but its content does '
+                           'not match; storing the new node under a random uuid',
+                           twin.pk, extra, digest)
             wanted = ''
     if found is None:
         found = build()
@@ -208,7 +250,7 @@ def get_or_create_block(content: Mapping[str, Any], *,
     """
     kind = block_kind(str(content.get('kind')))
     digest = block_hash(content)
-    return _get_or_create(orm.Dict, 'blocks', digest,
+    return _get_or_create('blocks', digest,
                           {BLOCK_HASH_EXTRA: digest, BLOCK_KIND_EXTRA: kind},
                           lambda: orm.Dict(dict(content)), index)
 
@@ -224,7 +266,7 @@ def get_or_create_schema(document: Mapping[str, Any], *,
     """The stored ``Dict`` of a schema document
     (:func:`src.aiida.block_schema.schema_document`), content-addressed like a block."""
     digest = schema_hash(document)
-    return _get_or_create(orm.Dict, 'schemas', digest, {SCHEMA_HASH_EXTRA: digest},
+    return _get_or_create('schemas', digest, {SCHEMA_HASH_EXTRA: digest},
                           lambda: orm.Dict(dict(document)), index)
 
 
@@ -301,7 +343,7 @@ def get_or_create_file(path: Path, name: Optional[str] = None, *,
         _put(node.base.repository, content, filename)
         return node
 
-    return _get_or_create(orm.SinglefileData, 'files', digest,
+    return _get_or_create('files', digest,
                           {FILE_SHA_EXTRA: digest}, build, index)
 
 
@@ -396,7 +438,7 @@ def get_or_create_provenance(provenance_file: Optional[Path],
             _put(node.base.repository, content, name)
         return node
 
-    return _get_or_create(orm.FolderData, 'folders', key, {FOLDER_SHA_EXTRA: key},
+    return _get_or_create('folders', key, {FOLDER_SHA_EXTRA: key},
                           build, index)
 
 
@@ -548,7 +590,7 @@ def verify() -> VerifyReport:
     """Report hashes held by more than one node, and stored hash extras that
     disagree with the node's content."""
     report = VerifyReport()
-    for _slot, node_class, extra in _SLOTS:
+    for _attr, node_class, extra, _slot in _SLOTS:
         qb = orm.QueryBuilder().append(
             node_class, tag='n', filters={'extras': {'has_key': extra}},
             project=[f'extras.{extra}', 'uuid'])
