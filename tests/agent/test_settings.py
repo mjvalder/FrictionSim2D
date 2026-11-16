@@ -187,9 +187,10 @@ def test_new_config_dir_is_owner_only(tmp_path):
 
 
 @pytest.mark.parametrize('size', ['2b', '4b', '9b'])
-def test_a_fine_tunes_first_name_is_renamed(tmp_path, size):
+@pytest.mark.parametrize('v', ['', '-v3'])
+def test_a_fine_tunes_first_name_is_renamed(tmp_path, size, v):
     from src.agent.settings import fallback_ollama_model
-    s = _legacy(tmp_path, f'fs2d-assistant:q35-{size}')
+    s = _legacy(tmp_path, f'fs2d-assistant:q35-{size}{v}')
     new = f'fs2d-assistant:qwen3.5-{size}'
     note = fallback_ollama_model(s, [new], [])
     assert s.ollama.model == new and 'now called' in note

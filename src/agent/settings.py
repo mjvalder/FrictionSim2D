@@ -23,9 +23,10 @@ OLLAMA_STOCK_MODEL = 'qwen3.5:4b'
 #: Models older agent.yaml files name: the Phase-0 derived model (never
 #: published) and the old default, whose template forces thinking (48 %, 44 s a turn).
 OLLAMA_LEGACY_MODELS = ('fs2d-qwen3-4b', 'qwen3:4b')
-#: The fine-tunes' first names (2026-11, before 'qwen3.5-<size>'): always renamed.
-OLLAMA_RENAMED = {f'fs2d-assistant:q35-{size}': f'fs2d-assistant:qwen3.5-{size}'
-                  for size in ('2b', '4b', '9b')}
+#: The fine-tunes' first names (2026-11, before 'qwen3.5-<size>', with or without the
+#: '-v3' of the round that shipped): always renamed.
+OLLAMA_RENAMED = {f'fs2d-assistant:q35-{size}{v}': f'fs2d-assistant:qwen3.5-{size}'
+                  for size in ('2b', '4b', '9b') for v in ('', '-v3')}
 #: agent.yaml from before the fine-tune default; `fallback_ollama_model` migrates it once.
 SETTINGS_VERSION = 2
 
