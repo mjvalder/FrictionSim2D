@@ -237,7 +237,6 @@ def _minimal_afm_config_with_secrets(tmp_path):
     )
 
 
-@pytest.mark.skip(reason='rebuild_set over the CalcJob graph is Task 10')
 def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_path,
                                                      monkeypatch):
     """`rebuild_set`'s exported `config.json` -- redacted at ingest time -- must
@@ -246,14 +245,14 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
     rebuild path (only `database.password`/`database.api_key`, plain `str`
     fields, are touched)."""
     root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
+    assert make_family_run(root, 'afm').relative_to(root).as_posix() == REL
 
     cfg = _minimal_afm_config_with_secrets(tmp_path)
     prov_dir = _prov_dir(root, REL)
     (prov_dir / 'config.json').write_text(cfg.model_dump_json(indent=2),
                                           encoding='utf-8')
 
-    import_root(root, label='secrets-rebuild')
+    assert import_root(root, label='secrets-rebuild').created_decks
     seen = {}
 
     class _FakeResult:

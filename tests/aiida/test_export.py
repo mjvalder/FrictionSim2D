@@ -1,660 +1,444 @@
-"""export-results is the inverse of ingest (spec §4.2)."""
+"""Export, rebuild and archive over the CalcJob graph (plan Task 10).
+
+`export_results` writes a set back into a tree `postprocess read` gives the
+same statuses on; `export_archive` writes one campaign as an `.aiida` archive
+gated on verdicts, closed over the campaign [I6], anonymised by default
+(ruling P2-R11), per-atom data opt-in, with JSON sidecars `compare` reads and a
+README [M4]. A second profile is `aiida_profile_clean.reset_storage()`.
+"""
 import json
-import re
-from pathlib import Path
+import sqlite3
+import zipfile
 
 import pytest
+import yaml
 
 pytest.importorskip('aiida')
-# The old set/run/result ingest is gone (plan Task 6, `import_root`);
-# Task 10 rewrites export over the CalcJob graph.
-pytest.skip('old ingest graph; Task 10 rewrites export over the CalcJob graph', allow_module_level=True)
-pytestmark = pytest.mark.aiida
+pytest.importorskip('scipy')
+pytestmark = [pytest.mark.aiida, pytest.mark.filterwarnings(
+    # aiida-core's own import-group warning (see tests/aiida/test_store.py).
+    'ignore:Object of type <DbGroup> not in session:sqlalchemy.exc.SAWarning')]
 
-from src.aiida.export import export_archive, export_results, import_archive, rebuild_set  # noqa: E402
-from src.aiida.ingest import ingest_root  # noqa: E402
-from src.run.tree import discover_runs  # noqa: E402
-from tests.helpers.synthetic_results import make_run  # noqa: E402
+from aiida import orm  # noqa: E402
 
-#: An AFM run: `rel_path` ends in `/K300/L2`, so -- exactly like a real
-#: AFMSimulation build -- `make_run` writes `provenance/` one level ABOVE the
-#: `L2` directory (shared by every layer), not inside it. `provenance.json`
-#: itself stays inside `L2`, alongside `lammps/` and `results/` (R18).
-REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
+import src.aiida.export as export_mod  # noqa: E402
+from src.aiida.compare import load_blocks, load_blocks_from_sidecar  # noqa: E402
+from src.aiida.export import (  # noqa: E402
+    ExportClosureError, UncheckedPointsError, export_archive, export_dataset,
+    export_results, import_archive, rebuild_set,
+)
+from src.aiida.ingest import import_root  # noqa: E402
+from src.aiida.query import related  # noqa: E402
+from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
+from src.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
+from src.postprocessing.read_data import DataReader  # noqa: E402
+from tests.aiida.test_steps_integrity import _pid, _write_ruling  # noqa: E402
+from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
+from tests.postprocessing.test_read_data_integrity import DECK, _afm_snapshots  # noqa: E402
 
-#: `langevin ... $(100.0*dt) <seed> zero yes tally yes` and
-#: `velocity ... create <temp> <seed>` -- the two RNG seeds
-#: `SimulationBase._run_seed` draws fresh with `random.randint` on every
-#: build. Used only by the real (non-mocked) round-trip test below to mask
-#: the one thing two builds of the same config are never expected to agree on.
-_LANGEVIN_SEED_RE = re.compile(r'(langevin\s+[\d.]+\s+[\d.]+\s+\$\([\d.]+\*dt\)\s+)\d+')
-_VELOCITY_SEED_RE = re.compile(r'(velocity\s+\S+\s+create\s+[\d.]+\s+)\d+')
+LOG = """LAMMPS (29 Aug 2024 - Update 1)
+Loop time of 12.5 on 4 procs for 1000 steps with 600 atoms
+Total wall time: 0:01:05
+"""
+OPTIONS = {'skip_fraction': 0.2}
+CALCJOB_TYPE = 'process.calculation.calcjob.CalcJobNode.'
 
 
-def _mask_rng_seeds(text: str) -> str:
-    text = _LANGEVIN_SEED_RE.sub(r'\1SEED', text)
-    return _VELOCITY_SEED_RE.sub(r'\1SEED', text)
+@pytest.fixture
+def no_profile_switch(monkeypatch):
+    """`aiida_profile_clean` is already loaded; do not load another."""
+    import src.aiida as aiida_pkg
+    monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
 
 
-def test_round_trip_rebuilds_the_tree(aiida_profile_clean, tmp_path):
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm', loads=(10.0, 30.0), tiers=('window', 'raw'))
-    ingest_root(root, label='rt')
+def _run(root, material='h-MoS2', *, loads=(10.0, 30.0, 50.0), eject=(),
+         quarantine=(), tiers=('window',)):
+    """An AFM run (system + slide deck) at `loads`: `eject` fail the integrity
+    check, `quarantine` lose their end snapshot."""
+    run_dir = make_family_run(root, 'afm', material=material, loads=loads, n=50,
+                              tiers=tiers, config=slide_config('afm', loads=loads))
+    (run_dir / 'lammps' / 'slide.in').write_text(DECK, encoding='utf-8')
+    for name in ('system', 'slide'):
+        (run_dir / 'lammps' / f'run_{name}.log').write_text(LOG, encoding='utf-8')
+    for load in loads:
+        _afm_snapshots(run_dir, load, eject=load in eject)
+    for load in quarantine:
+        for path in (run_dir / 'data').glob(f'final_f{load:g}N*'):
+            path.unlink()
+    return run_dir
 
-    written = export_results('rt', tmp_path / 'out')
 
-    out_run = tmp_path / 'out' / REL
-    assert (out_run / 'provenance.json').is_file()
-    # provenance/ is shared by every layer, so it lands one level up from L2
-    # (at .../K300/provenance), matching src.run.tree.provenance_dir_for --
-    # not inside L2 itself.
-    assert (out_run.parent / 'provenance' / 'config.json').is_file()
-    assert (out_run / 'lammps' / 'system.in').is_file()
-    assert {p.name for p in (out_run / 'results').iterdir()} == {
-        p.name for p in (root / REL / 'results').iterdir()}
-    assert (tmp_path / 'out' / 'settings.yaml').is_file()
+def _statuses(root):
+    """Every point the DataReader sees under `root`, with its status."""
+    out = {}
+    for point in DataReader(str(root)).points:
+        rel = point.locator.run_dir.resolve().relative_to(root.resolve()).as_posix()
+        out[(rel, point.load_kind, point.load, point.angle, point.speed)] = point.status
+    return out
+
+
+def _calcjobs(label):
+    group = orm.Group.collection.get(label=f'friction2d/{label}')
+    return [n for n in group.nodes if isinstance(n, orm.CalcJobNode)]
+
+
+def _archive_db(path, tmp_path):
+    db = tmp_path / f'{path.name}.sqlite3'
+    with zipfile.ZipFile(path) as archive:
+        db.write_bytes(archive.read('db.sqlite3'))
+    return sqlite3.connect(db)
+
+
+def _archive_calcjob_uuids(path, tmp_path):
+    con = _archive_db(path, tmp_path)
+    try:
+        return {u for (u,) in con.execute(
+            'SELECT uuid FROM db_dbnode WHERE node_type = ?', (CALCJOB_TYPE,))}
+    finally:
+        con.close()
+
+
+def _archive_text(path):
+    """Every entry of the archive, decompressed, as one text."""
+    with zipfile.ZipFile(path) as archive:
+        return '\n'.join(archive.read(name).decode('utf-8', errors='replace')
+                         for name in archive.namelist())
+
+
+# --- export_results: round trip ------------------------------------------------
+
+def test_round_trip_gives_the_source_statuses(aiida_profile_clean, no_profile_switch,
+                                              tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = _run(root, eject=(10.0,), quarantine=(50.0,), loads=(10.0, 30.0, 50.0, 70.0))
+    (run_dir / 'results' / 'halted.txt').write_text(
+        '# HALT stage=slide load=70 angle=0 speed=2 T=9000 step=3000\n', encoding='utf-8')
+    _write_ruling(root, _pid(root, 50.0), 'pass')
+    report = import_root(root, label='camp')
+    assert report.ok(), report.render()
+    assert report.rulings.applied == 1           # import_root applies the rulings
+    source = _statuses(root)
+    assert set(source.values()) >= {'complete', 'failed_integrity', 'halted'}
+
+    written = export_results('camp', tmp_path / 'out')
+
     assert written == sorted(written)
+    assert _statuses(tmp_path / 'out') == source
 
 
-def test_exported_tree_is_discoverable_again(aiida_profile_clean, tmp_path):
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    ingest_root(root, label='rt2')
+def test_export_results_writes_the_run_layout(aiida_profile_clean, no_profile_switch,
+                                              tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = _run(root, loads=(10.0, 30.0))
+    rel = run_dir.relative_to(root).as_posix()
+    assert import_root(root, label='camp').ok()
 
-    export_results('rt2', tmp_path / 'out')
+    export_results('camp', tmp_path / 'out')
 
-    original, = discover_runs(root)
-    exported, = discover_runs(tmp_path / 'out')
-    assert exported.tokens == original.tokens
-
-
-def test_exported_results_bytes_are_identical(aiida_profile_clean, tmp_path):
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    ingest_root(root, label='rt3')
-
-    export_results('rt3', tmp_path / 'out')
-
-    name = 'friction_f30_a0_s2_layer2.txt'
-    assert (tmp_path / 'out' / REL / 'results' / name).read_bytes() == \
-        (root / REL / 'results' / name).read_bytes()
+    out = tmp_path / 'out' / rel
+    assert (out / 'provenance.json').is_file()
+    # AFM: provenance/ is shared by every layer, one level above L2.
+    assert (out.parent / 'provenance' / 'config.json').is_file()
+    assert {p.name for p in (out / 'lammps').glob('*.in')} == {'system.in', 'slide.in'}
+    assert (out / 'lammps' / 'run_slide.log').read_text(encoding='utf-8') == LOG
+    assert {p.name for p in (out / 'results').iterdir()} == {
+        p.name for p in (run_dir / 'results').iterdir()}
+    assert {p.name for p in (out / 'data').iterdir()} == {
+        p.name for p in (run_dir / 'data').iterdir()}
+    for name in ('load_10N.data', 'final_f30N_a0.data'):
+        assert (out / 'data' / name).read_bytes() == (run_dir / 'data' / name).read_bytes()
 
 
-def test_unknown_label_raises(aiida_profile_clean, tmp_path):
-    with pytest.raises(LookupError, match='no simulation set'):
+def test_export_results_of_an_unknown_set_is_a_lookup_error(aiida_profile_clean,
+                                                            no_profile_switch, tmp_path):
+    with pytest.raises(LookupError, match='nope'):
         export_results('nope', tmp_path / 'out')
 
 
-def test_superseded_results_are_excluded_from_export(aiida_profile_clean, tmp_path):
-    """A re-ingested load point supersedes its old node (Task 16); the two
-    share the same run-relative file name, so export must only ever write
-    back the CURRENT one, never the stale one it replaced.
-
-    Asserts `_results_of` returns exactly one node directly (not just the
-    end-to-end byte comparison below): a QueryBuilder with no `order_by`
-    happens to return the new node last on this backend today, so the
-    dump-order "last write wins" would pass the byte check by coincidence --
-    the direct count is what actually pins the fix down.
-    """
-    from src.aiida.export import _results_of, resolve_set  # pylint: disable=protected-access
-    from src.aiida.ingest import find_or_create_run
-    from tests.helpers.synthetic_results import write_results
-
-    root = tmp_path / 'simulation_super'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    ingest_root(root, label='rt5')
-
-    name = 'friction_f30_a0_s2_layer2.txt'
-    old_bytes = (root / REL / 'results' / name).read_bytes()
-
-    # Same load point (force=30, angle=0, speed=2, layer=2), different bytes
-    # -- a re-run, not a duplicate.
-    write_results(root / REL, 'afm', load_kind='force', loads=(30.0,),
-                  layers=2, n=99)
-    new_bytes = (root / REL / 'results' / name).read_bytes()
-    assert new_bytes != old_bytes
-
-    report = ingest_root(root, label='rt5')
-    assert report.superseded_results
-
-    set_node = resolve_set('rt5')
-    loc, = discover_runs(root)
-    run_node, created = find_or_create_run(set_node, loc)
-    assert not created  # already exists from the ingest above
-
-    results = _results_of(run_node)
-    assert len(results) == 1
-    assert not results[0].base.extras.get('superseded', False)
-
-    export_results('rt5', tmp_path / 'out')
-
-    assert (tmp_path / 'out' / REL / 'results' / name).read_bytes() == new_bytes
-
-
-def test_oversize_run_files_are_logged_not_silently_dropped(
-        aiida_profile_clean, tmp_path, caplog):
-    """A file over `max_mb` is never stored (Task 16 R11c); export must say
-    so rather than silently produce a tree missing it."""
-    from src.aiida.data import FrictionSimulationData
-    from src.aiida.ingest import find_or_create_set
-
-    root = tmp_path / 'simulation_over'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    loc, = discover_runs(root)
-    set_node = find_or_create_set(root, 'rt-over')
-
-    node = FrictionSimulationData()
-    node.set_from_locator(loc, set_uuid=str(set_node.uuid), set_label=set_node.label)
-    node.add_run_files(loc, max_mb=0)  # forces every candidate file "oversize"
-    node.store()
-
-    with caplog.at_level('WARNING', logger='src.aiida.export'):
-        export_results('rt-over', tmp_path / 'out')
-
-    assert not (tmp_path / 'out' / REL / 'provenance.json').exists()
-    assert any('provenance.json' in message for message in caplog.messages)
-
-
-def test_oversize_result_aux_files_are_logged_not_silently_dropped(
-        aiida_profile_clean, tmp_path, caplog):
-    """Same as above, for a `FrictionResultsData` aux file (tier files are
-    always stored regardless of size -- only an aux file, like a hold/final
-    artefact, is ever recorded as oversize)."""
-    from src.aiida.data import FrictionResultsData
-    from src.aiida.ingest import find_or_create_run, find_or_create_set
-
-    root = tmp_path / 'simulation_over2'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    (root / REL / 'data').mkdir(exist_ok=True)
-    (root / REL / 'data' / 'final_f30.data').write_text('x' * 10, encoding='utf-8')
-    loc, = discover_runs(root)
-    set_node = find_or_create_set(root, 'rt-over2')
-    run_node, _created = find_or_create_run(set_node, loc)
-
-    tier_path = root / REL / 'results' / 'friction_f30_a0_s2_layer2.txt'
-    aux_path = root / REL / 'data' / 'final_f30.data'
-    node = FrictionResultsData()
-    node.family = 'afm'
-    node.load_kind = 'force'
-    node.load = 30.0
-    node.angle = 0.0
-    node.speed = 2.0
-    node.layers = 2
-    node.run_uuid = str(run_node.uuid)
-    node.set_uuid = str(run_node.set_uuid)
-    node.add_result_files({'window': tier_path}, run_dir=loc.run_dir,
-                          aux=(aux_path,), max_mb=0, content_sha256='deadbeef')
-    node.store()
-
-    with caplog.at_level('WARNING', logger='src.aiida.export'):
-        export_results('rt-over2', tmp_path / 'out')
-
-    assert not (tmp_path / 'out' / REL / 'data' / 'final_f30.data').exists()
-    assert any('final_f30.data' in message for message in caplog.messages)
-
-
-def test_reexport_overwrites_stale_files_and_writes_shared_provenance_once(
-        aiida_profile_clean, tmp_path):
-    """A re-export into a non-empty `dest` must overwrite whatever is already
-    there -- from an earlier export or a hand-edit -- never trust it. The
-    dedup that skips rewriting the shared AFM `provenance/**` subtree is
-    about not rewriting a path THIS call already wrote, not about the
-    filesystem; the multi-layer case (L1 and L2 share one `provenance/`)
-    must still only write that shared subtree once per call.
-    """
-    root = tmp_path / 'simulation_multi'
-    base = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300'
-    make_run(root, f'{base}/L1', 'afm', loads=(30.0,))
-    make_run(root, f'{base}/L2', 'afm', loads=(30.0,))
-    ingest_root(root, label='rt-multi')
-
-    out = tmp_path / 'out'
-    written = export_results('rt-multi', out)
-    shared = [p for p in written
-             if p.as_posix().endswith(f'{base}/provenance/config.json')]
-    assert len(shared) == 1
-
-    provenance_config = out / base / 'provenance' / 'config.json'
-    lammps_file = out / base / 'L1' / 'lammps' / 'system.in'
-    original_config = provenance_config.read_bytes()
-    original_lammps = lammps_file.read_bytes()
-
-    provenance_config.write_bytes(b'corrupted')
-    lammps_file.write_bytes(b'corrupted')
-
-    export_results('rt-multi', out)
-
-    assert provenance_config.read_bytes() == original_config
-    assert lammps_file.read_bytes() == original_lammps
-
-
-def test_sheet_like_provenance_stays_at_the_run_level(aiida_profile_clean, tmp_path):
-    """A sheet-like run has no shared per-layer provenance -- unlike AFM,
-    `provenance/` lives right next to `provenance.json`, inside the run
-    directory itself (`src.run.tree.provenance_dir_for`'s "both in the same
-    place" branch)."""
-    root = tmp_path / 'simulation_y'
-    rel = 'sheetonsheet/h-MoS2/100x_100y/K300'
-    make_run(root, rel, 'sheetonsheet')
-    ingest_root(root, label='rt4')
-
-    export_results('rt4', tmp_path / 'out')
-
-    out_run = tmp_path / 'out' / rel
-    assert (out_run / 'provenance' / 'config.json').is_file()
-
-
-class _FakeResult:
-    """Stand-in for `GenerationResult` -- only the fields `rebuild_set` reads."""
-
-    def __init__(self, created=None, simulation_root=None):
-        self.created = created if created is not None else []
-        self.simulation_root = simulation_root
-        self.failures = []
-
-
-def test_rebuild_calls_generate_package_once_per_run(aiida_profile_clean, tmp_path,
-                                                     monkeypatch):
-    """One call per DISTINCT stored config, not one per run and not one per
-    model: a second `afm` run with a different material must still get its
-    own call.
-
-    `generate_package` is patched at `src.aiida.export.generate_package` (an
-    allowed `src.aiida.` boundary), not `src.run.artifacts.generate_package`
-    (refused by `tests/repo/test_mock_targets.py`'s ratchet) -- `rebuild_set`
-    imports the name at module level specifically so this is the patch point
-    that actually intercepts the call.
-    """
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    # a SECOND afm run: rebuild must call the builder for it too, not once per model
-    make_run(root, 'afm/h-WS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2', 'afm')
-    make_run(root, 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1', 'indent')
-    ingest_root(root, label='rb')
+def test_rebuild_set_hands_each_config_once_to_the_router(aiida_profile_clean,
+                                                          no_profile_switch, tmp_path,
+                                                          monkeypatch):
+    root = tmp_path / 'sim'
+    _run(root, 'h-MoS2', loads=(10.0,))
+    _run(root, 'h-WS2', loads=(10.0,))
+    assert import_root(root, label='camp').ok()
     calls = []
 
-    def _fake(config_file, model, **kwargs):
-        calls.append((Path(config_file).name, model, kwargs))
-        return _FakeResult(created=[tmp_path / 'built'],
-                          simulation_root=tmp_path / 'built_root')
-
-    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
-
-    created, out_root = rebuild_set('rb', tmp_path / 'rebuilt')
-
-    assert len(calls) == 3
-    assert sorted(m for _c, m, _k in calls) == ['afm', 'afm', 'indent']
-    assert all(name == 'config.json' for name, _m, _k in calls)
-    assert all(k['simulation_root_name'] == '.' for _c, _m, k in calls)
-    assert all(k['use_aiida'] is False for _c, _m, k in calls)
-    assert all(k['allow_generate_amorphous'] is False for _c, _m, k in calls)
-    assert out_root == tmp_path / 'rebuilt'
-    assert len(created) == 3
-
-
-def test_rebuild_uses_the_stored_settings_not_the_defaults(aiida_profile_clean,
-                                                           tmp_path, monkeypatch):
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    ingest_root(root, label='rb2')
-    seen = {}
+    class _Result:  # pylint: disable=too-few-public-methods
+        created, failures = [], []
 
     def _fake(config_file, model, **kwargs):
-        # Checked from inside the call, not after `rebuild_set` returns: the
-        # staging directory is a `tempfile.TemporaryDirectory()` (R17) and is
-        # gone by the time the call comes back, so this is the only point at
-        # which the exported settings.yaml can still be read.
-        settings_file = kwargs['settings_file']
-        seen['name'] = Path(settings_file).name
-        seen['existed'] = Path(settings_file).is_file()
-        return _FakeResult(simulation_root=tmp_path / 'r')
+        calls.append((json.loads(config_file.read_text(encoding='utf-8')), model, kwargs))
+        return _Result()
 
-    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
+    monkeypatch.setattr(export_mod, 'generate_package', _fake)
+    created, dest = rebuild_set('camp', tmp_path / 'rebuilt')
 
-    rebuild_set('rb2', tmp_path / 'rebuilt')
-
-    assert seen['name'] == 'settings.yaml'
-    assert seen['existed'] is True
+    assert created == [] and dest == tmp_path / 'rebuilt'
+    assert len(calls) == 2
+    assert {model for _c, model, _k in calls} == {'afm'}
+    for _config, _model, kwargs in calls:
+        assert kwargs['use_aiida'] is False and kwargs['simulation_root_name'] == '.'
+        assert kwargs['allow_generate_amorphous'] is False
+        assert kwargs['output_root'] == tmp_path / 'rebuilt'
 
 
-def test_rebuild_refuses_an_unknown_label(aiida_profile_clean, tmp_path):
-    with pytest.raises(LookupError, match='no simulation set'):
-        rebuild_set('nope', tmp_path / 'rebuilt')
+# --- export_archive: gate, contents --------------------------------------------
+
+def test_an_unchecked_point_blocks_the_archive_unless_forced(aiida_profile_clean,
+                                                             no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0, 30.0))
+    report = import_root(root, label='camp')
+    assert report.ok(), report.render()
+    point = next(orm.load_node(u) for u in report.points
+                 if orm.load_node(u).base.attributes.get('load') == 30.0)
+    from src.aiida.steps import latest_verdict
+    latest_verdict(point).base.extras.set('superseded', True)
+
+    with pytest.raises(UncheckedPointsError) as caught:
+        export_archive('camp', tmp_path / 'camp.aiida')
+    (line,) = caught.value.points
+    assert point.base.attributes.get('point_uuid') in line and 'force30_a0_s2' in line
+    assert not (tmp_path / 'camp.aiida').exists()
+
+    path = export_archive('camp', tmp_path / 'camp.aiida', force=True)
+    assert path.is_file()
 
 
-def test_rebuild_dedupes_shared_afm_config_across_layers(aiida_profile_clean,
-                                                         tmp_path, monkeypatch):
-    """`L1` and `L2` of one AFM layer sweep share ONE stored `config.json`
-    (`run_simulations` already flattened the sweep into one member that built
-    every layer) -- rebuilding must call `generate_package` once for the pair,
-    not once per `L{n}` run node, or it would redo the whole layer sweep a
-    second time.
-    """
-    root = tmp_path / 'simulation_multi'
-    base = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300'
-    make_run(root, f'{base}/L1', 'afm', loads=(30.0,))
-    make_run(root, f'{base}/L2', 'afm', loads=(30.0,))
-    ingest_root(root, label='rb-dedup')
-    calls = []
-
-    def _fake(config_file, model, **kwargs):
-        calls.append(Path(config_file).resolve())
-        return _FakeResult(created=[tmp_path / 'built'])
-
-    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
-
-    created, _out_root = rebuild_set('rb-dedup', tmp_path / 'rebuilt')
-
-    assert len(calls) == 1
-    assert len(created) == 1
-
-
-def test_rebuild_stages_inputs_outside_dest(aiida_profile_clean, tmp_path,
-                                            monkeypatch):
-    """The staging export must live outside `dest`, in a real temp directory
-    that is gone once `rebuild_set` returns -- never `dest/something`, which
-    `JobManifest.from_simulation_directory`'s `rglob('lammps')` would also
-    find once `generate_hpc=True` builds real `lammps/` directories into
-    `dest`, duplicating every job (R17).
-    """
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    ingest_root(root, label='rb-stage')
-    seen = {}
-
-    def _fake(config_file, model, **kwargs):
-        seen['config_dir'] = Path(config_file).resolve().parent
-        seen['settings_dir'] = Path(kwargs['settings_file']).resolve().parent
-        return _FakeResult()
-
-    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
-
-    dest = tmp_path / 'rebuilt'
-    rebuild_set('rb-stage', dest)
-
-    dest = dest.resolve()
-    assert dest not in seen['config_dir'].parents and seen['config_dir'] != dest
-    assert dest not in seen['settings_dir'].parents and seen['settings_dir'] != dest
-    # the TemporaryDirectory is cleaned up on exit -- nothing was left behind
-    assert not seen['config_dir'].exists()
-    assert not seen['settings_dir'].exists()
-
-
-def _minimal_sheet_flake_config(tmp_path):
-    """A real, validating `SheetOnSheetSimulationConfig` with a `[Flake]`
-    section -- `flake_slide.py`'s `FlakeSlideSimulation` route -- built the
-    same way `tests/core/test_config.py`'s fixtures do (a dummy pot/cif file
-    on disk, real content unneeded since nothing here builds a structure).
-
-    `[Flake]` carries only `edge_length`: no `mat`/`pot_type`/`pot_path`/
-    `cif_path` of its own -- the common single-material case, where the flake
-    is carved from the `[2D]` sheet's own material rather than naming a
-    second one. `ComponentConfig.check_pot_type`'s `None` guard (added
-    alongside this fixture) is what makes this dump-and-reload safe at all;
-    before it, an unset flake `pot_type` round-tripped through
-    `model_dump_json()`'s explicit `null` into an `AttributeError` on reload,
-    independent of the alias fix this fixture exists to exercise.
-    """
-    from src.core.config import SheetOnSheetSimulationConfig, load_settings
-
-    dummy_pot = tmp_path / 'dummy.sw'
-    dummy_cif = tmp_path / 'dummy.cif'
-    dummy_pot.write_text('# dummy potential\n', encoding='utf-8')
-    dummy_cif.write_text('# dummy cif\n', encoding='utf-8')
-
-    return SheetOnSheetSimulationConfig(
-        general={'temp': 300.0},
-        **{'2D': {'mat': 'MoS2', 'pot_type': 'sw', 'pot_path': str(dummy_pot),
-                  'cif_path': str(dummy_cif), 'x': 50.0, 'y': 50.0,
-                  'layers': [1], 'stack_type': 'AB'},
-           'Flake': {'edge_length': 20.0}},
-        settings=load_settings(),
-    )
-
-
-def test_normalize_config_aliases_lets_a_flake_slide_config_reload(tmp_path):
-    """Unit-level check of `_normalize_config_aliases`, independent of the
-    full `rebuild_set` flow covered below: a sheet-on-sheet config with a
-    `[Flake]` section, dumped the way `run_simulations` stores it (field
-    names, no `by_alias=True`) and normalized back, must reload with
-    `flake` still populated -- `SheetOnSheetSimulationConfig.flake` has
-    `alias='Flake'` and neither `populate_by_name` nor `validate_by_name`,
-    so the un-normalized field-name key `'flake'` silently validates to
-    `None` instead of raising.
-    """
-    from src.aiida.export import _normalize_config_aliases  # pylint: disable=import-outside-toplevel
-    from src.core.config import SheetOnSheetSimulationConfig  # pylint: disable=import-outside-toplevel
-
-    original = _minimal_sheet_flake_config(tmp_path)
-    assert original.flake is not None  # sanity: the fixture really has a flake
-
-    dumped = json.loads(original.model_dump_json())
-    assert 'flake' in dumped and 'Flake' not in dumped  # field name, not the alias
-    assert dumped['flake'] is not None
-
-    # Isolate the flake defect from the '2D' one (also present, and covered by
-    # the AFM-side tests/integration test): fix '2D' by hand first, so
-    # reloading fails ONLY on the still-unfixed 'flake' key, silently
-    # dropping it to its default rather than raising.
-    isolated = dict(dumped)
-    isolated['2D'] = isolated.pop('sheet')
-    assert SheetOnSheetSimulationConfig(**isolated).flake is None
-
-    _normalize_config_aliases(dumped, SheetOnSheetSimulationConfig)
-    assert 'Flake' in dumped and 'flake' not in dumped
-
-    reloaded = SheetOnSheetSimulationConfig(**dumped)
-    assert reloaded.flake is not None
-    assert reloaded.flake.edge_length == 20.0
-
-    # Idempotent: normalizing an already-fixed dict changes nothing further.
-    before = json.loads(json.dumps(dumped))
-    _normalize_config_aliases(dumped, SheetOnSheetSimulationConfig)
-    assert dumped == before
-
-
-def test_rebuild_normalizes_flake_alias_so_the_config_routes_to_flake_slide(
-        aiida_profile_clean, tmp_path, monkeypatch):
-    """End-to-end (`generate_package` mocked at the allowed `src.aiida.`
-    boundary): a stored sheet-on-sheet run whose `config.json` has a
-    `[Flake]` section must reach `generate_package` with that section
-    restored, or `run.simulate._select_sheet_builder_cls` -- the REAL
-    selector, not a reimplementation of it -- would route it to the plain
-    `SheetOnSheetSimulation` instead of `FlakeSlideSimulation`, silently
-    building the wrong thing with no error at all.
-    """
-    from src.core.config import SheetOnSheetSimulationConfig  # pylint: disable=import-outside-toplevel
-    from src.run.simulate import _select_sheet_builder_cls  # pylint: disable=import-outside-toplevel
-    from src.builders.sheetonsheet.flake_slide import FlakeSlideSimulation  # pylint: disable=import-outside-toplevel
-
-    root = tmp_path / 'simulation_flake'
-    rel = 'sheetonsheet/h-MoS2/100x_100y/K300'
-    make_run(root, rel, 'sheetonsheet')
-
-    flake_cfg = _minimal_sheet_flake_config(tmp_path)
-    assert flake_cfg.flake is not None
-    (root / rel / 'provenance' / 'config.json').write_text(
-        flake_cfg.model_dump_json(indent=2), encoding='utf-8')
-
-    ingest_root(root, label='rb-flake')
-    seen = {}
-
-    def _fake(config_file, model, **kwargs):
-        data = json.loads(Path(config_file).read_text(encoding='utf-8'))
-        seen['config_obj'] = SheetOnSheetSimulationConfig(**data)
-        return _FakeResult()
-
-    monkeypatch.setattr('src.aiida.export.generate_package', _fake)
-
-    rebuild_set('rb-flake', tmp_path / 'rebuilt')
-
-    assert seen['config_obj'].flake is not None
-    assert seen['config_obj'].flake.edge_length == 20.0
-    assert _select_sheet_builder_cls('sheetonsheet',
-                                     seen['config_obj']) is FlakeSlideSimulation
-
-
-@pytest.mark.integration
-def test_rebuild_round_trips_a_real_build_through_the_router(aiida_profile_clean,
-                                                              tmp_path):
-    """The one non-mocked check in this file: a stored `config.json` --
-    `model_dump()` with `settings` embedded, as `run_simulations` writes it --
-    actually round-trips through the real `generate_package` router, giving
-    back the same run layout and the same LAMMPS inputs. Every other test
-    here mocks `generate_package`, which only proves the plumbing calls it
-    correctly, not that what it stores can be read back by the real builder.
-
-    Compared after masking the `langevin`/`velocity create` RNG seeds: those
-    are drawn fresh with `random.randint` on every build by design
-    (`src.builders.simulation_base.SimulationBase._run_seed` -- "a fresh seed
-    per run is mandatory", never reused across builds of the same config), so
-    a second build of the identical config is expected to draw different
-    seeds. Everything else in the script -- box, materials, groups, fixes,
-    potentials, paths -- must still match exactly.
-    """
-    from tests.helpers.examples import build  # pylint: disable=import-outside-toplevel
-
-    built_root = tmp_path / 'built'
-    result = build('afm_config.ini', 'afm', built_root)
-    if not result.created:
-        pytest.skip("examples/afm_config.ini did not build in this environment "
-                   f"(missing material/potential fixtures?): "
-                   f"{[f.render() for f in result.failures]}")
-
-    ingest_root(result.simulation_root, label='rb-real')
-
-    rebuilt_dest = tmp_path / 'rebuilt'
-    created, out_root = rebuild_set('rb-real', rebuilt_dest)
-
-    assert created
-    assert out_root == rebuilt_dest
-
-    original = {loc.tokens.rel_path: loc for loc in discover_runs(result.simulation_root)}
-    rebuilt = {loc.tokens.rel_path: loc for loc in discover_runs(rebuilt_dest)}
-    assert original.keys() == rebuilt.keys()
-    assert original  # discover_runs found at least one run in each tree
-
-    for rel_path, orig_loc in original.items():
-        rebuilt_loc = rebuilt[rel_path]
-        orig_scripts = {p.name: _mask_rng_seeds(p.read_text(encoding='utf-8'))
-                        for p in orig_loc.lammps_dir.glob('*.in')}
-        rebuilt_scripts = {p.name: _mask_rng_seeds(p.read_text(encoding='utf-8'))
-                           for p in rebuilt_loc.lammps_dir.glob('*.in')}
-        assert orig_scripts, f"{orig_loc.lammps_dir} had no *.in scripts to compare"
-        assert orig_scripts == rebuilt_scripts, f"{rel_path}: rebuilt *.in differs"
-
-
-def test_archive_round_trip_keeps_the_set_and_its_group(aiida_profile_clean, tmp_path):
-    """R19: an archive of the set's nodes alone creates no `friction2d/<label>`
-    group on import, so the imported set would be invisible to
-    `resolve_set`/`export`/`delete` -- breaking the hpc-direct mode (spec
-    §4.3). `export_archive` must archive the GROUP too, and the same
-    set/run/results query run before export must return the same result
-    after a round trip through a clean profile.
-    """
-    from aiida.orm import Group, QueryBuilder
-
-    from src.aiida.data import (FrictionResultsData, FrictionSimulationData,
-                                FrictionSimulationSetData)
-    from src.aiida.ingest import group_label
-
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    ingest_root(root, label='arch')
-
-    archive = export_archive('arch', tmp_path / 'arch.aiida')
-    assert archive.is_file()
+def test_archive_carries_verdicts_summaries_and_the_schema(aiida_profile_clean,
+                                                          no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0, 30.0))
+    assert import_root(root, label='camp').ok()
+    assert postprocess_group('camp', options=OPTIONS) == 2
+    path = export_archive('camp', tmp_path / 'camp.aiida')
+    readme = tmp_path / 'camp.aiida.README.md'
+    assert readme.is_file()
+    text = readme.read_text(encoding='utf-8')
+    for needle in ('points__', 'snapshots__', 'peratom__', 'blocks__',
+                   "parameters['block_names']", 'email', 'RemoteData', 'MB'):
+        assert needle in text, needle
 
     aiida_profile_clean.reset_storage()
-    from aiida.orm import Node
-    assert QueryBuilder().append(Node).count() == 0
+    assert import_archive(path) > 0
 
-    n_new = import_archive(archive)
+    def outputs_of(label):
+        qb = orm.QueryBuilder().append(orm.CalcFunctionNode, tag='f',
+                                       filters={'attributes.process_label': label})
+        return qb.append(orm.Dict, with_incoming='f').all(flat=True)
 
-    assert n_new >= 3
-    assert QueryBuilder().append(FrictionSimulationSetData).count() == 1
-    assert QueryBuilder().append(FrictionSimulationData).count() == 1
-    assert QueryBuilder().append(FrictionResultsData).count() == 1
-    set_node = QueryBuilder().append(FrictionSimulationSetData).first(flat=True)
-    assert set_node.label == 'arch'
-
-    group = Group.collection.get(label=group_label('arch'))
-    group_node_uuids = {node.uuid for node in group.nodes}
-    assert set_node.uuid in group_node_uuids
-    run_node = QueryBuilder().append(FrictionSimulationData).first(flat=True)
-    results_node = QueryBuilder().append(FrictionResultsData).first(flat=True)
-    assert run_node.uuid in group_node_uuids
-    assert results_node.uuid in group_node_uuids
+    assert len(outputs_of('check_integrity')) == 2
+    assert len(outputs_of('summarise')) == 2
+    (calc, *_rest) = _calcjobs('camp')
+    assert calc.inputs.schema['fields']['derived.drive_k']['unit'] == 'eV/angstrom^2'
+    assert verify().ok, verify().render()
 
 
-def test_archive_of_an_unknown_label_raises(aiida_profile_clean, tmp_path):
-    with pytest.raises(LookupError, match='no simulation set'):
-        export_archive('nope', tmp_path / 'x.aiida')
+def test_peratom_nodes_are_opt_in(aiida_profile_clean, no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0, 30.0), tiers=('window', 'peratom'))
+    assert import_root(root, label='camp').ok()
 
+    def peratom_count():
+        return orm.QueryBuilder().append(orm.CalcJobNode, tag='c').append(
+            orm.FolderData, with_incoming='c',
+            edge_filters={'label': {'like': 'peratom__%'}}).count()
 
-def test_reimporting_the_same_archive_leaves_no_stray_group(aiida_profile_clean,
-                                                             tmp_path):
-    """The archive already carries its own `friction2d/<label>` group (R19);
-    letting `aiida.tools.archive.import_archive` also create its default,
-    timestamp-labelled "import group" on every call leaves one of those
-    behind per import -- confirmed on a re-import, where nodes and the
-    `friction2d` group dedup correctly (n_new=0) but a stray
-    `20260922-...`-style group is still created. `import_archive` must pass
-    `create_group=False` so importing the same archive twice leaves exactly
-    one `Group` total.
-    """
-    from aiida.orm import Group, QueryBuilder
-
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    ingest_root(root, label='arch2')
-    archive = export_archive('arch2', tmp_path / 'arch2.aiida')
-
-    n_first = import_archive(archive)
-    assert n_first == 0  # already present in this profile (same one that exported it)
-    assert QueryBuilder().append(Group).count() == 1
-
-    n_second = import_archive(archive)
-    assert n_second == 0
-    assert QueryBuilder().append(Group).count() == 1
-
-
-def test_archive_round_trip_preserves_superseded_extras(aiida_profile_clean, tmp_path):
-    """`superseded` is an AiiDA *extra*, not an attribute -- must survive the
-    archive round trip so a re-imported store never re-serves a stale result
-    that `export_results` on the original profile would have excluded.
-    """
-    from aiida.orm import QueryBuilder
-
-    from src.aiida.data import FrictionResultsData
-    from src.aiida.export import resolve_set
-    from src.aiida.ingest import find_or_create_run
-
-    root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm', loads=(30.0,))
-    ingest_root(root, label='arch3')
-
-    set_node = resolve_set('arch3')
-    loc, = discover_runs(root)
-    run_node, _created = find_or_create_run(set_node, loc)
-    qb = QueryBuilder()
-    qb.append(FrictionResultsData, filters={'attributes.run_uuid': str(run_node.uuid)})
-    results_node = qb.first(flat=True)
-    results_node.base.extras.set('superseded', True)
-    old_uuid = results_node.uuid
-
-    archive = export_archive('arch3', tmp_path / 'arch3.aiida')
+    assert peratom_count() == 2
+    lean = export_archive('camp', tmp_path / 'lean.aiida', force=True)
+    full = export_archive('camp', tmp_path / 'full.aiida', force=True, include_peratom=True)
+    assert peratom_count() == 2                       # the local store keeps them
+    assert lean.stat().st_size < full.stat().st_size
 
     aiida_profile_clean.reset_storage()
-    import_archive(archive)
+    import_archive(lean)
+    assert peratom_count() == 0
+    assert all(p.base.attributes.get('has_peratom') for c in _calcjobs('camp')
+               if 'points' in c.outputs for p in c.outputs.points.values())
+    aiida_profile_clean.reset_storage()
+    import_archive(full)
+    assert peratom_count() == 2
 
-    qb = QueryBuilder()
-    qb.append(FrictionResultsData)
-    reimported = qb.first(flat=True)
-    assert reimported.uuid == old_uuid
-    assert reimported.base.extras.get('superseded', False) is True
 
-    written = export_results('arch3', tmp_path / 'out')
-    name = 'friction_f30_a0_s2_layer2.txt'
-    assert not any(p.name == name for p in written)
-    assert not (tmp_path / 'out' / REL / 'results' / name).exists()
+# --- closure [I6] ---------------------------------------------------------------
+
+def test_a_cross_campaign_dataset_does_not_pull_the_other_campaign_in(
+        aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
+    _run(tmp_path / 'a', 'h-MoS2', loads=(10.0,))
+    _run(tmp_path / 'b', 'h-WS2', loads=(10.0,))
+    assert import_root(tmp_path / 'a', label='A').ok()
+    assert import_root(tmp_path / 'b', label='B').ok()
+    postprocess_group('A', options=OPTIONS)
+    postprocess_group('B', options=OPTIONS)
+    table = build_dataset('both', ['A', 'B'], options=OPTIONS)
+    assert {row['set'] for row in table['rows']} == {'A', 'B'}
+    b_calcs = {c.uuid for c in _calcjobs('B')}
+
+    path = export_archive('A', tmp_path / 'a.aiida')
+
+    in_archive = _archive_calcjob_uuids(path, tmp_path)
+    assert in_archive == {c.uuid for c in _calcjobs('A')}
+    assert not in_archive & b_calcs
+    con = _archive_db(path, tmp_path)
+    groups = {label for (label,) in con.execute('SELECT label FROM db_dbgroup')}
+    con.close()
+    assert groups == {'friction2d/A'}
+
+    real = export_mod._start_pks
+    foreign = _calcjobs('B')[0]
+    monkeypatch.setattr(export_mod, '_start_pks',
+                        lambda group, **kw: real(group, **kw) | {foreign.pk})
+    with pytest.raises(ExportClosureError) as caught:
+        export_archive('A', tmp_path / 'leak.aiida')
+    assert any(foreign.uuid in line for line in caught.value.calcjobs)
+    assert not (tmp_path / 'leak.aiida').exists()
+
+
+def test_a_dataset_is_its_own_archive(aiida_profile_clean, no_profile_switch, tmp_path):
+    _run(tmp_path / 'a', 'h-MoS2', loads=(10.0,))
+    _run(tmp_path / 'b', 'h-WS2', loads=(10.0,))
+    import_root(tmp_path / 'a', label='A')
+    import_root(tmp_path / 'b', label='B')
+    postprocess_group('A', options=OPTIONS)
+    postprocess_group('B', options=OPTIONS)
+    table_uuid = build_dataset('both', ['A', 'B'], options=OPTIONS).uuid
+    calcs = {c.uuid for label in ('A', 'B') for c in _calcjobs(label)
+             if 'points' in c.outputs}
+
+    path = export_dataset('both', tmp_path / 'both.aiida')
+
+    assert calcs <= _archive_calcjob_uuids(path, tmp_path)
+    aiida_profile_clean.reset_storage()
+    import_archive(path)
+    group = orm.Group.collection.get(label='friction2d/datasets/both')
+    assert table_uuid in {n.uuid for n in group.nodes}
+    with pytest.raises(LookupError, match='none'):
+        export_dataset('none', tmp_path / 'none.aiida')
+
+
+# --- Review Focus 3 [C2]: two profiles share hashed nodes -----------------------
+
+def test_a_campaign_imported_into_another_profile_joins_its_shared_blocks(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    from src.aiida.store import machine_computer
+    from tests.aiida.test_query import A_UUID, B_UUID, _campaign
+
+    a = _campaign(tmp_path / 'A', A_UUID, machine_computer('localhost', {}),
+                  loads=(10.0,), timestep=0.001)
+    (a_calc,) = [c for c in _calcjobs('A') if 'points' in c.outputs]
+    a_hashes = {name: node.base.extras.get(BLOCK_HASH_EXTRA)
+                for name, node in a_calc.inputs.blocks.items()}
+    a_point = a[10.0].uuid
+    path = export_archive('A', tmp_path / 'a.aiida', force=True)
+
+    aiida_profile_clean.reset_storage()                          # profile B
+    b = _campaign(tmp_path / 'B', B_UUID, machine_computer('localhost', {}),
+                  loads=(10.0,), timestep=0.0005)
+    (b_calc,) = [c for c in _calcjobs('B') if 'points' in c.outputs]
+    b_hashes = {name: node.base.extras.get(BLOCK_HASH_EXTRA)
+                for name, node in b_calc.inputs.blocks.items()}
+    shared = {name for name in a_hashes if a_hashes[name] == b_hashes.get(name)}
+    assert {'thermostat', 'potential_sheet_0'} <= shared
+    assert a_hashes['integration'] != b_hashes['integration']
+
+    import_archive(path)
+
+    for name in a_hashes:
+        same = orm.QueryBuilder().append(
+            orm.Dict, filters={f'extras.{BLOCK_HASH_EXTRA}': a_hashes[name]}).count()
+        assert same == 1, name
+    assert [p.uuid for p in related(b[10.0], 'integration')] == [a_point]
+
+
+# --- sidecars --------------------------------------------------------------------
+
+def test_sidecars_round_trip_through_compare(aiida_profile_clean, no_profile_switch,
+                                             tmp_path):
+    root = tmp_path / 'sim'
+    _run(root, 'h-MoS2', loads=(10.0,))
+    _run(root, 'h-WS2', loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+    path = export_archive('camp', tmp_path / 'camp.aiida')
+    params = tmp_path / 'camp.aiida.params'
+
+    for calc in _calcjobs('camp'):
+        p = calc.inputs.parameters
+        sidecar = params / p['rel_path'] / f"{p['deck_name']}.json"
+        assert sidecar.is_file(), sidecar
+        one = load_blocks_from_sidecar(sidecar)
+        stored = load_blocks(str(calc.pk))
+        assert one.blocks == stored.blocks
+        assert one.derived == stored.derived
+        assert one.units == stored.units
+    assert list(params.glob('schema-*.json'))
+    whole = load_blocks_from_sidecar(params)
+    assert whole.blocks == load_blocks('camp').blocks
+    assert path.is_file()
+
+
+# --- anonymisation (ruling P2-R11) ------------------------------------------------
+
+SECRETS = {
+    'hpc_home': '/home/secretuser/hpc',
+    'scratch_dir': '/scratch/secretuser',
+    'log_dir': '/logs/secretuser',
+    'conda_env': '/envs/secretuser/lammps',
+    'hpc_host': 'login.secret-cluster.example',
+}
+JOB_EXECUTABLE = '/apps/secret/bin/lmp_mpi'
+JOB_CD = '/rds/secretuser/runs'
+
+
+def _hpc_tree(root):
+    run_dir = _run(root, loads=(10.0,))
+    prov = run_dir.parent / 'provenance'
+    hpc = {'scheduler_type': 'pbs', **SECRETS}
+    (prov / 'settings.yaml').write_text(yaml.safe_dump({'hpc': hpc}), encoding='utf-8')
+    config = json.loads((prov / 'config.json').read_text(encoding='utf-8'))
+    config['settings']['hpc'] = dict(hpc)
+    (prov / 'config.json').write_text(json.dumps(config), encoding='utf-8')
+    (root / 'hpc').mkdir()
+    (root / 'hpc' / 'job.pbs').write_text(
+        f'#!/bin/bash\ncd {JOB_CD}\nmpirun -np 4 {JOB_EXECUTABLE} -in lammps/slide.in\n',
+        encoding='utf-8')
+    return run_dir
+
+
+def test_archive_anonymises_hpc_details_by_default(aiida_profile_clean, no_profile_switch,
+                                                   tmp_path):
+    root = tmp_path / 'sim'
+    _hpc_tree(root)
+    assert import_root(root, label='camp', machine='mycluster').ok()
+    calc = next(c for c in _calcjobs('camp') if 'code' in c.inputs)
+    assert calc.inputs.code.filepath_executable.as_posix() == JOB_EXECUTABLE
+    assert calc.inputs.parameters['hpc_run_path'].startswith(JOB_CD)
+    assert calc.computer.hostname == SECRETS['hpc_host']
+
+    path = export_archive('camp', tmp_path / 'camp.aiida')
+
+    text = _archive_text(path)
+    for secret in (*SECRETS.values(), JOB_EXECUTABLE, JOB_CD):
+        assert secret not in text, secret
+    # The local store keeps everything.
+    assert calc.inputs.code.filepath_executable.as_posix() == JOB_EXECUTABLE
+    assert calc.computer.hostname == SECRETS['hpc_host']
+    # A re-import into the source profile deduplicates onto the full nodes.
+    assert import_archive(path) == 0
+
+    kept = export_archive('camp', tmp_path / 'kept.aiida', keep_hpc_paths=True)
+    text = _archive_text(kept)
+    for secret in (*SECRETS.values(), JOB_EXECUTABLE, JOB_CD):
+        assert secret in text, secret
+
+    aiida_profile_clean.reset_storage()
+    import_archive(path)
+    calc = next(c for c in _calcjobs('camp') if 'code' in c.inputs)
+    assert calc.inputs.code.filepath_executable.as_posix() == 'lmp_mpi'
+    assert 'hpc_run_path' not in calc.inputs.parameters.get_dict()
+    assert calc.computer.hostname == 'mycluster'
+    settings = yaml.safe_load(calc.inputs.provenance.base.repository.get_object_content(
+        'provenance/settings.yaml', mode='r'))
+    assert settings['hpc'] == {'scheduler_type': 'pbs', 'hpc_host': 'mycluster'}
+    assert calc.inputs.provenance.base.extras.get('friction2d_anonymised') is True
+    assert verify().ok, verify().render()

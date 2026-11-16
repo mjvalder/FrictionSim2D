@@ -1097,11 +1097,20 @@ def aiida_setup(create_profile: Optional[str], lammps_path: Optional[str]):
               default='friction2d.aiida', help='Output archive path')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_export(set_label: str, output: Path, profile: Optional[str]):
-    """Export one simulation set (set + runs + results) to a .aiida archive.
+@click.option('--force', is_flag=True,
+              help='Write even when live points have no integrity verdict')
+@click.option('--include-peratom', is_flag=True,
+              help='Keep the per-atom nodes (left out by default)')
+@click.option('--keep-hpc-paths', is_flag=True,
+              help='Do not anonymise HPC hostnames, executables and paths')
+def aiida_export(set_label: str, output: Path, profile: Optional[str],
+                 force: bool, include_peratom: bool, keep_hpc_paths: bool):
+    """Export one simulation set (its CalcJobs, verdicts and summaries) to a
+    .aiida archive, with ``<output>.params/`` block sidecars and a README.
 
     The archive can be transferred to another machine and imported with
-    ``FrictionSim2D aiida import-archive``.
+    ``FrictionSim2D aiida import-archive``. HPC details are anonymised unless
+    ``--keep-hpc-paths``; per-atom data is left out unless ``--include-peratom``.
 
     Example:
         FrictionSim2D aiida export 260421-afm -o ~/transfer/260421-afm.aiida
@@ -1110,7 +1119,9 @@ def aiida_export(set_label: str, output: Path, profile: Optional[str]):
 
     click.echo(f"📦 Exporting set {set_label!r} to {output} ...")
     try:
-        path = export_archive(set_label, output, profile=profile)
+        path = export_archive(set_label, output, profile=profile, force=force,
+                              include_peratom=include_peratom,
+                              keep_hpc_paths=keep_hpc_paths)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA export failed")
         _raise_abort(f"❌ Export failed: {exc}", exc)
