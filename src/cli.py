@@ -1547,6 +1547,52 @@ def postprocess_indent(run_root: Path, out_dir: Path, data_dir: Optional[Path]):
         click.echo(f"✅ {name} -> {path.resolve()}")
 
 
+# =============================================================================
+# COMPARE
+# =============================================================================
+
+def _compare_side(ref: str, profile: Optional[str]):
+    """Blocks of one ``compare`` argument: a sidecar directory, else the store."""
+    if Path(ref).is_dir():
+        from .aiida.compare import load_blocks_from_sidecar  # noqa: PLC0415
+        return load_blocks_from_sidecar(Path(ref))
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .aiida.compare import load_blocks  # noqa: PLC0415
+    load_aiida_profile(profile)
+    return load_blocks(ref)
+
+
+@cli.command('compare')
+@click.argument('a')
+@click.argument('b')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@click.option('--rtol', type=float, default=1e-6, show_default=True,
+              help='Relative tolerance for derived values.')
+def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float):
+    """Compare the parameter blocks of two runs or campaigns, field by field.
+
+    A and B are each a CalcJob pk or uuid, a point uuid, a group label, or an
+    archive's ``.params`` sidecar directory. A group gives the fields shared
+    by all its decks; a field that varies inside it shows as '<varies>'.
+
+    Example:
+        FrictionSim2D compare 260421-afm 260512-afm
+    """
+    from .core.compare import compare_blocks  # noqa: PLC0415
+
+    try:
+        left, right = _compare_side(a, profile), _compare_side(b, profile)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Compare failed")
+        _raise_abort(f"❌ Compare failed: {exc}", exc)
+    report = compare_blocks(left.blocks, right.blocks,
+                            units={**left.units, **right.units},
+                            derived_a=left.derived, derived_b=right.derived,
+                            defaults={**left.defaults, **right.defaults}, rtol=rtol)
+    click.echo(report.render())
+
+
 def main():
     try:
         cli()
