@@ -266,9 +266,9 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
                   post: Optional[Dict[str, float]] = None) -> RunSummary:
     """Reduce one load point's frames to the store's summary row.
 
-    The single COF computation on the store path: `FrictionResultsData`,
-    `db upload` and the API all read this, so a number can never differ
-    between them. `compute_friction_stats` stays the kernel.
+    The single COF computation on the store path: `FrictionResultsData`
+    and the postprocessing summary rows read this, so a number can never
+    differ between them. `compute_friction_stats` stays the kernel.
 
     `post` carries the post-stream channels (P6), which are derived from
     the retained final state rather than emitted by LAMMPS and so arrive

@@ -512,8 +512,7 @@ class PlotCommonMixin(PlotterMixinBase):
         """One row per load point, read from `summary_<size>.csv`.
 
         The CSV is `summarise_run`'s own output (`DataReader.summary_rows`),
-        so `cof` here is the ratio-of-means the store and the central DB
-        carry. `df.mean()` over an element-wise cof column -- what this used
+        so `cof` here is the ratio-of-means the store carries. `df.mean()` over an element-wise cof column -- what this used
         to do -- is a different number, and putting both on one axis is how
         the same run reported two COFs.
         """
