@@ -136,8 +136,8 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
     A set a dataset draws on is refused whole, before anything is deleted:
     deleting its CalcJobs would cascade (``input_calc_forward``) into the
     summaries a ``friction2d/datasets/<name>`` Group holds, leaving that
-    dataset's rows pointing at nothing. ``ValueError`` names the datasets;
-    delete those Groups first if the set must go.
+    dataset's rows pointing at nothing. ``ValueError`` names the datasets
+    and the :func:`src.aiida.steps.delete_dataset` calls that release the set.
     """
     _require_aiida()
     _ensure_aiida_profile(profile)
@@ -165,7 +165,8 @@ def delete_simulation_set(label: str, profile: Optional[str] = None) -> int:
         raise ValueError(
             f'set {label!r} is not deleted: dataset(s) {", ".join(map(repr, datasets))} '
             f'hold summaries of its points, which deleting it would delete too. '
-            f'Delete those dataset Groups first.')
+            f'Delete those datasets first: '
+            + '; '.join(f'src.aiida.steps.delete_dataset({n!r})' for n in datasets))
     stranded = _stranded_sets(group, doomed)
     step_inputs = _step_inputs(doomed)
     if doomed:

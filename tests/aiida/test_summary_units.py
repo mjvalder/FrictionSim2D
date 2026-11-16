@@ -115,3 +115,37 @@ def test_none_and_non_numeric_fields_still_need_no_unit():
 def test_unknown_family_is_refused():
     with pytest.raises(ValueError, match='family'):
         summary_units('nope', {'mean_cof': 0.1})
+
+
+# --- one spelling across the registries (fix round 1, item 7) -----------------
+
+def _registry_units():
+    from src.core.observables import REGISTRY
+    return {(fam, ob.name): ob.units for ob in REGISTRY.values()
+            for fam in ob.sim_types if ob.units}
+
+
+def test_shared_quantities_have_the_same_unit_in_both_registries():
+    """A summary key that IS an observable (the post-stream channels) and a
+    statistic of an observable (mean/std of nf, lfx, lfy) carry the
+    observable's unit, spelled the same way."""
+    registry = _registry_units()
+    shared = 0
+    for family, table in SUMMARY_UNITS.items():
+        for key, unit in table.items():
+            name = key.split('_', 1)[1] if key.startswith(('mean_', 'std_')) else key
+            if (family, name) in registry and name != 'cof':
+                assert registry[(family, name)] == unit, (family, key)
+                shared += 1
+    assert shared >= 20
+
+
+def test_lengths_are_spelled_angstrom_everywhere():
+    import re
+
+    from src.aiida.block_schema import UNITS
+    bare = re.compile(r'(^|[^A-Za-z])A($|[^A-Za-z])')
+    units = (list(UNITS.values()) + list(_registry_units().values())
+             + [u for table in SUMMARY_UNITS.values() for u in table.values()])
+    assert [u for u in units if bare.search(u)] == []
+    assert 'angstrom' in UNITS.values() and 'angstrom' in _registry_units().values()

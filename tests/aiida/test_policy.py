@@ -88,3 +88,19 @@ def test_policy_round_trips():
 def test_policy_is_frozen():
     with pytest.raises(AttributeError):
         Policy().verdict = '1.0.0'  # type: ignore[misc]
+
+
+def test_summaries_are_filtered_by_options_before_versions():
+    old_02 = {'uuid': 'a', 'code_version': '0.2.0', 'options_hash': 'h02'}
+    new_03 = {'uuid': 'b', 'code_version': '0.9.0', 'options_hash': 'h03'}
+    assert select([old_02, new_03], 'summary', Policy(), options_hash='h02') is old_02
+    assert select([old_02, new_03], 'summary', Policy(), options_hash='h03') is new_03
+    assert select([old_02, new_03], 'summary', Policy(), options_hash='nope') is None
+    assert select([old_02, new_03], 'summary', Policy(summary='0.2.0'),
+                  options_hash='h03') is None
+    assert select([old_02, new_03], 'summary', Policy()) is new_03
+
+
+def test_options_hash_is_for_summaries_only():
+    with pytest.raises(ValueError, match='summaries'):
+        select([], 'verdict', Policy(), options_hash='h')

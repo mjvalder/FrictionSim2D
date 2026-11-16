@@ -142,11 +142,11 @@ def test_afm_and_sheet_both_have_lfx_under_their_own_key():
 def test_registry_key_defaults_to_name():
     from src.core.observables import Observable
     ob = Observable(name='foo', sim_types=('afm',), group='2D_all',
-                    tier='window', stream='results', units='A')
+                    tier='window', stream='results', units='angstrom')
     assert ob.registry_key == 'foo'
     assert Observable(name='foo', key='foo@sheet', sim_types=('sheetonsheet',),
                       group='layer_1', tier='window', stream='results',
-                      units='A').registry_key == 'foo@sheet'
+                      units='angstrom').registry_key == 'foo@sheet'
 
 
 def test_existing_lookups_unchanged():
@@ -205,7 +205,7 @@ def test_add_rejects_a_results_channel_with_no_role():
     from src.core.observables import Observable, _add
     with pytest.raises(ValueError, match='role_key'):
         _add(Observable(name='rolelesss', sim_types=('afm',), group='2D_all',
-                        tier='window', stream='results', units='A'))
+                        tier='window', stream='results', units='angstrom'))
 
 
 def test_channel_by_role_finds_the_family_specific_channel():

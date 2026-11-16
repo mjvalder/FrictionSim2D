@@ -71,5 +71,5 @@ def test_an_unknown_column_is_prettified_not_an_error():
 
 def test_a_column_absent_from_a_family_falls_back_to_its_own_name():
     """`tip_min_z` is declared for 'afm' only."""
-    assert unit_for('tip_min_z', 'afm') == 'A'
+    assert unit_for('tip_min_z', 'afm') == 'angstrom'
     assert unit_for('tip_min_z', 'sheetonsheet') is None

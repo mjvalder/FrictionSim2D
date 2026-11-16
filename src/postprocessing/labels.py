@@ -31,9 +31,9 @@ DERIVED_LABELS: Dict[str, Tuple[str, Optional[str]]] = {
     'speed': ('Scan Speed', 'm/s'),
     'layer': ('Layers', None),
     'temperature': ('Temperature', 'K'),
-    'tip_radius': ('Tip Radius', 'A'),
-    'tip_sep': ('Tip-Sheet Separation', 'A'),
-    'tip_pos': ('Tip Displacement', 'A'),
+    'tip_radius': ('Tip Radius', 'angstrom'),
+    'tip_sep': ('Tip-Sheet Separation', 'angstrom'),
+    'tip_pos': ('Tip Displacement', 'angstrom'),
     'tipspeed': ('Tip Speed', 'm/s'),
 }
 
@@ -140,6 +140,10 @@ def display_name(column: str, family: str = 'afm') -> str:
     return ' '.join(part.capitalize() for part in column.split('_'))
 
 
+#: Unit spelling (the registry's) -> how an axis label writes it.
+_DISPLAY_UNITS = {'angstrom': 'A', 'eV/angstrom': 'eV/A'}
+
+
 def label_for(column: str, family: str = 'afm') -> str:
     """`'Normal Load (nN)'` -- the axis label for one column.
 
@@ -148,4 +152,5 @@ def label_for(column: str, family: str = 'afm') -> str:
     """
     name = display_name(column, family)
     unit = unit_for(column, family)
+    unit = _DISPLAY_UNITS.get(unit, unit)
     return f'{name} ({unit})' if unit else name
