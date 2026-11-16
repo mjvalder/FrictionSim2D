@@ -5,8 +5,9 @@ with ``engine.run`` and a ``remote_folder`` pointing at the run directory, so
 aiida-core skips upload and submit and only retrieves and parses: LAMMPS is
 never launched through AiiDA. The import path hard-codes ``LocalTransport``
 (``CalcJob._perform_import``), so the run directory must be readable on this
-machine; the ``RemoteData``'s Computer (a ``core.local`` one, see
-:func:`src.aiida.store.machine_computer`) only records where it came from.
+machine; the ``RemoteData``'s Computer (unconfigured, carrying the real host
+and scheduler, see :func:`src.aiida.store.machine_computer`) only records
+where it came from.
 
 What each deck's node carries:
 
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -52,7 +54,9 @@ from aiida.parsers.parser import Parser
 from .data_keys import content_hash
 from .decks import Deck, discover_decks, points_for
 from .retention import retrieve_patterns
-from .store import RUN_UUID_EXTRA, StoreIndex, get_or_create_file, new_file, new_folder
+from .store import (
+    RUN_UUID_EXTRA, StoreIndex, get_or_create_file, lammps_code, new_file, new_folder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +202,8 @@ class LammpsFrictionCalcJob(CalcJob):
 
         spec.exit_code(320, 'ERROR_NO_RESULTS',
                        message='The deck produced neither load points nor structures.')
+        spec.exit_code(410, 'ERROR_LAMMPS_NOT_FINISHED',
+                       message='LAMMPS did not finish (no Total wall time in the log).')
 
     def prepare_for_submission(self, folder: Folder) -> CalcInfo:
         """Only the retrieve lists: nothing is uploaded and nothing runs."""
@@ -365,7 +371,7 @@ class LammpsFrictionParser(Parser):
         """Parse the scratch retrieval and the retrieved log."""
         params = self.node.inputs.parameters.get_dict()
         config, record = _provenance_input(self.node)
-        self._run_info(params, record)
+        finished = self._run_info(params, record)
 
         scratch = kwargs.get('retrieved_temporary_folder')
         root = Path(scratch) if scratch else None
@@ -378,15 +384,21 @@ class LammpsFrictionParser(Parser):
             produced = self._points(root, params, config, record)
         if not produced:
             return self.exit_codes.ERROR_NO_RESULTS
+        if finished is False:
+            return self.exit_codes.ERROR_LAMMPS_NOT_FINISHED
         return None
 
     # -- run_info and log ------------------------------------------------------
 
-    def _run_info(self, params: Mapping[str, Any], record: Mapping[str, Any]) -> None:
+    def _run_info(self, params: Mapping[str, Any],
+                  record: Mapping[str, Any]) -> Optional[bool]:
         """``run_info`` from the log, each field falling back to
         ``provenance.json``. A log without a version line never blanks the
         recorded version: ``parse_log_extras`` only sets keys it found, and
-        ``log_has_version`` keeps the gap visible."""
+        ``log_has_version`` keeps the gap visible.
+
+        Returns whether LAMMPS finished (a ``Total wall time`` line), None
+        without a log."""
         from ..data.provenance import parse_log_extras  # pylint: disable=import-outside-toplevel
 
         log_name = params.get('log_name')
@@ -414,6 +426,7 @@ class LammpsFrictionParser(Parser):
             if procs:
                 info['n_procs'] = int(procs[-1])
         self.out('run_info', orm.Dict(info))
+        return None if text is None else bool(_WALL_RE.search(text))
 
     # -- system decks ----------------------------------------------------------
 
@@ -705,6 +718,92 @@ def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
         run_uuid=run_uuid, config=config, record=record, settings=settings)
 
 
+_LMP_TOKEN_RE = re.compile(r'(?:^|\s)(\S*/)?(lmp\S*)(?=\s|$)')
+_CD_RE = re.compile(r'^\s*cd\s+(/[^\s"\']+)\s*$', re.M)
+
+
+def _job_scripts(locator) -> List[Path]:
+    hpc_dir = _sim_root(locator) / 'hpc'
+    return sorted(p for ext in ('*.pbs', '*.slurm', '*.sh') for p in hpc_dir.glob(ext)
+                  if p.is_file() and not p.name.startswith('preflight'))
+
+
+def _executable_from_job_script(locator) -> Optional[str]:
+    """The first ``lmp*`` token of an ``mpirun``/``srun``/``lmp`` line of the
+    run's job script (``<simulation root>/hpc/*.pbs|*.slurm|*.sh``), else None."""
+    for script in _job_scripts(locator):
+        try:
+            text = script.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if line.lstrip().startswith('#'):
+                continue
+            if re.match(r'\s*(\S*mpirun|\S*mpiexec|srun|lmp\S*)\b', line):
+                match = _LMP_TOKEN_RE.search(line)
+                if match:
+                    return (match.group(1) or '') + match.group(2)
+    return None
+
+
+def _hpc_run_path(locator) -> Optional[str]:
+    """The HPC-side run path when a job script ``cd``s to an absolute directory
+    (the generated scripts do not), else None."""
+    for script in _job_scripts(locator):
+        try:
+            text = script.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            continue
+        match = _CD_RE.search(text)
+        if match:
+            return (PurePosixPath(match.group(1)) / locator.tokens.rel_path).as_posix()
+    return None
+
+
+def _log_info(log_path: Optional[Path]) -> Dict[str, Any]:
+    """``lammps_version`` and ``n_procs`` of a deck's log (keys only when found)."""
+    from ..data.provenance import parse_log_extras  # pylint: disable=import-outside-toplevel
+
+    if log_path is None:
+        return {}
+    info: Dict[str, Any] = {}
+    version = parse_log_extras(Path(log_path)).get('lammps_version')
+    if version:
+        info['lammps_version'] = version
+    procs = _PROCS_RE.findall(Path(log_path).read_text(encoding='utf-8', errors='replace'))
+    if procs:
+        info['n_procs'] = int(procs[-1])
+    return info
+
+
+def _hpc(run: RunInputs) -> Mapping[str, Any]:
+    hpc = (run.settings or {}).get('hpc')
+    return hpc if isinstance(hpc, Mapping) else {}
+
+
+def _options(hpc: Mapping[str, Any], n_procs: int) -> Dict[str, Any]:
+    """Real ``metadata.options``: resources from the log's process count."""
+    nodes = hpc.get('num_nodes')
+    machines = nodes if isinstance(nodes, int) and nodes > 0 and n_procs % nodes == 0 else 1
+    options: Dict[str, Any] = {
+        'resources': {'num_machines': machines,
+                      'num_mpiprocs_per_machine': math.ceil(n_procs / machines)},
+        'withmpi': n_procs > 1}
+    walltime = hpc.get('walltime_hours')
+    if walltime:
+        options['max_wallclock_seconds'] = int(walltime * 3600)
+    return options
+
+
+def _deck_code(locator, computer: orm.Computer,
+               version: Optional[str]) -> Optional[orm.InstalledCode]:
+    """The LAMMPS Code of (``computer``, ``version``); None without a version,
+    so no "unknown" Code ever merges unrelated binaries."""
+    if not version:
+        return None
+    return lammps_code(computer, version, _executable_from_job_script(locator))
+
+
 def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
                 run: Optional[RunInputs] = None,
                 structures: Optional[Mapping[str, orm.SinglefileData]] = None,
@@ -744,6 +843,12 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
 
     log_name = (Path(deck.log_path).relative_to(run_dir).as_posix()
                 if deck.log_path is not None else None)
+    log_info = _log_info(deck.log_path)
+    n_procs = log_info.get('n_procs') or run.record.get('n_procs') or 1
+    hpc = _hpc(run)
+    if code is None:
+        code = _deck_code(locator, computer, log_info.get('lammps_version')
+                          or run.record.get('lammps_version'))
     inputs: Dict[str, Any] = {
         'remote_folder': orm.RemoteData(computer=computer,
                                         remote_path=str(run_dir.resolve())),
@@ -761,9 +866,11 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
             'n_layers': n_layers,
             'log_name': log_name, 'writes_structures': deck.writes_structures,
             'block_names': labels,
+            'hpc_run_path': _hpc_run_path(locator),
         }),
         'metadata': {'computer': computer,
-                     'label': f'{locator.tokens.rel_path}:{deck.name}'},
+                     'label': f'{locator.tokens.rel_path}:{deck.name}',
+                     'options': _options(hpc, int(n_procs))},
     }
     includes = _unique(((_file_label(p.name), get_or_create_file(p, index=index))
                         for p in _included_files(locator, deck)), 'includes')

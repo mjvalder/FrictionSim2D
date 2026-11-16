@@ -140,13 +140,34 @@ def test_explicit_name_and_cif_exemption(aiida_profile_clean, tmp_path):
 
 
 def test_machine_computer_get_or_create(aiida_profile_clean):
-    comp = machine_computer('archer2')
+    hpc = {'hpc_host': 'login.archer2.ac.uk', 'scheduler_type': 'slurm'}
+    comp = machine_computer('archer2', hpc)
     assert comp.label == 'archer2'
-    assert comp.transport_type == 'core.local'
-    assert comp.scheduler_type == 'core.direct'
-    assert comp.get_workdir() == str(Path('~/aiida_workdir/archer2').expanduser())
-    assert comp.is_configured
-    assert machine_computer('archer2').pk == comp.pk
+    assert comp.hostname == 'login.archer2.ac.uk'
+    assert comp.transport_type == 'core.ssh'
+    assert comp.scheduler_type == 'core.slurm'
+    assert comp.get_workdir() == '/unused/friction2d-import'
+    assert not comp.is_configured
+    assert machine_computer('archer2', {}).pk == comp.pk
+
+
+def test_machine_computer_defaults(aiida_profile_clean):
+    comp = machine_computer('localhost', {})
+    assert (comp.hostname, comp.transport_type, comp.scheduler_type) == (
+        'localhost', 'core.local', 'core.direct')
+    assert machine_computer('cx3', {'scheduler_type': 'pbs'}).scheduler_type == 'core.pbspro'
+
+
+def test_lammps_code_is_keyed_by_machine_and_version(aiida_profile_clean):
+    from src.aiida.store import lammps_code
+    comp = machine_computer('archer2', {})
+    code = lammps_code(comp, '29 Aug 2024 - Update 1', '/opt/bin/lmp_mpi')
+    assert code.label == 'lammps-29Aug2024_Update1@archer2'
+    assert lammps_code(comp, '29 Aug 2024 - Update 1', 'lmp_other').pk == code.pk
+    assert str(code.filepath_executable) == '/opt/bin/lmp_mpi'
+    assert lammps_code(comp, '2 Aug 2023', None).pk != code.pk
+    assert lammps_code(machine_computer('cx3', {}), '2 Aug 2023', None).label == \
+        'lammps-2Aug2023@cx3'
 
 
 # --- deterministic uuids (critique C2) ------------------------------------------

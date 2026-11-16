@@ -83,7 +83,7 @@ def _afm_run(root, *, loads=(10.0, 30.0), written=(10.0, 30.0), logs=True,
 
 @pytest.fixture
 def computer(aiida_profile_clean):
-    return machine_computer('localhost')
+    return machine_computer('localhost', {})
 
 
 def _points(node):
@@ -663,3 +663,122 @@ def test_reindex_restores_the_run_extra(computer, tmp_path):
     assert all(n.base.extras.get('friction2d_run_uuid') == run_uuid for n in nodes)
     assert nodes[0].inputs.deck.base.extras.get('friction2d_sha256')
     assert verify().ok, verify().render()
+
+
+# --- the real machine, LAMMPS Code, resources, exit 410 (Task 5d) ------------------
+
+def _code_count():
+    return orm.QueryBuilder().append(orm.InstalledCode).count()
+
+
+def _set_hpc(loc, **hpc):
+    (loc.provenance_dir / 'settings.yaml').write_text(
+        yaml.safe_dump({'hpc': hpc}), encoding='utf-8')
+
+
+def test_an_unconfigured_real_computer_imports(aiida_profile_clean, tmp_path):
+    comp = machine_computer('archer2', {'hpc_host': 'login.archer2.ac.uk',
+                                        'scheduler_type': 'slurm'})
+    assert comp.hostname == 'login.archer2.ac.uk'
+    assert comp.scheduler_type == 'core.slurm'
+    assert comp.transport_type == 'core.ssh'
+    assert not comp.is_configured
+    nodes = import_run(_afm_run(tmp_path / 'sim'), computer=comp)
+    assert all(n.is_finished_ok for n in nodes)
+    assert not comp.is_configured
+
+
+def test_code_is_one_per_machine_and_version(aiida_profile_clean, tmp_path):
+    comp = machine_computer('archer2', {'hpc_host': 'login.archer2.ac.uk',
+                                        'scheduler_type': 'slurm'})
+    system, slide = import_run(_afm_run(tmp_path / 'sim'), computer=comp)
+    assert system.inputs.code.label == 'lammps-29Aug2024_Update1@archer2'
+    assert system.inputs.code.uuid == slide.inputs.code.uuid
+    extras = system.inputs.code.base.extras.all
+    assert extras['friction2d_lammps_version'] == VERSION
+    assert extras['friction2d_executable_source'] == 'assumed'
+    assert str(system.inputs.code.filepath_executable) == 'lmp'
+    other = import_run(_afm_run(tmp_path / 'sim2'), computer=comp)
+    assert other[0].inputs.code.uuid == system.inputs.code.uuid
+    assert _code_count() == 1
+
+
+def test_a_log_without_a_version_falls_back_to_provenance(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    for name in ('run_system.log', 'run_slide.log'):
+        (loc.lammps_dir / name).write_text('Total wall time: 0:00:05\n', encoding='utf-8')
+    record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
+    record['lammps_version'] = '2 Aug 2023'
+    loc.provenance_file.write_text(json.dumps(record), encoding='utf-8')
+    system, _slide = import_run(loc, computer=computer)
+    assert system.inputs.code.label == 'lammps-2Aug2023@localhost'
+    assert system.outputs.run_info['log_has_version'] is False
+
+
+def test_no_version_anywhere_gives_no_code(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    for name in ('run_system.log', 'run_slide.log'):
+        (loc.lammps_dir / name).write_text('Total wall time: 0:00:05\n', encoding='utf-8')
+    record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
+    record.pop('lammps_version', None)
+    loc.provenance_file.write_text(json.dumps(record), encoding='utf-8')
+    before = _code_count()
+    nodes = import_run(loc, computer=computer)
+    for node in nodes:
+        assert 'code' not in node.inputs
+        assert node.outputs.run_info['log_has_version'] is False
+    assert _code_count() == before
+
+
+def test_executable_comes_from_the_job_script(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    hpc = tmp_path / 'sim' / 'hpc'
+    hpc.mkdir()
+    (hpc / 'job.pbs').write_text(
+        '#!/bin/bash\n# mpirun nothing\nmpirun -np 4 /opt/lammps/bin/lmp_mpi -in x\n',
+        encoding='utf-8')
+    system, _slide = import_run(loc, computer=computer)
+    assert str(system.inputs.code.filepath_executable) == '/opt/lammps/bin/lmp_mpi'
+    assert system.inputs.code.base.extras.get('friction2d_executable_source') == 'job_script'
+
+
+def test_resources_come_from_the_log_and_hpc_settings(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    (loc.lammps_dir / 'run_slide.log').write_text(
+        SLIDE_LOG.replace('on 8 procs', 'on 128 procs'), encoding='utf-8')
+    _set_hpc(loc, num_nodes=1, walltime_hours=20)
+    system, slide = import_run(loc, computer=computer)
+    assert slide.get_option('resources') == {'num_machines': 1,
+                                             'num_mpiprocs_per_machine': 128}
+    assert slide.get_option('withmpi') is True
+    assert slide.get_option('max_wallclock_seconds') == 72000
+    assert system.get_option('resources')['num_mpiprocs_per_machine'] == 4
+
+
+def test_nodes_that_do_not_divide_the_procs_fall_back_to_one(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    _set_hpc(loc, num_nodes=3)
+    _system, slide = import_run(loc, computer=computer)       # 8 procs
+    assert slide.get_option('resources') == {'num_machines': 1,
+                                             'num_mpiprocs_per_machine': 8}
+    loc2 = _afm_run(tmp_path / 'sim2')
+    _set_hpc(loc2, num_nodes=2)
+    _system, slide2 = import_run(loc2, computer=computer)
+    assert slide2.get_option('resources') == {'num_machines': 2,
+                                              'num_mpiprocs_per_machine': 4}
+
+
+def test_a_log_without_total_wall_time_is_exit_410(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    (loc.lammps_dir / 'run_slide.log').write_text(
+        f'LAMMPS ({VERSION})\nLoop time of 1.0 on 8 procs for 10 steps\n', encoding='utf-8')
+    system, slide = import_run(loc, computer=computer)
+    assert system.is_finished_ok
+    assert slide.exit_status == 410
+    assert set(slide.outputs.points) == {'force10_a0_s2', 'force30_a0_s2'}
+
+
+def test_a_missing_log_stays_exit_0(computer, tmp_path):
+    nodes = import_run(_afm_run(tmp_path / 'sim', logs=False), computer=computer)
+    assert all(n.exit_status == 0 for n in nodes)
+    assert all(n.outputs.run_info['log_missing'] for n in nodes)

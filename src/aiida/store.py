@@ -31,6 +31,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -609,23 +610,67 @@ def verify() -> VerifyReport:
     return report
 
 
-def machine_computer(name: str) -> orm.Computer:
-    """The ``Computer`` labelled ``name``, created and configured on first use.
+_SCHEDULERS = {'pbs': 'core.pbspro', 'slurm': 'core.slurm'}
+_IMPORT_WORKDIR = '/unused/friction2d-import'
 
-    Imported runs are never executed through it: it records where a run
-    came from. Hence ``core.local``/``core.direct`` for every machine.
+
+def machine_computer(name: str, hpc: Mapping[str, Any]) -> orm.Computer:
+    """The ``Computer`` labelled ``name``, created on first use and left
+    **unconfigured**: it records where a run was produced, never executes.
+
+    ``hostname`` and ``scheduler_type`` come from the run's ``settings.hpc``
+    (``hpc_host``, ``scheduler_type``); ``workdir`` is a literal that is never
+    expanded. An existing Computer is returned untouched.
     """
     try:
-        computer = orm.Computer.collection.get(label=name)
+        return orm.Computer.collection.get(label=name)
     except NotExistent:
-        computer = orm.Computer(
-            label=name,
-            hostname='localhost',
-            description=f'Machine {name!r} that produced imported FrictionSim2D runs',
-            transport_type='core.local',
-            scheduler_type='core.direct',
-            workdir=str(Path('~/aiida_workdir').expanduser() / name),
-        ).store()
-    if not computer.is_configured:
-        computer.configure()
-    return computer
+        pass
+    hostname = hpc.get('hpc_host') or name
+    return orm.Computer(
+        label=name,
+        hostname=hostname,
+        description=f'Machine {name!r} that produced imported FrictionSim2D runs',
+        transport_type='core.local' if hostname == 'localhost' else 'core.ssh',
+        scheduler_type=_SCHEDULERS.get(hpc.get('scheduler_type'), 'core.direct'),
+        workdir=_IMPORT_WORKDIR,
+    ).store()
+
+
+VERSION_EXTRA = 'friction2d_lammps_version'
+EXECUTABLE_SOURCE_EXTRA = 'friction2d_executable_source'
+
+
+def _version_slug(version: str) -> str:
+    """``29 Aug 2024 - Update 1`` -> ``29Aug2024_Update1``."""
+    slug = re.sub(r'\s+-\s+', '_', version.strip())
+    return re.sub(r'[^A-Za-z0-9._-]', '', slug)
+
+
+def lammps_code(computer: orm.Computer, version: str,
+                executable: Optional[str]) -> orm.InstalledCode:
+    """The ``InstalledCode`` of LAMMPS ``version`` on ``computer``, one per
+    (machine, version).
+
+    Found by label ``lammps-<slug>@<computer>`` on that computer, else
+    created. A second ``executable`` for an existing key is logged, not
+    recorded. Not content-addressed (no uuid slot): the label is the key.
+    """
+    label = f'lammps-{_version_slug(version)}@{computer.label}'
+    found = orm.QueryBuilder().append(
+        orm.InstalledCode, filters={'label': label}, tag='c', project='*'
+    ).append(orm.Computer, with_node='c', filters={'id': computer.pk}).first()
+    if found:
+        code = found[0]
+        if executable and executable != code.filepath_executable.as_posix():
+            logger.info('LAMMPS %s on %s: ignoring executable %r (recorded %r)',
+                        version, computer.label, executable,
+                        code.filepath_executable.as_posix())
+        return code
+    code = orm.InstalledCode(
+        computer=computer, filepath_executable=executable or 'lmp', label=label,
+        description=f'LAMMPS {version} on {computer.label}, created from a run log')
+    code.base.extras.set_many({
+        VERSION_EXTRA: version,
+        EXECUTABLE_SOURCE_EXTRA: 'job_script' if executable else 'assumed'})
+    return code.store()
