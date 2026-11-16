@@ -205,11 +205,19 @@ def _quench_nsteps(tmp_path, rate):
     return int(re.search(r'^fix\s+quench .*\n^run\s+(\d+)', deck, re.M).group(1))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "quench_rate is labelled K/s but construction/components.py:1765-1766 makes the "
-    "quench step count proportional to it; the builder fix awaits the user."))
 def test_doubling_quench_rate_halves_the_quench(tmp_path):
     assert _quench_nsteps(tmp_path, 2e12) * 2 == _quench_nsteps(tmp_path, 1e12)
+
+
+def test_quench_step_count_is_dT_over_rate_dt(tmp_path):
+    """Default (1e12 K/s, 0.002 ps, 2200 K) is exactly 1.1e6 steps; 2e12 gives half."""
+    assert _quench_nsteps(tmp_path, 1e12) == 1_100_000
+    assert _quench_nsteps(tmp_path, 2e12) == 550_000
+
+
+def test_nonpositive_quench_rate_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match='quench_rate'):
+        _quench_nsteps(tmp_path, 0.0)
 
 
 # --- point units (Task 5b) ------------------------------------------------------

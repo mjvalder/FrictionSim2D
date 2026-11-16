@@ -356,11 +356,8 @@ UNITS: Dict[str, str] = {
     'settings.simulation.ramp_max_iterations': '1',  # afm/system_init.lmp:161 loop count
     # settings.quench
     'settings.quench.quench_slab_dims': _A,  # overrides.py:623; components.py:1727 vs target_x (A)
-    # K/s is the intended meaning, but construction/components.py:1765-1766 computes
-    # nsteps = (melt_temp - quench_temp) * rate * 1e-12 / dt, i.e. proportional to
-    # the rate; a K/s rate gives nsteps = dT / (rate * 1e-12 * dt). Both agree only
-    # at the 1e12 default. Pinned by an xfail in test_block_schema.py; the builder
-    # fix awaits the user.
+    # K/s; construction/components.py computes nsteps = dT / (rate * dt * 1e-12),
+    # so the step count is inversely proportional to the rate.
     'settings.quench.quench_rate': 'K/s',
     'settings.quench.melt_temp': 'K',  # common/make_amorphous.lmp:25 velocity create T
     'settings.quench.quench_temp': 'K',  # common/make_amorphous.lmp:32 npt temp

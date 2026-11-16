@@ -204,6 +204,8 @@ quench:
 
 Implementation note: model fields also support aliases such as `melt_temp` and `quench_temp`.
 
+`quench_rate` is in K/s; the quench runs `(melt_temp - quench_temp) / (quench_rate * timestep * 1e-12)` steps (default: 1,100,000). Before the `quench_rate is K/s` fix the step count was proportional to the rate instead, so non-default values were mis-applied (inverted); the default `1e12` was unaffected. Amorphous blocks built earlier with a non-default rate should be regenerated.
+
 ## hpc
 
 Defaults:
