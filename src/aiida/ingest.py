@@ -265,7 +265,9 @@ class ImportReport:
     integrity pass made (:func:`src.aiida.steps.check_group`); ``rulings`` is
     the rulings pass that follows (:class:`~src.aiida.steps.RulingReport`)
     and ``overrides`` every live expert override of the set, read from the
-    store, ``(point id, original status, new status, note)``.
+    store, ``(point id, original status, new status, note)``. ``rechecked``
+    are ``(point id, old status, new status)`` of the points whose stored
+    verdict this import's changes outdated (their context changed).
     ``superseded_elsewhere`` are ``(deck, other label)``: a CalcJob this
     import superseded that another set also holds -- that set now holds a
     superseded deck.
@@ -285,6 +287,7 @@ class ImportReport:
     warnings: List[str] = field(default_factory=list)
     superseded_elsewhere: List[Tuple[str, str]] = field(default_factory=list)
     overrides: List[Tuple[str, str, str, str]] = field(default_factory=list)
+    rechecked: List[Tuple[str, str, str]] = field(default_factory=list)
     rulings: Any = None
     dry_run: bool = False
 
@@ -309,6 +312,8 @@ class ImportReport:
             f'  unparseable runs:    {len(self.unparseable)}',
         ]
         lines += [f'  verdict {k}: {v}' for k, v in sorted(self.verdict_counts.items())]
+        lines += [f'  re-checked {pid}: {old} -> {new}'
+                  for pid, old, new in self.rechecked]
         if self.rulings is not None:
             lines.append(f'  rulings applied:     {self.rulings.applied}')
             lines.append(f'  rulings skipped:     {self.rulings.skipped}')
@@ -914,7 +919,8 @@ def _integrity_pass(state: _Import) -> None:
     report = state.report
     failed: List[Tuple[str, str]] = []
     report.verdict_counts = check_group(state.group, failures=failed,
-                                        warnings=report.warnings)
+                                        warnings=report.warnings,
+                                        rechecked=report.rechecked)
     report.failures += [(f'point {uuid}', f'integrity check: {message}')
                         for uuid, message in failed]
     report.rulings = rule_group(state.group)

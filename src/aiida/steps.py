@@ -311,17 +311,27 @@ def _live_verdicts(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
 
 
 def _settings_dump(warnings: Optional[List[str]] = None) -> Dict[str, Any]:
-    """``settings.integrity`` of the global settings; the defaults, with a
-    warning in ``warnings``, when they cannot be read."""
+    """``settings.integrity`` of the settings file in effect; the defaults,
+    with a warning in ``warnings``, when that file cannot be read.
+
+    ``load_settings`` skips an unreadable file silently (a log line), so the
+    file it would use (``settings_origin``) is read and validated here.
+    """
     # pylint: disable=import-outside-toplevel
-    from ..core.config import IntegritySettings, load_settings
+    import yaml
+
+    from ..core.config import GlobalSettings, IntegritySettings, settings_origin
+    path = settings_origin()
+    if path is None:
+        return IntegritySettings().model_dump(mode='json')
     try:
-        thresholds = load_settings().integrity
-    except (OSError, ValueError, AttributeError) as exc:
+        data = yaml.safe_load(Path(path).read_text(encoding='utf-8')) or {}
+        thresholds = GlobalSettings.model_validate(data).integrity
+    except Exception as exc:  # pylint: disable=broad-except
         thresholds = IntegritySettings()
         if warnings is not None:
-            warnings.append(f'settings.yaml unreadable ({type(exc).__name__}: {exc}); '
-                            f'integrity uses the default thresholds '
+            warnings.append(f'settings file {path} unreadable ({type(exc).__name__}: '
+                            f'{exc}); integrity uses the default thresholds '
                             f'v{thresholds.version}')
     return thresholds.model_dump(mode='json')
 
@@ -329,6 +339,22 @@ def _settings_dump(warnings: Optional[List[str]] = None) -> Dict[str, Any]:
 def _run_uuid(point: orm.Node) -> Optional[str]:
     from .store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
     return _creator(point).base.extras.get(RUN_UUID_EXTRA)
+
+
+def _size_group(point: orm.Node) -> Tuple[str, Any]:
+    """``(family, (size_x, size_y))``: the legacy truncation's comparison group."""
+    from ..run.naming import parse_run_path  # pylint: disable=import-outside-toplevel
+    attrs = point.base.attributes.all
+    tokens = parse_run_path(attrs['rel_path'])
+    return attrs['family'], (tokens.size_x, tokens.size_y)
+
+
+def _pid(point: orm.Node) -> str:
+    """The point's ruling id (``integrity_rulings.format_point_id``)."""
+    from ..postprocessing.integrity_rulings import format_point_id  # pylint: disable=import-outside-toplevel
+    attrs = point.base.attributes.all
+    return format_point_id(attrs['rel_path'], attrs['load_kind'], attrs['load'],
+                           attrs['angle'], attrs['speed'])
 
 
 def _window_rows(point: orm.FolderData, directory: Path) -> int:
@@ -339,90 +365,165 @@ def _window_rows(point: orm.FolderData, directory: Path) -> int:
     return 0 if frame is None else len(frame)
 
 
-def _stage2(points: List[orm.FolderData], directory: Path) -> Dict[int, str]:
+def _stage2(points: List[orm.FolderData], directory: Path,
+            problems: List[str]) -> Dict[int, str]:
     """pk -> the status the DataReader gives each point before stage 3: the
     parser's, then the legacy truncation over the set's points by (family,
     size) (`run_status.legacy_truncated`), then `mark_not_reached` over each
-    run's configured chains -- in the DataReader's order."""
+    run's configured chains -- in the DataReader's order.
+
+    A run whose part of this fails keeps its points' parser statuses, with
+    one entry in ``problems``; the other runs go on.
+    """
     # pylint: disable=import-outside-toplevel
     from ..core.observables import expected_tier_rows
     from ..postprocessing.run_status import (
         UNWINDOWED_FAMILIES, expected_chains, legacy_truncated, mark_not_reached,
         point_key)
-    from ..run.naming import parse_run_path
     from .calcjob import _provenance_input  # pylint: disable=protected-access
 
-    status = {p.pk: p.base.attributes.get('status') for p in points}
+    parser = {p.pk: p.base.attributes.get('status') for p in points}
+    status = dict(parser)
     by_run: Dict[Optional[str], List[orm.FolderData]] = {}
     for point in points:
         by_run.setdefault(_run_uuid(point), []).append(point)
-    configs = {u: _provenance_input(_creator(ps[0]))[0] for u, ps in by_run.items()}
+    broken: Dict[Optional[str], str] = {}
 
+    def fail(run_uuid, exc):
+        if run_uuid not in broken:
+            broken[run_uuid] = f'{type(exc).__name__}: {exc}'
+
+    configs: Dict[Optional[str], Any] = {}
     framed, rows = [], []
     for run_uuid, run_points in by_run.items():
-        config = configs[run_uuid]
-        for point in run_points:
-            if status[point.pk] in _NO_FRAMES:
-                continue
-            attrs = point.base.attributes.all
-            tokens = parse_run_path(attrs['rel_path'])
-            family = attrs['family']
-            framed.append(point)
-            rows.append([family, (tokens.size_x, tokens.size_y), 0,
-                         bool(config and expected_tier_rows(config, family)),
-                         status[point.pk]])
+        try:
+            configs[run_uuid] = _provenance_input(_creator(run_points[0]))[0]
+            for point in run_points:
+                if status[point.pk] in _NO_FRAMES:
+                    continue
+                family, size = _size_group(point)
+                rows.append([family, size, 0,
+                             bool(configs[run_uuid]
+                                  and expected_tier_rows(configs[run_uuid], family)),
+                             status[point.pk]])
+                framed.append((run_uuid, point))
+        except Exception as exc:  # pylint: disable=broad-except
+            fail(run_uuid, exc)
     # Window rows are read only where some point is judged at all.
     judged = {(r[0], r[1]) for r in rows if not r[3] and r[4] == 'complete'
               and r[0] not in UNWINDOWED_FAMILIES}
-    for point, row in zip(framed, rows):
+    for (run_uuid, point), row in zip(framed, rows):
         if (row[0], row[1]) in judged:
-            row[2] = _window_rows(point, directory)
+            try:
+                row[2] = _window_rows(point, directory)
+            except Exception as exc:  # pylint: disable=broad-except
+                fail(run_uuid, exc)
     for i in legacy_truncated([tuple(r) for r in rows]):
-        status[framed[i].pk] = 'truncated'
+        status[framed[i][1].pk] = 'truncated'
 
     for run_uuid, run_points in by_run.items():
-        family = run_points[0].base.attributes.get('family')
-        keyed = {}
-        for point in run_points:
-            attrs = point.base.attributes.all
-            keyed[point_key(attrs['load_kind'], attrs['load'], attrs['angle'],
-                            attrs['speed'])] = point.pk
-        current = {key: status[pk] for key, pk in keyed.items()}
-        for chain in expected_chains(configs[run_uuid], family) or []:
-            mark_not_reached(chain, current)
-        for key, pk in keyed.items():
-            status[pk] = current[key]
+        if run_uuid in broken:
+            continue
+        try:
+            keyed = {point_key(*(p.base.attributes.get(k) for k in
+                                 ('load_kind', 'load', 'angle', 'speed'))): p.pk
+                     for p in run_points}
+            current = {key: status[pk] for key, pk in keyed.items()}
+            family = run_points[0].base.attributes.get('family')
+            for chain in expected_chains(configs[run_uuid], family) or []:
+                mark_not_reached(chain, current)
+            status.update({pk: current[key] for key, pk in keyed.items()})
+        except Exception as exc:  # pylint: disable=broad-except
+            fail(run_uuid, exc)
+    for run_uuid, why in broken.items():
+        logger.warning('stage-2 status of run %s failed: %s', run_uuid, why)
+        problems.append(f'run {run_uuid}: stage-2 status failed ({why}); its points '
+                        f'are checked at their parser status')
+        for point in by_run[run_uuid]:
+            status[point.pk] = parser[point.pk]
     return status
+
+
+def _uuid_of(node: Optional[orm.Node]) -> Optional[str]:
+    return None if node is None else node.uuid
+
+
+def _unchanged(verdict: orm.Dict, inputs: Dict[str, Any], point: orm.Node) -> bool:
+    """Whether ``verdict``'s check had the context, snapshot and reference
+    ``inputs`` would give it now. A context from before ``status`` was
+    recorded stands for the parser status."""
+    func = verdict.creator
+    old = func.inputs.context.get_dict()
+    old.setdefault('status', point.base.attributes.get('status'))
+    return (old == inputs['context']
+            and all(_uuid_of(func.inputs[k] if k in func.inputs else None)
+                    == _uuid_of(inputs.get(k)) for k in ('snapshot', 'reference')))
+
+
+def _scope(points: List[orm.FolderData], new: List[orm.FolderData],
+           problems: List[str]) -> List[orm.FolderData]:
+    """The points whose stage-2 context this import may have changed: those
+    of every run with a new point, and of every (family, size) group holding
+    one."""
+    runs = {_run_uuid(p) for p in new}
+    groups = set()
+    for point in new:
+        try:
+            groups.add(_size_group(point))
+        except ValueError as exc:
+            problems.append(f'point {point.uuid}: {exc}')
+
+    def touched(point) -> bool:
+        if _run_uuid(point) in runs:
+            return True
+        try:
+            return _size_group(point) in groups
+        except ValueError:
+            return False
+    return [p for p in points if touched(p)]
 
 
 def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 failures: Optional[List[Tuple[str, str]]] = None,
-                warnings: Optional[List[str]] = None) -> Dict[str, int]:
-    """Run :func:`check_integrity` on every live point of ``group`` that has no
-    live verdict; return the new verdicts' status counts.
+                warnings: Optional[List[str]] = None,
+                rechecked: Optional[List[Tuple[str, str, str]]] = None) -> Dict[str, int]:
+    """Give every live point of ``group`` the verdict its current context
+    calls for; return the new verdicts' status counts.
 
-    Each point is checked at the stage-2 status the DataReader gives it
-    (:func:`_stage2`, over every live point of the set). ``settings`` is an
-    ``IntegritySettings`` dump (default: the global settings'; a fallback to
-    the defaults is reported in ``warnings``). A point whose check raises goes
-    to ``failures`` as ``(point uuid, message)`` and the others go on.
+    A point with no live verdict is checked. So is every point of the scope
+    this import touched (:func:`_scope`) whose stage-2 context -- status
+    (:func:`_stage2`, over every live point of the set), layers,
+    ``multi_speed``, ``writes_snapshot``, snapshot and reference -- differs
+    from its live verdict's: the old verdict is superseded with its ruled and
+    withdrawn successors, and ``(point id, old status, new status)`` goes to
+    ``rechecked``. ``settings`` is an ``IntegritySettings`` dump (default:
+    the settings file's; a fallback to the defaults goes to ``warnings``). A
+    point whose check raises goes to ``failures`` as ``(point uuid,
+    message)`` and the others go on.
     """
     points = _live_points(group)
     verdicts = _live_verdicts(points)
-    todo = [p for p in points if not verdicts[p.pk]]
-    counts: Counter = Counter()
-    if not todo:
+    new = [p for p in points if not verdicts[p.pk]]
+    if not new:
         return {}
-    settings_node = _step_input(settings or _settings_dump(warnings), 'integrity_settings')
+    problems: List[str] = []
+    counts: Counter = Counter()
+    settings_node = None
     runs: Dict[str, _RunView] = {}
     with TemporaryDirectory() as tmp:
-        status = _stage2(points, Path(tmp) / 'rows')
-        for point in todo:
+        status = _stage2(points, Path(tmp) / 'rows', problems)
+        for point in _scope(points, new, problems):
+            old = verdicts[point.pk]
             try:
                 run_uuid = _run_uuid(point)
                 if run_uuid not in runs:
                     runs[run_uuid] = _RunView(run_uuid, Path(tmp) / str(len(runs)))
                 inputs = _point_inputs(point, runs[run_uuid], status[point.pk])
+                if old and _unchanged(old[-1], inputs, point):
+                    continue
+                if settings_node is None:
+                    settings_node = _step_input(settings or _settings_dump(warnings),
+                                                'integrity_settings')
                 inputs['context'] = _step_input(inputs['context'], 'integrity_context')
                 verdict = check_integrity(**inputs, settings=settings_node)
             except Exception as exc:  # pylint: disable=broad-except
@@ -434,6 +535,14 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 KIND_EXTRA: 'verdict',
                 POINT_UUID_EXTRA: point.base.attributes.get('point_uuid')})
             counts[verdict['status']] += 1
+            for dead in old:
+                for successor in _successors(dead):
+                    _supersede(successor)
+                _supersede(dead)
+            if old and rechecked is not None:
+                rechecked.append((_pid(point), old[-1]['status'], verdict['status']))
+    if warnings is not None:
+        warnings += problems
     return dict(counts)
 
 
@@ -621,9 +730,10 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
                withdraw: Optional[bool] = None) -> RulingReport:
     """:func:`apply_rulings` on a loaded set Group."""
     # pylint: disable=import-outside-toplevel
-    from ..postprocessing.integrity_rulings import RULINGS_FILE, format_point_id, load_rulings
+    from ..postprocessing.integrity_rulings import RULINGS_FILE, load_rulings
     from .ingest import GROUP_PREFIX
 
+    explicit = rulings_path is not None
     if rulings_path is None:
         root = group.base.extras.get('source_root', None)
         rulings_path = Path(root) / RULINGS_FILE if root else None
@@ -639,10 +749,7 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     verdicts = _live_verdicts(points)
     by_id: Dict[str, List[orm.Dict]] = {}
     for point in points:
-        attrs = point.base.attributes.all
-        pid = format_point_id(attrs['rel_path'], attrs['load_kind'], attrs['load'],
-                              attrs['angle'], attrs['speed'])
-        by_id.setdefault(pid, []).extend(verdicts[point.pk])
+        by_id.setdefault(_pid(point), []).extend(verdicts[point.pk])
     ruled: set = set()
     for pid, ruling in rulings.items():
         if ruling.error:
@@ -651,7 +758,15 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
             report.unmatched.append(pid)
         else:
             ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v)}
-    if withdraw and _unreadable(rulings):
+    missing = not Path(rulings_path).exists()
+    if withdraw and missing and (explicit or not Path(rulings_path).parent.is_dir()):
+        # An absent file inside an existing campaign root means "no rulings";
+        # an unreachable root (an unmounted drive) or a mistyped path does not.
+        report.warnings.append(f'no ruling withdrawn: {rulings_path} is not '
+                               f'reachable (its directory is missing)'
+                               if not explicit else
+                               f'no ruling withdrawn: {rulings_path} does not exist')
+    elif withdraw and _unreadable(rulings):
         report.warnings.append('no ruling withdrawn: the rulings file has entries '
                                'that cannot be read')
     elif withdraw:

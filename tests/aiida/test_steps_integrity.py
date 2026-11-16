@@ -117,16 +117,24 @@ def test_every_point_gets_exactly_one_verdict(aiida_profile_clean, no_profile_sw
     assert func.inputs.context['status'] == 'no_output'
 
 
-def _assert_matches_reader(report, root):
-    """Every point's store verdict is the one `postprocess read` gives."""
+def _live_verdict(point):
+    (verdict,) = [v for v in _verdicts_of(point)
+                  if not v.base.extras.get('superseded', False)]
+    return verdict
+
+
+def _assert_matches_reader(report, root, uuids=None):
+    """Every point's live store verdict is the one `postprocess read` gives."""
     assert report.ok(), report.render()
     reader = DataReader(str(root))
     statuses = {}
-    for uuid in report.points:
+    for uuid in (report.points if uuids is None else uuids):
         point = orm.load_node(uuid)
-        (verdict,) = _verdicts_of(point)
-        expected = _point(reader, point.base.attributes.get('load'),
-                          points=True).integrity.as_dict()
+        verdict = _live_verdict(point)
+        attrs = point.base.attributes.all
+        (match,) = [p for p in reader.points if p.load == attrs['load']
+                    and p.tokens.rel_path == attrs['rel_path']]
+        expected = match.integrity.as_dict()
         got = verdict.get_dict()
         for key in ('status', 'failed', 'observed', 'reasons', 'quarantine',
                     'not_applicable', 'thresholds_version'):
@@ -137,7 +145,7 @@ def _assert_matches_reader(report, root):
                 assert got['measures'][key] is None, key
             else:
                 assert got['measures'][key] == pytest.approx(value), key
-        statuses[point.base.attributes.get('load')] = got['status']
+        statuses[attrs['load']] = got['status']
     return statuses
 
 
@@ -360,11 +368,104 @@ def test_delete_leaves_no_step_inputs(aiida_profile_clean, no_profile_switch, tm
 
 def test_unreadable_settings_warn(aiida_profile_clean, no_profile_switch, tmp_path,
                                   monkeypatch):
-    import src.core.config as config
+    """`load_settings` skips a broken file silently; the import must not."""
+    xdg = tmp_path / 'xdg'
+    (xdg / 'FrictionSim2D').mkdir(parents=True)
+    (xdg / 'FrictionSim2D' / 'settings.yaml').write_text(
+        'integrity: [unclosed\n  hole_bonds: : 2\n', encoding='utf-8')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(xdg))
+    root = tmp_path / 'sim'
+    _tree(root)
+    report = import_root(root, label='camp')
+    assert any('default thresholds' in w and 'settings.yaml' in w
+               for w in report.warnings), report.warnings
 
-    def broken(*_args, **_kwargs):
-        raise ValueError('bad yaml')
-    monkeypatch.setattr(config, 'load_settings', broken)
-    _tree(tmp_path)
+
+# --- re-checks when the set's context changes -----------------------------------
+
+_LEGACY = {'general': {'temp': 300, 'force': [10.0], 'scan_angle': [0.0],
+                       'scan_speed': [2.0]}}
+
+
+def _legacy_run(root, material, n):
+    """A one-load AFM run whose config gives no expected rows."""
+    run_dir = make_family_run(root, 'afm', material=material, loads=(10.0,), n=n,
+                              config=_LEGACY)
+    (run_dir / 'lammps' / 'slide.in').write_text(DECK, encoding='utf-8')
+    _afm_snapshots(run_dir, 10.0)
+    return run_dir
+
+
+def test_longer_window_rechecks_an_earlier_legacy_point(aiida_profile_clean,
+                                                        no_profile_switch, tmp_path):
+    first_dir = _legacy_run(tmp_path, 'h-MoS2', n=40)
+    first = import_root(tmp_path, label='camp')
+    assert first.verdict_counts == {'complete': 1}
+    (old_uuid,) = first.points
+
+    _legacy_run(tmp_path, 'h-WS2', n=50)
+    again = import_root(tmp_path, label='camp')
+
+    rel = first_dir.relative_to(tmp_path).as_posix()
+    assert again.rechecked == [(f'{rel}|force=10|angle=0|speed=2', 'complete', 'truncated')]
+    assert 're-checked' in again.render()
+    assert _assert_matches_reader(again, tmp_path, uuids=[old_uuid]) == {10.0: 'truncated'}
+    assert _assert_matches_reader(again, tmp_path) == {10.0: 'complete'}
+    assert len(_verdicts_of(orm.load_node(old_uuid))) == 2     # old one superseded
+
+    assert import_root(tmp_path, label='camp').rechecked == []   # settled
+
+
+def test_recheck_drops_the_rulings_of_the_dead_verdict(aiida_profile_clean,
+                                                       no_profile_switch, tmp_path):
+    _legacy_run(tmp_path, 'h-MoS2', n=40)
+    first = import_root(tmp_path, label='camp')
+    (point_uuid,) = first.points
+    dead = _live_verdict(orm.load_node(point_uuid))
+    pid = _pid(tmp_path, 10.0)
+    _write_ruling(tmp_path, pid, 'fail', note='looks wrong', override=True)
+    assert apply_rulings('camp').applied == 1
+
+    _legacy_run(tmp_path, 'h-WS2', n=50)
+    again = import_root(tmp_path, label='camp')
+
+    assert [r[0] for r in again.rechecked] == [pid]
+    on_dead = [n for n in orm.QueryBuilder().append(
+        orm.Dict, filters={'extras.friction2d_verdict_uuid': dead.uuid}).all(flat=True)
+        if not n.base.extras.get('superseded', False)]
+    assert on_dead == []
+    live = _ruled_live()
+    assert [n.base.extras.get('friction2d_verdict_uuid') for n in live] == [
+        _live_verdict(orm.load_node(point_uuid)).uuid]          # re-applied
+    assert live[0]['original_status'] == 'truncated'
+
+
+def test_stage2_failure_falls_back_to_parser_status(aiida_profile_clean,
+                                                   no_profile_switch, tmp_path,
+                                                   monkeypatch):
+    import src.aiida.steps as steps
+
+    def broken(*_args):
+        raise OSError('disk gone')
+    monkeypatch.setattr(steps, '_window_rows', broken)
+    _legacy_run(tmp_path, 'h-MoS2', n=40)
+    _legacy_run(tmp_path, 'h-WS2', n=50)
     report = import_root(tmp_path, label='camp')
-    assert any('default thresholds' in w for w in report.warnings), report.warnings
+    assert report.ok(), report.render()
+    assert report.verdict_counts == {'complete': 2}
+    assert any('stage-2 status failed' in w for w in report.warnings)
+
+
+def test_unreachable_root_withdraws_nothing(aiida_profile_clean, no_profile_switch,
+                                            tmp_path):
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass', note='ok', override=True)
+    assert apply_rulings('camp').applied == 1
+    group = orm.Group.collection.get(label='friction2d/camp')
+    group.base.extras.set('source_root', str(tmp_path / 'unmounted'))
+
+    report = apply_rulings('camp')
+
+    assert report.withdrawn == [] and len(report.overrides) == 1
+    assert any('not reachable' in w for w in report.warnings)
