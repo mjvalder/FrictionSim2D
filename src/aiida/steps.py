@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from aiida import orm
 from aiida.engine import calcfunction
@@ -51,6 +51,9 @@ POINT_UUID_EXTRA = 'friction2d_point_uuid'
 RULING_KEY_EXTRA = 'friction2d_ruling_key'
 #: The uuid of the checker verdict a ruled or withdrawn verdict stands for.
 VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
+#: True on a verdict checked while its stage-2 status was unknown (a
+#: ``_stage2`` failure in its run or (family, size) group): re-checked next time.
+PROVISIONAL_EXTRA = 'friction2d_provisional'
 #: ``'user'`` on a ruling Dict: a human, not the checker, decided it.
 AUTHOR_EXTRA = 'friction2d_author'
 
@@ -366,14 +369,17 @@ def _window_rows(point: orm.FolderData, directory: Path) -> int:
 
 
 def _stage2(points: List[orm.FolderData], directory: Path,
-            problems: List[str]) -> Dict[int, str]:
-    """pk -> the status the DataReader gives each point before stage 3: the
-    parser's, then the legacy truncation over the set's points by (family,
-    size) (`run_status.legacy_truncated`), then `mark_not_reached` over each
-    run's configured chains -- in the DataReader's order.
+            problems: List[str]) -> Tuple[Dict[int, str], Set[int]]:
+    """``(pk -> status, unknown pks)``: the status the DataReader gives each
+    point before stage 3 -- the parser's, then the legacy truncation over the
+    set's points by (family, size) (`run_status.legacy_truncated`), then
+    `mark_not_reached` over each run's configured chains, in the DataReader's
+    order.
 
-    A run whose part of this fails keeps its points' parser statuses, with
-    one entry in ``problems``; the other runs go on.
+    A run whose part of this fails is left out of the truncation's longest
+    windows, with one entry in ``problems``. Its points, and every point of a
+    (family, size) group it belongs to, are *unknown*: their status is the
+    parser's, and it must not replace a stored verdict.
     """
     # pylint: disable=import-outside-toplevel
     from ..core.observables import expected_tier_rows
@@ -413,13 +419,15 @@ def _stage2(points: List[orm.FolderData], directory: Path,
     judged = {(r[0], r[1]) for r in rows if not r[3] and r[4] == 'complete'
               and r[0] not in UNWINDOWED_FAMILIES}
     for (run_uuid, point), row in zip(framed, rows):
-        if (row[0], row[1]) in judged:
+        if (row[0], row[1]) in judged and run_uuid not in broken:
             try:
                 row[2] = _window_rows(point, directory)
             except Exception as exc:  # pylint: disable=broad-except
                 fail(run_uuid, exc)
-    for i in legacy_truncated([tuple(r) for r in rows]):
-        status[framed[i][1].pk] = 'truncated'
+    # A broken run's rows are unknown, not zero: they must not set a longest.
+    kept = [i for i, (run_uuid, _p) in enumerate(framed) if run_uuid not in broken]
+    for j in legacy_truncated([tuple(rows[i]) for i in kept]):
+        status[framed[kept[j]][1].pk] = 'truncated'
 
     for run_uuid, run_points in by_run.items():
         if run_uuid in broken:
@@ -435,13 +443,28 @@ def _stage2(points: List[orm.FolderData], directory: Path,
             status.update({pk: current[key] for key, pk in keyed.items()})
         except Exception as exc:  # pylint: disable=broad-except
             fail(run_uuid, exc)
+
+    unknown_groups = set()
     for run_uuid, why in broken.items():
         logger.warning('stage-2 status of run %s failed: %s', run_uuid, why)
         problems.append(f'run {run_uuid}: stage-2 status failed ({why}); its points '
-                        f'are checked at their parser status')
+                        f'and their (family, size) groups keep their verdicts')
         for point in by_run[run_uuid]:
-            status[point.pk] = parser[point.pk]
-    return status
+            try:
+                unknown_groups.add(_size_group(point))
+            except ValueError:
+                pass
+    unknown = {p.pk for run_uuid in broken for p in by_run[run_uuid]}
+    for point in points:
+        if point.pk not in unknown:
+            try:
+                if _size_group(point) in unknown_groups:
+                    unknown.add(point.pk)
+            except ValueError:
+                pass
+    for pk in unknown:
+        status[pk] = parser[pk]
+    return status, unknown
 
 
 def _uuid_of(node: Optional[orm.Node]) -> Optional[str]:
@@ -451,9 +474,12 @@ def _uuid_of(node: Optional[orm.Node]) -> Optional[str]:
 def _unchanged(verdict: orm.Dict, inputs: Dict[str, Any], point: orm.Node) -> bool:
     """Whether ``verdict``'s check had the context, snapshot and reference
     ``inputs`` would give it now. A context from before ``status`` was
-    recorded stands for the parser status."""
+    recorded stands for the parser status; a provisional one (checked while
+    stage 2 was unknown) is always stale."""
     func = verdict.creator
     old = func.inputs.context.get_dict()
+    if old.get('status_provisional'):
+        return False                       # checked while stage 2 was unknown
     old.setdefault('status', point.base.attributes.get('status'))
     return (old == inputs['context']
             and all(_uuid_of(func.inputs[k] if k in func.inputs else None)
@@ -503,7 +529,9 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     """
     points = _live_points(group)
     verdicts = _live_verdicts(points)
-    new = [p for p in points if not verdicts[p.pk]]
+    # A point with no verdict, or whose verdict was provisional.
+    new = [p for p in points if not verdicts[p.pk]
+           or verdicts[p.pk][-1].base.extras.get(PROVISIONAL_EXTRA, False)]
     if not new:
         return {}
     problems: List[str] = []
@@ -511,15 +539,22 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     settings_node = None
     runs: Dict[str, _RunView] = {}
     with TemporaryDirectory() as tmp:
-        status = _stage2(points, Path(tmp) / 'rows', problems)
+        status, unknown = _stage2(points, Path(tmp) / 'rows', problems)
         for point in _scope(points, new, problems):
             old = verdicts[point.pk]
+            if point.pk in unknown and old:
+                continue                    # stage 2 unknown: keep the verdict
             try:
                 run_uuid = _run_uuid(point)
                 if run_uuid not in runs:
                     runs[run_uuid] = _RunView(run_uuid, Path(tmp) / str(len(runs)))
                 inputs = _point_inputs(point, runs[run_uuid], status[point.pk])
-                if old and _unchanged(old[-1], inputs, point):
+                if point.pk in unknown:
+                    inputs['context']['status_provisional'] = True
+                    problems.append(f'point {_pid(point)}: checked provisionally at '
+                                    f'its parser status {status[point.pk]!r} '
+                                    f'(stage 2 unknown); the next import re-checks it')
+                elif old and _unchanged(old[-1], inputs, point):
                     continue
                 if settings_node is None:
                     settings_node = _step_input(settings or _settings_dump(warnings),
@@ -532,7 +567,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                     failures.append((point.uuid, f'{type(exc).__name__}: {exc}'))
                 continue
             verdict.base.extras.set_many({
-                KIND_EXTRA: 'verdict',
+                KIND_EXTRA: 'verdict', PROVISIONAL_EXTRA: point.pk in unknown,
                 POINT_UUID_EXTRA: point.base.attributes.get('point_uuid')})
             counts[verdict['status']] += 1
             for dead in old:
@@ -759,12 +794,13 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
         else:
             ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v)}
     missing = not Path(rulings_path).exists()
-    if withdraw and missing and (explicit or not Path(rulings_path).parent.is_dir()):
+    foreign = explicit and not _authoritative(group, Path(rulings_path))
+    if withdraw and missing and (foreign or not Path(rulings_path).parent.is_dir()):
         # An absent file inside an existing campaign root means "no rulings";
         # an unreachable root (an unmounted drive) or a mistyped path does not.
         report.warnings.append(f'no ruling withdrawn: {rulings_path} is not '
                                f'reachable (its directory is missing)'
-                               if not explicit else
+                               if not foreign else
                                f'no ruling withdrawn: {rulings_path} does not exist')
     elif withdraw and _unreadable(rulings):
         report.warnings.append('no ruling withdrawn: the rulings file has entries '

@@ -413,7 +413,12 @@ def test_longer_window_rechecks_an_earlier_legacy_point(aiida_profile_clean,
     assert _assert_matches_reader(again, tmp_path) == {10.0: 'complete'}
     assert len(_verdicts_of(orm.load_node(old_uuid))) == 2     # old one superseded
 
-    assert import_root(tmp_path, label='camp').rechecked == []   # settled
+    # A same-window run joins the group: everything is re-examined
+    # (`_unchanged`), nothing differs, only the new point is checked.
+    _legacy_run(tmp_path, 'h-NbSe2', n=50)
+    third = import_root(tmp_path, label='camp')
+    assert third.rechecked == [] and third.verdict_counts == {'complete': 1}
+    assert len(_verdicts_of(orm.load_node(old_uuid))) == 2
 
 
 def test_recheck_drops_the_rulings_of_the_dead_verdict(aiida_profile_clean,
@@ -438,6 +443,68 @@ def test_recheck_drops_the_rulings_of_the_dead_verdict(aiida_profile_clean,
     assert [n.base.extras.get('friction2d_verdict_uuid') for n in live] == [
         _live_verdict(orm.load_node(point_uuid)).uuid]          # re-applied
     assert live[0]['original_status'] == 'truncated'
+
+
+def test_stage2_failure_keeps_verdicts_and_checks_new_points_provisionally(
+        aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
+    """A run whose window cannot be read must not lower its group's longest
+    window: MoS2 keeps `truncated`; the new NbSe2 point is provisional until a
+    healthy import re-checks it."""
+    import src.aiida.steps as steps
+
+    _legacy_run(tmp_path, 'h-MoS2', n=40)
+    _legacy_run(tmp_path, 'h-WS2', n=50)
+    import_root(tmp_path, label='camp')
+    by_material = lambda m: next(orm.load_node(u) for u in _uuids()  # noqa: E731
+                                 if m in orm.load_node(u).base.attributes.get('rel_path'))
+    mos2 = by_material('h-MoS2')
+    assert _live_verdict(mos2)['status'] == 'truncated'
+
+    real = steps._window_rows
+
+    def flaky(point, directory):
+        if 'h-WS2' in point.base.attributes.get('rel_path'):
+            raise OSError('disk gone')
+        return real(point, directory)
+    monkeypatch.setattr(steps, '_window_rows', flaky)
+    _legacy_run(tmp_path, 'h-NbSe2', n=40)
+    broken = import_root(tmp_path, label='camp')
+
+    assert broken.rechecked == []
+    assert _live_verdict(mos2)['status'] == 'truncated'
+    nbse2 = by_material('h-NbSe2')
+    provisional = _live_verdict(nbse2)
+    assert provisional.base.extras.get('friction2d_provisional') is True
+    assert provisional['status'] == 'complete'             # parser status
+    assert any('provisionally' in w for w in broken.warnings), broken.warnings
+
+    monkeypatch.setattr(steps, '_window_rows', real)
+    healthy = import_root(tmp_path, label='camp')
+    rel = nbse2.base.attributes.get('rel_path')
+    assert healthy.rechecked == [(f'{rel}|force=10|angle=0|speed=2', 'complete', 'truncated')]
+    assert _assert_matches_reader(healthy, tmp_path,
+                                  uuids=[nbse2.uuid, mos2.uuid]) == {10.0: 'truncated'}
+    assert not _live_verdict(nbse2).base.extras.get('friction2d_provisional')
+    assert import_root(tmp_path, label='camp').rechecked == []
+
+
+def _uuids():
+    return [p.uuid for p in orm.QueryBuilder().append(
+        orm.FolderData, filters={'attributes': {'has_key': 'point_uuid'}}).all(flat=True)
+        if not p.base.extras.get('superseded', False)]
+
+
+def test_explicit_own_rulings_path_counts_a_missing_file_as_empty(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass', note='ok', override=True)
+    assert apply_rulings('camp').applied == 1
+    (tmp_path / RULINGS_FILE).unlink()
+
+    report = apply_rulings('camp', tmp_path / RULINGS_FILE)
+
+    assert report.withdrawn == [_pid(tmp_path, 30.0)] and report.overrides == []
 
 
 def test_stage2_failure_falls_back_to_parser_status(aiida_profile_clean,
