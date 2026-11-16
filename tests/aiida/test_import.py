@@ -1,0 +1,557 @@
+"""`import_root`: a campaign tree -> one CalcJob per deck (plan Task 6).
+
+Runs are keyed on `run_uuid`, decks on `run_uuid|deck_name`; a deck's
+fingerprint covers its files and the structures handed to it, so an unchanged
+deck is skipped and a changed one supersedes the old CalcJob -- locally, as
+extras. Replaces `test_ingest.py` and `test_aiida_round_trip.py`; the pure
+`load_points` tests are ported at the bottom.
+"""
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip('aiida')
+pytestmark = pytest.mark.aiida
+
+from aiida import orm  # noqa: E402
+
+from src.aiida.ingest import (  # noqa: E402
+    ImportReport, LoadPoint, SetRootMismatch, group_label, import_root,
+    load_points, supersede,
+)
+from src.aiida.store import DECK_KEY_EXTRA, DECK_SHA_EXTRA  # noqa: E402
+from src.run.tree import discover_runs  # noqa: E402
+from tests.helpers.results_tree import (  # noqa: E402
+    make_family_run, slide_config, write_final_data,
+)
+from tests.helpers.synthetic_results import PES_GRID_CSV, make_run, write_results  # noqa: E402
+
+VERSION = '29 Aug 2024 - Update 1'
+LOG = f"""LAMMPS ({VERSION})
+Loop time of 12.5 on 4 procs for 1000 steps with 600 atoms
+Total wall time: 0:01:05
+"""
+LOG_NO_VERSION = """Loop time of 12.5 on 4 procs for 1000 steps with 600 atoms
+Total wall time: 0:01:05
+"""
+
+
+def _afm_run(root, material, *, loads=(10.0,), logs=True):
+    """An AFM run with `system.in` + `slide.in`, `load_*.data` from the system
+    deck, a build, results and end snapshots for every load."""
+    run_dir = make_family_run(root, 'afm', material=material, loads=loads,
+                              config=slide_config('afm', loads=loads))
+    lammps = run_dir / 'lammps'
+    (lammps / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    if logs:
+        (lammps / 'run_system.log').write_text(LOG, encoding='utf-8')
+        (lammps / 'run_slide.log').write_text(LOG, encoding='utf-8')
+    data = run_dir / 'data'
+    data.mkdir(exist_ok=True)
+    for load in loads:
+        (data / f'load_{load:g}N.data').write_text(f'LAMMPS data {load}\n',
+                                                   encoding='utf-8')
+        write_final_data(run_dir, 'afm', load=load)
+    build = run_dir.parent / 'build'
+    build.mkdir(exist_ok=True)
+    (build / 'sheet.lmp').write_text(f'LAMMPS sheet {material}\n', encoding='utf-8')
+    return run_dir
+
+
+def _tree(root, materials=('h-MoS2', 'h-WS2'), **kwargs):
+    for material in materials:
+        _afm_run(root, material, **kwargs)
+    return root
+
+
+def _calcjobs():
+    return orm.QueryBuilder().append(
+        orm.CalcJobNode, filters={'process_type': 'aiida.calculations:friction2d.lammps'}
+    ).all(flat=True)
+
+
+def _live(nodes):
+    return [n for n in nodes if not n.base.extras.get('superseded', False)]
+
+
+def _node_count():
+    return orm.QueryBuilder().append(orm.Node).count()
+
+
+def _group_calcjobs(label):
+    group = orm.Group.collection.get(label=group_label(label))
+    return {n.pk for n in group.nodes if isinstance(n, orm.CalcJobNode)}
+
+
+def _set_record(run_dir, **fields):
+    path = run_dir / 'provenance.json'
+    record = json.loads(path.read_text(encoding='utf-8'))
+    record.update(fields)
+    path.write_text(json.dumps(record), encoding='utf-8')
+
+
+def _by_deck(rel_material):
+    """The live CalcJobs of the run whose rel_path names `rel_material`."""
+    return {n.inputs.parameters['deck_name']: n for n in _live(_calcjobs())
+            if rel_material in n.inputs.parameters['rel_path']}
+
+
+# --- first import, idempotence, identity ---------------------------------------
+
+def test_first_import_creates_one_calcjob_per_deck(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    report = import_root(root, label='camp')
+
+    assert isinstance(report, ImportReport)
+    assert report.ok(), report.render()
+    assert len(report.created_decks) == 4
+    assert len(_calcjobs()) == 4
+    assert all(n.is_finished_ok for n in _calcjobs())
+    assert _group_calcjobs('camp') == {n.pk for n in _calcjobs()}
+    for node in _calcjobs():
+        params = node.inputs.parameters.get_dict()
+        assert node.base.extras.get(DECK_KEY_EXTRA) == \
+            f"{params['run_uuid']}|{params['deck_name']}"
+        assert len(node.base.extras.get(DECK_SHA_EXTRA)) == 64
+    assert len(report.points) == 2
+    assert not report.log_missing and not report.no_version
+    group = orm.Group.collection.get(label='friction2d/camp')
+    extras = group.base.extras.all
+    for key in ('model', 'materials', 'source_root', 'source_host', 'git_commit',
+                'git_dirty', 'created'):
+        assert key in extras, key
+    assert extras['source_root'] == str(root.resolve())
+    assert extras['model'] == 'afm'
+    assert extras['materials'] == ['h-MoS2', 'h-WS2']
+    assert report.group_uuid == group.uuid
+
+
+def test_reimport_skips_every_deck_and_adds_no_node(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    import_root(root, label='camp')
+    before = _node_count()
+
+    again = import_root(root, label='camp')
+
+    assert again.ok(), again.render()
+    assert len(again.skipped_decks) == 4
+    assert again.created_decks == [] and again.superseded_decks == []
+    assert _node_count() == before
+
+
+def test_same_root_under_a_second_label_is_already_imported(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    import_root(root, label='first')
+
+    second = import_root(root, label='second')
+
+    assert second.ok(), second.render()
+    assert len(second.already_imported) == 4
+    assert second.created_decks == []
+    assert len(_calcjobs()) == 4
+    assert _group_calcjobs('first') == _group_calcjobs('second') == \
+        {n.pk for n in _calcjobs()}
+
+
+def test_a_moved_root_is_the_same_campaign(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    import_root(root, label='camp')
+    moved = tmp_path / 'elsewhere' / 'sim'
+    shutil.copytree(root, moved)
+
+    report = import_root(moved, label='camp')
+
+    assert report.ok(), report.render()
+    assert len(report.skipped_decks) == 4
+    group = orm.Group.collection.get(label='friction2d/camp')
+    assert group.base.extras.get('source_root') == str(moved.resolve())
+
+
+def test_a_different_tree_under_a_used_label_is_refused(aiida_profile_clean, tmp_path):
+    import_root(_tree(tmp_path / 'a'), label='camp')
+    other = _tree(tmp_path / 'b', materials=('h-MoTe2',))
+
+    with pytest.raises(SetRootMismatch, match='different campaign'):
+        import_root(other, label='camp')
+    with pytest.raises(SetRootMismatch):
+        import_root(other, label='camp', dry_run=True)
+    assert len(_calcjobs()) == 4
+
+
+def test_a_dry_run_creates_nothing_and_classifies(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    before = _node_count()
+    plan = import_root(root, label='camp', dry_run=True)
+    assert plan.dry_run and len(plan.created_decks) == 4
+    assert _node_count() == before
+    assert not orm.QueryBuilder().append(orm.Group).count()
+
+    import_root(root, label='camp')
+    assert len(import_root(root, label='camp', dry_run=True).skipped_decks) == 4
+
+
+# --- Review Focus 1: fingerprints and supersession -----------------------------
+
+def test_a_new_results_file_supersedes_only_that_deck(aiida_profile_clean, tmp_path):
+    """Review Focus 1a."""
+    root = _tree(tmp_path / 'sim')
+    import_root(root, label='camp')
+    old = _by_deck('h-MoS2')['slide']
+    old_points = list(old.outputs.points.values())
+    old_snapshots = list(old.outputs.snapshots.values())
+    other = list(_by_deck('h-WS2').values())
+    other_outputs = [n for c in other for n in c.base.links.get_outgoing().all_nodes()]
+    (mos2_run,) = [loc.run_dir for loc in discover_runs(root) if 'h-MoS2' in loc.tokens.rel_path]
+    write_results(mos2_run, 'afm', loads=(10.0,), tiers=('raw',), layers=2)
+    before = {n.pk for n in _calcjobs()}
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    new = [n for n in _calcjobs() if n.pk not in before]
+    assert len(new) == 1 and new[0].inputs.parameters['deck_name'] == 'slide'
+    assert len(report.superseded_decks) == 1 and len(report.skipped_decks) == 3
+    for node in [old, *old_points, *old_snapshots]:
+        assert node.base.extras.get('superseded') is True, node
+        assert node.base.extras.get('superseded_at')
+    for node in [*other, *other_outputs]:
+        assert not node.base.extras.get('superseded', False), node
+    assert not _by_deck('h-MoS2')['system'].base.extras.get('superseded', False)
+    names = new[0].outputs.points['force10_a0_s2'].base.repository.list_object_names('results')
+    assert any(name.startswith('raw_') for name in names)
+
+
+def test_a_changed_load_structure_reimports_system_and_its_slide(aiida_profile_clean,
+                                                                 tmp_path):
+    """Review Focus 1b."""
+    root = _tree(tmp_path / 'sim')
+    import_root(root, label='camp')
+    old = _by_deck('h-MoS2')
+    (mos2_run,) = [loc.run_dir for loc in discover_runs(root) if 'h-MoS2' in loc.tokens.rel_path]
+    load = mos2_run / 'data' / 'load_10N.data'
+    load.write_text(load.read_text(encoding='utf-8') + 'x', encoding='utf-8')
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    assert sorted(report.superseded_decks) == sorted(
+        f'{old["system"].inputs.parameters["rel_path"]}:{d}' for d in ('system', 'slide'))
+    new = _by_deck('h-MoS2')
+    assert {d: n.pk for d, n in new.items()}.keys() == {'system', 'slide'}
+    assert all(new[d].pk != old[d].pk for d in ('system', 'slide'))
+    assert all(old[d].base.extras.get('superseded') for d in ('system', 'slide'))
+    for calc in _live(_calcjobs()):
+        if 'structures' in calc.inputs:
+            for node in calc.inputs.structures.values():
+                assert not node.base.extras.get('superseded', False), calc
+    handed = {n.uuid for n in new['slide'].inputs.structures.values()}
+    assert handed <= {n.uuid for n in new['system'].outputs.structures.values()}
+
+
+def test_a_replaced_system_deck_cascades_to_every_slide_reading_it(aiida_profile_clean,
+                                                                   tmp_path):
+    """A system deck re-imported for its log alone: the slide decks' own files
+    and structure bytes are unchanged, yet they consumed the old system deck's
+    (now superseded) structures, so they re-import too (I2)."""
+    root = _tree(tmp_path / 'sim', materials=('h-MoS2',))
+    import_root(root, label='camp')
+    (loc,) = discover_runs(root)
+    (loc.lammps_dir / 'run_system.log').write_text(LOG + '# rerun\n', encoding='utf-8')
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    assert len(report.superseded_decks) == 2
+    for calc in _live(_calcjobs()):
+        for node in (calc.inputs.structures.values() if 'structures' in calc.inputs else []):
+            assert not node.base.extras.get('superseded', False)
+    plan = import_root(root, label='camp', dry_run=True)
+    assert len(plan.skipped_decks) == 2
+
+
+def test_a_dry_run_predicts_the_cascade(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim', materials=('h-MoS2',))
+    import_root(root, label='camp')
+    (loc,) = discover_runs(root)
+    (loc.data_dir / 'load_10N.data').write_text('changed\n', encoding='utf-8')
+    plan = import_root(root, label='camp', dry_run=True)
+    assert len(plan.superseded_decks) == 2 and plan.skipped_decks == []
+
+
+def test_supersede_follows_calcfunction_outputs_not_calcjob_consumers(
+        aiida_profile_clean, tmp_path):
+    from aiida.engine import calcfunction
+
+    @calcfunction
+    def verdict(point):
+        return orm.Dict({'status': point.base.attributes.get('status')})
+
+    @calcfunction
+    def ruled(value):
+        return orm.Dict({'ruled': value.get_dict()['status']})
+
+    root = _tree(tmp_path / 'sim', materials=('h-MoS2',))
+    import_root(root, label='camp')
+    decks = _by_deck('h-MoS2')
+    point = decks['slide'].outputs.points['force10_a0_s2']
+    first = verdict(point)
+    second = ruled(first)
+
+    supersede(decks['system'])
+
+    assert decks['system'].base.extras.get('superseded') is True
+    assert all(n.base.extras.get('superseded') for n in decks['system'].outputs.structures.values())
+    assert not decks['slide'].base.extras.get('superseded', False)     # INPUT_CALC consumer
+    assert not point.base.extras.get('superseded', False)
+
+    supersede(decks['slide'])
+    assert point.base.extras.get('superseded') is True
+    assert first.base.extras.get('superseded') is True
+    assert second.base.extras.get('superseded') is True
+
+
+# --- per-run failures, logs, versions, machines --------------------------------
+
+def test_a_run_without_run_uuid_fails_alone(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    (bad,) = [loc for loc in discover_runs(root) if 'h-MoS2' in loc.tokens.rel_path]
+    record = json.loads(bad.provenance_file.read_text(encoding='utf-8'))
+    del record['run_uuid']
+    bad.provenance_file.write_text(json.dumps(record), encoding='utf-8')
+
+    report = import_root(root, label='camp')
+
+    assert not report.ok()
+    assert report.failures[0][0] == bad.tokens.rel_path
+    assert 'MissingRunUUID' in report.failures[0][1]
+    assert 'FrictionSim2D aiida stamp-uuid' in report.failures[0][1]
+    assert len(report.created_decks) == 2
+    assert len(_calcjobs()) == 2
+
+
+def test_a_spring_in_newtons_per_metre_is_a_unit_mismatch(aiida_profile_clean, tmp_path):
+    root = _tree(tmp_path / 'sim')
+    (bad,) = [loc for loc in discover_runs(root) if 'h-WS2' in loc.tokens.rel_path]
+    config = json.loads((bad.provenance_dir / 'config.json').read_text(encoding='utf-8'))
+    spring = (config.get('general') or {}).get('driving_spring') or 50.0
+    _set_record(bad.run_dir, schema_version='2.2.0', drive_k=float(spring))
+
+    report = import_root(root, label='camp')
+
+    assert [where for where, _m in report.failures] == [bad.tokens.rel_path]
+    assert 'UnitMismatch' in report.failures[0][1]
+    assert len(report.created_decks) == 2
+    plan = import_root(root, label='camp', dry_run=True)
+    assert 'UnitMismatch' in plan.failures[0][1]
+
+
+def test_log_missing_and_no_version_are_reported(aiida_profile_clean, tmp_path):
+    root = tmp_path / 'sim'
+    no_log = _afm_run(root, 'h-MoS2', logs=False)
+    no_version = _afm_run(root, 'h-WS2')
+    (no_version / 'lammps' / 'run_slide.log').write_text(LOG_NO_VERSION, encoding='utf-8')
+    codes = orm.QueryBuilder().append(orm.InstalledCode).count()
+
+    report = import_root(root, label='camp')
+
+    rel_no_log = no_log.relative_to(root).as_posix()
+    rel_no_version = no_version.relative_to(root).as_posix()
+    assert sorted(report.log_missing) == [f'{rel_no_log}:slide', f'{rel_no_log}:system']
+    assert f'{rel_no_version}:slide' in report.no_version
+    assert f'{rel_no_version}:system' not in report.no_version
+    assert orm.QueryBuilder().append(orm.InstalledCode).count() == codes + 1
+    assert 'no LAMMPS version (no Code)' in report.render()
+
+
+def test_a_log_that_arrives_later_reimports_and_gets_its_code(aiida_profile_clean,
+                                                              tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = _afm_run(root, 'h-MoS2', logs=False)
+    first = import_root(root, label='camp')
+    assert len(first.log_missing) == 2
+    assert all('code' not in n.inputs for n in _calcjobs())
+
+    (run_dir / 'lammps' / 'run_slide.log').write_text(LOG, encoding='utf-8')
+    second = import_root(root, label='camp')
+
+    assert second.ok(), second.render()
+    assert [d.rsplit(':', 1)[1] for d in second.superseded_decks] == ['slide']
+    slide = _by_deck('h-MoS2')['slide']
+    assert slide.inputs.code.label == 'lammps-29Aug2024_Update1@localhost'
+    assert second.log_missing == []
+
+
+def test_a_machine_label_with_another_host_is_reused_with_a_warning(aiida_profile_clean,
+                                                                    tmp_path):
+    import yaml
+
+    from src.aiida.store import machine_computer
+
+    existing = machine_computer('archer2', {'hpc_host': 'login.archer2.ac.uk',
+                                            'scheduler_type': 'slurm'})
+    root = tmp_path / 'sim'
+    run_dir = _afm_run(root, 'h-MoS2')
+    (run_dir.parent / 'provenance' / 'settings.yaml').write_text(
+        yaml.safe_dump({'hpc': {'hpc_host': 'other.host.org', 'scheduler_type': 'pbs'}}),
+        encoding='utf-8')
+
+    report = import_root(root, label='camp', machine='archer2')
+
+    assert report.ok(), report.render()
+    assert len(report.warnings) == 1
+    assert 'archer2' in report.warnings[0] and 'other.host.org' in report.warnings[0]
+    assert 'WARNING' in report.render()
+    assert all(n.computer.pk == existing.pk for n in _calcjobs())
+
+
+def test_the_machine_defaults_to_the_runs_hpc_host(aiida_profile_clean, tmp_path):
+    import yaml
+
+    root = tmp_path / 'sim'
+    run_dir = _afm_run(root, 'h-MoS2')
+    (run_dir.parent / 'provenance' / 'settings.yaml').write_text(
+        yaml.safe_dump({'hpc': {'hpc_host': 'login.cluster.org', 'scheduler_type': 'pbs'}}),
+        encoding='utf-8')
+    report = import_root(root, label='camp')
+    assert report.ok() and not report.warnings
+    assert {n.computer.label for n in _calcjobs()} == {'login.cluster.org'}
+    assert {n.computer.scheduler_type for n in _calcjobs()} == {'core.pbspro'}
+
+
+def test_on_point_sees_every_new_point(aiida_profile_clean, tmp_path):
+    seen = []
+    root = _tree(tmp_path / 'sim')
+    report = import_root(root, label='camp',
+                         on_point=lambda calc, label, point: seen.append((label, point.uuid)))
+    assert sorted(u for _l, u in seen) == sorted(report.points)
+    assert {label for label, _u in seen} == {'force10_a0_s2'}
+    again = []
+    import_root(root, label='camp', on_point=lambda *a: again.append(a))
+    assert again == []
+
+
+def test_reindex_restores_the_deck_key(aiida_profile_clean, tmp_path):
+    from src.aiida.store import reindex
+    import_root(_tree(tmp_path / 'sim', materials=('h-MoS2',)), label='camp')
+    keys = {n.pk: n.base.extras.get(DECK_KEY_EXTRA) for n in _calcjobs()}
+    for node in _calcjobs():
+        node.base.extras.delete(DECK_KEY_EXTRA)
+    reindex()
+    assert {n.pk: n.base.extras.get(DECK_KEY_EXTRA) for n in _calcjobs()} == keys
+
+
+def test_an_empty_root_is_a_failure(aiida_profile_clean, tmp_path):
+    (tmp_path / 'empty').mkdir()
+    report = import_root(tmp_path / 'empty')
+    assert not report.ok()
+
+
+# --- the aiida-free helpers (ported from test_ingest.py) ------------------------
+
+REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
+
+
+def test_slide_points_group_the_three_tiers(tmp_path):
+    root = tmp_path / 'sim'
+    make_run(root, REL, 'afm', loads=(10.0, 30.0), angles=(0.0, 90.0),
+             speeds=(2.0,), tiers=('window', 'raw'))
+    loc, = discover_runs(root)
+
+    points = load_points(loc)
+
+    assert len(points) == 4
+    assert all(isinstance(p, LoadPoint) for p in points)
+    assert sorted((p.load, p.angle) for p in points) == [
+        (10.0, 0.0), (10.0, 90.0), (30.0, 0.0), (30.0, 90.0)]
+    one = points[0]
+    assert (one.family, one.load_kind, one.speed, one.layers) == ('afm', 'force', 2.0, 2)
+    assert set(one.tiers) == {'window', 'raw'}
+    assert len(one.content_sha256) == 64
+
+
+def test_sheet_points_are_pressures(tmp_path):
+    root = tmp_path / 'sim'
+    make_run(root, 'sheetonsheet/h-MoS2/100x_100y/K300', 'sheetonsheet', loads=(1.0,))
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    assert (point.load_kind, point.load, point.layers) == ('pressure', 1.0, None)
+
+
+def test_indent_pairs_its_retract_curve_with_the_hold(tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1',
+                       'indent', loads=(30.0,))
+    (run_dir / 'results' / 'indent_f30N_l1.csv').write_text(
+        'step,z_tip,fz_tip\n0,0,5.0\n', encoding='utf-8')
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    assert point.tiers['retract'].name == 'indent_f30N_l1.csv'
+
+
+def test_pes_refine_grid_is_not_a_second_point(tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, 'pes_sheet/h-MoS2/100x_100y/K300', 'pes_sheet', tiers=())
+    (run_dir / 'results' / 'pes_scan_refine.csv').write_text(
+        PES_GRID_CSV['pes_sheet'], encoding='utf-8')
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    assert point.load_kind == 'none'
+    assert point.tiers['window'].name == 'pes_scan.csv'
+    assert {Path(p).name for p in point.aux} == {'pes_scan_refine.csv'}
+
+
+FAMILY_CASES = [
+    ('afm', 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2', 'force'),
+    ('indent', 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1', 'force'),
+    ('pes_tip', 'pes_tip/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1', 'none'),
+    ('sheetonsheet', 'sheetonsheet/h-MoS2/100x_100y/K300', 'pressure'),
+    ('hetero', 'sheetonsheet/h-MoS2+h-WS2/100x_100y/K300', 'pressure'),
+    ('flake', 'sheetonsheet/h-MoS2+flake-h-WS2/100x_100y/K300', 'pressure'),
+    ('pes_sheet', 'pes_sheet/h-MoS2/100x_100y/K300', 'none'),
+]
+
+
+@pytest.mark.parametrize('family, rel, load_kind', FAMILY_CASES)
+def test_every_family_yields_a_load_point(tmp_path, family, rel, load_kind):
+    root = tmp_path / 'sim'
+    make_run(root, rel, family, tiers=() if family in PES_GRID_CSV else ('window',))
+    loc, = discover_runs(root)
+    point, = load_points(loc)
+    assert (point.family, point.load_kind) == (family, load_kind)
+    assert 'window' in point.tiers
+
+
+def test_families_tuple_is_fully_covered():
+    from src.core.observables import FAMILIES
+    assert {f for f, _rel, _kind in FAMILY_CASES} == set(FAMILIES)
+
+
+def test_a_tier_collision_is_warned_not_silently_overwritten(tmp_path, caplog):
+    root = tmp_path / 'sim'
+    run_dir = make_run(root, REL, 'afm', loads=(30.0,))
+    original = run_dir / 'results' / 'friction_f30_a0_s2_layer2.txt'
+    dup = run_dir / 'results' / 'friction_f30.0_a0_s2_layer2.txt.bak'
+    dup.write_text(original.read_text(encoding='utf-8'), encoding='utf-8')
+    loc, = discover_runs(root)
+    with caplog.at_level('WARNING'):
+        load_points(loc)
+    assert original.name in caplog.text and dup.name in caplog.text
+
+
+def test_importing_ingest_does_not_require_aiida():
+    code = (
+        "import sys\n"
+        "sys.modules['aiida'] = None\n"
+        "import src.aiida.ingest as ingest\n"
+        "assert sys.modules.get('aiida') is None\n"
+        "assert hasattr(ingest, 'load_points') and hasattr(ingest, 'import_root')\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run([sys.executable, '-c', code],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert 'OK' in result.stdout

@@ -21,8 +21,9 @@ pytest.importorskip('aiida')
 pytestmark = pytest.mark.aiida
 
 from src.aiida.data import FrictionSimulationSetData  # noqa: E402
-from src.aiida.export import export_archive, export_results, import_archive, rebuild_set  # noqa: E402
-from src.aiida.ingest import group_label, ingest_root  # noqa: E402
+from src.aiida.export import import_archive, rebuild_set  # noqa: E402
+from src.aiida.ingest import group_label, import_root  # noqa: E402
+from tests.helpers.results_tree import make_family_run  # noqa: E402
 from tests.helpers.synthetic_results import make_run  # noqa: E402
 
 REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
@@ -90,14 +91,30 @@ def _assert_node_has_no_secrets(node) -> None:
 
 
 def _assert_group_has_no_secrets(label: str) -> None:
-    """Walk every repository file of every node in `friction2d/<label>` and
-    assert none of `_SECRETS` occurs anywhere -- the store-wide guard."""
+    """Walk every repository file of every CalcJob in `friction2d/<label>`
+    and of every node linked to it (inputs and outputs) and assert none of
+    `_SECRETS` occurs anywhere -- the store-wide guard."""
     from aiida.orm import Group  # pylint: disable=import-outside-toplevel
 
     group = Group.collection.get(label=group_label(label))
     assert len(group.nodes) > 0
-    for node in group.nodes:
-        _assert_node_has_no_secrets(node)
+    seen = set()
+    for calc in group.nodes:
+        linked = (calc.base.links.get_incoming().all_nodes()
+                  + calc.base.links.get_outgoing().all_nodes())
+        for node in [calc, *linked]:
+            if node.pk not in seen:
+                seen.add(node.pk)
+                _assert_node_has_no_secrets(node)
+
+
+def _secret_tree(root: Path, material: str, database: dict) -> str:
+    """An AFM run (system + slide deck) with credential-bearing provenance."""
+    run_dir = make_family_run(root, 'afm', material=material)
+    (run_dir / 'lammps' / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    rel = run_dir.relative_to(root).as_posix()
+    _write_secret_provenance(root, rel, database=database)
+    return rel
 
 
 def test_set_from_root_strips_credentials_from_a_root_settings_file(
@@ -146,75 +163,50 @@ def test_set_from_root_also_finds_a_root_settings_yml(aiida_profile_clean, tmp_p
 
 @pytest.mark.parametrize('database', [FLAT_DATABASE, LEGACY_DATABASE],
                          ids=['flat', 'legacy-nested'])
-def test_ingest_strips_credentials_from_provenance_documents(
+def test_import_strips_credentials_from_provenance_documents(
         aiida_profile_clean, tmp_path, database):
+    """Export and archive round trips of the new graph are Task 10's."""
     root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    _write_secret_provenance(root, REL, database=database)
+    _secret_tree(root, 'h-MoS2', database)
 
-    report = ingest_root(root, label='secrets-ingest')
+    report = import_root(root, label='secrets-import')
     assert report.ok(), report.render()
+    assert report.created_decks
 
-    _assert_group_has_no_secrets('secrets-ingest')
-
-    exported = export_results('secrets-ingest', tmp_path / 'exported')
-    for path in exported:
-        _assert_no_secrets(path.read_text(encoding='utf-8', errors='replace'), path)
-
-    archive_path = tmp_path / 'archive.aiida'
-    export_archive('secrets-ingest', archive_path)
-
-    aiida_profile_clean.reset_storage()
-    n_new = import_archive(archive_path)
-    assert n_new > 0
-    _assert_group_has_no_secrets('secrets-ingest')
+    _assert_group_has_no_secrets('secrets-import')
 
 
 def test_group_wide_guard_no_secret_string_anywhere(aiida_profile_clean, tmp_path):
-    """Store-wide guard: after ingesting a tree with BOTH database shapes
+    """Store-wide guard: after importing a tree with BOTH database shapes
     (one run flat, one run legacy-nested), no repository file of any node in
-    the set's group contains any secret string."""
+    or linked to the set's group contains any secret string."""
     root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    _write_secret_provenance(root, REL, database=FLAT_DATABASE)
-    rel2 = 'afm/h-WS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
-    make_run(root, rel2, 'afm')
-    _write_secret_provenance(root, rel2, database=LEGACY_DATABASE)
+    _secret_tree(root, 'h-MoS2', FLAT_DATABASE)
+    _secret_tree(root, 'h-WS2', LEGACY_DATABASE)
     (root / 'settings.yaml').write_text(
         yaml.safe_dump({'database': FLAT_DATABASE}), encoding='utf-8')
 
-    report = ingest_root(root, label='secrets-guard')
+    report = import_root(root, label='secrets-guard')
     assert report.ok(), report.render()
-    assert len(report.created_runs) == 2
-    assert len(report.created_results) == 2
-
-    from aiida.orm import Group  # pylint: disable=import-outside-toplevel
-
-    group = Group.collection.get(label=group_label('secrets-guard'))
-    # 1 set + 2 runs + 2 results -- the store-wide guard below is only
-    # meaningful once this confirms every node actually landed in the group.
-    assert len(group.nodes) == 5
+    assert len(report.created_decks) == 4
 
     _assert_group_has_no_secrets('secrets-guard')
 
 
-def test_reingest_of_an_unredacted_tree_is_idempotent(aiida_profile_clean, tmp_path):
-    """Re-ingesting the SAME (still unredacted on disk) tree a second time
-    creates nothing new: the first ingest's sanitised, stored bytes are what
-    every subsequent comparison is keyed against."""
+def test_reimport_of_an_unredacted_tree_is_idempotent(aiida_profile_clean, tmp_path):
+    """Re-importing the SAME (still unredacted on disk) tree creates nothing
+    new: the fingerprint is over the files, the stored bytes are redacted."""
     root = tmp_path / 'simulation_x'
-    make_run(root, REL, 'afm')
-    _write_secret_provenance(root, REL, database=FLAT_DATABASE)
+    _secret_tree(root, 'h-MoS2', FLAT_DATABASE)
 
-    first = ingest_root(root, label='secrets-reingest')
+    first = import_root(root, label='secrets-reimport')
     assert first.ok(), first.render()
-    assert first.created_runs
+    assert first.created_decks
 
-    second = ingest_root(root, label='secrets-reingest')
+    second = import_root(root, label='secrets-reimport')
     assert second.ok(), second.render()
-    assert second.created_runs == []
-    assert second.created_results == []
-    assert second.updated_provenance == []
+    assert second.created_decks == []
+    assert len(second.skipped_decks) == len(first.created_decks)
 
 
 def _minimal_afm_config_with_secrets(tmp_path):
@@ -245,6 +237,7 @@ def _minimal_afm_config_with_secrets(tmp_path):
     )
 
 
+@pytest.mark.skip(reason='rebuild_set over the CalcJob graph is Task 10')
 def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_path,
                                                      monkeypatch):
     """`rebuild_set`'s exported `config.json` -- redacted at ingest time -- must
@@ -260,7 +253,7 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
     (prov_dir / 'config.json').write_text(cfg.model_dump_json(indent=2),
                                           encoding='utf-8')
 
-    ingest_root(root, label='secrets-rebuild')
+    import_root(root, label='secrets-rebuild')
     seen = {}
 
     class _FakeResult:

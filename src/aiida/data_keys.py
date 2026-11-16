@@ -26,12 +26,11 @@ TIER_KEYS = ('window', 'raw', 'peratom')
 def is_superseded(node) -> bool:
     """Whether `node` was marked replaced by `src.aiida.ingest.supersede`.
 
-    Both `ingest.find_results` (a superseded node must never be matched again)
-    and `export._results_of` (a superseded node must never be written back
+    `export._results_of` (a superseded node must never be written back
     out -- it and its replacement share the same run-relative file names, so
     exporting both would make the last one dumped win, possibly the stale
-    one) read the same `base.extras` flag; this is the one place that reads
-    it, so the two callers cannot drift into checking it differently.
+    one) and `query` read the flag through this one function, so the callers
+    cannot drift into checking it differently.
     """
     return bool(node.base.extras.get('superseded', False))
 

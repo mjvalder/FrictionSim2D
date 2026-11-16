@@ -23,6 +23,7 @@ pytestmark = pytest.mark.aiida
 REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
 
 
+@pytest.mark.skip(reason='old set/run nodes are gone (Task 6); run --aiida is removed in Task 11')
 def test_run_aiida_registers_an_all_empty_fresh_tree(aiida_profile_clean, tmp_path,
                                                       monkeypatch):
     def _fake_run_simulations(config_file, model, **kwargs):

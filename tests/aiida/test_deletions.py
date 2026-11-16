@@ -78,7 +78,8 @@ def test_lazy_exports_point_at_the_new_modules():
     import src.aiida as aiida_pkg
 
     exports = aiida_pkg._LAZY_EXPORTS
-    assert exports['ingest_root'][0].endswith('.ingest')
+    assert exports['import_root'][0].endswith('.ingest')
+    assert 'ingest_root' not in exports
     assert exports['export_results'][0].endswith('.export')
     assert exports['export_archive'][0].endswith('.export')
     assert exports['import_archive'][0].endswith('.export')

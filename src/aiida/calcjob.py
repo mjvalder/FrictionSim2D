@@ -37,6 +37,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -55,14 +56,16 @@ from .data_keys import content_hash
 from .decks import Deck, discover_decks, points_for
 from .retention import retrieve_patterns
 from .store import (
-    RUN_UUID_EXTRA, StoreIndex, get_or_create_file, lammps_code, new_file, new_folder,
+    DECK_KEY_EXTRA, RUN_UUID_EXTRA, StoreIndex, deck_key, get_or_create_file,
+    lammps_code, new_file, new_folder,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = ['LammpsFrictionCalcJob', 'LammpsFrictionParser', 'MissingRunUUID',
-           'RunInputs', 'deck_inputs', 'import_deck', 'import_run', 'point_label',
-           'point_uuid', 'run_inputs', 'structures_for']
+           'RunInputs', 'check_run', 'deck_inputs', 'import_deck', 'import_run',
+           'included_files', 'point_label', 'point_uuid', 'read_run_uuid',
+           'run_inputs', 'structures_for']
 
 
 class MissingRunUUID(ValueError):
@@ -208,10 +211,14 @@ class LammpsFrictionCalcJob(CalcJob):
     def prepare_for_submission(self, folder: Folder) -> CalcInfo:
         """Only the retrieve lists: nothing is uploaded and nothing runs."""
         params = self.inputs.parameters.get_dict()  # type: ignore[attr-defined]
-        # The run's identity, as an extra: found without loading `parameters`.
+        # The run's and the deck's identity, as extras: found without
+        # loading `parameters`.
         # Set here (presubmit runs on import too) so every launch route has it.
         if params.get('run_uuid'):
-            self.node.base.extras.set(RUN_UUID_EXTRA, params['run_uuid'])
+            extras = {RUN_UUID_EXTRA: params['run_uuid']}
+            if params.get('deck_name'):
+                extras[DECK_KEY_EXTRA] = deck_key(params['run_uuid'], params['deck_name'])
+            self.node.base.extras.set_many(extras)
         calcinfo = CalcInfo()
         calcinfo.uuid = str(self.uuid)
         calcinfo.codes_info = []
@@ -458,7 +465,9 @@ class LammpsFrictionParser(Parser):
         from .block_schema import POINT_UNITS
         from ..postprocessing.post_channels import final_data_path
         from ..postprocessing.run_status import halt_detail, point_key, read_halt_registry
-        from .ingest import load_points
+        # `ingest` drives this module (`import_root` -> `import_deck`); looked
+        # up at call time so the two do not form an import cycle.
+        load_points = import_module(f'{__package__}.ingest').load_points
 
         family = params['family']
         rel_path = params['rel_path']
@@ -622,7 +631,16 @@ def _run_uuid(locator, record: Mapping[str, Any]) -> str:
     return str(run_uuid)
 
 
-def _included_files(locator, deck: Deck) -> List[Path]:
+def read_run_uuid(locator) -> str:
+    """The run's ``provenance.json`` ``run_uuid``.
+
+    Raises:
+        MissingRunUUID: it is absent or not a UUID.
+    """
+    return _run_uuid(locator, _read_json(locator.provenance_file))
+
+
+def included_files(locator, deck: Deck) -> List[Path]:
     """The files the deck ``include``\\ s that exist on disk.
 
     Deck paths are simulation-root relative (``<rel_path>/lammps/
@@ -676,6 +694,37 @@ class RunInputs:
     settings: dict
 
 
+def _split_run(locator) -> Tuple[Any, dict, dict, dict, str]:
+    """``(blocks, config, record, settings, run_uuid)`` of one run, with
+    ``derived.drive_k`` checked against its unit; stores nothing."""
+    # pylint: disable=import-outside-toplevel
+    from ..postprocessing.read_data import resolve_n_layers
+    from ..postprocessing.run_status import read_run_config
+    from . import blocks as _blocks
+    from .block_schema import check_units
+
+    prov_dir = Path(locator.provenance_dir)
+    config = read_run_config(locator) or {}
+    record = _read_json(locator.provenance_file)
+    run_uuid = _run_uuid(locator, record)
+    settings = _read_yaml(prov_dir / 'settings.yaml')
+    split = _blocks.split_blocks(config, settings, record, family=locator.tokens.family,
+                                 n_layers=resolve_n_layers(locator, config or None),
+                                 provenance_dir=prov_dir)
+    check_units(split, record=record)
+    return split, config, record, settings, run_uuid
+
+
+def check_run(locator) -> str:
+    """What :func:`run_inputs` checks, storing nothing: the run's ``run_uuid``.
+
+    Raises:
+        MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
+        UnitMismatch: ``derived.drive_k`` is not ``driving_spring`` in eV/A^2.
+    """
+    return _split_run(locator)[4]
+
+
 def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
     """The inputs every deck of the run at ``locator`` shares.
 
@@ -689,22 +738,12 @@ def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
         UnitMismatch: ``derived.drive_k`` is not ``driving_spring`` in eV/A^2.
     """
     # pylint: disable=import-outside-toplevel
-    from ..postprocessing.read_data import resolve_n_layers
-    from ..postprocessing.run_status import read_run_config
-    from . import blocks as _blocks
-    from .block_schema import check_units, schema_document
+    from .block_schema import schema_document
     from .store import get_or_create_block, get_or_create_provenance, get_or_create_schema
 
     index = index if index is not None else StoreIndex.load()
     prov_dir = Path(locator.provenance_dir)
-    config = read_run_config(locator) or {}
-    record = _read_json(locator.provenance_file)
-    run_uuid = _run_uuid(locator, record)
-    settings = _read_yaml(prov_dir / 'settings.yaml')
-    split = _blocks.split_blocks(config, settings, record, family=locator.tokens.family,
-                                 n_layers=resolve_n_layers(locator, config or None),
-                                 provenance_dir=prov_dir)
-    check_units(split, record=record)
+    split, config, record, settings, run_uuid = _split_run(locator)
     return RunInputs(
         blocks={name: get_or_create_block(content, index=index)
                 for name, content in split.blocks.items()},
@@ -873,7 +912,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
                      'options': _options(hpc, int(n_procs))},
     }
     includes = _unique(((_file_label(p.name), get_or_create_file(p, index=index))
-                        for p in _included_files(locator, deck)), 'includes')
+                        for p in included_files(locator, deck)), 'includes')
     if includes:
         inputs['includes'] = includes
     if handed:

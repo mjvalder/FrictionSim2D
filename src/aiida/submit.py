@@ -103,8 +103,8 @@ def run_with_aiida(
     # Same as `run --aiida`: register the fresh tree (set + run nodes, no
     # results yet) so every CalcJob below finds its `simulation_node`.
     # Without it the parser has no run to attach results to (exit 321).
-    from .ingest import ingest_root  # pylint: disable=import-outside-toplevel
-    report = ingest_root(root_dir, label=label, profile=profile)
+    from .ingest import import_root  # pylint: disable=import-outside-toplevel
+    report = import_root(root_dir, label=label, profile=profile)
     if not report.ok():
         raise RuntimeError(
             f"Registering {root_dir} in AiiDA failed:\n{report.render()}")
@@ -173,7 +173,6 @@ def smart_submit(
     import click  # pylint: disable=import-outside-toplevel
 
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
-    from .ingest import find_run_by_rel_path  # pylint: disable=import-outside-toplevel
 
     try:
         load_aiida_profile(profile)
@@ -194,7 +193,9 @@ def smart_submit(
         )
     click.echo(f"Found {len(simulation_dirs)} run(s) under {root}")
 
-    untracked = [d for d in simulation_dirs if find_run_by_rel_path(d, root) is None]
+    # The per-run tracking nodes went with the old ingest (plan Task 6); this
+    # module is deleted in Task 11.
+    untracked = list(simulation_dirs)
     if untracked:
         click.echo(
             f"WARNING: {len(untracked)} run(s) are not registered in AiiDA; their "
@@ -328,7 +329,7 @@ def submit_simulation(
 def submit_batch(
     simulation_dirs: list,
     code_label: Any,
-    root_dir: Optional[Path] = None,
+    root_dir: Optional[Path] = None,  # pylint: disable=unused-argument
     options: Optional[Dict[str, Any]] = None,
     parameters: Optional[Dict[str, Any]] = None,
     daemon: bool = False,
@@ -351,15 +352,12 @@ def submit_batch(
     Returns:
         List of submitted ``ProcessNode`` instances.
     """
-    from .ingest import find_run_by_rel_path  # pylint: disable=import-outside-toplevel
 
     processes = []
     for sim_dir in simulation_dirs:
         sim_dir = Path(sim_dir)
 
-        sim_node = None
-        if root_dir:
-            sim_node = find_run_by_rel_path(sim_dir, root_dir)
+        sim_node = None     # no tracking nodes since plan Task 6
 
         try:
             proc = submit_simulation(

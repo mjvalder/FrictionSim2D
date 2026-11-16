@@ -1,8 +1,7 @@
 """What a finished run keeps.
 
-One rule, two consumers. `ingest.py` (until its Task 6 rewrite) derives what
-it stores from `retained_paths`; files over `aiida.max_stored_file_mb` are
-recorded there by sha256 instead of stored. The import-only
+One rule, two consumers. `ingest.load_points` derives each point's aux files
+from `retained_paths`. The import-only
 `LammpsFrictionCalcJob` retrieves from `retrieve_patterns`, narrowed per deck
 kind (`calcjob._temporary_list`): results, end snapshots, loaded structures
 and hold traces are retrieved and stored as outputs, while the run's inputs

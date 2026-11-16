@@ -55,6 +55,17 @@ SCHEMA_HASH_EXTRA = 'friction2d_schema_hash'
 #: The CalcJob extra that carries the run's identity (``provenance.json``
 #: ``run_uuid``), so every deck of one run is found by one value.
 RUN_UUID_EXTRA = 'friction2d_run_uuid'
+#: The CalcJob extra that carries the deck's identity,
+#: ``f'{run_uuid}|{deck_name}'`` -- recomputable from ``parameters``.
+DECK_KEY_EXTRA = 'friction2d_deck_key'
+#: The CalcJob extra that carries the deck's fingerprint
+#: (:func:`src.aiida.ingest.deck_fingerprint`): what was imported.
+DECK_SHA_EXTRA = 'friction2d_deck_sha256'
+
+
+def deck_key(run_uuid: str, deck_name: str) -> str:
+    """A deck's identity: ``f'{run_uuid}|{deck_name}'``."""
+    return f'{run_uuid}|{deck_name}'
 
 #: The uuid5 namespace of every content-addressed FrictionSim2D node. Fixed
 #: once (``uuid5(NAMESPACE_URL, 'https://frictionsim2d/aiida/node')``) and
@@ -64,7 +75,8 @@ RUN_UUID_EXTRA = 'friction2d_run_uuid'
 FRICTION2D_NAMESPACE = UUID('e1ff2212-fbb6-5980-a513-7e1d9d76aa12')
 
 #: The process type of the import-only CalcJob (entry point ``friction2d.lammps``).
-_CALCJOB_PROCESS_TYPE = 'aiida.calculations:friction2d.lammps'
+CALCJOB_PROCESS_TYPE = 'aiida.calculations:friction2d.lammps'
+_CALCJOB_PROCESS_TYPE = CALCJOB_PROCESS_TYPE
 
 _CONFLICT = '.sync-conflict-'
 _CHUNK = 1 << 20
@@ -305,6 +317,13 @@ def _sha(content: Union[Path, bytes]) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def staged_sha256(path: Path, name: Optional[str] = None) -> str:
+    """The sha256 the store records for ``path`` staged under ``name``
+    (default: as :func:`get_or_create_file` names it), without storing anything."""
+    path = Path(path)
+    return _sha(_staged(path, name or _staging_name(path)))
+
+
 def _put(repository: Any, content: Union[Path, bytes], name: str) -> None:
     if isinstance(content, Path):
         repository.put_object_from_file(str(content), name)
@@ -416,6 +435,15 @@ def _folder_key(members: List[Tuple[str, str]]) -> str:
     for name, sha in sorted(members):
         digest.update(f'{name}\0{sha}\n'.encode('utf-8'))
     return digest.hexdigest()
+
+
+def provenance_key(provenance_file: Optional[Path],
+                   provenance_dir: Optional[Path]) -> str:
+    """The key :func:`get_or_create_provenance` stores this provenance
+    under, computed without storing anything."""
+    return _folder_key([(name, _sha(_staged(path, name)))
+                        for name, path in _provenance_members(provenance_file,
+                                                              provenance_dir)])
 
 
 def get_or_create_provenance(provenance_file: Optional[Path],
@@ -537,8 +565,9 @@ def reindex() -> int:
       (``'kind' in content``), ``friction2d_schema_hash`` from each schema;
     * ``friction2d_sha256`` from each friction2d ``SinglefileData``'s stored
       bytes, ``friction2d_folder_sha256`` from each provenance folder's;
-    * the run extra (``friction2d_run_uuid``) of each friction2d CalcJob from
-      its ``parameters``.
+    * the run and deck extras (``friction2d_run_uuid``,
+      ``friction2d_deck_key``) of each friction2d CalcJob from its
+      ``parameters``.
 
     Run after an archive import that dropped or edited extras. Returns the
     number of nodes whose extras changed.
@@ -553,9 +582,14 @@ def reindex() -> int:
         orm.CalcJobNode, filters={'process_type': _CALCJOB_PROCESS_TYPE})
     for calc in qb.all(flat=True):
         params = calc.inputs.parameters.get_dict() if 'parameters' in calc.inputs else {}
-        run_uuid = params.get('run_uuid')
-        if run_uuid and calc.base.extras.get(RUN_UUID_EXTRA, None) != run_uuid:
-            calc.base.extras.set(RUN_UUID_EXTRA, run_uuid)
+        wanted = {}
+        if params.get('run_uuid'):
+            wanted[RUN_UUID_EXTRA] = params['run_uuid']
+            if params.get('deck_name'):
+                wanted[DECK_KEY_EXTRA] = deck_key(params['run_uuid'], params['deck_name'])
+        current = calc.base.extras.all
+        if any(current.get(k) != v for k, v in wanted.items()):
+            calc.base.extras.set_many(wanted)
             touched += 1
     return touched
 
@@ -635,6 +669,31 @@ def machine_computer(name: str, hpc: Mapping[str, Any]) -> orm.Computer:
         scheduler_type=_SCHEDULERS.get(hpc.get('scheduler_type'), 'core.direct'),
         workdir=_IMPORT_WORKDIR,
     ).store()
+
+
+def machine_mismatch(name: str, hpc: Mapping[str, Any]) -> Optional[str]:
+    """Why the existing Computer ``name`` disagrees with ``hpc``, or None.
+
+    Only what ``hpc`` states is compared (``hpc_host``, ``scheduler_type``):
+    :func:`machine_computer` reuses an existing label untouched, so a
+    different host or scheduler under the same label would go unnoticed.
+    """
+    try:
+        computer = orm.Computer.collection.get(label=name)
+    except NotExistent:
+        return None
+    problems = []
+    host = hpc.get('hpc_host')
+    if host and computer.hostname != host:
+        problems.append(f'hostname {computer.hostname!r} != {host!r}')
+    scheduler = hpc.get('scheduler_type')
+    if scheduler and computer.scheduler_type != _SCHEDULERS.get(scheduler, 'core.direct'):
+        problems.append(f'scheduler {computer.scheduler_type!r} != '
+                        f'{_SCHEDULERS.get(scheduler, "core.direct")!r}')
+    if not problems:
+        return None
+    return (f'machine {name!r} is already registered with {", ".join(problems)}; '
+            f'reusing it (pass --machine to record these runs under another label)')
 
 
 VERSION_EXTRA = 'friction2d_lammps_version'

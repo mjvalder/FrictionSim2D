@@ -13,11 +13,10 @@ from src.cli import cli
 
 
 class _Report:
-    """Stands in for `ingest.IngestReport`: just what the CLI reads off it."""
+    """Stands in for `ingest.ImportReport`: just what the CLI reads off it."""
 
-    def __init__(self, ok=True, empty_runs=(), unparseable=()):
+    def __init__(self, ok=True, unparseable=()):
         self._ok = ok
-        self.empty_runs = list(empty_runs)
         self.unparseable = list(unparseable)
 
     def ok(self):
@@ -31,7 +30,7 @@ def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
     seen = {}
     monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.ingest.ingest_root',
+        'src.aiida.ingest.import_root',
         lambda root, label=None, profile=None, dry_run=False:
             seen.update(root=Path(root), label=label, profile=profile,
                         dry_run=dry_run) or _Report())
@@ -48,19 +47,8 @@ def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
 
 def test_import_exits_non_zero_on_a_failure(tmp_path, monkeypatch):
     monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
-    monkeypatch.setattr('src.aiida.ingest.ingest_root',
+    monkeypatch.setattr('src.aiida.ingest.import_root',
                         lambda *a, **k: _Report(ok=False))
-
-    result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
-
-    assert result.exit_code == 1
-
-
-def test_import_exits_non_zero_on_empty_runs(tmp_path, monkeypatch):
-    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
-    monkeypatch.setattr(
-        'src.aiida.ingest.ingest_root',
-        lambda *a, **k: _Report(empty_runs=['h_MoS2/L1']))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
 
@@ -70,7 +58,7 @@ def test_import_exits_non_zero_on_empty_runs(tmp_path, monkeypatch):
 def test_import_exits_non_zero_on_unparseable_runs(tmp_path, monkeypatch):
     monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.ingest.ingest_root',
+        'src.aiida.ingest.import_root',
         lambda *a, **k: _Report(unparseable=['h_MoS2/broken']))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
@@ -78,17 +66,13 @@ def test_import_exits_non_zero_on_unparseable_runs(tmp_path, monkeypatch):
     assert result.exit_code == 1
 
 
-def test_import_dry_run_ignores_empty_runs_and_unparseable(tmp_path, monkeypatch):
-    """R8 fix round 1: --dry-run's empty_runs/unparseable must not fail it.
-
-    A dry-run preview of a fresh, pre-HPC tree is legitimately all-empty; only
-    a real import treats empty/unparseable runs as failures.
-    """
+def test_import_dry_run_ignores_unparseable(tmp_path, monkeypatch):
+    """R8 fix round 1: --dry-run's unparseable paths must not fail it;
+    only a real import treats them as failures."""
     monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
-        'src.aiida.ingest.ingest_root',
-        lambda *a, **k: _Report(empty_runs=['h_MoS2/L1'],
-                                unparseable=['h_MoS2/broken']))
+        'src.aiida.ingest.import_root',
+        lambda *a, **k: _Report(unparseable=['h_MoS2/broken']))
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path), '--dry-run'])
 
@@ -103,7 +87,7 @@ def test_import_reports_a_set_root_mismatch_cleanly(tmp_path, monkeypatch):
     def _raise(*_a, **_k):
         raise SetRootMismatch("label 'x' already names a different tree")
 
-    monkeypatch.setattr('src.aiida.ingest.ingest_root', _raise)
+    monkeypatch.setattr('src.aiida.ingest.import_root', _raise)
 
     result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path)])
 

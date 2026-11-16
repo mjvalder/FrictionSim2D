@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip('aiida')
+# The old set/run/result ingest is gone (plan Task 6, `import_root`);
+# Task 10 rewrites export over the CalcJob graph.
+pytest.skip('old ingest graph; Task 10 rewrites export over the CalcJob graph', allow_module_level=True)
 pytestmark = pytest.mark.aiida
 
 from src.aiida.export import export_archive, export_results, import_archive, rebuild_set  # noqa: E402

@@ -2,6 +2,9 @@
 import pytest
 
 pytest.importorskip('aiida')
+# The old set/run/result ingest is gone (plan Task 6, `import_root`);
+# Task 8 rewrites the query layer over the CalcJob graph.
+pytest.skip('old ingest graph; Task 8 rewrites the query layer over the CalcJob graph', allow_module_level=True)
 pytestmark = pytest.mark.aiida
 
 from src.aiida.ingest import ingest_root  # noqa: E402

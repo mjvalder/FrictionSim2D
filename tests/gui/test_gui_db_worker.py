@@ -189,18 +189,16 @@ def test_an_unknown_export_kind_is_refused(tmp_path, monkeypatch):
 def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
                                                                     monkeypatch):
     class FakeReport:
-        # `incomplete_results` is the real `IngestReport` field name -- using
-        # anything else here would let `_import` read the wrong attribute
-        # and still pass, since a fake object with no such attribute would
-        # raise AttributeError and get caught, but a fake with the WRONG
-        # name attached instead would silently return the wrong value.
+        # The real `ImportReport` field names: a fake with the WRONG name
+        # attached would let `_import` read the wrong attribute and pass.
         label = 'x'
-        set_uuid = '77aa'
-        created_runs = ['afm/a']
-        created_results = []
-        skipped_results = []
-        incomplete_results = ['afm/a#force30_a0_s2']
-        empty_runs = ['afm/c']
+        group_uuid = '77aa'
+        created_decks = ['afm/a:slide']
+        skipped_decks = []
+        superseded_decks = []
+        already_imported = []
+        no_version = ['afm/a:system']
+        log_missing = ['afm/a:slide']
         unparseable = ['afm/d']
         failures = [('afm/b', 'no results file')]
         dry_run = False
@@ -222,8 +220,9 @@ def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
     assert result['ok'] is True, 'the request ran; the ingest is what failed'
     assert result['ingest_ok'] is False
     assert result['failures'] == [['afm/b', 'no results file']]
-    assert result['incomplete'] == ['afm/a#force30_a0_s2']
-    assert result['empty_runs'] == ['afm/c']
+    assert result['incomplete'] == ['afm/a:slide']
+    assert result['no_version'] == ['afm/a:system']
+    assert result['created_decks'] == ['afm/a:slide']
     assert result['unparseable'] == ['afm/d']
     assert result['report'] == 'ingested 1 run, 0 results (1 failure)'
     assert result['set_uuid'] == '77aa'

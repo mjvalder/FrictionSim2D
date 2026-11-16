@@ -79,7 +79,7 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
 
     if created_simulations and use_aiida:
-        from .aiida.ingest import SetRootMismatch, ingest_root  # noqa: PLC0415
+        from .aiida.ingest import SetRootMismatch, import_root  # noqa: PLC0415
         click.echo(f"\n📦 Registering {simulation_root.name} in AiiDA...")
         import_hint = (
             f"   The simulation tree was generated at {simulation_root.absolute()} "
@@ -88,7 +88,7 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
             f"--label {aiida_label or simulation_root.name}"
         )
         try:
-            report = ingest_root(simulation_root, label=aiida_label)
+            report = import_root(simulation_root, label=aiida_label)
         except SetRootMismatch as exc:
             logger.exception("AiiDA set/root mismatch")
             _raise_abort(f"❌ {exc}\n{import_hint}", exc)
@@ -744,24 +744,23 @@ def aiida_status():
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
 @click.option('--dry-run', is_flag=True,
-              help='Print what would be ingested; create nothing.')
+              help='Print what would be imported; create nothing.')
 def aiida_import(simulation_folder: Path, label: Optional[str],
                  profile: Optional[str], dry_run: bool):
-    """Ingest a simulation tree into AiiDA.
+    """Import a simulation tree into AiiDA: one CalcJob per LAMMPS deck.
 
     SIMULATION_FOLDER is the ``simulation_XXXXXXXX`` directory produced by one
-    ``FrictionSim2D run``. Idempotent: re-importing adds only new or changed
-    load points. Exits 1 if any run failed; a real (non-dry-run) import also
-    exits 1 if any run was left empty or could not be parsed -- a dry-run
-    preview of a fresh, pre-HPC tree is legitimately all-empty.
+    ``FrictionSim2D run``. Idempotent: re-importing skips every unchanged
+    deck and supersedes a changed one. Exits 1 if any run failed; a real
+    (non-dry-run) import also exits 1 if any path could not be parsed.
 
     Example:
         FrictionSim2D aiida import ./simulation_20260421_173546 -l 260421-afm
     """
-    from .aiida.ingest import SetRootMismatch, ingest_root  # noqa: PLC0415
+    from .aiida.ingest import SetRootMismatch, import_root  # noqa: PLC0415
 
     try:
-        report = ingest_root(simulation_folder, label=label, profile=profile,
+        report = import_root(simulation_folder, label=label, profile=profile,
                              dry_run=dry_run)
     except SetRootMismatch as exc:
         _raise_abort(f"❌ {exc}", exc)
@@ -772,7 +771,7 @@ def aiida_import(simulation_folder: Path, label: Optional[str],
     click.echo(report.render())
     failed = not report.ok()
     if not dry_run:
-        failed = failed or bool(report.empty_runs) or bool(report.unparseable)
+        failed = failed or bool(report.unparseable)
     if failed:
         raise SystemExit(1)
 

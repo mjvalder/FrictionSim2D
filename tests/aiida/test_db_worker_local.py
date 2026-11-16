@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip('aiida')
+# The old set/run/result ingest is gone (plan Task 6, `import_root`);
+# Task 11 deletes it (old result nodes).
+pytest.skip('old ingest graph; Task 11 deletes it (old result nodes)', allow_module_level=True)
 pytestmark = pytest.mark.aiida
 
 from src.aiida.ingest import ingest_root  # noqa: E402

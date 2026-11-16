@@ -1,29 +1,48 @@
-"""One ingest path, idempotent.
+"""Import a campaign tree into the local AiiDA store: :func:`import_root`.
 
-Replaces `integration.py`'s three overlapping importers (`register_*`,
-`import_results_to_aiida`, `import_simulation_set`) with a single function that
-`run --aiida`, `aiida import` and the CalcJob parser all call.
+One import-only CalcJob (:mod:`src.aiida.calcjob`) per LAMMPS deck of every
+run under the root. Identity never comes from a path or a label (critique C3):
 
-No process nodes are faked on import: the nodes link by `set_uuid`/`run_uuid`
-attributes and share an AiiDA `Group`. The CalcJob path produces real provenance
-links for free; import does not pretend to. That is a deliberate choice
-(spec §4.1).
+* a run is its ``provenance.json`` ``run_uuid``;
+* a deck is ``f'{run_uuid}|{deck_name}'``, the CalcJob extra
+  ``friction2d_deck_key`` (recomputable from ``parameters``);
+* the label only names the Group ``friction2d/<label>``.
+
+Each imported deck carries a fingerprint, the extra ``friction2d_deck_sha256``
+(:func:`deck_fingerprint`): its deck file, includes, log, retained output
+files and provenance, and the sha256 of every structure handed to it -- the
+``load_*.data`` a system deck wrote for a slide deck included (critique I2).
+On re-import an unchanged deck is skipped; a changed one gets a new CalcJob
+and the old one is :func:`supersede`\\ d -- locally only, as extras.
+
+The load-point helpers (:class:`LoadPoint`, :func:`load_points`) are aiida-free
+and so is this module at import time: every aiida import is deferred.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from types import SimpleNamespace
+from typing import (
+    TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple,
+)
 
-from ..core.observables import expected_window_rows, is_truncated
+from ..data.provenance import sha256_file
 from ..postprocessing.read_data import (
     FILE_PATTERN_SHEET, FILE_PATTERN_SHEET_ALT, FILE_PATTERN_TIP,
     FILE_PATTERN_TIP_ALT, tier_of,
 )
 from ..run.naming import AFM_LIKE_MODELS
-from .data_keys import TIER_KEYS, content_hash, is_superseded
+from .data_keys import TIER_KEYS, content_hash
+
+if TYPE_CHECKING:  # pragma: no cover
+    from aiida import orm
+
+    from .decks import Deck
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +51,6 @@ GROUP_PREFIX = 'friction2d'
 #: Every key `LoadPoint.tiers` may hold. `'retract'` is the indent family's
 #: force-distance curve -- not a sampling tier, but it belongs to the same
 #: load point and must be hashed with it, so it rides in the same dict.
-#: `FrictionResultsData.add_result_files` (Task 11) iterates `TIER_KEYS` only,
-#: so a `'retract'` entry is stored via `aux`; Task 16's `create_results`
-#: splits `point.tiers` on exactly that tuple.
 POINT_KEYS = TIER_KEYS + ('retract',)
 
 #: `indent_f30N_l1.csv` -- the retract force-distance curve. Not a DataReader
@@ -58,253 +74,13 @@ def group_label(label: str) -> str:
     return f'{GROUP_PREFIX}/{label}'
 
 
-def _max_stored_file_mb(settings_file=None) -> int:
-    """`settings.aiida.max_stored_file_mb`, defaulting to 20 (spec §4.1)."""
-    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
-    try:
-        return int(load_settings(settings_file=settings_file).aiida.max_stored_file_mb)
-    except (OSError, ValueError, AttributeError):
-        return 20
-
-
-def _group_for(label: str):
-    from aiida.orm import Group  # pylint: disable=import-outside-toplevel
-    group, _created = Group.collection.get_or_create(label=group_label(label))
-    return group
-
-
-class SetRootMismatch(ValueError):
-    """A label already names a set built from a different tree.
-
-    Merging them silently is the failure this exists to prevent: `n_runs`,
-    `materials`, `git_commit` and the stored `settings.yaml` freeze from
-    whichever tree arrived first; a `rel_path` present in both returns tree A's
-    run node with `created=False`, so `add_run_files` never re-runs and tree
-    B's inputs are discarded while its results attach anyway; and `to_record`
-    then stamps tree A's `git_commit` and `pot_sha256` onto tree B's central
-    rows. It also fires on the ordinary "I edited the config and re-ran into a
-    fresh timestamped root", which is exactly when it matters most.
-    """
-
-
-def _find_set(root: Path, label: str):
-    """The set node for `label`, if it already exists; `None` otherwise.
-
-    Read-only -- never creates a node or a Group. Still raises
-    :class:`SetRootMismatch` when the existing set was built from a different
-    `source_root`, exactly like `find_or_create_set`: a dry run must surface
-    the same conflict a real ingest would, not silently classify every run
-    under the mismatched label as "would create".
-    """
-    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
-
-    from .data import FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
-
-    root = Path(root).resolve()
-    qb = QueryBuilder()
-    qb.append(FrictionSimulationSetData, filters={'attributes.label': label})
-    existing = qb.first(flat=True)
-    if existing is not None and existing.source_root and existing.source_root != str(root):
-        raise SetRootMismatch(
-            f"set {label!r} was ingested from {existing.source_root!r}; "
-            f"{str(root)!r} is a different tree. Pass --label to give this "
-            f"tree its own set, or delete the old one with "
-            f"`FrictionSim2D aiida delete {label}`.")
-    return existing
-
-
-def find_or_create_set(root: Path, label: str):
-    """The set node for `label`, created from `root` if it does not exist.
-
-    Raises :class:`SetRootMismatch` when `label` already names a set built from
-    a different `source_root`. Re-ingesting the SAME tree under the same label
-    is the idempotent path and is allowed.
-    """
-    existing = _find_set(root, label)
-    if existing is not None:
-        return existing
-
-    from .data import FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
-
-    node = FrictionSimulationSetData()
-    node.set_from_root(Path(root).resolve(), label)
-    node.store()
-    _group_for(label).add_nodes([node])
-    return node
-
-
-def _find_run(set_node, locator) -> Optional[object]:
-    """The run node for `(set_uuid, rel_path)`, if it already exists; `None`
-    otherwise. Read-only -- never creates a node."""
-    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
-
-    from .data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
-
-    qb = QueryBuilder()
-    qb.append(FrictionSimulationData, filters={
-        'attributes.set_uuid': str(set_node.uuid),
-        'attributes.rel_path': locator.tokens.rel_path,
-    })
-    return qb.first(flat=True)
-
-
-def find_or_create_run(set_node, locator) -> Tuple[object, bool]:
-    """The run node for `(set_uuid, rel_path)`; `(node, created)`."""
-    existing = _find_run(set_node, locator)
-    if existing is not None:
-        return existing, False
-
-    from .data import FrictionSimulationData  # pylint: disable=import-outside-toplevel
-
-    node = FrictionSimulationData()
-    node.set_from_locator(locator, set_uuid=str(set_node.uuid),
-                          set_label=set_node.label)
-    node.add_run_files(locator, max_mb=_max_stored_file_mb())
-    node.store()
-    node.status = 'imported'
-    _group_for(set_node.label).add_nodes([node])
-    return node, True
-
-
-def find_run_by_rel_path(run_dir: Path, root: Path) -> Optional[object]:
-    """The stored run node for a built directory, or None.
-
-    `submit_batch` used to CREATE a node per directory at submit time; the
-    nodes now exist already (`run --aiida` -> `ingest_root`), so submitting
-    looks one up. Returning None is not an error: a directory submitted
-    without `--aiida` simply has no node to track against.
-
-    Scoped to the set(s) whose `source_root` is `root`: `rel_path` alone is
-    not unique across sets (two different trees can each have a run at, say,
-    `K300/afm_.../layer1`), so an unscoped lookup would return an arbitrary
-    node instead of the one that actually belongs to this tree.
-    """
-    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
-
-    from .data import FrictionSimulationData, FrictionSimulationSetData  # pylint: disable=import-outside-toplevel
-
-    root = Path(root).resolve()
-    rel = Path(run_dir).resolve().relative_to(root).as_posix()
-
-    set_qb = QueryBuilder()
-    set_qb.append(FrictionSimulationSetData,
-                  filters={'attributes.source_root': str(root)})
-    set_uuids = [str(node.uuid) for node in set_qb.all(flat=True)]
-    if not set_uuids:
-        return None
-
-    qb = QueryBuilder()
-    qb.append(FrictionSimulationData, filters={
-        'attributes.rel_path': rel,
-        'attributes.set_uuid': {'in': set_uuids},
-    })
-    return qb.first(flat=True)
-
-
-def find_results(run_node, point) -> Optional[object]:
-    """The stored results node for this run at `point`'s CONDITIONS, if any.
-
-    Keyed on `(load_kind, load, angle, speed, layers)`, not on the content
-    hash, because those five ARE the load point's identity. Hash-keying let a
-    re-run of the same conditions create a second node with nothing superseding
-    the first; `time_series_hash TEXT UNIQUE` then rejected one of them at
-    insert time (and every incomplete row carries `time_series_hash = ''`, so
-    the second incomplete row in the whole table collided too), which
-    `db upload` swallowed as `rejected` with a warning.
-
-    A `{'attributes.layers': None}` QueryBuilder filter raises `TypeError` on
-    SQLite, so a sheet-family point (`layers is None`) omits that filter from
-    the query and matches it in Python on the candidates instead (R4).
-    Superseded nodes (R9) are excluded the same way: a stale node must never
-    be returned again, or a re-ingest would compare against it, or supersede
-    it a second time.
-
-    Candidates are ordered newest-first (`ctime desc`): if a create-then-
-    supersede pair was ever interrupted between the two (a crash, a killed
-    process) and more than one non-superseded node exists for the same
-    conditions, the newest one is the one a subsequent ingest should compare
-    against and, if still stale, supersede -- not an arbitrary DB-order pick.
-    """
-    live = _live_results(run_node, point)
-    return live[0] if live else None
-
-
-def _live_results(run_node, point) -> List:
-    """Every non-superseded results node of `run_node` at `point`'s
-    conditions, newest first. `point` is anything with `load_kind`, `load`,
-    `angle`, `speed` and `layers` -- a `LoadPoint` or a results node."""
-    from aiida.orm import QueryBuilder  # pylint: disable=import-outside-toplevel
-
-    from .data import FrictionResultsData  # pylint: disable=import-outside-toplevel
-
-    filters = {
-        'attributes.run_uuid': str(run_node.uuid),
-        'attributes.load_kind': point.load_kind,
-        'attributes.load': point.load,
-        'attributes.angle': point.angle,
-        'attributes.speed': point.speed,
-    }
-    if point.layers is not None:
-        filters['attributes.layers'] = point.layers
-    qb = QueryBuilder()
-    qb.append(FrictionResultsData, filters=filters)
-    qb.order_by({FrictionResultsData: [{'ctime': 'desc'}]})
-    return [node for node in qb.all(flat=True)
-            if node.layers == point.layers and not is_superseded(node)]
-
-
-def supersede_older(run_node, nodes) -> List:
-    """Supersede every other live results node at the conditions of `nodes`.
-
-    The CalcJob path's counterpart to `ingest_run`'s `find_results` +
-    `supersede`: the parser hands the engine fresh nodes without looking at
-    what the run already holds, so after a resubmit two live nodes would
-    exist per load point. Called from `LammpsFrictionCalcJob.on_terminated`
-    once the new nodes are stored. `nodes` themselves are never superseded.
-    Returns the nodes it superseded.
-    """
-    keep = {str(node.uuid) for node in nodes}
-    superseded = []
-    for node in nodes:
-        for other in _live_results(run_node, node):
-            if str(other.uuid) in keep:
-                continue
-            supersede(other, run_node)
-            keep.add(str(other.uuid))
-            superseded.append(other)
-    return superseded
-
-
-def results_exist(run_node, point) -> bool:
-    """True when this run already holds an up-to-date node for `point`.
-
-    Up to date means "same conditions AND same bytes". Same conditions with
-    different bytes is a re-run: the caller supersedes rather than skips.
-    """
-    existing = find_results(run_node, point)
-    return existing is not None and existing.content_sha256 == point.content_sha256
-
-
-def supersede(existing, run_node) -> None:  # pylint: disable=unused-argument
-    """Mark an older results node as replaced.
-
-    Attributes are immutable once stored, so this is an EXTRA. The node is not
-    deleted: it may already have been uploaded centrally and its `result_uuid`
-    is the pointer a reader was given. `Friction2DDB.query` filters it out.
-    """
-    from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
-
-    existing.base.extras.set('superseded', True)
-    existing.base.extras.set('superseded_at',
-                             datetime.now(timezone.utc).isoformat())
-
-
 @dataclass(frozen=True)
 class LoadPoint:
     """One results row of the store: everything that shares a load condition.
 
-    `tiers` is keyed by :data:`POINT_KEYS`; `create_results` stores the
-    :data:`TIER_KEYS` entries as tier files and `'retract'` as an aux file.
+    `tiers` is keyed by :data:`POINT_KEYS`; the CalcJob parser stores the
+    window/raw/retract entries on the point node and the per-atom tier on
+    its own node.
     """
     family: str
     load_kind: str
@@ -457,403 +233,603 @@ def load_points(locator) -> List[LoadPoint]:
     return points
 
 
-@dataclass
-class IngestReport:
-    """What one ingest did, run by run and point by point.
-
-    `aiida import` (Task 20) prints `render()` and exits non-zero when
-    `ok()` is False; it adds its OWN non-zero exit on `empty_runs` /
-    `unparseable` (R8) -- `ok()` here stays failures-only, because an
-    all-empty tree (a run directory `run --aiida` has just created, with no
-    results written yet) must be able to ingest successfully.
-
-    Every list is `field(default_factory=list)`, never a bare `[]` default --
-    a mutable default shared across every `IngestReport` instance is exactly
-    the bug dataclasses exist to prevent.
-    """
-    label: str
-    set_uuid: str = ''
-    created_runs: List[str] = field(default_factory=list)
-    created_results: List[str] = field(default_factory=list)
-    skipped_results: List[str] = field(default_factory=list)
-    superseded_results: List[str] = field(default_factory=list)
-    updated_provenance: List[str] = field(default_factory=list)
-    incomplete_results: List[str] = field(default_factory=list)
-    empty_runs: List[str] = field(default_factory=list)
-    unparseable: List[str] = field(default_factory=list)
-    failures: List[Tuple[str, str]] = field(default_factory=list)
-    dry_run: bool = False
-
-    def ok(self) -> bool:
-        return not self.failures
-
-    def render(self) -> str:
-        head = f"{'DRY RUN: ' if self.dry_run else ''}set {self.label!r}"
-        if self.set_uuid:
-            head += f" ({self.set_uuid})"
-        lines = [
-            head,
-            f"  runs created:        {len(self.created_runs)}",
-            f"  results created:     {len(self.created_results)}",
-            f"  results skipped:     {len(self.skipped_results)}",
-            f"  results superseded:  {len(self.superseded_results)}",
-            f"  provenance updated:  {len(self.updated_provenance)}",
-            f"  results incomplete:  {len(self.incomplete_results)}",
-            f"  empty runs:          {len(self.empty_runs)}",
-            f"  unparseable runs:    {len(self.unparseable)}",
-        ]
-        for rel, message in self.failures:
-            lines.append(f"  FAILED {rel}: {message}")
-        return '\n'.join(lines)
-
-
 def _point_key(rel_path: str, point: LoadPoint) -> str:
     return (f"{rel_path}#{point.load_kind}{point.load:g}"
             f"_a{point.angle:g}_s{point.speed:g}")
 
 
-def _frames_for(point: LoadPoint) -> Dict[str, Any]:
-    """The frames `summarise_run` consumes for one load point.
+# ---------------------------------------------------------------------------
+# The report
+# ---------------------------------------------------------------------------
 
-    A `.csv` member (a PES grid, the indent retract curve) is a plain comma
-    table with a `# family=` first line, not a LAMMPS `ave/time` file, so it
-    is read with `pd.read_csv(comment='#')`; everything else goes through
-    `read_data.read_results_file`, the same parser the DataReader uses.
+class SetRootMismatch(ValueError):
+    """A label already names a non-empty Group holding none of this root's runs.
+
+    Compared on ``run_uuid`` values, never on paths: the same runs rsynced to
+    a new path import under their label as before (``source_root`` is
+    updated), while a different campaign under a used label is refused --
+    merging it silently would give the label two unrelated campaigns.
     """
-    import pandas as pd  # pylint: disable=import-outside-toplevel
-
-    from ..postprocessing.read_data import read_results_file  # pylint: disable=import-outside-toplevel
-
-    frames: Dict[str, Any] = {}
-    for tier in TIER_KEYS:
-        path = point.tiers.get(tier)
-        if path is None:
-            continue
-        frames[tier] = (pd.read_csv(path, comment='#') if path.suffix == '.csv'
-                        else read_results_file(path, point.family,
-                                               n_layers=point.layers or 2))
-    retract = point.tiers.get('retract')
-    if retract is not None:
-        frames['retract'] = pd.read_csv(retract, comment='#')
-    return frames
 
 
-def _expected_window_rows(run_node, family: str) -> Optional[int]:
-    """How many `window` rows a finished slide writes, or None if unknown.
+@dataclass
+class ImportReport:
+    """What one :func:`import_root` did, deck by deck.
 
-    `slide_run_steps // results_frequency`, read from the run's own stored
-    `provenance/config.json` (its `settings` block is the settings the run
-    was built with). None for a non-slide family, a run node without that
-    file, or a config missing either value -- the caller then leaves
-    `is_complete` as `summarise_run` set it.
+    Deck entries are ``'<rel_path>:<deck_name>'``. ``points`` holds the uuid
+    of every point node a new CalcJob created (the hook integrity uses).
+    ``failures`` are ``(rel_path or deck, message)``: a :class:`MissingRunUUID`
+    or :class:`UnitMismatch` for one run lands here and the other runs go on.
+    ``verdict_counts`` is filled by the integrity pass (Task 6a).
     """
-    import json  # pylint: disable=import-outside-toplevel
+    label: str
+    group_uuid: str = ''
+    created_decks: List[str] = field(default_factory=list)
+    skipped_decks: List[str] = field(default_factory=list)
+    superseded_decks: List[str] = field(default_factory=list)
+    already_imported: List[str] = field(default_factory=list)
+    points: List[str] = field(default_factory=list)
+    verdict_counts: Dict[str, int] = field(default_factory=dict)
+    log_missing: List[str] = field(default_factory=list)
+    no_version: List[str] = field(default_factory=list)
+    unparseable: List[str] = field(default_factory=list)
+    failures: List[Tuple[str, str]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    dry_run: bool = False
 
-    try:
-        cfg = json.loads(run_node.base.repository.get_object_content(
-            'provenance/config.json'))
-    except (FileNotFoundError, OSError, ValueError):
-        return None
-    return expected_window_rows(cfg, family)
+    def ok(self) -> bool:
+        """No run or deck failed."""
+        return not self.failures
 
-
-def _flag_truncation(summary, point: LoadPoint, expected: Optional[int]) -> None:
-    """Mark a slide trace cut short (e.g. a walltime kill) as incomplete.
-
-    Short by MORE than one output interval: `fix ave/time` may or may not
-    write a row at the step the fix was defined, so one row either way is
-    normal. The COF of a partial trace is not the COF of the run, so
-    `is_complete` goes False and `truncated`/`expected_ntimesteps` land in the
-    summary extras (attributes, and the central row's `extras`).
-    """
-    if expected is None or 'window' not in point.tiers:
-        return
-    if is_truncated(summary.ntimesteps, expected):
-        summary.is_complete = False
-        summary.extras['truncated'] = True
-        summary.extras['expected_ntimesteps'] = expected
-
-
-def create_results(run_node, point: LoadPoint, run_dir: Path, *,
-                   skip_fraction: float = 0.2, store: bool = True):
-    """Build one load point as a `FrictionResultsData` and return it.
-
-    `run_dir` is the run's own root directory (`locator.run_dir`): every path
-    in `point.tiers`/`point.aux` lives under it, and `add_result_files` needs
-    it to compute each stored member's run-relative path (R18).
-
-    `store=False` (the CalcJob parser's path, via `ingest_retrieved`) returns
-    the node UNSTORED and skips the group: `Parser.out()` requires unstored
-    nodes so the engine can attach them to the calculation with real
-    provenance links. The engine does NOT add anything to a `Group` on its
-    own once it stores those outputs -- `LammpsFrictionCalcJob.on_terminated`
-    files them into the set's group afterwards, via `add_results_to_group`.
-    """
-    from ..data.models import summarise_run  # pylint: disable=import-outside-toplevel
-
-    from .data import FrictionResultsData  # pylint: disable=import-outside-toplevel
-
-    node = FrictionResultsData()
-    node.family = point.family
-    node.load_kind = point.load_kind
-    node.load = float(point.load)
-    node.angle = float(point.angle)
-    node.speed = float(point.speed)
-    node.layers = point.layers
-    node.run_uuid = str(run_node.uuid)
-    node.set_uuid = str(run_node.set_uuid)
-
-    # The 'retract' entry of `point.tiers` is not a sampling tier -- it rides
-    # to `add_result_files` as an aux file (R11c), alongside every other aux
-    # file the point carries (logs, hold/final artefacts, pes_scan_refine).
-    tiers = {t: p for t, p in point.tiers.items() if t in TIER_KEYS}
-    retract = point.tiers.get('retract')
-    aux = point.aux + ((retract,) if retract is not None else ())
-    node.add_result_files(tiers, run_dir=run_dir, aux=aux,
-                          max_mb=_max_stored_file_mb(),
-                          content_sha256=point.content_sha256)
-    summary = summarise_run(_frames_for(point), point.family,
-                            skip_fraction=skip_fraction)
-    _flag_truncation(summary, point, _expected_window_rows(run_node, point.family))
-    node.set_summary(summary)
-    if not store:
-        return node
-    node.store()
-    _group_for(run_node.set_label or run_node.set_uuid).add_nodes([node])
-    return node
+    def render(self) -> str:
+        """The report as text: counts, then every notable entry."""
+        head = f"{'DRY RUN: ' if self.dry_run else ''}set {self.label!r}"
+        if self.group_uuid:
+            head += f' ({self.group_uuid})'
+        lines = [
+            head,
+            f'  decks created:       {len(self.created_decks)}',
+            f'  decks skipped:       {len(self.skipped_decks)}',
+            f'  decks superseded:    {len(self.superseded_decks)}',
+            f'  already imported:    {len(self.already_imported)}',
+            f'  points created:      {len(self.points)}',
+            f'  log missing:         {len(self.log_missing)}',
+            f'  no LAMMPS version:   {len(self.no_version)}',
+            f'  unparseable runs:    {len(self.unparseable)}',
+        ]
+        lines += [f'  verdict {k}: {v}' for k, v in sorted(self.verdict_counts.items())]
+        lines += [f'  already imported elsewhere: {d}' for d in self.already_imported]
+        lines += [f'  no LAMMPS version (no Code): {d}' for d in self.no_version]
+        lines += [f'  log missing: {d}' for d in self.log_missing]
+        lines += [f'  unparseable: {d}' for d in self.unparseable]
+        lines += [f'  WARNING {w}' for w in self.warnings]
+        lines += [f'  FAILED {where}: {message}' for where, message in self.failures]
+        return '\n'.join(lines)
 
 
-def locator_for(run_dir: Path, rel_path: str):
-    """A `RunLocator` for a bare run directory whose `rel_path` is known.
+# ---------------------------------------------------------------------------
+# Fingerprints
+# ---------------------------------------------------------------------------
 
-    `discover_runs` needs a whole simulation root; a retrieved CalcJob folder
-    is one run with no `<model>/` above it, so the CalcJob parser builds its
-    locator from the `rel_path` recorded on the run node instead.
-    """
-    from dataclasses import replace  # pylint: disable=import-outside-toplevel
-    import json as _json  # pylint: disable=import-outside-toplevel
-
-    from ..run.naming import parse_run_path  # pylint: disable=import-outside-toplevel
-    from ..run.tree import RunLocator  # pylint: disable=import-outside-toplevel
-
-    run_dir = Path(run_dir)
-    tokens = parse_run_path(rel_path)
-    prov_file = run_dir / 'provenance.json'
-    family = tokens.model
-    if prov_file.is_file():
-        family = _json.loads(prov_file.read_text(encoding='utf-8')).get(
-            'family') or tokens.model
-    # NOT `provenance_dir_for(run_dir)`: for an AFM-family run that helper
-    # falls back to `run_dir.parent / 'provenance'` when `run_dir/provenance`
-    # does not exist -- correct for a real tree, wrong for a scratch directory
-    # that IS the whole retrieved tree. `run_dir.parent` there is arbitrary
-    # (whatever the CalcJob's `TemporaryDirectory` happens to sit under, or
-    # nothing at all if `run_dir` is the scratch root itself), never a real
-    # `provenance/` sibling, so this pins it to the one place that could
-    # possibly exist inside the retrieval.
-    return RunLocator(
-        tokens=replace(tokens, family=family), run_dir=run_dir,
-        provenance_file=prov_file, provenance_dir=run_dir / 'provenance',
-        results_dir=run_dir / 'results', data_dir=run_dir / 'data',
-        lammps_dir=run_dir / 'lammps')
+_CONFLICT = '.sync-conflict-'
+_LOAD_DATA_RE = re.compile(r'^load_.+\.data$')
 
 
-def ingest_retrieved(run_dir: Path, rel_path: str, run_node, *,
-                     skip_fraction: float = 0.2) -> List:
-    """UNSTORED `FrictionResultsData` for a retrieved CalcJob folder.
-
-    A `Parser` must hand `self.out()` unstored nodes so the engine can attach
-    them to the calculation with real provenance links. Same `load_points` and
-    same `summarise_run` as the import path -- the nodes are indistinguishable
-    from ones `ingest_run` would have created.
-
-    Degrades per point, exactly like `ingest_run`'s main loop: a truncated or
-    unparseable results file for ONE load point is logged and skipped, not
-    allowed to abort every other point of the same run (a PBS array where one
-    load's write got cut off must not also lose the 19 that finished cleanly).
-    The caller (the parser) treats an all-empty return the same as "no results
-    at all" -- `ERROR_NO_LOAD_POINTS` -- since there is no `IngestReport` here
-    to record a partial failure against.
-    """
-    locator = locator_for(run_dir, rel_path)
-    nodes = []
-    for point in load_points(locator):
-        try:
-            nodes.append(create_results(run_node, point, locator.run_dir,
-                                        skip_fraction=skip_fraction,
-                                        store=False))
-        except Exception:  # pylint: disable=broad-except
-            logger.exception("Ingest failed for a load point of %s", rel_path)
-    return nodes
+def _plain_files(directory: Path, pattern: str) -> List[Path]:
+    """Files matching ``pattern`` in ``directory``, Syncthing copies left out."""
+    if not Path(directory).is_dir():
+        return []
+    return [p for p in sorted(Path(directory).glob(pattern))
+            if p.is_file() and _CONFLICT not in p.name]
 
 
-def add_results_to_group(label: str, nodes) -> None:
-    """File already-stored results nodes into `label`'s AiiDA group.
-
-    The counterpart to `create_results`'s own `_group_for(...).add_nodes(...)`
-    call for the CalcJob-native path: `ingest_retrieved` hands its nodes to
-    the parser UNSTORED (`store=False`), and the AiiDA engine stores and links
-    them for real once the process finishes -- but the engine never adds
-    anything to a `Group` on its own. `LammpsFrictionCalcJob.on_terminated`
-    calls this once those nodes are stored, so `export_archive`'s group-based
-    "everything this set produced" query includes CalcJob-native results too.
-    """
-    nodes = list(nodes)
-    if not nodes:
-        return
-    _group_for(label).add_nodes(nodes)
+def _rel(path: Path, run_dir: Path) -> str:
+    """``path`` relative to the run directory: the same wherever the tree sits."""
+    return Path(os.path.relpath(path, run_dir)).as_posix()
 
 
-def _plan_run(rel: str, set_node, locator, points: List[LoadPoint],
-             report: IngestReport) -> None:
-    """Classify one run's points for a dry run, using READ-ONLY queries only.
-
-    No node and no Group is ever created here. `set_node` is `None` when no
-    set named `label` exists yet in the store (a brand-new import): every run
-    and point under it is then "would create", because there is nothing to
-    compare against. When a set DOES exist, a run/point that is not found in
-    it is likewise "would create" -- but one that IS found is classified
-    exactly as a real ingest would (`results_exist` / `find_results`), never
-    unconditionally reported as "created". Getting this wrong is what made a
-    dry run after a real ingest still claim N new results instead of N
-    skipped.
-    """
-    run_node = _find_run(set_node, locator) if set_node is not None else None
-    if run_node is None:
-        report.created_runs.append(rel)
-        report.created_results.extend(_point_key(rel, p) for p in points)
-        return
-    if run_node.provenance_changed(locator):
-        report.updated_provenance.append(rel)
-
-    for point in points:
-        key = _point_key(rel, point)
-        try:
-            if results_exist(run_node, point):
-                report.skipped_results.append(key)
-            elif find_results(run_node, point) is not None:
-                report.superseded_results.append(key)
-            else:
-                report.created_results.append(key)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("Dry-run classification failed for %s", key)
-            report.failures.append((key, f"{type(exc).__name__}: {exc}"))
+def _covers(deck: 'Deck', load: float, angle: float, speed: float) -> bool:
+    from .decks import points_for  # pylint: disable=import-outside-toplevel
+    return bool(points_for(deck, [SimpleNamespace(load=load, angle=angle, speed=speed)]))
 
 
-def ingest_run(locator, set_node, report: IngestReport, *,
-               skip_fraction: float = 0.2) -> None:
-    """Ingest one run into `set_node`, recording the outcome in `report`.
+def _slide_outputs(locator, deck: 'Deck') -> List[Path]:
+    """The output files a slide-like deck's CalcJob is built from: the result
+    files of its points and their end snapshots. A results file that names no
+    point (a PES grid, ``halted.txt``) belongs to every slide deck of the run;
+    an indent retract curve to the deck covering its load."""
+    from ..postprocessing.post_channels import final_data_path  # pylint: disable=import-outside-toplevel
 
-    One `try` per LOAD POINT, not one per run. With the try around the whole
-    loop, a single truncated file at load 3 of 20 aborted loads 4-20, named
-    none of them in the report, and on re-ingest hash-skipped 1-2 and raised
-    again on 3 -- 4-20 were unreachable until the user found the bad file by
-    hand. That is the remote-manual mode's normal failure (a PBS array where
-    some jobs hit walltime), so it must degrade per point.
-    """
-    rel = locator.tokens.rel_path
-    try:
-        points = load_points(locator)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Could not enumerate load points for %s", rel)
-        report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
-        return
-
-    if not points:
-        # A run directory with no results at all -- e.g. `run --aiida` has
-        # just created it and the job has not finished yet. Not a failure
-        # (R8): the caller decides whether an empty tree is acceptable.
-        report.empty_runs.append(rel)
-
-    if report.dry_run:
-        try:
-            _plan_run(rel, set_node, locator, points, report)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("Could not look up the run node for %s", rel)
-            report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
-        return
-
-    try:
-        run_node, created = find_or_create_run(set_node, locator)
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("Could not create the run node for %s", rel)
-        report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
-        return
-    if created:
-        report.created_runs.append(rel)
-    else:
-        try:
-            if run_node.refresh_provenance(locator):
-                report.updated_provenance.append(rel)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("Could not record the updated provenance of %s", rel)
-            report.failures.append((rel, f"{type(exc).__name__}: {exc}"))
-
-    for point in points:
-        key = _point_key(rel, point)
-        try:
-            if results_exist(run_node, point):
-                report.skipped_results.append(key)
+    found: List[Path] = []
+    model = locator.tokens.model
+    for path in _plain_files(locator.results_dir, '*'):
+        matched = _match_point(path.name, model)
+        indent = _INDENT_RE.match(path.name)
+        if matched is not None:
+            kind, load, angle, speed, _layers = matched
+            if not _covers(deck, load, angle, speed):
                 continue
-            stale = find_results(run_node, point)
-            node = create_results(run_node, point, locator.run_dir,
-                                  skip_fraction=skip_fraction)
-            if stale is not None:
-                supersede(stale, run_node)
-                report.superseded_results.append(key)
-            else:
-                report.created_results.append(key)
-            if not node.is_complete:
-                report.incomplete_results.append(key)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("Ingest failed for %s", key)
-            report.failures.append((key, f"{type(exc).__name__}: {exc}"))
+            found.append(path)
+            final = final_data_path(locator.data_dir, kind, load, angle)
+            if final is not None:
+                found.append(final)
+        elif indent is None or 'load' not in deck.point_filter or \
+                abs(float(indent['load']) - deck.point_filter['load']) <= 1e-9:
+            found.append(path)
+    if locator.tokens.family in _PES_FAMILIES:
+        final = final_data_path(locator.data_dir, 'none', 0.0, 0.0)
+        if final is not None:
+            found.append(final)
+    return sorted(set(found))
 
 
-def ingest_root(root: Path, label: Optional[str] = None,
-                profile: Optional[str] = None, *,
-                dry_run: bool = False) -> IngestReport:
-    """Ingest every run under `root`. Idempotent: re-running adds only new or
-    changed load points, and creates nothing at all when nothing changed.
+def _structure_files(locator, deck: 'Deck', decks: Sequence['Deck']) -> List[Tuple[Path, str]]:
+    """``(path, stored name)`` of every structure the deck's CalcJob gets as
+    ``structures``: ``build/*.lmp`` for the deck that reads the build, and for
+    a slide deck the ``load_*.data`` the run's system deck outputs for it."""
+    # pylint: disable=import-outside-toplevel
+    from .calcjob import structures_for
 
-    `profile` is loaded via `load_aiida_profile` before anything touches the
-    store. `dry_run` still loads it: a plan must classify each run/point
-    against what is ALREADY in the store (existing set found by label, run
-    found by `(set_uuid, rel_path)`, `results_exist`/`find_results` per
-    point), read-only and via `_find_set`/`_find_run` rather than
-    `find_or_create_*` -- nothing is stored and no Group is created, but a
-    dry run after a real ingest must report "0 created, N skipped", not
-    silently re-claim everything as new.
+    reads_build = deck.writes_structures or not any(d.writes_structures for d in decks)
+    out: List[Tuple[Path, str]] = []
+    if reads_build:
+        here = Path(locator.run_dir) / 'build'
+        build = here if here.is_dir() else Path(locator.run_dir).parent / 'build'
+        out += [(p, p.name) for p in _plain_files(build, '*.lmp')]
+    if not deck.writes_structures and any(d.writes_structures for d in decks):
+        loads = {p.name: p for p in _plain_files(locator.data_dir, 'load_*.data')
+                 if _LOAD_DATA_RE.match(p.name)}
+        named = {name: SimpleNamespace(filename=name) for name in loads}
+        out += [(loads[name], f'data/{name}') for name in structures_for(deck, named)]
+    return out
+
+
+def deck_fingerprint(locator, deck: 'Deck', decks: Sequence['Deck']) -> str:
+    """The deck's fingerprint (extra ``friction2d_deck_sha256``).
+
+    A sha256 over ``(run-relative name, sha256)`` of: the deck file, the
+    files it includes, its log (or its absence), its retained output files
+    (``load_*.data`` + ``hold_*.txt`` for a system deck, its points' result
+    files and snapshots otherwise), the run's provenance folder key, and the
+    stored sha256 of every structure handed to it (I2). Path-free, so a moved
+    tree has the same fingerprints; a log that arrives later changes it.
     """
-    from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
-    from ..run.tree import discover_runs, unparseable_runs  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from .calcjob import included_files
+    from .store import provenance_key, staged_sha256
 
-    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+    run_dir = Path(locator.run_dir)
+    if deck.writes_structures:
+        outputs = (_plain_files(locator.data_dir, 'load_*.data')
+                   + _plain_files(locator.data_dir, 'hold_*.txt'))
+    else:
+        outputs = _slide_outputs(locator, deck)
+    entries = [('deck', sha256_file(deck.path))]
+    entries += [(f'include:{_rel(p, run_dir)}', sha256_file(p))
+                for p in included_files(locator, deck)]
+    entries.append(('log', sha256_file(deck.log_path) if deck.log_path else '-'))
+    entries += [(f'output:{_rel(p, run_dir)}', sha256_file(p)) for p in outputs]
+    entries.append(('provenance', provenance_key(locator.provenance_file,
+                                                 locator.provenance_dir)))
+    entries += [('structure', sha)
+                for sha in sorted(staged_sha256(p, name)
+                                  for p, name in _structure_files(locator, deck, decks))]
+    digest = hashlib.sha256()
+    for name, sha in sorted(entries):
+        digest.update(f'{name}\0{sha}\n'.encode('utf-8'))
+    return digest.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Supersession (local only)
+# ---------------------------------------------------------------------------
+
+def _superseded_closure(calc: 'orm.CalcJobNode') -> Set[int]:
+    """pks of ``calc``'s CREATE outputs and, transitively, of the outputs of
+    every calcfunction that consumed one. INPUT_CALC consumers that are
+    CalcJobs (a slide deck reading a structure) are not followed."""
+    # pylint: disable=import-outside-toplevel
+    from aiida import orm
+    from aiida.common.links import LinkType
+
+    create = {'type': LinkType.CREATE.value}
+    qb = orm.QueryBuilder().append(orm.CalcJobNode, filters={'id': calc.pk}, tag='c')
+    qb.append(orm.Data, with_incoming='c', edge_filters=create, project='id')
+    seen = set(qb.all(flat=True))
+    frontier = set(seen)
+    while frontier:
+        qb = orm.QueryBuilder().append(orm.Data, filters={'id': {'in': sorted(frontier)}},
+                                       tag='d')
+        qb.append(orm.CalcFunctionNode, with_incoming='d', tag='f',
+                  edge_filters={'type': LinkType.INPUT_CALC.value})
+        qb.append(orm.Data, with_incoming='f', edge_filters=create, project='id')
+        frontier = set(qb.all(flat=True)) - seen
+        seen |= frontier
+    return seen
+
+
+def supersede(calc: 'orm.CalcJobNode') -> List[int]:
+    """Mark ``calc`` replaced, with its CREATE outputs and their calcfunction
+    descendants: extras ``superseded=True``, ``superseded_at`` (ISO, UTC).
+
+    Local to this profile: extras are an index, not provenance. Returns the
+    pks marked.
+    """
+    # pylint: disable=import-outside-toplevel
+    from datetime import datetime, timezone
+
+    from aiida import orm
+
+    extras = {'superseded': True,
+              'superseded_at': datetime.now(timezone.utc).isoformat()}
+    pks = [calc.pk, *sorted(_superseded_closure(calc))]
+    for pk in pks:
+        orm.load_node(pk).base.extras.set_many(extras)
+    return pks
+
+
+# ---------------------------------------------------------------------------
+# import_root
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Known:
+    """A stored deck CalcJob, from the one up-front projection query."""
+    pk: int
+    fingerprint: Optional[str]
+
+
+@dataclass
+class _Import:
+    """The state of one :func:`import_root` call."""
+    report: ImportReport
+    machine: Optional[str]
+    group: Any = None
+    group_pks: Set[int] = field(default_factory=set)
+    known: Dict[str, List[_Known]] = field(default_factory=dict)
+    index: Any = None
+    computers: Dict[str, Any] = field(default_factory=dict)
+    on_point: Optional[Callable[..., None]] = None
+
+
+def _group_runs(label: str) -> Tuple[Any, Set[int], Set[str]]:
+    """``(group or None, CalcJob pks in it, run_uuids in it)``."""
+    # pylint: disable=import-outside-toplevel
+    from aiida import orm
+    from aiida.common.exceptions import NotExistent
+
+    from .store import RUN_UUID_EXTRA
+
+    try:
+        group = orm.Group.collection.get(label=group_label(label))
+    except NotExistent:
+        return None, set(), set()
+    qb = orm.QueryBuilder().append(orm.Group, filters={'id': group.pk}, tag='g')
+    qb.append(orm.CalcJobNode, with_group='g',
+              project=['id', f'extras.{RUN_UUID_EXTRA}'])
+    rows = qb.all()
+    return group, {pk for pk, _u in rows}, {u for _pk, u in rows if u}
+
+
+def _check_root(label: str, group: Any, held: Set[str], run_uuids: Set[str]) -> None:
+    """Raise :class:`SetRootMismatch` when ``label`` names a non-empty Group
+    sharing no ``run_uuid`` with this root."""
+    if group is None or not run_uuids or not group.count() or held & run_uuids:
+        return
+    raise SetRootMismatch(
+        f'set {label!r} already holds {len(held)} other run(s) and none of this '
+        f"tree's {len(run_uuids)}: it is a different campaign. Pass --label to "
+        f'give this tree its own set, or delete the old one with '
+        f'`FrictionSim2D aiida delete {label}`.')
+
+
+def _known_decks(run_uuids: Iterable[str]) -> Dict[str, List[_Known]]:
+    """deck key -> the live (non-superseded) CalcJobs of it, oldest first."""
+    # pylint: disable=import-outside-toplevel
+    from aiida import orm
+
+    from .store import CALCJOB_PROCESS_TYPE, DECK_KEY_EXTRA, DECK_SHA_EXTRA, RUN_UUID_EXTRA
+
+    uuids = sorted(set(run_uuids))
+    known: Dict[str, List[_Known]] = {}
+    if not uuids:
+        return known
+    qb = orm.QueryBuilder().append(
+        orm.CalcJobNode, tag='c',
+        filters={'process_type': CALCJOB_PROCESS_TYPE,
+                 f'extras.{RUN_UUID_EXTRA}': {'in': uuids}},
+        project=['id', f'extras.{DECK_KEY_EXTRA}', f'extras.{DECK_SHA_EXTRA}',
+                 'extras.superseded'])
+    qb.order_by({'c': {'id': 'asc'}})
+    for pk, key, sha, superseded in qb.iterall():
+        if key and not superseded:
+            known.setdefault(key, []).append(_Known(pk, sha))
+    return known
+
+
+def _group_extras(root: Path, records: Sequence[dict]) -> Dict[str, Any]:
+    """The Group extras: what the campaign is and where it came from."""
+    import socket  # pylint: disable=import-outside-toplevel
+
+    def one_or_all(values):
+        values = sorted({str(v) for v in values if v is not None})
+        return values[0] if len(values) == 1 else values
+
+    materials = {m.get('name') for r in records for m in (r.get('materials') or [])
+                 if isinstance(m, dict)}
+    dirty = {bool(r.get('git_dirty')) for r in records if 'git_dirty' in r}
+    return {
+        'model': one_or_all(r.get('model') for r in records),
+        'materials': sorted(m for m in materials if m),
+        'source_root': str(Path(root).resolve()),
+        'source_host': socket.gethostname(),
+        'git_commit': one_or_all(r.get('git_commit') for r in records),
+        'git_dirty': any(dirty),
+    }
+
+
+def _open_group(label: str, root: Path, records: Sequence[dict]):
+    from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
+
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    group, created = orm.Group.collection.get_or_create(label=group_label(label))
+    extras = _group_extras(root, records)
+    if created or 'created' not in group.base.extras.all:
+        extras['created'] = datetime.now(timezone.utc).isoformat()
+    group.base.extras.set_many(extras)
+    return group
+
+
+def _computer(state: _Import, settings: dict):
+    """The machine Computer of a run: ``--machine`` > ``settings.hpc.hpc_host``
+    > ``'localhost'``. A label already registered with another host or
+    scheduler is reused, with a warning in the report."""
+    from .store import machine_computer, machine_mismatch  # pylint: disable=import-outside-toplevel
+
+    hpc = settings.get('hpc') if isinstance(settings.get('hpc'), dict) else {}
+    name = state.machine or hpc.get('hpc_host') or 'localhost'
+    if name not in state.computers:
+        problem = machine_mismatch(name, hpc)
+        if problem and problem not in state.report.warnings:
+            state.report.warnings.append(problem)
+        state.computers[name] = machine_computer(name, hpc)
+    return state.computers[name]
+
+
+def _has_dead_structures(calc) -> bool:
+    """Whether any of ``calc``'s ``structures`` inputs is superseded."""
+    if 'structures' not in calc.inputs:
+        return False
+    return any(node.base.extras.get('superseded', False)
+               for node in calc.inputs.structures.values())
+
+
+def _record_new(state: _Import, name: str, node) -> None:
+    """Report what a new deck CalcJob produced; hand each new point to the hook."""
+    report = state.report
+    report.created_decks.append(name)
+    info = node.outputs.run_info.get_dict() if 'run_info' in node.outputs else {}
+    if info.get('log_missing', True):
+        report.log_missing.append(name)
+    if 'code' not in node.inputs:
+        report.no_version.append(name)
+    if 'points' in node.outputs:
+        for label, point in sorted(node.outputs.points.items()):
+            report.points.append(point.uuid)
+            if state.on_point is not None:
+                state.on_point(node, label, point)
+
+
+class _RunState:  # pylint: disable=too-few-public-methods
+    """One run's progress through :func:`_import_run`."""
+
+    def __init__(self, locator, run_uuid: str) -> None:
+        self.locator = locator
+        self.run_uuid = run_uuid
+        self.inputs = None          # calcjob.RunInputs, built on first need
+        self.handed: Dict[str, Any] = {}
+        self.system_replaced = False
+
+
+def _deck_name(locator, deck) -> str:
+    return f'{locator.tokens.rel_path}:{deck.name}'
+
+
+def _reuse(state: _Import, run: _RunState, deck, name: str, live: _Known) -> None:
+    """An unchanged deck: skipped in this group, or added to it from another."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    calc = orm.load_node(live.pk)
+    if live.pk in state.group_pks:
+        state.report.skipped_decks.append(name)
+    else:
+        state.report.already_imported.append(name)
+        if not state.report.dry_run:
+            state.group.add_nodes([calc])
+            state.group_pks.add(live.pk)
+    if deck.writes_structures and 'structures' in calc.outputs:
+        run.handed.update(dict(calc.outputs.structures.items()))
+
+
+def _import_deck(state: _Import, run: _RunState, deck, decks,
+                 fingerprint: str, stale: List[_Known]) -> bool:
+    """Import one deck as a new CalcJob; supersede ``stale``. False on failure."""
+    # pylint: disable=import-outside-toplevel
+    from aiida import orm
+
+    from .calcjob import import_deck, run_inputs, structures_for
+    from .store import DECK_KEY_EXTRA, DECK_SHA_EXTRA, deck_key
+
+    name = _deck_name(run.locator, deck)
+    if run.inputs is None:
+        run.inputs = run_inputs(run.locator, index=state.index)
+    computer = _computer(state, run.inputs.settings)
+    given = None if deck.writes_structures else structures_for(deck, run.handed)
+    try:
+        _outputs, node = import_deck(run.locator, deck, computer=computer,
+                                     run=run.inputs, structures=given, decks=decks,
+                                     index=state.index)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception('Import failed for deck %s', name)
+        state.report.failures.append((name, f'{type(exc).__name__}: {exc}'))
+        return False
+    if node.is_excepted or not node.is_finished:
+        state.report.failures.append((name, f'CalcJob {node.pk} did not finish'))
+        return False
+    node.base.extras.set_many({DECK_KEY_EXTRA: deck_key(run.run_uuid, deck.name),
+                               DECK_SHA_EXTRA: fingerprint})
+    state.group.add_nodes([node])
+    state.group_pks.add(node.pk)
+    for old in stale:
+        supersede(orm.load_node(old.pk))
+    if stale:
+        state.report.superseded_decks.append(name)
+        run.system_replaced = run.system_replaced or deck.writes_structures
+    if deck.writes_structures and 'structures' in node.outputs:
+        run.handed.update(dict(node.outputs.structures.items()))
+    _record_new(state, name, node)
+    return True
+
+
+def _plan_deck(state: _Import, run: _RunState, deck, stale: List[_Known]) -> None:
+    """Dry run: classify a deck that would get a new CalcJob."""
+    state.report.created_decks.append(_deck_name(run.locator, deck))
+    if stale:
+        state.report.superseded_decks.append(_deck_name(run.locator, deck))
+        run.system_replaced = run.system_replaced or deck.writes_structures
+
+
+def _import_run(state: _Import, run: _RunState) -> None:
+    """Every deck of one run, system decks first."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from .decks import discover_decks  # pylint: disable=import-outside-toplevel
+    from .store import deck_key  # pylint: disable=import-outside-toplevel
+
+    decks = discover_decks(run.locator)
+    for deck in decks:
+        name = _deck_name(run.locator, deck)
+        fingerprint = deck_fingerprint(run.locator, deck, decks)
+        live = state.known.get(deck_key(run.run_uuid, deck.name), [])
+        current = live[-1] if live else None
+        # A slide deck reading a replaced system deck's structures re-imports
+        # even when its own files are unchanged: a live deck never consumes
+        # superseded inputs (I2).
+        cascaded = (not deck.writes_structures and run.system_replaced
+                    and _receives_structures(deck, decks))
+        if (current is not None and current.fingerprint == fingerprint and not cascaded
+                and (state.report.dry_run
+                     or not _has_dead_structures(orm.load_node(current.pk)))):
+            _reuse(state, run, deck, name, current)
+            continue
+        if state.report.dry_run:
+            _plan_deck(state, run, deck, live)
+        elif not _import_deck(state, run, deck, decks, fingerprint, live):
+            if deck.writes_structures:
+                state.report.failures.append(
+                    (run.locator.tokens.rel_path,
+                     f'system deck {deck.name!r} failed; the run\'s other decks '
+                     f'were not imported'))
+                return
+
+
+def _receives_structures(deck, decks) -> bool:
+    """Whether a slide deck is handed structures by a system deck of its run."""
+    return not deck.writes_structures and any(d.writes_structures for d in decks)
+
+
+def _read_runs(locators, report: ImportReport) -> List[Tuple[Any, str, dict]]:
+    """``(locator, run_uuid, record)`` of every run with a usable identity;
+    the others go to ``failures``. A dry run also checks the units here (a
+    real import does it in :func:`~src.aiida.calcjob.run_inputs`, splitting
+    each run once)."""
+    # pylint: disable=import-outside-toplevel
+    import json
+
+    from .block_schema import UnitMismatch
+    from .calcjob import MissingRunUUID, check_run, read_run_uuid
+
+    runs = []
+    for locator in locators:
+        rel = locator.tokens.rel_path
+        try:
+            run_uuid = (check_run(locator) if report.dry_run
+                        else read_run_uuid(locator))
+            record = json.loads(Path(locator.provenance_file).read_text(encoding='utf-8'))
+        except (MissingRunUUID, UnitMismatch) as exc:
+            report.failures.append((rel, f'{type(exc).__name__}: {exc}'))
+            continue
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception('Could not read run %s', rel)
+            report.failures.append((rel, f'{type(exc).__name__}: {exc}'))
+            continue
+        runs.append((locator, run_uuid, record))
+    return runs
+
+
+def import_root(root: Path, label: Optional[str] = None, *,
+                machine: Optional[str] = None, profile: Optional[str] = None,
+                dry_run: bool = False,
+                on_point: Optional[Callable[..., None]] = None) -> ImportReport:
+    """Import every run under ``root`` into ``friction2d/<label>``: one
+    CalcJob per deck, keyed on ``run_uuid|deck_name``.
+
+    Idempotent: a deck whose fingerprint (:func:`deck_fingerprint`) is
+    unchanged is skipped, or -- when it was imported under another label --
+    added to this Group (``already_imported``). A changed deck gets a new
+    CalcJob and the old one is :func:`supersede`\\ d. A run without a
+    ``run_uuid``, or whose spring is not in eV/A^2, is reported in
+    ``failures`` and the other runs go on.
+
+    Args:
+        root: The simulation root (``simulation_<stamp>/``).
+        label: The set's name (default: ``root``'s name).
+        machine: The machine label; default ``settings.hpc.hpc_host`` of each
+            run, else ``'localhost'``.
+        profile: The AiiDA profile (default: the configured one).
+        dry_run: Classify every deck against the store; create nothing.
+        on_point: Called as ``on_point(calcjob, point_label, point)`` for
+            every point node a new CalcJob creates.
+
+    Raises:
+        SetRootMismatch: ``label`` names a non-empty set holding none of the
+            root's runs.
+    """
+    # pylint: disable=import-outside-toplevel
+    from ..run.tree import discover_runs, unparseable_runs
+    from . import load_aiida_profile
+    from .store import StoreIndex
 
     root = Path(root)
     label = label or root.name
-    report = IngestReport(label=label, dry_run=dry_run)
+    report = ImportReport(label=label, dry_run=dry_run)
     report.unparseable = unparseable_runs(root)
-
     locators = discover_runs(root)
     if not locators:
         report.failures.append((str(root), 'no provenance.json found'))
         return report
 
     load_aiida_profile(profile)
+    runs = _read_runs(locators, report)
+    group, group_pks, held = _group_runs(label)
+    _check_root(label, group, held, {u for _loc, u, _r in runs})
 
-    settings = load_settings()
-    # `DatabaseSettings.skip_fraction` is a plain, always-present field
-    # (Task 31 made `DatabaseSettings` central-only but kept this field).
-    skip_fraction = settings.database.skip_fraction
+    state = _Import(report=report, machine=machine, group_pks=group_pks,
+                    known=_known_decks(u for _loc, u, _r in runs), on_point=on_point)
+    if not dry_run:
+        state.group = _open_group(label, root, [r for _loc, _u, r in runs])
+        state.index = StoreIndex.load()
+    elif group is not None:
+        state.group = group
+    if state.group is not None:
+        report.group_uuid = str(state.group.uuid)
 
-    if dry_run:
-        set_node = _find_set(root, label)
-    else:
-        set_node = find_or_create_set(root, label)
-    if set_node is not None:
-        report.set_uuid = str(set_node.uuid)
-
-    for locator in locators:
-        ingest_run(locator, set_node, report, skip_fraction=skip_fraction)
+    for locator, run_uuid, _record in runs:
+        try:
+            _import_run(state, _RunState(locator, run_uuid))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception('Import failed for run %s', locator.tokens.rel_path)
+            report.failures.append((locator.tokens.rel_path,
+                                    f'{type(exc).__name__}: {exc}'))
     return report

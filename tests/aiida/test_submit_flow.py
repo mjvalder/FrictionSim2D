@@ -62,13 +62,11 @@ def _record_profile(monkeypatch):
 
 
 def _ingested_tree(tmp_path):
-    from src.aiida.ingest import ingest_root
-
+    """A tree on disk. The old ingest that registered it is gone (Task 6);
+    `aiida submit` is removed in Task 11, and fails before it looks."""
     root = tmp_path / 'simulation_x'
     make_run(root, REL_A, 'afm')
     make_run(root, REL_B, 'afm')
-    report = ingest_root(root, label='flow')
-    assert report.ok(), report.render()
     return root
 
 

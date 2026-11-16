@@ -23,7 +23,7 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'FrictionSimulationSetData': (f'{__name__}.data', 'FrictionSimulationSetData'),
     'FrictionResultsData': (f'{__name__}.data', 'FrictionResultsData'),
     'Friction2DDB': (f'{__name__}.query', 'Friction2DDB'),
-    'ingest_root': (f'{__name__}.ingest', 'ingest_root'),
+    'import_root': (f'{__name__}.ingest', 'import_root'),
     'export_results': (f'{__name__}.export', 'export_results'),
     'rebuild_set': (f'{__name__}.export', 'rebuild_set'),
     'export_archive': (f'{__name__}.export', 'export_archive'),

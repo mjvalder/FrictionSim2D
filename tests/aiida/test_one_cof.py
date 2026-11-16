@@ -12,6 +12,9 @@ guarded behind `importorskip`.
 import pytest
 
 pytest.importorskip('aiida')
+# The old set/run/result ingest is gone (plan Task 6, `import_root`);
+# Task 11 deletes it (old result nodes).
+pytest.skip('old ingest graph; Task 11 deletes it (old result nodes)', allow_module_level=True)
 
 from src.aiida.data import FrictionResultsData          # noqa: E402
 from src.aiida.export import resolve_set                # noqa: E402
