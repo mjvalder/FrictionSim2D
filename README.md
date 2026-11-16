@@ -16,7 +16,7 @@ from source. Requires Python 3.9+ and LAMMPS on your path; Atomsk is optional.
 conda create -n frictionsim2d python=3.11
 conda activate frictionsim2d
 pip install -e .          # core
-pip install -e ".[all]"   # with aiida, db, plotting, and api extras
+pip install -e ".[all]"   # with aiida, plotting, and gui extras
 ```
 
 Verify:
@@ -97,25 +97,11 @@ verdi profile show
 verdi daemon status
 ```
 
-### Option C – Community database only
-
-```bash
-conda create -n frictionsim2d-db -c conda-forge frictionsim2d-db
-conda activate frictionsim2d-db
-```
-
 ### Option D – Postprocessing / plotting
 
 ```bash
 conda create -n frictionsim2d-plotting -c conda-forge frictionsim2d-plotting
 conda activate frictionsim2d-plotting
-```
-
-### Option E – REST API server
-
-```bash
-conda create -n frictionsim2d-api -c conda-forge frictionsim2d-api
-conda activate frictionsim2d-api
 ```
 
 ### Option F – All-in-one
@@ -177,93 +163,12 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - `FrictionSim2D settings show|init|reset`
 - `FrictionSim2D aiida status|setup|submit|import|list-sets|dump|rebuild|query|delete|clear|export|import-archive|package`
 - `FrictionSim2D postprocess read|plot|pes-scan|indent`
-- `FrictionSim2D db setup|init|create-key|upload|stage|query|stats|publish|reject|delete`
-- `FrictionSim2D api serve`
 
 Full reference: [documentation/commands.md](documentation/commands.md).
 
-## Shared database
-
-FrictionSim2D supports an API-first shared database model for publications.
-
-- Users query and upload through a public REST API URL.
-- Database credentials stay only on the server.
-- Each contributor gets a personal API key.
-
-### Publication links to put on GitHub
-
-- Public FrictionSim2DDB API: https://YOUR-DOMAIN-OR-IP:8000
-- Local mirror API (for local development only): http://localhost:8000
-
-Important: localhost is only reachable on the same machine. It is not a public link.
-
-### Configure connection
-
-For server admins (machine running PostgreSQL + API server), set database credentials:
-
-```bash
-export FRICTION_DB_HOST=db.example.com
-export FRICTION_DB_PORT=5432
-export FRICTION_DB_NAME=frictionsim2d
-export FRICTION_DB_USER=myuser
-export FRICTION_DB_PASSWORD=secret
-```
-
-For package users/collaborators, set API URL and personal API key (no DB password needed):
-
-```bash
-export FRICTION_API_URL=https://YOUR-DOMAIN-OR-IP:8000
-export FRICTION_API_KEY=sk_your_personal_key
-```
-
-### Start the API server (server admin)
-
-```bash
-FrictionSim2D db init --profile local
-FrictionSim2D api serve --host 0.0.0.0 --port 8000
-```
-
-### Create contributor keys (server admin)
-
-```bash
-FrictionSim2D db create-key --name alice --profile local
-FrictionSim2D db create-key --name bob --profile local
-```
-
-### Upload results
-
-```bash
-# Upload through authenticated REST endpoint (example)
-curl -X POST "$FRICTION_API_URL/results" \
-	-H "X-API-Key: $FRICTION_API_KEY" \
-	-H "Content-Type: application/json" \
-	-d '{"material":"h-MoS2","simulation_type":"afm","layers":1,"mean_cof":0.03}'
-```
-
-### Query results
-
-```bash
-# Print table to terminal
-FrictionSim2D db query --material h-MoS2 --layers 1
-
-# Save to CSV
-FrictionSim2D db query --material h-WS2 --csv output.csv
-```
-
-### Database statistics
-
-```bash
-FrictionSim2D db stats
-```
-
-### Delete your own rows
-
-```bash
-FrictionSim2D db delete --uploader alice
-```
-
 ## AiiDA notes
 
+- The former central database and REST API were removed; share results as AiiDA archives (`FrictionSim2D aiida import`).
 - Use `FrictionSim2D aiida setup` for first-time profile/computer/code setup.
 - For secure HPC clusters, running AiiDA natively on the HPC environment is often more robust than local SSH transport.
 - Use archive transfer when needed: `aiida export` on source environment and `aiida import-archive` on target.
