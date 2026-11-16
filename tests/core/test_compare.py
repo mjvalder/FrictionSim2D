@@ -138,3 +138,19 @@ def test_real_key_matches_compare_tolerance():
                             {'integration': {'settings.simulation.timestep': 0.3}},
                             units={})
     assert report.identical == ['integration'] and report.differs == {}
+
+
+def test_integers_compare_exactly_floats_to_tolerance():
+    from src.core.compare import canonical, canonical_text, same_value
+    assert not same_value(12345678, 12345679)
+    assert same_value(12345678.0, 12345679.0)          # floats, even integral
+    assert same_value(10000000, 1e7)                   # the float keys as that int
+    assert canonical_text(10000000) == canonical_text(1e7)
+    assert not same_value(12345678, 12345678.0)        # 12345678.0 keys as 12345700.0
+    assert canonical(True) is True and canonical([3, 2.5]) == [3, 2.5]
+    report = compare_blocks({'realization': {'indent.seed': 12345678}},
+                            {'realization': {'indent.seed': 12345679}}, units={})
+    assert report.differs['realization'] == [('indent.seed', 12345678, 12345679, '')]
+    merged, _ = merge_varying([({'b': {'n': 12345678}}, {}, {}),
+                               ({'b': {'n': 12345679}}, {}, {})])
+    assert merged['b']['n'] == VARIES

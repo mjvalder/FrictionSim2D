@@ -11,6 +11,7 @@ of identity and are compared separately, to a relative tolerance.
 """
 from __future__ import annotations
 
+import json
 import math
 import numbers
 from dataclasses import dataclass, field
@@ -18,7 +19,7 @@ from types import MappingProxyType
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 __all__ = ['DEFAULT_ATOL', 'DEFAULT_RTOL', 'VARIES', 'CompareReport', 'compare_blocks',
-           'canonical', 'merge_varying', 'real_key', 'refill',
+           'canonical', 'canonical_text', 'merge_varying', 'real_key', 'refill',
            'same_value']
 
 #: Stands for a field that takes several values within a campaign.
@@ -123,11 +124,26 @@ def real_key(value: float, rtol: float = DEFAULT_RTOL) -> float:
     return float(f'{value:.{digits}g}')
 
 
+def _is_float(value: Any) -> bool:
+    """A real that is not an integer type (bools and ints, numpy's included,
+    are exact)."""
+    return isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral)
+
+
 def canonical(value: Any, rtol: float = DEFAULT_RTOL) -> Any:
-    """``value`` with every real (inside lists and dicts too) replaced by its
-    :func:`real_key`: the form two requested values are equal in."""
-    if _is_number(value):
+    """``value`` with every float (inside lists and dicts too) replaced by its
+    :func:`real_key`: the form two requested values are equal in.
+
+    Integers and bools pass unchanged, so seeds, step and atom counts stay
+    exact (``12345678 != 12345679``). A float is rounded even when integral
+    (``12345678.0`` keys as ``12345700.0``). An int and a float are equal
+    when the float's key is that integer: ``10000000 == 1e7``, but
+    ``12345678 != 12345678.0`` (the float rounds to ``12345700.0``).
+    """
+    if _is_float(value):
         return real_key(value, rtol)
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return int(value)
     if isinstance(value, Mapping):
         return {k: canonical(v, rtol) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -135,18 +151,37 @@ def canonical(value: Any, rtol: float = DEFAULT_RTOL) -> Any:
     return value
 
 
+def _text_ready(value: Any) -> Any:
+    """Integral floats as ints, so the text of ``1e7`` is that of ``10000000``."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _text_ready(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_text_ready(v) for v in value]
+    return value
+
+
+def canonical_text(value: Any, rtol: float = DEFAULT_RTOL) -> str:
+    """:func:`canonical` as JSON text: two values have one text exactly when
+    :func:`same_value` holds. ``related()`` keys table cells with it."""
+    return json.dumps(_text_ready(canonical(value, rtol)), sort_keys=True)
+
+
 def same_value(a: Any, b: Any, rtol: float = DEFAULT_RTOL) -> bool:
-    """Equal after :func:`canonical`: the equality of a requested field in
+    """Equal after :func:`canonical` (floats to ``rtol``'s significant
+    figures, ints exact): the equality of a requested field in
     :func:`compare_blocks`, :func:`merge_varying` and ``related()``."""
     return canonical(a, rtol) == canonical(b, rtol)
 
 
 def _close(a: Any, b: Any, rtol: float, atol: float = DEFAULT_ATOL) -> bool:
-    """Equal, numbers within ``max(atol, rtol * max(|a|, |b|))``, or numbers
+    """Equal, numbers within ``max(atol, rtol * max(|a|, |b|))``, or floats
     with one :func:`real_key`."""
     if _is_number(a) and _is_number(b):
         return (abs(a - b) <= max(atol, rtol * max(abs(a), abs(b)))
-                or real_key(a, rtol) == real_key(b, rtol))
+                or (_is_float(a) and _is_float(b)
+                    and real_key(a, rtol) == real_key(b, rtol)))
     return a == b
 
 

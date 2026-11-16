@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import (Any, Dict, Iterable, List, Literal, Mapping, Optional, Sequence,
                     Set, Tuple, Union)
 
-from ..core.compare import canonical, refill
+from ..core.compare import canonical_text, refill
 from .block_schema import BLOCK_KINDS, FIELD_MAP, REALIZATION_FIELDS, unindexed
 from .blocks import NAME_SEP, block_kind
 from .compare import block_name, schema_tables
@@ -471,23 +471,25 @@ def point_table(*, include_superseded: bool = False):
     left_out: Dict[Tuple[Optional[str], str], Set[str]] = {}
     for entry in points.values():
         meta = entry['meta']
-        missing = sorted(label for label, h in entry['blocks'] if h not in blocks)
+        reasons = {f'block {label} has no stored content by hash'
+                   for label, h in entry['blocks'] if h not in blocks}
         if entry['schema'] not in schemas:
-            missing.append(_SCHEMA_LINK)
-        if missing:
-            left_out.setdefault((meta['run_uuid'], meta['rel_path']), set()).update(missing)
+            reasons.add('no schema to refill defaults from')
+        if reasons:
+            left_out.setdefault((meta['run_uuid'], meta['rel_path']), set()).update(reasons)
             continue
         row = {**meta, 'schema_hash': entry['schema']}
         for label, digest in entry['blocks']:
             row.update(refiller.columns(label, digest, blocks[digest], entry['schema']))
         rows.append(row)
-    for (run_uuid, rel_path), labels in sorted(left_out.items(), key=str):
-        logger.warning('run %s (%s): its points are left out of the point table: %s '
-                       'have no stored content by hash, or no schema link (run '
-                       '`FrictionSim2D aiida reindex`)', run_uuid, rel_path,
-                       ', '.join(sorted(labels)))
+    for (run_uuid, rel_path), reasons in sorted(left_out.items(), key=str):
+        logger.warning('run %s (%s): points left out of the point table: %s; run '
+                       '`FrictionSim2D aiida reindex`', run_uuid, rel_path,
+                       '; '.join(sorted(reasons)))
     rows.sort(key=_default_order)
-    table = pd.DataFrame(rows)
+    # object dtype: a column with an absent cell must not turn its ints into
+    # floats (a float is keyed to rtol, an int exactly).
+    table = pd.DataFrame(rows, dtype=object)
     table.attrs['units'] = {h: tables[0] for h, tables in refiller.tables.items()}
     return table
 
@@ -560,14 +562,15 @@ def _absent(value: Any) -> bool:
 
 
 def _key(value: Any) -> str:
-    """One canonical string per value (:func:`src.core.compare.canonical`:
-    reals to the significant figures ``compare`` resolves), absent alike.
-    numpy scalars (pandas hands them back) count as their Python value."""
+    """One canonical string per value (:func:`src.core.compare.canonical_text`:
+    floats to the significant figures ``compare`` resolves, ints exact),
+    absent alike. numpy scalars (pandas hands them back) count as their
+    Python value."""
     if hasattr(value, 'item') and not isinstance(value, (list, dict)):
         value = value.item()
     if _absent(value):
         return _ABSENT
-    return json.dumps(canonical(value), sort_keys=True)
+    return canonical_text(value)
 
 
 def _axis_key(value: Any) -> str:

@@ -396,9 +396,13 @@ def test_points_without_schema_warn_once_per_run(campaigns, monkeypatch, caplog)
                         lambda blocks, schemas: (real(blocks, schemas)[0], {}))
     with caplog.at_level('WARNING', logger='src.aiida.query'):
         assert point_table().empty
-    lines = [r.getMessage() for r in caplog.records if 'left out' in r.getMessage()]
+    lines = sorted(r.getMessage() for r in caplog.records if 'left out' in r.getMessage())
     assert len(lines) == 2                       # runs A and B, not 7 points
-    assert all('schema' in line for line in lines)
+    for line, root in zip(lines, ('A', 'B')):
+        run_uuid = {'A': A_UUID, 'B': B_UUID}[root]
+        assert line.startswith(f'run {run_uuid} (afm/'), line
+        assert line.endswith('): points left out of the point table: no schema to '
+                             'refill defaults from; run `FrictionSim2D aiida reindex`'), line
 
 
 def test_snapshot_shares_one_points_projection(campaigns, monkeypatch):
@@ -415,3 +419,17 @@ def test_snapshot_shares_one_points_projection(campaigns, monkeypatch):
         db.get_available_materials()
         db.get_available_conditions()
     assert len(calls) == 1
+
+
+def test_large_integers_relate_exactly(uuids_back):
+    steps = 'integration.settings.simulation.slide_run_steps'
+    table = _hand_table([_row('p', **{steps: 12345678}), _row('q', **{steps: 12345679}),
+                         _row('r', **{steps: 12345678, 'thermostat.general.temp': 400.0})])
+    assert related('p', 'thermostat', table=table) == ['n-r']
+    assert related('p', 'integration', table=table) == ['n-q']
+
+
+def test_point_table_keeps_integers_beside_absent_cells(campaigns):
+    table = point_table()
+    column = next(c for c in table.columns if c.endswith('.slide_run_steps'))
+    assert {type(v) for v in table[column]} == {int}
