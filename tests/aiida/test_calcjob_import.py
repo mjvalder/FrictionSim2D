@@ -17,8 +17,8 @@ pytestmark = pytest.mark.aiida
 from aiida import orm  # noqa: E402
 
 from src.aiida.calcjob import (  # noqa: E402
-    LammpsFrictionCalcJob, LammpsFrictionParser, deck_inputs, import_deck,
-    import_run, point_label,
+    LammpsFrictionCalcJob, LammpsFrictionParser, MissingRunUUID, deck_inputs,
+    import_deck, import_run, point_label,
 )
 from src.aiida.decks import discover_decks  # noqa: E402
 from src.aiida.retention import retrieve_patterns  # noqa: E402
@@ -417,6 +417,8 @@ def test_inputs_are_content_addressed(computer, tmp_path):
     assert params['rel_path'] == loc2.tokens.rel_path
     assert params['family'] == 'afm' and params['n_layers'] == 2
     assert params['point_filter'] == {}
+    assert params['run_uuid'] == json.loads(
+        loc2.provenance_file.read_text(encoding='utf-8'))['run_uuid']
 
 
 def test_potentials_sharing_a_stem_both_survive(computer, tmp_path):
@@ -473,3 +475,82 @@ def test_a_password_in_provenance_settings_never_reaches_the_store(computer, tmp
     prov = nodes[0].inputs.provenance.base.repository
     settings = yaml.safe_load(prov.get_object_content('provenance/settings.yaml'))
     assert settings['database']['host'] == 'db.example.org'
+
+
+# --- run and point identity (Task 5b) --------------------------------------------
+
+RUN_UUID = '3f0c2a7e-1b7d-4c4e-9a51-6d2f0e8b9c11'
+
+
+def _set_record(loc, **fields):
+    record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
+    record.update(fields)
+    loc.provenance_file.write_text(json.dumps(record), encoding='utf-8')
+
+
+def test_point_uuid_derives_from_the_run_uuid(computer, tmp_path):
+    from uuid import UUID, uuid5
+    loc = _afm_run(tmp_path / 'sim')
+    _set_record(loc, run_uuid=RUN_UUID)
+    system, slide = import_run(loc, computer=computer)
+
+    p10 = _points(slide)['force10_a0_s2'].base.attributes
+    assert p10.get('point_uuid') == str(uuid5(UUID(RUN_UUID), 'force10_a0_s2'))
+    assert slide.inputs.parameters['run_uuid'] == RUN_UUID
+    assert system.base.extras.get('friction2d_run_uuid') == RUN_UUID
+    assert slide.base.extras.get('friction2d_run_uuid') == RUN_UUID
+
+
+def test_the_same_point_from_a_moved_copy_keeps_its_uuid(computer, tmp_path):
+    import shutil
+    loc = _afm_run(tmp_path / 'sim')
+    _set_record(loc, run_uuid=RUN_UUID)
+    shutil.copytree(tmp_path / 'sim', tmp_path / 'elsewhere' / 'sim2')
+    (moved,) = discover_runs(tmp_path / 'elsewhere' / 'sim2')
+    assert moved.run_dir != loc.run_dir
+
+    first = _points(import_run(loc, computer=computer)[1])['force10_a0_s2']
+    second = _points(import_run(moved, computer=computer)[1])['force10_a0_s2']
+
+    assert first.uuid != second.uuid
+    assert first.base.attributes.get('point_uuid') == \
+        second.base.attributes.get('point_uuid')
+
+
+def test_point_units_per_family(computer, tmp_path):
+    afm = _points(import_run(_afm_run(tmp_path / 'afm'), computer=computer)[1])
+    assert afm['force10_a0_s2'].base.attributes.get('units') == \
+        {'load': 'nN', 'angle': 'deg', 'speed': 'm/s'}
+
+    root = tmp_path / 'sheet'
+    run_dir = make_family_run(root, 'sheetonsheet', loads=(0.5,),
+                              config=slide_config('sheetonsheet', loads=(0.5,)))
+    (run_dir / 'lammps' / 'system.in').unlink()
+    (run_dir / 'lammps' / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    (sheet,) = discover_runs(root)
+    (slide,) = import_run(sheet, computer=computer)
+    points = _points(slide)
+    assert points['pressure0p5_a0_s2'].base.attributes.get('units')['load'] == 'GPa'
+
+
+def test_point_carries_the_achieved_load_and_ramp(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    _set_record(loc, load_achieved_by_load={'10': 9.7},
+                ramp_by_load={'10': {'converged': False, 'r': 0.3, 'iterations': 40}})
+    points = _points(import_run(loc, computer=computer)[1])
+
+    p10, p30 = (points[k].base.attributes for k in ('force10_a0_s2', 'force30_a0_s2'))
+    assert p10.get('load_achieved') == 9.7 and p10.get('ramp_converged') is False
+    assert p30.get('load_achieved') is None and p30.get('ramp_converged') is None
+
+
+def test_a_run_without_run_uuid_raises(computer, tmp_path):
+    loc = _afm_run(tmp_path / 'sim')
+    record = json.loads(loc.provenance_file.read_text(encoding='utf-8'))
+    del record['run_uuid']
+    loc.provenance_file.write_text(json.dumps(record), encoding='utf-8')
+
+    with pytest.raises(MissingRunUUID, match='stamp-uuid') as info:
+        deck_inputs(loc, discover_decks(loc)[0], computer=computer)
+    assert str(loc.provenance_file) in str(info.value)
+    assert isinstance(info.value, ValueError)

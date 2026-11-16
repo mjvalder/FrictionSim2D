@@ -1055,7 +1055,8 @@ class AFMSimulation(SimulationBase):
         # here regardless.)
         # pylint: disable-next=import-outside-toplevel
         from ...data.provenance import (ProvenanceRecord, material_provenance,
-                                       sha256_file, write_provenance)
+                                       new_run_uuid, sha256_file,
+                                       write_provenance)
 
         # Shared with the sheet family's write_sheet_provenance, so both
         # record build identity identically; git absence is recorded, never
@@ -1118,6 +1119,7 @@ class AFMSimulation(SimulationBase):
                 context['virtual_offset'])
 
         record = ProvenanceRecord(
+            run_uuid=new_run_uuid(),   # one per L{n}: each layer count is a run
             family=self.FAMILY,
             model=self.model,
             materials=materials,

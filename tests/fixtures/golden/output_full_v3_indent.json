@@ -243,6 +243,12 @@
    "run_role": {
     "value": "label"
    },
+   "run_uuid": {
+    "value": "5b354208-92f5-5afc-ac52-1b44d64aafe4"
+   },
+   "run_uuid_stamped_at": {
+    "value": null
+   },
    "schema_version": {
     "value": "2.0.0"
    },
@@ -522,6 +528,8 @@
    "status_detail": "grid not modelled for indent; integrity: missing bond reference structure",
    "provenance": {
     "schema_version": "2.0.0",
+    "run_uuid": "5b354208-92f5-5afc-ac52-1b44d64aafe4",
+    "run_uuid_stamped_at": null,
     "family": "indent",
     "model": "indent",
     "materials": [
@@ -609,7 +617,7 @@
       "bond_spring": null
      }
     },
-    "provenance_sha256": "5d6febaaa3c2987757f1cdafff00b3666eb509819936c595e326ed8bc005e819",
+    "provenance_sha256": "cff6ee3567f678913ebf92377b1d96f3b74d316ffd423f2edf0e455af7f5cfc3",
     "enriched": false,
     "ramp": null
    },

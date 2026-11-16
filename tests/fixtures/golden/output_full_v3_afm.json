@@ -244,6 +244,12 @@
    "run_role": {
     "value": "label"
    },
+   "run_uuid": {
+    "value": "a2683b46-167a-556f-a4ed-4cdb221c08a7"
+   },
+   "run_uuid_stamped_at": {
+    "value": null
+   },
    "schema_version": {
     "value": "2.0.0"
    },
@@ -528,6 +534,8 @@
    "status_detail": "grid unknown: config has no general.force; integrity: missing bond reference structure",
    "provenance": {
     "schema_version": "2.0.0",
+    "run_uuid": "a2683b46-167a-556f-a4ed-4cdb221c08a7",
+    "run_uuid_stamped_at": null,
     "family": "afm",
     "model": "afm",
     "materials": [
@@ -615,7 +623,7 @@
       "bond_spring": null
      }
     },
-    "provenance_sha256": "8ac7c685226736d3c371338cdbb77ae6abb686662d7c6fee5c3dedd5fabf0c45",
+    "provenance_sha256": "c86e7e4e1b2c2d62955f166a4be1a1afa787687e5677ff60d8e765fba43b52f7",
     "enriched": false,
     "ramp": null
    },

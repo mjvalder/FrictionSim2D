@@ -270,6 +270,23 @@ Exit code: non-zero if any run failed. A real (non-dry-run) import also exits
 non-zero if any run was left empty or could not be parsed; a `--dry-run`
 preview of a fresh, pre-HPC tree is legitimately all-empty and exits 0.
 
+### aiida stamp-uuid
+
+Give every legacy `provenance.json` under ROOT a `run_uuid`. Runs built
+before provenance schema 2.2.0 carry no run identity, and the CalcJob import
+refuses them (`MissingRunUUID`). Needs no aiida-core:
+
+```bash
+FrictionSim2D aiida stamp-uuid ROOT [--dry-run]
+```
+
+- Each file without a `run_uuid` gets a fresh uuid4 (each AFM `L{n}` record
+  its own) and `run_uuid_stamped_at` (ISO date), so stamped legacy runs stay
+  distinguishable. Every other key keeps its value; the write is atomic.
+- An existing `run_uuid` is never overwritten: a second pass stamps nothing.
+- `--dry-run` reports what would be stamped and writes nothing.
+- Exit code 1 if any `provenance.json` was unreadable (listed, not raised).
+
 ### aiida list-sets
 
 ```bash

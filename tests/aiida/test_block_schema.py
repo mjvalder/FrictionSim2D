@@ -206,3 +206,40 @@ def _quench_nsteps(tmp_path, rate):
     "quench step count proportional to it; the builder fix awaits the user."))
 def test_doubling_quench_rate_halves_the_quench(tmp_path):
     assert _quench_nsteps(tmp_path, 2e12) * 2 == _quench_nsteps(tmp_path, 1e12)
+
+
+# --- point units (Task 5b) ------------------------------------------------------
+
+def _ingest_load_kinds():
+    """Every string literal `ingest` can give a LoadPoint's `load_kind`: the
+    `load_kind=` keywords and the first element of `_match_point`'s returns."""
+    import ast
+    tree = ast.parse((REPO / 'src' / 'aiida' / 'ingest.py').read_text(encoding='utf-8'))
+
+    def strings(node):
+        return {n.value for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+
+    kinds = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == 'load_kind':
+            kinds |= strings(node.value)
+        if isinstance(node, ast.FunctionDef) and node.name == '_match_point':
+            for ret in ast.walk(node):
+                if isinstance(ret, ast.Return) and isinstance(ret.value, ast.Tuple):
+                    kinds |= strings(ret.value.elts[0])
+    return kinds - {'GPa'}       # the comparand of `'pressure' if unit == 'GPa'`
+
+
+def test_point_units_cover_every_ingest_load_kind():
+    from src.aiida.block_schema import POINT_UNITS
+    kinds = _ingest_load_kinds()
+    assert kinds >= {'force', 'pressure', 'none'}, kinds
+    assert set(POINT_UNITS) >= kinds
+
+
+def test_point_units_match_the_point_paths():
+    from src.aiida.block_schema import POINT_UNITS
+    assert POINT_UNITS['force'] == {'load': 'nN', 'angle': 'deg', 'speed': 'm/s'}
+    assert POINT_UNITS['pressure']['load'] == 'GPa'
+    assert POINT_UNITS['none'] == {}

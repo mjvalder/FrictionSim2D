@@ -204,6 +204,12 @@
    "run_role": {
     "value": "label"
    },
+   "run_uuid": {
+    "value": "5b1e0ec2-1cdf-5c2e-84b7-9d96b14a5d2c"
+   },
+   "run_uuid_stamped_at": {
+    "value": null
+   },
    "schema_version": {
     "value": "2.0.0"
    },
@@ -433,6 +439,8 @@
    "status_detail": "integrity: missing final snapshot (data/final_*.data)",
    "provenance": {
     "schema_version": "2.0.0",
+    "run_uuid": "5b1e0ec2-1cdf-5c2e-84b7-9d96b14a5d2c",
+    "run_uuid_stamped_at": null,
     "family": "pes_tip",
     "model": "pes_tip",
     "materials": [
@@ -519,7 +527,7 @@
       "bond_spring": null
      }
     },
-    "provenance_sha256": "064514e0a3f17a3f9e8b7e81d1410a6aac548e08aa02524af485b21bc4e5e1ff",
+    "provenance_sha256": "932d448ff93ab49b9b258fa83108f6cb363222730295d8f95d545ee32018aa0e",
     "enriched": false,
     "ramp": null
    },

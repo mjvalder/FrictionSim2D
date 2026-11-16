@@ -196,6 +196,12 @@
    "run_role": {
     "value": "label"
    },
+   "run_uuid": {
+    "value": "38f92e25-2740-5a30-9c54-429b6248e082"
+   },
+   "run_uuid_stamped_at": {
+    "value": null
+   },
    "schema_version": {
     "value": "2.0.0"
    },
@@ -374,6 +380,8 @@
    "status_detail": "integrity: missing final snapshot (data/final_*.data)",
    "provenance": {
     "schema_version": "2.0.0",
+    "run_uuid": "38f92e25-2740-5a30-9c54-429b6248e082",
+    "run_uuid_stamped_at": null,
     "family": "pes_sheet",
     "model": "pes_sheet",
     "materials": [
@@ -460,7 +468,7 @@
       "bond_spring": null
      }
     },
-    "provenance_sha256": "7e8916bdf4c779c6ab31abbb5c52bea2aa85e1dbbeb6e6ded906c9b3f8593a8a",
+    "provenance_sha256": "8c7dcaa0e1bf52f349bd4f0afcf3e1fd3461e1dbeadcc598966606a0c35ca8ec",
     "enriched": false,
     "ramp": null
    },

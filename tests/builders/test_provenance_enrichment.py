@@ -24,6 +24,7 @@ from pathlib import Path
 
 from src.builders.afm import AFMSimulation
 from src.builders.afm.base import enrich_provenance_post_run
+from src.data.provenance import PROVENANCE_SCHEMA_VERSION
 from tests.helpers.afm import _make_afm_config, _seed_builder_state
 
 
@@ -99,7 +100,7 @@ def test_enrich_a_legacy_one_x_provenance_json_works(tmp_path):
     assert result == prov_path
 
     data = json.loads(result.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "2.1.0"
+    assert data["schema_version"] == PROVENANCE_SCHEMA_VERSION
     assert data["family"] == "afm"
     assert data["model"] == "afm"
     assert data["materials"] == [{
@@ -325,3 +326,55 @@ def test_load_achieved_without_configured_loads_is_the_largest_load(tmp_path):
     result = enrich_provenance_post_run(layer_dir, log_path)
     out = json.loads(result.read_text(encoding="utf-8"))
     assert out["load_achieved"] == 9.5
+
+
+# --- run identity (Task 5b) -----------------------------------------------------
+
+def test_an_afm_build_records_a_uuid4_run_uuid(tmp_path):
+    from uuid import UUID
+    builder = _builder(tmp_path)
+    data = json.loads((_built_layer_dir(builder, tmp_path) / "provenance.json")
+                      .read_text(encoding="utf-8"))
+    assert UUID(data["run_uuid"]).version == 4
+    assert "run_uuid_stamped_at" not in data
+
+
+def test_a_rebuild_of_the_same_config_is_a_new_run(tmp_path):
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    first = json.loads((_built_layer_dir(_builder(tmp_path / "a"), tmp_path / "a")
+                        / "provenance.json").read_text(encoding="utf-8"))
+    second = json.loads((_built_layer_dir(_builder(tmp_path / "b"), tmp_path / "b")
+                         / "provenance.json").read_text(encoding="utf-8"))
+    assert first["run_uuid"] != second["run_uuid"]
+
+
+def test_enrichment_keeps_the_run_uuid(tmp_path):
+    layer_dir = _built_layer_dir(_builder(tmp_path), tmp_path)
+    prov = layer_dir / "provenance.json"
+    before = json.loads(prov.read_text(encoding="utf-8"))["run_uuid"]
+    log_path = _write_log(tmp_path, "log_system.lammps",
+                          "LAMMPS (2 Aug 2023 - Update 3)\n"
+                          "# RAMP_STATUS converged=1 r=0.042 iterations=17\n")
+
+    enrich_provenance_post_run(layer_dir, log_path)
+
+    assert json.loads(prov.read_text(encoding="utf-8"))["run_uuid"] == before
+
+
+def test_enrichment_keeps_a_legacy_stamp(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    layer_dir = _built_layer_dir(_builder(tmp_path), tmp_path)
+    prov = layer_dir / "provenance.json"
+    data = json.loads(prov.read_text(encoding="utf-8"))
+    del data["run_uuid"]
+    prov.write_text(json.dumps(data), encoding="utf-8")
+    stamp_run_uuids(layer_dir)
+    stamped = json.loads(prov.read_text(encoding="utf-8"))
+    log_path = _write_log(tmp_path, "log.lammps", "LAMMPS (2 Aug 2023)\n")
+
+    enrich_provenance_post_run(layer_dir, log_path)
+
+    after = json.loads(prov.read_text(encoding="utf-8"))
+    assert after["run_uuid"] == stamped["run_uuid"]
+    assert after["run_uuid_stamped_at"] == stamped["run_uuid_stamped_at"]

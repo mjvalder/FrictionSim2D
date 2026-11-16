@@ -12,7 +12,7 @@ record feeds the AiiDA store.
 - Give AiiDA import and `postprocess`/GUI tooling one shared, versioned schema
   to read.
 
-## The provenance record — schema 2.0.0
+## The provenance record — schema 2.2.0
 
 Provenance is a Pydantic model, `ProvenanceRecord` (`src/data/provenance.py`),
 written by the builder at build time as `provenance.json`. A missing required
@@ -20,7 +20,14 @@ field fails the *build*, not later analysis.
 
 Top-level identity:
 
-- `schema_version` — `"2.0.0"` for anything written today.
+- `schema_version` — `"2.2.0"` for anything written today.
+- `run_uuid` — the run's identity, a uuid4 drawn at build time (2.2.0). Each
+  AFM `L{n}` record gets its own, and a rebuild of the same config is a new
+  run with a new one. The AiiDA import keys the run and its points on it
+  (`point_uuid = uuid5(run_uuid, point label)`), so the same run imported
+  under two labels, or from a moved copy, is still one run. A pre-2.2 record
+  has none and reads with `run_uuid = None`; `FrictionSim2D aiida stamp-uuid
+  ROOT` gives it one and records `run_uuid_stamped_at`.
 - `family` — what schema this run's result files follow (`afm`, `indent`,
   `sheetonsheet`, `hetero`, `flake`, `pes_tip`, `pes_sheet`).
 - `model` — where the run lives in the output tree (the CLI/top-level axis:

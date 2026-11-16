@@ -73,9 +73,9 @@ def test_parse_log_extras(tmp_path):
 
 
 def test_schema_is_two_and_materials_replace_the_single_triple():
-    assert PROVENANCE_SCHEMA_VERSION == '2.1.0'
+    assert PROVENANCE_SCHEMA_VERSION == '2.2.0'
     rec = _record()
-    assert rec.schema_version == '2.1.0'
+    assert rec.schema_version == '2.2.0'
     assert not hasattr(rec, 'pot_path')
     assert [m.role for m in rec.materials] == ['sheet']
 
@@ -116,7 +116,7 @@ def test_reader_upgrades_a_one_x_file(tmp_path):
     rec = read_provenance(path, family='hetero', model='sheetonsheet',
                           material_name='h-MoS2')
 
-    assert rec.schema_version == '2.1.0'
+    assert rec.schema_version == '2.2.0'
     assert rec.family == 'hetero'
     assert rec.model == 'sheetonsheet'
     assert len(rec.materials) == 1
@@ -242,3 +242,143 @@ def test_parse_hold_files_skips_a_partial_last_line(tmp_path):
     (tmp_path / 'hold_10N.txt').write_text(hdr + "1000 1.0 5 6\n2000")
     (tmp_path / 'hold_20N.txt').write_text(hdr + "2000\n")
     assert parse_hold_files(tmp_path) == {'10': 1.0}
+
+
+# --- run identity (Task 5b, critique C3) ------------------------------------
+
+def test_schema_version_is_2_2_0():
+    assert PROVENANCE_SCHEMA_VERSION == '2.2.0'
+
+
+def test_new_run_uuid_is_a_fresh_uuid4():
+    from uuid import UUID
+    from src.data.provenance import new_run_uuid
+    first, second = new_run_uuid(), new_run_uuid()
+    assert UUID(first).version == 4 and str(UUID(first)) == first
+    assert first != second
+
+
+def test_run_uuid_round_trips(tmp_path):
+    rec = _record(run_uuid='3f0c2a7e-1b7d-4c4e-9a51-6d2f0e8b9c11')
+    assert read_provenance(write_provenance(tmp_path, rec)).run_uuid == rec.run_uuid
+
+
+def test_a_2_1_0_file_without_run_uuid_reads_as_none(tmp_path):
+    path = write_provenance(tmp_path, _record())
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['schema_version'] = '2.1.0'
+    data.pop('run_uuid', None)
+    path.write_text(json.dumps(data), encoding='utf-8')
+
+    rec = read_provenance(path)
+
+    assert rec.run_uuid is None and rec.run_uuid_stamped_at is None
+
+
+def test_an_unset_run_uuid_is_not_written(tmp_path):
+    """No `"run_uuid": null` key: a legacy record re-written by enrichment
+    stays one the stamper recognises by the key's absence."""
+    data = json.loads(write_provenance(tmp_path, _record()).read_text(encoding='utf-8'))
+    assert 'run_uuid' not in data and 'run_uuid_stamped_at' not in data
+
+
+# --- legacy stamping -----------------------------------------------------------
+
+def _legacy_file(path, **extra):
+    """A 2.1.0 provenance.json as a pre-5b build wrote it (no run_uuid)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(_record().model_dump_json(exclude={'interlayer'}))
+    data['schema_version'] = '2.1.0'
+    data.pop('run_uuid', None)
+    data.pop('run_uuid_stamped_at', None)
+    data['drive_k'] = 8.0 / 16.02          # a float that must survive unchanged
+    data.update(extra)
+    path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    return path
+
+
+def _afm_tree(root):
+    base = root / 'afm' / 'h-MoS2' / '100x_100y' / 'sub_aSi_tip_Si_r25' / 'K300'
+    return [_legacy_file(base / f'L{n}' / 'provenance.json') for n in (1, 2)]
+
+
+def test_stamp_gives_each_legacy_record_its_own_uuid(tmp_path):
+    import datetime
+    from uuid import UUID
+    from src.data.provenance import stamp_run_uuids
+    files = _afm_tree(tmp_path)
+    before = [json.loads(p.read_text(encoding='utf-8')) for p in files]
+
+    report = stamp_run_uuids(tmp_path)
+
+    assert sorted(report.stamped) == sorted(files)
+    assert report.already == [] and report.unreadable == []
+    after = [json.loads(p.read_text(encoding='utf-8')) for p in files]
+    uuids = [a['run_uuid'] for a in after]
+    assert all(UUID(u).version == 4 for u in uuids) and uuids[0] != uuids[1]
+    for old, new in zip(before, after):
+        assert new['run_uuid_stamped_at'] == datetime.date.today().isoformat()
+        assert {k: v for k, v in new.items()
+                if k not in ('run_uuid', 'run_uuid_stamped_at')} == old
+        assert new['schema_version'] == '2.1.0'
+    assert read_provenance(files[0]).run_uuid == uuids[0]
+
+
+def test_stamp_is_idempotent(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    files = _afm_tree(tmp_path)
+    stamp_run_uuids(tmp_path)
+    texts = [p.read_bytes() for p in files]
+
+    again = stamp_run_uuids(tmp_path)
+
+    assert again.stamped == [] and sorted(again.already) == sorted(files)
+    assert [p.read_bytes() for p in files] == texts
+
+
+def test_stamp_never_overwrites_an_existing_uuid(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    path = write_provenance(tmp_path / 'run', _record(run_uuid='keep-me'))
+    text = path.read_bytes()
+
+    report = stamp_run_uuids(tmp_path)
+
+    assert report.already == [path] and report.stamped == []
+    assert path.read_bytes() == text
+
+
+def test_stamp_dry_run_writes_nothing(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    files = _afm_tree(tmp_path)
+    texts = [p.read_bytes() for p in files]
+
+    report = stamp_run_uuids(tmp_path, dry_run=True)
+
+    assert sorted(report.stamped) == sorted(files)
+    assert [p.read_bytes() for p in files] == texts
+    assert sorted(p.name for p in files[0].parent.iterdir()) == ['provenance.json']
+
+
+def test_stamp_reports_an_unreadable_file(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    good = _legacy_file(tmp_path / 'a' / 'provenance.json')
+    bad = tmp_path / 'b' / 'provenance.json'
+    bad.parent.mkdir()
+    bad.write_text('{"truncated": ', encoding='utf-8')
+    listed = tmp_path / 'c' / 'provenance.json'
+    listed.parent.mkdir()
+    listed.write_text('[1, 2]', encoding='utf-8')
+
+    report = stamp_run_uuids(tmp_path)
+
+    assert report.stamped == [good]
+    assert sorted(report.unreadable) == sorted([bad, listed])
+    assert bad.read_text(encoding='utf-8') == '{"truncated": '
+
+
+def test_stamp_keeps_the_file_mode(tmp_path):
+    from src.data.provenance import stamp_run_uuids
+    path = _legacy_file(tmp_path / 'provenance.json')
+    path.chmod(0o644)
+    stamp_run_uuids(tmp_path)
+    assert path.stat().st_mode & 0o777 == 0o644

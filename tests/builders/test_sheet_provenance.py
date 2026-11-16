@@ -65,6 +65,16 @@ def test_a_sheet_build_writes_a_valid_provenance_record(tmp_path):
     assert record.run_role == "label"
 
 
+def test_a_sheet_build_records_its_own_run_uuid(tmp_path):
+    """Task 5b: every build is a new run, with a fresh uuid4."""
+    from uuid import UUID
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    first = _record(_build_homogeneous(tmp_path / "a")[0]).run_uuid
+    second = _record(_build_homogeneous(tmp_path / "b")[0]).run_uuid
+    assert UUID(first).version == 4 and first != second
+
+
 def test_the_recorded_seed_is_the_seed_baked_into_the_script(tmp_path):
     """The one field that proves the record belongs to THIS run.
 

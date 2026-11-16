@@ -251,12 +251,15 @@ _INTEGRITY = ('hole_bonds', 'isolated_radius_bonds', 'isolated_atoms',
               'version')
 
 #: ProvenanceRecord leaves that identify or describe the record, not the run's
-#: physics. ``run_uuid`` arrives with Task 5b; ``materials.role`` is the block
+#: physics. ``run_uuid`` (and a legacy record's ``run_uuid_stamped_at``) is the
+#: run's identity: it lives on the CalcJob (``parameters``, extra
+#: ``friction2d_run_uuid``) and on its points, never in a block, or every run
+#: would get blocks of its own. ``materials.role`` is the block
 #: name's role, not its content; ``pot_path``/``pot_resolution_route`` say
 #: where and how the file was found, ``pot_file_sha256`` what it is (M6).
 PROVENANCE_EXCLUDED = frozenset((
-    'schema_version', 'run_uuid', 'family', 'model', 'run_role', 'git_commit',
-    'git_dirty', 'config_hash', 'materials.role', 'materials.pot_path',
+    'schema_version', 'run_uuid', 'run_uuid_stamped_at', 'family', 'model',
+    'run_role', 'git_commit', 'git_dirty', 'config_hash', 'materials.role', 'materials.pot_path',
     'materials.pot_resolution_route'))
 
 #: Leaf fields that are not simulation physics, each named. Job submission
@@ -396,6 +399,19 @@ UNITS: Dict[str, str] = {
     'point.load.pressure': 'GPa',  # overrides.py:353; sheetonsheet/slide.lmp:131 / ev_a3_to_gpa
     'point.angle': 'deg',  # overrides.py:372; afm/slide.lmp:129 cos(a*PI/180)
     'point.speed': 'm/s',  # overrides.py:367; afm/slide.lmp:131 speed/100 -> A/ps
+}
+
+#: ``load_kind`` -> the unit of each identity attribute of a point (its
+#: ``units`` attribute). One entry per ``load_kind`` that
+#: :func:`src.aiida.ingest.load_points` produces: ``'force'`` (tip families),
+#: ``'pressure'`` (sheet families) and ``'none'`` (a PES grid, whose load,
+#: angle and speed are placeholders 0.0 -- so they carry no unit).
+POINT_UNITS: Dict[str, Dict[str, str]] = {
+    'force': {'load': UNITS['point.load.force'], 'angle': UNITS['point.angle'],
+              'speed': UNITS['point.speed']},
+    'pressure': {'load': UNITS['point.load.pressure'], 'angle': UNITS['point.angle'],
+                 'speed': UNITS['point.speed']},
+    'none': {},
 }
 
 

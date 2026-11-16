@@ -170,7 +170,7 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
     # pay it -- `--help` and every non-build subcommand instantiate nothing.
     # pylint: disable-next=import-outside-toplevel
     from ...data.provenance import (ProvenanceRecord, material_provenance,
-                                   write_provenance)
+                                   new_run_uuid, write_provenance)
     import hashlib  # pylint: disable=import-outside-toplevel
 
     config = builder.config
@@ -207,6 +207,7 @@ def write_sheet_provenance(builder, *, contact_cutoff: float,
         materials.append(material_provenance(flake, 'flake'))
 
     record = ProvenanceRecord(
+        run_uuid=new_run_uuid(),
         family=builder.FAMILY,
         model=builder.model,
         materials=materials,

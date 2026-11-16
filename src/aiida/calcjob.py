@@ -37,6 +37,7 @@ from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from uuid import UUID, uuid5
 
 from aiida import orm
 from aiida.common.datastructures import CalcInfo
@@ -51,8 +52,17 @@ from .store import new_file, new_folder
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['LammpsFrictionCalcJob', 'LammpsFrictionParser', 'deck_inputs',
-           'import_deck', 'import_run', 'point_label', 'structures_for']
+__all__ = ['LammpsFrictionCalcJob', 'LammpsFrictionParser', 'MissingRunUUID',
+           'deck_inputs', 'import_deck', 'import_run', 'point_label', 'point_uuid',
+           'structures_for']
+
+#: The CalcJob extra that carries the run's identity (``provenance.json``
+#: ``run_uuid``), so every deck of one run is found by one value.
+RUN_UUID_EXTRA = 'friction2d_run_uuid'
+
+
+class MissingRunUUID(ValueError):
+    """A run's ``provenance.json`` has no ``run_uuid`` (a pre-2.2 build)."""
 
 _CONFLICT = '.sync-conflict-'
 _PES_FAMILIES = ('pes_tip', 'pes_sheet')
@@ -94,6 +104,15 @@ def point_label(point: Any) -> str:
     """
     return (f'{point.load_kind}{_num(point.load)}'
             f'_a{_num(point.angle)}_s{_num(point.speed)}')
+
+
+def point_uuid(run_uuid: str, label: str) -> str:
+    """A point's stable identity: ``uuid5(UUID(run_uuid), label)``.
+
+    Path-free, so the same point of the same run gets the same uuid wherever
+    the run directory sits, and under whatever set label it is imported.
+    """
+    return str(uuid5(UUID(run_uuid), label))
 
 
 def _file_label(name: str) -> str:
@@ -143,8 +162,8 @@ class LammpsFrictionCalcJob(CalcJob):
                              help='Structure files the deck reads: build/*.lmp, '
                                   "and the system deck's load_*.data outputs.")
         spec.input('parameters', valid_type=orm.Dict,
-                   help='deck_name, rel_path, point_filter, family, n_layers, '
-                        'log_name, writes_structures.')
+                   help='deck_name, rel_path, run_uuid, point_filter, family, '
+                        'n_layers, log_name, writes_structures.')
 
         spec.input('metadata.options.resources', valid_type=dict,
                    default={'num_machines': 1, 'num_mpiprocs_per_machine': 1})
@@ -179,6 +198,10 @@ class LammpsFrictionCalcJob(CalcJob):
     def prepare_for_submission(self, folder: Folder) -> CalcInfo:
         """Only the retrieve lists: nothing is uploaded and nothing runs."""
         params = self.inputs.parameters.get_dict()  # type: ignore[attr-defined]
+        # The run's identity, as an extra: found without loading `parameters`.
+        # Set here (presubmit runs on import too) so every launch route has it.
+        if params.get('run_uuid'):
+            self.node.base.extras.set(RUN_UUID_EXTRA, params['run_uuid'])
         calcinfo = CalcInfo()
         calcinfo.uuid = str(self.uuid)
         calcinfo.codes_info = []
@@ -348,7 +371,7 @@ class LammpsFrictionParser(Parser):
         if params.get('writes_structures'):
             produced = self._structures(root)
         else:
-            produced = self._points(root, params, config)
+            produced = self._points(root, params, config, record)
         if not produced:
             return self.exit_codes.ERROR_NO_RESULTS
         return None
@@ -410,11 +433,12 @@ class LammpsFrictionParser(Parser):
     # -- slide-like decks ------------------------------------------------------
 
     def _points(self, root: Optional[Path], params: Mapping[str, Any],
-                config: Optional[dict]) -> int:
+                config: Optional[dict], record: Mapping[str, Any]) -> int:
         """One ``points`` node per point this deck covers, configured or present,
         plus its ``peratom`` and ``snapshots`` nodes when it has them."""
         # pylint: disable=import-outside-toplevel
         from ..core.observables import expected_tier_rows
+        from .block_schema import POINT_UNITS
         from ..postprocessing.post_channels import final_data_path
         from ..postprocessing.run_status import halt_detail, point_key, read_halt_registry
         from .ingest import load_points
@@ -469,6 +493,8 @@ class LammpsFrictionParser(Parser):
                     status, detail = 'halted', halted
             node = new_folder(files)
             node.base.attributes.set_many({
+                **_point_identity(params.get('run_uuid'), label, ident, record,
+                                  POINT_UNITS),
                 'family': family, 'load_kind': ident.load_kind,
                 'load': float(ident.load), 'angle': float(ident.angle),
                 'speed': float(ident.speed), 'layers': ident.layers,
@@ -483,6 +509,24 @@ class LammpsFrictionParser(Parser):
             if final is not None:
                 self.out(f'snapshots.{label}', new_file(final, name=f'data/{final.name}'))
         return len(labels)
+
+
+def _point_identity(run_uuid: Optional[str], label: str, ident: Any,
+                    record: Mapping[str, Any],
+                    point_units: Mapping[str, Mapping[str, str]]) -> Dict[str, Any]:
+    """``point_uuid``, ``units`` and the per-load ``load_achieved`` /
+    ``ramp_converged`` from ``provenance.json`` (None when not recorded)."""
+    from ..data.provenance import load_key  # pylint: disable=import-outside-toplevel
+
+    key = load_key(ident.load)
+    achieved = (record.get('load_achieved_by_load') or {}).get(key)
+    ramp = (record.get('ramp_by_load') or {}).get(key)
+    return {
+        'point_uuid': point_uuid(run_uuid, label) if run_uuid else None,
+        'units': dict(point_units[ident.load_kind]),
+        'load_achieved': None if achieved is None else float(achieved),
+        'ramp_converged': ramp.get('converged') if isinstance(ramp, Mapping) else None,
+    }
 
 
 def _layers_token(rel_path: str) -> Optional[int]:
@@ -535,6 +579,24 @@ def _build_dir(locator) -> Path:
     return here if here.is_dir() else Path(locator.run_dir).parent / 'build'
 
 
+def _sim_root(locator) -> Path:
+    """The simulation root the run's ``rel_path`` is relative to."""
+    run_dir = Path(locator.run_dir)
+    depth = len(PurePosixPath(locator.tokens.rel_path).parts)
+    return run_dir.parents[depth - 1] if depth else run_dir
+
+
+def _run_uuid(locator, record: Mapping[str, Any]) -> str:
+    """``record['run_uuid']``, or :class:`MissingRunUUID` naming the file."""
+    run_uuid = record.get('run_uuid')
+    if not run_uuid:
+        raise MissingRunUUID(
+            f'{locator.provenance_file} has no run_uuid (a run built before '
+            f'provenance schema 2.2.0). Stamp the legacy runs with '
+            f'`FrictionSim2D aiida stamp-uuid {_sim_root(locator)}`, or rebuild.')
+    return str(run_uuid)
+
+
 def _included_files(locator, deck: Deck) -> List[Path]:
     """The files the deck ``include``\\ s that exist on disk.
 
@@ -543,8 +605,7 @@ def _included_files(locator, deck: Deck) -> List[Path]:
     ``lammps/``, is accepted too. A ``$``-variable path is skipped.
     """
     run_dir = Path(locator.run_dir)
-    depth = len(PurePosixPath(locator.tokens.rel_path).parts)
-    sim_root = run_dir.parents[depth - 1] if depth else run_dir
+    sim_root = _sim_root(locator)
     try:
         text = Path(deck.path).read_text(encoding='utf-8', errors='replace')
     except OSError:
@@ -571,6 +632,9 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
     slide deck. The ``build/*.lmp`` files go to the system deck, or to every
     deck of a run that has none. ``decks`` is the run's deck list, when the
     caller already has it.
+
+    Raises:
+        MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
     """
     # pylint: disable=import-outside-toplevel
     from ..postprocessing.read_data import resolve_n_layers
@@ -582,6 +646,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
     prov_dir = Path(locator.provenance_dir)
     config = read_run_config(locator) or {}
     record = _read_json(locator.provenance_file)
+    run_uuid = _run_uuid(locator, record)
     settings = _read_yaml(prov_dir / 'settings.yaml')
     n_layers = resolve_n_layers(locator, config or None)
     blocks = split_blocks(config, settings, record, family=locator.tokens.family,
@@ -608,6 +673,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
                               'potentials'),
         'parameters': orm.Dict({
             'deck_name': deck.name, 'rel_path': locator.tokens.rel_path,
+            'run_uuid': run_uuid,
             'point_filter': dict(deck.point_filter),
             'family': locator.tokens.family,
             'n_layers': n_layers,

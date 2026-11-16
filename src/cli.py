@@ -671,14 +671,46 @@ def hpc_enrich_provenance(sim_dir: Path, log_path: Optional[Path],
 # AIIDA COMMANDS (Optional)
 # =============================================================================
 
+#: `aiida` subcommands that need no aiida-core: the group's install check
+#: (which imports `src.aiida`, and with it `aiida`) is skipped for them.
+_AIIDA_FREE_COMMANDS = frozenset({'stamp-uuid'})
+
+
 @cli.group('aiida')
-def aiida_group():
+@click.pass_context
+def aiida_group(ctx: click.Context):
     """AiiDA workflow management (requires aiida-core)."""
+    if ctx.invoked_subcommand in _AIIDA_FREE_COMMANDS:
+        return
     from .aiida import AIIDA_AVAILABLE
     if not AIIDA_AVAILABLE:
         click.echo("⚠️  AiiDA not available. Install with:", err=True)
         click.echo("   conda install -c conda-forge aiida-core", err=True)
         raise click.Abort()
+
+@aiida_group.command('stamp-uuid')
+@click.argument('root', type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option('--dry-run', is_flag=True, help='Report what would be stamped; write nothing.')
+def aiida_stamp_uuid(root: Path, dry_run: bool):
+    """Give every legacy provenance.json under ROOT a run_uuid.
+
+    Runs built before provenance schema 2.2.0 have no run identity, and the
+    import refuses them. Each one gets a fresh uuid4 plus
+    ``run_uuid_stamped_at``; an existing run_uuid is never touched, so a
+    second pass stamps nothing. Needs no aiida-core. Exits 1 if any
+    provenance.json was unreadable.
+
+    Example:
+        FrictionSim2D aiida stamp-uuid ./simulation_20260421_173546 --dry-run
+    """
+    from .data.provenance import stamp_run_uuids  # noqa: PLC0415
+
+    report = stamp_run_uuids(root, dry_run=dry_run)
+    text = report.render()
+    click.echo(text.replace('stamped', 'would stamp', 1) if dry_run else text)
+    if report.unreadable:
+        raise SystemExit(1)
+
 
 @aiida_group.command('preflight')
 def aiida_preflight():

@@ -224,6 +224,12 @@
    "run_role": {
     "value": "label"
    },
+   "run_uuid": {
+    "value": "ba43635b-2a06-5814-b6d0-65c46e08e2f8"
+   },
+   "run_uuid_stamped_at": {
+    "value": null
+   },
    "schema_version": {
     "value": "2.0.0"
    },
@@ -463,6 +469,8 @@
    "status_detail": "grid unknown: config has no general.pressure; integrity: missing bond reference structure",
    "provenance": {
     "schema_version": "2.0.0",
+    "run_uuid": "ba43635b-2a06-5814-b6d0-65c46e08e2f8",
+    "run_uuid_stamped_at": null,
     "family": "flake",
     "model": "sheetonsheet",
     "materials": [
@@ -549,7 +557,7 @@
       "bond_spring": null
      }
     },
-    "provenance_sha256": "0f88ce2ea9d39cad8e5e91f0f52facc5107fba5101524edb17de8c314da6e961",
+    "provenance_sha256": "f01aefae1124b787303251bb8670e2ebfbf6a2b28491764272886336dcee380b",
     "enriched": false,
     "ramp": null
    },

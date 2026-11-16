@@ -183,3 +183,53 @@ def test_dump_is_gone():
 
     assert result.exit_code != 0
     assert 'export-results' in CliRunner().invoke(cli, ['aiida', '--help']).output
+
+
+# --- stamp-uuid (Task 5b): legacy runs get a run_uuid, with no aiida import ---
+
+def _legacy(path):
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'schema_version': '2.1.0', 'family': 'afm'}),
+                    encoding='utf-8')
+    return path
+
+
+def test_stamp_uuid_stamps_and_dry_run_does_not(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', False)   # needs no aiida
+    prov = _legacy(tmp_path / 'afm' / 'L1' / 'provenance.json')
+
+    dry = CliRunner().invoke(cli, ['aiida', 'stamp-uuid', str(tmp_path), '--dry-run'])
+    assert dry.exit_code == 0, dry.output
+    assert 'would stamp 1' in dry.output
+    assert 'run_uuid' not in json.loads(prov.read_text(encoding='utf-8'))
+
+    real = CliRunner().invoke(cli, ['aiida', 'stamp-uuid', str(tmp_path)])
+    assert real.exit_code == 0, real.output
+    assert 'stamped 1' in real.output
+    assert json.loads(prov.read_text(encoding='utf-8'))['run_uuid']
+
+
+def test_stamp_uuid_exits_1_on_an_unreadable_file(tmp_path):
+    bad = tmp_path / 'x' / 'provenance.json'
+    bad.parent.mkdir()
+    bad.write_text('{', encoding='utf-8')
+    result = CliRunner().invoke(cli, ['aiida', 'stamp-uuid', str(tmp_path)])
+    assert result.exit_code == 1
+    assert str(bad) in result.output
+
+
+def test_stamp_uuid_imports_no_aiida(tmp_path):
+    import subprocess
+    import sys
+    _legacy(tmp_path / 'provenance.json')
+    code = ('import sys\n'
+            'from src.cli import cli\n'
+            f'try:\n    cli(["aiida", "stamp-uuid", {str(tmp_path)!r}])\n'
+            'except SystemExit as exc:\n    assert not exc.code, exc.code\n'
+            'bad = sorted(m for m in sys.modules if m == "aiida" or m.startswith("aiida."))\n'
+            'assert not bad, bad\n')
+    done = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                          cwd=Path(__file__).resolve().parents[2], check=False)
+    assert done.returncode == 0, done.stderr
