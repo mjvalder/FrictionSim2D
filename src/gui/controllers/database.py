@@ -2,7 +2,7 @@
 
 Every request runs in a subprocess (see :mod:`src.gui.db_worker`) for the
 reasons `PreviewController` does: `import aiida` plus `load_profile` is slow
-and process-global, psycopg2 and httpx can hang, and a hung request must be
+and process-global, psycopg2 can hang, and a hung request must be
 killable without taking the window with it. The process lifecycle here --
 including the `errorOccurred(FailedToStart)` carve-out -- is that controller's,
 deliberately.
@@ -19,14 +19,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
+from PySide6.QtCore import QObject, QProcess, Signal
 
 from ..workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 __all__ = ['CACHE_KEEP', 'DatabaseController', 'DatabaseRequest',
-          'central_configured', 'request_key']
+          'request_key']
 
 #: How many keyed query-cache directories `.preview/_db` keeps. A cached
 #: `list` result is a few hundred kB of rows; ten covers the handful of
@@ -51,32 +51,6 @@ def _cached_success(result_file: Path) -> bool:
         return False
 
 
-#: What `DatabaseSettings.api_url` is when nobody has set it.
-DEFAULT_API_URL = 'http://localhost:8000'
-
-
-def central_configured(settings: Any) -> bool:
-    """Has this installation been pointed at a central database at all?
-
-    There is a difference between "the central database is down" and "there
-    is no central database", and only the second is true today. The field
-    default is a localhost URL, so a bare default with no key and no host
-    beside it means nobody has configured anything -- and every central action
-    would end as a ConnectionError string against a server that was never
-    supposed to be there.
-    """
-    database = getattr(settings, 'database', None)
-    if database is None:
-        return False
-    url = (getattr(database, 'api_url', '') or '').strip()
-    if not url:
-        return False
-    if url != DEFAULT_API_URL:
-        return True
-    return bool((getattr(database, 'api_key', '') or '').strip()
-                or (getattr(database, 'host', '') or '').strip())
-
-
 @dataclass
 class DatabaseRequest:
     """One database request: a kind, a source, and the kind's own fields."""
@@ -97,9 +71,6 @@ class DatabaseController(QObject):
     finished = Signal(str, object)     # kind, the worker's result dict
     failed = Signal(str, str)          # kind, message
     cancelled = Signal(str)            # kind
-
-    #: The API key travels in the child's environment, never in `request.json`.
-    API_KEY_ENV = 'FRICTIONSIM2D_API_KEY'
 
     #: Kinds that write outside the workspace. Killing one mid-flight leaves a
     #: half-written destination directory behind, so the window refuses to
@@ -182,13 +153,9 @@ class DatabaseController(QObject):
         """Identity of a result: the request exactly as the worker reads it.
 
         That is `_payload`, connection included -- the same filters against
-        another profile, URL or API key are another store's answer. The key
-        itself is hashed in, never written: it only changes the digest.
+        another profile are another store's answer.
         """
         payload = self._payload(request)
-        if request.source == 'central':
-            api_key = (self.settings.database.api_key or '').strip()
-            payload['api_key_sha256'] = hashlib.sha256(api_key.encode()).hexdigest()
         return request_key(request.kind, request.source, payload)
 
     @property
@@ -242,7 +209,6 @@ class DatabaseController(QObject):
         process.setArguments(['-m', 'src.gui.db_worker', str(request_file)])
         process.setWorkingDirectory(str(Path(__file__).resolve().parents[3]))
         process.setProcessChannelMode(QProcess.MergedChannels)
-        process.setProcessEnvironment(self._environment(request))
         process.readyReadStandardOutput.connect(self._on_output)
         process.finished.connect(self._on_finished)
         process.errorOccurred.connect(self._on_error)
@@ -263,31 +229,11 @@ class DatabaseController(QObject):
 
     def _payload(self, request: DatabaseRequest) -> Dict[str, Any]:
         """The request as the worker reads it: the pane's fields plus the
-        connection settings, which the pane never sees (D9). The API key is
-        deliberately absent -- see `_environment`."""
+        connection settings, which the pane never sees (D9)."""
         payload: Dict[str, Any] = {'kind': request.kind, 'source': request.source}
         payload.update(request.payload)
-        if request.source == 'central':
-            payload['api_url'] = self.settings.database.api_url
-            payload['configured'] = central_configured(self.settings)
-        else:
-            payload['profile'] = self.settings.aiida.profile
+        payload['profile'] = self.settings.aiida.profile
         return payload
-
-    def _environment(self, request: DatabaseRequest) -> QProcessEnvironment:
-        """The child's environment, carrying the API key for a central request.
-
-        Not `request.json`: that file stays in the workspace as the D13 cache
-        and is never pruned, so a key written into it outlives the session.
-        """
-        environment = QProcessEnvironment.systemEnvironment()
-        key = (self.settings.database.api_key or '').strip() \
-            if request.source == 'central' else ''
-        if key:
-            environment.insert(self.API_KEY_ENV, key)
-        else:
-            environment.remove(self.API_KEY_ENV)
-        return environment
 
     # -------------------------------------------------------------- signals
 

@@ -136,21 +136,11 @@ Plot from JSON plot config:
 FrictionSim2D postprocess plot plot_config.json --output-dir plots
 ```
 
-## 10. Database upload and query
+## 10. Central database and REST API (removed)
 
-```bash
-FrictionSim2D db init
-FrictionSim2D db upload 260421-afm --uploader my_name --contact me@example.org
-FrictionSim2D db query --material h-MoS2 --limit 20
-```
-
-## 11. Serve the REST API
-
-```bash
-FrictionSim2D api serve --host 0.0.0.0 --port 8000
-```
-
-Then inspect API docs at `/docs` on that host.
+The central PostgreSQL database, `FrictionSim2D db ...` and `FrictionSim2D api ...`
+were removed. Share results as AiiDA archives instead (`FrictionSim2D aiida import`,
+see [aiida.md](aiida.md)).
 
 ## Related docs
 

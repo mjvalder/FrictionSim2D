@@ -64,8 +64,6 @@ def _controller(qt_app, tmp_path):
     workspace = Workspace.open(tmp_path / 'ws')
     settings = GlobalSettings()
     settings.aiida.profile = 'friction2d'
-    settings.database.api_url = 'http://localhost:8000'
-    settings.database.api_key = 'k'
     return DatabaseController(workspace, settings)
 
 
@@ -76,7 +74,6 @@ def test_the_request_key_is_stable_and_input_sensitive():
 
     assert first == same
     assert first != other
-    assert first != request_key('list', 'central', {'filters': {'family': 'afm'}})
     assert len(first) == 24
 
 
@@ -96,40 +93,6 @@ def test_start_writes_a_request_carrying_the_local_profile(controller):
     assert written['filters'] == {'family': 'afm'}
     assert written['result_file'].endswith('result.json')
     assert 'api_key' not in written
-
-
-def test_a_central_request_carries_the_url_but_never_the_key(controller):
-    """`request.json` is written into the workspace and kept as the D13 cache.
-    A key written there outlives the session in a directory the user may sync
-    or share, so it goes through the child's environment instead."""
-    request = DatabaseRequest(kind='list', source='central', payload={'filters': {}})
-
-    controller.start(request)
-    environment = controller._process.processEnvironment()
-    controller.cancel()
-
-    written = json.loads(
-        (controller.directory_for(request) / 'request.json').read_text(
-            encoding='utf-8'))
-    assert written['api_url'] == 'http://localhost:8000'
-    assert 'api_key' not in written
-    assert 'profile' not in written
-    # Not `'k' not in json.dumps(written)`: the payload necessarily contains
-    # the substring "kind" (asserted above), which already contains 'k' and
-    # makes that check unsatisfiable regardless of whether the secret leaked.
-    # Checking for the quoted JSON string value instead catches a leaked 'k'
-    # without tripping on 'kind'.
-    assert '"k"' not in json.dumps(written)
-    assert environment.value(DatabaseController.API_KEY_ENV) == 'k'
-
-
-def test_a_local_request_does_not_leak_the_key_into_the_environment(controller):
-    controller.start(DatabaseRequest(kind='list', source='local',
-                                     payload={'filters': {}}))
-    environment = controller._process.processEnvironment()
-    controller.cancel()
-
-    assert environment.value(DatabaseController.API_KEY_ENV) == ''
 
 
 def test_a_write_in_flight_names_itself(controller):
@@ -182,25 +145,23 @@ class TestTheWorkerReallyRuns:
     `src` importable, the newline-delimited JSON on stdout, the result file
     landing where the request said, and the exit code. Those are exactly the
     failures that make a worker look hung rather than broken, so one end-to-end
-    seam earns its runtime. `check` against an unconfigured central source is
-    the one request kind that needs no aiida, no httpx call and no network.
+    seam earns its runtime. A request for the removed `central` source is the
+    one request that needs no aiida profile and no network.
     """
 
     def test_a_check_round_trips_through_the_real_entry_point(self, controller):
-        controller.settings.database.api_url = ''
         progress = []
         controller.progress.connect(progress.append)
 
         controller.start(DatabaseRequest(kind='check', source='central',
                                          payload={}))
-        result = _run_until(controller.finished, timeout_ms=60000)
+        result = _run_until(controller.failed, timeout_ms=60000)
 
         assert result, 'the worker never finished -- the -m entry point is broken'
-        kind, payload = result
+        kind, message = result
         assert kind == 'check'
-        assert payload['ok'] is True
-        assert payload['ready'] is False
-        assert any('not configured' in c['detail'] for c in payload['checks'])
+        assert message == ('central database removed; '
+                           'use the local AiiDA store')
         assert not controller.running
 
 
@@ -277,34 +238,15 @@ class TestResultCache:
         assert failed == []
         assert not (directory / 'result.json').exists()
 
-    def test_the_cache_key_includes_the_connection(self, controller):
-        """A different profile, URL or API key is a different database: the
-        same filters must not be answered from another store's result."""
+    def test_the_cache_key_includes_the_profile(self, controller):
+        """A different profile is a different store: the same filters must
+        not be answered from another store's result."""
         local = DatabaseRequest(kind='list', source='local', payload={'filters': {}})
-        central = DatabaseRequest(kind='list', source='central', payload={'filters': {}})
-        before_local = controller.directory_for(local)
-        before_central = controller.directory_for(central)
+        before = controller.directory_for(local)
 
         controller.settings.aiida.profile = 'other'
-        controller.settings.database.api_url = 'https://db.example.org'
-        assert controller.directory_for(local) != before_local
-        changed_url = controller.directory_for(central)
-        assert changed_url != before_central
 
-        controller.settings.database.api_key = 'another-key'
-        assert controller.directory_for(central) != changed_url
-
-    def test_the_api_key_is_hashed_into_the_key_never_written(self, controller):
-        controller.settings.database.api_key = 'sekrit-token-123'
-        request = DatabaseRequest(kind='list', source='central', payload={'filters': {}})
-
-        controller.start(request)
-        controller.cancel()
-
-        directory = controller.directory_for(request)
-        for path in directory.rglob('*'):
-            assert 'sekrit-token-123' not in path.read_text(encoding='utf-8')
-        assert 'sekrit-token-123' not in str(directory)
+        assert controller.directory_for(local) != before
 
     def test_non_cached_kinds_share_one_scratch_directory_per_kind(self, controller):
         """A `detail` fires on every row click; one directory per click would

@@ -24,8 +24,6 @@ ALLOWED_TARGET_PREFIXES = (
     "src.builders.construction.components.run_lammps_commands",
     "src.builders.components.run_lammps_commands",   # lazy alias of the line above
     "src.aiida.",
-    "src.api.",
-    "src.data.database.",
     # run_simulations builds real geometry -- a genuine expensive boundary.
     # src.cli imports the name at module level (`from .run.simulate import
     # run_simulations`), so src.cli.run_simulations is the name the CLI

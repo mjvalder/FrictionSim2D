@@ -37,14 +37,6 @@ def test_every_aiida_subcommand_is_documented():
     assert missing == []
 
 
-def test_every_db_subcommand_is_documented():
-    names = _subcommand_names(cli.commands['db'])
-    text = (DOCS / 'commands.md').read_text(encoding='utf-8')
-
-    missing = [n for n in names if f'db {n}' not in text]
-    assert missing == []
-
-
 def test_settings_doc_lists_the_real_fields():
     from src.core.config import AiidaSettings, DatabaseSettings
 

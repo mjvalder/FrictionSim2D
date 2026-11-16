@@ -160,110 +160,6 @@ def test_filter_keys_are_all_real_friction2d_db_query_kwargs():
     assert 'is_complete' not in db_worker.FILTER_KEYS
 
 
-class FakeClient:
-    def __init__(self, rows):
-        self.rows = rows
-        self.calls = []
-        self.closed = False
-
-    def query(self, **filters):
-        # The real client returns a DataFrame, not a list of dicts.
-        pandas = pytest.importorskip('pandas')
-        self.calls.append(filters)
-        return pandas.DataFrame(self.rows)
-
-    def get_result(self, result_id):
-        return dict(self.rows[0], id=result_id)
-
-    def list_materials(self):
-        return ['h-MoS2']
-
-    def close(self):
-        self.closed = True
-
-
-CENTRAL_ROWS = [{'id': 41, 'material': 'h_MoS2', 'family': 'afm', 'mean_cof': 0.07,
-                 'run_uuid': '1a2b', 'result_uuid': '9f8e', 'set_label': 's1',
-                 'contact': 'someone@example.org', 'source_host': 'cluster-a',
-                 'uploaded_at': '2026-09-01T10:00:00'}]
-
-
-@pytest.fixture(name='fake_client')
-def _fake_client(monkeypatch):
-    client = FakeClient(CENTRAL_ROWS)
-    monkeypatch.setattr(db_worker, '_central_client', lambda request: client)
-    return client
-
-
-def test_central_list_maps_filter_names_to_the_client(fake_client):
-    result = db_worker.dispatch({
-        'kind': 'list', 'source': 'central', 'api_url': 'http://x',
-        'filters': {'materials': ['h-MoS2'], 'potential': 'sw', 'family': 'afm',
-                    'limit': 200}})
-
-    assert result['ok'] is True
-    assert result['records'] == CENTRAL_ROWS
-    assert result['total_count'] == 1
-    assert result['limit'] == 200, \
-        'not truncated (1 row < limit 200) -- total_count is exact, but the ' \
-        'limit is still reported'
-    assert fake_client.calls[0]['material'] == 'h-MoS2'
-    assert fake_client.calls[0]['potential_type'] == 'sw'
-    assert fake_client.calls[0]['family'] == 'afm'
-    assert fake_client.calls[0]['limit'] == 200
-    assert 'potential' not in fake_client.calls[0]
-    assert 'materials' not in fake_client.calls[0]
-
-
-def test_central_total_count_is_unknown_when_the_limit_is_reached(fake_client):
-    """The REST client has no way to ask the store for a true total -- it only
-    ever returns what it fetched, up to `limit`. When the returned row count
-    reaches that cap, `total_count` must not claim that count is the store's
-    total; `limit` is reported instead so the pane can say
-    "N results (limit L)" using `returned`."""
-    result = db_worker.dispatch({
-        'kind': 'list', 'source': 'central',
-        'filters': {'limit': len(CENTRAL_ROWS)}})
-
-    assert result['returned'] == len(CENTRAL_ROWS)
-    assert result['total_count'] is None
-    assert result['limit'] == len(CENTRAL_ROWS)
-
-
-def test_central_facets_are_read_off_the_rows(fake_client):
-    """The REST /conditions endpoint answers with ranges and count maps and
-    has no potential or set axis, so the fetched rows are the choices."""
-    result = db_worker.dispatch({'kind': 'list', 'source': 'central', 'filters': {}})
-
-    assert result['facets']['materials'] == ['h-MoS2']   # from list_materials()
-    assert result['facets']['families'] == ['afm']
-    assert result['facets']['set_labels'] == ['s1']
-    assert result['facets']['models'] == []
-
-
-def test_central_detail_wraps_the_record_in_the_shared_shape(fake_client):
-    result = db_worker.dispatch({'kind': 'detail', 'source': 'central',
-                                 'result_id': 41})
-
-    assert result['ok'] is True
-    assert result['kind'] == 'detail'
-    assert result['result']['attributes']['id'] == 41
-    assert result['result']['uuid'] == '9f8e'
-    assert result['run']['attributes'] == {}
-    assert result['files'] == []
-    assert result['total_bytes'] == 0
-
-
-def test_central_detail_carries_the_owner_contact(fake_client):
-    """The files of a central row live on someone else's machine; the
-    contact is how a reader asks for them (D6)."""
-    result = db_worker.dispatch({'kind': 'detail', 'source': 'central',
-                                 'result_id': 41})
-
-    assert result['result']['attributes']['contact'] == 'someone@example.org'
-    assert result['result']['attributes']['source_host'] == 'cluster-a'
-
-
 def test_summary_csv_writes_the_visible_rows_in_column_order(tmp_path):
     result = db_worker.dispatch({
         'kind': 'export', 'source': 'local', 'what': 'summary_csv',
@@ -280,15 +176,6 @@ def test_summary_csv_writes_the_visible_rows_in_column_order(tmp_path):
     assert result['bytes'] > 0
 
 
-def test_summary_csv_is_the_only_export_the_central_source_allows(tmp_path):
-    result = db_worker.dispatch({
-        'kind': 'export', 'source': 'central', 'what': 'results',
-        'dest': str(tmp_path / 'out'), 'selection': []})
-
-    assert result['ok'] is False
-    assert "'results'" in result['error']
-
-
 def test_an_unknown_export_kind_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(db_worker, '_load_profile', lambda request: None)
 
@@ -297,14 +184,6 @@ def test_an_unknown_export_kind_is_refused(tmp_path, monkeypatch):
 
     assert result['ok'] is False
     assert 'everything' in result['error']
-
-
-def test_import_is_refused_against_the_central_database(tmp_path):
-    result = db_worker.dispatch({'kind': 'import', 'source': 'central',
-                                 'root': str(tmp_path), 'label': 'x'})
-
-    assert result['ok'] is False
-    assert 'read-only' in result['error']
 
 
 def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
@@ -380,37 +259,14 @@ def test_a_local_check_turns_a_broken_profile_into_a_failed_check(monkeypatch):
     assert result['notes'], 'a failed check must say what to do about it'
 
 
-def test_a_central_check_calls_the_statistics_endpoint(fake_client):
-    fake_client.get_statistics = lambda: {'total_rows': 91}
-
-    result = db_worker.dispatch({'kind': 'check', 'source': 'central',
+@pytest.mark.parametrize('kind', ['list', 'detail', 'export', 'import', 'check'])
+def test_a_central_request_is_the_removed_source_error(kind):
+    """The central database is gone: every request kind answers with the one
+    error, without touching a store or the network."""
+    result = db_worker.dispatch({'kind': kind, 'source': 'central',
                                  'api_url': 'http://localhost:8000'})
 
-    assert result['ready'] is True
-    assert [c for c in result['checks']
-            if c['name'] == 'GET /statistics'][0]['detail'] == '91 results'
-
-
-def test_a_central_check_without_a_url_fails_before_connecting():
-    result = db_worker.dispatch({'kind': 'check', 'source': 'central',
-                                 'api_url': ''})
-
-    assert result['ready'] is False
-    assert any('not configured' in c['detail'] for c in result['checks'])
-    assert any('Local store' in note for note in result['notes'])
-
-
-def test_an_unconfigured_central_check_never_connects(monkeypatch):
-    """`configured` False means the URL is only the built-in default: there
-    is no central database there, and a connection attempt would end as a
-    ConnectionError string the user cannot act on."""
-    def _never(request):
-        raise AssertionError('the check must not build a client')
-
-    monkeypatch.setattr(db_worker, '_central_client', _never)
-
-    result = db_worker.dispatch({'kind': 'check', 'source': 'central',
-                                 'api_url': 'http://localhost:8000',
-                                 'configured': False})
-
-    assert result['ready'] is False
+    assert result['ok'] is False
+    assert result['kind'] == kind
+    assert result['error'] == ('central database removed; '
+                               'use the local AiiDA store')

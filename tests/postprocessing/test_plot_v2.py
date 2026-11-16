@@ -94,15 +94,12 @@ def test_an_empty_dataset_list_is_still_fine(tmp_path):
     assert plotter.full_data_files == {}
 
 
-def test_a_db_uri_is_not_checked_for_files(tmp_path):
-    """The `db://` branch returns before the file check, so a DB-backed
-    dataset is never refused for having no output_full_*.json. Its own query
-    failure is caught and logged by `_load_db_labels`; Task 22 rewires that
-    to the v3 client."""
-    plotter = Plotter(data_dirs=['db://central?family=afm'], labels=['db'],
-                      output_dir=str(tmp_path / 'out'))
-
-    assert plotter.full_data_files == {'db': {}}
+def test_a_db_uri_is_refused_naming_the_aiida_source(tmp_path):
+    """`db://central` is gone with the central database; the error names the
+    `aiida://dataset/<name>` source that replaces it (Task 12)."""
+    with pytest.raises(PlotDataError, match='aiida://dataset/'):
+        Plotter(data_dirs=['db://central?family=afm'], labels=['db'],
+                output_dir=str(tmp_path / 'out'))
 
 
 def test_a_v1_document_is_refused(tmp_path):
@@ -418,42 +415,6 @@ def test_the_histogram_says_slope_not_cof(tmp_path):
     assert label_for('cof_slope') == 'COF (slope of LF vs NF)'
 
 
-def test_db_uri_parses_the_v3_filters():
-    from src.postprocessing.plot_common import PlotCommonMixin
-
-    params = PlotCommonMixin._parse_db_uri(  # pylint: disable=protected-access
-        'db://central?family=hetero&model=sheetonsheet&potential_type=sw'
-        '&layers=2&force_min=10&force_max=40&limit=500')
-
-    assert params['profile'] == 'central'
-    assert params['family'] == 'hetero'
-    assert params['model'] == 'sheetonsheet'
-    assert params['potential_type'] == 'sw'
-    assert params['layers'] == 2
-    assert params['force_range'] == (10.0, 40.0)
-    assert params['limit'] == 500
-
-
-def test_a_non_db_uri_is_none():
-    from src.postprocessing.plot_common import PlotCommonMixin
-
-    assert PlotCommonMixin._parse_db_uri('/some/dir') is None
-
-
-def test_db_local_is_refused_rather_than_silently_meaning_central():
-    """There is one database. The local store is AiiDA nodes, not SQL, and a
-    URL that says 'local' while querying the central DB lies about where its
-    numbers came from."""
-    from src.postprocessing.plot_common import PlotCommonMixin
-
-    with pytest.raises(PlotDataError, match='export-results'):
-        PlotCommonMixin._parse_db_uri('db://local?family=afm')
-
-    assert PlotCommonMixin._parse_db_uri('db://central?family=afm')['profile'] \
-        == 'central'
-    assert PlotCommonMixin._parse_db_uri('db://?family=afm')['profile'] == 'central'
-
-
 def test_db_rows_carry_the_v3_identity_and_no_lf_aliases():
     import pandas as pd
 
@@ -496,29 +457,6 @@ def test_lf_source_on_a_db_row_falls_back_loudly(tmp_path, caplog):
 
     assert col == 'lf'
     assert 'lf_sx_sy' in caplog.text
-
-
-def test_load_db_labels_calls_the_api_client(monkeypatch, tmp_path):
-    import pandas as pd
-
-    import src.postprocessing.plot_common as pc
-
-    seen = {}
-
-    class _Client:
-        def query(self, **kwargs):
-            seen.update(kwargs)
-            return pd.DataFrame(columns=['material', 'size_x', 'size_y',
-                                         'mean_cof', 'mean_lf', 'mean_nf'])
-
-    monkeypatch.setattr(pc, 'get_client', lambda **kw: _Client())
-
-    Plotter(data_dirs=['db://central?family=hetero&layers=2'], labels=['db'],
-            output_dir=str(tmp_path))
-
-    assert seen['family'] == 'hetero'
-    assert seen['layers'] == 2
-    assert 'profile' not in seen
 
 
 def test_both_ranking_modes_write_the_same_shape(tmp_path):

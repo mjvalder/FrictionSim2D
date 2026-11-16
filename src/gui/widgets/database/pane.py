@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -41,8 +40,8 @@ __all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS',
           'render_checks']
 
 #: The pane's third axis, beside the AiiDA profile.
-SOURCES: Tuple[str, str] = ('local', 'central')
-SOURCE_LABELS = {'local': 'Local store', 'central': 'Central'}
+SOURCES: Tuple[str, ...] = ('local',)
+SOURCE_LABELS = {'local': 'Local store'}
 
 #: (kind, button text, tooltip). Buttons rather than a menu: a QMenu popup is
 #: one more thing that can be left open in a teardown path.
@@ -57,19 +56,14 @@ EXPORT_LABELS: Tuple[Tuple[str, str, str], ...] = (
      'A directory tree `postprocess read` can read'),
 )
 
-#: Downloads the central summary DB cannot serve -- it holds no files.
-_LOCAL_ONLY_EXPORTS = ('results', 'provenance', 'run_tree')
-
 #: What each source needs installed. Probed with `find_spec`, never imported:
 #: this module is reached from `src.cli`, and a compute node has neither.
 BACKEND_MODULES: Dict[str, Tuple[str, ...]] = {
     'local': ('aiida',),
-    'central': ('httpx',),
 }
 
 INSTALL_HINTS: Dict[str, str] = {
     'local': "pip install -e '.[aiida]'",
-    'central': "pip install -e '.[api]'",
 }
 
 #: `message`'s level -> stylesheet. 'info' clears back to the palette.
@@ -240,33 +234,13 @@ class DatabasePane(QWidget):
             'stored config')
         row.addWidget(self.rebuild_box)
 
-        self.copy_contact_button = QPushButton('Copy owner contact', self)
-        self.copy_contact_button.setToolTip(
-            'The e-mail of whoever uploaded the selected central row -- the '
-            'central database holds no files, so this is how you ask for them')
-        self.copy_contact_button.clicked.connect(self._copy_contact)
-        row.addWidget(self.copy_contact_button)
-
         self.import_button = QPushButton('Import run directory…', self)
         self.import_button.setToolTip(
             'Ingest a simulation directory into the local store')
         self.import_button.clicked.connect(self._request_import)
         row.addWidget(self.import_button)
 
-        self._apply_source_actions()
         return row
-
-    def _apply_source_actions(self) -> None:
-        """The central DB holds summaries only: three downloads are local,
-        and the owner contact is the one action that is central-only."""
-        local = self._source == 'local'
-        for what in _LOCAL_ONLY_EXPORTS:
-            button = self.download_buttons.get(what)
-            if button is not None:
-                button.setEnabled(local)
-        self.rebuild_box.setEnabled(local)
-        self.copy_contact_button.setEnabled(not local)
-        self.import_button.setEnabled(local)
 
     # ---------------------------------------------------------------- state
 
@@ -279,8 +253,8 @@ class DatabasePane(QWidget):
 
         `QRadioButton.setChecked` succeeds on a disabled button; without this
         check, a caller (`_restore_database_state`, a stray test) could put
-        the pane on a source with no working backend or no central database
-        configured, and every action gated on `self._source` -- Search,
+        the pane on a source with no working backend,
+        and every action gated on `self._source` -- Search,
         Refresh, Check connection -- would fire against it anyway with no
         button ever having been clickable to get there.
         """
@@ -362,13 +336,11 @@ class DatabasePane(QWidget):
         self._source = source
         # The rows on screen belong to the store we just left, and every
         # action reads `self._source`: clicking one would ask the new store
-        # for the old store's row -- a central `result_id` of None (the worker
-        # does `int(...)`) or a central uuid handed to `load_node`. The
+        # for the old store's row -- a stale uuid handed to `load_node`. The
         # Summary CSV would export the old store's rows under the new one's
         # name. Nothing survives a source change.
         self.clear_results()
         self.source_changed.emit(source)
-        self._apply_source_actions()
 
     def clear_results(self) -> None:
         """Drop the rows, the detail and everything measured from them."""
@@ -416,11 +388,8 @@ class DatabasePane(QWidget):
         if not records:
             return
         record = records[0]
-        if self._source == 'central':
-            payload = {'result_id': record.get('id')}
-        else:
-            payload = {'run_uuid': record.get('run_uuid'),
-                       'result_uuid': record.get('result_uuid')}
+        payload = {'run_uuid': record.get('run_uuid'),
+                   'result_uuid': record.get('result_uuid')}
         self.detail_requested.emit(self._source, payload)
 
     def selected_records(self) -> List[Dict[str, Any]]:
@@ -537,27 +506,3 @@ class DatabasePane(QWidget):
             return
         self.import_requested.emit(
             self._source, {'root': str(root), 'label': root.name, 'dry_run': False})
-
-    def _copy_contact(self) -> None:
-        """Put the selected rows' owner contacts on the clipboard (D6).
-
-        The central database holds summaries, not files -- reaching the
-        person who ran it is the only way to get the rest.
-        """
-        records = self.selected_records()
-        if not records:
-            self.message('Select a row first.', 'warn')
-            return
-        contacts = sorted({str(r.get('contact') or '').strip() for r in records}
-                          - {''})
-        if not contacts:
-            self.message('That row carries no owner contact.', 'warn')
-            return
-        self._set_clipboard('\n'.join(contacts))
-        self.message('Copied to the clipboard: ' + ', '.join(contacts))
-
-    def _set_clipboard(self, text: str) -> None:
-        """The clipboard seam. A method rather than an inline call for the
-        same reason `_ask_directory` is one: a test can override it instead of
-        depending on what the offscreen platform plugin implements."""
-        QGuiApplication.clipboard().setText(text)

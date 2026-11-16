@@ -224,59 +224,14 @@ def test_postprocess_plot_mismatched_labels(runner, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# db group
+# removed groups
 # ---------------------------------------------------------------------------
 
-def test_db_help(runner):
-    result = runner.invoke(cli, ['db', '--help'])
-    assert result.exit_code == 0
-    for cmd in ('upload', 'query', 'stats', 'init', 'stage', 'publish',
-                'reject', 'setup', 'create-key', 'delete'):
-        assert cmd in result.output
-
-
-def test_db_upload_help(runner):
-    result = runner.invoke(cli, ['db', 'upload', '--help'])
-    assert result.exit_code == 0
-    assert '--uploader' in result.output
-
-
-def test_db_query_help(runner):
-    result = runner.invoke(cli, ['db', 'query', '--help'])
-    assert result.exit_code == 0
-    assert '--material' in result.output
-
-
-def test_db_stage_help(runner):
-    result = runner.invoke(cli, ['db', 'stage', '--help'])
-    assert result.exit_code == 0
-    assert '--uploader' in result.output
-    assert '--api-key' in result.output
-
-
-def test_db_setup_help(runner):
-    result = runner.invoke(cli, ['db', 'setup', '--help'])
-    assert result.exit_code == 0
-    assert '--name' in result.output
-    assert '--profile' not in result.output
-
-
-# ---------------------------------------------------------------------------
-# api group
-# ---------------------------------------------------------------------------
-
-def test_api_help(runner):
-    result = runner.invoke(cli, ['api', '--help'])
-    assert result.exit_code == 0
-    assert 'serve' in result.output
-
-
-def test_api_serve_help(runner):
-    result = runner.invoke(cli, ['api', 'serve', '--help'])
-    assert result.exit_code == 0
-    assert '--host' in result.output
-    assert '--port' in result.output
-    assert '--reload' in result.output
+@pytest.mark.parametrize('group', ['db', 'api'])
+def test_the_central_database_groups_are_gone(runner, group):
+    result = runner.invoke(cli, [group, '--help'])
+    assert result.exit_code == 2
+    assert 'No such command' in result.output
 
 
 # ---------------------------------------------------------------------------

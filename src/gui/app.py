@@ -38,8 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .controllers.database import (DatabaseController, DatabaseRequest,
-                                   central_configured)
+from .controllers.database import DatabaseController, DatabaseRequest
 from .controllers.document import ConfigDocument, DocumentError
 from .controllers.generate import GenerateController, GenerateRequest
 from .controllers.preview import PreviewController, PreviewRequest
@@ -51,8 +50,7 @@ from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.database.detail import format_bytes
-from .widgets.database.pane import (SOURCES, DatabasePane, missing_backend,
-                                    render_checks)
+from .widgets.database.pane import SOURCES, DatabasePane, render_checks
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
@@ -1052,20 +1050,8 @@ class MainWindow(QMainWindow):
         The `_restoring_db_state` guard blocks that write outright; the
         snapshot means correctness never depends on the two agreeing.
 
-        Availability (D11) is re-applied *before* `set_source`, under the same
-        guard, for both directions: a remembered source that is not usable
-        here must not get selected (`set_source` refuses a disabled button on
-        its own, but only if the button was already disabled -- checking here
-        first is what disables it in time), and a remembered source that has
-        become usable again (a workspace switch onto settings where central
-        is configured) must be re-enabled before `set_source` gets a chance to
-        select it. Guarded so a resulting handover -- disabling the source
-        this workspace remembered hands the pane to the other one -- writes
-        nothing back to disk; only the on-screen selection falls back. This
-        is also what re-checks availability on a workspace switch
-        (`_choose_workspace` only calls this method) without a second,
-        unguarded call that could write the fallback to the new workspace's
-        state.
+        A remembered source that is no longer offered (the removed 'central'
+        one) is ignored: only sources in `SOURCES` are selected.
         """
         state = self.workspace.state
         source = state.get('db_source')
@@ -1073,7 +1059,6 @@ class MainWindow(QMainWindow):
         dest = state.get('db_dest')
         self._restoring_db_state = True
         try:
-            self._apply_database_availability()
             if source in SOURCES:
                 self.database_pane.set_source(source)
             if isinstance(filters, dict):
@@ -1088,51 +1073,6 @@ class MainWindow(QMainWindow):
             return
         self.workspace.remember('db_source', self.database_pane.source)
         self.workspace.remember('db_filters', self.database_pane.filters.value())
-
-    def _apply_database_availability(self) -> None:
-        """Disable the central source until this installation is pointed at a
-        central database.
-
-        `missing_backend` answers "is httpx installed"; it cannot answer "does
-        a central database exist", and the answer today is no. Left enabled,
-        every central action ends as a raw ConnectionError against a localhost
-        URL nobody ever configured -- a stack-trace string in place of "you
-        have not set this up".
-
-        Called from `_restore_database_state` (already under the
-        `_restoring_db_state` guard) but also from `_apply_settings`, live,
-        any time the Settings tab is applied -- clearing `database.api_url`
-        while Central is selected must not let the resulting fallback
-        (`set_source_enabled` hands the pane to Local) look like the user
-        chose Local: `source_changed` -> `_remember_database_state` would
-        otherwise overwrite the workspace's remembered 'central' with 'local'
-        outside of any restore. Wrapping the body in the same guard (saving
-        and restoring its previous value, since a call from
-        `_restore_database_state` already has it set) makes an
-        availability-driven fallback silent the same way a restore-driven one
-        already is. The other half of "comes back once the missing piece is
-        fixed": re-enabling Central here, while the workspace still remembers
-        it and the pane is showing the Local fallback, switches the pane back
-        rather than leaving it stranded on Local until the next restart.
-        """
-        if missing_backend('central'):
-            return          # the pane already said what to install
-        previous = self._restoring_db_state
-        self._restoring_db_state = True
-        try:
-            if not central_configured(self.settings):
-                self.database_pane.set_source_enabled(
-                    'central', False,
-                    'Central: not configured. Set database.api_url (and '
-                    'database.api_key) in the Settings tab. The Local store '
-                    'needs none of this.')
-            else:
-                self.database_pane.set_source_enabled('central', True)
-                if (self.workspace.state.get('db_source') == 'central'
-                        and self.database_pane.source != 'central'):
-                    self.database_pane.set_source('central')
-        finally:
-            self._restoring_db_state = previous
 
     def _on_db_query(self, source: str, filters: dict) -> None:
         self._remember_database_state()
@@ -1370,7 +1310,6 @@ class MainWindow(QMainWindow):
         self.form.set_settings(self.settings)
         self._refresh_settings_origin()
         self.statusBar().showMessage('Applied settings changes.')
-        self._apply_database_availability()
         return None
 
     def _sync_settings(self) -> bool:

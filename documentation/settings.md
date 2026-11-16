@@ -295,17 +295,12 @@ workflows). See `docs/superpowers/specs/TO-DO/future-works.md`
 
 ## database
 
-FrictionSim2D has **one** database now: the central summary store. The local
-store is AiiDA, configured entirely under `## aiida` above and via
-`FrictionSim2D aiida setup` — there is no separate local Postgres mirror any
-more.
+The central summary database, its REST API and the `db`/`api` command groups
+were removed. The local store is AiiDA, configured entirely under `## aiida` above
+and via `FrictionSim2D aiida setup`. The `database` section below is a leftover:
+nothing reads it any more, and it is deleted in Task 11.
 
-| Store | Backend | Contents | CLI group |
-|---|---|---|---|
-| **Local (AiiDA)** | AiiDA's own profile (SQLite/PostgreSQL) | Full time-series data, complete provenance | `FrictionSim2D aiida` |
-| **Central** | One shared PostgreSQL database | Summary statistics + a pointer back to the local run (mean COF, forces, conditions, run UUID, host) | `FrictionSim2D db` |
-
-Eight fields, central-only:
+Eight fields, unused:
 
 ```yaml
 database:
@@ -319,19 +314,9 @@ database:
   skip_fraction: 0.2
 ```
 
-- `host`, `port`, `dbname`, `user`, `password` — the central PostgreSQL
-  connection. `db`-group commands resolve these in order: an explicit CLI
-  flag (`--host`, `--port`, ...; its own env var is `FRICTION_DB_HOST`,
-  `FRICTION_DB_PORT`, ...), then this section — whose own defaults, when
-  nothing above set them, come from a *different* set of env vars
-  (`FRICTION_CENTRAL_DB_HOST`, `FRICTION_CENTRAL_DB_PORT`, ...) read when
-  settings are loaded.
-- `api_key` — the API key attached to writes made through this settings file
-  (`FRICTION_DB_API_KEY` overrides it). It records which contributor a row
-  came from; it does not gate read access on its own (Postgres role
-  permissions do that).
-- `api_url` — where `src.data.get_client(mode='api')` (the default client
-  mode) sends requests; `FrictionSim2D api serve` is what listens there.
+- `host`, `port`, `dbname`, `user`, `password`, `api_key`, `api_url` — the former
+  central-database connection (env defaults `FRICTION_CENTRAL_DB_*`,
+  `FRICTION_DB_API_KEY`). Unused.
 - `skip_fraction` — the same warm-up fraction the postprocessing COF
   calculation uses, applied when the store computes summary statistics.
 
@@ -346,11 +331,6 @@ document is staged into the AiiDA store (see
 [aiida.md](aiida.md#credentials-never-enter-the-store) for the precise
 guarantee), so a tree built before the first gate existed, or a hand-edited
 settings file with credentials still in it, cannot leak them either.
-
-The old profile switch that picked between a `local`/`central` nested pair,
-and the `api_host`/`api_port` fields, are gone — there is only ever one
-database to talk to now, and `FrictionSim2D api serve --host/--port` takes
-the server bind address directly instead of duplicating it here.
 
 ## integrity
 
