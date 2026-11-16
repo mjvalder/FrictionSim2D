@@ -477,6 +477,22 @@ SUMMARY_UNITS: Dict[str, Dict[str, str]] = {
 }
 
 
+#: The observable registry's unit spelling -> this module's. Two spellings
+#: of one unit, kept apart on purpose (controller ruling P2-R14):
+#: ``core.observables`` units are part of the ``output_full`` export
+#: contract that external tools read (changing them needs an EXPORT_SCHEMA
+#: bump), and these are hashed into stored schema nodes. Every other unit is
+#: spelled the same in both; ``tests/aiida/test_summary_units.py`` compares
+#: every shared quantity through :func:`normalise_unit` and fails on any
+#: other mismatch.
+OBSERVABLE_UNIT_ALIASES: Dict[str, str] = {'A': _A, 'eV/A': 'eV/angstrom'}
+
+
+def normalise_unit(unit: str) -> str:
+    """An observable-registry unit in this module's spelling."""
+    return OBSERVABLE_UNIT_ALIASES.get(unit, unit)
+
+
 def summary_units(family: str, content: Mapping[str, Any]) -> Dict[str, str]:
     """``{key: unit}`` for every number (or ``None``, a number not measurable
     here) in a summary's ``content``. Strings and booleans carry no unit.

@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.aiida.block_schema import SUMMARY_UNITS, summary_units
+from src.aiida.block_schema import (OBSERVABLE_UNIT_ALIASES, SUMMARY_UNITS,
+                                    normalise_unit, summary_units)
 from src.core.observables import FAMILIES, channel_by_role
 from src.data.models import RunSummary, summarise_run
 from src.postprocessing.post_channels import AFM_LIKE_FAMILIES
@@ -117,7 +118,7 @@ def test_unknown_family_is_refused():
         summary_units('nope', {'mean_cof': 0.1})
 
 
-# --- one spelling across the registries (fix round 1, item 7) -----------------
+# --- the two spellings, mapped explicitly (fix rounds 1-2, ruling P2-R14) -------
 
 def _registry_units():
     from src.core.observables import REGISTRY
@@ -125,27 +126,42 @@ def _registry_units():
             for fam in ob.sim_types if ob.units}
 
 
-def test_shared_quantities_have_the_same_unit_in_both_registries():
-    """A summary key that IS an observable (the post-stream channels) and a
-    statistic of an observable (mean/std of nf, lfx, lfy) carry the
-    observable's unit, spelled the same way."""
+def _shared():
+    """``(family, summary key, summary unit, registry unit)`` for every
+    summary key that IS an observable (the post channels) or a statistic of
+    one (mean/std of nf, lfx, lfy, lf)."""
     registry = _registry_units()
-    shared = 0
+    out = []
     for family, table in SUMMARY_UNITS.items():
         for key, unit in table.items():
             name = key.split('_', 1)[1] if key.startswith(('mean_', 'std_')) else key
             if (family, name) in registry and name != 'cof':
-                assert registry[(family, name)] == unit, (family, key)
-                shared += 1
-    assert shared >= 20
+                out.append((family, key, unit, registry[(family, name)]))
+    return out
 
 
-def test_lengths_are_spelled_angstrom_everywhere():
-    import re
+def test_shared_quantities_agree_after_normalisation():
+    shared = _shared()
+    assert len(shared) >= 20
+    lengths = [s for s in shared if s[2] == 'angstrom']
+    assert lengths and {s[3] for s in lengths} == {'A'}        # the alias is exercised
+    for family, key, unit, registry_unit in shared:
+        assert normalise_unit(registry_unit) == unit, (family, key)
 
+
+def test_an_unaliased_mismatch_fails(monkeypatch):
+    """Only the alias table bridges the spellings: 'Angstrom' is not 'angstrom'."""
+    assert normalise_unit('Angstrom') != 'angstrom'
+    monkeypatch.delitem(OBSERVABLE_UNIT_ALIASES, 'A')
+    assert any(normalise_unit(r) != u for _f, _k, u, r in _shared())
+
+
+def test_every_registry_unit_normalises_into_the_schema_vocabulary():
+    """A registry unit is either spelled as block_schema spells it or is in
+    the alias table; block_schema itself never uses the registry spelling."""
     from src.aiida.block_schema import UNITS
-    bare = re.compile(r'(^|[^A-Za-z])A($|[^A-Za-z])')
-    units = (list(UNITS.values()) + list(_registry_units().values())
-             + [u for table in SUMMARY_UNITS.values() for u in table.values()])
-    assert [u for u in units if bare.search(u)] == []
-    assert 'angstrom' in UNITS.values() and 'angstrom' in _registry_units().values()
+    schema = set(UNITS.values()) | {u for t in SUMMARY_UNITS.values() for u in t.values()}
+    assert not schema & set(OBSERVABLE_UNIT_ALIASES)
+    assert set(OBSERVABLE_UNIT_ALIASES.values()) <= schema | {'eV/angstrom'}
+    known = schema | {'eV/angstrom', 'step'}
+    assert {normalise_unit(u) for u in _registry_units().values()} <= known

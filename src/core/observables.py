@@ -103,10 +103,7 @@ class Observable:
     parse it back.
 
     ``units`` is the physical unit of the emitted column, in LAMMPS ``metal``
-    terms: 'nN', 'eV', 'eV/angstrom', 'angstrom', 'K', 'count'. Lengths are
-    spelled 'angstrom', as in ``src.aiida.block_schema.UNITS`` and
-    ``SUMMARY_UNITS`` (``tests/aiida/test_summary_units.py`` cross-checks the
-    two). The sheet family shipped a
+    terms: 'nN', 'eV', 'eV/A', 'A', 'K', 'count'. The sheet family shipped a
     lateral force in eV/A against a normal load in nN for the life of the
     project, producing a COF a factor 1.602176565 too small.
 
@@ -297,7 +294,7 @@ for _name, _native in [
         group='tip_fix' if _name.startswith(('nf', 'lf', 'tip')) else '2D_all',
         tier='window', stream='results',
         rename_to=_native,
-        units='nN' if _name in ('nf', 'lfx', 'lfy') else 'angstrom',
+        units='nN' if _name in ('nf', 'lfx', 'lfy') else 'A',
         role_key=_LEGACY_ROLE_KEYS[_name]))
 
 # --- layer-resolved COM: bilayer entries for the golden tests. Builders inject
@@ -311,7 +308,7 @@ for _lyr in (1, 2):
             lammps_compute=f'compute COM_L{_lyr} layer_{_lyr} com',
             lammps_variable=(f'variable com{_ax}_L{_lyr} equal '
                              f'c_COM_L{_lyr}[{"xyz".index(_ax) + 1}]'),
-            rename_to=f'v_com{_ax}_L{_lyr}', units='angstrom',
+            rename_to=f'v_com{_ax}_L{_lyr}', units='A',
             role_key=f'layer_com_{_ax}_L{_lyr}'))
 
 # --- energies and temperatures ------------------------------------------------
@@ -471,7 +468,7 @@ for _ax, _native in (('x', 'v_fx'), ('y', 'v_fy')):
 for _ax in ('x', 'y', 'z'):
     _add(Observable(name=f'drive{_ax}', sim_types=('sheetonsheet', 'hetero'),
                     group='layer_n', tier='window', stream='results',
-                    rename_to=f'v_com{_ax}_top', units='angstrom',
+                    rename_to=f'v_com{_ax}_top', units='A',
                     role_key=f'driven_com_{_ax}'))
 # The flake model has one mobile body, so the driven COM is the flake's, not
 # a top layer's. Same role_key as the sheet's drive{x,y,z} and AFM's tip*,
@@ -484,7 +481,7 @@ for _ax in ('x', 'y', 'z'):
     _add(Observable(name=f'drive{_ax}', key=f'drive{_ax}@flake',
                     sim_types=('flake',), group='flake',
                     tier='window', stream='results',
-                    rename_to=f'v_com{_ax}_flake', units='angstrom',
+                    rename_to=f'v_com{_ax}_flake', units='A',
                     role_key=f'driven_com_{_ax}'))
 # Reaction force on the fixed bottom layer. react_x doubles as the frozen
 # legacy correction's LJ-branch discriminator -- see Task 11 and
@@ -503,8 +500,8 @@ for _name, _key, _native, _role, _unit in [
     ('raw_lfx', 'raw_lfx@sheet', 'v_xfrict', 'raw_lateral_force_x', 'nN'),
     ('raw_lfy', 'raw_lfy@sheet', 'v_yfrict', 'raw_lateral_force_y', 'nN'),
     ('raw_nf', 'raw_nf@sheet', 'v_fz', 'raw_normal_load', 'nN'),
-    ('raw_drivex', None, 'v_comx_top', 'raw_driven_com_x', 'angstrom'),
-    ('raw_drivey', None, 'v_comy_top', 'raw_driven_com_y', 'angstrom'),
+    ('raw_drivex', None, 'v_comx_top', 'raw_driven_com_x', 'A'),
+    ('raw_drivey', None, 'v_comy_top', 'raw_driven_com_y', 'A'),
 ]:
     _add(Observable(name=_name, key=_key, sim_types=('sheetonsheet', 'hetero'),
                     group='layer_n', tier='raw', stream='results',
@@ -542,20 +539,20 @@ _add(Observable(name='sigma_xx_2d', sim_types=('afm', 'indent'),
                 lammps_compute=('compute satom 2D_all stress/atom NULL\n'
                                 'compute sxx 2D_all reduce sum c_satom[1]'),
                 lammps_variable='variable sxx_2d equal c_sxx',
-                rename_to='v_sxx_2d', units='eV/angstrom',
+                rename_to='v_sxx_2d', units='eV/A',
                 role_key='membrane_stress_xx'))
 _add(Observable(name='sigma_yy_2d', sim_types=('afm', 'indent'),
                 group='2D_all', tier='peratom', stream='results',
                 lammps_compute='compute syy 2D_all reduce sum c_satom[2]',
                 lammps_variable='variable syy_2d equal c_syy',
-                rename_to='v_syy_2d', units='eV/angstrom',
+                rename_to='v_syy_2d', units='eV/A',
                 role_key='membrane_stress_yy'))
 # post-stream: derived from retained artefacts, never a LAMMPS column
 _add(Observable(name='deflect_max', sim_types=('afm', 'indent'),
-                group='2D_all', tier='peratom', stream='post', units='angstrom',
+                group='2D_all', tier='peratom', stream='post', units='A',
                 role_key='max_deflection'))
 _add(Observable(name='gap_min', sim_types=('afm', 'indent'),
-                group='tip_all', tier='peratom', stream='post', units='angstrom',
+                group='tip_all', tier='peratom', stream='post', units='A',
                 role_key='min_gap'))
 
 
@@ -584,7 +581,7 @@ def _sigma_xx_layer(lyr: int) -> Observable:
                         f'compute sxx_L{lyr} layer_{lyr} reduce sum '
                         f'c_satom_L{lyr}[1]'),
         lammps_variable=f'variable sigma_xx_2d_L{lyr} equal c_sxx_L{lyr}',
-        rename_to=f'v_sigma_xx_2d_L{lyr}', units='eV/angstrom',
+        rename_to=f'v_sigma_xx_2d_L{lyr}', units='eV/A',
         role_key=f'membrane_stress_xx_L{lyr}')
 
 
@@ -598,7 +595,7 @@ def _sigma_yy_layer(lyr: int) -> Observable:
                         f'compute syy_L{lyr} layer_{lyr} reduce sum '
                         f'c_satom_L{lyr}[2]'),
         lammps_variable=f'variable sigma_yy_2d_L{lyr} equal c_syy_L{lyr}',
-        rename_to=f'v_sigma_yy_2d_L{lyr}', units='eV/angstrom',
+        rename_to=f'v_sigma_yy_2d_L{lyr}', units='eV/A',
         role_key=f'membrane_stress_yy_L{lyr}')
 
 
@@ -659,11 +656,11 @@ _add(Observable(name='n_contact_il', sim_types=('sheetonsheet', 'hetero'),
 # role, so neither needs a PARITY_EXEMPT entry.
 _add(Observable(name='gap_min_il', sim_types=('sheetonsheet', 'hetero', 'flake'),
                 group='layer_n', tier='peratom', stream='post', opt_in=True,
-                units='angstrom', role_key='min_gap'))
+                units='A', role_key='min_gap'))
 _add(Observable(name='corrugation_max',
                 sim_types=('sheetonsheet', 'hetero', 'flake'),
                 group='layer_n', tier='peratom', stream='post', opt_in=True,
-                units='angstrom', role_key='max_deflection'))
+                units='A', role_key='max_deflection'))
 
 # --- raw trace (100 fs instantaneous samples) ---------------------------------
 _RAW_ROLE_KEYS = {
@@ -684,7 +681,7 @@ for _name in ('raw_lfx', 'raw_lfy', 'raw_nf', 'raw_tipx', 'raw_tipy', 'raw_tipz'
         name=_name,
         sim_types=('afm', 'indent'), group='tip_fix', tier='raw', stream='results',
         rename_to=_RAW_RENAME_TO[_name],
-        units='nN' if _name in ('raw_lfx', 'raw_lfy', 'raw_nf') else 'angstrom',
+        units='nN' if _name in ('raw_lfx', 'raw_lfy', 'raw_nf') else 'A',
         role_key=_RAW_ROLE_KEYS[_name]))
 
 # --- punch-through ingredient: min tip z, in the SLIDING script --------------
@@ -692,7 +689,7 @@ _add(Observable(name='tip_min_z', sim_types=('afm',),
                 group='tip_all', tier='window', stream='results',
                 lammps_compute='compute cz_tip_s tip_all reduce min z',
                 lammps_variable='variable tip_min_z equal c_cz_tip_s',
-                rename_to='v_tip_min_z', units='angstrom'))
+                rename_to='v_tip_min_z', units='A'))
 
 
 def channels_for(sim_type: str, tier: str) -> list:
@@ -768,7 +765,7 @@ def layer_channels(n_layers: int) -> list:
                 lammps_compute=f'compute COM_L{lyr} layer_{lyr} com',
                 lammps_variable=(f'variable com{ax}_L{lyr} equal '
                                  f'c_COM_L{lyr}[{"xyz".index(ax) + 1}]'),
-                rename_to=f'v_com{ax}_L{lyr}', units='angstrom',
+                rename_to=f'v_com{ax}_L{lyr}', units='A',
                 role_key=f'layer_com_{ax}_L{lyr}'))
         out.append(_pe_sum_layer(lyr))
         out.append(_sigma_xx_layer(lyr))
