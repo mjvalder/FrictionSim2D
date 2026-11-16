@@ -42,11 +42,16 @@ def _find(node_class: Type[orm.Node], extra: str, value: str) -> Optional[orm.No
 def get_or_create_block(kind: str, content: Mapping[str, Any]) -> orm.Dict:
     """The stored ``Dict`` for this block, created on first sight.
 
-    ``kind`` may be a block name (``material__sheet_0``): the node is keyed by
-    the kind alone, so one material in two roles is one node.
+    ``kind`` may be a block name (``material__sheet_0``); ``content`` is the
+    canonical block (:func:`src.aiida.blocks.split_blocks`), whose own ``kind``
+    must match. The node is keyed by the content hash alone, so one material
+    in two roles is one node.
     """
     kind = block_kind(kind)
-    digest = block_hash(kind, content)
+    if content.get('kind') != kind:
+        raise ValueError(f'block content kind {content.get("kind")!r} does not '
+                         f'match the block kind {kind!r}')
+    digest = block_hash(content)
     found = _find(orm.Dict, BLOCK_HASH_EXTRA, digest)
     if found is not None:
         return found

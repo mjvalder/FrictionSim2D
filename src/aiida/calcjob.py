@@ -583,7 +583,9 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
     config = read_run_config(locator) or {}
     record = _read_json(locator.provenance_file)
     settings = _read_yaml(prov_dir / 'settings.yaml')
-    blocks = split_blocks(config, settings, record, provenance_dir=prov_dir)
+    n_layers = resolve_n_layers(locator, config or None)
+    blocks = split_blocks(config, settings, record, family=locator.tokens.family,
+                          n_layers=n_layers, provenance_dir=prov_dir).blocks
     decks = list(decks) if decks is not None else discover_decks(locator)
 
     reads_build = deck.writes_structures or not any(d.writes_structures for d in decks)
@@ -608,7 +610,7 @@ def deck_inputs(locator, deck: Deck, *, computer: orm.Computer,
             'deck_name': deck.name, 'rel_path': locator.tokens.rel_path,
             'point_filter': dict(deck.point_filter),
             'family': locator.tokens.family,
-            'n_layers': resolve_n_layers(locator, config or None),
+            'n_layers': n_layers,
             'log_name': log_name, 'writes_structures': deck.writes_structures,
         }),
         'metadata': {'computer': computer,

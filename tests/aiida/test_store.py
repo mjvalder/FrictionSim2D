@@ -13,8 +13,9 @@ from src.aiida.store import (  # noqa: E402
     get_or_create_block, get_or_create_file, machine_computer,
 )
 
-THERMOSTAT = {'settings': {'thermostat': {'type': 'langevin'}},
-              'general': {'temp': 300.0}}
+THERMOSTAT = {'kind': 'thermostat', 'block_schema': '1.0.0',
+              'fields': {'settings.thermostat.type': 'nose-hoover',
+                         'general.temp': 300.0}}
 
 
 def test_same_block_reused(aiida_profile_clean):            # Review Focus 2
@@ -22,7 +23,7 @@ def test_same_block_reused(aiida_profile_clean):            # Review Focus 2
     first = get_or_create_block('thermostat', t)
     assert first.is_stored
     assert first.pk == get_or_create_block('thermostat', dict(t)).pk
-    assert first.base.extras.get('friction2d_block_hash') == block_hash('thermostat', t)
+    assert first.base.extras.get('friction2d_block_hash') == block_hash(t)
     assert first.base.extras.get('friction2d_block_kind') == 'thermostat'
     assert first.get_dict() == t
 
@@ -30,14 +31,20 @@ def test_same_block_reused(aiida_profile_clean):            # Review Focus 2
 def test_different_content_or_kind_is_a_new_block(aiida_profile_clean):
     base = get_or_create_block('thermostat', THERMOSTAT)
     warmer = get_or_create_block(
-        'thermostat', {**THERMOSTAT, 'general': {'temp': 400.0}})
-    other_kind = get_or_create_block('drive', THERMOSTAT)
+        'thermostat', {**THERMOSTAT, 'fields': {'general.temp': 400.0}})
+    other_kind = get_or_create_block('drive', {**THERMOSTAT, 'kind': 'drive'})
     assert len({base.pk, warmer.pk, other_kind.pk}) == 3
+
+
+def test_content_kind_must_match_the_block_name(aiida_profile_clean):
+    with pytest.raises(ValueError, match='kind'):
+        get_or_create_block('drive', THERMOSTAT)
 
 
 def test_block_name_resolves_to_its_kind(aiida_profile_clean):
     """Two roles of one material share the node: the role is the link, not the content."""
-    content = {'name': 'Si', 'cif_sha256': 'ab' * 32}
+    content = {'kind': 'material', 'block_schema': '1.0.0',
+               'fields': {'name': 'Si', 'cif_sha256': 'ab' * 32}}
     tip = get_or_create_block('material__tip_0', content)
     sub = get_or_create_block('material__substrate_0', content)
     assert tip.pk == sub.pk
