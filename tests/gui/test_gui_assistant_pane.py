@@ -955,21 +955,25 @@ def test_remote_base_url_no_install(qt_app, env, tmp_path):
     assert 'pull fs2d-assistant:qwen3.5-4b' in pane.details_label.text()
 
 
-def test_schema_mismatch_warns_once(qt_app, env, tmp_path):
-    pane, _ = _tune_pane(tmp_path, tune=_tune(tmp_path, schema_hash='aaaa'),
-                         models=['qwen3.5:4b', 'fs2d-assistant:qwen3.5-4b'],
-                         schema_hash_fn=lambda: 'bbbb')
-    pane.model_box.setCurrentText('qwen3.5:4b')
-    pane._on_model_chosen()  # pylint: disable=protected-access
-    pane.model_box.setCurrentText('fs2d-assistant:qwen3.5-4b')
-    pane._on_model_chosen()  # pylint: disable=protected-access
-    assert pane.chat.toPlainText().count('older tool set') == 1
+def test_schema_mismatch_is_logged_once_not_told(qt_app, env, tmp_path, caplog):
+    with caplog.at_level('WARNING', logger='src.gui.assistant.pane'):
+        pane, _ = _tune_pane(tmp_path, tune=_tune(tmp_path, schema_hash='aaaa'),
+                             models=['qwen3.5:4b', 'fs2d-assistant:qwen3.5-4b'],
+                             schema_hash_fn=lambda: 'bbbb')
+        before = pane.chat.toPlainText()
+        pane.model_box.setCurrentText('qwen3.5:4b')
+        pane._on_model_chosen()  # pylint: disable=protected-access
+        pane.model_box.setCurrentText('fs2d-assistant:qwen3.5-4b')
+        pane._on_model_chosen()  # pylint: disable=protected-access
+    assert sum('tool schema aaaa' in r.message for r in caplog.records) == 1
+    assert 'schema' not in pane.chat.toPlainText() and 'schema' not in before
 
 
-def test_schema_match_no_warning(qt_app, env, tmp_path):
-    pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:qwen3.5-4b'])
+def test_schema_match_no_log(qt_app, env, tmp_path, caplog):
+    with caplog.at_level('WARNING', logger='src.gui.assistant.pane'):
+        pane, _ = _tune_pane(tmp_path, models=['fs2d-assistant:qwen3.5-4b'])
     assert pane.status_label.text() == 'Ollama ready (fs2d-assistant:qwen3.5-4b)'
-    assert 'older tool set' not in pane.chat.toPlainText()
+    assert not any('tool schema' in r.message for r in caplog.records)
 
 
 def test_idle_timer_never_stops_ollama_during_an_install(qt_app, env, tmp_path):

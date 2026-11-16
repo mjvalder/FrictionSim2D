@@ -83,3 +83,10 @@ def test_local_bundle_keeps_published_registry(monkeypatch, tmp_path):
     monkeypatch.setattr(bundles, 'PUBLISHED', {'qwen3.5-4b': tune})
     found = catalogue(tmp_path / 'models')['fs2d-assistant:qwen3.5-4b']
     assert found.registry == 'ns/fs2d-assistant:qwen3.5-4b' and found.bundle is not None
+
+
+def test_verified_schemas_count_as_a_fit(tmp_path):
+    from src.agent.bundles import FineTune
+    tune = FineTune(tag='t', base='b', schema_hash='old', knowledge_hash='k',
+                    verified_schemas=('new',))
+    assert tune.fits('old') and tune.fits('new') and not tune.fits('other')
