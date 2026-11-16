@@ -1551,15 +1551,15 @@ def postprocess_indent(run_root: Path, out_dir: Path, data_dir: Optional[Path]):
 # COMPARE
 # =============================================================================
 
-def _compare_side(ref: str, profile: Optional[str]):
+def _compare_side(ref: str, profile: Optional[str], rtol: float, atol: float):
     """Blocks of one ``compare`` argument: a sidecar directory, else the store."""
     if Path(ref).is_dir():
         from .aiida.compare import load_blocks_from_sidecar  # noqa: PLC0415
-        return load_blocks_from_sidecar(Path(ref))
+        return load_blocks_from_sidecar(Path(ref), rtol=rtol, atol=atol)
     from .aiida import load_aiida_profile  # noqa: PLC0415
     from .aiida.compare import load_blocks  # noqa: PLC0415
     load_aiida_profile(profile)
-    return load_blocks(ref)
+    return load_blocks(ref, rtol=rtol, atol=atol)
 
 
 @cli.command('compare')
@@ -1569,11 +1569,16 @@ def _compare_side(ref: str, profile: Optional[str]):
               help='AiiDA profile name (default: configured default profile)')
 @click.option('--rtol', type=float, default=1e-6, show_default=True,
               help='Relative tolerance for derived values.')
-def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float):
+@click.option('--atol', type=float, default=1e-9, show_default=True,
+              help='Absolute tolerance floor for derived values.')
+def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float, atol: float):
     """Compare the parameter blocks of two runs or campaigns, field by field.
 
     A and B are each a CalcJob pk or uuid, a point uuid, a group label, or an
-    archive's ``.params`` sidecar directory. A group gives the fields shared
+    archive's ``.params`` sidecar directory. Prefix a reference with ``pk:``,
+    ``uuid:``, ``point:`` or ``group:`` to say which; unprefixed, an all-digit
+    reference is a pk (else a group label), anything else a group, uuid or point.
+    Each side is read in its own schema's units and defaults. A group gives the fields shared
     by all its decks; a field that varies inside it shows as '<varies>'.
 
     Example:
@@ -1582,14 +1587,16 @@ def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float):
     from .core.compare import compare_blocks  # noqa: PLC0415
 
     try:
-        left, right = _compare_side(a, profile), _compare_side(b, profile)
+        left = _compare_side(a, profile, rtol, atol)
+        right = _compare_side(b, profile, rtol, atol)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Compare failed")
         _raise_abort(f"❌ Compare failed: {exc}", exc)
     report = compare_blocks(left.blocks, right.blocks,
-                            units={**left.units, **right.units},
+                            units=left.units, units_b=right.units,
                             derived_a=left.derived, derived_b=right.derived,
-                            defaults={**left.defaults, **right.defaults}, rtol=rtol)
+                            defaults=left.defaults, defaults_b=right.defaults,
+                            kinds={**right.kinds, **left.kinds}, rtol=rtol, atol=atol)
     click.echo(report.render())
 
 
