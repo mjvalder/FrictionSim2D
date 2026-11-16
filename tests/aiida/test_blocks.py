@@ -12,8 +12,9 @@ import pytest
 from src.aiida.blocks import (
     BLOCK_KINDS, EXCLUDED, FIELD_MAP, PROVENANCE_EXCLUDED, PROVENANCE_MAP,
     PROVENANCE_SOURCED, SWEPT, UNRESOLVED, RunBlocks, assigned, block_hash,
-    block_kind, leaf_field_paths, split_blocks,
+    block_kind, leaf_field_paths, split_blocks, upgrade_block,
 )
+from src.aiida import block_schema
 from src.aiida.block_schema import defaults_for
 from src.core.config import (
     AFMSimulationConfig, GlobalSettings, SheetOnSheetSimulationConfig,
@@ -464,6 +465,80 @@ def test_provenance_sourced_fields_are_not_read_from_config(afm, tmp_path):
         assert _diff(_split(cfg, st, prov), _split(cfg2, st, prov)) == set()
 
 
+# --- default elision across schema versions ---------------------------------------
+
+@pytest.fixture
+def bumped(monkeypatch):
+    """Schema 1.1.0, whose bump changed general.temp's default from 250 K to 300 K."""
+    monkeypatch.setattr(block_schema, 'BLOCK_SCHEMA_VERSION', '1.1.0')
+    monkeypatch.setattr(block_schema, 'LEGACY_DEFAULTS',
+                        {'1.0.0': {'general.temp': 250.0}})
+
+
+def _old(content, version='1.0.0', **fields):
+    return {**content, 'block_schema': version, 'fields': {**content['fields'], **fields}}
+
+
+def test_legacy_value_is_not_an_elision_value(afm, bumped):
+    """A new run at the new default and one asking for the old value stay apart."""
+    cfg, st, prov = afm
+    absent = _split({**cfg, 'general': {k: v for k, v in cfg['general'].items()
+                                         if k != 'temp'}}, st, prov)
+    old_value = _split(_with(cfg, 'general.temp', 250.0), st, prov)
+    assert 'general.temp' not in absent.blocks['thermostat']['fields']
+    assert old_value.blocks['thermostat']['fields']['general.temp'] == 250.0
+    assert _diff(absent, old_value) == {'thermostat'}
+    assert absent.blocks['thermostat']['block_schema'] == '1.1.0'
+
+
+def test_old_block_refills_the_old_default(afm, bumped):
+    """A 1.0.0 block that elided temp meant 250 K: it joins the explicit-250 run,
+    not the run left at the new 300 K default."""
+    cfg, st, prov = afm
+    current = _split(cfg, st, prov).blocks['thermostat']        # temp 300 -> elided
+    explicit_250 = _split(_with(cfg, 'general.temp', 250.0), st, prov).blocks['thermostat']
+    old_elided = _old(current)                                  # 1.0.0, temp absent
+    upgraded = upgrade_block(old_elided, family='afm')
+    assert upgraded['block_schema'] == '1.1.0'
+    assert upgraded['fields']['general.temp'] == 250.0
+    assert block_hash(upgraded) == block_hash(explicit_250)
+    assert block_hash(upgraded) != block_hash(current)
+    # An old block that asked for 300 K explicitly is the new default: elided.
+    old_300 = _old(current, **{'general.temp': 300.0})
+    assert block_hash(upgrade_block(old_300, family='afm')) == block_hash(current)
+
+
+def test_upgrade_leaves_current_and_unrelated_blocks_alone(afm, bumped):
+    cfg, st, prov = afm
+    blocks = _split(cfg, st, prov).blocks
+    for name in ('thermostat', 'geometry', 'material__sheet_0'):
+        assert upgrade_block(blocks[name], family='afm') == blocks[name]
+    # temp belongs to thermostat; an old geometry block gains nothing.
+    old_geometry = _old(blocks['geometry'])
+    assert upgrade_block(old_geometry, family='afm') == blocks['geometry']
+    with pytest.raises(ValueError, match='newer'):
+        upgrade_block(_old(blocks['thermostat'], version='2.0.0'), family='afm')
+
+
+def test_upgrade_takes_the_earliest_recorded_change(afm, monkeypatch):
+    cfg, st, prov = afm
+    monkeypatch.setattr(block_schema, 'BLOCK_SCHEMA_VERSION', '1.2.0')
+    monkeypatch.setattr(block_schema, 'LEGACY_DEFAULTS', {
+        '1.0.0': {'general.temp': 250.0}, '1.1.0': {'general.temp': 280.0},
+        '1.0.5': {'sheets.stack_type': 'AB'}})
+    blocks = _split(cfg, st, prov).blocks
+    assert upgrade_block(_old(blocks['thermostat']), family='afm')['fields'][
+        'general.temp'] == 250.0
+    assert upgrade_block(_old(blocks['thermostat'], version='1.1.0'), family='afm')[
+        'fields']['general.temp'] == 280.0
+    # A list-section field is refilled for each index the block names.
+    geometry = upgrade_block(_old(blocks['geometry']), family='afm')['fields']
+    assert geometry['sheets.0.stack_type'] == 'AB'
+    assert geometry['flake_sheets.0.x'] == blocks['geometry']['fields']['flake_sheets.0.x']
+    assert 'sheets.0.stack_type' not in upgrade_block(
+        _old(blocks['geometry'], version='1.1.0'), family='afm')['fields']
+
+
 # --- the hash -----------------------------------------------------------------
 
 def _block(kind, **fields):
@@ -689,7 +764,7 @@ def test_each_provenance_field_lands_where_mapped(afm, field):
         for item in [cfg[k] for k in ('tip', 'sub', 'sheet', 'flake')] + \
                 cfg['sheets'] + cfg['flake_sheets']:
             item['mat'] = None
-    a, b =_split(cfg, st, prov), _split(cfg, st, _perturb_provenance(prov, field))
+    a, b = _split(cfg, st, prov), _split(cfg, st, _perturb_provenance(prov, field))
     changed = _diff(a, b)
     if destination in BLOCK_KINDS:
         assert changed and {block_kind(n) for n in changed} == {destination}, changed

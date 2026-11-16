@@ -20,7 +20,17 @@ has an answer (critique C1):
   family model's default is elided, so an absent field and its default hash
   alike and a field added later changes no existing hash;
 - ``kind`` and ``block_schema`` sit inside the content, so the hash is
-  recomputable from the stored attributes alone (C2).
+  recomputable from the stored attributes alone (C2). A block of an older
+  schema version is brought to the current one by :func:`upgrade_block`
+  (old defaults refilled, then elided against the current ones).
+
+"Requested" means what the config asked for, whether or not the builder then
+reads it. A field the builder may ignore still enters identity by design --
+``tip.damping_ratio`` is unused whenever ``tip.dspring`` is set
+(``afm/base.py:794``), yet two runs differing only in it get different
+``thermostat`` blocks. Deciding which requested fields are inert would mean
+re-implementing every builder's branches here, and getting one wrong would
+merge different physics; a spurious split is the safe failure.
 
 The field table, units and defaults live in :mod:`src.aiida.block_schema`;
 the names are re-exported here. Files enter a block by sha256, never by path.
@@ -38,18 +48,19 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple, Union
 
 from ..data.provenance import MATERIAL_ROLES, sha256_file
 from ..run.tree import provenance_dir_for
+from . import block_schema as _schema
 from .block_schema import (
     ANNOTATIONS, BLOCK_KINDS, BLOCK_SCHEMA_VERSION, DERIVED_PATHS, EXCLUDED,
-    FIELD_MAP, INTERLAYER_DERIVED, LEGACY_DEFAULTS, LIST_SECTIONS,
-    PROVENANCE_EXCLUDED, PROVENANCE_MAP, PROVENANCE_SOURCED, REALIZATION_FIELDS,
-    SWEPT, RunBlocks, coerce, defaults_for, is_sweep_union, leaf_field_paths,
+    FIELD_MAP, INTERLAYER_DERIVED, LIST_SECTIONS, PROVENANCE_EXCLUDED,
+    PROVENANCE_MAP, PROVENANCE_SOURCED, REALIZATION_FIELDS, SWEPT, RunBlocks,
+    coerce, defaults_for, is_sweep_union, leaf_field_paths, unindexed, version_key,
 )
 
 __all__ = [
     'BLOCK_KINDS', 'BLOCK_SCHEMA_VERSION', 'EXCLUDED', 'FIELD_MAP', 'NAME_SEP',
     'PROVENANCE_EXCLUDED', 'PROVENANCE_MAP', 'PROVENANCE_SOURCED', 'SWEPT',
     'UNRESOLVED', 'RunBlocks', 'assigned', 'block_hash', 'block_kind',
-    'leaf_field_paths', 'split_blocks',
+    'leaf_field_paths', 'split_blocks', 'upgrade_block',
 ]
 
 logger = logging.getLogger(__name__)
@@ -124,7 +135,9 @@ def block_hash(content: Mapping[str, Any]) -> str:
 
 
 def _canonical(kind: str, fields: Mapping[str, Any]) -> Dict[str, Any]:
-    return {'kind': kind, 'block_schema': BLOCK_SCHEMA_VERSION, 'fields': dict(fields)}
+    # Read off the module, not the import-time copy, so a bump is seen everywhere.
+    return {'kind': kind, 'block_schema': _schema.BLOCK_SCHEMA_VERSION,
+            'fields': dict(fields)}
 
 
 # --- files ----------------------------------------------------------------------
@@ -239,14 +252,14 @@ def _requested(path: str, map_path: str, value: Any, *, n_layers: Optional[int],
 
 
 def _is_default(map_path: str, value: Any, defaults: Mapping[str, Any]) -> bool:
-    """Is ``value`` the field's model default (or its legacy default)?"""
-    candidates = []
-    if map_path in defaults:
-        candidates.append(defaults[map_path])
-    legacy = LEGACY_DEFAULTS.get(BLOCK_SCHEMA_VERSION, {})
-    if map_path in legacy:
-        candidates.append(coerce(map_path, legacy[map_path]))
-    return any(_normalise(value) == _normalise(c) for c in candidates)
+    """Is ``value`` the field's current model default?
+
+    Only the current default elides. ``LEGACY_DEFAULTS`` is a refill rule for
+    old blocks (:func:`upgrade_block`), never a second elision value: that
+    would merge a new run left at the new default with one that asks for the
+    old value explicitly.
+    """
+    return map_path in defaults and _normalise(value) == _normalise(defaults[map_path])
 
 
 def _run_fields(config: Mapping[str, Any], settings: Mapping[str, Any],
@@ -408,3 +421,63 @@ def split_blocks(config: Mapping[str, Any], settings: Mapping[str, Any],
     for kind in _RUN_KINDS:
         blocks[kind] = _canonical(kind, fields[kind])
     return RunBlocks(blocks=blocks, derived=_derived(provenance), family=family)
+
+
+# --- older schema versions ---------------------------------------------------------
+
+def _legacy_refill(version: str) -> Dict[str, Any]:
+    """FIELD_MAP path -> the default a block of ``version`` elided it at.
+
+    The earliest ``LEGACY_DEFAULTS`` entry at or after ``version`` wins: a
+    default recorded as changing out of a later version had not changed yet
+    when ``version`` was current.
+    """
+    current = version_key(_schema.BLOCK_SCHEMA_VERSION)
+    since = version_key(version)
+    refill: Dict[str, Any] = {}
+    for recorded in sorted(_schema.LEGACY_DEFAULTS, key=version_key):
+        if since <= version_key(recorded) < current:
+            for path, value in _schema.LEGACY_DEFAULTS[recorded].items():
+                refill.setdefault(path, value)
+    return refill
+
+
+def _refill_keys(map_path: str, fields: Mapping[str, Any]) -> List[str]:
+    """The content keys an elided ``map_path`` stood for in ``fields``.
+
+    A list section (``sheets.x``) is refilled for each index the block
+    already names; an index none of whose fields survived cannot be seen.
+    """
+    head, _, rest = map_path.partition('.')
+    if head not in LIST_SECTIONS:
+        return [map_path]
+    indices = sorted({key.split('.')[1] for key in fields
+                      if key.startswith(f'{head}.') and key.split('.')[1].isdigit()},
+                     key=int)
+    return [f'{head}.{i}.{rest}' for i in indices]
+
+
+def upgrade_block(content: Mapping[str, Any], *, family: str) -> Dict[str, Any]:
+    """``content`` re-canonicalised at the current :data:`BLOCK_SCHEMA_VERSION`.
+
+    A field an older block elided meant that version's default: it is written
+    back from ``LEGACY_DEFAULTS``, then every field is elided against the
+    current default. A current block comes back unchanged; a block newer than
+    this code raises ``ValueError``.
+    """
+    kind = block_kind(str(content.get('kind')))
+    version = str(content.get('block_schema'))
+    if version_key(version) > version_key(_schema.BLOCK_SCHEMA_VERSION):
+        raise ValueError(f'block_schema {version} is newer than this code '
+                         f'({_schema.BLOCK_SCHEMA_VERSION})')
+    fields = dict(content.get('fields') or {})
+    for map_path, old in _legacy_refill(version).items():
+        if FIELD_MAP.get(map_path) != kind:
+            continue
+        for key in _refill_keys(map_path, fields):
+            fields.setdefault(key, coerce(map_path, old))
+    defaults = defaults_for(family)
+    fields = {key: value for key, value in fields.items()
+              if unindexed(key) not in FIELD_MAP
+              or not _is_default(unindexed(key), value, defaults)}
+    return _canonical(kind, fields)

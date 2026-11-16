@@ -39,10 +39,24 @@ from ..run.naming import AFM_LIKE_MODELS, SHEET_LIKE_MODELS
 #: Stamped into every block's content, so a bump changes every hash.
 BLOCK_SCHEMA_VERSION = '1.0.0'
 
-#: Schema version -> {field path: the effective value an absent field had}.
-#: Default elision treats this value as a default too (see
-#: :func:`src.aiida.blocks.split_blocks`). Empty until a default changes.
+#: Schema version -> {FIELD_MAP path: its default in that version}, for each
+#: default that changed in the bump *out of* that version. It is a refill
+#: rule, never an extra elision value: an elided field in a block stamped
+#: with an older version meant that version's default, so
+#: :func:`src.aiida.blocks.upgrade_block` writes the old value back, then
+#: elides against the current default. A block's field takes the value from
+#: the earliest recorded version at or after the block's own.
+#:
+#: Changing a model default therefore needs, in one commit: bump
+#: :data:`BLOCK_SCHEMA_VERSION`, record the old value here under the old
+#: version, and regenerate ``tests/fixtures/block_defaults.json``
+#: (``test_block_schema.py::test_defaults_match_the_snapshot`` fails until then).
 LEGACY_DEFAULTS: Dict[str, Dict[str, Any]] = {}
+
+
+def version_key(version: str) -> Tuple[int, ...]:
+    """``'1.10.0'`` -> ``(1, 10, 0)``, for ordering schema versions."""
+    return tuple(int(part) for part in str(version).split('.'))
 
 BLOCK_KINDS = ('material', 'potential', 'interaction', 'thermostat', 'integration',
                'drive', 'geometry', 'protocol', 'output', 'realization')
@@ -339,7 +353,12 @@ UNITS: Dict[str, str] = {
     'settings.simulation.ramp_max_iterations': '1',  # afm/system_init.lmp:161 loop count
     # settings.quench
     'settings.quench.quench_slab_dims': _A,  # overrides.py:623; components.py:1727 vs target_x (A)
-    'settings.quench.quench_rate': 'K/s',  # construction/components.py:1765 rate * 1e-12 / dt
+    # K/s is the intended meaning, but construction/components.py:1765-1766 computes
+    # nsteps = (melt_temp - quench_temp) * rate * 1e-12 / dt, i.e. proportional to
+    # the rate; a K/s rate gives nsteps = dT / (rate * 1e-12 * dt). Both agree only
+    # at the 1e12 default. Pinned by an xfail in test_block_schema.py; the builder
+    # fix awaits the user.
+    'settings.quench.quench_rate': 'K/s',
     'settings.quench.melt_temp': 'K',  # common/make_amorphous.lmp:25 velocity create T
     'settings.quench.quench_temp': 'K',  # common/make_amorphous.lmp:32 npt temp
     'settings.quench.timestep': 'ps',  # common/make_amorphous.lmp:21 timestep
@@ -521,17 +540,20 @@ _DEFAULTS_CACHE: Dict[type, Dict[str, Any]] = {}
 
 
 def defaults_for(family: str) -> Dict[str, Any]:
-    """Model default per field path (coerced) for ``family``; required fields absent.
+    """Model default per :data:`FIELD_MAP` path (coerced) for ``family``.
 
-    AFM families read ``AFMSimulationConfig``, sheet families
-    ``SheetOnSheetSimulationConfig``; ``settings.*`` comes from ``GlobalSettings``
-    through either.
+    Required fields are absent. AFM families read ``AFMSimulationConfig``,
+    sheet families ``SheetOnSheetSimulationConfig``; ``settings.*`` comes from
+    ``GlobalSettings`` through either. Only block fields are listed: the
+    excluded ones (``settings.database.*`` reads the environment) have no
+    place in identity. Pinned by ``tests/fixtures/block_defaults.json``.
     """
     model = family_model(family)
     if model not in _DEFAULTS_CACHE:
         _DEFAULTS_CACHE[model] = {
             path: coerce(path, info.get_default(call_default_factory=True))
-            for path, info in _leaves(model) if not info.is_required()}
+            for path, info in _leaves(model)
+            if path in FIELD_MAP and not info.is_required()}
     return dict(_DEFAULTS_CACHE[model])
 
 

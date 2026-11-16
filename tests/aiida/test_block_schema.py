@@ -3,14 +3,23 @@
 No aiida import and no `aiida` marker: this file runs in the fast suite.
 """
 import json
+import re
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from src.aiida.block_schema import (
-    BLOCK_SCHEMA_VERSION, FIELD_MAP, LEGACY_DEFAULTS, UNITS, RunBlocks, UnitMismatch,
-    check_units, defaults_for, missing_units, numeric_paths, schema_document,
+    AFM_FAMILIES, BLOCK_SCHEMA_VERSION, FIELD_MAP, LEGACY_DEFAULTS, SHEET_FAMILIES,
+    UNITS, RunBlocks, UnitMismatch, check_units, defaults_for, missing_units,
+    numeric_paths, schema_document,
 )
+from src.core.config import load_settings
 from src.data.models import NM_TO_EV_A2
+
+REPO = Path(__file__).resolve().parents[2]
+SNAPSHOT = REPO / 'tests' / 'fixtures' / 'block_defaults.json'
+FAMILIES = sorted(AFM_FAMILIES | SHEET_FAMILIES)
 
 _ALLOWED = {'angstrom', 'eV', 'eV/angstrom^2', 'N/m', 'nN', 'GPa', 'K', 'ps', 'm/s',
             'deg', 'meV', 'steps', '1',
@@ -120,3 +129,80 @@ def test_schema_document_is_json_safe():
     assert doc['fields']['point.load.force']['unit'] == 'nN'
     assert 'tip.r' in doc['fields'] and 'tip.r' not in schema_document('sheetonsheet')['fields']
     assert {p for p in FIELD_MAP if p.startswith('general.')} <= set(doc['fields'])
+
+
+# --- the default snapshot -------------------------------------------------------
+
+def _snapshot_drift(current_version, current, golden):
+    """Why ``current`` defaults disagree with the ``golden`` snapshot, or None."""
+    if golden['block_schema'] != current_version:
+        return (f"BLOCK_SCHEMA_VERSION is {current_version} but "
+                f"{SNAPSHOT.name} was taken at {golden['block_schema']}: "
+                "regenerate the snapshot for the new version.")
+    lines = []
+    for family in sorted(set(current) | set(golden['families'])):
+        now, then = current.get(family, {}), golden['families'].get(family, {})
+        for path in sorted(set(now) | set(then)):
+            if now.get(path, '<absent>') != then.get(path, '<absent>'):
+                lines.append(f"  {family}: {path}: {then.get(path, '<absent>')!r} -> "
+                             f"{now.get(path, '<absent>')!r}")
+    if not lines:
+        return None
+    return ("A model default changed without a schema bump, so default elision would "
+            "now hash different physics alike:\n" + "\n".join(lines) + "\n"
+            "Bump BLOCK_SCHEMA_VERSION, record each old value in "
+            "LEGACY_DEFAULTS[<old version>], then regenerate "
+            f"tests/fixtures/{SNAPSHOT.name}.")
+
+
+def _current_defaults():
+    return {family: defaults_for(family) for family in FAMILIES}
+
+
+def test_defaults_match_the_snapshot():
+    golden = json.loads(SNAPSHOT.read_text(encoding='utf-8'))
+    drift = _snapshot_drift(BLOCK_SCHEMA_VERSION, _current_defaults(), golden)
+    assert drift is None, drift
+
+
+def test_snapshot_drift_names_the_fix():
+    golden = json.loads(SNAPSHOT.read_text(encoding='utf-8'))
+    changed = _current_defaults()
+    changed['afm'] = {**changed['afm'], 'settings.simulation.timestep': 0.002}
+    drift = _snapshot_drift(BLOCK_SCHEMA_VERSION, changed, golden)
+    assert 'afm: settings.simulation.timestep: 0.001 -> 0.002' in drift
+    assert 'Bump BLOCK_SCHEMA_VERSION' in drift and 'LEGACY_DEFAULTS' in drift
+    assert 'regenerate' in _snapshot_drift('9.9.9', _current_defaults(), golden)
+
+
+def test_defaults_are_environment_free():
+    """Only block fields: settings.database.* reads the environment, and is excluded."""
+    for family in FAMILIES:
+        assert set(defaults_for(family)) <= set(FIELD_MAP), family
+
+
+# --- quench_rate: label vs builder ----------------------------------------------
+
+def _quench_nsteps(tmp_path, rate):
+    """The quench run length the builder writes for ``rate`` (no LAMMPS run)."""
+    from src.builders.construction import components  # pylint: disable=import-outside-toplevel
+    settings = load_settings().model_copy(deep=True)
+    settings.quench.run_local = False                    # write the deck, then stop
+    settings.quench.quench_rate = rate
+    out = tmp_path / f'r{rate:g}'
+    out.mkdir()
+    mat = REPO / 'examples' / 'materials' / 'Si.cif'
+    pot = REPO / 'examples' / 'potentials' / 'sw' / 'Si.sw'
+    with patch.object(components, 'create_orthogonal_slab'), \
+            pytest.raises(RuntimeError, match='manual LAMMPS run'):
+        components.make_amorphous('zz_quench_rate_probe', mat, 8.0, 8.0, 8.0, pot,
+                                  'sw', out, settings)
+    deck = (out / 'lmp_input_amorphous_zz_quench_rate_probe.in').read_text(encoding='utf-8')
+    return int(re.search(r'^fix\s+quench .*\n^run\s+(\d+)', deck, re.M).group(1))
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "quench_rate is labelled K/s but construction/components.py:1765-1766 makes the "
+    "quench step count proportional to it; the builder fix awaits the user."))
+def test_doubling_quench_rate_halves_the_quench(tmp_path):
+    assert _quench_nsteps(tmp_path, 2e12) * 2 == _quench_nsteps(tmp_path, 1e12)
