@@ -344,7 +344,7 @@ FrictionSim2D aiida recheck 260421-afm --settings-file ./settings.yaml
   `thresholds_version`, or whose stored settings differ from the current ones.
 - The old verdict is superseded with its rulings, exactly as for a context
   change, and the set's own rulings file is applied again to the new verdicts.
-- It lists `rechecked <point>: <old> -> <new>` for every status that changed.
+- It lists `re-checked <point>: <old> -> <new>` for every status that changed.
   A second run checks nothing.
 - A ruling applied from another file (`--rulings`) is not re-applied: the
   report warns and names the `aiida rule LABEL --rulings <file>` to run.

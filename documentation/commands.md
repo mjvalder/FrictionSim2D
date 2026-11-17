@@ -316,7 +316,7 @@ FrictionSim2D aiida recheck LABEL [--settings-file PATH] [--profile TEXT]
   another file is not re-applied; the report warns with the
   `aiida rule LABEL --rulings <file>` to run.
 - Prints `set '<label>': N point(s) checked under integrity thresholds v<version>`,
-  the new verdict counts, `rechecked <point>: <old> -> <new>` for every point
+  the new verdict counts, `re-checked <point>: <old> -> <new>` for every point
   whose status changed, failures, warnings and the rulings report.
 - A second run checks nothing. Exits 1 if any check failed.
 

@@ -697,7 +697,7 @@ def test_recheck_applies_new_thresholds_and_reapplies_rulings(
     assert report.version == '1.1.0'
     assert sum(report.verdict_counts.values()) == 3
     assert report.rechecked == [(pid30, 'failed_integrity', 'complete')]
-    assert f'rechecked {pid30}: failed_integrity -> complete' in report.render()
+    assert f're-checked {pid30}: failed_integrity -> complete' in report.render()
     statuses = {}
     for point in (orm.load_node(u) for u in first.points):
         verdict = _live_verdict(point)

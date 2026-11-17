@@ -1010,7 +1010,7 @@ class RecheckReport:
         lines = [f'set {self.label!r}: {total} point(s) checked under integrity '
                  f'thresholds v{self.version}']
         lines += [f'  verdict {status}: {n}' for status, n in sorted(self.verdict_counts.items())]
-        lines += [f'  rechecked {pid}: {old} -> {new}' for pid, old, new in self.rechecked]
+        lines += [f'  re-checked {pid}: {old} -> {new}' for pid, old, new in self.rechecked]
         lines += [f'  FAILED {who}: {why}' for who, why in self.failures]
         lines += [f'  WARNING {w}' for w in self.warnings]
         if self.rulings is not None:

@@ -192,8 +192,8 @@ def test_recheck_reports_flipped_points_and_is_idempotent(store, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert 'thresholds v1.1.0' in result.output
-    assert f'rechecked {_pid(root, 30.0)}: failed_integrity -> complete' in result.output
+    assert f're-checked {_pid(root, 30.0)}: failed_integrity -> complete' in result.output
     again = _run('recheck', 'camp', '--settings-file', str(settings))
     assert again.exit_code == 0, again.output
     assert "set 'camp': 0 point(s) checked" in again.output
-    assert 'rechecked ' not in again.output
+    assert 're-checked ' not in again.output
