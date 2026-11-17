@@ -756,9 +756,15 @@ def _was_ruled_quarantined(verdict: orm.Dict) -> bool:
     return any(not _live(n) for n in qb.all(flat=True))
 
 
-def _rule(report: RulingReport, pid: str, ruling, verdict: orm.Dict) -> bool:
+def _rule(report: RulingReport, pid: str, ruling, verdict: orm.Dict,
+          source: Tuple[str, bool]) -> bool:
     """One (ruling, verdict) pair: decide, skip or apply. True when the
-    ruling applies to the verdict (applied now or already)."""
+    ruling applies to the verdict (applied now or already).
+
+    ``source`` is ``(resolved rulings file, whether it is the set's own)``;
+    it goes into the ruling Dict as ``source``/``own_file``. The ruling key
+    covers ``source`` only for another file, so own-file keys made before
+    the field existed still match."""
     from ..postprocessing.integrity_rulings import decide  # pylint: disable=import-outside-toplevel
 
     original = verdict['status']
@@ -777,11 +783,12 @@ def _rule(report: RulingReport, pid: str, ruling, verdict: orm.Dict) -> bool:
         return False
     content = {'point': pid, 'ruling': ruling.ruling, 'note': ruling.note,
                'date': ruling.date, 'override': ruling.override}
-    key = f'{verdict.uuid}|{_canonical(content)}'
+    path, own = source
+    key = f'{verdict.uuid}|{_canonical(content if own else {**content, "source": path})}'
     if _ruled(key):
         report.skipped += 1
         return True
-    node = _step_input(content, 'ruling')
+    node = _step_input({**content, 'source': path, 'own_file': own}, 'ruling')
     node.base.extras.set(AUTHOR_EXTRA, 'user')
     ruled = apply_ruling(verdict=verdict, ruling=node)
     _tag(ruled, 'ruled_verdict', verdict, **{RULING_KEY_EXTRA: key})
@@ -815,6 +822,28 @@ def _authoritative(group: orm.Group, path: Path) -> bool:
     return own in (path.resolve(), (path / RULINGS_FILE).resolve())
 
 
+def _rulings_source(group: orm.Group, path: Path) -> Tuple[str, bool]:
+    """``(resolved rulings file, whether it is the set's own)`` of ``path``
+    (the file, or its directory)."""
+    from ..postprocessing.integrity_rulings import RULINGS_FILE  # pylint: disable=import-outside-toplevel
+
+    if _authoritative(group, path):
+        return str((Path(group.base.extras.get('source_root')) / RULINGS_FILE).resolve()), True
+    path = Path(path)
+    return str((path / RULINGS_FILE if path.is_dir() else path).resolve()), False
+
+
+def _from_source(ruled: orm.Dict, source: Tuple[str, bool]) -> bool:
+    """Whether the ruling behind the ruled verdict ``ruled`` came from
+    ``source``. A ruling Dict without ``own_file`` predates the field and
+    came from the set's own file."""
+    content = ruled.creator.inputs.ruling.get_dict()
+    own = content.get('own_file', True)
+    if source[1]:
+        return own
+    return not own and content.get('source') == source[0]
+
+
 def _unreadable(rulings) -> bool:
     """Whether the file, or an entry of it, could not be read: its point is
     unknown, so nothing may be withdrawn on the strength of its absence."""
@@ -836,8 +865,9 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     if rulings_path is None:
         report.warnings.append('the set records no source_root; pass the rulings file')
         return report
+    source = _rulings_source(group, Path(rulings_path))
     if withdraw is None:
-        withdraw = _authoritative(group, Path(rulings_path))
+        withdraw = source[1]
     rulings = load_rulings(Path(rulings_path))
     points = _live_points(group)
     verdicts = _live_verdicts(points)
@@ -851,8 +881,8 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
         elif not by_id.get(pid):
             report.unmatched.append(pid)
         else:
-            ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v)}
-    own = _authoritative(group, Path(rulings_path))
+            ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v, source)}
+    own = source[1]
     if own:
         # The own file lives in source_root, whichever form named it.
         rulings_dir = Path(group.base.extras.get('source_root'))
@@ -874,8 +904,9 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
         live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
         for pid, pid_verdicts in sorted(by_id.items()):
             for verdict in pid_verdicts:
-                if verdict.uuid not in ruled and live.get(verdict.uuid):
-                    _withdraw(report, pid, verdict, live[verdict.uuid])
+                mine = [n for n in live.get(verdict.uuid, []) if _from_source(n, source)]
+                if verdict.uuid not in ruled and mine:
+                    _withdraw(report, pid, verdict, mine)
     live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
     report.overrides = [
         (pid, node['original_status'], node['status'], node.get('note', ''))
@@ -898,13 +929,19 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
     ones. A quarantined point takes either ruling; any other needs
     ``override: true`` and a note.
 
+    Each ruling Dict records its file: ``source`` (the resolved path) and
+    ``own_file`` (whether it is the set's own ``integrity_rulings.yaml``).
     Overrides are never permanent: reading the set's own rulings file (the
-    default), every live ruled verdict whose point no applicable ruling names
-    any more -- entry deleted, ``override: true`` or the note removed -- is
-    withdrawn (:func:`withdraw_ruling`), so the latest verdict follows the
-    file. An explicit ``rulings_path`` that is not that file withdraws
-    nothing unless ``withdraw=True``; neither does a file with unreadable
-    entries.
+    default), every live ruled verdict whose ruling came from that file and
+    whose point no applicable ruling there names any more -- entry deleted,
+    ``override: true`` or the note removed -- is withdrawn
+    (:func:`withdraw_ruling`), so the latest verdict follows the file. A
+    ruling from another file is left alone by that pass: only
+    ``withdraw=True`` with that same file (matched by resolved path)
+    withdraws it. An explicit ``rulings_path`` that is not the own file
+    withdraws nothing unless ``withdraw=True``; a file with unreadable
+    entries never does. A ruling Dict without ``own_file`` (made before it
+    was recorded) counts as the own file's.
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 

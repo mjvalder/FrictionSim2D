@@ -323,7 +323,77 @@ def test_partial_explicit_file_withdraws_nothing(aiida_profile_clean, no_profile
 
     assert report.applied == 1 and report.withdrawn == []
     assert len(_ruled_live()) == 2 and len(report.overrides) == 1
-    assert apply_rulings('camp', partial, withdraw=True).withdrawn == [_pid(tmp_path, 30.0)]
+    # --withdraw on another file withdraws only that file's rulings.
+    assert apply_rulings('camp', partial, withdraw=True).withdrawn == []
+    partial.write_text('[]\n', encoding='utf-8')
+    assert apply_rulings('camp', partial, withdraw=True).withdrawn == [_pid(tmp_path, 10.0)]
+    assert len(_ruled_live()) == 1
+
+
+def test_a_ruling_from_another_file_survives_the_own_file_pass(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    """I1: the own-file pass at import withdraws only the own file's rulings."""
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    review = tmp_path / 'reviews' / 'x.yaml'
+    review.parent.mkdir()
+    review.write_text(f'- point: "{pid}"\n  ruling: pass\n  note: viewer artefact\n'
+                      f'  override: true\n', encoding='utf-8')
+    assert apply_rulings('camp', review.parent / '.' / 'x.yaml').applied == 1
+    (func,) = _nodes('apply_ruling')
+    assert func.inputs.ruling['source'] == str(review.resolve())
+    assert func.inputs.ruling['own_file'] is False
+
+    (tmp_path / RULINGS_FILE).write_text('[]\n', encoding='utf-8')   # own file empty
+    again = import_root(tmp_path, label='camp')
+
+    assert again.rulings.withdrawn == []
+    assert again.overrides == [(pid, 'failed_integrity', 'complete', 'viewer artefact')]
+    assert len(_ruled_live()) == 1
+    assert apply_rulings('camp').withdrawn == []                      # `aiida rule`
+    assert apply_rulings('camp', review, withdraw=True).withdrawn == []
+    review.write_text('[]\n', encoding='utf-8')
+    assert apply_rulings('camp', review, withdraw=True).withdrawn == [pid]
+    assert _ruled_live() == []
+
+
+def test_an_own_file_ruling_records_its_source(aiida_profile_clean, no_profile_switch,
+                                               tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass')
+    assert apply_rulings('camp', tmp_path).applied == 1
+    (func,) = _nodes('apply_ruling')
+    assert func.inputs.ruling['own_file'] is True
+    assert func.inputs.ruling['source'] == str((tmp_path / RULINGS_FILE).resolve())
+    assert apply_rulings('camp').skipped == 1          # one key, whichever form named it
+
+
+def test_a_ruling_without_a_source_counts_as_the_own_files(
+        aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
+    """Ruling Dicts made before `source`/`own_file` existed are withdrawn by
+    the own-file pass, as they always were."""
+    from src.aiida import steps
+    real = steps._step_input
+
+    def legacy(content, kind):
+        if kind == 'ruling':
+            content = {k: v for k, v in content.items() if k not in ('source', 'own_file')}
+        return real(content, kind)
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'pass', note='viewer artefact', override=True)
+    monkeypatch.setattr(steps, '_step_input', legacy)
+    assert apply_rulings('camp').applied == 1
+    monkeypatch.undo()
+    (func,) = _nodes('apply_ruling')
+    assert 'own_file' not in func.inputs.ruling.get_dict()
+
+    assert apply_rulings('camp').skipped == 1          # its key still matches
+    (tmp_path / RULINGS_FILE).unlink()
+    assert import_root(tmp_path, label='camp').rulings.withdrawn == [pid]
 
 
 def test_unmatched_ruling_and_explicit_path(aiida_profile_clean, no_profile_switch,

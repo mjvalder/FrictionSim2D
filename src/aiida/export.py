@@ -23,7 +23,8 @@ nodes are immutable once stored and the local store keeps everything. After
 survives in a free page) and repository blobs: the Computer hostname becomes
 its label, a Code's ``filepath_executable`` its basename, ``remote_workdir`` and
 ``RemoteData.remote_path`` ``<machine label>:<rel_path>``, ``hpc_run_path``
-leaves the CalcJob ``parameters``, the set Group's ``source_root`` becomes its
+leaves the CalcJob ``parameters``, a ruling Dict's ``source`` becomes its
+basename, the set Group's ``source_root`` becomes its
 basename and ``source_host`` the machine label (or ``unknown``), and the
 provenance documents lose ``hpc.hpc_home``/``scratch_dir``/``log_dir``/
 ``conda_env``/``account`` and ``database.user``/``host`` (``hpc.hpc_host``
@@ -814,6 +815,19 @@ def _anonymise_parameters(archive: _Archive) -> int:
     return changed
 
 
+def _anonymise_rulings(archive: _Archive) -> int:
+    """A ruling Dict's ``source`` (the rulings file it came from) -> its basename."""
+    changed = 0
+    for pk, attributes, extras, _meta in _inputs_labelled(archive, 'ruling'):
+        attributes = json.loads(attributes or '{}')
+        name = _abs_basename(attributes.get('source'))
+        if name is not None:
+            attributes['source'] = name
+            _mark(archive, pk, extras, attributes)
+            changed += 1
+    return changed
+
+
 def _anonymise_remote(archive: _Archive, labels: Mapping[int, str]) -> int:
     """``remote_workdir`` of each CalcJob and ``remote_path`` of its
     ``RemoteData`` -> ``<machine label>:<rel_path>``."""
@@ -921,6 +935,7 @@ def _anonymise(archive: _Archive) -> int:
     docstring); returns the number of rows changed."""
     changed, hosts, labels = _anonymise_computers(archive)
     changed += _anonymise_codes(archive) + _anonymise_parameters(archive)
+    changed += _anonymise_rulings(archive)
     changed += _anonymise_remote(archive, labels) + _anonymise_groups(archive, hosts)
     changed += _anonymise_logs(archive) + _anonymise_processes(archive)
     for row in _inputs_labelled(archive, 'provenance'):

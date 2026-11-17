@@ -353,7 +353,9 @@ FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/ --withdraw
   pass. `aiida rule` applies it (or another file) on demand.
 - Each (verdict, ruling) pair becomes one `apply_ruling` calcfunction. The
   ruling `Dict` carries the extra `friction2d_author='user'`: a human decided
-  it, not the checker.
+  it, not the checker. It also records the file it came from: `source` (the
+  resolved path; its basename in an anonymised archive) and `own_file` (whether
+  that is the set's own `integrity_rulings.yaml`).
 - Idempotent: a ruling already applied to a verdict is skipped (the extra
   `friction2d_ruling_key = <verdict uuid>|<sha256 of the ruling>`). Editing a
   ruling's note or date applies it anew, superseding the previous ruled
@@ -386,13 +388,23 @@ needs `override: true` **and** a non-empty `note`:
   withdrawn: `withdraw_ruling` puts the checker's verdict back in force,
   stamped `withdrawn_ruling=<ruled uuid>`, and the report lists
   `withdrawn: <point>`.
-  - The set's own file always withdraws what it no longer says.
-  - Another file passed with `--rulings` withdraws nothing unless `--withdraw`
-    is given.
+  - Each file withdraws only its own rulings. The set's own file (every
+    import, and `aiida rule LABEL` without `--rulings`) always withdraws the
+    rulings **it** made that it no longer says. It never touches a ruling
+    applied from another file.
+  - A ruling from another file is withdrawn only by
+    `aiida rule LABEL --rulings THAT_FILE --withdraw`, with the entry gone from
+    that file. The file is matched by resolved path, so it must be the same
+    file, not a copy elsewhere.
+  - A ruling stored before `source`/`own_file` were recorded counts as the own
+    file's.
   - **An unreachable root withdraws nothing.** If the set's `source_root`
-    directory is missing (an unmounted drive) or a `--rulings` path does not
-    exist, every ruling stays in force and the report warns. A missing file
-    inside an existing root does mean "no rulings".
+    directory is missing (an unmounted drive), every ruling stays in force and
+    the report warns:
+    `WARNING no ruling withdrawn: <path> is not reachable (its directory <root> is missing)`.
+    A missing file inside an existing root does mean "no rulings". A
+    `--rulings` path that does not exist is refused by the CLI before anything
+    is read (`Path '<path>' does not exist`).
   - A file with unreadable entries withdraws nothing either.
 - **Re-checks re-apply rulings.** When a later import re-checks a point, the
   old ruled verdict is superseded with the old checker verdict, and the rulings
