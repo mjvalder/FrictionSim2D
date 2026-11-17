@@ -17,6 +17,8 @@ projections and reduced in pandas (critique I8), never node by node:
   combined mode) carried them (critique C1a, C1b). Joined on block hash
   values, never on node identity (C2).
 * :func:`latest` -- the verdict or summary the policy selects for a point.
+* :func:`dataset_rows` -- a dataset's rows joined with their points and the
+  summaries it fixed, for the plot source ``aiida://dataset/<name>``.
 
 Superseded nodes (extra ``superseded=True``, on the point or its CalcJob)
 are left out everywhere unless asked for.
@@ -48,7 +50,8 @@ except ImportError:  # pragma: no cover - the aiida tier skips without it
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['AXES', 'Friction2DDB', 'QueryResult', 'latest', 'point_table', 'related']
+__all__ = ['AXES', 'Friction2DDB', 'QueryResult', 'dataset_rows', 'latest', 'point_table',
+           'related']
 
 #: The swept axes: point attributes, never block content (``SWEPT``).
 AXES = ('load', 'angle', 'speed')
@@ -734,6 +737,63 @@ def latest(point: Union[str, Any], kind: Literal['verdict', 'summary'],
     if kind == 'verdict':
         return latest_verdict(node, policy)
     return latest_summaries([node], policy, digest=_summary_digest(options))[node.pk]
+
+
+# ---------------------------------------------------------------------------
+# dataset_rows()
+# ---------------------------------------------------------------------------
+
+#: Dataset row keys that are not a scalar of the joined row.
+_DATASET_ONLY = ('block_hashes', 'family', 'point_uuid', 'calc_uuid', 'code_version',
+                 'options_hash', 'skip_fraction')
+
+
+def dataset_rows(name: str) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, str]]]:
+    """``(rows, units)`` of the dataset ``friction2d/datasets/<name>``.
+
+    One row per dataset row: its point's :meth:`Friction2DDB.query` identity
+    columns (run tokens, ``rel_path``, ``family``, ``layers``, ``load``,
+    ``angle``, ``speed`` and their units), the dataset row's own bookkeeping
+    (``set``, ``summary_uuid``, ``verdict_uuid``, ``verdict_status``,
+    ``thresholds_version``, ``provisional``) and every scalar of the summary
+    the dataset fixed -- never the one the settings in effect would select
+    now. ``units`` is the dataset's own table: family -> key -> unit.
+
+    A point is found by its ``calc_uuid`` and ``point_uuid``, superseded or
+    not: a dataset keeps the points it was built from. A row whose point or
+    summary is gone is left out, with a warning.
+
+    Raises:
+        LookupError: no dataset of that name.
+    """
+    from .steps import DATASET_EXTRA  # pylint: disable=import-outside-toplevel
+    _require_aiida()
+    qb = orm.QueryBuilder().append(
+        orm.Group, tag='g', filters={'label': f'{_DATASET_PREFIX}{name}'})
+    qb.append(orm.Dict, with_group='g', filters={f'extras.{DATASET_EXTRA}': name},
+              project=['*'])
+    tables = qb.all(flat=True)
+    if not tables:
+        raise LookupError(f'no dataset {name!r} ({_DATASET_PREFIX}{name})')
+    table = tables[0]
+    entries = table.get('rows') or []
+    points = {(r['calc_uuid'], r['point_uuid']): r
+              for r in _points(include_superseded=True).rows}
+    summaries = {n.uuid: n for n in _nodes_by_uuid([e['summary_uuid'] for e in entries])}
+    rows: List[Dict[str, Any]] = []
+    for entry in entries:
+        point = points.get((entry.get('calc_uuid'), entry.get('point_uuid')))
+        summary = summaries.get(entry.get('summary_uuid'))
+        if point is None or summary is None:
+            logger.warning('dataset %r: point %s left out (its %s is gone)', name,
+                           entry.get('point_uuid'), 'point' if point is None else 'summary')
+            continue
+        row = {k: v for k, v in point.items() if k not in ('superseded', 'set_labels')}
+        row.update({k: v for k, v in entry.items() if k not in _DATASET_ONLY})
+        row.update(_summary_columns(summary, row))
+        rows.append(row)
+    rows.sort(key=_default_order)
+    return rows, dict(table.get('units') or {})
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 PLOT_STATUSES = DELIVERED_STATUSES
 
 
+#: The plot source naming a stored dataset: ``aiida://dataset/<name>``.
+DATASET_URI = 'aiida://dataset/'
+
 #: summary_<size>.csv column -> the name the plot specs use.
 SUMMARY_COLUMN_ALIASES = {
     'mean_nf': 'nf', 'mean_lf': 'lf', 'mean_lfx': 'lfx', 'mean_lfy': 'lfy',
@@ -240,12 +243,14 @@ class PlotCommonMixin(PlotterMixinBase):
     def _discover_data_files(self) -> None:
         """Find all ``output_full_*.json`` files in each data directory.
 
-        Entries whose ``data_dir`` starts with ``db://`` are skipped here;
-        :meth:`_load_db_labels` refuses them (the central database is gone).
+        Entries whose ``data_dir`` is a URI (``aiida://dataset/<name>``, or
+        the removed ``db://``) are skipped here; :meth:`_load_dataset_labels`
+        reads or refuses them.
         """
         for label, data_dir in zip(self.labels, self.data_dirs):
-            if str(data_dir).startswith('db://'):
-                logger.debug("Skipping file discovery for DB-backed label '%s'", label)
+            if str(data_dir).startswith(('db://', DATASET_URI)):
+                logger.debug("Skipping file discovery for store-backed label '%s'",
+                             label)
                 continue
 
             search_dir = Path(data_dir) / 'outputs'
@@ -285,67 +290,98 @@ class PlotCommonMixin(PlotterMixinBase):
                     f"`FrictionSim2D postprocess read <root> --export`.")
 
     # =====================================================================
-    # DB-BACKED DATA SOURCE  (db:// is removed; aiida://dataset/<name> is Task 12)
+    # STORE-BACKED DATA SOURCE  (aiida://dataset/<name>)
     # =====================================================================
 
     @staticmethod
-    def _db_df_to_summary_rows(label: str, db_df: pd.DataFrame) -> list[dict]:
-        """Convert a query-result frame to summary rows.
+    def _dataset_to_summary_rows(label: str, rows: list[dict]) -> list[dict]:
+        """`src.aiida.query.dataset_rows` rows as the summary rows the CSV
+        path yields (`_summary_rows_from_csv`): `id`/`material` in the
+        underscored spelling, `size`/`file_key` as `100x100y`, `force` or
+        `pressure` by `load_kind`, `layer`, and the plot aliases (`cof` is the
+        summary's `mean_cof`, the store's ratio of means).
 
-        The three `lf_*` variants are NOT emitted. The frame carries one
-        lateral force (`mean_lf`); aliasing it to `lf_as_was`, `lf_sx_sy` and
-        `lf_fx_fy` made `lf_source` silently a no-op on query-backed datasets --
-        the plot claimed a definition it did not have. Without the columns,
-        `_resolve_lf_axis` warns and falls back, which is the honest answer.
+        The three `lf_*` pair variants are NOT emitted: a summary carries one
+        lateral force (`mean_lf`), and aliasing it would make `lf_source` a
+        silent no-op. Without the columns `_resolve_lf_axis` warns and falls
+        back, which is the honest answer.
         """
-        rows = []
-        for _, record in db_df.iterrows():
+        def fmt(value) -> str:
+            value = float(value)
+            return str(int(value)) if value.is_integer() else f'{value:g}'
+
+        out = []
+        for record in rows:
+            # `ReadRun.material`'s spelling: the stack, the flake, underscored.
+            materials = '+'.join(record.get('materials') or ())
+            material = (f"{materials}+flake-{record['flake_material']}"
+                        if record.get('flake_material') else materials)
+            material = material.replace('-', '_')
             sx, sy = record.get('size_x'), record.get('size_y')
-            file_key = (f"{int(sx)}x{int(sy)}y"
-                        if sx is not None and sy is not None
-                        and not (pd.isna(sx) or pd.isna(sy)) else 'unknownx')
-            rows.append({
-                'dataset_label': label, 'file_key': file_key,
-                'id': record.get('material', ''),
-                'material': record.get('material', ''),
-                'family': record.get('family'), 'model': record.get('model'),
-                'set_label': record.get('set_label'),
-                'potential': record.get('potential_name'),
-                'potential_type': record.get('potential_type'),
-                'temperature': record.get('temperature'),
-                'tip_material': record.get('tip_material'),
-                'tip_radius': record.get('tip_radius'),
-                'size': file_key, 'layer': record.get('layers'),
-                'force': record.get('force_nN'),
-                'pressure': record.get('pressure_gpa'),
-                'angle': record.get('scan_angle', 0.0),
-                'speed': record.get('scan_speed'),
-                'nf': record.get('mean_nf'), 'lf': record.get('mean_lf'),
-                'lfx': record.get('mean_lfx'), 'lfy': record.get('mean_lfy'),
-                'cof': record.get('mean_cof'),
-                'mean_nf': record.get('mean_nf'),
-                'mean_lf': record.get('mean_lf'),
-                'mean_cof': record.get('mean_cof'),
-                'std_cof': record.get('std_cof'),
-                'std_lf': record.get('std_lf'),
-                'ntimesteps': record.get('ntimesteps'),
-                'is_complete': record.get('is_complete'),
+            size = (f'{fmt(sx)}x{fmt(sy)}y' if sx is not None and sy is not None
+                    else 'unknownx')
+            kind = record.get('load_kind')
+            row = dict(record)
+            row.update({
+                'dataset_label': label, 'file_key': size, 'size': size,
+                'id': material, 'material': material,
+                'materials': materials, 'potential': record.get('pot_token'),
+                'layer': record.get('layers'), 'status': 'complete',
+                'force': record.get('load') if kind == 'force' else float('nan'),
+                'pressure': (record.get('load') if kind == 'pressure'
+                             else float('nan')),
             })
-        return rows
+            for src, dst in SUMMARY_COLUMN_ALIASES.items():
+                if src in record:
+                    row[dst] = record[src]
+            out.append(row)
+        return out
 
-    def _load_db_labels(self) -> None:
-        """Refuse any label whose ``data_dir`` is a ``db://`` URI.
+    def _load_dataset_labels(self) -> None:
+        """Load every label whose ``data_dir`` is ``aiida://dataset/<name>``.
 
-        The central database and its REST client were removed; the local
-        AiiDA store is read through ``aiida://dataset/<name>`` (added in
-        Task 12).
+        The rows are the dataset's (``build_dataset``): complete points with
+        the summary the dataset fixed, read from the AiiDA profile in
+        effect. ``dataset_units[label]`` keeps the dataset's units (family
+        -> key -> unit); each row carries its own ``load_unit``,
+        ``angle_unit`` and ``speed_unit``. A ``db://`` URI is refused: the
+        central database was removed.
         """
         for label, data_dir in zip(self.labels, self.data_dirs):
-            if str(data_dir).startswith('db://'):
+            data_dir = str(data_dir)
+            if data_dir.startswith('db://'):
                 raise PlotDataError(
                     f"{label}: {data_dir} -- the central database was "
                     f"removed. Read the local AiiDA store with "
-                    f"`aiida://dataset/<name>` instead.")
+                    f"`{DATASET_URI}<name>` instead.")
+            if not data_dir.startswith(DATASET_URI):
+                continue
+            name = data_dir[len(DATASET_URI):]
+            if not name:
+                raise PlotDataError(
+                    f"{label}: {data_dir} names no dataset; "
+                    f"use `{DATASET_URI}<name>`")
+            rows, units = self._read_dataset(label, name)
+            self.dataset_units[label] = units
+            self._db_summary_rows.extend(
+                self._dataset_to_summary_rows(label, rows))
+
+    @staticmethod
+    def _read_dataset(label: str, name: str) -> tuple[list[dict], dict]:
+        """``dataset_rows(name)`` from the AiiDA profile in effect."""
+        # pylint: disable=import-outside-toplevel
+        try:
+            from ..aiida import load_aiida_profile
+            from ..aiida.query import dataset_rows
+        except ImportError as exc:  # pragma: no cover - aiida extra absent
+            raise PlotDataError(
+                f"{label}: {DATASET_URI}{name} needs aiida-core: "
+                f"pip install -e '.[aiida]'") from exc
+        load_aiida_profile()
+        try:
+            return dataset_rows(name)
+        except LookupError as exc:
+            raise PlotDataError(f"{label}: {exc}") from exc
 
     def _load_all_metadata(self) -> None:
         """Load and merge metadata from all available data files."""
@@ -586,7 +622,7 @@ class PlotCommonMixin(PlotterMixinBase):
                             'dataset_label': label, 'file_key': file_key,
                             **run_data, **stats})
 
-        # DB-backed datasets are pre-computed and carry no time series, so a
+        # Stored datasets are pre-computed and carry no time series, so a
         # window argument cannot apply to them.
         if self._db_summary_rows and first_n is None and timestep_range is None:
             all_records.extend(self._db_summary_rows)

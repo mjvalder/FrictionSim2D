@@ -50,7 +50,7 @@ from .style import CAPTION
 from .preview.viewport import FINITE_COMPONENTS, ViewportPanel
 from .schema.simulation_types import FAMILIES, MODES, family_for_model
 from .widgets.database.detail import format_bytes
-from .widgets.database.pane import SOURCES, DatabasePane, render_checks
+from .widgets.database.pane import DatabasePane, render_checks
 from .widgets.form import ConfigForm
 from .workspace import RecentWorkspaces, Workspace
 
@@ -217,9 +217,9 @@ class MainWindow(QMainWindow):
         # stale rather than leaving the viewport showing a superseded system
         # with no indication anything changed.
         self._render_snapshot: Optional[dict] = None
-        # Set around _restore_database_state so the pane's own signals
-        # (source_changed) don't loop back into _remember_database_state
-        # while a workspace's saved state is still being applied.
+        # Set around _restore_database_state so nothing the pane emits while
+        # a workspace's saved state is being applied loops back into
+        # _remember_database_state.
         self._restoring_db_state = False
 
         self.setWindowTitle(f"{APP_NAME} — Simulation Builder")
@@ -995,7 +995,6 @@ class MainWindow(QMainWindow):
         pane.import_requested.connect(self._on_db_import)
         pane.check_requested.connect(self._on_db_check)
         pane.cancel_requested.connect(self._on_db_cancel)
-        pane.source_changed.connect(lambda _source: self._remember_database_state())
 
         self.database.started.connect(self._on_db_started)
         self.database.progress.connect(self.statusBar().showMessage)
@@ -1037,30 +1036,23 @@ class MainWindow(QMainWindow):
             self.database_pane.message(f"Cancelled the {kind} request.", 'warn')
 
     def _restore_database_state(self) -> None:
-        """Put back the source, filters and destination this workspace last used.
+        """Put back the filters and destination this workspace last used.
 
-        Snapshot all three values before touching the pane: `set_source` below
-        can emit `source_changed`, which is wired to `_remember_database_state`
-        (so a live source toggle is recorded even without a query). Since
-        `self.workspace.state` is the same dict object read here and written
-        there, applying `set_source` first and only then reading back
-        `db_filters` would read whatever `_remember_database_state` had just
-        written from the pane's still-stale, pre-switch filters -- silently
-        clobbering the new workspace's saved filters with the old workspace's.
-        The `_restoring_db_state` guard blocks that write outright; the
-        snapshot means correctness never depends on the two agreeing.
+        Both values are snapshotted before touching the pane, and the
+        `_restoring_db_state` guard blocks `_remember_database_state` while
+        they are applied: `self.workspace.state` is the dict that method
+        writes, so a write in between would clobber the new workspace's saved
+        filters with the old workspace's still-on-screen ones.
 
-        A remembered source that is no longer offered (the removed 'central'
-        one) is ignored: only sources in `SOURCES` are selected.
+        The remembered `db_source` is not read back: the pane has one source,
+        the local store, so a workspace that remembers the removed 'central'
+        one opens on the local store like every other.
         """
         state = self.workspace.state
-        source = state.get('db_source')
         filters = state.get('db_filters')
         dest = state.get('db_dest')
         self._restoring_db_state = True
         try:
-            if source in SOURCES:
-                self.database_pane.set_source(source)
             if isinstance(filters, dict):
                 self.database_pane.filters.set_value(filters)
             if isinstance(dest, str):
@@ -1122,10 +1114,8 @@ class MainWindow(QMainWindow):
             elapsed = result.get('elapsed_s', 0)
             limit = result.get('limit')
             if total is None and limit:
-                # The central client has no true total once its own `limit`
-                # cut the rows short (see `_list` in db_worker.py) -- "N of
-                # None results" would read like a broken query rather than a
-                # truncated one.
+                # No true total: "N of None results" would read like a broken
+                # query rather than a truncated one.
                 lines = [f"{returned} results (limit {limit}) in {elapsed} s"]
             else:
                 lines = [f"{returned} of {total} results in {elapsed} s"]
@@ -1151,20 +1141,21 @@ class MainWindow(QMainWindow):
                                        'warn' if warnings else 'info')
         elif kind == 'import':
             lines = [result.get('report', '')]
-            for label, key in (('incomplete', 'incomplete'),
-                               ('with no results at all', 'empty_runs')):
-                entries = result.get(key) or []
+            failures = [': '.join(str(part) for part in f)
+                        for f in result.get('failures') or []]
+            for label, entries in (
+                    ('deck(s) with no log yet', result.get('log_missing') or []),
+                    ('deck(s) with no LAMMPS version',
+                     result.get('no_version') or []),
+                    ('path(s) unparseable', result.get('unparseable') or []),
+                    ('failure(s)', failures)):
                 if entries:
-                    lines.append(f"{len(entries)} run(s) {label}: "
+                    lines.append(f"{len(entries)} {label}: "
                                  + ', '.join(entries[:5])
                                  + (' …' if len(entries) > 5 else ''))
-            unparseable = result.get('unparseable') or []
-            if unparseable:
-                lines.append(f"{len(unparseable)} path(s) unparseable: "
-                             + ', '.join(unparseable[:5])
-                             + (' …' if len(unparseable) > 5 else ''))
-            quiet = not (result.get('incomplete') or result.get('empty_runs')
-                        or unparseable)
+            lines += [f"note: {w}" for w in result.get('warnings') or []]
+            quiet = not (result.get('log_missing') or result.get('no_version')
+                         or result.get('unparseable') or result.get('warnings'))
             self.database_pane.message(
                 '\n'.join(line for line in lines if line),
                 'info' if result.get('ingest_ok') and quiet else

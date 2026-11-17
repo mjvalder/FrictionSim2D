@@ -469,3 +469,13 @@ class TestDescribeSection:
         spec = describe_section(TipConfig, name='tip', key='tip')
         assert spec.key == 'tip'
         assert 'r' in spec.field_map()
+
+
+@pytest.mark.parametrize('field', ['bond_spring', 'driving_spring'])
+def test_the_spring_help_quotes_the_exact_conversion_factor(field):
+    """The builders divide by NM_TO_EV_A2 = 16.02176565, not the old 16.02."""
+    from src.data.models import NM_TO_EV_A2
+
+    detail = overrides_for('sheetonsheet')['general'].fields[field].detail
+    assert f'{NM_TO_EV_A2}' in detail
+    assert 'divide by 16.02)' not in detail

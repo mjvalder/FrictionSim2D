@@ -33,13 +33,13 @@ RECORDS = [
     {'set_label': 's1', 'family': 'afm', 'materials': ['h-MoS2'], 'layers': 2,
      'load_kind': 'force', 'load': 30.0, 'angle': 0.0, 'speed': 2.0,
      'temperature': 300.0, 'mean_cof': 0.0731, 'std_cof': 0.0044,
-     'is_complete': True, 'imported_at': '2026-09-01T10:00:00',
-     'run_uuid': '1a2b', 'result_uuid': '9f8e'},
+     'status': 'complete', 'reasons': '',
+     'run_uuid': '1a2b', 'node_uuid': '9f8e'},
     {'set_label': 's1', 'family': 'hetero', 'materials': ['h-MoS2', 'h-WS2'],
      'layers': None, 'load_kind': 'pressure', 'load': 1.5, 'angle': 30.0,
      'speed': 2.0, 'temperature': 300.0, 'mean_cof': 0.0125, 'std_cof': 0.0009,
-     'is_complete': False, 'imported_at': '2026-09-02T10:00:00',
-     'run_uuid': '3c4d', 'result_uuid': '7b6a'},
+     'status': 'quarantined', 'reasons': 'no end snapshot',
+     'run_uuid': '3c4d', 'node_uuid': '7b6a'},
 ]
 
 
@@ -66,45 +66,17 @@ class TestColumnFormatting:
         assert display_value({'mean_cof': None}, column) == '—'
         assert display_value({'mean_cof': 0.0}, column) == '0.0000'
 
-    def test_a_central_row_reads_its_own_field_names(self):
-        """`ResultRecord` has force_nN/pressure_gpa/scan_angle/scan_speed/
-        material where a local row has load/angle/speed/materials."""
-        central = {'material': 'h_MoS2', 'force_nN': 30.0, 'scan_angle': 30.0,
-                   'scan_speed': 2.0}
+    def test_status_and_reasons_are_the_verdict(self):
         by_key = {c.key: c for c in CURATED_COLUMNS}
+        assert display_value(RECORDS[1], by_key['status']) == 'quarantined'
+        assert display_value(RECORDS[1], by_key['reasons']) == 'no end snapshot'
+        assert display_value({'status': None}, by_key['status']) == '—'
 
-        assert display_value(central, by_key['materials']) == 'h_MoS2'
-        assert display_value(central, by_key['load']) == '30.00 nN'
-        assert display_value(central, by_key['angle']) == '30.0 °'
-        assert display_value(central, by_key['speed']) == '2.00 Å/ps'
-
-    def test_a_central_pressure_row_is_labelled_GPa(self):
-        column = next(c for c in CURATED_COLUMNS if c.key == 'load')
-        assert display_value({'pressure_gpa': 1.5}, column) == '1.50 GPa'
-
-    def test_status_falls_back_to_is_complete_with_its_own_words(self):
-        column = next(c for c in CURATED_COLUMNS if c.key == 'status')
-        assert display_value(RECORDS[0], column) == 'complete'
-        assert display_value(RECORDS[1], column) == 'incomplete'
-
-    def test_status_shows_an_incomplete_suffix_for_a_local_row(self):
-        """Every real local row carries its own `status` ('imported'), so
-        the is_complete fallback above never fires for it -- but a local row
-        can still be marked incomplete, and that must not vanish."""
-        column = next(c for c in CURATED_COLUMNS if c.key == 'status')
-        record = {'status': 'imported', 'is_complete': False}
-        assert display_value(record, column) == 'imported (incomplete)'
-
-    def test_status_shows_an_incomplete_suffix_for_a_central_row(self):
-        """A central row's own status word is 'staged' or 'published'."""
-        column = next(c for c in CURATED_COLUMNS if c.key == 'status')
-        record = {'status': 'published', 'is_complete': False}
-        assert display_value(record, column) == 'published (incomplete)'
-
-    def test_the_added_column_falls_back_from_uploaded_to_imported(self):
-        column = next(c for c in CURATED_COLUMNS if c.key == 'uploaded_at')
-        assert column.fallbacks == ('imported_at',)
-        assert display_value(RECORDS[0], column) == '2026-09-01T10:00:00'
+    def test_no_column_reads_a_removed_store_field(self):
+        """The central `ResultRecord` names (force_nN, scan_angle, ...) and
+        the old `imported_at` are no fallbacks any more."""
+        assert all(c.fallbacks == () for c in CURATED_COLUMNS)
+        assert 'uploaded_at' not in [c.key for c in CURATED_COLUMNS]
 
     def test_record_value_prefers_the_primary_key(self):
         column = Column('a', 'A', fallbacks=('b',))
@@ -135,15 +107,11 @@ class TestResultTableModel:
         assert titles[:3] == ['Set', 'Family', 'Materials']
 
     def test_all_columns_shows_every_field_of_a_record(self, model):
-        """The curated Status/Added columns come from is_complete/imported_at
-        fallbacks while is_complete/imported_at also appear as their own
-        extra columns, so the column count exceeds the record's key count --
-        assert the record's keys are covered and the columns are unique,
-        not a length match."""
+        """Every key of the record is covered, each once."""
         model.set_all_columns(True)
         keys = [c.key for c in model.columns]
         assert 'run_uuid' in keys
-        assert 'result_uuid' in keys
+        assert 'node_uuid' in keys
         assert set(RECORDS[0]) <= set(keys)
         assert len(keys) == len(set(keys))
 
@@ -211,48 +179,26 @@ class TestResultSortProxyModel:
 class TestStatusColour:
     """No inline hex anywhere: the three tokens live in style.py."""
 
-    def test_status_level_maps_the_stored_vocabulary(self):
+    def test_status_level_maps_the_verdict_vocabulary(self):
+        from src.gui.widgets.database.model import STATUS_LEVELS, status_level
+        from src.postprocessing.run_status import STATUSES
+
+        assert set(STATUS_LEVELS) == set(STATUSES)
+        assert status_level({'status': 'complete'}) == 'ok'
+        assert status_level({'status': 'quarantined'}) == 'warn'
+        assert status_level({'status': 'failed_integrity'}) == 'error'
+        assert status_level({'status': 'truncated'}) == 'error'
+
+    def test_an_unchecked_point_warns(self):
         from src.gui.widgets.database.model import status_level
 
-        assert status_level({'status': 'completed'}) == 'ok'
-        assert status_level({'status': 'published'}) == 'ok'
-        assert status_level({'status': 'running'}) == 'warn'
-        assert status_level({'status': 'staged'}) == 'warn'
-        assert status_level({'status': 'failed'}) == 'error'
-        assert status_level({'status': 'rejected'}) == 'error'
+        assert status_level({'status': None}) == 'warn'
+        assert status_level({}) == 'warn'
 
-    def test_imported_the_only_local_status_is_ok(self):
+    def test_an_unknown_status_warns_rather_than_passing(self):
         from src.gui.widgets.database.model import status_level
 
-        assert status_level({'status': 'imported'}) == 'ok'
-
-    def test_an_incomplete_run_without_a_status_still_warns(self):
-        from src.gui.widgets.database.model import status_level
-
-        assert status_level({'is_complete': False}) == 'warn'
-        assert status_level({'is_complete': True}) == 'ok'
-        assert status_level({}) == 'ok'
-
-    def test_an_incomplete_local_import_warns_despite_its_ok_status(self):
-        # N6: 'imported' + is_complete False -> 'warn', not the 'ok' the
-        # status word alone would give.
-        from src.gui.widgets.database.model import status_level
-
-        assert status_level({'status': 'imported', 'is_complete': False}) == 'warn'
-
-    def test_an_incomplete_published_row_warns_despite_its_ok_status(self):
-        # N6: 'published' + is_complete False -> 'warn', same reasoning for
-        # the central source's shape.
-        from src.gui.widgets.database.model import status_level
-
-        assert status_level({'status': 'published', 'is_complete': False}) == 'warn'
-
-    def test_an_incomplete_failed_run_stays_an_error(self):
-        # N6: error outranks incomplete -- demoting a failed run to 'warn'
-        # would hide the more serious fact.
-        from src.gui.widgets.database.model import status_level
-
-        assert status_level({'status': 'failed', 'is_complete': False}) == 'error'
+        assert status_level({'status': 'imported'}) == 'warn'
 
     def test_the_row_is_painted_with_the_style_token(self, qt_app):
         del qt_app
@@ -260,7 +206,7 @@ class TestStatusColour:
         from src.gui.style import STATUS_ERROR_COLOR
 
         model = ResultTableModel()
-        model.set_records([dict(RECORDS[0], status='failed')])
+        model.set_records([dict(RECORDS[0], status='failed_integrity')])
 
         brush = model.data(model.index(0, 0), Qt.ForegroundRole)
 
@@ -269,6 +215,6 @@ class TestStatusColour:
     def test_an_ok_row_is_left_to_the_palette(self, qt_app):
         del qt_app
         model = ResultTableModel()
-        model.set_records([dict(RECORDS[0], status='completed')])
+        model.set_records([dict(RECORDS[0], status='complete')])
 
         assert model.data(model.index(0, 0), Qt.ForegroundRole) is None

@@ -3,7 +3,7 @@
 The worker is the only place that touches aiida or httpx, and it runs out of
 process precisely because `import aiida` is slow and process-global. These
 tests call `dispatch` directly with the backend factories monkeypatched, so
-they need neither aiida nor Qt. `tests/aiida/test_db_worker_local.py` covers
+they need neither aiida nor Qt. `tests/aiida/test_store_consumers.py` covers
 the same path against a real temporary profile.
 """
 
@@ -52,7 +52,8 @@ class FakeDB:
 
 ROWS = [{'rel_path': 'afm/h-MoS2/100x_100y/K300/L2', 'family': 'afm', 'layers': 2,
          'load_kind': 'force', 'load': 30.0, 'mean_cof': 0.0731,
-         'run_uuid': '1a2b', 'result_uuid': '9f8e', 'set_label': 's1'}]
+         'status': 'complete', 'reasons': '', 'run_uuid': '1a2b',
+         'node_uuid': '9f8e', 'point_uuid': '5c5c', 'set_label': 's1'}]
 
 
 @pytest.fixture(name='fake_db')
@@ -77,6 +78,7 @@ def test_list_returns_records_facets_and_counts(fake_db):
     assert isinstance(result['elapsed_s'], float)
     assert result['set_sizes'] == {'s1': 4}
     assert result['warnings'] == [], 'every facet came from the store'
+    assert {'status', 'reasons', 'point_uuid'} <= set(result['columns'])
 
 
 def test_a_backfilled_facet_is_reported_as_a_warning(fake_db):
@@ -197,10 +199,13 @@ def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
         skipped_decks = []
         superseded_decks = []
         already_imported = []
+        points = ['p1', 'p2']
+        verdict_counts = {'complete': 2}
         no_version = ['afm/a:system']
         log_missing = ['afm/a:slide']
         unparseable = ['afm/d']
         failures = [('afm/b', 'no results file')]
+        warnings = ['afm/a: settings fallback']
         dry_run = False
 
         def ok(self):
@@ -220,12 +225,18 @@ def test_import_reports_a_failing_ingest_without_failing_the_request(tmp_path,
     assert result['ok'] is True, 'the request ran; the ingest is what failed'
     assert result['ingest_ok'] is False
     assert result['failures'] == [['afm/b', 'no results file']]
-    assert result['incomplete'] == ['afm/a:slide']
+    assert result['log_missing'] == ['afm/a:slide']
     assert result['no_version'] == ['afm/a:system']
     assert result['created_decks'] == ['afm/a:slide']
     assert result['unparseable'] == ['afm/d']
     assert result['report'] == 'ingested 1 run, 0 results (1 failure)'
-    assert result['set_uuid'] == '77aa'
+    assert result['group_uuid'] == '77aa'
+    assert result['n_points'] == 2
+    assert result['verdict_counts'] == {'complete': 2}
+    assert result['warnings'] == ['afm/a: settings fallback']
+    # The placeholders are gone, not left empty.
+    assert not {'set_uuid', 'empty_runs', 'incomplete'} & set(result)
+    json.dumps(result)
 
 
 def test_a_local_check_reports_the_profile_and_the_set_count(monkeypatch):

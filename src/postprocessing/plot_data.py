@@ -77,7 +77,10 @@ class Plotter(
         #: own default.
         self.plot_family: str = 'afm'
         self.material_type_map: dict[str, str] = {}
+        #: Summary rows of the ``aiida://dataset/<name>`` labels.
         self._db_summary_rows: list[dict] = []
+        #: label -> the dataset's units (family -> key -> unit).
+        self.dataset_units: dict[str, dict] = {}
 
         self.type_display_names = {
             'b_type': 'buckled',
@@ -89,7 +92,7 @@ class Plotter(
         self.next_series_color_index = 0
 
         self._discover_data_files()
-        self._load_db_labels()
+        self._load_dataset_labels()
         self._load_all_metadata()
         self._create_material_type_map()
         self._initialize_series_color_map()

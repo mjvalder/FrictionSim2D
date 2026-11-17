@@ -1,4 +1,5 @@
-"""The Database pane: source toggle, filters, table, detail, actions, messages.
+"""The Database pane over the local AiiDA store: filters, table, detail,
+actions, messages.
 
 One non-modal message panel is the pane's only error surface, the way `issues`
 is for the builder, and exactly one modal is reachable from here --
@@ -15,14 +16,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QButtonGroup,
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QPlainTextEdit,
     QPushButton,
-    QRadioButton,
     QSplitter,
     QTableView,
     QVBoxLayout,
@@ -39,7 +39,8 @@ __all__ = ['DatabasePane', 'EXPORT_LABELS', 'SOURCES', 'SOURCE_LABELS',
           'BACKEND_MODULES', 'INSTALL_HINTS', 'missing_backend',
           'render_checks']
 
-#: The pane's third axis, beside the AiiDA profile.
+#: The one store the pane reads. Kept as a tuple because every request and
+#: the workspace state still name their source.
 SOURCES: Tuple[str, ...] = ('local',)
 SOURCE_LABELS = {'local': 'Local store'}
 
@@ -47,16 +48,17 @@ SOURCE_LABELS = {'local': 'Local store'}
 #: one more thing that can be left open in a teardown path.
 EXPORT_LABELS: Tuple[Tuple[str, str, str], ...] = (
     ('results', 'Results files',
-     'The stored tier files and logs of the selected runs, verbatim'),
+     'The stored tier files (window, raw) of the selected points, verbatim'),
     ('provenance', 'Provenance bundle',
-     'provenance.json, config.json, settings.yaml, cif and potentials'),
+     'provenance.json, config.json, settings.yaml, cif and potentials of the '
+     'selected runs'),
     ('summary_csv', 'Summary CSV',
      'The rows currently visible in the table, with the columns shown'),
     ('run_tree', 'Recreate run tree',
      'A directory tree `postprocess read` can read'),
 )
 
-#: What each source needs installed. Probed with `find_spec`, never imported:
+#: What the store needs installed. Probed with `find_spec`, never imported:
 #: this module is reached from `src.cli`, and a compute node has neither.
 BACKEND_MODULES: Dict[str, Tuple[str, ...]] = {
     'local': ('aiida',),
@@ -100,7 +102,7 @@ def render_checks(result: Dict[str, Any]) -> str:
 
 
 class DatabasePane(QWidget):
-    """Browse and download the two stores."""
+    """Browse and download the local store."""
 
     query_requested = Signal(str, dict)     # source, filters
     refresh_requested = Signal(str, dict)   # source, filters
@@ -109,7 +111,6 @@ class DatabasePane(QWidget):
     import_requested = Signal(str, dict)    # source, {'root', 'label', 'dry_run'}
     check_requested = Signal(str)           # source
     cancel_requested = Signal()             # stop whatever is running
-    source_changed = Signal(str)            # source
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -120,7 +121,7 @@ class DatabasePane(QWidget):
         self.set_sizes: Dict[str, int] = {}
         #: Stored bytes of the last inspected run, as a per-run yardstick.
         self.last_detail_bytes: Optional[int] = None
-        #: One standing explanation per disabled source (Task 14).
+        #: One standing explanation per unavailable source (Task 14).
         self._notes: Dict[str, str] = {}
 
         layout = QVBoxLayout(self)
@@ -154,14 +155,8 @@ class DatabasePane(QWidget):
 
     def _build_source_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self._source_buttons = QButtonGroup(self)
-        for index, name in enumerate(SOURCES):
-            button = QRadioButton(SOURCE_LABELS[name], self)
-            button.setChecked(name == self._source)
-            button.toggled.connect(
-                lambda checked, key=name: self._on_source_toggled(key, checked))
-            self._source_buttons.addButton(button, index)
-            row.addWidget(button)
+        self.source_label = QLabel(SOURCE_LABELS[self._source], self)
+        row.addWidget(self.source_label)
 
         row.addSpacing(16)
         self.search_button = QPushButton('Search', self)
@@ -248,38 +243,18 @@ class DatabasePane(QWidget):
     def source(self) -> str:
         return self._source
 
-    def set_source(self, source: str) -> None:
-        """Select `source` -- unless its button is disabled (D11).
-
-        `QRadioButton.setChecked` succeeds on a disabled button; without this
-        check, a caller (`_restore_database_state`, a stray test) could put
-        the pane on a source with no working backend,
-        and every action gated on `self._source` -- Search,
-        Refresh, Check connection -- would fire against it anyway with no
-        button ever having been clickable to get there.
-        """
-        if source not in SOURCES or source == self._source:
-            return
-        button = self._source_buttons.button(SOURCES.index(source))
-        if button is None or not button.isEnabled():
-            return
-        button.setChecked(True)
-
     def set_source_enabled(self, source: str, enabled: bool,
                            reason: str = '') -> None:
-        """Enable or disable one source, saying why in the message panel.
+        """Mark the store usable or not, saying why in the message panel.
 
         One note per source, replaced rather than appended, so re-enabling a
         source clears its message instead of leaving a stale explanation on
-        screen. A source that is disabled while selected hands over to the
-        other one if that is usable.
+        screen.
         """
         if source not in SOURCES:
             return
-        button = self._source_buttons.button(SOURCES.index(source))
-        if button is not None:
-            button.setEnabled(enabled)
-            button.setToolTip(reason)
+        self.source_label.setEnabled(enabled)
+        self.source_label.setToolTip(reason)
 
         cleared = self._notes.pop(source, None) if enabled else None
         if not enabled and reason:
@@ -294,13 +269,6 @@ class DatabasePane(QWidget):
             # re-enabling an already-enabled source must not wipe a query
             # result out of the panel.
             self.message('')
-
-        if not enabled and self._source == source:
-            other = next((s for s in SOURCES if s != source), None)
-            other_button = (self._source_buttons.button(SOURCES.index(other))
-                            if other else None)
-            if other_button is not None and other_button.isEnabled():
-                self.set_source(other)
 
     def _apply_backend_availability(self) -> None:
         """Build even with no backend installed (D11): disable what cannot
@@ -326,21 +294,6 @@ class DatabasePane(QWidget):
             self.import_button.setEnabled(False)
             for button in self.download_buttons.values():
                 button.setEnabled(False)
-            return
-        if self._source not in usable:
-            self.set_source(usable[0])
-
-    def _on_source_toggled(self, source: str, checked: bool) -> None:
-        if not checked or source == self._source:
-            return
-        self._source = source
-        # The rows on screen belong to the store we just left, and every
-        # action reads `self._source`: clicking one would ask the new store
-        # for the old store's row -- a stale uuid handed to `load_node`. The
-        # Summary CSV would export the old store's rows under the new one's
-        # name. Nothing survives a source change.
-        self.clear_results()
-        self.source_changed.emit(source)
 
     def clear_results(self) -> None:
         """Drop the rows, the detail and everything measured from them."""
@@ -388,8 +341,8 @@ class DatabasePane(QWidget):
         if not records:
             return
         record = records[0]
-        payload = {'run_uuid': record.get('run_uuid'),
-                   'result_uuid': record.get('result_uuid')}
+        payload = {'node_uuid': record.get('node_uuid'),
+                   'point_uuid': record.get('point_uuid')}
         self.detail_requested.emit(self._source, payload)
 
     def selected_records(self) -> List[Dict[str, Any]]:
@@ -406,12 +359,10 @@ class DatabasePane(QWidget):
 
         The Summary CSV promises "the rows currently visible, with the columns
         shown" (D6), and what a column shows is `record_value` -- key first,
-        then the column's fallbacks. The worker only ever sees `record[key]`,
-        so a central row, whose load/angle/speed live under `force_nN`,
-        `scan_angle` and `scan_speed`, exported three blank columns that the
-        table on screen had filled. Resolving here rather than in the worker
-        keeps the fallback vocabulary in the one module that defines it, and
-        leaves the worker's list/dict cell formatting where it is.
+        then the column's fallbacks. The worker only ever sees `record[key]`;
+        resolving here rather than in the worker keeps the fallback
+        vocabulary in the one module that defines it, and leaves the worker's
+        list/dict cell formatting where it is.
         """
         columns = self.model.columns
         return [{c.key: record_value(record, c) for c in columns}
@@ -460,8 +411,8 @@ class DatabasePane(QWidget):
         payload: Dict[str, Any] = {
             'what': what,
             'dest': str(dest),
-            'selection': [{'run_uuid': r.get('run_uuid') or '',
-                           'result_uuid': r.get('result_uuid') or '',
+            'selection': [{'node_uuid': r.get('node_uuid') or '',
+                           'point_uuid': r.get('point_uuid') or '',
                            'set_label': r.get('set_label') or ''}
                           for r in selection],
             'rebuild': bool(self.rebuild_box.isChecked()),

@@ -415,33 +415,36 @@ def test_the_histogram_says_slope_not_cof(tmp_path):
     assert label_for('cof_slope') == 'COF (slope of LF vs NF)'
 
 
-def test_db_rows_carry_the_v3_identity_and_no_lf_aliases():
-    import pandas as pd
-
+def test_dataset_rows_carry_the_v3_identity_and_no_lf_aliases():
+    """`dataset_rows` (a `Friction2DDB.query`-shaped row) to a summary row:
+    the CSV path's names, no lateral-force variant aliased from `mean_lf`."""
     from src.postprocessing.plot_common import PlotCommonMixin
 
-    db_df = pd.DataFrame([{
-        'material': 'h_MoS2', 'materials': ['h-MoS2'], 'family': 'afm',
-        'model': 'afm', 'set_label': '260910-afm', 'potential_type': 'sw',
-        'potential_name': 'pot_sw_h-MoS2', 'layers': 2, 'size_x': 100.0,
-        'size_y': 100.0, 'temperature': 300.0, 'tip_material': 'Si',
-        'tip_radius': 25.0, 'force_nN': 30.0, 'pressure_gpa': None,
-        'scan_angle': 0.0, 'scan_speed': 2.0, 'mean_cof': 0.1, 'std_cof': 0.01,
-        'mean_lf': 3.0, 'std_lf': 0.2, 'mean_nf': 30.0, 'std_nf': 0.5,
-        'mean_lfx': 3.0, 'std_lfx': 0.2, 'mean_lfy': 0.0, 'std_lfy': 0.1,
-        'ntimesteps': 500, 'is_complete': True,
-    }])
+    record = {
+        'materials': ['h-MoS2'], 'flake_material': None, 'family': 'afm',
+        'model': 'afm', 'set': '260910-afm', 'pot_token': 'pot_sw_h-MoS2',
+        'layers': 2, 'size_x': 100.0, 'size_y': 100.0, 'temperature': 300.0,
+        'tip_material': 'Si', 'tip_radius': 25.0, 'load_kind': 'force',
+        'load': 30.0, 'angle': 0.0, 'speed': 2.0, 'load_unit': 'nN',
+        'mean_cof': 0.1, 'std_cof': 0.01, 'mean_lf': 3.0, 'std_lf': 0.2,
+        'mean_nf': 30.0, 'std_nf': 0.5, 'mean_lfx': 3.0, 'std_lfx': 0.2,
+        'mean_lfy': 0.0, 'std_lfy': 0.1, 'ntimesteps': 500,
+    }
 
-    row, = PlotCommonMixin._db_df_to_summary_rows('db', db_df)  # pylint: disable=protected-access
+    row, = PlotCommonMixin._dataset_to_summary_rows('ds', [record])  # pylint: disable=protected-access
 
-    assert row['id'] == 'h_MoS2'
+    assert row['dataset_label'] == 'ds'
+    assert row['id'] == row['material'] == 'h_MoS2'
     assert row['family'] == 'afm'
     assert row['potential'] == 'pot_sw_h-MoS2'
     assert row['temperature'] == 300.0
-    assert row['file_key'] == '100x100y'
+    assert row['file_key'] == row['size'] == '100x100y'
     assert row['force'] == 30.0
+    assert row['pressure'] != row['pressure'], 'NaN: a force run has no pressure'
+    assert row['layer'] == 2
     assert row['cof'] == 0.1
     assert row['lf'] == 3.0
+    assert row['load_unit'] == 'nN'
     for absent in ('lf_as_was', 'lf_sx_sy', 'lf_fx_fy'):
         assert absent not in row, f'{absent} must not be aliased from mean_lf'
 

@@ -28,11 +28,12 @@ def format_bytes(count: int) -> str:
 
 
 class DetailPanel(QWidget):
-    """Run attributes, result attributes and the stored file list.
+    """One point: its attributes, the verdict and summary the policy selects,
+    the `related` counts, and the stored file list.
 
-    Three groups rather than one flat list: the same key can mean different
-    things on the two nodes, and the file list is the answer to a different
-    question ("is it worth downloading") than the attributes are.
+    Groups rather than one flat list: the same key can mean different things
+    on two nodes, and the file list is the answer to a different question
+    ("is it worth downloading") than the attributes are.
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -53,12 +54,19 @@ class DetailPanel(QWidget):
         """Render one worker `detail` response, replacing what is shown."""
         self.tree.clear()
 
-        run = detail.get('run') or {}
-        result = detail.get('result') or {}
-        self._group('Run', [('run uuid', str(run.get('uuid') or ''))]
-                    + _attribute_rows(run.get('attributes')))
-        self._group('Result', [('result uuid', str(result.get('uuid') or ''))]
-                    + _attribute_rows(result.get('attributes')))
+        for title, key in (('Point', 'point'), ('Verdict', 'verdict'),
+                           ('Summary', 'summary')):
+            node = detail.get(key)
+            if node is None:
+                self._group(title, [(f'{key} uuid', 'none')])
+                continue
+            self._group(title, [(f'{key} uuid', str(node.get('uuid') or ''))]
+                        + _attribute_rows(node.get('attributes')))
+
+        related = detail.get('related') or {}
+        if related:
+            self._group('Related (differ only along)',
+                        [(kind, str(count)) for kind, count in related.items()])
 
         files = detail.get('files') or []
         if files:

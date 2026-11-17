@@ -36,13 +36,13 @@ LOAD_UNITS: Dict[str, str] = {'force': 'nN', 'pressure': 'GPa'}
 #: string, and an empty cell reads like a bug.
 MISSING = '—'
 
-#: Every status either store stores, and how alarming it is. `prepared` and
-#: `staged` are warnings rather than errors: nothing is wrong, but the row is
-#: not a finished result either.
+#: Every verdict status (`run_status.STATUSES`) and how alarming it is. A
+#: `quarantined` point is unjudged rather than broken, so it warns; every
+#: other non-complete status is a point whose numbers must not be used.
 STATUS_LEVELS: Dict[str, str] = {
-    'completed': 'ok', 'published': 'ok', 'imported': 'ok',
-    'prepared': 'warn', 'submitted': 'warn', 'running': 'warn', 'staged': 'warn',
-    'failed': 'error', 'rejected': 'error',
+    'complete': 'ok', 'quarantined': 'warn',
+    'truncated': 'error', 'no_output': 'error', 'unreadable': 'error',
+    'halted': 'error', 'failed_integrity': 'error', 'not_reached': 'error',
 }
 
 _LEVEL_COLORS = {'warn': STATUS_WARN_COLOR, 'error': STATUS_ERROR_COLOR,
@@ -50,27 +50,16 @@ _LEVEL_COLORS = {'warn': STATUS_WARN_COLOR, 'error': STATUS_ERROR_COLOR,
 
 
 def status_level(record: Dict[str, Any]) -> str:
-    """'ok', 'warn' or 'error' for one row.
+    """'ok', 'warn' or 'error' for one row, from its verdict `status`.
 
-    A run with no status at all is judged by `is_complete`: an interrupted
-    run that still wrote a results file is the case worth colouring.
-
-    Every real row carries a status ('imported' for local runs, 'staged' or
-    'published' for central), so that no-status fallback is for the
-    theoretical case only. When a status IS present but the record is also
-    explicitly marked incomplete (`is_complete is False`), that still has to
-    surface -- a 'published' row that is incomplete is a warning, not a clean
-    'ok'. Checked before the vocabulary lookup, not instead of it, so 'error'
-    still outranks 'incomplete': a 'failed' run that is also incomplete stays
-    an error, since failure is the more serious fact and demoting it to
-    'warn' would hide it.
+    A point with no verdict (`status` None: never checked) warns -- its
+    numbers are not known to be usable. A status outside the vocabulary
+    warns too, rather than passing as 'ok'.
     """
     status = str(record.get('status') or '').lower()
-    incomplete = record.get('is_complete') is False
-    if status:
-        level = STATUS_LEVELS.get(status, 'warn')
-        return 'warn' if incomplete and level != 'error' else level
-    return 'warn' if incomplete else 'ok'
+    if not status:
+        return 'warn'
+    return STATUS_LEVELS.get(status, 'warn')
 
 
 @dataclass(frozen=True)
@@ -82,35 +71,27 @@ class Column:
     fmt: str = '{}'
     unit: str = ''
     align_right: bool = False
-    #: Keys to try when `key` is absent -- the local store and the central DB
-    #: name a few of the same things differently.
+    #: Keys to try when `key` is absent.
     fallbacks: Tuple[str, ...] = ()
     #: How a bool reads in this column.
     truthy_text: Tuple[str, str] = ('yes', 'no')
 
 
-#: The curated subset. Several columns carry fallbacks because the two stores
-#: name the same quantity differently: a local row is an AiiDA node's attributes
-#: (`load`, `load_kind`, `angle`, `speed`, `materials`), a central row is a
-#: `ResultRecord` (`force_nN` or `pressure_gpa`, `scan_angle`, `scan_speed`,
-#: `material`). Without the fallbacks every central row read '—' in four columns.
+#: The curated subset, over a `Friction2DDB.query` row: the run tokens, the
+#: point's swept axes, the selected summary's COF and the selected verdict.
 CURATED_COLUMNS: Tuple[Column, ...] = (
     Column('set_label', 'Set'),
     Column('family', 'Family'),
-    Column('materials', 'Materials', fallbacks=('material',)),
+    Column('materials', 'Materials'),
     Column('layers', 'Layers', align_right=True),
-    Column('load', 'Load', fmt='{:.2f}', align_right=True,
-           fallbacks=('force_nN', 'pressure_gpa')),
-    Column('angle', 'Angle', fmt='{:.1f}', unit='°', align_right=True,
-           fallbacks=('scan_angle',)),
-    Column('speed', 'Speed', fmt='{:.2f}', unit='Å/ps', align_right=True,
-           fallbacks=('scan_speed',)),
+    Column('load', 'Load', fmt='{:.2f}', align_right=True),
+    Column('angle', 'Angle', fmt='{:.1f}', unit='°', align_right=True),
+    Column('speed', 'Speed', fmt='{:.2f}', unit='Å/ps', align_right=True),
     Column('temperature', 'T', fmt='{:.0f}', unit='K', align_right=True),
     Column('mean_cof', 'mean COF', fmt='{:.4f}', align_right=True),
     Column('std_cof', 'std COF', fmt='{:.4f}', align_right=True),
-    Column('status', 'Status', fallbacks=('is_complete',),
-           truthy_text=('complete', 'incomplete')),
-    Column('uploaded_at', 'Added', fallbacks=('imported_at',)),
+    Column('status', 'Status'),
+    Column('reasons', 'Reasons'),
 )
 
 _CURATED_KEYS = tuple(c.key for c in CURATED_COLUMNS)
@@ -155,35 +136,18 @@ def sort_value(record: Dict[str, Any], column: Column) -> Any:
 def _unit(record: Dict[str, Any], column: Column) -> str:
     """The unit to print after the value.
 
-    A local row says which it is in `load_kind`; a central row does not carry
-    that field at all, and the answer is which of the two load columns is
-    populated. Getting this wrong prints a pressure in nN.
+    A load's unit is decided by the row's `load_kind`: getting this wrong
+    prints a pressure in nN.
     """
     if column.unit:
         return column.unit
     if column.key != 'load':
         return ''
-    kind = str(record.get('load_kind') or '')
-    if kind in LOAD_UNITS:
-        return LOAD_UNITS[kind]
-    if record.get('force_nN') is not None:
-        return LOAD_UNITS['force']
-    if record.get('pressure_gpa') is not None:
-        return LOAD_UNITS['pressure']
-    return ''
+    return LOAD_UNITS.get(str(record.get('load_kind') or ''), '')
 
 
 def display_value(record: Dict[str, Any], column: Column) -> str:
-    """What the cell reads.
-
-    The Status column is a special case: every real row carries its own
-    `status` (local: 'imported'; central: 'staged'/'published'), so the
-    `is_complete` fallback below only fires for a record with no `status` at
-    all. When `status` is present and the record is explicitly marked
-    incomplete (`is_complete is False`), that fact would otherwise be
-    invisible -- a staged/published row with missing fields still just reads
-    its status word. Append the flag rather than hiding it.
-    """
+    """What the cell reads: formatted, with its unit, '—' when absent."""
     value = record_value(record, column)
     if value is None:
         return MISSING
@@ -197,9 +161,6 @@ def display_value(record: Dict[str, Any], column: Column) -> str:
         except (ValueError, TypeError):
             text = str(value)
 
-    if (column.key == 'status' and record.get('status') is not None
-            and record.get('is_complete') is False):
-        text = f"{text} (incomplete)"
 
     unit = _unit(record, column)
     return f"{text} {unit}".strip()

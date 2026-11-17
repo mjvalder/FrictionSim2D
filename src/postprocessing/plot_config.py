@@ -308,7 +308,7 @@ class DatasetsHeader(BaseModel):
 
     data_dirs: List[str] = Field(
         default_factory=list,
-        description="Directories holding outputs/, or db:// URIs")
+        description="Directories holding outputs/, or aiida://dataset/<name> URIs")
     labels: List[str] = Field(default_factory=list,
                               description='One per data_dir')
     dataset_display_labels: Dict[str, str] = Field(default_factory=dict)
@@ -473,7 +473,7 @@ def load_plot_document(path: Path) -> PlotDocument:
     if not document.data_dirs:
         raise ValueError(
             f"{path}: data_dirs is empty -- a plot document must name at "
-            f"least one dataset directory (or db:// URI)")
+            f"least one dataset directory (or aiida://dataset/<name> URI)")
     return document
 
 

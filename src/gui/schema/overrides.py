@@ -399,12 +399,12 @@ _COMMON: Dict[str, SectionOverride] = {
             'bond_spring': FieldOverride(
                 label='Bond spring constant', order=9, unit='N/m',
                 help='Harmonic bonds holding a sheet together.',
-                detail='Converted to eV/Å² in the builder (divide by 16.02).',
+                detail='Converted to eV/Å² in the builder (divide by NM_TO_EV_A2 = 16.02176565).',
             ),
             'driving_spring': FieldOverride(
                 label='Driving spring constant', order=10, unit='N/m',
                 help='Stiffness of the spring dragging the moving sheet.',
-                detail='Converted to eV/Å² in the builder (divide by 16.02).',
+                detail='Converted to eV/Å² in the builder (divide by NM_TO_EV_A2 = 16.02176565).',
                 required_if_settings=('simulation.drive_method', 'virtual_atom'),
             ),
             'twist_angle': FieldOverride(
@@ -533,7 +533,7 @@ _PLOT: Dict[str, SectionOverride] = {
                 label='Lateral-force source', order=2,
                 help='Which lateral-force definition to plot.',
                 detail='Refused rather than aliased when the dataset does '
-                       'not carry it -- a db:// dataset has one.'),
+                       'not carry it -- an aiida://dataset/ source has one.'),
         }),
     'summary': SectionOverride(label='Summary'),
     'timeseries': SectionOverride(label='Timeseries'),

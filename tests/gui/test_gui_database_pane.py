@@ -27,10 +27,10 @@ from src.gui.workspace import RecentWorkspaces, Workspace  # noqa: E402
 RECORDS = [
     {'set_label': 's1', 'family': 'afm', 'materials': ['h-MoS2'], 'layers': 2,
      'load_kind': 'force', 'load': 30.0, 'mean_cof': 0.0731,
-     'run_uuid': '1a2b', 'result_uuid': '9f8e'},
+     'run_uuid': 'r1', 'node_uuid': '1a2b', 'point_uuid': '9f8e'},
     {'set_label': 's1', 'family': 'hetero', 'materials': ['h-WS2'], 'layers': 1,
      'load_kind': 'force', 'load': 10.0, 'mean_cof': 0.0125,
-     'run_uuid': '3c4d', 'result_uuid': '7b6a'},
+     'run_uuid': 'r2', 'node_uuid': '3c4d', 'point_uuid': '7b6a'},
 ]
 
 
@@ -64,14 +64,12 @@ class TestPaneLayout:
         assert SOURCES == ('local',)
         assert pane.source == 'local'
 
-    def test_the_removed_central_source_cannot_be_selected(self, pane):
-        seen = []
-        pane.source_changed.connect(seen.append)
+    def test_there_is_no_source_switch(self, pane):
+        from PySide6.QtWidgets import QRadioButton
 
-        pane.set_source('central')
-
-        assert pane.source == 'local'
-        assert seen == []
+        assert pane.findChildren(QRadioButton) == []
+        assert pane.source_label.text() == 'Local store'
+        assert not hasattr(pane, 'set_source')
 
     def test_search_asks_for_a_query_with_the_current_filters(self, pane):
         seen = []
@@ -104,7 +102,7 @@ class TestPaneLayout:
 
         pane.table.selectRow(0)
 
-        assert seen == [{'run_uuid': '1a2b', 'result_uuid': '9f8e'}]
+        assert seen == [{'node_uuid': '1a2b', 'point_uuid': '9f8e'}]
 
     def test_selected_and_visible_records(self, pane):
         pane.table.selectRow(1)
@@ -171,7 +169,7 @@ class TestDownloads:
         assert payload['what'] == 'results'
         assert payload['dest'].endswith('dl')
         assert payload['selection'] == [
-            {'run_uuid': '1a2b', 'result_uuid': '9f8e', 'set_label': 's1'}]
+            {'node_uuid': '1a2b', 'point_uuid': '9f8e', 'set_label': 's1'}]
         assert payload['rebuild'] is False
 
     def test_provenance_and_run_tree_carry_the_same_selection(self, ready):
@@ -268,20 +266,16 @@ class TestDownloads:
         assert [r['load'] for r in payload['records']] == [30.0, 10.0]
         assert set(payload['records'][0]) == set(payload['columns'])
 
-    def test_summary_csv_exports_the_fallback_columns(
+    def test_summary_csv_round_trips_the_shown_columns(
             self, pane, tmp_path, monkeypatch):
         """The Summary CSV promises the visible rows "with the columns shown"
-        (D6), and what Load/Angle/Speed show for a row without those keys comes from
-        `force_nN`, `scan_angle` and `scan_speed` -- the columns' fallbacks.
-        The worker writes `record[key]` and knows nothing of them, so an
-        unresolved payload exported three blank columns the table had filled.
-        """
+        (D6): the worker writes exactly the payload's columns."""
         from src.gui import db_worker
         monkeypatch.setattr(pane, '_ask_directory', lambda: tmp_path / 'dl')
-        pane.set_records([{'id': 41, 'set_label': 's1', 'family': 'afm',
-                           'material': 'h-MoS2', 'force_nN': 30.0,
-                           'scan_angle': 15.0, 'scan_speed': 5.0,
-                           'status': 'published'}])
+        pane.set_records([{'set_label': 's1', 'family': 'afm',
+                           'materials': ['h-MoS2'], 'load_kind': 'force',
+                           'load': 30.0, 'angle': 15.0, 'speed': 5.0,
+                           'status': 'complete', 'node_uuid': 'n1'}])
         seen = []
         pane.export_requested.connect(lambda source, payload: seen.append(payload))
 
@@ -518,7 +512,7 @@ class TestWindowWiring:
         monkeypatch.setattr(type(window.database), 'current_kind',
                             property(lambda self: 'export'))
 
-        window._on_db_detail('local', {'run_uuid': '1a2b', 'result_uuid': '9f8e'})
+        window._on_db_detail('local', {'node_uuid': '1a2b', 'point_uuid': '9f8e'})
 
         assert started == []
         assert 'still running' in window.database_pane.messages.toPlainText()
@@ -612,38 +606,48 @@ class TestImport:
 
         assert seen == []
 
+    @staticmethod
+    def _import_result(**fields):
+        """A worker `import` response: the real `ImportReport` field names."""
+        result = {
+            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
+            'group_uuid': '77aa', 'created_decks': ['afm/a:slide'],
+            'skipped_decks': [], 'superseded_decks': [], 'already_imported': [],
+            'n_points': 1, 'verdict_counts': {'complete': 1}, 'log_missing': [],
+            'no_version': [], 'unparseable': [], 'failures': [], 'warnings': [],
+            'dry_run': False, 'report': "set 'x' (77aa)\n  decks created:       1"}
+        result.update(fields)
+        return result
+
     def test_a_finished_import_shows_the_report(self, window):
-        window._on_db_finished('import', {
-            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
-            'set_uuid': '77aa', 'created_runs': ['afm/a'], 'created_results': [],
-            'skipped_results': [], 'incomplete': [], 'empty_runs': [],
-            'unparseable': [], 'failures': [], 'dry_run': False,
-            'report': "set 'x' (77aa)\n  runs created:    1"})
+        window._on_db_finished('import', self._import_result())
 
-        assert 'runs created' in window.database_pane.messages.toPlainText()
+        assert 'decks created' in window.database_pane.messages.toPlainText()
 
-    def test_incomplete_and_empty_runs_are_reported_not_buried(self, window):
-        window._on_db_finished('import', {
-            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
-            'set_uuid': '77aa', 'created_runs': ['afm/a'],
-            'created_results': ['afm/a#force30_a0_s2'], 'skipped_results': [],
-            'incomplete': ['afm/a#force30_a0_s2'], 'empty_runs': ['afm/c'],
-            'unparseable': [], 'failures': [], 'dry_run': False,
-            'report': "set 'x' (77aa)"})
+    def test_missing_logs_and_versions_are_reported_not_buried(self, window):
+        window._on_db_finished('import', self._import_result(
+            log_missing=['afm/a:slide'], no_version=['afm/a:system', 'afm/b:system']))
 
         text = window.database_pane.messages.toPlainText()
-        assert '1 run(s) incomplete' in text
-        assert '1 run(s) with no results at all' in text
+        assert '1 deck(s) with no log yet: afm/a:slide' in text
+        assert '2 deck(s) with no LAMMPS version' in text
+
+    def test_failures_are_reported_at_error(self, window, monkeypatch):
+        seen = []
+        monkeypatch.setattr(window.database_pane, 'message',
+                            lambda text, level='info': seen.append((text, level)))
+
+        window._on_db_finished('import', self._import_result(
+            ingest_ok=False, failures=[['afm/b', 'no results file']]))
+
+        (text, level), = seen
+        assert '1 failure(s): afm/b: no results file' in text
+        assert level == 'error'
 
     def test_unparseable_paths_are_reported_not_buried(self, window):
         """N8: `aiida import` exits non-zero on `unparseable`; the pane must
         not bury it either."""
-        window._on_db_finished('import', {
-            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
-            'set_uuid': '77aa', 'created_runs': [], 'created_results': [],
-            'skipped_results': [], 'incomplete': [], 'empty_runs': [],
-            'unparseable': ['afm/broken'], 'failures': [], 'dry_run': False,
-            'report': "set 'x' (77aa)"})
+        window._on_db_finished('import', self._import_result(unparseable=['afm/broken']))
 
         text = window.database_pane.messages.toPlainText()
         assert '1 path(s) unparseable' in text
@@ -656,12 +660,7 @@ class TestImport:
         monkeypatch.setattr(window.database_pane, 'message',
                             lambda text, level='info': levels.append(level))
 
-        window._on_db_finished('import', {
-            'ok': True, 'kind': 'import', 'ingest_ok': True, 'label': 'x',
-            'set_uuid': '77aa', 'created_runs': [], 'created_results': [],
-            'skipped_results': [], 'incomplete': [], 'empty_runs': [],
-            'unparseable': ['afm/broken'], 'failures': [], 'dry_run': False,
-            'report': "set 'x' (77aa)"})
+        window._on_db_finished('import', self._import_result(unparseable=['afm/broken']))
 
         assert levels == ['warn']
 
@@ -748,12 +747,11 @@ class TestWorkspaceMemory:
 
     def test_switching_workspace_does_not_clobber_the_new_workspaces_filters(
             self, window, tmp_path, monkeypatch):
-        """Regression: restoring a source different from the pane's current
-        one used to fire source_changed -> _remember_database_state, which
-        wrote the OLD workspace's still-on-screen filters into the shared
-        state dict before db_filters was even read back out of it -- so the
-        new workspace's saved filters were clobbered both on screen and on
-        disk before the user touched anything."""
+        """Regression: a write to the shared state dict while a workspace's
+        saved state is being applied once wrote the OLD workspace's
+        still-on-screen filters before db_filters was even read back out of
+        it -- so the new workspace's saved filters were clobbered both on
+        screen and on disk before the user touched anything."""
         other = Workspace.open(tmp_path / 'other')
         other.remember('db_source', 'central')
         other.remember('db_filters', dict(EMPTY_FILTERS, family='hetero'))
@@ -782,7 +780,7 @@ class TestDegradation:
                             lambda name: None if name == 'aiida' else object())
 
         assert pane_module.missing_backend('local') == ['aiida']
-        assert pane_module.missing_backend('central') == []
+        assert pane_module.missing_backend('central') == [], 'no such source'
 
     def test_a_missing_backend_says_what_to_install(
             self, qt_app, monkeypatch):
@@ -793,7 +791,7 @@ class TestDegradation:
 
         pane = pane_module.DatabasePane()
 
-        assert not pane._source_buttons.button(0).isEnabled()
+        assert not pane.source_label.isEnabled()
         text = pane.messages.toPlainText()
         assert 'aiida' in text
         assert "pip install -e '.[aiida]'" in text
@@ -811,7 +809,7 @@ class TestDegradation:
         assert 'x' in pane.messages.toPlainText()
 
     def test_a_present_backend_is_left_alone(self, pane):
-        assert pane._source_buttons.button(0).isEnabled()
+        assert pane.source_label.isEnabled()
         assert pane.search_button.isEnabled()
 
 
@@ -839,18 +837,6 @@ class TestRemovedCentralSourceIsNeverReachable:
         window.database_pane.search_button.click()
 
         assert seen and seen[0].source == 'local'
-
-    def test_set_source_refuses_the_removed_source(self, window):
-        # A stray call reaching `set_source('central')` must not select it,
-        # and must not write it to disk either, since no signal fires for a
-        # selection that never happened.
-        window.workspace.remember('db_source', 'central')
-
-        window.database_pane.set_source('central')
-
-        assert window.database_pane.source == 'local'
-        assert window.workspace.state['db_source'] == 'central'
-
 
 class TestMessageLevels:
 

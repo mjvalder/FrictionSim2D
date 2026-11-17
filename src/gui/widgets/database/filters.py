@@ -32,9 +32,9 @@ HIGH_SENTINEL = 1e30
 
 #: The exact `filters` block a `list` request carries. Every key is present
 #: always -- a filter that disappears from the dict would change the D13 cache
-#: key without changing the query. There is no `is_complete` key: neither the
-#: local store (`Friction2DDB.query`) nor the central client accepts one, and
-#: spec D3 does not list a Completeness filter.
+#: key without changing the query. There is no `is_complete` key:
+#: `Friction2DDB.query` does not accept one, and spec D3 does not list a
+#: Completeness filter.
 EMPTY_FILTERS: Dict[str, Any] = {
     'materials': None,
     'family': None,

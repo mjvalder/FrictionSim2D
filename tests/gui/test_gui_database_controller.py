@@ -252,9 +252,9 @@ class TestResultCache:
         """A `detail` fires on every row click; one directory per click would
         grow `.preview/_db` without bound."""
         first = DatabaseRequest(kind='detail', source='local',
-                                payload={'run_uuid': 'a', 'result_uuid': 'b'})
+                                payload={'node_uuid': 'a', 'point_uuid': 'b'})
         second = DatabaseRequest(kind='detail', source='local',
-                                 payload={'run_uuid': 'c', 'result_uuid': 'd'})
+                                 payload={'node_uuid': 'c', 'point_uuid': 'd'})
         export = DatabaseRequest(kind='export', source='local',
                                  payload={'what': 'summary_csv'})
 
@@ -267,7 +267,7 @@ class TestResultCache:
         file must be gone before the next request runs -- otherwise a worker
         that dies without writing one would deliver the previous answer."""
         request = DatabaseRequest(kind='detail', source='local',
-                                  payload={'run_uuid': 'a', 'result_uuid': 'b'})
+                                  payload={'node_uuid': 'a', 'point_uuid': 'b'})
         directory = controller.directory_for(request)
         _seed(directory, {'ok': True, 'kind': 'detail'})
 
@@ -370,7 +370,7 @@ class TestCachePruning:
 
     def test_the_scratch_directory_survives_the_prune(self, controller):
         scratch = controller.directory_for(
-            DatabaseRequest(kind='detail', source='local', payload={'run_uuid': 'a'}))
+            DatabaseRequest(kind='detail', source='local', payload={'node_uuid': 'a'}))
         scratch.mkdir(parents=True, exist_ok=True)
         os.utime(scratch.parent, (1, 1))
 

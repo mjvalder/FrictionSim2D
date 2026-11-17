@@ -19,7 +19,7 @@ import sys
 import time
 import traceback
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: The kwargs `Friction2DDB.query` accepts. Anything else in a request's
 #: `filters` block is dropped rather than passed through -- a typo in the pane
@@ -64,22 +64,6 @@ def _records(frame) -> List[Dict[str, Any]]:
     conversion rather than a hand-written one.
     """
     return json.loads(frame.to_json(orient='records', date_format='iso'))
-
-
-def _add_imported_at(records: List[Dict[str, Any]]) -> None:
-    """Normalise the Added column's "never stored" state to ``None``.
-
-    `QueryResult.to_dataframe()` already carries `imported_at` on every row --
-    it comes from `FrictionSimulationData.to_dict()`, which reads the run
-    node's `imported_at` extra and defaults to the empty string if `status`
-    was never set. This only turns that empty-string default into `None`, so
-    the GUI's Added column can tell "not stored" from a real timestamp with
-    `is None` rather than a string comparison; it does not fetch or add
-    anything that was not already on the row.
-    """
-    for record in records:
-        if record.get('imported_at') == '':
-            record['imported_at'] = None
 
 
 def _facet_lists(conditions: Dict[str, Any]) -> Dict[str, List[Any]]:
@@ -169,7 +153,6 @@ def _list(request: Dict[str, Any]) -> Dict[str, Any]:
                if k in FILTER_KEYS and v is not None}
     started = time.monotonic()
 
-    sizes: Dict[str, int] = {}
     limit = filters.get('limit')
     db = _local_db(request)
     _emit('progress', message='querying the local store')
@@ -178,17 +161,15 @@ def _list(request: Dict[str, Any]) -> Dict[str, Any]:
     with snapshot() if snapshot is not None else nullcontext():
         result = db.query(**filters)
         records = _records(result.to_dataframe())
-        _add_imported_at(records)
         facets = {'materials': list(db.get_available_materials()),
                   **_facet_lists(db.get_available_conditions())}
     total = result.total_count
-    # Only the local source can export a whole set, so only it needs the
-    # run counts the run_tree confirmation quotes.
+    # The run counts the run_tree confirmation quotes.
     sizes = _set_sizes(db.list_sets())
 
     filled = _backfill_facets(facets, records)
     return {
-        'ok': True, 'kind': 'list', 'source': request.get('source', 'local'),
+        'ok': True, 'kind': 'list', 'source': 'local',
         'records': records,
         'columns': list(records[0]) if records else [],
         'facets': facets,
@@ -199,8 +180,17 @@ def _list(request: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _node_dict(node) -> Dict[str, Any]:
-    """Identity plus every stored attribute of one node."""
+def _related_kinds() -> Tuple[str, ...]:
+    """What `detail` counts `related` points along: every block kind
+    (`realization` among them) and the swept axes `load` and `speed`."""
+    from ..aiida.block_schema import BLOCK_KINDS  # pylint: disable=import-outside-toplevel
+    return tuple(BLOCK_KINDS) + ('load', 'speed')
+
+
+def _node_dict(node) -> Optional[Dict[str, Any]]:
+    """Identity plus every stored attribute of one node; None for no node."""
+    if node is None:
+        return None
     return {'uuid': node.uuid, 'node_type': node.node_type,
             'attributes': dict(node.base.attributes.all)}
 
@@ -219,16 +209,43 @@ def _repository_files(node, which: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _detail(request: Dict[str, Any]) -> Dict[str, Any]:
-    """Everything about one selected row -- without downloading anything."""
-    _load_profile(request)
+def _point(item: Dict[str, Any]):
+    """The point `FolderData` a row names, by its `node_uuid`.
+
+    Not by `point_uuid`: a re-import supersedes a point and keeps its
+    `point_uuid`, so only the node uuid names exactly the row on screen.
+    """
     from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
-    run = load_node(uuid=request['run_uuid'])
-    result = load_node(uuid=request['result_uuid'])
-    files = _repository_files(run, 'run') + _repository_files(result, 'result')
+    return load_node(uuid=item['node_uuid'])
+
+
+def _related_counts(db, point) -> Dict[str, int]:
+    """How many current points differ from `point` only along each kind,
+    from one `point_table()`. Empty when the point is not in the table (its
+    blocks carry no hash extras: `FrictionSim2D aiida reindex`)."""
+    table = db.point_table()
+    counts: Dict[str, int] = {}
+    for kind in _related_kinds():
+        try:
+            counts[kind] = len(db.related(point, kind, table=table))
+        except LookupError:
+            return {}
+    return counts
+
+
+def _detail(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Everything about one selected row -- without downloading anything:
+    the point's attributes and stored files, the verdict and summary the
+    policy selects, and the `related` counts."""
+    db = _local_db(request)
+    point = _point(request)
+    files = _repository_files(point, 'point')
     return {
         'ok': True, 'kind': 'detail', 'source': 'local',
-        'run': _node_dict(run), 'result': _node_dict(result),
+        'point': _node_dict(point),
+        'verdict': _node_dict(db.latest(point, 'verdict')),
+        'summary': _node_dict(db.latest(point, 'summary')),
+        'related': _related_counts(db, point),
         'files': files, 'total_bytes': sum(f['bytes'] for f in files),
     }
 
@@ -273,44 +290,57 @@ def _export_summary_csv(request: Dict[str, Any], dest) -> Dict[str, Any]:
     return _export_response(request, dest, [target])
 
 
+def _stored_paths(node) -> List[str]:
+    """Every file path in a node's repository."""
+    return [(root / name).as_posix()
+            for root, _dirs, files in node.base.repository.walk() for name in files]
+
+
 def _export_result_files(request: Dict[str, Any], dest) -> Dict[str, Any]:
-    """The verbatim stored tier files and logs, under <dest>/<rel_path>/."""
-    from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
+    """Each selected point's stored tier files (window and raw), verbatim,
+    under <dest>/<rel_path>/. `run_tree` is the download with the per-atom
+    files, snapshots and logs."""
     written: List[Any] = []
     warnings: List[str] = []
     for item in request.get('selection') or []:
-        run = load_node(uuid=item['run_uuid'])
-        target = dest / run.rel_path
+        point = _point(item)
+        rel_path = point.base.attributes.get('rel_path')
+        target = dest / rel_path
         target.mkdir(parents=True, exist_ok=True)
-        _emit('progress', message=f"copying {run.rel_path}")
-        load_node(uuid=item['result_uuid']).base.repository.copy_tree(target)
-        copied = [p for p in target.rglob('*') if p.is_file()]
-        if not copied:
+        _emit('progress', message=f"copying {rel_path}")
+        point.base.repository.copy_tree(target)
+        stored = _stored_paths(point)
+        if not stored:
             # A file over `settings.aiida.max_stored_file_mb` is recorded by
-            # hash instead of stored, so a run can be in the store and have
+            # hash instead of stored, so a point can be in the store and have
             # nothing to hand back. Silence here reads as a failed download.
-            warnings.append(f"{run.rel_path}: nothing stored (files over the "
+            warnings.append(f"{rel_path}: nothing stored (files over the "
                             f"size limit are recorded by hash)")
-        written += copied
+        written += [target / path for path in stored]
     return _export_response(request, dest, written, warnings)
 
 
 def _export_provenance(request: Dict[str, Any], dest) -> Dict[str, Any]:
-    """provenance.json, config.json, settings.yaml, cif and potentials.
+    """provenance.json, config.json, settings.yaml, cif and potentials,
+    copied out of the `provenance` input of each selected point's CalcJob.
 
     One bundle per selected run and nothing else -- deliberately not
-    `Friction2DDB.export_for_reproduction`, which exports the run's whole set
-    tree and would turn "download the provenance of this row" into a
-    multi-gigabyte copy of every run beside it.
+    `export_results`, which exports the run's whole set and would turn
+    "download the provenance of this row" into a multi-gigabyte copy of
+    every run beside it. Two points of one run share one bundle.
     """
-    from aiida.orm import load_node  # pylint: disable=import-outside-toplevel
     from ..aiida.export import (  # pylint: disable=import-outside-toplevel
         export_provenance_bundle)
     written: List[Any] = []
+    done = set()
     for item in request.get('selection') or []:
-        run = load_node(uuid=item['run_uuid'])
-        _emit('progress', message=f"provenance for {run.rel_path}")
-        written += list(export_provenance_bundle(run, dest / run.rel_path))
+        calc = _point(item).creator
+        if calc.uuid in done:
+            continue
+        done.add(calc.uuid)
+        rel_path = calc.inputs.parameters.get('rel_path')
+        _emit('progress', message=f"provenance for {rel_path}")
+        written += list(export_provenance_bundle(calc, dest / rel_path))
     return _export_response(request, dest, written)
 
 
@@ -379,33 +409,34 @@ def _import(request: Dict[str, Any]) -> Dict[str, Any]:
                           request.get('profile'), bool(request.get('dry_run')))
     return {
         'ok': True, 'kind': 'import', 'ingest_ok': bool(report.ok()),
-        'label': report.label, 'set_uuid': report.group_uuid,
+        'label': report.label, 'group_uuid': report.group_uuid,
         'created_decks': list(report.created_decks),
         'skipped_decks': list(report.skipped_decks),
         'superseded_decks': list(report.superseded_decks),
         'already_imported': list(report.already_imported),
-        'no_version': list(report.no_version),
+        'n_points': len(report.points),
+        'verdict_counts': dict(report.verdict_counts),
         # Decks whose log has not arrived yet: not a failure, but something
         # the user wants to see before trusting the numbers that just arrived.
-        # The pane shows this key as "incomplete" (Task 12 redesigns it).
-        'incomplete': list(report.log_missing),
-        'empty_runs': [],
+        'log_missing': list(report.log_missing),
+        'no_version': list(report.no_version),
         # A run whose `provenance.json` could not even be parsed. `aiida
         # import` exits non-zero on this (N8); the pane must not bury it either.
         'unparseable': list(report.unparseable),
         'failures': [list(f) for f in report.failures],
+        'warnings': list(report.warnings),
         'dry_run': bool(report.dry_run),
         'report': report.render(),
     }
 
 
 def _check(request: Dict[str, Any]) -> Dict[str, Any]:
-    """Can this source be reached, and with what.
+    """Can the local store be reached, and with what.
 
-    A fifth request kind beside D8's four: loading an AiiDA profile or
-    touching an HTTP endpoint is exactly the work that must not run on the UI
-    thread, so the check goes through the same subprocess everything else
-    does. `ok` says the check ran; `ready` says the source is usable.
+    A fifth request kind beside D8's four: loading an AiiDA profile is
+    exactly the work that must not run on the UI thread, so the check goes
+    through the same subprocess everything else does. `ok` says the check
+    ran; `ready` says the store is usable.
     """
     from importlib.util import find_spec  # pylint: disable=import-outside-toplevel
     source = request.get('source', 'local')
