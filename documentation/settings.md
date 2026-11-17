@@ -26,7 +26,7 @@ FrictionSim2D settings init --global   # -> ~/.config/FrictionSim2D/settings.yam
 FrictionSim2D settings show --origin   # which file is actually in effect
 ```
 
-Use `--global` for machine-level values (HPC host, queue names, database credentials) and
+Use `--global` for machine-level values (HPC host, queue names, AiiDA profile) and
 a per-run file for anything that belongs to one campaign.
 
 For reproducibility, keep a copy of the exact settings file used in your simulation root.
@@ -49,7 +49,6 @@ FrictionSim2D settings reset
 - `quench`
 - `hpc`
 - `aiida`
-- `database`
 - `integrity`
 
 ## simulation
@@ -272,9 +271,9 @@ aiida:
 - `profile` — the AiiDA profile every profile-taking function falls back to
   when its own `profile` argument (Python) or `--profile` option (CLI) is
   omitted. `null` means "AiiDA's own default profile."
-- `computer_label` — the AiiDA computer label `aiida setup` registers
-  (`localhost` by default; every supported mode runs its CalcJobs on
-  `localhost`, even hpc-direct, because that *is* the HPC in that mode).
+- `computer_label` — not read by the import, which names each run's
+  Computer from `aiida import --machine`, then `machine`, then the run's
+  `hpc.hpc_host`, else `localhost` (`aiida setup` registers no Computer).
 - `max_stored_file_mb` — files larger than this are recorded by sha256 + path
   instead of being copied into the AiiDA repository.
 - `skip_fraction` — leading fraction of each friction trace discarded as
@@ -295,42 +294,21 @@ which is removed (see [aiida.md](aiida.md) for the two supported remote
 workflows). See `docs/superpowers/specs/TO-DO/future-works.md`
 §15.3/§15.4/§15.6 for the closed triage of each.
 
-## database
+## Removed: database
 
 The central summary database, its REST API and the `db`/`api` command groups
-were removed. The local store is AiiDA, configured entirely under `## aiida` above
-and via `FrictionSim2D aiida setup`. The `database` section below is a leftover:
-nothing reads it any more, and it is deleted in Task 11.
+were removed; the AiiDA store (`## aiida` above) is the only database. An old
+settings file with a `database:` block still loads: the block is ignored, with
+one warning.
 
-Eight fields, unused:
-
-```yaml
-database:
-  host: ""
-  port: 5432
-  dbname: frictionsim2ddb
-  user: ""
-  password: ""
-  api_key: ""
-  api_url: http://localhost:8000
-  skip_fraction: 0.2
-```
-
-- `host`, `port`, `dbname`, `user`, `password`, `api_key`, `api_url` — the former
-  central-database connection (env defaults `FRICTION_CENTRAL_DB_*`,
-  `FRICTION_DB_API_KEY`). Unused.
-- `skip_fraction` — the same warm-up fraction the postprocessing COF
-  calculation uses, applied when the store computes summary statistics.
-
-`password` and `api_key` -- and any other mapping key named like a credential,
-anywhere in the document -- are blanked in the copy of the settings written
-into every run tree (`provenance/settings.yaml` and the `settings` block of
+Any mapping key named like a credential (`password`, `api_key`, `token`, ...),
+anywhere in a settings or config document, is blanked in the copy written into
+every run tree (`provenance/settings.yaml` and the `settings` block of
 `provenance/config.json`): those files are stored in the AiiDA repository and
-travel in archives and export bundles. The other `database` fields are kept.
-This happens twice: once when the tree is written (`redact_secrets`), and
-again -- independently, and by the same rule -- the moment any settings/config
-document is staged into the AiiDA store (see
-[aiida.md](aiida.md#credentials-never-enter-the-store) for the precise
+travel in archives and export bundles. This happens twice: once when the tree
+is written (`redact_secrets`), and again -- independently, and by the same
+rule -- the moment any settings/config document is staged into the AiiDA store
+(see [aiida.md](aiida.md#credentials-never-enter-the-store) for the precise
 guarantee), so a tree built before the first gate existed, or a hand-edited
 settings file with credentials still in it, cannot leak them either.
 

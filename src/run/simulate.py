@@ -169,7 +169,6 @@ def run_simulations(
     settings_file: Optional[Union[str, Path]] = None,
     output_root: Optional[Union[str, Path]] = None,
     ensure_hpc_settings=None,
-    use_aiida: bool = False,  # pylint: disable=unused-argument
     generate_hpc: bool = False,
     simulation_root_name: Optional[str] = None,
     on_failure: Optional[Callable[[Path, Dict[str, Any], Exception], None]] = None,
@@ -238,7 +237,7 @@ def run_simulations(
     created_simulations: List[Path] = []
     # What goes INTO the run tree (config.json, provenance/settings.yaml, and
     # through them the AiiDA repository, archives and export bundles) never
-    # carries the central-DB password or API key.
+    # carries a credential.
     tree_settings = redact_secrets(defaults).model_dump()
 
     for run_dict in configs_to_run:

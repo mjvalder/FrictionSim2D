@@ -195,7 +195,7 @@ def write_pes_grid(run_dir: Path, family: str, *, n: int = 4) -> Path:
     descriptors would be exercised by no test in either plan.
 
     This IS a PES run's window tier -- `DataReader` reads it as one, the same
-    way `FrictionResultsData._TIER_PREFIX` maps `pes_scan` to `'window'`.
+    way the store files `pes_scan` under `'window'`.
     """
     if family not in _PES_FAMILIES:
         raise ValueError(f'write_pes_grid is for {_PES_FAMILIES}, got {family!r}')

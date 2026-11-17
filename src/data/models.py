@@ -128,8 +128,8 @@ def compute_derived_columns(
     """Compute lateral force magnitude and element-wise COF.
 
     This is the canonical function for adding derived columns to a
-    time-series DataFrame. Used by :class:`DataReader` and
-    :class:`FrictionResultsData`.
+    time-series DataFrame. Used by :class:`DataReader` and the store's
+    summaries (:func:`summarise_run`).
 
     Args:
         lfx: Lateral force x-component.
@@ -266,9 +266,9 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
                   post: Optional[Dict[str, float]] = None) -> RunSummary:
     """Reduce one load point's frames to the store's summary row.
 
-    The single COF computation on the store path: `FrictionResultsData`
-    and the postprocessing summary rows read this, so a number can never
-    differ between them. `compute_friction_stats` stays the kernel.
+    The single COF computation on the store path: the store's summaries
+    (`src.aiida.steps.summarise`) and the postprocessing summary rows read
+    this, so a number can never differ between them. `compute_friction_stats` stays the kernel.
 
     `post` carries the post-stream channels (P6), which are derived from
     the retained final state rather than emitted by LAMMPS and so arrive

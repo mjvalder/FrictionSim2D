@@ -94,8 +94,8 @@ class LoadPoint:
     content_sha256: str
 
 
-#: What the RUN node stores (`FrictionSimulationData.add_run_files`), as
-#: run-relative globs: these retained files are never also a point's aux.
+#: What the CalcJob stores once per run (its provenance and LAMMPS inputs),
+#: as run-relative globs: these retained files are never also a point's aux.
 _RUN_NODE_GLOBS = ('provenance.json', 'provenance/**/*', 'lammps/*.in',
                    'lammps/system.in.settings')
 
@@ -518,6 +518,7 @@ class _Import:
     index: Any = None
     computers: Dict[str, Any] = field(default_factory=dict)
     on_point: Optional[Callable[..., None]] = None
+    settings_file: Optional[Path] = None
 
 
 def _group_runs(label: str) -> Tuple[Any, Set[int], Set[str]]:
@@ -609,15 +610,16 @@ def _open_group(label: str, root: Path, records: Sequence[dict]):
     return group
 
 
-def _load_settings():
+def _load_settings(settings_file: Optional[Path] = None):
     from ..core.config import load_settings  # pylint: disable=import-outside-toplevel
-    return load_settings()
+    return load_settings(settings_file=settings_file)
 
 
-def _settings_machine() -> Optional[str]:
-    """``settings.aiida.machine`` of the global settings (None when unset)."""
+def _settings_machine(settings_file: Optional[Path] = None) -> Optional[str]:
+    """``settings.aiida.machine`` of ``settings_file``, else of the per-user
+    settings (None when unset)."""
     try:
-        return _load_settings().aiida.machine or None
+        return _load_settings(settings_file=settings_file).aiida.machine or None
     except (OSError, ValueError, AttributeError):
         return None
 
@@ -841,7 +843,8 @@ def _read_runs(locators, report: ImportReport) -> List[Tuple[Any, str, dict]]:
 def import_root(root: Path, label: Optional[str] = None, *,
                 machine: Optional[str] = None, profile: Optional[str] = None,
                 dry_run: bool = False,
-                on_point: Optional[Callable[..., None]] = None) -> ImportReport:
+                on_point: Optional[Callable[..., None]] = None,
+                settings_file: Optional[Path] = None) -> ImportReport:
     """Import every run under ``root`` into ``friction2d/<label>``: one
     CalcJob per deck, keyed on ``run_uuid|deck_name``.
 
@@ -861,6 +864,8 @@ def import_root(root: Path, label: Optional[str] = None, *,
         dry_run: Classify every deck against the store; create nothing.
         on_point: Called as ``on_point(calcjob, point_label, point)`` for
             every point node a new CalcJob creates.
+        settings_file: The settings file whose ``aiida.machine`` and
+            ``integrity`` thresholds apply (default: the per-user one).
 
     Raises:
         SetRootMismatch: ``label`` names a non-empty set holding none of the
@@ -885,9 +890,10 @@ def import_root(root: Path, label: Optional[str] = None, *,
     group, group_pks, held = _group_runs(label)
     _check_root(label, group, held, {u for _loc, u, _r in runs})
 
-    state = _Import(report=report, machine=machine or _settings_machine(),
+    state = _Import(report=report, machine=machine or _settings_machine(settings_file),
                     group_pks=group_pks,
-                    known=_known_decks(u for _loc, u, _r in runs), on_point=on_point)
+                    known=_known_decks(u for _loc, u, _r in runs), on_point=on_point,
+                    settings_file=settings_file)
     if not dry_run:
         state.group = _open_group(label, root, [r for _loc, _u, r in runs])
         state.index = StoreIndex.load()
@@ -920,7 +926,8 @@ def _integrity_pass(state: _Import) -> None:
     failed: List[Tuple[str, str]] = []
     report.verdict_counts = check_group(state.group, failures=failed,
                                         warnings=report.warnings,
-                                        rechecked=report.rechecked)
+                                        rechecked=report.rechecked,
+                                        settings_file=state.settings_file)
     report.failures += [(f'point {uuid}', f'integrity check: {message}')
                         for uuid, message in failed]
     report.rulings = rule_group(state.group)

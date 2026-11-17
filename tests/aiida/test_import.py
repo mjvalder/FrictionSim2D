@@ -516,7 +516,7 @@ def _with_settings_machine(monkeypatch, machine):
     """settings.aiida.machine = `machine`, as `ingest._settings_machine` reads it."""
     from types import SimpleNamespace
     settings = SimpleNamespace(aiida=SimpleNamespace(machine=machine))
-    monkeypatch.setattr('src.aiida.ingest._load_settings', lambda: settings)
+    monkeypatch.setattr('src.aiida.ingest._load_settings', lambda settings_file=None: settings)
 
 
 def test_settings_aiida_machine_names_the_computer(aiida_profile_clean, tmp_path,
@@ -710,3 +710,13 @@ def test_importing_ingest_does_not_require_aiida():
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert 'OK' in result.stdout
+
+
+def test_an_explicit_settings_file_names_the_machine(aiida_profile_clean, tmp_path):
+    settings_file = tmp_path / 'settings.yaml'
+    settings_file.write_text('aiida:\n  machine: from-file\n', encoding='utf-8')
+    root = tmp_path / 'sim'
+    _afm_run(root, 'h-MoS2')
+
+    assert import_root(root, label='camp', settings_file=settings_file).ok()
+    assert {n.computer.label for n in _calcjobs()} == {'from-file'}

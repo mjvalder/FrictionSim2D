@@ -18,8 +18,8 @@ from typing import Sequence
 
 #: The three sampling tiers that become stored tier files. `src/aiida/
 #: ingest.py` imports this rather than declaring its own, so `POINT_KEYS =
-#: TIER_KEYS + ('retract',)` there and `FrictionResultsData.add_result_files`'s
-#: loop cannot disagree about what a tier is.
+#: TIER_KEYS + ('retract',)` there and the CalcJob parser cannot disagree
+#: about what a tier is.
 TIER_KEYS = ('window', 'raw', 'peratom')
 
 
@@ -39,10 +39,10 @@ def content_hash(paths: Sequence[Path]) -> str:
     """SHA-256 over the given files' bytes, in the given order.
 
     The ONE definition of a content hash over a set of result files:
-    `FrictionResultsData.add_result_files`'s fallback (when no hash is passed
-    in) and `src.aiida.ingest.load_points` (which hashes every entry of
-    `point.tiers`, `'retract'` included) both call this, so the two paths
-    can never diverge into hashing a different file set.
+    `src.aiida.ingest.load_points` (which hashes every entry of
+    `point.tiers`, `'retract'` included) and the CalcJob parser both call
+    this, so the two paths can never diverge into hashing a different file
+    set.
     """
     digest = hashlib.sha256()
     for path in paths:

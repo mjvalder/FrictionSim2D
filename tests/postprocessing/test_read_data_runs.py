@@ -158,8 +158,8 @@ def test_runs_are_sorted_deterministically(tmp_path):
 
 def test_a_pes_grid_is_one_run_with_no_load(tmp_path):
     """A PES scan has no friction files at all -- its whole result is
-    `results/pes_scan.csv`, which IS its window tier (the same mapping
-    `FrictionResultsData._TIER_PREFIX` makes). `load_kind` is 'none' rather
+    `results/pes_scan.csv`, which IS its window tier (the same mapping the
+    store makes). `load_kind` is 'none' rather
     than a fictitious 0.0 nN force."""
     make_family_run(tmp_path, 'pes_sheet')
 
@@ -488,8 +488,8 @@ def test_summary_rows_come_from_summarise_run(tmp_path):
     three different numbers on one plot.
 
     Checked against `compute_friction_stats` on the parsed arrays -- the
-    kernel `summarise_run` uses and the number the store writes into
-    `FrictionResultsData`'s attributes and the central `ResultRecord` --
+    kernel `summarise_run` uses and the number the store writes into its
+    summaries --
     rather than against `summarise_run` called again here, which would only
     prove the function is deterministic."""
     from src.data.models import compute_friction_stats

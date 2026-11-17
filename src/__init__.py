@@ -12,12 +12,10 @@ from __future__ import annotations
 __version__ = "0.2.0"
 
 import logging
-from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .aiida.submit import run_with_aiida
     from .builders.afm import AFMSimulation
     from .builders.sheetonsheet import SheetOnSheetSimulation
     from .core.config import (
@@ -28,8 +26,6 @@ if TYPE_CHECKING:
     )
     from .potentials.manager import PotentialManager
     from .run.simulate import run_simulations
-
-_AIIDA_AVAILABLE = find_spec('aiida') is not None
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +66,6 @@ def __getattr__(name: str):
     if name == 'parse_config':
         from .core.config import parse_config as _parse_config
         return _parse_config
-    if name == 'run_with_aiida':
-        if not _AIIDA_AVAILABLE:
-            raise AttributeError(
-                "run_with_aiida is unavailable because AiiDA is not installed",
-            )
-        from .aiida.submit import run_with_aiida as _run_with_aiida
-        return _run_with_aiida
     raise AttributeError(f"module {__name__!s} has no attribute {name!r}")
 
 
@@ -144,6 +133,3 @@ __all__ = [
     "parse_config",
     "run_simulations",
 ]
-
-if _AIIDA_AVAILABLE:
-    __all__.append("run_with_aiida")

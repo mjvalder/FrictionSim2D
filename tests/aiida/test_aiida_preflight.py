@@ -32,3 +32,39 @@ def test_entry_points_check_runs():
     from src.aiida.preflight import preflight
     rep = preflight()
     assert any('entry point' in m.lower() for m in rep.messages)
+
+
+class _EP:
+    def __init__(self, name):
+        self.name = name
+
+
+def _fake_entry_points(table):
+    return lambda group: [_EP(n) for n in table.get(group, ())]
+
+
+def test_entry_points_need_the_calcjob_and_the_parser(monkeypatch):
+    from src.aiida.preflight import _check_entry_points
+    monkeypatch.setattr('importlib.metadata.entry_points', _fake_entry_points(
+        {'aiida.calculations': ['friction2d.lammps']}))
+    messages = []
+    assert not _check_entry_points(messages)
+    assert any('aiida.parsers:friction2d.lammps NOT registered' in m for m in messages)
+
+
+def test_a_friction2d_data_entry_point_fails_the_check(monkeypatch):
+    from src.aiida.preflight import _check_entry_points
+    monkeypatch.setattr('importlib.metadata.entry_points', _fake_entry_points({
+        'aiida.calculations': ['friction2d.lammps'], 'aiida.parsers': ['friction2d.lammps'],
+        'aiida.data': ['core.dict', 'friction2d.results']}))
+    messages = []
+    assert not _check_entry_points(messages)
+    assert any("stale aiida.data entry points ['friction2d.results']" in m for m in messages)
+
+
+def test_the_current_entry_points_pass(monkeypatch):
+    from src.aiida.preflight import _check_entry_points
+    monkeypatch.setattr('importlib.metadata.entry_points', _fake_entry_points({
+        'aiida.calculations': ['friction2d.lammps'], 'aiida.parsers': ['friction2d.lammps'],
+        'aiida.data': ['core.dict']}))
+    assert _check_entry_points([])

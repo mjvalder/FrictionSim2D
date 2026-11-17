@@ -289,7 +289,8 @@ def test_stale_thresholds_and_provisional_verdicts_are_reported(
     _checker(points[30.0]).base.extras.set('friction2d_provisional', True)
     current = steps._settings_dump()
     monkeypatch.setattr(steps, '_settings_dump',
-                        lambda warnings=None: {**current, 'version': '1.1.0'})
+                        lambda warnings=None, settings_file=None: {**current,
+                                                                   'version': '1.1.0'})
 
     warnings = []
     assert postprocess_group('camp', warnings=warnings) == 3
@@ -573,3 +574,27 @@ def test_clear_takes_datasets_and_summaries(aiida_profile_clean, no_profile_swit
     assert orm.QueryBuilder().append(orm.ProcessNode).count() == 0
     assert not orm.QueryBuilder().append(
         orm.Group, filters={'label': {'like': 'friction2d/%'}}).count()
+
+
+def test_an_explicit_settings_file_beats_the_xdg_one(aiida_profile_clean, no_profile_switch,
+                                                     tmp_path, monkeypatch):
+    """`settings_file=` is read instead of the per-user file, for the summary
+    options, the integrity thresholds of the import and the dataset."""
+    config = tmp_path / 'xdg'
+    (config / 'FrictionSim2D').mkdir(parents=True)
+    (config / 'FrictionSim2D' / 'settings.yaml').write_text(
+        'aiida:\n  skip_fraction: 0.4\n', encoding='utf-8')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(config))
+    explicit = tmp_path / 'run-settings.yaml'
+    explicit.write_text('aiida:\n  skip_fraction: 0.3\n', encoding='utf-8')
+
+    assert summary_options() == {'skip_fraction': 0.4}
+    assert summary_options(settings_file=explicit) == {'skip_fraction': 0.3}
+
+    _tree(tmp_path / 'sim')
+    assert import_root(tmp_path / 'sim', label='camp', settings_file=explicit).ok()
+    assert postprocess_group('camp', settings_file=explicit) == 3
+    assert {s['skip_fraction'] for s in _summaries()} == {0.3}
+    table = build_dataset('d', ['camp'], settings_file=explicit)
+    assert table['policy']['summary_options'] == {'skip_fraction': 0.3}
+    assert len(table['rows']) == 3

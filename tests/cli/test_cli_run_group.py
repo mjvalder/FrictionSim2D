@@ -75,17 +75,19 @@ def test_settings_file_option_reaches_the_runner(runner, captured, tmp_path):
     assert captured[0]["settings_file"] == settings_file
 
 
-def test_aiida_flag_reaches_the_runner(runner, captured, tmp_path):
-    result = runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
-                                             "--output-dir", str(tmp_path), "--aiida"])
+@pytest.mark.parametrize("flag", ["--aiida", "--label"])
+@pytest.mark.parametrize("model", ["afm", "sheetonsheet", "pes-sheet", "pes-tip", "indent"])
+def test_run_commands_have_no_aiida_options(runner, model, flag):
+    """AiiDA is import-only: `run` generates, `aiida import` registers."""
+    result = runner.invoke(cli_module.cli, ["run", model, "--help"])
     assert result.exit_code == 0, result.output
-    assert captured[0]["use_aiida"] is True
+    assert flag not in result.output
 
 
-def test_without_the_aiida_flag_use_aiida_is_false(runner, captured, tmp_path):
+def test_the_runner_is_not_told_about_aiida(runner, captured, tmp_path):
     runner.invoke(cli_module.cli, ["run", "afm", "examples/afm_config.ini",
                                    "--output-dir", str(tmp_path)])
-    assert captured[0]["use_aiida"] is False
+    assert "use_aiida" not in captured[0]
 
 
 def test_hpc_scripts_flag_reaches_the_runner(runner, captured, tmp_path):

@@ -285,22 +285,6 @@ class AiidaSettings(BaseModel):
     machine: Optional[str] = None
 
 
-class DatabaseSettings(BaseModel):
-    """The CENTRAL summary database, and nothing else.
-
-    The local store is AiiDA (spec U2): `database.local` and `active_profile`
-    described a second local Postgres beside it and are gone.
-    """
-    host: str = os.environ.get('FRICTION_CENTRAL_DB_HOST', '')
-    port: int = int(os.environ.get('FRICTION_CENTRAL_DB_PORT', '5432'))
-    dbname: str = os.environ.get('FRICTION_CENTRAL_DB_NAME', 'frictionsim2ddb')
-    user: str = os.environ.get('FRICTION_CENTRAL_DB_USER', '')
-    password: str = os.environ.get('FRICTION_CENTRAL_DB_PASSWORD', '')
-    api_key: str = os.environ.get('FRICTION_DB_API_KEY', '')
-    api_url: str = os.environ.get('FRICTION_CENTRAL_API_URL', 'http://localhost:8000')
-    skip_fraction: float = 0.2
-
-
 class GlobalSettings(BaseModel):
     """Represents the full structure of settings.yaml with hardcoded defaults."""
     geometry: GeometrySettings = Field(default_factory=GeometrySettings)
@@ -311,15 +295,7 @@ class GlobalSettings(BaseModel):
     potential: PotentialSettings = Field(default_factory=PotentialSettings)
     hpc: HPCSettings = Field(default_factory=HPCSettings)
     aiida: AiidaSettings = Field(default_factory=AiidaSettings)
-    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     integrity: IntegritySettings = Field(default_factory=IntegritySettings)
-
-#: `DatabaseSettings` fields that are credentials. Never written into a run
-#: tree: `provenance/settings.yaml` and `config.json` are stored in the AiiDA
-#: repository and travel in archives and export bundles. Kept for readers of
-#: this constant; :func:`redact_secrets_mapping` no longer keys off it
-#: directly (see its docstring -- 2026-09-22 review round).
-SECRET_DATABASE_FIELDS = ('password', 'api_key')
 
 #: Mapping-key names that always name a credential, matched case-
 #: insensitively, WHEREVER they occur in a settings/config document -- not
@@ -328,15 +304,15 @@ SECRET_DATABASE_FIELDS = ('password', 'api_key')
 #: (2026-09-22): none is legitimately named any of these. `run/naming.py`'s
 #: `pot_token`/`RunTokens` vocabulary uses "token" for an unrelated concept
 #: (a directory-name fragment), but that value is never a key in a settings/
-#: config document -- it is an AiiDA node ATTRIBUTE
-#: (`FrictionSimulationData.pot_token`), which this function never touches.
+#: config document -- it is a CalcJob extra (`friction2d_tokens`), which
+#: this function never touches.
 #: If a genuinely non-secret field is ever added under one of these names,
 #: it must be renamed, or carved out here explicitly with a comment saying
 #: why -- never worked around at a call site.
 _SECRET_KEY_NAMES = frozenset({
     'password', 'passwd', 'api_key', 'apikey', 'secret', 'token',
 })
-#: Suffixed forms of the same names, e.g. `db_password`, `central_api_key`.
+#: Suffixed forms of the same names, e.g. `db_password`, `remote_api_key`.
 _SECRET_KEY_SUFFIXES = ('_password', '_secret', '_token', '_api_key')
 
 
@@ -362,10 +338,10 @@ def redact_secrets_mapping(data: Any) -> Any:
     is walked and blanked independently, not just the first; `database.
     extra.password` or `general.settings.database.password` at any nesting
     depth inside a `config.json` document; a stray `hpc.api_key`; and a bare
-    top-level `password`. `SECRET_DATABASE_FIELDS`-scoped, `database`/
-    `settings`-path-only redaction (this function's original 2026-09-22
-    shape) missed exactly these -- a 2026-09-22 review round's probe got a
-    credential through every one of them.
+    top-level `password`. `database`/`settings`-path-only redaction (this
+    function's original 2026-09-22 shape) missed exactly these -- a
+    2026-09-22 review round's probe got a credential through every one of
+    them.
 
     Non-dict, non-list input passes through unchanged. Every dict and list
     encountered is copied (the input is never mutated); key order is
@@ -386,9 +362,10 @@ def redact_secrets(settings: GlobalSettings) -> GlobalSettings:
     storage-time sanitiser (`src.aiida.data.redact`) uses on a raw `settings.
     yaml`/`config.json` document -- via a `model_dump`/`model_validate` round
     trip, so write-time and store-time redaction can never drift apart into
-    two different notions of "credential". Every other field -- including
-    the non-secret `database.host`/`api_url`, which say where a run's rows
-    were meant to go -- is kept. `settings` itself is not mutated.
+    two different notions of "credential". Every other field is kept.
+    `settings` itself is not mutated. (`GlobalSettings` itself carries no
+    credential field since the central database settings went; this guards
+    any that are added later.)
     """
     redacted = redact_secrets_mapping(settings.model_dump())
     return cast(GlobalSettings, GlobalSettings.model_validate(redacted))
@@ -1187,12 +1164,6 @@ def _settings_paths_in_precedence_order(
     return paths
 
 
-#: `database.*` keys from the old per-profile shape (`active_profile`, `local`,
-#: `central`). `DatabaseSettings` is flat and central-only now (Task 31) --
-#: these are silently dropped as unknown extras by pydantic, which would take
-#: a user's central-DB credentials with them, so `load_settings` warns instead.
-_OLD_DATABASE_PROFILE_KEYS = frozenset({'active_profile', 'local', 'central'})
-
 #: `AiidaSettings` keys removed when AiiDA became import-only.
 _REMOVED_AIIDA_KEYS = ('enabled', 'lammps_code_label')
 
@@ -1200,12 +1171,10 @@ _REMOVED_AIIDA_KEYS = ('enabled', 'lammps_code_label')
 def _warn_dropped_settings_keys(path: Path, data: Mapping[str, Any]) -> None:
     """Log ONE warning naming every removed key a settings file still carries."""
     dropped = []
-    db_block = data.get('database')
-    if isinstance(db_block, dict) and _OLD_DATABASE_PROFILE_KEYS & db_block.keys():
+    if 'database' in data:
         dropped.append(
-            "the old database.active_profile/local/central block (DatabaseSettings "
-            "is central-only and flat; its host/port/dbname/user/password/api_key "
-            "are IGNORED -- flatten them to database.host, database.port, ...)")
+            "the database block (the central database is gone; the AiiDA store "
+            "is the only database)")
     aiida_block = data.get('aiida')
     if isinstance(aiida_block, dict):
         dropped.extend(f"aiida.{key}" for key in _REMOVED_AIIDA_KEYS

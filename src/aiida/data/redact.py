@@ -4,11 +4,9 @@ repository with a credential still in it (spec follow-up A).
 `redact_secrets` (`src.core.config`) blanks credential-named fields at WRITE
 time, in `src.run.simulate` -- but a tree built before that existed, or a
 root-level `settings.yaml`/`.yml` a user wrote by hand (`settings init` run in
-the simulation root, which `FrictionSimulationSetData.set_from_root` also
-stages), never went through it. `stage_file` is the second, independent gate:
-every path staged into a `FrictionSimulationSetData`, `FrictionSimulationData`
-or `FrictionResultsData` repository -- and, via `src.aiida.submit.
-_stage_sim_dir`, a CalcJob's `simulation_dir` input -- goes through it instead
+the simulation root), never went through it. `stage_file` is the second,
+independent gate: every file the import stages into a friction2d node
+repository (`src.aiida.store`, `src.aiida.calcjob`) goes through it instead
 of calling `repository.put_object_from_file` directly, so a credential cannot
 reach the store, an archive or an export bundle regardless of what write-time
 redaction did or did not do to the source tree.
@@ -57,10 +55,10 @@ def _is_provenance_candidate(name: str) -> bool:
     """True when `name` sits inside a `provenance` path component, other
     than under its `cif/`/`potentials/` subdirectories.
 
-    The `provenance` component need not be first: `src.aiida.submit.
-    _stage_sim_dir` (a CalcJob's `simulation_dir` input) can stage the very
-    same file several directories deep, e.g. `afm/h-MoS2/.../K300/provenance/
-    settings.yaml` -- `provenance` a middle component, not the first.
+    The `provenance` component need not be first: a file staged with its
+    run-relative path sits several directories deep, e.g. `afm/h-MoS2/.../
+    K300/provenance/settings.yaml` -- `provenance` a middle component, not
+    the first.
     Matching is case-insensitive.
     """
     dirs = [seg.lower() for seg in name.split('/')[:-1]]
@@ -75,8 +73,7 @@ def _looks_like_settings_or_config_name(basename_lower: str) -> bool:
     config document, or an obvious variant of one, by its own name alone --
     independent of location: `settings.yaml`/`settings.yml` (plus any
     suffix, e.g. a `.bak` copy), `config.json` (likewise), or any `*.ini`
-    file (the run `.ini` a `FrictionSimulationSetData` may also carry, see
-    `add_file`).
+    file (a run `.ini`).
     """
     if basename_lower.startswith(('settings.yaml', 'settings.yml', 'config.json')):
         return True
@@ -98,8 +95,8 @@ def is_settings_or_config_document(name: str) -> bool:
     `provenance.json` (a `provenance` SIBLING, not a path component under
     it -- it sits at the run's own root) is deliberately never a candidate:
     `src.data.provenance.ProvenanceRecord` carries no credential field, so
-    parsing it would only cost `FrictionSimulationData.refresh_provenance`'s
-    stored-vs-on-disk sha comparison its idempotency for no safety gain.
+    parsing it would cost a stored-vs-on-disk sha comparison its
+    idempotency for no safety gain.
     """
     basename_lower = name.rsplit('/', maxsplit=1)[-1].lower()
     return (_is_provenance_candidate(name)
@@ -110,9 +107,8 @@ def _sanitize_ini_text(text: str, name: str) -> str:
     """Blank every secret-named option of an INI document, in every section
     (including `DEFAULT`). `configparser` does not preserve comments or
     blank-line formatting -- acceptable here: the only INI this module
-    handles today is the run `.ini` a `FrictionSimulationSetData` may carry
-    (`add_file`), staged for the record, not reloaded by anything that cares
-    about its formatting.
+    handles is a run `.ini` staged for the record, not reloaded by anything
+    that cares about its formatting.
     """
     parser = configparser.ConfigParser(interpolation=None)
     try:

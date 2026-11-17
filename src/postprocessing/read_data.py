@@ -310,8 +310,8 @@ _RESULTS_RE = re.compile(
 _TIER_BY_PREFIX = {'friction': 'window', 'raw': 'raw', 'peratom': 'peratom'}
 
 #: A PES scan's grid IS its window tier -- one grid per run, no load point to
-#: speak of. The same mapping `FrictionResultsData._TIER_PREFIX` makes when it
-#: files `pes_scan` under `'window'`; two readers, one rule.
+#: speak of. The store files `pes_scan` under `'window'` the same way; two
+#: readers, one rule.
 _PES_GRID_NAME = 'pes_scan.csv'
 
 _PES_POINT = LoadPoint(load_kind='none', load=0.0, angle=0.0, speed=0.0,
@@ -902,8 +902,7 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             try:
                 # A PES grid is a comma table with a `# family=` first
                 # line, not a LAMMPS `ave/time` file, so it goes
-                # through read_csv -- exactly as
-                # `FrictionResultsData.frame` does for a stored `.csv`.
+                # through read_csv, as the store does for a stored `.csv`.
                 frames[tier] = (
                     pd.read_csv(path, comment='#') if path.suffix == '.csv'
                     else read_results_file(path, family, n_layers))

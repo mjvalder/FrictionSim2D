@@ -1,16 +1,8 @@
-"""AiiDA Data types for FrictionSim2D.
+"""Storage-time helpers for the friction2d AiiDA store.
 
-This module defines custom AiiDA Data node types for storing and querying
-friction simulation data according to FAIR principles.
+Only :mod:`.redact` lives here: the custom ``Data`` node types are gone
+(the store uses core ``Dict``/``FolderData``/``SinglefileData`` nodes), so
+this package exports nothing.
 """
 
-from .simulation import FrictionSimulationData
-from .simulation_set import FrictionSimulationSetData
-from .results import FrictionResultsData, TIER_KEYS
-
-__all__ = [
-    'FrictionSimulationData',
-    'FrictionSimulationSetData',
-    'FrictionResultsData',
-    'TIER_KEYS',
-]
+__all__: list = []

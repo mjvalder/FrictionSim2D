@@ -28,6 +28,34 @@ class PreflightReport:
                 and self.entry_points_ok)
 
 
+#: The plugins the store needs: ``(entry-point group, name)``.
+REQUIRED_ENTRY_POINTS = (('aiida.calculations', 'friction2d.lammps'),
+                         ('aiida.parsers', 'friction2d.lammps'))
+
+
+def _check_entry_points(messages: List[str]) -> bool:
+    """Whether the CalcJob and parser entry points are registered and no
+    ``friction2d.*`` ``aiida.data`` one is (the custom Data nodes are gone;
+    a stale one means the package metadata predates their removal)."""
+    from importlib.metadata import entry_points  # pylint: disable=import-outside-toplevel
+
+    ok = True
+    for group, name in REQUIRED_ENTRY_POINTS:
+        if any(ep.name == name for ep in entry_points(group=group)):
+            messages.append(f"entry point {group}:{name} registered")
+        else:
+            ok = False
+            messages.append(f"entry point {group}:{name} NOT registered — "
+                            "reinstall the package (pip install -e .)")
+    stale = sorted(ep.name for ep in entry_points(group='aiida.data')
+                   if ep.name.startswith('friction2d'))
+    if stale:
+        ok = False
+        messages.append(f"stale aiida.data entry points {stale} — the friction2d "
+                        "Data types are gone; reinstall the package (pip install -e .)")
+    return ok
+
+
 def preflight() -> PreflightReport:
     # This module -- and this function most of all -- must stay importable
     # and callable without aiida-core installed (a generation-only machine is
@@ -83,14 +111,7 @@ def preflight() -> PreflightReport:
             rep.messages.append(f"computer listing failed: {exc}")
 
     try:
-        from importlib.metadata import entry_points
-        eps = entry_points(group='aiida.calculations')
-        ours = [ep.name for ep in eps if ep.name.startswith('friction2d')]
-        rep.entry_points_ok = bool(ours)
-        rep.messages.append(
-            f"friction2d entry points: {ours}" if ours else
-            "friction2d.* entry points NOT registered — reinstall the "
-            "package (pip install -e .)")
+        rep.entry_points_ok = _check_entry_points(rep.messages)
     except Exception as exc:  # pylint: disable=broad-except
         rep.messages.append(f"entry-point scan failed: {exc}")
 

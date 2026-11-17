@@ -80,7 +80,6 @@ def generate_package(config_file: Union[str, Path],
                      output_root: Union[str, Path],
                      settings_file: Optional[Union[str, Path]] = None,
                      generate_hpc: bool = False,
-                     use_aiida: bool = False,
                      simulation_root_name: Optional[str] = None,
                      allow_generate_amorphous: bool = True,
                      ensure_hpc_settings=None) -> GenerationResult:
@@ -92,7 +91,6 @@ def generate_package(config_file: Union[str, Path],
         output_root: Directory to create the simulation root inside.
         settings_file: Optional settings.yaml override.
         generate_hpc: Also emit HPC job scripts.
-        use_aiida: Enable AiiDA provenance.
         simulation_root_name: Explicit root directory name. Without it the name
             is a timestamp to the second, so two runs in the same second merge.
         allow_generate_amorphous: False forbids a melt-quench (see
@@ -113,7 +111,6 @@ def generate_package(config_file: Union[str, Path],
         settings_file=settings_file,
         output_root=Path(output_root),
         ensure_hpc_settings=ensure_hpc_settings,
-        use_aiida=use_aiida,
         generate_hpc=generate_hpc,
         simulation_root_name=simulation_root_name,
         on_failure=record,

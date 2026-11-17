@@ -32,8 +32,39 @@ def test_ssh_transport_helpers_are_gone():
     assert not hasattr(setup_mod, '_TRANSPORT_MAP')
     assert not hasattr(setup_mod, 'start_rabbitmq')
     assert not hasattr(setup_mod, '_patch_rabbitmq_consumer_timeout')
-    assert hasattr(setup_mod, 'setup_localhost_computer')
-    assert hasattr(setup_mod, 'setup_lammps_code')
+    assert hasattr(setup_mod, 'setup_profile')
+
+
+@pytest.mark.parametrize('name', ['setup_localhost_computer', 'setup_lammps_code',
+                                  '_find_lammps_executable', 'check_daemon_status',
+                                  'start_daemon'])
+def test_code_and_daemon_helpers_are_gone(name):
+    """Computers and Codes are made at import; nothing needs the daemon."""
+    import src.aiida.setup as setup_mod
+
+    assert not hasattr(setup_mod, name)
+
+
+def test_full_setup_sets_up_the_profile_only(monkeypatch):
+    import src.aiida.setup as setup_mod
+
+    seen = []
+    monkeypatch.setattr(setup_mod, 'setup_profile', lambda name: seen.append(name) or True)
+    assert setup_mod.full_setup('p1') == {'profile': True}
+    assert seen == ['p1']
+
+
+@pytest.mark.parametrize('module', ['src.aiida.submit', 'src.aiida.data.simulation',
+                                    'src.aiida.data.simulation_set',
+                                    'src.aiida.data.results'])
+def test_submission_and_custom_node_modules_are_gone(module):
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module)
+
+
+def test_no_friction2d_data_entry_points():
+    assert not [ep for ep in entry_points(group='aiida.data')
+                if ep.name.startswith('friction2d')]
 
 
 def test_aiida_setup_has_no_remote_options():
@@ -45,7 +76,7 @@ def test_aiida_setup_has_no_remote_options():
 
     assert '--use-remote' not in out
     assert '--hpc-config' not in out
-    assert '--lammps-path' in out
+    assert '--lammps-path' not in out
     # `aiida setup` CREATES a profile; every other command LOADS one.
     assert '--create-profile' in out
     assert '--profile ' not in out
@@ -86,5 +117,7 @@ def test_lazy_exports_point_at_the_new_modules():
     for dead in ('register_simulation_batch', 'register_single_simulation',
                  'import_results_to_aiida', 'import_simulation_set',
                  'dump_results_to_json', 'rebuild_simulation_set',
-                 'FrictionProvenanceData', 'FrictionWorkChain'):
+                 'FrictionProvenanceData', 'FrictionWorkChain',
+                 'FrictionSimulationData', 'FrictionSimulationSetData',
+                 'FrictionResultsData', 'run_with_aiida', 'smart_submit'):
         assert dead not in exports

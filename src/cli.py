@@ -41,16 +41,7 @@ def _ensure_hpc_settings(hpc_settings) -> None:
 
 
 def _run_simulation(model: str, config_file: str, output_dir: str,
-                    use_aiida: bool, generate_hpc: bool,
-                    settings_file: Optional[Path] = None,
-                    aiida_label: Optional[str] = None):
-    if use_aiida:
-        from .aiida import AIIDA_AVAILABLE
-        if not AIIDA_AVAILABLE:
-            click.echo("⚠️  AiiDA not available. Install with:", err=True)
-            click.echo("   conda install -c conda-forge aiida-core", err=True)
-            raise click.Abort()
-
+                    generate_hpc: bool, settings_file: Optional[Path] = None):
     try:
         created_simulations, simulation_root, configs_to_run, _ = run_simulations(
             config_file=config_file,
@@ -58,7 +49,6 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
             settings_file=settings_file,
             output_root=Path(output_dir),
             ensure_hpc_settings=_ensure_hpc_settings,
-            use_aiida=use_aiida,
             generate_hpc=generate_hpc,
         )
     except (ValueError, FileNotFoundError) as exc:
@@ -77,27 +67,6 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
         raise click.Abort() from exc
 
     click.echo(f"📋 Found {len(configs_to_run)} simulation configurations")
-
-    if created_simulations and use_aiida:
-        from .aiida.ingest import SetRootMismatch, import_root  # noqa: PLC0415
-        click.echo(f"\n📦 Registering {simulation_root.name} in AiiDA...")
-        import_hint = (
-            f"   The simulation tree was generated at {simulation_root.absolute()} "
-            "and is intact; register it later with:\n"
-            f"   FrictionSim2D aiida import {simulation_root} "
-            f"--label {aiida_label or simulation_root.name}"
-        )
-        try:
-            report = import_root(simulation_root, label=aiida_label)
-        except SetRootMismatch as exc:
-            logger.exception("AiiDA set/root mismatch")
-            _raise_abort(f"❌ {exc}\n{import_hint}", exc)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("AiiDA registration failed")
-            _raise_abort(f"❌ Registration failed: {exc}\n{import_hint}", exc)
-        click.echo(report.render())
-        if not report.ok():
-            raise click.Abort()
 
     click.echo(
         f"\n✅ Generation complete: {len(created_simulations)}/"
@@ -131,26 +100,21 @@ def run_group():
               help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
-@click.option('--aiida', 'use_aiida', is_flag=True,
-              help='Enable AiiDA provenance tracking')
-@click.option('--label', '-l', 'aiida_label', default=None,
-              help='Label for the AiiDA simulation set it creates '
-                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
                             help='Generate HPC scripts for the simulation root')
 def run_afm(config_file: str, settings_file: Optional[Path], output_dir: str,
-            use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
+            generate_hpc: bool):
     """Generate AFM simulation files.
 
     Creates all necessary LAMMPS input files, structures, and potentials
     for tip-on-substrate friction simulations.
 
     Example:
-        FrictionSim2D run.afm afm_config.ini -o ./afm_output --aiida
+        FrictionSim2D run afm afm_config.ini -o ./afm_output
     """
     _run_simulation(
-        'afm', config_file, output_dir, use_aiida, generate_hpc,
-        settings_file=settings_file, aiida_label=aiida_label
+        'afm', config_file, output_dir, generate_hpc,
+        settings_file=settings_file
     )
 
 @run_group.command('sheetonsheet')
@@ -160,26 +124,21 @@ def run_afm(config_file: str, settings_file: Optional[Path], output_dir: str,
           help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
-@click.option('--aiida', 'use_aiida', is_flag=True,
-              help='Enable AiiDA provenance tracking')
-@click.option('--label', '-l', 'aiida_label', default=None,
-              help='Label for the AiiDA simulation set it creates '
-                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
         help='Generate HPC scripts for the simulation root')
 def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir: str,
-             use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
+             generate_hpc: bool):
     """Generate sheet-on-sheet simulation files.
 
     Creates all necessary LAMMPS input files for 4-layer sheet-on-sheet
     friction simulations.
 
     Example:
-        FrictionSim2D run.sheetonsheet sheet_config.ini -o ./sheet_output
+        FrictionSim2D run sheetonsheet sheet_config.ini -o ./sheet_output
     """
     _run_simulation(
-        'sheetonsheet', config_file, output_dir, use_aiida, generate_hpc,
-        settings_file=settings_file, aiida_label=aiida_label
+        'sheetonsheet', config_file, output_dir, generate_hpc,
+        settings_file=settings_file
     )
 
 
@@ -190,15 +149,10 @@ def run_sheetonsheet(config_file: str, settings_file: Optional[Path], output_dir
               help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
-@click.option('--aiida', 'use_aiida', is_flag=True,
-              help='Enable AiiDA provenance tracking')
-@click.option('--label', '-l', 'aiida_label', default=None,
-              help='Label for the AiiDA simulation set it creates '
-                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
               help='Generate HPC scripts for the simulation root')
 def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: str,
-                  use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
+                  generate_hpc: bool):
     """Generate sheet-on-sheet interlayer PES scan files.
 
     Builds a frozen bilayer and writes a cheap, static lateral grid-scan of the
@@ -209,8 +163,8 @@ def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: s
         FrictionSim2D run pes-sheet examples/pes_sheet_config.ini -o ./pes_output
     """
     _run_simulation(
-        'pes_sheet', config_file, output_dir, use_aiida, generate_hpc,
-        settings_file=settings_file, aiida_label=aiida_label
+        'pes_sheet', config_file, output_dir, generate_hpc,
+        settings_file=settings_file
     )
 
 
@@ -221,15 +175,10 @@ def run_pes_sheet(config_file: str, settings_file: Optional[Path], output_dir: s
               help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
-@click.option('--aiida', 'use_aiida', is_flag=True,
-              help='Enable AiiDA provenance tracking')
-@click.option('--label', '-l', 'aiida_label', default=None,
-              help='Label for the AiiDA simulation set it creates '
-                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
               help='Generate HPC scripts for the simulation root')
 def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str,
-                use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
+                generate_hpc: bool):
     """Generate tip-on-sheet (AFM) surface PES scan files.
 
     Builds and indents the AFM tip + sheet + substrate stack to a low load
@@ -240,8 +189,8 @@ def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str
         FrictionSim2D run pes-tip examples/pes_tip_config.ini -o ./pes_output
     """
     _run_simulation(
-        'pes_tip', config_file, output_dir, use_aiida, generate_hpc,
-        settings_file=settings_file, aiida_label=aiida_label
+        'pes_tip', config_file, output_dir, generate_hpc,
+        settings_file=settings_file
     )
 
 
@@ -252,15 +201,10 @@ def run_pes_tip(config_file: str, settings_file: Optional[Path], output_dir: str
               help='Path to a settings.yaml file for this run only.')
 @click.option('--output-dir', '-o', default='simulation_output',
               help='Output directory for generated files')
-@click.option('--aiida', 'use_aiida', is_flag=True,
-              help='Enable AiiDA provenance tracking')
-@click.option('--label', '-l', 'aiida_label', default=None,
-              help='Label for the AiiDA simulation set it creates '
-                   '(default: the simulation root name).')
 @click.option('--hpc-scripts', 'generate_hpc', is_flag=True,
               help='Generate HPC scripts for the simulation root')
 def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
-               use_aiida: bool, generate_hpc: bool, aiida_label: Optional[str]):
+               generate_hpc: bool):
     """Generate AFM indentation ("indent") simulation files: hold + pull-off retract.
 
     The standard AFM build + indentation ramp (system.in) to each load in
@@ -276,21 +220,9 @@ def run_indent(config_file: str, settings_file: Optional[Path], output_dir: str,
         FrictionSim2D run indent examples/indent_config.ini -o ./indent_output --hpc-scripts
     """
     _run_simulation(
-        'indent', config_file, output_dir, use_aiida, generate_hpc,
-        settings_file=settings_file, aiida_label=aiida_label
+        'indent', config_file, output_dir, generate_hpc,
+        settings_file=settings_file
     )
-
-
-def _parse_walltime(value: Optional[str]) -> Optional[int]:
-    if not value:
-        return None
-    if value.isdigit():
-        return int(value)
-    parts = value.split(':')
-    if len(parts) == 3:
-        hours, minutes, seconds = [int(p) for p in parts]
-        return hours * 3600 + minutes * 60 + seconds
-    raise ValueError("Walltime must be seconds or HH:MM:SS")
 
 
 def _raise_abort(message: str, exc: Exception) -> NoReturn:
@@ -737,31 +669,56 @@ def aiida_status():
         click.echo(f"⚠️  No active profile: {exc}")
         click.echo("\n📝 Setup AiiDA with: verdi presto --use-postgres")
 
+#: ``--settings-file`` of the commands that read the store's settings
+#: (``aiida.machine``, ``aiida.skip_fraction``, ``integrity``, ``aiida.profile``).
+_store_settings_file_option = click.option(
+    '--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None, help='settings.yaml to read instead of the per-user one '
+                       '(~/.config/FrictionSim2D/settings.yaml).')
+
+
+def _store_profile(profile: Optional[str], settings_file: Optional[Path]) -> Optional[str]:
+    """``profile``, else ``aiida.profile`` of an explicit ``settings_file``
+    (``None`` leaves it to ``load_aiida_profile``: the per-user settings)."""
+    if profile is None and settings_file is not None:
+        return load_settings(settings_file=settings_file).aiida.profile or None
+    return profile
+
+
 @aiida_group.command('import')
 @click.argument('simulation_folder', type=click.Path(exists=True, path_type=Path))
 @click.option('--label', '-l', default=None,
               help='Label for the simulation set (default: the folder name).')
+@click.option('--machine', default=None,
+              help='Machine (Computer) the runs were produced on (default: '
+                   "settings.aiida.machine, else each run's settings.hpc.hpc_host, "
+                   "else 'localhost').")
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
+@_store_settings_file_option
 @click.option('--dry-run', is_flag=True,
               help='Print what would be imported; create nothing.')
-def aiida_import(simulation_folder: Path, label: Optional[str],
-                 profile: Optional[str], dry_run: bool):
+def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disable=too-many-arguments
+                 machine: Optional[str], profile: Optional[str],
+                 settings_file: Optional[Path], dry_run: bool):
     """Import a simulation tree into AiiDA: one CalcJob per LAMMPS deck.
 
     SIMULATION_FOLDER is the ``simulation_XXXXXXXX`` directory produced by one
     ``FrictionSim2D run``. Idempotent: re-importing skips every unchanged
-    deck and supersedes a changed one. Exits 1 if any run failed; a real
-    (non-dry-run) import also exits 1 if any path could not be parsed.
+    deck and supersedes a changed one. Every new point gets an integrity
+    verdict, then the set's rulings file is applied. Exits 1 if any run
+    failed; a real (non-dry-run) import also exits 1 if any path could not
+    be parsed.
 
     Example:
-        FrictionSim2D aiida import ./simulation_20260421_173546 -l 260421-afm
+        FrictionSim2D aiida import ./simulation_20260421_173546 -l 260421-afm --machine archer2
     """
     from .aiida.ingest import SetRootMismatch, import_root  # noqa: PLC0415
 
     try:
-        report = import_root(simulation_folder, label=label, profile=profile,
-                             dry_run=dry_run)
+        report = import_root(simulation_folder, label=label, machine=machine,
+                             profile=_store_profile(profile, settings_file),
+                             dry_run=dry_run, settings_file=settings_file)
     except SetRootMismatch as exc:
         _raise_abort(f"❌ {exc}", exc)
     except Exception as exc:  # pylint: disable=broad-except
@@ -774,6 +731,145 @@ def aiida_import(simulation_folder: Path, label: Optional[str],
         failed = failed or bool(report.unparseable)
     if failed:
         raise SystemExit(1)
+
+
+@aiida_group.command('rule')
+@click.argument('label')
+@click.option('--rulings', 'rulings_path',
+              type=click.Path(exists=True, path_type=Path), default=None,
+              help='Rulings file, or its directory (default: integrity_rulings.yaml '
+                   'in the root the set was imported from).')
+@click.option('--withdraw', is_flag=True,
+              help='Also withdraw every ruling the file no longer makes (always '
+                   "done for the set's own file; never otherwise without this).")
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_rule(label: str, rulings_path: Optional[Path], withdraw: bool,
+               profile: Optional[str]):
+    """Apply a rulings file to the set LABEL: a pass or fail ruling per
+    quarantined point (or, with ``override: true`` and a note, per any point).
+
+    Idempotent: a ruling already applied is skipped. Prints what was applied,
+    skipped and withdrawn, every live override of the set, and the rulings
+    that name no point of it.
+
+    Example:
+        FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/260421.yaml
+    """
+    from .aiida.steps import apply_rulings  # noqa: PLC0415
+
+    try:
+        report = apply_rulings(label, rulings_path, withdraw=True if withdraw else None,
+                               profile=profile)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Rulings failed")
+        _raise_abort(f"❌ Rulings for set {label!r} failed: {exc}", exc)
+    click.echo(report.render())
+
+
+@aiida_group.command('reindex')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_reindex(profile: Optional[str]):
+    """Recompute every friction2d index extra (block, schema, file and
+    folder hashes; run, deck and token extras) from the stored nodes.
+
+    Run it after an archive import that dropped or edited extras.
+    """
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .aiida.store import reindex  # noqa: PLC0415
+
+    try:
+        load_aiida_profile(profile)
+        touched = reindex()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Reindex failed")
+        _raise_abort(f"❌ Reindex failed: {exc}", exc)
+    click.echo(f"reindexed {touched} node(s)")
+
+
+@aiida_group.command('verify')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def aiida_verify(profile: Optional[str]):
+    """Check the store's content hashes: a hash held by more than one node,
+    or a hash extra that disagrees with its node's content.
+
+    Exits 1 when it finds either (``aiida reindex`` repairs a mismatch).
+    """
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .aiida.store import verify  # noqa: PLC0415
+
+    try:
+        load_aiida_profile(profile)
+        report = verify()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Verify failed")
+        _raise_abort(f"❌ Verify failed: {exc}", exc)
+    click.echo(report.render())
+    if not report.ok:
+        raise SystemExit(1)
+
+
+@aiida_group.command('postprocess')
+@click.argument('label')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@_store_settings_file_option
+def aiida_postprocess(label: str, profile: Optional[str], settings_file: Optional[Path]):
+    """Summarise every point of the set LABEL whose latest verdict is complete.
+
+    One tracked summary per point and summary options (settings
+    ``aiida.skip_fraction``) and code version; a second pass makes none.
+
+    Example:
+        FrictionSim2D aiida postprocess 260421-afm
+    """
+    from .aiida.steps import postprocess_group as summarise_set  # noqa: PLC0415
+
+    warnings: list = []
+    try:
+        made = summarise_set(label, warnings=warnings,
+                                 profile=_store_profile(profile, settings_file),
+                                 settings_file=settings_file)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Postprocess failed")
+        _raise_abort(f"❌ Postprocess of set {label!r} failed: {exc}", exc)
+    click.echo(f"set {label!r}: {made} new summar{'y' if made == 1 else 'ies'}")
+    for line in warnings:
+        click.echo(f"  WARNING {line}")
+
+
+@aiida_group.command('dataset')
+@click.argument('name')
+@click.argument('labels', nargs=-1, required=True)
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@_store_settings_file_option
+def aiida_dataset(name: str, labels: Tuple[str, ...], profile: Optional[str],
+                  settings_file: Optional[Path]):
+    """Make the dataset NAME from the sets LABELS: one row per point whose
+    latest verdict is complete, with the summary the policy selects.
+
+    Datasets are never rewritten: a NAME that exists is refused.
+
+    Example:
+        FrictionSim2D aiida dataset mos2-loads 260421-afm 260512-afm
+    """
+    from .aiida.steps import build_dataset  # noqa: PLC0415
+
+    warnings: list = []
+    try:
+        table = build_dataset(name, list(labels), warnings=warnings,
+                              profile=_store_profile(profile, settings_file),
+                              settings_file=settings_file)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Dataset failed")
+        _raise_abort(f"❌ Dataset {name!r} failed: {exc}", exc)
+    click.echo(f"dataset {name!r} ({table.uuid}): {len(table['rows'])} row(s) "
+               f"from {', '.join(labels)}")
+    for line in warnings:
+        click.echo(f"  WARNING {line}")
 
 
 @aiida_group.command('list-sets')
@@ -910,8 +1006,9 @@ def aiida_rebuild(set_label: str, output_dir: Path, hpc_scripts: bool,
 def aiida_delete(set_label: str, profile: Optional[str]):
     """Delete a single simulation set and all its linked nodes.
 
-    SET_LABEL is the label of the set to delete. All linked SimulationData
-    and ResultsData nodes, and the set's own Group, are also removed.
+    SET_LABEL is the label of the set to delete. Its CalcJobs, their outputs
+    and steps, the inputs nothing else uses, and the set's own Group are
+    removed.
 
     Example:
         FrictionSim2D aiida delete 260312-force_rebomos
@@ -936,8 +1033,9 @@ def aiida_delete(set_label: str, profile: Optional[str]):
 def aiida_clear(profile: Optional[str]):
     """Delete all FrictionSim2D nodes from the AiiDA database.
 
-    This removes every SimulationSet, Simulation, and Results node in the
-    profile. The action is irreversible.
+    This removes every friction2d CalcJob with its outputs, steps, summaries
+    and datasets, the inputs they leave unused, and every ``friction2d/*``
+    Group in the profile. Computers are kept. The action is irreversible.
 
     Example:
         FrictionSim2D aiida clear
@@ -951,6 +1049,18 @@ def aiida_clear(profile: Optional[str]):
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Clear failed")
         _raise_abort(f"❌ Clear failed: {exc}", exc)
+
+
+#: The columns ``aiida query`` leads with: the point, then its verdict.
+_QUERY_LEADING = ('set_label', 'rel_path', 'deck_name', 'load', 'load_unit', 'angle',
+                  'speed', 'status', 'reasons', 'verdict_kind', 'provisional',
+                  'thresholds_version')
+
+
+def _verdict_first(df):
+    """``df`` with :data:`_QUERY_LEADING` (those present) first."""
+    leading = [c for c in _QUERY_LEADING if c in df.columns]
+    return df[leading + [c for c in df.columns if c not in leading]]
 
 
 @aiida_group.command('query')
@@ -991,7 +1101,12 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
         temperature_min: Optional[float], temperature_max: Optional[float],
         limit: Optional[int], order_by: Optional[str], output_format: str,
         output: Optional[str], profile: Optional[str]):
-    """Query simulation runs and their results.
+    """Query the store's points: one row per live point, its verdict first.
+
+    Each row leads with the point (set, run, deck, load, angle, speed), then
+    the verdict the policy selects (``status``, ``reasons``,
+    ``verdict_kind``, ``provisional``, ``thresholds_version``), then the
+    point's tokens, identity and summary.
 
     Example:
         FrictionSim2D aiida query --material h-MoS2 --layers 2 --format csv
@@ -1040,10 +1155,10 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
 
     try:
         if output_format == 'table':
-            df = results.to_dataframe()
+            df = _verdict_first(results.to_dataframe())
             click.echo("\n" + df.to_string(index=False))
         elif output_format == 'csv':
-            df = results.to_dataframe()
+            df = _verdict_first(results.to_dataframe())
             if output:
                 df.to_csv(output, index=False)
                 click.echo(f"✅ Saved to {output}")
@@ -1068,23 +1183,20 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
 @click.option('--create-profile', '-p', 'create_profile', default=None,
               help='Name of the AiiDA profile to CREATE (default: friction2d). '
                    'Every other command spells --profile, which LOADS an existing one.')
-@click.option('--lammps-path', type=click.Path(),
-              help='Explicit path to the LAMMPS executable')
-def aiida_setup(create_profile: Optional[str], lammps_path: Optional[str]):
-    """Set up the AiiDA profile, the localhost computer and the LAMMPS code.
+def aiida_setup(create_profile: Optional[str]):
+    """Create (or load) the AiiDA profile.
 
-    localhost only: on the HPC, run this inside the HPC conda environment
-    (hpc-direct mode) and bring the archive home with `aiida export`.
+    Only the profile: the machine Computer and the LAMMPS Code of each run
+    are created when it is imported (``aiida import``).
 
     Example:
-        FrictionSim2D aiida setup --lammps-path /usr/local/bin/lmp
+        FrictionSim2D aiida setup --create-profile friction2d
     """
     from .aiida.setup import full_setup  # noqa: PLC0415
 
     click.echo("🔧 Running AiiDA first-time setup ...")
     try:
-        full_setup(profile_name=create_profile or 'friction2d',
-                   lammps_executable=lammps_path)
+        full_setup(profile_name=create_profile or 'friction2d')
         click.echo("✅ AiiDA setup complete")
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA setup failed")
@@ -1150,127 +1262,6 @@ def aiida_import_archive(archive_path: Path, profile: Optional[str]):
         _raise_abort(f"❌ Import failed: {exc}", exc)
     click.echo(f"✅ Imported {n_new} new node(s)")
 
-
-@aiida_group.command('package')
-@click.argument('simulation_dir', type=click.Path(exists=True))
-@click.option('--output', '-o', type=click.Path(), default=None,
-              help='Output archive path (.tar.gz)')
-def aiida_package(simulation_dir: str, output: Optional[str]):
-    """Create a tar.gz archive of simulation inputs for transfer."""
-    import tarfile  # noqa: PLC0415
-    sim_path = Path(simulation_dir)
-    out_path = Path(output) if output else sim_path.with_suffix('.tar.gz')
-
-    def _tar_filter(info: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
-        if info.name.endswith('.lammpstrj'):
-            return None
-        return info
-
-    click.echo(f"📦 Packing {sim_path} → {out_path}")
-    with tarfile.open(out_path, 'w:gz') as tar:
-        tar.add(sim_path, arcname=sim_path.name, filter=_tar_filter)
-    click.echo(f"✅ Archive created: {out_path}")
-
-
-@aiida_group.command('submit')
-@click.argument('simulation_dir', type=click.Path(exists=True))
-@click.option('--settings-file', type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              default=None,
-              help='Path to a settings.yaml file for this submission.')
-@click.option('--code', '-c', default=None,
-              help='AiiDA code label (auto-detects if not specified)')
-@click.option('--scripts', default=None,
-              help='Comma-separated list of LAMMPS scripts to run in order')
-@click.option('--machines', type=int, default=None,
-              help='Override: Number of machines per job')
-@click.option('--mpiprocs', type=int, default=None,
-              help='Override: MPI processes per machine')
-@click.option('--walltime', type=str, default=None,
-              help='Override: Walltime (HH:MM:SS or hours)')
-@click.option('--queue', type=str, default=None,
-              help='Override: Scheduler queue name')
-@click.option('--project', type=str, default=None,
-              help='Override: Scheduler project/account')
-@click.option('--dry-run', is_flag=True,
-              help='Preview configuration without submitting')
-@click.option('--daemon', is_flag=True, default=False,
-              help='Submit to the AiiDA daemon (needs RabbitMQ). '
-                   'Default: run in-process, which needs no broker.')
-@click.option('--profile', default=None,
-              help='AiiDA profile name (default: configured default profile)')
-def aiida_submit(  # pylint: disable=too-many-arguments
-    simulation_dir: str,
-    settings_file: Optional[Path],
-    code: Optional[str],
-    scripts: Optional[str],
-    machines: Optional[int],
-    mpiprocs: Optional[int],
-    walltime: Optional[str],
-    queue: Optional[str],
-    project: Optional[str],
-    dry_run: bool,
-    daemon: bool,
-    profile: Optional[str],
-):
-    """Run (or, with --daemon, submit) simulations as AiiDA CalcJobs.
-
-    SIMULATION_DIR is a simulation_* root or any directory inside one; every
-    run at or below it is submitted. Register the tree first (``run --aiida``
-    or ``aiida import``) so results are stored against its run nodes.
-    Automatically detects codes, uses settings.yaml defaults,
-    and prompts for essential missing values. Manual overrides are supported.
-
-    Examples:
-
-    # Minimal usage (auto-detect code, use defaults)
-      FrictionSim2D aiida submit ./afm_output
-
-      # With manual overrides
-      FrictionSim2D aiida submit ./output --machines 4 --walltime 24:00:00
-
-      # Preview before submitting
-      FrictionSim2D aiida submit ./output --dry-run
-    """
-    from .aiida.submit import smart_submit
-
-    sim_path = Path(simulation_dir)
-    click.echo(f"🚀 Preparing submission from {sim_path}\n")
-
-    try:
-        # Collect manual overrides
-        overrides = {}
-        if machines is not None:
-            overrides['machines'] = machines
-        if mpiprocs is not None:
-            overrides['mpiprocs'] = mpiprocs
-        if walltime is not None:
-            overrides['walltime'] = walltime
-        if queue is not None:
-            overrides['queue'] = queue
-        if project is not None:
-            overrides['project'] = project
-
-        # Call smart submit helper
-        processes = smart_submit(
-            simulation_dir=sim_path,
-            settings_file=settings_file,
-            code_label=code,
-            scripts=scripts,
-            dry_run=dry_run,
-            daemon=daemon,
-            profile=profile,
-            **overrides,
-        )
-
-        if not dry_run and processes and not daemon and not all(
-                p.is_finished_ok for p in processes):
-            raise SystemExit(1)
-
-    except click.ClickException:
-        raise
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.exception("AiiDA submit failed")
-        _raise_abort(f"❌ Submission failed: {exc}", exc)
 
 # =============================================================================
 # POSTPROCESSING COMMANDS
@@ -1565,11 +1556,47 @@ def postprocess_indent(run_root: Path, out_dir: Path, data_dir: Optional[Path]):
 # COMPARE
 # =============================================================================
 
+_SIDECAR_PREFIX = 'sidecar:'
+
+
+def _sidecar_dir(path: Path) -> Optional[Path]:
+    """The export sidecar ``path`` is or holds: ``path`` itself when it has
+    a ``schema-*.json``, else its one ``*.params`` child that has; None when
+    neither (several such children raise ``ValueError``)."""
+    if not path.is_dir():
+        return None
+    if any(path.glob('schema-*.json')):
+        return path
+    found = sorted(d for d in path.glob('*.params')
+                   if d.is_dir() and any(d.glob('schema-*.json')))
+    if len(found) > 1:
+        raise ValueError(f'{path} holds several sidecars ({", ".join(d.name for d in found)}); '
+                         f'name one')
+    return found[0] if found else None
+
+
 def _compare_side(ref: str, profile: Optional[str], rtol: float, atol: float):
-    """Blocks of one ``compare`` argument: a sidecar directory, else the store."""
-    if Path(ref).is_dir():
-        from .aiida.compare import load_blocks_from_sidecar  # noqa: PLC0415
-        return load_blocks_from_sidecar(Path(ref), rtol=rtol, atol=atol)
+    """Blocks of one ``compare`` argument.
+
+    ``sidecar:<path>`` is an export sidecar (its directory, a directory
+    holding one, or one deck's JSON in it). Unprefixed, a directory is a
+    sidecar only when it is or holds one (:func:`_sidecar_dir`); anything
+    else is a store reference, so a folder that happens to share a group's
+    name never shadows the group.
+    """
+    from .aiida.compare import load_blocks_from_sidecar  # noqa: PLC0415
+    if ref.startswith(_SIDECAR_PREFIX):
+        path = Path(ref[len(_SIDECAR_PREFIX):])
+        if path.is_file():
+            return load_blocks_from_sidecar(path, rtol=rtol, atol=atol)
+        found = _sidecar_dir(path)
+        if found is None:
+            raise LookupError(f'{path} is not an export sidecar: no schema-*.json in '
+                              f'it or in a *.params directory under it')
+        return load_blocks_from_sidecar(found, rtol=rtol, atol=atol)
+    found = _sidecar_dir(Path(ref))
+    if found is not None:
+        return load_blocks_from_sidecar(found, rtol=rtol, atol=atol)
     from .aiida import load_aiida_profile  # noqa: PLC0415
     from .aiida.compare import load_blocks  # noqa: PLC0415
     load_aiida_profile(profile)
@@ -1589,8 +1616,10 @@ def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float, atol: float
     """Compare the parameter blocks of two runs or campaigns, field by field.
 
     A and B are each a CalcJob pk or uuid, a point uuid, a group label, or an
-    archive's ``.params`` sidecar directory. Prefix a reference with ``pk:``,
-    ``uuid:``, ``point:`` or ``group:`` to say which; unprefixed, an all-digit
+    archive's ``.params`` sidecar. Prefix a reference with ``pk:``, ``uuid:``,
+    ``point:``, ``group:`` or ``sidecar:`` to say which. Unprefixed, a
+    directory that is (or holds) a ``.params`` sidecar written by ``aiida
+    export`` is read as one; otherwise the store is asked: an all-digit
     reference is a pk (else a group label), anything else a group, uuid or point.
     Each side is read in its own schema's units and defaults. A group gives the fields shared
     by all its decks; a field that varies inside it shows as '<varies>'.

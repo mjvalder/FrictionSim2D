@@ -49,7 +49,7 @@ def test_run_afm_help(runner):
     assert result.exit_code == 0
     assert 'CONFIG_FILE' in result.output
     assert '--output-dir' in result.output
-    assert '--aiida' in result.output
+    assert '--aiida' not in result.output
     assert '--hpc-scripts' in result.output
 
 
@@ -430,24 +430,10 @@ def test_aiida_import_archive_loads_profile(runner, monkeypatch, tmp_path):
     ]
 
 
-def test_aiida_package_help(runner):
-    result = runner.invoke(cli, ['aiida', 'package', '--help'])
-    assert result.exit_code == 0
-    assert 'SIMULATION_DIR' in result.output
-
-
-def test_aiida_submit_help(runner):
-    result = runner.invoke(cli, ['aiida', 'submit', '--help'])
-    assert result.exit_code == 0
-    assert '--dry-run' in result.output
-    assert '--walltime' in result.output
-    assert '--array' not in result.output
-
-
-def test_aiida_submit_rejects_array_flag(runner):
-    """AiiDA-managed array CalcJobs are removed (see task-B brief): array
-    jobs on an HPC go through `hpc generate` + qsub + `aiida import` instead,
-    so `--array` is no longer a recognised option."""
-    result = runner.invoke(cli, ['aiida', 'submit', '.', '--array'])
+@pytest.mark.parametrize('gone', ['package', 'submit'])
+def test_aiida_submission_commands_are_gone(runner, gone):
+    """AiiDA is import-only: jobs go through `hpc generate` + the scheduler +
+    `aiida import`; nothing submits through AiiDA any more."""
+    result = runner.invoke(cli, ['aiida', gone, '--help'])
     assert result.exit_code != 0
-    assert 'no such option' in result.output.lower()
+    assert 'No such command' in result.output

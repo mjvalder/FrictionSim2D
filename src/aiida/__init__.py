@@ -19,9 +19,6 @@ else:
     LOAD_PROFILE = None
 
 _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
-    'FrictionSimulationData': (f'{__name__}.data', 'FrictionSimulationData'),
-    'FrictionSimulationSetData': (f'{__name__}.data', 'FrictionSimulationSetData'),
-    'FrictionResultsData': (f'{__name__}.data', 'FrictionResultsData'),
     'Friction2DDB': (f'{__name__}.query', 'Friction2DDB'),
     'import_root': (f'{__name__}.ingest', 'import_root'),
     'export_results': (f'{__name__}.export', 'export_results'),
@@ -32,8 +29,6 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'delete_simulation_set': (f'{__name__}.integration', 'delete_simulation_set'),
     'clear_all_nodes': (f'{__name__}.integration', 'clear_all_nodes'),
     'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),
-    'run_with_aiida': (f'{__name__}.submit', 'run_with_aiida'),
-    'smart_submit': (f'{__name__}.submit', 'smart_submit'),
     'full_setup': (f'{__name__}.setup', 'full_setup'),
 }
 

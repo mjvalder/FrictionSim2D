@@ -180,7 +180,7 @@ def test_snapshot_drift_names_the_fix():
 
 
 def test_defaults_are_environment_free():
-    """Only block fields: settings.database.* reads the environment, and is excluded."""
+    """Only block fields are listed."""
     for family in FAMILIES:
         assert set(defaults_for(family)) <= set(FIELD_MAP), family
 

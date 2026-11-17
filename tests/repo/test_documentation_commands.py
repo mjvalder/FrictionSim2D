@@ -38,10 +38,8 @@ def test_every_aiida_subcommand_is_documented():
 
 
 def test_settings_doc_lists_the_real_fields():
-    from src.core.config import AiidaSettings, DatabaseSettings
+    from src.core.config import AiidaSettings
 
     text = (DOCS / 'settings.md').read_text(encoding='utf-8')
     for field in AiidaSettings.model_fields:
-        assert f'{field}:' in text, field
-    for field in DatabaseSettings.model_fields:
         assert f'{field}:' in text, field

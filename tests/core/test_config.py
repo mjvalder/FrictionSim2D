@@ -804,14 +804,25 @@ def test_removed_aiida_and_database_keys_warn_once(tmp_path, caplog):
     assert 'aiida.enabled' in warnings[0].getMessage()
 
 
-def test_database_settings_is_central_only():
-    from src.core.config import DatabaseSettings
-
-    assert set(DatabaseSettings.model_fields) == {
-        'host', 'port', 'dbname', 'user', 'password', 'api_key', 'api_url',
-        'skip_fraction'}
+def test_database_settings_are_gone():
+    """The central database is gone: no `DatabaseSettings`, no `database`
+    field; the AiiDA store is the only database."""
     import src.core.config as config_mod
+    assert not hasattr(config_mod, 'DatabaseSettings')
     assert not hasattr(config_mod, 'DatabaseProfileSettings')
+    assert 'database' not in GlobalSettings.model_fields
+
+
+def test_a_flat_database_block_still_loads_with_one_warning(tmp_path, caplog):
+    settings_file = tmp_path / 'settings.yaml'
+    settings_file.write_text('database:\n  host: db.example.org\n  password: x\n'
+                             'thermostat:\n  type: langevin\n', encoding='utf-8')
+    with caplog.at_level('WARNING'):
+        settings = load_settings(settings_file=settings_file)
+    assert settings.thermostat.type == 'langevin'
+    assert not hasattr(settings, 'database')
+    warnings = [r for r in caplog.records if r.levelname == 'WARNING']
+    assert len(warnings) == 1 and 'database block' in warnings[0].getMessage()
 
 
 def test_old_settings_file_with_removed_aiida_and_database_keys_still_loads(
@@ -857,13 +868,11 @@ def test_old_settings_file_with_removed_aiida_and_database_keys_still_loads(
     assert not hasattr(settings.aiida, 'enabled')
     assert not hasattr(settings.aiida, 'transport')
 
-    # The nested database.central block is now silently ignored --
-    # DatabaseSettings.host stays at its default, NOT 'db.example.org'.
-    assert settings.database.host == ''
-    assert any(
-        'database.active_profile' in rec.message or 'central' in rec.message
-        for rec in caplog.records
-    ), "load_settings must warn when it silently drops an old nested database block"
+    # The database block is ignored (the central database is gone), and
+    # load_settings says so rather than dropping it silently.
+    assert not hasattr(settings, 'database')
+    assert any('database block' in rec.message for rec in caplog.records), \
+        "load_settings must warn when it ignores a database block"
 
 
 def test_integrity_defaults_match_s48():

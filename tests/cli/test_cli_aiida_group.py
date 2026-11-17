@@ -1,5 +1,7 @@
 """The aiida CLI surface (spec §4.2): import / export-results / rebuild.
 
+The commands that need a real store are in `tests/aiida/test_cli_aiida.py`.
+
 `aiida dump` is gone -- superseded by `export-results`, which writes a set
 back out as an ordinary simulation tree instead of a `postprocess read
 --export` blob.
@@ -31,17 +33,18 @@ def test_import_passes_label_and_dry_run(tmp_path, monkeypatch):
     monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
     monkeypatch.setattr(
         'src.aiida.ingest.import_root',
-        lambda root, label=None, profile=None, dry_run=False:
-            seen.update(root=Path(root), label=label, profile=profile,
-                        dry_run=dry_run) or _Report())
+        lambda root, label=None, machine=None, profile=None, dry_run=False,
+        settings_file=None:
+            seen.update(root=Path(root), label=label, machine=machine, profile=profile,
+                        dry_run=dry_run, settings_file=settings_file) or _Report())
 
     result = CliRunner().invoke(cli, [
         'aiida', 'import', str(tmp_path), '--label', '260910-afm',
-        '--profile', 'friction2d', '--dry-run'])
+        '--profile', 'friction2d', '--dry-run', '--machine', 'archer2'])
 
     assert result.exit_code == 0, result.output
-    assert seen == {'root': tmp_path, 'label': '260910-afm',
-                    'profile': 'friction2d', 'dry_run': True}
+    assert seen == {'root': tmp_path, 'label': '260910-afm', 'machine': 'archer2',
+                    'profile': 'friction2d', 'dry_run': True, 'settings_file': None}
     assert 'results created: 4' in result.output
 
 
@@ -227,3 +230,24 @@ def test_stamp_uuid_exits_1_on_a_non_uuid_run_uuid(tmp_path):
     assert result.exit_code == 1
     assert 'invalid run_uuid' in result.output
     assert json.loads(prov.read_text(encoding='utf-8'))['run_uuid'] == 'run-42'
+
+
+def test_import_takes_the_profile_from_an_explicit_settings_file(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr('src.aiida.AIIDA_AVAILABLE', True)
+    monkeypatch.setattr('src.aiida.ingest.import_root',
+                        lambda root, **kwargs: seen.update(kwargs) or _Report())
+    settings = tmp_path / 'settings.yaml'
+    settings.write_text('aiida:\n  profile: from-file\n', encoding='utf-8')
+
+    result = CliRunner().invoke(cli, ['aiida', 'import', str(tmp_path),
+                                      '--settings-file', str(settings)])
+
+    assert result.exit_code == 0, result.output
+    assert seen['profile'] == 'from-file' and seen['settings_file'] == settings
+
+
+@pytest.mark.parametrize('command', ['rule', 'reindex', 'verify', 'postprocess', 'dataset'])
+def test_the_store_commands_exist(command):
+    result = CliRunner().invoke(cli, ['aiida', command, '--help'])
+    assert result.exit_code == 0, result.output

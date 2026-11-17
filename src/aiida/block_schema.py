@@ -240,8 +240,6 @@ _HPC = ('scheduler_type', 'queue', 'partition', 'account', 'hpc_host', 'hpc_home
         'use_tmpdir', 'preflight', 'lammps_scripts')
 _AIIDA = ('profile', 'computer_label', 'max_stored_file_mb', 'skip_fraction',
           'machine')
-_DATABASE = ('host', 'port', 'dbname', 'user', 'password', 'api_key', 'api_url',
-             'skip_fraction')
 # Analysis thresholds of the post-run integrity check, not simulation physics:
 # a new threshold set judges the same run differently, it is not a new run.
 _INTEGRITY = ('hole_bonds', 'isolated_radius_bonds', 'isolated_atoms',
@@ -263,15 +261,14 @@ PROVENANCE_EXCLUDED = frozenset((
     'materials.pot_resolution_route'))
 
 #: Leaf fields that are not simulation physics, each named. Job submission
-#: (``hpc``), the import itself (``aiida``), the central DB (``database``,
-#: until Task 11 removes it), integrity thresholds (``integrity``), how and
-#: where the amorphous quench runs (not what it produces), ``materials_list``
+#: (``hpc``), the import itself (``aiida``), integrity thresholds
+#: (``integrity``), how and where the amorphous quench runs (not what it
+#: produces), ``materials_list``
 #: (consumed by sweep expansion), the deck shape and point set
 #: (``outer_loop``, ``scan_angle_force``), and :data:`PROVENANCE_EXCLUDED`.
 EXCLUDED = frozenset(
     [f'settings.hpc.{n}' for n in _HPC]
     + [f'settings.aiida.{n}' for n in _AIIDA]
-    + [f'settings.database.{n}' for n in _DATABASE]
     + [f'settings.integrity.{n}' for n in _INTEGRITY]
     + ['settings.quench.run_local', 'settings.quench.n_procs',
        'settings.quench.allow_generate']
@@ -658,8 +655,7 @@ def defaults_for(family: str) -> Dict[str, Any]:
     Required fields are absent. AFM families read ``AFMSimulationConfig``,
     sheet families ``SheetOnSheetSimulationConfig``; ``settings.*`` comes from
     ``GlobalSettings`` through either. Only block fields are listed: the
-    excluded ones (``settings.database.*`` reads the environment) have no
-    place in identity. Pinned by ``tests/fixtures/block_defaults.json``.
+    excluded ones have no place in identity. Pinned by ``tests/fixtures/block_defaults.json``.
     """
     model = family_model(family)
     if model not in _DEFAULTS_CACHE:

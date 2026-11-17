@@ -30,9 +30,8 @@ def test_core_lazy_exports_resolve():
 
 
 def test_top_level_lazy_exports_resolve():
+    assert "run_with_aiida" not in src.__all__  # AiiDA submission is gone
     for name in src.__all__:
-        if name == "run_with_aiida":
-            continue  # gated on _AIIDA_AVAILABLE
         assert getattr(src, name) is not None, f"src.{name} did not resolve"
 
 

@@ -20,18 +20,16 @@ PASSWORD = 'hunter2-central-db-password'
 API_KEY = 'sk-central-api-key-0123456789'
 
 
-def test_redact_secrets_blanks_only_the_credentials():
+def test_redact_secrets_keeps_every_non_credential_field():
+    """`GlobalSettings` carries no credential since the central database
+    settings went; redaction is a faithful copy, never the original."""
     settings = GlobalSettings()
-    settings.database.password = PASSWORD
-    settings.database.api_key = API_KEY
-    settings.database.host = 'db.example.org'
+    settings.hpc.hpc_host = 'cluster.example.org'
 
     safe = redact_secrets(settings)
 
-    assert safe.database.password == ''
-    assert safe.database.api_key == ''
-    assert safe.database.host == 'db.example.org'
-    assert settings.database.password == PASSWORD  # the original is untouched
+    assert safe == settings and safe is not settings
+    assert safe.hpc.hpc_host == 'cluster.example.org'
 
 
 def test_generated_tree_carries_no_credentials(tmp_path, monkeypatch):
@@ -56,7 +54,7 @@ def test_generated_tree_carries_no_credentials(tmp_path, monkeypatch):
         assert API_KEY not in text, path
     stored = yaml.safe_load(next(p for p in written if p.name == 'settings.yaml')
                             .read_text(encoding='utf-8'))
-    assert stored['database']['host'] == 'db.example.org'
+    assert 'database' not in stored   # the block is ignored, never written
 
 
 def test_redact_secrets_mapping_blanks_the_flat_shape():

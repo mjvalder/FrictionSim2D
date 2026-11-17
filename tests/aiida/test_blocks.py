@@ -661,7 +661,7 @@ def test_map_and_exclusions_name_only_real_fields():
 
 
 def test_exclusions_are_named_not_physics():
-    for section in ('hpc', 'aiida', 'database', 'integrity'):
+    for section in ('hpc', 'aiida', 'integrity'):
         assert any(p.startswith(f'settings.{section}.') for p in EXCLUDED), section
     assert not any(p.startswith('settings.thermostat.') for p in EXCLUDED)
 

@@ -72,3 +72,68 @@ def test_sidecar_reads_each_deck_against_its_own_schema_version(tmp_path):
     single = load_blocks_from_sidecar(root / 'afm2' / 'slide.json')
     assert single.units['general.temp'] == 'mK'   # its own 1.1.0, not the other
     assert load_blocks_from_sidecar(deck).units['general.temp'] == 'K'
+
+
+# --- a store reference is never shadowed by a local directory -----------------
+
+def _patched_store(monkeypatch, sides):
+    """`load_blocks` from the store, recording each reference it is given."""
+    import src.aiida as aiida_pkg
+    import src.aiida.compare as compare_mod
+    from src.aiida.compare import load_blocks_from_sidecar
+
+    seen = []
+    monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
+
+    def _store(ref, **kwargs):
+        seen.append(ref)
+        return load_blocks_from_sidecar(sides[ref], **kwargs)
+
+    monkeypatch.setattr(compare_mod, 'load_blocks', _store)
+    return seen
+
+
+def test_a_plain_directory_named_like_a_group_reads_the_store(tmp_path, monkeypatch):
+    a = _sidecar(tmp_path / 'store-a.params', 300.0)
+    b = _sidecar(tmp_path / 'store-b.params', 400.0)
+    seen = _patched_store(monkeypatch, {'camp': a, 'other': b})
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'camp').mkdir()                  # a folder, not an export sidecar
+    (tmp_path / 'camp' / 'notes.json').write_text('{}', encoding='utf-8')
+
+    result = CliRunner().invoke(cli, ['compare', 'camp', 'other'])
+
+    assert result.exit_code == 0, result.output
+    assert seen == ['camp', 'other']
+    assert '300.0' in result.output and '400.0' in result.output
+
+
+def test_a_directory_holding_an_export_sidecar_is_read_as_one(tmp_path, monkeypatch):
+    seen = _patched_store(monkeypatch, {})
+    export = tmp_path / 'transfer'
+    _sidecar(export / 'camp.aiida.params', 300.0)
+    b = _sidecar(tmp_path / 'b.params', 400.0)
+
+    result = CliRunner().invoke(cli, ['compare', str(export), str(b)])
+
+    assert result.exit_code == 0, result.output
+    assert seen == []
+    assert '300.0' in result.output and '400.0' in result.output
+
+
+def test_the_sidecar_prefix_names_a_sidecar_explicitly(tmp_path, monkeypatch):
+    seen = _patched_store(monkeypatch, {})
+    a = _sidecar(tmp_path / 'a.params', 300.0)
+    deck = _sidecar(tmp_path / 'b.params', 400.0) / 'afm' / 'slide.json'
+
+    result = CliRunner().invoke(cli, ['compare', f'sidecar:{a}', f'sidecar:{deck}'])
+
+    assert result.exit_code == 0, result.output
+    assert seen == []
+    assert '400.0' in result.output
+
+    plain = tmp_path / 'plain'
+    plain.mkdir()
+    bad = CliRunner().invoke(cli, ['compare', f'sidecar:{plain}', f'sidecar:{a}'])
+    assert bad.exit_code != 0
+    assert 'schema-' in bad.output

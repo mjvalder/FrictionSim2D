@@ -283,17 +283,19 @@ def _content_addressed() -> Set[int]:
     return pks
 
 
+#: ``node_type`` prefix of the removed ``friction2d.*`` ``aiida.data`` node
+#: types (the old set/run/results nodes) an older profile may still hold.
+_LEGACY_NODE_TYPE = 'data.friction2d.%'
+
+
 def _legacy_nodes() -> List[int]:
-    """The pre-Task-6 FrictionSimulation*/FrictionResults data nodes."""
+    """The pk of every node of a removed ``friction2d.*`` Data type, matched
+    on ``node_type`` (the classes and their entry points are gone)."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
-    from .data import (FrictionResultsData, FrictionSimulationData,  # pylint: disable=import-outside-toplevel
-                       FrictionSimulationSetData)
-
-    pks: List[int] = []
-    for cls in (FrictionResultsData, FrictionSimulationData, FrictionSimulationSetData):
-        pks += orm.QueryBuilder().append(cls, project='id').all(flat=True)
-    return pks
+    return orm.QueryBuilder().append(
+        orm.Node, filters={'node_type': {'like': _LEGACY_NODE_TYPE}},
+        project='id').all(flat=True)
 
 
 def clear_all_nodes(profile: Optional[str] = None) -> int:

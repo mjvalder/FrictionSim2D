@@ -439,10 +439,9 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
     ``JobManifest``'s ``rglob('lammps')`` and duplicate every job -- and hands
     each DISTINCT staged ``provenance/config.json`` (by path: every ``L{n}`` of
     an AFM run shares one) to ``run.artifacts.generate_package``, alias-fixed
-    (:func:`_fix_config_aliases`), with ``use_aiida=False``,
-    ``allow_generate_amorphous=False`` and ``simulation_root_name='.'`` so each
-    run keeps its ``rel_path``. The run's stored ``provenance/settings.yaml`` is
-    the settings file. Returns ``(created paths, dest)``.
+    (:func:`_fix_config_aliases`), with ``allow_generate_amorphous=False``
+    and ``simulation_root_name='.'`` so each run keeps its ``rel_path``. The
+    run's stored ``provenance/settings.yaml`` is the settings file. Returns ``(created paths, dest)``.
     """
     _load_profile(profile)
     rel_paths = sorted({calc.inputs.parameters['rel_path']
@@ -470,7 +469,7 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
             result = generate_package(
                 config_json, model, output_root=dest,
                 settings_file=settings_file if settings_file.is_file() else None,
-                generate_hpc=generate_hpc, use_aiida=False,
+                generate_hpc=generate_hpc,
                 simulation_root_name='.', allow_generate_amorphous=False)
             for failure in result.failures:
                 logger.error('Rebuild failed: %s', failure.render())

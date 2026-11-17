@@ -23,7 +23,6 @@ Options:
 
 - `--settings-file PATH` — per-run settings.yaml override
 - `-o, --output-dir TEXT` (default: `simulation_output`)
-- `--aiida` — register generated simulations in AiiDA
 - `--hpc-scripts` — generate PBS/SLURM scripts in the same step
 
 ### run sheetonsheet
@@ -213,10 +212,15 @@ templates already carry it, guarded by `command -v`.
 
 > AiiDA commands require `aiida-core`. Install with `pip install -e .[aiida]`.
 
-`run <model> ... --aiida --label LABEL` registers the simulation set and its
-run nodes at generation time (before any results exist); a later
-`aiida import` on the finished tree attaches results to those same nodes.
-See [aiida.md](aiida.md) for the node model and run modes.
+The store is import-only: `run` generates, the scheduler runs, and `aiida
+import` registers the finished tree (one CalcJob per deck, an integrity
+verdict per point, the set's rulings). Nothing submits through AiiDA.
+See [aiida.md](aiida.md) for the node model.
+
+Commands that read settings (`import`, `postprocess`, `dataset`) take
+`--settings-file PATH` to read that file instead of
+`~/.config/FrictionSim2D/settings.yaml`; its `aiida.profile` also names the
+profile when `--profile` is not given.
 
 ### aiida status
 
@@ -236,9 +240,8 @@ FrictionSim2D aiida preflight
 
 ### aiida setup
 
-Creates the AiiDA profile, the `localhost` computer, and the LAMMPS code.
-Localhost only — run this inside the HPC's own conda environment for
-hpc-direct mode.
+Creates (or loads) the AiiDA profile — only the profile: the machine
+`Computer` and the LAMMPS `Code` of each run are created when it is imported.
 
 ```bash
 FrictionSim2D aiida setup [OPTIONS]
@@ -249,7 +252,6 @@ Options:
 - `-p, --create-profile TEXT` — name of the profile to **create** (default:
   `friction2d`). Every other `aiida` command spells `--profile`, which
   **loads** an existing one.
-- `--lammps-path PATH` — explicit path to the LAMMPS executable
 
 ### aiida import
 
@@ -263,12 +265,79 @@ FrictionSim2D aiida import SIMULATION_FOLDER [OPTIONS]
 Options:
 
 - `-l, --label TEXT` — label for the set (default: the folder name)
+- `--machine TEXT` — the machine (Computer) the runs were produced on
+  (default: `settings.aiida.machine`, else each run's `settings.hpc.hpc_host`,
+  else `localhost`)
 - `--profile TEXT`
+- `--settings-file PATH`
 - `--dry-run` — print what would be ingested; create nothing
 
+The report counts decks created, skipped, superseded and already imported
+(under another label), points, verdicts and rulings, and lists every deck with
+no LAMMPS version (no Code), every failure and every warning.
+
 Exit code: non-zero if any run failed. A real (non-dry-run) import also exits
-non-zero if any run was left empty or could not be parsed; a `--dry-run`
-preview of a fresh, pre-HPC tree is legitimately all-empty and exits 0.
+non-zero if any run could not be parsed.
+
+### aiida rule
+
+Apply a rulings file to a set: a `pass`/`fail` ruling per quarantined point,
+or — with `override: true` and a note — per any point:
+
+```bash
+FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--profile TEXT]
+```
+
+- `--rulings PATH` — the file, or its directory (default:
+  `integrity_rulings.yaml` in the root the set was imported from)
+- `--withdraw` — also withdraw every ruling the file no longer makes. The
+  set's own file always withdraws them; another file does only with this flag.
+
+Idempotent. Prints `applied N, skipped N, withdrawn N`, every live override of
+the set (`override <point>: <original> -> <new> (<note>)`), the withdrawn
+points, and rulings that match no point.
+
+### aiida postprocess
+
+Summarise every point of a set whose latest verdict is `complete` (one tracked
+summary per point, summary options and code version; a second pass makes none):
+
+```bash
+FrictionSim2D aiida postprocess LABEL [--profile TEXT] [--settings-file PATH]
+```
+
+The summary options come from `settings.aiida.skip_fraction`.
+
+### aiida dataset
+
+Make the dataset `friction2d/datasets/NAME` from one or more sets: one row per
+point whose latest verdict is `complete`, with the summary the policy selects
+and the units:
+
+```bash
+FrictionSim2D aiida dataset NAME LABEL [LABEL ...] [--profile TEXT] [--settings-file PATH]
+```
+
+Datasets are never rewritten: an existing NAME is refused.
+
+### aiida reindex
+
+Recompute every friction2d index extra (block, schema, file and folder hashes;
+run, deck and token extras) from the stored nodes — after an archive import
+that dropped or edited extras:
+
+```bash
+FrictionSim2D aiida reindex [--profile TEXT]
+```
+
+### aiida verify
+
+Report hashes held by more than one node and hash extras that disagree with
+their node's content; exits 1 when it finds either:
+
+```bash
+FrictionSim2D aiida verify [--profile TEXT]
+```
 
 ### aiida stamp-uuid
 
@@ -356,6 +425,12 @@ Options:
 - `-o, --output PATH`
 - `--profile TEXT`
 
+One row per live point. The `table` and `csv` formats lead with the point
+(`set_label`, `rel_path`, `deck_name`, `load`, `load_unit`, `angle`, `speed`)
+and the verdict the policy selects (`status`, `reasons`, `verdict_kind`,
+`provisional`, `thresholds_version`), then the run tokens, the identity
+columns and the selected summary.
+
 Any other `RunTokens` filter is Python-API only (`src/aiida/query.py`), not
 exposed as a CLI option.
 
@@ -393,48 +468,6 @@ came across inside the archive:
 ```bash
 FrictionSim2D aiida import-archive ARCHIVE_PATH [--profile TEXT]
 ```
-
-### aiida package
-
-Create a `tar.gz` of simulation inputs for cluster transfer (excludes `.lammpstrj`):
-
-```bash
-FrictionSim2D aiida package SIMULATION_DIR [-o OUTPUT]
-```
-
-### aiida submit
-
-```bash
-FrictionSim2D aiida submit SIMULATION_DIR [OPTIONS]
-```
-
-`SIMULATION_DIR` is a `simulation_*` root or any directory inside one (a model
-directory, a single run). The root is found by walking up to the nearest
-directory with `<model>/.../provenance.json` under it, and every run at or
-below `SIMULATION_DIR` is submitted. Register the tree first (`run --aiida` or
-`aiida import`): a run with no run node still runs and its results are copied
-back into the tree, but nothing is stored until you `aiida import` it.
-
-In-process mode (the default) reports `Ran N job(s): K finished ok, M failed`
-with each failed job's exit status, and exits 1 if any failed. With `--daemon`
-the jobs are only queued and the command reports `Submitted`.
-
-Options:
-
-- `--profile TEXT` — AiiDA profile to load (default: `settings.aiida.profile`,
-  then AiiDA's default profile)
-
-- `--settings-file PATH`
-- `-c, --code TEXT` (auto-detects if not specified, falling back to `settings.aiida.lammps_code_label`)
-- `--scripts TEXT` (comma-separated list)
-- `--machines INTEGER`
-- `--mpiprocs INTEGER`
-- `--walltime TEXT` (`HH:MM:SS` or hours)
-- `--queue TEXT`
-- `--project TEXT`
-- `--dry-run` — preview configuration without submitting
-- `--daemon` — submit to the AiiDA daemon (needs RabbitMQ). Default: run
-  in-process with `aiida.engine.run`, which needs no broker.
 
 ## postprocess
 
@@ -522,6 +555,23 @@ Produces both descriptor sets from the one hold-and-retract run:
 - `indent_manifest.csv` — `material, layer, load, seed, hold_steps, z_step, n_steps, wall_time`
 
 See [indent.md](indent.md).
+
+## compare
+
+Compare the parameter blocks of two runs or campaigns, field by field, each in
+its own schema's units and defaults:
+
+```bash
+FrictionSim2D compare A B [--profile TEXT] [--rtol FLOAT] [--atol FLOAT]
+```
+
+A and B are each a CalcJob pk or uuid, a point uuid, a set (group) label, or
+an `aiida export` sidecar. Prefix one with `pk:`, `uuid:`, `point:`, `group:`
+or `sidecar:` to say which (`sidecar:` takes the `<archive>.params/`
+directory, a directory holding one, or one deck's JSON in it). Unprefixed, a
+directory counts as a sidecar only when it is, or holds, a `.params` directory
+with its `schema-*.json`; anything else is looked up in the store, so a local
+folder that shares a set's name never shadows the set.
 
 ## db and api (removed)
 

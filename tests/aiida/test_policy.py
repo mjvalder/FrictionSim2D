@@ -74,7 +74,7 @@ def test_empty_candidates_select_nothing():
 
 def test_unknown_kind_is_rejected():
     with pytest.raises(ValueError, match='kind'):
-        select([], 'nondim', Policy())
+        select([], 'bogus', Policy())
 
 
 def test_policy_round_trips():

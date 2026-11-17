@@ -194,7 +194,7 @@ def test_rebuild_set_hands_each_config_once_to_the_router(aiida_profile_clean,
     assert len(calls) == 2
     assert {model for _c, model, _k in calls} == {'afm'}
     for _config, _model, kwargs in calls:
-        assert kwargs['use_aiida'] is False and kwargs['simulation_root_name'] == '.'
+        assert 'use_aiida' not in kwargs and kwargs['simulation_root_name'] == '.'
         assert kwargs['allow_generate_amorphous'] is False
         assert kwargs['output_root'] == tmp_path / 'rebuilt'
 

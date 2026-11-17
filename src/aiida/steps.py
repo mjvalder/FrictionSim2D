@@ -335,11 +335,13 @@ def _live_verdicts(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
     return out
 
 
-def _strict_settings(warnings: Optional[List[str]], fallback: str):
-    """The ``GlobalSettings`` of the settings file in effect, validated
-    strictly; None without a file, or -- with ``f'settings file <path>
-    unreadable (<error>); {fallback}'`` in ``warnings``, or logged as a
-    WARNING when ``warnings`` is None -- when it cannot be read.
+def _strict_settings(warnings: Optional[List[str]], fallback: str,
+                     settings_file: Optional[Path] = None):
+    """The ``GlobalSettings`` of the settings file in effect (``settings_file``
+    when given, else the per-user one), validated strictly; None without a
+    file, or -- with ``f'settings file <path> unreadable (<error>);
+    {fallback}'`` in ``warnings``, or logged as a WARNING when ``warnings``
+    is None -- when it cannot be read.
 
     ``load_settings`` skips an unreadable file silently (a log line), so the
     file it would use (``settings_origin``) is read and validated here.
@@ -348,7 +350,7 @@ def _strict_settings(warnings: Optional[List[str]], fallback: str):
     import yaml
 
     from ..core.config import GlobalSettings, settings_origin
-    path = settings_origin()
+    path = settings_origin(settings_file)
     if path is None:
         return None
     try:
@@ -363,13 +365,16 @@ def _strict_settings(warnings: Optional[List[str]], fallback: str):
         return None
 
 
-def _settings_dump(warnings: Optional[List[str]] = None) -> Dict[str, Any]:
-    """``settings.integrity`` of the settings file in effect; the defaults,
-    with a warning in ``warnings``, when that file cannot be read."""
+def _settings_dump(warnings: Optional[List[str]] = None,
+                   settings_file: Optional[Path] = None) -> Dict[str, Any]:
+    """``settings.integrity`` of the settings file in effect (see
+    :func:`_strict_settings`); the defaults, with a warning in ``warnings``,
+    when that file cannot be read."""
     from ..core.config import IntegritySettings  # pylint: disable=import-outside-toplevel
     default = IntegritySettings()
     settings = _strict_settings(
-        warnings, f'integrity uses the default thresholds v{default.version}')
+        warnings, f'integrity uses the default thresholds v{default.version}',
+        settings_file)
     return (default if settings is None else settings.integrity).model_dump(mode='json')
 
 
@@ -546,7 +551,8 @@ def _scope(points: List[orm.FolderData], new: List[orm.FolderData],
 def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 failures: Optional[List[Tuple[str, str]]] = None,
                 warnings: Optional[List[str]] = None,
-                rechecked: Optional[List[Tuple[str, str, str]]] = None) -> Dict[str, int]:
+                rechecked: Optional[List[Tuple[str, str, str]]] = None,
+                settings_file: Optional[Path] = None) -> Dict[str, int]:
     """Give every live point of ``group`` the verdict its current context
     calls for; return the new verdicts' status counts.
 
@@ -556,8 +562,10 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     ``multi_speed``, ``writes_snapshot``, snapshot and reference -- differs
     from its live verdict's: the old verdict is superseded with its ruled and
     withdrawn successors, and ``(point id, old status, new status)`` goes to
-    ``rechecked`` when the status changed. ``settings`` is an ``IntegritySettings`` dump (default:
-    the settings file's; a fallback to the defaults goes to ``warnings``). A
+    ``rechecked`` when the status changed. ``settings`` is an
+    ``IntegritySettings`` dump (default: that of ``settings_file``, else of
+    the per-user settings file; a fallback to the defaults goes to
+    ``warnings``). A
     point whose check raises goes to ``failures`` as ``(point uuid,
     message)`` and the others go on.
     """
@@ -591,8 +599,9 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 elif old and _unchanged(old[-1], inputs, point):
                     continue
                 if settings_node is None:
-                    settings_node = _step_input(settings or _settings_dump(warnings),
-                                                'integrity_settings')
+                    settings_node = _step_input(
+                        settings or _settings_dump(warnings, settings_file=settings_file),
+                        'integrity_settings')
                 inputs['context'] = _step_input(inputs['context'], 'integrity_context')
                 verdict = check_integrity(**inputs, settings=settings_node)
             except Exception as exc:  # pylint: disable=broad-except
@@ -1083,14 +1092,16 @@ def summarise(point: orm.FolderData, options: orm.Dict, parse: orm.Dict,
                      'point_uuid': point.base.attributes.get('point_uuid')})
 
 
-def summary_options(warnings: Optional[List[str]] = None) -> Dict[str, Any]:
-    """The summary options of the settings file in effect:
+def summary_options(warnings: Optional[List[str]] = None, *,
+                    settings_file: Optional[Path] = None) -> Dict[str, Any]:
+    """The summary options of the settings file in effect (``settings_file``
+    when given, else the per-user one):
     ``{'skip_fraction': settings.aiida.skip_fraction}``. The file is read
     strictly; when it cannot be, the default, with a warning in ``warnings``."""
     from ..core.config import AiidaSettings  # pylint: disable=import-outside-toplevel
     default = AiidaSettings().skip_fraction
     settings = _strict_settings(
-        warnings, f'summaries use the default skip_fraction {default}')
+        warnings, f'summaries use the default skip_fraction {default}', settings_file)
     return {'skip_fraction': float(default if settings is None
                                    else settings.aiida.skip_fraction)}
 
@@ -1190,16 +1201,19 @@ def _report_versions(label: str, verdicts: Dict[int, Tuple[Optional[orm.Dict], b
             f'datasets use those verdicts until the points are re-checked')
 
 
-def postprocess_group(label: str, *, policy: Policy = Policy(), skip_failed: bool = True,
+def postprocess_group(label: str, *, policy: Policy = Policy(),
+                      skip_failed: bool = True,
                       options: Optional[Dict[str, Any]] = None,
                       warnings: Optional[List[str]] = None,
-                      profile: Optional[str] = None) -> int:
+                      profile: Optional[str] = None,
+                      settings_file: Optional[Path] = None) -> int:
     """Summarise every live point of ``friction2d/<label>`` whose selected
     verdict (:func:`latest_verdict` under ``policy``) is ``complete`` --
     checked, ruled or overridden so; return the number of new summaries.
 
     A summary's identity is (point, :func:`options_hash` of ``options``,
-    ``code_version``); ``options`` default to :func:`summary_options`. A
+    ``code_version``); ``options`` default to :func:`summary_options` (of
+    ``settings_file``, else of the per-user settings file). A
     point that already has a live summary with that identity is skipped, so
     a second pass makes none; new options or a ``code_version`` bump make
     new summaries beside the old ones, which stay live (``policy`` and the
@@ -1221,8 +1235,11 @@ def postprocess_group(label: str, *, policy: Policy = Policy(), skip_failed: boo
     problems: List[str] = []
     points = _live_points(_set_group(label))
     verdicts = _latest(points, policy)
-    _report_versions(label, verdicts, _settings_dump(problems)['version'], problems)
-    opts = normalise_options(options if options is not None else summary_options(problems))
+    _report_versions(label, verdicts,
+                     _settings_dump(problems, settings_file=settings_file)['version'],
+                     problems)
+    opts = normalise_options(options if options is not None
+                             else summary_options(problems, settings_file=settings_file))
     digest = options_hash(opts)
     existing = _live_summaries(points)
     inputs_of = _SummaryInputs(opts)
@@ -1344,7 +1361,8 @@ def _dataset_rows(name: str, labels: Sequence[str], policy: Policy, digest: str
 def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy(),
                   options: Optional[Dict[str, Any]] = None,
                   warnings: Optional[List[str]] = None,
-                  profile: Optional[str] = None) -> orm.Dict:
+                  profile: Optional[str] = None,
+                  settings_file: Optional[Path] = None) -> orm.Dict:
     """Make the dataset ``friction2d/datasets/<name>`` from the sets
     ``labels``: a Group holding, for every live point whose selected verdict
     is ``complete``, the summary ``policy`` selects among those made with
@@ -1363,8 +1381,9 @@ def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy()
     nothing is left orphaned. :func:`delete_dataset` undoes a dataset.
 
     ``options`` are normalised (:func:`normalise_options`; unknown keys
-    raise). An unreadable settings file, when ``options`` default, goes to
-    ``warnings`` (logged as a WARNING without a list).
+    raise); they default to those of ``settings_file``, else of the per-user
+    settings file. An unreadable settings file, when ``options`` default,
+    goes to ``warnings`` (logged as a WARNING without a list).
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
@@ -1375,7 +1394,7 @@ def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy()
                          f'not rewritten -- build it under a new name, or '
                          f'delete_dataset({name!r}) first')
     opts = normalise_options(options if options is not None
-                             else summary_options(warnings))
+                             else summary_options(warnings, settings_file=settings_file))
     digest = options_hash(opts)
     rows, members, units = _dataset_rows(name, labels, policy, digest)
     group = orm.Group(label=group_label).store()

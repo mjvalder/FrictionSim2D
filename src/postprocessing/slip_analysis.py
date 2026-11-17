@@ -32,10 +32,8 @@ class SlipResult:
     def summary(self) -> Dict[str, float]:
         """The four scalars ``RunSummary.extras`` carries for this run.
 
-        Every key keeps the ``slip_`` prefix: ``FrictionResultsData.to_record``
-        filters extras to keys starting with ``pes_`` or ``slip_``, so an
-        unprefixed key would be stored on the node and then silently dropped
-        on the way to the central DB.
+        Every key keeps the ``slip_`` prefix, so it lands in a summary
+        beside the friction statistics without colliding with any of them.
 
         ``slip_mean_interval_samples`` can be nan (fewer than two events);
         callers that hand these to AiiDA pass them through ``_finite`` first,
