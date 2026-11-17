@@ -465,9 +465,6 @@ def _check(request: Dict[str, Any]) -> Dict[str, Any]:
             'notes': notes, 'ready': all(c['ok'] for c in checks)}
 
 
-#: What a request for the removed 'central' source answers.
-CENTRAL_REMOVED = 'central database removed; use the local AiiDA store'
-
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     'list': _list,
     'detail': _detail,
@@ -491,9 +488,6 @@ def dispatch(request: Dict[str, Any]) -> Dict[str, Any]:
     identically.
     """
     kind = request.get('kind') or ''
-    if request.get('source') == 'central':
-        return {'ok': False, 'kind': kind, 'error': CENTRAL_REMOVED,
-                'traceback': ''}
     handler = HANDLERS.get(kind)
     if handler is None:
         return {'ok': False, 'kind': kind,

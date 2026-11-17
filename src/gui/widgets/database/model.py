@@ -161,7 +161,6 @@ def display_value(record: Dict[str, Any], column: Column) -> str:
         except (ValueError, TypeError):
             text = str(value)
 
-
     unit = _unit(record, column)
     return f"{text} {unit}".strip()
 

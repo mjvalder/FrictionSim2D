@@ -267,16 +267,3 @@ def test_a_local_check_turns_a_broken_profile_into_a_failed_check(monkeypatch):
     failed = [c for c in result['checks'] if not c['ok']]
     assert 'no profile named friction2d' in failed[0]['detail']
     assert result['notes'], 'a failed check must say what to do about it'
-
-
-@pytest.mark.parametrize('kind', ['list', 'detail', 'export', 'import', 'check'])
-def test_a_central_request_is_the_removed_source_error(kind):
-    """The central database is gone: every request kind answers with the one
-    error, without touching a store or the network."""
-    result = db_worker.dispatch({'kind': kind, 'source': 'central',
-                                 'api_url': 'http://localhost:8000'})
-
-    assert result['ok'] is False
-    assert result['kind'] == kind
-    assert result['error'] == ('central database removed; '
-                               'use the local AiiDA store')

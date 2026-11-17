@@ -145,23 +145,21 @@ class TestTheWorkerReallyRuns:
     `src` importable, the newline-delimited JSON on stdout, the result file
     landing where the request said, and the exit code. Those are exactly the
     failures that make a worker look hung rather than broken, so one end-to-end
-    seam earns its runtime. A request for the removed `central` source is the
-    one request that needs no aiida profile and no network.
+    seam earns its runtime. A request of an unknown kind is the one request
+    that is answered before any aiida profile loads.
     """
 
-    def test_a_check_round_trips_through_the_real_entry_point(self, controller):
+    def test_a_request_round_trips_through_the_real_entry_point(self, controller):
         progress = []
         controller.progress.connect(progress.append)
 
-        controller.start(DatabaseRequest(kind='check', source='central',
-                                         payload={}))
+        controller.start(DatabaseRequest(kind='wat', source='local', payload={}))
         result = _run_until(controller.failed, timeout_ms=60000)
 
         assert result, 'the worker never finished -- the -m entry point is broken'
         kind, message = result
-        assert kind == 'check'
-        assert message == ('central database removed; '
-                           'use the local AiiDA store')
+        assert kind == 'wat'
+        assert message == "unknown request kind: 'wat'"
         assert not controller.running
 
 
