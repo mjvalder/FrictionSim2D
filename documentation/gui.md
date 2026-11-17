@@ -62,8 +62,9 @@ front:
 - **Scan speed** is metres per second. The generated script divides it by
   100 to get the Å/ps LAMMPS actually drives with: 100 m/s = 1 Å/ps.
 - **Driving spring** and **bond spring** (sheet-on-sheet) are newtons per
-  metre. The builder divides by 16.02 to get eV/Å² before writing it into
-  the LAMMPS input.
+  metre. Every builder divides by the exact factor `NM_TO_EV_A2 =
+  16.02176565` to get eV/Å² before writing it into the LAMMPS input (AFM
+  used a rounded 16.02 before provenance schema 2.2.0).
 
 Separately, `[tip] damping_ratio` now defaults to 0.0 (off) rather than
 0.0072. `dspring` — a raw viscous override — already takes precedence

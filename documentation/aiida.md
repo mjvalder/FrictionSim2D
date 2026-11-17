@@ -1,286 +1,670 @@
-# AiiDA workflows
+# AiiDA provenance store
 
 FrictionSim2D uses [AiiDA](https://www.aiida.net/) as its **local** provenance
-store. There is no separate local database: a stored run's full time series,
-inputs and build metadata live only in the AiiDA profile. The central summary
-database (`FrictionSim2D db ...`, see [commands.md](commands.md)) holds
-aggregate statistics only, contributed from this store.
+store and its only database. AiiDA never builds or runs a simulation: the
+builders write the LAMMPS decks and job scripts, the jobs run outside AiiDA
+(locally or on an HPC), and `FrictionSim2D aiida import` records the finished
+run directory afterwards. Results are shared as `.aiida` archives, with no
+server in between.
 
-## 1. The node model
+What the store gives you:
 
-Every simulation set is three kinds of node:
+- a graph showing which inputs produced which result, down to the number on a
+  plot;
+- shared input nodes, so runs that use the same material, potential file or
+  thermostat setup are connected, and "the runs that differ only in X" is one
+  query (`related()`);
+- archives that open in plain aiida-core, with JSON sidecars that need no
+  AiiDA at all (Materials Cloud Archive is the publication target).
 
-| node | one per | holds |
-|---|---|---|
-| `FrictionSimulationSetData` | one `simulation_*` root (or `--label`) | `settings.yaml`, the `.ini` config, and attributes `label`, `model`, `source_root`, `created`, `git_commit`, `git_dirty`, `materials[]`, `n_runs`, `source_host` |
-| `FrictionSimulationData` | one run (one `provenance.json` — an `L{n}` layer directory for AFM-like families, or a run directory for sheet-like families) | the run's LAMMPS inputs and provenance files, plus every `RunTokens` field as an attribute (`model`, `family`, `materials[]`, `size_x/y`, `substrate`, `tip_material`, `temperature`, `layers`, `pot_token`, `rel_path`, ...) and the full provenance record under `provenance` |
-| `FrictionResultsData` | one load point (`(load, angle, speed)` for slide families; one grid for a PES scan; one load for indent) | the original result files verbatim (`friction_*`, `raw_*`, `peratom_*`, `pes_scan*.csv`, `indent_*.csv`, logs, final/hold data), plus summary attributes (`family`, `load_kind`, `load`, `angle`, `speed`, `layers`, `tiers[]`, mean/COF statistics, `run_uuid`, `set_uuid`) |
-
-**Numbers are attributes, files are in the repository.** Time series are
-never stored as attributes — `FrictionResultsData.frame(tier)` re-parses the
-stored file with the same reader `postprocess read` uses, so the store and
-the CLI never disagree about how to read a results file.
-
-Attributes are immutable once an AiiDA node is stored. Anything that changes
-after the fact — import timestamps, job status — lives in **extras**, not
-attributes. Re-importing a run whose result content changed does not edit the
-old `FrictionResultsData` node in place: the old node is marked
-`extras['superseded'] = True` and a fresh node takes its place. Queries,
-exports and re-import matching all skip superseded nodes, so a stale result
-is never returned or double-counted, but it is never deleted either.
-
-The same goes for a run's `provenance.json`. `hpc enrich-provenance` rewrites
-it after the run node was created (`ramp_*`, `unloaded_reference_z`,
-`lammps_version`); the next `aiida import` of the tree sees that the file
-changed and records the new record, its sha256 and the file text in
-`extras['provenance_updated']` (reported as `provenance updated: N`).
-`export-results`, the provenance bundle and `db upload` all use that newer
-record; re-importing an unchanged file records nothing.
-
-Every node belonging to one simulation set is tagged with the AiiDA group
-`friction2d/<label>`. `aiida export <label>` archives that whole group
-(the group itself included); `aiida import-archive` does **not** recreate
-the group — importing an archive is a pure node import, so re-importing
-someone else's export never accumulates loose groups of its own.
-
-**No process nodes on `aiida import`.** Nodes link to each other by
-`set_uuid`/`run_uuid` attributes, not by AiiDA `CalcJobNode` provenance links.
-This is deliberate: faking a calculation node for data that was never run
-through AiiDA would be misleading provenance. A run submitted through
-`aiida submit` (§3 below) *does* get real CalcJob provenance links, for free,
-because it actually went through the engine.
-
-### What is never stored
-
-`visuals/` and any `*.lammpstrj` trajectory file are **never** ingested —
-they exist for visual/manual verification only and stay on disk. LAMMPS run
-logs (`lammps/run_*.log`) **are** kept, because the settle-loop and
-build-identity diagnostics folded into provenance come from them.
-
-What *is* stored is one rule, `src/aiida/retention.py`, shared by
-`aiida import` and the CalcJob's `retrieve_list`, so both paths keep the same
-files: `provenance.json`, `provenance/**`, `lammps/*.in`,
-`lammps/system.in.settings`, `lammps/run_*.log`, `results/*`,
-`data/{hold_*,final_*,load_*}`, `log*.lammps` and `*.out`. The run node takes
-the inputs and provenance, each load point its own tier files, and every other
-retained file (including a `results/*` file no load point claims) rides along
-on each load point. Anything over `aiida.max_stored_file_mb` is recorded by
-path, size and sha256 instead of stored.
-
-### Credentials never enter the store
-
-**The guarantee:** any mapping key named like a credential -- `password`,
-`passwd`, `api_key`, `apikey`, `secret`, `token`, or a name ending in
-`_password`/`_secret`/`_token`/`_api_key` (case-insensitive) -- is blanked to
-`''` in every YAML, JSON or INI settings/config document before that document
-is stored in a friction2d node repository, an archive or an export bundle.
-This is a key-NAME rule, not a fixed path: it catches a credential wherever it
-sits (`database.password`, a legacy `database.local.password`, a YAML
-anchor/alias, `database.extra.password`, a stray `hpc.api_key`, a bare
-top-level `password`, ...), because `src.core.config.redact_secrets_mapping`
-walks every mapping and list in the parsed document rather than checking a
-`database`/`settings` path specifically (a 2026-09-22 review round replaced
-the original, narrower, path-based version after a probe got a credential
-past it through exactly those shapes).
-
-`src.aiida.data.redact.stage_file` is the choke point: every path staged into
-a `FrictionSimulationSetData`, `FrictionSimulationData` or
-`FrictionResultsData` repository, and (via `src.aiida.calcjob._stage_sim_dir`,
-behind `prepare_simulation_folder`, which `submit.py` uses to build a
-CalcJob's `simulation_dir` input for the **local**/**hpc-direct** run modes)
-a CalcJob's own input `FolderData`, goes through it instead of writing to the
-repository directly. A candidate
-document -- `settings.yaml`/`.yml`, `config.json`, `*.ini`, any of those with
-an extra suffix such as `.bak`, or any file under a `provenance` path
-component outside its `cif/`/`potentials/` subdirectories -- is parsed (JSON,
-then YAML, then, for a `.ini` name, `configparser`) and re-serialised with
-every credential-named key blanked; anything else is stored verbatim,
-unchanged. A candidate that cannot be parsed in any of those forms (a
-multi-document YAML stream, non-UTF-8 content) is REFUSED outright
-(`UnparsableDocumentError`) rather than stored unexamined -- failing closed,
-not open. This is the second, independent gate: a tree built before
-write-time redaction existed (`redact_secrets`, built on the same
-`redact_secrets_mapping`, see [settings.md](settings.md#database)), or a root
-`settings.yaml`/`.yml` a user wrote by hand with `settings init` run in the
-simulation root (`FrictionSimulationSetData.set_from_root` stages that file),
-never goes through the first gate, but still cannot carry a credential into
-a node, an archive or an export bundle -- including through `aiida.tools.
-archive.create_archive`'s default traversal rules, which follow a results
-node BACKWARD through the calculation that created it to that calculation's
-own inputs, so a CalcJob's `simulation_dir` `FolderData` can reach an archive
-even when `export_archive` names only the set/run/results nodes of a group,
-never the `FolderData` or the `CalcJobNode` itself.
-
-**Nodes stored before this change are not rewritten.** Sanitisation only ever
-happens at staging time, going forward -- an archive taken from, or a node
-already sitting in, a profile populated before this guarantee existed can
-still carry a credential. Clear the profile (`FrictionSim2D aiida clear`) or
-re-create it before sharing an archive built from old data.
-
-## 2. Idempotent import
+## 1. One-time setup
 
 ```bash
-FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm
+FrictionSim2D aiida status                     # is aiida-core installed, which profile is active
+FrictionSim2D aiida setup                      # create (or load) the profile 'friction2d'
+FrictionSim2D aiida setup -p myprofile         # another profile name
+FrictionSim2D aiida preflight                  # profile + entry points healthy? exit 0 only if so
 ```
 
-`SIMULATION_FOLDER` is the `simulation_XXXXXXXX` directory produced by one
-`FrictionSim2D run`. `-l/--label` names the set (default: the folder name).
+- `aiida setup` creates the **profile only**. It runs `verdi presto
+  --use-postgres` and falls back to SQLite when PostgreSQL is not available.
+- No RabbitMQ broker and no daemon are needed: every import runs in-process
+  (`engine.run`). The test tier runs against a broker-less SQLite profile.
+- The machine `Computer` and the LAMMPS `Code` of each run are created when the
+  run is imported (§2.4), not at setup.
+- `setup` spells `-p/--create-profile` because it *creates* a profile. Every
+  other command spells `--profile`, which *loads* an existing one (default:
+  `settings.aiida.profile`, else AiiDA's own default profile).
 
-Re-running the same import is safe: only new or changed load points are
-added, nothing already stored is duplicated. It exits non-zero if any run
-failed. On a real (non-dry-run) import it also exits non-zero if any run was
-left empty or could not be parsed — but `--dry-run` on a fresh, pre-HPC tree
-legitimately previews an all-empty set and still exits 0 unless it hit an
-actual failure:
+The workflows the store supports:
+
+| workflow | steps |
+|---|---|
+| **local** | `FrictionSim2D run ...`, run LAMMPS, `FrictionSim2D aiida import ROOT` |
+| **remote-manual** | `run` + `hpc generate`, rsync the tree to the cluster, submit the job scripts there, rsync the results back, `aiida import ROOT` locally. Nothing AiiDA-specific runs on the cluster. See [hpc_jobs.md](hpc_jobs.md). |
+| **hpc-direct** | install FrictionSim2D + aiida-core in the HPC's conda env, `aiida setup` and `aiida import` there, `aiida export LABEL` to an archive, `aiida import-archive` on your workstation |
+
+There is no AiiDA submission. `aiida submit`, `run --aiida` and `run_with_aiida`
+were removed.
+
+## 2. The graph
+
+### 2.1 One CalcJob per LAMMPS deck
+
+Each LAMMPS deck of a run is recorded as one `LammpsFrictionCalcJob`
+(entry point `friction2d.lammps`):
+
+- a sheet-on-sheet run has one deck;
+- an AFM run has a `system` deck plus slide decks: one `slide_f<F>N` deck per
+  load in array mode, or a single `slide` deck in combined mode;
+- local runs follow the same deck pattern.
+
+The CalcJob is launched in AiiDA's *import mode*: `engine.run` with a
+`remote_folder` pointing at the run directory and no upload or submit. aiida-core
+only retrieves and parses. Retrieval copies into a temporary sandbox, so the
+run directory is never written. Its `process_state` and exit status describe
+the parse, not the LAMMPS run:
+
+| exit code | meaning |
+|---|---|
+| 320 `ERROR_NO_RESULTS` | the deck produced neither load points nor structures |
+| 330 `ERROR_PARSING_FAILED` | the parser raised |
+| 410 `ERROR_LAMMPS_NOT_FINISHED` | the log has no `Total wall time` line |
+
+**Inputs** of a deck CalcJob:
+
+| link label | node | content |
+|---|---|---|
+| `deck` | `SinglefileData` | `lammps/<deck>.in` |
+| `includes__*` | `SinglefileData` | files the deck includes (`lammps/system.in.settings`) |
+| `provenance` | `FolderData` | the run's `provenance/` directory plus `provenance.json`, credential-redacted |
+| `blocks__<label>` | `Dict` | the parameter blocks (§3) |
+| `derived` | `Dict` | builder-computed values: `drive_k`, relaxed `lat_c`, `damp_ev`, ... Not hashed. |
+| `schema` | `Dict` | the block schema: kind, unit and default of every field |
+| `potentials__*` | `SinglefileData` | the potential files the run used |
+| `structures__*` | `SinglefileData` | `build/*.lmp` for the first deck. For a slide deck, the very `load_*.data` nodes the system deck output for its loads: the system → slide handoff is a link in the graph. |
+| `parameters` | `Dict` | `deck_name`, `rel_path`, `run_uuid`, `point_filter`, `family`, `n_layers`, `log_name`, `writes_structures`, `block_names`, `build_level` |
+| `code` | `InstalledCode` | the LAMMPS Code of (machine, version); absent when the version is unknown (§2.4) |
+| `remote_folder` | `RemoteData` | the run directory, on the machine `Computer` the run was produced on |
+
+**Outputs** of a deck CalcJob:
+
+| link label | node | content |
+|---|---|---|
+| `points__<key>` | `FolderData` | one load point: its window and raw tiers (and the indent retract curve). `<key>` is `<load kind><load>_a<angle>_s<speed>`, e.g. `force10_a0_s2` (`m` = minus, `p` = decimal point). |
+| `snapshots__<key>` | `SinglefileData` | the point's end snapshot, `final_*.data` |
+| `peratom__<key>` | `FolderData` | the point's per-atom tier |
+| `structures__*` | `SinglefileData` | `load_*.data` written by a system deck |
+| `aux__*` | `SinglefileData` | other retained files of a system deck (`hold_*.txt`) |
+| `run_info` | `Dict` | `lammps_version`, `wall_time_s`, `n_procs`, `log_missing`, `log_has_version`, `not_stored` |
+| `log` | `SinglefileData` | the deck's LAMMPS log |
+
+A point carries the attributes `family`, `load_kind`, `load`, `angle`,
+`speed`, `layers`, `status`, `units`, `point_uuid`, `rel_path`, `deck_name`,
+`has_snapshot` and `has_peratom`. A deck's `point_filter` comes from its stem
+(`slide_f30N` covers load 30). The configured points are read from
+`provenance/config.json`, so a configured point that wrote nothing is an empty
+`FolderData` with `status='no_output'`, never a silent gap.
+
+**Steps on the points** are calcfunctions, so the provenance runs from a point
+to every number derived from it:
+
+```
+point + snapshot + bond reference + context + thresholds ─► check_integrity ─► verdict Dict
+verdict + ruling Dict ────────────────────────────────────► apply_ruling    ─► ruled verdict Dict
+ruled verdict + verdict ──────────────────────────────────► withdraw_ruling ─► withdrawn verdict Dict
+point + options (+ snapshot, provenance) ─────────────────► summarise       ─► summary Dict (with units)
+```
+
+A dataset is not a calcfunction: it is a Group of the selected summaries plus
+one table `Dict` (§6).
+
+**Groups.** Each campaign is the Group `friction2d/<label>`, with extras
+`source_root`, `source_host`, `git_commit`, `git_dirty`, `model`, `materials`
+and `created`. Each dataset is the Group `friction2d/datasets/<name>`.
+
+### 2.2 What is stored and what is not
+
+One rule, `src/aiida/retention.py`, decides which files of a run are kept:
+`provenance.json`, `provenance/**`, `lammps/*.in`, `lammps/system.in.settings`,
+`lammps/run_*.log`, `results/*`, `data/hold_*.txt`, `data/final_*.data`,
+`data/load_*.data` and `build/*.lmp`.
+
+- `visuals/` and every `*.lammpstrj` trajectory are **never** stored. They stay
+  on disk for visual checks only.
+- A file over `aiida.max_stored_file_mb` is recorded in `run_info.not_stored`
+  by path, size and sha256 instead of being stored.
+- Syncthing `*.sync-conflict-*` copies are skipped; the original file is kept.
+
+### 2.3 Credentials never enter the store
+
+Every file staged into a node goes through `src.aiida.data.redact.stage_file`.
+
+- A settings or config document (`settings.yaml`, `config.json`, `*.ini`, any
+  of those with an extra suffix, any file under `provenance/` outside `cif/`
+  and `potentials/`) is parsed and re-serialised with every credential-named
+  key blanked: `password`, `passwd`, `api_key`, `apikey`, `secret`, `token`,
+  or a name ending in `_password`, `_secret`, `_token` or `_api_key`
+  (case-insensitive), wherever the key sits.
+- A candidate document that cannot be parsed is refused
+  (`UnparsableDocumentError`), never stored unexamined.
+- This is the second of two gates. The first blanks the same keys when the
+  run tree is written (`redact_secrets`, see [settings.md](settings.md)).
+
+Content-addressed file hashes are taken over the **stored** (redacted) bytes,
+so a published hash can be checked against the published content.
+
+### 2.4 Machine and LAMMPS version: Computer and Code
+
+- **Computer.** One per machine label, created at first import and left
+  unconfigured: it records where a run came from and never executes anything.
+  The label is `aiida import --machine`, else `settings.aiida.machine`, else the
+  run's `settings.hpc.hpc_host`, else `localhost`. Its hostname and scheduler
+  come from the run's `settings.hpc`.
+- **Code.** One `InstalledCode` per (machine, LAMMPS version), labelled
+  `lammps-<version>@<machine>`. The version comes from the deck's log, falling
+  back to `provenance.json`. The executable is the `lmp*` token of the run's job
+  script, else `lmp`.
+- **The no-version rule.** A deck whose LAMMPS version is unknown gets **no**
+  Code, so an "unknown" Code never merges unrelated binaries. The import report
+  lists each such deck under `no LAMMPS version (no Code)`.
+- `metadata.options.resources` come from the process count in the log;
+  `max_wallclock_seconds` from `settings.hpc.walltime_hours`.
+- Known limitation: Computers and Codes are found by label. Two profiles that
+  each created `lammps-<version>@archer2` hold two different nodes, and an
+  archive import adds the second one beside the first.
+
+## 3. Parameter blocks
+
+A run's `config.json`, `settings.yaml` and `provenance.json` are split into
+named parameter blocks, each stored once as an `orm.Dict`. Every run with an
+identical block links to the same node, which is what connects runs across
+campaigns.
+
+| block | one per | holds |
+|---|---|---|
+| `material__<role>_<i>` | material entry (sheet, tip, substrate, flake) | material name, CIF sha256 |
+| `potential__<role>_<i>` | material entry | potential type and potential-file sha256 (what the build resolved) |
+| `interaction` | run | interlayer style and file sha256, `interlayer_g`, `lj_override`, `potential.*` settings |
+| `thermostat` | run | temperature, thermostat type and boundaries, tip `dspring`/`damping_ratio` |
+| `integration` | run | timestep, minimiser, neighbour list, `slide_run_steps`, hold and ramp steps |
+| `drive` | run | drive method, constraint mode, springs, tip position |
+| `geometry` | run | sheet size, layers, stacking, tip radius, substrate, flake, lattice matching, twist, finite sheet, the amorphous quench recipe |
+| `protocol` | run | PES and indent protocol, halt factor, interlayer comparison mode |
+| `output` | run | dumps, frequencies, channels, `thermo` |
+| `realization` | run | the RNG seeds (`seed_thermal_tip`, `seed_thermal_sub`, `seed_velocity`, `seed_sheet_center`, the indent `seed`) and `substrate_realization_id` |
+
+The full field table, units and defaults are in `src/aiida/block_schema.py`
+(`FIELD_MAP`, `UNITS`). How they are derived from a run is in
+[provenance.md](provenance.md#from-provenance-to-blocks).
+
+**Block rules:**
+
+- **Requested values only.** A block holds what the config asked for, coerced
+  to the model's type (`300` and `300.0` alike for a float field).
+- **Swept axes are not block content.** Load, angle and speed are point
+  attributes, so a load sweep does not put every deck on its own `drive`
+  block. The deck shape (`outer_loop`) is not identity either.
+- **Builder-computed values go to `derived`**, an unhashed input: the
+  relaxed `lat_c`, `drive_k`, `damp_ev`, the built geometry, the interlayer
+  details.
+- **Defaults are elided.** A field equal to its family default is left out, so
+  an absent field and its default hash alike, and a field added later changes
+  no existing hash. Readers refill elided fields from the run's own `schema`
+  node, never from today's defaults.
+- **Files enter by sha256, never by path.** An unresolvable file is recorded
+  as `unresolved:<basename>`, with a warning.
+- **The hash covers kind and content, not the role.** Si used as a tip and Si
+  used as a substrate share one material node.
+- **Coverage is enforced.** A test fails when a config or settings model gains
+  a field that is neither assigned to a block nor listed in `EXCLUDED`
+  (`hpc.*`, `aiida.*`, `integrity.*`, `quench.run_local`/`n_procs`/
+  `allow_generate`, `materials_list`, `outer_loop`, `scan_angle_force`, and the
+  record's own identity fields).
+- **Every numeric field has a unit**, ASCII, metal units: lengths in
+  `angstrom`, springs in the drive block in `N/m`, `drive_k` in
+  `eV/angstrom^2`, temperatures in `K`. A unit change is a `block_schema`
+  version bump with a converter, never silent.
+
+`kind` and `block_schema` sit inside each block's content, so a block's hash
+can be recomputed from its stored attributes alone. Content-addressed nodes
+(blocks, files, provenance folders, schemas) also get a deterministic UUID
+from their hash, so the same block built by two people in two profiles is one
+node after an archive import.
+
+**Unit check at import.** The import refuses a run whose `derived.drive_k` is
+not its requested `driving_spring` (N/m) divided by the exact factor
+`NM_TO_EV_A2 = 16.02176565` (a spring recorded in N/m, or converted twice).
+AFM builds before provenance schema 2.2.0, and stamped legacy runs, divided by
+a rounded `16.02`; for those the check also accepts that factor.
+
+## 4. Identity and import
 
 ```bash
+FrictionSim2D aiida import ./simulation_20260421_143404 --label 260421-afm --machine archer2
 FrictionSim2D aiida import ./simulation_20260421_143404 --dry-run
 ```
 
-`--profile` loads an existing AiiDA profile (default: `settings.aiida.profile`,
-or AiiDA's own default profile if that is unset too).
+Options: `-l/--label` (default: the folder name), `--machine`, `--profile`,
+`--settings-file` (whose `aiida.machine`, `aiida.profile` and `integrity`
+thresholds apply), `--dry-run` (classify every deck against the store; create
+nothing).
 
-**Truncated runs are not complete.** For the slide families (`afm`,
-`sheetonsheet`, `hetero`, `flake`) the expected length of the `window` trace
-is `slide_run_steps // results_frequency`, read from the run's stored
-`provenance/config.json`. A trace more than one output interval shorter (a
-walltime kill, say) is stored with `is_complete = False` and the attributes
-`truncated = True` and `expected_ntimesteps`; the import report counts it
-under `results incomplete`. When the expected length cannot be derived (no
-settings block, indent, PES) `is_complete` is left as computed.
+### 4.1 Identity never comes from a path or a label
 
-`FrictionSim2D run <model> ... --aiida --label 251113-afm` runs the same
-ingest at generation time: it registers the set and run nodes immediately
-(with no results yet), and a later `aiida import` on the finished tree
-attaches results to those same nodes rather than creating new ones.
+- **A run** is its `provenance.json` `run_uuid`, a uuid4 drawn at build time
+  (provenance schema 2.2.0). A run without one is refused with `MissingRunUUID`
+  and reported as a failure; the other runs go on.
+- **A deck** is `<run_uuid>|<deck_name>` (the CalcJob extra
+  `friction2d_deck_key`).
+- **A point** is `point_uuid = uuid5(run_uuid, <key>)`, e.g.
+  `uuid5(run_uuid, 'force10_a0_s2')`. It is path-free: the same point of the
+  same run has the same uuid wherever the run directory sits and under whatever
+  label it is imported.
+- **The label only names the Group.** The same runs rsynced to a new path
+  import into their set as before (`source_root` is updated). A label that
+  already names a non-empty set holding none of the tree's runs is refused
+  (`SetRootMismatch`): pass another `--label`, or delete the old set.
 
-## 3. Run modes
+### 4.2 Legacy runs: stamp, then import
 
-| mode | workflow |
-|---|---|
-| **local** | `FrictionSim2D run <model> ... --aiida` then `FrictionSim2D aiida submit`, which runs a real CalcJob on the `localhost` computer — or generate + run LAMMPS yourself and `FrictionSim2D aiida import` the finished tree. Either way the results end up as the same `FrictionResultsData` nodes. |
-| **remote-manual** | `FrictionSim2D run` + `FrictionSim2D hpc generate` → rsync the tree to the cluster → submit the PBS/Slurm scripts there → rsync the results back → `FrictionSim2D aiida import <root>` locally. Nothing AiiDA-specific ever runs on the cluster. |
-| **hpc-direct** | Same as local, but with AiiDA itself installed inside the HPC's own conda environment: `FrictionSim2D aiida setup` there, run and ingest on the cluster, `FrictionSim2D aiida export <label>` to build a portable archive, then `FrictionSim2D aiida import-archive` on your workstation. |
-
-There is no SSH-connected remote-submission mode: the HPC blocks direct
-inbound AiiDA connections, so "remote" here always means one of the two
-workflows above, never a live `core.ssh` transport.
-
-**Submission is broker-less by default.** `FrictionSim2D aiida submit` runs
-each simulation in-process with `aiida.engine.run` — no RabbitMQ required.
-Pass `--daemon` to submit to the AiiDA daemon instead (`aiida.engine.submit`),
-which does need a running broker. `aiida submit` takes `--profile` like every
-other command, accepts the simulation root or any directory inside it, and
-finds each run's node by its `rel_path` under that root -- so register the
-tree first (`run --aiida`, or `aiida import`). The Python API
-`run_with_aiida(...)` registers the fresh tree itself before submitting.
-
-## 4. One-time setup
+Runs built before provenance schema 2.2.0 carry no `run_uuid`. Give them one,
+once, before their first import:
 
 ```bash
-FrictionSim2D aiida status                       # check install + profile health
-FrictionSim2D aiida setup                        # create the profile, computer, LAMMPS code
-FrictionSim2D aiida setup --lammps-path /usr/local/bin/lmp
+FrictionSim2D aiida stamp-uuid ./simulation_20260421_143404 --dry-run   # report only
+FrictionSim2D aiida stamp-uuid ./simulation_20260421_143404
 ```
 
-`aiida setup` uses `-p/--create-profile` (default `friction2d`) because it
-*creates* a profile — every other `aiida` command spells `--profile` and
-*loads* an existing one. `setup` is localhost-only: on the HPC, run it inside
-the HPC's own conda environment for hpc-direct mode, then bring the result
-home with `aiida export`.
+- Each `provenance.json` without a `run_uuid` gets a fresh uuid4 (each AFM
+  `L{n}` record its own) and `run_uuid_stamped_at` (the ISO date). Every other
+  key keeps its value; the write is atomic. Needs no aiida-core.
+- An existing `run_uuid` is never overwritten, so a second pass stamps nothing.
+  A `run_uuid` that is not a UUID is reported as `invalid` and left alone.
+- Exit code 1 if any `provenance.json` was unreadable or invalid.
+- Stamping rewrites `provenance.json`, and the provenance is part of each
+  deck's fingerprint. Stamp a copy of a tree, and keep using that stamped copy:
+  a second, separately stamped copy of the same runs gets new `run_uuid`
+  values, so it imports as different runs.
 
-`FrictionSim2D aiida preflight` checks profile, database and entry points
-before you generate a campaign — it tells apart "no profile initialised here"
-(fine on a generation-only machine) from "profile broken" and exits 0 only
-when both a healthy profile and the `friction2d` entry points are present.
+### 4.3 Re-import and supersession
 
-## 5. Query, export, rebuild
+Each imported deck carries a fingerprint, the extra `friction2d_deck_sha256`: a
+sha256 over its deck file, includes, log (or its absence), retained output
+files, the run's provenance and every structure handed to it. It is path-free,
+so a moved tree has the same fingerprints.
+
+- **Unchanged deck** → skipped. If it was imported under another label, it is
+  added to this Group too (`already imported`).
+- **Changed deck** (a log that arrived later, a re-run, `hpc enrich-provenance`
+  rewriting `provenance.json`) → a new CalcJob. The old CalcJob, its outputs and
+  every calcfunction result derived from them get the extras `superseded=True`
+  and `superseded_at`.
+- Nothing is deleted or overwritten. Queries, comparisons, exports and the
+  integrity pass skip superseded nodes unless asked for them.
+- **Supersession is local.** It is an index in this profile's extras, not
+  provenance. Supersession across archives from different profiles is not
+  tracked.
+- A superseded CalcJob that another set also holds is reported as
+  `superseded <deck>, also held by set '<other>'`.
+
+The import report counts decks created, skipped, superseded and already
+imported, points created, decks with a missing log, decks with no LAMMPS
+version, unparseable runs, and the integrity verdicts and rulings of §5. It
+exits 1 if any run failed; a real (non-dry-run) import also exits 1 if any
+path could not be parsed.
+
+## 5. Integrity verdicts and rulings
+
+### 5.1 A verdict for every point, at import
+
+Every import (not a `--dry-run`) ends with an integrity pass over the whole set:
+
+- every live point with no live verdict gets one from `check_integrity`, the
+  ported checker of [integrity.md](integrity.md), with the thresholds of the
+  `integrity` block of `--settings-file` (else the per-user settings);
+- `no_output` and `not_reached` points get a verdict too, so "no verdict"
+  never means "not looked at";
+- a point whose stage-2 context changed (a later import changed its status,
+  layers, snapshot or reference) is re-checked; its old verdict and that
+  verdict's rulings are superseded, and the report lists
+  `re-checked <point>: <old> -> <new>`;
+- a point whose stage-2 status could not be computed is checked
+  *provisionally* (extra `friction2d_provisional`) and re-checked on the next
+  import.
+
+A verdict holds `status`, `failed`, `observed`, `reasons`, `quarantine`,
+`not_applicable`, `measures`, `thresholds_version`, `code_version` and
+`point_uuid`.
+
+### 5.2 Rulings: `integrity_rulings.yaml`
+
+Rulings live in `integrity_rulings.yaml` in the simulation root, in the format
+of [integrity.md](integrity.md#quarantine-and-rulings). The point id is
+`<rel_path>|<load_kind>=<load>|angle=<a>|speed=<s>`.
 
 ```bash
-FrictionSim2D aiida query --material h-MoS2 --layers 2 --format csv
-FrictionSim2D aiida query --set-label 251113-afm --format table
+FrictionSim2D aiida rule 260421-afm                                  # the set's own file
+FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/260421.yaml  # another file
+FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/ --withdraw
+```
+
+- Every `aiida import` also applies the set's own file, after the integrity
+  pass. `aiida rule` applies it (or another file) on demand.
+- Each (verdict, ruling) pair becomes one `apply_ruling` calcfunction. The
+  ruling `Dict` carries the extra `friction2d_author='user'`: a human decided
+  it, not the checker.
+- Idempotent: a ruling already applied to a verdict is skipped (the extra
+  `friction2d_ruling_key = <verdict uuid>|<sha256 of the ruling>`). Editing a
+  ruling's note or date applies it anew, superseding the previous ruled
+  verdict.
+- A quarantined point takes `pass` or `fail`.
+
+### 5.3 Expert overrides of any verdict
+
+You can overrule **any** verdict, not only a quarantined one. Such a ruling
+needs `override: true` **and** a non-empty `note`:
+
+```yaml
+- point: "afm/h_MoS2/.../L1|force=30|angle=0|speed=2"
+  ruling: pass
+  override: true
+  note: the ejected atoms are a known thermostat artefact
+  date: 2026-11-16
+```
+
+- Without `override: true`, or with an empty note, the ruling changes nothing;
+  the report lists the point under `not quarantined` and warns.
+- What `pass` and `fail` do to each status, and that `pass` is refused for a
+  point with no data, is the rule of [integrity.md](integrity.md#overriding-any-verdict).
+- **Overrides are always listed.** Every import report and every `aiida rule`
+  report prints each live override of the set:
+  `override <point>: <original> -> <new> (<note>)`. The ruled verdict carries
+  `overridden: true` and `original_status`.
+- **Withdrawing.** Remove the entry (or its `override: true`, or its note) and
+  re-apply the file (`aiida rule LABEL`, or the next import). The ruling is
+  withdrawn: `withdraw_ruling` puts the checker's verdict back in force,
+  stamped `withdrawn_ruling=<ruled uuid>`, and the report lists
+  `withdrawn: <point>`.
+  - The set's own file always withdraws what it no longer says.
+  - Another file passed with `--rulings` withdraws nothing unless `--withdraw`
+    is given.
+  - **An unreachable root withdraws nothing.** If the set's `source_root`
+    directory is missing (an unmounted drive) or a `--rulings` path does not
+    exist, every ruling stays in force and the report warns. A missing file
+    inside an existing root does mean "no rulings".
+  - A file with unreadable entries withdraws nothing either.
+- **Re-checks re-apply rulings.** When a later import re-checks a point, the
+  old ruled verdict is superseded with the old checker verdict, and the rulings
+  pass that follows applies the file's ruling to the new verdict. If a re-check
+  moves a ruled point out of quarantine, its ruling (without `override: true`)
+  no longer applies, and the report warns that it now needs `override: true`
+  and a note.
+
+### 5.4 Which verdict counts: the policy
+
+A point can hold several live verdicts (checker, ruled, withdrawn, and those of
+a newer threshold set). `src/aiida/policy.py` picks one by **declared version,
+never by creation time**:
+
+1. the highest `thresholds_version`, then the highest `code_version`: a newer
+   generation wins over every verdict of an older one, a ruled one included;
+2. within one generation: ruled > withdrawn > the checker's own;
+3. then the uuid, so the choice is reproducible.
+
+A ruling does not carry over to a new generation by itself: the rulings pass
+re-applies it to the new generation's verdict. A `Policy` can also pin an exact
+`thresholds_version` (verdicts) or `code_version` (summaries) instead of
+`'newest'`.
+
+## 6. Postprocessing, datasets and queries
+
+```bash
+FrictionSim2D aiida postprocess 260421-afm
+FrictionSim2D aiida dataset mos2-loads 260421-afm 260512-afm
+FrictionSim2D aiida query --set-label 260421-afm --format csv -o points.csv
 FrictionSim2D aiida list-sets
 ```
 
-`aiida query` filters on `RunTokens` fields exposed as CLI options
-(`--material`, repeatable — a matching run must contain **all** given
-materials — `--family`, `--model`, `--potential`, `--layers`, plus the
-force/pressure/angle/speed/temperature min/max ranges) and `--set-label`.
-Anything else `RunTokens` carries is reachable only from the Python API
-(`src/aiida/query.py`), not from the CLI.
+- **`aiida postprocess LABEL`** runs `summarise` on every live point whose
+  selected verdict is `complete` (checked, ruled or overridden so). A summary
+  is `RunSummary` (mean/std COF, lateral and normal force, ...) plus `units`,
+  `options` (`skip_fraction`, from `settings.aiida.skip_fraction`),
+  `options_hash`, `code_version` and `point_uuid`. Its identity is (point,
+  options hash, code version): a second pass makes none; new options or a new
+  code version make new summaries beside the old ones. It warns about points
+  summarised on a provisional verdict and about verdicts from an older
+  threshold set (reported, not re-checked).
+- **`aiida dataset NAME LABEL...`** makes the Group `friction2d/datasets/NAME`
+  from one or more sets: for every live point whose selected verdict is
+  `complete`, the summary the policy selects, plus one table `Dict` holding
+  `name`, `labels`, the `policy` (with the summary options and their hash),
+  `units` per family, `columns` and one row per point (set, family,
+  `point_uuid`, `calc_uuid`, `summary_uuid`, ...). A figure built from it names
+  the verdict and summary generation it used. Datasets are never rewritten: an
+  existing NAME is refused. Plot one with the plot source
+  `aiida://dataset/<name>` ([postprocessing.md](postprocessing.md)).
+- **`aiida query`** prints one row per live point: the point, the verdict the
+  policy selects (`status`, `reasons`, `verdict_kind`, `provisional`,
+  `thresholds_version`), the run tokens, identity columns and the selected
+  summary. Filters are in [commands.md](commands.md#aiida-query).
 
-```bash
-FrictionSim2D aiida export-results 251113-afm ~/exported/251113-afm
-FrictionSim2D aiida rebuild 251113-afm -o ~/rebuild_test --hpc-scripts
+### 6.1 `related()`: the runs that differ only in X
+
+From Python (`src.aiida.query`):
+
+```python
+from src.aiida import load_aiida_profile
+from src.aiida.query import point_table, related
+
+load_aiida_profile()
+table = point_table()                                   # one row per live point
+others = related(point_uuid, 'thermostat', table=table) # differ only in the thermostat block
+loads = related(point_uuid, 'load', table=table)        # the same physics at other loads
+dt = related(point_uuid, 'settings.simulation.timestep', table=table)
+reps = related(point_uuid, 'realization', table=table)  # pure replicates: seeds only
 ```
 
-- `aiida export-results SET_LABEL OUTPUT_DIR` writes a stored set back out as
-  an ordinary simulation tree (`results/`, `provenance.json`, `provenance/`)
-  — it works unchanged with `postprocess read` and the GUI download.
-- `aiida rebuild SET_LABEL [-o DIR] [--hpc-scripts]` instead regenerates a
-  set's *inputs*: it exports each run's stored `config.json` and the set's
-  `settings.yaml`, then reruns the real builder router (the same one
-  `FrictionSim2D run` uses) — not a duplicated, drifting copy of it. Add
-  `--hpc-scripts` to also generate PBS/Slurm scripts after rebuilding.
+`point_table()` has one row per point and one column per requested field
+(`<block name>.<field path>`, e.g. `integration.settings.simulation.timestep`,
+`material__sheet_0.name`), every elided field refilled from the run's own
+schema, plus the swept axes `load`, `angle`, `speed`, their units and the
+identity columns. It is built from bulk projections, not a query per point.
 
-These are different operations: `export-results` gets you back the finished
-outputs; `rebuild` gets you back a fresh, re-runnable input tree.
+`related(point, vary)` returns the current points equal to `point` everywhere
+except along `vary`:
 
-## 6. Archives
+- **Point level and field level.** `vary` is a swept axis (`'load'`,
+  `'angle'`, `'speed'`), a block kind (`'thermostat'`), a block name
+  (`'material__sheet_0'`), a field path (`'settings.simulation.timestep'`, bare
+  or with its block), `'realization'`, or a list of these. Identity columns
+  (`family`, `rel_path`, ...) cannot be varied.
+- **Tolerance.** Floats are equal when they agree to 6 significant figures
+  (`0.1 + 0.2` and `0.3` match; `1.0` and `1.001` do not). Integers and bools
+  compare exactly, so seeds and step counts never round. Swept axes compare to
+  9 decimals. This is the same tolerance `compare` uses for block fields, so
+  the two never disagree on whether a value changed.
+- **Units.** A field stored in another unit by the other run's schema is never
+  equal, and the swept axes' units always have to match (a load in nN and one
+  in GPa are not two values of one quantity).
+- **Seeds and realization.** The `realization` block (seeds) is ignored: seeds
+  differ between every pair of runs, so comparing them would relate nothing. A
+  *replicate*, equal on every field but the seeds, is returned only when
+  `'realization'` is in `vary`.
+- **Deck shape and groups do not matter.** An array-mode point and a
+  combined-mode point of the same physics relate, across campaigns.
+- The point itself is never returned; results are ordered by `rel_path`,
+  `load`, `angle`, `speed`.
 
-```bash
-FrictionSim2D aiida export 251113-afm -o ~/transfer/251113-afm.aiida
-FrictionSim2D aiida import-archive ~/transfer/251113-afm.aiida
-```
-
-`aiida export SET_LABEL` archives every node of that set's
-`friction2d/<label>` group, the group itself included, to a portable `.aiida`
-file. `aiida import-archive ARCHIVE_PATH` imports it into the current
-profile — this is the way an hpc-direct store gets mirrored onto a local
-workstation. As noted above, importing an archive creates no extra group of
-its own; the group came across inside the archive.
-
-## 7. Deleting sets
-
-```bash
-FrictionSim2D aiida delete 260312-force_rebomos    # one set and its linked nodes (irreversible)
-FrictionSim2D aiida clear                          # every FrictionSim2D node in the profile (irreversible)
-```
-
-Both prompt for confirmation unless `--yes` is passed.
-
-## 8. Packaging inputs for transfer
+### 6.2 `compare`: two runs or campaigns, field by field
 
 ```bash
-FrictionSim2D aiida package ./simulation_output/simulation_YYYYMMDD_HHMMSS -o bundle.tar.gz
+FrictionSim2D compare 260421-afm 260512-afm               # two sets
+FrictionSim2D compare point:<point_uuid> pk:1234          # a point against a CalcJob
+FrictionSim2D compare sidecar:~/dl/260421-afm.aiida.params 260512-afm
 ```
 
-Builds a `tar.gz` of simulation inputs for cluster transfer; excludes
-`.lammpstrj` files by design.
+A and B are each a CalcJob pk or uuid, a `point_uuid`, a set label, or an
+archive's `.params` sidecar. A prefix says which: `pk:`, `uuid:`, `point:`,
+`group:` or `sidecar:`.
 
-## Known gaps
+- **`sidecar:`** takes the `<archive>.params/` directory, a directory holding
+  one, or one deck's JSON in it. Without a prefix, a directory is read as a
+  sidecar only when it is, or holds, a `.params` directory with its
+  `schema-*.json`. Anything else is looked up in the store, so a local folder
+  that shares a set's name never shadows the set. An unprefixed all-digit
+  reference is a pk (else a group label).
+- **Field by field, with units.** The report lists, per block, each differing
+  field as `path: a -> b <unit>`, the blocks present on one side only, and the
+  derived values that differ.
+- **Units and defaults per side.** Each side is read in its own schema's units
+  and defaults (the CalcJob's `schema` node, or the sidecar's
+  `schema-<version>.json`), so a comparison reads the units a run was stored
+  with, not today's. An elided field is refilled from its own side's default.
+  A field the two sides store in different units is listed as a unit
+  difference and never compared.
+- **Tolerance.** Block fields: floats to 6 significant figures, integers
+  exactly (as in `related()`). Derived values:
+  `|a - b| <= max(atol, rtol * max(|a|, |b|))`, with `--rtol` (default `1e-6`)
+  and `--atol` (default `1e-9`); these two options apply to derived values only.
+- **Seeds.** Unlike `related()`, `compare` shows the `realization` block like
+  any other, so two runs that differ only in their seeds are reported as such.
+- **Campaigns.** A group gives the fields shared by all its current decks; a
+  field that varies inside it shows as `<varies>`. The swept axes are point
+  attributes, not blocks, so a load sweep does not show as a difference.
 
-- **Flake results written before 2026-09-22 have no COF.** Flake slides now
-  apply the configured pressure to the flake and record the normal force
-  `v_fz`, so `summarise_run` computes their COF and they can be published like
-  any sheet-on-sheet result. An older flake results file has no `v_fz` column:
-  it ingests with COF `None` and `is_complete=False`, and cannot be published.
-- **AFM's `provenance/` directory is not retrieved by the CalcJob.** The run
-  node created at generation time (`run --aiida`) already holds the same
-  provenance data as an attribute, so retrieving the directory again on
-  completion would be redundant; only `provenance.json` and the LAMMPS
-  inputs/results travel back through `retrieve_list`.
-- **A duplicate central-DB upload is not an error, at either client.** The
-  REST API responds `409 Conflict` to a duplicate `time_series_hash`, and
-  `FrictionHTTPClient.upload_result`/`upload_record` (the `mode='api'`
-  client — see [commands.md](commands.md)) return `None` for it rather than
-  raising, mirroring the direct-`psycopg2` client's own `Optional[int]`
-  return for the same case. `db upload`/`db stage` report it as
-  `skipped (already in central DB)`, not a failure.
+## 7. Maintenance: `reindex` and `verify`
+
+Identity lookups go through node extras (`friction2d_block_hash`,
+`friction2d_block_kind`, `friction2d_sha256`, `friction2d_folder_sha256`,
+`friction2d_schema_hash`, and the CalcJob extras `friction2d_run_uuid`,
+`friction2d_deck_key`, `friction2d_tokens`). Extras are an index, recomputable
+from the nodes themselves.
+
+```bash
+FrictionSim2D aiida verify      # duplicate hashes, or hash extras that disagree with content; exit 1 if any
+FrictionSim2D aiida reindex     # recompute every index extra from the stored nodes
+```
+
+Run `reindex` after an archive import that dropped or edited extras.
+`point_table()` leaves out the points of a CalcJob whose blocks lack their hash
+extra, with a warning that names `reindex`.
+
+## 8. Getting data back out
+
+```bash
+FrictionSim2D aiida export-results 260421-afm ~/exported/260421-afm
+FrictionSim2D aiida rebuild 260421-afm -o ~/rebuild_test --hpc-scripts
+```
+
+- **`export-results LABEL OUTPUT_DIR`** writes a set's live CalcJobs back as an
+  ordinary simulation tree (`provenance/`, `lammps/`, `results/`, `data/`,
+  logs). Halted points get their `results/halted.txt` line back and user
+  rulings their `integrity_rulings.yaml` entry, so `postprocess read` gives the
+  statuses it gave on the source tree.
+- **`rebuild LABEL`** regenerates a set's *inputs*: it hands each run's stored
+  `config.json` and `settings.yaml` to the builder router `FrictionSim2D run`
+  uses. `--hpc-scripts` also writes the job scripts.
+
+## 9. Archives
+
+```bash
+FrictionSim2D aiida export 260421-afm -o ~/transfer/260421-afm.aiida
+FrictionSim2D aiida export 260421-afm -o 260421-afm.aiida --include-peratom
+FrictionSim2D aiida export 260421-afm -o 260421-afm.aiida --keep-hpc-paths
+FrictionSim2D aiida import-archive ~/transfer/260421-afm.aiida
+```
+
+`aiida export LABEL` writes three things:
+
+- `<output>` — the `.aiida` archive: the set's Group, its CalcJobs and every
+  calcfunction reached from their outputs (verdicts, rulings, summaries), plus
+  what aiida's export closure adds (their inputs and outputs). Every node is a
+  core AiiDA type, so the archive imports and its data loads **without
+  FrictionSim2D installed**; only `calc.process_class` and `calc.res` need the
+  plugin.
+- `<output>.params/` — the JSON sidecars: `<rel_path>/<deck>.json` per live
+  deck (`{block name: block content, 'derived': ...}`) and
+  `schema-<version>.json`. `FrictionSim2D compare` reads them without AiiDA.
+- `<output>.README.md` — the link-label conventions (`points__*`, `blocks__*`,
+  ...), the schema nodes, the archive size and the personal data it carries.
+
+**The integrity gate.** The export refuses while any live point of the set has
+no live verdict (`UncheckedPointsError`, listing the points): import the set
+again to check them, or pass `--force` to write anyway. It also refuses when the
+closure would carry a CalcJob of another set (`ExportClosureError`).
+
+**Per-atom data is left out** by default: the `peratom__*` nodes are dropped
+from the archive. Pass `--include-peratom` to keep them.
+
+**HPC details are anonymised** by default. The anonymisation rewrites the
+written archive, never the store, which keeps everything:
+
+- a Computer's hostname becomes its machine label, a Code's executable its
+  basename;
+- `RemoteData.remote_path` and each CalcJob's `remote_workdir` become
+  `<machine label>:<rel_path>`; `hpc_run_path` leaves `parameters`;
+- the set Group's `source_root` becomes its basename and `source_host` the
+  machine label (or `unknown`);
+- in the provenance documents, `hpc.hpc_home`, `scratch_dir`, `log_dir`,
+  `conda_env` and `account` and `database.user`/`host` are dropped,
+  `hpc.hpc_host` becomes the machine label, and every absolute path becomes its
+  basename;
+- node logs and process failure text are scrubbed of local paths;
+- rewritten nodes keep their UUIDs and carry the extra
+  `friction2d_anonymised`. Their `friction2d_folder_sha256` is recomputed from
+  the rewritten content, so `aiida verify` agrees on the far side.
+
+Pass `--keep-hpc-paths` to keep all of these as recorded.
+
+**Attribution.** The AiiDA User (name and email) of whoever imported the runs
+is kept on every node, for attribution, and the README says so.
+
+**Datasets export separately.** A set archive never includes dataset Groups or
+their tables. `src.aiida.export.export_dataset(name, path)` (Python only, no CLI
+command yet) archives one dataset on its own, with the verdicts of every member
+point, across every set it was built from; it is gated, anonymised, per-atom
+free and documented the same way.
+
+**`aiida import-archive PATH`** imports an archive into the current profile.
+The set's Group comes across inside the archive, so no extra import group is
+made. Content-addressed nodes that already exist (same UUID) are not
+duplicated. Run `aiida verify` (and `aiida reindex` if needed) afterwards.
+
+### 9.1 Publishing on Materials Cloud
+
+Materials Cloud Archive (DOI, long-term hosting) is the publication target:
+
+1. Import every run, make sure the import report shows no failures and every
+   point has a verdict (the export refuses otherwise).
+2. Review the overrides listed by `aiida rule LABEL`.
+3. `aiida postprocess LABEL` and, for a figure, `aiida dataset NAME LABEL...`.
+4. `aiida export LABEL -o LABEL.aiida` (anonymised; add `--include-peratom` only
+   if the per-atom data is part of the record).
+5. Upload `LABEL.aiida`, `LABEL.aiida.params/` and `LABEL.aiida.README.md`
+   together. A reader can browse the graph after `verdi archive import`, or
+   compare against their own runs with `FrictionSim2D compare` on the sidecars.
+
+## 10. Deleting
+
+```bash
+FrictionSim2D aiida delete 260312-force_rebomos    # one set (irreversible)
+FrictionSim2D aiida clear                          # every FrictionSim2D node (irreversible)
+```
+
+- `delete` removes the set's Group and every CalcJob of it that no other set
+  holds, with that CalcJob's outputs and their calcfunction results. Shared
+  inputs (blocks, files, provenance, schema, Codes, Computers) are never
+  deleted. A set that a dataset draws on is refused whole.
+- `clear` removes every friction2d CalcJob with its outputs, steps, summaries
+  and datasets, the inputs they leave unused, and every `friction2d/*` Group.
+  Computers are kept.
+- Both prompt for confirmation unless `--yes` is passed.
 
 ## Related docs
 
 - [commands.md](commands.md)
+- [provenance.md](provenance.md)
+- [integrity.md](integrity.md)
 - [settings.md](settings.md)
 - [hpc_jobs.md](hpc_jobs.md)
-- [provenance.md](provenance.md)

@@ -441,7 +441,8 @@ def rebuild_set(label: str, dest: Path, *, profile: Optional[str] = None,
     an AFM run shares one) to ``run.artifacts.generate_package``, alias-fixed
     (:func:`_fix_config_aliases`), with ``allow_generate_amorphous=False``
     and ``simulation_root_name='.'`` so each run keeps its ``rel_path``. The
-    run's stored ``provenance/settings.yaml`` is the settings file. Returns ``(created paths, dest)``.
+    run's stored ``provenance/settings.yaml`` is the settings file. Returns
+    ``(created paths, dest)``.
     """
     _load_profile(profile)
     rel_paths = sorted({calc.inputs.parameters['rel_path']

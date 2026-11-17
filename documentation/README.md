@@ -16,7 +16,7 @@ Read in this order if you are new; each document also stands alone.
 | 7 | [settings.md](settings.md) | Every `settings.yaml` section and its defaults |
 | 8 | [pes_scan.md](pes_scan.md) | Static potential-energy-surface (corrugation-barrier) scans |
 | 9 | [indent.md](indent.md) | Indentation runs: penetration on hold, adhesion on retract |
-| 10 | [aiida.md](aiida.md) | AiiDA setup, submission, import, query, archive exchange |
+| 10 | [aiida.md](aiida.md) | AiiDA store: graph, import, integrity rulings, `related()`, `compare`, archives |
 | 11 | [hpc_jobs.md](hpc_jobs.md) | Scheduler script generation and two-phase submission |
 | 12 | [provenance.md](provenance.md) | Provenance manifest model and file tracking internals |
 | 13 | [python_api.md](python_api.md) | Driving the package from Python instead of the CLI |

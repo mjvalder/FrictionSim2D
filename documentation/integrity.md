@@ -53,7 +53,7 @@ Both families get every rule. The inputs differ:
 |---|---|---|
 | temperature channel | `temp_sheet_3d`, N = all sheet atoms | `temp_center_3d`, N = atoms of the centre layers (all but the first and last) |
 | heating peak | over the whole window | after the first `sheet_heating_skip_samples` samples |
-| gap | top minus bottom layer centre of mass (bilayers) | shear interface, one layer above minus the one below |
+| gap | layer 2 minus layer 1 centre of mass (`comz_L2 - comz_L1`), for any stack of two or more layers | shear interface, one layer above minus the one below (`comz_L{k+1} - comz_L{k}`, `k = n_layers // 2`) |
 | `gap_rise` | the highest rise over the start | a lasting shift of either sign: the median of the last `sheet_gap_end_samples` against the start |
 | `collapse` | not applied | applied to every adjacent pair |
 | core channels | `nf lfx lfy comx comy comz tipx tipy tipz` | `lfx lfy nf` and `comz_L<k>` of each layer; layer 1 is fixed, so is exempt from `frozen` |
@@ -148,11 +148,17 @@ under `overridden by you`.
 A ruling on a point that does not exist gives a warning. Unreadable or duplicate entries also give
 a warning; for a duplicate, the last entry wins.
 
+The AiiDA store applies the same file and the same rules: every `aiida import` checks each new
+point and then applies the set's `integrity_rulings.yaml`, and `aiida rule LABEL` re-applies it on
+demand. There, removing a ruling and re-applying the file withdraws it. See
+[aiida.md](aiida.md#5-integrity-verdicts-and-rulings).
+
 ## Changing thresholds
 
 The thresholds come from the `integrity:` block of your settings (see [settings.md](settings.md#integrity)).
-For one read, point `--integrity-settings` at a YAML file holding an `integrity:` mapping. Its
-values replace the user settings:
+For one read, point `--integrity-settings` at a YAML file holding an `integrity:` mapping. That
+mapping replaces the whole `integrity` block of your settings: a key it omits falls back to its
+built-in default (the table above), not to the value in your settings file.
 
 ```yaml
 # strict.yaml

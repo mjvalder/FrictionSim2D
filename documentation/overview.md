@@ -40,8 +40,9 @@ registration, submission, and import workflows.
 4. Run the LAMMPS jobs locally or on a cluster.
 5. Import completed results into the local AiiDA database — full timeseries plus
    provenance: `FrictionSim2D aiida import`.
-6. Share results as AiiDA archives (`FrictionSim2D aiida import`); the central
-   database was removed.
+6. Check, summarise and compare them in the store (`aiida postprocess`,
+   `aiida dataset`, `FrictionSim2D compare`), and share them as AiiDA archives
+   (`aiida export`, `aiida import-archive`).
 
 ## Quick start
 
@@ -107,8 +108,9 @@ per expanded parameter set.
 | `run` | Generate simulations of any of the five models |
 | `settings` | Inspect, initialise, or reset global settings |
 | `hpc` | Build scheduler scripts from generated simulations |
-| `aiida` | Setup, submit, import, query, export archives |
+| `aiida` | Setup, import, integrity rulings, summaries, datasets, query, archives |
 | `postprocess` | Read results and produce plots or descriptor tables |
+| `compare` | Compare the parameters of two runs or campaigns, field by field |
 
 Full reference in [commands.md](commands.md).
 
@@ -117,7 +119,7 @@ Full reference in [commands.md](commands.md).
 Results live in the local AiiDA store (`FrictionSim2D aiida ...`): full
 time-series data and complete provenance. The former central PostgreSQL database
 and REST API were removed; exchange results as AiiDA archives
-(`FrictionSim2D aiida import`).
+(`FrictionSim2D aiida export` / `aiida import-archive`).
 
 ## Reproducibility
 

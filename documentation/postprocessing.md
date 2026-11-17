@@ -277,10 +277,12 @@ FrictionSim2D postprocess plot --init plots.json --data-dir /data/campaign_a
 
 `db://` URIs were removed with the central database; a `data_dir` that starts with
 `db://` raises `PlotDataError`. Read the local AiiDA store with
-`aiida://dataset/<name>` (added in Task 12), or export a tree and use that directory:
+`aiida://dataset/<name>` (a dataset made by `FrictionSim2D aiida dataset`, see
+[aiida.md](aiida.md#6-postprocessing-datasets-and-queries)), or export a tree and
+use that directory:
 
 ```bash
-FrictionSim2D aiida export-results <label> --output-dir <dir>
+FrictionSim2D aiida export-results <label> <dir>
 ```
 
 ---

@@ -103,8 +103,9 @@ def fallback_ollama_model(settings: AgentSettings, installed: Iterable[str],
     """Move an old agent.yaml to the fine-tune default, and the default to stock
     when the fine-tune is neither installed nor installable.
 
-    A fine-tune's first name is always renamed. The legacy names are migrated once (``settings_version``), so a user who
-    picks one again afterwards keeps it; any other model is never rewritten.
+    A fine-tune's first name is always renamed. The legacy names are migrated
+    once (``settings_version``), so a user who picks one again afterwards keeps
+    it; any other model is never rewritten.
     Returns a note for the user when the model changed, else None.
     """
     names, old = set(installed), settings.ollama.model

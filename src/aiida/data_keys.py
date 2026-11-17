@@ -1,16 +1,10 @@
-"""Vocabulary shared between `data/results.py` and `ingest.py` -- aiida-free.
+"""Vocabulary shared by the import and the CalcJob parser -- aiida-free.
 
-`data/results.py` imports `aiida.orm.Data` at module level (it IS a Data node
-type), and `data/__init__.py` eagerly imports `results.py` alongside
-`simulation.py`/`simulation_set.py` (also `aiida.orm.Data` node types) -- so
-importing ANY name from `src.aiida.data`, including a submodule of it, forces
-`aiida` to be importable. `src.aiida.ingest` needs `TIER_KEYS` and a
-content-hash helper at module load time (for `POINT_KEYS = TIER_KEYS +
-('retract',)`), but every other symbol in that module defers its own `aiida`
-import into a function body specifically so the module stays importable on a
-machine without `aiida` installed. This module lives OUTSIDE `src.aiida.data`
-(a sibling of `ingest.py`, not a child of the package with the eager
-imports) so importing it triggers none of that.
+`src.aiida.ingest` needs `TIER_KEYS` and a content-hash helper at module load
+time (for `POINT_KEYS = TIER_KEYS + ('retract',)`), and defers every `aiida`
+import into a function body so it stays importable without aiida-core. This
+module holds what it and :mod:`src.aiida.calcjob` must agree on, and imports
+no `aiida` at all, so either can import it at module level.
 """
 import hashlib
 from pathlib import Path
@@ -26,11 +20,8 @@ TIER_KEYS = ('window', 'raw', 'peratom')
 def is_superseded(node) -> bool:
     """Whether `node` was marked replaced by `src.aiida.ingest.supersede`.
 
-    `export._results_of` (a superseded node must never be written back
-    out -- it and its replacement share the same run-relative file names, so
-    exporting both would make the last one dumped win, possibly the stale
-    one) and `query` read the flag through this one function, so the callers
-    cannot drift into checking it differently.
+    `src.aiida.compare` reads the flag through this function, so a
+    superseded deck or point never stands for its run in a comparison.
     """
     return bool(node.base.extras.get('superseded', False))
 

@@ -6,10 +6,11 @@ How the suite is organised, how to run each tier, and the two ways a naive
 ## Tiers
 
 ```bash
-pytest tests --ignore=tests/gui          # fast tier: 1520 tests, ~1.5 min
-pytest -m lammps                         # real LAMMPS runs: 61 tests, ~25 min
-pytest -m 'integration and not lammps'   # cross-package tier: 97 tests, ~23 s
-pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 103 tests, ~3:20
+pytest tests --ignore=tests/gui          # fast tier: 3689 tests, ~14 min
+pytest -m lammps                         # real LAMMPS runs: 80 tests
+pytest -m 'integration and not lammps'   # cross-package tier: 105 tests
+pytest -m integration                    # the same tier PLUS the LAMMPS smoke: 116 tests
+pytest tests/aiida -m aiida              # the AiiDA tier: 291 tests, ~11 min, broker-less SQLite profile
 pytest -m ""                             # everything
 pytest tests/builders                    # one package
 pytest tests/core/test_config.py::test_name              # one test
@@ -25,8 +26,7 @@ the default.
   modal dialog and the run never finishes. Always name paths or pass
   `--ignore=tests/gui`.
 - **`-m integration` replaces the default marker expression**, including the
-  `not lammps` part, so it pulls the real-LAMMPS smoke in with it — 3:20 rather than
-  23 s. Use `-m 'integration and not lammps'` when you want only the fast half.
+  `not lammps` part, so it pulls the real-LAMMPS smoke in with it. Use `-m 'integration and not lammps'` when you want only the fast half.
 
 ## Markers
 

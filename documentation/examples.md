@@ -1,6 +1,6 @@
 # Examples
 
-End-to-end workflows, from generating a simulation tree through to plots and database records.
+End-to-end workflows, from generating a simulation tree through to plots and the AiiDA store.
 
 ## 1. Generate AFM simulations
 
@@ -82,25 +82,38 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 FrictionSim2D run afm examples/afm_config.ini --hpc-scripts --output-dir ./simulation_output
 ```
 
-## 7. AiiDA setup and submission
+## 7. AiiDA setup
+
+AiiDA only records finished runs; nothing is submitted through it. Create the
+profile once:
 
 ```bash
 FrictionSim2D aiida setup
-FrictionSim2D aiida submit ./simulation_output/simulation_YYYYMMDD_HHMMSS
-```
-
-Dry-run first:
-
-```bash
-FrictionSim2D aiida submit ./simulation_output/simulation_YYYYMMDD_HHMMSS --dry-run
 ```
 
 ## 8. Import and query AiiDA results
 
-Import a completed simulation directory into the local AiiDA database:
+Import a finished simulation directory into the local AiiDA store (one CalcJob
+per LAMMPS deck, an integrity verdict per point). Preview it first:
 
 ```bash
-FrictionSim2D aiida import ./simulation_20260421_143404 --label "251113-afm"
+FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm --dry-run
+FrictionSim2D aiida import ./simulation_20260421_143404 --label 251113-afm
+```
+
+A tree built before provenance schema 2.2.0 needs a `run_uuid` first:
+
+```bash
+FrictionSim2D aiida stamp-uuid ./simulation_20260421_143404
+```
+
+Summarise the complete points, collect them into a dataset, and compare two
+sets:
+
+```bash
+FrictionSim2D aiida postprocess 251113-afm
+FrictionSim2D aiida dataset mos2-afm 251113-afm
+FrictionSim2D compare 251113-afm 251120-afm
 ```
 
 Write a stored set back out as an ordinary simulation tree, ready for `postprocess read`/plotting:
@@ -116,7 +129,8 @@ FrictionSim2D aiida query --material h-MoS2 --format table
 FrictionSim2D aiida query --set-label 251113-afm --format csv --output afm_results.csv
 ```
 
-Export one simulation set to a portable archive:
+Export one simulation set to a portable archive (with `.params/` sidecars and
+a README; HPC details anonymised):
 
 ```bash
 FrictionSim2D aiida export 251113-afm -o friction2d_results.aiida
@@ -136,11 +150,12 @@ Plot from JSON plot config:
 FrictionSim2D postprocess plot plot_config.json --output-dir plots
 ```
 
-## 10. Central database and REST API (removed)
+## 10. Sharing results
 
-The central PostgreSQL database, `FrictionSim2D db ...` and `FrictionSim2D api ...`
-were removed. Share results as AiiDA archives instead (`FrictionSim2D aiida import`,
-see [aiida.md](aiida.md)).
+The former central database and REST API (`FrictionSim2D db ...`,
+`FrictionSim2D api ...`) were removed. Share results as AiiDA archives:
+`FrictionSim2D aiida export` on one side, `FrictionSim2D aiida import-archive`
+on the other (see [aiida.md](aiida.md#9-archives)).
 
 ## Related docs
 

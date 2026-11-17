@@ -19,7 +19,6 @@ Available builders:
 from src import AFMSimulation, SheetOnSheetSimulation
 ```
 
-If AiiDA extras are installed, `run_with_aiida` is also exported.
 
 ## 1. Run AFM from Python
 
@@ -84,21 +83,34 @@ sim.set_base_output_dir("./")
 sim.build()
 ```
 
-## 6. AiiDA helper
+## 6. AiiDA store
+
+AiiDA records finished runs; it never runs them (there is no submission
+helper). With the AiiDA extras installed:
 
 ```python
-from src.aiida.submit import run_with_aiida
+from src.aiida import load_aiida_profile
+from src.aiida.ingest import import_root
+from src.aiida.query import Friction2DDB, point_table, related
 
-sims, root, nodes = run_with_aiida("afm_config.ini", model="afm")
+load_aiida_profile()                      # settings.aiida.profile, else AiiDA's default
+report = import_root("simulation_20260421_143404", label="260421-afm")
+print(report.render())
+
+db = Friction2DDB()
+df = db.query(set_label="260421-afm").to_dataframe()   # one row per live point
+
+table = point_table()
+same_but_load = related(df.point_uuid[0], "load", table=table)
 ```
 
-Use this for generate+submit flow with one call.
+See [aiida.md](aiida.md) for the graph, `related()` and the archive export.
 
 ## Notes
 
 - `src.__init__` defines convenience wrappers `afm()` and `sheetonsheet()`.
 - Internal helper `_run_all()` exists in source but is intentionally internal by naming convention.
-- For long sweeps, call patterns that return created paths and log metadata immediately to your run notebook or database.
+- For long sweeps, call patterns that return created paths and log metadata immediately to your run notebook.
 
 ## Related docs
 

@@ -354,8 +354,9 @@ FrictionSim2D aiida stamp-uuid ROOT [--dry-run]
   distinguishable. Every other key keeps its value; the write is atomic.
 - An existing `run_uuid` is never overwritten: a second pass stamps nothing.
 - `--dry-run` reports what would be stamped and writes nothing.
-- Stamping rewrites `provenance.json`, so a run imported before stamping
-  re-imports as changed.
+- Stamping rewrites `provenance.json`. Stamp once, before the first import,
+  and keep the stamped tree: a separately stamped copy of the same runs gets
+  new `run_uuid` values and imports as different runs.
 - Exit code 1 if any `provenance.json` was unreadable, or holds a `run_uuid`
   that is not a UUID (listed under `invalid`, never overwritten).
 
@@ -370,8 +371,8 @@ Options:
 - `--profile TEXT`
 - `--format {table|json|csv}` (default: `table`)
 
-`Results` counts live results only; superseded nodes are kept in the store but
-not counted.
+`Runs` counts distinct runs of live decks and `Results` live points;
+superseded nodes are kept in the store but not counted.
 
 ### aiida export-results
 
@@ -452,12 +453,24 @@ FrictionSim2D aiida clear [--profile TEXT] [--yes]
 
 ### aiida export
 
-Archive one simulation set (set + runs + results — the whole
-`friction2d/<label>` group) to a portable `.aiida` file:
+Archive one simulation set (its Group, CalcJobs, verdicts, rulings and
+summaries) to a portable `.aiida` file, with `<OUTPUT>.params/` block
+sidecars and `<OUTPUT>.README.md`:
 
 ```bash
-FrictionSim2D aiida export SET_LABEL [-o OUTPUT] [--profile TEXT]
+FrictionSim2D aiida export SET_LABEL [-o OUTPUT] [--profile TEXT] [--force]
+                                     [--include-peratom] [--keep-hpc-paths]
 ```
+
+- `-o, --output PATH` (default: `friction2d.aiida`; an existing file is refused)
+- `--force` — write even when live points have no integrity verdict (the
+  export refuses otherwise)
+- `--include-peratom` — keep the per-atom nodes (left out by default)
+- `--keep-hpc-paths` — do not anonymise hostnames, executables and paths
+
+The AiiDA User email is kept for attribution. Datasets are not included; they
+export separately (`src.aiida.export.export_dataset`, Python only). See
+[aiida.md](aiida.md#9-archives).
 
 ### aiida import-archive
 

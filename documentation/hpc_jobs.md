@@ -83,8 +83,8 @@ FrictionSim2D run afm afm_config.ini --hpc-scripts -o ./simulation_output
 rsync -avzhP ./simulation_output/simulation_YYYYMMDD_HHMMSS HPC_HOST:HPC_HOME/
 
 # 2. submit on the cluster (qsub/sbatch the generated scripts), then bring results home
-rsync -avzhP --include="*/" --include="results/***" --include="visuals/***" \
-      --include="run*.log" --exclude="*" \
+rsync -avzhP --include="*/" --include="results/***" --include="data/***" \
+      --include="visuals/***" --include="run*.log" --exclude="*" \
       HPC_HOST:HPC_HOME/simulation_YYYYMMDD_HHMMSS ./
 
 # 3. ingest the finished tree

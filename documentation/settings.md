@@ -203,7 +203,7 @@ quench:
 
 Implementation note: model fields also support aliases such as `melt_temp` and `quench_temp`.
 
-`quench_rate` is in K/s; the quench runs `(melt_temp - quench_temp) / (quench_rate * timestep * 1e-12)` steps (default: 1,100,000). Before the `quench_rate is K/s` fix the step count was proportional to the rate instead, so non-default values were mis-applied (inverted); the default `1e12` was unaffected. Amorphous blocks built earlier with a non-default rate should be regenerated.
+`quench_rate` is in K/s; the quench runs `(melt_temp - quench_temp) / (quench_rate * timestep * 1e-12)` steps (default: 1,100,000), so doubling the rate halves the run. Before the `quench_rate is K/s` fix (commit `e531b54`) the step count was proportional to the rate instead, so a non-default rate was applied inverted (a rate of `1e13` ran 100 times too long, not 10 times too short). The default `1e12` gave the same step count under both formulas, at any timestep. An amorphous substrate built earlier with a non-default rate should be regenerated: delete its cached `amor_<material>.lmp` (and `amor_<material>.lmp.json`) in the materials directory, because the cache is reused whatever the quench settings.
 
 ## hpc
 
@@ -251,11 +251,15 @@ For sheet-on-sheet runs, script ordering is adjusted automatically to slide scri
 
 ## aiida
 
-Five fields, all reachable. The old SSH-connected HPC mode is gone: the HPC
-blocks direct connections, so the supported remote workflows are
-remote-manual (rsync out, `aiida import` on return) and hpc-direct (AiiDA
-runs in the HPC's own conda env, archive brought home) — see
-[aiida.md](aiida.md).
+Settings of the AiiDA store, which is import-only: no simulation is submitted
+through AiiDA, finished runs are imported afterwards. The supported remote
+workflows are remote-manual (rsync out, `aiida import` on return) and
+hpc-direct (AiiDA runs in the HPC's own conda env, archive brought home) — see
+[aiida.md](aiida.md). None of these fields enters a run's parameter blocks.
+
+`aiida import`, `aiida postprocess` and `aiida dataset` read this block (and
+`integrity`) from `--settings-file` when given, else from the per-user
+settings file.
 
 Defaults:
 
@@ -271,15 +275,17 @@ aiida:
 - `profile` — the AiiDA profile every profile-taking function falls back to
   when its own `profile` argument (Python) or `--profile` option (CLI) is
   omitted. `null` means "AiiDA's own default profile."
-- `computer_label` — not read by the import, which names each run's
+- `computer_label` — not read by anything: the import names each run's
   Computer from `aiida import --machine`, then `machine`, then the run's
   `hpc.hpc_host`, else `localhost` (`aiida setup` registers no Computer).
 - `max_stored_file_mb` — files larger than this are recorded by sha256 + path
   instead of being copied into the AiiDA repository.
 - `skip_fraction` — leading fraction of each friction trace discarded as
-  transient before the COF statistics.
-- `machine` — the machine a run tree was produced on; `null` lets ingest
-  resolve it.
+  transient before the COF statistics. It is the summary option of
+  `aiida postprocess` and `aiida dataset`: a new value makes new summaries
+  beside the old ones, never edits them.
+- `machine` — the machine label (Computer) a run tree was produced on; `null`
+  lets the import fall back to each run's `hpc.hpc_host`, else `localhost`.
 - `enabled` and `lammps_code_label` are removed (AiiDA is import-only); an
   old settings file naming them loads with one warning.
 
@@ -296,10 +302,10 @@ workflows). See `docs/superpowers/specs/TO-DO/future-works.md`
 
 ## Removed: database
 
-The central summary database, its REST API and the `db`/`api` command groups
-were removed; the AiiDA store (`## aiida` above) is the only database. An old
-settings file with a `database:` block still loads: the block is ignored, with
-one warning.
+The `database` section is gone, with the central summary database, its REST
+API and the `db`/`api` command groups. The local AiiDA store (`aiida` above)
+is the only database. An old settings file with a `database:` block still
+loads: the block is ignored, with one warning.
 
 Any mapping key named like a credential (`password`, `api_key`, `token`, ...),
 anywhere in a settings or config document, is blanked in the copy written into
@@ -308,7 +314,7 @@ every run tree (`provenance/settings.yaml` and the `settings` block of
 travel in archives and export bundles. This happens twice: once when the tree
 is written (`redact_secrets`), and again -- independently, and by the same
 rule -- the moment any settings/config document is staged into the AiiDA store
-(see [aiida.md](aiida.md#credentials-never-enter-the-store) for the precise
+(see [aiida.md](aiida.md#23-credentials-never-enter-the-store) for the precise
 guarantee), so a tree built before the first gate existed, or a hand-edited
 settings file with credentials still in it, cannot leak them either.
 

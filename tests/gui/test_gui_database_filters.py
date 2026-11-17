@@ -1,8 +1,8 @@
-"""One filter form serves both sources.
+"""The filter form of the database pane.
 
-The local store and the central DB expose the same run fields after the AiiDA
-rework, so the bar produces one dict and `db_worker._central_filters`
-translates it for the REST surface. What is pinned here: an untouched control
+The bar produces one dict, the `filters` block of a `list` request, which
+`db_worker` passes to `Friction2DDB.query` over the local AiiDA store. What
+is pinned here: an untouched control
 contributes nothing (None, not '(any)'), a half-filled range still works, and
 free text is NOT part of the query.
 """
