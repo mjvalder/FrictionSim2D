@@ -211,3 +211,17 @@ def test_setup_afm_over_a_folder_proposes_the_sweep(deps):
     text = setup_afm(deps, AFMSetupRequest(materials_folder='examples:/materials',
                                            potential_type='sw'))
     assert 'proposed' in text and 'every material in examples:/materials' in text
+
+
+def test_a_potential_folder_is_named_as_such_and_says_to_ask(deps):
+    folder = deps.roots.workspace / 'pots'
+    folder.mkdir()
+    (folder / 'h-MoS2.sw').write_text('x')
+    with pytest.raises(ToolInputError, match='holds potential files.*ask the user'):
+        folder_material_ops(deps, 'workspace:/pots', 'sw')
+
+
+def test_a_missing_structure_says_to_ask_and_explains_amorphous(deps):
+    from src.agent.tools.materials import resolve_material
+    with pytest.raises(ToolInputError, match='built amorphous.*ask the user'):
+        resolve_material(deps, 'amorphous Si', 'sw')

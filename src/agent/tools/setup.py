@@ -256,7 +256,9 @@ class _SetupBase(BaseModel):
     @model_validator(mode='after')
     def _one_source(self):
         if bool(self.materials) == bool(self.materials_folder):
-            raise ValueError('give either materials or materials_folder, not both or neither')
+            raise ValueError('give either materials or materials_folder, not both or neither '
+                             '(materials_folder is the folder of .cif structure files; the '
+                             'potentials named after them are found on their own)')
         return self
 
     def describe(self) -> str:

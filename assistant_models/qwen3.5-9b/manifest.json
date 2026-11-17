@@ -7,5 +7,8 @@
   "latency_p50": null,
   "registry": null,
   "sha256": "b821d3b298f8206eeaf886292ad8ae8275651fbad27180198281e7db49653ecf",
-  "size": 5780090720
+  "size": 5780090720,
+  "verified_schemas": [
+    "58d9a9a68b61b3d2"
+  ]
 }

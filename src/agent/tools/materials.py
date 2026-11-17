@@ -13,6 +13,9 @@ from ..sandbox import SandboxError, display_path, resolve_readable
 from . import compact
 
 STRUCTURE_SUFFIX = '.cif'
+#: Appended to a lookup that failed: a small model guesses or gives up otherwise.
+ASK_FOLDER = ('if you cannot tell where the files are, ask the user for the exact folder '
+              '(e.g. workspace:/run/materials)')
 #: Never potentials, whatever folder they sit in.
 _NOT_POTENTIALS = {'.py', '.pyc', '.cif', '.txt', '.md', '.json', '.ini', '.yaml', '.data'}
 _SKIP_DIRS = {'__pycache__'}
@@ -131,7 +134,8 @@ def search_structures(deps, query: str) -> str:
     wanted = _norm(query)
     hits = [f for f in index_for(deps).structures if wanted in _norm(f.name)]
     if not hits:
-        return f"no structure matching '{query}' in the workspace or examples" + _note(deps)
+        return (f"no structure matching '{query}' in the workspace or examples; "
+                f'{ASK_FOLDER}' + _note(deps))
     return compact('\n'.join(f'{f.name} -- {display_path(f.path, deps.roots)}'
                              for f in hits[:15])) + _note(deps)
 
@@ -157,13 +161,21 @@ def search_potentials(deps, material: str, potential_type: Optional[str] = None)
                              for f in hits[:15])) + _note(deps)
 
 
+def _no_structure(name: str) -> ToolInputError:
+    """A structure name that matches no file, with what to do next."""
+    hint = ''
+    if name.casefold().startswith(('amorphous', 'a-')):
+        hint = ' (a substrate is always built amorphous: name the structure itself, e.g. Si)'
+    return ToolInputError(f"no structure file named '{name}'{hint}; call search_structures "
+                          f'and use a name exactly as it returns; {ASK_FOLDER}')
+
+
 def resolve_material(deps, name: str,
                      potential_type: Optional[str] = None) -> Tuple[FoundFile, FoundFile]:
     """The first structure and potential for ``name`` (exact stem preferred)."""
     structures = [f for f in index_for(deps).structures if f.name.casefold() == name.casefold()]
     if not structures:
-        raise ToolInputError(f"no structure file named '{name}'; call search_structures "
-                             'and use a name exactly as it returns')
+        raise _no_structure(name)
     potentials = _potentials_for(deps, name, potential_type)
     if not potentials:
         kind = f'{potential_type} ' if potential_type else ''
@@ -181,8 +193,7 @@ def _structure(deps, name: str) -> FoundFile:
     for found in index_for(deps).structures:
         if found.name.casefold() == name.casefold():
             return found
-    raise ToolInputError(f"no structure file named '{name}'; call search_structures "
-                         'and use a name exactly as it returns')
+    raise _no_structure(name)
 
 
 def _cell_line(name: str, cell: dict) -> str:
@@ -254,13 +265,18 @@ def folder_material_ops(deps, folder: str,
     try:
         path = resolve_readable(folder, deps.roots)
     except SandboxError as exc:
-        raise ToolInputError(str(exc)) from exc
+        raise ToolInputError(f'{exc}; {ASK_FOLDER}') from exc
     if not path.is_dir():
-        raise ToolInputError(f'{folder}: not a folder')
+        raise ToolInputError(f'{folder}: not a folder; {ASK_FOLDER}')
     structures = sorted((f for f in index_for(deps).structures if f.path.parent == path),
                         key=lambda f: f.name.casefold())
     if not structures:
-        raise ToolInputError(f'no structure (CIF) files directly in {folder}')
+        if any(p.suffix.lower() in EXTENSION_MAP for p in path.iterdir()):
+            raise ToolInputError(f'{folder} holds potential files, not structures: '
+                                 'materials_folder is the folder of .cif files, and the '
+                                 'potentials named after them are found on their own; '
+                                 + ASK_FOLDER)
+        raise ToolInputError(f'no structure (CIF) files directly in {folder}; {ASK_FOLDER}')
     by_folder = {}
     for structure in structures:
         for potential in _potentials_for(deps, structure.name, potential_type):

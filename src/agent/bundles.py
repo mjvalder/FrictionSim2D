@@ -17,7 +17,7 @@ import os
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ PARAMETER num_ctx 16384
 """
 
 _REQUIRED = ('tag', 'base', 'schema_hash', 'knowledge_hash')
-_OPTIONAL = ('sha256', 'size', 'pass1', 'latency_p50', 'registry')
+_OPTIONAL = ('sha256', 'size', 'pass1', 'latency_p50', 'registry', 'verified_schemas')
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,13 @@ class FineTune:  # pylint: disable=too-many-instance-attributes
     pass1: Optional[float] = None
     latency_p50: Optional[float] = None
     registry: Optional[str] = None
+    #: Tool schemas besides ``schema_hash`` the model was benchmarked on and passed.
+    verified_schemas: Tuple[str, ...] = ()
     bundle: Optional[Path] = None
+
+    def fits(self, schema_hash: str) -> bool:
+        """Whether the model was trained or benchmarked on the tool schema ``schema_hash``."""
+        return schema_hash == self.schema_hash or schema_hash in self.verified_schemas
 
     @property
     def name(self) -> str:
@@ -103,6 +109,8 @@ def _read(folder: Path) -> Optional[FineTune]:
         logger.warning('Skipping model bundle %s: unreadable manifest (%s)', folder, exc)
         return None
     fields.update({k: data[k] for k in _OPTIONAL if data.get(k) is not None})
+    if 'verified_schemas' in fields:
+        fields['verified_schemas'] = tuple(fields['verified_schemas'])
     return FineTune(**fields, bundle=folder)
 
 

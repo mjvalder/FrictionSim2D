@@ -1,11 +1,11 @@
 {
   "tag": "qwen3.5-2b",
   "base": "unsloth/Qwen3.5-2B",
-  "schema_hash": "b8b78921bc6dd497",
+  "schema_hash": "58d9a9a68b61b3d2",
   "knowledge_hash": "ea92dc8b1bc8424b",
   "pass1": null,
   "latency_p50": null,
   "registry": null,
-  "sha256": "027e2ca2de89ec701c47b8ccb47fe23d86a9d36ed4380b1daf4c24dfb9de8274",
+  "sha256": "035a0e8cbc2fae042f9f3710d8ca5fcdbc778d731f5f463f77207b5a8bc48478",
   "size": 1312164768
 }

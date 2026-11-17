@@ -37,8 +37,6 @@ from .worker import AgentWorker
 logger = logging.getLogger(__name__)
 _ORPHAN_THREADS = []  # keeps a still-running QThread alive past its pane
 
-SCHEMA_WARNING = ('{name} was trained for an older tool set; results may degrade. '
-                  'Retraining is the fix.')
 
 
 def _app_schema_hash() -> str:
@@ -130,7 +128,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
         self._install_fn = install_fn
         self._schema_hash_fn = schema_hash_fn
         self._installing = False
-        self._schema_warned = set()  # fine-tunes already warned about this session
+        self._schema_checked = set()  # fine-tunes whose tool schema was checked this session
         self._ollama_ready = False
         self._ollama_starting = False
         self._ollama_checking = False
@@ -429,7 +427,7 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
     def _update_ollama_ready(self) -> None:
         model = self.settings.ollama.model
         tune = self._finetunes.get(model)
-        self._warn_schema(tune)
+        self._check_schema(tune)
         self._ollama_ready = model_installed(model, self._installed)
         offer = (not self._ollama_ready and tune is not None and tune.installable
                  and is_local(self.settings))
@@ -452,17 +450,20 @@ class AssistantPane(QWidget):  # pylint: disable=too-many-instance-attributes
                                     f'{ollama_binary()} pull {model}')
             self._set_status(f'Ollama is running but has no model {model} — see Details')
 
-    def _warn_schema(self, tune) -> None:
-        """Once per fine-tune: a note when it learnt another tool set than this app's."""
-        if tune is None or tune.name in self._schema_warned:
+    def _check_schema(self, tune) -> None:
+        """Once per fine-tune: log (not tell the user) when it was neither trained nor
+        benchmarked on this app's tools. Shipped bundles are held to that by
+        tests/agent/test_shipped_bundles.py; this catches a hand-made one."""
+        if tune is None or tune.name in self._schema_checked:
             return
         try:
             current = self._schema_hash_fn()
         except ImportError:  # no pydantic-ai: the assistant cannot run anyway
             return
-        self._schema_warned.add(tune.name)
-        if tune.schema_hash != current:
-            self.note(SCHEMA_WARNING.format(name=tune.name))
+        self._schema_checked.add(tune.name)
+        if not tune.fits(current):
+            logger.warning('%s was trained for tool schema %s, not this app\'s %s',
+                           tune.name, tune.schema_hash, current)
 
     def _install(self) -> None:
         """Install the selected fine-tune on a pool thread (the user's click only)."""
