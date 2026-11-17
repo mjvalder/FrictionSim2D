@@ -177,3 +177,23 @@ def test_import_machine_beats_the_settings_file(store, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert _computers() == {'archer2'}
+
+
+# --- recheck --------------------------------------------------------------------
+
+def test_recheck_reports_flipped_points_and_is_idempotent(store, tmp_path):
+    root = tmp_path / 'sim'
+    _imported(root, eject=(30.0,))
+    settings = tmp_path / 'settings.yaml'
+    settings.write_text('integrity:\n  ejected_atoms: 3\n  isolated_atoms: 3\n'
+                        "  version: '1.1.0'\n", encoding='utf-8')
+
+    result = _run('recheck', 'camp', '--settings-file', str(settings))
+
+    assert result.exit_code == 0, result.output
+    assert 'thresholds v1.1.0' in result.output
+    assert f'rechecked {_pid(root, 30.0)}: failed_integrity -> complete' in result.output
+    again = _run('recheck', 'camp', '--settings-file', str(settings))
+    assert again.exit_code == 0, again.output
+    assert "set 'camp': 0 point(s) checked" in again.output
+    assert 'rechecked ' not in again.output

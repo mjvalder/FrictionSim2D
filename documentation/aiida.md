@@ -333,6 +333,22 @@ Every import (not a `--dry-run`) ends with an integrity pass over the whole set:
   *provisionally* (extra `friction2d_provisional`) and re-checked on the next
   import.
 
+An import does **not** re-check points after the integrity settings change.
+Edit the `integrity:` block (bump its `version` when thresholds change), then run:
+
+```bash
+FrictionSim2D aiida recheck 260421-afm --settings-file ./settings.yaml
+```
+
+- `aiida recheck` re-checks every live point whose live verdict has another
+  `thresholds_version`, or whose stored settings differ from the current ones.
+- The old verdict is superseded with its rulings, exactly as for a context
+  change, and the set's own rulings file is applied again to the new verdicts.
+- It lists `rechecked <point>: <old> -> <new>` for every status that changed.
+  A second run checks nothing.
+- A ruling applied from another file (`--rulings`) is not re-applied: the
+  report warns and names the `aiida rule LABEL --rulings <file>` to run.
+
 A verdict holds `status`, `failed`, `observed`, `reasons`, `quarantine`,
 `not_applicable`, `measures`, `thresholds_version`, `code_version` and
 `point_uuid`.
@@ -424,8 +440,9 @@ never by creation time**:
 2. within one generation: ruled > withdrawn > the checker's own;
 3. then the uuid, so the choice is reproducible.
 
-A ruling does not carry over to a new generation by itself: the rulings pass
-re-applies it to the new generation's verdict. A `Policy` can also pin an exact
+A new generation comes from `aiida recheck` (§5.1). A ruling does not carry
+over to it by itself: the rulings pass that `recheck` runs re-applies it to the
+new generation's verdict. A `Policy` can also pin an exact
 `thresholds_version` (verdicts) or `code_version` (summaries) instead of
 `'newest'`.
 
@@ -446,7 +463,8 @@ FrictionSim2D aiida list-sets
   options hash, code version): a second pass makes none; new options or a new
   code version make new summaries beside the old ones. It warns about points
   summarised on a provisional verdict and about verdicts from an older
-  threshold set (reported, not re-checked).
+  threshold set. It does not re-check them: run `aiida recheck LABEL` first
+  (§5.1).
 - **`aiida dataset NAME LABEL...`** makes the Group `friction2d/datasets/NAME`
   from one or more sets: for every live point whose selected verdict is
   `complete`, the summary the policy selects, plus one table `Dict` holding

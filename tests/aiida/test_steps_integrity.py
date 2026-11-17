@@ -6,6 +6,7 @@ ported checker (`integrity.check_files`) run as a calcfunction; the user's
 `apply_ruling` per (verdict, ruling) pair.
 """
 import pytest
+import yaml
 
 pytest.importorskip('aiida')
 pytest.importorskip('scipy')
@@ -16,7 +17,7 @@ from aiida.common.links import LinkType  # noqa: E402
 
 from src.aiida.ingest import import_root  # noqa: E402
 from src.aiida.integration import clear_all_nodes, delete_simulation_set  # noqa: E402
-from src.aiida.steps import apply_rulings  # noqa: E402
+from src.aiida.steps import apply_rulings, recheck_set  # noqa: E402
 from src.postprocessing.integrity_rulings import RULINGS_FILE, point_id  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
@@ -662,3 +663,86 @@ def test_ruling_that_stops_applying_after_a_recheck_says_why(
     msgs = [w for w in again.warnings + again.rulings.warnings if pid in w]
     assert any('no longer quarantined' in w and 'override: true' in w
                and 'quarantined to truncated' in w for w in msgs), msgs
+
+
+# --- aiida recheck: new integrity settings (I2) ------------------------------------
+
+def _settings_file(path, version=None, **integrity):
+    if version is not None:
+        integrity['version'] = version
+    path.write_text(yaml.safe_dump({'integrity': integrity}), encoding='utf-8')
+    return path
+
+
+@pytest.fixture
+def no_user_settings(monkeypatch, tmp_path):
+    """No per-user settings file: the import checks under the defaults."""
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'no-xdg'))
+
+
+def test_recheck_applies_new_thresholds_and_reapplies_rulings(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root = tmp_path / 'sim'
+    _tree(root, eject=(30.0,))
+    first = import_root(root, label='camp')
+    assert first.verdict_counts == {'complete': 2, 'failed_integrity': 1}
+    pid10, pid30 = _pid(root, 10.0), _pid(root, 30.0)
+    _write_ruling(root, pid10, 'fail', note='tip artefact', override=True)
+    assert apply_rulings('camp').applied == 1
+    loose = _settings_file(tmp_path / 'settings.yaml', version='1.1.0',
+                           ejected_atoms=3, isolated_atoms=3)
+
+    report = recheck_set('camp', settings_file=loose)
+
+    assert report.version == '1.1.0'
+    assert sum(report.verdict_counts.values()) == 3
+    assert report.rechecked == [(pid30, 'failed_integrity', 'complete')]
+    assert f'rechecked {pid30}: failed_integrity -> complete' in report.render()
+    statuses = {}
+    for point in (orm.load_node(u) for u in first.points):
+        verdict = _live_verdict(point)
+        assert verdict['thresholds_version'] == '1.1.0'
+        statuses[point.base.attributes.get('load')] = verdict['status']
+    assert statuses[30.0] == 'complete'
+    # The ruling re-applies to the new verdict; the old ruled one is superseded.
+    (ruled,) = _ruled_live()
+    assert ruled.creator.inputs.verdict['thresholds_version'] == '1.1.0'
+    assert ruled['status'] == 'failed_integrity' and ruled['overridden']
+    assert report.rulings.applied == 1 and report.rulings.withdrawn == []
+
+    checks = len(_nodes('check_integrity'))
+    again = recheck_set('camp', settings_file=loose)
+    assert again.verdict_counts == {} and again.rechecked == []
+    assert (again.rulings.applied, again.rulings.skipped) == (0, 1)
+    assert len(_nodes('check_integrity')) == checks
+
+
+def test_recheck_follows_a_settings_edit_without_a_version_bump(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root = tmp_path / 'sim'
+    _tree(root, eject=(30.0,))
+    import_root(root, label='camp')
+    assert recheck_set('camp').verdict_counts == {}        # same settings: nothing
+
+    edited = _settings_file(tmp_path / 'settings.yaml', ejected_atoms=3, isolated_atoms=3)
+    report = recheck_set('camp', settings_file=edited)
+
+    assert report.version == '1.0.0' and sum(report.verdict_counts.values()) == 3
+    assert report.rechecked == [(_pid(root, 30.0), 'failed_integrity', 'complete')]
+
+
+def test_recheck_warns_that_a_foreign_ruling_needs_reapplying(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root = tmp_path / 'sim'
+    _tree(root, eject=(30.0,))
+    import_root(root, label='camp')
+    review = tmp_path / 'x.yaml'
+    review.write_text(f'- point: "{_pid(root, 30.0)}"\n  ruling: pass\n'
+                      f'  note: fine\n  override: true\n', encoding='utf-8')
+    assert apply_rulings('camp', review).applied == 1
+
+    report = recheck_set('camp', settings_file=_settings_file(
+        tmp_path / 'settings.yaml', version='1.1.0', ejected_atoms=3, isolated_atoms=3))
+
+    assert any(str(review.resolve()) in w and '--rulings' in w for w in report.warnings)
+    assert _ruled_live() == []

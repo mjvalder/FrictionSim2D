@@ -217,7 +217,7 @@ import` registers the finished tree (one CalcJob per deck, an integrity
 verdict per point, the set's rulings). Nothing submits through AiiDA.
 See [aiida.md](aiida.md) for the node model.
 
-Commands that read settings (`import`, `postprocess`, `dataset`) take
+Commands that read settings (`import`, `recheck`, `postprocess`, `dataset`) take
 `--settings-file PATH` to read that file instead of
 `~/.config/FrictionSim2D/settings.yaml`; its `aiida.profile` also names the
 profile when `--profile` is not given.
@@ -296,6 +296,29 @@ FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--profile TEXT]
 Idempotent. Prints `applied N, skipped N, withdrawn N`, every live override of
 the set (`override <point>: <original> -> <new> (<note>)`), the withdrawn
 points, and rulings that match no point.
+
+### aiida recheck
+
+Re-check a set under the current integrity settings, after editing the
+`integrity:` block of `settings.yaml` (bump its `version` when the thresholds
+change):
+
+```bash
+FrictionSim2D aiida recheck LABEL [--settings-file PATH] [--profile TEXT]
+```
+
+- Re-checks every live point whose live verdict was checked with another
+  `integrity.version`, or with other integrity settings (any threshold edited
+  without a version bump counts).
+- The old verdict is superseded with its ruled and withdrawn verdicts, as when
+  a later import changes a point's context. Then the set's own rulings file is
+  applied again, so its rulings land on the new verdicts. A ruling applied from
+  another file is not re-applied; the report warns with the
+  `aiida rule LABEL --rulings <file>` to run.
+- Prints `set '<label>': N point(s) checked under integrity thresholds v<version>`,
+  the new verdict counts, `rechecked <point>: <old> -> <new>` for every point
+  whose status changed, failures, warnings and the rulings report.
+- A second run checks nothing. Exits 1 if any check failed.
 
 ### aiida postprocess
 

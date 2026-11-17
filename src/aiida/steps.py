@@ -7,6 +7,8 @@
   are the integrity module's own (dimensionless, nothing rescaled here).
 * :func:`check_group` -- runs it on every live point of a set that has no
   live verdict yet; :func:`~src.aiida.ingest.import_root` calls it.
+* :func:`recheck_set` -- ``check_group(recheck=True)`` then the rulings
+  pass: re-checks the points checked under other integrity settings.
 * :func:`apply_ruling` -- a calcfunction: a verdict as one user ruling decides
   it (:func:`src.postprocessing.integrity_rulings.rule_verdict`, the rulings
   layer's own decision).
@@ -48,11 +50,11 @@ from .policy import Policy, select
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'RulingReport', 'apply_ruling',
+__all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'RecheckReport', 'RulingReport', 'apply_ruling',
            'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
            'delete_dataset', 'is_provisional', 'latest_summaries', 'latest_verdict',
            'latest_verdicts', 'normalise_options', 'options_hash', 'postprocess_group',
-           'rule_group', 'summarise', 'summary_options', 'withdraw_ruling']
+           'recheck_set', 'rule_group', 'summarise', 'summary_options', 'withdraw_ruling']
 
 #: Marks every Dict made only as a step's input (value: what it is).
 STEP_INPUT_EXTRA = 'friction2d_step_input'
@@ -548,11 +550,34 @@ def _scope(points: List[orm.FolderData], new: List[orm.FolderData],
     return [p for p in points if touched(p)]
 
 
+def _stale_settings(verdict: orm.Dict, current: Dict[str, Any]) -> bool:
+    """Whether ``verdict`` was checked under integrity settings other than
+    ``current``: another ``thresholds_version``, or other stored content."""
+    if verdict.get('thresholds_version') != current.get('version'):
+        return True
+    func = verdict.creator
+    return 'settings' not in func.inputs or func.inputs.settings.get_dict() != current
+
+
+def _foreign_ruling_note(node: orm.Dict, pid: str) -> Optional[str]:
+    """For a ruled verdict whose ruling came from another file than the
+    set's own, a note that the next own-file pass will not re-apply it."""
+    if node.base.extras.get(KIND_EXTRA, None) != 'ruled_verdict':
+        return None
+    ruling = node.creator.inputs.ruling.get_dict()
+    if ruling.get('own_file', True):
+        return None
+    return (f'point {pid}: its ruling from {ruling.get("source")} was superseded with '
+            f'the re-checked verdict; re-apply it with `aiida rule LABEL --rulings '
+            f'{ruling.get("source")}`')
+
+
 def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 failures: Optional[List[Tuple[str, str]]] = None,
                 warnings: Optional[List[str]] = None,
                 rechecked: Optional[List[Tuple[str, str, str]]] = None,
-                settings_file: Optional[Path] = None) -> Dict[str, int]:
+                settings_file: Optional[Path] = None,
+                recheck: bool = False) -> Dict[str, int]:
     """Give every live point of ``group`` the verdict its current context
     calls for; return the new verdicts' status counts.
 
@@ -568,13 +593,25 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     ``warnings``). A
     point whose check raises goes to ``failures`` as ``(point uuid,
     message)`` and the others go on.
+
+    With ``recheck``, every live point whose live verdict was checked under
+    other integrity settings (:func:`_stale_settings`: another
+    ``thresholds_version``, or other stored settings content) is checked
+    too, and superseded as a context change is -- ``aiida recheck``. A
+    superseded ruling that came from another file than the set's own goes to
+    ``warnings``: the own-file pass does not re-apply it.
     """
     points = _live_points(group)
     verdicts = _live_verdicts(points)
     # A point with no verdict, or whose verdict was provisional.
     new = [p for p in points if not verdicts[p.pk]
            or verdicts[p.pk][-1].base.extras.get(PROVISIONAL_EXTRA, False)]
-    if not new:
+    stale: Set[int] = set()
+    if recheck:
+        settings = settings or _settings_dump(warnings, settings_file=settings_file)
+        stale = {p.pk for p in points
+                 if verdicts[p.pk] and _stale_settings(verdicts[p.pk][-1], settings)}
+    if not new and not stale:
         return {}
     problems: List[str] = []
     counts: Counter = Counter()
@@ -582,7 +619,8 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     runs: Dict[str, _RunView] = {}
     with TemporaryDirectory() as tmp:
         status, unknown = _stage2(points, Path(tmp) / 'rows', problems)
-        for point in _scope(points, new, problems):
+        scope = {p.pk for p in _scope(points, new, problems)} | stale
+        for point in [p for p in points if p.pk in scope]:
             old = verdicts[point.pk]
             if point.pk in unknown and old:
                 continue                    # stage 2 unknown: keep the verdict
@@ -596,7 +634,7 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                     problems.append(f'point {_pid(point)}: checked provisionally at '
                                     f'its parser status {status[point.pk]!r} '
                                     f'(stage 2 unknown); the next import re-checks it')
-                elif old and _unchanged(old[-1], inputs, point):
+                elif old and point.pk not in stale and _unchanged(old[-1], inputs, point):
                     continue
                 if settings_node is None:
                     settings_node = _step_input(
@@ -615,6 +653,9 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
             counts[verdict['status']] += 1
             for dead in old:
                 for successor in _successors(dead):
+                    note = _foreign_ruling_note(successor, _pid(point))
+                    if note is not None:
+                        problems.append(note)
                     _supersede(successor)
                 _supersede(dead)
             if old and rechecked is not None and old[-1]['status'] != verdict['status']:
@@ -949,6 +990,60 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
     return rule_group(_set_group(label), rulings_path, withdraw=withdraw)
 
 
+@dataclass
+class RecheckReport:
+    """What one :func:`recheck_set` pass did: the integrity settings
+    ``version`` it checked under, the new verdicts' status counts, the
+    re-checked points whose status changed (``(point id, old, new)``), the
+    rulings pass that followed, failures and warnings."""
+    label: str
+    version: str = ''
+    verdict_counts: Dict[str, int] = field(default_factory=dict)
+    rechecked: List[Tuple[str, str, str]] = field(default_factory=list)
+    rulings: Optional[RulingReport] = None
+    failures: List[Tuple[str, str]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def render(self) -> str:
+        """The report as text."""
+        total = sum(self.verdict_counts.values())
+        lines = [f'set {self.label!r}: {total} point(s) checked under integrity '
+                 f'thresholds v{self.version}']
+        lines += [f'  verdict {status}: {n}' for status, n in sorted(self.verdict_counts.items())]
+        lines += [f'  rechecked {pid}: {old} -> {new}' for pid, old, new in self.rechecked]
+        lines += [f'  FAILED {who}: {why}' for who, why in self.failures]
+        lines += [f'  WARNING {w}' for w in self.warnings]
+        if self.rulings is not None:
+            lines.append(self.rulings.render())
+        return '\n'.join(lines)
+
+
+def recheck_set(label: str, *, settings_file: Optional[Path] = None,
+                profile: Optional[str] = None) -> RecheckReport:
+    """Re-check the set ``friction2d/<label>`` under the current integrity
+    settings (those of ``settings_file``, else of the per-user file).
+
+    :func:`check_group` with ``recheck=True``: every live point whose live
+    verdict was checked with another ``thresholds_version``, or with other
+    stored settings content, gets a new verdict; the old one is superseded
+    with its ruled and withdrawn verdicts, as a context change does. Then
+    the set's own rulings file is applied (:func:`rule_group`), so its
+    rulings land on the new verdicts. A second pass checks nothing.
+    """
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+
+    load_aiida_profile(profile)
+    group = _set_group(label)
+    report = RecheckReport(label=label)
+    settings = _settings_dump(report.warnings, settings_file=settings_file)
+    report.version = settings['version']
+    report.verdict_counts = check_group(
+        group, settings=settings, failures=report.failures, warnings=report.warnings,
+        rechecked=report.rechecked, recheck=True)
+    report.rulings = rule_group(group)
+    return report
+
+
 # ---------------------------------------------------------------------------
 # The latest verdict (by policy, never by ctime)
 # ---------------------------------------------------------------------------
@@ -1235,7 +1330,7 @@ def _report_versions(label: str, verdicts: Dict[int, Tuple[Optional[orm.Dict], b
         warnings.append(
             f'set {label!r}: {count} point(s) have verdicts checked with integrity '
             f'thresholds v{version}, not the current v{current}; summaries and '
-            f'datasets use those verdicts until the points are re-checked')
+            f'datasets use those verdicts until `aiida recheck {label}` re-checks them')
 
 
 def postprocess_group(label: str, *, policy: Policy = Policy(),
@@ -1262,7 +1357,7 @@ def postprocess_group(label: str, *, policy: Policy = Policy(),
     To ``warnings``: every point summarised in this pass on a provisional
     verdict, every thresholds version other than the current
     ``IntegritySettings.version`` a selected verdict was checked with
-    (reported, not re-checked), an unreadable settings file, and, with
+    (reported; :func:`recheck_set` re-checks them), an unreadable settings file, and, with
     ``skip_failed``, every point whose summary raised (otherwise the error
     propagates).
     """

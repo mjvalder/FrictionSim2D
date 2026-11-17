@@ -667,7 +667,7 @@ def aiida_status():
         click.echo(f"   Storage: {profile.storage_backend}")
     except Exception as exc:  # pylint: disable=broad-except
         click.echo(f"⚠️  No active profile: {exc}")
-        click.echo("\n📝 Setup AiiDA with: verdi presto --use-postgres")
+        click.echo("\n📝 Setup AiiDA with: verdi presto")
 
 #: ``--settings-file`` of the commands that read the store's settings
 #: (``aiida.machine``, ``aiida.skip_fraction``, ``integrity``, ``aiida.profile``).
@@ -765,6 +765,36 @@ def aiida_rule(label: str, rulings_path: Optional[Path], withdraw: bool,
         logger.exception("Rulings failed")
         _raise_abort(f"❌ Rulings for set {label!r} failed: {exc}", exc)
     click.echo(report.render())
+
+
+@aiida_group.command('recheck')
+@click.argument('label')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+@_store_settings_file_option
+def aiida_recheck(label: str, profile: Optional[str], settings_file: Optional[Path]):
+    """Re-check the set LABEL under the current integrity settings.
+
+    Every live point whose verdict was checked with another integrity
+    ``version``, or other integrity settings, gets a new verdict; the old one
+    is superseded with its rulings, then the set's own rulings file is applied
+    again. Prints the points whose status changed. A second run checks
+    nothing. Exits 1 if any check failed.
+
+    Example:
+        FrictionSim2D aiida recheck 260421-afm --settings-file ./settings.yaml
+    """
+    from .aiida.steps import recheck_set  # noqa: PLC0415
+
+    try:
+        report = recheck_set(label, settings_file=settings_file,
+                             profile=_store_profile(profile, settings_file))
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Recheck failed")
+        _raise_abort(f"❌ Recheck of set {label!r} failed: {exc}", exc)
+    click.echo(report.render())
+    if report.failures:
+        raise SystemExit(1)
 
 
 @aiida_group.command('reindex')

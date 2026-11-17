@@ -346,7 +346,9 @@ integrity:
 
 `margins` is empty by default. A rule with margin `m` quarantines a passing point whose value
 is in `[m * threshold, threshold)`. `postprocess read --integrity-settings <file>` replaces this
-block for one read; `--no-integrity` skips the check.
+block for one read; `--no-integrity` skips the check. Verdicts already in the AiiDA store keep
+the settings they were checked with until `aiida recheck LABEL` re-checks them
+([aiida.md](aiida.md#51-a-verdict-for-every-point-at-import)).
 
 ## Related docs
 
