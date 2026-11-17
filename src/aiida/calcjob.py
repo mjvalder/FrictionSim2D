@@ -401,7 +401,10 @@ class LammpsFrictionParser(Parser):
         except Exception as exc:  # pylint: disable=broad-except
             # Caught, not raised: an exception would discard every output
             # (the log and run_info included) with the excepted process.
-            self.logger.exception('Parsing the outputs of %s failed', params.get('deck_name'))
+            # error, not exception: the node's log is published with the archive,
+            # and a traceback carries absolute home, repository and conda paths.
+            self.logger.error('Parsing the outputs of %s failed: %s: %s',
+                              params.get('deck_name'), type(exc).__name__, exc)
             failure, produced = f'{type(exc).__name__}: {exc}', 0
         if self._not_stored:
             info['not_stored'] = list(self._not_stored)

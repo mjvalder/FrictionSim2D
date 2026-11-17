@@ -68,7 +68,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = ['ArchiveFormatError', 'ExportClosureError', 'UncheckedPointsError', 'export_archive',
            'export_dataset', 'export_provenance_bundle', 'export_results',
-           'import_archive', 'rebuild_set', 'resolve_set', 'write_sidecars']
+           'import_archive', 'rebuild_set', 'resolve_set', 'sidecar_documents',
+           'write_sidecars']
 
 #: The extra a rewritten (anonymised) node carries in the archive.
 ANONYMISED_EXTRA = 'friction2d_anonymised'
@@ -860,12 +861,68 @@ def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
     return changed
 
 
+#: An absolute path inside free text (not ``eV/angstrom``: a word character
+#: before the slash is not a path start).
+_TEXT_PATH = re.compile(r'(?<![\w.~])(~?/[^\s\'"()\[\],;]+)')
+#: Log-record metadata that is a traceback or a frame, never kept.
+_LOG_DROPPED = ('exc_info', 'exc_text', 'stack_info', 'args', 'msg')
+
+
+def _basenamed_text(text: str) -> str:
+    """``text`` with every absolute path reduced to its basename."""
+    return _TEXT_PATH.sub(lambda m: PurePosixPath(m.group(1)).name or m.group(1), text)
+
+
+def _anonymise_logs(archive: _Archive) -> int:
+    """Node logs keep their level and the first line of their message, with
+    absolute paths reduced to basenames; the traceback body and the
+    traceback/frame metadata are dropped (a record's ``pathname`` is basenamed)."""
+    changed = 0
+    for pk, message, metadata in archive.rows('SELECT id, message, metadata FROM db_dblog'):
+        lines = (message or '').splitlines()
+        new_message = _basenamed_text(lines[0]) if lines else ''
+        content = json.loads(metadata or '{}')
+        new_metadata = {k: v for k, v in content.items() if k not in _LOG_DROPPED}
+        _scrub(new_metadata, {})
+        for key, value in new_metadata.items():
+            if isinstance(value, str):
+                new_metadata[key] = _basenamed_text(value)
+        if new_message != message or new_metadata != content:
+            archive.con.execute('UPDATE db_dblog SET message = ?, metadata = ? WHERE id = ?',
+                                (new_message, json.dumps(new_metadata), pk))
+            changed += 1
+    return changed
+
+
+#: Process-node attributes that carry free text a failure wrote: kept as
+#: their first line, with absolute paths reduced to basenames.
+_PROCESS_TEXT = ('exit_message', 'process_status', 'exception')
+
+
+def _anonymise_processes(archive: _Archive) -> int:
+    """``exit_message``/``process_status``/``exception`` of every process node."""
+    changed = 0
+    for pk, attributes, extras in archive.rows(
+            "SELECT id, attributes, extras FROM db_dbnode WHERE node_type LIKE 'process.%'"):
+        attributes = json.loads(attributes or '{}')
+        before = dict(attributes)
+        for key in _PROCESS_TEXT:
+            if isinstance(attributes.get(key), str):
+                lines = attributes[key].splitlines()
+                attributes[key] = _basenamed_text(lines[0]) if lines else ''
+        if attributes != before:
+            _mark(archive, pk, extras, attributes)
+            changed += 1
+    return changed
+
+
 def _anonymise(archive: _Archive) -> int:
     """Rewrite the archive's HPC and local details (see the module
     docstring); returns the number of rows changed."""
     changed, hosts, labels = _anonymise_computers(archive)
     changed += _anonymise_codes(archive) + _anonymise_parameters(archive)
     changed += _anonymise_remote(archive, labels) + _anonymise_groups(archive, hosts)
+    changed += _anonymise_logs(archive) + _anonymise_processes(archive)
     for row in _inputs_labelled(archive, 'provenance'):
         changed += _anonymise_folder(archive, row, hosts)
     return changed
@@ -980,25 +1037,46 @@ def _rewrite_archive(path: Path, *, anonymise: bool, drop_peratom: bool) -> Dict
     return counts
 
 
+def _remove(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
 def _write_archive(entities: List[Any], output_path: Path, *, anonymise: bool,
-                   drop_peratom: bool) -> Dict[str, int]:
-    """``create_archive`` into a partial file beside ``output_path``, rewrite
-    it, then move it into place: on any failure nothing is left at
-    ``output_path`` (and the partial file is removed)."""
+                   drop_peratom: bool, readme: Callable[[int], str],
+                   sidecars: Optional[Mapping[str, Mapping[str, Any]]] = None
+                   ) -> Dict[str, int]:
+    """Write the archive, its README (``readme(size in bytes)``) and its
+    sidecars (``<output_path>.params/``) as partial files beside
+    ``output_path``, then move all of them into place: on any failure before
+    that, nothing is left at any target and every partial file is removed."""
     from aiida.tools.archive import create_archive  # pylint: disable=import-outside-toplevel
 
-    if output_path.exists():
-        raise FileExistsError(f'{output_path} exists; remove it or choose another path')
+    targets = [output_path, Path(f'{output_path}.README.md')]
+    if sidecars is not None:
+        targets.append(Path(f'{output_path}.params'))
+    for target in targets:
+        if target.exists():
+            raise FileExistsError(f'{target} exists; remove it or choose another path')
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    partial = output_path.with_name(f'.{output_path.name}.partial')
-    partial.unlink(missing_ok=True)
+    partials = [target.with_name(f'.{target.name}.partial') for target in targets]
+    for partial in partials:
+        _remove(partial)
     try:
-        create_archive(entities, filename=partial)
-        counts = _rewrite_archive(partial, anonymise=anonymise, drop_peratom=drop_peratom)
-        partial.replace(output_path)
+        create_archive(entities, filename=partials[0])
+        counts = _rewrite_archive(partials[0], anonymise=anonymise, drop_peratom=drop_peratom)
+        partials[1].write_text(readme(partials[0].stat().st_size), encoding='utf-8')
+        if sidecars is not None:
+            partials[2].mkdir()
+            _put_sidecars(sidecars, partials[2])
     except BaseException:
-        partial.unlink(missing_ok=True)
+        for partial in partials:
+            _remove(partial)
         raise
+    for partial, target in zip(partials, targets):
+        partial.replace(target)
     return counts
 
 
@@ -1042,28 +1120,38 @@ def _merge_schemas(documents: Iterable[Mapping[str, Any]]) -> Dict[str, Dict[str
     return merged
 
 
-def write_sidecars(calcs: Iterable[Any], params_dir: Path) -> List[Path]:
-    """``<params_dir>/<rel_path>/<deck>.json`` per live CalcJob with blocks,
-    plus ``schema-<version>.json``: what ``compare.load_blocks_from_sidecar``
-    reads, with no aiida-core needed."""
-    written: List[Path] = []
+def sidecar_documents(calcs: Iterable[Any]) -> Dict[str, Dict[str, Any]]:
+    """Every sidecar, by its path relative to ``<archive>.params/``:
+    ``<rel_path>/<deck>.json`` per live CalcJob with blocks, plus
+    ``schema-<version>.json`` (:func:`_merge_schemas`, which may raise)."""
+    documents: Dict[str, Dict[str, Any]] = {}
     schemas = []
     for calc in calcs:
         if not _live(calc) or 'blocks' not in calc.inputs:
             continue
         params = calc.inputs.parameters
-        path = Path(params_dir) / params['rel_path'] / f"{params['deck_name']}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(_sidecar(calc), indent=2, sort_keys=True), encoding='utf-8')
-        written.append(path)
+        documents[f"{params['rel_path']}/{params['deck_name']}.json"] = _sidecar(calc)
         if 'schema' in calc.inputs:
             schemas.append(calc.inputs.schema.get_dict())
     for version, document in _merge_schemas(schemas).items():
-        path = Path(params_dir) / f'schema-{version}.json'
+        documents[f'schema-{version}.json'] = document
+    return documents
+
+
+def _put_sidecars(documents: Mapping[str, Mapping[str, Any]], params_dir: Path) -> List[Path]:
+    written = []
+    for rel, document in sorted(documents.items()):
+        path = Path(params_dir) / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(document, indent=2, sort_keys=True), encoding='utf-8')
         written.append(path)
     return written
+
+
+def write_sidecars(calcs: Iterable[Any], params_dir: Path) -> List[Path]:
+    """Write :func:`sidecar_documents` under ``params_dir``: what
+    ``compare.load_blocks_from_sidecar`` reads, with no aiida-core needed."""
+    return _put_sidecars(sidecar_documents(calcs), Path(params_dir))
 
 
 def _schema_nodes(calcs: Iterable[Any]) -> List[str]:
@@ -1134,19 +1222,17 @@ _KEPT = ('Kept as recorded (`keep_hpc_paths=True`): Computer hostnames, Code '
          'account and database host/user in the provenance documents.')
 
 
-def _write_readme(path: Path, *, title: str, calcs: List[Any], include_peratom: bool,
-                  keep_hpc_paths: bool, sidecars: bool = True) -> Path:
-    size = path.stat().st_size
-    readme = Path(f'{path}.README.md')
-    readme.write_text(_README.format(
-        name=path.name, title=title, n_calcs=len(calcs),
+def _readme_text(name: str, size: int, *, title: str, calcs: List[Any],
+                 include_peratom: bool, keep_hpc_paths: bool, sidecars: bool = True) -> str:
+    """The README of archive ``name`` (``size`` bytes)."""
+    return _README.format(
+        name=name, title=title, n_calcs=len(calcs),
         size=f'{size / 1e6:.1f} MB ({size} bytes)',
         peratom=('Included.' if include_peratom
                  else 'Left out of this archive (`include_peratom=False`).'),
         schemas='\n'.join(f'* {line}' for line in _schema_nodes(calcs)) or '* none',
-        sidecars=_SIDECARS.format(name=path.name) if sidecars else '',
-        details=_KEPT if keep_hpc_paths else _ANONYMISED), encoding='utf-8')
-    return readme
+        sidecars=_SIDECARS.format(name=name) if sidecars else '',
+        details=_KEPT if keep_hpc_paths else _ANONYMISED)
 
 
 def _log_size(path: Path, what: str) -> None:
@@ -1196,12 +1282,17 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
     calcs = _calcjobs(group)
     members = {calc.pk for calc in calcs}
     output_path = Path(output_path)
+    sidecars = sidecar_documents(calcs)
+
+    def readme(size: int) -> str:
+        return _readme_text(output_path.name, size, title=f'Set `{group.label}`',
+                            calcs=calcs, include_peratom=include_peratom,
+                            keep_hpc_paths=keep_hpc_paths)
+
     counts = _write_archive([group, *(orm.load_node(pk) for pk in sorted(start - members))],
                             output_path, anonymise=not keep_hpc_paths,
-                            drop_peratom=not include_peratom)
-    write_sidecars(calcs, Path(f'{output_path}.params'))
-    _write_readme(output_path, title=f'Set `{group.label}`', calcs=calcs,
-                  include_peratom=include_peratom, keep_hpc_paths=keep_hpc_paths)
+                            drop_peratom=not include_peratom, readme=readme,
+                            sidecars=sidecars)
     _log_size(output_path, f'set {label!r} ({len(start)} start nodes, {counts})')
     return output_path
 
@@ -1245,12 +1336,16 @@ def export_dataset(name: str, output_path: Path, *, profile: Optional[str] = Non
             raise UncheckedPointsError(f'dataset {name!r}', unchecked)
     functions = _reachable_functions({p.pk for p in points}, _VERDICT_FUNCTIONS)
     output_path = Path(output_path)
-    _write_archive([group, *(orm.load_node(pk) for pk in sorted(functions))], output_path,
-                   anonymise=not keep_hpc_paths, drop_peratom=not include_peratom)
     calcs = list({p.creator.pk: p.creator for p in points}.values())
-    _write_readme(output_path, title=f'Dataset `{group.label}`', calcs=calcs,
-                  include_peratom=include_peratom, keep_hpc_paths=keep_hpc_paths,
-                  sidecars=False)
+
+    def readme(size: int) -> str:
+        return _readme_text(output_path.name, size, title=f'Dataset `{group.label}`',
+                            calcs=calcs, include_peratom=include_peratom,
+                            keep_hpc_paths=keep_hpc_paths, sidecars=False)
+
+    _write_archive([group, *(orm.load_node(pk) for pk in sorted(functions))], output_path,
+                   anonymise=not keep_hpc_paths, drop_peratom=not include_peratom,
+                   readme=readme)
     _log_size(output_path, f'dataset {name!r}')
     return output_path
 

@@ -10,6 +10,7 @@ import json
 import socket
 import sqlite3
 import zipfile
+from pathlib import Path
 
 import pytest
 import yaml
@@ -472,9 +473,12 @@ def test_archive_anonymises_hpc_details_by_default(aiida_profile_clean, no_profi
     assert verify().ok, verify().render()
 
 
+REPO = Path(__file__).resolve().parents[2]
+
+
 def _secrets(tmp_path):
     return (*SECRETS.values(), *DATABASE.values(), JOB_EXECUTABLE, JOB_CD,
-            str(tmp_path), socket.gethostname())
+            str(tmp_path), socket.gethostname(), str(REPO), str(Path.home()))
 
 
 def _assert_scrubbed(text, tmp_path):
@@ -597,3 +601,70 @@ def test_deleted_rows_leave_no_bytes_behind(aiida_profile_clean, no_profile_swit
                                                 drop_peratom=True)
     assert counts['peratom_dropped'] == 1
     assert b'PERATOM-LOG-SECRET' not in db.read_bytes()
+
+
+def test_a_failed_parse_stays_visible_without_paths(aiida_profile_clean, no_profile_switch,
+                                                    tmp_path, monkeypatch):
+    """A deck whose outputs fail to parse logs one ERROR line (no traceback); an
+    older node's traceback log is cut to its first line, paths basenamed."""
+    from aiida.common import timezone
+    import src.aiida.calcjob as calcjob
+
+    root = tmp_path / 'sim'
+    run_dir = _run(root, loads=(10.0,))
+
+    def unreadable(*args, **kwargs):
+        raise ValueError(f'cannot read {run_dir}/results/friction_f10.txt')
+    monkeypatch.setattr(calcjob, '_status', unreadable)
+    report = import_root(root, label='camp')
+    (calc,) = [c for c in _calcjobs('camp') if c.exit_status == 330]
+    assert any('ValueError' in message for _name, message in report.failures)
+    (log,) = [entry for entry in orm.Log.collection.get_logs_for(calc)
+              if entry.levelname == 'ERROR']
+    assert 'Traceback' not in log.message and 'ValueError' in log.message
+    orm.Log(timezone.now(), 'aiida.parser', 'ERROR', calc.pk,
+            f'Parsing failed\nTraceback (most recent call last):\n  File '
+            f'"{REPO}/src/aiida/calcjob.py", line 1\nValueError: {Path.home()}/x',
+            metadata={'pathname': f'{REPO}/src/aiida/calcjob.py',
+                      'exc_text': f'File "{Path.home()}/envs/x.py"'}).store()
+
+    path = export_archive('camp', tmp_path / 'camp.aiida', force=True)
+
+    _assert_scrubbed(_archive_text(path), tmp_path)
+    aiida_profile_clean.reset_storage()
+    import_archive(path)
+    (calc,) = [c for c in _calcjobs('camp') if c.exit_status == 330]
+    messages = sorted(entry.message for entry in orm.Log.collection.get_logs_for(calc)
+                      if entry.levelname == 'ERROR')
+    assert messages[0] == 'Parsing failed'
+    assert 'friction_f10.txt' in messages[1] and 'failed' in messages[1]
+    for entry in orm.Log.collection.get_logs_for(calc):
+        assert 'exc_text' not in entry.metadata
+        assert entry.metadata.get('pathname', 'calcjob.py') == 'calcjob.py'
+
+
+def test_a_late_failure_leaves_nothing_at_the_targets(aiida_profile_clean,
+                                                      no_profile_switch, tmp_path,
+                                                      monkeypatch):
+    root = tmp_path / 'sim'
+    _run(root, loads=(10.0,))
+    assert import_root(root, label='camp').ok()
+
+    def clash(documents):
+        raise ValueError('schema clash')
+    monkeypatch.setattr(export_mod, '_merge_schemas', clash)
+    out = tmp_path / 'out'
+    out.mkdir()
+    with pytest.raises(ValueError, match='schema clash'):
+        export_archive('camp', out / 'camp.aiida')
+    assert list(out.iterdir()) == []
+
+    def broken_readme(*args, **kwargs):
+        raise RuntimeError('readme failed')
+    monkeypatch.undo()
+    import src.aiida as aiida_pkg
+    monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
+    monkeypatch.setattr(export_mod, '_readme_text', broken_readme)
+    with pytest.raises(RuntimeError, match='readme failed'):
+        export_archive('camp', out / 'camp.aiida')
+    assert list(out.iterdir()) == []
