@@ -130,6 +130,10 @@ One rule, `src/aiida/retention.py`, decides which files of a run are kept:
 `lammps/run_*.log`, `results/*`, `data/hold_*.txt`, `data/final_*.data`,
 `data/load_*.data` and `build/*.lmp`.
 
+- Root-level `log*.lammps` and `*.out` (from a multi-deck local run) also match
+  the retention rule. They are kept on disk but are **not** stored in the
+  CalcJob yet.
+
 - `visuals/` and every `*.lammpstrj` trajectory are **never** stored. They stay
   on disk for visual checks only.
 - A file over `aiida.max_stored_file_mb` is recorded in `run_info.not_stored`
@@ -398,8 +402,10 @@ needs `override: true` **and** a non-empty `note`:
   date: 2026-11-16
 ```
 
-- Without `override: true`, or with an empty note, the ruling changes nothing;
-  the report lists the point under `not quarantined` and warns.
+- Without `override: true`, or with an empty note, the ruling changes nothing,
+  and the report lists the point and warns. `aiida rule` prints
+  `not quarantined: <point>`. The import report prints
+  `ruling on a point not quarantined (needs override: true and a note): <point>`.
 - What `pass` and `fail` do to each status, and that `pass` is refused for a
   point with no data, is the rule of [integrity.md](integrity.md#overriding-any-verdict).
 - **Overrides are always listed.** Every import report and every `aiida rule`
@@ -409,8 +415,10 @@ needs `override: true` **and** a non-empty `note`:
 - **Withdrawing.** Remove the entry (or its `override: true`, or its note) and
   re-apply the file (`aiida rule LABEL`, or the next import). The ruling is
   withdrawn: `withdraw_ruling` puts the checker's verdict back in force,
-  stamped `withdrawn_ruling=<ruled uuid>`, and the report lists
-  `withdrawn: <point>`.
+  stamped `withdrawn_ruling=<ruled uuid>`. `aiida rule` prints
+  `withdrawn: <point>`; the import report prints `ruling withdrawn: <point>`.
+  A ruling naming no point of the set is printed as `unmatched: <point>`
+  (`ruling unmatched: <point>` in the import report).
   - Each file withdraws only its own rulings. The set's own file (every
     import, and `aiida rule LABEL` without `--rulings`) always withdraws the
     rulings **it** made that it no longer says. It never touches a ruling
@@ -561,9 +569,11 @@ archive's `.params` sidecar. A prefix says which: `pk:`, `uuid:`, `point:`,
   A field the two sides store in different units is listed as a unit
   difference and never compared.
 - **Tolerance.** Block fields: floats to 6 significant figures, integers
-  exactly (as in `related()`). Derived values:
-  `|a - b| <= max(atol, rtol * max(|a|, |b|))`, with `--rtol` (default `1e-6`)
-  and `--atol` (default `1e-9`); these two options apply to derived values only.
+  exactly (as in `related()`). Derived values are equal when
+  `|a - b| <= max(atol, rtol * max(|a|, |b|))`, or when both are floats with
+  the same significant-figure key (6 figures at the default `rtol`, the key of
+  `related()`). `--rtol` (default `1e-6`) and `--atol` (default `1e-9`) apply to
+  derived values only.
 - **Seeds.** Unlike `related()`, `compare` shows the `realization` block like
   any other, so two runs that differ only in their seeds are reported as such.
 - **Campaigns.** A group gives the fields shared by all its current decks; a
@@ -693,6 +703,14 @@ FrictionSim2D aiida clear                          # every FrictionSim2D node (i
   holds, with that CalcJob's outputs and their calcfunction results. Shared
   inputs (blocks, files, provenance, schema, Codes, Computers) are never
   deleted. A set that a dataset draws on is refused whole.
+- **Cascade.** AiiDA deletes everything downstream of a deleted node. A CalcJob
+  whose deletion would cascade into a CalcJob another set holds is kept, with
+  the warning
+  `Keeping CalcJob <pk> of '<label>': deleting it would delete CalcJobs another set holds`.
+- **Stranded copies.** If another set holds one of the deleted decks only as a
+  superseded CalcJob, that set is left with no live copy of the deck. The
+  delete warns:
+  `Deleting set '<label>' removed the live CalcJobs of N deck(s) that set(s) '<other>' hold only as superseded copies. Recover by re-importing the tree under each surviving label (FrictionSim2D aiida import <root> --label <label>).`
 - `clear` removes every friction2d CalcJob with its outputs, steps, summaries
   and datasets, the inputs they leave unused, and every `friction2d/*` Group.
   Computers are kept.

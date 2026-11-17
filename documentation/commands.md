@@ -256,7 +256,9 @@ Options:
 ### aiida import
 
 Ingest a `simulation_XXXXXXXX` directory as a new (or updated) simulation set.
-Idempotent — re-importing adds only new or changed load points:
+Idempotent, deck by deck: re-importing skips every unchanged deck and imports a
+changed deck as a new CalcJob that supersedes the old one (with its points,
+verdicts and summaries). See [aiida.md](aiida.md#43-re-import-and-supersession).
 
 ```bash
 FrictionSim2D aiida import SIMULATION_FOLDER [OPTIONS]
@@ -289,13 +291,19 @@ FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--profile TEXT]
 ```
 
 - `--rulings PATH` — the file, or its directory (default:
-  `integrity_rulings.yaml` in the root the set was imported from)
-- `--withdraw` — also withdraw every ruling the file no longer makes. The
-  set's own file always withdraws them; another file does only with this flag.
+  `integrity_rulings.yaml` in the root the set was imported from). A path that
+  does not exist is an error; nothing is read or withdrawn.
+- `--withdraw` — also withdraw the rulings this file made that it no longer
+  makes. The set's own file always withdraws its own; another file does only
+  with this flag. Each file withdraws only the rulings applied from it
+  (matched by resolved path), never another file's.
 
-Idempotent. Prints `applied N, skipped N, withdrawn N`, every live override of
-the set (`override <point>: <original> -> <new> (<note>)`), the withdrawn
-points, and rulings that match no point.
+Idempotent. Prints
+`rulings for set '<label>' (<path>): applied N, skipped N, withdrawn N`, then
+every live override of the set (`override <point>: <original> -> <new> (<note>)`),
+`withdrawn: <point>`, `unmatched: <point>` (no point of the set) and
+`not quarantined: <point>` (needs `override: true` and a note) lines, and
+warnings.
 
 ### aiida recheck
 
@@ -465,6 +473,13 @@ Delete a single simulation set and all linked nodes (irreversible):
 ```bash
 FrictionSim2D aiida delete SET_LABEL [--profile TEXT] [--yes]
 ```
+
+- A set a dataset draws on is refused whole.
+- A CalcJob another set holds is kept, and so is one whose deletion would
+  cascade into such a CalcJob (warning `Keeping CalcJob <pk> of '<label>' ...`).
+- Another set that held a deleted deck only as a superseded copy is left with
+  no live copy; the delete warns and says to re-import the tree under that
+  label. See [aiida.md](aiida.md#10-deleting).
 
 ### aiida clear
 
