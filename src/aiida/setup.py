@@ -15,14 +15,16 @@ def setup_profile(
     profile_name: str = 'friction2d',
     use_postgres: bool = True,
 ) -> bool:
-    """Create and configure an AiiDA profile.
+    """Create and configure an AiiDA profile with ``verdi presto``.
 
-    On HPC, this typically uses ``verdi presto`` for a quick setup with
-    either PostgreSQL (recommended) or SQLite.
+    The import-only store works on either storage backend, with no broker
+    and no daemon: SQLite is enough. ``use_postgres`` tries PostgreSQL first
+    and falls back to SQLite when it is not available.
 
     Args:
         profile_name: Name for the AiiDA profile.
-        use_postgres: Whether to use PostgreSQL (requires psycopg2).
+        use_postgres: Try a PostgreSQL profile first (needs a running
+            PostgreSQL server and psycopg2).
 
     Returns:
         ``True`` if profile was created or already exists.

@@ -36,10 +36,8 @@ FrictionSim2D = "src.cli:main"
 aiida = [
   "aiida-core>=2.7,<3",
   "typing_extensions>=4.0",
-  # rabbitmq-server and postgresql are system / conda dependencies.
-  # Install via:  conda install -c conda-forge aiida-core aiida-core.services
-  # Then run:     rabbitmq-server -detached
-  #               verdi presto --use-postgres
+  # The store is import-only: no message broker and no daemon are needed.
+  # Create a profile with:  FrictionSim2D aiida setup   (or: verdi presto)
 ]
 plotting = [
   "matplotlib>=3.5",

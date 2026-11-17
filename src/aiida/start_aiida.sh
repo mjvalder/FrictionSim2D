@@ -2,6 +2,12 @@
 # =============================================================================
 # start_aiida.sh – One-time AiiDA setup / startup script for FrictionSim2D
 #
+# OPTIONAL / LEGACY. The FrictionSim2D store is import-only: `aiida import`
+# runs in-process and needs no RabbitMQ broker, no PostgreSQL server and no
+# daemon. `FrictionSim2D aiida setup` (or `verdi presto`) is all a new
+# profile needs. This script is kept for setups that want a broker-backed
+# PostgreSQL profile for other AiiDA work.
+#
 # Run this script after activating the frictionsim2d-aiida conda environment
 # to start RabbitMQ and configure the AiiDA profile used by FrictionSim2D.
 #

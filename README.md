@@ -2,7 +2,7 @@
 
 FrictionSim2D generates and manages LAMMPS friction simulation workflows for 2D materials.
 It supports AFM sliding, sheet-on-sheet shear, static PES scans, and indentation setups,
-with HPC script generation and optional AiiDA provenance and submission workflows.
+with HPC script generation and an optional AiiDA provenance store for finished runs.
 
 Full documentation lives in [documentation/](documentation/) — start with
 [documentation/README.md](documentation/README.md).
@@ -28,8 +28,9 @@ lmp -h
 ```
 
 Individual extras, external-binary checks, AiiDA bootstrap, and troubleshooting are
-covered in [documentation/installation.md](documentation/installation.md). RabbitMQ and
-PostgreSQL are required for full AiiDA workflows.
+covered in [documentation/installation.md](documentation/installation.md). The AiiDA
+store needs no RabbitMQ broker and no daemon: `FrictionSim2D aiida setup` creates the
+profile only, and an SQLite profile is enough.
 
 The conda-forge installation scheme below is planned for a future release and is
 intentionally hidden for now.
@@ -144,10 +145,10 @@ FrictionSim2D run indent examples/indent_config.ini --output-dir ./simulation_ou
 
 See [documentation/indent.md](documentation/indent.md).
 
-Generate with AiiDA registration enabled:
+Import a finished run tree into the AiiDA provenance store:
 
 ```bash
-FrictionSim2D run afm examples/afm_config.ini --aiida --output-dir ./simulation_output
+FrictionSim2D aiida import ./simulation_output/simulation_YYYYMMDD_HHMMSS -l my-campaign
 ```
 
 Generate HPC scripts:
@@ -161,15 +162,16 @@ FrictionSim2D hpc generate ./simulation_output/simulation_YYYYMMDD_HHMMSS --sche
 - `FrictionSim2D run afm|sheetonsheet|pes-sheet|pes-tip|indent ...`
 - `FrictionSim2D hpc generate ...`
 - `FrictionSim2D settings show|init|reset`
-- `FrictionSim2D aiida status|setup|submit|import|list-sets|dump|rebuild|query|delete|clear|export|import-archive|package`
+- `FrictionSim2D aiida status|setup|preflight|stamp-uuid|import|rule|recheck|postprocess|dataset|query|list-sets|export-results|rebuild|reindex|verify|delete|clear|export|import-archive`
 - `FrictionSim2D postprocess read|plot|pes-scan|indent`
 
 Full reference: [documentation/commands.md](documentation/commands.md).
 
 ## AiiDA notes
 
-- The former central database and REST API were removed; share results as AiiDA archives (`FrictionSim2D aiida import`).
-- Use `FrictionSim2D aiida setup` for first-time profile/computer/code setup.
+- The former central database and REST API were removed; share results as AiiDA archives (`FrictionSim2D aiida export`).
+- The store is import-only: runs are generated and run outside AiiDA, then registered with `FrictionSim2D aiida import`.
+- `FrictionSim2D aiida setup` creates the profile only (SQLite is enough; no broker or daemon). Computers and Codes are created at import.
 - For secure HPC clusters, running AiiDA natively on the HPC environment is often more robust than local SSH transport.
 - Use archive transfer when needed: `aiida export` on source environment and `aiida import-archive` on target.
 
