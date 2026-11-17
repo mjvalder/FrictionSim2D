@@ -353,6 +353,13 @@ A verdict holds `status`, `failed`, `observed`, `reasons`, `quarantine`,
 `not_applicable`, `measures`, `thresholds_version`, `code_version` and
 `point_uuid`.
 
+The store applies the rules of [integrity.md](integrity.md) unchanged. That
+includes the 2-layer case: a bilayer sheet-on-sheet point (hetero, flake,
+sheetonsheet) gets **no `gap_rise`** (it needs three or more layers) and **no
+heating check** (`n_heat = 0`; only the centre layers are counted). Its verdict
+rests on the gate, `collapse` and the snapshot rules. Both rules show up in
+`not_applicable`.
+
 ### 5.2 Rulings: `integrity_rulings.yaml`
 
 Rulings live in `integrity_rulings.yaml` in the simulation root, in the format

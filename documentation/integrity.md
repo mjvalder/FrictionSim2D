@@ -61,6 +61,18 @@ Both families get every rule. The inputs differ:
 
 Monolayers have no gap, so `gap_rise` and `collapse` do not apply to them.
 
+A **2-layer sheet-on-sheet stack** (a bilayer hetero, flake or sheetonsheet point) gets fewer
+rules than the table suggests. This is faithful to ML_taxonomy s51 and is not a bug:
+
+| rule | 2-layer sheet stack | why |
+|---|---|---|
+| `gap_rise` | not applied | the shear-interface gap needs `n_layers >= 3` |
+| `sheet_heating` | not applied | `n_heat = 0`: the temperature uses the centre layers only (all but the first and last), and a bilayer has none |
+| `collapse`, `frozen`, snapshot rules | applied | |
+
+So a bilayer sheet point is judged only on the gate, `collapse` and the snapshot rules. A
+passing bilayer verdict does not mean its gap or heating was checked.
+
 The sheet temperature uses each point's own atom count N.
 
 ## Statuses
