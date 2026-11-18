@@ -862,8 +862,11 @@ def _anonymise_remote(archive: _Archive, labels: Mapping[int, str]) -> int:
 def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
     """A set Group's ``source_root`` -> its basename, ``source_host`` -> the
     machine label, or ``'unknown'``, and each source path of the ruling
-    ledger its basename (:func:`_basenamed_ledger`)."""
-    from .steps import LEDGER_EXTRA  # pylint: disable=import-outside-toplevel
+    ledger its basename (:func:`_basenamed_ledger`). The extras the ledger
+    replaced (``friction2d_pending_rulings``, ``friction2d_ruling_conflicts``)
+    hold full paths and are dropped."""
+    # pylint: disable=import-outside-toplevel,protected-access
+    from .steps import _OLD_EXTRAS, LEDGER_EXTRA
     changed = 0
     for pk, extras in archive.rows('SELECT id, extras FROM db_dbgroup'):
         content = json.loads(extras or '{}')
@@ -874,6 +877,8 @@ def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
             content['source_host'] = hosts.get(content['source_host'], 'unknown')
         if content.get(LEDGER_EXTRA):
             content[LEDGER_EXTRA] = _basenamed_ledger(content[LEDGER_EXTRA])
+        for key in _OLD_EXTRAS:
+            content.pop(key, None)
         if content != before:
             archive.set_json(pk, 'extras', content, table='db_dbgroup')
             changed += 1

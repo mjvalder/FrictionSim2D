@@ -34,10 +34,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -70,6 +71,11 @@ VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
 #: (:mod:`src.aiida.ledger`): every ruling of every rulings file, the
 #: ones not in force included. Every rulings pass reconciles the store with it.
 LEDGER_EXTRA = 'friction2d_rulings_ledger'
+#: The Group extras the ledger replaced: read once to seed the ledger of a
+#: set ruled before it existed, then deleted (and dropped from archives).
+_OLD_EXTRAS = ('friction2d_pending_rulings', 'friction2d_ruling_conflicts')
+#: The ' (2)' an anonymised archive appends to a repeated basename.
+_ARCHIVED_SUFFIX = re.compile(r' \(\d+\)$')
 #: True on a verdict checked while its stage-2 status was unknown (a
 #: ``_stage2`` failure in its run or (family, size) group): re-checked next time.
 PROVISIONAL_EXTRA = 'friction2d_provisional'
@@ -732,6 +738,8 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
     pending: List[Tuple[str, str, str]] = field(default_factory=list)
     pending_withdrawn: List[Tuple[str, str]] = field(default_factory=list)
     retracted: List[Tuple[str, str]] = field(default_factory=list)
+    archived: List[Tuple[str, str]] = field(default_factory=list)
+    changed: List[Tuple[str, str, str, str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def render(self) -> str:
@@ -739,6 +747,7 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
         lines = [f'{"DRY RUN: " if self.dry_run else ""}rulings for set {self.label!r} '
                  f'({self.rulings_path}): applied {self.applied}, replaced {self.replaced}, '
                  f'skipped {self.skipped}, withdrawn {len(self.withdrawn)}']
+        lines += [f'  {line}' for line in self.changed_lines()]
         lines += [f'  override {pid}: {old} -> {new} ({note})'
                   for pid, old, new, note in self.overrides]
         lines += [f'  withdrawn: {pid}' for pid in self.withdrawn]
@@ -763,7 +772,15 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
         lines += [f'pending ruling withdrawn: {pid} ({src})'
                   for pid, src in self.pending_withdrawn]
         lines += [f'ruling retracted by its file: {pid} ({src})' for pid, src in self.retracted]
+        lines += [f'ruling archived: {pid} ({src}): it came with an archive and still '
+                  f'counts; no file is read for it' for pid, src in self.archived]
         return lines
+
+    def changed_lines(self) -> List[str]:
+        """Each of changed as text: every point whose decision in force
+        this pass changed."""
+        return [f'ruling changed: {pid} {old} -> {new} ({src}, {why})'
+                for pid, old, new, src, why in self.changed]
 
     def conflict_lines(self) -> List[str]:
         """Each of ``conflicts`` as text."""
@@ -824,40 +841,46 @@ def _was_ruled_quarantined(verdict: orm.Dict) -> bool:
     return any(not _live(n) for n in qb.all(flat=True))
 
 
-def _why_not(report: RulingReport, pid: str, entry: Dict[str, Any],
+def _refusal(pid: str, source: str, entry: Dict[str, Any],
              verdict: orm.Dict) -> Optional[str]:
-    """Why the ledger ``entry`` cannot rule ``verdict`` (``decide``), with
-    one warning; None when it can."""
+    """The warning why the ledger ``entry`` of ``source`` cannot rule
+    ``verdict`` (``decide``); None when it can."""
     from ..postprocessing.integrity_rulings import decide  # pylint: disable=import-outside-toplevel
 
     original = verdict['status']
     _status, why = decide(original, _ruling_of(entry))
     if why is None:
         return None
-    if original != 'quarantined' and pid not in report.not_quarantined:
-        report.not_quarantined.append(pid)
     if (original != 'quarantined' and not entry.get('override')
             and _was_ruled_quarantined(verdict)):
-        line = (f'integrity ruling no longer applies: {pid}: re-checked from '
+        return (f'integrity ruling no longer applies: {pid} ({source}): re-checked from '
                 f'quarantined to {original}; the point is no longer quarantined, '
                 f'so its ruling now needs `override: true` and a note')
-    else:
-        line = f'integrity ruling ignored: {pid}: {why}'
-    if line not in report.warnings:
-        report.warnings.append(line)
-    return why
+    return f'integrity ruling ignored: {pid} ({source}): {why}'
+
+
+def _matches_source(recorded: Optional[str], source: str, own_source: Optional[str]) -> bool:
+    """Whether a ruling Dict's ``source`` (``recorded``) is the ledger's
+    ``source``. A ruling Dict without one predates the field and came from
+    the set's own file. A ledger source that is not absolute comes from an
+    anonymised archive: a basename, maybe disambiguated as ``x.yaml (2)``,
+    matched against the recorded source's basename."""
+    recorded = recorded or own_source
+    if recorded is None:
+        return False
+    if Path(source).is_absolute():
+        return recorded == source
+    return PurePosixPath(recorded).name == _ARCHIVED_SUFFIX.sub('', source)
 
 
 def _in_force_is(node: orm.Dict, source: str, entry: Dict[str, Any],
                  own_source: Optional[str]) -> bool:
-    """Whether the ruled verdict ``node`` was made from ``source``'s
-    ``entry``. A ruling Dict without ``source`` predates the field and came
-    from the set's own file."""
+    """Whether the ruled verdict ``node`` was made from ``source``'s ``entry``."""
     from .ledger import CONTENT  # pylint: disable=import-outside-toplevel
 
     content = node.creator.inputs.ruling.get_dict()
     content['override'] = bool(content.get('override'))
-    return ((content.get('source') or own_source) == source
+    return (_matches_source(content.get('source'), source, own_source)
             and all(content.get(k, '') == entry[k] for k in CONTENT))
 
 
@@ -890,12 +913,25 @@ def _withdraw(report: RulingReport, pid: str, verdict: orm.Dict,
         report.withdrawn.append(pid)
 
 
-def _own_source(group: orm.Group) -> Optional[str]:
-    """The set's own rulings file, resolved; None without a ``source_root``."""
+def _own_source(group: orm.Group, root: Optional[Path],
+                warnings: List[str]) -> Optional[str]:
+    """The set's own rulings file, resolved: under ``root`` (the root being
+    imported) when given, else under the set's ``source_root``. None
+    without one, or when it is not an absolute path (a set loaded from an
+    anonymised archive): a relative path is never read from disk."""
     from ..postprocessing.integrity_rulings import RULINGS_FILE  # pylint: disable=import-outside-toplevel
 
-    root = group.base.extras.get('source_root', None)
-    return str((Path(root) / RULINGS_FILE).resolve()) if root else None
+    if root is not None:
+        return str((Path(root) / RULINGS_FILE).resolve())
+    stored = group.base.extras.get('source_root', None)
+    if not stored:
+        warnings.append('the set records no source_root: its own rulings file is not read')
+        return None
+    if not Path(stored).is_absolute():
+        warnings.append(f'the set\'s source_root {stored!r} is not a path on this machine '
+                        f'(an archive): its own rulings file is not read')
+        return None
+    return str((Path(stored) / RULINGS_FILE).resolve())
 
 
 def _resolve_source(path: Path, own: Optional[str], known: Set[str]) -> str:
@@ -914,19 +950,52 @@ def _resolve_source(path: Path, own: Optional[str], known: Set[str]) -> str:
 
 
 def _load_source(source: str):
-    """``load_rulings`` of ``source``, or None when the file does not exist."""
-    from ..postprocessing.integrity_rulings import load_rulings  # pylint: disable=import-outside-toplevel
-    return load_rulings(Path(source)) if Path(source).is_file() else None
+    """``load_rulings`` of ``source``; None when the file does not exist. A
+    file with no YAML document at all (0 bytes, blank, only comments) is
+    unreadable, not "no rulings": an editor that truncated it must not
+    withdraw everything. ``[]`` says "no rulings"."""
+    # pylint: disable=import-outside-toplevel
+    import yaml
+
+    from ..postprocessing.integrity_rulings import Ruling, load_rulings
+    path = Path(source)
+    if not path.is_file():
+        return None
+    try:
+        empty = yaml.safe_load(path.read_text(encoding='utf-8')) is None
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        empty = False                          # load_rulings reports it
+    if empty:
+        return {'<file>': Ruling(error='the file holds no entries (empty); write `[]` '
+                                       'to withdraw every ruling')}
+    return load_rulings(path)
+
+
+def _former_own(ledger, own: Optional[str], report: RulingReport) -> None:
+    """Entries the own file made at a former root (``own_file`` at another
+    path) rank as another file's from now on, at their old path: the new
+    own file overrides them only where it rules a point. Reported once."""
+    if own is None:
+        return
+    former = sorted({s for by_source in ledger.values() for s, e in by_source.items()
+                     if s != own and e.get('own_file') and Path(s).is_absolute()})
+    for source in former:
+        for by_source in ledger.values():
+            if source in by_source:
+                by_source[source]['own_file'] = False
+        report.warnings.append(f'former own rulings file {source} now ranks as another '
+                               f'file: the own file {own} overrides it only where it '
+                               f'rules a point')
 
 
 def _update_ledger(ledger, report: RulingReport, own: Optional[str],
                    explicit: Optional[str], dropped: Optional[str]) -> None:
     """Read every source into ``ledger`` (:func:`.ledger.read_source`): the
-    sources the ledger already holds (one that is gone is marked missing), then the set's own file,
-    then ``explicit`` (``--rulings``), which is therefore seen last."""
-    # pylint: disable=import-outside-toplevel
-    from ..postprocessing.integrity_rulings import load_rulings
-    from .ledger import Clock, read_source
+    sources the ledger already holds (one that is gone is marked missing),
+    then the set's own file, then ``explicit`` (``--rulings``), which is
+    therefore seen last. A source that is not an absolute path (from an
+    anonymised archive) is never read: it is marked ``archived``."""
+    from .ledger import Clock, read_source  # pylint: disable=import-outside-toplevel
 
     clock = Clock()
 
@@ -935,30 +1004,26 @@ def _update_ledger(ledger, report: RulingReport, own: Optional[str],
                                warnings=report.warnings):
             report.retracted.append((pid, source))
 
-    # An entry the own file made at a former source_root is that file's: it
-    # is not re-read as another source, and the own file replaces it.
-    former_own = {s for by_source in ledger.values() for s, e in by_source.items()
-                  if s != own and e.get('own_file')}
-    others = sorted({s for by_source in ledger.values() for s in by_source}
-                    - former_own - {own, explicit, dropped})
+    for pid in sorted(ledger):
+        for source, entry in sorted(ledger[pid].items()):
+            if not Path(source).is_absolute() and entry.get('status') != 'archived':
+                entry['status'] = 'archived'
+                report.archived.append((pid, source))
+    _former_own(ledger, own, report)
+    others = sorted({s for by_source in ledger.values() for s in by_source
+                     if Path(s).is_absolute()} - {own, explicit, dropped})
     for source in others:                       # a file that is gone: missing
         read(source, _load_source(source), False)
-    if own is None:
-        report.warnings.append("the set records no source_root: its own rulings file "
-                               "is not read")
-    elif Path(own).parent.is_dir():
-        for source in former_own:
-            for pid in sorted(ledger):
-                ledger[pid].pop(source, None)
-                if not ledger[pid]:
-                    del ledger[pid]
-        # An absent file inside an existing campaign root means "no rulings".
-        read(own, load_rulings(Path(own)), True)
-    else:
-        # An unreachable root (an unmounted drive) withdraws nothing.
-        read(own, None, True)
-        report.warnings.append(f'no ruling withdrawn: {own} is not reachable (its '
-                               f'directory {Path(own).parent} is missing)')
+    if own is not None:
+        if Path(own).parent.is_dir():
+            # An absent file inside an existing campaign root means "no rulings".
+            rulings = _load_source(own)
+            read(own, {} if rulings is None else rulings, True)
+        else:
+            # An unreachable root (an unmounted drive) withdraws nothing.
+            read(own, None, True)
+            report.warnings.append(f'no ruling withdrawn: {own} is not reachable (its '
+                                   f'directory {Path(own).parent} is missing)')
     if explicit is not None and explicit != own:
         rulings = _load_source(explicit)
         if rulings is None and not any(explicit in e for e in ledger.values()):
@@ -967,13 +1032,76 @@ def _update_ledger(ledger, report: RulingReport, own: Optional[str],
             read(explicit, rulings, False)
 
 
-def _reconcile(group: orm.Group, ledger, report: RulingReport, own: Optional[str]) -> None:
+def _seed_entry(content: Dict[str, Any], own_file: bool, when) -> Dict[str, Any]:
+    from .ledger import stamp  # pylint: disable=import-outside-toplevel
+    return {'ruling': content['ruling'], 'note': content.get('note', '') or '',
+            'date': content.get('date', '') or '', 'override': bool(content.get('override')),
+            'own_file': own_file, 'author': 'user', 'seen_at': stamp(when),
+            'status': 'present'}
+
+
+def _seed_ledger(group: orm.Group, own: Optional[str]) -> Dict[str, Dict[str, Any]]:
+    """The ledger of a set ruled before the ledger existed: every live ruled
+    verdict's ruling (by its ruling Dict's ``source``; none means the own
+    file), then every ruling of the old extras ``friction2d_pending_rulings``
+    and ``friction2d_ruling_conflicts`` (their full ruling from the latest
+    ruling Dict of that point and source, when one was ever applied)."""
+    ledger: Dict[str, Dict[str, Any]] = {}
+    points = _live_points(group)
+    verdicts = _live_verdicts(points)
+    live = _ruled_by_verdict([v.uuid for vs in verdicts.values() for v in vs])
+    for point in points:
+        for verdict in verdicts[point.pk]:
+            for node in live.get(verdict.uuid, []):
+                content = node.creator.inputs.ruling.get_dict()
+                source = content.get('source') or own
+                if source is not None:
+                    entry = _seed_entry(content, source == own, node.ctime)
+                    ledger.setdefault(_pid(point), {})[source] = {**entry, 'in_force': True}
+    for key in _OLD_EXTRAS:
+        for old in group.base.extras.get(key, []) or []:
+            pid, source = old.get('point'), old.get('source')
+            if not pid or not source or source in ledger.get(pid, {}):
+                continue
+            qb = orm.QueryBuilder().append(orm.Dict, tag='r', filters={
+                f'extras.{STEP_INPUT_EXTRA}': 'ruling', 'attributes.point': pid,
+                'attributes.source': source})
+            qb.order_by({'r': {'id': 'desc'}})
+            full = qb.first(flat=True)
+            ledger.setdefault(pid, {})[source] = _seed_entry(
+                full.get_dict() if full is not None else old, source == own,
+                full.ctime if full is not None else datetime.now(timezone.utc))
+    return ledger
+
+
+def _record_refusals(report: RulingReport, pid: str, refusals: Dict[str, Optional[str]],
+                     order: List[str], chosen: Optional[str], verdict: orm.Dict) -> None:
+    """Warn about every entry ranked above ``chosen`` (all, without one)
+    that does not apply: it is why ``chosen`` is in force. A lower-ranked
+    entry that does not apply changes nothing and is not reported."""
+    for source in order:
+        if source == chosen:
+            return
+        line = refusals[source]
+        if line is None:
+            continue
+        if verdict['status'] != 'quarantined' and pid not in report.not_quarantined:
+            report.not_quarantined.append(pid)
+        if line not in report.warnings:
+            report.warnings.append(line)
+
+
+def _reconcile(group: orm.Group, ledger, previous, report: RulingReport,
+               own: Optional[str]) -> None:
     """Make every live verdict's ruling in force the one the ledger calls
     for (:func:`.ledger.desired_ruling`): apply it, replace another, or
-    withdraw one no source makes any more; then fill the report's
-    conflicts, pending and overrides. With ``report.dry_run`` nothing is
-    made: the counts say what would be."""
-    from .ledger import conflicts, desired_ruling  # pylint: disable=import-outside-toplevel
+    withdraw one no source makes any more; mark it ``in_force`` in the
+    ledger; then fill the report's changes, conflicts, pending and
+    overrides. ``previous`` is ``point id -> (source, ruling)`` in force
+    before this pass. With ``report.dry_run`` nothing is made: the counts
+    say what would be."""
+    # pylint: disable=import-outside-toplevel
+    from .ledger import conflicts, ruling_order, why_in_force
 
     points = _live_points(group)
     verdicts = _live_verdicts(points)
@@ -981,15 +1109,24 @@ def _reconcile(group: orm.Group, ledger, report: RulingReport, own: Optional[str
     for point in points:
         by_id.setdefault(_pid(point), []).extend(verdicts[point.pk])
     live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
-    for pid in sorted(set(by_id) | set(ledger)):
+    for pid in sorted(set(by_id) | set(ledger) | set(previous)):
         entries = ledger.get(pid, {})
         pid_verdicts = by_id.get(pid, [])
-        if entries and not pid_verdicts:
-            report.unmatched.append(pid)
-        chosen = desired_ruling(entries, own)
+        if not pid_verdicts:
+            if entries:
+                report.unmatched.append(pid)
+            continue
+        # A set loaded from an archive has no own file to read; the own
+        # file's archived entry still ranks first.
+        rank_own = own if own is not None else next(
+            (s for s, e in sorted(entries.items())
+             if e.get('own_file') and not Path(s).is_absolute()), None)
+        order = ruling_order(entries, rank_own)
+        chosen = None
         for verdict in pid_verdicts:
-            usable = {s for s, e in entries.items() if _why_not(report, pid, e, verdict) is None}
-            chosen = desired_ruling({s: entries[s] for s in usable}, own)
+            refusals = {s: _refusal(pid, s, entries[s], verdict) for s in order}
+            chosen = next((s for s in order if refusals[s] is None), None)
+            _record_refusals(report, pid, refusals, order, chosen, verdict)
             in_force = live.get(verdict.uuid, [])
             if chosen is None:
                 if in_force:
@@ -1004,7 +1141,18 @@ def _reconcile(group: orm.Group, ledger, report: RulingReport, own: Optional[str
                     report.replaced += 1
                 else:
                     report.applied += 1
-        found = conflicts(entries, own, chosen)
+        for source, entry in entries.items():
+            if source == chosen:
+                entry['in_force'] = True
+            else:
+                entry.pop('in_force', None)
+        before = previous.get(pid)
+        after = entries[chosen]['ruling'] if chosen is not None else 'none'
+        if (before[1] if before else 'none') != after:
+            report.changed.append((pid, before[1] if before else 'none', after,
+                                   chosen or (before[0] if before else ''),
+                                   why_in_force(entries, rank_own, chosen)))
+        found = conflicts(entries, rank_own, chosen)
         if found is not None:
             report.conflicts.append((pid, *found))
         report.pending += [(pid, s, 'missing') for s in sorted(entries)
@@ -1018,20 +1166,28 @@ def _reconcile(group: orm.Group, ledger, report: RulingReport, own: Optional[str
 
 def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
                withdraw_pending: Optional[Path] = None,
-               dry_run: bool = False) -> RulingReport:
+               dry_run: bool = False, root: Optional[Path] = None) -> RulingReport:
     """:func:`apply_rulings` on a loaded set Group; with ``dry_run``, the
-    report of what it would do, and nothing written."""
+    report of what it would do, and nothing written. ``root`` is the root
+    being imported, when it is not yet the set's ``source_root`` (a dry run)."""
     from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
     from .ledger import drop_source  # pylint: disable=import-outside-toplevel
 
-    own = _own_source(group)
-    stored = group.base.extras.get(LEDGER_EXTRA, {})
-    ledger = json.loads(json.dumps(stored))                 # a deep copy
+    report = RulingReport(label=group.label[len(GROUP_PREFIX) + 1:], dry_run=dry_run)
+    own = _own_source(group, root, report.warnings)
+    extras = group.base.extras.all
+    stored = extras.get(LEDGER_EXTRA)
+    if stored is None:
+        ledger = _seed_ledger(group, own)
+    else:
+        ledger = json.loads(json.dumps(stored))             # a deep copy
+    previous = {pid: next(((s, e['ruling']) for s, e in by_source.items()
+                           if e.get('in_force')), None)
+                for pid, by_source in ledger.items()}
+    previous = {pid: v for pid, v in previous.items() if v is not None}
     known = {s for by_source in ledger.values() for s in by_source}
     explicit = None if rulings_path is None else _resolve_source(rulings_path, own, known)
-    report = RulingReport(label=group.label[len(GROUP_PREFIX) + 1:],
-                          rulings_path=explicit or own or '', own_source=own or '',
-                          dry_run=dry_run)
+    report.rulings_path, report.own_source = explicit or own or '', own or ''
     dropped = None
     if withdraw_pending is not None:
         dropped = _resolve_source(withdraw_pending, own, known)
@@ -1045,9 +1201,13 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
                 report.warnings.append(f'the ledger holds no ruling of {dropped}: '
                                        f'nothing dropped')
     _update_ledger(ledger, report, own, explicit, dropped)
-    _reconcile(group, ledger, report, own)
-    if not dry_run and ledger != stored:
-        group.base.extras.set(LEDGER_EXTRA, ledger)
+    _reconcile(group, ledger, previous, report, own)
+    if not dry_run:
+        if ledger != stored:
+            group.base.extras.set(LEDGER_EXTRA, ledger)
+        for key in _OLD_EXTRAS:
+            if key in extras:
+                group.base.extras.delete(key)
     return report
 
 

@@ -327,6 +327,7 @@ class ImportReport:
             lines.append(f'  rulings replaced:    {self.rulings.replaced}')
             lines.append(f'  rulings skipped:     {self.rulings.skipped}')
             lines.append(f'  rulings withdrawn:   {len(self.rulings.withdrawn)}')
+            lines += [f'  {line}' for line in self.rulings.changed_lines()]
             lines += [f'  ruling withdrawn: {pid}' for pid in self.rulings.withdrawn]
             lines += [f'  ruling unmatched: {pid}' for pid in self.rulings.unmatched]
             lines += [f'  ruling on a point not quarantined (needs override: true '
@@ -939,16 +940,17 @@ def import_root(root: Path, label: Optional[str] = None, *,
     if not dry_run:
         _integrity_pass(state)
     elif state.group is not None:
-        _dry_rulings(state)
+        _dry_rulings(state, root)
     return report
 
 
-def _dry_rulings(state: _Import) -> None:
+def _dry_rulings(state: _Import, root: Path) -> None:
     """A dry run's rulings report: what the rulings pass would do to the
-    set as stored (no check is run, nothing is written)."""
+    set as stored, with ``root`` (the root being imported) as its root (no
+    check is run, nothing is written)."""
     rule_group = import_module(f'{__package__}.steps').rule_group
     report = state.report
-    report.rulings = rule_group(state.group, dry_run=True)
+    report.rulings = rule_group(state.group, dry_run=True, root=root)
     report.overrides = list(report.rulings.overrides)
     report.warnings += report.rulings.warnings
 

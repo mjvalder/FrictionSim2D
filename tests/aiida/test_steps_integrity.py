@@ -1286,3 +1286,278 @@ def test_a_dry_run_lists_conflicts_and_pending(aiida_profile_clean, no_profile_s
     assert _conflicts(report.rulings) == [(pid, (own, 'fail'), [(src, 'pass')])]
     assert report.rulings.pending == [(pid, src, 'missing')]
     assert _ruling_extras() == extras            # the ledger still says 'present'
+
+
+# --- review 2026-11-18 (2): legacy stores, root moves, archives, edits ---------
+
+def _nodes_count():
+    return orm.QueryBuilder().append(orm.Node).count()
+
+
+def _yaml(path, pid, ruling, note='n', override=False):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = f'- point: "{pid}"\n  ruling: {ruling}\n  note: {note}\n'
+    if override:
+        text += '  override: true\n'
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
+def test_a_store_ruled_before_the_ledger_is_seeded_from_its_rulings(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    _tree(root, quarantine=(30.0, 50.0))
+    import_root(root, label='camp')
+    p30, p50 = _pid(root, 30.0), _pid(root, 50.0)
+    other = _yaml(tmp_path / 'o.yaml', p30, 'pass')
+    assert apply_rulings('camp', other).applied == 1
+    lost = _yaml(tmp_path / 'lost.yaml', p50, 'fail', note='was pending')
+    group = orm.load_group('friction2d/camp')
+    group.base.extras.delete(LEDGER)                     # ruled before the ledger
+    group.base.extras.set_many({
+        'friction2d_pending_rulings': [{'point': p50, 'source': str(lost.resolve()),
+                                        'ruling': 'fail', 'note': 'was pending'}],
+        'friction2d_ruling_conflicts': []})
+    lost.unlink()
+
+    report = import_root(root, label='camp')
+
+    s30, s50 = str(other.resolve()), str(lost.resolve())
+    assert sorted(_live_sources()) == sorted([('complete', s30), ('failed_integrity', s50)])
+    assert report.rulings.pending == [(p50, s50, 'missing')]
+    extras = orm.load_group('friction2d/camp').base.extras.all
+    assert 'friction2d_pending_rulings' not in extras
+    assert 'friction2d_ruling_conflicts' not in extras
+    assert set(extras[LEDGER]) == {p30, p50}
+
+
+def test_a_moved_root_keeps_the_former_own_files_rulings(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    import shutil
+    root = tmp_path / 'sim'
+    _tree(root, quarantine=(30.0,))
+    import_root(root, label='camp')
+    pid = _pid(root, 30.0)
+    _write_ruling(root, pid, 'fail', note='own fail')
+    assert apply_rulings('camp').applied == 1
+    moved = tmp_path / 'moved'
+    shutil.copytree(root, moved)
+    (moved / RULINGS_FILE).unlink()                     # copied without the yaml
+    former = str((root / RULINGS_FILE).resolve())
+    nodes = _nodes_count()
+
+    dry = import_root(moved, label='camp', dry_run=True)
+    assert any(f'former own rulings file {former} now ranks as another file' in w
+               for w in dry.warnings), dry.render()
+    assert (dry.rulings.applied, dry.rulings.replaced, dry.rulings.withdrawn) == (0, 0, [])
+    assert _nodes_count() == nodes
+
+    report = import_root(moved, label='camp')
+
+    assert any(f'former own rulings file {former} now ranks as another file' in w
+               for w in report.warnings), report.render()
+    assert _live_sources() == [('failed_integrity', former)]
+    shutil.rmtree(root)                                  # the old root is gone too
+    again = import_root(moved, label='camp')
+    assert again.rulings.pending == [(pid, former, 'missing')]
+    assert _live_sources() == [('failed_integrity', former)]
+    _write_ruling(moved, pid, 'pass', note='new own')    # the new own file rules it
+    import_root(moved, label='camp')
+    assert _live_rulings() == [('complete', True)]
+
+
+def test_a_moved_root_with_its_rulings_file_settles_in_one_pass(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    import shutil
+    root = tmp_path / 'sim'
+    _tree(root, quarantine=(30.0,))
+    import_root(root, label='camp')
+    pid = _pid(root, 30.0)
+    _write_ruling(root, pid, 'fail', note='own fail')
+    assert apply_rulings('camp').applied == 1
+    moved = tmp_path / 'moved'
+    shutil.copytree(root, moved)
+
+    import_root(moved, label='camp')
+
+    assert _live_rulings() == [('failed_integrity', True)]
+    nodes, extras = _nodes_count(), _ruling_extras()
+    assert import_root(moved, label='camp').rulings.conflicts == []
+    assert _nodes_count() == nodes and _ruling_extras() == extras
+
+
+def test_relative_ledger_sources_are_archived_and_never_read(
+        aiida_profile_clean, no_profile_switch, tmp_path, monkeypatch):
+    from src.aiida.export import _basenamed_ledger
+    root = tmp_path / 'sim'
+    _tree(root, quarantine=(30.0,))
+    import_root(root, label='camp')
+    pid = _pid(root, 30.0)
+    review = _yaml(tmp_path / 'rev' / RULINGS_FILE, pid, 'pass')
+    assert apply_rulings('camp', review.parent).applied == 1
+    group = orm.load_group('friction2d/camp')
+    group.base.extras.set(LEDGER, _basenamed_ledger(group.base.extras.get(LEDGER)))
+    cwd = tmp_path / 'elsewhere'
+    cwd.mkdir()
+    (cwd / RULINGS_FILE).write_text('[]\n')              # decoys a relative read would hit
+    monkeypatch.chdir(cwd)
+    nodes = _nodes_count()
+
+    report = apply_rulings('camp')
+
+    assert report.retracted == [] and report.pending == []
+    assert report.archived == [(pid, RULINGS_FILE)]
+    assert 'ruling archived' in report.render() and '--rulings' not in report.render()
+    assert len(_ruled_live()) == 1 and _nodes_count() == nodes
+    again = apply_rulings('camp')
+    assert again.archived == [] and again.pending == [] and _nodes_count() == nodes
+
+
+def test_a_note_edit_does_not_re_rank_a_ruling(aiida_profile_clean, no_profile_switch,
+                                               tmp_path):
+    pid, _own = _setup(tmp_path)
+    one = _yaml(tmp_path / 'a.yaml', pid, 'fail')
+    two = _yaml(tmp_path / 'b.yaml', pid, 'pass')
+    apply_rulings('camp', one)
+    apply_rulings('camp', two)
+    assert _live_sources() == [('complete', str(two.resolve()))]
+
+    _yaml(one, pid, 'fail', note='typo fixed')
+    report = import_root(tmp_path, label='camp')
+
+    assert _live_sources() == [('complete', str(two.resolve()))]
+    assert report.rulings.changed == []
+    _yaml(one, pid, 'fail', note='typo fixed', override=True)   # a new decision
+    report = import_root(tmp_path, label='camp')
+    assert _live_sources() == [('failed_integrity', str(one.resolve()))]
+    (line,) = report.rulings.changed_lines()
+    assert line.startswith(f'ruling changed: {pid} pass -> fail ({one.resolve()}, '
+                           f'most recently seen')
+    assert line in report.render()
+
+
+def test_every_change_of_decision_is_printed(aiida_profile_clean, no_profile_switch,
+                                             tmp_path):
+    pid, own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+
+    first = import_root(tmp_path, label='camp')
+
+    assert first.rulings.changed_lines() == [
+        f"ruling changed: {pid} none -> fail ({own}, the set's own integrity_rulings.yaml "
+        f"wins)"]
+    assert f'ruling changed: {pid} none -> fail' in first.render()
+    assert import_root(tmp_path, label='camp').rulings.changed == []
+    _write_ruling(tmp_path, pid, 'fail', note='reworded')       # same decision: no line
+    assert apply_rulings('camp').changed == []
+    _drop_own(tmp_path)
+    gone = apply_rulings('camp')
+    assert gone.changed_lines() == [
+        f'ruling changed: {pid} fail -> none ({own}, no file rules it)']
+
+
+def test_an_emptied_rulings_file_changes_nothing(aiida_profile_clean, no_profile_switch,
+                                                 tmp_path):
+    pid, own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+    assert apply_rulings('camp').applied == 1
+    for text in ('', '  \n\n', 'point: [unclosed\n', '{}\n'):
+        (tmp_path / RULINGS_FILE).write_text(text, encoding='utf-8')
+        report = import_root(tmp_path, label='camp')
+        assert report.rulings.withdrawn == [] and len(_ruled_live()) == 1, repr(text)
+        assert any(own in w and 'not read' in w for w in report.warnings), repr(text)
+    _drop_own(tmp_path)                                  # an explicit [] withdraws
+    assert import_root(tmp_path, label='camp').rulings.withdrawn == [pid]
+
+
+def test_an_ignored_ruling_names_its_file(aiida_profile_clean, no_profile_switch, tmp_path):
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'pass', note='own')     # no override: does not apply
+    own = str((tmp_path / RULINGS_FILE).resolve())
+    other = _yaml(tmp_path / 'o.yaml', pid, 'fail', note='x', override=True)
+    weak = _yaml(tmp_path / 'w.yaml', pid, 'pass', note='y')
+
+    report = apply_rulings('camp', other)
+
+    assert _live_sources() == [('failed_integrity', str(other.resolve()))]
+    assert any(w.startswith(f'integrity ruling ignored: {pid} ({own}):')
+               for w in report.warnings), report.warnings
+    assert report.not_quarantined == [pid]
+    nodes = _nodes_count()
+    assert import_root(tmp_path, label='camp').rulings.applied == 0
+    assert _nodes_count() == nodes
+
+    # A lower-ranked entry that does not apply while another is in force is
+    # not reported; a higher-ranked one is (it is why the other is in force).
+    _drop_own(tmp_path)
+    apply_rulings('camp', weak)
+    _yaml(other, pid, 'fail', note='x', override=False)
+    apply_rulings('camp')
+    _yaml(other, pid, 'fail', note='x', override=True)   # a new decision: now newest
+    report = apply_rulings('camp')
+    assert _live_sources() == [('failed_integrity', str(other.resolve()))]
+    assert report.not_quarantined == []
+    assert not any(str(weak.resolve()) in w for w in report.warnings), report.warnings
+    _yaml(weak, pid, 'fail', note='y')                   # newer again, still no override
+    report = apply_rulings('camp')
+    assert _live_sources() == [('failed_integrity', str(other.resolve()))]
+    assert report.not_quarantined == [pid]
+    assert any(str(weak.resolve()) in w for w in report.warnings), report.warnings
+
+
+def test_withdraw_pending_on_a_present_file_detaches_it(aiida_profile_clean,
+                                                        no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    review = _yaml(tmp_path / 'a.yaml', pid, 'pass')
+    apply_rulings('camp', review)
+
+    report = apply_rulings('camp', withdraw_pending=review)
+
+    assert report.pending_withdrawn == [(pid, str(review.resolve()))]
+    assert _ruled_live() == []
+    assert import_root(tmp_path, label='camp').rulings.applied == 0   # not re-read
+    assert apply_rulings('camp', review).applied == 1                # until passed again
+
+
+def test_a_changed_deck_keeps_the_winner_among_files(aiida_profile_clean,
+                                                     no_profile_switch, tmp_path):
+    run_dir = _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    one = _yaml(tmp_path / 'a.yaml', pid, 'pass')
+    two = _yaml(tmp_path / 'b.yaml', pid, 'fail')
+    apply_rulings('camp', one)
+    apply_rulings('camp', two)
+    one.unlink()
+    for deck in sorted((run_dir / 'lammps').glob('*.in')):
+        deck.write_text(deck.read_text() + '\n# edited\n')
+
+    import_root(tmp_path, label='camp')
+
+    assert _live_sources() == [('failed_integrity', str(two.resolve()))]
+    nodes, extras = _nodes_count(), _ruling_extras()
+    import_root(tmp_path, label='camp')
+    apply_rulings('camp')
+    assert _nodes_count() == nodes and _ruling_extras() == extras
+
+
+def test_a_recheck_keeps_every_files_rulings(aiida_profile_clean, no_profile_switch,
+                                             no_user_settings, tmp_path):
+    root = tmp_path / 'sim'
+    _tree(root, quarantine=(30.0,), eject=(50.0,))
+    import_root(root, label='camp')
+    p30, p50 = _pid(root, 30.0), _pid(root, 50.0)
+    _write_ruling(root, p50, 'pass', note='own', override=True)
+    one = _yaml(tmp_path / 'a.yaml', p30, 'pass')
+    two = tmp_path / 'b.yaml'
+    two.write_text(f'- point: "{p30}"\n  ruling: fail\n  note: b\n- point: "{p50}"\n'
+                   f'  ruling: fail\n  note: b\n  override: true\n', encoding='utf-8')
+    apply_rulings('camp', one)
+    apply_rulings('camp', two)
+    before = sorted(_live_sources())
+
+    recheck_set('camp', settings_file=_bump(tmp_path))
+
+    assert sorted(_live_sources()) == before and len(before) == 2

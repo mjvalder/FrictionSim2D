@@ -88,7 +88,7 @@ def test_rule_prints_the_overrides_and_the_withdrawn(store, tmp_path):
     assert f'override {pid}: complete -> ' in applied.output
     assert 'skipped 1' in _run('rule', 'camp', '--rulings', str(rulings)).output
 
-    rulings.write_text('', encoding='utf-8')     # the file withdraws its ruling
+    rulings.write_text('[]\n', encoding='utf-8')     # the file withdraws its ruling
     gone = _run('rule', 'camp', '--rulings', str(rulings))
     assert gone.exit_code == 0, gone.output
     assert 'withdrawn 1' in gone.output and f'withdrawn: {pid}' in gone.output
