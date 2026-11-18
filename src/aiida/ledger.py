@@ -10,8 +10,10 @@ survives a re-import that supersedes the point's deck. An entry is::
 
     {ruling, note, date, override,     # the ruling, as its file says it
      own_file, author,                 # where it came from, who made it
-     seen_at,                          # first added, or last changed in content
-     status}                           # 'present' or 'missing' (its file is gone)
+     seen_at,                          # first added, or its decision last changed
+     status,                           # 'present', 'missing' (its file is gone) or
+                                       # 'archived' (from an archive: no file to read)
+     in_force}                         # True on the entry the last pass put in force
 
 * :func:`read_source` -- a source's rulings file replaces that source's
   entries; a missing file marks them ``missing`` and keeps them.
@@ -26,10 +28,18 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 #: The fields of an entry that are the ruling itself.
 CONTENT = ('ruling', 'note', 'date', 'override')
+#: The fields whose change makes an entry newly seen (re-ranks it): the
+#: decision, not its wording -- fixing a typo in a note never flips a point.
+DECISION = ('ruling', 'override')
 
 Ledger = Dict[str, Dict[str, Dict[str, Any]]]
 
 _FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+
+
+def stamp(when: datetime) -> str:
+    """``when`` as a ledger timestamp (UTC, fixed width: orders as text)."""
+    return when.astimezone(timezone.utc).strftime(_FORMAT)
 
 
 class Clock:  # pylint: disable=too-few-public-methods
@@ -43,9 +53,9 @@ class Clock:  # pylint: disable=too-few-public-methods
                       if start else datetime.now(timezone.utc))
 
     def __call__(self) -> str:
-        stamp = self._next.strftime(_FORMAT)
+        now = stamp(self._next)
         self._next += timedelta(microseconds=1)
-        return stamp
+        return now
 
 
 def content_of(ruling) -> Dict[str, Any]:
@@ -94,10 +104,12 @@ def read_source(ledger: Ledger, source: str, rulings: Optional[Mapping[str, Any]
     for pid, ruling in valid.items():
         content = content_of(ruling)
         old = ledger.get(pid, {}).get(source)
-        same = old is not None and all(old.get(k) == content[k] for k in CONTENT)
-        ledger.setdefault(pid, {})[source] = {
-            **content, 'own_file': own, 'author': 'user',
-            'seen_at': old['seen_at'] if same else now, 'status': 'present'}
+        same = old is not None and all(old.get(k) == content[k] for k in DECISION)
+        entry = {**content, 'own_file': own, 'author': 'user',
+                 'seen_at': old['seen_at'] if same else now, 'status': 'present'}
+        if old is not None and old.get('in_force'):
+            entry['in_force'] = True
+        ledger.setdefault(pid, {})[source] = entry
     return retracted
 
 
@@ -143,16 +155,28 @@ def conflicts(entries: Mapping[str, Mapping[str, Any]], own_source: Optional[str
     if len({e['ruling'] for e in entries.values()}) < 2:
         return None
     order = ruling_order(entries, own_source)
+    why = why_in_force(entries, own_source, in_force)
     if in_force is None:
-        return None, 'none of them applies', [(s, entries[s]['ruling']) for s in order]
+        return None, why, [(s, entries[s]['ruling']) for s in order]
     decision = entries[in_force]['ruling']
-    if in_force == own_source:
-        why = "the set's own integrity_rulings.yaml wins"
-    else:
-        why = f"most recently seen ({entries[in_force].get('seen_at', '')})"
-        stronger = order[:order.index(in_force)]
-        if stronger:
-            why += f'; {", ".join(stronger)} does not apply'
     others = [(s, entries[s]['ruling']) for s in order
               if s != in_force and entries[s]['ruling'] != decision]
     return (in_force, decision), why, others
+
+
+def why_in_force(entries: Mapping[str, Mapping[str, Any]], own_source: Optional[str],
+                 in_force: Optional[str]) -> str:
+    """Why ``in_force`` (:func:`desired_ruling`'s choice, or None) is the
+    ruling in force among one point's ``entries``."""
+    if not entries:
+        return 'no file rules it'
+    if in_force is None:
+        return 'no ruling applies'
+    if in_force == own_source:
+        return "the set's own integrity_rulings.yaml wins"
+    order = ruling_order(entries, own_source)
+    why = f"most recently seen ({entries[in_force].get('seen_at', '')})"
+    stronger = order[:order.index(in_force)]
+    if stronger:
+        why += f'; {", ".join(stronger)} does not apply'
+    return why

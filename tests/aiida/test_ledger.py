@@ -1,7 +1,9 @@
 """The ruling ledger: which ruling should be in force, and how a source's
 rulings file updates it. Plain dicts only -- no AiiDA needed."""
+from datetime import datetime, timezone
+
 from src.aiida.ledger import (Clock, conflicts, desired_ruling, drop_source,
-                              read_source, ruling_order)
+                              read_source, ruling_order, stamp, why_in_force)
 from src.postprocessing.integrity_rulings import Ruling
 
 OWN, O1, O2 = '/camp/integrity_rulings.yaml', '/rev/o1.yaml', '/rev/o2.yaml'
@@ -85,8 +87,23 @@ def test_reading_a_file_replaces_that_sources_entries():
     assert ledger[PID][O1]['seen_at'] == first            # unchanged content: not re-seen
     read_source(ledger, O1, {PID: Ruling(ruling='pass', note='new note')},
                 own=False, now=clock(), warnings=warnings)
-    assert ledger[PID][O1]['seen_at'] > first             # changed content: seen now
+    assert ledger[PID][O1]['note'] == 'new note'
+    assert ledger[PID][O1]['seen_at'] == first            # a note edit does not re-rank
+    read_source(ledger, O1, {PID: Ruling(ruling='fail', note='new note')},
+                own=False, now=clock(), warnings=warnings)
+    assert ledger[PID][O1]['seen_at'] > first             # a new decision: seen now
+    second = ledger[PID][O1]['seen_at']
+    read_source(ledger, O1, {PID: Ruling(ruling='fail', note='n', override=True)},
+                own=False, now=clock(), warnings=warnings)
+    assert ledger[PID][O1]['seen_at'] > second            # override changed: seen now
     assert warnings == []
+
+
+def test_reading_keeps_the_in_force_mark():
+    ledger = {PID: {O1: {**_entry('pass', 'a'), 'in_force': True}}}
+    read_source(ledger, O1, {PID: Ruling(ruling='pass', note='n')}, own=False, now='b',
+                warnings=[])
+    assert ledger[PID][O1]['in_force'] is True
 
 
 def test_a_missing_source_is_marked_and_kept():
@@ -135,3 +152,18 @@ def test_clock_is_strictly_increasing():
     clock = Clock('2026-11-18T10:00:00.000000Z')
     stamps = [clock() for _ in range(5)]
     assert stamps == sorted(set(stamps)) and len(stamps) == 5
+
+
+def test_why_in_force():
+    entries = {OWN: _entry('pass', 'a'), O1: _entry('fail', '2026-11-18T10')}
+    assert 'own' in why_in_force(entries, OWN, OWN)
+    assert why_in_force(entries, OWN, O1) == (
+        f'most recently seen (2026-11-18T10); {OWN} does not apply')
+    assert why_in_force(entries, OWN, None) == 'no ruling applies'
+    assert why_in_force({}, OWN, None) == 'no file rules it'
+
+
+def test_stamp_orders_as_text():
+    early = stamp(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    late = stamp(datetime(2026, 1, 1, 0, 0, 0, 1, tzinfo=timezone.utc))
+    assert early < late and early.endswith('Z')
