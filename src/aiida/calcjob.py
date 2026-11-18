@@ -70,6 +70,10 @@ __all__ = ['LammpsFrictionCalcJob', 'LammpsFrictionParser', 'MissingRunUUID',
 class MissingRunUUID(ValueError):
     """A run's ``provenance.json`` has no ``run_uuid`` (a pre-2.2 build)."""
 
+
+class ConfigMismatch(ValueError):
+    """No candidate ``config.json`` of a run matches its ``config_hash``."""
+
 _CONFLICT = '.sync-conflict-'
 _PES_FAMILIES = ('pes_tip', 'pes_sheet')
 _PES_REFINE_NAME = 'pes_scan_refine.csv'
@@ -767,9 +771,58 @@ class RunInputs:
     max_stored_file_mb: int = 20
 
 
-def _split_run(locator) -> Tuple[Any, dict, dict, dict, str]:
-    """``(blocks, config, record, settings, run_uuid)`` of one run, with
-    ``derived.drive_k`` checked against its unit; stores nothing."""
+def _config_candidates(locator) -> List[Path]:
+    """Where the config a run was built from may sit, in order:
+    ``provenance/config.json``, its Syncthing ``config.sync-conflict-*.json``
+    copies, and ``<run parent>/_v3_crashed/provenance/config.json`` (the
+    AFM campaign moved a crashed build there before the rerun)."""
+    prov_dir = Path(locator.provenance_dir)
+    conflicts = sorted(prov_dir.glob('config.sync-conflict-*.json')) if prov_dir.is_dir() else []
+    return [prov_dir / 'config.json', *conflicts,
+            Path(locator.run_dir).parent / '_v3_crashed' / 'provenance' / 'config.json']
+
+
+def run_config_file(locator, record: Optional[Mapping[str, Any]] = None) -> Optional[Path]:
+    """The ``config.json`` the run was built from: the first candidate
+    (:func:`_config_candidates`) whose :func:`~src.data.provenance.config_hash`
+    is ``provenance.json``'s ``config_hash``.
+
+    A run's AFM ``provenance/`` is shared by its layers, so a one-layer rerun
+    can overwrite the ``config.json`` the other layer ran with. Returns
+    None when ``provenance/config.json`` is the match, or when there is
+    nothing to check (no ``config_hash`` in the record, or no candidate on
+    disk); the other candidate's path when it is the match.
+
+    Raises:
+        ConfigMismatch: candidates exist and none matches.
+    """
+    from ..data.provenance import config_hash  # pylint: disable=import-outside-toplevel
+
+    record = _read_json(locator.provenance_file) if record is None else record
+    expected = record.get('config_hash')
+    candidates = _config_candidates(locator)
+    present = [path for path in candidates if path.is_file()]
+    if not expected or not present:
+        return None
+    for path in present:
+        try:
+            config = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if config_hash(config) == expected:
+            return None if path == candidates[0] else path
+    tried = ', '.join(str(path) for path in present)
+    raise ConfigMismatch(
+        f'provenance/config.json does not match the config_hash {expected[:12]} of '
+        f'{locator.provenance_file}, and no other config does (tried {tried}): '
+        f'the config this run was built from is lost or the record is stale')
+
+
+def _split_run(locator) -> Tuple[Any, dict, dict, dict, str, Optional[Path]]:
+    """``(blocks, config, record, settings, run_uuid, config_file)`` of one
+    run, with ``derived.drive_k`` checked against its unit and the config
+    checked against ``config_hash`` (``config_file``: the replacement
+    :func:`run_config_file` found, or None); stores nothing."""
     # pylint: disable=import-outside-toplevel
     from ..postprocessing.read_data import resolve_n_layers
     from ..postprocessing.run_status import read_run_config
@@ -777,15 +830,17 @@ def _split_run(locator) -> Tuple[Any, dict, dict, dict, str]:
     from .block_schema import check_units
 
     prov_dir = Path(locator.provenance_dir)
-    config = read_run_config(locator) or {}
     record = _read_json(locator.provenance_file)
     run_uuid = _run_uuid(locator, record)
+    config_file = run_config_file(locator, record)
+    config = (_read_json(config_file) if config_file is not None
+              else read_run_config(locator) or {})
     settings = _read_yaml(prov_dir / 'settings.yaml')
     split = _blocks.split_blocks(config, settings, record, family=locator.tokens.family,
                                  n_layers=resolve_n_layers(locator, config or None),
                                  provenance_dir=prov_dir)
     check_units(split, record=record)
-    return split, config, record, settings, run_uuid
+    return split, config, record, settings, run_uuid, config_file
 
 
 def check_run(locator) -> str:
@@ -794,6 +849,7 @@ def check_run(locator) -> str:
     Raises:
         MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
         UnitMismatch: ``derived.drive_k`` is not ``driving_spring`` in eV/A^2.
+        ConfigMismatch: no candidate config matches ``config_hash``.
     """
     return _split_run(locator)[4]
 
@@ -809,6 +865,7 @@ def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
     Raises:
         MissingRunUUID: ``provenance.json`` has no ``run_uuid``.
         UnitMismatch: ``derived.drive_k`` is not ``driving_spring`` in eV/A^2.
+        ConfigMismatch: no candidate config matches ``config_hash``.
     """
     # pylint: disable=import-outside-toplevel
     from .block_schema import schema_document
@@ -816,14 +873,14 @@ def run_inputs(locator, *, index: Optional[StoreIndex] = None) -> RunInputs:
 
     index = index if index is not None else StoreIndex.load()
     prov_dir = Path(locator.provenance_dir)
-    split, config, record, settings, run_uuid = _split_run(locator)
+    split, config, record, settings, run_uuid, config_file = _split_run(locator)
     return RunInputs(
         blocks={name: get_or_create_block(content, index=index)
                 for name, content in split.blocks.items()},
         derived=orm.Dict({'fields': dict(split.derived)}),
         schema=get_or_create_schema(schema_document(split.family), index=index),
         provenance=get_or_create_provenance(locator.provenance_file, prov_dir,
-                                            index=index),
+                                            config_file=config_file, index=index),
         potentials=_unique(((_file_label(p.name), get_or_create_file(p, index=index))
                             for p in _files(prov_dir / 'potentials', '*')),
                            'potentials'),

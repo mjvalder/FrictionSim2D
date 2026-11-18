@@ -7,7 +7,7 @@ import pytest
 
 from src.data.provenance import (
     BuiltGeometry, MATERIAL_ROLES, MaterialProvenance, PROVENANCE_SCHEMA_VERSION,
-    ProvenanceRecord, parse_log_extras, read_provenance, sha256_file,
+    ProvenanceRecord, config_hash, parse_log_extras, read_provenance, sha256_file,
     write_provenance,
 )
 
@@ -432,3 +432,21 @@ def test_render_says_would_stamp_on_a_dry_run():
     report = StampReport(stamped=[Path('a')])
     assert report.render(dry_run=True).startswith('would stamp 1,')
     assert report.render().startswith('stamped 1,')
+
+
+class _Cfg(pydantic.BaseModel):
+    name: str = 'h-MoS2 \u00c5ngstr\u00f6m'
+    cutoff: float = 11.0
+    tiny: float = 1e-05
+    layers: list = [1, 2]
+    off: bool = False
+    none: object = None
+
+
+@pytest.mark.parametrize('model', ['settings', 'small'])
+def test_config_hash_recomputes_the_builders_hash_from_config_json(model, mock_settings):
+    """The builders hash `model_dump_json()` and write `model_dump_json(indent=2)`."""
+    obj = mock_settings if model == 'settings' else _Cfg()
+    written = obj.model_dump_json(indent=2)
+    assert config_hash(json.loads(written)) == hashlib.sha256(
+        obj.model_dump_json().encode()).hexdigest()

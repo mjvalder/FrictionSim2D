@@ -159,6 +159,19 @@ def new_run_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def config_hash(config: Any) -> str:
+    """``config_hash`` of a run config: the sha256 of its compact JSON.
+
+    The builders hash ``config.model_dump_json()`` and write
+    ``provenance/config.json`` as ``model_dump_json(indent=2)``. Re-serialising
+    the parsed file with pydantic's own JSON writer gives those same bytes
+    (``json.dumps`` would not: it writes ``1e-05`` where pydantic writes
+    ``0.00001``), so this recomputes the recorded hash from ``config.json``.
+    """
+    import pydantic_core  # pylint: disable=import-outside-toplevel
+    return hashlib.sha256(pydantic_core.to_json(config)).hexdigest()
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, 'rb') as fh:

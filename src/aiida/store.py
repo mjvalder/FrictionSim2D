@@ -452,11 +452,15 @@ def new_folder(files: Mapping[str, Path]) -> orm.FolderData:
 
 
 def _provenance_members(provenance_file: Optional[Path],
-                         provenance_dir: Optional[Path]) -> List[Tuple[str, Path]]:
+                         provenance_dir: Optional[Path],
+                         config_file: Optional[Path] = None) -> List[Tuple[str, Path]]:
     """``(stored name, path)`` of every provenance file, sorted by name.
 
     Syncthing ``*.sync-conflict-*`` copies are left out: the original is the
-    record.
+    record. ``config_file``, when given, is stored as
+    ``provenance/config.json`` in place of the file of that name: the config
+    the run was built from (``calcjob.run_config_file``), when
+    ``provenance/config.json`` was overwritten after the build.
     """
     members: List[Tuple[str, Path]] = []
     if provenance_file is not None and Path(provenance_file).is_file():
@@ -467,6 +471,9 @@ def _provenance_members(provenance_file: Optional[Path],
             if path.is_file() and _CONFLICT not in path.name:
                 rel = path.relative_to(root).as_posix()
                 members.append((f'provenance/{rel}', path))
+    if config_file is not None:
+        members = [m for m in members if m[0] != 'provenance/config.json']
+        members.append(('provenance/config.json', Path(config_file)))
     return sorted(members)
 
 
@@ -479,16 +486,18 @@ def _folder_key(members: List[Tuple[str, str]]) -> str:
 
 
 def provenance_key(provenance_file: Optional[Path],
-                   provenance_dir: Optional[Path]) -> str:
+                   provenance_dir: Optional[Path],
+                   config_file: Optional[Path] = None) -> str:
     """The key :func:`get_or_create_provenance` stores this provenance
     under, computed without storing anything."""
     return _folder_key([(name, _sha(_staged(path, name)))
                         for name, path in _provenance_members(provenance_file,
-                                                              provenance_dir)])
+                                                              provenance_dir, config_file)])
 
 
 def get_or_create_provenance(provenance_file: Optional[Path],
                              provenance_dir: Optional[Path], *,
+                             config_file: Optional[Path] = None,
                              index: Optional[StoreIndex] = None) -> orm.FolderData:
     """The stored ``FolderData`` of a run's ``provenance.json`` + ``provenance/``.
 
@@ -497,9 +506,12 @@ def get_or_create_provenance(provenance_file: Optional[Path],
     never reaches the store. Keyed by a sha256 over every member's stored
     name and the sha256 of its STAGED bytes, so two runs with byte-identical
     provenance share one node and the key is recomputable from the node.
+    ``config_file`` replaces ``provenance/config.json``
+    (:func:`_provenance_members`).
     """
     staged = [(name, _staged(path, name))
-              for name, path in _provenance_members(provenance_file, provenance_dir)]
+              for name, path in _provenance_members(provenance_file, provenance_dir,
+                                                    config_file)]
     key = _folder_key([(name, _sha(content)) for name, content in staged])
 
     def build() -> orm.FolderData:

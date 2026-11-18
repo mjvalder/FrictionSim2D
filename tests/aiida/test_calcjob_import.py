@@ -24,6 +24,7 @@ from src.aiida.decks import discover_decks  # noqa: E402
 from src.aiida.retention import retrieve_patterns  # noqa: E402
 from src.aiida.store import machine_computer  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
+from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.helpers.results_tree import (  # noqa: E402
     make_family_run, slide_config, write_final_data,
 )
@@ -464,6 +465,7 @@ def test_a_password_in_provenance_settings_never_reaches_the_store(computer, tmp
     config = json.loads((loc.provenance_dir / 'config.json').read_text(encoding='utf-8'))
     config['settings']['database'] = {'password': SECRET}
     (loc.provenance_dir / 'config.json').write_text(json.dumps(config), encoding='utf-8')
+    seal_config_hash(loc.run_dir, loc.provenance_dir)
 
     nodes = import_run(loc, computer=computer)
     assert all(n.is_finished_ok for n in nodes)

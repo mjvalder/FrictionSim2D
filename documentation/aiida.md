@@ -312,6 +312,33 @@ so a moved tree has the same fingerprints.
 - A superseded CalcJob that another set also holds is reported as
   `superseded <deck>, also held by set '<other>'`.
 
+### 4.4 The config must match `config_hash`
+
+`provenance.json` records `config_hash`, the sha256 of the build's compact
+`config.json` (`model_dump_json()`). Every import, dry runs included, checks
+it before anything is stored. An AFM run's `provenance/` is shared by its
+`L{n}` layers, so a one-layer rerun can overwrite the `config.json` the other
+layer ran with.
+
+- `provenance/config.json` matches: imported as before.
+- It does not: the importer takes the first of these that matches:
+  - `provenance/config.sync-conflict-*.json` (Syncthing copies);
+  - `<run parent>/_v3_crashed/provenance/config.json` (for an AFM run, the pot
+    level).
+
+  That file is stored as `provenance/config.json` in the run's provenance
+  folder, and so drives the blocks, the parser and the integrity check. The
+  report warns:
+  `WARNING <run>: provenance/config.json does not match the config_hash of provenance.json; using <file>, which does`.
+- None matches: the run goes to `failures` as
+  `ConfigMismatch: provenance/config.json does not match the config_hash ...`,
+  naming every file tried, and the other runs go on. Repair the run (restore
+  its config) before importing it.
+- A record without `config_hash`, or a run with no `config.json` at all, is
+  not checked.
+
+### 4.5 The import report
+
 The import report counts decks created, skipped, superseded and already
 imported, points created, decks with a missing log, decks with no LAMMPS
 version, unparseable runs, and the integrity verdicts and rulings of §5. It

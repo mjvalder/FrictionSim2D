@@ -24,6 +24,7 @@ from src.aiida.ingest import (  # noqa: E402
     load_points, supersede,
 )
 from src.aiida.store import DECK_KEY_EXTRA, DECK_SHA_EXTRA  # noqa: E402
+from src.data.provenance import config_hash  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.results_tree import (  # noqa: E402
     make_family_run, slide_config, write_final_data,
@@ -92,6 +93,24 @@ def _set_record(run_dir, **fields):
     record = json.loads(path.read_text(encoding='utf-8'))
     record.update(fields)
     path.write_text(json.dumps(record), encoding='utf-8')
+
+
+def _edit_config(loc, path=None, **general):
+    """Rewrite the run's config.json (or ``path``) with ``general`` changed;
+    return the new config."""
+    source = loc.provenance_dir / 'config.json'
+    config = json.loads(source.read_text(encoding='utf-8'))
+    config['general'].update(general)
+    target = path or source
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(config, indent=2), encoding='utf-8')
+    return config
+
+
+def _stored_config(rel_material):
+    (calc, *_rest) = _by_deck(rel_material).values()
+    return json.loads(calc.inputs.provenance.base.repository.get_object_content(
+        'provenance/config.json', mode='r'))
 
 
 def _by_deck(rel_material):
@@ -323,14 +342,13 @@ def test_supersede_follows_calcfunction_outputs_not_calcjob_consumers(
 
 def test_a_config_edit_reimports_every_deck_of_the_run(aiida_profile_clean, tmp_path):
     """The provenance folder is in every deck's fingerprint: a changed config
-    changes the blocks, so the run's decks re-import (the dry run says so)."""
+    changes the blocks, so the run's decks re-import (the dry run says so).
+    A rebuild writes the config and its config_hash together."""
     root = _tree(tmp_path / 'sim')
     import_root(root, label='camp')
     (loc,) = [r for r in discover_runs(root) if 'h-MoS2' in r.tokens.rel_path]
-    config_path = loc.provenance_dir / 'config.json'
-    config = json.loads(config_path.read_text(encoding='utf-8'))
-    config['general']['temp'] = 350
-    config_path.write_text(json.dumps(config), encoding='utf-8')
+    config = _edit_config(loc, temp=350)
+    _set_record(loc.run_dir, config_hash=config_hash(config))
 
     plan = import_root(root, label='camp', dry_run=True)
     assert len(plan.superseded_decks) == 2 and len(plan.skipped_decks) == 2
@@ -339,6 +357,50 @@ def test_a_config_edit_reimports_every_deck_of_the_run(aiida_profile_clean, tmp_
     assert report.ok(), report.render()
     assert sorted(d.rsplit(':', 1)[1] for d in report.superseded_decks) == ['slide', 'system']
     assert len(report.skipped_decks) == 2
+
+
+def _mos2(root):
+    (loc,) = [r for r in discover_runs(root) if 'h-MoS2' in r.tokens.rel_path]
+    return loc
+
+
+def test_a_config_that_does_not_match_its_hash_is_a_failure(aiida_profile_clean, tmp_path):
+    """config.json overwritten after the build (a one-layer rerun of a shared
+    pot-level provenance/) and no copy matches: the run fails alone."""
+    root = _tree(tmp_path / 'sim')
+    _edit_config(_mos2(root), temp=350)
+
+    for dry_run in (True, False):
+        report = import_root(root, label='camp', dry_run=dry_run)
+        (failure,) = report.failures
+        assert 'h-MoS2' in failure[0] and failure[1].startswith('ConfigMismatch:')
+        assert 'config_hash' in failure[1]
+    assert _by_deck('h-MoS2') == {}
+    assert len(_by_deck('h-WS2')) == 2
+
+
+@pytest.mark.parametrize('where', ['sync_conflict', 'v3_crashed'])
+def test_the_config_matching_the_hash_is_the_one_imported(aiida_profile_clean, tmp_path,
+                                                          where):
+    """The overwritten config's original survives as a Syncthing copy or in
+    the crashed build's `_v3_crashed/provenance/`: that one is imported."""
+    root = _tree(tmp_path / 'sim')
+    loc = _mos2(root)
+    original = loc.provenance_dir / 'config.json'
+    keep = (loc.provenance_dir / 'config.sync-conflict-20261015-101010-ABCDEFG.json'
+            if where == 'sync_conflict'
+            else loc.run_dir.parent / '_v3_crashed' / 'provenance' / 'config.json')
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(original, keep)
+    built = json.loads(original.read_text(encoding='utf-8'))
+    _edit_config(loc, temp=350)                      # the rerun's config, not this run's
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    assert any(str(keep) in w and 'config_hash' in w for w in report.warnings)
+    assert _stored_config('h-MoS2') == built
+    assert import_root(root, label='camp').created_decks == []   # same fingerprint
 
 
 def test_a_truncated_slide_trace_is_a_truncated_point(aiida_profile_clean, tmp_path):

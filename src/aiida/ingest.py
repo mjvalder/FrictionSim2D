@@ -428,7 +428,7 @@ def deck_fingerprint(locator, deck: 'Deck', decks: Sequence['Deck']) -> str:
     tree has the same fingerprints; a log that arrives later changes it.
     """
     # pylint: disable=import-outside-toplevel
-    from .calcjob import included_files
+    from .calcjob import included_files, run_config_file
     from .store import provenance_key, staged_sha256
 
     run_dir = Path(locator.run_dir)
@@ -443,7 +443,8 @@ def deck_fingerprint(locator, deck: 'Deck', decks: Sequence['Deck']) -> str:
     entries.append(('log', sha256_file(deck.log_path) if deck.log_path else '-'))
     entries += [(f'output:{_rel(p, run_dir)}', sha256_file(p)) for p in outputs]
     entries.append(('provenance', provenance_key(locator.provenance_file,
-                                                 locator.provenance_dir)))
+                                                 locator.provenance_dir,
+                                                 run_config_file(locator))))
     entries += [('structure', sha)
                 for sha in sorted(staged_sha256(p, name)
                                   for p, name in _structure_files(locator, deck, decks))]
@@ -817,15 +818,17 @@ def _receives_structures(deck, decks) -> bool:
 
 
 def _read_runs(locators, report: ImportReport) -> List[Tuple[Any, str, dict]]:
-    """``(locator, run_uuid, record)`` of every run with a usable identity;
-    the others go to ``failures``. A dry run also checks the units here (a
-    real import does it in :func:`~src.aiida.calcjob.run_inputs`, splitting
-    each run once)."""
+    """``(locator, run_uuid, record)`` of every run with a usable identity
+    and a config matching its ``config_hash``
+    (:func:`~src.aiida.calcjob.run_config_file`; a replacement config is a
+    warning); the others go to ``failures``. A dry run also checks the units
+    here (a real import does it in :func:`~src.aiida.calcjob.run_inputs`,
+    splitting each run once)."""
     # pylint: disable=import-outside-toplevel
     import json
 
     from .block_schema import UnitMismatch
-    from .calcjob import MissingRunUUID, check_run, read_run_uuid
+    from .calcjob import ConfigMismatch, MissingRunUUID, check_run, read_run_uuid, run_config_file
 
     runs = []
     for locator in locators:
@@ -834,13 +837,18 @@ def _read_runs(locators, report: ImportReport) -> List[Tuple[Any, str, dict]]:
             run_uuid = (check_run(locator) if report.dry_run
                         else read_run_uuid(locator))
             record = json.loads(Path(locator.provenance_file).read_text(encoding='utf-8'))
-        except (MissingRunUUID, UnitMismatch) as exc:
+            config_file = run_config_file(locator, record)
+        except (MissingRunUUID, UnitMismatch, ConfigMismatch) as exc:
             report.failures.append((rel, f'{type(exc).__name__}: {exc}'))
             continue
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception('Could not read run %s', rel)
             report.failures.append((rel, f'{type(exc).__name__}: {exc}'))
             continue
+        if config_file is not None:
+            report.warnings.append(
+                f'{rel}: provenance/config.json does not match the config_hash of '
+                f'provenance.json; using {config_file}, which does')
         runs.append((locator, run_uuid, record))
     return runs
 

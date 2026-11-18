@@ -22,6 +22,7 @@ pytestmark = pytest.mark.aiida
 from src.aiida.export import import_archive, rebuild_set  # noqa: E402
 from src.aiida.ingest import group_label, import_root  # noqa: E402
 from tests.helpers.results_tree import make_family_run  # noqa: E402
+from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 
 REL = 'afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L2'
 
@@ -69,6 +70,7 @@ def _write_secret_provenance(root: Path, rel: str, *, database: dict) -> None:
     (prov_dir / 'config.json').write_text(
         json.dumps({'general': {'temp': 300}, 'settings': {'database': database}}),
         encoding='utf-8')
+    seal_config_hash(root / rel, prov_dir)
 
 
 def _assert_no_secrets(text: str, path) -> None:
@@ -202,6 +204,7 @@ def test_rebuild_set_reloads_a_redacted_config_json(aiida_profile_clean, tmp_pat
     prov_dir = _prov_dir(root, REL)
     (prov_dir / 'config.json').write_text(_minimal_afm_config_with_secrets(tmp_path),
                                           encoding='utf-8')
+    seal_config_hash(root / REL, prov_dir)
 
     assert import_root(root, label='secrets-rebuild').created_decks
     seen = {}

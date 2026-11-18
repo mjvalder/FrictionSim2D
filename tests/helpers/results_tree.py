@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from src.data.provenance import (MaterialProvenance, ProvenanceRecord,
                                  write_provenance)
 from tests.helpers.synthetic_results import (PES_GRID_CSV, load_kind_for,
-                                             write_results)
+                                             record_config_hash, write_results)
 
 #: family -> path template, relative to the simulation root. The AFM-like
 #: families carry the sub/tip level and a trailing L{layers}; the sheet-like
@@ -60,7 +60,7 @@ def _material_token(material: str, second: Optional[str],
 
 
 def _record(family: str, material: str, second: Optional[str],
-            flake: Optional[str], run_uuid: str) -> ProvenanceRecord:
+            flake: Optional[str], run_uuid: str, config: dict) -> ProvenanceRecord:
     materials = [MaterialProvenance(name=material, role='sheet',
                                     pot_path='/p/MoS.sw', pot_type='sw',
                                     pot_resolution_route='explicit',
@@ -76,7 +76,7 @@ def _record(family: str, material: str, second: Optional[str],
         materials=materials,
         seed_thermal_tip=None, seed_thermal_sub=None, seed_velocity=None,
         substrate_realization_id=None, damping_ratio=None, damp_ev=None,
-        git_commit='deadbeef', git_dirty=False, config_hash='ff' * 32,
+        git_commit='deadbeef', git_dirty=False, config_hash=record_config_hash(config),
         layer_type_map={'layer_1': [1], 'layer_2': [2]},
         unloaded_reference_z={'layer_1': 0.0, 'layer_2': 6.5},
         contact_cutoff=4.8, cutoff_source='test',
@@ -118,14 +118,14 @@ def make_family_run(root: Path, family: str, *, material: str = 'h-MoS2',
     # resolves exactly this.
     prov_parent = run_dir.parent if family in _AFM_LIKE else run_dir
     (prov_parent / 'provenance').mkdir(parents=True, exist_ok=True)
-    (prov_parent / 'provenance' / 'config.json').write_text(
-        json.dumps(config if config is not None else {'general': {'temp': temp}}),
-        encoding='utf-8')
+    config = config if config is not None else {'general': {'temp': temp}}
+    (prov_parent / 'provenance' / 'config.json').write_text(json.dumps(config),
+                                                            encoding='utf-8')
     # A run_uuid derived from the run's path: distinct per run, yet stable,
     # so the whole-document goldens that carry it stay pinned.
     write_provenance(run_dir, _record(
         family, material, second_material, flake_material,
-        str(uuid5(NAMESPACE_URL, f'friction2d-test:{rel}'))))
+        str(uuid5(NAMESPACE_URL, f'friction2d-test:{rel}')), config))
 
     load_kind = load_kind_for(MODEL_FOR_FAMILY[family])
     if family in _PES_FAMILIES:

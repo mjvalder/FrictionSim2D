@@ -6,8 +6,31 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from src.core.observables import rename_map
+from src.data.provenance import config_hash
 
 _SETTINGS_STUB = "thermostat:\n  type: langevin\n"
+
+#: Whether the helpers' records carry the real ``config_hash`` of the
+#: ``config.json`` they write. Off: the placeholder ``'ff' * 32`` the
+#: postprocessing goldens pin. ``tests/aiida/conftest.py`` turns it on, since
+#: the importer checks the hash (``calcjob.run_config_file``), as a real
+#: build's record would pass.
+REAL_CONFIG_HASH = False
+
+
+def record_config_hash(config) -> str:
+    """The ``config_hash`` a helper's record carries for ``config``."""
+    return config_hash(config) if REAL_CONFIG_HASH else 'ff' * 32
+
+
+def seal_config_hash(run_dir: Path, prov_dir: Path) -> None:
+    """Set ``run_dir``'s record ``config_hash`` to that of
+    ``prov_dir/config.json``: what a rebuild writing that config would record."""
+    record_path = Path(run_dir) / 'provenance.json'
+    record = json.loads(record_path.read_text(encoding='utf-8'))
+    record['config_hash'] = config_hash(
+        json.loads((Path(prov_dir) / 'config.json').read_text(encoding='utf-8')))
+    record_path.write_text(json.dumps(record), encoding='utf-8')
 
 #: The two PES families write DIFFERENT CSVs and both must be exercised: a
 #: fixture that used the sheet shape for both left `pes_fmax`, `pes_flat_rms`,
@@ -132,12 +155,13 @@ def make_run(root: Path, rel_path: str, family: str, *,
 
     prov_dir = (run_dir.parent if layers is not None else run_dir) / 'provenance'
     prov_dir.mkdir(parents=True, exist_ok=True)
-    (prov_dir / 'config.json').write_text(json.dumps({'general': {'temp': 300}}),
-                                          encoding='utf-8')
+    config = {'general': {'temp': 300}}
+    (prov_dir / 'config.json').write_text(json.dumps(config), encoding='utf-8')
     (prov_dir / 'settings.yaml').write_text(_SETTINGS_STUB, encoding='utf-8')
     (run_dir / 'provenance.json').write_text(json.dumps({
         'schema_version': '2.0.0', 'family': family, 'model': model,
-        'git_commit': 'deadbeef', 'git_dirty': False, 'config_hash': 'ff' * 32,
+        'git_commit': 'deadbeef', 'git_dirty': False,
+        'config_hash': record_config_hash(config),
         'layer_type_map': {}, 'contact_cutoff': 4.8, 'cutoff_source': 'test',
         'thermostat_scheme': 'langevin', 'run_role': 'label',
         'seed_thermal_tip': None, 'seed_thermal_sub': None, 'seed_velocity': None,
