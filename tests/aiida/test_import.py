@@ -403,6 +403,22 @@ def test_the_config_matching_the_hash_is_the_one_imported(aiida_profile_clean, t
     assert import_root(root, label='camp').created_decks == []   # same fingerprint
 
 
+def test_a_run_with_no_decks_is_reported(aiida_profile_clean, tmp_path):
+    """A results-only run (no lammps/*.in) imports nothing, and says so."""
+    root = _tree(tmp_path / 'sim')
+    loc = _mos2(root)
+    shutil.rmtree(loc.lammps_dir)
+
+    for dry_run in (True, False):
+        report = import_root(root, label='camp', dry_run=dry_run)
+        assert report.ok()
+        assert report.no_decks == [loc.tokens.rel_path]
+        text = report.render()
+        assert 'runs with no decks:  1' in text
+        assert f'no decks (nothing imported): {loc.tokens.rel_path}' in text
+    assert _by_deck('h-MoS2') == {}
+    assert len(_by_deck('h-WS2')) == 2
+
 def test_a_truncated_slide_trace_is_a_truncated_point(aiida_profile_clean, tmp_path):
     root = tmp_path / 'sim'
     run_dir = make_family_run(root, 'afm', loads=(10.0,), n=20,

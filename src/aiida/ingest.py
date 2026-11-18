@@ -272,6 +272,8 @@ class ImportReport:
     store, ``(point id, original status, new status, note)``. ``rechecked``
     are ``(point id, old status, new status)`` of the points whose stored
     verdict this import's changes outdated (their context changed).
+    ``no_decks`` are the runs with no ``lammps/*.in`` deck: nothing of them
+    is imported (not a failure).
     ``superseded_elsewhere`` are ``(deck, other label)``: a CalcJob this
     import superseded that another set also holds -- that set now holds a
     superseded deck.
@@ -287,6 +289,7 @@ class ImportReport:
     log_missing: List[str] = field(default_factory=list)
     no_version: List[str] = field(default_factory=list)
     unparseable: List[str] = field(default_factory=list)
+    no_decks: List[str] = field(default_factory=list)
     failures: List[Tuple[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     superseded_elsewhere: List[Tuple[str, str]] = field(default_factory=list)
@@ -314,6 +317,7 @@ class ImportReport:
             f'  log missing:         {len(self.log_missing)}',
             f'  no LAMMPS version:   {len(self.no_version)}',
             f'  unparseable runs:    {len(self.unparseable)}',
+            f'  runs with no decks:  {len(self.no_decks)}',
         ]
         lines += [f'  verdict {k}: {v}' for k, v in sorted(self.verdict_counts.items())]
         lines += [f'  re-checked {pid}: {old} -> {new}'
@@ -333,6 +337,7 @@ class ImportReport:
         lines += [f'  no LAMMPS version (no Code): {d}' for d in self.no_version]
         lines += [f'  log missing: {d}' for d in self.log_missing]
         lines += [f'  unparseable: {d}' for d in self.unparseable]
+        lines += [f'  no decks (nothing imported): {d}' for d in self.no_decks]
         lines += [f'  superseded {deck}, also held by set {other!r}'
                   for deck, other in self.superseded_elsewhere]
         lines += [f'  WARNING {w}' for w in self.warnings]
@@ -786,6 +791,10 @@ def _import_run(state: _Import, run: _RunState) -> None:
     from .store import deck_key  # pylint: disable=import-outside-toplevel
 
     decks = discover_decks(run.locator)
+    if not decks:
+        # No lammps/*.in (a results-only run): nothing to import, but never silently.
+        state.report.no_decks.append(run.locator.tokens.rel_path)
+        return
     for deck in decks:
         name = _deck_name(run.locator, deck)
         fingerprint = deck_fingerprint(run.locator, deck, decks)

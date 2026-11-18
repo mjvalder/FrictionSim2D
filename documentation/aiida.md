@@ -341,9 +341,14 @@ layer ran with.
 
 The import report counts decks created, skipped, superseded and already
 imported, points created, decks with a missing log, decks with no LAMMPS
-version, unparseable runs, and the integrity verdicts and rulings of §5. It
-exits 1 if any run failed; a real (non-dry-run) import also exits 1 if any
-path could not be parsed.
+version, unparseable runs, runs with no decks, and the integrity verdicts and
+rulings of §5. It exits 1 if any run failed; a real (non-dry-run) import also
+exits 1 if any path could not be parsed.
+
+- **A run with no decks** (no `lammps/*.in`, e.g. a results-only copy) has
+  nothing to import: no CalcJob, so no point either. It is not a failure, but
+  it is never silent: the report counts it (`runs with no decks:`) and names
+  it (`no decks (nothing imported): <run>`).
 
 ## 5. Integrity verdicts and rulings
 
