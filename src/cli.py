@@ -1219,8 +1219,11 @@ def aiida_query(  # pylint: disable=too-many-arguments,too-many-locals
 @click.option('--create-profile', '-p', 'create_profile', default=None,
               help='Name of the AiiDA profile to CREATE (default: friction2d). '
                    'Every other command spells --profile, which LOADS an existing one.')
-def aiida_setup(create_profile: Optional[str]):
-    """Create (or load) the AiiDA profile.
+@click.option('--postgres', is_flag=True,
+              help='Try a PostgreSQL profile first (needs a running server); falls '
+                   'back to SQLite. Default: SQLite, which the import-only store needs.')
+def aiida_setup(create_profile: Optional[str], postgres: bool):
+    """Create (or load) the AiiDA profile: SQLite unless ``--postgres``.
 
     Only the profile: the machine Computer and the LAMMPS Code of each run
     are created when it is imported (``aiida import``).
@@ -1232,7 +1235,7 @@ def aiida_setup(create_profile: Optional[str]):
 
     click.echo("🔧 Running AiiDA first-time setup ...")
     try:
-        full_setup(profile_name=create_profile or 'friction2d')
+        full_setup(profile_name=create_profile or 'friction2d', use_postgres=postgres)
         click.echo("✅ AiiDA setup complete")
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("AiiDA setup failed")

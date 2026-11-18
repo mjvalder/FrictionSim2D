@@ -23,11 +23,13 @@ What the store gives you:
 FrictionSim2D aiida status                     # is aiida-core installed, which profile is active
 FrictionSim2D aiida setup                      # create (or load) the profile 'friction2d'
 FrictionSim2D aiida setup -p myprofile         # another profile name
+FrictionSim2D aiida setup --postgres           # try PostgreSQL first (needs a server)
 FrictionSim2D aiida preflight                  # profile + entry points healthy? exit 0 only if so
 ```
 
-- `aiida setup` creates the **profile only**. It runs `verdi presto
-  --use-postgres` and falls back to SQLite when PostgreSQL is not available.
+- `aiida setup` creates the **profile only**, on **SQLite** by default
+  (`verdi presto`). With `--postgres` it runs `verdi presto --use-postgres`
+  first and falls back to SQLite when PostgreSQL is not available.
 - No RabbitMQ broker and no daemon are needed: every import runs in-process
   (`engine.run`). The test tier runs against a broker-less SQLite profile.
 - The machine `Computer` and the LAMMPS `Code` of each run are created when the

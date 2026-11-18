@@ -49,7 +49,8 @@ def test_full_setup_sets_up_the_profile_only(monkeypatch):
     import src.aiida.setup as setup_mod
 
     seen = []
-    monkeypatch.setattr(setup_mod, 'setup_profile', lambda name: seen.append(name) or True)
+    monkeypatch.setattr(setup_mod, 'setup_profile',
+                        lambda name, use_postgres: seen.append(name) or True)
     assert setup_mod.full_setup('p1') == {'profile': True}
     assert seen == ['p1']
 

@@ -240,8 +240,9 @@ FrictionSim2D aiida preflight
 
 ### aiida setup
 
-Creates (or loads) the AiiDA profile — only the profile: the machine
-`Computer` and the LAMMPS `Code` of each run are created when it is imported.
+Creates (or loads) the AiiDA profile, on SQLite unless `--postgres`. Only the
+profile: the machine `Computer` and the LAMMPS `Code` of each run are created
+when it is imported.
 
 ```bash
 FrictionSim2D aiida setup [OPTIONS]
@@ -252,6 +253,9 @@ Options:
 - `-p, --create-profile TEXT` — name of the profile to **create** (default:
   `friction2d`). Every other `aiida` command spells `--profile`, which
   **loads** an existing one.
+- `--postgres` — try a PostgreSQL profile first (needs a running server and
+  psycopg2), falling back to SQLite. Without it the profile is SQLite, which
+  is all the import-only store needs.
 
 ### aiida import
 

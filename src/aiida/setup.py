@@ -13,18 +13,19 @@ logger = logging.getLogger(__name__)
 
 def setup_profile(
     profile_name: str = 'friction2d',
-    use_postgres: bool = True,
+    use_postgres: bool = False,
 ) -> bool:
     """Create and configure an AiiDA profile with ``verdi presto``.
 
     The import-only store works on either storage backend, with no broker
-    and no daemon: SQLite is enough. ``use_postgres`` tries PostgreSQL first
-    and falls back to SQLite when it is not available.
+    and no daemon: SQLite is enough, and the default. ``use_postgres``
+    (``aiida setup --postgres``) tries PostgreSQL first and falls back to
+    SQLite when it is not available.
 
     Args:
         profile_name: Name for the AiiDA profile.
         use_postgres: Try a PostgreSQL profile first (needs a running
-            PostgreSQL server and psycopg2).
+            PostgreSQL server and psycopg2). Off by default.
 
     Returns:
         ``True`` if profile was created or already exists.
@@ -79,7 +80,7 @@ def setup_profile(
     return True
 
 
-def full_setup(profile_name: str = 'friction2d') -> dict:
+def full_setup(profile_name: str = 'friction2d', *, use_postgres: bool = False) -> dict:
     """First-time AiiDA setup for FrictionSim2D: the profile only.
 
     Computers and Codes are created at import (one per machine and LAMMPS
@@ -88,6 +89,7 @@ def full_setup(profile_name: str = 'friction2d') -> dict:
 
     Args:
         profile_name: AiiDA profile name to CREATE (or load, if it exists).
+        use_postgres: Try PostgreSQL first (:func:`setup_profile`).
 
     Returns:
         ``{'profile': True}``.
@@ -95,6 +97,6 @@ def full_setup(profile_name: str = 'friction2d') -> dict:
     Raises:
         RuntimeError: The profile could not be created.
     """
-    if not setup_profile(profile_name):
+    if not setup_profile(profile_name, use_postgres=use_postgres):
         raise RuntimeError("AiiDA profile setup failed — cannot continue")
     return {'profile': True}
