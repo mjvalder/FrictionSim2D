@@ -197,3 +197,24 @@ def test_recheck_reports_flipped_points_and_is_idempotent(store, tmp_path):
     assert again.exit_code == 0, again.output
     assert "set 'camp': 0 point(s) checked" in again.output
     assert 're-checked ' not in again.output
+
+
+def test_rule_withdraw_pending_drops_a_lost_files_ruling(store, tmp_path):
+    root = tmp_path / 'sim'
+    _imported(root, eject=(30.0,))
+    pid = _pid(root, 30.0)
+    review = tmp_path / 'x.yaml'
+    review.write_text(f'- point: "{pid}"\n  ruling: pass\n  note: fine\n'
+                      f'  override: true\n', encoding='utf-8')
+    assert _run('rule', 'camp', '--rulings', str(review)).exit_code == 0
+    review.unlink()
+    settings = tmp_path / 'settings.yaml'
+    settings.write_text("integrity:\n  version: '1.1.0'\n", encoding='utf-8')
+
+    recheck = _run('recheck', 'camp', '--settings-file', str(settings))
+    assert f'ruling pending: {review.resolve()} missing: {pid}' in recheck.output
+
+    result = _run('rule', 'camp', '--withdraw-pending', str(review))
+    assert result.exit_code == 0, result.output
+    assert f'pending ruling withdrawn: {pid} ({review.resolve()})' in result.output
+    assert 'ruling pending:' not in _run('rule', 'camp').output

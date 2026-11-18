@@ -731,21 +731,91 @@ def test_recheck_follows_a_settings_edit_without_a_version_bump(
     assert report.rechecked == [(_pid(root, 30.0), 'failed_integrity', 'complete')]
 
 
-def test_recheck_warns_that_a_foreign_ruling_needs_reapplying(
-        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+def _foreign_setup(tmp_path):
+    """An ejected 30 N point with a pass override from another file, x.yaml."""
     root = tmp_path / 'sim'
     _tree(root, eject=(30.0,))
     import_root(root, label='camp')
+    pid = _pid(root, 30.0)
     review = tmp_path / 'x.yaml'
-    review.write_text(f'- point: "{_pid(root, 30.0)}"\n  ruling: pass\n'
+    review.write_text(f'- point: "{pid}"\n  ruling: pass\n'
                       f'  note: fine\n  override: true\n', encoding='utf-8')
     assert apply_rulings('camp', review).applied == 1
+    return root, pid, review
 
-    report = recheck_set('camp', settings_file=_settings_file(
-        tmp_path / 'settings.yaml', version='1.1.0', ejected_atoms=3, isolated_atoms=3))
 
-    assert any(str(review.resolve()) in w and '--rulings' in w for w in report.warnings)
+def _bump(tmp_path):
+    return _settings_file(tmp_path / 'settings.yaml', version='1.1.0')
+
+
+def _live_foreign():
+    return [(n['status'], n.creator.inputs.ruling['source'],
+             n.creator.inputs.verdict['thresholds_version']) for n in _ruled_live()]
+
+
+def test_recheck_reapplies_a_foreign_ruling_from_its_source(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root, pid, review = _foreign_setup(tmp_path)
+
+    report = recheck_set('camp', settings_file=_bump(tmp_path))
+
+    assert report.rechecked == [] and sum(report.verdict_counts.values()) == 3
+    assert _live_foreign() == [('complete', str(review.resolve()), '1.1.0')]
+    assert report.rulings.pending == []
+    assert not any('--rulings' in w for w in report.warnings)
+    assert recheck_set('camp', settings_file=_bump(tmp_path)).rulings.applied == 0
+
+
+def test_a_foreign_ruling_whose_file_is_missing_is_pending(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root, pid, review = _foreign_setup(tmp_path)
+    moved = review.with_suffix('.bak')
+    review.rename(moved)
+
+    report = recheck_set('camp', settings_file=_bump(tmp_path))
+
     assert _ruled_live() == []
+    src = str(review.resolve())
+    assert report.rulings.pending == [(pid, src, 'missing')]
+    assert f'ruling pending: {src} missing' in report.render()
+    assert f'--rulings {src}' in report.render()
+    again = import_root(root, label='camp', settings_file=_bump(tmp_path))
+    assert again.rulings.pending == [(pid, src, 'missing')]
+    assert f'ruling pending: {src} missing' in again.render()
+    assert apply_rulings('camp').pending == [(pid, src, 'missing')]   # `aiida rule`
+
+    moved.rename(review)                        # the file is back: re-applied
+    back = import_root(root, label='camp', settings_file=_bump(tmp_path))
+    assert back.rulings.pending == []
+    assert _live_foreign() == [('complete', src, '1.1.0')]
+
+
+def test_a_pending_ruling_ends_when_its_file_withdraws_it(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root, pid, review = _foreign_setup(tmp_path)
+    review.write_text('[]\n', encoding='utf-8')
+
+    report = recheck_set('camp', settings_file=_bump(tmp_path))
+
+    src = str(review.resolve())
+    assert report.rulings.pending == [(pid, src, 'no longer rules the point')]
+    assert apply_rulings('camp', review).pending == [
+        (pid, src, 'no longer rules the point')]     # not withdrawn without --withdraw
+    withdrawn = apply_rulings('camp', review, withdraw=True)
+    assert withdrawn.pending == [] and withdrawn.pending_withdrawn == [(pid, src)]
+    assert apply_rulings('camp').pending == []
+
+
+def test_a_pending_ruling_of_a_lost_file_is_withdrawn_explicitly(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root, pid, review = _foreign_setup(tmp_path)
+    review.unlink()
+    recheck_set('camp', settings_file=_bump(tmp_path))
+
+    report = apply_rulings('camp', withdraw_pending=review)
+
+    assert report.pending == [] and report.pending_withdrawn == [(pid, str(review.resolve()))]
+    assert import_root(root, label='camp', settings_file=_bump(tmp_path)).rulings.pending == []
 
 
 # --- own file wins over any other rulings file -------------------------------

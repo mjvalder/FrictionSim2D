@@ -742,9 +742,15 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
 @click.option('--withdraw', is_flag=True,
               help='Also withdraw every ruling the file no longer makes (always '
                    "done for the set's own file; never otherwise without this).")
+@click.option('--withdraw-pending', 'withdraw_pending',
+              type=click.Path(path_type=Path), default=None,
+              help='Drop every pending ruling of this rulings file (one a re-check '
+                   'superseded and that could not be re-applied, e.g. the file is '
+                   'gone). The file need not exist.')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
-def aiida_rule(label: str, rulings_path: Optional[Path], withdraw: bool,
+def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-many-arguments
+               withdraw: bool, withdraw_pending: Optional[Path],
                profile: Optional[str]):
     """Apply a rulings file to the set LABEL: a pass or fail ruling per
     quarantined point (or, with ``override: true`` and a note, per any point).
@@ -760,7 +766,7 @@ def aiida_rule(label: str, rulings_path: Optional[Path], withdraw: bool,
 
     try:
         report = apply_rulings(label, rulings_path, withdraw=True if withdraw else None,
-                               profile=profile)
+                               withdraw_pending=withdraw_pending, profile=profile)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Rulings failed")
         _raise_abort(f"❌ Rulings for set {label!r} failed: {exc}", exc)

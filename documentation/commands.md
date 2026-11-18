@@ -287,7 +287,7 @@ Apply a rulings file to a set: a `pass`/`fail` ruling per quarantined point,
 or — with `override: true` and a note — per any point:
 
 ```bash
-FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--profile TEXT]
+FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--withdraw-pending PATH] [--profile TEXT]
 ```
 
 - `--rulings PATH` — the file, or its directory (default:
@@ -296,14 +296,18 @@ FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--profile TEXT]
 - `--withdraw` — also withdraw the rulings this file made that it no longer
   makes. The set's own file always withdraws its own; another file does only
   with this flag. Each file withdraws only the rulings applied from it
-  (matched by resolved path), never another file's.
+  (matched by resolved path), never another file's. It also withdraws that
+  file's pending rulings (below) for points it no longer names.
+- `--withdraw-pending PATH` — drop every pending ruling of that file. The
+  file need not exist; use it when the file is gone for good.
 
 Idempotent. Prints
 `rulings for set '<label>' (<path>): applied N, skipped N, withdrawn N`, then
 every live override of the set (`override <point>: <original> -> <new> (<note>)`),
 `withdrawn: <point>`, `unmatched: <point>` (no point of the set) and
-`not quarantined: <point>` (needs `override: true` and a note) lines, and
-warnings.
+`not quarantined: <point>` (needs `override: true` and a note),
+`conflict <point>: ...` and `ruling pending: <file> <reason>: <point>; ...`
+lines, and warnings.
 
 ### aiida recheck
 
@@ -321,8 +325,9 @@ FrictionSim2D aiida recheck LABEL [--settings-file PATH] [--profile TEXT]
 - The old verdict is superseded with its ruled and withdrawn verdicts, as when
   a later import changes a point's context. Then the set's own rulings file is
   applied again, so its rulings land on the new verdicts. A ruling applied from
-  another file is not re-applied; the report warns with the
-  `aiida rule LABEL --rulings <file>` to run.
+  another file is re-applied from that file too; if the file is missing or no
+  longer rules the point, the ruling is kept as pending and listed by every
+  later import, `aiida rule` and `aiida recheck` (see aiida.md §5.3).
 - Prints `set '<label>': N point(s) checked under integrity thresholds v<version>`,
   the new verdict counts, `re-checked <point>: <old> -> <new>` for every point
   whose status changed, failures, warnings and the rulings report.

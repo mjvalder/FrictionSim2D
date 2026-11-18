@@ -390,8 +390,8 @@ FrictionSim2D aiida recheck 260421-afm --settings-file ./settings.yaml
   change, and the set's own rulings file is applied again to the new verdicts.
 - It lists `re-checked <point>: <old> -> <new>` for every status that changed.
   A second run checks nothing.
-- A ruling applied from another file (`--rulings`) is not re-applied: the
-  report warns and names the `aiida rule LABEL --rulings <file>` to run.
+- A ruling applied from another file (`--rulings`) is re-applied from that
+  file as well, or kept as pending when it cannot be (§5.3).
 
 A verdict holds `status`, `failed`, `observed`, `reasons`, `quarantine`,
 `not_applicable`, `measures`, `thresholds_version`, `code_version` and
@@ -503,6 +503,23 @@ needs `override: true` **and** a non-empty `note`:
   moves a ruled point out of quarantine, its ruling (without `override: true`)
   no longer applies, and the report warns that it now needs `override: true`
   and a note.
+- **Re-checks keep rulings from other files.** A ruling applied from another
+  file is re-applied from its recorded `source` once the re-check has made
+  the new verdict (the own-file pass that follows every import, `aiida rule`
+  and `aiida recheck` does it). The own file still wins (see above).
+  - If that file is missing, no longer rules the point, or its ruling no
+    longer applies, the ruling is **pending**: it is stored on the set Group
+    (extra `friction2d_pending_rulings`) and every later import, `aiida rule`
+    and `aiida recheck` report lists it:
+    `ruling pending: <file> missing: <point>; restore it with 'FrictionSim2D aiida rule LABEL --rulings <file>', or drop it with '--withdraw-pending <file>'`
+    (the reason is `missing`, `no longer rules the point` or `does not apply`).
+  - Every own-file pass retries it, so a file that comes back (a remounted
+    drive) restores the ruling by itself.
+  - Pending ends when the ruling is re-applied, when
+    `aiida rule LABEL --rulings <file> --withdraw` runs with the point gone
+    from that file, or with `aiida rule LABEL --withdraw-pending <file>` (the
+    file need not exist). The report then prints
+    `pending ruling withdrawn: <point> (<file>)`.
 
 ### 5.4 Which verdict counts: the policy
 

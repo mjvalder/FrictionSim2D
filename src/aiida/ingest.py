@@ -331,6 +331,7 @@ class ImportReport:
             lines += [f'  ruling on a point not quarantined (needs override: true '
                       f'and a note): {pid}' for pid in self.rulings.not_quarantined]
             lines += [f'  ruling conflict {line}' for line in self.rulings.conflict_lines()]
+            lines += [f'  {line}' for line in self.rulings.pending_lines()]
         lines += [f'  override {pid}: {old} -> {new} ({note})'
                   for pid, old, new, note in self.overrides]
         lines += [f'  already imported elsewhere: {d}' for d in self.already_imported]
