@@ -57,7 +57,12 @@ def test_full_setup_sets_up_the_profile_only(monkeypatch):
 
 @pytest.mark.parametrize('module', ['src.aiida.submit', 'src.aiida.data.simulation',
                                     'src.aiida.data.simulation_set',
-                                    'src.aiida.data.results'])
+                                    'src.aiida.data.results',
+                                    # merged into profile, layout, rulings, query + steps
+                                    'src.aiida.setup', 'src.aiida.preflight',
+                                    'src.aiida.data_keys', 'src.aiida.decks',
+                                    'src.aiida.retention', 'src.aiida.policy',
+                                    'src.aiida.ledger', 'src.aiida.integration'])
 def test_submission_and_custom_node_modules_are_gone(module):
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(module)
@@ -96,14 +101,16 @@ KEPT = ['list_simulation_sets', 'delete_simulation_set', 'clear_all_nodes']
 
 @pytest.mark.parametrize('name', GONE)
 def test_superseded_function_is_gone(name):
-    import src.aiida.integration as integ
-    assert not hasattr(integ, name), name
+    import src.aiida.query as query_mod
+    import src.aiida.steps as steps_mod
+    assert not hasattr(query_mod, name), name
+    assert not hasattr(steps_mod, name), name
 
 
 @pytest.mark.parametrize('name', KEPT)
 def test_surviving_function_is_kept(name):
-    import src.aiida.integration as integ
-    assert callable(getattr(integ, name))
+    import src.aiida as aiida_pkg
+    assert callable(getattr(aiida_pkg, name))
 
 
 def test_lazy_exports_point_at_the_new_modules():

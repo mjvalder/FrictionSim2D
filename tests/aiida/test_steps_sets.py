@@ -1,4 +1,6 @@
-"""list-sets / delete / clear over the CalcJob graph (`src/aiida/integration.py`)."""
+"""list-sets / delete / clear over the CalcJob graph (`list_simulation_sets` in
+`src/aiida/query.py`; `delete_simulation_set`, `clear_all_nodes` in
+`src/aiida/steps.py`)."""
 import pytest
 
 pytest.importorskip('aiida')
@@ -7,9 +9,8 @@ pytestmark = pytest.mark.aiida
 from aiida import orm  # noqa: E402
 
 from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.integration import (  # noqa: E402
-    clear_all_nodes, delete_simulation_set, list_simulation_sets,
-)
+from src.aiida.query import list_simulation_sets  # noqa: E402
+from src.aiida.steps import clear_all_nodes, delete_simulation_set  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
 from tests.aiida.test_import import _calcjobs, _tree  # noqa: E402
 from tests.helpers.synthetic_results import write_results  # noqa: E402

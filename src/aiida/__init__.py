@@ -25,9 +25,9 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'rebuild_set': (f'{__name__}.export', 'rebuild_set'),
     'export_archive': (f'{__name__}.export', 'export_archive'),
     'import_archive': (f'{__name__}.export', 'import_archive'),
-    'list_simulation_sets': (f'{__name__}.integration', 'list_simulation_sets'),
-    'delete_simulation_set': (f'{__name__}.integration', 'delete_simulation_set'),
-    'clear_all_nodes': (f'{__name__}.integration', 'clear_all_nodes'),
+    'list_simulation_sets': (f'{__name__}.query', 'list_simulation_sets'),
+    'delete_simulation_set': (f'{__name__}.steps', 'delete_simulation_set'),
+    'clear_all_nodes': (f'{__name__}.steps', 'clear_all_nodes'),
     'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),
     'full_setup': (f'{__name__}.profile', 'full_setup'),
 }

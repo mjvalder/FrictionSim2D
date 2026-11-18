@@ -21,10 +21,10 @@ from aiida import orm  # noqa: E402
 import src.aiida.steps as steps  # noqa: E402
 from src.aiida.block_schema import SUMMARY_UNITS  # noqa: E402
 from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.integration import clear_all_nodes, delete_simulation_set  # noqa: E402
 from src.aiida.rulings import Policy  # noqa: E402
 from src.aiida.steps import (DATASET_PREFIX, apply_rulings, build_dataset,  # noqa: E402
-                             delete_dataset, is_provisional, latest_verdict,
+                             clear_all_nodes, delete_dataset, delete_simulation_set,
+                             is_provisional, latest_verdict,
                              merge_units, normalise_options, options_hash,
                              postprocess_group, summary_options)
 from src.postprocessing.read_data import DataReader  # noqa: E402

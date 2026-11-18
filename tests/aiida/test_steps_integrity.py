@@ -16,8 +16,8 @@ from aiida import orm  # noqa: E402
 from aiida.common.links import LinkType  # noqa: E402
 
 from src.aiida.ingest import import_root  # noqa: E402
-from src.aiida.integration import clear_all_nodes, delete_simulation_set  # noqa: E402
-from src.aiida.steps import apply_rulings, recheck_set  # noqa: E402
+from src.aiida.steps import (apply_rulings, clear_all_nodes,  # noqa: E402
+                             delete_simulation_set, recheck_set)
 from src.postprocessing.integrity_rulings import RULINGS_FILE, point_id  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402

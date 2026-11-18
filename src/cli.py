@@ -924,7 +924,7 @@ def aiida_list_sets(profile: Optional[str], output_format: str):
         FrictionSim2D aiida list-sets
         FrictionSim2D aiida list-sets --format json
     """
-    from .aiida.integration import list_simulation_sets  # noqa: PLC0415
+    from .aiida.query import list_simulation_sets  # noqa: PLC0415
 
     try:
         rows = list_simulation_sets(profile=profile)
@@ -1053,7 +1053,7 @@ def aiida_delete(set_label: str, profile: Optional[str]):
     Example:
         FrictionSim2D aiida delete 260312-force_rebomos
     """
-    from .aiida.integration import delete_simulation_set  # noqa: PLC0415
+    from .aiida.steps import delete_simulation_set  # noqa: PLC0415
 
     click.echo(f"🗑️  Deleting simulation set '{set_label}'…")
     try:
@@ -1080,7 +1080,7 @@ def aiida_clear(profile: Optional[str]):
     Example:
         FrictionSim2D aiida clear
     """
-    from .aiida.integration import clear_all_nodes  # noqa: PLC0415
+    from .aiida.steps import clear_all_nodes  # noqa: PLC0415
 
     click.echo("🗑️  Deleting all FrictionSim2D nodes…")
     try:

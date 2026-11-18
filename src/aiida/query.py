@@ -19,6 +19,7 @@ projections and reduced in pandas (critique I8), never node by node:
 * :func:`latest` -- the verdict or summary the policy selects for a point.
 * :func:`dataset_rows` -- a dataset's rows joined with their points and the
   summaries it fixed, for the plot source ``aiida://dataset/<name>``.
+* :func:`list_simulation_sets` -- one row per set (``aiida list-sets``).
 
 Superseded nodes (extra ``superseded=True``, on the point or its CalcJob)
 are left out everywhere unless asked for.
@@ -50,8 +51,8 @@ except ImportError:  # pragma: no cover - the aiida tier skips without it
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['AXES', 'Friction2DDB', 'QueryResult', 'dataset_rows', 'latest', 'point_table',
-           'related']
+__all__ = ['AXES', 'Friction2DDB', 'QueryResult', 'dataset_rows', 'latest',
+           'list_simulation_sets', 'point_table', 'related']
 
 #: The swept axes: point attributes, never block content (``SWEPT``).
 AXES = ('load', 'angle', 'speed')
@@ -978,3 +979,12 @@ class Friction2DDB:
     def get_available_materials(self) -> List[str]:
         """Every material named by a live point's run, sorted."""
         return sorted({m for row in self._live().rows for m in (row.get('materials') or ())})
+
+
+def list_simulation_sets(profile: Optional[str] = None) -> List[Dict[str, Any]]:
+    """:meth:`Friction2DDB.list_sets` on ``profile`` (loaded first; None: the
+    configured one) -- one row per set, for ``aiida list-sets``."""
+    _require_aiida()
+    from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
+    load_aiida_profile(profile)
+    return Friction2DDB().list_sets()
