@@ -315,11 +315,6 @@ class QueryResult:
     total_count: int
     query_params: Dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def point_uuids(self) -> List[str]:
-        """The ``point_uuid`` of every returned row, in order."""
-        return [row.get('point_uuid') for row in self.rows]
-
     def to_dataframe(self):
         """The rows as a ``pandas.DataFrame``."""
         import pandas as pd  # pylint: disable=import-outside-toplevel
@@ -813,8 +808,8 @@ class Friction2DDB:
 
     @contextmanager
     def snapshot(self):
-        """Within it, :meth:`query`, :meth:`get_available_conditions`,
-        :meth:`get_available_materials` and :meth:`get_statistics` share one
+        """Within it, :meth:`query`, :meth:`get_available_conditions` and
+        :meth:`get_available_materials` share one
         projection of the live points (one refresh of the GUI list costs one)."""
         self._snapshot = _points()
         try:
@@ -983,34 +978,3 @@ class Friction2DDB:
     def get_available_materials(self) -> List[str]:
         """Every material named by a live point's run, sorted."""
         return sorted({m for row in self._live().rows for m in (row.get('materials') or ())})
-
-    def get_statistics(self, policy: Policy = Policy()) -> Dict[str, Any]:
-        """Counts: ``n_groups`` (sets), ``n_decks`` (live CalcJobs),
-        ``n_runs``, ``n_points`` (live points), ``by_verdict`` (the status of
-        the verdict ``policy`` selects; ``'unchecked'`` without one),
-        ``by_family``, ``by_model``, ``by_material``, ``n_materials``."""
-        from .steps import latest_verdicts  # pylint: disable=import-outside-toplevel
-        found = self._live()
-        nodes = [found.nodes[r['node_uuid']] for r in found.rows]
-        verdicts: Dict[int, Any] = {}
-        for batch in _chunks(nodes):
-            verdicts.update(latest_verdicts(batch, policy))
-        qb = orm.QueryBuilder().append(
-            orm.CalcJobNode, filters={'process_type': _process_type()},
-            project=['extras.superseded'])
-        stats: Dict[str, Any] = {
-            'n_groups': len(_set_groups()),
-            'n_decks': sum(1 for (dead,) in qb.all() if not _dead(dead)),
-            'n_runs': len({r['run_uuid'] for r in found.rows}),
-            'n_points': len(found.rows),
-            'by_verdict': {}, 'by_family': {}, 'by_model': {}, 'by_material': {}}
-        for row, node in zip(found.rows, nodes):
-            verdict = verdicts.get(node.pk)
-            status = verdict.get('status') if verdict is not None else 'unchecked'
-            for key, value in (('by_verdict', status), ('by_family', row.get('family')),
-                               ('by_model', row.get('model'))):
-                stats[key][value] = stats[key].get(value, 0) + 1
-            for material in row.get('materials') or ():
-                stats['by_material'][material] = stats['by_material'].get(material, 0) + 1
-        stats['n_materials'] = len(stats['by_material'])
-        return stats

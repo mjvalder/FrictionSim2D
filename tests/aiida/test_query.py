@@ -273,7 +273,7 @@ def test_tokens_extra_is_set_and_reindexed(campaigns):
     assert calc.base.extras.get(TOKENS_EXTRA) == tokens
 
 
-def test_available_conditions_materials_sets_and_statistics(campaigns):
+def test_available_conditions_materials_and_sets(campaigns):
     db = Friction2DDB()
     conditions = db.get_available_conditions()
     assert conditions['forces'] == [10.0, 20.0, 30.0, 40.0]
@@ -284,9 +284,6 @@ def test_available_conditions_materials_sets_and_statistics(campaigns):
     sets = {s['label']: s for s in db.list_sets()}
     assert sets['A']['n_runs'] == 1 and sets['A']['n_points'] == 3
     assert sets['B']['n_decks'] == 2
-    stats = db.get_statistics()
-    assert (stats['n_groups'], stats['n_decks'], stats['n_points']) == (2, 6, 7)
-    assert stats['by_verdict'] == {'unchecked': 7}
 
 
 def test_latest_reads_policy_selection(aiida_profile_clean, no_profile_switch, tmp_path):

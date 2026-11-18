@@ -2,7 +2,7 @@
 rulings file updates it. Plain dicts only -- no AiiDA needed."""
 from datetime import datetime, timezone
 
-from src.aiida.ledger import (Clock, conflicts, desired_ruling, drop_source,
+from src.aiida.ledger import (Clock, conflicts, drop_source,
                               read_source, ruling_order, stamp, why_in_force)
 from src.postprocessing.integrity_rulings import Ruling
 
@@ -15,39 +15,32 @@ def _entry(ruling, seen_at, status='present', note='n'):
             'seen_at': seen_at, 'status': status}
 
 
-# --- desired_ruling ------------------------------------------------------------
+# --- ruling_order: which source is strongest ------------------------------------
 
 def test_the_own_file_wins_whenever_it_rules():
     entries = {O1: _entry('pass', '2026-11-18T10'), OWN: _entry('fail', '2026-01-01T00')}
-    assert desired_ruling(entries, OWN) == OWN
+    assert ruling_order(entries, OWN)[0] == OWN
 
 
 def test_otherwise_the_most_recently_seen_wins():
     entries = {O1: _entry('pass', '2026-11-18T10'), O2: _entry('fail', '2026-11-18T11')}
-    assert desired_ruling(entries, OWN) == O2
     assert ruling_order(entries, OWN) == [O2, O1]
 
 
 def test_a_missing_source_still_counts():
     entries = {O1: _entry('pass', '2026-11-18T12', status='missing'),
                O2: _entry('fail', '2026-11-18T11')}
-    assert desired_ruling(entries, OWN) == O1
-
-
-def test_a_ruling_that_does_not_apply_gives_way():
-    entries = {OWN: _entry('pass', 'a'), O1: _entry('pass', 'b')}
-    assert desired_ruling(entries, OWN, applies=lambda s, e: s != OWN) == O1
-    assert desired_ruling(entries, OWN, applies=lambda s, e: False) is None
+    assert ruling_order(entries, OWN)[0] == O1
 
 
 def test_no_entries_no_ruling():
-    assert desired_ruling({}, OWN) is None
+    assert ruling_order({}, OWN) == []
 
 
 def test_a_tie_is_broken_by_source_path():
     entries = {O1: _entry('pass', 'same'), O2: _entry('fail', 'same')}
-    assert desired_ruling(entries, None) == desired_ruling(dict(reversed(entries.items())),
-                                                           None)
+    assert ruling_order(entries, None) == ruling_order(dict(reversed(entries.items())),
+                                                       None)
 
 
 # --- conflicts -----------------------------------------------------------------

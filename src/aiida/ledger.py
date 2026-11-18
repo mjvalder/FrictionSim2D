@@ -17,14 +17,15 @@ survives a re-import that supersedes the point's deck. An entry is::
 
 * :func:`read_source` -- a source's rulings file replaces that source's
   entries; a missing file marks them ``missing`` and keeps them.
-* :func:`desired_ruling` -- the source whose entry should be in force: the
-  set's own file, else the most recently seen other source.
+* :func:`ruling_order` -- the sources of one point, strongest first: the
+  set's own file, else the most recently seen other source. The entry in
+  force is the first of them that applies (``steps._reconcile``).
 * :func:`conflicts` -- the sources of one point that disagree.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 #: The fields of an entry that are the ruling itself.
 CONTENT = ('ruling', 'note', 'date', 'override')
@@ -134,24 +135,13 @@ def ruling_order(entries: Mapping[str, Mapping[str, Any]],
     return ([own_source] if own_source in entries else []) + others
 
 
-def desired_ruling(entries: Mapping[str, Mapping[str, Any]], own_source: Optional[str],
-                   applies: Optional[Callable[[str, Mapping[str, Any]], bool]] = None
-                   ) -> Optional[str]:
-    """The source whose entry should be in force for one point: the first of
-    :func:`ruling_order` that ``applies`` (default: every one), or None."""
-    for source in ruling_order(entries, own_source):
-        if applies is None or applies(source, entries[source]):
-            return source
-    return None
-
-
 def conflicts(entries: Mapping[str, Mapping[str, Any]], own_source: Optional[str],
               in_force: Optional[str]
               ) -> Optional[Tuple[Optional[Tuple[str, str]], str, List[Tuple[str, str]]]]:
     """None when the sources of one point agree (one decision, ``pass`` or
     ``fail``); else ``((source, ruling) in force or None, why, [(source,
     ruling) of every source that disagrees with it])``. ``in_force`` is
-    :func:`desired_ruling`'s choice."""
+    the first source of :func:`ruling_order` that applies, or None."""
     if len({e['ruling'] for e in entries.values()}) < 2:
         return None
     order = ruling_order(entries, own_source)
@@ -166,7 +156,8 @@ def conflicts(entries: Mapping[str, Mapping[str, Any]], own_source: Optional[str
 
 def why_in_force(entries: Mapping[str, Mapping[str, Any]], own_source: Optional[str],
                  in_force: Optional[str]) -> str:
-    """Why ``in_force`` (:func:`desired_ruling`'s choice, or None) is the
+    """Why ``in_force`` (the first applying source of :func:`ruling_order`,
+    or None) is the
     ruling in force among one point's ``entries``."""
     if not entries:
         return 'no file rules it'

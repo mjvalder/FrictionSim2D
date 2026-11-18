@@ -1094,7 +1094,8 @@ def _record_refusals(report: RulingReport, pid: str, refusals: Dict[str, Optiona
 def _reconcile(group: orm.Group, ledger, previous, report: RulingReport,
                own: Optional[str]) -> None:
     """Make every live verdict's ruling in force the one the ledger calls
-    for (:func:`.ledger.desired_ruling`): apply it, replace another, or
+    for (the first source of :func:`.ledger.ruling_order` that applies):
+    apply it, replace another, or
     withdraw one no source makes any more; mark it ``in_force`` in the
     ledger; then fill the report's changes, conflicts, pending and
     overrides. ``previous`` is ``point id -> (source, ruling)`` in force
