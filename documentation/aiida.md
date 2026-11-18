@@ -437,6 +437,24 @@ needs `override: true` **and** a non-empty `note`:
     `--rulings` path that does not exist is refused by the CLI before anything
     is read (`Path '<path>' does not exist`).
   - A file with unreadable entries withdraws nothing either.
+- **The set's own file always wins.** A ruling from another file applies only
+  to points the own `integrity_rulings.yaml` does not rule. When both rule the
+  same point, the own file's ruling stays in force:
+  - `aiida rule LABEL --rulings OTHER` does not apply OTHER's ruling to a
+    point with an own-file ruling in force. It never flips that ruling.
+  - If OTHER ruled the point first, the next import (or `aiida rule LABEL`)
+    applies the own file's ruling over it.
+  - Either way the conflict is stored on the set Group (extra
+    `friction2d_ruling_conflicts`; its `source` is basenamed in an anonymised
+    archive) and listed by **every** later import and `aiida rule` report:
+    `conflict <point>: the own integrity_rulings.yaml rules <own> (in force); <other file> rules <other> (not applied)`
+    (`ruling conflict ...` in the import report).
+  - The conflict ends when OTHER no longer rules the point and is applied
+    again (`aiida rule LABEL --rulings OTHER`).
+  - If the own file drops its ruling, OTHER's ruling is **not** applied
+    behind your back. Each report warns
+    `ruling not in force: <point>: ...; run 'FrictionSim2D aiida rule LABEL --rulings <other>' to apply it`
+    until you do.
 - **Re-checks re-apply rulings.** When a later import re-checks a point, the
   old ruled verdict is superseded with the old checker verdict, and the rulings
   pass that follows applies the file's ruling to the new verdict. If a re-check

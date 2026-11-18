@@ -532,6 +532,30 @@ def test_a_ruling_source_is_basenamed_in_the_archive(aiida_profile_clean,
     assert func.inputs.ruling['own_file'] is False
 
 
+
+def test_a_ruling_conflict_source_is_basenamed_in_the_archive(aiida_profile_clean,
+                                                             no_profile_switch, tmp_path):
+    root = tmp_path / 'sim'
+    run_dir = _hpc_tree(root, eject=(10.0,))
+    pid = format_point_id(run_dir.relative_to(root).as_posix(), 'force', 10.0, 0.0, 2.0)
+    entry = {'point': pid, 'note': 'viewer artefact', 'override': True}
+    (root / 'integrity_rulings.yaml').write_text(
+        yaml.safe_dump([{**entry, 'ruling': 'fail'}]), encoding='utf-8')
+    review = tmp_path / 'reviews' / 'x.yaml'
+    review.parent.mkdir()
+    review.write_text(yaml.safe_dump([{**entry, 'ruling': 'pass'}]), encoding='utf-8')
+    assert import_root(root, label='camp', machine='mycluster').ok()
+    from src.aiida.steps import CONFLICTS_EXTRA, apply_rulings
+    assert apply_rulings('camp', review).conflicts
+
+    path = export_archive('camp', tmp_path / 'camp.aiida')
+
+    _assert_scrubbed(_archive_text(path), tmp_path)
+    aiida_profile_clean.reset_storage()
+    import_archive(path)
+    group = orm.load_group('friction2d/camp')
+    assert [e['source'] for e in group.base.extras.get(CONFLICTS_EXTRA)] == ['x.yaml']
+
 def test_a_failed_rewrite_leaves_no_archive(aiida_profile_clean, no_profile_switch,
                                             tmp_path, monkeypatch):
     root = tmp_path / 'sim'

@@ -746,3 +746,102 @@ def test_recheck_warns_that_a_foreign_ruling_needs_reapplying(
 
     assert any(str(review.resolve()) in w and '--rulings' in w for w in report.warnings)
     assert _ruled_live() == []
+
+
+# --- own file wins over any other rulings file -------------------------------
+
+def _review(root, pid, ruling, note='expert pass'):
+    review = root / 'reviews' / 'x.yaml'
+    review.parent.mkdir(exist_ok=True)
+    review.write_text(f'- point: "{pid}"\n  ruling: {ruling}\n  note: {note}\n',
+                      encoding='utf-8')
+    return review
+
+
+def _live_rulings():
+    return [(n['status'], n.creator.inputs.ruling['own_file']) for n in _ruled_live()]
+
+
+def test_another_file_cannot_overrule_the_own_file(aiida_profile_clean, no_profile_switch,
+                                                   tmp_path):
+    """The own file rules first; another file's ruling on the same point is not
+    applied, and the conflict is listed by `aiida rule` and every import."""
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'fail', note='own says fail')
+    assert apply_rulings('camp').applied == 1
+    review = _review(tmp_path, pid, 'pass')
+
+    other = apply_rulings('camp', review)
+
+    assert other.applied == 0
+    assert _live_rulings() == [('failed_integrity', True)]
+    conflict = (pid, 'fail', str(review.resolve()), 'pass')
+    assert other.conflicts == [conflict]
+    assert f'conflict {pid}' in other.render()
+    for _ in range(2):                                   # every import, not once
+        again = import_root(tmp_path, label='camp')
+        assert again.rulings.applied == 0
+        assert again.rulings.conflicts == [conflict]
+        assert f'ruling conflict {pid}' in again.render()
+        assert _live_rulings() == [('failed_integrity', True)]
+    assert apply_rulings('camp').conflicts == [conflict]    # `aiida rule`
+
+
+def test_the_own_file_takes_a_point_another_file_ruled_first(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    review = _review(tmp_path, pid, 'pass')
+    assert apply_rulings('camp', review).applied == 1    # the own file rules nothing yet
+    assert _live_rulings() == [('complete', False)]
+
+    _write_ruling(tmp_path, pid, 'fail', note='own says fail')
+    again = import_root(tmp_path, label='camp')
+
+    assert _live_rulings() == [('failed_integrity', True)]
+    conflict = (pid, 'fail', str(review.resolve()), 'pass')
+    assert again.rulings.conflicts == [conflict]
+    assert import_root(tmp_path, label='camp').rulings.conflicts == [conflict]
+    assert apply_rulings('camp', review).conflicts == [conflict]
+    assert _live_rulings() == [('failed_integrity', True)]
+
+
+def test_a_conflict_ends_with_the_other_files_ruling(aiida_profile_clean,
+                                                     no_profile_switch, tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'fail', note='own says fail')
+    assert apply_rulings('camp').applied == 1
+    review = _review(tmp_path, pid, 'pass')
+    assert apply_rulings('camp', review).conflicts
+    review.write_text('[]\n', encoding='utf-8')
+
+    assert apply_rulings('camp', review).conflicts == []
+    assert import_root(tmp_path, label='camp').rulings.conflicts == []
+
+
+def test_a_conflict_whose_own_ruling_is_gone_warns(aiida_profile_clean, no_profile_switch,
+                                                   tmp_path):
+    """The other file's ruling is not applied behind the user's back."""
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'fail', note='own says fail')
+    assert apply_rulings('camp').applied == 1
+    review = _review(tmp_path, pid, 'pass')
+    apply_rulings('camp', review)
+    (tmp_path / RULINGS_FILE).write_text('[]\n', encoding='utf-8')
+
+    again = import_root(tmp_path, label='camp')
+
+    assert again.rulings.withdrawn == [pid]
+    assert again.rulings.conflicts == []
+    assert _ruled_live() == []
+    assert any(str(review.resolve()) in w and '--rulings' in w for w in again.warnings)
+    assert apply_rulings('camp', review).applied == 1
+    assert _live_rulings() == [('complete', False)]
+    assert not any('--rulings' in w for w in import_root(tmp_path, label='camp').warnings)

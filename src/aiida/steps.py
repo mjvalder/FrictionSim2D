@@ -66,6 +66,10 @@ POINT_UUID_EXTRA = 'friction2d_point_uuid'
 RULING_KEY_EXTRA = 'friction2d_ruling_key'
 #: The uuid of the checker verdict a ruled or withdrawn verdict stands for.
 VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
+#: On a set Group: ``[{point, source, ruling, note}]``, the rulings of other
+#: files that name a point the set's own rulings file rules. They are not in
+#: force (the own file wins) and every rulings pass lists them.
+CONFLICTS_EXTRA = 'friction2d_ruling_conflicts'
 #: True on a verdict checked while its stage-2 status was unknown (a
 #: ``_stage2`` failure in its run or (family, size) group): re-checked next time.
 PROVISIONAL_EXTRA = 'friction2d_provisional'
@@ -717,6 +721,9 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
     ruled verdict was withdrawn because no applicable ruling names them any
     more. ``overrides`` are ``(point id, original status, new status, note)``
     of every live overridden verdict of the set, read from the store.
+    ``conflicts`` are ``(point id, own ruling, other file, its ruling)``:
+    another file rules a point the set's own file rules, and the own
+    file's ruling is in force.
     """
     label: str
     rulings_path: str = ''
@@ -726,6 +733,7 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
     not_quarantined: List[str] = field(default_factory=list)
     withdrawn: List[str] = field(default_factory=list)
     overrides: List[Tuple[str, str, str, str]] = field(default_factory=list)
+    conflicts: List[Tuple[str, str, str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def render(self) -> str:
@@ -738,8 +746,15 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
         lines += [f'  withdrawn: {pid}' for pid in self.withdrawn]
         lines += [f'  unmatched: {pid}' for pid in self.unmatched]
         lines += [f'  not quarantined: {pid}' for pid in self.not_quarantined]
+        lines += [f'  conflict {line}' for line in self.conflict_lines()]
         lines += [f'  WARNING {w}' for w in self.warnings]
         return '\n'.join(lines)
+
+    def conflict_lines(self) -> List[str]:
+        """Each of ``conflicts`` as text."""
+        return [f'{pid}: the own integrity_rulings.yaml rules {own} (in force); '
+                f'{source} rules {other} (not applied)'
+                for pid, own, source, other in self.conflicts]
 
 
 def _canonical(content: Dict[str, Any]) -> str:
@@ -891,6 +906,69 @@ def _unreadable(rulings) -> bool:
     return any(key == '<file>' or key.startswith('<malformed') for key in rulings)
 
 
+def _own_rulings(by_id: Dict[str, List[orm.Dict]],
+                 live: Dict[str, List[orm.Dict]]) -> Dict[str, str]:
+    """point id -> the ruling (``pass``/``fail``) of its in-force own-file
+    ruled verdict, from ``live`` (:func:`_ruled_by_verdict`)."""
+    out: Dict[str, str] = {}
+    for pid, pid_verdicts in by_id.items():
+        for verdict in pid_verdicts:
+            for node in live.get(verdict.uuid, []):
+                content = node.creator.inputs.ruling.get_dict()
+                if content.get('own_file', True):
+                    out[pid] = content['ruling']
+    return out
+
+
+def _overruled(by_id: Dict[str, List[orm.Dict]], before: Dict[str, List[orm.Dict]],
+               ruled: set) -> List[Dict[str, str]]:
+    """The conflicts an own-file pass made: rulings of other files that were
+    in force (``before`` the pass) on a verdict the own file now rules
+    (applying it superseded them: a verdict has one live ruled successor)."""
+    found = []
+    for pid, pid_verdicts in sorted(by_id.items()):
+        for verdict in pid_verdicts:
+            if verdict.uuid not in ruled:
+                continue
+            for node in before.get(verdict.uuid, []):
+                content = node.creator.inputs.ruling.get_dict()
+                if not content.get('own_file', True):
+                    found.append({'point': pid, 'source': content.get('source', ''),
+                                  'ruling': content['ruling'],
+                                  'note': content.get('note', '')})
+    return found
+
+
+def _record_conflicts(group: orm.Group, source: Tuple[str, bool],
+                      found: List[Dict[str, str]]) -> None:
+    """Store ``found`` in the Group's :data:`CONFLICTS_EXTRA`. A pass of
+    another file replaces that file's entries (what it rules now); the own
+    file's pass adds the rulings it just overruled."""
+    stored = list(group.base.extras.get(CONFLICTS_EXTRA, []))
+    if not source[1]:
+        stored = [e for e in stored if e.get('source') != source[0]]
+    keys = {(e['point'], e['source']) for e in found}
+    stored = [e for e in stored if (e.get('point'), e.get('source')) not in keys] + found
+    if stored != group.base.extras.get(CONFLICTS_EXTRA, []):
+        group.base.extras.set(CONFLICTS_EXTRA, stored)
+
+
+def _report_conflicts(group: orm.Group, report: RulingReport,
+                      own_ruled: Dict[str, str]) -> None:
+    """List every stored conflict whose point the own file still rules; warn
+    for one whose own ruling is gone: the other file's ruling is not in force
+    until that file is applied again."""
+    for entry in group.base.extras.get(CONFLICTS_EXTRA, []):
+        pid, src, other = entry['point'], entry['source'], entry['ruling']
+        if pid in own_ruled:
+            report.conflicts.append((pid, own_ruled[pid], src, other))
+        else:
+            report.warnings.append(
+                f'ruling not in force: {pid}: the own integrity_rulings.yaml no '
+                f'longer rules it, and {src} rules {other}; run `FrictionSim2D aiida '
+                f'rule {report.label} --rulings {src}` to apply it')
+
+
 def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
                withdraw: Optional[bool] = None) -> RulingReport:
     """:func:`apply_rulings` on a loaded set Group."""
@@ -915,15 +993,24 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     by_id: Dict[str, List[orm.Dict]] = {}
     for point in points:
         by_id.setdefault(_pid(point), []).extend(verdicts[point.pk])
+    own = source[1]
+    before = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
+    own_ruled = {} if own else _own_rulings(by_id, before)
+    found: List[Dict[str, str]] = []
     ruled: set = set()
     for pid, ruling in rulings.items():
         if ruling.error:
             report.warnings.append(f'integrity ruling ignored: {ruling.error}')
         elif not by_id.get(pid):
             report.unmatched.append(pid)
+        elif pid in own_ruled:
+            # The own file wins: another file never flips its ruling.
+            found.append({'point': pid, 'source': source[0],
+                          'ruling': ruling.ruling, 'note': ruling.note})
         else:
             ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v, source)}
-    own = source[1]
+    if own:
+        found = _overruled(by_id, before, ruled)
     if own:
         # The own file lives in source_root, whichever form named it.
         rulings_dir = Path(group.base.extras.get('source_root'))
@@ -953,6 +1040,9 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
         (pid, node['original_status'], node['status'], node.get('note', ''))
         for pid, pid_verdicts in sorted(by_id.items()) for verdict in pid_verdicts
         for node in live.get(verdict.uuid, []) if node.get('overridden')]
+    if own or not _unreadable(rulings):
+        _record_conflicts(group, source, found)
+    _report_conflicts(group, report, _own_rulings(by_id, live))
     return report
 
 
@@ -983,6 +1073,13 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
     withdraws nothing unless ``withdraw=True``; a file with unreadable
     entries never does. A ruling Dict without ``own_file`` (made before it
     was recorded) counts as the own file's.
+
+    The own file always wins. Another file's ruling is not applied to a
+    point with an own-file ruling in force, and an own-file pass applies its
+    ruling over another file's. Each such conflict is stored on the Group
+    (:data:`CONFLICTS_EXTRA`) and listed in ``conflicts`` by every later
+    pass, until that file no longer rules the point; one whose own ruling is
+    gone is a warning (the other file's ruling is not applied unasked).
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
