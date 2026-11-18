@@ -495,10 +495,11 @@ needs `override: true` **and** a non-empty `note`:
     (`ruling conflict ...` in the import report).
   - The conflict ends when OTHER no longer rules the point and is applied
     again (`aiida rule LABEL --rulings OTHER`).
-  - If the own file drops its ruling, OTHER's ruling is **not** applied
-    behind your back. Each report warns
-    `ruling not in force: <point>: ...; run 'FrictionSim2D aiida rule LABEL --rulings <other>' to apply it`
-    until you do.
+  - The own file wins only while it rules the point, so an override is never
+    lost. If the own file drops its ruling, OTHER's ruling is re-applied from
+    OTHER on that same pass. If OTHER is missing (or no longer rules the
+    point), the ruling becomes pending, with the usual
+    `ruling pending: ...` line (below).
 - **Re-checks re-apply rulings.** When a later import re-checks a point, the
   old ruled verdict is superseded with the old checker verdict, and the rulings
   pass that follows applies the file's ruling to the new verdict. If a re-check

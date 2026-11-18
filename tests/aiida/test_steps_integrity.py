@@ -924,24 +924,42 @@ def test_a_conflict_ends_with_the_other_files_ruling(aiida_profile_clean,
     assert import_root(tmp_path, label='camp').rulings.conflicts == []
 
 
-def test_a_conflict_whose_own_ruling_is_gone_warns(aiida_profile_clean, no_profile_switch,
-                                                   tmp_path):
-    """The other file's ruling is not applied behind the user's back."""
+def _overruled_then_dropped(tmp_path):
+    """Own `fail` overrules x.yaml's `pass`; then the own file drops it."""
     _tree(tmp_path, quarantine=(30.0,))
     import_root(tmp_path, label='camp')
     pid = _pid(tmp_path, 30.0)
     _write_ruling(tmp_path, pid, 'fail', note='own says fail')
     assert apply_rulings('camp').applied == 1
     review = _review(tmp_path, pid, 'pass')
-    apply_rulings('camp', review)
+    assert apply_rulings('camp', review).conflicts
     (tmp_path / RULINGS_FILE).write_text('[]\n', encoding='utf-8')
+    return pid, review
+
+
+def test_the_other_files_ruling_returns_when_the_own_file_drops_its_own(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    """The own file wins only while it rules the point: an override is never lost."""
+    pid, review = _overruled_then_dropped(tmp_path)
 
     again = import_root(tmp_path, label='camp')
 
     assert again.rulings.withdrawn == [pid]
-    assert again.rulings.conflicts == []
-    assert _ruled_live() == []
-    assert any(str(review.resolve()) in w and '--rulings' in w for w in again.warnings)
-    assert apply_rulings('camp', review).applied == 1
+    assert again.rulings.conflicts == [] and again.rulings.pending == []
     assert _live_rulings() == [('complete', False)]
-    assert not any('--rulings' in w for w in import_root(tmp_path, label='camp').warnings)
+    assert not any('--rulings' in w for w in again.warnings)
+    assert import_root(tmp_path, label='camp').rulings.applied == 0
+
+
+def test_a_dropped_own_ruling_leaves_a_lost_files_ruling_pending(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, review = _overruled_then_dropped(tmp_path)
+    review.unlink()
+
+    again = import_root(tmp_path, label='camp')
+
+    src = str(review.resolve())
+    assert _ruled_live() == []
+    assert again.rulings.conflicts == []
+    assert again.rulings.pending == [(pid, src, 'missing')]
+    assert f'ruling pending: {src} missing: {pid}' in again.render()

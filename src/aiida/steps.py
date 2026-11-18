@@ -988,22 +988,31 @@ def _record_conflicts(group: orm.Group, source: Tuple[str, bool],
         group.base.extras.set(CONFLICTS_EXTRA, stored)
 
 
+def _release_conflicts(group: orm.Group, by_id: Dict[str, List[orm.Dict]]) -> None:
+    """The own file wins only while it rules the point: a stored conflict
+    whose own ruling is gone becomes a pending ruling (:data:`PENDING_EXTRA`),
+    which the same pass re-applies from its file (:func:`_settle_pending`)."""
+    stored = list(group.base.extras.get(CONFLICTS_EXTRA, []))
+    if not stored:
+        return
+    own_ruled = _own_rulings(by_id, _ruled_by_verdict(
+        [v.uuid for vs in by_id.values() for v in vs]))
+    released = [e for e in stored if e['point'] not in own_ruled]
+    if released:
+        group.base.extras.set(CONFLICTS_EXTRA,
+                              [e for e in stored if e['point'] in own_ruled])
+        _add_pending(group, released)
+
+
 def _report_conflicts(group: orm.Group, report: RulingReport,
                       own_ruled: Dict[str, str]) -> None:
-    """List every stored conflict whose point the own file still rules; warn
-    for one whose own ruling is gone: the other file's ruling is not in force
-    until that file is applied again."""
+    """List every stored conflict whose point the own file rules with
+    another decision (:func:`_release_conflicts` has turned the others into
+    pending rulings)."""
     for entry in group.base.extras.get(CONFLICTS_EXTRA, []):
         pid, src, other = entry['point'], entry['source'], entry['ruling']
-        if own_ruled.get(pid) == other:
-            continue                        # the own file now agrees: no conflict
-        if pid in own_ruled:
+        if pid in own_ruled and own_ruled[pid] != other:
             report.conflicts.append((pid, own_ruled[pid], src, other))
-        else:
-            report.warnings.append(
-                f'ruling not in force: {pid}: the own integrity_rulings.yaml no '
-                f'longer rules it, and {src} rules {other}; run `FrictionSim2D aiida '
-                f'rule {report.label} --rulings {src}` to apply it')
 
 
 def _retry(report: RulingReport, entry: Dict[str, str],
@@ -1135,6 +1144,7 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
                 mine = [n for n in live.get(verdict.uuid, []) if _from_source(n, source)]
                 if verdict.uuid not in ruled and mine:
                     _withdraw(report, pid, verdict, mine)
+    _release_conflicts(group, by_id)
     _settle_pending(group, report, by_id, source, rulings, bool(withdraw),
                     str(Path(withdraw_pending).resolve()) if withdraw_pending else None,
                     found)
@@ -1184,8 +1194,9 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
     point with an own-file ruling in force, and an own-file pass applies its
     ruling over another file's. Each such conflict is stored on the Group
     (:data:`CONFLICTS_EXTRA`) and listed in ``conflicts`` by every later
-    pass, until that file no longer rules the point; one whose own ruling is
-    gone is a warning (the other file's ruling is not applied unasked).
+    pass, until that file no longer rules the point. The own file wins only
+    while it rules the point: once its ruling is gone, the other file's is
+    re-applied from that file on the same pass, or left pending.
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
