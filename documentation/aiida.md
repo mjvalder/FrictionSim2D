@@ -484,7 +484,9 @@ needs `override: true` **and** a non-empty `note`:
     point with an own-file ruling in force. It never flips that ruling.
   - If OTHER ruled the point first, the next import (or `aiida rule LABEL`)
     applies the own file's ruling over it.
-  - Either way the conflict is stored on the set Group (extra
+  - The same decision from both files (both `pass`, or both `fail`) is no
+    conflict: nothing is applied and nothing is listed.
+  - Otherwise the conflict is stored on the set Group (extra
     `friction2d_ruling_conflicts`; its `source` is basenamed in an anonymised
     archive) and listed by **every** later import and `aiida rule` report:
     `conflict <point>: the own integrity_rulings.yaml rules <own> (in force); <other file> rules <other> (not applied)`

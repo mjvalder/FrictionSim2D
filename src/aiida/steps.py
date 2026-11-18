@@ -960,6 +960,8 @@ def _report_conflicts(group: orm.Group, report: RulingReport,
     until that file is applied again."""
     for entry in group.base.extras.get(CONFLICTS_EXTRA, []):
         pid, src, other = entry['point'], entry['source'], entry['ruling']
+        if own_ruled.get(pid) == other:
+            continue                        # the own file now agrees: no conflict
         if pid in own_ruled:
             report.conflicts.append((pid, own_ruled[pid], src, other))
         else:
@@ -1004,9 +1006,11 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
         elif not by_id.get(pid):
             report.unmatched.append(pid)
         elif pid in own_ruled:
-            # The own file wins: another file never flips its ruling.
-            found.append({'point': pid, 'source': source[0],
-                          'ruling': ruling.ruling, 'note': ruling.note})
+            # The own file wins: another file never flips its ruling. The
+            # same decision from both is no conflict.
+            if own_ruled[pid] != ruling.ruling:
+                found.append({'point': pid, 'source': source[0],
+                              'ruling': ruling.ruling, 'note': ruling.note})
         else:
             ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v, source)}
     if own:
@@ -1040,9 +1044,11 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
         (pid, node['original_status'], node['status'], node.get('note', ''))
         for pid, pid_verdicts in sorted(by_id.items()) for verdict in pid_verdicts
         for node in live.get(verdict.uuid, []) if node.get('overridden')]
+    own_after = _own_rulings(by_id, live)
     if own or not _unreadable(rulings):
-        _record_conflicts(group, source, found)
-    _report_conflicts(group, report, _own_rulings(by_id, live))
+        _record_conflicts(group, source, [e for e in found
+                                          if own_after.get(e['point']) != e['ruling']])
+    _report_conflicts(group, report, own_after)
     return report
 
 

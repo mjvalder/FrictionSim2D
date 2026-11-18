@@ -809,6 +809,36 @@ def test_the_own_file_takes_a_point_another_file_ruled_first(
     assert _live_rulings() == [('failed_integrity', True)]
 
 
+def test_the_same_decision_from_both_files_is_no_conflict(aiida_profile_clean,
+                                                          no_profile_switch, tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'fail', note='own says fail')
+    assert apply_rulings('camp').applied == 1
+    review = _review(tmp_path, pid, 'fail', note='I agree')
+
+    other = apply_rulings('camp', review)
+
+    assert (other.applied, other.conflicts) == (0, [])
+    assert _live_rulings() == [('failed_integrity', True)]
+    assert import_root(tmp_path, label='camp').rulings.conflicts == []
+
+
+def test_the_own_file_agreeing_with_an_earlier_ruling_is_no_conflict(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    assert apply_rulings('camp', _review(tmp_path, pid, 'pass')).applied == 1
+    _write_ruling(tmp_path, pid, 'pass', note='own agrees')
+
+    again = import_root(tmp_path, label='camp')
+
+    assert _live_rulings() == [('complete', True)]
+    assert again.rulings.conflicts == []
+    assert import_root(tmp_path, label='camp').rulings.conflicts == []
+
 def test_a_conflict_ends_with_the_other_files_ruling(aiida_profile_clean,
                                                      no_profile_switch, tmp_path):
     _tree(tmp_path, quarantine=(30.0,))
