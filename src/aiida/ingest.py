@@ -38,12 +38,12 @@ from ..postprocessing.read_data import (
     FILE_PATTERN_TIP_ALT, tier_of,
 )
 from ..run.naming import AFM_LIKE_MODELS
-from .data_keys import TIER_KEYS, content_hash
+from .layout import TIER_KEYS, content_hash
 
 if TYPE_CHECKING:  # pragma: no cover
     from aiida import orm
 
-    from .decks import Deck
+    from .layout import Deck
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _aux_files(locator, claimed=()) -> Tuple[Path, ...]:
     Returned as absolute paths under `locator.run_dir` (not basenames), per
     R30: `create_results` stores them via `path.relative_to(run_dir)`.
     """
-    from .retention import retained_paths  # pylint: disable=import-outside-toplevel
+    from .layout import retained_paths  # pylint: disable=import-outside-toplevel
 
     run_dir = Path(locator.run_dir)
     resolved_root = run_dir.resolve()
@@ -365,7 +365,7 @@ def _rel(path: Path, run_dir: Path) -> str:
 
 
 def _covers(deck: 'Deck', load: float, angle: float, speed: float) -> bool:
-    from .decks import points_for  # pylint: disable=import-outside-toplevel
+    from .layout import points_for  # pylint: disable=import-outside-toplevel
     return bool(points_for(deck, [SimpleNamespace(load=load, angle=angle, speed=speed)]))
 
 
@@ -788,7 +788,7 @@ def _import_run(state: _Import, run: _RunState) -> None:
     """Every deck of one run, system decks first."""
     from aiida import orm  # pylint: disable=import-outside-toplevel
 
-    from .decks import discover_decks  # pylint: disable=import-outside-toplevel
+    from .layout import discover_decks  # pylint: disable=import-outside-toplevel
     from .store import deck_key  # pylint: disable=import-outside-toplevel
 
     decks = discover_decks(run.locator)

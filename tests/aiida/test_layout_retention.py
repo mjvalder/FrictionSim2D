@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.aiida.retention import (
+from src.aiida.layout import (
     RETAINED_GLOBS, RETRIEVE_LIST, retained_paths, retrieve_patterns)
 
 

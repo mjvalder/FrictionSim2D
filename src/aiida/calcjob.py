@@ -52,9 +52,7 @@ from aiida.common.folders import Folder
 from aiida.engine import CalcJob
 from aiida.parsers.parser import Parser
 
-from .data_keys import content_hash
-from .decks import Deck, discover_decks, points_for
-from .retention import retrieve_patterns
+from .layout import Deck, content_hash, discover_decks, points_for, retrieve_patterns
 from .store import (
     StoreIndex, calcjob_extras, get_or_create_file, lammps_code, new_file, new_folder,
 )
@@ -85,7 +83,7 @@ _POINT_TIERS = ('window', 'raw', 'retract')
 _READ_TIERS = ('window', 'raw', 'peratom')
 
 #: What each kind of deck retrieves, as remote globs of
-#: :func:`~src.aiida.retention.retrieve_patterns`: a system deck writes the
+#: :func:`~src.aiida.layout.retrieve_patterns`: a system deck writes the
 #: loaded structures (and the AFM hold traces), a slide-like deck the results
 #: and end snapshots.
 _SYSTEM_RETRIEVE = ('data/load_*.data', 'data/hold_*.txt')

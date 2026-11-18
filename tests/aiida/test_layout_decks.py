@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.aiida.decks import deck_log, discover_decks, points_for
+from src.aiida.layout import deck_log, discover_decks, points_for
 from src.run.tree import discover_runs
 from tests.helpers.results_tree import make_family_run
 
@@ -149,7 +149,7 @@ def test_unrecognised_slide_stem_warns(tmp_path, caplog, stem):
     """An odd `slide_*` stem still covers every point, but says so."""
     loc = _locator(tmp_path, 'afm')
     _touch(loc.lammps_dir / f'{stem}.in')
-    with caplog.at_level('WARNING', logger='src.aiida.decks'):
+    with caplog.at_level('WARNING', logger='src.aiida.layout'):
         deck = [d for d in discover_decks(loc) if d.name == stem][0]
     assert deck.point_filter == {}
     assert stem in caplog.text
@@ -159,6 +159,6 @@ def test_unrecognised_slide_stem_warns(tmp_path, caplog, stem):
 def test_known_unfiltered_stems_do_not_warn(tmp_path, caplog, stem):
     loc = _locator(tmp_path, 'pes_sheet')
     _touch(loc.lammps_dir / f'{stem}.in')
-    with caplog.at_level('WARNING', logger='src.aiida.decks'):
+    with caplog.at_level('WARNING', logger='src.aiida.layout'):
         discover_decks(loc)
     assert 'unrecognised' not in caplog.text

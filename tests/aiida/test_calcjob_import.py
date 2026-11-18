@@ -20,8 +20,7 @@ from src.aiida.calcjob import (  # noqa: E402
     LammpsFrictionCalcJob, LammpsFrictionParser, MissingRunUUID, deck_inputs,
     import_deck, import_run, point_label,
 )
-from src.aiida.decks import discover_decks  # noqa: E402
-from src.aiida.retention import retrieve_patterns  # noqa: E402
+from src.aiida.layout import discover_decks, retrieve_patterns  # noqa: E402
 from src.aiida.store import machine_computer  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
 from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402

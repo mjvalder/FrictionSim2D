@@ -133,7 +133,7 @@ and `created`. Each dataset is the Group `friction2d/datasets/<name>`.
 
 ### 2.2 What is stored and what is not
 
-One rule, `src/aiida/retention.py`, decides which files of a run are kept:
+One rule, `src/aiida/layout.py`, decides which files of a run are kept:
 `provenance.json`, `provenance/**`, `lammps/*.in`, `lammps/system.in.settings`,
 `lammps/run_*.log`, `results/*`, `data/hold_*.txt`, `data/final_*.data`,
 `data/load_*.data` and `build/*.lmp`.

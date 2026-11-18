@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from ..core.compare import DEFAULT_ATOL, DEFAULT_RTOL, merge_varying
-from .data_keys import is_superseded
+from .layout import is_superseded
 from .block_schema import version_key
 
 __all__ = ['LoadedBlocks', 'block_name', 'load_blocks', 'load_blocks_from_sidecar',
