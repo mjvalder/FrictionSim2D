@@ -325,12 +325,6 @@ class QueryResult:
         import pandas as pd  # pylint: disable=import-outside-toplevel
         return pd.DataFrame(self.rows)
 
-    def export_csv(self, filepath: Path) -> Path:
-        """The rows as CSV."""
-        filepath = Path(filepath)
-        self.to_dataframe().to_csv(filepath, index=False)
-        return filepath
-
     def export_json(self, filepath: Path) -> Path:
         """The query parameters, the count and the rows as JSON."""
         filepath = Path(filepath)
@@ -938,10 +932,6 @@ class Friction2DDB:
         if limit:
             rows = rows[:limit]
         return QueryResult(rows=rows, total_count=total, query_params=params)
-
-    def query_by_set(self, label: str) -> QueryResult:
-        """Every live point of one set."""
-        return self.query(set_label=label)
 
     # -- parameters ------------------------------------------------------------
 

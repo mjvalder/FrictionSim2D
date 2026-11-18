@@ -109,8 +109,8 @@ def _num(value: float) -> str:
 def point_label(point: Any) -> str:
     """The key of one load point, e.g. ``force10_a0_s2``.
 
-    The load-condition half of :func:`src.aiida.ingest._point_key`, spelled
-    as a valid link label (alphanumerics and single underscores).
+    The load condition (kind and load, angle, speed), spelled as a valid
+    link label (alphanumerics and single underscores).
     """
     return (f'{point.load_kind}{_num(point.load)}'
             f'_a{_num(point.angle)}_s{_num(point.speed)}')

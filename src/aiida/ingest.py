@@ -238,11 +238,6 @@ def load_points(locator) -> List[LoadPoint]:
     return points
 
 
-def _point_key(rel_path: str, point: LoadPoint) -> str:
-    return (f"{rel_path}#{point.load_kind}{point.load:g}"
-            f"_a{point.angle:g}_s{point.speed:g}")
-
-
 # ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------
