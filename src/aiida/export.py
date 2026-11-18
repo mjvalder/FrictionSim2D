@@ -25,7 +25,7 @@ its label, a Code's ``filepath_executable`` its basename, ``remote_workdir`` and
 ``RemoteData.remote_path`` ``<machine label>:<rel_path>``, ``hpc_run_path``
 leaves the CalcJob ``parameters``, a ruling Dict's ``source`` becomes its
 basename, the set Group's ``source_root`` (and each ruling conflict's
-``source``) becomes its
+and pending ruling's ``source``) becomes its
 basename and ``source_host`` the machine label (or ``unknown``), and the
 provenance documents lose ``hpc.hpc_home``/``scratch_dir``/``log_dir``/
 ``conda_env``/``account`` and ``database.user``/``host`` (``hpc.hpc_host``
@@ -861,9 +861,9 @@ def _anonymise_remote(archive: _Archive, labels: Mapping[int, str]) -> int:
 
 def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
     """A set Group's ``source_root`` -> its basename, ``source_host`` -> the
-    machine label, or ``'unknown'``, and each ruling conflict's ``source``
-    its basename."""
-    from .steps import CONFLICTS_EXTRA  # pylint: disable=import-outside-toplevel
+    machine label, or ``'unknown'``, and each ruling conflict's and pending
+    ruling's ``source`` its basename."""
+    from .steps import CONFLICTS_EXTRA, PENDING_EXTRA  # pylint: disable=import-outside-toplevel
     changed = 0
     for pk, extras in archive.rows('SELECT id, extras FROM db_dbgroup'):
         content = json.loads(extras or '{}')
@@ -872,10 +872,11 @@ def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
             content['source_root'] = PurePosixPath(str(content['source_root'])).name
         if content.get('source_host'):
             content['source_host'] = hosts.get(content['source_host'], 'unknown')
-        if content.get(CONFLICTS_EXTRA):
-            content[CONFLICTS_EXTRA] = [
-                {**entry, 'source': PurePosixPath(str(entry.get('source', ''))).name}
-                for entry in content[CONFLICTS_EXTRA]]
+        for key in (CONFLICTS_EXTRA, PENDING_EXTRA):
+            if content.get(key):
+                content[key] = [
+                    {**entry, 'source': PurePosixPath(str(entry.get('source', ''))).name}
+                    for entry in content[key]]
         if content != before:
             archive.set_json(pk, 'extras', content, table='db_dbgroup')
             changed += 1
