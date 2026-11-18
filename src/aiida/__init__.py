@@ -29,7 +29,7 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     'delete_simulation_set': (f'{__name__}.integration', 'delete_simulation_set'),
     'clear_all_nodes': (f'{__name__}.integration', 'clear_all_nodes'),
     'LammpsFrictionCalcJob': (f'{__name__}.calcjob', 'LammpsFrictionCalcJob'),
-    'full_setup': (f'{__name__}.setup', 'full_setup'),
+    'full_setup': (f'{__name__}.profile', 'full_setup'),
 }
 
 __all__ = ['AIIDA_AVAILABLE', 'load_aiida_profile']

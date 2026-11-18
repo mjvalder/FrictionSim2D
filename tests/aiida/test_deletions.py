@@ -26,13 +26,13 @@ def test_lazy_export_is_gone():
 
 
 def test_ssh_transport_helpers_are_gone():
-    import src.aiida.setup as setup_mod
+    import src.aiida.profile as profile_mod
 
-    assert not hasattr(setup_mod, 'setup_computer_from_hpc_settings')
-    assert not hasattr(setup_mod, '_TRANSPORT_MAP')
-    assert not hasattr(setup_mod, 'start_rabbitmq')
-    assert not hasattr(setup_mod, '_patch_rabbitmq_consumer_timeout')
-    assert hasattr(setup_mod, 'setup_profile')
+    assert not hasattr(profile_mod, 'setup_computer_from_hpc_settings')
+    assert not hasattr(profile_mod, '_TRANSPORT_MAP')
+    assert not hasattr(profile_mod, 'start_rabbitmq')
+    assert not hasattr(profile_mod, '_patch_rabbitmq_consumer_timeout')
+    assert hasattr(profile_mod, 'setup_profile')
 
 
 @pytest.mark.parametrize('name', ['setup_localhost_computer', 'setup_lammps_code',
@@ -40,18 +40,18 @@ def test_ssh_transport_helpers_are_gone():
                                   'start_daemon'])
 def test_code_and_daemon_helpers_are_gone(name):
     """Computers and Codes are made at import; nothing needs the daemon."""
-    import src.aiida.setup as setup_mod
+    import src.aiida.profile as profile_mod
 
-    assert not hasattr(setup_mod, name)
+    assert not hasattr(profile_mod, name)
 
 
 def test_full_setup_sets_up_the_profile_only(monkeypatch):
-    import src.aiida.setup as setup_mod
+    import src.aiida.profile as profile_mod
 
     seen = []
-    monkeypatch.setattr(setup_mod, 'setup_profile',
+    monkeypatch.setattr(profile_mod, 'setup_profile',
                         lambda name, use_postgres: seen.append(name) or True)
-    assert setup_mod.full_setup('p1') == {'profile': True}
+    assert profile_mod.full_setup('p1') == {'profile': True}
     assert seen == ['p1']
 
 

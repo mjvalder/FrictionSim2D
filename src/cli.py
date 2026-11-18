@@ -651,7 +651,7 @@ def aiida_preflight():
     machine) from "profile broken" (spec §8). Exit code 0 only when a healthy
     profile and the friction2d entry points are both present.
     """
-    from .aiida.preflight import main as preflight_main
+    from .aiida.profile import main as preflight_main
     raise SystemExit(preflight_main())
 
 
@@ -1235,7 +1235,7 @@ def aiida_setup(create_profile: Optional[str], postgres: bool):
     Example:
         FrictionSim2D aiida setup --create-profile friction2d
     """
-    from .aiida.setup import full_setup  # noqa: PLC0415
+    from .aiida.profile import full_setup  # noqa: PLC0415
 
     click.echo("🔧 Running AiiDA first-time setup ...")
     try:
