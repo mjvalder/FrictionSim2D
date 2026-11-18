@@ -246,7 +246,7 @@ def test_rulings_pass_is_idempotent(aiida_profile_clean, no_profile_switch, tmp_
 
     _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass', note='second look')
     report = apply_rulings('camp')
-    assert (report.applied, report.skipped) == (1, 0)
+    assert (report.applied, report.replaced, report.skipped) == (0, 1, 0)
     live = [n for n in _ruled_outputs() if not n.base.extras.get('superseded', False)]
     assert [n['note'] for n in live] == ['second look']
 
@@ -766,7 +766,23 @@ def test_recheck_reapplies_a_foreign_ruling_from_its_source(
     assert recheck_set('camp', settings_file=_bump(tmp_path)).rulings.applied == 0
 
 
-def test_a_foreign_ruling_whose_file_is_missing_is_pending(
+
+
+# --- the ruling ledger: missing files are pending, and still count -------------
+
+LEDGER = 'friction2d_rulings_ledger'
+
+
+def _ledger():
+    return orm.load_group('friction2d/camp').base.extras.get(LEDGER, {})
+
+
+def _ruling_extras():
+    return {k: v for k, v in orm.load_group('friction2d/camp').base.extras.all.items()
+            if 'ruling' in k}
+
+
+def test_a_foreign_ruling_whose_file_is_missing_is_pending_and_still_counts(
         aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
     root, pid, review = _foreign_setup(tmp_path)
     moved = review.with_suffix('.bak')
@@ -774,23 +790,24 @@ def test_a_foreign_ruling_whose_file_is_missing_is_pending(
 
     report = recheck_set('camp', settings_file=_bump(tmp_path))
 
-    assert _ruled_live() == []
     src = str(review.resolve())
+    assert _live_foreign() == [('complete', src, '1.1.0')]       # re-applied from the ledger
     assert report.rulings.pending == [(pid, src, 'missing')]
-    assert f'ruling pending: {src} missing' in report.render()
-    assert f'--rulings {src}' in report.render()
+    assert f'ruling pending: {src} missing: {pid}' in report.render()
+    assert f'--rulings {src}' in report.render() and f'--withdraw-pending {src}' in report.render()
     again = import_root(root, label='camp', settings_file=_bump(tmp_path))
     assert again.rulings.pending == [(pid, src, 'missing')]
     assert f'ruling pending: {src} missing' in again.render()
     assert apply_rulings('camp').pending == [(pid, src, 'missing')]   # `aiida rule`
 
-    moved.rename(review)                        # the file is back: re-applied
+    moved.rename(review)                        # the file is back: present again
     back = import_root(root, label='camp', settings_file=_bump(tmp_path))
-    assert back.rulings.pending == []
+    assert back.rulings.pending == [] and back.rulings.applied == 0
     assert _live_foreign() == [('complete', src, '1.1.0')]
+    assert _ledger()[pid][src]['status'] == 'present'
 
 
-def test_a_pending_ruling_ends_when_its_file_withdraws_it(
+def test_a_file_that_drops_its_ruling_withdraws_it_on_any_pass(
         aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
     root, pid, review = _foreign_setup(tmp_path)
     review.write_text('[]\n', encoding='utf-8')
@@ -798,30 +815,75 @@ def test_a_pending_ruling_ends_when_its_file_withdraws_it(
     report = recheck_set('camp', settings_file=_bump(tmp_path))
 
     src = str(review.resolve())
-    assert report.rulings.pending == [(pid, src, 'no longer rules the point')]
-    assert apply_rulings('camp', review).pending == [
-        (pid, src, 'no longer rules the point')]     # not withdrawn without --withdraw
-    withdrawn = apply_rulings('camp', review, withdraw=True)
-    assert withdrawn.pending == [] and withdrawn.pending_withdrawn == [(pid, src)]
+    assert _ruled_live() == [] and report.rulings.pending == []
+    assert report.rulings.retracted == [(pid, src)]
+    assert f'ruling retracted by its file: {pid} ({src})' in report.render()
+    assert _ledger() == {}
+
+
+@pytest.mark.parametrize('form', ['file', 'directory'])
+def test_withdraw_pending_drops_a_lost_files_ruling(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path, form):
+    root = tmp_path / 'sim'
+    _tree(root, eject=(30.0,))
+    import_root(root, label='camp')
+    pid = _pid(root, 30.0)
+    drive = tmp_path / 'drive'
+    drive.mkdir()
+    review = drive / RULINGS_FILE
+    review.write_text(f'- point: "{pid}"\n  ruling: pass\n  note: fine\n  override: true\n',
+                      encoding='utf-8')
+    assert apply_rulings('camp', drive).applied == 1
+    review.unlink()
+    drive.rmdir()                               # the drive is unmounted
+    assert recheck_set('camp', settings_file=_bump(tmp_path)).rulings.pending
+
+    report = apply_rulings('camp', withdraw_pending=review if form == 'file' else drive)
+
+    src = str(review.resolve())
+    assert report.pending == [] and report.pending_withdrawn == [(pid, src)]
+    assert report.withdrawn == [pid] and _ruled_live() == []
+    assert import_root(root, label='camp', settings_file=_bump(tmp_path)).rulings.pending == []
+    assert _ledger() == {}
+
+
+def test_withdraw_pending_refuses_the_own_file(aiida_profile_clean, no_profile_switch,
+                                              tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    _write_ruling(tmp_path, _pid(tmp_path, 30.0), 'pass')
+    assert apply_rulings('camp').applied == 1
+
+    report = apply_rulings('camp', withdraw_pending=tmp_path)
+
+    assert report.pending_withdrawn == [] and len(_ruled_live()) == 1
+    assert any("own rulings file" in w for w in report.warnings)
+
+
+def test_an_unreachable_own_file_is_pending_and_still_counts(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    _tree(tmp_path, eject=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    _write_ruling(tmp_path, pid, 'pass', note='ok', override=True)
+    assert apply_rulings('camp').applied == 1
+    own = str((tmp_path / RULINGS_FILE).resolve())
+    hidden = tmp_path.parent / f'{tmp_path.name}-unmounted'
+    tmp_path.rename(hidden)
+    try:
+        report = apply_rulings('camp')
+        assert report.withdrawn == [] and len(report.overrides) == 1
+        assert report.pending == [(pid, own, 'missing')]
+        assert "the set's own rulings file is unreachable" in report.render()
+    finally:
+        hidden.rename(tmp_path)
     assert apply_rulings('camp').pending == []
 
 
-def test_a_pending_ruling_of_a_lost_file_is_withdrawn_explicitly(
-        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
-    root, pid, review = _foreign_setup(tmp_path)
-    review.unlink()
-    recheck_set('camp', settings_file=_bump(tmp_path))
+# --- conflicts: the own file wins, else the most recently seen -----------------
 
-    report = apply_rulings('camp', withdraw_pending=review)
-
-    assert report.pending == [] and report.pending_withdrawn == [(pid, str(review.resolve()))]
-    assert import_root(root, label='camp', settings_file=_bump(tmp_path)).rulings.pending == []
-
-
-# --- own file wins over any other rulings file -------------------------------
-
-def _review(root, pid, ruling, note='expert pass'):
-    review = root / 'reviews' / 'x.yaml'
+def _review(root, pid, ruling, note='expert pass', name='x.yaml'):
+    review = root / 'reviews' / name
     review.parent.mkdir(exist_ok=True)
     review.write_text(f'- point: "{pid}"\n  ruling: {ruling}\n  note: {note}\n',
                       encoding='utf-8')
@@ -832,13 +894,30 @@ def _live_rulings():
     return [(n['status'], n.creator.inputs.ruling['own_file']) for n in _ruled_live()]
 
 
+def _live_sources():
+    return [(n['status'], n.creator.inputs.ruling['source']) for n in _ruled_live()]
+
+
+def _conflicts(report):
+    """``(point, (source, ruling) in force, [(source, ruling) not applied])``."""
+    return [(pid, in_force, others) for pid, in_force, _why, others in report.conflicts]
+
+
+def _setup(tmp_path):
+    _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    return _pid(tmp_path, 30.0), str((tmp_path / RULINGS_FILE).resolve())
+
+
+def _drop_own(tmp_path):
+    (tmp_path / RULINGS_FILE).write_text('[]\n', encoding='utf-8')
+
+
 def test_another_file_cannot_overrule_the_own_file(aiida_profile_clean, no_profile_switch,
                                                    tmp_path):
     """The own file rules first; another file's ruling on the same point is not
     applied, and the conflict is listed by `aiida rule` and every import."""
-    _tree(tmp_path, quarantine=(30.0,))
-    import_root(tmp_path, label='camp')
-    pid = _pid(tmp_path, 30.0)
+    pid, own = _setup(tmp_path)
     _write_ruling(tmp_path, pid, 'fail', note='own says fail')
     assert apply_rulings('camp').applied == 1
     review = _review(tmp_path, pid, 'pass')
@@ -847,23 +926,22 @@ def test_another_file_cannot_overrule_the_own_file(aiida_profile_clean, no_profi
 
     assert other.applied == 0
     assert _live_rulings() == [('failed_integrity', True)]
-    conflict = (pid, 'fail', str(review.resolve()), 'pass')
-    assert other.conflicts == [conflict]
+    conflict = (pid, (own, 'fail'), [(str(review.resolve()), 'pass')])
+    assert _conflicts(other) == [conflict]
+    assert "own integrity_rulings.yaml wins" in other.conflicts[0][2]
     assert f'conflict {pid}' in other.render()
     for _ in range(2):                                   # every import, not once
         again = import_root(tmp_path, label='camp')
         assert again.rulings.applied == 0
-        assert again.rulings.conflicts == [conflict]
+        assert _conflicts(again.rulings) == [conflict]
         assert f'ruling conflict {pid}' in again.render()
         assert _live_rulings() == [('failed_integrity', True)]
-    assert apply_rulings('camp').conflicts == [conflict]    # `aiida rule`
+    assert _conflicts(apply_rulings('camp')) == [conflict]    # `aiida rule`
 
 
 def test_the_own_file_takes_a_point_another_file_ruled_first(
         aiida_profile_clean, no_profile_switch, tmp_path):
-    _tree(tmp_path, quarantine=(30.0,))
-    import_root(tmp_path, label='camp')
-    pid = _pid(tmp_path, 30.0)
+    pid, own = _setup(tmp_path)
     review = _review(tmp_path, pid, 'pass')
     assert apply_rulings('camp', review).applied == 1    # the own file rules nothing yet
     assert _live_rulings() == [('complete', False)]
@@ -871,35 +949,33 @@ def test_the_own_file_takes_a_point_another_file_ruled_first(
     _write_ruling(tmp_path, pid, 'fail', note='own says fail')
     again = import_root(tmp_path, label='camp')
 
+    assert again.rulings.replaced == 1
     assert _live_rulings() == [('failed_integrity', True)]
-    conflict = (pid, 'fail', str(review.resolve()), 'pass')
-    assert again.rulings.conflicts == [conflict]
-    assert import_root(tmp_path, label='camp').rulings.conflicts == [conflict]
-    assert apply_rulings('camp', review).conflicts == [conflict]
+    conflict = (pid, (own, 'fail'), [(str(review.resolve()), 'pass')])
+    assert _conflicts(again.rulings) == [conflict]
+    assert _conflicts(import_root(tmp_path, label='camp').rulings) == [conflict]
+    assert _conflicts(apply_rulings('camp', review)) == [conflict]
     assert _live_rulings() == [('failed_integrity', True)]
 
 
 def test_the_same_decision_from_both_files_is_no_conflict(aiida_profile_clean,
                                                           no_profile_switch, tmp_path):
-    _tree(tmp_path, quarantine=(30.0,))
-    import_root(tmp_path, label='camp')
-    pid = _pid(tmp_path, 30.0)
+    pid, own = _setup(tmp_path)
     _write_ruling(tmp_path, pid, 'fail', note='own says fail')
     assert apply_rulings('camp').applied == 1
     review = _review(tmp_path, pid, 'fail', note='I agree')
 
     other = apply_rulings('camp', review)
 
-    assert (other.applied, other.conflicts) == (0, [])
+    assert (other.applied, other.replaced, other.conflicts) == (0, 0, [])
     assert _live_rulings() == [('failed_integrity', True)]
     assert import_root(tmp_path, label='camp').rulings.conflicts == []
+    assert set(_ledger()[pid]) == {own, str(review.resolve())}   # both kept
 
 
 def test_the_own_file_agreeing_with_an_earlier_ruling_is_no_conflict(
         aiida_profile_clean, no_profile_switch, tmp_path):
-    _tree(tmp_path, quarantine=(30.0,))
-    import_root(tmp_path, label='camp')
-    pid = _pid(tmp_path, 30.0)
+    pid, _own = _setup(tmp_path)
     assert apply_rulings('camp', _review(tmp_path, pid, 'pass')).applied == 1
     _write_ruling(tmp_path, pid, 'pass', note='own agrees')
 
@@ -909,11 +985,10 @@ def test_the_own_file_agreeing_with_an_earlier_ruling_is_no_conflict(
     assert again.rulings.conflicts == []
     assert import_root(tmp_path, label='camp').rulings.conflicts == []
 
+
 def test_a_conflict_ends_with_the_other_files_ruling(aiida_profile_clean,
                                                      no_profile_switch, tmp_path):
-    _tree(tmp_path, quarantine=(30.0,))
-    import_root(tmp_path, label='camp')
-    pid = _pid(tmp_path, 30.0)
+    pid, _own = _setup(tmp_path)
     _write_ruling(tmp_path, pid, 'fail', note='own says fail')
     assert apply_rulings('camp').applied == 1
     review = _review(tmp_path, pid, 'pass')
@@ -926,14 +1001,12 @@ def test_a_conflict_ends_with_the_other_files_ruling(aiida_profile_clean,
 
 def _overruled_then_dropped(tmp_path):
     """Own `fail` overrules x.yaml's `pass`; then the own file drops it."""
-    _tree(tmp_path, quarantine=(30.0,))
-    import_root(tmp_path, label='camp')
-    pid = _pid(tmp_path, 30.0)
+    pid, _own = _setup(tmp_path)
     _write_ruling(tmp_path, pid, 'fail', note='own says fail')
     assert apply_rulings('camp').applied == 1
     review = _review(tmp_path, pid, 'pass')
     assert apply_rulings('camp', review).conflicts
-    (tmp_path / RULINGS_FILE).write_text('[]\n', encoding='utf-8')
+    _drop_own(tmp_path)
     return pid, review
 
 
@@ -944,14 +1017,14 @@ def test_the_other_files_ruling_returns_when_the_own_file_drops_its_own(
 
     again = import_root(tmp_path, label='camp')
 
-    assert again.rulings.withdrawn == [pid]
+    assert again.rulings.replaced == 1 and again.rulings.withdrawn == []
     assert again.rulings.conflicts == [] and again.rulings.pending == []
     assert _live_rulings() == [('complete', False)]
     assert not any('--rulings' in w for w in again.warnings)
     assert import_root(tmp_path, label='camp').rulings.applied == 0
 
 
-def test_a_dropped_own_ruling_leaves_a_lost_files_ruling_pending(
+def test_a_dropped_own_ruling_gives_a_lost_files_ruling_back_pending(
         aiida_profile_clean, no_profile_switch, tmp_path):
     pid, review = _overruled_then_dropped(tmp_path)
     review.unlink()
@@ -959,7 +1032,257 @@ def test_a_dropped_own_ruling_leaves_a_lost_files_ruling_pending(
     again = import_root(tmp_path, label='camp')
 
     src = str(review.resolve())
-    assert _ruled_live() == []
+    assert _live_sources() == [('complete', src)]
     assert again.rulings.conflicts == []
     assert again.rulings.pending == [(pid, src, 'missing')]
     assert f'ruling pending: {src} missing: {pid}' in again.render()
+
+
+# --- the sequences that lost or flipped an override (review, 2026-11-18) -------
+
+def test_agreement_own_after_other_keeps_the_other_when_own_drops(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    review = _review(tmp_path, pid, 'pass')
+    assert apply_rulings('camp', review).applied == 1
+    _write_ruling(tmp_path, pid, 'pass', note='own agrees')
+    import_root(tmp_path, label='camp')
+    assert _live_rulings() == [('complete', True)]
+    _drop_own(tmp_path)
+
+    import_root(tmp_path, label='camp')
+
+    assert _live_sources() == [('complete', str(review.resolve()))]
+
+
+def test_agreement_other_after_own_keeps_the_other_when_own_drops(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'pass', note='own')
+    import_root(tmp_path, label='camp')
+    review = _review(tmp_path, pid, 'pass')
+    apply_rulings('camp', review)
+    _drop_own(tmp_path)
+
+    import_root(tmp_path, label='camp')
+
+    assert _live_sources() == [('complete', str(review.resolve()))]
+
+
+def test_a_conflict_turned_agreement_keeps_the_other_when_own_drops(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+    import_root(tmp_path, label='camp')
+    review = _review(tmp_path, pid, 'pass')
+    assert apply_rulings('camp', review).conflicts
+    review.write_text(f'- point: "{pid}"\n  ruling: fail\n  note: agree\n', encoding='utf-8')
+    assert apply_rulings('camp', review).conflicts == []
+    _drop_own(tmp_path)
+
+    import_root(tmp_path, label='camp')
+
+    assert _live_sources() == [('failed_integrity', str(review.resolve()))]
+
+
+def test_two_other_files_conflict_openly_and_withdrawal_brings_the_first_back(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    one = _review(tmp_path, pid, 'pass', name='o1.yaml')
+    two = _review(tmp_path, pid, 'fail', name='o2.yaml')
+    assert apply_rulings('camp', one).applied == 1
+
+    report = apply_rulings('camp', two)
+
+    s1, s2 = str(one.resolve()), str(two.resolve())
+    assert report.replaced == 1
+    assert _live_sources() == [('failed_integrity', s2)]
+    assert _conflicts(report) == [(pid, (s2, 'fail'), [(s1, 'pass')])]
+    assert 'most recently seen' in report.conflicts[0][2]
+    assert _conflicts(import_root(tmp_path, label='camp').rulings) == _conflicts(report)
+    assert _live_sources() == [('failed_integrity', s2)]       # re-reading flips nothing
+
+    two.write_text('[]\n', encoding='utf-8')
+    back = apply_rulings('camp', two)
+
+    assert back.replaced == 1 and back.conflicts == []
+    assert _live_sources() == [('complete', s1)]
+
+
+def test_a_returning_file_does_not_replace_a_later_ruling(
+        aiida_profile_clean, no_profile_switch, no_user_settings, tmp_path):
+    root = tmp_path / 'sim'
+    _tree(root, eject=(30.0,))
+    import_root(root, label='camp')
+    pid = _pid(root, 30.0)
+    one = tmp_path / 'o1.yaml'
+    one.write_text(f'- point: "{pid}"\n  ruling: pass\n  note: fine\n  override: true\n')
+    assert apply_rulings('camp', one).applied == 1
+    moved = one.with_suffix('.bak')
+    one.rename(moved)
+    settings = _settings_file(tmp_path / 'settings.yaml', version='1.1.0')
+    assert recheck_set('camp', settings_file=settings).rulings.pending
+    two = tmp_path / 'o2.yaml'
+    two.write_text(f'- point: "{pid}"\n  ruling: fail\n  note: nope\n  override: true\n')
+    assert apply_rulings('camp', two).replaced == 1
+    moved.rename(one)
+
+    report = import_root(root, label='camp', settings_file=settings)
+
+    s1, s2 = str(one.resolve()), str(two.resolve())
+    assert _live_sources() == [('failed_integrity', s2)]
+    assert _conflicts(report.rulings) == [(pid, (s2, 'fail'), [(s1, 'pass')])]
+    assert report.rulings.pending == []
+
+
+def test_reconcile_is_idempotent(aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+    import_root(tmp_path, label='camp')
+    review = _review(tmp_path, pid, 'pass')
+    apply_rulings('camp', review)
+    _drop_own(tmp_path)
+    import_root(tmp_path, label='camp')
+    extras = _ruling_extras()
+    nodes = orm.QueryBuilder().append(orm.Node).count()
+
+    for again in (import_root(tmp_path, label='camp').rulings, apply_rulings('camp'),
+                  apply_rulings('camp', review)):
+        assert (again.applied, again.replaced, again.withdrawn) == (0, 0, [])
+        assert orm.QueryBuilder().append(orm.Node).count() == nodes
+        assert _ruling_extras() == extras
+
+    _write_ruling(tmp_path, pid, 'fail', note='own again')     # own re-adds: conflict back
+    report = import_root(tmp_path, label='camp')
+    assert _live_rulings() == [('failed_integrity', True)]
+    assert report.rulings.conflicts
+    _drop_own(tmp_path)
+    import_root(tmp_path, label='camp')
+    assert _live_rulings() == [('complete', False)]
+
+
+def test_a_lost_file_stays_counted_while_the_own_file_rules_and_after(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+    import_root(tmp_path, label='camp')
+    review = _review(tmp_path, pid, 'pass')
+    apply_rulings('camp', review)
+    _drop_own(tmp_path)
+    moved = review.with_suffix('.bak')
+    review.rename(moved)
+    assert import_root(tmp_path, label='camp').rulings.pending
+    _write_ruling(tmp_path, pid, 'fail', note='own back')
+    report = import_root(tmp_path, label='camp')
+    assert report.rulings.conflicts and report.rulings.pending
+    moved.rename(review)
+
+    report = import_root(tmp_path, label='camp')
+
+    assert report.rulings.conflicts and not report.rulings.pending
+    _drop_own(tmp_path)
+    import_root(tmp_path, label='camp')
+    assert _live_rulings() == [('complete', False)]
+
+
+def test_a_changed_deck_keeps_another_files_ruling(aiida_profile_clean, no_profile_switch,
+                                                  tmp_path):
+    run_dir = _tree(tmp_path, quarantine=(30.0,))
+    import_root(tmp_path, label='camp')
+    pid = _pid(tmp_path, 30.0)
+    review = tmp_path / 'o.yaml'
+    review.write_text(f'- point: "{pid}"\n  ruling: pass\n  note: looked\n', encoding='utf-8')
+    assert apply_rulings('camp', review).applied == 1
+    for deck in sorted((run_dir / 'lammps').glob('*.in')):
+        deck.write_text(deck.read_text() + '\n# edited\n')
+
+    report = import_root(tmp_path, label='camp')
+
+    assert report.superseded_decks, report.render()
+    assert _pid(tmp_path, 30.0) == pid
+    assert _live_sources() == [('complete', str(review.resolve()))]
+    assert report.rulings.applied == 1
+
+
+def test_a_malformed_entry_does_not_hide_the_files_other_rulings(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+    import_root(tmp_path, label='camp')
+    review = tmp_path / 'o.yaml'
+    review.write_text(f'- point: "{pid}"\n  ruling: pass\n  note: looked\n- 42\n',
+                      encoding='utf-8')
+
+    report = apply_rulings('camp', review)
+
+    src = str(review.resolve())
+    assert _conflicts(report) == [(pid, (own, 'fail'), [(src, 'pass')])]
+    assert any('entry 1' in w for w in report.warnings)
+    _drop_own(tmp_path)
+    import_root(tmp_path, label='camp')
+    assert _live_sources() == [('complete', src)]
+
+
+def test_a_malformed_entry_withdraws_nothing(aiida_profile_clean, no_profile_switch,
+                                             tmp_path):
+    pid, _own = _setup(tmp_path)
+    review = _review(tmp_path, pid, 'pass')
+    assert apply_rulings('camp', review).applied == 1
+    review.write_text('- 42\n', encoding='utf-8')
+
+    report = apply_rulings('camp', review)
+
+    assert report.withdrawn == [] and len(_ruled_live()) == 1
+    assert any('no ruling of' in w for w in report.warnings)
+
+
+def test_an_unreadable_file_changes_nothing(aiida_profile_clean, no_profile_switch,
+                                            tmp_path):
+    pid, _own = _setup(tmp_path)
+    review = _review(tmp_path, pid, 'pass')
+    assert apply_rulings('camp', review).applied == 1
+    ledger = _ledger()
+    review.write_text('- point: [unclosed\n', encoding='utf-8')
+
+    report = import_root(tmp_path, label='camp')
+
+    assert report.rulings.withdrawn == [] and len(_ruled_live()) == 1
+    assert _ledger() == ledger
+    assert any('not read' in w for w in report.warnings)
+
+
+# --- a dry run reports and writes nothing --------------------------------------
+
+def test_a_dry_run_import_reports_the_rulings_pass_and_writes_nothing(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    pid, _own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'pass')
+    extras = _ruling_extras()
+    nodes = orm.QueryBuilder().append(orm.Node).count()
+
+    report = import_root(tmp_path, label='camp', dry_run=True)
+
+    assert report.rulings is not None and report.rulings.dry_run
+    assert (report.rulings.applied, report.rulings.skipped) == (1, 0)
+    assert 'rulings applied:     1' in report.render()
+    assert orm.QueryBuilder().append(orm.Node).count() == nodes
+    assert _ruling_extras() == extras
+    assert import_root(tmp_path, label='camp').rulings.applied == 1
+
+
+def test_a_dry_run_lists_conflicts_and_pending(aiida_profile_clean, no_profile_switch,
+                                               tmp_path):
+    pid, own = _setup(tmp_path)
+    _write_ruling(tmp_path, pid, 'fail', note='own')
+    import_root(tmp_path, label='camp')
+    review = _review(tmp_path, pid, 'pass')
+    apply_rulings('camp', review)
+    review.unlink()
+    extras = _ruling_extras()
+
+    report = import_root(tmp_path, label='camp', dry_run=True)
+
+    src = str(review.resolve())
+    assert _conflicts(report.rulings) == [(pid, (own, 'fail'), [(src, 'pass')])]
+    assert report.rulings.pending == [(pid, src, 'missing')]
+    assert _ruling_extras() == extras            # the ledger still says 'present'

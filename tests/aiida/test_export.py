@@ -535,20 +535,29 @@ def test_a_ruling_source_is_basenamed_in_the_archive(aiida_profile_clean,
 
 
 
-def test_a_ruling_conflict_source_is_basenamed_in_the_archive(aiida_profile_clean,
-                                                             no_profile_switch, tmp_path):
+def test_the_ruling_ledgers_sources_are_basenamed_in_the_archive(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    """The own file, another file, a missing one: every source path of the
+    ledger is its basename in an anonymised archive (two sources of one
+    basename stay apart)."""
     root = tmp_path / 'sim'
     run_dir = _hpc_tree(root, eject=(10.0,))
     pid = format_point_id(run_dir.relative_to(root).as_posix(), 'force', 10.0, 0.0, 2.0)
     entry = {'point': pid, 'note': 'viewer artefact', 'override': True}
     (root / 'integrity_rulings.yaml').write_text(
         yaml.safe_dump([{**entry, 'ruling': 'fail'}]), encoding='utf-8')
-    review = tmp_path / 'reviews' / 'x.yaml'
-    review.parent.mkdir()
-    review.write_text(yaml.safe_dump([{**entry, 'ruling': 'pass'}]), encoding='utf-8')
+    reviews = []
+    for name in ('a', 'b'):
+        review = tmp_path / 'reviews' / name / 'x.yaml'
+        review.parent.mkdir(parents=True)
+        review.write_text(yaml.safe_dump([{**entry, 'ruling': 'pass'}]), encoding='utf-8')
+        reviews.append(review)
     assert import_root(root, label='camp', machine='mycluster').ok()
-    from src.aiida.steps import CONFLICTS_EXTRA, apply_rulings
-    assert apply_rulings('camp', review).conflicts
+    from src.aiida.steps import LEDGER_EXTRA, apply_rulings
+    for review in reviews:
+        assert apply_rulings('camp', review).conflicts
+    reviews[1].unlink()
+    assert apply_rulings('camp').pending
 
     path = export_archive('camp', tmp_path / 'camp.aiida')
 
@@ -556,33 +565,11 @@ def test_a_ruling_conflict_source_is_basenamed_in_the_archive(aiida_profile_clea
     aiida_profile_clean.reset_storage()
     import_archive(path)
     group = orm.load_group('friction2d/camp')
-    assert [e['source'] for e in group.base.extras.get(CONFLICTS_EXTRA)] == ['x.yaml']
-
-
-def test_a_pending_ruling_source_is_basenamed_in_the_archive(aiida_profile_clean,
-                                                            no_profile_switch, tmp_path):
-    root = tmp_path / 'sim'
-    run_dir = _hpc_tree(root, eject=(10.0,))
-    pid = format_point_id(run_dir.relative_to(root).as_posix(), 'force', 10.0, 0.0, 2.0)
-    review = tmp_path / 'reviews' / 'x.yaml'
-    review.parent.mkdir()
-    review.write_text(yaml.safe_dump([{'point': pid, 'ruling': 'pass', 'override': True,
-                                       'note': 'viewer artefact'}]), encoding='utf-8')
-    assert import_root(root, label='camp', machine='mycluster').ok()
-    from src.aiida.steps import PENDING_EXTRA, apply_rulings, recheck_set
-    assert apply_rulings('camp', review).applied == 1
-    review.unlink()
-    settings = tmp_path / 'settings.yaml'
-    settings.write_text("integrity:\n  version: '1.1.0'\n", encoding='utf-8')
-    assert recheck_set('camp', settings_file=settings).rulings.pending
-
-    path = export_archive('camp', tmp_path / 'camp.aiida')
-
-    _assert_scrubbed(_archive_text(path), tmp_path)
-    aiida_profile_clean.reset_storage()
-    import_archive(path)
-    group = orm.load_group('friction2d/camp')
-    assert [e['source'] for e in group.base.extras.get(PENDING_EXTRA)] == ['x.yaml']
+    ledger = group.base.extras.get(LEDGER_EXTRA)
+    assert set(ledger) == {pid}
+    assert sorted(ledger[pid]) == ['integrity_rulings.yaml', 'x.yaml', 'x.yaml (2)']
+    assert sorted(e['status'] for e in ledger[pid].values()) == [
+        'missing', 'present', 'present']
 
 def test_a_failed_rewrite_leaves_no_archive(aiida_profile_clean, no_profile_switch,
                                             tmp_path, monkeypatch):

@@ -324,6 +324,7 @@ class ImportReport:
                   for pid, old, new in self.rechecked]
         if self.rulings is not None:
             lines.append(f'  rulings applied:     {self.rulings.applied}')
+            lines.append(f'  rulings replaced:    {self.rulings.replaced}')
             lines.append(f'  rulings skipped:     {self.rulings.skipped}')
             lines.append(f'  rulings withdrawn:   {len(self.rulings.withdrawn)}')
             lines += [f'  ruling withdrawn: {pid}' for pid in self.rulings.withdrawn]
@@ -937,7 +938,19 @@ def import_root(root: Path, label: Optional[str] = None, *,
                                     f'{type(exc).__name__}: {exc}'))
     if not dry_run:
         _integrity_pass(state)
+    elif state.group is not None:
+        _dry_rulings(state)
     return report
+
+
+def _dry_rulings(state: _Import) -> None:
+    """A dry run's rulings report: what the rulings pass would do to the
+    set as stored (no check is run, nothing is written)."""
+    rule_group = import_module(f'{__package__}.steps').rule_group
+    report = state.report
+    report.rulings = rule_group(state.group, dry_run=True)
+    report.overrides = list(report.rulings.overrides)
+    report.warnings += report.rulings.warnings
 
 
 def _integrity_pass(state: _Import) -> None:

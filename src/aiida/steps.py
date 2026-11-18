@@ -12,9 +12,9 @@
 * :func:`apply_ruling` -- a calcfunction: a verdict as one user ruling decides
   it (:func:`src.postprocessing.integrity_rulings.rule_verdict`, the rulings
   layer's own decision).
-* :func:`apply_rulings` -- the idempotent pass over a set's
-  ``integrity_rulings.yaml``: one ``apply_ruling`` per (verdict, ruling)
-  pair, keyed by the extra ``friction2d_ruling_key``.
+* :func:`apply_rulings` -- the idempotent rulings pass: reads the set's
+  rulings files into its ruling ledger (:mod:`src.aiida.ledger`) and gives
+  every live verdict the ruling the ledger calls for.
 * :func:`latest_verdict` -- the verdict a :class:`~src.aiida.policy.Policy`
   selects for a point, by declared version (never ctime); provisional or
   not is :func:`is_provisional`.
@@ -66,15 +66,10 @@ POINT_UUID_EXTRA = 'friction2d_point_uuid'
 RULING_KEY_EXTRA = 'friction2d_ruling_key'
 #: The uuid of the checker verdict a ruled or withdrawn verdict stands for.
 VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
-#: On a set Group: ``[{point, source, ruling, note}]``, the rulings of other
-#: files that name a point the set's own rulings file rules. They are not in
-#: force (the own file wins) and every rulings pass lists them.
-CONFLICTS_EXTRA = 'friction2d_ruling_conflicts'
-#: On a set Group: ``[{point, source, ruling, note}]``, rulings of other files
-#: that a re-check superseded and that could not yet be re-applied from their
-#: file (missing, or no longer ruling the point). Every own-file pass retries
-#: them and every rulings report lists them until re-applied or withdrawn.
-PENDING_EXTRA = 'friction2d_pending_rulings'
+#: On a set Group: the ruling ledger, ``{point id: {source path: entry}}``
+#: (:mod:`src.aiida.ledger`): every ruling of every rulings file, the
+#: ones not in force included. Every rulings pass reconciles the store with it.
+LEDGER_EXTRA = 'friction2d_rulings_ledger'
 #: True on a verdict checked while its stage-2 status was unknown (a
 #: ``_stage2`` failure in its run or (family, size) group): re-checked next time.
 PROVISIONAL_EXTRA = 'friction2d_provisional'
@@ -568,29 +563,6 @@ def _stale_settings(verdict: orm.Dict, current: Dict[str, Any]) -> bool:
     return 'settings' not in func.inputs or func.inputs.settings.get_dict() != current
 
 
-def _foreign_ruling(node: orm.Dict, pid: str) -> Optional[Dict[str, str]]:
-    """For a ruled verdict whose ruling came from another file than the
-    set's own, that ruling as a :data:`PENDING_EXTRA` entry."""
-    if node.base.extras.get(KIND_EXTRA, None) != 'ruled_verdict':
-        return None
-    ruling = node.creator.inputs.ruling.get_dict()
-    if ruling.get('own_file', True):
-        return None
-    return {'point': pid, 'source': ruling.get('source', ''),
-            'ruling': ruling['ruling'], 'note': ruling.get('note', '')}
-
-
-def _add_pending(group: orm.Group, entries: List[Dict[str, str]]) -> None:
-    """Add ``entries`` to the Group's :data:`PENDING_EXTRA` (one per
-    point and source)."""
-    if not entries:
-        return
-    keys = {(e['point'], e['source']) for e in entries}
-    stored = [e for e in group.base.extras.get(PENDING_EXTRA, [])
-              if (e.get('point'), e.get('source')) not in keys]
-    group.base.extras.set(PENDING_EXTRA, stored + entries)
-
-
 def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
                 failures: Optional[List[Tuple[str, str]]] = None,
                 warnings: Optional[List[str]] = None,
@@ -616,10 +588,9 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     With ``recheck``, every live point whose live verdict was checked under
     other integrity settings (:func:`_stale_settings`: another
     ``thresholds_version``, or other stored settings content) is checked
-    too, and superseded as a context change is -- ``aiida recheck``. A
-    superseded ruling that came from another file than the set's own is
-    recorded as pending (:data:`PENDING_EXTRA`): the next own-file pass
-    (:func:`rule_group`) re-applies it from that file.
+    too, and superseded as a context change is -- ``aiida recheck``. The
+    rulings pass that follows (:func:`rule_group`) re-applies every ruling
+    from the set's ledger to the new verdicts, whatever file it came from.
     """
     points = _live_points(group)
     verdicts = _live_verdicts(points)
@@ -634,7 +605,6 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
     if not new and not stale:
         return {}
     problems: List[str] = []
-    displaced: List[Dict[str, str]] = []
     counts: Counter = Counter()
     settings_node = None
     runs: Dict[str, _RunView] = {}
@@ -674,15 +644,10 @@ def check_group(group: orm.Group, *, settings: Optional[Dict[str, Any]] = None,
             counts[verdict['status']] += 1
             for dead in old:
                 for successor in _successors(dead):
-                    foreign = _foreign_ruling(successor, _pid(point))
-                    if foreign is not None:
-                        displaced.append(foreign)
                     _supersede(successor)
                 _supersede(dead)
             if old and rechecked is not None and old[-1]['status'] != verdict['status']:
                 rechecked.append((_pid(point), old[-1]['status'], verdict['status']))
-    # The rulings pass that follows re-applies them from their files.
-    _add_pending(group, displaced)
     if warnings is not None:
         warnings += problems
     return dict(counts)
@@ -730,43 +695,50 @@ def withdraw_ruling(ruled: orm.Dict, verdict: orm.Dict) -> orm.Dict:
 
 @dataclass
 class RulingReport:  # pylint: disable=too-many-instance-attributes
-    """What one :func:`apply_rulings` pass did.
+    """What one rulings pass (:func:`rule_group`) did, or would do (``dry_run``).
 
-    ``applied``/``skipped`` count (verdict, ruling) pairs: a new
-    ``apply_ruling``, or one already in the store. ``unmatched`` are ruling
-    ids naming no live point of the set; ``not_quarantined`` those on a point
-    that is not quarantined and that lack ``override: true`` or a note (or
-    would pass a point with no data). ``withdrawn`` are the points whose
-    ruled verdict was withdrawn because no applicable ruling names them any
-    more. ``overrides`` are ``(point id, original status, new status, note)``
-    of every live overridden verdict of the set, read from the store.
-    ``conflicts`` are ``(point id, own ruling, other file, its ruling)``:
-    another file rules a point the set's own file rules, and the own
-    file's ruling is in force.
-    ``pending`` are ``(point id, other file, reason)``: a ruling of another
-    file that a re-check superseded and that could not be re-applied from
-    that file (``missing``, ``no longer rules the point``, ``does not
-    apply``); ``pending_withdrawn`` ``(point id, other file)`` those this pass
-    dropped.
+    ``applied`` counts ruled verdicts made where none was in force,
+    ``replaced`` those made over another ruling, ``skipped`` the verdicts
+    whose ruling in force already is the one the ledger calls for.
+    ``withdrawn`` are the points whose ruling was withdrawn because no
+    source rules them any more. ``unmatched`` are ruled point ids naming no
+    live point of the set; ``not_quarantined`` those on a point that is not
+    quarantined and that lack ``override: true`` or a note (or would pass a
+    point with no data). ``overrides`` are ``(point id, original status,
+    new status, note)`` of every live overridden verdict of the set, read
+    from the store.
+
+    ``conflicts`` are ``(point id, (source, ruling) in force or None, why,
+    [(source, ruling) not applied])``: two or more sources rule the point
+    with different decisions. ``pending`` are ``(point id, source,
+    'missing')``: a ruling of a file that is gone, kept in the ledger and
+    still counted. ``pending_withdrawn`` are ``(point id, source)`` dropped
+    by ``--withdraw-pending``; ``retracted`` ``(point id, source)`` entries a
+    file no longer makes. ``own_source`` is the set's own rulings file.
     """
     label: str
     rulings_path: str = ''
+    own_source: str = ''
+    dry_run: bool = False
     applied: int = 0
+    replaced: int = 0
     skipped: int = 0
     unmatched: List[str] = field(default_factory=list)
     not_quarantined: List[str] = field(default_factory=list)
     withdrawn: List[str] = field(default_factory=list)
     overrides: List[Tuple[str, str, str, str]] = field(default_factory=list)
-    conflicts: List[Tuple[str, str, str, str]] = field(default_factory=list)
+    conflicts: List[Tuple[str, Optional[Tuple[str, str]], str, List[Tuple[str, str]]]] = \
+        field(default_factory=list)
     pending: List[Tuple[str, str, str]] = field(default_factory=list)
     pending_withdrawn: List[Tuple[str, str]] = field(default_factory=list)
+    retracted: List[Tuple[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def render(self) -> str:
         """The report as text."""
-        lines = [f'rulings for set {self.label!r} ({self.rulings_path}): '
-                 f'applied {self.applied}, skipped {self.skipped}, '
-                 f'withdrawn {len(self.withdrawn)}']
+        lines = [f'{"DRY RUN: " if self.dry_run else ""}rulings for set {self.label!r} '
+                 f'({self.rulings_path}): applied {self.applied}, replaced {self.replaced}, '
+                 f'skipped {self.skipped}, withdrawn {len(self.withdrawn)}']
         lines += [f'  override {pid}: {old} -> {new} ({note})'
                   for pid, old, new, note in self.overrides]
         lines += [f'  withdrawn: {pid}' for pid in self.withdrawn]
@@ -778,30 +750,35 @@ class RulingReport:  # pylint: disable=too-many-instance-attributes
         return '\n'.join(lines)
 
     def pending_lines(self) -> List[str]:
-        """Each of ``pending`` and ``pending_withdrawn`` as text."""
-        return ([f'ruling pending: {src} {reason}: {pid}; restore it with '
-                 f'`FrictionSim2D aiida rule {self.label} --rulings {src}`, or drop it '
-                 f'with `--withdraw-pending {src}`' for pid, src, reason in self.pending]
-                + [f'pending ruling withdrawn: {pid} ({src})'
-                   for pid, src in self.pending_withdrawn])
+        """Each of ``pending``, ``pending_withdrawn`` and ``retracted`` as text."""
+        lines = []
+        for pid, src, reason in self.pending:
+            if src == self.own_source:
+                lines.append(f'ruling pending: {src} {reason}: {pid}; the set\'s own rulings '
+                             f'file is unreachable, its ruling still counts')
+            else:
+                lines.append(f'ruling pending: {src} {reason}: {pid}; it still counts. '
+                             f'Restore it with `FrictionSim2D aiida rule {self.label} '
+                             f'--rulings {src}`, or drop it with `--withdraw-pending {src}`')
+        lines += [f'pending ruling withdrawn: {pid} ({src})'
+                  for pid, src in self.pending_withdrawn]
+        lines += [f'ruling retracted by its file: {pid} ({src})' for pid, src in self.retracted]
+        return lines
 
     def conflict_lines(self) -> List[str]:
         """Each of ``conflicts`` as text."""
-        return [f'{pid}: the own integrity_rulings.yaml rules {own} (in force); '
-                f'{source} rules {other} (not applied)'
-                for pid, own, source, other in self.conflicts]
+        lines = []
+        for pid, in_force, why, others in self.conflicts:
+            head = (f'{pid}: {in_force[0]} rules {in_force[1]} (in force: {why})'
+                    if in_force else f'{pid}: no ruling in force ({why})')
+            lines.append('; '.join([head] + [f'{src} rules {ruling} (not applied)'
+                                             for src, ruling in others]))
+        return lines
 
 
 def _canonical(content: Dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(',', ':'))
                           .encode('utf-8')).hexdigest()
-
-
-def _ruled(key: str) -> List[orm.Dict]:
-    """The live ruled verdicts carrying ``friction2d_ruling_key == key``."""
-    return [n for n in orm.QueryBuilder().append(
-        orm.Dict, filters={f'extras.{RULING_KEY_EXTRA}': key}).all(flat=True)
-        if _live(n)]
 
 
 def _successors(verdict: orm.Dict) -> List[orm.Dict]:
@@ -847,317 +824,230 @@ def _was_ruled_quarantined(verdict: orm.Dict) -> bool:
     return any(not _live(n) for n in qb.all(flat=True))
 
 
-def _rule(report: RulingReport, pid: str, ruling, verdict: orm.Dict,
-          source: Tuple[str, bool]) -> bool:
-    """One (ruling, verdict) pair: decide, skip or apply. True when the
-    ruling applies to the verdict (applied now or already).
-
-    ``source`` is ``(resolved rulings file, whether it is the set's own)``;
-    it goes into the ruling Dict as ``source``/``own_file``. The ruling key
-    covers ``source`` only for another file, so own-file keys made before
-    the field existed still match."""
+def _why_not(report: RulingReport, pid: str, entry: Dict[str, Any],
+             verdict: orm.Dict) -> Optional[str]:
+    """Why the ledger ``entry`` cannot rule ``verdict`` (``decide``), with
+    one warning; None when it can."""
     from ..postprocessing.integrity_rulings import decide  # pylint: disable=import-outside-toplevel
 
     original = verdict['status']
-    _status, why = decide(original, ruling)
-    if why is not None:
-        if original != 'quarantined' and pid not in report.not_quarantined:
-            report.not_quarantined.append(pid)
-        if (original != 'quarantined' and not ruling.override
-                and _was_ruled_quarantined(verdict)):
-            report.warnings.append(
-                f'integrity ruling no longer applies: {pid}: re-checked from '
+    _status, why = decide(original, _ruling_of(entry))
+    if why is None:
+        return None
+    if original != 'quarantined' and pid not in report.not_quarantined:
+        report.not_quarantined.append(pid)
+    if (original != 'quarantined' and not entry.get('override')
+            and _was_ruled_quarantined(verdict)):
+        line = (f'integrity ruling no longer applies: {pid}: re-checked from '
                 f'quarantined to {original}; the point is no longer quarantined, '
                 f'so its ruling now needs `override: true` and a note')
-        else:
-            report.warnings.append(f'integrity ruling ignored: {pid}: {why}')
-        return False
-    content = {'point': pid, 'ruling': ruling.ruling, 'note': ruling.note,
-               'date': ruling.date, 'override': ruling.override}
-    path, own = source
-    key = f'{verdict.uuid}|{_canonical(content if own else {**content, "source": path})}'
-    if _ruled(key):
-        report.skipped += 1
-        return True
-    node = _step_input({**content, 'source': path, 'own_file': own}, 'ruling')
+    else:
+        line = f'integrity ruling ignored: {pid}: {why}'
+    if line not in report.warnings:
+        report.warnings.append(line)
+    return why
+
+
+def _in_force_is(node: orm.Dict, source: str, entry: Dict[str, Any],
+                 own_source: Optional[str]) -> bool:
+    """Whether the ruled verdict ``node`` was made from ``source``'s
+    ``entry``. A ruling Dict without ``source`` predates the field and came
+    from the set's own file."""
+    from .ledger import CONTENT  # pylint: disable=import-outside-toplevel
+
+    content = node.creator.inputs.ruling.get_dict()
+    content['override'] = bool(content.get('override'))
+    return ((content.get('source') or own_source) == source
+            and all(content.get(k, '') == entry[k] for k in CONTENT))
+
+
+def _apply(pid: str, source: str, entry: Dict[str, Any], verdict: orm.Dict,
+           own_source: Optional[str]) -> None:
+    """A ruled verdict of ``verdict`` from ``source``'s ledger ``entry``; it
+    supersedes the verdict's earlier ruled and withdrawn ones."""
+    from .ledger import CONTENT  # pylint: disable=import-outside-toplevel
+
+    content = {'point': pid, **{k: entry[k] for k in CONTENT}, 'source': source}
+    node = _step_input({**content, 'own_file': source == own_source}, 'ruling')
     node.base.extras.set(AUTHOR_EXTRA, 'user')
     ruled = apply_ruling(verdict=verdict, ruling=node)
-    _tag(ruled, 'ruled_verdict', verdict, **{RULING_KEY_EXTRA: key})
+    _tag(ruled, 'ruled_verdict', verdict,
+         **{RULING_KEY_EXTRA: f'{verdict.uuid}|{_canonical(content)}'})
     for older in _successors(verdict):
         if older.pk != ruled.pk:
             _supersede(older)
-    report.applied += 1
-    return True
 
 
 def _withdraw(report: RulingReport, pid: str, verdict: orm.Dict,
-              ruled_nodes: List[orm.Dict]) -> None:
+              ruled_nodes: List[orm.Dict], dry_run: bool) -> None:
     """Withdraw ``ruled_nodes``, the live ruled verdicts of ``verdict``."""
-    for ruled in ruled_nodes:
-        back = withdraw_ruling(ruled=ruled, verdict=verdict)
-        _tag(back, 'withdrawn_verdict', verdict)
-        _supersede(ruled)
-        if pid not in report.withdrawn:
-            report.withdrawn.append(pid)
+    if not dry_run:
+        for ruled in ruled_nodes:
+            back = withdraw_ruling(ruled=ruled, verdict=verdict)
+            _tag(back, 'withdrawn_verdict', verdict)
+            _supersede(ruled)
+    if pid not in report.withdrawn:
+        report.withdrawn.append(pid)
 
 
-def _authoritative(group: orm.Group, path: Path) -> bool:
-    """Whether ``path`` is the set's own rulings file (or its directory)."""
+def _own_source(group: orm.Group) -> Optional[str]:
+    """The set's own rulings file, resolved; None without a ``source_root``."""
     from ..postprocessing.integrity_rulings import RULINGS_FILE  # pylint: disable=import-outside-toplevel
 
     root = group.base.extras.get('source_root', None)
-    if not root:
-        return False
-    own = (Path(root) / RULINGS_FILE).resolve()
-    path = Path(path)
-    return own in (path.resolve(), (path / RULINGS_FILE).resolve())
+    return str((Path(root) / RULINGS_FILE).resolve()) if root else None
 
 
-def _rulings_source(group: orm.Group, path: Path) -> Tuple[str, bool]:
-    """``(resolved rulings file, whether it is the set's own)`` of ``path``
-    (the file, or its directory)."""
+def _resolve_source(path: Path, own: Optional[str], known: Set[str]) -> str:
+    """The source ``path`` names: the file, or ``DIR/integrity_rulings.yaml``
+    for a directory -- also for one that does not exist when that is the
+    source the ledger knows (an unmounted drive)."""
     from ..postprocessing.integrity_rulings import RULINGS_FILE  # pylint: disable=import-outside-toplevel
 
-    if _authoritative(group, path):
-        return str((Path(group.base.extras.get('source_root')) / RULINGS_FILE).resolve()), True
     path = Path(path)
-    return str((path / RULINGS_FILE if path.is_dir() else path).resolve()), False
-
-
-def _from_source(ruled: orm.Dict, source: Tuple[str, bool]) -> bool:
-    """Whether the ruling behind the ruled verdict ``ruled`` came from
-    ``source``. A ruling Dict without ``own_file`` predates the field and
-    came from the set's own file."""
-    content = ruled.creator.inputs.ruling.get_dict()
-    own = content.get('own_file', True)
-    if source[1]:
+    as_file, in_dir = str(path.resolve()), str((path / RULINGS_FILE).resolve())
+    if own in (as_file, in_dir):
         return own
-    return not own and content.get('source') == source[0]
+    if path.is_dir() or (in_dir in known and as_file not in known):
+        return in_dir
+    return as_file
 
 
-def _unreadable(rulings) -> bool:
-    """Whether the file, or an entry of it, could not be read: its point is
-    unknown, so nothing may be withdrawn on the strength of its absence."""
-    return any(key == '<file>' or key.startswith('<malformed') for key in rulings)
-
-
-def _own_rulings(by_id: Dict[str, List[orm.Dict]],
-                 live: Dict[str, List[orm.Dict]]) -> Dict[str, str]:
-    """point id -> the ruling (``pass``/``fail``) of its in-force own-file
-    ruled verdict, from ``live`` (:func:`_ruled_by_verdict`)."""
-    out: Dict[str, str] = {}
-    for pid, pid_verdicts in by_id.items():
-        for verdict in pid_verdicts:
-            for node in live.get(verdict.uuid, []):
-                content = node.creator.inputs.ruling.get_dict()
-                if content.get('own_file', True):
-                    out[pid] = content['ruling']
-    return out
-
-
-def _overruled(by_id: Dict[str, List[orm.Dict]], before: Dict[str, List[orm.Dict]],
-               ruled: set) -> List[Dict[str, str]]:
-    """The conflicts an own-file pass made: rulings of other files that were
-    in force (``before`` the pass) on a verdict the own file now rules
-    (applying it superseded them: a verdict has one live ruled successor)."""
-    found = []
-    for pid, pid_verdicts in sorted(by_id.items()):
-        for verdict in pid_verdicts:
-            if verdict.uuid not in ruled:
-                continue
-            for node in before.get(verdict.uuid, []):
-                content = node.creator.inputs.ruling.get_dict()
-                if not content.get('own_file', True):
-                    found.append({'point': pid, 'source': content.get('source', ''),
-                                  'ruling': content['ruling'],
-                                  'note': content.get('note', '')})
-    return found
-
-
-def _record_conflicts(group: orm.Group, source: Tuple[str, bool],
-                      found: List[Dict[str, str]]) -> None:
-    """Store ``found`` in the Group's :data:`CONFLICTS_EXTRA`. A pass of
-    another file replaces that file's entries (what it rules now); the own
-    file's pass adds the rulings it just overruled."""
-    stored = list(group.base.extras.get(CONFLICTS_EXTRA, []))
-    if not source[1]:
-        stored = [e for e in stored if e.get('source') != source[0]]
-    keys = {(e['point'], e['source']) for e in found}
-    stored = [e for e in stored if (e.get('point'), e.get('source')) not in keys] + found
-    if stored != group.base.extras.get(CONFLICTS_EXTRA, []):
-        group.base.extras.set(CONFLICTS_EXTRA, stored)
-
-
-def _release_conflicts(group: orm.Group, by_id: Dict[str, List[orm.Dict]]) -> None:
-    """The own file wins only while it rules the point: a stored conflict
-    whose own ruling is gone becomes a pending ruling (:data:`PENDING_EXTRA`),
-    which the same pass re-applies from its file (:func:`_settle_pending`)."""
-    stored = list(group.base.extras.get(CONFLICTS_EXTRA, []))
-    if not stored:
-        return
-    own_ruled = _own_rulings(by_id, _ruled_by_verdict(
-        [v.uuid for vs in by_id.values() for v in vs]))
-    released = [e for e in stored if e['point'] not in own_ruled]
-    if released:
-        group.base.extras.set(CONFLICTS_EXTRA,
-                              [e for e in stored if e['point'] in own_ruled])
-        _add_pending(group, released)
-
-
-def _report_conflicts(group: orm.Group, report: RulingReport,
-                      own_ruled: Dict[str, str]) -> None:
-    """List every stored conflict whose point the own file rules with
-    another decision (:func:`_release_conflicts` has turned the others into
-    pending rulings)."""
-    for entry in group.base.extras.get(CONFLICTS_EXTRA, []):
-        pid, src, other = entry['point'], entry['source'], entry['ruling']
-        if pid in own_ruled and own_ruled[pid] != other:
-            report.conflicts.append((pid, own_ruled[pid], src, other))
-
-
-def _retry(report: RulingReport, entry: Dict[str, str],
-           pid_verdicts: List[orm.Dict], own_ruled: Dict[str, str],
-           found: List[Dict[str, str]]) -> Optional[str]:
-    """Re-apply one pending ruling from its file; None once it is settled
-    (applied, or the own file rules the point: a conflict, or agreement),
-    else why it is still pending."""
+def _load_source(source: str):
+    """``load_rulings`` of ``source``, or None when the file does not exist."""
     from ..postprocessing.integrity_rulings import load_rulings  # pylint: disable=import-outside-toplevel
-
-    pid, src = entry['point'], entry['source']
-    path = Path(src)
-    if not path.is_file():
-        return 'missing'
-    ruling = load_rulings(path).get(pid)
-    if ruling is None or ruling.error:
-        return 'no longer rules the point'
-    if pid in own_ruled:
-        if own_ruled[pid] != ruling.ruling:
-            found.append({'point': pid, 'source': src, 'ruling': ruling.ruling,
-                          'note': ruling.note})
-        return None
-    if not pid_verdicts:
-        return 'names no live point'
-    applied = [v for v in pid_verdicts if _rule(report, pid, ruling, v, (src, False))]
-    return None if applied else 'does not apply'
+    return load_rulings(Path(source)) if Path(source).is_file() else None
 
 
-def _settle_pending(group: orm.Group, report: RulingReport, by_id, source, rulings,
-                    withdraw: bool, dropped: Optional[str],
-                    found: List[Dict[str, str]]) -> None:
-    """Retry or drop the Group's pending rulings (:data:`PENDING_EXTRA`).
-
-    An own-file pass retries every one. A pass of another file settles that
-    file's: the ones it now applied or found in conflict end, and with
-    ``withdraw`` the ones it no longer rules are withdrawn. ``dropped`` (a
-    resolved path) withdraws every pending ruling of that file."""
-    stored = list(group.base.extras.get(PENDING_EXTRA, []))
-    if not stored:
-        return
-    live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
-    own_ruled = _own_rulings(by_id, live)
-    keep = []
-    for entry in stored:
-        pid, src = entry['point'], entry['source']
-        if src == dropped or (not source[1] and src == source[0] and withdraw
-                              and not _unreadable(rulings) and pid not in rulings):
-            report.pending_withdrawn.append((pid, src))
-            continue
-        if not source[1] and src != source[0]:
-            reason = 'missing' if not Path(src).is_file() else 'not re-applied yet'
-            keep.append(entry)
-            report.pending.append((pid, src, reason))
-            continue
-        reason = _retry(report, entry, by_id.get(pid, []), own_ruled, found)
-        if reason is not None:
-            keep.append(entry)
-            report.pending.append((pid, src, reason))
-    if keep != stored:
-        group.base.extras.set(PENDING_EXTRA, keep)
-
-
-def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
-               withdraw: Optional[bool] = None,
-               withdraw_pending: Optional[Path] = None) -> RulingReport:
-    """:func:`apply_rulings` on a loaded set Group."""
+def _update_ledger(ledger, report: RulingReport, own: Optional[str],
+                   explicit: Optional[str], dropped: Optional[str]) -> None:
+    """Read every source into ``ledger`` (:func:`.ledger.read_source`): the
+    sources the ledger already holds (one that is gone is marked missing), then the set's own file,
+    then ``explicit`` (``--rulings``), which is therefore seen last."""
     # pylint: disable=import-outside-toplevel
-    from ..postprocessing.integrity_rulings import RULINGS_FILE, load_rulings
-    from .ingest import GROUP_PREFIX
+    from ..postprocessing.integrity_rulings import load_rulings
+    from .ledger import Clock, read_source
 
-    if rulings_path is None:
-        root = group.base.extras.get('source_root', None)
-        rulings_path = Path(root) / RULINGS_FILE if root else None
-    report = RulingReport(label=group.label[len(GROUP_PREFIX) + 1:],
-                          rulings_path=str(rulings_path or ''))
-    if rulings_path is None:
-        report.warnings.append('the set records no source_root; pass the rulings file')
-        return report
-    source = _rulings_source(group, Path(rulings_path))
-    if withdraw is None:
-        withdraw = source[1]
-    rulings = load_rulings(Path(rulings_path))
+    clock = Clock()
+
+    def read(source, rulings, is_own):
+        for pid in read_source(ledger, source, rulings, own=is_own, now=clock(),
+                               warnings=report.warnings):
+            report.retracted.append((pid, source))
+
+    # An entry the own file made at a former source_root is that file's: it
+    # is not re-read as another source, and the own file replaces it.
+    former_own = {s for by_source in ledger.values() for s, e in by_source.items()
+                  if s != own and e.get('own_file')}
+    others = sorted({s for by_source in ledger.values() for s in by_source}
+                    - former_own - {own, explicit, dropped})
+    for source in others:                       # a file that is gone: missing
+        read(source, _load_source(source), False)
+    if own is None:
+        report.warnings.append("the set records no source_root: its own rulings file "
+                               "is not read")
+    elif Path(own).parent.is_dir():
+        for source in former_own:
+            for pid in sorted(ledger):
+                ledger[pid].pop(source, None)
+                if not ledger[pid]:
+                    del ledger[pid]
+        # An absent file inside an existing campaign root means "no rulings".
+        read(own, load_rulings(Path(own)), True)
+    else:
+        # An unreachable root (an unmounted drive) withdraws nothing.
+        read(own, None, True)
+        report.warnings.append(f'no ruling withdrawn: {own} is not reachable (its '
+                               f'directory {Path(own).parent} is missing)')
+    if explicit is not None and explicit != own:
+        rulings = _load_source(explicit)
+        if rulings is None and not any(explicit in e for e in ledger.values()):
+            report.warnings.append(f'{explicit} does not exist: nothing read')
+        else:
+            read(explicit, rulings, False)
+
+
+def _reconcile(group: orm.Group, ledger, report: RulingReport, own: Optional[str]) -> None:
+    """Make every live verdict's ruling in force the one the ledger calls
+    for (:func:`.ledger.desired_ruling`): apply it, replace another, or
+    withdraw one no source makes any more; then fill the report's
+    conflicts, pending and overrides. With ``report.dry_run`` nothing is
+    made: the counts say what would be."""
+    from .ledger import conflicts, desired_ruling  # pylint: disable=import-outside-toplevel
+
     points = _live_points(group)
     verdicts = _live_verdicts(points)
     by_id: Dict[str, List[orm.Dict]] = {}
     for point in points:
         by_id.setdefault(_pid(point), []).extend(verdicts[point.pk])
-    own = source[1]
-    before = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
-    own_ruled = {} if own else _own_rulings(by_id, before)
-    found: List[Dict[str, str]] = []
-    ruled: set = set()
-    for pid, ruling in rulings.items():
-        if ruling.error:
-            report.warnings.append(f'integrity ruling ignored: {ruling.error}')
-        elif not by_id.get(pid):
+    live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
+    for pid in sorted(set(by_id) | set(ledger)):
+        entries = ledger.get(pid, {})
+        pid_verdicts = by_id.get(pid, [])
+        if entries and not pid_verdicts:
             report.unmatched.append(pid)
-        elif pid in own_ruled:
-            # The own file wins: another file never flips its ruling. The
-            # same decision from both is no conflict.
-            if own_ruled[pid] != ruling.ruling:
-                found.append({'point': pid, 'source': source[0],
-                              'ruling': ruling.ruling, 'note': ruling.note})
-        else:
-            ruled |= {v.uuid for v in by_id[pid] if _rule(report, pid, ruling, v, source)}
-    if own:
-        found = _overruled(by_id, before, ruled)
-    if own:
-        # The own file lives in source_root, whichever form named it.
-        rulings_dir = Path(group.base.extras.get('source_root'))
-        reachable = rulings_dir.is_dir()
-    else:
-        given = Path(rulings_path)
-        reachable = (given / RULINGS_FILE if given.is_dir() else given).is_file()
-    if withdraw and not reachable:
-        # An absent file inside an existing campaign root means "no rulings";
-        # an unreachable root (an unmounted drive) or a mistyped path does not.
-        report.warnings.append(f'no ruling withdrawn: {rulings_path} is not '
-                               f'reachable (its directory {rulings_dir} is missing)'
-                               if own else
-                               f'no ruling withdrawn: {rulings_path} does not exist')
-    elif withdraw and _unreadable(rulings):
-        report.warnings.append('no ruling withdrawn: the rulings file has entries '
-                               'that cannot be read')
-    elif withdraw:
-        live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
-        for pid, pid_verdicts in sorted(by_id.items()):
-            for verdict in pid_verdicts:
-                mine = [n for n in live.get(verdict.uuid, []) if _from_source(n, source)]
-                if verdict.uuid not in ruled and mine:
-                    _withdraw(report, pid, verdict, mine)
-    _release_conflicts(group, by_id)
-    _settle_pending(group, report, by_id, source, rulings, bool(withdraw),
-                    str(Path(withdraw_pending).resolve()) if withdraw_pending else None,
-                    found)
+        chosen = desired_ruling(entries, own)
+        for verdict in pid_verdicts:
+            usable = {s for s, e in entries.items() if _why_not(report, pid, e, verdict) is None}
+            chosen = desired_ruling({s: entries[s] for s in usable}, own)
+            in_force = live.get(verdict.uuid, [])
+            if chosen is None:
+                if in_force:
+                    _withdraw(report, pid, verdict, in_force, report.dry_run)
+            elif len(in_force) == 1 and _in_force_is(in_force[0], chosen, entries[chosen],
+                                                     own):
+                report.skipped += 1
+            else:
+                if not report.dry_run:
+                    _apply(pid, chosen, entries[chosen], verdict, own)
+                if in_force:
+                    report.replaced += 1
+                else:
+                    report.applied += 1
+        found = conflicts(entries, own, chosen)
+        if found is not None:
+            report.conflicts.append((pid, *found))
+        report.pending += [(pid, s, 'missing') for s in sorted(entries)
+                           if entries[s].get('status') == 'missing']
     live = _ruled_by_verdict([v.uuid for vs in by_id.values() for v in vs])
     report.overrides = [
         (pid, node['original_status'], node['status'], node.get('note', ''))
         for pid, pid_verdicts in sorted(by_id.items()) for verdict in pid_verdicts
         for node in live.get(verdict.uuid, []) if node.get('overridden')]
-    own_after = _own_rulings(by_id, live)
-    if own or not _unreadable(rulings):
-        _record_conflicts(group, source, [e for e in found
-                                          if own_after.get(e['point']) != e['ruling']])
-    _report_conflicts(group, report, own_after)
+
+
+def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
+               withdraw_pending: Optional[Path] = None,
+               dry_run: bool = False) -> RulingReport:
+    """:func:`apply_rulings` on a loaded set Group; with ``dry_run``, the
+    report of what it would do, and nothing written."""
+    from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
+    from .ledger import drop_source  # pylint: disable=import-outside-toplevel
+
+    own = _own_source(group)
+    stored = group.base.extras.get(LEDGER_EXTRA, {})
+    ledger = json.loads(json.dumps(stored))                 # a deep copy
+    known = {s for by_source in ledger.values() for s in by_source}
+    explicit = None if rulings_path is None else _resolve_source(rulings_path, own, known)
+    report = RulingReport(label=group.label[len(GROUP_PREFIX) + 1:],
+                          rulings_path=explicit or own or '', own_source=own or '',
+                          dry_run=dry_run)
+    dropped = None
+    if withdraw_pending is not None:
+        dropped = _resolve_source(withdraw_pending, own, known)
+        if dropped == own:
+            report.warnings.append(f"{own} is the set's own rulings file: it is read on "
+                                   f"every pass, so edit it instead of dropping it")
+            dropped = None
+        else:
+            report.pending_withdrawn = [(pid, dropped) for pid in drop_source(ledger, dropped)]
+            if not report.pending_withdrawn:
+                report.warnings.append(f'the ledger holds no ruling of {dropped}: '
+                                       f'nothing dropped')
+    _update_ledger(ledger, report, own, explicit, dropped)
+    _reconcile(group, ledger, report, own)
+    if not dry_run and ledger != stored:
+        group.base.extras.set(LEDGER_EXTRA, ledger)
     return report
 
 
@@ -1165,44 +1055,36 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
                   withdraw: Optional[bool] = None,
                   withdraw_pending: Optional[Path] = None,
                   profile: Optional[str] = None) -> RulingReport:
-    """Apply ``integrity_rulings.yaml`` to the set ``friction2d/<label>``.
+    """Reconcile the set ``friction2d/<label>``'s rulings with its ruling
+    ledger (:mod:`src.aiida.ledger`, Group extra :data:`LEDGER_EXTRA`).
 
-    Reads ``<group.extras.source_root>/integrity_rulings.yaml`` by default
-    (``integrity_rulings.load_rulings``; ``rulings_path`` may be the file or
-    its directory). For each live verdict of a point a ruling names it runs
-    :func:`apply_ruling` -- unless a live ruled verdict already carries
-    ``friction2d_ruling_key == f'{verdict.uuid}|{sha256(canonical ruling)}'``.
-    A new ruled verdict supersedes the verdict's earlier ruled and withdrawn
-    ones. A quarantined point takes either ruling; any other needs
-    ``override: true`` and a note.
+    Every pass reads the set's own ``integrity_rulings.yaml``
+    (``<source_root>/integrity_rulings.yaml``), ``rulings_path`` when given
+    (the file or its directory), and every other rulings file the ledger
+    already holds that exists. A file that parses replaces its entries: a
+    point it no longer rules is withdrawn by it. A malformed entry is
+    skipped (the others count, nothing is withdrawn); an unreadable file
+    changes nothing. A file that is gone keeps its entries, marked
+    ``missing``: they still count and every report lists them as pending.
+    ``withdraw_pending`` (resolved as ``rulings_path`` is; it need not
+    exist) deletes that file's entries. ``withdraw`` is accepted for
+    compatibility and changes nothing: every pass follows the files.
 
-    Each ruling Dict records its file: ``source`` (the resolved path) and
-    ``own_file`` (whether it is the set's own ``integrity_rulings.yaml``).
-    Overrides are never permanent: reading the set's own rulings file (the
-    default), every live ruled verdict whose ruling came from that file and
-    whose point no applicable ruling there names any more -- entry deleted,
-    ``override: true`` or the note removed -- is withdrawn
-    (:func:`withdraw_ruling`), so the latest verdict follows the file. A
-    ruling from another file is left alone by that pass: only
-    ``withdraw=True`` with that same file (matched by resolved path)
-    withdraws it. An explicit ``rulings_path`` that is not the own file
-    withdraws nothing unless ``withdraw=True``; a file with unreadable
-    entries never does. A ruling Dict without ``own_file`` (made before it
-    was recorded) counts as the own file's.
-
-    The own file always wins. Another file's ruling is not applied to a
-    point with an own-file ruling in force, and an own-file pass applies its
-    ruling over another file's. Each such conflict is stored on the Group
-    (:data:`CONFLICTS_EXTRA`) and listed in ``conflicts`` by every later
-    pass, until that file no longer rules the point. The own file wins only
-    while it rules the point: once its ruling is gone, the other file's is
-    re-applied from that file on the same pass, or left pending.
+    Per point the ruling in force is the own file's, else the most recently
+    seen (added or changed) entry of another file -- the first of those that
+    applies (``decide``: a quarantined point takes either ruling, any other
+    needs ``override: true`` and a note). Each live verdict gets it
+    (:func:`apply_ruling`, superseding the earlier ruled and withdrawn
+    ones), loses one no source makes (:func:`withdraw_ruling`), or keeps the
+    one in force. Idempotent: a second pass makes no node and leaves the
+    ledger as it was. Each ruling Dict records ``source`` (the resolved
+    path) and ``own_file``.
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 
+    del withdraw                    # every pass follows the files
     load_aiida_profile(profile)
-    return rule_group(_set_group(label), rulings_path, withdraw=withdraw,
-                      withdraw_pending=withdraw_pending)
+    return rule_group(_set_group(label), rulings_path, withdraw_pending=withdraw_pending)
 
 
 @dataclass
@@ -1242,8 +1124,8 @@ def recheck_set(label: str, *, settings_file: Optional[Path] = None,
     verdict was checked with another ``thresholds_version``, or with other
     stored settings content, gets a new verdict; the old one is superseded
     with its ruled and withdrawn verdicts, as a context change does. Then
-    the set's own rulings file is applied (:func:`rule_group`), so its
-    rulings land on the new verdicts. A second pass checks nothing.
+    the rulings pass (:func:`rule_group`) gives the new verdicts the rulings
+    of the set's ledger, from every file. A second pass checks nothing.
     """
     from . import load_aiida_profile  # pylint: disable=import-outside-toplevel
 

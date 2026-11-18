@@ -740,13 +740,13 @@ def aiida_import(simulation_folder: Path, label: Optional[str],  # pylint: disab
               help='Rulings file, or its directory (default: integrity_rulings.yaml '
                    'in the root the set was imported from).')
 @click.option('--withdraw', is_flag=True,
-              help='Also withdraw every ruling the file no longer makes (always '
-                   "done for the set's own file; never otherwise without this).")
+              help='Kept for compatibility; changes nothing. Every pass follows each '
+                   'file: a point a file no longer rules loses that file\'s ruling.')
 @click.option('--withdraw-pending', 'withdraw_pending',
               type=click.Path(path_type=Path), default=None,
-              help='Drop every pending ruling of this rulings file (one a re-check '
-                   'superseded and that could not be re-applied, e.g. the file is '
-                   'gone). The file need not exist.')
+              help='Drop every ruling of this rulings file (or directory) from the '
+                   "set's ruling ledger, e.g. a pending one whose file is gone for "
+                   'good. The file need not exist.')
 @click.option('--profile', default=None,
               help='AiiDA profile name (default: configured default profile)')
 def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-many-arguments
@@ -755,9 +755,13 @@ def aiida_rule(label: str, rulings_path: Optional[Path],  # pylint: disable=too-
     """Apply a rulings file to the set LABEL: a pass or fail ruling per
     quarantined point (or, with ``override: true`` and a note, per any point).
 
-    Idempotent: a ruling already applied is skipped. Prints what was applied,
-    skipped and withdrawn, every live override of the set, and the rulings
-    that name no point of it.
+    Every pass reads the set's own integrity_rulings.yaml, the --rulings
+    file, and every other file the set's ruling ledger already holds. The
+    own file's ruling wins; else the most recently added or changed one.
+    A file that is gone keeps its rulings (listed as pending). Idempotent.
+    Prints what was applied, replaced, skipped and withdrawn, every live
+    override, every conflict and pending ruling, and the rulings that name
+    no point of the set.
 
     Example:
         FrictionSim2D aiida rule 260421-afm --rulings ~/reviews/260421.yaml

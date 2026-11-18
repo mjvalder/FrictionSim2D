@@ -861,9 +861,9 @@ def _anonymise_remote(archive: _Archive, labels: Mapping[int, str]) -> int:
 
 def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
     """A set Group's ``source_root`` -> its basename, ``source_host`` -> the
-    machine label, or ``'unknown'``, and each ruling conflict's and pending
-    ruling's ``source`` its basename."""
-    from .steps import CONFLICTS_EXTRA, PENDING_EXTRA  # pylint: disable=import-outside-toplevel
+    machine label, or ``'unknown'``, and each source path of the ruling
+    ledger its basename (:func:`_basenamed_ledger`)."""
+    from .steps import LEDGER_EXTRA  # pylint: disable=import-outside-toplevel
     changed = 0
     for pk, extras in archive.rows('SELECT id, extras FROM db_dbgroup'):
         content = json.loads(extras or '{}')
@@ -872,15 +872,28 @@ def _anonymise_groups(archive: _Archive, hosts: Mapping[str, str]) -> int:
             content['source_root'] = PurePosixPath(str(content['source_root'])).name
         if content.get('source_host'):
             content['source_host'] = hosts.get(content['source_host'], 'unknown')
-        for key in (CONFLICTS_EXTRA, PENDING_EXTRA):
-            if content.get(key):
-                content[key] = [
-                    {**entry, 'source': PurePosixPath(str(entry.get('source', ''))).name}
-                    for entry in content[key]]
+        if content.get(LEDGER_EXTRA):
+            content[LEDGER_EXTRA] = _basenamed_ledger(content[LEDGER_EXTRA])
         if content != before:
             archive.set_json(pk, 'extras', content, table='db_dbgroup')
             changed += 1
     return changed
+
+
+def _basenamed_ledger(ledger: Mapping[str, Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """The ruling ledger with every source path its basename; two sources of
+    one basename become ``x.yaml`` and ``x.yaml (2)``, the same name for the
+    same path in every point."""
+    names: Dict[str, str] = {}
+    for source in sorted({s for by_source in ledger.values() for s in by_source}):
+        name = PurePosixPath(source).name
+        n, unique = 1, name
+        while unique in names.values():
+            n += 1
+            unique = f'{name} ({n})'
+        names[source] = unique
+    return {pid: {names[s]: entry for s, entry in by_source.items()}
+            for pid, by_source in ledger.items()}
 
 
 #: An absolute path inside free text (not ``eV/angstrom``: a word character

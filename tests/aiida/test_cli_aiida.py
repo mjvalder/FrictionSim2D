@@ -71,7 +71,7 @@ def test_rule_without_rulings_applies_and_skips_nothing(store, tmp_path):
     _imported(tmp_path / 'sim')
     result = _run('rule', 'camp')
     assert result.exit_code == 0, result.output
-    assert 'applied 0, skipped 0' in result.output
+    assert 'applied 0, replaced 0, skipped 0' in result.output
 
 
 def test_rule_prints_the_overrides_and_the_withdrawn(store, tmp_path):
@@ -84,17 +84,18 @@ def test_rule_prints_the_overrides_and_the_withdrawn(store, tmp_path):
 
     applied = _run('rule', 'camp', '--rulings', str(rulings))
     assert applied.exit_code == 0, applied.output
-    assert 'applied 1, skipped 0' in applied.output
+    assert 'applied 1, replaced 0, skipped 0' in applied.output
     assert f'override {pid}: complete -> ' in applied.output
     assert 'skipped 1' in _run('rule', 'camp', '--rulings', str(rulings)).output
 
-    rulings.write_text('', encoding='utf-8')
-    kept = _run('rule', 'camp', '--rulings', str(rulings))
-    assert 'withdrawn 0' in kept.output         # an explicit file withdraws nothing ...
-    gone = _run('rule', 'camp', '--rulings', str(rulings), '--withdraw')
-    assert gone.exit_code == 0, gone.output    # ... unless told to
+    rulings.write_text('', encoding='utf-8')     # the file withdraws its ruling
+    gone = _run('rule', 'camp', '--rulings', str(rulings))
+    assert gone.exit_code == 0, gone.output
     assert 'withdrawn 1' in gone.output and f'withdrawn: {pid}' in gone.output
+    assert f'ruling retracted by its file: {pid}' in gone.output
     assert 'override ' not in gone.output
+    again = _run('rule', 'camp', '--rulings', str(rulings), '--withdraw')
+    assert again.exit_code == 0 and 'withdrawn 0' in again.output   # a no-op flag
 
 
 def test_rule_on_an_unknown_set_fails_cleanly(store):
