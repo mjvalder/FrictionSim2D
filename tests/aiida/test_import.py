@@ -636,6 +636,23 @@ def test_sheet_points_are_pressures(tmp_path):
     assert (point.load_kind, point.load, point.layers) == ('pressure', 1.0, None)
 
 
+
+def test_a_sync_conflict_copy_is_not_a_tier(tmp_path):
+    """A Syncthing copy sorts before its original (`.sync` < `.txt`) and also
+    matches the point pattern: it must never stand in for the original."""
+    root = tmp_path / 'sim'
+    make_run(root, REL, 'afm', loads=(10.0,), tiers=('window', 'raw'))
+    loc, = discover_runs(root)
+    for path in sorted(loc.results_dir.iterdir()):
+        stem, suffix = path.name.split('.', 1)
+        shutil.copy(path, loc.results_dir / f'{stem}.sync-conflict-20261001-120000-ABCDEFG.{suffix}')
+
+    point, = load_points(loc)
+
+    assert set(point.tiers) == {'window', 'raw'}
+    assert not any('.sync-conflict-' in p.name for p in point.tiers.values())
+    assert not any('.sync-conflict-' in p.name for p in point.aux)
+
 def test_indent_pairs_its_retract_curve_with_the_hold(tmp_path):
     root = tmp_path / 'sim'
     run_dir = make_run(root, 'indent/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/L1',

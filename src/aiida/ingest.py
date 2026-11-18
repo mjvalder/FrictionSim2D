@@ -102,7 +102,8 @@ _RUN_NODE_GLOBS = ('provenance.json', 'provenance/**/*', 'lammps/*.in',
 
 def _aux_files(locator, claimed=()) -> Tuple[Path, ...]:
     """Every retained file of the run that neither the run node nor a load
-    point's tier/retract/grid file already stores.
+    point's tier/retract/grid file already stores, Syncthing
+    ``*.sync-conflict-*`` copies left out.
 
     Derived from `retention.retained_paths` -- the same rule the CalcJob's
     `retrieve_list` is built from -- so the import path and the CalcJob path
@@ -122,7 +123,8 @@ def _aux_files(locator, claimed=()) -> Tuple[Path, ...]:
     for pattern in _RUN_NODE_GLOBS:
         skip.update(p.resolve() for p in run_dir.glob(pattern))
     return tuple(run_dir / path.relative_to(resolved_root)
-                 for path in retained_paths(run_dir) if path not in skip)
+                 for path in retained_paths(run_dir)
+                 if path not in skip and _CONFLICT not in path.name)
 
 
 def _match_point(name: str, model: str):
@@ -193,6 +195,8 @@ def load_points(locator) -> List[LoadPoint]:
     model = locator.tokens.model
     grouped: Dict[Tuple[str, float, float, float, Optional[int]], Dict[str, Path]] = {}
     for path in sorted(locator.results_dir.iterdir()):
+        if _CONFLICT in path.name:
+            continue   # a Syncthing copy: the original is the result
         matched = _match_point(path.name, model)
         if matched is None:
             continue
