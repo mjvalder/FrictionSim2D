@@ -305,8 +305,9 @@ FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--withdraw-pending
 
 Every pass reads the set's own file, the `--rulings` file, and every other
 file the set's ruling ledger already holds that still exists. The own file's
-ruling wins; else the most recently added or changed one. A file that is gone
-keeps its rulings: they still count and are listed as pending (see aiida.md
+ruling wins; else the one whose decision was most recently added or changed
+(a note edit does not count). An empty file changes nothing; `[]` withdraws
+every ruling of it. A file that is gone keeps its rulings: they still count and are listed as pending (see aiida.md
 §5.3).
 
 Idempotent. Prints
@@ -314,8 +315,10 @@ Idempotent. Prints
 then every live override of the set (`override <point>: <original> -> <new> (<note>)`),
 `withdrawn: <point>`, `unmatched: <point>` (no point of the set) and
 `not quarantined: <point>` (needs `override: true` and a note),
-`conflict <point>: ...` (files that disagree, naming the ruling in force and
-why), `ruling pending: <file> missing: <point>; ...`,
+`ruling changed: <point> <old> -> <new> (<file>, <why>)` (every change of the
+decision in force), `conflict <point>: ...` (files that disagree, naming the
+ruling in force and why), `ruling pending: <file> missing: <point>; ...`,
+`ruling archived: ...` (rulings from an archive, never read from disk),
 `ruling retracted by its file: ...` and `pending ruling withdrawn: ...`
 lines, and warnings.
 

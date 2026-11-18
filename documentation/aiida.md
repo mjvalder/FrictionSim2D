@@ -475,8 +475,11 @@ needs `override: true` **and** a non-empty `note`:
 Every set keeps a **ruling ledger** (Group extra `friction2d_rulings_ledger`):
 every ruling of every rulings file, by point id and file, including the ones
 not in force. Each entry records the ruling, its note and date, its file
-(`source`), when it was **seen** (first added, or last changed), and whether
-the file is `present` or `missing`.
+(`source`), when it was **seen** (first added, or its decision last changed),
+whether the file is `present`, `missing` or `archived`, and which entry is in
+force. A set ruled before the ledger existed gets one at its next pass, built
+from its live rulings and the old `friction2d_pending_rulings` and
+`friction2d_ruling_conflicts` extras, which are then deleted.
 
 **Which files are read.** Every import, `aiida rule` and `aiida recheck`
 reads:
@@ -495,7 +498,9 @@ reads:
 - A malformed entry is skipped with a warning. The file's other entries still
   count, but nothing of that file is withdrawn on that pass
   (`WARNING no ruling of <file> withdrawn: it has entries that cannot be read`).
-- A file that cannot be read at all changes nothing, with a warning.
+- A file that cannot be read at all changes nothing, with a warning. So does a
+  file that is empty (0 bytes, blank, or only comments), as an editor may
+  leave it: write `[]` to withdraw every ruling of a file.
 - A file that is **gone** keeps its entries, marked `missing`. They **still
   count**: an unmounted drive never costs you an override. Every report lists
   them as pending:
@@ -506,6 +511,17 @@ reads:
   force, are listed as pending, and the report warns
   `WARNING no ruling withdrawn: <file> is not reachable (its directory <root> is missing)`.
   A missing file inside an existing root does mean "no rulings".
+- **A moved root.** When a set is re-imported from another root, the rulings
+  the own file made at the old root rank as another file's from then on, at
+  their old path (`missing` if it is gone). The new own file overrides them
+  only where it rules a point. The report warns once:
+  `WARNING former own rulings file <path> now ranks as another file: ...`.
+  A dry run judges this against the root being imported.
+- **Archived rulings.** A set loaded from an anonymised archive has basenames
+  in its ledger (`x.yaml`, `x.yaml (2)`). They are never read from disk: they
+  stay in force, marked `archived`, and the first pass prints
+  `ruling archived: <point> (<file>): it came with an archive and still counts; no file is read for it`.
+  They are not pending and carry no restore hint.
 - `aiida rule LABEL --withdraw-pending FILE` deletes every entry of FILE from
   the ledger (a directory means `DIR/integrity_rulings.yaml`; the file need
   not exist). The report prints `pending ruling withdrawn: <point> (<file>)`.
@@ -515,10 +531,17 @@ reads:
 
 1. the set's own file's ruling, if it rules the point;
 2. else the **most recently seen** ruling of another file. Re-reading an
-   unchanged file does not make it newer; editing its entry does.
+   unchanged file does not make it newer, and neither does editing an entry's
+   note or date; changing its `ruling` or `override` does.
 
 A ruling that does not apply to the point's verdict (no `override: true` on a
-point that is not quarantined) is skipped and the next one counts. Every pass
+point that is not quarantined) is skipped and the next one counts, with
+`WARNING integrity ruling ignored: <point> (<file>): <why>`. A lower-ranked
+ruling that does not apply while another is in force is not reported.
+
+**Every change of decision is printed**, whatever caused it:
+`ruling changed: <point> <old> -> <new> (<file>, <why>)`, where a decision is
+`pass`, `fail` or `none`. Every pass
 makes the store match: it applies the ruling, replaces another one, or
 withdraws one no file makes any more. A second identical pass makes nothing.
 The reports count `applied`, `replaced`, `skipped` and `withdrawn`.
