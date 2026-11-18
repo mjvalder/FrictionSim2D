@@ -7,7 +7,7 @@ projections and reduced in pandas (critique I8), never node by node:
 
 * :meth:`Friction2DDB.query` -- one row per live point: the run tokens (the
   CalcJob extra ``friction2d_tokens``), the point's own attributes with
-  units, the verdict and the summary the :class:`~src.aiida.policy.Policy`
+  units, the verdict and the summary the :class:`~src.aiida.rulings.Policy`
   selects.
 * :func:`point_table` -- one row per point, one column per requested field
   (``<block name>.<field path>``, elided fields refilled from the run's own
@@ -39,7 +39,7 @@ from ..core.compare import canonical_text, refill
 from .block_schema import BLOCK_KINDS, FIELD_MAP, REALIZATION_FIELDS, unindexed
 from .blocks import NAME_SEP, block_kind
 from .compare import block_name, schema_tables
-from .policy import Policy
+from .rulings import Policy
 
 try:
     from aiida import orm

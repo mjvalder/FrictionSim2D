@@ -13,9 +13,9 @@
   it (:func:`src.postprocessing.integrity_rulings.rule_verdict`, the rulings
   layer's own decision).
 * :func:`apply_rulings` -- the idempotent rulings pass: reads the set's
-  rulings files into its ruling ledger (:mod:`src.aiida.ledger`) and gives
+  rulings files into its ruling ledger (:mod:`src.aiida.rulings`) and gives
   every live verdict the ruling the ledger calls for.
-* :func:`latest_verdict` -- the verdict a :class:`~src.aiida.policy.Policy`
+* :func:`latest_verdict` -- the verdict a :class:`~src.aiida.rulings.Policy`
   selects for a point, by declared version (never ctime); provisional or
   not is :func:`is_provisional`.
 * :func:`summarise` -- a calcfunction: one point's ``RunSummary`` with units;
@@ -47,7 +47,7 @@ from aiida import orm
 from aiida.engine import calcfunction
 
 from .. import __version__ as CODE_VERSION
-from .policy import Policy, select
+from .rulings import Policy, select
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ RULING_KEY_EXTRA = 'friction2d_ruling_key'
 #: The uuid of the checker verdict a ruled or withdrawn verdict stands for.
 VERDICT_UUID_EXTRA = 'friction2d_verdict_uuid'
 #: On a set Group: the ruling ledger, ``{point id: {source path: entry}}``
-#: (:mod:`src.aiida.ledger`): every ruling of every rulings file, the
+#: (:mod:`src.aiida.rulings`): every ruling of every rulings file, the
 #: ones not in force included. Every rulings pass reconciles the store with it.
 LEDGER_EXTRA = 'friction2d_rulings_ledger'
 #: The Group extras the ledger replaced: read once to seed the ledger of a
@@ -876,7 +876,7 @@ def _matches_source(recorded: Optional[str], source: str, own_source: Optional[s
 def _in_force_is(node: orm.Dict, source: str, entry: Dict[str, Any],
                  own_source: Optional[str]) -> bool:
     """Whether the ruled verdict ``node`` was made from ``source``'s ``entry``."""
-    from .ledger import CONTENT  # pylint: disable=import-outside-toplevel
+    from .rulings import CONTENT  # pylint: disable=import-outside-toplevel
 
     content = node.creator.inputs.ruling.get_dict()
     content['override'] = bool(content.get('override'))
@@ -888,7 +888,7 @@ def _apply(pid: str, source: str, entry: Dict[str, Any], verdict: orm.Dict,
            own_source: Optional[str]) -> None:
     """A ruled verdict of ``verdict`` from ``source``'s ledger ``entry``; it
     supersedes the verdict's earlier ruled and withdrawn ones."""
-    from .ledger import CONTENT  # pylint: disable=import-outside-toplevel
+    from .rulings import CONTENT  # pylint: disable=import-outside-toplevel
 
     content = {'point': pid, **{k: entry[k] for k in CONTENT}, 'source': source}
     node = _step_input({**content, 'own_file': source == own_source}, 'ruling')
@@ -990,12 +990,12 @@ def _former_own(ledger, own: Optional[str], report: RulingReport) -> None:
 
 def _update_ledger(ledger, report: RulingReport, own: Optional[str],
                    explicit: Optional[str], dropped: Optional[str]) -> None:
-    """Read every source into ``ledger`` (:func:`.ledger.read_source`): the
+    """Read every source into ``ledger`` (:func:`.rulings.read_source`): the
     sources the ledger already holds (one that is gone is marked missing),
     then the set's own file, then ``explicit`` (``--rulings``), which is
     therefore seen last. A source that is not an absolute path (from an
     anonymised archive) is never read: it is marked ``archived``."""
-    from .ledger import Clock, read_source  # pylint: disable=import-outside-toplevel
+    from .rulings import Clock, read_source  # pylint: disable=import-outside-toplevel
 
     clock = Clock()
 
@@ -1033,7 +1033,7 @@ def _update_ledger(ledger, report: RulingReport, own: Optional[str],
 
 
 def _seed_entry(content: Dict[str, Any], own_file: bool, when) -> Dict[str, Any]:
-    from .ledger import stamp  # pylint: disable=import-outside-toplevel
+    from .rulings import stamp  # pylint: disable=import-outside-toplevel
     return {'ruling': content['ruling'], 'note': content.get('note', '') or '',
             'date': content.get('date', '') or '', 'override': bool(content.get('override')),
             'own_file': own_file, 'author': 'user', 'seen_at': stamp(when),
@@ -1094,7 +1094,7 @@ def _record_refusals(report: RulingReport, pid: str, refusals: Dict[str, Optiona
 def _reconcile(group: orm.Group, ledger, previous, report: RulingReport,
                own: Optional[str]) -> None:
     """Make every live verdict's ruling in force the one the ledger calls
-    for (the first source of :func:`.ledger.ruling_order` that applies):
+    for (the first source of :func:`.rulings.ruling_order` that applies):
     apply it, replace another, or
     withdraw one no source makes any more; mark it ``in_force`` in the
     ledger; then fill the report's changes, conflicts, pending and
@@ -1102,7 +1102,7 @@ def _reconcile(group: orm.Group, ledger, previous, report: RulingReport,
     before this pass. With ``report.dry_run`` nothing is made: the counts
     say what would be."""
     # pylint: disable=import-outside-toplevel
-    from .ledger import conflicts, ruling_order, why_in_force
+    from .rulings import conflicts, ruling_order, why_in_force
 
     points = _live_points(group)
     verdicts = _live_verdicts(points)
@@ -1172,7 +1172,7 @@ def rule_group(group: orm.Group, rulings_path: Optional[Path] = None, *,
     report of what it would do, and nothing written. ``root`` is the root
     being imported, when it is not yet the set's ``source_root`` (a dry run)."""
     from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
-    from .ledger import drop_source  # pylint: disable=import-outside-toplevel
+    from .rulings import drop_source  # pylint: disable=import-outside-toplevel
 
     report = RulingReport(label=group.label[len(GROUP_PREFIX) + 1:], dry_run=dry_run)
     own = _own_source(group, root, report.warnings)
@@ -1217,7 +1217,7 @@ def apply_rulings(label: str, rulings_path: Optional[Path] = None, *,
                   withdraw_pending: Optional[Path] = None,
                   profile: Optional[str] = None) -> RulingReport:
     """Reconcile the set ``friction2d/<label>``'s rulings with its ruling
-    ledger (:mod:`src.aiida.ledger`, Group extra :data:`LEDGER_EXTRA`).
+    ledger (:mod:`src.aiida.rulings`, Group extra :data:`LEDGER_EXTRA`).
 
     Every pass reads the set's own ``integrity_rulings.yaml``
     (``<source_root>/integrity_rulings.yaml``), ``rulings_path`` when given
@@ -1373,7 +1373,7 @@ def latest_verdict(point: orm.FolderData, policy: Policy = Policy()) -> Optional
 
     Among the point's live verdicts -- the checker's (``check_integrity``),
     the ruled (``apply_ruling``) and the withdrawn (``withdraw_ruling``) --
-    :func:`src.aiida.policy.select` takes the newest generation
+    :func:`src.aiida.rulings.select` takes the newest generation
     (``thresholds_version``, then ``code_version``; or the pinned one), and
     within it a ruled verdict over a withdrawn one over the checker's; then
     the uuid. Never the creation time. Whether the choice is provisional is
@@ -1540,7 +1540,7 @@ def _live_summaries(points: List[orm.FolderData]) -> Dict[int, List[orm.Dict]]:
 def latest_summaries(points: List[orm.FolderData], policy: Policy = Policy(), *,
                      digest: Optional[str] = None) -> Dict[int, Optional[orm.Dict]]:
     """point pk -> the summary ``policy`` selects among the point's live
-    summaries (:func:`src.aiida.policy.select`): only those made with the
+    summaries (:func:`src.aiida.rulings.select`): only those made with the
     options whose :func:`options_hash` is ``digest`` (any, when None), then
     the highest ``code_version``, then the uuid. In one query."""
     return {pk: _select_node(nodes, 'summary', policy, digest)

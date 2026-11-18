@@ -563,7 +563,7 @@ In an anonymised archive every file path in the ledger is its basename.
 ### 5.4 Which verdict counts: the policy
 
 A point can hold several live verdicts (checker, ruled, withdrawn, and those of
-a newer threshold set). `src/aiida/policy.py` picks one by **declared version,
+a newer threshold set). `src/aiida/rulings.py` picks one by **declared version,
 never by creation time**:
 
 1. the highest `thresholds_version`, then the highest `code_version`: a newer
