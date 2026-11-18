@@ -296,21 +296,27 @@ FrictionSim2D aiida rule LABEL [--rulings PATH] [--withdraw] [--withdraw-pending
 
 - `--rulings PATH` — the file, or its directory (default:
   `integrity_rulings.yaml` in the root the set was imported from). A path that
-  does not exist is an error; nothing is read or withdrawn.
-- `--withdraw` — also withdraw the rulings this file made that it no longer
-  makes. The set's own file always withdraws its own; another file does only
-  with this flag. Each file withdraws only the rulings applied from it
-  (matched by resolved path), never another file's. It also withdraws that
-  file's pending rulings (below) for points it no longer names.
-- `--withdraw-pending PATH` — drop every pending ruling of that file. The
-  file need not exist; use it when the file is gone for good.
+  does not exist is an error; nothing is read.
+- `--withdraw` — kept for compatibility; changes nothing. Every pass follows
+  each file: a point a file no longer rules loses that file's ruling.
+- `--withdraw-pending PATH` — delete every ruling of that file (or
+  `DIR/integrity_rulings.yaml`) from the set's ruling ledger. The file need
+  not exist; use it when the file is gone for good.
+
+Every pass reads the set's own file, the `--rulings` file, and every other
+file the set's ruling ledger already holds that still exists. The own file's
+ruling wins; else the most recently added or changed one. A file that is gone
+keeps its rulings: they still count and are listed as pending (see aiida.md
+§5.3).
 
 Idempotent. Prints
-`rulings for set '<label>' (<path>): applied N, skipped N, withdrawn N`, then
-every live override of the set (`override <point>: <original> -> <new> (<note>)`),
+`rulings for set '<label>' (<path>): applied N, replaced N, skipped N, withdrawn N`,
+then every live override of the set (`override <point>: <original> -> <new> (<note>)`),
 `withdrawn: <point>`, `unmatched: <point>` (no point of the set) and
 `not quarantined: <point>` (needs `override: true` and a note),
-`conflict <point>: ...` and `ruling pending: <file> <reason>: <point>; ...`
+`conflict <point>: ...` (files that disagree, naming the ruling in force and
+why), `ruling pending: <file> missing: <point>; ...`,
+`ruling retracted by its file: ...` and `pending ruling withdrawn: ...`
 lines, and warnings.
 
 ### aiida recheck
@@ -328,10 +334,9 @@ FrictionSim2D aiida recheck LABEL [--settings-file PATH] [--profile TEXT]
   without a version bump counts).
 - The old verdict is superseded with its ruled and withdrawn verdicts, as when
   a later import changes a point's context. Then the set's own rulings file is
-  applied again, so its rulings land on the new verdicts. A ruling applied from
-  another file is re-applied from that file too; if the file is missing or no
-  longer rules the point, the ruling is kept as pending and listed by every
-  later import, `aiida rule` and `aiida recheck` (see aiida.md §5.3).
+  applied again, so its rulings land on the new verdicts. A ruling from
+  another file is re-applied from the set's ruling ledger too, even if that
+  file is missing (it is then listed as pending; see aiida.md §5.3).
 - Prints `set '<label>': N point(s) checked under integrity thresholds v<version>`,
   the new verdict counts, `re-checked <point>: <old> -> <new>` for every point
   whose status changed, failures, warnings and the rulings report.

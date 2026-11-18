@@ -454,75 +454,88 @@ needs `override: true` **and** a non-empty `note`:
   report prints each live override of the set:
   `override <point>: <original> -> <new> (<note>)`. The ruled verdict carries
   `overridden: true` and `original_status`.
-- **Withdrawing.** Remove the entry (or its `override: true`, or its note) and
-  re-apply the file (`aiida rule LABEL`, or the next import). The ruling is
+- **Withdrawing.** Remove the entry (or its `override: true`, or its note)
+  and re-apply the file (`aiida rule LABEL`, or the next import). The ruling is
   withdrawn: `withdraw_ruling` puts the checker's verdict back in force,
   stamped `withdrawn_ruling=<ruled uuid>`. `aiida rule` prints
   `withdrawn: <point>`; the import report prints `ruling withdrawn: <point>`.
   A ruling naming no point of the set is printed as `unmatched: <point>`
   (`ruling unmatched: <point>` in the import report).
-  - Each file withdraws only its own rulings. The set's own file (every
-    import, and `aiida rule LABEL` without `--rulings`) always withdraws the
-    rulings **it** made that it no longer says. It never touches a ruling
-    applied from another file.
-  - A ruling from another file is withdrawn only by
-    `aiida rule LABEL --rulings THAT_FILE --withdraw`, with the entry gone from
-    that file. The file is matched by resolved path, so it must be the same
-    file, not a copy elsewhere.
-  - A ruling stored before `source`/`own_file` were recorded counts as the own
-    file's.
-  - **An unreachable root withdraws nothing.** If the set's `source_root`
-    directory is missing (an unmounted drive), every ruling stays in force and
-    the report warns:
-    `WARNING no ruling withdrawn: <path> is not reachable (its directory <root> is missing)`.
-    A missing file inside an existing root does mean "no rulings". A
-    `--rulings` path that does not exist is refused by the CLI before anything
-    is read (`Path '<path>' does not exist`).
-  - A file with unreadable entries withdraws nothing either.
-- **The set's own file always wins.** A ruling from another file applies only
-  to points the own `integrity_rulings.yaml` does not rule. When both rule the
-  same point, the own file's ruling stays in force:
-  - `aiida rule LABEL --rulings OTHER` does not apply OTHER's ruling to a
-    point with an own-file ruling in force. It never flips that ruling.
-  - If OTHER ruled the point first, the next import (or `aiida rule LABEL`)
-    applies the own file's ruling over it.
-  - The same decision from both files (both `pass`, or both `fail`) is no
-    conflict: nothing is applied and nothing is listed.
-  - Otherwise the conflict is stored on the set Group (extra
-    `friction2d_ruling_conflicts`; its `source` is basenamed in an anonymised
-    archive) and listed by **every** later import and `aiida rule` report:
-    `conflict <point>: the own integrity_rulings.yaml rules <own> (in force); <other file> rules <other> (not applied)`
-    (`ruling conflict ...` in the import report).
-  - The conflict ends when OTHER no longer rules the point and is applied
-    again (`aiida rule LABEL --rulings OTHER`).
-  - The own file wins only while it rules the point, so an override is never
-    lost. If the own file drops its ruling, OTHER's ruling is re-applied from
-    OTHER on that same pass. If OTHER is missing (or no longer rules the
-    point), the ruling becomes pending, with the usual
-    `ruling pending: ...` line (below).
-- **Re-checks re-apply rulings.** When a later import re-checks a point, the
-  old ruled verdict is superseded with the old checker verdict, and the rulings
-  pass that follows applies the file's ruling to the new verdict. If a re-check
-  moves a ruled point out of quarantine, its ruling (without `override: true`)
-  no longer applies, and the report warns that it now needs `override: true`
-  and a note.
-- **Re-checks keep rulings from other files.** A ruling applied from another
-  file is re-applied from its recorded `source` once the re-check has made
-  the new verdict (the own-file pass that follows every import, `aiida rule`
-  and `aiida recheck` does it). The own file still wins (see above).
-  - If that file is missing, no longer rules the point, or its ruling no
-    longer applies, the ruling is **pending**: it is stored on the set Group
-    (extra `friction2d_pending_rulings`) and every later import, `aiida rule`
-    and `aiida recheck` report lists it:
-    `ruling pending: <file> missing: <point>; restore it with 'FrictionSim2D aiida rule LABEL --rulings <file>', or drop it with '--withdraw-pending <file>'`
-    (the reason is `missing`, `no longer rules the point` or `does not apply`).
-  - Every own-file pass retries it, so a file that comes back (a remounted
-    drive) restores the ruling by itself.
-  - Pending ends when the ruling is re-applied, when
-    `aiida rule LABEL --rulings <file> --withdraw` runs with the point gone
-    from that file, or with `aiida rule LABEL --withdraw-pending <file>` (the
-    file need not exist). The report then prints
-    `pending ruling withdrawn: <point> (<file>)`.
+- **Re-checks re-apply rulings.** When a later import or `aiida recheck`
+  re-checks a point, the old ruled verdict is superseded with the old checker
+  verdict, and the rulings pass that follows applies the point's ruling to the
+  new verdict, whatever file it came from. A re-import that supersedes a
+  changed deck does the same: rulings are kept by point id, not by node. If a
+  re-check moves a ruled point out of quarantine, its ruling (without
+  `override: true`) no longer applies, and the report warns that it now needs
+  `override: true` and a note.
+
+#### The ruling ledger: an override is never silently lost or flipped
+
+Every set keeps a **ruling ledger** (Group extra `friction2d_rulings_ledger`):
+every ruling of every rulings file, by point id and file, including the ones
+not in force. Each entry records the ruling, its note and date, its file
+(`source`), when it was **seen** (first added, or last changed), and whether
+the file is `present` or `missing`.
+
+**Which files are read.** Every import, `aiida rule` and `aiida recheck`
+reads:
+
+- the set's own `integrity_rulings.yaml`;
+- the `--rulings` file of `aiida rule`, if given;
+- every other file the ledger already holds that still exists.
+
+**What reading a file does.**
+
+- A file that parses replaces its entries. A point it no longer rules loses
+  that file's ruling: removing an entry is how a file withdraws a ruling, for
+  the own file and any other alike. The report prints
+  `ruling retracted by its file: <point> (<file>)`. `--withdraw` is kept for
+  compatibility and changes nothing.
+- A malformed entry is skipped with a warning. The file's other entries still
+  count, but nothing of that file is withdrawn on that pass
+  (`WARNING no ruling of <file> withdrawn: it has entries that cannot be read`).
+- A file that cannot be read at all changes nothing, with a warning.
+- A file that is **gone** keeps its entries, marked `missing`. They **still
+  count**: an unmounted drive never costs you an override. Every report lists
+  them as pending:
+  `ruling pending: <file> missing: <point>; it still counts. Restore it with 'FrictionSim2D aiida rule LABEL --rulings <file>', or drop it with '--withdraw-pending <file>'`.
+  When the file comes back, the next pass reads it again by itself.
+- **An unreachable root withdraws nothing.** If the set's `source_root`
+  directory is missing, the own file counts as gone: its rulings stay in
+  force, are listed as pending, and the report warns
+  `WARNING no ruling withdrawn: <file> is not reachable (its directory <root> is missing)`.
+  A missing file inside an existing root does mean "no rulings".
+- `aiida rule LABEL --withdraw-pending FILE` deletes every entry of FILE from
+  the ledger (a directory means `DIR/integrity_rulings.yaml`; the file need
+  not exist). The report prints `pending ruling withdrawn: <point> (<file>)`.
+  The own file cannot be dropped this way: edit it instead.
+
+**Which ruling is in force.** For each point:
+
+1. the set's own file's ruling, if it rules the point;
+2. else the **most recently seen** ruling of another file. Re-reading an
+   unchanged file does not make it newer; editing its entry does.
+
+A ruling that does not apply to the point's verdict (no `override: true` on a
+point that is not quarantined) is skipped and the next one counts. Every pass
+makes the store match: it applies the ruling, replaces another one, or
+withdraws one no file makes any more. A second identical pass makes nothing.
+The reports count `applied`, `replaced`, `skipped` and `withdrawn`.
+
+**Conflicts are always listed.** When two or more files rule a point with
+different decisions, every report prints one line naming the ruling in force
+and why:
+`conflict <point>: <file> rules fail (in force: the set's own integrity_rulings.yaml wins); <other> rules pass (not applied)`
+(`ruling conflict ...` in the import report; `most recently seen (<time>)`
+when no own ruling decides). Files that agree are not a conflict, but both
+stay in the ledger: if the own file drops its ruling, the other file's comes
+back.
+
+`aiida import --dry-run` on an existing set prints the rulings pass it would
+make (counts, conflicts, pending) and writes nothing.
+
+In an anonymised archive every file path in the ledger is its basename.
 
 ### 5.4 Which verdict counts: the policy
 
