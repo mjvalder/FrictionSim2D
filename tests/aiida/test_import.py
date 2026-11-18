@@ -647,6 +647,25 @@ def test_the_machine_defaults_to_the_runs_hpc_host(aiida_profile_clean, tmp_path
     assert {n.computer.scheduler_type for n in _calcjobs()} == {'core.pbspro'}
 
 
+def test_without_settings_yaml_the_machine_is_the_configs_hpc_host(aiida_profile_clean,
+                                                                   tmp_path):
+    """No provenance/settings.yaml: `config.settings.hpc` names the Computer,
+    as it does for the blocks (`split_blocks`)."""
+    root = tmp_path / 'sim'
+    loc_dir = _afm_run(root, 'h-MoS2')
+    prov = loc_dir.parent / 'provenance'
+    assert not (prov / 'settings.yaml').exists()
+    config = json.loads((prov / 'config.json').read_text(encoding='utf-8'))
+    config['settings']['hpc'] = {'hpc_host': 'login.cluster.org', 'scheduler_type': 'pbs'}
+    (prov / 'config.json').write_text(json.dumps(config), encoding='utf-8')
+    _set_record(loc_dir, config_hash=config_hash(config))
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    assert {n.computer.label for n in _calcjobs()} == {'login.cluster.org'}
+    assert {n.computer.scheduler_type for n in _calcjobs()} == {'core.pbspro'}
+
 def test_a_parse_failure_keeps_run_info_and_is_retried(aiida_profile_clean, tmp_path,
                                                       monkeypatch):
     from src.aiida import calcjob

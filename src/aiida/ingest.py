@@ -635,13 +635,16 @@ def _settings_machine(settings_file: Optional[Path] = None) -> Optional[str]:
         return None
 
 
-def _computer(state: _Import, settings: dict):
+def _computer(state: _Import, settings: dict, config: Optional[dict] = None):
     """The machine Computer of a run: ``import_root(machine=)`` >
     ``settings.aiida.machine`` (both in ``state.machine``) > the run's
-    ``settings.hpc.hpc_host`` > ``'localhost'``. A label already registered
-    with another host or scheduler is reused, with a warning in the report."""
+    ``settings.hpc.hpc_host`` > ``'localhost'``. The run's settings are
+    ``provenance/settings.yaml``, else ``config['settings']`` (as
+    ``blocks.split_blocks`` reads them). A label already registered with
+    another host or scheduler is reused, with a warning in the report."""
     from .store import machine_computer, machine_mismatch  # pylint: disable=import-outside-toplevel
 
+    settings = settings or (config or {}).get('settings') or {}
     hpc = settings.get('hpc') if isinstance(settings.get('hpc'), dict) else {}
     name = state.machine or hpc.get('hpc_host') or 'localhost'
     if name not in state.computers:
@@ -735,7 +738,7 @@ def _import_deck(state: _Import, run: _RunState, deck, decks,
     name = _deck_name(run.locator, deck)
     if run.inputs is None:
         run.inputs = run_inputs(run.locator, index=state.index)
-    computer = _computer(state, run.inputs.settings)
+    computer = _computer(state, run.inputs.settings, run.inputs.config)
     given = None if deck.writes_structures else structures_for(deck, run.handed)
     try:
         _outputs, node = import_deck(run.locator, deck, computer=computer,

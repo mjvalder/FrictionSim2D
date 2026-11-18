@@ -170,7 +170,9 @@ so a published hash can be checked against the published content.
   unconfigured: it records where a run came from and never executes anything.
   The label is `aiida import --machine`, else `settings.aiida.machine`, else the
   run's `settings.hpc.hpc_host`, else `localhost`. Its hostname and scheduler
-  come from the run's `settings.hpc`.
+  come from the run's `settings.hpc`. The run's settings are
+  `provenance/settings.yaml`, else the `settings` section of
+  `provenance/config.json`, the same fallback the parameter blocks use.
 - **Code.** One `InstalledCode` per (machine, LAMMPS version), labelled
   `lammps-<version>@<machine>`. The version comes from the deck's log, falling
   back to `provenance.json`. The executable is the `lmp*` token of the run's job
