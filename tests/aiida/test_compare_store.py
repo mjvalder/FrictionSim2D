@@ -13,6 +13,7 @@ from src.aiida.compare import load_blocks  # noqa: E402
 from src.aiida.store import machine_computer  # noqa: E402
 from src.core.compare import VARIES, compare_blocks  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
+from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.aiida.test_calcjob_import import (  # noqa: E402
     RUN_UUID, _afm_run, _points, _set_record,
 )
@@ -36,6 +37,7 @@ def _import(root, run_uuid, temp, computer):
     data = json.loads(config.read_text(encoding='utf-8'))
     data.setdefault('general', {})['temp'] = temp
     config.write_text(json.dumps(data), encoding='utf-8')
+    seal_config_hash(loc.run_dir, config.parent)
     (loc,) = [r for r in discover_runs(root) if r.run_dir == loc.run_dir]
     return import_run(loc, computer=computer)
 

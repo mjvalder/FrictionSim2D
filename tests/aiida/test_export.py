@@ -35,6 +35,7 @@ from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
 from src.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
 from src.postprocessing.integrity_rulings import RULINGS_FILE, format_point_id  # noqa: E402
+from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.helpers.results_tree import make_family_run, slide_config  # noqa: E402
 from tests.postprocessing.test_read_data_integrity import DECK, _afm_snapshots  # noqa: E402
 
@@ -419,6 +420,7 @@ def _hpc_tree(root, material='h-MoS2', **kwargs):
     config['settings']['hpc'] = dict(hpc)
     config['settings']['database'] = dict(DATABASE)
     (prov / 'config.json').write_text(json.dumps(config), encoding='utf-8')
+    seal_config_hash(run_dir, prov)
     (root / 'hpc').mkdir(exist_ok=True)
     (root / 'hpc' / 'job.pbs').write_text(
         f'#!/bin/bash\ncd {JOB_CD}\nmpirun -np 4 {JOB_EXECUTABLE} -in lammps/slide.in\n',

@@ -22,6 +22,7 @@ from src.aiida.query import (Friction2DDB, QueryResult, latest,  # noqa: E402
 from src.aiida.steps import latest_verdict, postprocess_group  # noqa: E402
 from src.aiida.store import TOKENS_EXTRA, machine_computer, reindex  # noqa: E402
 from src.run.tree import discover_runs  # noqa: E402
+from tests.helpers.synthetic_results import seal_config_hash  # noqa: E402
 from tests.aiida.test_calcjob_import import _afm_run, _set_record  # noqa: E402
 
 A_UUID = '0b7c2f5e-1d3a-4c8e-9f60-2a4b6c8d0e1f'
@@ -54,6 +55,7 @@ def _campaign(root, run_uuid, computer, *, loads, timestep=None, array=False,
         data = json.loads(config.read_text(encoding='utf-8'))
         data.setdefault('settings', {}).setdefault('simulation', {})['timestep'] = timestep
         config.write_text(json.dumps(data), encoding='utf-8')
+        seal_config_hash(loc.run_dir, config.parent)
     if array:
         (loc.lammps_dir / 'slide.in').unlink()
         for load in loads:
