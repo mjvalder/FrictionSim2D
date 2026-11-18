@@ -549,6 +549,23 @@ def test_log_missing_and_no_version_are_reported(aiida_profile_clean, tmp_path):
     assert 'no LAMMPS version (no Code)' in report.render()
 
 
+def test_a_per_pressure_log_in_results_is_found(aiida_profile_clean, tmp_path):
+    """MLIP sheet runs: `slide_p<P>gpa.in` logs to `results/log_p<P>gpa.lammps`."""
+    root = tmp_path / 'sim'
+    run_dir = make_family_run(root, 'sheetonsheet', loads=(0.5, 1.0))
+    (run_dir / 'lammps' / 'system.in').unlink()
+    for p in ('0p5', '1'):
+        (run_dir / 'lammps' / f'slide_p{p}gpa.in').write_text('# slide\n', encoding='utf-8')
+        (run_dir / 'results' / f'log_p{p}gpa.lammps').write_text(LOG, encoding='utf-8')
+
+    report = import_root(root, label='camp')
+
+    assert report.ok(), report.render()
+    assert len(report.created_decks) == 2
+    assert report.log_missing == [] and report.no_version == []
+    assert {n.inputs.parameters['log_name'] for n in _calcjobs()} == {
+        'results/log_p0p5gpa.lammps', 'results/log_p1gpa.lammps'}
+
 def test_a_log_that_arrives_later_reimports_and_gets_its_code(aiida_profile_clean,
                                                               tmp_path):
     root = tmp_path / 'sim'

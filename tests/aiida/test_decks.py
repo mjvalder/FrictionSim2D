@@ -103,6 +103,18 @@ def test_log_local_layout(tmp_path):
     assert [d.log_path for d in discover_decks(loc)] == [log]
 
 
+def test_log_in_results_per_pressure(tmp_path):
+    """The MLIP sheet runs log each `slide_p<P>gpa` deck to
+    `results/log_p<P>gpa.lammps`, beside several decks."""
+    loc = _locator(tmp_path, 'sheetonsheet')
+    (loc.lammps_dir / 'system.in').unlink()
+    for p in ('0p5', '1'):
+        _touch(loc.lammps_dir / f'slide_p{p}gpa.in')
+        _touch(loc.results_dir / f'log_p{p}gpa.lammps')
+    _touch(loc.results_dir / 'log_p1gpa.sync-conflict-20261001-120000-ABCDEFG.lammps')
+    assert [d.log_path for d in discover_decks(loc)] == [
+        loc.results_dir / 'log_p0p5gpa.lammps', loc.results_dir / 'log_p1gpa.lammps']
+
 def test_local_log_ignored_with_several_decks(tmp_path):
     loc = _locator(tmp_path, 'afm')
     _touch(loc.lammps_dir / 'slide.in')

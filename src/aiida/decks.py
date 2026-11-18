@@ -91,13 +91,16 @@ def deck_log(locator: 'RunLocator', deck_name: str) -> Optional[Path]:
     """The log of one deck, or None.
 
     Tried in order: `lammps/run_<stem>.log` (array mode); `lammps/run_system.log`
-    or `lammps/run_slide.log` (combined mode); the single `log*.lammps` in the
-    run root (local run) when the run has exactly one deck.
+    or `lammps/run_slide.log` (combined mode); `results/log_<stem minus
+    'slide_'>.lammps` (the MLIP sheet runs: `slide_p1gpa` ->
+    `results/log_p1gpa.lammps`); the single `log*.lammps` in the run root
+    (local run) when the run has exactly one deck.
     """
     lammps_dir = locator.lammps_dir
     combined = 'run_system.log' if deck_name.startswith('system') else 'run_slide.log'
-    for name in (f'run_{deck_name}.log', combined):
-        candidate = lammps_dir / name
+    for candidate in (lammps_dir / f'run_{deck_name}.log', lammps_dir / combined,
+                      Path(locator.results_dir)
+                      / f"log_{deck_name.removeprefix('slide_')}.lammps"):
         if candidate.is_file():
             return candidate
     if len(_stems(locator)) == 1:

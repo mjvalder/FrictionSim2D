@@ -59,6 +59,12 @@ Each LAMMPS deck of a run is recorded as one `LammpsFrictionCalcJob`
   load in array mode, or a single `slide` deck in combined mode;
 - local runs follow the same deck pattern.
 
+A deck's log is the first of `lammps/run_<deck>.log` (array mode),
+`lammps/run_system.log` / `lammps/run_slide.log` (combined mode),
+`results/log_<deck minus 'slide_'>.lammps` (the MLIP sheet runs:
+`slide_p1gpa` -> `results/log_p1gpa.lammps`), and the single root
+`log*.lammps` of a one-deck local run.
+
 The CalcJob is launched in AiiDA's *import mode*: `engine.run` with a
 `remote_folder` pointing at the run directory and no upload or submit. aiida-core
 only retrieves and parses. Retrieval copies into a temporary sandbox, so the
