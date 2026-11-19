@@ -1,56 +1,356 @@
 {
+  "_comment": "Every figure of the article. Read from the AiiDA store of the DOI archive: one dataset per simulation set (aiida://dataset/<set>); see README.md. Each plot's _source names the config or script it was first made with.",
   "data_dirs": [
-    "251113-afm/",
-    "251125-sheetonsheet/",
-    "260227-tmd/",
-    "260227-mos2_jing2/",
-    "260227-mos2_jing3/",
-    "260227-rebomos/",
-    "260227-sevik_mos2/",
-    "260227-sw_lammps/",
-    "260312-force_rebomos/",
-    "260312-force_sevik/"
+    "aiida://dataset/260227-sw_lammps",
+    "aiida://dataset/260227-mos2_jing2",
+    "aiida://dataset/260227-sevik_mos2",
+    "aiida://dataset/260227-rebomos",
+    "aiida://dataset/260312-force_rebomos",
+    "aiida://dataset/260312-force_sevik",
+    "aiida://dataset/260909-afm",
+    "aiida://dataset/261107-sheet",
+    "aiida://dataset/260830-deepmd",
+    "aiida://dataset/260909-mace_d3",
+    "aiida://dataset/260909-mace_nod3"
   ],
   "labels": [
-    "251113_afm",
-    "sheetonsheet",
-    "tmd",
-    "mos2_jiang2",
-    "mos2_jiang3",
-    "rebomos",
-    "sevik_mos2",
     "mos2_jiang1",
+    "mos2_jiang2",
+    "sevik_mos2",
+    "rebomos",
     "force_rebomos",
-    "force_sevik"
+    "force_sevik",
+    "260909_afm_v4",
+    "sheet_periods",
+    "deepmd",
+    "mace_d3",
+    "mace_nod3"
   ],
   "dataset_display_labels": {
-    "tmd": "SW-Jiang_4",
     "mos2_jiang1": "SW-Jiang_1",
     "mos2_jiang2": "SW-Jiang_2",
-    "mos2_jiang3": "SW-Jiang_3",
+    "sevik_mos2": "SW-Kandemir",
     "rebomos": "REBOMoS",
-    "sevik_mos2": "SW-Sevik",
     "force_rebomos": "REBOMoS",
-    "force_sevik": "SW-Sevik"
+    "force_sevik": "SW-Kandemir"
   },
   "series_color_map": {
     "SW-Jiang_1": "#7E2F8E",
     "SW-Jiang_2": "#77AC30",
-    "SW-Jiang_3": "#EDB120",
-    "SW-Jiang_4": "#0072BD",
-    "SW-Sevik": "#D95319",
+    "SW-Kandemir": "#D95319",
     "REBOMoS": "#4DBEEE",
     "SW - Hu": "#A2142F",
     "ReaxFF - Serpini": "#FFD60A",
-    "Exp. - Serpini": "#6582FD"
+    "Exp. - Serpini": "#6582FD",
+    "DeepMD-D3*": "#E07A10",
+    "MACE-D3*": "#1B4F72",
+    "MACE*": "#52B788",
+    "DeePMD + D3": "#FF453A",
+    "MACE + D3": "#00A3A3",
+    "MACE (no D3)": "#CB845D"
   },
   "plots": [
     {
+      "_source": "plots_pub/plots_mos2_cof_mlip.json (written by make_cof_histogram_mlip.py)",
+      "plot_type": "cof_histogram",
+      "filename": "cof_histogram_mos2.png",
+      "show_adhesion_pairs": true,
+      "datasets": [
+        "mos2_jiang1",
+        "mos2_jiang2",
+        "sevik_mos2",
+        "rebomos"
+      ],
+      "filter_size": "100x100y",
+      "x_axis": "nf",
+      "y_axis": "lf",
+      "lf_source": "sx_sy",
+      "angle": 90,
+      "x_limits": [
+        0.0,
+        370
+      ],
+      "fit_x_range": [
+        0.0,
+        370
+      ],
+      "slope_fit_constraint": "none",
+      "slope_decimals": 5,
+      "y_label": "COF",
+      "annotate_bars": false,
+      "x_label_rotation": 30,
+      "bar_width": 0.8,
+      "external_outline_width": 6.0,
+      "external_series": [
+        {
+          "file": "mos2_mlip_lf_nf.json",
+          "path": [
+            "DeePMD + D3"
+          ],
+          "x_key": "nf",
+          "y_key": "lf",
+          "label": "DeePMD + D3",
+          "solid": true
+        },
+        {
+          "file": "mos2_mlip_lf_nf.json",
+          "path": [
+            "MACE + D3"
+          ],
+          "x_key": "nf",
+          "y_key": "lf",
+          "label": "MACE + D3",
+          "solid": true
+        },
+        {
+          "file": "mos2_mlip_lf_nf.json",
+          "path": [
+            "MACE (no D3)"
+          ],
+          "x_key": "nf",
+          "y_key": "lf",
+          "label": "MACE (no D3)",
+          "solid": true
+        },
+        {
+          "file": "mos2_comparison_data.json",
+          "path": [
+            "cofvsload"
+          ],
+          "x_key": "pressure",
+          "y_key": "cof",
+          "label": "SW - Hu",
+          "x_transform": "lambda x: x * 98",
+          "y_transform": "lambda x, y: x * 98 * y"
+        },
+        {
+          "file": "mos2_reaxff_comparison.json",
+          "path": [
+            "reaxff_comparison_ac"
+          ],
+          "x_key": "x",
+          "y_key": "y",
+          "label": "ReaxFF - Serpini"
+        },
+        {
+          "file": "mos2_reaxff_comparison.json",
+          "path": [
+            "serpini_et_al"
+          ],
+          "x_key": "x",
+          "y_key": "y",
+          "label": "Exp. - Serpini"
+        }
+      ],
+      "ratio_x_range": [
+        30,
+        370
+      ],
+      "filter_layer": 2,
+      "y_limits": [
+        0,
+        0.38
+      ],
+      "without_adhesion_label": "Equation 1",
+      "with_adhesion_label": "Equation 2",
+      "without_adhesion_legend_first": true
+    },
+    {
+      "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::stickslip_period",
+      "plot_type": "stickslip_period_histogram",
+      "filename": "fs2d_afm_stickslip_period.png",
+      "stickslip_file": "tables/stickslip_v2.csv",
+      "ranking_file": "tables/cof_ranking_v2.csv",
+      "loads": [
+        10,
+        20,
+        30,
+        50
+      ],
+      "bins_arange": [
+        0.4,
+        2.6,
+        0.1
+      ],
+      "line_width": 2.0,
+      "reference_line": 1,
+      "x_label": "Lateral-force period / lattice period along the scan",
+      "y_label": "Runs",
+      "legend_location": "upper right",
+      "use_scientific_notation": false
+    },
+    {
+      "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::contact",
+      "plot_type": "contact_cof_scatter",
+      "filename": "fs2d_contact_area_cof.png",
+      "contact_file": "tables/contact_loaded_v2.csv",
+      "ranking_file": "tables/cof_ranking_v2.csv",
+      "x_column": "contact_area",
+      "state": "load",
+      "loads": [
+        10,
+        20,
+        30,
+        50
+      ],
+      "marker_scale": 0.8,
+      "alpha": 0.75,
+      "y_scale": "log",
+      "y_ticks": [
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1
+      ],
+      "x_label": "Contact area (Å$^2$)",
+      "y_label": "COF",
+      "legend_location": "upper right",
+      "use_scientific_notation": false
+    },
+    {
+      "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::contact",
+      "plot_type": "contact_cof_scatter",
+      "filename": "fs2d_contact_atoms_cof.png",
+      "contact_file": "tables/contact_loaded_v2.csv",
+      "ranking_file": "tables/cof_ranking_v2.csv",
+      "x_column": "contact_atoms",
+      "state": "load",
+      "loads": [
+        10,
+        20,
+        30,
+        50
+      ],
+      "marker_scale": 0.8,
+      "alpha": 0.75,
+      "y_scale": "log",
+      "y_ticks": [
+        0.005,
+        0.01,
+        0.02,
+        0.05,
+        0.1
+      ],
+      "x_label": "Sheet atoms in contact with the tip",
+      "y_label": "COF",
+      "legend_location": "upper right",
+      "use_scientific_notation": false
+    },
+    {
+      "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::sheet_profile",
+      "plot_type": "sheet_profile",
+      "filename": "fs2d_sheet_profile_mos2.png",
+      "run_dir": "trees/260909-afm/afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-MoS2",
+      "layer_dir": "L2",
+      "loads": [
+        10,
+        20,
+        30,
+        50
+      ],
+      "tip_types": [
+        4,
+        5,
+        6
+      ],
+      "tip_apex_depth": 2.0,
+      "far_field_radius": 30,
+      "sublayer_dz": 0.5,
+      "radial_bins_arange": [
+        0,
+        42,
+        1.5
+      ],
+      "line_width": 2.0,
+      "top_label": "top surface",
+      "bottom_label": "bottom layer",
+      "x_label": "Distance from the tip axis (Å)",
+      "y_label": "Height relative to far field (Å)",
+      "legend_location": "lower right",
+      "use_scientific_notation": false
+    },
+    {
+      "_source": "Sync/ML_taxonomy/scripts/build_round13_integrity_audit.py (audit/round13_integrity_all/panels/h_MoS2_L2.png)",
+      "plot_type": "integrity_panel",
+      "filename": "integrity_panel_h_MoS2_l2.png",
+      "material": "h_MoS2",
+      "layer": 2,
+      "run_dir": "trees/260909-afm/afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-MoS2",
+      "loads": [
+        2,
+        5,
+        10,
+        20,
+        30,
+        50,
+        70,
+        85,
+        100
+      ],
+      "traces_file": "tables/integrity_traces_l2.csv",
+      "status_file": "tables/run_status_l2.csv",
+      "dpi": 100
+    },
+    {
+      "_source": "Sync/ML_taxonomy/scripts/build_round13_integrity_audit.py (audit/round13_integrity_all/panels/h_NiSe2_L2.png)",
+      "plot_type": "integrity_panel",
+      "filename": "integrity_panel_h_NiSe2_l2.png",
+      "material": "h_NiSe2",
+      "layer": 2,
+      "run_dir": "trees/260909-afm/afm/h-NiSe2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-NiSe2",
+      "loads": [
+        2,
+        5,
+        10,
+        20,
+        30,
+        50,
+        70,
+        85,
+        100
+      ],
+      "traces_file": "tables/integrity_traces_l2.csv",
+      "status_file": "tables/run_status_l2.csv",
+      "dpi": 100
+    },
+    {
+      "_source": "plots_afm_v4.json",
+      "plot_type": "summary",
+      "use_dataset_colors": false,
+      "datasets": [
+        "260909_afm_v4"
+      ],
+      "filter_size": "100x100y",
+      "x_axis": "force",
+      "y_axis": "lf",
+      "x_label": "Normal load (nN)",
+      "y_label": "Lateral Force (nN)",
+      "filter_layer": 2,
+      "plot_by": "id",
+      "add_linear_fit": false,
+      "fit_x_range": [
+        0,
+        100
+      ],
+      "filename": "lf_vs_load_100x100_afm.png",
+      "filter_materials": [
+        "h_MoS2",
+        "h_WTe2",
+        "t_NiS2",
+        "t_SnS2",
+        "p_SiO",
+        "b_arsenene",
+        "InSe"
+      ]
+    },
+    {
+      "_source": "plots_pub/plots_sheetonsheet_261107.json",
       "plot_type": "summary",
       "filename": "lf_vs_load_100x100_sheetonsheet.png",
       "use_dataset_colors": false,
       "datasets": [
-        "sheetonsheet"
+        "sheet_periods"
       ],
       "filter_size": "100x100y",
       "x_axis": "nf",
@@ -65,14 +365,14 @@
       ],
       "filter_materials": [
         "AlSe",
-        "t_VS2",
         "t_SnS2",
-        "h_VS2",
-        "p_CS",
+        "t_ReTe2",
+        "h_MoS2",
+        "h_NiS2",
         "p_GeSe",
-        "b_SiSe",
-        "h_ScTe2",
-        "b_CO"
+        "p_SnTe",
+        "b_CO",
+        "b_SiGe"
       ],
       "x_limits": [
         -50,
@@ -80,107 +380,26 @@
       ],
       "y_limits": [
         -5,
-        170
+        440
       ]
     },
     {
-      "plot_type": "summary",
-      "filename": "lf_vs_load_100x100_afm.png",
-      "use_dataset_colors": false,
-      "datasets": [
-        "251113_afm"
-      ],
-      "filter_size": "100x100y",
-      "x_axis": "force",
-      "y_axis": "lf",
-      "x_label": "Normal load (nN)",
-      "y_label": "Lateral Force (nN)",
-      "plot_by": "id",
-      "add_linear_fit": false,
-      "fit_x_range": [
-        0,
-        100
-      ],
-      "filter_materials": [
-        "h_MoS2",
-        "h_MoSe2",
-        "t_CoTe2",
-        "t_HfS2",
-        "p_arsenene",
-        "b_SnS",
-        "b_SnSe"
-      ]
-    },
-    {
-      "plot_type": "timeseries",
-      "filename": "lf_vs_time_h_MoS2_l2_afm.png",
-      "use_dataset_colors": false,
-      "datasets": [
-        "251113_afm"
-      ],
-      "filter_size": "100x100y",
-      "angle": 0,
-      "y_axis": "lf",
-      "x_label": "Time (ps)",
-      "y_label": "Lateral Force (nN)",
-      "filter_materials": [
-        "h_MoS2"
-      ],
-      "filter_layer": 2,
-      "filter_forces": [
-        2,
-        30,
-        85
-      ],
-      "time_scale": 0.001
-    },
-    {
-      "plot_type": "scatter_comparison",
-      "filename": "tribindex_vs_cof_sheetonsheet.png",
-      "x_source": {
-        "file": "trib_index.json",
-        "material_column": "materials",
-        "value_column": "tribIndex",
-        "error_column": "dev"
-      },
-      "y_source": {
-        "dataset": "sheetonsheet",
-        "metric": "cof",
-        "filter_size": "100x100y",
-        "angle": 0,
-        "force_range": [
-          5,
-          30
-        ],
-        "error_metric": "slope_stderr"
-      },
-      "show_error_bars": true,
-      "color_by_material_class": true,
-      "show_point_labels": false,
-      "point_label_fontsize": 10,
-      "add_linear_fit": false,
-      "show_r_squared": false,
-      "show_identity_line": false,
-      "iterative_outlier_removal": 0,
-      "legend_location": "lower right",
-      "x_label": "Lubricating Figure of Merit",
-      "y_label": "Coefficient of Friction (COF)",
-      "y_limits": [
-        0.018,
-        null
-      ]
-    },
-    {
+      "_source": "plots_pub/plots_mos2_lf_nf_mlip.json",
       "plot_type": "summary",
       "filename": "lf_vs_nf_100x100_mos2_sx_sy.png",
+      "axes_margins_in": {
+        "left": 1.31,
+        "right": 0.093,
+        "bottom": 1.693
+      },
+      "legend_top_align": "right",
+      "legend_ncol": 4,
       "use_dataset_colors": true,
       "datasets": [
-        "tmd",
+        "mos2_jiang1",
         "mos2_jiang2",
-        "mos2_jiang3",
-        "rebomos",
         "sevik_mos2",
-        "mos2_jiang1"
+        "rebomos"
       ],
       "filter_size": "100x100y",
       "x_axis": "nf",
@@ -212,12 +431,50 @@
         "rebomos": "o",
         "sw": "^"
       },
-      "legend_outside": false,
-      "legend_location": "upper left",
+      "legend_outside": "top",
       "legend_separate_png": false,
       "x_label": "Normal Force (nN)",
       "y_label": "Lateral Force (nN)",
       "external_series": [
+        {
+          "file": "mos2_mlip_lf_nf.json",
+          "path": [
+            "DeePMD + D3"
+          ],
+          "x_key": "nf",
+          "y_key": "lf",
+          "label": "DeepMD-D3*",
+          "plot_style": "line",
+          "marker_style": "P",
+          "marker_face": "filled",
+          "fit_line_style": "-"
+        },
+        {
+          "file": "mos2_mlip_lf_nf.json",
+          "path": [
+            "MACE + D3"
+          ],
+          "x_key": "nf",
+          "y_key": "lf",
+          "label": "MACE-D3*",
+          "plot_style": "line",
+          "marker_style": "P",
+          "marker_face": "filled",
+          "fit_line_style": "-"
+        },
+        {
+          "file": "mos2_mlip_lf_nf.json",
+          "path": [
+            "MACE (no D3)"
+          ],
+          "x_key": "nf",
+          "y_key": "lf",
+          "label": "MACE*",
+          "plot_style": "line",
+          "marker_style": "P",
+          "marker_face": "filled",
+          "fit_line_style": "-"
+        },
         {
           "file": "mos2_comparison_data.json",
           "path": [
@@ -254,9 +511,74 @@
           "line_style": "--",
           "marker_style": "D"
         }
+      ],
+      "y_limits": [
+        0,
+        105
+      ],
+      "legend_order": [
+        "SW-Jiang_1",
+        "SW-Jiang_2",
+        "SW-Kandemir",
+        "REBOMoS",
+        "DeepMD-D3*",
+        "MACE-D3*",
+        "MACE*",
+        "SW - Hu",
+        "ReaxFF - Serpini",
+        "Exp. - Serpini"
       ]
     },
     {
+      "_source": "plots_afm_v3.json, on v4 data (v4 = v3 + 7 rerun materials, shared runs bit-identical); same figure as lf_vs_time_h_MoS2_l2_afm_v3.png",
+      "plot_type": "timeseries",
+      "filename": "lf_vs_time_h_MoS2_l2_afm_2_30_85nN.png",
+      "use_dataset_colors": false,
+      "datasets": [
+        "260909_afm_v4"
+      ],
+      "filter_size": "100x100y",
+      "angle": 0,
+      "y_axis": "lf",
+      "x_label": "Time (ps)",
+      "y_label": "Lateral Force (nN)",
+      "filter_materials": [
+        "h_MoS2"
+      ],
+      "filter_layer": 2,
+      "filter_forces": [
+        2,
+        30,
+        85
+      ],
+      "time_scale": 0.001
+    },
+    {
+      "_source": "plots_afm_v3.json, on v4 data (v4 = v3 + 7 rerun materials, shared runs bit-identical)",
+      "plot_type": "timeseries",
+      "filename": "lf_vs_time_h_MoS2_l2_afm_v3.png",
+      "use_dataset_colors": false,
+      "datasets": [
+        "260909_afm_v4"
+      ],
+      "filter_size": "100x100y",
+      "angle": 0,
+      "y_axis": "lf",
+      "x_label": "Time (ps)",
+      "y_label": "Lateral Force (nN)",
+      "filter_materials": [
+        "h_MoS2"
+      ],
+      "filter_layer": 2,
+      "filter_forces": [
+        2,
+        30,
+        85
+      ],
+      "time_scale": 0.001
+    },
+    {
+      "_source": "plots_pub/plots_mos2_timeseries.json",
       "plot_type": "timeseries",
       "filename": "lf_vs_time_h_MoS2_l2_v_com_top.png",
       "use_dataset_colors": true,
@@ -274,12 +596,13 @@
       ],
       "time_scale": 0.001,
       "shift_time_to_zero": true,
-      "secondary_y_axis": "v_comy_top",
+      "secondary_y_axis": "drivey",
       "secondary_y_label": "Displacement in x (nm)",
       "secondary_y_scale": 0.1,
       "legend_location": "upper right"
     },
     {
+      "_source": "aiida_dump/plots_publication.json (also writes the _spectrum.png and the results JSON)",
       "plot_type": "stick_slip_analysis",
       "filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_rebomos.png",
       "spectrum_filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_rebomos_spectrum.png",
@@ -293,7 +616,7 @@
         0.1
       ],
       "time_scale": 0.001,
-      "displacement_axis": "v_comy_top",
+      "displacement_axis": "drivey",
       "displacement_scale": 0.1,
       "time_unit": "ps",
       "displacement_unit": "nm",
@@ -307,6 +630,7 @@
       "fft_peak_rank": 2
     },
     {
+      "_source": "aiida_dump/plots_publication.json (also writes the _spectrum.png and the results JSON)",
       "plot_type": "stick_slip_analysis",
       "filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_sevik.png",
       "spectrum_filename": "stick_slip_h_MoS2_v_com_top_0.1GPa_sevik_spectrum.png",
@@ -320,7 +644,7 @@
         0.1
       ],
       "time_scale": 0.001,
-      "displacement_axis": "v_comy_top",
+      "displacement_axis": "drivey",
       "displacement_scale": 0.1,
       "time_unit": "ps",
       "displacement_unit": "nm",
@@ -336,70 +660,39 @@
       "extrema_min_distance_points": 6
     },
     {
-      "plot_type": "cof_histogram",
-      "filename": "cof_histogram_mos2.png",
-      "datasets": [
-        "mos2_jiang1",
-        "mos2_jiang2",
-        "mos2_jiang3",
-        "tmd",
-        "sevik_mos2",
-        "rebomos"
-      ],
-      "filter_size": "100x100y",
-      "x_axis": "nf",
-      "y_axis": "lf",
-      "lf_source": "sx_sy",
-      "angle": 90,
-      "x_limits": [
-        0.0,
-        370
-      ],
-      "fit_x_range": [
-        0.0,
-        370
-      ],
-      "slope_fit_constraint": "none",
-      "slope_decimals": 5,
-      "y_label": "COF",
-      "annotate_bars": false,
-      "x_label_rotation": 30,
-      "figure_size": [
-        13,
-        7
-      ],
-      "bar_width": 0.5,
-      "external_series": [
-        {
-          "file": "mos2_comparison_data.json",
-          "path": [
-            "cofvsload"
-          ],
-          "x_key": "pressure",
-          "y_key": "cof",
-          "label": "SW - Hu",
-          "x_transform": "lambda x: x * 98",
-          "y_transform": "lambda x, y: x * 98 * y"
-        },
-        {
-          "file": "mos2_reaxff_comparison.json",
-          "path": [
-            "reaxff_comparison_ac"
-          ],
-          "x_key": "x",
-          "y_key": "y",
-          "label": "ReaxFF - Serpini"
-        },
-        {
-          "file": "mos2_reaxff_comparison.json",
-          "path": [
-            "serpini_et_al"
-          ],
-          "x_key": "x",
-          "y_key": "y",
-          "label": "Exp. - Serpini"
-        }
-      ]
+      "_source": "plots_pub/plots_sheetonsheet_261107.json",
+      "plot_type": "scatter_comparison",
+      "filename": "tribindex_vs_cof_sheetonsheet.png",
+      "x_source": {
+        "file": "trib_index.json",
+        "material_column": "materials",
+        "value_column": "tribIndex",
+        "error_column": "dev"
+      },
+      "y_source": {
+        "dataset": "sheet_periods",
+        "metric": "cof",
+        "filter_size": "100x100y",
+        "angle": 0,
+        "load_column": "pressure",
+        "load_range": [
+          5,
+          20
+        ],
+        "require_all_loads": true,
+        "error_metric": "sem"
+      },
+      "show_error_bars": true,
+      "color_by_material_class": true,
+      "show_point_labels": false,
+      "point_label_fontsize": 10,
+      "add_linear_fit": false,
+      "show_r_squared": false,
+      "show_identity_line": false,
+      "iterative_outlier_removal": 0,
+      "legend_location": "upper left",
+      "x_label": "Lubricating Figure of Merit",
+      "y_label": "Coefficient of Friction (COF)"
     }
   ]
 }

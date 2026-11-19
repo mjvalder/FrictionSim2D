@@ -1,0 +1,55 @@
+{
+  "figure": {
+    "size": [
+      10,
+      7
+    ],
+    "dpi": 150
+  },
+  "fonts": {
+    "title": 26,
+    "axis_label": 24,
+    "tick_label": 22,
+    "legend": 16
+  },
+  "colors": {
+    "palette": "gem12"
+  },
+  "markers": {
+    "style": "o",
+    "size": 12
+  },
+  "lines": {
+    "width": 1.3,
+    "fit_style": "--",
+    "fit_alpha": 0.8
+  },
+  "grid": {
+    "show": true,
+    "which": "both",
+    "major_style": "-",
+    "minor_style": ":",
+    "major_alpha": 0.5,
+    "minor_alpha": 0.3
+  },
+  "error_bands": {
+    "alpha": 0.2
+  },
+  "legend": {
+    "location": "best"
+  },
+  "layout": {},
+  "axes": {
+    "use_scientific_notation": true,
+    "scilimits": [
+      -3,
+      4
+    ]
+  },
+  "export": {
+    "formats": [
+      "png"
+    ],
+    "transparent": false
+  }
+}
