@@ -7,6 +7,7 @@ registered by name with :func:`register`; :func:`get_analysis` looks it up.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from importlib import import_module
 from typing import TYPE_CHECKING, ClassVar, Dict, FrozenSet, Literal, Tuple, Type
 
 from pydantic import BaseModel
@@ -72,6 +73,7 @@ def get_analysis(name: str) -> Type[Analysis]:
     Raises:
         KeyError: no analysis of that name.
     """
+    import_module('.catalogue', __package__)  # registers every analysis
     try:
         return ANALYSES[name]
     except KeyError:
