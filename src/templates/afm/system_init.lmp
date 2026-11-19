@@ -11,7 +11,7 @@ neighbor        {{ neighbor_list }} bin
 {{ neigh_modify_command }}
 
 comm_style tiled
-region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -5 {{ zhi_box }}
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} {{ box_zlo }} {{ box_zhi }}
 create_box      {{ ngroups }} box
 
 read_data       {{ sub_file }} add append group sub

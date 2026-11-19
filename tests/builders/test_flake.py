@@ -311,15 +311,19 @@ def _make_flake_builder(tmp_path: Path) -> AFMSimulation:
     builder = AFMSimulation(config, output_dir=str(tmp_path / "out"))
 
     # Hand-populate the state write_inputs() consumes (bypassing real builds).
-    builder.flake_path = Path("flake_h-MoS2_hexagon.data")
+    builder.flake_path = tmp_path / "flake_h-MoS2_hexagon.data"
     builder.flake_dims = {'xlo': 0.0, 'xhi': 50.0, 'ylo': 0.0, 'yhi': 50.0, 'zlo': -1.0, 'zhi': 4.0}
     builder.sheet_dims = {'xlo': 0.0, 'xhi': 50.0, 'ylo': 0.0, 'yhi': 50.0, 'zlo': 0.0, 'zhi': 3.0}
     builder.box_dims = {'xlo': 0.0, 'xhi': 70.0, 'ylo': 0.0, 'yhi': 70.0, 'zlo': -5.0, 'zhi': 0.0}
     builder.sheet_offset = {'x': 0.0, 'y': 0.0}
     builder.lat_c = 6.0
-    builder.sheet_paths[1] = Path("sheet.lmp")
-    builder.tip_path = Path("tip.lmp")
-    builder.sub_path = Path("sub.lmp")
+    builder.sheet_paths[1] = tmp_path / "sheet.lmp"
+    builder.tip_path = tmp_path / "tip.lmp"
+    builder.sub_path = tmp_path / "sub.lmp"
+    # One atom each: build_render_context sizes the z box from them.
+    for path in (builder.flake_path, builder.sheet_paths[1], builder.tip_path,
+                 builder.sub_path):
+        path.write_text("# dummy\n\nAtoms # atomic\n\n1 1 0.0 0.0 0.0\n", encoding="utf-8")
     builder.output_dir_layer[1] = builder.output_dir / "L1"
     builder.relative_run_dir_layer[1] = builder.relative_run_dir / "L1"
     (builder.output_dir_layer[1] / "lammps").mkdir(parents=True, exist_ok=True)
@@ -334,6 +338,7 @@ def _make_flake_builder(tmp_path: Path) -> AFMSimulation:
     }
     fake_pm = MagicMock()
     fake_pm.types.__len__.return_value = 9
+    fake_pm.max_pair_cutoff.return_value = 11.0
     builder.pm[1] = fake_pm
     return builder
 

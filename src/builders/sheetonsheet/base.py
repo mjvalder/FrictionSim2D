@@ -23,6 +23,8 @@ from ...core.config import SheetOnSheetSimulationConfig
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import POTENTIALS_WITH_INTERNAL_LJ
 from ..utils.lammps_data import atomic2molecular
+from ..utils.z_vacuum import (SHEET_VIRTUAL_ATOM_HEIGHT, VIRTUAL_ATOM_ROOM, ZBox,
+                              data_atom_z_range)
 from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -721,6 +723,16 @@ class SheetOnSheetSimulation(SimulationBase):
             cut = _CONTACT_CUTOFF_FALLBACK
         return min(cut, 0.95 * lj_cut)
 
+    def _sheet_z_box(self) -> ZBox:
+        """The periodic-z box of the sheet stack the decks read."""
+        assert self.pm is not None
+        virtual = self.pm.virtual_atom_type is not None
+        return ZBox.for_settings(
+            self.config.settings, data_atom_z_range(self.structure_paths['sheet']),
+            self.pm.max_pair_cutoff(),
+            top_clearance=(SHEET_VIRTUAL_ATOM_HEIGHT + VIRTUAL_ATOM_ROOM
+                           if virtual else 0.0))
+
     def write_inputs(self) -> None:
         """Generate LAMMPS scripts."""
         logger.info("Writing LAMMPS inputs...")
@@ -728,6 +740,7 @@ class SheetOnSheetSimulation(SimulationBase):
         assert self.pm is not None
         assert self.sheet_dims is not None
         assert self.lat_c is not None
+        self.z_box = self._sheet_z_box()
 
         n_layers = self.n_layers
         total_types = len(self.pm.types)
@@ -779,6 +792,7 @@ class SheetOnSheetSimulation(SimulationBase):
             'ylo': self.sheet_dims.get('ylo', 0.0),
             'yhi': self.sheet_dims.get('yhi', 100.0),
             'zhi': self.sheet_dims.get('zhi', 15.0),
+            **self.z_box.context(),
             'data_file': (
                 f"{rel_run_dir_str}/build/"
                 f"{self.structure_paths['sheet'].name}"

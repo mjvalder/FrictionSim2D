@@ -18,6 +18,7 @@ neighbor        {{ neighbor_list }} bin
 comm_style      tiled
 
 read_data       {{ data_file }}
+change_box      all z final {{ box_zlo }} {{ box_zhi }} units box
 include         {{ potential_file }}
 {% if needs_molecule_ids %}
 {{ mol_ids.emit_molecule_ids(molecule_groups) -}}

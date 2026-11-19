@@ -16,7 +16,7 @@ comm_style      tiled
 thermo          {{ thermo }}
 timestep        {{ timestep }}
 
-region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -5 {{ zhi_box }}
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} {{ box_zlo }} {{ box_zhi }}
 create_box      {{ ngroups }} box
 read_data       {{ tip_file }} add append shift {{ tip_x }} {{ tip_y }} {{ tip_z }} group tip offset 0 0 0 0 0
 read_data       {{ sheet_file }} add append shift {{ sheet_shift_x }} {{ sheet_shift_y }} {{ sheet_z }} group 2D offset {{ offset_2d }} 0 0 0 0

@@ -58,7 +58,7 @@ neigh_modify every 1 delay 0 check yes
 
 comm_style      tiled
 
-region          box block 0.0 100.0 0.0 100.0 -15.0 30.0 units box
+region          box block 0.0 100.0 0.0 100.0 -9.650000 9.650000 units box
 create_box      3 box
 
 read_data       out/build/sheet.lmp add append group bot
@@ -349,14 +349,17 @@ def _seed_builder_state(builder: SheetOnSheetSimulation, tmp_path: Path) -> Path
     builder.relative_run_dir = Path("out")
 
     sheet_path = tmp_path / "sheet.lmp"
-    sheet_path.write_text("# dummy\n", encoding="utf-8")
+    # One atom at z=0: write_inputs sizes the z box from it.
+    sheet_path.write_text("# dummy\n\nAtoms # atomic\n\n1 1 0.0 0.0 0.0\n",
+                          encoding="utf-8")
     builder.structure_paths["sheet"] = sheet_path
 
     builder.lat_c = 3.0
     builder.sheet_dims = {
         "xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zhi": 15.0,
     }
-    builder.pm = SimpleNamespace(types=[1, 2, 3], is_sheet_lj=lambda _pt: True)
+    builder.pm = SimpleNamespace(types=[1, 2, 3], is_sheet_lj=lambda _pt: True,
+                                 max_pair_cutoff=lambda: 11.0, virtual_atom_type=None)
     builder.groups = {
         "layer_1": "1",
         "layer_2": "2",

@@ -30,9 +30,9 @@ neighbor        {{ neighbor_list }} bin
 {{ neigh_modify_command }}
 comm_style      tiled
 
-region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -15.0 {{ zhi + 15 }} units box
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} {{ box_zlo }} {{ box_zhi }} units box
 read_data       {{ data_file }} group all_atoms
-change_box      all z final -15.0 {{ zhi + 15 }} units box
+change_box      all z final {{ box_zlo }} {{ box_zhi }} units box
 
 include         {{ potential_file }}
 

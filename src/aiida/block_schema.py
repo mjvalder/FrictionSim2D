@@ -265,13 +265,15 @@ PROVENANCE_EXCLUDED = frozenset((
 #: (``integrity``), how and where the amorphous quench runs (not what it
 #: produces), ``materials_list``
 #: (consumed by sweep expansion), the deck shape and point set
-#: (``outer_loop``, ``scan_angle_force``), and :data:`PROVENANCE_EXCLUDED`.
+#: (``outer_loop``, ``scan_angle_force``), the periodic-z vacuum margin
+#: (every build refuses a vacuum under cutoff + skin, so the margin cannot
+#: change which atoms interact), and :data:`PROVENANCE_EXCLUDED`.
 EXCLUDED = frozenset(
     [f'settings.hpc.{n}' for n in _HPC]
     + [f'settings.aiida.{n}' for n in _AIIDA]
     + [f'settings.integrity.{n}' for n in _INTEGRITY]
     + ['settings.quench.run_local', 'settings.quench.n_procs',
-       'settings.quench.allow_generate']
+       'settings.quench.allow_generate', 'settings.geometry.z_vacuum_margin']
     + [f'{s}.materials_list' for s in ('sheet', 'sheets', 'flake_sheets')]
     + ['general.outer_loop', 'general.scan_angle_force']
 ) | PROVENANCE_EXCLUDED

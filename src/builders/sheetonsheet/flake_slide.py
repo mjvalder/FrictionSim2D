@@ -30,6 +30,7 @@ from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..construction import components
 from ..utils.interlayer import (check_interlayer_box_from_data, interlayer_style,
                                 interlayer_template_context, set_interlayer_from_config)
+from ..utils.z_vacuum import VIRTUAL_ATOM_ROOM, ZBox
 from ..construction.hetero_stack import _box_region_cmd, _detect_atom_style, _run_lammps
 from ...interfaces.ase import read_lammps_data
 
@@ -418,6 +419,13 @@ class FlakeSlideSimulation(SimulationBase):
         # 6. Render context + slide.in.
         at = read_lammps_data(combined_path)
         cell = at.cell
+        self.z_box = ZBox.for_settings(
+            settings, (float(at.positions[:, 2].min()), float(at.positions[:, 2].max())),
+            pm.max_pair_cutoff(),
+            # flake/slide.lmp creates the virtual atom lat_c_default above the
+            # flake's centre of mass.
+            top_clearance=(settings.geometry.lat_c_default + VIRTUAL_ATOM_ROOM
+                           if reserve_virtual_type else 0.0))
         general = self.config.general
         sim = settings.simulation
         out = settings.output
@@ -440,6 +448,7 @@ class FlakeSlideSimulation(SimulationBase):
             "ylo": 0.0,
             "yhi": float(cell[1, 1]),
             "zhi": zhi,
+            **self.z_box.context(),
             "data_file": self._run_dir_path(combined_path.name),
             "potential_file": self._run_dir_path("lammps", "system.in.settings"),
             "num_atom_types": len(pm.types),

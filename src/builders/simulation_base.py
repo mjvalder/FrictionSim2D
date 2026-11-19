@@ -22,6 +22,7 @@ from ..interfaces.jinja import PackageLoader
 from ..core.utils.paths import get_material_path, get_potential_path
 from ..hpc import HPCScriptGenerator, HPCConfig
 from ..hpc.manifest import JobManifest
+from .utils.z_vacuum import ZBox
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,10 @@ class SimulationBase(ABC):
         #: `model` property's fallback to `FAMILY` stays well-defined for a
         #: builder built directly (no `run_simulations` in front of it).
         self._model: str = ''
+        #: The periodic-z box the run decks must write (set by each builder
+        #: once it knows its atoms and cutoff). :meth:`write_file` checks
+        #: every ``.in`` deck against it.
+        self.z_box: Optional[ZBox] = None
         try:
             self.atomsk: Optional[AtomskWrapper] = AtomskWrapper()
         except RuntimeError:
@@ -291,6 +296,8 @@ class SimulationBase(ABC):
         Returns:
             The full path to the written file.
         """
+        if self.z_box is not None and str(filename).endswith('.in'):
+            self.z_box.check_deck(content, where=str(filename))
         target_dir = Path(output_dir) if output_dir is not None else self.output_dir
         full_path = target_dir / filename
         full_path.parent.mkdir(parents=True, exist_ok=True)

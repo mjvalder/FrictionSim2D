@@ -94,7 +94,8 @@ def _seed_builder_state(builder: AFMSimulation, tmp_path: Path) -> Path:
         def ids_by_component(self, component):
             return [3] if component == 'sheet' else []
 
-    builder.pm[1] = SimpleNamespace(types=_StubTypes([1, 2, 3]))
+    builder.pm[1] = SimpleNamespace(types=_StubTypes([1, 2, 3]),
+                                    max_pair_cutoff=lambda: 11.0)
     builder.lat_c = 6.0
     sheet_dims = {
         "xlo": 0.0,
@@ -109,7 +110,9 @@ def _seed_builder_state(builder: AFMSimulation, tmp_path: Path) -> Path:
     builder.sheet_offset = {"x": 0.0, "y": 0.0}
 
     for path in (builder.sheet_paths[1], builder.tip_path, builder.sub_path):
-        path.write_text("# dummy\n", encoding="utf-8")
+        # One atom at z=0: build_render_context sizes the z box from it.
+        path.write_text("# dummy\n\nAtoms # atomic\n\n1 1 0.0 0.0 0.0\n",
+                        encoding="utf-8")
 
     return layer_dir
 

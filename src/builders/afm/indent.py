@@ -118,6 +118,11 @@ class IndentSimulation(AFMSimulation):
         self.indent_seeds[n_layers] = seed
         return seed
 
+    def _z_top_travel(self) -> float:
+        """The retract lifts the tip ``n_steps * z_step`` (a bound: the
+        approach lowered it first)."""
+        return self.n_steps * self.z_step
+
     def build_render_context(self, n_layers: int) -> Dict[str, object]:
         context = super().build_render_context(n_layers)
         # Phase 1 (hold): the AFM base already supplies results_file_pattern (the

@@ -9,6 +9,7 @@ from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ...interfaces.ase import read_lammps_data
+from ..utils.z_vacuum import SHEET_VIRTUAL_ATOM_HEIGHT, VIRTUAL_ATOM_ROOM, ZBox
 from ..utils.interlayer import (check_interlayer_box, interlayer_style,
                                 interlayer_template_context)
 from ..construction.hetero_stack import (
@@ -251,12 +252,14 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
 
         bands = compute_layer_zbands(stack.data_path, stack.layers)
 
-        # Box from the assembled hetero.data (template adds the z-vacuum itself
-        # via change_box, so zhi is just the topmost atom z).
+        # Box from the assembled hetero.data: the template sets the z extent
+        # with change_box, from the atom z-range (self.z_box, set below once
+        # the potentials are final).
         at = read_lammps_data(stack.data_path)
         cell = at.cell
         xlo, xhi = 0.0, float(cell[0, 0])
         ylo, yhi = 0.0, float(cell[1, 1])
+        zmin = float(at.positions[:, 2].min())
         zhi = float(at.positions[:, 2].max())
 
         settings = self.config.settings
@@ -338,7 +341,14 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
         # bands, the type/virtual-atom spine) is shared.
         self._stack = stack
         self._layer_bands = bands
-        self._hetero_box = {"xlo": xlo, "xhi": xhi, "ylo": ylo, "yhi": yhi, "zhi": zhi}
+        cutoff = (stack.pm.max_pair_cutoff() if stack.pm is not None
+                  else float(settings.potential.lj_cutoff))
+        self.z_box = ZBox.for_settings(
+            settings, (zmin, zhi), cutoff,
+            top_clearance=(SHEET_VIRTUAL_ATOM_HEIGHT + VIRTUAL_ATOM_ROOM
+                           if reserve_virtual_type else 0.0))
+        self._hetero_box = {"xlo": xlo, "xhi": xhi, "ylo": ylo, "yhi": yhi, "zhi": zhi,
+                            **self.z_box.context()}
         self._hetero_coincidence_cell = (xhi - xlo, yhi - ylo)
         self._hetero_cell_xy_tilt = float(cell[1, 0])
         self._hetero_atom_style = atom_style
@@ -487,6 +497,8 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "ylo": box["ylo"],
             "yhi": box["yhi"],
             "zhi": box["zhi"],
+            "box_zlo": box["box_zlo"],
+            "box_zhi": box["box_zhi"],
             "data_file": self._run_dir_path("hetero.data"),
             "potential_file": self._run_dir_path("lammps", "system.in.settings"),
             "num_atom_types": self._hetero_num_atom_types,

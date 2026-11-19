@@ -137,10 +137,12 @@ def test_pes_sheet_write_inputs_renders_scan(tmp_path: Path):
     builder.relative_run_dir = Path("pes_sheet/h-MoS2/30x_30y/K0")
 
     # Stand in for the geometry/potential state build() would populate.
-    class _PM:  # minimal PotentialManager stand-in (unused by write_inputs)
-        pass
+    class _PM:  # minimal PotentialManager stand-in: what the z box reads
+        virtual_atom_type = None
+        max_pair_cutoff = staticmethod(lambda: 11.0)
     builder.pm = _PM()
     builder.structure_paths = {"sheet": tmp_path / "h-MoS2_2.lmp"}
+    builder.structure_paths["sheet"].write_text("# dummy\n\nAtoms # atomic\n\n1 1 0.0 0.0 0.0\n", encoding="utf-8")
     builder.sheet_dims = {"xlo": 0.0, "xhi": 30.0, "ylo": 0.0, "yhi": 30.0, "zhi": 20.0}
     builder.sheet_unit_cell = {"xlo": 0.0, "xhi": 3.0, "ylo": 0.0, "yhi": 5.0}
     builder.lat_c = 6.5

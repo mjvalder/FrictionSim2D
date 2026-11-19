@@ -172,14 +172,14 @@ def test_indent_outer_loop_scan_angle_does_not_split(tmp_path: Path):
     builder.sub_path = tmp_path / "sub.lmp"
     builder.z_positions[1] = {"sub": 0.0, "sheet": 16.0, "tip": 40.0, "tip_contact_gap": 3.5}
     builder.groups[1] = {"sub_types": "1", "tip_types": "2", "sheet_types": "3"}
-    builder.pm[1] = SimpleNamespace(types=[1, 2, 3])
+    builder.pm[1] = SimpleNamespace(types=[1, 2, 3], max_pair_cutoff=lambda: 11.0)
     builder.lat_c = 6.0
     sheet_dims = {"xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zlo": 0.0, "zhi": 12.0}
     builder.sheet_dims = dict(sheet_dims)
     builder.box_dims = dict(sheet_dims)
     builder.sheet_offset = {"x": 0.0, "y": 0.0}
     for path in (builder.sheet_paths[1], builder.tip_path, builder.sub_path):
-        path.write_text("# dummy\n", encoding="utf-8")
+        path.write_text("# dummy\n\nAtoms # atomic\n\n1 1 0.0 0.0 0.0\n", encoding="utf-8")
 
     builder.write_inputs(1)
     lammps_dir = layer_dir / "lammps"
@@ -299,7 +299,7 @@ def _system_init_context(**overrides):
     ctx = {
         "atom_style": "atomic", "neighbor_list": 0.3,
         "neigh_modify_command": "neigh_modify every 1 delay 0 check yes",
-        "xlo": 0, "xhi": 60, "ylo": 0, "yhi": 60, "zhi_box": 120, "ngroups": 6,
+        "xlo": 0, "xhi": 60, "ylo": 0, "yhi": 60, "box_zlo": -10.0, "box_zhi": 120, "ngroups": 6,
         "sub_file": "build/sub.lmp", "tip_file": "build/tip.lmp", "sheet_file": "build/sheet.lmp",
         "tip_x": 30, "tip_y": 30, "tip_z": 60, "sub_natypes": 2, "offset_2d": 4,
         "sheet_shift_x": 0, "sheet_shift_y": 0, "sheet_z": 15,

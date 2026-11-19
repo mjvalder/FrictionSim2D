@@ -214,6 +214,10 @@ class PESGridMixin:
         """``interlayer_template_context`` for the two scanned layers."""
         raise NotImplementedError
 
+    def _scan_z_box(self):
+        """The periodic-z box (:class:`~src.builders.utils.z_vacuum.ZBox`)."""
+        raise NotImplementedError
+
     # ------------------------------------------------------------ shared --
 
     def _layer_count_hint(self) -> str:
@@ -280,6 +284,8 @@ class PESGridMixin:
             'z_relax': self._z_relax(),
             'data_dir': f"{self.relative_run_dir}/data",   # final_pes.data
         }
+        self.z_box = self._scan_z_box()
+        base_context.update(self.z_box.context())
         base_context.update(self._scan_extra_context())
         # Interlayer style (spec 2026-11-11 §7): molecule IDs for ILP/KC, and
         # the interlayer term alone as an extra CSV column where an ILP/KC
@@ -383,6 +389,9 @@ class PESSheetSimulation(PESGridMixin, SheetOnSheetSimulation):
 
     def _scan_pm(self):
         return self.pm
+
+    def _scan_z_box(self):
+        return self._sheet_z_box()
 
     def _scan_interlayer_context(self) -> Dict:
         """The slide's interlayer keys over the type-based ``layer_1``/``layer_2``."""
@@ -594,6 +603,10 @@ class HeteroPESSheetSimulation(PESGridMixin, HeteroSheetOnSheetSimulation):
 
     def _scan_pm(self):
         return getattr(self._stack, 'pm', None)
+
+    def _scan_z_box(self):
+        """Set by ``HeteroSheetOnSheetSimulation.build`` from ``hetero.data``."""
+        return self.z_box
 
     def _scan_interlayer_context(self) -> Dict:
         """The hetero slide's interlayer keys over the z-band ``layer_N`` groups."""

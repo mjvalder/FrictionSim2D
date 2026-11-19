@@ -19,6 +19,7 @@ from ...core.utils.structures import cifread
 from ...lattice.apply import rotate_flake_in_plane
 from ...potentials.manager import PotentialManager
 from ..utils.lammps_data import get_model_dimensions
+from ..utils.z_vacuum import ZBox, data_atom_z_range, shifted, union_z_range
 from ...core.utils.tokens import format_numeric_token
 from ...potentials.utils import normalize_potential_type, lj_params
 from ...data.models import EV_A_TO_NN, NM_TO_EV_A2
@@ -704,6 +705,13 @@ class AFMSimulation(SimulationBase):
 
         return pm
 
+    def _z_top_travel(self) -> float:
+        """How far the run lifts the tip above where system_init reads it.
+
+        Zero: the approach only lowers it and the slide moves it laterally.
+        """
+        return 0.0
+
     def build_render_context(self, n_layers: int) -> Dict[str, object]:
         """Assemble the Jinja render context for one layer configuration.
 
@@ -746,7 +754,6 @@ class AFMSimulation(SimulationBase):
 
         xlo, xhi = box_dims['xlo'], box_dims['xhi']
         ylo, yhi = box_dims['ylo'], box_dims['yhi']
-        zhi_box = z_positions['tip'] + 50.0
 
         default_tip_x = (
             (self.sheet_dims['xlo'] + self.sheet_dims['xhi']) / 2.0
@@ -788,6 +795,18 @@ class AFMSimulation(SimulationBase):
                 'flake_corner_k': flake_cfg.corner_spring_k,
             })
 
+        # Periodic-z box from the atoms system_init reads, at their shifts.
+        zranges = [shifted(data_atom_z_range(tip_path), tip_z),
+                   shifted(data_atom_z_range(sheet_path), z_positions['sheet'])]
+        if sub_path is not None:
+            zranges.append(data_atom_z_range(sub_path))
+        if flake_cfg is not None and self.flake_path is not None:
+            zranges.append(shifted(data_atom_z_range(self.flake_path),
+                                    z_positions['flake']))
+        self.z_box = ZBox.for_settings(
+            self.config.settings, union_z_range(zranges), pm.max_pair_cutoff(),
+            top_travel=self._z_top_travel())
+
         # Tip viscous damping: an explicit dspring (including 0.0) overrides; otherwise the
         # viscous coefficient is auto-computed in the LAMMPS script from damping_ratio, the
         # driving spring constant, and the actual tip mass/atom count (see slide template).
@@ -816,7 +835,7 @@ class AFMSimulation(SimulationBase):
             'xhi': xhi,
             'ylo': ylo,
             'yhi': yhi,
-            'zhi_box': zhi_box,
+            **self.z_box.context(),
             'potential_file': f"{self.relative_run_dir_layer[n_layers]}/lammps/system.in.settings",
             'sub_file': (
                 f"{self.relative_run_dir}/build/{sub_path.name}"

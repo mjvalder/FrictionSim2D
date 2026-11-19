@@ -554,6 +554,7 @@ def _hetero_pes_scan_written(tmp_path, monkeypatch, style):
     from types import SimpleNamespace
     from src.builders.construction.hetero_stack import register_hetero_potentials
     from src.builders.sheetonsheet.pes_sheet import HeteroPESSheetSimulation
+    from src.builders.utils.z_vacuum import ZBox
     raw = _hetero_pes_raw()
     raw["general"]["interlayer_style"] = style
     cfg = SheetOnSheetSimulationConfig(**raw, settings=_settings())
@@ -566,6 +567,7 @@ def _hetero_pes_scan_written(tmp_path, monkeypatch, style):
                         {"idx": 2, "zlo": 5.0, "zhi": 9.0}]
     sim._hetero_box = {"xlo": 0.0, "xhi": 12.0, "ylo": 0.0, "yhi": 12.0, "zhi": 20.0}
     sim._hetero_atom_style = "atomic"
+    sim.z_box = ZBox.for_settings(cfg.settings, (0.0, 9.0), pm.max_pair_cutoff())
     monkeypatch.setattr(HeteroPESSheetSimulation, "_scan_periods", lambda self: (3.2, 5.5))
     monkeypatch.setattr(HeteroPESSheetSimulation, "_scan_n_cells", lambda self: 8)
     sim.write_scan_scripts()

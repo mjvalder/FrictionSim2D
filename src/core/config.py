@@ -46,6 +46,17 @@ class GeometrySettings(BaseModel):
         ),
     )
     finite_sheet_sheetonsheet_edge_mode: Literal['none', 'rigid'] = 'none'
+    z_vacuum_margin: float = Field(
+        default=8.0,
+        ge=0.0,
+        description=(
+            "Extra periodic-z vacuum (Å) on top of the largest pair cutoff plus "
+            "the neighbor skin. Every box is periodic in z, so the vacuum between "
+            "the top atoms and the image of the bottom atoms must exceed the "
+            "cutoff or the stack interacts with itself; the margin absorbs the "
+            "atoms' motion during the run (thermal, load, tip travel)."
+        ),
+    )
 
 class ThermostatSettings(BaseModel):
     """Thermostat and time integration settings."""

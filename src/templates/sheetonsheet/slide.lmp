@@ -49,7 +49,7 @@ neighbor        {{ neighbor_list }} bin
 
 comm_style      tiled
 
-region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -15.0 {{zhi + 15}} units box
+region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} {{ box_zlo }} {{ box_zhi }} units box
 {% if constraint_mode == 'atom_bonds' %}
 create_box      {{ num_atom_types }} box bond/types {{ n_bond_types }} extra/bond/per/atom 100
 

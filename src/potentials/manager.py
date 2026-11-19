@@ -27,6 +27,7 @@ from .utils import (
     POTENTIALS_REQUIRING_LJ,
     POTENTIALS_WITH_INTERNAL_LJ,
     REAXFF_TYPES,
+    internal_pair_cutoff,
     lj_params,
 )
 from .interlayer import (
@@ -1099,6 +1100,27 @@ class PotentialManager:
             tap = 1 if source is not None and source.name.endswith('_taper.KC') else 0
             return [f"{self._interlayer_substyle} {KC_FULL_CUTOFF} {tap}"]
         return []
+
+    def max_pair_cutoff(self) -> float:
+        """Largest pair cutoff the written settings apply (Angstrom).
+
+        What the periodic-z vacuum must exceed: the ``lj/cut`` cutoff when an
+        LJ term is written, the ILP/KC cutoff (or KC/z's, for ``lj_g``), and
+        the long-range part of any potential with its own LJ (ReaxFF taper
+        and QEq, REBOMoS LJ). Short-ranged many-body potentials (sw, tersoff,
+        ...) only ever appear beside an LJ term with a longer cutoff.
+        """
+        lj_cutoff = float(self.settings.potential.lj_cutoff)
+        cutoffs = [0.0]
+        if self.cross_interaction_commands or self.virtual_atom_type is not None:
+            cutoffs.append(lj_cutoff)
+        for part in self._interlayer_style_parts():
+            cutoffs.append(float(part.split()[1]))
+        for comp in self.components.values():
+            config = comp['config']
+            cutoffs.append(internal_pair_cutoff(
+                config.pot_type, config.pot_path, fallback=lj_cutoff))
+        return max(cutoffs)
 
     def _write_gaussian_commands(self, settings_dir: Path) -> List[str]:
         """Write gaussian_plus/minus.KC and return the KC/z pair_coeff lines.

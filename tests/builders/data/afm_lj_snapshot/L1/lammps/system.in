@@ -9,7 +9,7 @@ neighbor        0.3 bin
 neigh_modify every 1 delay 0 check yes
 
 comm_style tiled
-region          box block 0.0 98.70606040522237 0.0 99.2693680471787 -5 118.54851185
+region          box block 0.0 98.70606040522237 0.0 99.2693680471787 -9.316996 89.085917
 create_box      9 box
 
 read_data       <OUT>/build/sub.lmp add append group sub

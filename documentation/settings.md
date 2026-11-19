@@ -128,7 +128,16 @@ geometry:
   tip_reduction_factor: 2.25
   rigid_tip: false
   lat_c_default: 6.0
+  z_vacuum_margin: 8.0
 ```
+
+`z_vacuum_margin` (Å, ≥ 0): every run box is periodic in z, so the builder sets
+the box z extent from the atoms it reads: `zlo = zmin - V/2`, `zhi = zmax + V/2`, with
+`V = largest pair cutoff + simulation.neighbor_list + z_vacuum_margin`. The cutoff is
+the `lj/cut` cutoff, the ILP/KC cutoff (16 Å) under `interlayer_style = ilp/kc`, or the
+long-range part of a potential with its own LJ (ReaxFF taper/QEq, REBOMoS 2.5σ). The
+indent retract distance is added on top, and sheet slides keep room for the drive's
+virtual atom. A build whose deck would leave less than cutoff + skin of vacuum fails.
 
 ## output
 

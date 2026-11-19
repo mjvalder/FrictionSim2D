@@ -266,8 +266,9 @@ def _pes_builder(tmp_path: Path):
     builder = PESSheetSimulation(_sheet_cfg(tmp_path, layers=[2]),
                                  output_dir=str(tmp_path / "o"))
     builder.relative_run_dir = Path("pes_sheet/h-MoS2/30x_30y/K0")
-    builder.pm = SimpleNamespace()
+    builder.pm = SimpleNamespace(virtual_atom_type=None, max_pair_cutoff=lambda: 11.0)
     builder.structure_paths = {"sheet": tmp_path / "h-MoS2_2.lmp"}
+    builder.structure_paths["sheet"].write_text("# dummy\n\nAtoms # atomic\n\n1 1 0.0 0.0 0.0\n", encoding="utf-8")
     builder.sheet_dims = {"xlo": 0.0, "xhi": 30.0, "ylo": 0.0,
                           "yhi": 30.0, "zhi": 20.0}
     builder.sheet_unit_cell = {"xlo": 0.0, "xhi": 3.0, "ylo": 0.0, "yhi": 5.0}

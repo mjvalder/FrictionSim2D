@@ -357,3 +357,71 @@ def pot_dir_token(pot_type: str, path: Union[str, Path]) -> str:
     # for ReaxFF files the trailing token is identity, not an extension.
     stem = ''.join(c if (c.isalnum() or c in '-_.') else '-' for c in stem)
     return f'pot_{slug}_{stem}'
+
+
+# ---------------------------------------------------------------------------
+# Pair cutoffs a potential file carries (for the periodic-z vacuum)
+# ---------------------------------------------------------------------------
+#: ``fix qeq/reaxff 1 0.0 10.0 ...``: the charge-equilibration cutoff every
+#: ReaxFF template emits; it reaches across the periodic boundary too.
+REAXFF_QEQ_CUTOFF = 10.0
+
+#: LAMMPS ``pair rebomos`` cuts its LJ term at 2.5 sigma.
+REBOMOS_LJ_SIGMA_FACTOR = 2.5
+
+#: ``pair_style airebo 3.0``: LJ to 3 sigma_CC (3.4 Angstrom).
+AIREBO_LJ_CUTOFF = 3.0 * 3.4
+
+
+def reaxff_cutoff(path: Union[str, Path]) -> float:
+    """Longest ReaxFF range: the upper taper radius (``swb``) or the QEq cutoff.
+
+    ``swb`` is general parameter 13 of the ``ffield`` file (the non-bonded
+    vdW + Coulomb taper). Falls back to :data:`REAXFF_QEQ_CUTOFF` when the
+    file cannot be parsed.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+            lines = handle.readlines()
+        swb = float(lines[1 + 13].split()[0])
+    except (OSError, IndexError, ValueError):
+        logger.warning("Could not read swb from %s; using %.1f A",
+                       path, REAXFF_QEQ_CUTOFF)
+        swb = 0.0
+    return max(swb, REAXFF_QEQ_CUTOFF)
+
+
+def rebomos_cutoff(path: Union[str, Path]) -> float:
+    """REBOMoS LJ range: 2.5 x the largest ``sigma_*`` in the parameter file."""
+    sigmas: List[float] = []
+    with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+        for raw in handle:
+            parts = raw.split()
+            if len(parts) >= 2 and parts[1].lower().startswith('sigma'):
+                try:
+                    sigmas.append(float(parts[0]))
+                except ValueError:
+                    continue
+    if not sigmas:
+        raise ValueError(f"{path}: no sigma_* lines; cannot size the z vacuum")
+    return REBOMOS_LJ_SIGMA_FACTOR * max(sigmas)
+
+
+def internal_pair_cutoff(pot_type: str, path: Union[str, Path],
+                         fallback: float) -> float:
+    """The long-range cutoff a many-body potential with its own LJ applies.
+
+    ``fallback`` (the run's ``lj_cutoff``) is used for internal-LJ types
+    without a parser here (``comb``, ``comb3``); types that need an external
+    LJ are short-ranged and return 0.
+    """
+    ptype = normalize_potential_type(pot_type)
+    if ptype in REAXFF_TYPES:
+        return reaxff_cutoff(path)
+    if ptype == 'rebomos':
+        return rebomos_cutoff(path)
+    if ptype == 'airebo':
+        return AIREBO_LJ_CUTOFF
+    if ptype in POTENTIALS_WITH_INTERNAL_LJ:
+        return fallback
+    return 0.0

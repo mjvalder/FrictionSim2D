@@ -20,7 +20,7 @@ neigh_modify every 1 delay 0 check yes
 
 comm_style      tiled
 
-region          box block 0.0 98.70606040522237 0.0 99.2693680471787 -15.0 25.62711264635152 units box
+region          box block 0.0 98.70606040522237 0.0 99.2693680471787 -9.650000 31.426202 units box
 create_box      7 box
 
 read_data       <OUT>/build/h-MoS2_3.lmp add append group bot
