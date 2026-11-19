@@ -60,6 +60,7 @@ class ExternalSeries(BaseModel):
     x_transform: Optional[str] = Field(
         None, description='lambda source, evaluated')
     y_transform: Optional[str] = None
+    fit_line_style: Optional[str] = Field(None, description="Fit line style (default '--')")
 
 
 class SourceSpec(BaseModel):
@@ -98,7 +99,15 @@ class PlotBase(BaseModel):
     x_limits: Optional[List[Optional[float]]] = None
     y_limits: Optional[List[Optional[float]]] = None
     legend_location: Optional[str] = None
-    legend_outside: bool = False
+    legend_outside: Union[bool, Literal['left', 'top']] = Field(
+        False, description="True: right of the axes; 'left' or 'top' for those sides")
+    legend_top_align: Optional[Literal['right']] = Field(
+        None, description="With legend_outside='top': right-align instead of centring")
+    legend_ncol: Optional[int] = Field(None, description="Columns of a 'top' legend (default 5)")
+    legend_outside_left_anchor: Optional[float] = Field(
+        None, description="x anchor of a 'left' legend in axes units (default -0.16)")
+    legend_order: Optional[List[str]] = Field(
+        None, description='These labels first, in this order; the rest keep theirs')
     figure_size: Optional[List[float]] = None
     filter_size: Optional[str] = None
     filter_layer: Optional[int] = None
@@ -149,6 +158,9 @@ class SummaryPlot(PlotBase):
     plot_type: Literal['summary'] = 'summary'
 
     add_linear_fit: Optional[bool] = None
+    axes_margins_in: Optional[Dict[Literal['left', 'right', 'bottom'], float]] = Field(
+        None, description='Space (in) between that side of the axes and the image edge, '
+                          'so panels line up; never clips')
     append_slope_to_legend: Optional[bool] = None
     clip_fit_to_data: Optional[bool] = None
     extend_fit_to_origin: Optional[bool] = None

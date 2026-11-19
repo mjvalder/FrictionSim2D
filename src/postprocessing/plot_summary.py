@@ -223,7 +223,8 @@ class PlotSummaryMixin(PlotterMixinBase):
                             + fit_params_ext['intercept']
                         )
                         ax.plot(
-                            x_fit, y_fit, linestyle='--',
+                            x_fit, y_fit,
+                            linestyle=series.get('fit_line_style') or '--',
                             linewidth=self.settings["lines"]["width"],
                             alpha=self.settings["lines"]["fit_alpha"],
                             color=color,
@@ -290,7 +291,8 @@ class PlotSummaryMixin(PlotterMixinBase):
                 )
                 plt.close(legend_fig)
 
-        self._save_plot(fig, plot_config.get('filename'))
+        self._save_plot(fig, plot_config.get('filename'),
+                        axes_margins_in=plot_config.get('axes_margins_in'))
 
     def _generate_summary_plot(self, plot_config: dict) -> None:
         """Generate a summary plot (main plot type)."""

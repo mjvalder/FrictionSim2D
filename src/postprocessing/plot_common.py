@@ -954,18 +954,39 @@ class PlotCommonMixin(PlotterMixinBase):
                 )
 
         if ax.get_legend_handles_labels()[1]:
-            legend_outside = plot_config.get('legend_outside', False)
-            if legend_outside:
-                ax.legend(
-                    loc='center left',
-                    bbox_to_anchor=(1.02, 0.5),
-                    fontsize=s["fonts"]["legend"],
-                )
+            self._place_legend(ax, plot_config)
+
+    def _place_legend(self, ax, plot_config: dict) -> None:
+        """Draw the legend: ``legend_order`` first, then ``legend_outside``
+        (True = right of the axes, ``'left'``, ``'top'``) or ``legend_location``."""
+        s = self.settings
+        handles, labels = ax.get_legend_handles_labels()
+        legend_order = plot_config.get('legend_order')
+        if legend_order:
+            rank = {label: i for i, label in enumerate(legend_order)}
+            pairs = sorted(zip(handles, labels), key=lambda p: rank.get(p[1], len(rank)))
+            handles, labels = [p[0] for p in pairs], [p[1] for p in pairs]
+        fontsize = s["fonts"]["legend"]
+        legend_outside = plot_config.get('legend_outside', False)
+        if legend_outside == 'left':
+            # Left of the y-axis label; the tight-bbox export widens the canvas.
+            anchor_x = plot_config.get('legend_outside_left_anchor') or -0.16
+            ax.legend(handles, labels, loc='center right',
+                      bbox_to_anchor=(anchor_x, 0.5), fontsize=fontsize)
+        elif legend_outside == 'top':
+            if plot_config.get('legend_top_align') == 'right':
+                kwargs = {'loc': 'lower right', 'bbox_to_anchor': (1.0, 1.02),
+                          'borderaxespad': 0}
             else:
-                legend_loc = plot_config.get(
-                    'legend_location', s["legend"]["location"],
-                )
-                ax.legend(loc=legend_loc, fontsize=s["fonts"]["legend"])
+                kwargs = {'loc': 'lower center', 'bbox_to_anchor': (0.5, 1.02)}
+            ax.legend(handles, labels, ncol=plot_config.get('legend_ncol') or 5,
+                      fontsize=fontsize, **kwargs)
+        elif legend_outside:
+            ax.legend(handles, labels, loc='center left',
+                      bbox_to_anchor=(1.02, 0.5), fontsize=fontsize)
+        else:
+            legend_loc = plot_config.get('legend_location', s["legend"]["location"])
+            ax.legend(handles, labels, loc=legend_loc, fontsize=fontsize)
 
     def _apply_axis_limits(self, ax, plot_config: dict) -> None:
         """Apply explicit x and y axis limits from plot config."""
@@ -988,8 +1009,14 @@ class PlotCommonMixin(PlotterMixinBase):
         fig,
         filename: str | None,
         tight_bbox: bool = True,
+        axes_margins_in: dict | None = None,
     ) -> None:
-        """Save the plot to file(s) in configured formats."""
+        """Save the plot to file(s) in configured formats.
+
+        ``axes_margins_in`` (with ``tight_bbox``): any of ``left``/``right``/
+        ``bottom`` -> inches between that side of the first axes and the image
+        edge, so panels line up. It only ever widens the tight box, never clips.
+        """
         if not filename:
             logger.warning("No filename specified. Plot not saved.")
             plt.close(fig)
@@ -1026,13 +1053,32 @@ class PlotCommonMixin(PlotterMixinBase):
             fig.savefig(
                 output_path, dpi=self.settings["figure"]["dpi"],
                 format=fmt, transparent=transparent,
-                bbox_inches='tight' if tight_bbox else None,
+                bbox_inches=(self._margin_bbox(fig, axes_margins_in)
+                             if tight_bbox and axes_margins_in
+                             else 'tight' if tight_bbox else None),
                 pad_inches=0.1 if tight_bbox else 0.0,
             )
             logger.info("Generated plot: %s", output_path)
             self.written.append(output_path)
 
         plt.close(fig)
+
+    @staticmethod
+    def _margin_bbox(fig, axes_margins_in: dict):
+        """The padded tight bbox, widened so each named side of the first axes
+        sits that many inches from the image edge."""
+        from matplotlib.transforms import Bbox  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+        tight = fig.get_tightbbox(fig.canvas.get_renderer()).padded(0.1)
+        axes_pos = fig.axes[0].get_position()
+        fig_w, fig_h = fig.get_size_inches()
+        x0, y0, x1 = tight.x0, tight.y0, tight.x1
+        if 'left' in axes_margins_in:
+            x0 = min(x0, axes_pos.x0 * fig_w - axes_margins_in['left'])
+        if 'right' in axes_margins_in:
+            x1 = max(x1, axes_pos.x1 * fig_w + axes_margins_in['right'])
+        if 'bottom' in axes_margins_in:
+            y0 = min(y0, axes_pos.y0 * fig_h - axes_margins_in['bottom'])
+        return Bbox.from_extents(x0, y0, x1, tight.y1)
 
     # =====================================================================
     # SUMMARY PLOT
