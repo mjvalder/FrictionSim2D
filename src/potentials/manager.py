@@ -1607,8 +1607,11 @@ class PotentialManager:
         What the periodic-z vacuum must exceed: the ``lj/cut`` cutoff when an
         LJ term is written, the ILP/KC cutoff (or KC/z's, for ``lj_g``), and
         the long-range part of any potential with its own LJ (ReaxFF taper
-        and QEq, REBOMoS LJ). Short-ranged many-body potentials (sw, tersoff,
-        ...) only ever appear beside an LJ term with a longer cutoff.
+        and QEq, REBOMoS LJ), the ``dispersion/d3`` overlay's ``d3_cutoff``,
+        and ``lj_cutoff`` for an MLIP (its model cutoff is not read from the
+        model file, and every shipped model's is shorter). Short-ranged
+        many-body potentials (sw, tersoff, ...) only ever appear beside an LJ
+        term with a longer cutoff.
         """
         lj_cutoff = float(self.settings.potential.lj_cutoff)
         cutoffs = [0.0]
@@ -1620,6 +1623,8 @@ class PotentialManager:
             config = comp['config']
             cutoffs.append(internal_pair_cutoff(
                 config.pot_type, config.pot_path, fallback=lj_cutoff))
+        if self.d3_enabled:
+            cutoffs.append(float(self.settings.potential.d3_cutoff))
         return max(cutoffs)
 
     def _write_gaussian_commands(self, settings_dir: Path) -> List[str]:

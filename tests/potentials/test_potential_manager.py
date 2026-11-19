@@ -1741,3 +1741,21 @@ class TestNonHybridPathForBothFrameworks:
         assert model in coeff[0], (
             'MACE model path must survive the non-hybrid rewrite')
         assert coeff[0].endswith('Mo S Si # sheet, tip')
+
+
+@pytest.mark.parametrize("pot_type,fname", [("mace", "m.json"), ("deepmd", "m.pth")])
+def test_mlip_vacuum_cutoff_covers_the_model_and_d3(mock_settings, tmp_path,
+                                                    pot_type, fname):
+    """The periodic-z vacuum must clear the D3 overlay's cutoff (16 A by
+    default, longer than lj_cutoff), and an MLIP alone still gets lj_cutoff."""
+    model = _fake_model(tmp_path, fname)
+    pm = PotentialManager(mock_settings, use_langevin=False)
+    cfg = make_component_config(tmp_path, pot_type=pot_type, pot_path=model)
+    pm.register_component("sheet", cfg, n_layers=3)
+    pm.add_self_interaction("sheet")
+    lj = float(mock_settings.potential.lj_cutoff)
+    assert pm.max_pair_cutoff() == pytest.approx(lj)
+    pm.enable_d3()
+    d3 = float(mock_settings.potential.d3_cutoff)
+    assert d3 > lj
+    assert pm.max_pair_cutoff() == pytest.approx(d3)

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from ..core.mlip import MLIP_REGISTRY
+from ..core.mlip import MLIP_REGISTRY, is_mlip
 from ..core.utils.structures import (  # noqa: PLC2701
     _normalize_element_symbol, cifread, count_atomtypes,
     SINGLE_TYPE_EXTENSIONS, SINGLE_TYPE_POTENTIALS,
@@ -444,9 +444,12 @@ def internal_pair_cutoff(pot_type: str, path: Union[str, Path],
     """The long-range cutoff a many-body potential with its own LJ applies.
 
     ``fallback`` (the run's ``lj_cutoff``) is used for internal-LJ types
-    without a parser here (``comb``, ``comb3``); types that need an external
-    LJ are short-ranged and return 0.
+    without a parser here (``comb``, ``comb3``) and for MLIPs (a model's
+    cutoff, ~5-6 A for the shipped MACE/DeePMD models, is not read from the
+    file); types that need an external LJ are short-ranged and return 0.
     """
+    if is_mlip(pot_type):
+        return fallback
     ptype = normalize_potential_type(pot_type)
     if ptype in REAXFF_TYPES:
         return reaxff_cutoff(path)
