@@ -34,7 +34,8 @@ except ImportError:  # pragma: no cover - the aiida tier skips without it
         """Stand-in so the module imports without aiida-core."""
         return func
 
-__all__ = ['ANALYSIS_GROUP_PREFIX', 'find_result', 'params_hash', 'record_analysis',
+__all__ = ['ANALYSIS_GROUP_PREFIX', 'find_result',
+           'find_result_node', 'params_hash', 'record_analysis',
            'run_analysis', 'store_result']
 
 #: The Group of a dataset's results is this plus the dataset name.
@@ -129,6 +130,18 @@ def _find_node(name: str, dataset: str, digest: Optional[str], version: Optional
     qb.append(orm.SinglefileData, with_group='g', filters=filters, project=['*'])
     qb.order_by({orm.SinglefileData: {'id': 'desc'}})
     return qb.first(flat=True)
+
+
+def find_result_node(name: str, dataset: str, params_hash: Optional[str] = None,  # pylint: disable=redefined-outer-name
+                     version: Optional[str] = None):
+    """The newest stored result node (its ``uuid`` and extras carry the
+    metadata), selected as :func:`find_result` does, or None."""
+    if version is None:
+        try:
+            version = get_analysis(name).version
+        except KeyError:
+            pass
+    return _find_node(name, dataset, params_hash, version)
 
 
 def find_result(name: str, dataset: str, params_hash: Optional[str] = None,  # pylint: disable=redefined-outer-name

@@ -1690,6 +1690,137 @@ def compare_cmd(a: str, b: str, profile: Optional[str], rtol: float, atol: float
     click.echo(report.render())
 
 
+# =============================================================================
+# ANALYSE COMMANDS
+# =============================================================================
+
+@cli.group('analyse')
+def analyse_group():
+    """Run and read the on-demand analyses of a dataset in the AiiDA store."""
+
+
+def _parse_params(analysis, pairs: Tuple[str, ...]) -> dict:
+    """``k=v`` pairs, validated by the analysis's ``Params`` model.
+
+    Raises:
+        click.UsageError: a malformed pair, an unknown name or a bad value,
+            each naming the parameter.
+    """
+    fields = analysis.Params.model_fields
+    values = {}
+    for pair in pairs:
+        key, sep, value = pair.partition('=')
+        if not sep or not key:
+            raise click.UsageError(f"--param {pair!r}: expected NAME=VALUE")
+        if key not in fields:
+            raise click.UsageError(f"--param {key}: {analysis.name} has no such parameter "
+                                   f"(known: {', '.join(sorted(fields)) or 'none'})")
+        values[key] = value
+    try:
+        model = analysis.Params(**values)
+    except ValueError as exc:
+        errors = getattr(exc, 'errors', lambda: [])()
+        detail = '; '.join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in errors)
+        raise click.UsageError(f"--param {detail or exc}") from exc
+    return {key: getattr(model, key) for key in values}
+
+
+def _analysis_or_abort(name: str):
+    from .analysis.base import get_analysis  # noqa: PLC0415
+    try:
+        return get_analysis(name)
+    except KeyError as exc:
+        raise click.UsageError(str(exc.args[0])) from exc
+
+
+def _stored_or_abort(name: str, dataset: str, profile: Optional[str], params=None):
+    """The newest stored result node of ``name`` over ``dataset``."""
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .analysis import store  # noqa: PLC0415
+    from .analysis.base import get_analysis  # noqa: PLC0415
+    load_aiida_profile(profile)
+    digest = None
+    if params is not None:
+        digest = store.params_hash(get_analysis(name).Params(**params).model_dump(mode='json'))
+    node = store.find_result_node(name, dataset, digest)
+    if node is None:
+        raise click.ClickException(f"no stored result of {name} over {dataset}; "
+                                   f"run: FrictionSim2D analyse run {name} {dataset}")
+    return node
+
+
+@analyse_group.command('list')
+def analyse_list():
+    """List the registered analyses."""
+    from .analysis import base  # noqa: PLC0415
+    if not base.ANALYSES:
+        click.echo("no analyses registered")
+        return
+    for name in sorted(base.ANALYSES):
+        cls = base.ANALYSES[name]
+        click.echo(f"{name}\t{cls.version}\t{cls.level}\t{','.join(sorted(cls.families))}")
+
+
+@analyse_group.command('run')
+@click.argument('name')
+@click.argument('dataset')
+@click.option('--param', 'params', multiple=True, metavar='NAME=VALUE',
+              help='Analysis parameter (repeatable).')
+@click.option('--force', is_flag=True, help='Recompute even if a result is stored.')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def analyse_run(name: str, dataset: str, params: Tuple[str, ...], force: bool,
+                profile: Optional[str]):
+    """Run analysis NAME over DATASET (or reuse its stored result)."""
+    from .aiida import load_aiida_profile  # noqa: PLC0415
+    from .analysis import store  # noqa: PLC0415
+    values = _parse_params(_analysis_or_abort(name), params)
+    try:
+        load_aiida_profile(profile)
+        table = store.run_analysis(name, dataset, values, force=force)
+        node = _stored_or_abort(name, dataset, profile, values)
+    except click.ClickException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Analysis failed")
+        _raise_abort(f"❌ Analysis failed: {exc}", exc)
+    extras = node.base.extras.all
+    click.echo(f"rows: {len(table)}")
+    click.echo(f"dropped: {extras.get('n_dropped', 0)}")
+    click.echo(f"uuid: {node.uuid}")
+
+
+@analyse_group.command('show')
+@click.argument('name')
+@click.argument('dataset')
+@click.option('--rows', default=10, show_default=True, help='Rows of the table to print.')
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def analyse_show(name: str, dataset: str, rows: int, profile: Optional[str]):
+    """Print the stored result of NAME over DATASET: metadata and head."""
+    import io  # noqa: PLC0415
+    import pandas as pd  # noqa: PLC0415
+    node = _stored_or_abort(name, dataset, profile)
+    click.echo(f"uuid: {node.uuid}")
+    for key, value in sorted(node.base.extras.all.items()):
+        click.echo(f"{key}: {value}")
+    table = pd.read_csv(io.BytesIO(node.get_content(mode='rb')))
+    click.echo(table.head(rows).to_string(index=False))
+
+
+@analyse_group.command('export')
+@click.argument('name')
+@click.argument('dataset')
+@click.argument('out', type=click.Path(dir_okay=False, path_type=Path))
+@click.option('--profile', default=None,
+              help='AiiDA profile name (default: configured default profile)')
+def analyse_export(name: str, dataset: str, out: Path, profile: Optional[str]):
+    """Write the stored result of NAME over DATASET to OUT (CSV)."""
+    node = _stored_or_abort(name, dataset, profile)
+    out.write_bytes(node.get_content(mode='rb'))
+    click.echo(f"wrote {out}")
+
+
 def main():
     try:
         cli()
