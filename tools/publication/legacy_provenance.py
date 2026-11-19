@@ -104,7 +104,7 @@ def _record(run_dir: Path, family: str) -> ProvenanceRecord:
                 if manifest_file.is_file() else {})
     lammps = run_dir / 'lammps'
     settings = lammps / 'system.in.settings'
-    decks = sorted(lammps.glob('slide_*.in'))
+    decks = sorted(lammps.glob('slide*.in'))
     sim = config.get('settings', {}).get('simulation', {})
     spring = config['general'].get('driving_spring')
     drive_k = (float(spring) / NM_TO_EV_A2

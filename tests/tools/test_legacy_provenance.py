@@ -83,3 +83,12 @@ def test_existing_provenance_untouched(tmp_path):
     result = reconstruct(run, root)
     assert result.wrote is None
     assert (run / 'provenance.json').read_bytes() == before
+
+
+def test_single_deck_named_slide_in(tmp_path):
+    """260312 runs have one ``slide.in`` looping over pressures, not ``slide_p*.in``."""
+    root, run = _tree(tmp_path, 'rebomos', REBOMOS_REL)
+    (run / 'lammps' / 'slide_p1gpa.in').rename(run / 'lammps' / 'slide.in')
+    result = reconstruct(run, root)
+    record = ProvenanceRecord.model_validate_json(result.wrote.read_text(encoding='utf-8'))
+    assert record.thermostat_scheme == 'nvt_center'
