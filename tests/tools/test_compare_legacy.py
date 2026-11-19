@@ -38,3 +38,14 @@ def test_a_point_missing_from_the_store_is_listed():
     legacy = _legacy([[1.0, 2.0, 3.0]])
     report = compare(legacy, {'schema': 3, 'runs': []})
     assert report.missing == [('p', 1.0, 90.0)]
+
+
+def test_top_com_maps_to_the_drive_channel():
+    """The registry renames v_comx_top to drivex (observables.py, drive{x,y,z})."""
+    legacy = {'results': {'s20': {'p1.0': {'a90': {
+        'columns': ['v_comx_top'], 'data': [[5.0]]}}}}}
+    export = {'schema': 3, 'runs': [{
+        'load_kind': 'pressure', 'load': 1.0, 'angle': 90.0,
+        'tiers': {'window': {'columns': ['drivex'], 'data': [[5.0]]}}}]}
+    report = compare(legacy, export)
+    assert report.notes == [] and report.columns[0].max_abs == 0.0

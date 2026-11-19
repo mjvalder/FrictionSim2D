@@ -22,7 +22,8 @@ import numpy as np
 
 #: Legacy column -> schema-3 column, where the name changed.
 RENAMED = {'v_sx': 'react_x', 'v_sy': 'react_y', 'v_sz': 'react_z',
-           'v_fx': 'drive_fx', 'v_fy': 'drive_fy', 'v_fz': 'drive_fz'}
+           'v_fx': 'drive_fx', 'v_fy': 'drive_fy', 'v_fz': 'drive_fz',
+           'v_comx_top': 'drivex', 'v_comy_top': 'drivey', 'v_comz_top': 'drivez'}
 
 Key = Tuple[str, float, float]  # (load kind 'p' | 'f', load, angle)
 _LOAD_RE = re.compile(r'^([pf])(-?[\d.]+)$')
