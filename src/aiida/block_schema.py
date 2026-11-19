@@ -455,6 +455,9 @@ _SUMMARY_RETRACT = {
 _SUMMARY_POST_AFM = {'gap_min': _A, 'deflect_max': _A}
 _SUMMARY_POST_SHEET = {'gap_min_il': _A, 'corrugation_max': _A}
 
+#: ``data.models.LF_PAIRS``: |react_x, react_y| and |drive_fx, drive_fy|, nN.
+_SUMMARY_LF_PAIRS = {'mean_lf_sx_sy': _NN, 'mean_lf_fx_fy': _NN}
+
 #: ``pes_scan.grid_descriptors``: ``energy_eV`` is the total PE in eV
 #: (``afm/pes_scan.lmp:87``), the grid axes are Angstrom, the tip forces nN
 #: (``afm/pes_scan.lmp:72-74`` scale by ``ev_a_to_nn``).
@@ -476,7 +479,7 @@ SUMMARY_UNITS: Dict[str, Dict[str, str]] = {
     'indent': {**_SUMMARY_BASE, **_SUMMARY_DRIVEN, **_SUMMARY_SLIP,
                **_SUMMARY_RETRACT, **_SUMMARY_POST_AFM},
     **{family: {**_SUMMARY_BASE, **_SUMMARY_DRIVEN, **_SUMMARY_SLIP,
-                **_SUMMARY_POST_SHEET}
+                **_SUMMARY_POST_SHEET, **_SUMMARY_LF_PAIRS}
        for family in ('sheetonsheet', 'hetero', 'flake')},
     'pes_sheet': {**_SUMMARY_BASE, **_SUMMARY_PES},
     'pes_tip': {**_SUMMARY_BASE, **_SUMMARY_PES, **_SUMMARY_PES_TIP},

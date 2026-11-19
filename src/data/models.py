@@ -261,6 +261,13 @@ def _role_column(df, family: str, role_key: str) -> Optional[str]:
     return None
 
 
+#: summary key -> (x, y) window columns of the sheet family's alternative
+#: lateral forces; :func:`summarise_run` records the mean magnitude.
+LF_PAIRS = {'mean_lf_sx_sy': ('react_x', 'react_y'),
+            'mean_lf_fx_fy': ('drive_fx', 'drive_fy')}
+LF_PAIR_FAMILIES = frozenset({'sheetonsheet', 'hetero', 'flake'})
+
+
 def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
                   skip_fraction: float = 0.2,
                   post: Optional[Dict[str, float]] = None) -> RunSummary:
@@ -303,6 +310,16 @@ def summarise_run(frames_by_tier: Dict[str, Any], family: str, *,
     else:
         # the role columns did not resolve: no stats, and say so
         summary.is_complete = False
+
+    # The sheet family's two alternative lateral forces: the magnitude of the
+    # bottom layer's reaction (sx_sy) and of the top layer's drive (fx_fy),
+    # averaged over the WHOLE window like the postprocessing summary always did.
+    if family in LF_PAIR_FAMILIES:
+        for name, (x_col, y_col) in LF_PAIRS.items():
+            if x_col in window.columns and y_col in window.columns:
+                summary.extras[name] = _finite(np.mean(np.hypot(
+                    window[x_col].to_numpy(dtype=float),
+                    window[y_col].to_numpy(dtype=float))))
 
     dx_col, dy_col, dz_col = (_role_column(window, family, role)
                               for role in _DRIVEN_ROLES)

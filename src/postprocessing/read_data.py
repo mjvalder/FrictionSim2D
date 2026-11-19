@@ -482,8 +482,6 @@ SUMMARY_LF_COLUMNS = ('mean_lf_sx_sy', 'mean_lf_fx_fy')
 SUMMARY_POST_COLUMNS = ('gap_min', 'deflect_max', 'gap_min_il',
                         'corrugation_max')
 
-_LF_PAIRS = {'mean_lf_sx_sy': ('react_x', 'react_y'),
-             'mean_lf_fx_fy': ('drive_fx', 'drive_fy')}
 
 
 #: Material-name prefix -> metadata bucket. `h_` hexagonal, `t_` T-phase,
@@ -1124,14 +1122,9 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
             row.update(summary.as_dict())
             row['is_complete'] = (run.status == 'complete'
                                   and bool(summary.is_complete))
-            window = run.window if usable else pd.DataFrame()
-            for name, (x_col, y_col) in _LF_PAIRS.items():
-                if x_col in window.columns and y_col in window.columns:
-                    row[name] = float(np.mean(np.hypot(
-                        window[x_col].to_numpy(dtype=float),
-                        window[y_col].to_numpy(dtype=float))))
-                else:
-                    row[name] = float('nan')
+            for name in SUMMARY_LF_COLUMNS:  # from summarise_run; NaN where absent
+                value = row.get(name) if usable else None
+                row[name] = float('nan') if value is None else float(value)
             for name in SUMMARY_POST_COLUMNS:
                 row[name] = (float(run.post.get(name, float('nan'))) if usable
                              else float('nan'))
