@@ -208,3 +208,26 @@ def _check_source(source):
     assert loaded.read_text().strip()
     assert source.settings_text(row) == 'pair_style sw\n'
     assert source.structure_text(row) == '# built sheet\n'
+
+
+@pytest.fixture
+def store_with_peratom(aiida_profile_clean, no_profile_switch, tmp_path):
+    """The `store` fixture's run, with a peratom tier at every load."""
+    from tests.helpers.synthetic_results import write_results
+    run_dir = _tree(tmp_path / 'tree', eject=(10.0,))
+    _write_extras(run_dir)
+    write_results(run_dir, 'afm', loads=(10.0, 30.0, 50.0), tiers=('peratom',), layers=2, n=50)
+    import_root(tmp_path / 'tree', label='camp')
+    postprocess_group('camp')
+    build_dataset('paper', ['camp'])
+
+
+def test_store_source_frames_carry_the_peratom_tier(store_with_peratom):
+    # The CalcJob outputs the per-atom tier as its own `peratom.<label>`
+    # node, beside the point (calcjob.py:582-587).
+    with RunSource.from_dataset('paper') as source:
+        for row in source.rows.itertuples():
+            frames = source.frames(row)
+            assert {'window', 'peratom'} <= set(frames)
+            assert 'E_int_tip_sheet' in frames['peratom']
+            assert len(frames['peratom']) == 50

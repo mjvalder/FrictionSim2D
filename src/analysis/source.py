@@ -141,9 +141,29 @@ class StoreFetcher:
             self._tmp = None
 
     def frames(self, row: Any) -> Dict[str, pd.DataFrame]:
-        """`src.aiida.query.point_frames` of the row."""
-        from ..aiida.query import point_frames  # pylint: disable=import-outside-toplevel
-        return point_frames(row.calc_uuid, row.node_uuid)
+        """`src.aiida.query.point_frames` of the row, plus its ``peratom``
+        tier: the CalcJob outputs that as its own ``peratom.<point label>``
+        node beside the point (`calcjob.py:582-587`), read the same way."""
+        # pylint: disable=import-outside-toplevel
+        from aiida import orm
+
+        from ..aiida.query import point_frames
+        from ..aiida.steps import _point_frames  # pylint: disable=protected-access
+        frames = point_frames(row.calc_uuid, row.node_uuid)
+        if 'peratom' in frames:
+            return frames
+        calc = orm.load_node(row.calc_uuid)
+        if 'peratom' not in calc.outputs:
+            return frames
+        point = orm.load_node(row.node_uuid)
+        label = _point_label(point)
+        if label not in calc.outputs.peratom:
+            return frames
+        n_layers = int(calc.inputs.parameters.get_dict()['n_layers'])
+        with tempfile.TemporaryDirectory() as tmp:
+            frames.update(_point_frames(calc.outputs.peratom[label], Path(tmp) / 'results',
+                                        point.base.attributes.get('family'), n_layers))
+        return frames
 
     def snapshot(self, row: Any, kind: SnapshotKind) -> Optional[Path]:
         """``final``: the CalcJob's ``snapshots.<point label>`` output
