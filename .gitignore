@@ -25,3 +25,7 @@ tests/agent/evals/.results/
 assistant_models/*/model.gguf
 # Syncthing ignore patterns: per machine, never synced or committed
 .stignore
+
+# Agent worktrees and agent data (not source)
+.claude/
+tools/agent_data/
