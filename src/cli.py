@@ -73,6 +73,10 @@ def _run_simulation(model: str, config_file: str, output_dir: str,
         f"{len(configs_to_run)} successful"
     )
     click.echo(f"📂 Output directory: {simulation_root.absolute()}")
+    if len(created_simulations) < len(configs_to_run):
+        # A build that failed (logged above) must fail the command, or a
+        # script chaining `run` and `hpc generate` carries on as if it worked.
+        raise SystemExit(1)
 
 # =============================================================================
 # MAIN CLI GROUP

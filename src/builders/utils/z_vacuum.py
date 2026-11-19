@@ -149,7 +149,10 @@ class ZBox:
             ValueError: The atoms do not fit, or the vacuum (less
                 ``top_travel``) is below ``cutoff + skin``.
         """
-        if zlo >= self.zmin or zhi <= self.zmax + self.top_clearance:
+        # top_clearance is the least room needed, so a box top exactly that far
+        # above the atoms passes (zhi takes max(V/2, clearance), which lands on
+        # equality whenever the clearance wins); 1e-6 absorbs zhi's rounding.
+        if zlo >= self.zmin or zhi < self.zmax + self.top_clearance - 1e-6:
             raise ValueError(
                 f"{where}: periodic z box [{zlo:.3f}, {zhi:.3f}] does not contain "
                 f"the atoms [{self.zmin:.3f}, {self.zmax:.3f}]"

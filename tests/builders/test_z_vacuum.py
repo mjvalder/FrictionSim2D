@@ -49,6 +49,16 @@ def test_check_deck_refuses_the_old_sheet_box():
         box.check_deck(deck)
 
 
+def test_box_from_zhi_passes_when_the_clearance_wins():
+    """virtual_atom slides: clearance 11 > V/2 = 10.15 puts zhi exactly on
+    zmax + clearance. The box the ZBox itself makes must pass its own check."""
+    box = _zbox(zmax=31.303, cutoff=12.0, skin=0.3, top_clearance=11.0)
+    assert box.zhi == pytest.approx(31.303 + 11.0)
+    box.check(box.zlo, box.zhi)
+    with pytest.raises(ValueError, match="does not contain"):
+        box.check(box.zlo, box.zhi - 0.01)
+
+
 def test_check_deck_reads_the_last_change_box():
     box = _zbox()
     deck = ("region          box block 0 1 0 1 -1 31 units box\n"
@@ -124,3 +134,4 @@ def test_internal_lj_potentials_report_their_own_range():
     assert internal_pair_cutoff(
         "reaxff", pots / "reaxff" / "ffield_ponomarev.reax.MoS", 11.0) == 10.0
     assert internal_pair_cutoff("sw", pots / "sw" / "MoS2_wen.sw", 11.0) == 0.0
+
