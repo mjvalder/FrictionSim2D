@@ -39,7 +39,7 @@ PLOT_TYPES = ('summary', 'timeseries', 'stick_slip_analysis',
               'scatter_comparison', 'rank_friction', 'correlation',
               'cof_histogram')
 
-_FORBID = ConfigDict(extra='forbid')
+_FORBID = ConfigDict(extra='forbid', populate_by_name=True)
 
 
 class ExternalSeries(BaseModel):
@@ -84,6 +84,9 @@ class PlotBase(BaseModel):
     model_config = _FORBID
 
     plot_type: str
+    source: Optional[str] = Field(
+        None, alias='_source',
+        description='Documentation only: the config or script this plot was first made with')
     filename: Optional[str] = None
     title: Optional[str] = None
     datasets: Optional[List[str]] = None
@@ -325,6 +328,8 @@ class DatasetsHeader(BaseModel):
 
 class PlotDocument(DatasetsHeader):
     """A whole `postprocess plot` document."""
+    comment: Optional[str] = Field(None, alias='_comment',
+                                   description='Documentation only')
     plots: List[AnyPlot] = Field(default_factory=list)
 
 

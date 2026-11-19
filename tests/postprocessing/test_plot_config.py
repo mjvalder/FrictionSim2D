@@ -174,3 +174,30 @@ def test_an_unknown_preset_is_a_key_error():
 
     with pytest.raises(KeyError, match='wallpaper'):
         load_preset('wallpaper')
+
+
+def test_source_and_comment_accepted():
+    """The publication document notes each plot's origin in `_source` and the
+    document's in `_comment`; both are documentation, kept on a round trip."""
+    from src.postprocessing.plot_config import PlotDocument
+
+    doc = PlotDocument.model_validate({
+        '_comment': 'y', 'data_dirs': ['d'], 'labels': ['d'],
+        'plots': [{'plot_type': 'summary', '_source': 'x'}]})
+
+    assert doc.comment == 'y'
+    assert doc.plots[0].source == 'x'
+    dumped = doc.model_dump(by_alias=True, exclude_unset=True)
+    assert dumped['_comment'] == 'y'
+    assert dumped['plots'][0]['_source'] == 'x'
+
+
+def test_unknown_key_still_rejected():
+    from pydantic import ValidationError
+
+    from src.postprocessing.plot_config import PlotDocument
+
+    with pytest.raises(ValidationError, match='_sorce'):
+        PlotDocument.model_validate({
+            'data_dirs': [], 'labels': [],
+            'plots': [{'plot_type': 'summary', '_sorce': 'x'}]})
