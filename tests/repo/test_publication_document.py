@@ -58,3 +58,30 @@ def test_every_published_figure_has_a_plot():
     made = {p['filename'] for p in raw['plots']}
     made |= {p['spectrum_filename'] for p in raw['plots'] if p.get('spectrum_filename')}
     assert {f.name for f in (PUB / 'Images' / 'plots').glob('*.png')} == made
+
+
+def _expand(name):
+    """`a_{x,y}{,_s}.png` -> every file name it stands for."""
+    import itertools  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
+    parts = re.split(r'\{([^}]*)\}', name)
+    choices = [[p] if i % 2 == 0 else p.split(',') for i, p in enumerate(parts)]
+    return {''.join(c) for c in itertools.product(*choices)}
+
+
+def test_known_differences_name_published_figures():
+    """README's known-differences list names real figures, and the comparison
+    script points there instead of claiming any figure reproduces."""
+    import re  # pylint: disable=import-outside-toplevel
+    text = (PUB / 'README.md').read_text(encoding='utf-8')
+    section = text.split('## Known differences from the published figures', 1)[1].split('\n## ', 1)[0]
+    named = set()
+    for line in section.splitlines():
+        if line.startswith('- '):
+            for name in re.findall(r'`([^`]+\.png)`', line.split(':', 1)[0]):
+                named |= _expand(name)
+    published = {f.name for f in (PUB / 'Images' / 'plots').glob('*.png')}
+    assert named and named <= published, named - published
+    assert len(named) == 14
+    script = (PUB / 'compare_to_reference.py').read_text(encoding='utf-8')
+    assert 'Known differences' in script and 'stick-slip' not in script

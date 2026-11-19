@@ -2,9 +2,9 @@
 
     python compare_to_reference.py [rebuilt_dir]
 
-BYTE-IDENTICAL: same file. PIXEL-IDENTICAL: same image, different PNG metadata (the four
-stick-slip figures, whose originals were written by an older matplotlib). Anything else is a
-real difference.
+BYTE-IDENTICAL: same file. PIXEL-IDENTICAL: same image, different PNG metadata. DIFFERENT:
+anything else. README.md, "Known differences from the published figures", lists every figure
+known to differ and why.
 """
 import hashlib, sys
 from pathlib import Path

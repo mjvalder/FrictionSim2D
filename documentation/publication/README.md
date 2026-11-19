@@ -76,13 +76,15 @@ plot reads only the points its filters select, straight from the store; nothing 
 disk. The tables of the analysis figures are the stored analyses, read as
 `{"analysis": <name>, "dataset": "260909-afm"}`. The snapshot figures read the stored
 snapshots of `260909-afm`. The sheet-on-sheet figures read
-`aiida://analysis/period_summary/261107-sheet`: each run cut to whole lattice periods. That cut takes the lattice period along the scan from
-the AFM bilayers (`geometry_dataset=260909-afm`), as the published cut did. The plotter never
-computes an analysis; a missing one stops the plot and names the `analyse run` command.
+`aiida://analysis/period_summary/261107-sheet`: each run cut to whole lattice periods. That
+cut takes the lattice period along the scan from the AFM bilayers
+(`geometry_dataset=260909-afm`), as the published cut did. The plotter never computes an
+analysis; a missing one stops the plot and names the `analyse run` command.
 
 `compare_to_reference.py` compares each rebuilt figure with the published one in
 `Images/plots/`. It reports each figure as identical byte for byte, identical pixel for pixel
-(only the PNG metadata differs), or different.
+(only the PNG metadata differs), or different. The figures it reports as different are listed
+under [Known differences from the published figures](#known-differences-from-the-published-figures).
 
 ## Figures
 
@@ -100,6 +102,39 @@ computes an analysis; a missing one stops the plot and names the `analyse run` c
 | `fs2d_contact_area_cof.png`, `fs2d_contact_atoms_cof.png` | `contact_cof_scatter` | `260909-afm` (`contact`, `cof_ranking`) |
 | `fs2d_sheet_profile_mos2.png` | `sheet_profile` | `260909-afm` (h-MoS₂ snapshots) |
 | `integrity_panel_h_{MoS2,NiSe2}_l2.png` | `integrity_panel` | `260909-afm` (snapshots, `integrity_traces`, `run_status`) |
+
+## Known differences from the published figures
+
+The rebuilt figures match the published ones except for the following. Each difference comes
+from the data, as stated; the drawing code is the same.
+
+- `fs2d_afm_stickslip_period.png`: the runs are those that pass the integrity check. The
+  published figure used the runs a classifier labelled sliding. The rebuilt figure has 481 runs
+  against 448: 37 runs are new, and the 4 runs of p-CTe are missing (see the contact figures).
+- `fs2d_contact_area_cof.png`, `fs2d_contact_atoms_cof.png`: the p-CTe bilayer is not in the
+  archive, so its points are missing (536 points against 540). The COF comes from the stored
+  ranking; the published one was rounded to 6 significant digits. The two differ by at most
+  4.6 × 10⁻⁶ relative, which changes only the antialiasing.
+- `integrity_panel_h_MoS2_l2.png`, `integrity_panel_h_NiSe2_l2.png`: the temperature and gap
+  traces are the stored double-precision frames; the published panels used single-precision
+  copies. The lines move by less than a pixel, in the temperature and gap rows only. The traces
+  are one table of about 1.36 million rows (`integrity_traces` over `260909-afm`), which every
+  panel reads in full.
+- `lf_vs_load_100x100_sheetonsheet.png`: 126 of the 1401 runs of `261107-sheet` fail the
+  integrity check and are left out; the published cut kept them. The figure has 10 fewer
+  points: b-SiGe at 8 loads, p-GeSe and p-SnTe at 20 GPa.
+- `tribindex_vs_cof_sheetonsheet.png`: the same 126 runs are left out. 9 points in the
+  5–20 GPa window are missing, from b-antimonene, b-bismuthene, black phosphorus, p-GeSe,
+  p-GeTe, p-SnSe, p-SnTe and p-arsenene.
+- `cof_histogram_mos2.png`: the bar values equal the published ones within 10⁻⁴. The image is
+  19 px wider (layout only).
+- `lf_vs_nf_100x100_mos2_sx_sy.png`: the values are the same; only some pixels differ.
+- `lf_vs_time_h_MoS2_l2_v_com_top.png`: the SW-Kandemir lateral force is 1.602 times the
+  published curve. The published curve was in eV/Å but labelled nN. The archive stores the
+  legacy SW results converted to nN.
+- `stick_slip_h_MoS2_v_com_top_0.1GPa_{rebomos,sevik}{,_spectrum}.png`: the displacement
+  trace is offset by about 23 rows against the published one, although the data and the time
+  axis are the same. The cause is not yet known.
 
 ## Files
 
