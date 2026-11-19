@@ -27,7 +27,8 @@ __all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
            'SummaryPlot', 'TimeseriesPlot', 'StickSlipPlot',
            'ScatterComparisonPlot', 'RankFrictionPlot', 'CorrelationPlot',
            'CofHistogramPlot', 'TableSource', 'StickslipPeriodHistogramPlot',
-           'ContactCofScatterPlot', 'SheetProfilePlot', 'IntegrityPanelPlot', 'AnyPlot', 'DatasetsHeader', 'PlotDocument',
+           'ContactCofScatterPlot', 'SheetProfilePlot', 'IntegrityPanelPlot', 'AnyPlot',
+           'DatasetsHeader', 'PlotDocument',
            'load_plot_document', 'schema_markdown', 'FigureSettings',
            'FontSettings', 'ColorSettings', 'MarkerSettings', 'LineSettings',
            'GridSettings', 'ErrorBandSettings', 'LegendSettings',
@@ -336,17 +337,33 @@ class CofHistogramPlot(PlotBase):
 class TableSource(BaseModel):
     """Where a table plot reads its rows. A bare string is a file path.
 
-    A CSV path, resolved like external-series files. (Analysis results by
-    name come with the analysis layer.)
+    Exactly one of ``file`` (a CSV, resolved like external-series files) or
+    ``analysis`` (a stored result of that analysis over ``dataset``, the
+    newest one of ``version`` -- by default the registered analysis' current
+    version). The plotter never computes an analysis: run it first with
+    ``FrictionSim2D analyse run <analysis> <dataset>``.
     """
     model_config = _FORBID
 
     file: Optional[Path] = Field(None, description='CSV file')
+    analysis: Optional[str] = Field(None, description='Stored analysis result, by name')
+    dataset: Optional[str] = Field(None, description='Dataset the analysis ran over')
+    version: Optional[str] = Field(None, description="Analysis version (default: current)")
 
     @model_validator(mode='before')
     @classmethod
     def _bare_path(cls, value):
         return {'file': value} if isinstance(value, (str, Path)) else value
+
+    @model_validator(mode='after')
+    def _one_source(self):
+        if (self.file is None) == (self.analysis is None):
+            raise ValueError('a table source names exactly one of file or analysis')
+        if self.analysis is not None and not self.dataset:
+            raise ValueError(f'analysis {self.analysis!r} needs dataset')
+        if self.file is not None and (self.dataset or self.version):
+            raise ValueError('dataset and version go only with an analysis')
+        return self
 
     @model_serializer(mode='wrap')
     def _as_bare_path(self, handler):
@@ -393,8 +410,13 @@ class SheetProfilePlot(_TablePlot):
     """Top surface and bottom layer height vs distance from the tip axis, per load."""
     plot_type: Literal['sheet_profile'] = 'sheet_profile'
 
-    run_dir: Optional[str] = Field(None, description='AFM run directory holding <layer_dir>/')
+    run_dir: Optional[str] = Field(
+        None, description='AFM run directory holding <layer_dir>/ (or give dataset)')
     layer_dir: Optional[str] = None
+    dataset: Optional[str] = Field(
+        None, description='Stored dataset holding the run (instead of run_dir)')
+    material: Optional[str] = Field(None, description='Material, with dataset')
+    layer: Optional[int] = Field(None, description='Layers, with dataset (default 2)')
     tip_types: Optional[List[int]] = None
     tip_apex_depth: Optional[float] = None
     far_field_radius: Optional[float] = None
@@ -409,7 +431,10 @@ class IntegrityPanelPlot(PlotBase):
     plot_type: Literal['integrity_panel'] = 'integrity_panel'
 
     material: Optional[str] = Field(None, description='Material (required)')
-    run_dir: Optional[str] = Field(None, description='AFM run directory holding L<layer>/')
+    run_dir: Optional[str] = Field(
+        None, description='AFM run directory holding L<layer>/ (or give dataset)')
+    dataset: Optional[str] = Field(
+        None, description='Stored dataset holding the run (instead of run_dir)')
     layer: Optional[int] = None
     loads: Optional[List[float]] = None
     traces_file: Optional[TableSource] = Field(
@@ -433,7 +458,8 @@ class DatasetsHeader(BaseModel):
 
     data_dirs: List[str] = Field(
         default_factory=list,
-        description="Directories holding outputs/, or aiida://dataset/<name> URIs")
+        description=("Directories holding outputs/, aiida://dataset/<name> or "
+                     "aiida://analysis/<name>/<dataset> URIs"))
     labels: List[str] = Field(default_factory=list,
                               description='One per data_dir')
     dataset_display_labels: Dict[str, str] = Field(default_factory=dict)

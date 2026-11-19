@@ -285,6 +285,17 @@ use that directory:
 FrictionSim2D aiida export-results <label> <dir>
 ```
 
+### Stored analyses as plot sources
+
+- `aiida://analysis/<name>/<dataset>` in `data_dirs`: a summary-shaped analysis result
+  (`period_summary`) becomes that label's summary rows, as `aiida://dataset/` does.
+- A table field (`ranking_file`, `traces_file`, ...) takes a path or
+  `{"analysis": <name>, "dataset": <dataset>, "version": <optional>}`.
+- `sheet_profile` and `integrity_panel` take `dataset` + `material` + `layer` instead
+  of `run_dir`; the integrity panel draws failed points too.
+- The plotter never computes an analysis: a missing result raises naming
+  `FrictionSim2D analyse run <name> <dataset>`.
+
 ---
 
 ## Plot schema
@@ -298,7 +309,7 @@ against.
 
 | field | type | meaning |
 |---|---|---|
-| `data_dirs` | `List[str]` | Directories holding outputs/, or aiida://dataset/<name> URIs |
+| `data_dirs` | `List[str]` | Directories holding outputs/, aiida://dataset/<name> or aiida://analysis/<name>/<dataset> URIs |
 | `labels` | `List[str]` | One per data_dir |
 | `dataset_display_labels` | `Dict[str, str]` |  |
 | `series_color_map` | `Dict[str, Optional[str]]` |  |
@@ -855,8 +866,11 @@ against.
 | `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
 | `load_colors` | `Optional[List[str]]` |  |
 | `line_width` | `Optional[float]` |  |
-| `run_dir` | `Optional[str]` | AFM run directory holding <layer_dir>/ |
+| `run_dir` | `Optional[str]` | AFM run directory holding <layer_dir>/ (or give dataset) |
 | `layer_dir` | `Optional[str]` |  |
+| `dataset` | `Optional[str]` | Stored dataset holding the run (instead of run_dir) |
+| `material` | `Optional[str]` | Material, with dataset |
+| `layer` | `Optional[int]` | Layers, with dataset (default 2) |
 | `tip_types` | `Optional[List[int]]` |  |
 | `tip_apex_depth` | `Optional[float]` |  |
 | `far_field_radius` | `Optional[float]` |  |
@@ -907,7 +921,8 @@ against.
 | `average_first_n_timesteps` | `Optional[int]` |  |
 | `average_timestep_range` | `Optional[List[int]]` |  |
 | `material` | `Optional[str]` | Material (required) |
-| `run_dir` | `Optional[str]` | AFM run directory holding L<layer>/ |
+| `run_dir` | `Optional[str]` | AFM run directory holding L<layer>/ (or give dataset) |
+| `dataset` | `Optional[str]` | Stored dataset holding the run (instead of run_dir) |
 | `layer` | `Optional[int]` |  |
 | `loads` | `Optional[List[float]]` |  |
 | `traces_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, step, temp_sheet_3d, comz_L1, comz_L2 |

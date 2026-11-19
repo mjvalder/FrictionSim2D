@@ -136,3 +136,180 @@ def test_a_plot_without_its_table_names_the_field(tmp_path):
     with pytest.raises(PlotDataError, match='contact_cof_scatter needs ranking_file'):
         plotter.generate_plot({'plot_type': 'contact_cof_scatter', 'filename': 'c.png',
                                'contact_file': 'c.csv', 'x_column': 'contact_area'})
+
+
+# --- analysis results as sources (analysis-layer Task 5) -----------------------
+
+@pytest.fixture
+def no_profile(monkeypatch):
+    import src.aiida as aiida_pkg  # pylint: disable=import-outside-toplevel
+    monkeypatch.setattr(aiida_pkg, 'load_aiida_profile', lambda profile=None: None)
+
+
+@pytest.fixture
+def stored(monkeypatch, no_profile):
+    """`find_result` over a dict of ``(name, dataset) -> table``."""
+    from src.analysis import store  # pylint: disable=import-outside-toplevel
+    tables, calls = {}, []
+
+    def find(name, dataset, params_hash=None, version=None):
+        calls.append((name, dataset, version))
+        table = tables.get((name, dataset))
+        return None if table is None else table.copy()
+
+    monkeypatch.setattr(store, 'find_result', find)
+    tables['calls'] = calls
+    return tables
+
+
+def test_table_source_takes_a_file_or_an_analysis():
+    source = TableSource(analysis='cof_ranking', dataset='paper')
+    assert source.file is None and source.analysis == 'cof_ranking'
+    assert source.model_dump() == {'file': None, 'analysis': 'cof_ranking',
+                                   'dataset': 'paper', 'version': None}
+    assert TableSource.model_validate(source.model_dump()) == source
+    assert TableSource(file='x.csv').model_dump() == 'x.csv', 'a file source stays a bare path'
+    with pytest.raises(ValueError, match='exactly one of file or analysis'):
+        TableSource(file='x.csv', analysis='cof_ranking', dataset='paper')
+    with pytest.raises(ValueError, match='exactly one of file or analysis'):
+        TableSource()
+    with pytest.raises(ValueError, match='needs dataset'):
+        TableSource(analysis='cof_ranking')
+    with pytest.raises(ValueError, match='only with an analysis'):
+        TableSource(file='x.csv', dataset='paper')
+
+
+def test_load_table_reads_a_stored_analysis(tmp_path, stored):
+    stored[('cof_ranking', 'paper')] = pd.DataFrame(
+        {'material': ['A', 'B'], 'eligible': [True, False]})
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    eligible = plotter._eligible_materials(
+        {'analysis': 'cof_ranking', 'dataset': 'paper', 'version': '3'})
+    assert list(eligible.index) == ['A']
+    assert stored['calls'] == [('cof_ranking', 'paper', '3')]
+    with pytest.raises(PlotDataError, match=r"cof_ranking over paper: missing column\(s\) \['x'\]"):
+        load_table(TableSource(analysis='cof_ranking', dataset='paper'), tmp_path, ['x'])
+
+
+def test_missing_analysis_names_the_command_fast(tmp_path, stored):
+    with pytest.raises(PlotDataError,
+                       match='FrictionSim2D analyse run cof_ranking paper'):
+        load_table(TableSource(analysis='cof_ranking', dataset='paper'), tmp_path)
+
+
+def _period_table():
+    """`period_summary` rows as the analysis stores them (no dataset_label)."""
+    return pd.DataFrame({
+        'run_uuid': ['r1', 'r1', 'r2'], 'point_uuid': ['p1', 'p2', 'p3'],
+        'id': ['h_MoS2'] * 3, 'material': ['h_MoS2'] * 3, 'size': ['100x100y'] * 3,
+        'layer': [2, 2, 2], 'load': [10.0, 30.0, 1.0],
+        'load_kind': ['force', 'force', 'pressure'],
+        'force': [10.0, 30.0, float('nan')], 'pressure': [float('nan'), float('nan'), 1.0],
+        'angle': [0.0] * 3, 'speed': [2.0] * 3,
+        'cof_periods': [0.1, 0.2, 0.3], 'cof': [0.1, 0.2, 0.3],
+        'lf': [1.0, 6.0, 0.3], 'nf': [10.0, 30.0, 1.0], 'lf_sx_sy': [1.1, 6.1, 0.4]})
+
+
+def test_analysis_data_source_feeds_summary_rows_fast(tmp_path, stored):
+    stored[('period_summary', 'sheets')] = _period_table()
+    plotter = Plotter(data_dirs=['aiida://analysis/period_summary/sheets'],
+                      labels=['periods'], output_dir=str(tmp_path))
+
+    frame = plotter._get_summary_data_df()
+
+    assert set(frame['dataset_label']) == {'periods'}
+    assert set(frame['file_key']) == {'100x100y'}
+    assert list(frame['cof']) == [0.1, 0.2, 0.3]
+    assert list(frame['force'][:2]) == [10.0, 30.0]
+    assert list(frame['pressure'][2:]) == [1.0]
+    assert (frame['status'] == 'complete').all()
+    assert plotter._resolve_lf_axis(frame, 'lf', {'lf_source': 'sx_sy'}) == 'lf_sx_sy'
+    assert plotter.full_data_files['periods'] == {}, 'no file discovery for the URI'
+
+
+def test_missing_analysis_data_source_names_the_command(tmp_path, stored):
+    with pytest.raises(PlotDataError,
+                       match='FrictionSim2D analyse run period_summary sheets'):
+        Plotter(data_dirs=['aiida://analysis/period_summary/sheets'], labels=['p'],
+                output_dir=str(tmp_path))
+    with pytest.raises(PlotDataError, match='aiida://analysis/<name>/<dataset>'):
+        Plotter(data_dirs=['aiida://analysis/period_summary'], labels=['p'],
+                output_dir=str(tmp_path))
+
+
+class _DirFetch:
+    """A fetcher reading a `_run_dir` tree, the way `StoreFetcher` reads the store."""
+
+    def __init__(self, run):
+        self.run = run
+        self.asked = []
+
+    def snapshot(self, row, kind):
+        self.asked.append((kind, row.load))
+        name = (f"load_{row.load:g}N.data" if kind == 'load'
+                else f"final_f{row.load:g}N_a0.data")
+        path = self.run / 'L2' / 'data' / name
+        return path if path.exists() else None
+
+    def settings_text(self, row):  # pylint: disable=unused-argument
+        return (self.run / 'L2' / 'lammps' / 'system.in.settings').read_text(encoding='utf-8')
+
+
+@pytest.fixture
+def dataset_source(tmp_path, monkeypatch, no_profile):
+    """`RunSource.from_dataset('paper')` over the `_run_dir` tree: M at L2,
+    10 nN passing and 20 nN failed; another material and layer as decoys."""
+    from src.analysis.source import RunSource  # pylint: disable=import-outside-toplevel
+    fetch = _DirFetch(_run_dir(tmp_path))
+    rows = pd.DataFrame({
+        'family': ['afm'] * 4, 'run_uuid': ['r', 'r', 'other', 'r1'],
+        'point_uuid': ['p10', 'p20', 'q', 'l1'], 'calc_uuid': ['c'] * 4,
+        'materials': [['M'], ['M'], ['N'], ['M']], 'layers': [2, 2, 2, 1],
+        'load': [10.0, 20.0, 10.0, 10.0], 'angle': [0.0] * 4,
+        'verdict_status': ['complete', 'failed_integrity', 'complete', 'complete']})
+    opened = []
+
+    def from_dataset(name):
+        opened.append(name)
+        return RunSource(rows, None, fetch)
+
+    monkeypatch.setattr(RunSource, 'from_dataset', staticmethod(from_dataset))
+    fetch.opened = opened
+    return fetch
+
+
+def test_sheet_profile_reads_a_dataset(tmp_path, dataset_source):
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    plotter.generate_plot({'plot_type': 'sheet_profile', 'filename': 's.png',
+                           'dataset': 'paper', 'material': 'M', 'layer': 2, 'loads': [10],
+                           'tip_types': [4], 'far_field_radius': 10})
+    assert (tmp_path / 's.png').is_file()
+    assert dataset_source.opened == ['paper']
+    assert dataset_source.asked == [('load', 10.0)]
+
+
+def test_integrity_panel_reads_a_dataset_failed_loads_included(tmp_path, dataset_source):
+    traces = tmp_path / 'traces.csv'
+    pd.DataFrame({'run_id': ['M/l2/f10/a0'] * 3, 'step': [0, 1, 2],
+                  'temp_sheet_3d': [300.0, 301.0, 299.0], 'comz_L1': [0.0] * 3,
+                  'comz_L2': [3.0, 3.1, 3.0]}).to_csv(traces, index=False)
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    plotter.generate_plot({'plot_type': 'integrity_panel', 'filename': 'i.png',
+                           'material': 'M', 'dataset': 'paper', 'layer': 2,
+                           'loads': [10, 20, 30], 'traces_file': str(traces)})
+    assert (tmp_path / 'i.png').is_file()
+    assert dataset_source.asked == [('final', 10.0), ('final', 20.0)], \
+        'the failed 20 nN point is drawn; 30 nN has no point'
+
+
+def test_a_dataset_panel_without_the_material_names_it(tmp_path, dataset_source):
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    with pytest.raises(PlotDataError, match='sheet_profile needs material'):
+        plotter.generate_plot({'plot_type': 'sheet_profile', 'filename': 's.png',
+                               'dataset': 'paper', 'loads': [10]})
+    with pytest.raises(PlotDataError, match='needs run_dir or dataset'):
+        plotter.generate_plot({'plot_type': 'sheet_profile', 'filename': 's.png',
+                               'loads': [10]})
+    with pytest.raises(PlotDataError, match="no point of Q at layer 2 in dataset 'paper'"):
+        plotter.generate_plot({'plot_type': 'sheet_profile', 'filename': 's.png',
+                               'dataset': 'paper', 'material': 'Q', 'loads': [10]})

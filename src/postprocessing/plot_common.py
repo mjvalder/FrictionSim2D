@@ -31,6 +31,10 @@ PLOT_STATUSES = DELIVERED_STATUSES
 #: The plot source naming a stored dataset: ``aiida://dataset/<name>``.
 DATASET_URI = 'aiida://dataset/'
 
+#: The plot source naming a stored, summary-shaped analysis result
+#: (``period_summary``): ``aiida://analysis/<name>/<dataset>``.
+ANALYSIS_URI = 'aiida://analysis/'
+
 #: summary_<size>.csv column -> the name the plot specs use.
 SUMMARY_COLUMN_ALIASES = {
     'mean_nf': 'nf', 'mean_lf': 'lf', 'mean_lfx': 'lfx', 'mean_lfy': 'lfy',
@@ -243,12 +247,12 @@ class PlotCommonMixin(PlotterMixinBase):
     def _discover_data_files(self) -> None:
         """Find all ``output_full_*.json`` files in each data directory.
 
-        Entries whose ``data_dir`` is a URI (``aiida://dataset/<name>``, or
-        the removed ``db://``) are skipped here; :meth:`_load_dataset_labels`
-        reads or refuses them.
+        Entries whose ``data_dir`` is a URI (``aiida://dataset/<name>``,
+        ``aiida://analysis/<name>/<dataset>``, or the removed ``db://``) are
+        skipped here; :meth:`_load_dataset_labels` reads or refuses them.
         """
         for label, data_dir in zip(self.labels, self.data_dirs):
-            if str(data_dir).startswith(('db://', DATASET_URI)):
+            if str(data_dir).startswith(('db://', DATASET_URI, ANALYSIS_URI)):
                 logger.debug("Skipping file discovery for store-backed label '%s'",
                              label)
                 continue
@@ -344,7 +348,8 @@ class PlotCommonMixin(PlotterMixinBase):
         the summary the dataset fixed, read from the AiiDA profile in
         effect. ``dataset_units[label]`` keeps the dataset's units (family
         -> key -> unit); each row carries its own ``load_unit``,
-        ``angle_unit`` and ``speed_unit``. A ``db://`` URI is refused: the
+        ``angle_unit`` and ``speed_unit``. An ``aiida://analysis/`` label is
+        read by :meth:`_load_analysis_label`. A ``db://`` URI is refused: the
         central database was removed.
         """
         for label, data_dir in zip(self.labels, self.data_dirs):
@@ -354,6 +359,9 @@ class PlotCommonMixin(PlotterMixinBase):
                     f"{label}: {data_dir} -- the central database was "
                     f"removed. Read the local AiiDA store with "
                     f"`{DATASET_URI}<name>` instead.")
+            if data_dir.startswith(ANALYSIS_URI):
+                self._load_analysis_label(label, data_dir)
+                continue
             if not data_dir.startswith(DATASET_URI):
                 continue
             name = data_dir[len(DATASET_URI):]
@@ -366,6 +374,50 @@ class PlotCommonMixin(PlotterMixinBase):
             self.dataset_units[label] = units
             self._db_summary_rows.extend(
                 self._dataset_to_summary_rows(label, rows))
+
+    def _load_analysis_label(self, label: str, uri: str) -> None:
+        """The summary rows of ``aiida://analysis/<name>/<dataset>``: the
+        stored table of a summary-shaped analysis (``period_summary``), never
+        computed here."""
+        from .plot_tables import analysis_table  # pylint: disable=import-outside-toplevel
+        name, sep, dataset = uri[len(ANALYSIS_URI):].partition('/')
+        if not (name and sep and dataset) or '/' in dataset:
+            raise PlotDataError(
+                f"{label}: {uri} -- expected `{ANALYSIS_URI}<name>/<dataset>`")
+        try:
+            table = analysis_table(name, dataset)
+        except PlotDataError as exc:
+            raise PlotDataError(f"{label}: {exc}") from exc
+        self._db_summary_rows.extend(
+            self._analysis_to_summary_rows(label, table.to_dict('records')))
+
+    @staticmethod
+    def _analysis_to_summary_rows(label: str, rows: list[dict]) -> list[dict]:
+        """A summary-shaped analysis table's rows as summary rows: it already
+        spells ``id``/``material``/``size``/``layer``/``force``/``pressure``
+        and the ``cof``/``lf``/``nf`` aliases (`periods.summary_identity`),
+        so this adds what the table cannot know -- ``dataset_label`` and
+        ``file_key`` -- and fills, as :meth:`_dataset_to_summary_rows` does,
+        any spelling it lacks."""
+        out = []
+        for record in rows:
+            row = dict(record)
+            kind = record.get('load_kind')
+            size = record.get('size') or 'unknownx'
+            row.update({'dataset_label': label, 'file_key': size, 'size': size,
+                        'status': 'complete'})
+            row.setdefault('material', record.get('id'))
+            row.setdefault('id', row['material'])
+            if 'layer' not in row and 'layers' in record:
+                row['layer'] = record['layers']
+            for key in ('force', 'pressure'):
+                if key not in row:
+                    row[key] = record.get('load') if kind == key else float('nan')
+            for src, dst in SUMMARY_COLUMN_ALIASES.items():
+                if src in record and dst not in record:
+                    row[dst] = record[src]
+            out.append(row)
+        return out
 
     @staticmethod
     def _read_dataset(label: str, name: str) -> tuple[list[dict], dict]:
@@ -636,7 +688,8 @@ class PlotCommonMixin(PlotterMixinBase):
         """One row per load point, read from `summary_<size>.csv`.
 
         The CSV is `summarise_run`'s own output (`DataReader.summary_rows`),
-        so `cof` here is the ratio-of-means the store carries. `df.mean()` over an element-wise cof column -- what this used
+        so `cof` here is the ratio-of-means the store carries. `df.mean()`
+        over an element-wise cof column -- what this used
         to do -- is a different number, and putting both on one axis is how
         the same run reported two COFs.
         """
@@ -1354,7 +1407,7 @@ class PlotCommonMixin(PlotterMixinBase):
         materials: list, num_remove: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list]:
         """Iteratively remove points with largest residuals from OLS fit."""
-        from scipy import stats as scipy_stats
+        from scipy import stats as scipy_stats  # pylint: disable=import-outside-toplevel
 
         x = np.array(x)
         y = np.array(y)

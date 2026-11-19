@@ -23,12 +23,17 @@ def expand_lammps_types(spec: str) -> Set[int]:
     return out
 
 
-def read_type_groups(settings_path: Path) -> Dict[str, Set[int]]:
+def parse_type_groups(text: str) -> Dict[str, Set[int]]:
     """``{group: atom types}`` for every ``group <name> type ...`` line; the first wins."""
     groups: Dict[str, Set[int]] = {}
-    for m in _GROUP_RE.finditer(Path(settings_path).read_text(encoding='utf-8')):
+    for m in _GROUP_RE.finditer(text):
         groups.setdefault(m.group(1), expand_lammps_types(m.group(2)))
     return groups
+
+
+def read_type_groups(settings_path: Path) -> Dict[str, Set[int]]:
+    """:func:`parse_type_groups` of a settings file."""
+    return parse_type_groups(Path(settings_path).read_text(encoding='utf-8'))
 
 
 def radial_profile(xy: np.ndarray, z: np.ndarray, axis: np.ndarray, z_far: float,

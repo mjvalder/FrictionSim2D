@@ -1,0 +1,65 @@
+"""Stored analyses as plot sources (plan Task 5), against a real store.
+
+The store is `tests/analysis/test_store.py`'s: one AFM run at 10/30/50 nN
+imported as set `camp` (10 nN fails its integrity check), dataset `paper`.
+"""
+import pandas as pd
+import pytest
+
+pytest.importorskip('aiida')
+pytest.importorskip('scipy')
+pytestmark = pytest.mark.aiida
+
+import matplotlib  # noqa: E402
+
+matplotlib.use('Agg')
+
+import src.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
+from src.analysis.store import run_analysis, store_result  # noqa: E402
+from src.postprocessing.plot_config import TableSource  # noqa: E402
+from src.postprocessing.plot_data import PlotDataError, Plotter  # noqa: E402
+from src.postprocessing.plot_tables import load_table  # noqa: E402
+from tests.analysis.test_store import no_profile_switch, probe, store  # noqa: E402,F401
+
+
+def test_table_source_resolves_an_analysis(store, probe, tmp_path):  # noqa: F811
+    table = pd.DataFrame({'material': ['A', 'B'], 'eligible': [True, False],
+                          'value': [0.1 + 0.2, 1.0 / 3.0]})
+    store_result(probe, 'paper', {}, table, dropped=[])
+
+    got = load_table(TableSource(analysis='probe', dataset='paper'), tmp_path,
+                     required=['material', 'value'])
+    pd.testing.assert_frame_equal(got, table)
+
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path / 'plots'))
+    eligible = plotter._eligible_materials(  # pylint: disable=protected-access
+        TableSource(analysis='probe', dataset='paper').model_dump())
+    assert list(eligible.index) == ['A']
+    with pytest.raises(PlotDataError, match='analyse run probe paper'):
+        load_table(TableSource(analysis='probe', dataset='paper', version='9'), tmp_path)
+
+
+def test_missing_analysis_names_the_command(store, tmp_path):  # noqa: F811
+    with pytest.raises(PlotDataError,
+                       match='no stored cof_ranking over paper; run: '
+                             'FrictionSim2D analyse run cof_ranking paper'):
+        load_table(TableSource(analysis='cof_ranking', dataset='paper'), tmp_path)
+
+
+def test_analysis_data_source_feeds_summary_rows(store, tmp_path):  # noqa: F811
+    stored = run_analysis('period_summary', 'paper', {'period_x': {'h_MoS2': 3.16}})
+    assert sorted(stored['force']) == [30.0, 50.0]
+    assert 'dataset_label' not in stored
+
+    plotter = Plotter(data_dirs=['aiida://analysis/period_summary/paper'],
+                      labels=['periods'], output_dir=str(tmp_path / 'plots'))
+    frame = plotter._get_summary_data_df()  # pylint: disable=protected-access
+
+    assert sorted(frame['force']) == [30.0, 50.0]
+    assert set(frame['dataset_label']) == {'periods'}
+    assert set(frame['id']) == {'h_MoS2'} and set(frame['size']) == {'100x100y'}
+    assert list(frame.sort_values('force')['cof']) == list(
+        stored.sort_values('force')['cof_periods'])
+    plotter.generate_plot({'plot_type': 'summary', 'filename': 'cof.png',
+                           'x_axis': 'force', 'y_axis': 'cof'})
+    assert (tmp_path / 'plots' / 'cof.png').is_file()
