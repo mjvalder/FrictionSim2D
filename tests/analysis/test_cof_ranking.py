@@ -12,8 +12,10 @@ import pytest
 
 import src.analysis.catalogue  # noqa: F401  (registers the analyses)
 from src.analysis.base import get_analysis
-from src.analysis.periods import settle_skip, whole_periods
+from src.analysis.periods import (NO_DRIVE_STEP, NO_PERIOD, PeriodParams, dominant_period,
+                                  period_map, settle_skip, whole_periods)
 from src.analysis.source import RunSource
+from tests.analysis.test_sheet_geometry import SETTINGS, _bilayer, _square
 
 #: dx = 2 m/s * 0.01 * (1000 steps * 0.001 ps) = 0.02 A per sample.
 FIELDS = {'settings.simulation.timestep': 0.001, 'general.driving_spring': 8.0,
@@ -34,8 +36,13 @@ class _Fetch:
         self.windows = windows
         self.fields = fields or FIELDS
 
+    raws = {}
+
     def frames(self, row):
-        return {'window': self.windows[row.point_uuid]}
+        out = {'window': self.windows[row.point_uuid]}
+        if row.point_uuid in self.raws:
+            out['raw'] = self.raws[row.point_uuid]
+        return out
 
     def run_fields(self, row):
         return dict(self.fields)
@@ -182,6 +189,129 @@ def test_registered_levels_and_families():
     assert get_analysis('cof_ranking').families == {'afm'}
 
 
+def test_n_skip_ignores_nan_samples():
+    # taxlib takes the late mean with pandas' .mean(), which skips NaN.
+    lfx = np.r_[np.zeros(50), np.full(49, -1.0), np.nan]
+
+    assert settle_skip(lfx, 8.0, 0.02) == math.ceil((1.0 / 8.0) / 0.02)
+    assert settle_skip(np.full(10, np.nan), 8.0, 0.02) == 0
+
+
+def test_dominant_period_finds_the_lattice_wavelength():
+    drive = np.arange(2000) * 0.01                   # A
+    force = 0.3 * drive + np.sin(2 * np.pi * drive / 2.5)
+
+    assert dominant_period(drive, force) == pytest.approx(2.5, rel=0.02)
+    assert math.isnan(dominant_period(drive[:63], force[:63]))
+
+
+def test_period_summary_carries_the_fft_period_of_the_raw_force():
+    raw_time = 100 * np.arange(5000)
+    drive = raw_time * (2.0 / 100 * 0.001)          # A: 0.002 A per raw sample
+    raw = pd.DataFrame({'time': raw_time, 'raw_lfx': np.sin(2 * np.pi * drive / 2.5)})
+    fetch = _Fetch({'p1': _window(cof=np.full(500, 0.1))})
+    fetch.raws = {'p1': raw}
+    source = RunSource(pd.DataFrame([_row('p1')]), 'afm', fetch=fetch)
+
+    row = _compute('period_summary', source, period_x={'h_M': 3.0}).iloc[0]
+
+    assert row.fft_period_A == pytest.approx(2.5, rel=0.02)
+    assert row.fft_ratio == pytest.approx(row.fft_period_A / 3.0)
+
+
+def test_schema_default_none_is_missing_and_drops_the_run():
+    fields = {**FIELDS, 'settings.simulation.timestep': None}
+    source = RunSource(pd.DataFrame([_row('p1')]), 'afm',
+                       fetch=_Fetch({'p1': _window(cof=np.full(500, 0.1))}, fields))
+
+    table = _compute('period_summary', source, period_x={'h_M': 3.0})
+
+    assert table.empty
+    assert source.dropped == [('p1', NO_DRIVE_STEP)]
+
+
+# -- period_map: one test per branch ----------------------------------------
+
+def _geometry_fetch(windows, structures):
+    """frames/run_fields as `_Fetch`, plus a built structure per material."""
+    fetch = _Fetch(windows)
+    fetch.structure_text = lambda row: structures.get(row.materials[0])
+    fetch.settings_text = lambda row: SETTINGS
+    return fetch
+
+
+def test_period_map_own_source_reads_every_point():
+    pts, box = _square(3.0)
+    rows = [_row('p1', status='failed_integrity')]  # its structure still counts
+    source = RunSource(pd.DataFrame(rows), 'afm',
+                       fetch=_geometry_fetch({}, {'h-M': _bilayer(pts, box)}))
+
+    period = period_map(source, PeriodParams())
+
+    assert period['h_M'] == pytest.approx(3.0, abs=0.002)
+
+
+def test_period_map_geometry_dataset(monkeypatch):
+    from src.analysis import store
+    calls = []
+
+    def fake(name, dataset, params=None, **kw):
+        calls.append((name, dataset))
+        return pd.DataFrame({'material': ['h_M'], 'layer': [2], 'period_x_top': [2.5]})
+
+    monkeypatch.setattr(store, 'run_analysis', fake)
+    period = period_map(_source([_row('p0')], {}), PeriodParams(geometry_dataset='geo'))
+
+    assert calls == [('sheet_geometry', 'geo')]
+    assert period == {'h_M': 2.5}
+
+
+def test_period_map_period_x_is_used_as_given():
+    params = PeriodParams(period_x=json.dumps({'h_M': 3.1}), lattice={'h_N': 4.0})
+
+    assert period_map(_source([_row('p0')], {}), params) == {'h_M': 3.1, 'h_N': 4.0}
+
+
+def test_period_map_lattice_fallback(monkeypatch):
+    from src.analysis import store
+    monkeypatch.setattr(store, 'run_analysis', lambda *a, **k: pd.DataFrame(
+        {'material': ['h_M'], 'layer': [2], 'period_x_top': [2.5]}))
+
+    period = period_map(_source([_row('p0')], {}), PeriodParams(geometry_dataset='geo',
+                                                      lattice={'h_M': 9.0, 'h_N': 4.0}))
+
+    assert period == {'h_M': 2.5, 'h_N': 4.0}        # the geometry wins where it has a row
+
+
+def test_period_map_layer_fallback(monkeypatch):
+    from src.analysis import store
+    monkeypatch.setattr(store, 'run_analysis', lambda *a, **k: pd.DataFrame(
+        {'material': ['h_M', 'h_M', 'h_N', 'h_S'], 'layer': [1, 2, 1, 4],
+         'period_x_top': [2.4, 2.5, 3.3, 5.0]}))
+
+    period = period_map(_source([_row('p0')], {}), PeriodParams(geometry_dataset='geo'))
+
+    # bilayer first, then the monolayer, then a sheet's own stack
+    assert period == {'h_M': 2.5, 'h_N': 3.3, 'h_S': 5.0}
+
+
+def test_material_without_a_period_is_dropped_not_averaged():
+    source = _source([_row('p1')], {'p1': _window(cof=np.full(500, 0.1))})
+
+    table = _compute('period_summary', source, period_x={'h_other': 3.0})
+
+    assert table.empty
+    assert source.dropped == [('p1', NO_PERIOD)]
+
+
+def test_ranking_material_without_a_period_is_not_eligible():
+    rows, windows = _material('h-A', (0.1,) * 4)
+    table = _compute('cof_ranking', _source(rows, windows), period_x={'h_B': 3.0})
+
+    assert not table.eligible.iloc[0]
+    assert 'no lattice period at 10 nN' in table.excluded_because.iloc[0]
+
+
 # --------------------------------------------------------------------------
 # publication checks: the read-only `friction2d_pub` store against frozen files
 # --------------------------------------------------------------------------
@@ -191,31 +321,17 @@ _FROZEN_RANKING = _PUB / '260909_afm_v4/analysis/cof_ranking_v2.csv'
 _LEGACY_PERIODS = _PUB / '261107_sheetonsheet/periods/outputs/output_full_100x100y.json'
 
 _PUB_SCRIPT = """
-import json, sys
-import pandas as pd
+import sys
 from src.aiida import load_aiida_profile
 load_aiida_profile('friction2d_pub')
-from src.aiida.query import dataset_rows
 from src.analysis.base import get_analysis
 from src.analysis.source import RunSource
 name, dataset, out = sys.argv[1:4]
-# The built structure does not depend on a run's verdict: every AFM point is
-# read (a material whose bilayer runs all fail still has a lattice), the
-# bilayer's period first, the monolayer's where no bilayer was imported.
-with RunSource.from_dataset('260909-afm') as afm:
-    every = afm.all_rows.assign(verdict_status='complete')
-with RunSource(every, 'afm') as afm:
-    geo = get_analysis('sheet_geometry')
-    geometry = geo().compute(afm, geo.Params())
-period = {}
-for layer in (1, 2):
-    period.update(geometry[geometry.layer == layer].set_index('material')['period_x_top'])
-if name == 'cof_ranking':  # the published ranking reads the bilayers' only
-    period = geometry[geometry.layer == 2].set_index('material')['period_x_top'].to_dict()
+# No period_x: each analysis takes a_x from the dataset's own sheet_geometry,
+# as `FrictionSim2D analyse run` would (computed here, never stored).
 with RunSource.from_dataset(dataset) as source:
     cls = get_analysis(name)
-    cls().compute(source, cls.Params(period_x=period)).to_csv(out, index=False,
-                                                               float_format=repr)
+    cls().compute(source, cls.Params()).to_csv(out, index=False, float_format=repr)
 """
 
 
@@ -326,6 +442,15 @@ def test_sheet_period_summary_matches_the_legacy_period_file(tmp_path):
           f'not in the legacy file: {len(missing)} {missing[:10]}; off: {len(bad)} '
           f'{dict(list(bad.items())[:10])}')
 
-    assert len(table) > 0
+    assert len(table) == 1275     # every pass 0 degree run: none dropped for its period
     assert not missing
-    assert not bad
+    # The one known difference is the geometry's source, not the cut: the
+    # converter took a_x from the AFM bilayers' s42 table (b_CSe 3.062 A); the
+    # sheet's own built stack gives 3.064 A (one 0.002 A refinement step), which
+    # moves this run's whole-period start by one row.
+    known = {('b_CSe', 20.0, 0.0)}
+    assert set(bad) <= known
+    for key in set(bad):
+        row = table[(table.material == key[0]) & (table.pressure == key[1])].iloc[0]
+        assert row.period_x_A == pytest.approx(3.064, abs=1e-9)
+        assert abs(bad[key]['n'][0] - bad[key]['n'][1]) == 1

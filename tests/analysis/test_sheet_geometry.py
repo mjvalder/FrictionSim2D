@@ -14,6 +14,7 @@ pytest.importorskip('scipy')
 import src.analysis.catalogue  # noqa: E402,F401  (registers the analyses)
 from src.analysis.base import get_analysis  # noqa: E402
 from src.analysis.source import RunSource  # noqa: E402
+from src.analysis.sheet_geometry import read_lmp  # noqa: E402
 
 #: The settings of a run whose sheet types are the structure's + 6 (s42:85).
 SETTINGS = """\
@@ -189,3 +190,49 @@ def test_validates_against_frozen_ranking(tmp_path):
 
     assert common
     assert not bad
+
+
+def test_reads_every_point_whatever_its_verdict():
+    # The built structure does not depend on the run's verdict.
+    pts, box = _square(3.0)
+    rows = pd.DataFrame([{'point_uuid': 'p1', 'verdict_status': 'failed_integrity',
+                          'family': 'afm', 'materials': ['M'], 'layers': 2}])
+    source = RunSource(rows, 'afm', fetch=_Fetch(_bilayer(pts, box)))
+
+    table = get_analysis('sheet_geometry')().compute(
+        source, get_analysis('sheet_geometry').Params())
+
+    assert len(table) == 1 and table.iloc[0].period_x_top == pytest.approx(3.0, abs=0.002)
+    assert source.dropped == [('p1', 'failed_integrity')]   # no second drop
+
+
+def test_sheet_rows_without_layers_take_the_settings_layering():
+    pts, box = _square(3.0)
+    rows = pd.DataFrame([{'point_uuid': 'p1', 'verdict_status': 'complete',
+                          'family': 'sheetonsheet', 'materials': ['M'], 'layers': None}])
+    source = RunSource(rows, 'sheetonsheet', fetch=_Fetch(_bilayer(pts, box)))
+
+    table = get_analysis('sheet_geometry')().compute(
+        source, get_analysis('sheet_geometry').Params())
+
+    assert table.iloc[0].layer == 2        # layer_1, layer_2 in SETTINGS
+    assert table.iloc[0].period_x_top == pytest.approx(3.0, abs=0.002)
+
+
+@pytest.mark.parametrize('style, fmt', [
+    ('atomic', '{i} {t} {x} {y} {z}'),
+    ('molecular', '{i} 0 {t} {x} {y} {z} 0 0 0'),   # the sheet family's build/<mat>_4.lmp
+    ('full', '{i} 1 {t} 0.0 {x} {y} {z}'),
+    ('charge', '{i} {t} 0.5 {x} {y} {z}'),
+])
+def test_read_lmp_follows_the_atom_style(style, fmt):
+    text = ('LAMMPS data file\n\n2 atoms\n\n0 10 xlo xhi\n0 20 ylo yhi\n\n'
+            f'Atoms # {style}\n\n'
+            + '\n'.join(fmt.format(i=i, t=t, x=x, y=y, z=z) for i, (t, x, y, z)
+                        in enumerate([(3, 1.0, 2.0, 3.0), (4, 4.0, 5.0, 6.0)], 1)) + '\n')
+
+    box, typ, xyz = read_lmp(text)
+
+    assert box == {'x': 10.0, 'y': 20.0}
+    assert list(typ) == [3, 4]
+    assert xyz.tolist() == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]

@@ -90,6 +90,10 @@ def _material_row(material: str, loads: Tuple[float, ...], points: pd.DataFrame,
         failed = ran[(ran['load'] == f) & (ran['verdict_status'] != PASS_STATUS)]
         for status in failed['verdict_status']:
             reasons.append(f'integrity check: {status} at {_label(f)} nN')
+        if failed.empty and f not in runs:
+            # a pass run `period_rows` dropped (no a_x or no drive step)
+            reasons.append(f'no lattice period at {_label(f)} nN' if not np.isfinite(a_x)
+                           else f'no drive step at {_label(f)} nN')
     row['eligible'] = not reasons
     row['excluded_because'] = '; '.join(reasons)
     return row
@@ -100,7 +104,7 @@ class CofRanking(Analysis):  # pylint: disable=too-few-public-methods
     """Each material's whole-period COF over the load window, and its rank."""
 
     name = 'cof_ranking'
-    version = '1'
+    version = '2'
     level = 'material'
     families = frozenset({'afm'})
     Params = RankingParams
@@ -121,9 +125,10 @@ class CofRanking(Analysis):  # pylint: disable=too-few-public-methods
             raise ValueError('more than one pass point per material and load: '
                              f'{sorted(set(zip(duplicated.material_key, duplicated.load)))}')
         period = period_map(source, params)
+        keys = dict(zip(passed['point_uuid'], passed['material_key']))
         runs: Dict[str, Dict[float, Dict[str, Any]]] = {}
-        for key, record in zip(passed['material_key'], period_rows(source, passed, period)):
-            runs.setdefault(key, {})[record['load']] = record
+        for record in period_rows(source, passed, period):
+            runs.setdefault(keys[record['point_uuid']], {})[record['load']] = record
         trib = params.trib_index or {}
         zeta = dict(zip(trib.get('materials', []), zip(trib.get('tribIndex', []),
                                                        trib.get('dev', []))))

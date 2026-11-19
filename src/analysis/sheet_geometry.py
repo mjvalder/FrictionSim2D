@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from scipy.spatial import Delaunay, cKDTree  # pylint: disable=no-name-in-module
 
 from .base import Analysis, register
+from .source import PASS_STATUS
 
 __all__ = ['TOP_TOL', 'SheetGeometry', 'describe', 'read_lmp', 'read_settings']
 
@@ -36,14 +37,32 @@ def _expand(spec: str) -> List[int]:
     return out
 
 
+#: Atom style -> (column of the type, column of x) in an ``Atoms`` line. s42
+#: read only ``atomic`` (``id type x y z``); the sheet family's build files are
+#: ``molecular`` (``id mol type x y z``).
+_ATOM_COLUMNS = {'atomic': (1, 2), 'molecular': (2, 3), 'bond': (2, 3), 'angle': (2, 3),
+                 'full': (2, 4), 'charge': (1, 3)}
+
+
 def read_lmp(text: str) -> Tuple[Dict[str, float], np.ndarray, np.ndarray]:
-    """``(box, types, xyz)`` of a LAMMPS data file's ``Atoms`` block (s42:53-60)."""
+    """``(box, types, xyz)`` of a LAMMPS data file's ``Atoms`` block (s42:53-60),
+    the columns chosen by its ``# <style>`` hint (``atomic`` without one).
+
+    Raises:
+        ValueError: an atom style this reader does not know.
+    """
     lines = text.splitlines()
     box = {k: float(line.split()[1]) - float(line.split()[0]) for line in lines[:30]
            for k in ('x', 'y') if f'{k}lo {k}hi' in line}
     start = next(k for k, line in enumerate(lines) if line.startswith('Atoms'))
-    rows = [line.split() for line in lines[start + 2:] if len(line.split()) >= 5]
-    atoms = np.array([[float(v) for v in r[1:5]] for r in rows])
+    _, _, hint = lines[start].partition('#')
+    style = hint.strip() or 'atomic'
+    if style not in _ATOM_COLUMNS:
+        raise ValueError(f'unsupported atom style {style!r} (known: {sorted(_ATOM_COLUMNS)})')
+    col_t, col_x = _ATOM_COLUMNS[style]
+    rows = [line.split() for line in lines[start + 2:] if len(line.split()) >= col_x + 3]
+    atoms = np.array([[float(r[col_t])] + [float(v) for v in r[col_x:col_x + 3]]
+                      for r in rows])
     return box, atoms[:, 0].astype(int), atoms[:, 1:4]
 
 
@@ -153,7 +172,7 @@ class SheetGeometry(Analysis):  # pylint: disable=too-few-public-methods
     """Lattice period and surface geometry of each material's built sheet."""
 
     name = 'sheet_geometry'
-    version = '1'
+    version = '2'
     level = 'material'
     families = frozenset({'afm', 'sheetonsheet'})
 
@@ -161,25 +180,33 @@ class SheetGeometry(Analysis):  # pylint: disable=too-few-public-methods
         """No parameters."""
 
     def compute(self, source, params) -> pd.DataFrame:
-        """One row per (material, layers); the first run of each with a stored
-        structure is read. A material with none is recorded as dropped."""
-        groups: Dict[Tuple[str, int], List[Any]] = {}
-        for row in source.rows.itertuples():
+        """One row per (material, layers), over every point of the source
+        whatever its verdict (``all_rows``): the built structure does not
+        depend on how the run went. The first run of each with a stored
+        structure is read. A point with no ``layers`` (the sheet family's)
+        takes the layer count of its settings' ``layer_<i>`` groups. A pass
+        point of a material with no structure is recorded as dropped."""
+        groups: Dict[Tuple[str, Optional[int]], List[Any]] = {}
+        for row in source.all_rows.itertuples():
             mats = row.materials
             mats = [mats] if isinstance(mats, str) else list(mats)
-            groups.setdefault((_material(mats[0]), int(row.layers)), []).append(row)
+            layers = None if row.layers is None or pd.isna(row.layers) else int(row.layers)
+            groups.setdefault((_material(mats[0]), layers), []).append(row)
         out = []
-        for (material, layers), rows in sorted(groups.items()):
+        for (material, layers), rows in sorted(groups.items(), key=lambda kv: (kv[0][0],
+                                                                                kv[0][1] or 0)):
             found = self._first_structure(source, rows)
             if found is None:
-                source.dropped.extend((str(r.point_uuid), 'no_structure') for r in rows)
+                source.dropped.extend((str(r.point_uuid), 'no_structure') for r in rows
+                                      if r.verdict_status == PASS_STATUS)
                 continue
             text, row = found
             elem, sigma, groups_t = read_settings(source.settings_text(row))
             box, typ, xyz = read_lmp(text)
             # system.in reads the sheet with a type offset (s42:85).
             typ = typ + (min(t for ts in groups_t.values() for t in ts) - typ.min())
-            out.append({'material': material, 'layer': layers,
+            out.append({'material': material,
+                        'layer': layers if layers is not None else max(groups_t),
                         **describe(box, typ, xyz, elem, sigma, groups_t)})
         return pd.DataFrame(out)
 
