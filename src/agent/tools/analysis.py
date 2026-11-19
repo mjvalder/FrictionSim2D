@@ -387,9 +387,12 @@ def summarise_results(deps, path: str, material: Optional[str] = None,
 def _plot_models() -> Dict[str, type]:
     """plot_type -> its model, read off the PlotBase subclasses."""
     models = {}
-    for model in plot_config.PlotBase.__subclasses__():
+    pending = list(plot_config.PlotBase.__subclasses__())
+    while pending:  # every descendant: some types share an intermediate base
+        model = pending.pop()
+        pending.extend(model.__subclasses__())
         field = model.model_fields.get('plot_type')
-        if field is not None:
+        if field is not None and isinstance(field.default, str):
             models[field.default] = model
     return models
 

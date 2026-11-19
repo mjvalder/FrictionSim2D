@@ -298,17 +298,19 @@ against.
 
 | field | type | meaning |
 |---|---|---|
-| `data_dirs` | `List[str]` | Directories holding outputs/ |
+| `data_dirs` | `List[str]` | Directories holding outputs/, or aiida://dataset/<name> URIs |
 | `labels` | `List[str]` | One per data_dir |
 | `dataset_display_labels` | `Dict[str, str]` |  |
 | `series_color_map` | `Dict[str, Optional[str]]` |  |
-| `plots` | `List[Annotated[Union[src.postprocessing.plot_config.SummaryPlot, src.postprocessing.plot_config.TimeseriesPlot, src.postprocessing.plot_config.StickSlipPlot, src.postprocessing.plot_config.ScatterComparisonPlot, src.postprocessing.plot_config.RankFrictionPlot, src.postprocessing.plot_config.CorrelationPlot, src.postprocessing.plot_config.CofHistogramPlot], FieldInfo(annotation=NoneType, required=True, discriminator='plot_type')]]` |  |
+| `comment` | `Optional[str]` | Documentation only |
+| `plots` | `List[Annotated[Union[src.postprocessing.plot_config.SummaryPlot, src.postprocessing.plot_config.TimeseriesPlot, src.postprocessing.plot_config.StickSlipPlot, src.postprocessing.plot_config.ScatterComparisonPlot, src.postprocessing.plot_config.RankFrictionPlot, src.postprocessing.plot_config.CorrelationPlot, src.postprocessing.plot_config.CofHistogramPlot, src.postprocessing.plot_config.StickslipPeriodHistogramPlot, src.postprocessing.plot_config.ContactCofScatterPlot, src.postprocessing.plot_config.SheetProfilePlot, src.postprocessing.plot_config.IntegrityPanelPlot], FieldInfo(annotation=NoneType, required=True, discriminator='plot_type')]]` |  |
 
 ## `summary`
 
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['summary']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -320,7 +322,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` |  |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -341,6 +347,7 @@ against.
 | `average_first_n_timesteps` | `Optional[int]` |  |
 | `average_timestep_range` | `Optional[List[int]]` |  |
 | `add_linear_fit` | `Optional[bool]` |  |
+| `axes_margins_in` | `Optional[Dict[Literal['left', 'right', 'bottom'], float]]` | Space (in) between that side of the axes and the image edge, so panels line up; never clips |
 | `append_slope_to_legend` | `Optional[bool]` |  |
 | `clip_fit_to_data` | `Optional[bool]` |  |
 | `extend_fit_to_origin` | `Optional[bool]` |  |
@@ -353,7 +360,6 @@ against.
 | `label_suffix` | `Optional[str]` |  |
 | `legend_figure_size` | `Optional[List[float]]` |  |
 | `legend_filename` | `Optional[str]` |  |
-| `legend_ncol` | `Optional[int]` |  |
 | `legend_separate_png` | `Optional[bool]` |  |
 | `marker_by_potential_type` | `Optional[bool]` |  |
 | `plot_by` | `Optional[str]` |  |
@@ -373,6 +379,7 @@ against.
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['timeseries']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -384,7 +391,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -426,6 +437,7 @@ against.
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['stick_slip_analysis']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -437,7 +449,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -457,6 +473,7 @@ against.
 | `use_scientific_notation` | `Optional[bool]` |  |
 | `average_first_n_timesteps` | `Optional[int]` |  |
 | `average_timestep_range` | `Optional[List[int]]` |  |
+| `shift_time_to_zero` | `Optional[bool]` | Start the time axis at 0 (default) or keep the LAMMPS clock |
 | `apply_hann_window` | `Optional[bool]` |  |
 | `bottom_ylabel` | `Optional[str]` |  |
 | `displacement_axis` | `Optional[str]` |  |
@@ -496,6 +513,7 @@ against.
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['scatter_comparison']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -507,7 +525,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -543,6 +565,7 @@ against.
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['rank_friction']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -554,7 +577,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -585,6 +612,7 @@ against.
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['correlation']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -596,7 +624,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -626,6 +658,7 @@ against.
 | field | type | meaning |
 |---|---|---|
 | `plot_type` | `Literal['cof_histogram']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
 | `filename` | `Optional[str]` |  |
 | `title` | `Optional[str]` |  |
 | `datasets` | `Optional[List[str]]` |  |
@@ -637,7 +670,11 @@ against.
 | `x_limits` | `Optional[List[Optional[float]]]` |  |
 | `y_limits` | `Optional[List[Optional[float]]]` |  |
 | `legend_location` | `Optional[str]` |  |
-| `legend_outside` | `<class 'bool'>` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
 | `figure_size` | `Optional[List[float]]` |  |
 | `filter_size` | `Optional[str]` |  |
 | `filter_layer` | `Optional[int]` |  |
@@ -664,8 +701,218 @@ against.
 | `slope_decimals` | `Optional[int]` |  |
 | `slope_fit_constraint` | `Optional[Literal['first_point', 'origin', 'none']]` |  |
 | `x_label_rotation` | `Optional[int]` |  |
+| `external_outline_width` | `Optional[float]` | Ring width (pt) of a hollow external-series bar (default 10) |
+| `show_adhesion_pairs` | `Optional[bool]` | Two bars per series: mean LF/NF (with adhesion) and the slope |
+| `ratio_x_range` | `Optional[List[float]]` | Load window of the mean LF/NF (default: the fit window) |
+| `with_adhesion_label` | `Optional[str]` |  |
+| `without_adhesion_label` | `Optional[str]` |  |
+| `without_adhesion_legend_first` | `Optional[bool]` |  |
+| `no_adhesion_hatch` | `Optional[str]` | Hatch of the slope bar (default '///') |
 
----
+## `stickslip_period_histogram`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['stickslip_period_histogram']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
+| `load_colors` | `Optional[List[str]]` |  |
+| `line_width` | `Optional[float]` |  |
+| `stickslip_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN, lf_period_A, a_x_A, lf_period_clear |
+| `ranking_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, eligible |
+| `bins_arange` | `Optional[List[float]]` | [start, stop, step] |
+| `reference_line` | `Optional[float]` | x of the dashed line; null for none |
+
+## `contact_cof_scatter`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['contact_cof_scatter']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
+| `load_colors` | `Optional[List[str]]` |  |
+| `line_width` | `Optional[float]` |  |
+| `contact_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN, state, <x_column> |
+| `ranking_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, eligible, cof_<L>nN |
+| `x_column` | `Optional[str]` | Contact column on x (required) |
+| `state` | `Optional[str]` | 'load' (default) or 'final' |
+| `marker_scale` | `Optional[float]` | times markers.size**2 (0.8) |
+| `alpha` | `Optional[float]` |  |
+| `y_scale` | `Optional[Literal['log', 'linear']]` |  |
+| `y_ticks` | `Optional[List[float]]` |  |
+
+## `sheet_profile`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['sheet_profile']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
+| `load_colors` | `Optional[List[str]]` |  |
+| `line_width` | `Optional[float]` |  |
+| `run_dir` | `Optional[str]` | AFM run directory holding <layer_dir>/ |
+| `layer_dir` | `Optional[str]` |  |
+| `tip_types` | `Optional[List[int]]` |  |
+| `tip_apex_depth` | `Optional[float]` |  |
+| `far_field_radius` | `Optional[float]` |  |
+| `sublayer_dz` | `Optional[float]` |  |
+| `radial_bins_arange` | `Optional[List[float]]` | [start, stop, step] |
+| `top_label` | `Optional[str]` |  |
+| `bottom_label` | `Optional[str]` |  |
+
+## `integrity_panel`
+
+| field | type | meaning |
+|---|---|---|
+| `plot_type` | `Literal['integrity_panel']` |  |
+| `source` | `Optional[str]` | Documentation only: the config or script this plot was first made with |
+| `filename` | `Optional[str]` |  |
+| `title` | `Optional[str]` |  |
+| `datasets` | `Optional[List[str]]` |  |
+| `use_dataset_colors` | `Optional[bool]` |  |
+| `x_axis` | `Optional[str]` |  |
+| `y_axis` | `Optional[str]` |  |
+| `x_label` | `Optional[str]` | Overrides label_for() |
+| `y_label` | `Optional[str]` | Overrides label_for() |
+| `x_limits` | `Optional[List[Optional[float]]]` |  |
+| `y_limits` | `Optional[List[Optional[float]]]` |  |
+| `legend_location` | `Optional[str]` |  |
+| `legend_outside` | `Union[bool, Literal['left', 'top']]` | True: right of the axes; 'left' or 'top' for those sides |
+| `legend_top_align` | `Optional[Literal['right']]` | With legend_outside='top': right-align instead of centring |
+| `legend_ncol` | `Optional[int]` | Columns of a 'top' legend (default 5) |
+| `legend_outside_left_anchor` | `Optional[float]` | x anchor of a 'left' legend in axes units (default -0.16) |
+| `legend_order` | `Optional[List[str]]` | These labels first, in this order; the rest keep theirs |
+| `figure_size` | `Optional[List[float]]` |  |
+| `filter_size` | `Optional[str]` |  |
+| `filter_layer` | `Optional[int]` |  |
+| `filter_speed` | `Optional[float]` |  |
+| `filter_tip_radius` | `Optional[float]` |  |
+| `filter_materials` | `Optional[List[str]]` |  |
+| `filter_forces` | `Optional[List[float]]` |  |
+| `filter_pressures` | `Optional[List[float]]` |  |
+| `pressures` | `Optional[List[float]]` |  |
+| `angle` | `Optional[float]` |  |
+| `force` | `Optional[float]` |  |
+| `filter_force_range` | `Optional[List[float]]` |  |
+| `filter_nf_range` | `Optional[List[float]]` |  |
+| `lf_source` | `Optional[Literal['as_was', 'sx_sy', 'fx_fy']]` |  |
+| `family` | `Optional[str]` | Keep only runs of this family (new in v2) |
+| `tier` | `Literal['window', 'raw', 'peratom']` | Which sampling tier to plot (new in v2) |
+| `use_scientific_notation` | `Optional[bool]` |  |
+| `average_first_n_timesteps` | `Optional[int]` |  |
+| `average_timestep_range` | `Optional[List[int]]` |  |
+| `material` | `Optional[str]` | Material (required) |
+| `run_dir` | `Optional[str]` | AFM run directory holding L<layer>/ |
+| `layer` | `Optional[int]` |  |
+| `loads` | `Optional[List[float]]` |  |
+| `traces_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, step, temp_sheet_3d, comz_L1, comz_L2 |
+| `status_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, force, status |
+| `dpi` | `Optional[int]` |  |
 
 ## Settings and presets
 
