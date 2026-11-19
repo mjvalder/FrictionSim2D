@@ -21,10 +21,16 @@
 {% if mem %}
 #SBATCH --mem={{ mem }}
 {% endif %}
+{% if gres %}
+#SBATCH --gres={{ gres }}
+{% endif %}
 
 module purge
 {% for mod in modules %}
 module load {{ mod }}
+{% endfor %}
+{% for line in env_lines %}
+{{ line }}
 {% endfor %}
 
 {% if array_size > 1 %}
@@ -88,14 +94,14 @@ fi
 {% endif %}
 
 # Phase 1: system initialisation (writes load_*N.data)
-{{ mpi_command }} lmp {{ lmp_flags }} -in ${LAMMPS_SIM_PATH}/lammps/system.in
+{{ launch_command }} -in ${LAMMPS_SIM_PATH}/lammps/system.in
 if [ $? -ne 0 ]; then
     echo "Error: system.in failed for ${SIM_PATH}"
     exit 1
 fi
 
 # Phase 2: slide simulation (reads load_*N.data, loops over forces)
-{{ mpi_command }} lmp {{ lmp_flags }} -in ${LAMMPS_SIM_PATH}/lammps/slide.in
+{{ launch_command }} -in ${LAMMPS_SIM_PATH}/lammps/slide.in
 if [ $? -ne 0 ]; then
     echo "Error: slide.in failed for ${SIM_PATH}"
     exit 1

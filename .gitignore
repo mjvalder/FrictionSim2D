@@ -2,7 +2,18 @@ src/data/settings/settings.yaml
 visuals
 *.lammpstrj
 ptest
-scripts
+# Ignore the scripts/ scratch area by default, but keep the MLIP deliverables
+# tracked: the build recipes, Milestone-0 decks, local runner and benchmark are
+# referenced by documentation/mlip.md and documentation/milestone0.md, so an
+# unqualified `scripts` entry would silently drop them from the repo.
+# NB: only /scripts/* is excluded (not /scripts itself), or git would refuse to
+# descend into the directory and these negations would never be consulted.
+/scripts/*
+!/scripts/hpc/
+!/scripts/milestone0/
+!/scripts/run_local.sh
+!/scripts/mlip_bilayer_benchmark.py
+!/scripts/fetch_mlip_models.sh
 __pycache__
 results
 run
@@ -13,3 +24,16 @@ frictionsim2d-file-audit.md
 docs/
 AGENTS.md
 CLAUDE.md
+# Scratch output of scripts/mlip_bilayer_benchmark.py. It defaults to
+# `bench_<framework>/` in the CWD, which is the repo root when the benchmark is
+# invoked the way documentation/mlip.md shows -- so the decks, .data files and a
+# symlink to a multi-GB model land in the tree unless ignored. Everything in
+# there is regenerable; pass --workdir to put it somewhere else.
+bench_*/
+
+# Claude Code / agent local config, alongside the CLAUDE.md and AGENTS.md above.
+.claude/
+
+# Stray LAMMPS run artifacts (a bare `lmp` in the repo root drops log.lammps;
+# *.lammpstrj is already covered at the top of this file).
+log.lammps

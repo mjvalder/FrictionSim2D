@@ -18,11 +18,14 @@ from typing import List, Dict, Any, Tuple, Optional, Union, Iterator
 from collections import defaultdict
 import logging
 import re
+import os
 import shutil
 
 from ase.data import atomic_masses, atomic_numbers
 
 from .config import ComponentConfig, GlobalSettings
+from .mlip import (MLIP_REGISTRY, d3_coeff_line, d3_style_token, get_mlip,
+                   is_mlip, mlip_by_style, model_elements)
 from .utils import count_atomtypes, lj_params, cifread
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,77 @@ POTENTIALS_WITH_INTERNAL_LJ = {'airebo', 'rebomos', 'comb', 'comb3', 'reaxff', '
 POTENTIALS_REQUIRING_LJ = {'sw', 'tersoff', 'rebo', 'edip', 'meam', 'eam', 'bop',
                             'morse',  'sw/mod', 'extep', 'vashishta'}
 REAXFF_TYPES = {'reaxff', 'reax/c'}
+
+#: Cutoff for the build-time ``pair_style zero`` surrogate (see
+#: :meth:`PotentialManager.write_surrogate_file`). It only has to be a legal
+#: cutoff — the style computes nothing, so the value cannot affect any geometry.
+ZERO_SURROGATE_CUTOFF = 10.0
+
+# Serialized-model extensions, derived from the registry so a new framework
+# needs no edit here. Used to route model files to the shared potentials dir.
+MLIP_MODEL_EXTENSIONS = tuple(sorted(
+    {ext.lower() for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions}
+))
+
+
+def is_mlip_model_file(path: Union[str, Path]) -> bool:
+    """True if ``path`` names a serialized MLIP model file (by extension)."""
+    return str(path).lower().endswith(MLIP_MODEL_EXTENSIONS)
+
+
+def stage_model_file(src: Path, dest: Path,
+                     link_from: Optional[Path] = None) -> None:
+    """Place ``src`` at ``dest``, hard-linking MLIP model files.
+
+    Used for both destinations a model reaches: the campaign-root
+    ``potentials/`` store the deck references, and each run's
+    ``provenance/potentials/`` record. Both need a real, openable file -- LAMMPS
+    reads the first, provenance must carry the second -- but neither needs its
+    own *bytes*. A hard link is a real file; identity is pinned by the sha256 the
+    provenance manifest already records. So one campaign holds ONE inode of a
+    model instead of one per run plus one for the store. For an 18 MB-multi-GB
+    foundation model over a sweep that is the dominant cost on disk.
+
+    Classical potentials (KB-scale text) keep the plain copy: linking them would
+    change long-standing behaviour for no benefit, and a small editable text file
+    is one a user may reasonably expect to be independent per run.
+
+    Args:
+        src: the file to place. Its bytes are the identity of the entry
+            whatever we end up linking from.
+        dest: where it goes.
+        link_from: preferred link source when it already exists -- normally
+            another copy already inside this campaign, which keeps the tree's
+            aliasing internal. Falls back to ``src``.
+
+    Falls back to a plain copy whenever linking cannot work: a different
+    filesystem (``EXDEV``), a filesystem without hard links, or a permission
+    refusal. The result is then byte-identical to the pre-existing behaviour, so
+    this can only save space, never fail a build.
+
+    .. warning::
+
+       Hard links survive a move but **not every transfer**. ``rsync`` collapses
+       them only with ``-H``, and ``tar`` must be told as well; without those
+       flags the links re-expand into independent copies at the far end. The
+       bytes still arrive -- this is a transfer-size question, not a provenance
+       one.
+
+       Linked entries also alias their source for *in-place* writes. Replacing a
+       file makes a new inode and breaks the link, which is the normal case; an
+       open-and-overwrite would propagate. Nothing edits a serialized model in
+       place, but do not treat these as write-protected.
+    """
+    if is_mlip_model_file(src):
+        for candidate in (link_from, src):
+            if candidate is None or not Path(candidate).is_file():
+                continue
+            try:
+                os.link(candidate, dest)
+                return
+            except OSError as exc:  # cross-device, no-hardlink FS, permissions
+                logger.debug("Hard link from %s failed (%s)", candidate, exc)
+    shutil.copy2(src, dest)
 
 
 @dataclass
@@ -145,6 +219,22 @@ class TypeRegistry:
             result.append("NULL")
         return result
 
+    def build_full_map(self) -> List[str]:
+        """Build a pot_label list covering EVERY atom type in the cell.
+
+        This is the map a full-cell MLIP requires. Unlike
+        :meth:`build_null_map`, which partitions the cell by component and pads
+        the rest with ``NULL``, this names a real element for every type --
+        because both MLIP frameworks reject NULL entries (v4 spec §1, E2/E3)
+        and DeePMD additionally refuses a type-range restriction
+        (``pair_deepmd.cpp:816``), so an MLIP's ``pair_coeff`` must be ``* *``
+        with one entry per type.
+
+        Returns:
+            One pot_label per type, in type-id order. Never contains ``NULL``.
+        """
+        return [atype.pot_label for atype in self]
+
     def get_element_map(self, component: str) -> Dict[str, List[int]]:
         """Get element -> [type_ids] mapping for a component (for backward compatibility)."""
         result: Dict[str, List[int]] = defaultdict(list)
@@ -253,7 +343,9 @@ class PotentialManager:
     def __init__(self, settings: GlobalSettings,
                 use_langevin: Optional[bool] = None,
                 potentials_dir: Optional[Union[str, Path]] = None,
-                potentials_prefix: Optional[str] = None):
+                potentials_prefix: Optional[str] = None,
+                shared_potentials_dir: Optional[Union[str, Path]] = None,
+                shared_potentials_prefix: Optional[str] = None):
         """Initialize the PotentialManager.
 
         Args:
@@ -265,11 +357,22 @@ class PotentialManager:
             potentials_dir: Absolute path to where potential files should be copied.
             potentials_prefix: String prefix for pair_coeff paths (e.g.,
                 'afm/.../potentials'). If None, falls back to the copied file path.
+            shared_potentials_dir: Absolute path to a simulation-root potentials
+                directory used for MLIP **model files only**. A foundation model
+                is hundreds of MB, so copying it into every run directory of a
+                sweep costs gigabytes over rsync; it is staged once here instead.
+                Classical potentials keep their per-run staging either way.
+            shared_potentials_prefix: pair_style/pair_coeff prefix for the shared
+                directory, relative to a run's lammps dir (e.g. '../potentials').
         """
         self.settings = settings
 
         self.potentials_dir: Optional[Path] = Path(potentials_dir).resolve() if potentials_dir else None
         self.potentials_prefix = potentials_prefix
+        self.shared_potentials_dir: Optional[Path] = (
+            Path(shared_potentials_dir).resolve() if shared_potentials_dir else None
+        )
+        self.shared_potentials_prefix = shared_potentials_prefix
 
         if use_langevin is not None:
             self.use_langevin = use_langevin
@@ -287,6 +390,20 @@ class PotentialManager:
         self.lj_overrides: Dict[Tuple[str, str], Tuple[float, float]] = {}
 
         self.virtual_atom_type: Optional[int] = None
+
+        # MLIP state. `_mlip_model_paths` maps pot_type -> staged model path so
+        # write_file can build a style token from a usage table keyed only by
+        # pot_type.
+        self._mlip_model_paths: Dict[str, str] = {}
+        # pot_type -> component names that asked for a self-interaction, in call
+        # order. An MLIP's pair_coeff is materialised ONCE at write time from
+        # this (see _mlip_self_interaction_lines), not per component.
+        self._mlip_components: Dict[str, List[str]] = {}
+        # pot_type -> the model's real filesystem path, as configured. The
+        # deck path in _mlip_model_paths may be a relative staging prefix,
+        # which is not openable from here; the coverage check needs this one.
+        self._mlip_source_paths: Dict[str, str] = {}
+        self.d3_enabled: bool = False
 
     @property
     def lj_cutoff(self) -> float:
@@ -406,6 +523,20 @@ class PotentialManager:
         """
         commands = []
         pot_type = config.pot_type.lower()
+        if is_mlip(pot_type):
+            # The line below is wrong for BOTH frameworks -- deepmd carries the
+            # model in the pair_style line, mace in the pair_coeff line -- and
+            # the only callers are the generation-time melt-quench builds, which
+            # cannot evaluate an MLIP anyway (v6 §5). Refuse, never emit.
+            raise ValueError(
+                f"'{pot_type}' cannot be used for a single-component "
+                f"generation-time build (this is the amorph = 'a' melt-quench "
+                f"path). That run needs a potential the GENERATING machine can "
+                f"evaluate, and its result depends on forces, so the "
+                f"`pair_style zero` surrogate is not an option either. Use "
+                f"amorph = 'c', or prepare the amorphous structure separately "
+                f"with a classical potential. See the v6 spec §5."
+            )
         pot_path = self._get_potential_path(config.pot_path)
 
         commands.append(f"pair_style {pot_type}")
@@ -451,7 +582,34 @@ class PotentialManager:
         pot_type = self._normalize_potential_type(config.pot_type)
         pot_counts = count_atomtypes(config.pot_path, elements, pot_type=pot_type)
 
-        self.potential_usage[pot_type] += n_layers if self.is_sheet_lj(pot_type) else 1
+        if is_mlip(pot_type):
+            # An MLIP is scoped to the CELL, not the component (v6 spec §3):
+            # ONE instance covers every type, so registering a second MLIP
+            # component must not add a second sub-style token. Set rather than
+            # increment. Rule 1 of validate_mlip_cell already guarantees every
+            # MLIP component of a framework names the same model, so there is
+            # nothing a second instance could express.
+            self.potential_usage[pot_type] = 1
+
+            # write_file needs the staged model path to build the style token,
+            # but potential_usage is keyed by pot_type alone. Record it now so
+            # two components sharing one framework resolve the same string.
+            staged = self._get_potential_path(config.pot_path)
+            self._mlip_source_paths.setdefault(pot_type, str(config.pot_path))
+            existing = self._mlip_model_paths.setdefault(pot_type, staged)
+            if existing != staged:
+                # Every instance of one framework shares a single style token,
+                # so a second, different model cannot be expressed. Config
+                # validation should reject this; warn loudly if it slips past.
+                logger.warning(
+                    "Component '%s' registers a second %s model (%s); the first "
+                    "(%s) is what every instance will use.",
+                    name, pot_type, staged, existing,
+                )
+        else:
+            self.potential_usage[pot_type] += (
+                n_layers if self.is_sheet_lj(pot_type) else 1
+            )
 
         apply_langevin = self.use_langevin and name in ('tip', 'sub')
 
@@ -470,7 +628,7 @@ class PotentialManager:
             'map': component_map,
             'elements': elements,
             'n_layers': n_layers,
-            'use_langevin': self.use_langevin
+            'use_langevin': self.use_langevin,
         }
 
         return component_map
@@ -548,20 +706,31 @@ class PotentialManager:
         If `potentials_dir` is configured, copies the potential file there (once)
         and returns either `<potentials_prefix>/<filename>` if provided, or the
         absolute staged path. Otherwise, returns the original path unchanged.
+
+        MLIP **model files** (recognised by extension) go to
+        `shared_potentials_dir` instead when one is configured: one copy at the
+        simulation root serves every run of a sweep. Classical potential files
+        are unaffected and keep their per-run copy.
         """
-        if not self.potentials_dir:
+        src_path = Path(original_path)
+
+        if self.shared_potentials_dir and is_mlip_model_file(src_path):
+            dest_dir = self.shared_potentials_dir
+            prefix = self.shared_potentials_prefix
+        elif self.potentials_dir:
+            dest_dir = self.potentials_dir
+            prefix = self.potentials_prefix
+        else:
             return original_path
 
-        src_path = Path(original_path)
-        dest_dir = self.potentials_dir
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / src_path.name
 
         if not dest_path.exists():
-            shutil.copy2(src_path, dest_path)
+            stage_model_file(src_path, dest_path)
 
-        if self.potentials_prefix:
-            return f"{self.potentials_prefix}/{src_path.name}"
+        if prefix:
+            return f"{prefix}/{src_path.name}"
 
         return str(dest_path)
 
@@ -575,6 +744,16 @@ class PotentialManager:
             True if explicit LJ is needed, False if potential handles it internally.
         """
         pot_lower = pot_type.lower()
+        if is_mlip(pot_lower):
+            # An MLIP behaves like an internal-LJ potential, and has no other
+            # option: the per-layer alternative needed one instance per layer
+            # with NULL-padded type maps, which BOTH frameworks reject (v4 spec
+            # §1, E2/E3). One instance spans every layer of the component and
+            # supplies the interlayer physics itself, so no explicit lj/cut is
+            # added. Overlaying LJ on top is rejected on physics too (v4 §2):
+            # the MLIP cutoff already spans the interlayer gap, so a UFF-mixed
+            # LJ parameterised to BE the interlayer potential double-counts.
+            return False
         if pot_lower in POTENTIALS_WITH_INTERNAL_LJ:
             return False
         if pot_lower in POTENTIALS_REQUIRING_LJ:
@@ -582,6 +761,236 @@ class PotentialManager:
 
         logger.warning("Unknown potential type '%s', assuming LJ is required.", pot_type)
         return True
+
+    # === MLIP helpers ======================================================
+
+    def enable_d3(self) -> None:
+        """Turn on the ``dispersion/d3`` overlay for this settings file.
+
+        D3 is a full-cell-only capability (stock ``pair_style dispersion/d3``
+        needs a real element for every atom type, so it cannot be restricted to
+        the MLIP pairs of a partial cell) -- which costs nothing now that
+        full-cell is the only supported topology. Enabling it switches the
+        header to ``pair_style hybrid/overlay``. Builders call this; the
+        cell-level capability check lives in ``mlip.validate_mlip_cell``.
+        """
+        self.d3_enabled = True
+
+    def has_mlip(self) -> bool:
+        """True if any registered component uses an MLIP framework."""
+        return bool(self._mlip_pot_types())
+
+    def mlip_framework(self) -> Optional[str]:
+        """The single MLIP framework in this cell, or ``None`` if classical.
+
+        A cell is uniform by construction (v6 §4: every component must use the
+        SAME MLIP), so "the frameworks in use" is at most one name. Builders
+        that assemble their own render context use this to supply the
+        ``mlip_sheet`` / ``mlip_deck_directives`` template keys without having
+        to guess which component speaks for the cell.
+
+        The >1 case is refused at emission by
+        :meth:`_mlip_self_interaction_lines`; this accessor stays quiet and
+        returns the first so a context lookup can never be the thing that
+        raises.
+        """
+        frameworks = self._mlip_pot_types()
+        return frameworks[0] if frameworks else None
+
+    def deck_directives(self) -> List[str]:
+        """Deck lines this cell's MLIP style requires before ``read_data``.
+
+        Empty for a classical cell and for deepmd (which declares none), so a
+        non-MLIP deck renders byte-identically to before.
+        """
+        framework = self.mlip_framework()
+        return list(get_mlip(framework).deck_directives) if framework else []
+
+    def write_surrogate_file(self, output_path: Path) -> Path:
+        """Write the build-time ``pair_style zero`` stand-in for this cell.
+
+        FrictionSim2D runs LAMMPS *at generation time* to stack layers and to
+        assemble hetero/flake cells. Those runs only place atoms and renumber
+        types — but they ``include`` the real settings file, which for an MLIP
+        would demand an MLIP-enabled LAMMPS on the generation machine and in CI
+        (spec §3.3). ``pair_style zero`` is stock LAMMPS, is defined for every
+        element and exerts exactly zero force, so it satisfies the parser
+        without being able to influence the geometry.
+
+        **Only for LAMMPS runs that do not integrate or minimize.** A run whose
+        result depends on the forces (an interface-spacing minimization, say)
+        must use the configured ``lat_c`` instead — under this surrogate it
+        would "minimize" a flat energy landscape and return nonsense.
+        """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            f"{self.get_masses_string()}\n"
+            f"pair_style zero {ZERO_SURROGATE_CUTOFF}\n"
+            f"pair_coeff * *\n",
+            encoding='utf-8',
+        )
+        return output_path
+
+    def _mlip_atom_list(self, pot_type: str) -> List[str]:
+        """Build the cell-wide MLIP type map, with the §1.4 virtual placeholder.
+
+        The map spans EVERY atom type in the cell (:meth:`TypeRegistry.build_full_map`)
+        because an MLIP is cell-scoped, not component-scoped (v6 spec §3): both
+        frameworks reject NULL entries (v4 E2/E3) and DeePMD refuses a
+        type-range restriction (``pair_deepmd.cpp:816``), so the only shape
+        either accepts is ``pair_coeff * *`` naming a real element per type.
+
+        A virtual drive atom cannot stay ``NULL`` either -- ``pair_mace``
+        segfaults on it, ``pair_deepmd`` errors out ("Pair hybrid sub-style
+        deepmd is not used"), and ``dispersion/d3`` rejects it -- so it takes
+        the framework's placeholder element; ``neigh_modify exclude`` (see
+        :meth:`_virtual_exclusion_lines`) then empties its neighbour list, so it
+        contributes only a constant isolated-atom energy and zero force.
+
+        The map can no longer contain NULL by construction. What it *can* do is
+        claim types belonging to a classical component, which is why
+        :meth:`_mlip_self_interaction_lines` refuses a non-uniform cell before
+        this map is ever emitted.
+        """
+        atom_list = self.types.build_full_map()
+        if self.virtual_atom_type is None:
+            return atom_list
+
+        v_idx = self.virtual_atom_type - 1
+        if v_idx >= len(atom_list):
+            return atom_list
+
+        atom_list = list(atom_list)
+        atom_list[v_idx] = get_mlip(pot_type).virtual_atom_element
+        return atom_list
+
+    def _mlip_self_interaction_lines(self) -> List[str]:
+        """Materialise the single ``pair_coeff`` line an MLIP cell needs.
+
+        Deferred to write time deliberately: the full type map has to span
+        components registered *after* the first :meth:`add_self_interaction`
+        call, which is exactly what ``hetero_afm`` and ``flake_slide`` do.
+        Emitting eagerly would silently truncate the map.
+
+        Raises:
+            ValueError: if the cell is not uniformly one MLIP. That is the
+                "loud fail" of v6 §4 -- an SW tip beside an MLIP sheet, or MACE
+                beside DeePMD. Neither can be expressed: one ``pair_coeff * *``
+                claims every type, so a classical component would have its types
+                silently absorbed by the MLIP, and a second framework's ``* *``
+                would simply override the first.
+        """
+        frameworks = self._mlip_pot_types()
+        if not frameworks or not self._mlip_components:
+            return []
+
+        if len(frameworks) > 1:
+            raise ValueError(
+                f"Two MLIP frameworks in one cell ({', '.join(sorted(frameworks))}). "
+                f"Each needs its own 'pair_coeff * *' spanning every atom type, "
+                f"so the second silently overrides the first. Every component in "
+                f"a cell must use the SAME MLIP. See the v6 spec "
+                f"(2026-09-03-mlip-multicomponent-fullcell-design.md) §4."
+            )
+
+        pot_type = frameworks[0]
+        foreign = [
+            (name, self._normalize_potential_type(comp['config'].pot_type))
+            for name, comp in self.components.items()
+            if self._normalize_potential_type(comp['config'].pot_type) != pot_type
+        ]
+        if foreign:
+            listed = ', '.join(f"{name} ({pot})" for name, pot in foreign)
+            raise ValueError(
+                f"Cannot mix '{pot_type}' with a classical potential in one cell: "
+                f"{listed}. An MLIP's type map covers EVERY atom type "
+                f"('pair_coeff * *' is the only form either framework accepts -- "
+                f"v4 spec E2/E3), so those components' types would be silently "
+                f"absorbed by {pot_type} rather than handled by their own "
+                f"potential. Make the whole cell {pot_type}, or the whole cell "
+                f"classical. See the v6 spec §4."
+            )
+
+        atom_list = self._mlip_atom_list(pot_type)
+        self._check_model_covers(pot_type, atom_list)
+        pot_path = self._mlip_model_paths.get(pot_type, '')
+        # potential_usage is 1 for an MLIP by construction (v6 §3), so a
+        # full-cell MLIP is never a numbered hybrid sub-style.
+        index_str = f" {self.potential_indices[pot_type]}" \
+            if self.potential_usage[pot_type] > 1 else ""
+        cmd = get_mlip(pot_type).coeff_line(index_str, pot_path, atom_list)
+        return [f"{cmd} # {', '.join(self._mlip_components[pot_type])}"]
+
+    def _check_model_covers(self, pot_type: str, atom_list: List[str]) -> None:
+        """Refuse a type map naming an element the model does not have.
+
+        v6 §4 rule 3b. This matters more than a typical validation because the
+        failure is **silent**: v4 E7 measured that an element the model lacks
+        does not error -- LAMMPS maps the types to the model's first N elements
+        and returns a plausible, wrong energy.
+
+        Only enforced where the answer is knowable without loading the model
+        (MACE's symmetrix json). :func:`mlip.model_elements` returns ``None``
+        otherwise -- for DeePMD, and for any file it cannot parse -- and this
+        is then a no-op, so it can only add a diagnosis, never block a build
+        that would have worked.
+        """
+        covered = model_elements(pot_type, self._mlip_source_paths.get(pot_type, ''))
+        if covered is None:
+            return
+        missing = sorted(set(atom_list) - covered)
+        if not missing:
+            return
+        raise ValueError(
+            f"The {pot_type} model does not cover every element in this cell: "
+            f"missing {', '.join(missing)} (model has "
+            f"{', '.join(sorted(covered))}). Naming an element the model lacks "
+            f"does NOT error at run time -- LAMMPS maps those types to the "
+            f"model's first N elements and returns a plausible, WRONG energy "
+            f"(v4 spec E7). Re-extract the model with every element the cell "
+            f"needs, e.g. `symmetrix_extract_mace -m <model> --chemical-symbols "
+            f"{' '.join(sorted(set(atom_list)))}`. See the v6 spec §4."
+        )
+
+    def _all_self_interaction_lines(self) -> List[str]:
+        """Every self-interaction line, MLIP ones materialised at write time."""
+        return self._mlip_self_interaction_lines() + self.self_interaction_commands
+
+    def _is_mlip_component(self, name: str) -> bool:
+        """True if ``name`` is a registered component using an MLIP."""
+        comp = self.components.get(name)
+        if not comp:
+            return False
+        return is_mlip(self._normalize_potential_type(comp['config'].pot_type))
+
+    def _mlip_pot_types(self) -> List[str]:
+        """MLIP frameworks in use, in registration order."""
+        return [pot for pot in self.potential_usage if is_mlip(pot)]
+
+    def _d3_element_list(self) -> List[str]:
+        """One real element symbol per atom type, for the D3 coeff line."""
+        mlips = self._mlip_pot_types()
+        placeholder = get_mlip(mlips[0]).virtual_atom_element if mlips else 'H'
+        return [
+            placeholder if atype.element == 'Virtual' else atype.element
+            for atype in self.types
+        ]
+
+    def _virtual_exclusion_lines(self) -> List[str]:
+        """``neigh_modify`` lines hiding the virtual drive atom from MLIP/D3.
+
+        DELIBERATELY one line per type rather than a single wildcard line:
+        ``neigh_modify exclude type M N`` takes two explicit numeric type IDs
+        and has **no** wildcard form, so ``exclude type <v> *`` is a parse error
+        that would kill every MLIP run. ``scripts/milestone0/m0_4_virtual_exclude.in``
+        enumerates the same pairs (including the v-v self pair) for this reason.
+        """
+        v = self.virtual_atom_type
+        if v is None:
+            return []
+        return [f"neigh_modify exclude type {v} {t}"
+                for t in range(1, len(self.types) + 1)]
 
     def add_self_interaction(self, component_name: str,
                             layer: Optional[int] = None):
@@ -600,6 +1009,16 @@ class PotentialManager:
         n_layers = comp['n_layers']
 
         pot_type = self._normalize_potential_type(c_conf.pot_type)
+
+        if is_mlip(pot_type):
+            # An MLIP is cell-scoped: record the request and emit ONE line for
+            # the whole cell at write time (_mlip_self_interaction_lines). The
+            # map must span components registered after this call, so it cannot
+            # be built now. No potential_indices bump either -- there is only
+            # ever one instance, hence no hybrid sub-style number.
+            self._mlip_components.setdefault(pot_type, []).append(component_name)
+            return
+
         self.potential_indices[pot_type] += 1
         pot_index = self.potential_indices[pot_type]
 
@@ -620,6 +1039,11 @@ class PotentialManager:
                                     base_pot_index: int):
         """Add self-interaction for a specific layer.
 
+        Classical potentials only: this is the per-layer, NULL-partitioned
+        topology, which no MLIP can express (v4 spec §1, E2/E3), and
+        :meth:`is_sheet_lj` is ``False`` for every MLIP so an MLIP component
+        never reaches here.
+
         Args:
             comp: Component dictionary.
             layer: Layer index (0-based).
@@ -636,7 +1060,6 @@ class PotentialManager:
         index_str = f" {pot_index}" if needs_index else ""
 
         atom_list = self.types.build_null_map(name, layer=layer)
-
         pot_path = self._get_potential_path(c_conf.pot_path)
         cmd = f"pair_coeff * * {pot_type}{index_str} {pot_path} {' '.join(atom_list)}"
         self.self_interaction_commands.append(f"{cmd} # {name} Layer {layer+1}")
@@ -657,6 +1080,36 @@ class PotentialManager:
             custom_params: Optional dict with 'epsilon', 'sigma', 'cutoff'
                 overrides.
         """
+        mlip1 = self._is_mlip_component(comp1_name)
+        mlip2 = self._is_mlip_component(comp2_name)
+        if mlip1 and mlip2:
+            # The MLIP already describes this pair -- its cutoff spans the
+            # inter-component gap -- so a UFF-mixed LJ parameterised to BE that
+            # interaction double-counts it (v6 §3, the v4 §2 argument applied
+            # between components rather than between layers).
+            logger.debug(
+                "Skipping %s-%s cross LJ: both components are covered by one "
+                "MLIP, which supplies that interaction itself.",
+                comp1_name, comp2_name,
+            )
+            return
+        if mlip1 != mlip2:
+            mlip_name, other = (comp1_name, comp2_name) if mlip1 \
+                else (comp2_name, comp1_name)
+            mlip_pot = self._normalize_potential_type(
+                self.components[mlip_name]['config'].pot_type)
+            other_pot = self._normalize_potential_type(
+                self.components[other]['config'].pot_type)
+            raise ValueError(
+                f"Cannot add a cross-interaction between {mlip_pot} component "
+                f"'{mlip_name}' and {other_pot} component '{other}': an MLIP's "
+                f"type map already claims every atom type, so this LJ term "
+                f"would double-count on types the MLIP owns. Such a cell is "
+                f"refused outright (v6 spec §4); it should not have reached "
+                f"here. Make the whole cell one MLIP, or the whole cell "
+                f"classical."
+            )
+
         elements1 = self.types.elements_in_component(comp1_name)
         elements2 = self.types.elements_in_component(comp2_name)
 
@@ -700,6 +1153,14 @@ class PotentialManager:
         comp = self.components.get(component_name)
         if not comp:
             raise ValueError(f"Component '{component_name}' not registered.")
+        if self._is_mlip_component(component_name):
+            # One MLIP instance spans every layer and supplies the interlayer
+            # physics itself; overlaying LJ double-counts (v4 spec §2).
+            logger.debug(
+                "Skipping interlayer LJ for '%s': its MLIP covers every layer.",
+                component_name,
+            )
+            return
         n_layers = comp['n_layers']
         elements = comp['elements']
 
@@ -768,6 +1229,14 @@ class PotentialManager:
         comp = self.components.get(component_name)
         if not comp:
             raise ValueError(f"Component '{component_name}' not registered.")
+        if self._is_mlip_component(component_name):
+            # As add_interlayer_interaction: one MLIP instance spans every
+            # layer, so both the real and the ghost LJ terms would double-count.
+            logger.debug(
+                "Skipping ghost/interlayer LJ for '%s': its MLIP covers every layer.",
+                component_name,
+            )
+            return
         n_layers = comp['n_layers']
 
         if n_layers < 2:
@@ -996,6 +1465,49 @@ class PotentialManager:
 
         return cmd
 
+    @staticmethod
+    def _strip_non_hybrid_prefix(cmd: str) -> str:
+        """Rewrite a self-interaction pair_coeff for a non-hybrid pair_style.
+
+        Classical lines go through :meth:`_strip_hybrid_prefix` (drop the style
+        name and index, keep the potential file). MLIP lines must NOT, because
+        that routine locates the potential file as "the first token from index
+        3 containing ``/`` or ``.``" -- a heuristic both frameworks defeat, in
+        opposite directions:
+
+        * ``pair_coeff * * symmetrix/mace model.json Mo S`` -- the STYLE token
+          contains a ``/``, so the heuristic stops on it and returns the line
+          untouched, leaving the style token in place.
+        * ``pair_coeff * * deepmd Mo S`` -- no token matches at all (the model
+          path lives in the pair_style line), so it again returns the line
+          untouched, leaving ``deepmd`` in place.
+
+        Either way the style token survives into a non-hybrid deck, which is
+        exactly what must not happen. Dropping ``tokens[3]`` unconditionally is
+        correct for both, and both forms are the ones the Milestone-0 decks
+        use:
+
+        * deepmd -- model path is in the ``pair_style`` line, so the non-hybrid
+          coeff line is a bare type map: ``pair_coeff * * Mo S`` (see
+          ``scripts/milestone0/m0_4_virtual_exclude.in``, deepmd variant).
+        * mace (symmetrix) -- the model path is in the coeff line and the
+          style token is DROPPED: ``pair_coeff * * model.json Mo S``. Keeping
+          it (``pair_coeff * * symmetrix/mace model.json ...``) makes LAMMPS
+          read ``symmetrix/mace`` as the model filename and fail. Verified
+          2026-08-24 on an h-MoS2 trilayer.
+        """
+        parts = cmd.split('#', 1)
+        main = parts[0].strip()
+        comment = f" # {parts[1].strip()}" if len(parts) > 1 else ""
+
+        tokens = main.split()
+        if len(tokens) > 3 and mlip_by_style(tokens[3]) is not None:
+            # Drop the sub-style selector token; whatever follows (a model
+            # path for symmetrix/mace, nothing for deepmd) is already correct.
+            return f"{' '.join(tokens[:3] + tokens[4:])}{comment}"
+
+        return PotentialManager._strip_hybrid_prefix(cmd)
+
     def write_file(self, output_path: Path):
         """Write the complete potential settings file.
 
@@ -1003,10 +1515,33 @@ class PotentialManager:
             output_path: Path for the output file (e.g., system.in.settings).
         """
         lj_cutoff = self.settings.potential.lj_cutoff
-        has_lj = bool(self.cross_interaction_commands) or self.virtual_atom_type is not None
-        use_hybrid = (not self._is_single_potential()) or self.virtual_atom_type is not None
+        # Materialise MLIP lines BEFORE opening the file: a non-uniform cell
+        # raises here (v6 §4), and it must not leave a half-written deck behind.
+        self_interaction_lines = self._all_self_interaction_lines()
+        # An MLIP's `pair_coeff * *` already spans EVERY type including the
+        # virtual drive atom: no NULL type map is possible for an MLIP, so
+        # _mlip_atom_list fills the virtual slot with the framework's
+        # virtual_atom_element, and _virtual_exclusion_lines keeps any virtual
+        # pair from ever being built. The placeholder lj/cut is therefore not
+        # just redundant there but harmful -- under plain `hybrid` a
+        # `pair_coeff * <v> lj/cut` REASSIGNS the virtual type away from the
+        # MLIP, leaving its type map covering types it no longer owns, which
+        # segfaults as soon as create_atoms makes a real virtual atom.
+        # Classical potentials still need it: their `* *` lines NULL out types
+        # the potential does not know, leaving the virtual type unassigned.
+        virtual_needs_lj = (self.virtual_atom_type is not None
+                            and not self._mlip_pot_types())
+        has_lj = bool(self.cross_interaction_commands) or virtual_needs_lj
+        # A D3 overlay is a second pair style over the same pairs, so it always
+        # needs a hybrid (overlay) header even for a lone full-cell MLIP.
+        use_hybrid = ((not self._is_single_potential())
+                      or virtual_needs_lj
+                      or self.d3_enabled)
 
-        # Build pair_style parts; ReaxFF needs NULL + keywords when in hybrid
+        # Build pair_style parts; ReaxFF needs NULL + keywords when in hybrid,
+        # and MLIPs get their argument string from the registry (deepmd carries
+        # the model path here; symmetrix/mace carries neither -- its model path
+        # goes in the pair_coeff line and it takes no style keywords).
         style_parts = []
         for pot_type, count in self.potential_usage.items():
             for _ in range(count):
@@ -1016,8 +1551,18 @@ class PotentialManager:
                     style_parts.append(
                         f"{pot_type} NULL safezone {safezone} mincap {mincap}"
                     )
+                elif is_mlip(pot_type):
+                    style_parts.append(
+                        get_mlip(pot_type).style_token(
+                            self._mlip_model_paths.get(pot_type, '')
+                        )
+                    )
                 else:
                     style_parts.append(pot_type)
+
+        # D3 sits next to the potential it overlays, before the LJ sub-style.
+        if self.d3_enabled:
+            style_parts.append(d3_style_token(self.settings))
 
         if has_lj:
             style_parts.append(f"lj/cut {lj_cutoff}")
@@ -1031,8 +1576,16 @@ class PotentialManager:
             f.write(self.get_component_groups_string())
             f.write("\n")
 
+            if self.virtual_atom_type is not None and (self._mlip_pot_types()
+                                                       or self.d3_enabled):
+                f.write("# Virtual drive atom is invisible to the MLIP/D3 graph\n")
+                for line in self._virtual_exclusion_lines():
+                    f.write(f"{line}\n")
+                f.write("\n")
+
             if use_hybrid:
-                f.write(f"pair_style hybrid {' '.join(style_parts)}\n")
+                hybrid_style = 'hybrid/overlay' if self.d3_enabled else 'hybrid'
+                f.write(f"pair_style {hybrid_style} {' '.join(style_parts)}\n")
             elif style_parts:
                 pot = style_parts[0]
                 if pot.lower() in REAXFF_TYPES:
@@ -1046,13 +1599,18 @@ class PotentialManager:
                 else:
                     f.write(f"pair_style {pot}\n")
 
-            if self.self_interaction_commands:
+            if self_interaction_lines:
                 f.write("# Self-interactions (intra-component)\n")
-                for cmd in self.self_interaction_commands:
+                for cmd in self_interaction_lines:
                     if use_hybrid:
                         f.write(f"{cmd}\n")
                     else:
-                        f.write(f"{self._strip_hybrid_prefix(cmd)}\n")
+                        f.write(f"{self._strip_non_hybrid_prefix(cmd)}\n")
+                f.write("\n")
+
+            if self.d3_enabled:
+                f.write("# D3 dispersion overlay (full-cell only)\n")
+                f.write(f"{d3_coeff_line(self._d3_element_list())}\n")
                 f.write("\n")
 
             if self.cross_interaction_commands:
@@ -1061,7 +1619,7 @@ class PotentialManager:
                     f.write(f"{cmd}\n")
                 f.write("\n")
 
-            if self.virtual_atom_type is not None:
+            if virtual_needs_lj:
                 f.write("# Virtual atom (minimal LJ)\n")
                 f.write(f"pair_coeff * {self.virtual_atom_type} lj/cut 1e-100 1e-100\n")
 

@@ -23,6 +23,7 @@ from .config import (
     parse_config,
 )
 from .material_templates import has_template_marker, substitute_materials
+from .mlip import is_mlip
 from .path_utils import format_dimension_token
 from .utils import _find_existing  # noqa: PLC2701  (intentional internal reuse)
 from ..builders.afm import AFMSimulation
@@ -1124,6 +1125,38 @@ def _select_sheet_builder_cls(model, config_obj):
     return SheetOnSheetSimulation
 
 
+#: Coverage segment of the MLIP flavour token. Full-cell is the only topology
+#: the matrix allows (v4 spec §3), so the segment is constant -- it is kept
+#: rather than dropped so that already-built trees stay decodable by
+#: ``src.hpc.manifest.parse_mlip_flavor`` and by the postprocessing filters.
+MLIP_COVERAGE_TOKEN = 'native'
+
+
+def mlip_flavor_token(sheet: Dict[str, Any]) -> str:
+    """The ``_<pot_type>-native-<disp>`` suffix for an MLIP run, or ``''``.
+
+    Sweeping the same material across potentials/flavors must not collide, so
+    every MLIP flavor gets its own leaf directory. The token is deliberately
+    confined to the innermost run-parameter segment: the upstream material/size
+    segments are what ``postprocessing/read_data.py`` parses, and changing those
+    would break every existing filter.
+
+    The coverage segment no longer varies: ``mlip_interlayer`` is gone and
+    full-cell is the only supported topology (v4 spec §5). Anything the raw dict
+    still carries under that key is ignored here and rejected by
+    :class:`~src.core.config.SheetConfig`.
+
+    Defaults mirror :class:`~src.core.config.SheetConfig` because this runs on
+    the raw config dict, before any model exists.
+    """
+    pot_type = str(sheet.get('pot_type') or '')
+    if not is_mlip(pot_type):
+        return ''
+    dispersion = sheet.get('dispersion') or 'none'
+    disp_token = 'base' if dispersion == 'none' else dispersion
+    return f"_{pot_type.lower()}-{MLIP_COVERAGE_TOKEN}-{disp_token}"
+
+
 def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     """The output directory a run config builds into, relative to the
     simulation root.
@@ -1143,6 +1176,8 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     y = sheet.get('y', 100)
     temp = run_dict['general'].get('temp', 300)
     size_token = f"{format_dimension_token(x)}x_{format_dimension_token(y)}y"
+    # Innermost run-parameter segment only -- see mlip_flavor_token.
+    run_token = f"K{int(temp)}{mlip_flavor_token(sheet)}"
 
     top_dir = model  # 'afm' | 'sheetonsheet' | 'pes_tip' | 'pes_sheet'
     if model in AFM_LIKE_MODELS:
@@ -1158,10 +1193,10 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
         return (
             Path(top_dir) / mat / size_token /
             f"sub_{sub_str}_tip_{tip_str}_r{int(tip_r)}" /
-            f"K{int(temp)}"
+            run_token
         )
 
-    return Path(top_dir) / mat / size_token / f"K{int(temp)}"
+    return Path(top_dir) / mat / size_token / run_token
 
 
 def run_simulations(

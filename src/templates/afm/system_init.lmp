@@ -3,12 +3,22 @@
 clear
 units           metal
 atom_style      {{ atom_style }}
+{% for directive in mlip_deck_directives | default([]) %}
+{{ directive }}
+{% endfor %}
 boundary        p p p
 
 neighbor        {{ neighbor_list }} bin
 {{ neigh_modify_command }}
 
+{% if not mlip_sheet | default(false) %}
+{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
+   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
+   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
+   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
+   run loses nothing by falling back to the default brick decomposition. #}
 comm_style tiled
+{% endif %}
 region          box block {{ xlo }} {{ xhi }} {{ ylo }} {{ yhi }} -5 {{ zhi_box }}
 create_box      {{ ngroups }} box
 
@@ -21,7 +31,14 @@ read_data       {{ flake_file }} add append shift {{ flake_shift_x }} {{ flake_s
 
 include         {{ potential_file }}
 
+{% if not mlip_sheet | default(false) %}
+{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
+   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
+   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
+   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
+   run loses nothing by falling back to the default brick decomposition. #}
 balance         1.0 rcb
+{% endif %}
 
 {% if dump_enabled %}
 dump            sys all atom {{ dump_freq }} {{ dump_file }}
@@ -109,7 +126,14 @@ variable        force equal {{ forces }}
 variable        find equal v_force
 {% endif %}
 
+{% if not mlip_sheet | default(false) %}
+{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
+   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
+   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
+   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
+   run loses nothing by falling back to the default brick decomposition. #}
 balance         1.0 rcb
+{% endif %}
 
 variable        num_floads equal 100
 variable        r equal 0.0

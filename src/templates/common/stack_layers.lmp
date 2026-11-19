@@ -53,4 +53,11 @@ variable z2 equal xcm(layer_2,z)
 variable lat_c equal v_z2-v_z1
 {% endif %}
 
-write_data {{ output_path }}
+# `nocoeff` is load-bearing. The MLIP stacking surrogate is `pair_style zero`,
+# which HAS per-type coefficients, so a plain write_data serialises a
+# "Pair Coeffs # zero" block into the structure. Production scripts read_data
+# BEFORE they include the settings file that defines pair_style, and LAMMPS
+# then aborts with "Must define pair_style before Pair Coeffs"
+# (read_data.cpp:782). Classical many-body styles happen not to write the
+# section, which is why this only bites MLIP runs.
+write_data {{ output_path }} nocoeff

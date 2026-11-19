@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import List, Optional, NoReturn
 import click
 
-from .core.config import load_settings, settings_origin, _global_settings_path
+from .core.config import (
+    load_settings,
+    resolve_profile,
+    settings_origin,
+    _global_settings_path,
+)
 from .core.run import (
     run_simulations,
     _build_hpc_manifest_entries,
@@ -417,14 +422,20 @@ def hpc_group():
               help='HPC scheduler type')
 @click.option('--output-dir', '-o', default=None,
               help='Output directory for scripts (default: simulation_dir/hpc)')
+@click.option('--profile', 'profile', default=None,
+              help='HPC profile from settings.yaml (hpc: profiles:) to merge '
+                   'onto the base hpc settings, e.g. a GPU cluster profile. '
+                   'Defaults to hpc.active_profile when set.')
 def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
-                 scheduler: str, output_dir: Optional[str]):
+                 scheduler: str, output_dir: Optional[str],
+                 profile: Optional[str]):
     """Generate HPC submission scripts for existing simulations.
-    
+
     Scans simulation directory and creates PBS or SLURM job scripts.
-    
+
     Example:
         FrictionSim2D hpc generate ./afm_output --scheduler pbs
+        FrictionSim2D hpc generate ./afm_output --profile cx3
     """
     from .hpc import HPCScriptGenerator, HPCConfig
 
@@ -437,6 +448,18 @@ def hpc_generate(simulation_dir: str, settings_file: Optional[Path],
     settings = load_settings(settings_file=settings_file)
     _ensure_hpc_settings(settings.hpc)
     settings.hpc.scheduler_type = scheduler  # CLI --scheduler overrides the settings default
+
+    # An explicit --profile wins over settings' active_profile; resolve before
+    # building the HPCConfig so every downstream resource (queue, select line,
+    # per-framework binary) already reflects the profile.
+    profile_name = profile or getattr(settings.hpc, 'active_profile', None)
+    if profile_name:
+        try:
+            settings.hpc = resolve_profile(settings.hpc, profile_name)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(f"   profile: {profile_name}")
+
     hpc_config = HPCConfig.from_settings(settings.hpc)
 
     simulation_paths = []

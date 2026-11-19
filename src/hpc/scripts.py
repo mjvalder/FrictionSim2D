@@ -1,23 +1,59 @@
 """HPC script generation for PBS and SLURM schedulers."""
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 import shutil
 import json
 
 from jinja2 import Environment, FileSystemLoader
 
-from .manifest import JobManifest
-from ..core.config import GlobalSettings
+from .manifest import JobManifest, _mlip_job_fields
+from ..core.config import GlobalSettings, resolve_profile
+from ..core.mlip import get_mlip, is_mlip
 
 TEMPLATES_DIR = Path(__file__).parent.parent / 'templates' / 'hpc'
+
+#: Job-group key: ``(needs_gpu, framework)``. Jobs sharing a key can share one
+#: array script; jobs that differ cannot (different resources, or — for
+#: mace-vs-deepmd — outright incompatible LAMMPS builds).
+GroupKey = Tuple[bool, Optional[str]]
+
+#: The key a plain classical CPU job carries. A campaign whose only group is
+#: this one renders exactly the pre-MLIP filenames and bytes.
+CPU_GROUP: GroupKey = (False, None)
 
 
 def _default_hpc_settings():
     """Return default validated HPC settings from GlobalSettings."""
     return GlobalSettings().hpc
+
+
+def _group_key(entry) -> GroupKey:
+    """Group key for a :class:`~src.hpc.manifest.JobEntry`.
+
+    Tolerates entries predating the MLIP fields (``getattr`` defaults), so a
+    manifest loaded from an older campaign groups as pure CPU.
+    """
+    return (
+        bool(getattr(entry, 'needs_gpu', False)),
+        getattr(entry, 'framework', None) or None,
+    )
+
+
+def _group_suffix(key: GroupKey) -> str:
+    """Filename token for a group: ``cpu``, ``gpu_deepmd``, ``gpu_mace``, ..."""
+    needs_gpu, framework = key
+    parts = ['gpu' if needs_gpu else 'cpu']
+    if framework:
+        parts.append(framework)
+    return '_'.join(parts)
+
+
+def _ordered_groups(grouped: Dict[GroupKey, List[str]]) -> List[GroupKey]:
+    """Deterministic group order: CPU first, then frameworks alphabetically."""
+    return sorted(grouped, key=lambda k: (k[0], k[1] or ''))
 
 
 @dataclass
@@ -45,10 +81,15 @@ class HPCConfig:
         use_tmpdir: Whether to use scratch directory.
         lammps_scripts: Script names to execute.
         max_array_size: Maximum array job size.
+        framework: MLIP framework this config renders for ('deepmd' | 'mace'),
+            or None for a classical CPU job. Set per job group by
+            :meth:`HPCScriptGenerator._config_for_group`; it selects the
+            LauncherSpec that supplies the MPI rank count and extra lmp flags.
     """
     hpc_settings: Any = field(default_factory=_default_hpc_settings)
     job_name: str = "friction2d"
     lmp_flags: str = "-l none"
+    framework: Optional[str] = None
 
     @classmethod
     def from_settings(cls, hpc_settings, job_name: str = "friction2d") -> 'HPCConfig':
@@ -135,12 +176,120 @@ class HPCConfig:
     def max_array_size(self) -> int:
         return self.hpc_settings.max_array_size
 
+    # ------------------------------------------------------------------
+    # MLIP / GPU resolution
+    # ------------------------------------------------------------------
+
+    @property
+    def gpu(self):
+        """:class:`~src.core.config.GPUSettings` for this group, or None."""
+        return getattr(self.hpc_settings, 'gpu', None)
+
+    @property
+    def lmp_binary(self) -> str:
+        """LAMMPS binary for this group.
+
+        Defaults to the bare ``lmp`` on PATH — which is exactly what the
+        templates hard-coded before MLIP support, so a profile-free config
+        renders an unchanged launch line.
+        """
+        return getattr(self.hpc_settings, 'lmp_binary', None) or 'lmp'
+
+    @property
+    def launcher(self):
+        """:class:`~src.core.mlip.LauncherSpec` for this group's framework."""
+        if self.framework and is_mlip(self.framework):
+            return get_mlip(self.framework).launcher
+        return None
+
+    @property
+    def mpi_ranks(self) -> int:
+        """MPI ranks to request (the PBS ``mpiprocs`` token).
+
+        The CPU path asks for one rank per core. A GPU/MLIP job does not: the
+        LauncherSpec pins the rank count (both current frameworks are
+        single-rank — MACE because symmetrix is OpenMP-threaded rather than
+        rank-parallel, DeePMD because one process owns the GPU and extra ranks
+        are monotonically slower at ~13 GB VRAM each), and requesting
+        ``mpiprocs=ncpus`` there would contradict ``mpirun -np 1``.
+        """
+        launcher = self.launcher
+        if launcher is not None:
+            return launcher.mpi_ranks
+        if self.gpu is not None:
+            return 1
+        return self.cpus_per_node
+
+    @property
+    def resolved_lmp_flags(self) -> str:
+        """Base flags plus this framework's launcher flags."""
+        launcher = self.launcher
+        extra = launcher.lmp_flags if launcher else ''
+        return ' '.join(part for part in (self.lmp_flags, extra) if part)
+
+    @property
+    def launch_command(self) -> str:
+        """Fully-resolved LAMMPS invocation, minus the ``-in <script>`` part.
+
+        Reproduces the templates' former ``{{ mpi_command }} lmp {{ lmp_flags }}``
+        expression character-for-character for a profile-free config — including
+        the trailing space when the flag string is empty, because the templates
+        append ``" -in ..."`` straight after it.
+        """
+        return f"{self.mpi_command} {self.lmp_binary} {self.resolved_lmp_flags}"
+
+    @property
+    def env_lines(self) -> List[str]:
+        """Shell lines to emit after the module loads, in precedence order.
+
+        Settings-level lines first, then whatever the framework's LauncherSpec
+        requires (e.g. DeePMD's ``LAMMPS_PLUGIN_PATH`` export). Duplicates are
+        dropped so a profile that already exports a line does not export twice.
+        """
+        lines = list(getattr(self.hpc_settings, 'env_lines', None) or [])
+        launcher = self.launcher
+        if launcher is not None:
+            for line in launcher.env_lines:
+                if line not in lines:
+                    lines.append(line)
+        return lines
+
+    def _select_line(self) -> str:
+        """PBS ``select`` statement for this group.
+
+        With no GPU configured this is byte-identical to the pre-MLIP string,
+        because ``mpi_ranks`` collapses to ``cpus_per_node``.
+        """
+        line = (f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb"
+                f":mpiprocs={self.mpi_ranks}")
+        gpu = self.gpu
+        if gpu is not None:
+            line += f":ngpus={gpu.ngpus}"
+            if gpu.gpu_type:
+                line += f":gpu_type={gpu.gpu_type}"
+        return line
+
+    @property
+    def gres(self) -> Optional[str]:
+        """SLURM ``--gres`` value, or None when no GPU is requested.
+
+        SLURM has no ``select`` line, so the GPU request has to travel through
+        its own directive. None keeps the CPU rendering unchanged.
+        """
+        gpu = self.gpu
+        if gpu is None:
+            return None
+        if gpu.gpu_type:
+            return f"gpu:{gpu.gpu_type}:{gpu.ngpus}"
+        return f"gpu:{gpu.ngpus}"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for template rendering.
-        
+
         Returns:
             Dictionary with all config values and computed fields.
         """
+        select = self._select_line()
         return {
             'nodes': self.nodes,
             'cpus_per_node': self.cpus_per_node,
@@ -159,11 +308,14 @@ class HPCConfig:
             'lmp_flags': self.lmp_flags,
             'use_tmpdir': self.use_tmpdir,
             'lammps_scripts': self.lammps_scripts,
-            'select_multi': f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:mpiprocs={self.cpus_per_node}",
-            'select_single': f"1:ncpus={self.cpus_per_node}:mem={self.memory_gb}gb:mpiprocs={self.cpus_per_node}",
+            'select_multi': select,
+            'select_single': select,
             'ntasks_per_node': self.cpus_per_node,
             'cpus_per_task': 1,
             'mem': f"{self.memory_gb}G",
+            'launch_command': self.launch_command,
+            'env_lines': self.env_lines,
+            'gres': self.gres,
         }
 
 
@@ -193,10 +345,59 @@ class HPCScriptGenerator:
         Raises:
             ValueError: If required fields are missing.
         """
-        if not self.config.modules:
-            raise ValueError("HPC modules list is empty.")
+        # A conda-based MLIP profile legitimately loads NO modules -- the whole
+        # environment (lmp, the deepmd plugin, libtorch, CUDA) comes from one
+        # conda prefix exported via env_lines. So an empty module list is only
+        # an error when env_lines is *also* empty, which means nothing at all
+        # was configured.
+        if not self.config.modules and not self.config.env_lines:
+            raise ValueError(
+                "HPC settings configure neither 'modules' nor 'env_lines'; the "
+                "generated job would have no way to find LAMMPS. Set one of "
+                "them under 'hpc:' (or in the active profile) in settings.yaml."
+            )
         if self.config.use_tmpdir and not self.config.scratch_dir:
             raise ValueError("HPC scratch_dir required when use_tmpdir is true.")
+
+    def _config_for_group(self, key: GroupKey, split: bool) -> HPCConfig:
+        """Return the :class:`HPCConfig` a given job group must render with.
+
+        Two adjustments on top of the generator's base config:
+
+        * if the group names an MLIP framework and an ``active_profile`` is set,
+          that profile's ``frameworks:`` overlay is merged in — this is what
+          supplies the framework's own ``lmp`` binary, modules and env lines;
+        * if the campaign is *actually being split* (more than one group) and
+          this group does not need a GPU, the GPU request is dropped so the CPU
+          half of a mixed campaign does not idle an accelerator.
+
+        The GPU strip is deliberately conditional on ``split``: a single-group
+        campaign renders whatever the user's profile asked for, so
+        ``--profile cx3`` on a wholly classical campaign still honours the
+        profile rather than silently discarding half of it.
+
+        Args:
+            key: ``(needs_gpu, framework)``.
+            split: whether the campaign produced more than one group.
+
+        Returns:
+            The base config itself when nothing needs changing (which is what
+            keeps single-group CPU output byte-identical), else a copy.
+        """
+        needs_gpu, framework = key
+        settings = self.config.hpc_settings
+
+        active = getattr(settings, 'active_profile', None)
+        profiles = getattr(settings, 'profiles', None) or {}
+        if framework and active and active in profiles:
+            settings = resolve_profile(settings, active, framework=framework)
+
+        if split and not needs_gpu and getattr(settings, 'gpu', None) is not None:
+            settings = settings.model_copy(update={'gpu': None})
+
+        if settings is self.config.hpc_settings and not framework:
+            return self.config
+        return replace(self.config, hpc_settings=settings, framework=framework)
 
     def _resolve_log_dir(self, base_dir: str) -> str:
         """Resolve log directory for job scripts.
@@ -231,16 +432,58 @@ class HPCScriptGenerator:
         if log_dir and not log_dir.startswith(('$', '/')):
             (sim_root / log_dir).mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _group_paths(simulation_paths: List[str],
+                     job_entries: Optional[List[Any]]) -> Dict[GroupKey, List[str]]:
+        """Bucket ``simulation_paths`` by resource group, preserving order.
+
+        ``job_entries`` is index-parallel to ``simulation_paths``. When it is
+        absent -- the plain string API used by ``create_hpc_package`` and by
+        every slide-only (sheet-on-sheet) campaign, which never reaches the
+        manifest-carrying combined/two-phase generators -- the group is
+        recovered from the run-directory flavour token instead.
+
+        That fallback matters: without it an MLIP sheet-on-sheet job silently
+        rendered as a plain CPU job, i.e. bare ``mpirun lmp`` with no GPU
+        request, the wrong binary and no ``LAMMPS_PLUGIN_PATH`` -- which fails
+        at runtime with "Unrecognized pair style 'deepmd'". Classical paths
+        carry no token, so ``parse_mlip_flavor`` returns None for them and they
+        stay in the CPU group exactly as before.
+        """
+        if not job_entries or len(job_entries) != len(simulation_paths):
+            inferred: Dict[GroupKey, List[str]] = {}
+            for path in simulation_paths:
+                fields = _mlip_job_fields(path)
+                key: GroupKey = (bool(fields.get('needs_gpu', False)),
+                                 fields.get('framework') or None)
+                inferred.setdefault(key, []).append(path)
+            return inferred
+
+        grouped: Dict[GroupKey, List[str]] = {}
+        for path, entry in zip(simulation_paths, job_entries):
+            grouped.setdefault(_group_key(entry), []).append(path)
+        return grouped
+
     def _generate_array_scripts(self, simulation_paths: List[str], output_dir: Path,
-                                base_dir: str, scheduler: Literal['pbs', 'slurm']) -> List[Path]:
+                                base_dir: str, scheduler: Literal['pbs', 'slurm'],
+                                job_entries: Optional[List[Any]] = None) -> List[Path]:
         """Generate array job scripts with automatic chunking.
-        
+
+        Jobs are first split by ``(needs_gpu, framework)`` — a GPU/MLIP job
+        cannot share an array script with a CPU one, and the two MLIP builds
+        cannot share one with each other — and only then chunked by
+        ``max_array_size`` within each group. A campaign that yields a single
+        group keeps the original ``run.pbs``/``manifest_1.txt`` names.
+
         Args:
             simulation_paths: List of relative simulation paths.
             output_dir: Directory to write scripts.
             base_dir: Base directory variable for HPC.
             scheduler: Scheduler type.
-            
+            job_entries: Optional index-parallel JobEntry list carrying the
+                resource fields to group on. Without it every path is treated
+                as a plain CPU job.
+
         Returns:
             List of generated script paths.
         """
@@ -249,70 +492,88 @@ class HPCScriptGenerator:
         output_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_local_log_dir(output_dir)
 
-        n_sims = len(simulation_paths)
-        n_scripts = math.ceil(n_sims / self.config.max_array_size)
+        grouped = self._group_paths(simulation_paths, job_entries)
+        group_keys = _ordered_groups(grouped)
+        split = len(group_keys) > 1
+
         template_name = f"{scheduler}_array.j2"
         script_ext = ".pbs" if scheduler == 'pbs' else ".sh"
-        scripts = []
         template = self.jinja_env.get_template(template_name)
+        scripts = []
 
-        for i in range(n_scripts):
-            start_idx = i * self.config.max_array_size
-            end_idx = min((i + 1) * self.config.max_array_size, n_sims)
-            chunk = simulation_paths[start_idx:end_idx]
+        for key in group_keys:
+            paths = grouped[key]
+            config = self._config_for_group(key, split)
+            group_token = f"_{_group_suffix(key)}" if split else ""
+            n_sims = len(paths)
+            n_scripts = math.ceil(n_sims / config.max_array_size)
 
-            manifest_name = f"manifest_{i+1}.txt"
-            (output_dir / manifest_name).write_text('\n'.join(chunk))
+            for i in range(n_scripts):
+                start_idx = i * config.max_array_size
+                end_idx = min((i + 1) * config.max_array_size, n_sims)
+                chunk = paths[start_idx:end_idx]
 
-            context = self.config.to_dict()
-            context.update({
-                'array_size': len(chunk),
-                'manifest_file': f"{base_dir}/{output_dir.name}/{manifest_name}",
-                'manifest_filename': manifest_name,
-                'base_dir': base_dir,
-                'log_dir': self._resolve_log_dir(base_dir),
-            })
-            if n_scripts > 1:
-                context['job_name'] = f"{self.config.job_name}_{i+1}"
+                manifest_name = f"manifest{group_token}_{i+1}.txt"
+                (output_dir / manifest_name).write_text('\n'.join(chunk))
 
-            script_name = f"run_{i+1}{script_ext}" if n_scripts > 1 else f"run{script_ext}"
-            script_path = output_dir / script_name
-            script_path.write_text(template.render(context))
-            scripts.append(script_path)
+                context = config.to_dict()
+                context.update({
+                    'array_size': len(chunk),
+                    'manifest_file': f"{base_dir}/{output_dir.name}/{manifest_name}",
+                    'manifest_filename': manifest_name,
+                    'base_dir': base_dir,
+                    'log_dir': self._resolve_log_dir(base_dir),
+                })
+                job_name = config.job_name + group_token
+                if n_scripts > 1:
+                    job_name = f"{job_name}_{i+1}"
+                if job_name != config.job_name:
+                    context['job_name'] = job_name
+
+                chunk_token = f"_{i+1}" if n_scripts > 1 else ""
+                script_path = output_dir / f"run{group_token}{chunk_token}{script_ext}"
+                script_path.write_text(template.render(context))
+                scripts.append(script_path)
 
         self._write_master_script(output_dir, scripts, scheduler)
         return scripts
 
     def generate_pbs_scripts(self, simulation_paths: List[str], output_dir: Path,
-                            base_dir: str = "$PBS_O_WORKDIR") -> List[Path]:
+                            base_dir: str = "$PBS_O_WORKDIR",
+                            job_entries: Optional[List[Any]] = None) -> List[Path]:
         """Generate PBS array job scripts.
-        
+
         Args:
             simulation_paths: List of relative simulation paths.
             output_dir: Directory to write scripts.
             base_dir: Base directory variable.
-            
+            job_entries: Optional index-parallel JobEntry list for GPU/framework
+                splitting.
+
         Returns:
             List of generated script paths.
         """
         return self._generate_array_scripts(
-            simulation_paths, output_dir, base_dir, 'pbs'
+            simulation_paths, output_dir, base_dir, 'pbs', job_entries=job_entries
         )
 
     def generate_slurm_scripts(self, simulation_paths: List[str], output_dir: Path,
-                                base_dir: str = "$SLURM_SUBMIT_DIR") -> List[Path]:
+                                base_dir: str = "$SLURM_SUBMIT_DIR",
+                                job_entries: Optional[List[Any]] = None) -> List[Path]:
         """Generate SLURM array job scripts.
-        
+
         Args:
             simulation_paths: List of relative simulation paths.
             output_dir: Directory to write scripts.
             base_dir: Base directory variable.
-            
+            job_entries: Optional index-parallel JobEntry list for GPU/framework
+                splitting.
+
         Returns:
             List of generated script paths.
         """
         return self._generate_array_scripts(
-            simulation_paths, output_dir, base_dir, 'slurm'
+            simulation_paths, output_dir, base_dir, 'slurm', job_entries=job_entries
         )
 
     def _write_master_script(self, output_dir: Path, scripts: List[Path],
@@ -359,6 +620,13 @@ class HPCScriptGenerator:
         same job, eliminating the need for PBS job dependencies. Use when each
         simulation directory has exactly one system script and one slide script.
 
+        Jobs are grouped by ``(needs_gpu, framework)`` and one script is emitted
+        per group (``run_cpu.pbs``, ``run_gpu_deepmd.pbs``, ...), because a GPU
+        job cannot share a resource request with a CPU one and the two MLIP
+        LAMMPS builds are mutually incompatible binaries. A campaign with a
+        single group keeps the original ``run.pbs``/``manifest_combined.txt``
+        names and bytes.
+
         Args:
             manifest: JobManifest containing all jobs.
             output_dir: Directory to write scripts.
@@ -366,7 +634,7 @@ class HPCScriptGenerator:
             base_dir: Base directory variable (auto-detected if None).
 
         Returns:
-            List containing the single generated script path.
+            List of generated script paths, one per job group.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -378,38 +646,53 @@ class HPCScriptGenerator:
         # One entry per unique simulation directory, preserving order.
         seen: dict = {}
         for j in system_jobs:
-            seen.setdefault(j.simulation_path, None)
-        sim_dirs = list(seen.keys())
+            seen.setdefault(j.simulation_path, _group_key(j))
 
-        manifest_name = 'manifest_combined.txt'
-        (output_dir / manifest_name).write_text('\n'.join(sim_dirs) + '\n', encoding='utf-8')
+        grouped: Dict[GroupKey, List[str]] = {}
+        for sim_path, key in seen.items():
+            grouped.setdefault(key, []).append(sim_path)
+        group_keys = _ordered_groups(grouped)
+        split = len(group_keys) > 1
 
         template_name = f"{scheduler}_combined.j2"
         template = self.jinja_env.get_template(template_name)
         script_ext = '.pbs' if scheduler == 'pbs' else '.sh'
+        scripts: List[Path] = []
 
-        context = self.config.to_dict()
-        context.update({
-            'array_size': len(sim_dirs),
-            'manifest_file': f"{base_dir}/hpc/{manifest_name}",
-            'manifest_filename': manifest_name,
-            'base_dir': base_dir,
-            'log_dir': self._resolve_log_dir(base_dir),
-        })
+        for key in group_keys:
+            sim_dirs = grouped[key]
+            config = self._config_for_group(key, split)
+            group_token = f"_{_group_suffix(key)}" if split else ""
 
-        script_path = output_dir / f"run{script_ext}"
-        script_path.write_text(template.render(context))
+            manifest_name = f"manifest_combined{group_token}.txt"
+            (output_dir / manifest_name).write_text(
+                '\n'.join(sim_dirs) + '\n', encoding='utf-8')
 
-        self._write_combined_submission(output_dir, script_path, scheduler)
-        return [script_path]
+            context = config.to_dict()
+            context.update({
+                'array_size': len(sim_dirs),
+                'manifest_file': f"{base_dir}/hpc/{manifest_name}",
+                'manifest_filename': manifest_name,
+                'base_dir': base_dir,
+                'log_dir': self._resolve_log_dir(base_dir),
+            })
+            if group_token:
+                context['job_name'] = f"{config.job_name}{group_token}"
 
-    def _write_combined_submission(self, output_dir: Path, script: Path,
+            script_path = output_dir / f"run{group_token}{script_ext}"
+            script_path.write_text(template.render(context))
+            scripts.append(script_path)
+
+        self._write_combined_submission(output_dir, scripts, scheduler)
+        return scripts
+
+    def _write_combined_submission(self, output_dir: Path, scripts: List[Path],
                                     scheduler: Literal['pbs', 'slurm']) -> Path:
-        """Write submission helper for a combined system+slide script.
+        """Write submission helper for the combined system+slide script(s).
 
         Args:
             output_dir: Directory to write script.
-            script: The combined script path.
+            scripts: The combined script paths, one per job group.
             scheduler: Scheduler type.
 
         Returns:
@@ -429,7 +712,7 @@ class HPCScriptGenerator:
             '',
             f'cd {sim_root}',
             '',
-            f'{submit_cmd} hpc/{script.name}',
+            *(f'{submit_cmd} hpc/{script.name}' for script in scripts),
             '',
             f'# Monitor with: {"qstat" if scheduler == "pbs" else "squeue"} -u $USER',
             '',

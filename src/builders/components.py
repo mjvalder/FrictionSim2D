@@ -30,6 +30,7 @@ from jinja2 import Environment
 from ..core.config import (
     GlobalSettings, SheetConfig, SubstrateConfig, TipConfig, ComponentConfig, FlakeConfig
 )
+from ..core.mlip import is_mlip
 from ..core.potential_manager import PotentialManager
 from ..core.utils import (
     cifread, get_material_path, get_model_dimensions,
@@ -1752,6 +1753,55 @@ def _create_base_slab(
             target_x=target_x, target_y=target_y, target_z=target_z
         )
 
+def build_stacking_potential_file(
+    config: SheetConfig,
+    settings: GlobalSettings,
+    layers_for_setup: int,
+    pot_file: Path,
+    edge_mode: str = 'none',
+) -> PotentialManager:
+    """Write the potential file that the stacking LAMMPS run ``include``s.
+
+    Classical sheets get their real potential (self-interactions plus explicit
+    interlayer LJ where the style needs it) — byte-identical to before.
+
+    MLIP sheets get a **``pair_style zero`` surrogate** instead (spec §3.3):
+    stacking merely places layers at a known ``lat_c`` and renumbers types, and
+    requiring an MLIP-enabled python-LAMMPS just to *generate* inputs would make
+    the generator undeployable on ordinary machines and in CI. ``pair_style
+    zero`` is stock LAMMPS, is defined for every element (unlike an SW
+    surrogate, which presumes a parametrization exists for the material — false
+    in general for a screening tool) and exerts exactly zero force, so it cannot
+    influence the stacked geometry. The masses still have to be there: LAMMPS
+    refuses to run without a mass for every type.
+
+    Args:
+        config: the sheet configuration.
+        settings: global settings (LJ cutoff, thermostat, ...).
+        layers_for_setup: how many layers this stacking pass builds.
+        pot_file: destination path.
+        edge_mode: finite-sheet edge mode; ``!= 'none'`` splits edge types out.
+
+    Returns:
+        The :class:`PotentialManager` used, whose type registry the caller
+        needs for ``create_box`` and the renumbering loop.
+    """
+    pm = PotentialManager(settings)
+    regions = [None, 'edge'] if edge_mode != 'none' else None
+    pm.register_component("sheet", config, n_layers=layers_for_setup,
+                          regions=regions)
+
+    if is_mlip(config.pot_type):
+        pm.write_surrogate_file(pot_file)
+        return pm
+
+    pm.add_self_interaction("sheet")
+    if pm.is_sheet_lj(config.pot_type):
+        pm.add_interlayer_interaction("sheet")
+    pm.write_file(pot_file)
+    return pm
+
+
 def stack_multilayer_sheet(
     base_layer_path: Path,
     config: SheetConfig,
@@ -1793,6 +1843,18 @@ def stack_multilayer_sheet(
 
     if calculate_lat_c:
         assert settings is not None
+        if is_mlip(config.pot_type):
+            # Belt and braces: SheetConfig makes lat_c mandatory for MLIP
+            # sheets precisely so this branch is unreachable. Reaching it would
+            # mean minimizing under the pair_style zero surrogate (which exerts
+            # no force) and returning a meaningless interlayer distance.
+            raise ValueError(
+                f"An MLIP sheet (pot_type = '{config.pot_type}') cannot have its "
+                f"lat_c found by minimization: stacking runs under a "
+                f"'pair_style zero' surrogate because no MLIP-enabled "
+                f"python-LAMMPS is assumed on the generation machine. Set an "
+                f"explicit [2D] lat_c (see scripts/mlip_bilayer_benchmark.py)."
+            )
         logger.info("Running minimization to find optimal interlayer distance")
         initial_guess = settings.geometry.lat_c_default
     else:
@@ -1802,15 +1864,10 @@ def stack_multilayer_sheet(
     layers_for_setup = 2 if calculate_lat_c else n_layers
     pot_file = Path(tempfile.gettempdir()) / f"sheet_{layers_for_setup}_{uuid.uuid4().hex[:8]}.in.settings"
 
-    pm = PotentialManager(settings)
-    regions = [None, 'edge'] if edge_mode != 'none' else None
-    pm.register_component("sheet", config, n_layers=layers_for_setup, regions=regions)
-    pm.add_self_interaction("sheet")
-
-    if pm.is_sheet_lj(config.pot_type):
-        pm.add_interlayer_interaction("sheet")
-
-    pm.write_file(pot_file)
+    pm = build_stacking_potential_file(
+        config, settings, layers_for_setup=layers_for_setup,
+        pot_file=pot_file, edge_mode=edge_mode,
+    )
 
     total_types = len(pm.types)
     max_z = initial_guess * (layers_for_setup - 1) + 20.0
@@ -2100,11 +2157,16 @@ def apply_langevin_regions(
     else:
         raise ValueError(f"Unknown component name: {component_name}")
 
-    pm = PotentialManager(settings, use_langevin=True)
-    pm.register_component(component_name, config)
-    base_elements = pm.components[component_name]['elements']
-    expanded_elements = [elem for elem in base_elements for _ in range(3)]
-    potential_commands = pm.get_single_component_commands(config, expanded_elements)
+    # No potential is built here on purpose. `apply_langevin_regions.lmp` only
+    # relabels atom types by region and writes the data file back -- it never
+    # integrates, minimizes, or references a pair style, and it assigns
+    # temporary unit masses so `write_data` works without one. The
+    # `get_single_component_commands` call that used to sit here fed a
+    # `potential_commands` context key the template does not reference, so its
+    # result was discarded; for an MLIP it also raised, blocking the whole
+    # AFM-like build for a value nobody read. `make_amorphous.lmp` DOES use
+    # those commands, which is why the call survives there (and why an MLIP is
+    # still refused on that path -- v6 §5).
 
     jinja_env = Environment(
         loader=PackageLoader('src.templates'),
@@ -2117,7 +2179,6 @@ def apply_langevin_regions(
         'input_path': component_path,
         'num_types': num_types,
         'boundaries': boundaries,
-        'potential_commands': potential_commands
     }
 
     template = jinja_env.get_template('common/apply_langevin_regions.lmp')

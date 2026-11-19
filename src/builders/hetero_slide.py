@@ -10,6 +10,7 @@ from jinja2 import Environment
 
 from ..core.config import SheetOnSheetSimulationConfig
 from ..core.simulation_base import SimulationBase
+from ..core.mlip import get_mlip, is_mlip
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
 from ..interfaces.jinja import PackageLoader
 from .hetero import (
@@ -290,6 +291,15 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             # virtual type) to hp.settings_path -- no second write needed.
             num_atom_types = len(hp.pm.types)  # == stack.total_types + 1
 
+        # The cell's MLIP framework, or None when classical. Taken from the
+        # first sheet because a cell is uniform by construction (v6 §4: every
+        # component must use the SAME MLIP, enforced by validate_mlip_cell and
+        # again at emission), and because `hp` above exists only on the
+        # virtual_atom branch -- so its PotentialManager is not available here.
+        _sheet_pot = (self.config.sheets[0].pot_type or ''
+                      if self.config.sheets else '')
+        _mlip_framework = _sheet_pot.lower() if is_mlip(_sheet_pot) else None
+
         # Same key set as SheetOnSheetSimulation.write_inputs' base_context (only
         # the keys the template actually references), with hetero-specific values
         # and RUN-DIR-RELATIVE paths.
@@ -310,6 +320,16 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "n_bond_types": 0,
             "atom_style": atom_style,
             "pot_type": "sw",
+            # LOAD-BEARING, both keys. The templates render them behind
+            # `| default(...)`, which does NOT raise when a key is absent -- it
+            # silently renders nothing (directives) or the classical branch
+            # (mlip_sheet), the build still reports success, and the omission
+            # surfaces only when LAMMPS aborts or balloons its memory. This
+            # builder subclasses SimulationBase directly, so it inherits
+            # neither the AFM nor the sheet-on-sheet wiring.
+            "mlip_sheet": _mlip_framework is not None,
+            "mlip_deck_directives": (list(get_mlip(_mlip_framework).deck_directives)
+                                     if _mlip_framework else []),
             "has_internal_lj": True,  # hybrid sw -> reaction-force friction proxy
             # Default an unset load to 0.0 (zero-load slide). A raw None renders
             # ``variable pressure equal None`` -> LAMMPS "Invalid thermo keyword

@@ -346,6 +346,8 @@ class PlotSummaryMixin(PlotterMixinBase):
         slope_decimals = plot_config.get('slope_decimals', 5)
         slope_fit_constraint = plot_config.get('slope_fit_constraint', 'none')
 
+        clip_fit_to_data = plot_config.get('clip_fit_to_data', False)
+
         marker_by_potential = plot_config.get('marker_by_potential_type', False)
         potential_markers = plot_config.get('potential_markers', {
             'reaxff': 's',
@@ -359,6 +361,8 @@ class PlotSummaryMixin(PlotterMixinBase):
                 return 'reaxff'
             if 'rebomos' in lowered:
                 return 'rebomos'
+            if 'deepmd' in lowered or 'dpa' in lowered:
+                return 'deepmd'
             return 'sw'
 
         filters = self._apply_default_filters(df, plot_config, x_col)
@@ -538,6 +542,7 @@ class PlotSummaryMixin(PlotterMixinBase):
                 fit_constraint=fit_constraint,
                 custom_color=series_color,
                 extend_fit_to_origin=extend_fit_to_origin,
+                clip_fit_to_data=clip_fit_to_data,
             )
 
             logger.debug("Plotted %s (%d points)", group_name, len(group))

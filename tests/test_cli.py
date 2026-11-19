@@ -104,6 +104,75 @@ def test_hpc_generate_help(runner):
     assert result.exit_code == 0
     assert '--scheduler' in result.output
     assert '--output-dir' in result.output
+    assert '--profile' in result.output
+
+
+PROFILE_SETTINGS_YAML = """\
+hpc:
+  scheduler_type: pbs
+  queue: v1_small24
+  modules: [tools/prod, lammps]
+  use_tmpdir: false
+  profiles:
+    cx3:
+      queue: gpu72
+      num_cpus: 8
+      memory_gb: 64
+"""
+
+
+def _sim_tree(tmp_path):
+    """Minimal built-simulation tree that ``hpc generate`` can discover."""
+    lammps_dir = tmp_path / 'sim' / 'sheetonsheet' / 'mos2' / 'lammps'
+    lammps_dir.mkdir(parents=True)
+    (lammps_dir / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    settings = tmp_path / 'settings.yaml'
+    settings.write_text(PROFILE_SETTINGS_YAML, encoding='utf-8')
+    return tmp_path / 'sim', settings
+
+
+def test_hpc_generate_profile_changes_rendered_queue(runner, tmp_path):
+    sim_dir, settings = _sim_tree(tmp_path)
+
+    result = runner.invoke(cli, [
+        'hpc', 'generate', str(sim_dir),
+        '--settings-file', str(settings),
+        '--profile', 'cx3',
+    ])
+
+    assert result.exit_code == 0, result.output
+    script = (sim_dir / 'hpc' / 'run.pbs').read_text(encoding='utf-8')
+    assert '#PBS -q gpu72' in script
+    assert 'v1_small24' not in script
+    # Profile resources reach the select line too.
+    assert '#PBS -l select=1:ncpus=8:mem=64gb' in script
+
+
+def test_hpc_generate_without_profile_uses_base_queue(runner, tmp_path):
+    sim_dir, settings = _sim_tree(tmp_path)
+
+    result = runner.invoke(cli, [
+        'hpc', 'generate', str(sim_dir), '--settings-file', str(settings),
+    ])
+
+    assert result.exit_code == 0, result.output
+    script = (sim_dir / 'hpc' / 'run.pbs').read_text(encoding='utf-8')
+    assert '#PBS -q v1_small24' in script
+    assert 'gpu72' not in script
+
+
+def test_hpc_generate_unknown_profile_exits_non_zero(runner, tmp_path):
+    sim_dir, settings = _sim_tree(tmp_path)
+
+    result = runner.invoke(cli, [
+        'hpc', 'generate', str(sim_dir),
+        '--settings-file', str(settings),
+        '--profile', 'cx4',
+    ])
+
+    assert result.exit_code != 0
+    assert 'cx4' in result.output
+    assert not (sim_dir / 'hpc' / 'run.pbs').exists()
 
 
 # ---------------------------------------------------------------------------

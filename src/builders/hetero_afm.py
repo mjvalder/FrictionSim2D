@@ -20,6 +20,7 @@ from src.builders import components
 from src.builders.afm import AFMSimulation
 from src.builders.hetero import build_hetero_structure, register_sheet_block
 from src.builders.indent import IndentSimulation
+from src.core.mlip import validate_mlip_cell
 from src.core.potential_manager import PotentialManager
 from src.core.utils import get_model_dimensions
 
@@ -432,10 +433,22 @@ class HeteroAFMSimulation(AFMSimulation):
         (both AFM scripts include it), and sets the ``sheet_types`` context var to
         the sheet_1 ∪ sheet_2 type-id union that ``slide.lmp`` groups on.
         """
+        # Same whole-cell capability rules as the homogeneous AFM path
+        # (spec §1.1/§3.4); every hetero sheet is a component of one cell.
+        validate_mlip_cell(
+            self.config.sheets[0],
+            components=([('tip', self.config.tip), ('sub', self.config.sub)]
+                        + [(f"sheet_{i + 1}", sheet) for i, sheet
+                           in enumerate(self.config.sheets[1:], start=1)]),
+            constraint_mode=self.config.settings.simulation.constraint_mode,
+        )
+
         pm = PotentialManager(
             self.config.settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
             potentials_prefix=str(self.relative_run_dir / "provenance" / "potentials"),
+            shared_potentials_dir=self.shared_potentials_dir,
+            shared_potentials_prefix=self.SHARED_POTENTIALS_PREFIX,
         )
         pm.set_lj_overrides(self.config.lj_override)
 
@@ -467,6 +480,9 @@ class HeteroAFMSimulation(AFMSimulation):
         for i in range(len(sheet_names)):
             for j in range(i + 1, len(sheet_names)):
                 pm.add_cross_interaction(sheet_names[i], sheet_names[j])
+
+        if self.config.sheets[0].dispersion == 'd3':
+            pm.enable_d3()
 
         settings_path = self.output_dir_layer[n_sheet_layers] / "lammps" / "system.in.settings"
         pm.write_file(settings_path)

@@ -1,0 +1,38 @@
+diff --git a/pair_symmetrix/pair_symmetrix_mace_kokkos.cpp b/pair_symmetrix/pair_symmetrix_mace_kokkos.cpp
+index ae555e1..854aee6 100644
+--- a/pair_symmetrix/pair_symmetrix_mace_kokkos.cpp
++++ b/pair_symmetrix/pair_symmetrix_mace_kokkos.cpp
+@@ -138,7 +138,32 @@ void PairSymmetrixMACEKokkos<DeviceType, Precision>::coeff(int narg, char **arg)
+   utils::logmesg(lmp, "success\n");
+ 
+   // extract atomic numbers from pair_coeff
+-  mace_types = Kokkos::View<int*>("mace_types", mace->atomic_numbers.size());
++  // ---------------------------------------------------------------------
++  // LOCAL BUGFIX (2026-08-31, not upstream as of origin/main 0d86e1e nor
++  // origin/develop). `mace_types` is indexed by LAMMPS ATOM TYPE everywhere
++  // it is read -- `mace_types(type(i)-1)` -- so it needs ONE ENTRY PER ATOM
++  // TYPE. Upstream sizes it by `mace->atomic_numbers.size()`, the number of
++  // ELEMENTS IN THE MODEL, then fills narg-3 entries in the loop below. Those
++  // agree only when ntypes == n_elements, which is true of upstream's own
++  // examples and false for any multi-layer cell: our h-MoS2 trilayer has 7
++  // LAMMPS types against a 2-element (Mo,S) model, so the loop wrote 5 ints
++  // past the end of a 2-int allocation on EVERY pair_coeff.
++  // Symptoms this caused, all now explained by one line:
++  //   * "malloc_consolidate(): invalid chunk size" / "free(): invalid next
++  //     size" / "corrupted size vs. prev_size" -- fatal when something
++  //     allocates soon after (hybrid/overlay + dispersion/d3 died in 4.6 s),
++  //     merely a teardown abort otherwise.
++  //   * On CUDA the host mirror holds only 2 valid entries, so deep_copy
++  //     ships 2 to the device and types 3..7 read OUT OF BOUNDS on the device
++  //     view -- the silent 27% energy error. On the host backend the mirror
++  //     aliases the view, so the overflowed values are read back intact and
++  //     the energy comes out right despite the corruption.
++  // The CPU pair style is unaffected: it uses std::vector::push_back.
++  // ---------------------------------------------------------------------
++  if (narg-3 != atom->ntypes)
++    error->all(FLERR, "pair_coeff for symmetrix/mace needs exactly one element "
++                      "per atom type ({} given, {} atom types)", narg-3, atom->ntypes);
++  mace_types = Kokkos::View<int*>("mace_types", narg-3);
+   auto h_mace_types = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mace_types);
+   auto h_mace_atomic_numbers = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mace->atomic_numbers);
+   for (int i=3; i<narg; ++i) {

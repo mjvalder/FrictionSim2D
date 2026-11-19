@@ -135,7 +135,7 @@ velocity        virtual set 0.0 0.0 0.0
 fix             spr layer_3 spring couple virtual 3.12075467163009 0.0 0.0 NULL 0
 fix             move_virtual virtual move linear $(v_speed*v_speed_x/100) $(v_speed*v_speed_y/100) 0.0
 
-fix             fc_ave all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file out/results/friction_p${pressure}_a${a}_s${speed}
+fix             fc_ave all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_top v_comy_top v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot v_comz_top v_comz_bot file out/results/friction_p${pressure}_a${a}_s${speed}
 
 run             500000"""
 
@@ -300,7 +300,10 @@ def _seed_builder_state(builder: SheetOnSheetSimulation, tmp_path: Path) -> Path
     builder.sheet_dims = {
         "xlo": 0.0, "xhi": 100.0, "ylo": 0.0, "yhi": 100.0, "zhi": 15.0,
     }
-    builder.pm = SimpleNamespace(types=[1, 2, 3], is_sheet_lj=lambda _pt: True)
+    builder.pm = SimpleNamespace(
+        types=[1, 2, 3],
+        is_sheet_lj=lambda _pt: True,
+    )
     builder.groups = {
         "layer_1": "1",
         "layer_2": "2",

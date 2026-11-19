@@ -21,10 +21,16 @@
 {% if mem %}
 #SBATCH --mem={{ mem }}
 {% endif %}
+{% if gres %}
+#SBATCH --gres={{ gres }}
+{% endif %}
 
 module purge
 {% for mod in modules %}
 module load {{ mod }}
+{% endfor %}
+{% for line in env_lines %}
+{{ line }}
 {% endfor %}
 
 {% if array_size > 1 %}
@@ -69,7 +75,7 @@ cd $SCRATCH
 cd $SLURM_SUBMIT_DIR
 {% endif %}
 
-{{ mpi_command }} lmp {{ lmp_flags }} -in ${SCRIPT_PATH}
+{{ launch_command }} -in ${SCRIPT_PATH}
 if [ $? -ne 0 ]; then
     echo "Error: LAMMPS failed on ${SCRIPT_PATH}"
     exit 1

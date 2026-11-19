@@ -789,7 +789,7 @@ class PlotCommonMixin(PlotterMixinBase):
         color_idx=0, line_style=None, marker_style=None,
         marker_face='filled', fit_only=False,
         fit_constraint='first_point', custom_color=None,
-        extend_fit_to_origin=False,
+        extend_fit_to_origin=False, clip_fit_to_data=False,
     ):
         """Plot a single data series with optional fit and error bands.
 
@@ -853,6 +853,8 @@ class PlotCommonMixin(PlotterMixinBase):
                     else (fit_x_range[0] if fit_x_range else x_data.min())
                 )
                 x_max = fit_x_range[1] if fit_x_range else x_data.max()
+                if clip_fit_to_data and len(x_data):
+                    x_max = min(x_max, float(np.max(x_data)))
                 x_fit = np.linspace(x_min, x_max, 100)
                 y_fit = fit_params['slope'] * x_fit + fit_params['intercept']
                 fit_linestyle = (

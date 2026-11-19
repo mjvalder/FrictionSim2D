@@ -19,6 +19,8 @@ Read in this order if you are new; each document also stands alone.
 | 11 | [hpc_jobs.md](hpc_jobs.md) | Scheduler script generation and two-phase submission |
 | 12 | [provenance.md](provenance.md) | Provenance manifest model and file tracking internals |
 | 13 | [python_api.md](python_api.md) | Driving the package from Python instead of the CLI |
+| 14 | [mlip.md](mlip.md) | Machine-learned potentials (DeePMD via `pair_style deepmd`, MACE via `symmetrix/mace`): the capability matrix (full-cell, single-component only), how to obtain each model, the two example configs, the D3 overlay, the builds and GPU profiles |
+| 15 | [milestone0.md](milestone0.md) | MLIP feasibility runbook — the hand-written LAMMPS decks, and the executed results the v4 matrix is built on |
 
 If your goal is simply to generate and run simulations, documents 1 through 6 are
 sufficient. Documents 12 and 13 matter for development and reproducibility work.

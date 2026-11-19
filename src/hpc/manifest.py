@@ -5,8 +5,71 @@ import re
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
+
+from ..core.mlip import MLIP_REGISTRY, get_mlip
+
+
+#: Matches the run-directory flavour token that
+#: :func:`src.core.run.mlip_flavor_token` appends to the innermost
+#: run-parameter segment, e.g. ``K300_deepmd-native-base``.
+#: The framework alternation is built from the registry so a newly registered
+#: framework is understood here without editing this pattern.
+#:
+#: The coverage field still accepts ``lj`` even though the generator now only
+#: ever emits ``native`` (full-cell is the only topology -- v4 spec §5). That is
+#: deliberate backward compatibility: this token is the ONLY surviving record of
+#: which framework a *discovered* job needs, so a tree built before v4 that
+#: stopped decoding would silently land its MLIP jobs in the CPU array with the
+#: wrong binary and no GPU request.
+_MLIP_FLAVOR_RE = re.compile(
+    r'_(?P<framework>' + '|'.join(sorted(MLIP_REGISTRY)) + r')'
+    r'-(?P<interlayer>lj|native)'
+    r'-(?P<dispersion>base|d3)$'
+)
+
+
+def parse_mlip_flavor(path_str: str) -> Optional[Tuple[str, str, str]]:
+    """Recover ``(framework, interlayer, dispersion)`` from a run path.
+
+    ``hpc generate`` builds its manifest by discovering a *built tree*
+    (:meth:`JobManifest.from_simulation_directory`), never by reading the
+    configs, so the run-directory flavour token is the only surviving record of
+    which framework a job needs. That is precisely why spec §1.3 confines the
+    token to the innermost run-parameter segment: upstream segments stay
+    parseable by the existing postprocessing filters, and this stays decodable.
+
+    Every segment is checked, not just the last, because AFM nests a per-layer
+    ``L<N>`` directory *below* the flavoured segment.
+
+    Returns:
+        The parsed triple, or ``None`` for a classical (non-MLIP) path.
+    """
+    for segment in reversed(Path(path_str).parts):
+        match = _MLIP_FLAVOR_RE.search(segment)
+        if match:
+            return (match.group('framework'),
+                    match.group('interlayer'),
+                    match.group('dispersion'))
+    return None
+
+
+def _mlip_job_fields(path_str: str) -> Dict[str, Any]:
+    """Resource fields for a discovered job, inferred from its path.
+
+    Classical jobs get today's defaults verbatim, so a non-MLIP campaign still
+    renders as a single CPU array exactly as before.
+    """
+    flavor = parse_mlip_flavor(path_str)
+    if flavor is None:
+        return {}
+    framework = flavor[0]
+    return {
+        'needs_gpu': True,
+        'framework': framework,
+        'launcher_flags': get_mlip(framework).launcher.lmp_flags,
+    }
 
 
 class JobStatus(Enum):
@@ -41,6 +104,15 @@ class JobEntry:
         simulation_node_uuid: AiiDA simulation node UUID.
         results_node_uuid: AiiDA results node UUID.
         error_message: Error description if failed.
+        needs_gpu: Whether this job must run on a GPU node.
+        framework: MLIP framework driving the job ('deepmd' | 'mace'), or None
+            for a classical potential. Together with ``needs_gpu`` this is the
+            key ``HPCScriptGenerator`` groups on: MACE and DeePMD are two
+            mutually incompatible LAMMPS builds, so they cannot share one array
+            job even when their resource request is identical.
+        launcher_flags: Extra ``lmp`` flags this job's framework needs (from
+            ``src.core.mlip.LauncherSpec.lmp_flags``), recorded at generation
+            time so the manifest stays self-describing.
     """
     job_id: str
     simulation_path: str
@@ -58,6 +130,11 @@ class JobEntry:
     simulation_node_uuid: Optional[str] = None
     results_node_uuid: Optional[str] = None
     error_message: Optional[str] = None
+    # --- MLIP resource fields. Defaults describe a plain CPU job, so a
+    # manifest.json written before MLIP support still loads through from_dict().
+    needs_gpu: bool = False
+    framework: Optional[str] = None
+    launcher_flags: str = ""
 
     def update_status(self, new_status: JobStatus, **kwargs):
         """Update job status with automatic timestamp management.
@@ -403,6 +480,8 @@ class JobManifest:
                 'path_str': path_str,
                 'material': material,
                 'layers': layers,
+                # GPU/framework facts survive only in the run-dir flavour token.
+                'mlip': _mlip_job_fields(path_str),
             })
 
         for sim_info in sim_directories:
@@ -416,6 +495,7 @@ class JobManifest:
                     lammps_script=script_name,
                     material=sim_info['material'],
                     layers=sim_info['layers'],
+                    **sim_info['mlip'],
                 ))
 
         for sim_info in sim_directories:
@@ -429,6 +509,7 @@ class JobManifest:
                         simulation_path=str(sim_info['rel_path']),
                         material=sim_info['material'],
                         layers=sim_info['layers'],
+                        **sim_info['mlip'],
                     ))
                 continue
 
@@ -463,6 +544,7 @@ class JobManifest:
                     force=force,
                     angle=angle,
                     speed=speed,
+                    **sim_info['mlip'],
                 ))
         return manifest
 

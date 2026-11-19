@@ -20,6 +20,7 @@ from ase.io import read
 from jinja2 import Environment
 
 from ..core.config import SheetOnSheetSimulationConfig
+from ..core.mlip import validate_mlip_cell
 from ..core.potential_manager import PotentialManager
 from ..core.simulation_base import SimulationBase
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -219,6 +220,14 @@ class FlakeSlideSimulation(SimulationBase):
         # 3. ONE PotentialManager: sheet -> flake(s) -> reserved virtual, so global
         #    atom types are sheet 1..S, flake S+1..S+F, virtual S+F+1. Run-dir-
         #    relative potential staging (LAMMPS runs with cwd = output_dir).
+        # Capability-matrix rules across the whole cell (spec §1.1/§3.4).
+        validate_mlip_cell(
+            sheet_cfg,
+            components=[(name, comp)
+                        for name, comp in zip(flake_names, flake_components)],
+            constraint_mode=settings.simulation.constraint_mode,
+        )
+
         pm = PotentialManager(
             settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
@@ -297,6 +306,15 @@ class FlakeSlideSimulation(SimulationBase):
             "constraint_mode": sim.constraint_mode,
             "atom_style": _detect_atom_style(combined_path),
             "pot_type": "sw",
+            # LOAD-BEARING, both keys. The templates render them behind
+            # `| default(...)`, which does NOT raise when a key is absent -- it
+            # silently renders nothing (directives) or the classical branch
+            # (mlip_sheet), the build still reports success, and the omission
+            # surfaces only when LAMMPS aborts or balloons its memory. This
+            # builder subclasses SimulationBase directly, so it inherits
+            # neither the AFM nor the sheet-on-sheet wiring.
+            "mlip_sheet": pm.has_mlip(),
+            "mlip_deck_directives": pm.deck_directives(),
             "has_internal_lj": True,
             "pressures": general.pressure if general.pressure is not None else 0.0,
             "scan_speed_config": general.scan_speed,
@@ -433,6 +451,14 @@ class FlakeSlideSimulation(SimulationBase):
         total_types = len(pm.types)
         masses_block = pm.get_masses_string()
         combined_path = self.output_dir / "flake_slide.data"
+
+        # This run only places atoms (read_data + shift) and writes them back:
+        # `run 0` computes nothing the result depends on. For an MLIP cell the
+        # real settings would demand an MLIP-enabled LAMMPS just to *generate*
+        # inputs, so include the zero surrogate instead (spec §3.3).
+        if pm.has_mlip():
+            settings_path = pm.write_surrogate_file(
+                self.output_dir / "assemble_flake_slide.in.settings")
 
         script = f"""clear
 units           metal

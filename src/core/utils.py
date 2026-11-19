@@ -206,8 +206,17 @@ def count_atomtypes(
     str_path = str(potential_filepath)
     pot_lower = (pot_type or '').lower()
 
-    single_type_pots = {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam'}
-    single_type_exts = ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff')
+    # 'mace'/'deepmd' and the binary model extensions are MLIP entries: their
+    # model files are serialised tensors, not UTF-8 text, so parsing them here
+    # would crash. One atom type per element is the correct answer for them.
+    single_type_pots = {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam',
+                        'mace', 'deepmd'}
+    # NB: '.json' is symmetrix/MACE's model format. Callers such as
+    # check_potential_cif_compatibility() do NOT pass pot_type, so the
+    # extension list is the only guard -- keep it in step with
+    # mlip.MLIP_REGISTRY[*].file_extensions.
+    single_type_exts = ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff',
+                        '.pt', '.pth', '.pb', '.json')
 
     if pot_lower in single_type_pots or str_path.lower().endswith(single_type_exts):
         return {el: 1 for el in elements}
@@ -544,8 +553,12 @@ def get_potential_element_order(
         ValueError: If CIF elements don't match potential elements or validation fails.
     """
     pot_lower = pot_type.lower()
-    single_type_pots = {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam'}
-    single_type_exts = ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff')
+    # Keep in sync with count_atomtypes: MLIP model files are binary and must
+    # never be opened as UTF-8 text.
+    single_type_pots = {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam',
+                        'mace', 'deepmd'}
+    single_type_exts = ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff',
+                        '.pt', '.pth', '.pb')
 
     if pot_lower in single_type_pots or str(potential_filepath).lower().endswith(single_type_exts):
         pot_element_counts = {el: 1 for el in cif_elements}

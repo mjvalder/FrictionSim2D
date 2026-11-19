@@ -73,6 +73,7 @@ from ..core.lattice_matching import (
     find_commensurate_twist,
     scan_registry_index,
 )
+from ..core.mlip import is_mlip, validate_mlip_cell
 from ..core.potential_manager import PotentialManager
 from ..interfaces.jinja import PackageLoader
 from .components import apply_sheet_edge_types, build_monolayer, calculate_layer_shifts
@@ -295,6 +296,22 @@ def register_hetero_potentials(
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
+    # Capability-matrix rules across the whole hetero cell -- see
+    # docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md (v4) §3/§6.
+    # NOTE: an earlier revision of this comment claimed a DeePMD material
+    # beside an SW one was legal via NULL type maps. That was never true --
+    # pair_deepmd rejects NULL (pair_deepmd.cpp:816), measured 2026-08-10 -- so
+    # partial-cell is now rejected for BOTH frameworks. A hetero cell is also
+    # multi-component, which v4 §6 rules out for full-cell MLIP as well: the
+    # builders register one instance per component, and that is a NULL-map
+    # topology whichever framework it names.
+    validate_mlip_cell(
+        sheets[0],
+        components=[(f"sheet_{i + 1}", sheet)
+                    for i, sheet in enumerate(sheets[1:], start=1)],
+        constraint_mode=settings.simulation.constraint_mode,
+    )
+
     # Mirror the AFM / sheet-on-sheet potential path exactly: stage the real
     # potential files under the run dir's provenance folder and reference them
     # by a run-dir-relative prefix in the pair_coeff lines.
@@ -404,6 +421,14 @@ def register_hetero_flake_potentials(
 
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
+
+    # Same capability-matrix rules as the periodic hetero spine (spec §1.1/§3.4).
+    validate_mlip_cell(
+        flake_sheets[0],
+        components=[(f"flake_{i + 1}", sheet)
+                    for i, sheet in enumerate(flake_sheets[1:], start=1)],
+        constraint_mode=settings.simulation.constraint_mode,
+    )
 
     # Same run-dir-relative potential staging as the periodic hetero spine.
     pm = PotentialManager(
@@ -1305,6 +1330,26 @@ def assemble_hetero_stack(
         key = (bot_m, top_m)
         if key in gap_cache:
             return gap_cache[key]
+        if any(is_mlip(sheets[m].pot_type) for m in (bot_m, top_m)):
+            # An MLIP interface cannot be minimized here: the generation machine
+            # is not assumed to have an MLIP-enabled LAMMPS (spec §3.3), and the
+            # zero surrogate that makes the *assembly* run possible would
+            # "minimize" a flat landscape. lat_c is mandatory for MLIP sheets
+            # precisely so it can stand in. The LARGER of the pair is used: a
+            # too-small starting gap under an attractive foundation model is the
+            # documented "dome plow" failure mode, whereas a slightly too-large
+            # one simply relaxes inward during the real run.
+            spacings = [sheets[m].lat_c for m in (bot_m, top_m)
+                        if sheets[m].lat_c is not None]
+            if not spacings:
+                raise ValueError(
+                    f"An MLIP hetero interface between {sheets[bot_m].mat!r} and "
+                    f"{sheets[top_m].mat!r} needs an explicit [2D] lat_c on at "
+                    f"least one material: the interface spacing cannot be found "
+                    f"by minimization without an MLIP-enabled LAMMPS."
+                )
+            gap_cache[key] = max(spacings)
+            return gap_cache[key]
         if bot_m == top_m:
             if n_layers[bot_m] > 1:
                 rel = np.array(intra_shifts[bot_m][1], dtype=float) - np.array(
@@ -1371,7 +1416,16 @@ def assemble_hetero_stack(
     zmaxs = [z_ext[s.material_index][1] + s.z for s in layers_spec]
     box_region = _box_region_cmd(lx, ly, xy, min(zmins) - 10.0, max(zmaxs) + 10.0)
 
-    # Render + run the assembly.
+    # Render + run the assembly. The assembly is a pure placement (`run 0` then
+    # write_data), so for an MLIP cell the zero surrogate stands in for the real
+    # settings — otherwise generating inputs would need an MLIP-enabled LAMMPS
+    # (spec §3.3). The REAL settings path is still what the run scripts include.
+    if hetero_potentials.pm.has_mlip():
+        include_path = hetero_potentials.pm.write_surrogate_file(
+            workdir / "stack_hetero.in.settings")
+    else:
+        include_path = settings_path
+
     output_path = workdir / "hetero.data"
     layers_ctx = [
         {
@@ -1392,7 +1446,7 @@ def assemble_hetero_stack(
         "total_types": total_types,
         "layers": layers_ctx,
         "masses_block": masses_block,
-        "settings_path": str(settings_path),
+        "settings_path": str(include_path),
         "output_path": str(output_path),
     }
     env = Environment(

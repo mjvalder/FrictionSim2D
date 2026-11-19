@@ -569,3 +569,280 @@ def test_the_model_does_not_judge_the_angle_split():
 def test_damping_ratio_defaults_to_zero():
     from src.core.config import TipConfig
     assert TipConfig.model_fields['damping_ratio'].default == 0.0
+
+
+def test_d3_dispersion_settings_defaults():
+    """The D3 knobs (spec §1.2) live on PotentialSettings with these defaults."""
+    potential = GlobalSettings().potential
+    assert potential.d3_functional == 'pbe'
+    assert potential.d3_damping == 'bj'
+    assert potential.d3_cutoff == 16.0
+    assert potential.d3_cn_cutoff == 8.0
+
+
+def test_d3_damping_rejects_non_canonical_token():
+    """d3_damping is the canonical name, enum-validated: 'd3bj' is not one."""
+    from src.core.config import PotentialSettings
+    PotentialSettings(d3_damping='zerom')  # a valid member
+    with pytest.raises(ValidationError):
+        PotentialSettings(d3_damping='d3bj')
+
+
+# ---------------------------------------------------------------------------
+# MLIP config surface (v4 spec §5)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sheet_kwargs(tmp_path):
+    """Baseline SheetConfig kwargs whose paths exist (so no resolver runs)."""
+    cif = tmp_path / "h-MoS2.cif"
+    cif.write_text("# dummy cif\n", encoding="utf-8")
+    return {
+        'mat': 'h-MoS2',
+        'cif_path': str(cif),
+        'x': 50.0,
+        'y': 50.0,
+        'layers': [3],
+    }
+
+
+def _model(tmp_path, name):
+    """Write a fake (binary) MLIP model file and return its path string."""
+    p = tmp_path / name
+    p.write_bytes(b"\x80\x02not-utf8\xff")
+    return str(p)
+
+
+def test_mlip_keys_default_to_classical_behaviour(sheet_kwargs, tmp_path):
+    """An untouched (SW) sheet carries the inert defaults."""
+    pot = tmp_path / "MoS2.sw"
+    pot.write_text("# sw\n", encoding="utf-8")
+    sheet = SheetConfig(**{**sheet_kwargs, 'pot_type': 'sw', 'pot_path': str(pot)})
+    assert sheet.dispersion == 'none'
+    assert not hasattr(sheet, 'mlip_interlayer')
+
+
+@pytest.mark.parametrize('value', ['lj', 'native', ''])
+def test_mlip_interlayer_is_rejected_loudly(sheet_kwargs, tmp_path, value):
+    """The key is GONE (v4 §5) and an old config must not be silently ignored.
+
+    ``mlip_interlayer`` only ever chose between a partition ('lj') and full
+    coverage ('native'); the partition is unavailable for both frameworks
+    (v4 §1 E2/E3), so the key carries no information. Pydantic ignores unknown
+    keys by default, which for this one would silently change the physics of an
+    existing config -- hence the explicit rejection.
+    """
+    with pytest.raises(ValidationError, match=r"2026-08-11-mlip-post-m0-design"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
+                       'pot_path': _model(tmp_path, 'm.pth'), 'lat_c': 6.15,
+                       'mlip_interlayer': value})
+
+
+def test_mlip_interlayer_is_rejected_on_a_classical_sheet_too(sheet_kwargs, tmp_path):
+    pot = tmp_path / "MoS2.sw"
+    pot.write_text("# sw\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match=r"2026-08-11-mlip-post-m0-design"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'sw', 'pot_path': str(pot),
+                       'mlip_interlayer': 'native'})
+
+
+def test_dispersion_requires_an_mlip_pot_type(sheet_kwargs, tmp_path):
+    pot = tmp_path / "MoS2.sw"
+    pot.write_text("# sw\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match="dispersion"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'sw', 'pot_path': str(pot),
+                       'dispersion': 'd3'})
+
+
+def test_mlip_requires_lat_c(sheet_kwargs, tmp_path):
+    with pytest.raises(ValidationError, match="lat_c"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
+                       'pot_path': _model(tmp_path, 'm.pth')})
+
+
+def test_mlip_requires_a_framework_matching_model_extension(sheet_kwargs, tmp_path):
+    """A MACE model handed to deepmd (or vice versa) is a hard error."""
+    with pytest.raises(ValidationError, match="extension"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
+                       'pot_path': _model(tmp_path, 'm.json'),
+                       'lat_c': 6.15})
+    with pytest.raises(ValidationError, match="extension"):
+        SheetConfig(**{**sheet_kwargs, 'pot_type': 'mace',
+                       'pot_path': _model(tmp_path, 'm.pb'),
+                       'lat_c': 6.15})
+
+
+def test_valid_mlip_sheets_are_accepted(sheet_kwargs, tmp_path):
+    """Full-cell base and full-cell + D3, for both frameworks (v4 §3).
+
+    ``base`` is now pinned to a SINGLE layer. A multilayer MLIP stack with
+    ``dispersion = none`` is rejected since the bilayer benchmark measured the
+    bare model as having no interlayer binding at all -- see
+    ``TestMultilayerMLIPRequiresD3``. One layer has no interlayer gap, so
+    base-only remains legitimate there.
+    """
+    base = SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
+                          'pot_path': _model(tmp_path, 'm.pth'),
+                          'layers': [1], 'lat_c': 6.15})
+    assert base.dispersion == 'none'
+
+    full_d3 = SheetConfig(**{**sheet_kwargs, 'pot_type': 'deepmd',
+                             'pot_path': _model(tmp_path, 'm.pth'),
+                             'dispersion': 'd3', 'lat_c': 6.15})
+    assert full_d3.dispersion == 'd3'
+
+    mace = SheetConfig(**{**sheet_kwargs, 'pot_type': 'mace',
+                          'pot_path': _model(tmp_path, 'm.json'),
+                          'layers': [1], 'lat_c': 6.15})
+    assert mace.dispersion == 'none'
+
+    mace_d3 = SheetConfig(**{**sheet_kwargs, 'pot_type': 'mace',
+                             'pot_path': _model(tmp_path, 'm.json'),
+                             'dispersion': 'd3', 'lat_c': 6.15})
+    assert mace_d3.dispersion == 'd3'
+
+
+def test_ini_round_trips_the_mlip_keys(tmp_path):
+    """``dispersion``/``lat_c`` typed into a [2D] section reach SheetConfig."""
+    model = _model(tmp_path, 'dpa.pth')
+    cif = tmp_path / "h-MoS2.cif"
+    cif.write_text("# dummy cif\n", encoding="utf-8")
+    ini = tmp_path / "sheet_mlip.ini"
+    ini.write_text(
+        "[general]\n"
+        "temp = 300\n"
+        "pressure = 1.0\n"
+        "\n"
+        "[2D]\n"
+        "mat = h-MoS2\n"
+        "pot_type = deepmd\n"
+        f"pot_path = {model}\n"
+        f"cif_path = {cif}\n"
+        "x = 50\n"
+        "y = 50\n"
+        "layers = [3]\n"
+        "lat_c = 6.15\n"
+        "dispersion = d3\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_config(ini)
+    assert parsed['2D']['dispersion'] == 'd3'
+
+    config = SheetOnSheetSimulationConfig(**{**parsed, 'settings': load_settings()})
+    assert config.sheet.dispersion == 'd3'
+    assert config.sheet.lat_c == 6.15
+
+
+def test_ini_carrying_the_removed_key_fails_loudly(tmp_path):
+    """A pre-v4 .ini must not build silently with different physics."""
+    model = _model(tmp_path, 'dpa.pth')
+    cif = tmp_path / "h-MoS2.cif"
+    cif.write_text("# dummy cif\n", encoding="utf-8")
+    ini = tmp_path / "old_sheet_mlip.ini"
+    ini.write_text(
+        "[general]\n"
+        "temp = 300\n"
+        "pressure = 1.0\n"
+        "\n"
+        "[2D]\n"
+        "mat = h-MoS2\n"
+        "pot_type = deepmd\n"
+        f"pot_path = {model}\n"
+        f"cif_path = {cif}\n"
+        "x = 50\n"
+        "y = 50\n"
+        "layers = [3]\n"
+        "lat_c = 6.15\n"
+        "mlip_interlayer = lj\n",
+        encoding="utf-8",
+    )
+    parsed = parse_config(ini)
+    with pytest.raises(ValidationError, match=r"2026-08-11-mlip-post-m0-design"):
+        SheetOnSheetSimulationConfig(**{**parsed, 'settings': load_settings()})
+
+
+class TestMultilayerMLIPRequiresD3:
+    """A multilayer MLIP stack without D3 is unbound -- measured, not argued.
+
+    The bilayer benchmark (2026-08-11, DPA-3.1-3M/Alex2D on the backported
+    binary) found the bare foundation model has **no interlayer binding at
+    all**: its binding curve decreases monotonically to the edge of the scan,
+    binding energy 5.7e-7 J/m^2. Adding D3 produces a real minimum at 6.112 A
+    (experiment 6.15) with 0.265 J/m^2 (literature 0.25-0.30).
+
+    So `dispersion = none` on a multilayer MLIP sheet yields layers that drift
+    apart, and every interlayer friction/adhesion number from such a run is
+    meaningless. It has to fail at config time, not silently produce a campaign
+    that looks fine.
+    """
+
+    @staticmethod
+    def _kwargs(tmp_path, **over):
+        cif = tmp_path / 'MoS2.cif'
+        cif.write_text('#', encoding='utf-8')
+        model = tmp_path / 'dpa3_alex2d.pth'
+        model.write_bytes(b'\x00')
+        base = dict(mat='h-MoS2', pot_type='deepmd', pot_path=str(model),
+                    cif_path=str(cif), x=30.0, y=30.0, layers=[3], lat_c=6.112)
+        base.update(over)
+        return base
+
+    def test_multilayer_mlip_without_d3_is_rejected(self, tmp_path):
+        from src.core.config import SheetConfig
+        with pytest.raises(ValidationError, match='(?i)unbound|dispersion'):
+            SheetConfig(**self._kwargs(tmp_path, dispersion='none'))
+
+    def test_multilayer_mlip_with_d3_is_accepted(self, tmp_path):
+        from src.core.config import SheetConfig
+        cfg = SheetConfig(**self._kwargs(tmp_path, dispersion='d3'))
+        assert cfg.dispersion == 'd3'
+
+    def test_mace_without_d3_is_allowed_because_it_binds(self, tmp_path):
+        """The guard is framework-aware, not a blanket MLIP rule.
+
+        MACE-MPA-0 was measured (bench 2026-08-24) to bind a bare bilayer:
+        a real minimum at 6.717 A, 0.068 J/m^2. It under-binds versus the
+        0.25-0.30 literature range, and D3 then over-binds it (0.474 J/m^2),
+        so the no-D3 arm is a legitimate control rather than a broken run.
+        Blocking it would have generalised DPA-3's failure to a model that
+        does not share it.
+        """
+        from src.core.config import SheetConfig
+        model = tmp_path / 'mace.json'
+        model.write_bytes(b'\x00')
+        cfg = SheetConfig(**self._kwargs(
+            tmp_path, pot_type='mace', pot_path=str(model), dispersion='none'))
+        assert cfg.dispersion == 'none'
+
+    def test_allow_unbound_permits_a_deliberate_deepmd_control(self, tmp_path):
+        """`allow_unbound` exists so the no-D3 DeePMD control arm is runnable.
+
+        Demonstrating that the stack comes apart IS the scientific point of
+        that arm, so the guard must be opt-out-able -- while still firing by
+        default so an accidental config cannot waste a campaign.
+        """
+        from src.core.config import SheetConfig
+        cfg = SheetConfig(**self._kwargs(
+            tmp_path, dispersion='none', allow_unbound=True))
+        assert cfg.allow_unbound is True
+
+    def test_allow_unbound_defaults_to_false(self, tmp_path):
+        from src.core.config import SheetConfig
+        cfg = SheetConfig(**self._kwargs(tmp_path, dispersion='d3'))
+        assert cfg.allow_unbound is False
+
+    def test_single_layer_mlip_without_d3_is_fine(self, tmp_path):
+        """One layer has no interlayer gap to get wrong."""
+        from src.core.config import SheetConfig
+        cfg = SheetConfig(**self._kwargs(tmp_path, layers=[1], dispersion='none'))
+        assert cfg.dispersion == 'none'
+
+    def test_classical_multilayer_is_untouched(self, tmp_path):
+        """SW sheets are not affected -- their LJ interlayer term is real."""
+        from src.core.config import SheetConfig
+        sw = tmp_path / 'MoS2.sw'
+        sw.write_text('# sw\n', encoding='utf-8')
+        cfg = SheetConfig(**self._kwargs(tmp_path, pot_type='sw',
+                                         pot_path=str(sw), lat_c=None))
+        assert cfg.pot_type == 'sw'

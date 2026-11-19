@@ -9,7 +9,6 @@ import logging
 from abc import ABC
 from pathlib import Path
 from typing import Any, Dict, List, Union, Optional
-import shutil
 import json
 from datetime import datetime
 import hashlib
@@ -19,6 +18,7 @@ from jinja2 import Environment, FileSystemLoader
 from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader
 from .utils import get_material_path, get_potential_path
+from .potential_manager import stage_model_file
 from ..hpc import HPCScriptGenerator, HPCConfig
 from ..hpc.manifest import JobManifest
 
@@ -93,6 +93,37 @@ class SimulationBase(ABC):
             trim_blocks=True,
             lstrip_blocks=True
         )
+
+    #: pair_style/pair_coeff prefix for :attr:`shared_potentials_dir`. LAMMPS is
+    #: invoked from the simulation root (see ``src/templates/hpc/pbs_combined.j2``),
+    #: so a bare directory name is the correct relative path from every run.
+    SHARED_POTENTIALS_PREFIX = 'potentials'
+
+    @property
+    def simulation_root(self) -> Path:
+        """The campaign root that contains every run directory of this sweep.
+
+        ``set_base_output_dir`` supplies it for anything built through
+        ``run_simulations``; a directly-constructed builder falls back to
+        stripping ``relative_run_dir`` off ``output_dir``.
+        """
+        if self.base_output_dir is not None:
+            return self.base_output_dir
+        root = self.output_dir
+        if not self.relative_run_dir.is_absolute():
+            for _ in self.relative_run_dir.parts:
+                root = root.parent
+        return root
+
+    @property
+    def shared_potentials_dir(self) -> Path:
+        """Where MLIP model files are staged: once per campaign, not per run.
+
+        A foundation model is hundreds of MB; copying it into every run
+        directory of a 100-member sweep costs gigabytes over rsync. Classical
+        potentials keep their per-run ``provenance/potentials`` copy.
+        """
+        return self.simulation_root / self.SHARED_POTENTIALS_PREFIX
 
     def _create_directories(self, output_dir: Optional[Path] = None,
                             subdirs: Optional[List[str]] = None) -> None:
@@ -197,7 +228,11 @@ class SimulationBase(ABC):
         dest_path = dest_dir / file_path.name
 
         if not dest_path.exists():
-            shutil.copy2(file_path, dest_path)
+            # Prefer linking from the campaign's own store when it already
+            # exists, so the tree's aliasing stays internal; falls back to the
+            # source file. Either way the campaign holds one inode per model.
+            shared = self.shared_potentials_dir / file_path.name
+            stage_model_file(file_path, dest_path, link_from=shared)
             logger.debug("Added to provenance: %s", file_path.name)
 
         self._update_provenance_manifest(file_path, category, component, dest_path)
@@ -362,8 +397,13 @@ class SimulationBase(ABC):
             job_name=job_name
         )
 
-        if not hpc_config.modules:
-            raise ValueError("HPC modules list is empty; set hpc.modules in settings.")
+        # Empty modules is valid for a conda-based MLIP profile (see the same
+        # relaxation in src/hpc/scripts.py::_validate_config) -- env_lines then
+        # carries the whole environment.
+        if not hpc_config.modules and not hpc_config.env_lines:
+            raise ValueError(
+                "HPC settings configure neither 'modules' nor 'env_lines'; set "
+                "one of them under 'hpc:' in settings.yaml.")
         if hpc_config.use_tmpdir and not hpc_config.scratch_dir:
             raise ValueError("HPC scratch_dir is required when use_tmpdir is true.")
 

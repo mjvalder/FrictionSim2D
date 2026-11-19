@@ -66,6 +66,19 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
         'v_fz': 'nf',
     }
 
+    # eV/A -> nN. Pre-schema-2 sheet files emitted the LJ-branch lateral force
+    # unscaled (compute group/group's vector is a force in eV/A) while the
+    # normal load was already nN, so their COF is a factor 1.602176565 too
+    # SMALL. The correction is a MULTIPLICATION.
+    #
+    # Kept in sync by hand with the upstream FrictionSim2D repo, whose
+    # src/postprocessing/read_data.py carries the same logic. This file is a
+    # fork that predates the observable registry, so it cannot import it.
+    _LF_SCHEMA1_CORRECTION = 1.602176565
+
+    # Output-schema version this reader understands.
+    _LF_SCHEMA_CURRENT = 2
+
     # Filename patterns (compiled once at class level)
     _FILE_PATTERN_TIP = re.compile(r'fc_ave_slide_(\d+\.?\d*)nN_(\d+)angle_(\d+)ms_l(\d+)')
     # New AFM tip naming written by the current builder, e.g.
@@ -203,10 +216,73 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
 
         return None
 
+    @staticmethod
+    def _parse_lf_schema(line1: str) -> int:
+        """Output-schema version from a results file's first line.
+
+        Parsed as an INTEGER, not matched as the substring 'schema=2': a
+        substring test treats every future version as schema 1 and silently
+        applies the legacy unit correction to a file that never needed it.
+        Absent marker means the file predates the marker: schema 1.
+        """
+        m = re.search(r'schema=(\d+)', line1 or '')
+        return int(m.group(1)) if m else 1
+
+    @staticmethod
+    def _is_lj_branch(lfx, sx) -> bool:
+        """True when a pre-schema-2 sheet frame needs the unit correction.
+
+        On the many-body branch the template defines ``xfrict`` AS ``v_sx``,
+        so LAMMPS writes both columns from one value and they are byte-
+        identical. Any difference means the LJ branch, whose force is eV/A.
+        """
+        return not pd.Series(list(lfx)).equals(pd.Series(list(sx)))
+
+    def _correct_legacy_lf_schema1(self, df, filepath):
+        """Rescale a pre-schema-2 sheet frame's lateral force to nN.
+
+        FROZEN legacy path -- delete once the affected runs are re-simulated.
+        """
+        if df.attrs.get('lf_corrected'):
+            return df
+        df.attrs['lf_corrected'] = False
+        schema = df.attrs.get('lf_schema', 1)
+        if schema != 1:
+            if schema > self._LF_SCHEMA_CURRENT or schema < 1:
+                logger.warning(
+                    "%s: output schema %s is not one this reader understands "
+                    "(known: 1..%s). Lateral force left untouched.",
+                    filepath, schema, self._LF_SCHEMA_CURRENT)
+            return df
+        if 'lfx' not in df.columns:
+            return df
+        if 'v_sx' not in df.columns:
+            logger.warning(
+                "%s: pre-schema-2 sheet file carries lfx but no v_sx, so the "
+                "LJ/many-body branch cannot be identified. Lateral force left "
+                "AS WRITTEN; if this run used an lj/cut interlayer potential "
+                "its COF is a factor %s too small.",
+                filepath, self._LF_SCHEMA1_CORRECTION)
+            return df
+        if not self._is_lj_branch(df['lfx'], df['v_sx']):
+            return df                  # many-body branch: already nN
+        df['lfx'] = df['lfx'] * self._LF_SCHEMA1_CORRECTION
+        if 'lfy' in df.columns:
+            df['lfy'] = df['lfy'] * self._LF_SCHEMA1_CORRECTION
+        df.attrs['lf_corrected'] = True
+        logger.warning(
+            "%s: pre-schema-2 sheet file -- lateral force was eV/A against a "
+            "nN load, so COF was a factor %s too small. Multiplied lfx/lfy by "
+            "%s. Re-run this simulation to retire the correction.",
+            filepath, self._LF_SCHEMA1_CORRECTION,
+            self._LF_SCHEMA1_CORRECTION)
+        return df
+
     def _read_dataframe(self, filepath: Path, sim_type: str) -> pd.DataFrame:
         """Read a LAMMPS output file and return a labelled DataFrame."""
         if sim_type == 'sheet':
             sheet_col_names: list[str] | None = None
+            header_lines: list[str] = ['', '']
             try:
                 with open(filepath, 'r', encoding='utf-8', errors='ignore') as fh:
                     header_lines = [next(fh, ''), next(fh, '')]
@@ -223,6 +299,8 @@ class DataReader:  # pylint: disable=too-many-instance-attributes
                 filepath, sep=r'\s+', header=None, names=col_names, skiprows=2,
             )
             df.rename(columns=self._SHEET_COLUMN_RENAME, inplace=True)
+            df.attrs['lf_schema'] = self._parse_lf_schema(header_lines[0])
+            df = self._correct_legacy_lf_schema1(df, filepath)
         else:
             df = pd.read_csv(
                 filepath, sep=r'\s+', header=None,

@@ -20,6 +20,8 @@ from typing import Dict, Optional, List, Union
 
 from ..core.simulation_base import SimulationBase
 from ..core.config import SheetOnSheetSimulationConfig
+from ..core.mlip import (check_d3_fits_box, get_mlip, is_mlip,
+                        validate_mlip_cell)
 from ..core.potential_manager import PotentialManager, POTENTIALS_WITH_INTERNAL_LJ
 from ..core.utils import atomic2molecular, format_numeric_token, normalize_potential_type
 from ..data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -135,6 +137,19 @@ class SheetOnSheetSimulation(SimulationBase):
         self.lat_c = lat_c
         self.sheet_dims = dims
 
+        # F3: a D3 overlay whose cutoff exceeds the periodic box aborts deep
+        # inside LAMMPS ("Communication cutoff ... cannot exceed periodic box
+        # length"). Only the ACTUAL box is authoritative -- the built cell is a
+        # supercell rounded up from the requested x/y -- so this is checked here,
+        # after build_sheet, rather than in SheetConfig.
+        if getattr(self.config.sheet, 'dispersion', 'none') == 'd3':
+            check_d3_fits_box(
+                box_x=float(dims.get('xhi', 0.0)) - float(dims.get('xlo', 0.0)),
+                box_y=float(dims.get('yhi', 0.0)) - float(dims.get('ylo', 0.0)),
+                d3_cutoff=self.config.settings.potential.d3_cutoff,
+                skin=self.config.settings.simulation.neighbor_list,
+            )
+
         self.write_inputs()
         self._generate_hpc_scripts()
         logger.info("Build complete.")
@@ -174,22 +189,36 @@ class SheetOnSheetSimulation(SimulationBase):
         n_layers = self.n_layers
         constraint_mode = self.config.settings.simulation.constraint_mode
 
+        # Capability-matrix rules that need the whole cell (v4 spec §3/§6).
+        # A sheet-on-sheet cell is the sheet alone, so only the sheet-side rules
+        # can fire here -- chiefly the constraint_mode × MLIP refusal.
+        validate_mlip_cell(self.config.sheet, constraint_mode=constraint_mode)
+
         pm = PotentialManager(
             self.config.settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
             potentials_prefix=str(
                 self.relative_run_dir / "provenance" / "potentials"
-            )
+            ),
+            shared_potentials_dir=self.shared_potentials_dir,
+            shared_potentials_prefix=self.SHARED_POTENTIALS_PREFIX,
         )
         pm.set_lj_overrides(self.config.lj_override)
 
         sheet_edge_regions = [None, 'edge'] if self.config.settings.geometry.finite_sheet_sheetonsheet_edge_mode != 'none' else None
-        pm.register_component('sheet', self.config.sheet, n_layers=n_layers, regions=sheet_edge_regions)
+        pm.register_component('sheet', self.config.sheet, n_layers=n_layers,
+                              regions=sheet_edge_regions)
 
         self._register_drive_atom(pm)
 
         pm.add_self_interaction('sheet')
 
+        if self.config.sheet.dispersion == 'd3':
+            pm.enable_d3()
+
+        # An MLIP behaves exactly like an internal-LJ potential here: the one
+        # instance spanning the stack already carries the interlayer physics,
+        # so no explicit lj/cut (nor ghost LJ) is added.
         has_internal_lj = not pm.is_sheet_lj(self.config.sheet.pot_type)
         if has_internal_lj:
             pass  # ReaxFF, AIREBO, etc. handle interlayer interactions internally
@@ -321,6 +350,16 @@ class SheetOnSheetSimulation(SimulationBase):
             'thermostat_type': self.config.settings.thermostat.type,
             'atom_style': atom_style,
             'pot_type': pot_type,
+            # Suppresses `comm_style tiled` / `balance rcb`, which make
+            # pair_deepmd derive a bogus ghost count and try to allocate
+            # hundreds of GB (F2 in documentation/milestone0.md). Costs nothing:
+            # both frameworks run one MPI rank per GPU, and tiled/RCB only pay
+            # off when spreading irregular work over many ranks.
+            'mlip_sheet': is_mlip(pot_type),
+            # Extra deck lines the MLIP style demands (symmetrix/mace needs
+            # `atom_modify map yes` + `newton on`); empty for deepmd.
+            'mlip_deck_directives': (list(get_mlip(pot_type).deck_directives)
+                                     if is_mlip(pot_type) else []),
             'has_internal_lj': not self.pm.is_sheet_lj(pot_type),
             'ev_a_to_nn': EV_A_TO_NN,
             'ev_a3_to_gpa': EV_A3_TO_GPA,
