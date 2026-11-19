@@ -164,6 +164,15 @@ class _DatasetRunFiles:
         text = self.source.settings_text(next(self.rows.itertuples()))
         return parse_type_groups(text)
 
+    def statuses(self) -> dict:
+        """``{load: verdict status}`` of the points at 0 degrees: what the
+        store says of each load, a failed or unfinished one included."""
+        rows = self.rows
+        if 'angle' in rows:
+            rows = rows[rows['angle'].astype(float) == 0.0]
+        return {int(load): str(status) for load, status
+                in zip(rows['load'].astype(float), rows['verdict_status'])}
+
     def snapshot(self, load: float, kind: str) -> Path | None:
         """The stored snapshot of the point at ``load`` (0 degrees for a
         ``final`` one), or None."""
@@ -364,6 +373,8 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
             st = self._table(plot_config['status_file'], ['run_id', 'force', 'status'])
             st = st[st['run_id'].str.startswith(prefix)]
             status = dict(zip(st['force'].astype(int), st['status']))
+        elif hasattr(run, 'statuses'):     # a dataset: the stored verdicts say which failed
+            status = run.statuses()
         ex = self._table(self._required(plot_config, 'traces_file'),
                          ['run_id', 'step', 'temp_sheet_3d'])
         ex = ex[ex['run_id'].str.startswith(prefix)].sort_values(["run_id", "step"])

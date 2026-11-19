@@ -100,6 +100,11 @@ class RunSource:
         """``tier -> DataFrame`` of one row's point."""
         return self._fetch.frames(row)
 
+    def verdict(self, row: Any) -> Dict[str, Any]:
+        """The stored integrity verdict of the row's point (``status``,
+        ``reasons``, ``measures``, ...), or ``{}`` for a point without one."""
+        return self._fetch.verdict(row)
+
     def snapshot(self, row: Any, kind: SnapshotKind) -> Optional[Path]:
         """A temporary copy of the row's ``load`` or ``final`` snapshot, or
         None when the store has none."""
@@ -164,6 +169,16 @@ class StoreFetcher:
             frames.update(_point_frames(calc.outputs.peratom[label], Path(tmp) / 'results',
                                         point.base.attributes.get('family'), n_layers))
         return frames
+
+    def verdict(self, row: Any) -> Dict[str, Any]:
+        """The verdict Dict the row's ``verdict_uuid`` names (the one the
+        dataset's policy selected; `steps.check_integrity` stores its
+        ``measures``), or ``{}``."""
+        from aiida import orm  # pylint: disable=import-outside-toplevel
+        uuid = getattr(row, 'verdict_uuid', None)
+        if uuid is None or pd.isna(uuid):
+            return {}
+        return orm.load_node(uuid).get_dict()
 
     def snapshot(self, row: Any, kind: SnapshotKind) -> Optional[Path]:
         """``final``: the CalcJob's ``snapshots.<point label>`` output

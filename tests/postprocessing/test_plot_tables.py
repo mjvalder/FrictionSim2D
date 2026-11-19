@@ -313,3 +313,22 @@ def test_a_dataset_panel_without_the_material_names_it(tmp_path, dataset_source)
     with pytest.raises(PlotDataError, match="no point of Q at layer 2 in dataset 'paper'"):
         plotter.generate_plot({'plot_type': 'sheet_profile', 'filename': 's.png',
                                'dataset': 'paper', 'material': 'Q', 'loads': [10]})
+
+
+def test_a_dataset_panel_titles_each_load_with_its_stored_verdict(
+        tmp_path, dataset_source, monkeypatch):
+    import matplotlib.axes  # pylint: disable=import-outside-toplevel
+    titles = []
+    original = matplotlib.axes.Axes.set_title
+    monkeypatch.setattr(matplotlib.axes.Axes, 'set_title',
+                        lambda self, label, *a, **k: (titles.append(label),
+                                                      original(self, label, *a, **k))[1])
+    traces = tmp_path / 'traces.csv'
+    pd.DataFrame({'run_id': ['M/l2/f10/a0'], 'step': [0], 'temp_sheet_3d': [300.0],
+                  'comz_L1': [0.0], 'comz_L2': [3.0]}).to_csv(traces, index=False)
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    plotter.generate_plot({'plot_type': 'integrity_panel', 'filename': 'i.png',
+                           'material': 'M', 'dataset': 'paper', 'layer': 2,
+                           'loads': [10, 20], 'traces_file': str(traces)})
+    assert titles[0] == '10 nN'
+    assert titles[1] == '20 nN\nfailed_integrity'
