@@ -1,0 +1,24 @@
+mass 1*3 95.950000 #Mo
+mass 4*6 32.060000 #S
+mass 7 1.0 #Virtual atom
+group 2D_all type 1 2 3 4 5 6
+group 2D_core type 1 2 3 4 5 6
+group layer_1 type 1 4
+group layer_2 type 2 5
+group layer_3 type 3 6
+# Virtual drive atom is invisible to the MLIP/D3 graph
+neigh_modify exclude type 7 1
+neigh_modify exclude type 7 2
+neigh_modify exclude type 7 3
+neigh_modify exclude type 7 4
+neigh_modify exclude type 7 5
+neigh_modify exclude type 7 6
+neigh_modify exclude type 7 7
+
+pair_style hybrid/overlay deepmd potentials/dpa3_alex2d.pth dispersion/d3 bj pbe 16.0 8.0
+# Self-interactions (intra-component)
+pair_coeff * * deepmd Mo Mo Mo S S S Mo # sheet
+
+# D3 dispersion overlay (full-cell only)
+pair_coeff * * dispersion/d3 Mo Mo Mo S S S Mo
+

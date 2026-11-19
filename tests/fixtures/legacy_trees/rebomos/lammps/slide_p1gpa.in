@@ -1,0 +1,107 @@
+# LAMMPS Input Script for Sheet-vs-Sheet Sliding
+# 5-layer model, constraint_mode: none
+
+variable        speed equal 20.0
+
+variable        pressure equal 1.0
+
+variable        a equal 90.0
+
+clear
+units           metal
+atom_style      atomic
+boundary        p p p
+
+neighbor        0.3 bin
+neigh_modify    every 1 delay 0 check yes
+
+comm_style      tiled
+
+region          box block 0.0 98.706060405235 0.0 99.26936804718 -15.0 33.127112646352 units box
+create_box      10 box
+
+read_data       sheetonsheet/h-MoS2/100x_100y/K300/build/h-MoS2_5.lmp add append group bot
+
+include         sheetonsheet/h-MoS2/100x_100y/K300/lammps/system.in.settings
+
+
+
+dump            sys all atom 10000 sheetonsheet/h-MoS2/100x_100y/K300/visuals/slide_p${pressure}_a${a}_s${speed}.lammpstrj
+
+balance         1.0 rcb
+
+min_style       cg
+minimize 1e-4 1e-8 1000000 1000000
+
+# Thermostat on middle layers (2 through 4)
+group           center union layer_2 layer_3 layer_4
+velocity        center create 300.0 853635
+fix             nvt_center center nvt temp 300.0 300.0 $(100.0*dt)
+
+timestep        0.001
+thermo          10000
+
+# Top layer (layer 5): driven
+fix             fstage_top layer_5 rigid/nve single force * off off on torque * off off off
+# Bottom layer (layer 1): fixed
+fix             fsbot layer_1 setforce 0.0 0.0 0.0
+velocity        layer_1 set 0.0 0.0 0.0 units box
+
+# COM computes for key layers
+compute         COM_top layer_5 com
+variable        comx_top equal c_COM_top[1]
+variable        comy_top equal c_COM_top[2]
+variable        comz_top equal c_COM_top[3]
+
+compute         COM_ctop layer_4 com
+variable        comx_ctop equal c_COM_ctop[1]
+variable        comy_ctop equal c_COM_ctop[2]
+variable        comz_ctop equal c_COM_ctop[3]
+
+compute         COM_cbot layer_2 com
+variable        comx_cbot equal c_COM_cbot[1]
+variable        comy_cbot equal c_COM_cbot[2]
+variable        comz_cbot equal c_COM_cbot[3]
+
+compute         COM_bot layer_1 com
+variable        comx_bot equal c_COM_bot[1]
+variable        comy_bot equal c_COM_bot[2]
+variable        comz_bot equal c_COM_bot[3]
+
+# Apply Uniform Pressure
+# 1 eV/Å^3 = 160.2176621 GPa
+variable        A equal (98.706060405235-0.0)*(99.26936804718-0.0)
+variable        p equal v_pressure/160.2176565
+variable        f equal -v_p*v_A/(count(layer_5))
+
+fix             force layer_5 aveforce 0.0 0.0 $f
+
+variable        fx equal f_force[1]*1.602176565
+variable        fy equal f_force[2]*1.602176565
+variable        fz equal f_force[3]*1.602176565
+variable        sx equal f_fsbot[1]*1.602176565
+variable        sy equal f_fsbot[2]*1.602176565
+variable        sz equal f_fsbot[3]*1.602176565
+
+# Many-body potential; compute group/group not supported; use bottom layer reaction forces instead
+variable        xfrict equal v_sx
+variable        yfrict equal v_sy
+
+run             20000
+
+
+velocity        layer_5 set 0.0 0.0 0.0 units box
+
+variable        speed_x equal cos(v_a*PI/180)
+variable        speed_y equal sin(v_a*PI/180)
+
+velocity        layer_5 set 0.0 0.0 0.0 units box
+velocity        layer_5 set $(v_speed_x*v_speed/100) $(v_speed_y*v_speed/100) 0.0
+
+
+fix             fc_ave all ave/time 1 1000 1000 v_xfrict v_yfrict v_sx v_sy v_sz v_fx v_fy v_fz v_comx_ctop v_comy_ctop v_comz_ctop v_comx_cbot v_comy_cbot v_comz_cbot file sheetonsheet/h-MoS2/100x_100y/K300/results/friction_p${pressure}_a${a}_s${speed}
+
+run             500000
+
+
+

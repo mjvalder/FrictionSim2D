@@ -1,0 +1,164 @@
+{
+  "general": {
+    "temp": 300.0,
+    "force": null,
+    "pressure": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.25,
+      1.5,
+      1.75,
+      2.0,
+      2.25,
+      2.5,
+      2.75,
+      3.0,
+      3.25,
+      3.5,
+      3.75,
+      4.0,
+      4.25,
+      4.5,
+      4.75,
+      5.0
+    ],
+    "scan_angle": 90.0,
+    "scan_speed": 20.0,
+    "outer_loop": "pressure",
+    "bond_spring": 80.0,
+    "driving_spring": 800.0
+  },
+  "sheet": {
+    "mat": "h-MoS2",
+    "pot_type": "rebomos",
+    "pot_path": "examples/potentials/rebo/MoS.rebomos",
+    "cif_path": "examples/materials/h-MoS2.cif",
+    "x": 100.0,
+    "y": 100.0,
+    "layers": [
+      5
+    ],
+    "stack_type": "AA",
+    "lat_c": null
+  },
+  "settings": {
+    "geometry": {
+      "tip_reduction_factor": 2.25,
+      "rigid_tip": false,
+      "tip_base_z": 55.0,
+      "lat_c_default": 6.0
+    },
+    "thermostat": {
+      "type": "nose-hoover",
+      "time_integration": "nvt",
+      "langevin_boundaries": {
+        "tip": {
+          "fix": [
+            3.0,
+            0.0
+          ],
+          "thermo": [
+            6.0,
+            3.0
+          ]
+        },
+        "sub": {
+          "fix": [
+            0.0,
+            0.3
+          ],
+          "thermo": [
+            0.3,
+            0.6
+          ]
+        }
+      }
+    },
+    "simulation": {
+      "timestep": 0.001,
+      "thermo": 10000,
+      "min_style": "cg",
+      "minimization_command": "minimize 1e-4 1e-8 1000000 1000000",
+      "neighbor_list": 0.3,
+      "neigh_modify_command": "neigh_modify    every 1 delay 0 check yes",
+      "slide_run_steps": 500000,
+      "drive_method": "fix_move",
+      "constraint_mode": "none"
+    },
+    "quench": {
+      "run_local": true,
+      "n_procs": 16,
+      "quench_slab_dims": [
+        200,
+        200,
+        50
+      ],
+      "quench_rate": 1000000000000.0,
+      "melt_temp": 2500.0,
+      "quench_temp": 300.0,
+      "timestep": 0.001,
+      "melt_steps": 50000,
+      "quench_steps": 100000,
+      "equilibrate_steps": 20000
+    },
+    "output": {
+      "dump": {
+        "system_init": true,
+        "slide": true
+      },
+      "dump_frequency": {
+        "system_init": 10000,
+        "slide": 10000
+      },
+      "results_frequency": 1000
+    },
+    "potential": {
+      "lj_cutoff": 12.0,
+      "lj_type": "LJ_base",
+      "reaxff_safezone": 1.2,
+      "reaxff_mincap": 50
+    },
+    "hpc": {
+      "scheduler_type": "pbs",
+      "queue": null,
+      "partition": null,
+      "account": "",
+      "hpc_host": "mv923@dtn-b.hpc.ic.ac.uk",
+      "hpc_home": "/rds/general/user/mv923/home/",
+      "scratch_dir": "$EPHEMERAL",
+      "num_nodes": 1,
+      "num_cpus": 32,
+      "memory_gb": 62,
+      "walltime_hours": 20,
+      "max_array_size": 300,
+      "modules": [
+        "tools/prod",
+        "LAMMPS/29Aug2024-foss-2023b-kokkos"
+      ],
+      "mpi_command": "mpirun",
+      "use_tmpdir": true,
+      "lammps_scripts": [
+        "slide.in"
+      ]
+    },
+    "aiida": {
+      "enabled": false,
+      "lammps_code_label": "lammps@my_hpc",
+      "postprocess_code_label": "python@my_hpc",
+      "postprocess_script_path": "/path/to/your/read_data.py",
+      "create_provenance": true,
+      "auto_import_results": false,
+      "hpc_mode": "offline",
+      "computer_label": "localhost",
+      "transport": "local",
+      "hostname": null,
+      "workdir": null,
+      "username": null,
+      "ssh_port": 22,
+      "key_filename": null
+    }
+  }
+}
