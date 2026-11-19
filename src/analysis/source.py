@@ -1,0 +1,226 @@
+"""The points an analysis reads: one dataset's integrity-pass rows, and the
+stored files behind each of them.
+
+:class:`RunSource` holds the rows; what it reads per row goes through a
+fetcher -- :class:`StoreFetcher` against the loaded AiiDA profile, or any
+object with the same methods in a test.
+"""
+from __future__ import annotations
+
+import re
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
+
+import pandas as pd
+
+__all__ = ['PASS_STATUS', 'RunSource', 'StoreFetcher']
+
+#: The verdict status of an integrity-pass point (`steps._dataset_rows` keeps
+#: only these; `steps.postprocess_group` summarises only these).
+PASS_STATUS = 'complete'
+
+SnapshotKind = Literal['load', 'final']
+
+#: `calcjob._LOAD_FILE_RE`: a system deck's loaded structure.
+_LOAD_FILE_RE = re.compile(r'^load_(?P<load>[-+0-9.eE]+)N\.data$')
+#: `calcjob._TOL`.
+_TOL = 1e-9
+#: The settings file a deck includes (`calcjob.included_files`).
+_SETTINGS_NAME = 'system.in.settings'
+#: The link-label prefix of a CalcJob's ``points`` namespace.
+_POINTS_PREFIX = 'points__'
+
+
+class RunSource:
+    """The integrity-pass rows of one dataset, for one family.
+
+    ``rows`` (any rows; non-pass ones are dropped here) is a DataFrame of
+    :func:`src.aiida.query.dataset_rows` rows. ``family`` is checked against
+    the rows' ``family`` column, or taken from it when None. ``fetch`` reads
+    a row's stored files (:class:`StoreFetcher` by default).
+
+    Raises:
+        ValueError: the rows hold more than one family, or not ``family``.
+    """
+
+    def __init__(self, rows: pd.DataFrame, family: Optional[str] = None,
+                 fetch: Any = None) -> None:
+        found = sorted(set(rows['family'].dropna())) if 'family' in rows else []
+        if len(found) > 1:
+            raise ValueError(f'a dataset mixes families {found}; an analysis reads '
+                             f'one family -- build one dataset per family')
+        if family is None:
+            if not found:
+                raise ValueError('no family given and the rows carry none')
+            family = found[0]
+        elif found and found != [family]:
+            raise ValueError(f'rows are family {found[0]!r}, not {family!r}')
+        self.family: str = family
+        self.all_rows = rows.reset_index(drop=True)
+        passed = self.all_rows['verdict_status'] == PASS_STATUS
+        self.rows = self.all_rows[passed].reset_index(drop=True)
+        self.dropped: List[Tuple[str, str]] = [
+            (str(r.point_uuid), str(r.verdict_status))
+            for r in self.all_rows[~passed].itertuples()]
+        self._fetch = fetch if fetch is not None else StoreFetcher()
+
+    @classmethod
+    def from_dataset(cls, name: str) -> 'RunSource':
+        """The source of the dataset ``friction2d/datasets/<name>`` (the
+        profile must be loaded)."""
+        from ..aiida.query import dataset_rows  # pylint: disable=import-outside-toplevel
+        rows, _units = dataset_rows(name)
+        return cls(pd.DataFrame(rows), None, StoreFetcher())
+
+    def frames(self, row: Any) -> Dict[str, pd.DataFrame]:
+        """``tier -> DataFrame`` of one row's point."""
+        return self._fetch.frames(row)
+
+    def snapshot(self, row: Any, kind: SnapshotKind) -> Optional[Path]:
+        """A temporary copy of the row's ``load`` or ``final`` snapshot, or
+        None when the store has none."""
+        if kind not in ('load', 'final'):
+            raise ValueError(f'unknown snapshot kind {kind!r} (load or final)')
+        return self._fetch.snapshot(row, kind)
+
+    def settings_text(self, row: Any) -> str:
+        """The run's ``system.in.settings``."""
+        return self._fetch.settings_text(row)
+
+    def structure_text(self, row: Any) -> Optional[str]:
+        """The run's built ``<mat>_<n>.lmp``, or None when not stored."""
+        return self._fetch.structure_text(row)
+
+
+class StoreFetcher:
+    """Reads a row's files from the loaded AiiDA profile.
+
+    Snapshots are copied into one temporary directory that lives as long as
+    this fetcher.
+    """
+
+    def __init__(self) -> None:
+        self._tmp: Optional[tempfile.TemporaryDirectory] = None
+
+    def close(self) -> None:
+        """Remove the snapshot copies handed out so far."""
+        if self._tmp is not None:
+            self._tmp.cleanup()
+            self._tmp = None
+
+    def frames(self, row: Any) -> Dict[str, pd.DataFrame]:
+        """`src.aiida.query.point_frames` of the row."""
+        from ..aiida.query import point_frames  # pylint: disable=import-outside-toplevel
+        return point_frames(row.calc_uuid, row.node_uuid)
+
+    def snapshot(self, row: Any, kind: SnapshotKind) -> Optional[Path]:
+        """``final``: the CalcJob's ``snapshots.<point label>`` output
+        (`calcjob.py:192-194`). ``load``: the ``load_<F>N.data`` structure of
+        the row's load, an input or output ``structures`` node of the run's
+        CalcJobs (`calcjob.py:172-176, 195-197`)."""
+        from aiida import orm  # pylint: disable=import-outside-toplevel
+        calc = orm.load_node(row.calc_uuid)
+        node = None
+        if kind == 'final':
+            label = _point_label(orm.load_node(row.node_uuid))
+            if 'snapshots' in calc.outputs and label in calc.outputs.snapshots:
+                node = calc.outputs.snapshots[label]
+        else:
+            node = next((n for n in _structure_nodes(calc)
+                         if _is_load_file(n.filename, float(row.load))), None)
+        if node is None:
+            return None
+        if self._tmp is None:
+            # Lives as long as the fetcher (`close`): the caller reads the
+            # returned path after this returns, so no `with`.
+            self._tmp = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
+                prefix='friction2d-analysis-')
+        path = Path(self._tmp.name) / node.uuid / node.filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(node.get_content(mode='rb'))
+        return path
+
+    def settings_text(self, row: Any) -> str:
+        """``system.in.settings`` from the ``includes`` of the run's CalcJobs
+        (`calcjob.py:158-160`).
+
+        Raises:
+            LookupError: no CalcJob of the run includes it.
+        """
+        from aiida import orm  # pylint: disable=import-outside-toplevel
+        for calc in _run_calcs(orm.load_node(row.calc_uuid)):
+            if 'includes' not in calc.inputs:
+                continue
+            for node in calc.inputs.includes.values():
+                if node.filename == _SETTINGS_NAME:
+                    return node.get_content()
+        raise LookupError(f'run {row.run_uuid}: no CalcJob includes {_SETTINGS_NAME}')
+
+    def structure_text(self, row: Any) -> Optional[str]:
+        """The built ``<mat>_<n_layers>.lmp`` (`construction/components.py:2636`)
+        among the ``structures`` inputs of the run's CalcJobs, or None."""
+        from aiida import orm  # pylint: disable=import-outside-toplevel
+        calc = orm.load_node(row.calc_uuid)
+        n_layers = int(calc.inputs.parameters.get_dict()['n_layers'])
+        pattern = re.compile(rf'^.+_{n_layers}\.lmp$')
+        hits = {n.filename: n for c in _run_calcs(calc) if 'structures' in c.inputs
+                for n in c.inputs.structures.values() if pattern.match(n.filename)}
+        if not hits:
+            return None
+        if len(hits) > 1:
+            named = [h for m in _materials(row) for h in hits if h == f'{m}_{n_layers}.lmp']
+            if len(named) != 1:
+                raise LookupError(f'run {row.run_uuid}: {sorted(hits)} all match '
+                                  f'<mat>_{n_layers}.lmp')
+            return hits[named[0]].get_content()
+        return next(iter(hits.values())).get_content()
+
+
+def _point_label(point: Any) -> str:
+    """The ``points`` namespace key the point was output under."""
+    from aiida.common.links import LinkType  # pylint: disable=import-outside-toplevel
+    for link in point.base.links.get_incoming(link_type=LinkType.CREATE).all():
+        if link.link_label.startswith(_POINTS_PREFIX):
+            return link.link_label[len(_POINTS_PREFIX):]
+    raise LookupError(f'point node {point.uuid} is no points output')
+
+
+def _run_calcs(calc: Any) -> List[Any]:
+    """``calc`` first, then the run's other live friction2d CalcJobs."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from ..aiida.store import RUN_UUID_EXTRA  # pylint: disable=import-outside-toplevel
+    run_uuid = calc.base.extras.get(RUN_UUID_EXTRA, None)
+    others: List[Any] = []
+    if run_uuid is not None:
+        qb = orm.QueryBuilder().append(
+            orm.CalcJobNode, filters={f'extras.{RUN_UUID_EXTRA}': run_uuid,
+                                      'uuid': {'!==': calc.uuid}},
+            project=['*'])
+        others = sorted((n for n in qb.all(flat=True)
+                         if not n.base.extras.get('superseded', False)),
+                        key=lambda n: n.uuid)
+    return [calc, *others]
+
+
+def _structure_nodes(calc: Any) -> List[Any]:
+    """The ``structures`` inputs and outputs of the run's CalcJobs."""
+    nodes: List[Any] = []
+    for each in _run_calcs(calc):
+        for links in (each.inputs, each.outputs):
+            if 'structures' in links:
+                nodes += list(links.structures.values())
+    return nodes
+
+
+def _is_load_file(filename: str, load: float) -> bool:
+    match = _LOAD_FILE_RE.match(filename)
+    return bool(match) and abs(float(match['load']) - load) <= _TOL
+
+
+def _materials(row: Any) -> List[str]:
+    value = getattr(row, 'materials', None)
+    if isinstance(value, str):
+        return [value]
+    return list(value or [])
