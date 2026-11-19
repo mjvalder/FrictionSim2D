@@ -39,9 +39,6 @@ __all__ = ['ANALYSIS_GROUP_PREFIX', 'find_result', 'params_hash', 'record_analys
 
 #: The Group of a dataset's results is this plus the dataset name.
 ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
-_DATASET_GROUP_PREFIX = 'friction2d/datasets/'
-#: `src.aiida.steps.DATASET_EXTRA`, the extra naming a dataset's table Dict.
-_DATASET_EXTRA = 'friction2d_dataset'
 _CSV_NAME = 'table.csv'
 
 #: The table and drops :func:`record_analysis` stores. Not calcfunction inputs:
@@ -80,17 +77,6 @@ def record_analysis(dataset, params):  # pylint: disable=unused-argument
     return node
 
 
-def _dataset_table(name: str):
-    qb = orm.QueryBuilder().append(
-        orm.Group, tag='g', filters={'label': f'{_DATASET_GROUP_PREFIX}{name}'})
-    qb.append(orm.Dict, with_group='g', filters={f'extras.{_DATASET_EXTRA}': name},
-              project=['*'])
-    tables = qb.all(flat=True)
-    if not tables:
-        raise LookupError(f'no dataset {name!r} ({_DATASET_GROUP_PREFIX}{name})')
-    return tables[0]
-
-
 def _params_dict(params: Union[BaseModel, Mapping[str, Any], None]) -> Dict[str, Any]:
     if params is None:
         return {}
@@ -109,16 +95,19 @@ def store_result(analysis: AnalysisLike, dataset: str,
     Raises:
         LookupError: no dataset of that name.
     """
-    values = _params_dict(params)
+    # pylint: disable=import-outside-toplevel
+    from .source import dataset_table
+    values = _params_dict(analysis.Params(**_params_dict(params)))
     digest = params_hash(values)
     pairs = [[str(uuid), str(reason)] for uuid, reason in dropped]
     token = _PENDING.set((_to_csv(table), pairs))
     try:
         node = record_analysis(
-            _dataset_table(dataset),
+            dataset_table(dataset),
             orm.Dict({'analysis': analysis.name, 'version': analysis.version,
                       'params': values}),
-            metadata={'label': f'{analysis.name}:{dataset}'})
+            # Never a cache hit: the table is not a function of the inputs.
+            metadata={'label': f'{analysis.name}:{dataset}', 'disable_cache': True})
     finally:
         _PENDING.reset(token)
     node.base.extras.set_many({
@@ -145,7 +134,13 @@ def _find_node(name: str, dataset: str, digest: Optional[str], version: Optional
 def find_result(name: str, dataset: str, params_hash: Optional[str] = None,  # pylint: disable=redefined-outer-name
                 version: Optional[str] = None) -> Optional[pd.DataFrame]:
     """The newest stored table of analysis ``name`` over ``dataset`` (with
-    that ``params_hash`` and ``version``, when given), or None."""
+    that ``params_hash``, when given), or None. ``version`` defaults to the
+    registered analysis' current one; an unregistered name needs it given."""
+    if version is None:
+        try:
+            version = get_analysis(name).version
+        except KeyError:
+            pass
     node = _find_node(name, dataset, params_hash, version)
     if node is None:
         return None
@@ -173,10 +168,11 @@ def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
         node = _find_node(name, dataset, digest, cls.version)
         if node is not None:
             return _from_csv(node.get_content(mode='rb'))
-    source = RunSource.from_dataset(dataset)
-    if source.family not in cls.families:
-        raise ValueError(f'{name} reads families {sorted(cls.families)}, '
-                         f'not {source.family!r} (dataset {dataset!r})')
-    table = cls().compute(source, model)
-    uuid = store_result(cls, dataset, values, table, dropped=source.dropped)
+    with RunSource.from_dataset(dataset) as source:
+        if source.family not in cls.families:
+            raise ValueError(f'{name} reads families {sorted(cls.families)}, '
+                             f'not {source.family!r} (dataset {dataset!r})')
+        table = cls().compute(source, model)
+        dropped = source.dropped
+    uuid = store_result(cls, dataset, values, table, dropped=dropped)
     return _from_csv(orm.load_node(uuid).get_content(mode='rb'))

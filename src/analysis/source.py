@@ -7,6 +7,7 @@ object with the same methods in a test.
 """
 from __future__ import annotations
 
+import logging
 import re
 import tempfile
 from pathlib import Path
@@ -14,7 +15,9 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import pandas as pd
 
-__all__ = ['PASS_STATUS', 'RunSource', 'StoreFetcher']
+logger = logging.getLogger(__name__)
+
+__all__ = ['PASS_STATUS', 'RunSource', 'StoreFetcher', 'dataset_table']
 
 #: The verdict status of an integrity-pass point (`steps._dataset_rows` keeps
 #: only these; `steps.postprocess_group` summarises only these).
@@ -65,13 +68,33 @@ class RunSource:
             for r in self.all_rows[~passed].itertuples()]
         self._fetch = fetch if fetch is not None else StoreFetcher()
 
+    def __enter__(self) -> 'RunSource':
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Release what the fetcher holds (its snapshot copies)."""
+        close = getattr(self._fetch, 'close', None)
+        if close is not None:
+            close()
+
     @classmethod
     def from_dataset(cls, name: str) -> 'RunSource':
         """The source of the dataset ``friction2d/datasets/<name>`` (the
-        profile must be loaded)."""
+        profile must be loaded).
+
+        A dataset holds only ``complete`` points (`steps._dataset_rows`), so
+        the rest of its sets' live points are added here, with the verdict
+        the dataset's own policy selects: they land in ``all_rows`` and
+        ``dropped``, never in ``rows``.
+        """
         from ..aiida.query import dataset_rows  # pylint: disable=import-outside-toplevel
         rows, _units = dataset_rows(name)
-        return cls(pd.DataFrame(rows), None, StoreFetcher())
+        excluded = _excluded_rows(dataset_table(name),
+                                  {(r['calc_uuid'], r['point_uuid']) for r in rows})
+        return cls(pd.DataFrame(rows + excluded), None, StoreFetcher())
 
     def frames(self, row: Any) -> Dict[str, pd.DataFrame]:
         """``tier -> DataFrame`` of one row's point."""
@@ -175,6 +198,71 @@ class StoreFetcher:
                                   f'<mat>_{n_layers}.lmp')
             return hits[named[0]].get_content()
         return next(iter(hits.values())).get_content()
+
+
+def dataset_table(name: str) -> Any:
+    """The table ``Dict`` of the dataset ``friction2d/datasets/<name>`` (the
+    query of :func:`src.aiida.query.dataset_rows`).
+
+    Raises:
+        LookupError: no dataset of that name.
+    """
+    # pylint: disable=import-outside-toplevel
+    from aiida import orm
+
+    from ..aiida.steps import DATASET_EXTRA, DATASET_PREFIX
+    qb = orm.QueryBuilder().append(
+        orm.Group, tag='g', filters={'label': f'{DATASET_PREFIX}/{name}'})
+    qb.append(orm.Dict, with_group='g', filters={f'extras.{DATASET_EXTRA}': name},
+              project=['*'])
+    tables = qb.all(flat=True)
+    if not tables:
+        raise LookupError(f'no dataset {name!r} ({DATASET_PREFIX}/{name})')
+    return tables[0]
+
+
+def _excluded_rows(table: Any, kept: set) -> List[Dict[str, Any]]:
+    """Rows for the live points of the dataset's sets that it left out for
+    their verdict: the identity columns `query._points` gives every point,
+    plus ``set``, ``verdict_uuid`` and ``verdict_status`` (``None`` for a
+    point with no verdict). The selection is `steps._dataset_rows`' own
+    (steps.py:1722-1727) under the dataset's stored policy.
+
+    A ``complete`` point the dataset left out (it had no summary under the
+    dataset's options) is not a drop for its verdict; it is logged and left out.
+    """
+    # pylint: disable=import-outside-toplevel,protected-access
+    from ..aiida import query, steps
+    from ..aiida.rulings import Policy
+    policy = Policy.from_dict(table.get('policy') or {})
+    identity = {(r['calc_uuid'], r['point_uuid']): r
+                for r in query._points(include_superseded=True).rows}
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for label in table.get('labels') or []:
+        points = [p for p in steps._live_points(steps._set_group(label))
+                  if p.pk not in seen]
+        verdicts = steps.latest_verdicts(points, policy)
+        for point in points:
+            seen.add(point.pk)
+            key = (point.creator.uuid, point.base.attributes.get('point_uuid'))
+            if key in kept:
+                continue
+            verdict = verdicts.get(point.pk)
+            status = None if verdict is None else verdict['status']
+            if status == PASS_STATUS:
+                logger.info('dataset %r: complete point %s is not in it (no summary)',
+                            table.get('name'), key[1])
+                continue
+            row = {k: v for k, v in identity.get(key, {}).items()
+                   if k not in ('superseded', 'set_labels')}
+            row.update({'set': label, 'calc_uuid': key[0], 'point_uuid': key[1],
+                        'node_uuid': point.uuid,
+                        'family': point.base.attributes.get('family'),
+                        'verdict_uuid': None if verdict is None else verdict.uuid,
+                        'verdict_status': status or 'no_verdict'})
+            out.append(row)
+    return out
 
 
 def _point_label(point: Any) -> str:

@@ -95,6 +95,14 @@ def probe(monkeypatch):
     return _Probe
 
 
+def _point_uuid(load):
+    """The `point_uuid` identity of the live point at ``load``."""
+    qb = orm.QueryBuilder().append(orm.FolderData, filters={'attributes.load': load},
+                                   project=['attributes.point_uuid'])
+    (found,) = {u for u in qb.all(flat=True) if u}
+    return found
+
+
 def _results(dataset='paper'):
     group = orm.load_group(f'{ANALYSIS_GROUP_PREFIX}{dataset}')
     return [n for n in group.nodes if isinstance(n, orm.SinglefileData)]
@@ -110,7 +118,8 @@ def test_identical_rerun_reuses_the_result(store, probe):
     extras = node.base.extras.all
     assert extras['analysis'] == 'probe' and extras['version'] == '1'
     assert extras['dataset'] == 'paper'
-    assert extras['n_rows'] == 2 and extras['n_dropped'] == 0
+    assert extras['n_rows'] == 2 and extras['n_dropped'] == 1
+    assert node.base.attributes.get('dropped') == [[_point_uuid(10.0), 'failed_integrity']]
     func = node.creator
     assert func.process_label == 'record_analysis'
     assert func.inputs.dataset.base.extras.get('friction2d_dataset') == 'paper'
@@ -140,6 +149,27 @@ def test_new_params_make_a_new_result(store, probe):
     assert find_result('other', 'paper') is None
 
 
+def test_find_result_defaults_to_the_current_version(store, probe, monkeypatch):
+    run_analysis('probe', 'paper')
+
+    assert find_result('probe', 'paper') is not None
+    monkeypatch.setattr(probe, 'version', '2')
+    assert find_result('probe', 'paper') is None
+    assert find_result('probe', 'paper', version='1') is not None
+
+
+def test_stored_result_is_found_by_run_analysis(store, probe):
+    """`store_result` and `run_analysis` hash the same params alike: both
+    normalise through `Params` (defaults filled in)."""
+    table = pd.DataFrame({'run_uuid': ['r'], 'value': [0.5]})
+    store_result(probe, 'paper', {}, table, dropped=[])
+
+    back = run_analysis('probe', 'paper', {'scale': 1.0})
+
+    assert probe.calls == []
+    pd.testing.assert_frame_equal(back, table)
+
+
 def test_result_round_trips_floats_exactly(store, probe):
     table = pd.DataFrame({'run_uuid': ['r'] * len(AWKWARD), 'value': AWKWARD,
                           'n': list(range(len(AWKWARD)))})
@@ -156,10 +186,18 @@ def test_result_round_trips_floats_exactly(store, probe):
 
 
 def test_store_source_reads_frames_snapshot_settings_and_structure(store):
-    source = RunSource.from_dataset('paper')
+    with RunSource.from_dataset('paper') as source:
+        _check_source(source)
+        kept = source.snapshot(next(source.rows.itertuples()), 'final')
+        assert kept.is_file()
+    assert not kept.exists(), 'closing the source removes its snapshot copies'
 
+
+def _check_source(source):
     assert source.family == 'afm'
     assert sorted(source.rows.load) == [30.0, 50.0]
+    assert sorted(source.all_rows.load) == [10.0, 30.0, 50.0]
+    assert source.dropped == [(_point_uuid(10.0), 'failed_integrity')]
     row = next(source.rows.itertuples())
     assert 'window' in source.frames(row)
     final = source.snapshot(row, 'final')
