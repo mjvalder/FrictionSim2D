@@ -441,6 +441,10 @@ class IntegrityPanelPlot(PlotBase):
         None,
         description='run_id, step, temp_sheet_3d, comz_L1, comz_L2')
     status_file: Optional[TableSource] = Field(None, description='run_id, force, status')
+    title_status: Literal['completion', 'verdict'] = Field(
+        'completion',
+        description="Dataset panels: 'completion' titles a failed-integrity run as finished "
+                    "(as the published panels); 'verdict' shows its integrity verdict")
     dpi: Optional[int] = None
 
 

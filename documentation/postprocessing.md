@@ -927,6 +927,7 @@ against.
 | `loads` | `Optional[List[float]]` |  |
 | `traces_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, step, temp_sheet_3d, comz_L1, comz_L2 |
 | `status_file` | `Optional[src.postprocessing.plot_config.TableSource]` | run_id, force, status |
+| `title_status` | `Literal['completion', 'verdict']` | Dataset panels: 'completion' titles a failed-integrity run as finished (as the published panels); 'verdict' shows its integrity verdict |
 | `dpi` | `Optional[int]` |  |
 
 ## Settings and presets

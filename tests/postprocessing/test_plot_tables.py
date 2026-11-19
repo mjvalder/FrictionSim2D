@@ -315,8 +315,7 @@ def test_a_dataset_panel_without_the_material_names_it(tmp_path, dataset_source)
                                'dataset': 'paper', 'material': 'Q', 'loads': [10]})
 
 
-def test_a_dataset_panel_titles_each_load_with_its_stored_verdict(
-        tmp_path, dataset_source, monkeypatch):
+def _panel_titles(tmp_path, monkeypatch, **extra):
     import matplotlib.axes  # pylint: disable=import-outside-toplevel
     titles = []
     original = matplotlib.axes.Axes.set_title
@@ -329,6 +328,22 @@ def test_a_dataset_panel_titles_each_load_with_its_stored_verdict(
     plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
     plotter.generate_plot({'plot_type': 'integrity_panel', 'filename': 'i.png',
                            'material': 'M', 'dataset': 'paper', 'layer': 2,
-                           'loads': [10, 20], 'traces_file': str(traces)})
-    assert titles[0] == '10 nN'
-    assert titles[1] == '20 nN\nfailed_integrity'
+                           'loads': [10, 20], 'traces_file': str(traces), **extra})
+    return titles
+
+
+def test_a_dataset_panel_titles_show_completion_by_default(tmp_path, dataset_source,
+                                                           monkeypatch):
+    assert _panel_titles(tmp_path, monkeypatch)[:2] == ['10 nN', '20 nN']   # failed_integrity finished
+
+
+def test_a_dataset_panel_can_title_the_integrity_verdict(tmp_path, dataset_source, monkeypatch):
+    titles = _panel_titles(tmp_path, monkeypatch, title_status='verdict')
+    assert titles[:2] == ['10 nN', '20 nN\nfailed_integrity']
+
+
+def test_a_pressure_load_has_its_own_status_key(dataset_source):
+    from src.postprocessing.plot_tables import _DatasetRunFiles  # pylint: disable=import-outside-toplevel
+    files = _DatasetRunFiles('paper', 'M', 2)
+    files.rows = files.rows.assign(load=[0.5, 20.0])
+    assert files.statuses('verdict') == {0.5: 'complete', 20.0: 'failed_integrity'}

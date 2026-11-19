@@ -1,8 +1,10 @@
 """Integrity traces and run status: the two tables that show failures.
 
-Unlike every other analysis, these two keep the points whose integrity
-verdict is not ``complete`` -- a trace or a status of a failed point is what
-they exist to show. Neither records a non-pass point as dropped.
+Unlike every other analysis, these two keep the points that are not
+integrity-pass (a ``failed_integrity`` point, an unfinished one): a trace or a
+status of such a point is what they exist to show. Neither records a
+non-pass point as dropped; ``integrity_traces`` drops only a point with no
+window tier to trace.
 
 ``integrity_traces`` is the window tier per sample (``run_id, step,
 temp_sheet_3d, comz_L1, comz_L2``, as ML_taxonomy's ``integrity_traces_l2.csv``,
@@ -10,7 +12,9 @@ plus ``gap = comz_L2 - comz_L1``) with the point's stored s48 measures
 (``hole, isolated, ejected, T_sigma, gap_rise``) read from its verdict
 (``steps.check_integrity`` keeps them under ``measures``), never recomputed.
 ``run_status`` is one row per point: ``run_id, material, layer, force, angle,
-status`` (``run_status_l2.csv``'s columns).
+status`` (``run_status_l2.csv``'s columns) plus ``verdict``. ``status`` is the
+run's completion status (:func:`completion_status`), ``verdict`` the stored
+integrity verdict.
 """
 from __future__ import annotations
 
@@ -23,13 +27,23 @@ from pydantic import BaseModel
 from .base import Analysis, register
 from .periods import summary_identity
 
-__all__ = ['MEASURES', 'NO_WINDOW', 'IntegrityTraces', 'RunStatus', 'run_id']
+__all__ = ['MEASURES', 'NO_WINDOW', 'IntegrityTraces', 'RunStatus', 'completion_status',
+           'run_id']
 
 #: The stored s48 measures carried per run (`integrity._RULES`' measure keys).
 MEASURES = ('hole', 'isolated', 'ejected', 'T_sigma', 'gap_rise')
 #: The drop reason of a point with no window tier to trace (halted, not reached, ...).
 NO_WINDOW = 'no_window_tier'
 _TRACE = ('temp_sheet_3d', 'comz_L1', 'comz_L2')
+
+
+def completion_status(verdict_status: Any) -> Any:
+    """The run's completion status from its integrity verdict status: a
+    ``failed_integrity`` or ``quarantined`` run finished, so it is
+    ``complete``, as in ``run_status_l2.csv``; any other status is unchanged.
+    (A ruling only moves a point between these, so ``original_status`` adds
+    nothing.)"""
+    return 'complete' if verdict_status in ('failed_integrity', 'quarantined') else verdict_status
 
 
 def run_id(row: Any) -> str:
@@ -96,12 +110,16 @@ class RunStatus(Analysis):  # pylint: disable=too-few-public-methods
         """One row per point of ``source.all_rows``. Nothing is dropped: the
         non-pass points :class:`RunSource` pre-lists in ``dropped`` are rows
         here, so the list is cleared and the stored result's ``n_dropped`` is 0."""
+        # `store.run_analysis` reads `source.dropped` after `compute`, so clearing
+        # it here is what makes the stored `n_dropped` 0.
         source.dropped.clear()
         out = []
         for row in source.all_rows.itertuples():
             ident = summary_identity(row)
             out.append({'run_id': run_id(row), 'material': ident['material'],
                         'layer': ident['layer'], 'force': ident['force'],
-                        'angle': ident['angle'], 'status': row.verdict_status})
+                        'angle': ident['angle'],
+                        'status': completion_status(row.verdict_status),
+                        'verdict': row.verdict_status})
         return pd.DataFrame(out, columns=['run_id', 'material', 'layer', 'force', 'angle',
-                                          'status'])
+                                          'status', 'verdict'])

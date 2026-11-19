@@ -164,13 +164,16 @@ class _DatasetRunFiles:
         text = self.source.settings_text(next(self.rows.itertuples()))
         return parse_type_groups(text)
 
-    def statuses(self) -> dict:
-        """``{load: verdict status}`` of the points at 0 degrees: what the
-        store says of each load, a failed or unfinished one included."""
+    def statuses(self, kind: str = 'completion') -> dict:
+        """``{load: status}`` of the points at 0 degrees: the run's completion
+        status (a failed-integrity run finished) or, for ``kind='verdict'``,
+        the stored integrity verdict."""
+        from ..analysis.integrity_traces import completion_status  # pylint: disable=import-outside-toplevel
         rows = self.rows
         if 'angle' in rows:
             rows = rows[rows['angle'].astype(float) == 0.0]
-        return {int(load): str(status) for load, status
+        pick = str if kind == 'verdict' else (lambda v: str(completion_status(v)))
+        return {float(load): pick(status) for load, status
                 in zip(rows['load'].astype(float), rows['verdict_status'])}
 
     def snapshot(self, load: float, kind: str) -> Path | None:
@@ -372,9 +375,9 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
         if plot_config.get('status_file'):
             st = self._table(plot_config['status_file'], ['run_id', 'force', 'status'])
             st = st[st['run_id'].str.startswith(prefix)]
-            status = dict(zip(st['force'].astype(int), st['status']))
+            status = dict(zip(st['force'].astype(float), st['status']))
         elif hasattr(run, 'statuses'):     # a dataset: the stored verdicts say which failed
-            status = run.statuses()
+            status = run.statuses(plot_config.get('title_status') or 'completion')
         ex = self._table(self._required(plot_config, 'traces_file'),
                          ['run_id', 'step', 'temp_sheet_3d'])
         ex = ex[ex['run_id'].str.startswith(prefix)].sort_values(["run_id", "step"])
@@ -396,7 +399,7 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
         colour = {'layer_1': "tab:blue", 'layer_2': "tab:orange"}
         for j, force in enumerate(loads):
             col = {r: ax[i, j] for i, r in enumerate(rows)}
-            st = status.get(int(force), "complete" if not status else "not_reached")
+            st = status.get(float(force), "complete" if not status else "not_reached")
             col["side"].set_title(
                 f"{force:g} nN" + ("" if st == "complete" else f"\n{_STATUS_TEXT.get(st, st)}"),
                 fontsize=10, color="k" if st == "complete" else "firebrick")

@@ -80,12 +80,22 @@ def test_run_status_has_one_row_per_point_and_drops_none():
     source = _source()
     assert len(source.dropped) == 3          # RunSource itself records the non-pass points
     table = _compute('run_status', source)
-    assert list(table.columns) == ['run_id', 'material', 'layer', 'force', 'angle', 'status']
+    assert list(table.columns) == ['run_id', 'material', 'layer', 'force', 'angle', 'status',
+                                   'verdict']
     assert table['run_id'].tolist() == ['h_M/l2/f10/a0', 'h_M/l2/f20/a0', 'h_M/l2/f30/a0',
                                         'h_M/l2/f40/a0']
-    assert table['status'].tolist() == ['complete', 'failed_integrity', 'halted', 'not_reached']
+    # status: the run's completion (a failed-integrity run finished); verdict: the integrity one
+    assert table['status'].tolist() == ['complete', 'complete', 'halted', 'not_reached']
+    assert table['verdict'].tolist() == ['complete', 'failed_integrity', 'halted', 'not_reached']
     assert table['force'].tolist() == [10.0, 20.0, 30.0, 40.0]
     assert source.dropped == [], 'run_status drops nothing: the non-pass points are its rows'
+
+
+def test_completion_status_maps_integrity_verdicts_to_complete():
+    from src.analysis.integrity_traces import completion_status
+    assert [completion_status(v) for v in ('complete', 'failed_integrity', 'quarantined',
+                                           'halted', 'no_output')] == \
+        ['complete', 'complete', 'complete', 'halted', 'no_output']
 
 
 def test_a_pressure_load_is_no_force():
@@ -151,17 +161,18 @@ def test_traces_and_status_match_the_frozen_tables(tmp_path):
     key = ['run_id']
     ours_s = ours_s.set_index(key)
     shared = want_s.set_index(key).join(ours_s, rsuffix='_ours', how='left')
-    status_pairs = shared.groupby(['status', 'status_ours'], dropna=False).size()
-    print(f'status (frozen, ours) counts over all frozen rows:\n{status_pairs}')
-    # The frozen status is the stage-2 one (the run finished: complete, halted,
-    # not_reached, truncated); ours is the stored integrity verdict, which splits a
-    # finished run into complete / failed_integrity (and `no_output` for a crash).
-    # So a frozen `complete` is complete or failed_integrity here, never worse, and
-    # a frozen unfinished status is the same status.
+    print(f'status (frozen, ours) counts over all frozen rows:\n'
+          f'{shared.groupby(["status", "status_ours"], dropna=False).size()}')
+    # status is the completion status of the frozen table; the store differs only where
+    # it holds a crashed / unreached run the frozen file calls halted (listed, not accepted
+    # as either value).
+    known = {('halted', 'no_output'): 3, ('halted', 'not_reached'): 2}
+    got = shared.dropna(subset=['status_ours'])
+    diff = got[got['status'] != got['status_ours']]
+    print(f'divergent: {diff.groupby(["status", "status_ours"]).size().to_dict()}')
+    assert diff.groupby(['status', 'status_ours']).size().to_dict() == known
     mine = shared[shared.index.str.split('/').str[0].isin(mats)]
-    print(f'h_MoS2/h_NiSe2 pairs:\n{mine.groupby(["status", "status_ours"]).size()}')
-    done = mine['status'] == 'complete'
-    assert mine.loc[done, 'status_ours'].isin(['complete', 'failed_integrity']).all()
-    assert (mine.loc[~done, 'status'] == mine.loc[~done, 'status_ours']).all()
+    assert (mine['status'] == mine['status_ours']).all()
     assert (mine['force'] == mine['force_ours']).all()
-    assert (mine.loc[mine['material'] == 'h_MoS2', 'status_ours'] == 'complete').all()
+    assert (mine.loc[mine['material'] == 'h_MoS2', 'verdict'] == 'complete').all()
+    assert (mine.loc[mine['material'] == 'h_NiSe2', 'verdict'] == 'failed_integrity').sum() == 5
