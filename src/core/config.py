@@ -11,6 +11,7 @@ from typing import List, Optional, Union, Dict, Any, Literal, Mapping, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from .mlip import get_mlip, is_mlip
 from .utils.paths import get_material_path, get_potential_path
 from .utils.tokens import _is_float
 
@@ -187,6 +188,27 @@ class PotentialSettings(BaseModel):
         default=50,
         description="Minimum array capacity for ReaxFF internals"
     )
+    d3_functional: str = Field(
+        default='pbe',
+        description="DFT functional whose D3 parameters are used by pair_style dispersion/d3."
+    )
+    d3_damping: Literal['original', 'bj', 'zerom', 'bjm'] = Field(
+        default='bj',
+        description=(
+            "Canonical D3 damping name. The MLIP registry translates it into the "
+            "token the target LAMMPS build accepts (the ACEsuit MACE fork ships an "
+            "older dispersion/d3 than pinned mainline). Emitted syntax is assembled "
+            "in src/core/mlip.py::d3_style_token."
+        )
+    )
+    d3_cutoff: float = Field(
+        default=16.0,
+        description="D3 pair cutoff in Angstrom."
+    )
+    d3_cn_cutoff: float = Field(
+        default=8.0,
+        description="D3 coordination-number cutoff in Angstrom."
+    )
     model_config = {'validate_by_name': True}
 
 class IntegritySettings(BaseModel):
@@ -245,6 +267,39 @@ class IntegritySettings(BaseModel):
         default='1.0.0', description="Version of the integrity rule set")
     model_config = {'validate_by_name': True}
 
+
+class GPUSettings(BaseModel):
+    """GPU resources requested for a job.
+
+    Rendered into the PBS ``select`` line as ``ngpus``/``gpu_type``. ``None``
+    ``gpu_type`` means "whatever the queue's default accelerator is" and the
+    token is then omitted entirely rather than emitted empty.
+    """
+    ngpus: int = 1
+    gpu_type: Optional[str] = None
+
+
+class FrameworkOverlay(BaseModel):
+    """Per-MLIP-framework HPC overrides.
+
+    MACE (ACEsuit fork + Kokkos/libtorch) and DeePMD (pinned mainline +
+    deepmd-kit plugin) are two *incompatible* LAMMPS builds, so a campaign that
+    mixes them must resolve a different binary — and often different modules and
+    environment exports — per framework. This is the settings-side counterpart
+    of ``src.core.mlip.LauncherSpec.binary_key``.
+    """
+    binary: Optional[str] = None
+    modules: List[str] = Field(default_factory=list)
+    env_lines: List[str] = Field(default_factory=list)
+    conda_env: Optional[str] = Field(
+        default=None,
+        description=(
+            "Conda prefix holding this framework's LAMMPS build. When set it "
+            "replaces hpc.conda_env for this framework's job group only."
+        ),
+    )
+
+
 class HPCSettings(BaseModel):
     """HPC cluster and job submission settings."""
     scheduler_type: Literal['pbs', 'slurm'] = 'pbs'
@@ -271,6 +326,59 @@ class HPCSettings(BaseModel):
         'system.in',
         'slide.in'
     ])
+    # --- MLIP additions (all default to "nothing configured" so an untouched
+    # settings.yaml renders byte-identical scripts to before). Clusters are
+    # switched with --settings-file; there are no named profiles. ---
+    env_lines: List[str] = Field(default_factory=list)
+    gpu: Optional[GPUSettings] = None
+    frameworks: Dict[str, FrameworkOverlay] = Field(
+        default_factory=dict,
+        description=(
+            "Per-MLIP-framework overrides keyed by framework name (mace, deepmd). "
+            "Applied per job group by apply_framework_overlay()."
+        ),
+    )
+    lmp_binary: Optional[str] = Field(
+        default=None,
+        description=(
+            "LAMMPS binary for this job group. Set directly, or populated by "
+            "apply_framework_overlay() from a FrameworkOverlay's binary; None "
+            "means the plain 'lmp' on PATH."
+        ),
+    )
+
+
+def apply_framework_overlay(hpc: HPCSettings,
+                            framework: Optional[str]) -> HPCSettings:
+    """Return a copy of ``hpc`` with ``hpc.frameworks[framework]`` merged in.
+
+    MACE and DeePMD are two incompatible LAMMPS builds, so one campaign can
+    need a different binary, modules and environment per framework. Merge
+    rules: the overlay's ``modules`` and ``env_lines`` are appended to the
+    base ones (a framework needs the cluster's modules too); a set ``binary``
+    replaces ``lmp_binary``; a set ``conda_env`` replaces ``conda_env``.
+
+    Args:
+        hpc: base settings, never mutated.
+        framework: MLIP framework name of the job group, or ``None`` for a
+            classical group. A framework with no overlay entry is a no-op.
+
+    Returns:
+        A deep copy of ``hpc``, merged when an overlay applies.
+    """
+    merged = hpc.model_copy(deep=True)
+    overlay = merged.frameworks.get(framework) if framework else None
+    if overlay is None:
+        return merged
+    if overlay.binary:
+        merged.lmp_binary = overlay.binary
+    if overlay.conda_env:
+        merged.conda_env = overlay.conda_env
+    if overlay.modules:
+        merged.modules = list(merged.modules or []) + list(overlay.modules)
+    if overlay.env_lines:
+        merged.env_lines = list(merged.env_lines or []) + list(overlay.env_lines)
+    return merged
 
 
 class AiidaSettings(BaseModel):
@@ -447,6 +555,37 @@ class ComponentConfig(BaseModel):
 
         return str(resolved) if resolved.exists() else v
 
+    @model_validator(mode='after')
+    def validate_mlip_model_extension(self) -> 'ComponentConfig':
+        """A MACE/DeePMD ``pot_path`` must carry that framework's extension.
+
+        The two frameworks ship *incompatible* serialized formats and neither
+        errors cleanly when handed the other's file — LAMMPS either segfaults
+        or silently mis-loads. Catching the mismatch here is the only cheap
+        place. Classical potentials are untouched.
+
+        The accepted extensions live in ``MLIPSpec.file_extensions`` and are
+        **not** restated here, because MACE's changed: it is driven through
+        wcwitt/symmetrix, which consumes a ``.json`` extracted from a torch
+        checkpoint by ``symmetrix_extract_mace``, not the ACEsuit fork's
+        ``.model-lammps.pt``. DeePMD takes a frozen ``.pb``/``.pth``.
+        """
+        pot_type = self.pot_type
+        if not pot_type or not is_mlip(pot_type) or not self.pot_path:
+            return self
+
+        spec = get_mlip(pot_type)
+        if not str(self.pot_path).lower().endswith(
+                tuple(ext.lower() for ext in spec.file_extensions)):
+            raise ValueError(
+                f"pot_type = '{spec.name}' needs a model file whose extension is "
+                f"one of {', '.join(spec.file_extensions)}; got "
+                f"'{self.pot_path}'. A model of the other framework will not "
+                f"load."
+            )
+        return self
+
+
 class TipConfig(ComponentConfig):
     """Tip configuration parameters."""
     r: float = Field(..., description="Tip radius in Angstroms")
@@ -523,6 +662,25 @@ class SubstrateConfig(ComponentConfig):
         """Convert None to default 'c' value."""
         return 'c' if v is None else v
 
+#: Config keys struck by the v4 MLIP redesign. Pydantic *ignores* unknown keys
+#: by default, which for these would silently change a run's physics, so
+#: :meth:`SheetConfig.reject_removed_mlip_keys` rejects them by name with a
+#: pointer at the spec that removed them.
+REMOVED_SHEET_KEYS = {
+    'mlip_interlayer': (
+        "It only ever selected between a partitioned cell ('lj') and full "
+        "coverage ('native'), and the partition is unavailable for BOTH "
+        "frameworks: pair_deepmd rejects NULL type maps ('Pair hybrid "
+        "sub-style deepmd is not used') and refuses type-range pair_coeff "
+        "('deepmd requires that the scale should be set to all atom types', "
+        "pair_deepmd.cpp:816); pair_mace segfaults on NULL (ACEsuit #1314). "
+        "Full-cell is now the ONLY topology, so the key carries no "
+        "information -- delete the line. Interlayer coupling comes from the "
+        "model itself; use 'dispersion = d3' for a vdW correction."
+    ),
+}
+
+
 class SheetConfig(ComponentConfig):
     """Sheet configuration parameters."""
     x: Union[float, List[float]]
@@ -543,6 +701,119 @@ class SheetConfig(ComponentConfig):
             "is built; declared here only so it counts as a known key."
         ),
     )
+    dispersion: Literal['none', 'd3'] = Field(
+        default='none',
+        description=(
+            "Optional Grimme-D3 dispersion overlay (pair_style dispersion/d3). "
+            "Full-cell MLIP coverage only: stock dispersion/d3 needs a real "
+            "element for every atom type, so a partial cell would double-count "
+            "dispersion over the SW/LJ pairs."
+        ),
+    )
+    allow_unbound: bool = Field(
+        default=False,
+        description=(
+            "Escape hatch for running a deliberately unbound multilayer MLIP "
+            "stack (dispersion = 'none' on a framework whose bare model has no "
+            "interlayer binding). This is ONLY for no-D3 control arms, where "
+            "demonstrating the failure is the point. The layers will drift "
+            "apart and interlayer friction/adhesion numbers will be physically "
+            "meaningless -- never set this on a production run."
+        ),
+    )
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_removed_mlip_keys(cls, data):
+        """Fail loudly on keys the v4 redesign removed (v4 spec §5)."""
+        if not isinstance(data, dict):
+            return data
+        for key, reason in REMOVED_SHEET_KEYS.items():
+            if key in data:
+                raise ValueError(
+                    f"'{key}' was removed and is no longer accepted (got "
+                    f"{data[key]!r}). {reason} See "
+                    f"docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md "
+                    f"§5."
+                )
+        return data
+
+    @model_validator(mode='after')
+    def validate_mlip_capability_rules(self) -> 'SheetConfig':
+        """Enforce the v4 config-layer rules for MLIP sheets.
+
+        These come straight from the binding capability matrix
+        (``docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md`` §3/§5);
+        each message names the rule it enforces so a rejected config is
+        self-diagnosing. Cell-level rules that need to see *sibling* components
+        (no classical component alongside an MLIP; no multi-component full cell)
+        cannot be decided here and live in ``mlip.validate_mlip_cell`` instead.
+        """
+        mlip = bool(self.pot_type) and is_mlip(self.pot_type)
+
+        if not mlip:
+            if self.dispersion != 'none':
+                raise ValueError(
+                    f"dispersion = '{self.dispersion}' requires an MLIP pot_type "
+                    f"(mace or deepmd); got '{self.pot_type}'. The dispersion/d3 "
+                    f"overlay is only defined for full-cell MLIP coverage."
+                )
+            return self
+
+        if self.lat_c is None:
+            raise ValueError(
+                f"pot_type = '{self.pot_type}' requires an explicit lat_c. The "
+                f"interlayer distance is normally found by minimizing with the "
+                f"sheet's own potential, but MLIP stacking runs under a "
+                f"pair_style zero surrogate (no MLIP-enabled LAMMPS is assumed on "
+                f"the generation machine), so no minimization can supply it. Use "
+                f"the value from scripts/mlip_bilayer_benchmark.py."
+            )
+
+        # The 'mace => native' and 'd3 => native' rules that used to live here
+        # are gone with mlip_interlayer: full-cell is the only topology, so both
+        # are vacuous. What they were really guarding -- an MLIP or D3 sharing a
+        # cell with classical components -- is a whole-cell question and is
+        # enforced by mlip.validate_mlip_cell (v4 §3/§6).
+
+        # A MULTILAYER MLIP stack without D3 is physically unbound. This is a
+        # measured result, not a stylistic preference: the bilayer benchmark
+        # (2026-08-11, DPA-3.1-3M/Alex2D) found the bare foundation model has
+        # NO interlayer binding -- its binding curve falls monotonically to the
+        # edge of the scan, 5.7e-7 J/m^2, no minimum -- because the model is
+        # PBE-trained and PBE carries no dispersion. With D3 it gives a real
+        # minimum at 6.112 A (experiment 6.15) and 0.265 J/m^2 (literature
+        # 0.25-0.30). So `dispersion = none` here produces layers that drift
+        # apart and interlayer numbers that mean nothing. Fail now, loudly,
+        # rather than let a whole campaign render and run.
+        # Framework-aware: MACE-MPA-0 DOES bind a bare bilayer (6.717 A,
+        # 0.068 J/m^2), so `dispersion = none` is a real control for it, not a
+        # broken run. Only frameworks whose bare model has no minimum at all
+        # (DPA-3) are blocked -- and even then `allow_unbound = true` lets a
+        # deliberate control through.
+        spec = get_mlip(self.pot_type) if is_mlip(self.pot_type) else None
+        if (spec is not None and self.dispersion == 'none'
+                and not spec.binds_interlayer and not self.allow_unbound):
+            layers = self.layers if isinstance(self.layers, list) else [self.layers]
+            n_layers = max(int(n) for n in layers) if layers else 1
+            if n_layers > 1:
+                raise ValueError(
+                    f"pot_type = '{self.pot_type}' with {n_layers} layers "
+                    f"requires dispersion = 'd3'. A bare MLIP has no "
+                    f"interlayer binding: measured on DPA-3.1-3M/Alex2D the "
+                    f"binding curve has no minimum at all (5.7e-7 J/m^2), so "
+                    f"the layers drift apart and every interlayer friction or "
+                    f"adhesion number from the run is meaningless. Adding D3 "
+                    f"gives 6.112 A / 0.265 J/m^2, within 0.6% of experiment. "
+                    f"Set dispersion = d3 (see documentation/mlip.md, "
+                    f"'D3 is mandatory, not optional'). Single-layer cells, "
+                    f"which have no interlayer gap, are exempt. If you are "
+                    f"deliberately running this as a no-D3 CONTROL arm, set "
+                    f"allow_unbound = true to acknowledge the run is expected "
+                    f"to come apart."
+                )
+        return self
+
 
 class FlakeConfig(ComponentConfig):
     """A finite patch of 2D material placed between tip and sheet.
@@ -875,6 +1146,40 @@ def _fold_flake_sheet_sections(folded: Dict[str, Any]) -> Dict[str, Any]:
     return folded
 
 
+def _check_mlip_interlayer_choice(config: Any) -> None:
+    """Refuse a non-``lj`` interlayer style or the comparison mode under an MLIP.
+
+    An MLIP cell is full-cell only (one instance spans every atom type), so
+    there is no interlayer pair slot left for ILP/KC/LJ+Gaussian, and the only
+    vdW lever is ``dispersion = d3`` (documentation/mlip.md). Accepting the
+    choice would be a silent no-op or a broken deck.
+
+    Raises:
+        ValueError: If any component of ``config`` is an MLIP while
+            ``general.interlayer_style != 'lj'`` or
+            ``general.interlayer_comparison`` is set.
+    """
+    general = config.general
+    style = general.interlayer_style
+    comparison = general.interlayer_comparison
+    if style == 'lj' and not comparison:
+        return
+    components = [getattr(config, name, None) for name in ('tip', 'sub', 'flake', 'sheet')]
+    components += list(getattr(config, 'sheets', None) or [])
+    components += list(getattr(config, 'flake_sheets', None) or [])
+    mlip_types = sorted({c.pot_type for c in components
+                         if c is not None and c.pot_type and is_mlip(c.pot_type)})
+    if not mlip_types:
+        return
+    what = (f"interlayer_style = '{style}'" if style != 'lj'
+            else "interlayer_comparison = true")
+    raise ValueError(
+        f"{what} cannot be combined with an MLIP component "
+        f"(pot_type {', '.join(mlip_types)}): an MLIP cell is full-cell only, so "
+        "there is no interlayer pair slot to replace. Use interlayer_style = lj "
+        "and dispersion = d3 for the vdW term (documentation/mlip.md).")
+
+
 class AFMSimulationConfig(BaseModel):
     """Master configuration object for an AFM simulation run."""
     general: GeneralConfig
@@ -1080,6 +1385,12 @@ class AFMSimulationConfig(BaseModel):
         return self
 
     @model_validator(mode='after')
+    def _check_mlip_interlayer_choice(self):
+        """Refuse a non-lj interlayer style / comparison under an MLIP."""
+        _check_mlip_interlayer_choice(self)
+        return self
+
+    @model_validator(mode='after')
     def _check_interlayer_choice(self, info: ValidationInfo):
         """Reject interlayer settings that cannot produce a valid run."""
         from ..potentials.interlayer import check_interlayer_choice  # pylint: disable=import-outside-toplevel,cyclic-import
@@ -1140,6 +1451,12 @@ class SheetOnSheetSimulationConfig(BaseModel):
             folded['sheets'] = [folded['2D']]
 
         return _fold_flake_sheet_sections(folded)
+
+    @model_validator(mode='after')
+    def _check_mlip_interlayer_choice(self):
+        """Refuse a non-lj interlayer style / comparison under an MLIP."""
+        _check_mlip_interlayer_choice(self)
+        return self
 
     @model_validator(mode='after')
     def _check_interlayer_choice(self, info: ValidationInfo):

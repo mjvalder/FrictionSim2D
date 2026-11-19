@@ -24,6 +24,18 @@ In `hpc/` you can expect files such as:
 
 Exact names can vary with scheduler and script selection.
 
+### MLIP (GPU) job groups
+
+A campaign that mixes classical and MLIP runs (`pot_type = mace | deepmd`) is
+split into one job group per `(needs_gpu, framework)`, read back from each
+run's `pot_<framework>[-d3]_<stem>` path segment. Each group gets its own script
+and manifest with a group suffix (`run_cpu.pbs`, `run_gpu_mace.pbs`,
+`manifest_combined_gpu_deepmd.txt`, two-phase `run_system_cpu.sh`, ...); a
+single-group campaign keeps the plain names. MLIP groups request one MPI rank
+plus `hpc.gpu`, use the framework's binary and launcher flags from
+`hpc.frameworks`, and MACE groups export `OMP_NUM_THREADS` = the requested
+cores. See [mlip.md](mlip.md) §8.
+
 ### The manifest is a script list
 
 `manifest.json` (`src/hpc/manifest.py`) records, per generated LAMMPS script,
@@ -65,7 +77,8 @@ FrictionSim2D run afm afm_config.ini --hpc-scripts
 ## Checks before submission
 
 1. Confirm scheduler type (`pbs` or `slurm`).
-2. Confirm module list and MPI launcher in settings.
+2. Confirm module list and MPI launcher in settings (for MLIP groups also
+   `hpc.gpu` and the `hpc.frameworks.<framework>.binary`).
 3. Confirm walltime/resources match queue policies.
 4. Confirm script discovery includes expected `system.in`/`slide*.in` files.
 

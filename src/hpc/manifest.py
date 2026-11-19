@@ -6,9 +6,10 @@ import re
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, fields, asdict
 
+from ..core.mlip import get_mlip
 from ..core.observables import FAMILIES
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,49 @@ def _known_fields(data_cls: type, data: Dict[str, Any], kind: str) -> Dict[str, 
     if legacy_keys:
         logger.debug("Dropping legacy %s keys: %s", kind, sorted(legacy_keys))
     return {k: v for k, v in data.items() if k in known}
+
+
+def parse_mlip_flavor(path_str: str) -> Optional[Tuple[str, str]]:
+    """Recover ``(framework, dispersion)`` from a run path.
+
+    ``hpc generate`` builds its manifest by discovering a *built tree*
+    (:meth:`JobManifest.from_simulation_directory`), never by reading the
+    configs, so the run directory is the only surviving record of which
+    framework a job needs. It lives in the ``pot_<slug>_<stem>`` segment
+    :func:`src.run.naming.output_dir_for` always emits for an MLIP sheet:
+    ``pot_mace_<stem>`` / ``pot_mace-d3_<stem>`` (same for deepmd), decoded by
+    :func:`src.run.naming.mlip_flavor_from_pot_token`.
+
+    Every segment is checked, not just the last, because AFM nests a per-layer
+    ``L<N>`` directory (and an ``il-*`` level may follow) *below* the pot
+    segment, and the path may carry the simulation root in front.
+
+    Returns:
+        ``(framework, 'none' | 'd3')``, or ``None`` for a classical path.
+    """
+    from ..run.naming import mlip_flavor_from_pot_token  # pylint: disable=import-outside-toplevel
+    for segment in reversed(Path(path_str).parts):
+        flavor = mlip_flavor_from_pot_token(segment)
+        if flavor is not None:
+            return flavor
+    return None
+
+
+def _mlip_job_fields(path_str: str) -> Dict[str, Any]:
+    """Resource fields for a discovered job, inferred from its path.
+
+    Classical jobs get today's defaults verbatim, so a non-MLIP campaign still
+    renders as a single CPU array exactly as before.
+    """
+    flavor = parse_mlip_flavor(path_str)
+    if flavor is None:
+        return {}
+    framework = flavor[0]
+    return {
+        'needs_gpu': True,
+        'framework': framework,
+        'launcher_flags': get_mlip(framework).launcher.lmp_flags,
+    }
 
 
 class JobStatus(Enum):
@@ -59,6 +103,15 @@ class JobEntry:
         submitted_at: ISO timestamp of submission.
         completed_at: ISO timestamp of completion.
         error_message: Error description if failed.
+        needs_gpu: Whether this job must run on a GPU node.
+        framework: MLIP framework driving the job ('deepmd' | 'mace'), or None
+            for a classical potential. Together with ``needs_gpu`` this is the
+            key ``HPCScriptGenerator`` groups on: MACE and DeePMD are two
+            mutually incompatible LAMMPS builds, so they cannot share one array
+            job even when their resource request is identical.
+        launcher_flags: Extra ``lmp`` flags this job's framework needs (from
+            ``src.core.mlip.LauncherSpec.lmp_flags``), recorded at generation
+            time so the manifest stays self-describing.
     """
     job_id: str
     simulation_path: str
@@ -74,6 +127,11 @@ class JobEntry:
     submitted_at: Optional[str] = None
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
+    # --- MLIP resource fields. Defaults describe a plain CPU job, so a
+    # manifest.json written before MLIP support still loads through from_dict().
+    needs_gpu: bool = False
+    framework: Optional[str] = None
+    launcher_flags: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -291,6 +349,8 @@ class JobManifest:
                 'path_str': path_str,
                 'material': material,
                 'layers': layers,
+                # GPU/framework facts survive only in the run-dir flavour token.
+                'mlip': _mlip_job_fields(path_str),
             })
 
         for sim_info in sim_directories:
@@ -304,6 +364,7 @@ class JobManifest:
                     lammps_script=script_name,
                     material=sim_info['material'],
                     layers=sim_info['layers'],
+                    **sim_info['mlip'],
                 ))
 
         for sim_info in sim_directories:
@@ -317,6 +378,7 @@ class JobManifest:
                         simulation_path=str(sim_info['rel_path']),
                         material=sim_info['material'],
                         layers=sim_info['layers'],
+                        **sim_info['mlip'],
                     ))
                 continue
 
@@ -351,6 +413,7 @@ class JobManifest:
                     force=force,
                     angle=angle,
                     speed=speed,
+                    **sim_info['mlip'],
                 ))
         return manifest
 

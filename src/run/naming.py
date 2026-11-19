@@ -285,7 +285,10 @@ def output_dir_for(run_dict: Dict[str, Any], model: str) -> Path:
     if pot_path:
         from ..potentials.utils import pot_dir_token  # pylint: disable=import-outside-toplevel
         # deferred: potentials.utils imports the UFF table; only pot_path-bearing configs pay for it
-        pot_segment = pot_dir_token(sheet.get('pot_type', 'sw'), pot_path)
+        # An MLIP sheet's D3 choice rides in the slug (pot_mace-d3_<stem>), so
+        # with/without-D3 runs of one model never share a directory.
+        pot_segment = pot_dir_token(sheet.get('pot_type', 'sw'), pot_path,
+                                    dispersion=sheet.get('dispersion'))
 
     general = run_dict['general']
     il_segment = interlayer_dir_token(
@@ -352,6 +355,35 @@ class RunTokens:
     pot_token: Optional[str]
     rel_path: str
     interlayer_token: Optional[str] = None
+    #: MLIP framework decoded from ``pot_token`` ('mace', 'deepmd'), else None.
+    mlip_framework: Optional[str] = None
+    #: ``'d3'`` or ``'none'`` for an MLIP run (from the ``-d3`` slug suffix);
+    #: None for a classical run, whose path carries no dispersion choice.
+    dispersion: Optional[str] = None
+
+
+def mlip_flavor_from_pot_token(pot_token: Optional[str]) -> Optional[Tuple[str, str]]:
+    """Decode ``(framework, dispersion)`` from a ``pot_<slug>_<stem>`` segment.
+
+    The inverse of the MLIP branch of
+    :func:`src.potentials.utils.pot_dir_token`: ``pot_mace_<stem>`` ->
+    ``('mace', 'none')``, ``pot_deepmd-d3_<stem>`` -> ``('deepmd', 'd3')``.
+    Slugs never contain ``'_'`` ('/' is mapped to '-'), so the slug is the
+    text between ``pot_`` and the next underscore. A classical slug, or
+    anything that is not a pot token, gives ``None``.
+
+    Imports the stdlib-only MLIP registry lazily so this module stays a leaf.
+    """
+    if not pot_token or not pot_token.startswith('pot_'):
+        return None
+    slug = pot_token[len('pot_'):].split('_', 1)[0]
+    from ..core.mlip import MLIP_REGISTRY  # pylint: disable=import-outside-toplevel
+    dispersion = 'none'
+    if slug.endswith('-d3'):
+        slug, dispersion = slug[:-len('-d3')], 'd3'
+    if slug not in MLIP_REGISTRY:
+        return None
+    return slug, dispersion
 
 
 _LEGACY_AMORPH_RE = re.compile(r'^a(?P<mat>[A-Z].*)$')
@@ -461,6 +493,7 @@ def parse_run_path(rel_path: str) -> RunTokens:
     if idx != len(parts):
         raise ValueError(f"trailing path levels {parts[idx:]} in {rel_path!r}")
 
+    flavor = mlip_flavor_from_pot_token(pot_token)
     return RunTokens(
         model=model,
         family=model,
@@ -477,4 +510,6 @@ def parse_run_path(rel_path: str) -> RunTokens:
         pot_token=pot_token,
         rel_path=text,
         interlayer_token=interlayer_token,
+        mlip_framework=flavor[0] if flavor else None,
+        dispersion=flavor[1] if flavor else None,
     )

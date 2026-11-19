@@ -34,8 +34,17 @@ Common fields:
 - `pot_path`
 - `pot_type`
 - `stack_type` (default `AA` if omitted)
-- `lat_c` (optional)
+- `lat_c` (optional; **mandatory** for an MLIP sheet — the interlayer distance)
 - `materials_list` (optional)
+- `dispersion` (`none` or `d3`; MLIP sheets only)
+
+`pot_type` takes the classical types (`sw`, `tersoff`, `reaxff`, ...) or a
+machine-learned potential, `mace` or `deepmd`, with `pot_path` pointing at the
+model (`.json` symmetrix MACE; `.pth`/`.pb` DeePMD). Under an MLIP every
+component in the cell (tip, substrate, sheets, flake) must use the same MLIP,
+`amorph = a` is refused (use `amorph = c, match = true` for an AFM substrate),
+and `dispersion = d3` is the only vdW lever (`interlayer_style` must stay
+`lj`). See [mlip.md](mlip.md).
 
 ### [tip]
 

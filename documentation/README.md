@@ -23,6 +23,9 @@ Read in this order if you are new; each document also stands alone.
 | 14 | [postprocessing.md](postprocessing.md) | The `outputs/` schemas, plot documents, the plot schema, settings presets |
 | 15 | [testing.md](testing.md) | Test tiers and how to run them, markers, layout, the integration tier |
 | 16 | [integrity.md](integrity.md) | The post-run integrity check: rules, statuses, quarantine and rulings, thresholds |
+| 17 | [mlip.md](mlip.md) | Machine-learned potentials (DeePMD via `pair_style deepmd`, MACE via `symmetrix/mace`): the full-cell capability matrix (one MLIP across every component), how to obtain each model, the example configs, the D3 overlay, the builds and GPU job settings |
+| 18 | [milestone0.md](milestone0.md) | MLIP feasibility runbook — the hand-written LAMMPS decks, and the executed results the v4 matrix is built on |
+| 19 | [mlip_afm_gate.md](mlip_afm_gate.md) | The MLIP AFM verification gate: what is verified for tip-bearing MLIP cells, and the open cross-framework force disagreement (Gate 4) |
 
 If your goal is simply to generate and run simulations, documents 1 through 6 are
 sufficient. Documents 12 to 15 matter for development and reproducibility work.

@@ -15,10 +15,12 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
+from ..core.mlip import MLIP_REGISTRY
 from ..core.utils.structures import (  # noqa: PLC2701
     _normalize_element_symbol, cifread, count_atomtypes,
+    SINGLE_TYPE_EXTENSIONS, SINGLE_TYPE_POTENTIALS,
 )
 
 from ..interfaces import lammps as _lammps
@@ -87,10 +89,10 @@ def get_potential_element_order(
         ValueError: If CIF elements don't match potential elements or validation fails.
     """
     pot_lower = pot_type.lower()
-    single_type_pots = {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam'}
-    single_type_exts = ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff')
-
-    if pot_lower in single_type_pots or str(potential_filepath).lower().endswith(single_type_exts):
+    # Shared with count_atomtypes: MLIP model files are binary (or a symmetrix
+    # .json) and must never be parsed as a classical potential file.
+    if (pot_lower in SINGLE_TYPE_POTENTIALS
+            or str(potential_filepath).lower().endswith(SINGLE_TYPE_EXTENSIONS)):
         pot_element_counts = {el: 1 for el in cif_elements}
         return cif_elements, pot_element_counts
 
@@ -197,7 +199,11 @@ POTENTIALS_WITH_INTERNAL_LJ = {'airebo', 'rebomos', 'comb', 'comb3', 'reaxff', '
 POTENTIALS_REQUIRING_LJ = {'sw', 'tersoff', 'rebo', 'edip', 'meam', 'eam', 'bop',
                             'morse',  'sw/mod', 'extep', 'vashishta'}
 REAXFF_TYPES = {'reaxff', 'reax/c'}
-KNOWN_TYPES = POTENTIALS_REQUIRING_LJ | POTENTIALS_WITH_INTERNAL_LJ
+#: Machine-learned interatomic potentials (MACE, DeePMD), derived from the
+#: src.core.mlip registry. A third category: neither "requires LJ" nor
+#: "internal LJ" -- an MLIP cell is full-cell only (documentation/mlip.md).
+MLIP_TYPES = frozenset(MLIP_REGISTRY)
+KNOWN_TYPES = POTENTIALS_REQUIRING_LJ | POTENTIALS_WITH_INTERNAL_LJ | MLIP_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +221,14 @@ EXTENSION_MAP = {
     '.extep': 'extep',
     '.vashishta': 'vashishta',
 }
+
+#: MLIP model-file extensions (MLIPSpec.file_extensions). Deliberately NOT in
+#: EXTENSION_MAP: an MLIP is never inferred from a file. '.pth' is also an
+#: older NequIP/Allegro deployment and '.json' could become another code's
+#: format, so a guess could pick the wrong framework; an MLIP needs an explicit
+#: pot_type. Used only to trim the extension from the pot_ directory token.
+MLIP_FILE_EXTENSIONS = frozenset(
+    ext for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions)
 
 
 class PotentialTypeError(ValueError):
@@ -239,6 +253,7 @@ class ResolvedPotential:
 #     1. explicit ``pot_type`` on the entry (always wins)
 #     2. parent directory under the potentials root, if it names a known type
 #     3. file extension, through EXTENSION_MAP
+#        (an MLIP is never inferred by 2 or 3: it must be explicit)
 #     4. otherwise FAIL THE BUILD
 #
 # Variant styles (anything containing ``/``) are NEVER inferred. This matters
@@ -322,12 +337,19 @@ def resolve_pot_type(entry: Union[str, dict],
         return ResolvedPotential(path, pot_type, 'explicit')
 
     parts = Path(path).parts
+    suffix = Path(path).suffix.lower()
+    mlip_dir = next((p.strip().lower() for p in parts[:-1]
+                     if p.strip().lower() in MLIP_TYPES), None)
+    if suffix in MLIP_FILE_EXTENSIONS or mlip_dir:
+        raise PotentialTypeError(
+            f"{path}: looks like an MLIP model; MLIPs are never inferred from a "
+            f"folder or extension. State pot_type explicitly "
+            f"({' or '.join(sorted(MLIP_TYPES))}).")
     for part in parts[:-1]:
         candidate = part.strip().lower()
         if candidate in KNOWN_TYPES and '/' not in candidate:
             return ResolvedPotential(path, candidate, 'directory')
 
-    suffix = Path(path).suffix.lower()
     name = Path(path).name.lower()
     if '.reax.' in name or name.startswith('ffield'):
         raise PotentialTypeError(
@@ -341,15 +363,25 @@ def resolve_pot_type(entry: Union[str, dict],
         f"'{suffix}'. State pot_type explicitly.")
 
 
-def pot_dir_token(pot_type: str, path: Union[str, Path]) -> str:
+#: Slug suffix marking an MLIP run with the D3 dispersion overlay.
+MLIP_D3_SLUG_SUFFIX = '-d3'
+
+
+def pot_dir_token(pot_type: str, path: Union[str, Path],
+                  dispersion: Optional[str] = None) -> str:
     """Output-directory segment: pot_<type-slug>_<stem> (spec §13.4).
 
     '/' becomes '-' (sw/mod -> sw-mod); the stem is sanitised so the token
-    is always a single path segment.
+    is always a single path segment. For an MLIP ``pot_type`` the slug also
+    carries the dispersion choice -- ``mace`` (bare model) or ``mace-d3``
+    (``dispersion = d3``) -- so two runs of one model with and without D3
+    never share a directory. ``dispersion`` is ignored for classical types.
     """
     slug = pot_type.strip().lower().replace('/', '-')
+    if slug in MLIP_TYPES and (dispersion or '').strip().lower() == 'd3':
+        slug += MLIP_D3_SLUG_SUFFIX
     stem = Path(path).name
-    for ext in sorted(EXTENSION_MAP, key=len, reverse=True):
+    for ext in sorted({*EXTENSION_MAP, *MLIP_FILE_EXTENSIONS}, key=len, reverse=True):
         if stem.lower().endswith(ext):
             stem = stem[:-len(ext)]
             break

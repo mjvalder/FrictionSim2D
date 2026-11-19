@@ -21,3 +21,6 @@
 {% if mem %}
 #SBATCH --mem={{ mem }}
 {% endif %}
+{% if gres %}
+#SBATCH --gres={{ gres }}
+{% endif %}

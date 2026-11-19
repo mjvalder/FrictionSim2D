@@ -1010,7 +1010,9 @@ def test_stack_layers_template_sets_molecule_ids():
     assert "fix             mol_ids all property/atom mol ghost yes" in head
     assert "set group layer_2 mol 2" in head
     write = next(ln for ln in lines if ln.startswith("write_data"))
-    assert write == "write_data out.lmp nofix"      # no Molecules section
+    # nocoeff: the stacking deck may run on the pair_style zero MLIP surrogate,
+    # whose coefficients must never be written out; nofix: no Molecules section.
+    assert write == "write_data out.lmp nocoeff nofix"
 
 
 def test_comparison_mode_lj(tmp_path, monkeypatch):

@@ -22,8 +22,10 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ...core.config import SheetOnSheetSimulationConfig
+from ...core.mlip import validate_mlip_cell
 from ...potentials.manager import PotentialManager
-from ..simulation_base import SimulationBase, drive_spring, halt_temperature
+from ..simulation_base import (SimulationBase, drive_spring, halt_temperature,
+                               mlip_template_context)
 from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -356,6 +358,13 @@ class FlakeSlideSimulation(SimulationBase):
         reserve_virtual_type = settings.simulation.drive_method == "virtual_atom"
         settings_path = self.output_dir / "lammps" / "system.in.settings"
 
+        # Capability-matrix rules across the whole cell (spec §1.1/§3.4).
+        validate_mlip_cell(
+            sheet_cfg,
+            components=list(zip(flake_names, flake_components)),
+            constraint_mode=settings.simulation.constraint_mode,
+        )
+
         def _register(prefix: str) -> PotentialManager:
             return self._register_potentials(
                 prefix, sheet_cfg=sheet_cfg, n_sheet_layers=n_sheet_layers,
@@ -461,6 +470,11 @@ class FlakeSlideSimulation(SimulationBase):
             "constraint_mode": sim.constraint_mode,
             "atom_style": _detect_atom_style(combined_path),
             "pot_type": "sw",
+            # LOAD-BEARING (see mlip_template_context): this builder
+            # subclasses SimulationBase directly, so it inherits neither the
+            # AFM nor the sheet-on-sheet wiring. The cell is uniform, so the
+            # substrate sheet names its framework.
+            **mlip_template_context(sheet_cfg.pot_type),
             "has_internal_lj": True,
             # has_internal_lj is pinned True above, so use_group_group is
             # False under every style: the flake always reads the reaction
@@ -743,6 +757,14 @@ class FlakeSlideSimulation(SimulationBase):
                         [n for n in pm.components if n.startswith("flake")],
                         in_slide=False))
             mol_nofix = " nofix"
+
+        # This run only places atoms (read_data + shift) and writes them back:
+        # `run 0` computes nothing the result depends on. For an MLIP cell the
+        # real settings would demand an MLIP-enabled LAMMPS just to *generate*
+        # inputs, so include the zero surrogate instead (spec §3.3).
+        if pm.has_mlip():
+            settings_path = pm.write_surrogate_file(
+                self.output_dir / "assemble_flake_slide.in.settings")
 
         script = f"""clear
 units           metal

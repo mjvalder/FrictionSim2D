@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from ...core.config import SheetOnSheetSimulationConfig
-from ..simulation_base import SimulationBase, drive_spring, halt_temperature
+from ..simulation_base import (SimulationBase, drive_spring, halt_temperature,
+                               mlip_template_context)
 from .base import (sheet_obs_ctx, sheet_thermostat_scheme,
                    write_sheet_provenance)
 from ...data.models import EV_A_TO_NN, EV_A3_TO_GPA, NM_TO_EV_A2
@@ -509,6 +510,10 @@ class HeteroSheetOnSheetSimulation(SimulationBase):
             "n_bond_types": 0,
             "atom_style": self._hetero_atom_style,
             "pot_type": "sw",
+            # The cell's MLIP keys, from the first sheet: a cell is uniform
+            # by construction, and ``stack.pm`` exists only on some branches.
+            **mlip_template_context(self.config.sheets[0].pot_type
+                                    if self.config.sheets else None),
             **interlayer_ctx,
             # ``run_simulations`` refuses a slide with no pressure
             # (REQUIRES_PRESSURE, src.run.expand.missing_pressure). The 0.0

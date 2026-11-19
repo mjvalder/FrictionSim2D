@@ -1,0 +1,38 @@
+# M0.2 — DeePMD full-cell under `hybrid/overlay` with `dispersion/d3`.
+#        The genuinely open item: there are community segfault reports for this
+#        combination, and this deck is where the D3 argument order gets pinned.
+#
+# Geometry: bilayer_mos2.data from make_geometries.py — 24 atoms, 4 atom types.
+# TYPE LAYOUT:
+#   1 = Mo layer 1   2 = S layer 1
+#   3 = Mo layer 2   4 = S layer 2
+# Full-cell coverage: every type is mapped to a real element in BOTH the deepmd
+# and the dispersion/d3 coeff lines. `dispersion/d3` refuses NULL entries, which
+# is exactly why D3 is full-cell only (spec capability matrix, footnote 3).
+#
+# Run:  export LAMMPS_PLUGIN_PATH=...   (see scripts/hpc/README.md)
+#       $PREFIX/lammps-deepmd/bin/lmp -in m0_2_deepmd_overlay_d3.in
+#
+# PASS: 20 steps complete, finite energy/forces, and the D3 contribution is
+#       non-zero (compare E_pair against the same deck without the overlay).
+
+units metal
+atom_style atomic
+read_data bilayer_mos2.data
+# NOTE: dispersion/d3 argument order below is the runbook's verification target —
+# adjust to the pinned build's docs (https://docs.lammps.org/pair_dispersion_d3.html)
+# and record the working form in documentation/milestone0.md results.
+pair_style hybrid/overlay deepmd frozen_model.pth dispersion/d3 bj pbe 16.0 8.0
+pair_coeff * * deepmd Mo S Mo S
+pair_coeff * * dispersion/d3 Mo S Mo S
+# Masses are also in the data file; repeated here so the deck is self-contained.
+mass 1 95.95   # Mo
+mass 2 32.06   # S
+mass 3 95.95   # Mo
+mass 4 32.06   # S
+thermo 1
+run 0
+# nve added so the 20 steps are real dynamics (LAMMPS happily "runs" with no
+# integrator, which would not exercise the neighbour-list rebuild path).
+fix nve all nve
+run 20

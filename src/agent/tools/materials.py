@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from ...potentials.utils import EXTENSION_MAP, KNOWN_TYPES
+from ...potentials.utils import EXTENSION_MAP, KNOWN_TYPES, MLIP_TYPES
 from ..changes import Op, ToolInputError
 from ..sandbox import SandboxError, display_path, resolve_readable
 from . import compact
@@ -66,7 +66,8 @@ def potential_type_of(path: Path) -> Optional[str]:
     if suffix in EXTENSION_MAP:
         return EXTENSION_MAP[suffix]
     parent = path.parent.name.lower()
-    if parent in KNOWN_TYPES:
+    # An MLIP is never inferred from a folder name: it needs an explicit pot_type.
+    if parent in KNOWN_TYPES and parent not in MLIP_TYPES:
         return parent
     if 'reax' in path.name.lower():
         return 'reaxff'

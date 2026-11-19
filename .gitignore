@@ -2,7 +2,18 @@ src/data/settings/settings.yaml
 visuals
 *.lammpstrj
 ptest
-scripts
+# Ignore the scripts/ scratch area by default, but keep the MLIP deliverables
+# tracked: the build recipes, Milestone-0 decks, local runner and benchmark are
+# referenced by documentation/mlip.md and documentation/milestone0.md, so an
+# unqualified `scripts` entry would silently drop them from the repo.
+# NB: only /scripts/* is excluded (not /scripts itself), or git would refuse to
+# descend into the directory and these negations would never be consulted.
+/scripts/*
+!/scripts/hpc/
+!/scripts/milestone0/
+!/scripts/run_local.sh
+!/scripts/mlip_bilayer_benchmark.py
+!/scripts/fetch_mlip_models.sh
 __pycache__
 results*
 !tests/helpers/results_tree.py
@@ -29,3 +40,7 @@ assistant_models/*/model.gguf
 # Agent worktrees and agent data (not source)
 .claude/
 tools/agent_data/
+
+# Scratch output of scripts/mlip_bilayer_benchmark.py (defaults to
+# `bench_<framework>/` in the CWD); regenerable -- pass --workdir to move it.
+bench_*/

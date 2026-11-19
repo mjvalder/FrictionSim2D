@@ -50,6 +50,9 @@ def _render_sheetonsheet(**channels) -> str:
                       trim_blocks=True, lstrip_blocks=True)
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
+    # The MLIP keys are iterated/tested by name, so the 0 stub cannot stand in.
+    ctx['mlip_deck_directives'] = []
+    ctx['mlip_sheet'] = False
     ctx['n_layers'] = 3
     enabled_tiers = {'window': True, 'raw': True, 'peratom': True, **channels}
     ctx['obs_ctx'] = build_obs_ctx(
@@ -82,6 +85,9 @@ def _render_hetero(**channels) -> str:
                       trim_blocks=True, lstrip_blocks=True)
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
+    # The MLIP keys are iterated/tested by name, so the 0 stub cannot stand in.
+    ctx['mlip_deck_directives'] = []
+    ctx['mlip_sheet'] = False
     ctx['n_layers'] = 4
     ctx['has_internal_lj'] = True
     bands = [{'idx': i, 'zlo': 0.0, 'zhi': 1.0} for i in range(1, 5)]
@@ -120,6 +126,9 @@ def _render_flake(**channels) -> str:
                       trim_blocks=True, lstrip_blocks=True)
     source = env.loader.get_source(env, template)[0]
     ctx = {name: 0 for name in meta.find_undeclared_variables(env.parse(source))}
+    # The MLIP keys are iterated/tested by name, so the 0 stub cannot stand in.
+    ctx['mlip_deck_directives'] = []
+    ctx['mlip_sheet'] = False
     ctx['n_layers'] = 3
     ctx['has_internal_lj'] = True
     bands = [{'idx': i, 'zlo': 0.0, 'zhi': 1.0} for i in range(1, 4)]

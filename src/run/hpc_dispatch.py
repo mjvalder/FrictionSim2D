@@ -173,15 +173,18 @@ def hpc_generation_blocker(settings) -> Optional[str]:
     lets a caller say so up front instead of appearing to succeed while
     producing no scripts.
     """
-    if (not getattr(settings.hpc, 'modules', None)
-            and not getattr(settings.hpc, 'conda_env', None)):
+    hpc = settings.hpc
+    if (not getattr(hpc, 'modules', None)
+            and not getattr(hpc, 'conda_env', None)
+            and not getattr(hpc, 'env_lines', None)):
         return (
-            "The HPC 'Modules' and 'Conda environment' settings are both empty. "
-            "One of them gates job-script generation: scheduler, nodes, CPUs and "
+            "The HPC 'Modules', 'Conda environment' and 'env_lines' settings are all "
+            "empty. One of them gates job-script generation: scheduler, nodes, CPUs and "
             "walltime are all written into the scripts but none of them substitute "
             "for saying where LAMMPS comes from. Set the environment modules your cluster loads "
-            "before running, e.g. 'lammps, openmpi', or the conda prefix holding "
-            "lmp, e.g. '$HOME/envs/lammps'."
+            "before running, e.g. 'lammps, openmpi', the conda prefix holding "
+            "lmp, e.g. '$HOME/envs/lammps', or explicit env_lines (e.g. an MLIP "
+            "build's 'source .../activate')."
         )
     return None
 

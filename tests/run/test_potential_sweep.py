@@ -99,3 +99,31 @@ def test_flake_sweep_rejected():
     base['flake'] = {'mat': 'h-MoS2'}
     with pytest.raises(ValueError, match='flake'):
         expand_config_sweeps(base, base_dir=ROOT)
+
+
+# --- MLIPs are never inferred (an explicit pot_type is required) ---------------
+
+@pytest.mark.parametrize('entry', [
+    'models/mace-mpa-0.json',          # symmetrix MACE extension
+    'models/dpa3.pth',                 # DeePMD PyTorch -- also an old NequIP/Allegro format
+    'models/dpa2.pb',                  # DeePMD TensorFlow
+    'mace/some_model.bin',             # an MLIP-named folder
+    'deepmd/frozen/model.ckpt',
+])
+def test_an_mlip_model_is_never_inferred(entry):
+    with pytest.raises(PotentialTypeError, match='State pot_type explicitly'):
+        resolve_pot_type(entry, ROOT)
+
+
+@pytest.mark.parametrize('pot_type, entry', [
+    ('mace', 'models/mace-mpa-0.json'),
+    ('deepmd', 'deepmd/dpa3.pth'),
+])
+def test_an_mlip_model_with_an_explicit_type_resolves(pot_type, entry):
+    r = resolve_pot_type({'path': entry, 'pot_type': pot_type}, ROOT)
+    assert (r.pot_type, r.route) == (pot_type, 'explicit')
+
+
+def test_mlip_extensions_are_not_in_the_inference_map():
+    from src.potentials.utils import EXTENSION_MAP, MLIP_FILE_EXTENSIONS  # pylint: disable=import-outside-toplevel
+    assert MLIP_FILE_EXTENSIONS and not MLIP_FILE_EXTENSIONS & set(EXTENSION_MAP)

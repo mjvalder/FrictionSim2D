@@ -191,7 +191,14 @@ potential:
   LJ_cutoff: 11.0
   reaxff_safezone: 1.2
   reaxff_mincap: 50
+  d3_functional: pbe     # MLIP `dispersion = d3` only (pair_style dispersion/d3)
+  d3_damping: bj         # original | bj | zerom | bjm
+  d3_cutoff: 16.0        # Angstrom; the periodic box must exceed d3_cutoff + skin
+  d3_cn_cutoff: 8.0      # Angstrom
 ```
+
+The `d3_*` keys only matter for an MLIP sheet with `dispersion = d3`; see
+[mlip.md](mlip.md) §2.
 
 ## quench
 
@@ -239,9 +246,21 @@ hpc:
   use_tmpdir: true
   preflight: false       # also write hpc/preflight.sh + its submit wrapper
   lammps_scripts: [system.in, slide.in]
+  env_lines: []          # extra shell lines, rendered after the environment setup
+  lmp_binary: null       # LAMMPS binary (null: `lmp` on PATH)
+  gpu: null              # e.g. {ngpus: 1, gpu_type: L40S} -- requested by MLIP job groups
+  frameworks: {}         # per-MLIP overlay: {mace: {binary, modules, env_lines, conda_env}, deepmd: {...}}
 ```
 
-Job-script generation needs `modules`, `conda_env`, or both.
+Job-script generation needs `modules`, `conda_env`, `env_lines`, or a
+combination.
+
+MLIP runs (`pot_type = mace | deepmd`) are grouped into their own GPU job
+scripts (`run_gpu_mace.pbs`, ...). Each group gets `hpc.frameworks.<framework>`
+layered over the base block: `binary` replaces `lmp_binary`, `conda_env`
+replaces `conda_env`, `modules` and `env_lines` are appended. There are no named
+profiles; keep one settings file per cluster and pass it with
+`--settings-file`. Details in [mlip.md](mlip.md) §8.
 
 Job scripts -- PBS and SLURM alike -- load the environment, copy the simulation
 to `scratch_dir` when `use_tmpdir` is on, run LAMMPS with

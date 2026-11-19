@@ -23,8 +23,8 @@ cd "$SLURM_SUBMIT_DIR"
 
 # Run. slide.in runs even when system.in failed: it slides every load whose
 # load_*.data was written and skips the rest.
-{{ mpi_command }} lmp -in "$SIM/lammps/system.in" -log "$SIM/lammps/run_system.log"
-{{ mpi_command }} lmp -in "$SIM/lammps/slide.in" -log "$SIM/lammps/run_slide.log"
+{{ launch_command }} -in "$SIM/lammps/system.in" -log "$SIM/lammps/run_system.log"
+{{ launch_command }} -in "$SIM/lammps/slide.in" -log "$SIM/lammps/run_slide.log"
 {% if use_tmpdir %}
 
 # Copy results back

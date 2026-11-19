@@ -18,44 +18,10 @@ hdr()  { printf '\n== %s ==\n' "$*"; }
 STYLES=$(mktemp)
 trap 'rm -f "$STYLES"' EXIT
 
-# --- 1. environment ---------------------------------------------------------
-hdr "environment"
-{% if modules %}
-if type module >/dev/null 2>&1; then
-    module purge
-{% for mod in modules %}
-    if module load {{ mod }}; then ok "module load {{ mod }}"; else bad "module load {{ mod }} failed"; fi
-{% endfor %}
-else
-    bad "no 'module' command here -- run on the cluster ({{ submit_cmd }} hpc/{{ preflight_job }})"
-fi
-{% endif %}
-{% if conda_env %}
-CONDA_ENV="{{ conda_env }}"
-if [ -d "$CONDA_ENV" ]; then ok "conda prefix $CONDA_ENV"; else bad "no conda prefix at $CONDA_ENV"; fi
-export PATH="$CONDA_ENV/bin:$PATH"
-export LD_LIBRARY_PATH="$CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
-{% endif %}
-export OMP_NUM_THREADS=1
-{% if mpi_command %}
-MPI={{ mpi_command.split()[0] }}
-if command -v "$MPI" >/dev/null 2>&1; then ok "$MPI is $(command -v "$MPI")"; else bad "$MPI not on PATH"; fi
-{% endif %}
-
-# --- 2. LAMMPS binary (-h only) ---------------------------------------------
-hdr "lammps"
-LMPH=""
-if ! command -v lmp >/dev/null 2>&1; then
-    bad "no lmp on PATH"
-elif LMPH=$(lmp -h 2>&1); then
-    ok "lmp -h returned 0: $(command -v lmp)"
-    ver=$(grep -m1 -oE '[0-9]{1,2} [A-Z][a-z]{2} [0-9]{4}' <<<"$LMPH")
-    if [ -n "$ver" ]; then ok "LAMMPS version $ver"; else note "could not read the LAMMPS version"; fi
-else
-    bad "lmp -h failed -- the binary does not start:"
-    head -5 <<<"$LMPH" | sed 's/^/         /'
-    LMPH=""
-fi
+{% set multi = groups|length > 1 %}
+{% if multi %}
+BASE_PATH="$PATH"
+BASE_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 
 # --- 3. directories ---------------------------------------------------------
 hdr "directories"
@@ -77,9 +43,86 @@ else
 fi
 {% endif %}
 
-# --- 4. jobs: array ranges, decks and every file they read ------------------
-hdr "jobs"
+{% endif %}
+{% for g in groups %}
+{% if multi %}
+export PATH="$BASE_PATH"
+export LD_LIBRARY_PATH="$BASE_LD_LIBRARY_PATH"
+{% endif %}
+# --- 1. environment ---------------------------------------------------------
+hdr "environment{{ g.tag }}"
+{% if g.modules %}
+if type module >/dev/null 2>&1; then
+    module purge
+{% for mod in g.modules %}
+    if module load {{ mod }}; then ok "module load {{ mod }}"; else bad "module load {{ mod }} failed"; fi
+{% endfor %}
+else
+    bad "no 'module' command here -- run on the cluster ({{ submit_cmd }} hpc/{{ preflight_job }})"
+fi
+{% endif %}
+{% if g.conda_env %}
+CONDA_ENV="{{ g.conda_env }}"
+if [ -d "$CONDA_ENV" ]; then ok "conda prefix $CONDA_ENV"; else bad "no conda prefix at $CONDA_ENV"; fi
+export PATH="$CONDA_ENV/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
+{% if g.framework %}
+export CONDA_PREFIX="$CONDA_ENV"
+{% endif %}
+{% endif %}
+export OMP_NUM_THREADS={{ g.omp_threads }}
+{% for line in g.env_lines %}
+{{ line }}
+{% endfor %}
+{% if mpi_command %}
+MPI={{ mpi_command.split()[0] }}
+if command -v "$MPI" >/dev/null 2>&1; then ok "$MPI is $(command -v "$MPI")"; else bad "$MPI not on PATH"; fi
+{% endif %}
 
+# --- 2. LAMMPS binary (-h only) ---------------------------------------------
+hdr "lammps{{ g.tag }}"
+LMPH=""
+if ! command -v {{ g.lmp_binary }} >/dev/null 2>&1; then
+    bad "no {{ g.lmp_binary }} on PATH"
+elif LMPH=$({{ g.lmp_binary }} -h 2>&1); then
+    ok "{{ g.lmp_binary }} -h returned 0: $(command -v {{ g.lmp_binary }})"
+    ver=$(grep -m1 -oE '[0-9]{1,2} [A-Z][a-z]{2} [0-9]{4}' <<<"$LMPH")
+    if [ -n "$ver" ]; then ok "LAMMPS version $ver"; else note "could not read the LAMMPS version"; fi
+else
+    bad "{{ g.lmp_binary }} -h failed -- the binary does not start:"
+    head -5 <<<"$LMPH" | sed 's/^/         /'
+    LMPH=""
+fi
+
+{% if not multi %}
+# --- 3. directories ---------------------------------------------------------
+hdr "directories"
+LOG_DIR="{{ log_dir }}"
+if [ -d "$LOG_DIR" ] && [ -w "$LOG_DIR" ]; then
+    ok "log dir $LOG_DIR"
+else
+    bad "log dir $LOG_DIR missing or unwritable -- the scheduler opens it before the job starts"
+fi
+{% if use_tmpdir %}
+SCRATCH_BASE="{{ scratch_dir }}"
+if [ -z "$SCRATCH_BASE" ]; then
+    note "scratch dir '{{ scratch_dir }}' is empty here (set only inside a job?)"
+elif probe=$(mktemp -d "$SCRATCH_BASE/preflight_XXXXXX" 2>/dev/null); then
+    ok "scratch writable: $SCRATCH_BASE"
+    rm -rf "$probe"
+else
+    bad "cannot write to scratch $SCRATCH_BASE"
+fi
+{% endif %}
+
+{% endif %}
+{% if multi and not loop.first %}
+: >"$STYLES"
+{% endif %}
+# --- 4. jobs: array ranges, decks and every file they read ------------------
+hdr "jobs{{ g.tag }}"
+
+{% if loop.first %}
 check_deck() {  # prints one deck's problems; nothing when clean
     local deck=$1 sim cmd p d
     local -a files
@@ -144,15 +187,16 @@ check_job() {  # <job script> <manifest> [deck per simulation directory...]
     [ "$nbad" -eq 0 ] && ok "$script: all $ndecks decks and the files they read resolve"
 }
 
-{% for job in jobs %}
+{% endif %}
+{% for job in g.jobs %}
 check_job {{ job.script }} {{ job.manifest }}{% for phase in job.phases %} {{ phase }}{% endfor %}
 
 {% endfor %}
 
 # --- 5. styles the decks use ------------------------------------------------
-hdr "styles"
+hdr "styles{{ g.tag }}"
 if [ -z "$LMPH" ]; then
-    note "skipped -- no working lmp"
+    note "skipped -- no working {{ g.lmp_binary }}"
 elif [ ! -s "$STYLES" ]; then
     note "no pair_style found in the decks"
 else
@@ -168,6 +212,7 @@ else
     done < <(sort -u "$STYLES")
 fi
 
+{% endfor %}
 # --- summary ----------------------------------------------------------------
 printf '\n== summary ==\n  %d ok, %d warn, %d FAIL\n' "$pass" "$warn" "$fail"
 if [ "$fail" -eq 0 ]; then

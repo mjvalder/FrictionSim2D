@@ -125,6 +125,10 @@ Options:
 - `-s, --scheduler {pbs|slurm}` (default: `pbs`)
 - `-o, --output-dir TEXT` (default: `SIMULATION_DIR/hpc`)
 
+MLIP runs are split into per-framework GPU job scripts using `hpc.gpu` and
+`hpc.frameworks` from the settings file; point `--settings-file` at another
+cluster's `settings.yaml` to retarget ([mlip.md](mlip.md) §8).
+
 ### hpc enrich-provenance
 
 ```bash

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,7 @@ from src.core.config import GeneralConfig, parse_config
 from src.core.config import write_config
 from src.run.expand import count_expansion
 from src.run.simulate import run_simulations
-from src.hpc.manifest import JobManifest
+from src.hpc.manifest import JobEntry, JobManifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = REPO_ROOT / 'examples'
@@ -85,3 +86,59 @@ def test_scan_angle_manifest_count_matches_predicted_job_count(tmp_path: Path, m
     slide_jobs = manifest.get_slide_jobs()
     assert len(slide_jobs) == predicted.jobs
     assert sorted(job.angle for job in slide_jobs) == [0.0, 30.0, 60.0]
+
+
+def test_pre_mlip_manifest_json_still_loads(tmp_path: Path) -> None:
+    """The MLIP resource fields (needs_gpu/framework/launcher_flags) are added
+    with dataclass defaults precisely so a manifest.json written by an older
+    version — which has none of those keys — still round-trips. A user with an
+    in-flight campaign must not have to regenerate it."""
+    legacy = {
+        "name": "friction2d_manifest",
+        "created_at": "2026-01-01T00:00:00",
+        "last_updated": "2026-01-01T00:00:00",
+        "config_file": None,
+        "source_directory": None,
+        "config_node_uuid": None,
+        "provenance_node_uuid": None,
+        "scheduler": "pbs",
+        "package_directory": None,
+        "jobs": [
+            {
+                "job_id": "job_0",
+                "simulation_path": "afm/graphene/L2",
+                "lammps_script": "slide.in",
+                "material": "graphene",
+                "layers": 2,
+                "force": 5.0,
+                "angle": 0.0,
+                "speed": 2.0,
+                "status": "prepared",
+                "hpc_job_id": None,
+                "created_at": "2026-01-01T00:00:00",
+                "submitted_at": None,
+                "completed_at": None,
+                "simulation_node_uuid": None,
+                "results_node_uuid": None,
+                "error_message": None,
+            }
+        ],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    manifest = JobManifest.load(path)
+
+    assert manifest.n_jobs == 1
+    job = manifest.jobs[0]
+    assert job.material == "graphene"
+    # Missing keys fall back to the CPU defaults.
+    assert job.needs_gpu is False
+    assert job.framework is None
+    assert job.launcher_flags == ""
+
+    # And a fresh entry still serialises the new keys.
+    entry = JobEntry(job_id="job_1", simulation_path="afm/mos2/L1",
+                     needs_gpu=True, framework="deepmd")
+    assert entry.to_dict()["needs_gpu"] is True
+    assert entry.to_dict()["framework"] == "deepmd"

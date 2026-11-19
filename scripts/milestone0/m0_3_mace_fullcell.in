@@ -1,0 +1,32 @@
+# M0.3 — MACE full-cell base run (`pair_style mace`, no overlay, no hybrid).
+#        This is the baseline every other MACE item is compared against, and
+#        the reference energy for M0.4's constant-offset check.
+#
+# Geometry: bilayer_mos2.data from make_geometries.py — 24 atoms, 4 atom types.
+# TYPE LAYOUT:
+#   1 = Mo layer 1   2 = S layer 1
+#   3 = Mo layer 2   4 = S layer 2
+# Every type maps to a real element: `pair_style mace` rejects NULL type maps
+# (ACEsuit #1314), so MACE is scoped to full-cell coverage.
+#
+# Run (Kokkos, one GPU, one MPI rank — the pair style is used with
+# no_domain_decomposition):
+#       $PREFIX/lammps-mace/build/lmp -k on g 1 -sf kk -in m0_3_mace_fullcell.in
+#
+# PASS: 20 steps complete; finite total energy and forces; record E_pair at
+#       step 0 — M0.4 compares against it.
+
+units metal
+atom_style atomic
+read_data bilayer_mos2.data
+pair_style mace no_domain_decomposition
+pair_coeff * * mace mace.model-lammps.pt Mo S Mo S
+# Masses are also in the data file; repeated here so the deck is self-contained.
+mass 1 95.95   # Mo
+mass 2 32.06   # S
+mass 3 95.95   # Mo
+mass 4 32.06   # S
+thermo 1
+run 0
+fix nve all nve
+run 20

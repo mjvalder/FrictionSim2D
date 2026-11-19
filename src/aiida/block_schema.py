@@ -90,6 +90,8 @@ _SHEET = {
     **_fields(_GEOMETRY, 'x', 'y', 'layers', 'stack_type', 'lat_c'),
     # A Gaussian strength in meV: interaction, not geometry (reverses P2-R3).
     'interlayer_g': _INTERACTION,
+    # MLIP sheets: dispersion = d3 overlays a D3 term on the model.
+    'dispersion': _INTERACTION,
 }
 
 _TIP = {
@@ -152,7 +154,8 @@ _SETTINGS = {
     'output': _fields(_OUTPUT, 'dump', 'dump_frequency', 'results_frequency',
                       'channels', 'optional_channels'),
     'potential': _fields(_INTERACTION, 'lj_cutoff', 'lj_type', 'reaxff_safezone',
-                         'reaxff_mincap'),
+                         'reaxff_mincap', 'd3_functional', 'd3_damping', 'd3_cutoff',
+                         'd3_cn_cutoff'),
 }
 
 #: config.json sections holding one component (or a list of them).
@@ -237,7 +240,8 @@ POINT_PATHS = ('point.load.force', 'point.load.pressure', 'point.angle', 'point.
 _HPC = ('scheduler_type', 'queue', 'partition', 'account', 'hpc_host', 'hpc_home',
         'log_dir', 'scratch_dir', 'num_nodes', 'num_cpus', 'memory_gb',
         'walltime_hours', 'max_array_size', 'modules', 'conda_env', 'mpi_command',
-        'use_tmpdir', 'preflight', 'lammps_scripts')
+        'use_tmpdir', 'preflight', 'lammps_scripts', 'env_lines', 'frameworks',
+        'gpu.ngpus', 'gpu.gpu_type', 'lmp_binary')
 _AIIDA = ('profile', 'computer_label', 'max_stored_file_mb', 'skip_fraction',
           'machine')
 # Analysis thresholds of the post-run integrity check, not simulation physics:
@@ -275,6 +279,9 @@ EXCLUDED = frozenset(
     + ['settings.quench.run_local', 'settings.quench.n_procs',
        'settings.quench.allow_generate', 'settings.geometry.z_vacuum_margin']
     + [f'{s}.materials_list' for s in ('sheet', 'sheets', 'flake_sheets')]
+    # An acknowledgement that an MLIP cell may be unbound: it lifts a refusal,
+    # it does not change which atoms interact or how.
+    + [f'{s}.allow_unbound' for s in ('sheet', 'sheets', 'flake_sheets')]
     + ['general.outer_loop', 'general.scan_angle_force']
 ) | PROVENANCE_EXCLUDED
 

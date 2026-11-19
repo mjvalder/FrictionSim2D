@@ -11,6 +11,12 @@ module load {{ mod }}
 CONDA_ENV="{{ conda_env }}"
 export PATH="$CONDA_ENV/bin:$PATH"
 export LD_LIBRARY_PATH="$CONDA_ENV/lib:${LD_LIBRARY_PATH:-}"
+{% if framework %}
+# MLIP plugin lookups (e.g. deepmd-kit) key off CONDA_PREFIX
+export CONDA_PREFIX="$CONDA_ENV"
+{% endif %}
 
 {% endif %}
-export OMP_NUM_THREADS=1
+{# OMP_NUM_THREADS is 1 per MPI rank for classical runs; an OpenMP-threaded MLIP (MACE)
+   gets the cores its single rank owns. env_lines follow it, so they can override it. #}
+export OMP_NUM_THREADS={{ omp_threads|default(1) }}{% for line in env_lines|default([]) %}{{ "\n" ~ line }}{% endfor %}

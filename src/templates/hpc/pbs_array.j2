@@ -24,7 +24,7 @@ cd "$PBS_O_WORKDIR"
 {% endif %}
 
 # Run
-{{ mpi_command }} lmp -in "$DECK" -log "$SIM/lammps/run_$TAG.log"
+{{ launch_command }} -in "$DECK" -log "$SIM/lammps/run_$TAG.log"
 {% if use_tmpdir %}
 
 # Copy results back

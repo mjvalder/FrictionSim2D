@@ -10,10 +10,11 @@ import json
 import logging
 from itertools import product
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..simulation_base import SimulationBase, drive_spring, halt_temperature
 from ...core.config import AFMSimulationConfig
+from ...core.mlip import get_mlip, is_mlip, validate_mlip_cell
 from ...core.observables import AFM_HOLD_STEPS
 from ...core.utils.structures import cifread
 from ...lattice.apply import rotate_flake_in_plane
@@ -607,10 +608,26 @@ class AFMSimulation(SimulationBase):
         Returns:
             Configured PotentialManager instance.
         """
+        # Capability-matrix rules that need the whole cell -- see
+        # docs/superpowers/specs/2026-08-11-mlip-post-m0-design.md (v4) §3/§6:
+        # no MLIP alongside any classical component (partial-cell is dead for
+        # BOTH frameworks), no multi-component full-cell, and no molecular
+        # constraint modes with an MLIP sheet. In practice this means an AFM
+        # cell -- which always carries a tip, and usually a substrate -- cannot
+        # currently host an MLIP sheet at all.
+        validate_mlip_cell(
+            self.config.sheet,
+            components=[('tip', self.config.tip), ('sub', self.config.sub),
+                        ('flake', self.config.flake)],
+            constraint_mode=self.config.settings.simulation.constraint_mode,
+        )
+
         pm = PotentialManager(
             self.config.settings,
             potentials_dir=self.output_dir / "provenance" / "potentials",
             potentials_prefix=str(self.relative_run_dir / "provenance" / "potentials"),
+            shared_potentials_dir=self.shared_potentials_dir,
+            shared_potentials_prefix=self.SHARED_POTENTIALS_PREFIX,
         )
         pm.set_lj_overrides(self.config.lj_override)
 
@@ -618,12 +635,21 @@ class AFMSimulation(SimulationBase):
             pm.register_component('sub', self.config.sub)
         pm.register_component('tip', self.config.tip)
 
-        sheet_needs_layer_types = (
+        sheet_needs_interlayer_lj = (
             n_sheet_layers > 1 and
             pm.is_sheet_lj(self.config.sheet.pot_type)
         )
+        # Layer-resolved atom types are needed whenever the stacked data file
+        # carries them. An MLIP sheet still stacks per-layer types (the stacking
+        # step renumbers them) and the templates address layers by group -- it
+        # only drops the interlayer term (config validation refuses a non-lj
+        # interlayer_style under an MLIP). Classical internal-LJ potentials keep
+        # their previous collapsed-type behaviour exactly.
+        sheet_needs_layer_types = sheet_needs_interlayer_lj or (
+            n_sheet_layers > 1 and is_mlip(self.config.sheet.pot_type)
+        )
         style = interlayer_style(self.config.general)
-        if sheet_needs_layer_types:
+        if sheet_needs_interlayer_lj:
             # Between the sheet's own layers only; tip/sub keep lj/cut (spec
             # §3). Before the sheet's registration: ilp/tmd's chalcogen
             # sub-layer split is decided there, matching build_sheet's.
@@ -679,8 +705,11 @@ class AFMSimulation(SimulationBase):
             pm.add_cross_interaction('tip', 'flake')
             pm.add_cross_interaction('sheet', 'flake')
 
-        if sheet_needs_layer_types:
+        if sheet_needs_interlayer_lj:
             pm.add_interlayer(['sheet'])
+
+        if self.config.sheet.dispersion == 'd3':
+            pm.enable_d3()
 
         settings_path = self.output_dir_layer[n_sheet_layers] / "lammps" / "system.in.settings"
         pm.write_file(settings_path)
@@ -711,6 +740,21 @@ class AFMSimulation(SimulationBase):
         Zero: the approach only lowers it and the slide moves it laterally.
         """
         return 0.0
+
+    def _mlip_deck_directives(self) -> List[str]:
+        """Registry-declared deck lines for this cell's MLIP framework.
+
+        An AFM cell is uniform by construction: ``validate_mlip_cell`` permits
+        exactly one framework per cell and refuses any mix with a classical
+        component, so the sheet's ``pot_type`` names the whole cell's framework.
+
+        Returns an empty list for a classical cell (and for deepmd, which
+        declares none), so a non-MLIP deck renders byte-identically to before.
+        """
+        pot_type = self.config.sheet.pot_type or ''
+        if not is_mlip(pot_type):
+            return []
+        return list(get_mlip(pot_type).deck_directives)
 
     def build_render_context(self, n_layers: int) -> Dict[str, object]:
         """Assemble the Jinja render context for one layer configuration.
@@ -906,6 +950,26 @@ class AFMSimulation(SimulationBase):
             'velocity_seed': self._velocity_seed(n_layers),
             'seed_thermal_tip': self._run_seed('thermal_tip'),
             'seed_thermal_sub': self._run_seed('thermal_sub'),
+            # Deck lines the MLIP pair style REQUIRES before the box exists:
+            # symmetrix/mace needs `atom_modify map yes` (hard error at
+            # pair_symmetrix_mace.cpp:172 without it) and `newton on` (its
+            # Kokkos variant demands `newton pair on`). deepmd needs neither, so
+            # this is empty there. The registry owns the strings -- see
+            # MLIPSpec.deck_directives.
+            #
+            # LOAD-BEARING: the templates render this behind `| default([])`,
+            # which does NOT raise when the key is absent -- it renders nothing,
+            # the build still reports success, and the omission surfaces only
+            # when LAMMPS aborts. That is precisely what happened between v6
+            # opening the AFM/MLIP path and this line existing.
+            'mlip_deck_directives': self._mlip_deck_directives(),
+            # Same silent-default hazard, same cause. Suppresses `comm_style
+            # tiled` / `balance 1.0 rcb`: under pair_deepmd tiled makes the
+            # style derive a bogus ghost count and try to allocate hundreds of
+            # GB (F2, documentation/milestone0.md). Costs an MLIP run nothing --
+            # both frameworks run one rank per GPU, and tiled/RCB only pay off
+            # across many ranks.
+            'mlip_sheet': is_mlip(self.config.sheet.pot_type or ''),
         }
         context.update(flake_ctx)
         context.update(self._molecule_id_context(n_layers))

@@ -24,7 +24,58 @@ from src.potentials.manager import (
     POTENTIALS_WITH_INTERNAL_LJ,
     POTENTIALS_REQUIRING_LJ,
 )
-from src.core.config import ComponentConfig
+from src.core.config import ComponentConfig, SheetConfig, TipConfig
+
+
+# =========================================================================
+# Golden-block helpers (MLIP emission tests)
+# =========================================================================
+
+def _fake_model(tmp_path, name):
+    """Write a non-UTF-8 stub standing in for a serialized MLIP model."""
+    p = tmp_path / name
+    p.write_bytes(b"\x00")
+    return str(p)
+
+
+#: Real CIFs shipped with the examples: the MLIP tests read element lists
+#: from genuine structures instead of patching the readers.
+_MATERIALS = Path(__file__).resolve().parents[2] / 'examples' / 'materials'
+_REAL_CIFS = {'Si.cif': 'Si.cif', 'MoS2.cif': 'h-MoS2.cif'}
+_SW = Path(__file__).resolve().parents[2] / 'examples' / 'potentials' / 'sw'
+
+
+def _shipped_cif(name):
+    """Return the shipped CIF standing in for ``name`` (Si.cif / MoS2.cif)."""
+    return str(_MATERIALS / _REAL_CIFS[name])
+
+
+def make_component_config(tmp_path, pot_type, pot_path, kind='sheet'):
+    """Build a minimal sheet/tip config for PotentialManager tests."""
+    if kind == 'tip':
+        return TipConfig(mat='Si', pot_type=pot_type, pot_path=pot_path,
+                         cif_path=_shipped_cif('Si.cif'),
+                         r=20.0, amorph='c', dspring=0.1)
+    # lat_c is mandatory for MLIP sheets (enforced by SheetConfig), so it is
+    # supplied here to keep this helper usable for classical and MLIP alike.
+    return SheetConfig(mat='h-MoS2', pot_type=pot_type, pot_path=pot_path,
+                       cif_path=_shipped_cif('MoS2.cif'),
+                       x=50.0, y=50.0, layers=[1], lat_c=6.15)
+
+
+def make_sub_config(tmp_path, pot_type, pot_path):
+    """Minimal substrate config (Si), for multi-component cell tests."""
+    from src.core.config import SubstrateConfig
+    return SubstrateConfig(mat='Si', pot_type=pot_type, pot_path=pot_path,
+                           cif_path=_shipped_cif('Si.cif'),
+                           thickness=10.0)
+
+
+def write_and_read(pm, tmp_path, name='system.in.settings'):
+    """Render the settings file and return its text."""
+    out = Path(tmp_path) / name
+    pm.write_file(out)
+    return out.read_text(encoding='utf-8')
 
 
 class TestPotentialManagerInit:
@@ -76,6 +127,29 @@ class TestIsSheetLJ:
         """Unknown potentials should default to requiring LJ (safe default)."""
         pm = PotentialManager(mock_settings)
         assert pm.is_sheet_lj('unknown_potential') is True
+
+    def test_is_sheet_lj_is_false_for_every_mlip(self, mock_settings):
+        """An MLIP never takes the per-layer LJ path (v4 spec §3).
+
+        The per-layer topology needed NULL-padded type maps, which both
+        frameworks reject, so the single full-coverage instance is the only
+        answer there is -- and it supplies the interlayer physics itself.
+        """
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        assert pm.is_sheet_lj("deepmd") is False
+        assert pm.is_sheet_lj("mace") is False
+        assert pm.is_sheet_lj("DeePMD") is False     # case-insensitive
+        assert pm.is_sheet_lj("sw") is True          # unchanged
+        assert pm.is_sheet_lj("rebomos") is False    # unchanged
+
+    def test_is_sheet_lj_takes_no_interlayer_mode(self, mock_settings):
+        """The parameter is gone; a caller still passing it must fail loudly."""
+        import inspect
+
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        assert 'interlayer_mode' not in inspect.signature(pm.is_sheet_lj).parameters
+        assert ('interlayer_mode'
+                not in inspect.signature(pm.register_component).parameters)
 
 
 class TestNormalizationGuards:
@@ -1003,3 +1077,667 @@ class TestInterlayerStyles:
         ilp.register_component('sheet', mos2_multilayer_config, n_layers=4)
         with pytest.raises(ValueError, match='ghost'):
             ilp.add_interlayer(['sheet'], low_interaction_pairs=[(0, 2)])
+
+
+# =========================================================================
+# MLIP emission (golden blocks: exact LAMMPS text)
+# =========================================================================
+
+class TestMLIPEmission:
+    """Golden-block tests for the one MLIP topology the matrix allows.
+
+    Every assertion is against a WHOLE emitted line (``line in text.splitlines()``),
+    not a substring, because this is the text a LAMMPS parser sees verbatim.
+
+    Type layout note: ``_assign_types`` is ELEMENT-first (all layers of Mo, then
+    all layers of S), so a 3-layer MoS2 sheet is types 1,2,3 = Mo(L1..L3) and
+    4,5,6 = S(L1..L3).
+
+    The per-layer / NULL-partitioned goldens that used to live here are gone
+    with v4: both frameworks reject NULL type maps (v4 spec §1, E2/E3), so a
+    test pinning that text would be pinning output no LAMMPS build accepts.
+    """
+
+    def test_deepmd_multilayer_is_one_full_coverage_instance(
+            self, mock_settings, tmp_path):
+        """3 layers -> ONE un-indexed deepmd, full element list, no NULL, no LJ."""
+        model = _fake_model(tmp_path, "m.pth")
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, pot_type="deepmd", pot_path=model)
+        pm.register_component("sheet", cfg, n_layers=3)
+        pm.add_self_interaction("sheet")
+        text = write_and_read(pm, tmp_path)
+        lines = text.splitlines()
+
+        # A lone full-cell MLIP needs no hybrid wrapper at all.
+        assert f"pair_style deepmd {model}" in lines
+        assert "pair_coeff * * Mo Mo Mo S S S # sheet" in lines
+        assert "NULL" not in text
+        assert "deepmd 1" not in text
+        assert "lj/cut" not in text
+        # An MLIP is cell-scoped now (v6 §3): its line is materialised at write
+        # time rather than stored per component, so assert on the deck itself.
+        assert len([l for l in lines if l.startswith("pair_coeff")]) == 1
+        # The model-deviation trap: never two model paths on one style token.
+        assert f"deepmd {model} {model}" not in text
+
+    def test_deepmd_multilayer_with_virtual_keeps_the_full_map(
+            self, mock_settings, tmp_path):
+        """A virtual atom alone does NOT force `hybrid`; the map stays full.
+
+        E3 (`pair_deepmd.cpp:816`) forbids restricting deepmd to a type range,
+        so the coeff line stays ``pair_coeff * *`` with one element per type --
+        the virtual type taking the placeholder element. Because that map
+        already covers the virtual type (and `neigh_modify exclude` keeps it
+        inert), no lj/cut placeholder is needed, so a lone MLIP emits a plain
+        non-hybrid pair_style.
+        """
+        model = _fake_model(tmp_path, "m.pth")
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, pot_type="deepmd", pot_path=model)
+        pm.register_component("sheet", cfg, n_layers=3)
+        v = pm.register_virtual_atom()
+        pm.add_self_interaction("sheet")
+        text = write_and_read(pm, tmp_path)
+        lines = text.splitlines()
+
+        assert v == 7
+        assert f"pair_style deepmd {model}" in lines
+        # Non-hybrid: the coeff line carries no sub-style selector.
+        assert "pair_coeff * * Mo Mo Mo S S S Mo # sheet" in lines
+        assert "NULL" not in text
+        # The virtual type is covered by `* *`, never reassigned to lj/cut.
+        assert "lj/cut" not in text
+        assert f"pair_coeff * {v} lj/cut" not in text
+
+    def test_virtual_atom_is_never_reassigned_away_from_an_mlip(
+            self, mock_settings, tmp_path):
+        """Regression: a `pair_coeff * <v> lj/cut` line must not be emitted.
+
+        Under plain ``hybrid`` each type pair belongs to exactly ONE sub-style,
+        so a trailing ``pair_coeff * <v> lj/cut`` REASSIGNS the virtual type
+        away from the MLIP -- leaving its type map declaring an element for a
+        type it no longer owns. LAMMPS segfaults the moment ``create_atoms``
+        makes a real virtual atom (i.e. at the sliding phase, after a full
+        equilibration has already run). The MLIP map covers the virtual type
+        itself and `neigh_modify exclude` keeps it inert, so no placeholder is
+        needed at any point.
+        """
+        for dispersion in (False, True):
+            model = _fake_model(tmp_path, f"m_{dispersion}.pth")
+            pm = PotentialManager(mock_settings, use_langevin=False)
+            cfg = make_component_config(tmp_path, pot_type="deepmd",
+                                        pot_path=model)
+            pm.register_component("sheet", cfg, n_layers=3)
+            v = pm.register_virtual_atom()
+            pm.add_self_interaction("sheet")
+            if dispersion:
+                pm.enable_d3()
+            text = write_and_read(pm, tmp_path / f"d3_{dispersion}")
+
+            assert f"pair_coeff * {v} lj/cut" not in text, (
+                f"virtual type {v} reassigned away from the MLIP "
+                f"(dispersion={dispersion})")
+            assert "lj/cut" not in text, f"dispersion={dispersion}"
+            # The MLIP still owns every type, virtual one included.
+            assert "Mo Mo Mo S S S Mo" in text, f"dispersion={dispersion}"
+            for t in range(1, 8):
+                assert f"neigh_modify exclude type {v} {t}" in text
+
+    def test_mace_fullcell_with_d3_and_virtual(self, mock_settings, tmp_path):
+        """Full-cell + D3 mechanism incl. virtual-atom placeholder + exclusion."""
+        model = _fake_model(tmp_path, "m.json")
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, pot_type="mace", pot_path=model)
+        pm.register_component("sheet", cfg, n_layers=3)
+        v = pm.register_virtual_atom()
+        pm.add_self_interaction("sheet")
+        pm.enable_d3()
+        text = write_and_read(pm, tmp_path)
+        lines = text.splitlines()
+
+        assert v == 7
+        assert ("pair_style hybrid/overlay symmetrix/mace "
+                "dispersion/d3 bj pbe 16.0 8.0") in lines
+        # One MACE instance spans every layer; the virtual type carries the
+        # placeholder element because pair_mace rejects NULL.
+        assert f"pair_coeff * * symmetrix/mace {model} Mo Mo Mo S S S Mo # sheet" in lines
+        assert "pair_coeff * * dispersion/d3 Mo Mo Mo S S S Mo" in lines
+        # `neigh_modify exclude type` has NO wildcard form: enumerate the pairs
+        # (see scripts/milestone0/m0_4_virtual_exclude.in).
+        for t in range(1, 8):
+            assert f"neigh_modify exclude type 7 {t}" in lines
+        assert "neigh_modify exclude type 7 *" not in text
+        # No lj/cut placeholder: `pair_coeff * *` already spans the virtual
+        # type for both the MLIP and the D3 overlay.
+        assert "lj/cut" not in text
+
+    def test_deepmd_native_fullcell_emission(self, mock_settings, tmp_path):
+        """Non-hybrid deepmd takes its type map with NO sub-style selector.
+
+        (`pair_coeff * * Mo S ...` -- the form scripts/milestone0/m0_4 documents.)
+        """
+        model = _fake_model(tmp_path, "m.pth")
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, pot_type="deepmd", pot_path=model)
+        pm.register_component("sheet", cfg, n_layers=3)
+        pm.add_self_interaction("sheet")
+        text = write_and_read(pm, tmp_path)
+        lines = text.splitlines()
+
+        assert f"pair_style deepmd {model}" in lines
+        assert "pair_coeff * * Mo Mo Mo S S S # sheet" in lines
+        # Interlayer coupling comes from the model: no LJ anywhere.
+        assert "lj/cut" not in text
+        # Cell-scoped emission (v6 §3): assert on the deck, not on internal state.
+        assert len([l for l in lines if l.startswith("pair_coeff")]) == 1
+
+
+# =========================================================================
+# Shared MLIP model staging
+# =========================================================================
+
+class TestSharedModelStaging:
+    """MLIP models stage once at the simulation root, not per run directory."""
+
+    def test_mlip_model_staged_once_across_managers(
+        self, mock_settings, tmp_path
+    ):
+        """Two runs sharing a root copy the model once; SW stays per-run.
+
+        The MLIP and the SW component are deliberately in SEPARATE cells. They
+        used to share one, but a cell mixing an MLIP with a classical potential
+        is now refused at emission (v6 §4) -- an MLIP's ``pair_coeff * *``
+        claims every atom type, so the SW component's types would be silently
+        absorbed. Staging is per-manager regardless, which is what this covers.
+        """
+        shared = tmp_path / 'potentials'
+        model = _fake_model(tmp_path, 'm.pth')
+        sw = _SW / 'Si.sw'
+
+        emitted = {}
+        run_dirs = []
+        for run in ('run1', 'run2'):
+            run_pots = tmp_path / run / 'provenance' / 'potentials'
+
+            def _pm():
+                return PotentialManager(
+                    mock_settings, use_langevin=False,
+                    potentials_dir=run_pots,
+                    potentials_prefix=f'{run}/provenance/potentials',
+                    shared_potentials_dir=shared,
+                    shared_potentials_prefix='../potentials',
+                )
+
+            pm_mlip = _pm()
+            pm_mlip.register_component(
+                'sheet', make_component_config(tmp_path, 'deepmd', model),
+                n_layers=1,
+            )
+            pm_mlip.add_self_interaction('sheet')
+
+            pm_sw = _pm()
+            pm_sw.register_component(
+                'tip', make_component_config(tmp_path, 'sw', str(sw), kind='tip')
+            )
+            pm_sw.add_self_interaction('tip')
+
+            emitted[run] = (
+                write_and_read(pm_mlip, tmp_path / run, 'mlip.settings'),
+                write_and_read(pm_sw, tmp_path / run, 'sw.settings'),
+            )
+            run_dirs.append(run_pots)
+
+        # Exactly one copy of the model, at the shared root.
+        assert sorted(p.name for p in shared.iterdir()) == ['m.pth']
+        for run_pots in run_dirs:
+            assert not (run_pots / 'm.pth').exists()
+            # Classical potentials keep today's per-run staging.
+            assert (run_pots / 'Si.sw').exists()
+
+        for run, (mlip_text, sw_text) in emitted.items():
+            # A lone full-cell MLIP needs no hybrid wrapper.
+            assert 'pair_style deepmd ../potentials/m.pth' in mlip_text
+            assert f'{run}/provenance/potentials/Si.sw' in sw_text
+
+    def test_shared_model_not_recopied(
+        self, mock_settings, tmp_path
+    ):
+        """The second manager reuses the staged file rather than copying again."""
+        shared = tmp_path / 'potentials'
+        model = _fake_model(tmp_path, 'm.pth')
+
+        def stage():
+            pm = PotentialManager(
+                mock_settings, use_langevin=False,
+                shared_potentials_dir=shared,
+                shared_potentials_prefix='../potentials',
+            )
+            return pm._get_potential_path(model)
+
+        assert stage() == '../potentials/m.pth'
+        first = (shared / 'm.pth').stat().st_mtime_ns
+        assert stage() == '../potentials/m.pth'
+        assert (shared / 'm.pth').stat().st_mtime_ns == first
+
+
+# =========================================================================
+# v6: cell-scoped MLIP type maps
+# =========================================================================
+
+class TestBuildFullMap:
+    """``build_full_map`` spans every atom type in the cell, with no NULL.
+
+    This is the map a full-cell MLIP needs (v6 spec §3): both frameworks
+    reject NULL entries (v4 E2/E3), so a multi-component MLIP cell must be
+    described by ONE ``pair_coeff * *`` naming a real element for every type.
+    ``build_null_map`` stays as it is -- classical potentials still partition.
+    """
+
+    def test_full_map_spans_every_component_with_no_null(
+            self, mock_settings, tmp_path):
+        """sub(Si x3) + tip(Si x3) + sheet(Mo,S) -> 8 entries, in type-id order."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=True)
+        pm.register_component('sub', make_sub_config(tmp_path, 'deepmd', model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'deepmd', model, kind='tip'))
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model))
+
+        full = pm.types.build_full_map()
+
+        assert full == ['Si', 'Si', 'Si', 'Si', 'Si', 'Si', 'Mo', 'S']
+        assert 'NULL' not in full
+        assert len(full) == len(pm.types)
+
+    def test_full_map_matches_null_map_for_a_single_component_cell(
+            self, mock_settings, tmp_path):
+        """With one component there is nothing to pad, so the two agree."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model), n_layers=3)
+
+        assert pm.types.build_full_map() == pm.types.build_null_map('sheet')
+
+    def test_null_map_still_partitions(
+            self, mock_settings, tmp_path):
+        """Regression: classical partitioning behaviour is untouched."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'deepmd', model, kind='tip'))
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model))
+
+        assert pm.types.build_null_map('tip') == ['Si', 'NULL', 'NULL']
+        assert pm.types.build_null_map('sheet') == ['NULL', 'Mo', 'S']
+
+
+class TestOneMLIPInstancePerCell:
+    """An MLIP is scoped to the CELL, not to each component (v6 spec §3).
+
+    ``potential_usage`` drives how many sub-style tokens ``write_file`` emits.
+    One MLIP instance must cover the whole cell, so registering three MLIP
+    components must still count as one -- consistent with rule 1, which already
+    forbids two different models of one framework in a cell.
+    """
+
+    def test_three_mlip_components_count_as_one_instance(
+            self, mock_settings, tmp_path):
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        for name, cfg in (
+            ('sub', make_sub_config(tmp_path, 'deepmd', model)),
+            ('tip', make_component_config(tmp_path, 'deepmd', model, kind='tip')),
+            ('sheet', make_component_config(tmp_path, 'deepmd', model)),
+        ):
+            pm.register_component(name, cfg)
+
+        assert pm.potential_usage['deepmd'] == 1
+
+    def test_multilayer_mlip_sheet_still_counts_as_one(
+            self, mock_settings, tmp_path):
+        """is_sheet_lj is False for an MLIP, so layers never multiplied it."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model), n_layers=3)
+
+        assert pm.potential_usage['deepmd'] == 1
+
+    def test_classical_usage_counts_are_unchanged(
+            self, mock_settings, tmp_path):
+        """Regression: SW still counts per component, and per layer for a sheet."""
+        sw = _SW / 'Si.sw'
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'sw', str(sw), kind='tip'))
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'sw', str(_SW / 'MoS2_wen.sw')),
+            n_layers=3)
+
+        # 1 for the tip + 3 for the 3-layer sheet (is_sheet_lj('sw') is True).
+        assert pm.potential_usage['sw'] == 4
+
+
+class TestCellScopedMLIPEmission:
+    """One ``pair_coeff * *`` spanning every component (v6 spec §3/§4).
+
+    Emission is DEFERRED to ``write_file``: the full map must span components
+    registered *after* the first ``add_self_interaction`` call, which is the
+    order ``hetero_afm`` and ``flake_slide`` use.
+    """
+
+    def _afm_cell(self, mock_settings, tmp_path, pot='deepmd', tip_pot=None):
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sub', make_sub_config(tmp_path, pot, model))
+        tip_path = model
+        if tip_pot is not None and tip_pot != pot:
+            tip_path = str(_SW / 'Si.sw')
+        pm.register_component(
+            'tip', make_component_config(
+                tmp_path, tip_pot or pot, tip_path, kind='tip'))
+        pm.register_component('sheet', make_component_config(tmp_path, pot, model))
+        return pm, model
+
+    def test_afm_cell_emits_one_full_map_coeff_line(
+            self, mock_settings, tmp_path):
+        """3 MLIP components -> ONE un-indexed pair_coeff over all 4 types."""
+        pm, model = self._afm_cell(mock_settings, tmp_path)
+        for name in ('sub', 'tip', 'sheet'):
+            pm.add_self_interaction(name)
+        text = write_and_read(pm, tmp_path)
+        lines = text.splitlines()
+
+        assert f'pair_style deepmd {model}' in lines
+        assert len([l for l in lines if l.startswith('pair_coeff')]) == 1
+        assert 'pair_coeff * * Si Si Mo S # sub, tip, sheet' in lines
+        assert 'NULL' not in text
+        assert 'deepmd 1' not in text
+        assert 'lj/cut' not in text
+
+    def test_component_registered_after_self_interaction_is_in_the_map(
+            self, mock_settings, tmp_path):
+        """The ordering hazard deferral exists to remove (hetero_afm/flake)."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, 'deepmd', model))
+        pm.add_self_interaction('sheet')
+        # Registered LATE, after the sheet's self-interaction call.
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'deepmd', model, kind='tip'))
+        pm.add_self_interaction('tip')
+
+        assert 'pair_coeff * * Mo S Si # sheet, tip' in write_and_read(
+            pm, tmp_path).splitlines()
+
+    def test_mlip_plus_classical_cell_fails_loudly(
+            self, mock_settings, tmp_path):
+        """An SW tip beside an MLIP sheet must never reach LAMMPS (v6 §4)."""
+        pm, _ = self._afm_cell(mock_settings, tmp_path, tip_pot='sw')
+        for name in ('sub', 'sheet'):
+            pm.add_self_interaction(name)
+        pm.add_self_interaction('tip')
+
+        with pytest.raises(ValueError) as exc:
+            write_and_read(pm, tmp_path)
+        msg = str(exc.value)
+        assert 'tip' in msg and 'sw' in msg and 'deepmd' in msg
+
+    def test_two_mlip_frameworks_in_one_cell_fail_loudly(
+            self, mock_settings, tmp_path):
+        """Each framework would need its own `pair_coeff * *`; the second wins."""
+        deep = _fake_model(tmp_path, 'm.pth')
+        mace = _fake_model(tmp_path, 'm.json')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, 'deepmd', deep))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'mace', mace, kind='tip'))
+        pm.add_self_interaction('sheet')
+        pm.add_self_interaction('tip')
+
+        with pytest.raises(ValueError) as exc:
+            write_and_read(pm, tmp_path)
+        assert 'deepmd' in str(exc.value) and 'mace' in str(exc.value)
+
+    def test_single_component_mlip_deck_is_unchanged(
+            self, mock_settings, tmp_path):
+        """Regression against the existing v4 golden."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model), n_layers=3)
+        pm.add_self_interaction('sheet')
+        lines = write_and_read(pm, tmp_path).splitlines()
+
+        assert f'pair_style deepmd {model}' in lines
+        assert 'pair_coeff * * Mo Mo Mo S S S # sheet' in lines
+
+    def test_write_file_is_idempotent(
+            self, mock_settings, tmp_path):
+        """Materialising at write time must not accumulate lines."""
+        pm, _ = self._afm_cell(mock_settings, tmp_path)
+        for name in ('sub', 'tip', 'sheet'):
+            pm.add_self_interaction(name)
+        first = write_and_read(pm, tmp_path, 'a.settings')
+        second = write_and_read(pm, tmp_path, 'b.settings')
+        assert first == second
+
+
+class TestMLIPSuppressesCrossLJ:
+    """No LJ between components an MLIP already covers (v6 spec §3).
+
+    This is the physics argument of v4 §2 applied between components rather
+    than between layers: the MLIP cutoff already spans the tip/sheet gap, so a
+    UFF-mixed LJ parameterised to BE that interaction double-counts.
+    """
+
+    def _all_mlip_afm(self, mock_settings, tmp_path):
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sub', make_sub_config(tmp_path, 'deepmd', model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'deepmd', model, kind='tip'))
+        pm.register_component('sheet', make_component_config(tmp_path, 'deepmd', model))
+        for name in ('sub', 'tip', 'sheet'):
+            pm.add_self_interaction(name)
+        return pm
+
+    def test_afm_cross_interactions_are_suppressed(
+            self, mock_settings, tmp_path):
+        """The three pairs afm.py adds (sub-tip, sub-sheet, tip-sheet)."""
+        pm = self._all_mlip_afm(mock_settings, tmp_path)
+        pm.add_cross_interaction('sub', 'tip')
+        pm.add_cross_interaction('sub', 'sheet')
+        pm.add_cross_interaction('tip', 'sheet')
+
+        assert pm.cross_interaction_commands == []
+        assert 'lj/cut' not in write_and_read(pm, tmp_path)
+
+    def test_interlayer_interaction_is_suppressed_for_an_mlip_sheet(
+            self, mock_settings, tmp_path):
+        """afm.py:455 / sheetonsheet call this for multi-layer sheets."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model), n_layers=3)
+        pm.add_self_interaction('sheet')
+        pm.add_interlayer_interaction('sheet')
+
+        assert pm.cross_interaction_commands == []
+        assert 'lj/cut' not in write_and_read(pm, tmp_path)
+
+    def test_ghost_lj_is_suppressed_for_an_mlip_sheet(
+            self, mock_settings, tmp_path):
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'deepmd', model), n_layers=3)
+        pm.add_self_interaction('sheet')
+        pm.add_ghost_lj('sheet', max_real_distance=1)
+
+        assert pm.cross_interaction_commands == []
+
+    def test_cross_interaction_between_mlip_and_classical_raises(
+            self, mock_settings, tmp_path):
+        """rule 2 should have caught this upstream -- never emit it silently."""
+        model = _fake_model(tmp_path, 'm.pth')
+        sw = _SW / 'Si.sw'
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, 'deepmd', model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'sw', str(sw), kind='tip'))
+
+        with pytest.raises(ValueError) as exc:
+            pm.add_cross_interaction('tip', 'sheet')
+        assert 'deepmd' in str(exc.value)
+
+    def test_classical_cross_interactions_are_unchanged(
+            self, mock_settings, tmp_path):
+        """Regression: an all-SW cell still gets its LJ cross terms."""
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'sw', str(_SW / 'Si.sw'), kind='tip'))
+        pm.register_component(
+            'sheet', make_component_config(tmp_path, 'sw', str(_SW / 'MoS2_wen.sw')))
+        pm.add_cross_interaction('tip', 'sheet')
+
+        assert len(pm.cross_interaction_commands) == 2  # Si-Mo, Si-S
+        assert 'lj/cut' in write_and_read(pm, tmp_path)
+
+
+class TestMLIPElementCoverage:
+    """The emitted map must not name an element the model lacks (v6 §4 rule 3b).
+
+    This check earns its keep because the failure it prevents is SILENT: v4 E7
+    showed that naming an element the model does not have does not error --
+    LAMMPS maps the types to the model's first N elements and returns a
+    plausible, wrong energy (-61.89 eV instead of -256.90 on the reference
+    trilayer).
+    """
+
+    @staticmethod
+    def _mace_json(tmp_path, atomic_numbers, name='m.json'):
+        import json
+        p = tmp_path / name
+        p.write_text(json.dumps({'atomic_numbers': atomic_numbers,
+                                 'num_elements': len(atomic_numbers)}),
+                     encoding='utf-8')
+        return str(p)
+
+    def test_si_tip_on_a_mo_s_only_model_is_refused(
+            self, mock_settings, tmp_path):
+        """The real mace-mpa-0-medium-Mo-S.json is exactly this case."""
+        model = self._mace_json(tmp_path, [16, 42])  # S, Mo -- no Si
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, 'mace', model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'mace', model, kind='tip'))
+        pm.add_self_interaction('sheet')
+        pm.add_self_interaction('tip')
+
+        with pytest.raises(ValueError) as exc:
+            write_and_read(pm, tmp_path)
+        msg = str(exc.value)
+        assert 'Si' in msg
+        assert 'chemical-symbols' in msg  # names the re-extraction fix
+
+    def test_a_model_covering_every_element_passes(
+            self, mock_settings, tmp_path):
+        model = self._mace_json(tmp_path, [14, 16, 42])  # Si, S, Mo
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, 'mace', model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'mace', model, kind='tip'))
+        pm.add_self_interaction('sheet')
+        pm.add_self_interaction('tip')
+
+        assert 'Mo S Si' in write_and_read(pm, tmp_path)
+
+    def test_deepmd_coverage_is_not_enforced_at_generation_time(
+            self, mock_settings, tmp_path):
+        """type_map needs torch to read; v4 §3.3 forbids that dependency here."""
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, 'deepmd', model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, 'deepmd', model, kind='tip'))
+        pm.add_self_interaction('sheet')
+        pm.add_self_interaction('tip')
+
+        assert 'pair_coeff * * Mo S Si # sheet, tip' in write_and_read(
+            pm, tmp_path).splitlines()
+
+
+class TestSingleComponentCommandsRefuseMLIP:
+    """`get_single_component_commands` must never emit an MLIP deck (v6 §5).
+
+    Its output is `pair_style <pot>` + `pair_coeff * * <path> <elements>`,
+    which is wrong for BOTH frameworks: DeePMD carries the model in the
+    pair_style line, MACE in the pair_coeff line. Its only callers are the
+    generation-time melt-quench builds, which cannot run an MLIP anyway.
+    """
+
+    def test_mlip_config_raises(self, mock_settings, tmp_path):
+        model = _fake_model(tmp_path, 'm.pth')
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, 'deepmd', model, kind='tip')
+        with pytest.raises(ValueError) as exc:
+            pm.get_single_component_commands(cfg, ['Si'])
+        assert 'amorph' in str(exc.value) or 'deepmd' in str(exc.value)
+
+    def test_classical_config_is_unchanged(self, mock_settings, tmp_path):
+        sw = _SW / 'Si.sw'
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        cfg = make_component_config(tmp_path, 'sw', str(sw), kind='tip')
+        cmds = pm.get_single_component_commands(cfg, ['Si'])
+        assert cmds[0] == 'pair_style sw'
+        assert cmds[1].startswith('pair_coeff * * ')
+
+
+class TestNonHybridPathForBothFrameworks:
+    """A multi-component MLIP cell can now take the NON-hybrid path (v6 §8).
+
+    With one instance and no cross-LJ, `_is_single_potential` is true, so
+    `write_file` emits a bare `pair_style` and routes every line through
+    `_strip_non_hybrid_prefix`. Before v6 only single-component cells reached
+    that path, and the two frameworks need opposite treatment there: deepmd's
+    model path lives in the pair_style line (so the coeff line loses its style
+    token), MACE's lives in the coeff line (so it must survive).
+    """
+
+    def _cell(self, mock_settings, tmp_path, pot, model):
+        pm = PotentialManager(mock_settings, use_langevin=False)
+        pm.register_component('sheet', make_component_config(tmp_path, pot, model))
+        pm.register_component(
+            'tip', make_component_config(tmp_path, pot, model, kind='tip'))
+        pm.add_self_interaction('sheet')
+        pm.add_self_interaction('tip')
+        return write_and_read(pm, tmp_path).splitlines()
+
+    def test_deepmd_multi_component_non_hybrid(
+            self, mock_settings, tmp_path):
+        model = _fake_model(tmp_path, 'm.pth')
+        lines = self._cell(mock_settings, tmp_path, 'deepmd', model)
+
+        assert f'pair_style deepmd {model}' in lines
+        assert 'hybrid' not in '\n'.join(lines)
+        # Style token stripped; the model path stays in pair_style only.
+        assert 'pair_coeff * * Mo S Si # sheet, tip' in lines
+
+    def test_mace_multi_component_non_hybrid_keeps_the_model_path(
+            self, mock_settings, tmp_path):
+        """MACE carries its model in the COEFF line, so it must survive."""
+        model = _fake_model(tmp_path, 'm.json')
+        lines = self._cell(mock_settings, tmp_path, 'mace', model)
+
+        style = [l for l in lines if l.startswith('pair_style')]
+        coeff = [l for l in lines if l.startswith('pair_coeff')]
+        assert len(style) == 1 and len(coeff) == 1
+        assert 'hybrid' not in style[0]
+        assert model in coeff[0], (
+            'MACE model path must survive the non-hybrid rewrite')
+        assert coeff[0].endswith('Mo S Si # sheet, tip')

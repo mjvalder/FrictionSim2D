@@ -697,8 +697,10 @@ def _set(doc, path, tmp_path):
         doc[head] = _perturb(target, tmp_path, head)
         return
     for key in rest[:-1]:
+        if target.get(key) is None:      # an optional nested model left unset (hpc.gpu)
+            target[key] = {}
         target = target[key]
-    target[rest[-1]] = _perturb(target[rest[-1]], tmp_path, rest[-1])
+    target[rest[-1]] = _perturb(target.get(rest[-1]), tmp_path, rest[-1])
 
 
 @pytest.mark.parametrize('path', sorted(FIELD_MAP))

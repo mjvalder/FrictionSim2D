@@ -175,6 +175,51 @@ def test_hpc_generate_help(runner):
     assert result.exit_code == 0
     assert '--scheduler' in result.output
     assert '--output-dir' in result.output
+    # Named HPC profiles were dropped: clusters switch via --settings-file.
+    assert '--profile' not in result.output
+
+
+GPU_SETTINGS_YAML = """\
+hpc:
+  scheduler_type: pbs
+  queue: gpu72
+  num_cpus: 8
+  memory_gb: 64
+  modules: [tools/prod, lammps]
+  use_tmpdir: false
+  gpu: {ngpus: 1, gpu_type: L40S}
+  frameworks:
+    deepmd: {binary: $HOME/deepmd-kit/bin/lmp}
+"""
+
+
+def _mixed_sim_tree(tmp_path):
+    """A built tree with one classical and one DeePMD (pot_ segment) run."""
+    root = tmp_path / 'sim'
+    for rel in ('sheetonsheet/h-MoS2/50x_50y/K300',
+                'sheetonsheet/h-MoS2/50x_50y/K300/pot_deepmd_dpa3'):
+        lammps_dir = root / rel / 'lammps'
+        lammps_dir.mkdir(parents=True)
+        (lammps_dir / 'slide.in').write_text('# slide\n', encoding='utf-8')
+    settings = tmp_path / 'settings.yaml'
+    settings.write_text(GPU_SETTINGS_YAML, encoding='utf-8')
+    return root, settings
+
+
+def test_hpc_generate_splits_mlip_runs_into_a_gpu_script_with_the_overlay(runner, tmp_path):
+    sim_dir, settings = _mixed_sim_tree(tmp_path)
+
+    result = runner.invoke(cli, [
+        'hpc', 'generate', str(sim_dir), '--settings-file', str(settings),
+    ])
+
+    assert result.exit_code == 0, result.output
+    cpu = (sim_dir / 'hpc' / 'run_cpu.pbs').read_text(encoding='utf-8')
+    gpu = (sim_dir / 'hpc' / 'run_gpu_deepmd.pbs').read_text(encoding='utf-8')
+    assert 'ngpus' not in cpu
+    assert 'mpirun lmp -in ' in cpu
+    assert 'ngpus=1:gpu_type=L40S' in gpu
+    assert '$HOME/deepmd-kit/bin/lmp -in ' in gpu
 
 
 # ---------------------------------------------------------------------------

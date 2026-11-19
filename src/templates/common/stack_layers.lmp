@@ -60,5 +60,12 @@ variable lat_c equal v_z2-v_z1
 {# The stacked file is read back by a plain read_data, so with molecule IDs
    `nofix` keeps fix property/atom's Molecules section out of it. (`unfix`
    first would not do: write_data re-inits, and ILP/KC then refuse to run
-   without the molecule attribute.) #}
-write_data {{ output_path }}{% if needs_molecule_ids %} nofix{% endif %}
+   without the molecule attribute.)
+   `nocoeff` is load-bearing too. The MLIP stacking surrogate is `pair_style
+   zero`, which HAS per-type coefficients, so a plain write_data serialises a
+   "Pair Coeffs # zero" block into the structure. Production scripts read_data
+   BEFORE they include the settings file that defines pair_style, and LAMMPS
+   then aborts with "Must define pair_style before Pair Coeffs"
+   (read_data.cpp:782). Classical many-body styles happen not to write the
+   section, which is why this only bites MLIP runs. #}
+write_data {{ output_path }} nocoeff{% if needs_molecule_ids %} nofix{% endif %}

@@ -10,8 +10,28 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from ...interfaces.ase import read_structure
+from ..mlip import MLIP_REGISTRY
 
 logger = logging.getLogger(__name__)
+
+#: Model-file extensions of every registered MLIP framework ('.json' symmetrix
+#: MACE, '.pb'/'.pth' DeePMD), plus the legacy ACEsuit '.pt'. These files are
+#: serialised tensors (or a symmetrix JSON), never a classical potential file.
+MLIP_MODEL_EXTENSIONS = tuple(sorted(
+    {ext.lower() for spec in MLIP_REGISTRY.values() for ext in spec.file_extensions}
+    | {'.pt'}
+))
+
+#: Potentials that take exactly one LAMMPS atom type per element. Their files
+#: are never parsed for per-element multiplicity -- for an MLIP that would
+#: open a binary model as UTF-8 text and crash. Shared with
+#: src.potentials.utils.get_potential_element_order.
+SINGLE_TYPE_POTENTIALS = frozenset(
+    {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam'} | set(MLIP_REGISTRY))
+#: Extension fallback for callers that pass no ``pot_type`` (e.g.
+#: check_potential_cif_compatibility): the extension is then the only guard.
+SINGLE_TYPE_EXTENSIONS = (
+    ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff') + MLIP_MODEL_EXTENSIONS)
 
 def cifread(cif_path: Union[str, Path]) -> Dict[str, Any]:
     """Read a CIF file and extract crystal structure information using ASE.
@@ -69,10 +89,8 @@ def count_atomtypes(
     str_path = str(potential_filepath)
     pot_lower = (pot_type or '').lower()
 
-    single_type_pots = {'reaxff', 'reax/c', 'rebo', 'rebomos', 'airebo', 'meam'}
-    single_type_exts = ('.rebo', '.rebomos', '.airebo', '.meam', '.reaxff')
-
-    if pot_lower in single_type_pots or str_path.lower().endswith(single_type_exts):
+    if (pot_lower in SINGLE_TYPE_POTENTIALS
+            or str_path.lower().endswith(SINGLE_TYPE_EXTENSIONS)):
         return {el: 1 for el in elements}
 
     pattern = re.compile(r'([A-Za-z]+)(\d*)')

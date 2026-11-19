@@ -40,6 +40,9 @@ variable        find equal {{ forces }}
 clear
 units           metal
 atom_style      {{ atom_style }}
+{% for directive in mlip_deck_directives | default([]) %}
+{{ directive }}
+{% endfor %}
 boundary        p p p
 
 neighbor        {{ neighbor_list }} bin
@@ -47,7 +50,14 @@ neighbor        {{ neighbor_list }} bin
 
 timestep        {{ timestep }}
 thermo          {{ thermo }}
+{% if not mlip_sheet | default(false) %}
+{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
+   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
+   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
+   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
+   run loses nothing by falling back to the default brick decomposition. #}
 comm_style      tiled
+{% endif %}
 
 # The loaded contact state written by the system.in aveforce ramp (fresh seed).
 # A load whose system.in ramp halted (common/halt.lmp) or never ran has no
@@ -79,7 +89,14 @@ fix             fs_edge sheet_edge spring/self {{ finite_sheet_edge_spring_k }} 
 dump            sys all atom {{ dump_freq }} {{ dump_file_pattern }}
 {% endif %}
 
+{% if not mlip_sheet | default(false) %}
+{# comm_style tiled breaks pair_deepmd: it derives a bogus ghost count and
+   tries to allocate hundreds of GB (host side). Measured 2026-08-11; removing
+   `balance` alone does not help, removing tiled does. tiled/RCB exist to spread
+   irregular work over many MPI ranks and we run one rank per GPU, so an MLIP
+   run loses nothing by falling back to the default brick decomposition. #}
 balance         1.0 rcb
+{% endif %}
 
 # =====================================================================================
 # PHASE 1 -- finite-T damped hold at the target load (penetration).  No sliding.

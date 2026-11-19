@@ -10,7 +10,6 @@ import subprocess
 from abc import ABC
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union, Optional
-import shutil
 import json
 from datetime import datetime
 import hashlib
@@ -19,7 +18,9 @@ from jinja2 import Environment
 
 from ..interfaces.atomsk import AtomskWrapper
 from ..interfaces.jinja import PackageLoader
+from ..core.mlip import get_mlip, is_mlip
 from ..core.utils.paths import get_material_path, get_potential_path
+from ..potentials.manager import stage_model_file
 from ..hpc import HPCScriptGenerator, HPCConfig
 from ..hpc.manifest import JobManifest
 from .utils.z_vacuum import ZBox
@@ -72,6 +73,30 @@ def drive_spring(drive_method: str, k_ev: float,
     if drive_method == 'smd':
         return k_ev, 0.0
     return k_ev, rest_length
+
+
+def mlip_template_context(pot_type: Optional[str]) -> Dict[str, Any]:
+    """The ``mlip_sheet`` / ``mlip_deck_directives`` template keys.
+
+    ``pot_type`` names the whole cell's framework: a cell is uniform by
+    construction (v6 §4 -- every component uses the SAME MLIP, enforced by
+    ``validate_mlip_cell`` and again at emission).
+
+    LOAD-BEARING, both keys. The templates render them behind
+    ``| default(...)``, which does NOT raise when a key is absent -- it
+    silently renders nothing (directives) or the classical branch
+    (``mlip_sheet``: ``comm_style tiled`` / ``balance rcb``, which make
+    pair_deepmd derive a bogus ghost count and try to allocate hundreds of GB,
+    F2 in documentation/milestone0.md), the build still reports success, and
+    the omission surfaces only when LAMMPS aborts. Every builder that renders
+    a run deck must merge this into its context. A classical ``pot_type``
+    gives ``False`` / ``[]``, so a classical deck renders unchanged.
+    """
+    pot_type = pot_type or ''
+    if not is_mlip(pot_type):
+        return {'mlip_sheet': False, 'mlip_deck_directives': []}
+    return {'mlip_sheet': True,
+            'mlip_deck_directives': list(get_mlip(pot_type).deck_directives)}
 
 
 def _infer_provenance_category(file_path: Path) -> str:
@@ -219,6 +244,37 @@ class SimulationBase(ABC):
             lstrip_blocks=True
         )
 
+    #: pair_style/pair_coeff prefix for :attr:`shared_potentials_dir`. LAMMPS is
+    #: invoked from the simulation root (see ``src/templates/hpc/pbs_combined.j2``),
+    #: so a bare directory name is the correct relative path from every run.
+    SHARED_POTENTIALS_PREFIX = 'potentials'
+
+    @property
+    def simulation_root(self) -> Path:
+        """The campaign root that contains every run directory of this sweep.
+
+        ``set_base_output_dir`` supplies it for anything built through
+        ``run_simulations``; a directly-constructed builder falls back to
+        stripping ``relative_run_dir`` off ``output_dir``.
+        """
+        if self.base_output_dir is not None:
+            return self.base_output_dir
+        root = self.output_dir
+        if not self.relative_run_dir.is_absolute():
+            for _ in self.relative_run_dir.parts:
+                root = root.parent
+        return root
+
+    @property
+    def shared_potentials_dir(self) -> Path:
+        """Where MLIP model files are staged: once per campaign, not per run.
+
+        A foundation model is hundreds of MB; copying it into every run
+        directory of a 100-member sweep costs gigabytes over rsync. Classical
+        potentials keep their per-run ``provenance/potentials`` copy.
+        """
+        return self.simulation_root / self.SHARED_POTENTIALS_PREFIX
+
     def _create_directories(self, output_dir: Optional[Path] = None,
                             subdirs: Optional[List[str]] = None) -> None:
         """Creates standard simulation subdirectories.
@@ -344,7 +400,11 @@ class SimulationBase(ABC):
         dest_path = dest_dir / file_path.name
 
         if not dest_path.exists():
-            shutil.copy2(file_path, dest_path)
+            # Prefer linking from the campaign's own store when it already
+            # exists, so the tree's aliasing stays internal; falls back to the
+            # source file. Either way the campaign holds one inode per model.
+            shared = self.shared_potentials_dir / file_path.name
+            stage_model_file(file_path, dest_path, link_from=shared)
             logger.debug("Added to provenance: %s", file_path.name)
 
         self._update_provenance_manifest(file_path, category, component, dest_path)
@@ -532,9 +592,14 @@ class SimulationBase(ABC):
             job_name=job_name
         )
 
-        if not hpc_config.modules and not hpc_config.conda_env:
+        # Empty modules is valid for a conda-based or env_lines-only MLIP
+        # environment (see the same relaxation in
+        # src/hpc/scripts.py::_validate_config).
+        if (not hpc_config.modules and not hpc_config.conda_env
+                and not hpc_config.env_lines):
             raise ValueError(
-                "HPC modules list is empty; set hpc.modules or hpc.conda_env in settings.")
+                "HPC modules list is empty; set hpc.modules, hpc.conda_env or "
+                "hpc.env_lines in settings.")
         if hpc_config.use_tmpdir and not hpc_config.scratch_dir:
             raise ValueError("HPC scratch_dir is required when use_tmpdir is true.")
 

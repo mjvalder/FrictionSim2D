@@ -13,6 +13,7 @@ from typing import Dict, List
 from ...potentials.manager import PotentialManager
 from ...potentials.utils import normalize_potential_type
 from ..construction.hetero_stack import detect_inplane_repeat
+from ..simulation_base import mlip_template_context
 from ..utils.interlayer import interlayer_template_context
 from ..utils.pes_common import DEFAULT_GRID_N, PES_MINIMIZE_COMMAND, _cell_period
 from .base import (CUTOFF_NOT_APPLICABLE, SheetOnSheetSimulation,
@@ -218,6 +219,17 @@ class PESGridMixin:
         """The periodic-z box (:class:`~src.builders.utils.z_vacuum.ZBox`)."""
         raise NotImplementedError
 
+    def _scan_mlip_pot_type(self) -> str:
+        """The ``pot_type`` naming the cell's MLIP framework (if any).
+
+        Not :meth:`_scan_pot_type`: the hetero hook pins that to ``sw`` for the
+        ReaxFF ``qeq`` gate. The first sheet speaks for the whole cell, which
+        is uniform by construction (``validate_mlip_cell``).
+        """
+        sheets = getattr(self.config, 'sheets', None)
+        sheet = sheets[0] if sheets else self.config.sheet
+        return sheet.pot_type or ''
+
     # ------------------------------------------------------------ shared --
 
     def _layer_count_hint(self) -> str:
@@ -283,6 +295,9 @@ class PESGridMixin:
             'n_cells': n_cells,
             'z_relax': self._z_relax(),
             'data_dir': f"{self.relative_run_dir}/data",   # final_pes.data
+            # Without these the scan deck silently renders the classical
+            # branch (see mlip_template_context).
+            **mlip_template_context(self._scan_mlip_pot_type()),
         }
         self.z_box = self._scan_z_box()
         base_context.update(self.z_box.context())
