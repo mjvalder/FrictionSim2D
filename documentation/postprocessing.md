@@ -291,6 +291,9 @@ FrictionSim2D aiida export-results <label> <dir>
   (`period_summary`) becomes that label's summary rows, as `aiida://dataset/` does.
 - A table field (`ranking_file`, `traces_file`, ...) takes a path or
   `{"analysis": <name>, "dataset": <dataset>, "version": <optional>}`.
+- `stickslip_period_histogram` and `contact_cof_scatter` read the load from `load_nN`, or
+  from `force` as `stick_slip` and `contact` name it. Those analyses hold every layer:
+  `filter_layer` keeps one.
 - `sheet_profile` and `integrity_panel` take `dataset` + `material` + `layer` instead
   of `run_dir`; the integrity panel draws failed points too.
 - The plotter never computes an analysis: a missing result raises naming
@@ -764,7 +767,7 @@ against.
 | `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
 | `load_colors` | `Optional[List[str]]` |  |
 | `line_width` | `Optional[float]` |  |
-| `stickslip_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN, lf_period_A, a_x_A, lf_period_clear |
+| `stickslip_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN (or force), lf_period_A, a_x_A, lf_period_clear |
 | `ranking_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, eligible |
 | `bins_arange` | `Optional[List[float]]` | [start, stop, step] |
 | `reference_line` | `Optional[float]` | x of the dashed line; null for none |
@@ -813,7 +816,7 @@ against.
 | `loads` | `Optional[List[float]]` | Loads (nN), one colour each |
 | `load_colors` | `Optional[List[str]]` |  |
 | `line_width` | `Optional[float]` |  |
-| `contact_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN, state, <x_column> |
+| `contact_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, load_nN (or force), state, <x_column> |
 | `ranking_file` | `Optional[src.postprocessing.plot_config.TableSource]` | material, eligible, cof_<L>nN |
 | `x_column` | `Optional[str]` | Contact column on x (required) |
 | `state` | `Optional[str]` | 'load' (default) or 'final' |

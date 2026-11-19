@@ -87,6 +87,64 @@ def test_contact_scatter_takes_cof_at_each_load(tmp_path, monkeypatch):
     assert points == [([100.0], [0.02]), ([150.0], [0.03])]
 
 
+def test_period_histogram_reads_an_analysis_table_by_force_and_layer(tmp_path, monkeypatch):
+    """`stick_slip` names the load `force` and holds every layer (Task 9)."""
+    ss = tmp_path / 'ss_analysis.csv'
+    pd.DataFrame({'material': ['A', 'A', 'A'], 'force': [10.0, 20.0, 10.0],
+                  'layer': [2, 2, 1], 'lf_period_A': [3.0, 3.3, 6.0],
+                  'a_x_A': [3.0, 3.0, 3.0],
+                  'lf_period_clear': [True, True, True]}).to_csv(ss, index=False)
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    counts = []
+    import matplotlib.axes  # pylint: disable=import-outside-toplevel
+    real_hist = matplotlib.axes.Axes.hist
+
+    def spy(ax, x, *args, **kwargs):
+        counts.append(list(x))
+        return real_hist(ax, x, *args, **kwargs)
+
+    monkeypatch.setattr(matplotlib.axes.Axes, 'hist', spy)
+    plotter.generate_plot(StickslipPeriodHistogramPlot(
+        filename='p.png', stickslip_file=str(ss), ranking_file=str(_ranking(tmp_path)),
+        loads=[10, 20], filter_layer=2))
+    assert counts == [[1.0], [pytest.approx(1.1)]]   # the layer-1 row is filtered out
+
+
+def test_contact_scatter_reads_an_analysis_table_by_force_and_layer(tmp_path, monkeypatch):
+    contact = tmp_path / 'c_analysis.csv'
+    pd.DataFrame({'material': ['A', 'A', 'A'], 'force': [10.0, 20.0, 10.0],
+                  'layer': [2, 2, 1], 'state': ['load'] * 3,
+                  'contact_area': [100.0, 150.0, 999.0]}).to_csv(contact, index=False)
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    points = []
+    import matplotlib.axes  # pylint: disable=import-outside-toplevel
+    real_scatter = matplotlib.axes.Axes.scatter
+
+    def spy(ax, x, y, *args, **kwargs):
+        points.append((list(x), list(y)))
+        return real_scatter(ax, x, y, *args, **kwargs)
+
+    monkeypatch.setattr(matplotlib.axes.Axes, 'scatter', spy)
+    plotter.generate_plot(ContactCofScatterPlot(
+        filename='c.png', contact_file=str(contact), ranking_file=str(_ranking(tmp_path)),
+        x_column='contact_area', loads=[10, 20], filter_layer=2))
+    assert points == [([100.0], [0.02]), ([150.0], [0.03])]
+
+
+def test_a_table_without_load_or_layer_names_them(tmp_path):
+    bare = tmp_path / 'bare.csv'
+    pd.DataFrame({'material': ['A'], 'lf_period_A': [3.0], 'a_x_A': [3.0],
+                  'lf_period_clear': [True]}).to_csv(bare, index=False)
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    with pytest.raises(PlotDataError, match=r"bare\.csv: missing column\(s\) \['load_nN'\] \(or 'force'\)"):
+        plotter.generate_plot(StickslipPeriodHistogramPlot(
+            filename='p.png', stickslip_file=str(bare), ranking_file=str(_ranking(tmp_path))))
+    with pytest.raises(PlotDataError, match=r"ss\.csv: filter_layer needs a 'layer' column"):
+        plotter.generate_plot(StickslipPeriodHistogramPlot(
+            filename='p.png', stickslip_file=str(_stickslip(tmp_path)),
+            ranking_file=str(_ranking(tmp_path)), filter_layer=2))
+
+
 def _write_data(path, types, xyz, box=40.0):
     lines = ['LAMMPS data', '', f'{len(types)} atoms', '',
              f'0 {box} xlo xhi', f'0 {box} ylo yhi', '-20 60 zlo zhi', '', 'Atoms # atomic', '']

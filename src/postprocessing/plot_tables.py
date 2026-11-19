@@ -226,6 +226,29 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
         colors = plot_config.get('load_colors') or GEM12_COLORS
         return [colors[i % len(colors)] for i in range(len(loads))]
 
+    def _run_table(self, source: Any, required: Sequence[str],
+                   layer: Any = None) -> pd.DataFrame:
+        """A per-run table with a ``load_nN`` column and, with ``layer``, only
+        the rows of that many layers.
+
+        The frozen ML_taxonomy tables name the load ``load_nN`` and hold one
+        layer; a stored analysis (``contact``, ``stick_slip``) names it
+        ``force``, as a summary row does, and holds every layer.
+        """
+        table = self._table(source, [c for c in required if c != 'load_nN'])
+        if 'load_nN' not in table.columns and 'force' in table.columns:
+            table = table.assign(load_nN=table['force'])
+        source = _as_source(source)
+        name = (f'{source.analysis} over {source.dataset}' if source.analysis is not None
+                else Path(source.file).name)
+        if 'load_nN' in required and 'load_nN' not in table.columns:
+            raise PlotDataError(f"{name}: missing column(s) ['load_nN'] (or 'force')")
+        if layer is not None:
+            if 'layer' not in table.columns:
+                raise PlotDataError(f"{name}: filter_layer needs a 'layer' column")
+            table = table[table['layer'] == int(layer)]
+        return table
+
     def _eligible_materials(self, ranking_source: Any) -> pd.DataFrame:
         """Rows of the COF ranking whose ``eligible`` flag is set, indexed by material."""
         r = self._table(ranking_source, ['material', 'eligible'])
@@ -234,8 +257,9 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
     def _generate_stickslip_period_histogram(self, plot_config: dict) -> None:
         """Lateral-force period / lattice period, one step line per load."""
         self._require_all(plot_config, 'stickslip_file', 'ranking_file')
-        s = self._table(self._required(plot_config, 'stickslip_file'),
-                        ['material', 'load_nN', 'lf_period_A', 'a_x_A', 'lf_period_clear'])
+        s = self._run_table(self._required(plot_config, 'stickslip_file'),
+                            ['material', 'load_nN', 'lf_period_A', 'a_x_A', 'lf_period_clear'],
+                            plot_config.get('filter_layer'))
         eligible = self._eligible_materials(self._required(plot_config, 'ranking_file'))
         s = s[s['material'].isin(eligible.index) & s['lf_period_clear'].astype(bool)]
         loads = plot_config.get('loads', [10, 20, 30, 50])
@@ -260,8 +284,9 @@ class PlotTablesMixin(PlotterMixinBase):  # pylint: disable=too-few-public-metho
         from matplotlib import ticker  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
 
         x_col = self._required(plot_config, 'x_column')
-        c = self._table(self._required(plot_config, 'contact_file'),
-                        ['material', 'load_nN', 'state', x_col])
+        c = self._run_table(self._required(plot_config, 'contact_file'),
+                            ['material', 'load_nN', 'state', x_col],
+                            plot_config.get('filter_layer'))
         eligible = self._eligible_materials(self._required(plot_config, 'ranking_file'))
         c = c[(c['state'] == plot_config.get('state', 'load'))
               & c['material'].isin(eligible.index)].copy()

@@ -384,7 +384,7 @@ class StickslipPeriodHistogramPlot(_TablePlot):
 
     stickslip_file: Optional[TableSource] = Field(
         None,
-        description='material, load_nN, lf_period_A, a_x_A, lf_period_clear')
+        description='material, load_nN (or force), lf_period_A, a_x_A, lf_period_clear')
     ranking_file: Optional[TableSource] = Field(None, description='material, eligible')
     bins_arange: Optional[List[float]] = Field(None, description='[start, stop, step]')
     reference_line: Optional[float] = Field(1, description='x of the dashed line; null for none')
@@ -395,7 +395,7 @@ class ContactCofScatterPlot(_TablePlot):
     plot_type: Literal['contact_cof_scatter'] = 'contact_cof_scatter'
 
     contact_file: Optional[TableSource] = Field(
-        None, description='material, load_nN, state, <x_column>')
+        None, description='material, load_nN (or force), state, <x_column>')
     ranking_file: Optional[TableSource] = Field(
         None, description='material, eligible, cof_<L>nN')
     x_column: Optional[str] = Field(None, description='Contact column on x (required)')

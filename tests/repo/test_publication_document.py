@@ -12,7 +12,27 @@ def test_publication_document_validates():
     document = load_plot_document(PUB / 'plots_publication.json')
     assert len(document.plots) == 16
     assert len(document.data_dirs) == 11
-    assert all(d.startswith('aiida://dataset/') for d in document.data_dirs)
+    assert all(d.startswith(('aiida://dataset/', 'aiida://analysis/'))
+               for d in document.data_dirs)
+    assert 'aiida://analysis/period_summary/261107-sheet' in document.data_dirs
+
+
+def test_every_table_and_snapshot_is_read_from_the_store():
+    """No `tables/` or `trees/` on disk: the analysis plots read stored
+    analyses, the snapshot plots a dataset."""
+    raw = json.loads((PUB / 'plots_publication.json').read_text(encoding='utf-8'))
+    sources = {}
+    for plot in raw['plots']:
+        assert 'run_dir' not in plot, plot['filename']
+        for key in ('stickslip_file', 'ranking_file', 'contact_file',
+                    'traces_file', 'status_file'):
+            if key in plot:
+                assert isinstance(plot[key], dict), (plot['filename'], key)
+                sources[(plot['filename'], key)] = plot[key]['analysis']
+        if plot['plot_type'] in ('sheet_profile', 'integrity_panel'):
+            assert plot['dataset'] == '260909-afm'
+    assert set(sources.values()) == {'stick_slip', 'cof_ranking', 'contact',
+                                     'integrity_traces', 'run_status'}
 
 
 def test_every_shipped_input_it_names_is_there():

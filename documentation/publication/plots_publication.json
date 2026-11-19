@@ -1,5 +1,5 @@
 {
-  "_comment": "Every figure of the article. Read from the AiiDA store of the DOI archive: one dataset per simulation set (aiida://dataset/<set>); see README.md. Each plot's _source names the config or script it was first made with.",
+  "_comment": "Every figure of the article. Read from the AiiDA store of the DOI archive: one dataset per simulation set (aiida://dataset/<set>) and the stored analyses of 260909-afm and 261107-sheet (aiida://analysis/<name>/<set>, {\"analysis\": ..., \"dataset\": ...}); see README.md. Each plot's _source names the config or script it was first made with.",
   "data_dirs": [
     "aiida://dataset/260227-sw_lammps",
     "aiida://dataset/260227-mos2_jing2",
@@ -8,7 +8,7 @@
     "aiida://dataset/260312-force_rebomos",
     "aiida://dataset/260312-force_sevik",
     "aiida://dataset/260909-afm-whole",
-    "aiida://dataset/261107-sheet",
+    "aiida://analysis/period_summary/261107-sheet",
     "aiida://dataset/260830-deepmd",
     "aiida://dataset/260909-mace_d3",
     "aiida://dataset/260909-mace_nod3"
@@ -158,8 +158,15 @@
       "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::stickslip_period",
       "plot_type": "stickslip_period_histogram",
       "filename": "fs2d_afm_stickslip_period.png",
-      "stickslip_file": "tables/stickslip_v2.csv",
-      "ranking_file": "tables/cof_ranking_v2.csv",
+      "stickslip_file": {
+        "analysis": "stick_slip",
+        "dataset": "260909-afm"
+      },
+      "ranking_file": {
+        "analysis": "cof_ranking",
+        "dataset": "260909-afm"
+      },
+      "filter_layer": 2,
       "loads": [
         10,
         20,
@@ -182,8 +189,15 @@
       "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::contact",
       "plot_type": "contact_cof_scatter",
       "filename": "fs2d_contact_area_cof.png",
-      "contact_file": "tables/contact_loaded_v2.csv",
-      "ranking_file": "tables/cof_ranking_v2.csv",
+      "contact_file": {
+        "analysis": "contact",
+        "dataset": "260909-afm"
+      },
+      "ranking_file": {
+        "analysis": "cof_ranking",
+        "dataset": "260909-afm"
+      },
+      "filter_layer": 2,
       "x_column": "contact_area",
       "state": "load",
       "loads": [
@@ -211,8 +225,15 @@
       "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::contact",
       "plot_type": "contact_cof_scatter",
       "filename": "fs2d_contact_atoms_cof.png",
-      "contact_file": "tables/contact_loaded_v2.csv",
-      "ranking_file": "tables/cof_ranking_v2.csv",
+      "contact_file": {
+        "analysis": "contact",
+        "dataset": "260909-afm"
+      },
+      "ranking_file": {
+        "analysis": "cof_ranking",
+        "dataset": "260909-afm"
+      },
+      "filter_layer": 2,
       "x_column": "contact_atoms",
       "state": "load",
       "loads": [
@@ -240,8 +261,9 @@
       "_source": "Sync/ML_taxonomy/scripts/figs/fig_fs2d_article.py::sheet_profile",
       "plot_type": "sheet_profile",
       "filename": "fs2d_sheet_profile_mos2.png",
-      "run_dir": "trees/260909-afm/afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-MoS2",
-      "layer_dir": "L2",
+      "dataset": "260909-afm",
+      "material": "h_MoS2",
+      "layer": 2,
       "loads": [
         10,
         20,
@@ -275,7 +297,7 @@
       "filename": "integrity_panel_h_MoS2_l2.png",
       "material": "h_MoS2",
       "layer": 2,
-      "run_dir": "trees/260909-afm/afm/h-MoS2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-MoS2",
+      "dataset": "260909-afm",
       "loads": [
         2,
         5,
@@ -287,8 +309,14 @@
         85,
         100
       ],
-      "traces_file": "tables/integrity_traces_l2.csv",
-      "status_file": "tables/run_status_l2.csv",
+      "traces_file": {
+        "analysis": "integrity_traces",
+        "dataset": "260909-afm"
+      },
+      "status_file": {
+        "analysis": "run_status",
+        "dataset": "260909-afm"
+      },
       "dpi": 100
     },
     {
@@ -297,7 +325,7 @@
       "filename": "integrity_panel_h_NiSe2_l2.png",
       "material": "h_NiSe2",
       "layer": 2,
-      "run_dir": "trees/260909-afm/afm/h-NiSe2/100x_100y/sub_aSi_tip_Si_r25/K300/pot_sw_h-NiSe2",
+      "dataset": "260909-afm",
       "loads": [
         2,
         5,
@@ -309,8 +337,14 @@
         85,
         100
       ],
-      "traces_file": "tables/integrity_traces_l2.csv",
-      "status_file": "tables/run_status_l2.csv",
+      "traces_file": {
+        "analysis": "integrity_traces",
+        "dataset": "260909-afm"
+      },
+      "status_file": {
+        "analysis": "run_status",
+        "dataset": "260909-afm"
+      },
       "dpi": 100
     },
     {

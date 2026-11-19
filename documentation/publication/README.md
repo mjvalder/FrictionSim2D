@@ -57,6 +57,15 @@ FrictionSim2D aiida postprocess 260909-afm --settings-file documentation/publica
 FrictionSim2D aiida dataset 260909-afm-whole 260909-afm \
     --settings-file documentation/publication/settings_whole_window.yaml
 
+# The analyses the table, snapshot and sheet-on-sheet figures read, in this order:
+FrictionSim2D analyse run sheet_geometry 260909-afm
+FrictionSim2D analyse run cof_ranking 260909-afm
+FrictionSim2D analyse run period_summary 261107-sheet --param geometry_dataset=260909-afm
+FrictionSim2D analyse run contact 260909-afm
+FrictionSim2D analyse run stick_slip 260909-afm
+FrictionSim2D analyse run integrity_traces 260909-afm
+FrictionSim2D analyse run run_status 260909-afm
+
 cd documentation/publication
 FrictionSim2D postprocess plot plots_publication.json --settings plot_settings.json --output-dir plots
 python compare_to_reference.py plots
@@ -64,7 +73,13 @@ python compare_to_reference.py plots
 
 `plots_publication.json` reads each set as `aiida://dataset/<set>`. A timeseries or stick-slip
 plot reads only the points its filters select, straight from the store; nothing is written to
-disk.
+disk. The tables of the analysis figures are the stored analyses, read as
+`{"analysis": <name>, "dataset": "260909-afm"}`. The snapshot figures read the stored
+snapshots of `260909-afm`. The sheet-on-sheet figures read
+`aiida://analysis/period_summary/261107-sheet`: each run cut to whole lattice periods. That cut takes the lattice period along the scan from
+the AFM bilayers (`geometry_dataset=260909-afm`), as the published cut did. The plotter never
+computes an analysis; a missing one stops the plot and names the `analyse run` command.
+
 `compare_to_reference.py` compares each rebuilt figure with the published one in
 `Images/plots/`. It reports each figure as identical byte for byte, identical pixel for pixel
 (only the PNG metadata differs), or different.
@@ -79,21 +94,12 @@ disk.
 | `lf_vs_time_h_MoS2_l2_afm_v3.png`, `lf_vs_time_h_MoS2_l2_afm_2_30_85nN.png` | `timeseries` | `260909-afm` (the two files are the same figure) |
 | `lf_vs_time_h_MoS2_l2_v_com_top.png` | `timeseries` | `260312-force_*` |
 | `stick_slip_h_MoS2_v_com_top_0.1GPa_{rebomos,sevik}{,_spectrum}.png` | `stick_slip_analysis` | `260312-force_*` |
-| `lf_vs_load_100x100_sheetonsheet.png` | `summary` | `261107-sheet` |
-| `tribindex_vs_cof_sheetonsheet.png` | `scatter_comparison` | `261107-sheet`, `trib_index.json` |
-| `fs2d_afm_stickslip_period.png` | `stickslip_period_histogram` | `260909-afm` |
-| `fs2d_contact_area_cof.png`, `fs2d_contact_atoms_cof.png` | `contact_cof_scatter` | `260909-afm` |
+| `lf_vs_load_100x100_sheetonsheet.png` | `summary` | `261107-sheet` (`period_summary`) |
+| `tribindex_vs_cof_sheetonsheet.png` | `scatter_comparison` | `261107-sheet` (`period_summary`), `trib_index.json` |
+| `fs2d_afm_stickslip_period.png` | `stickslip_period_histogram` | `260909-afm` (`stick_slip`, `cof_ranking`) |
+| `fs2d_contact_area_cof.png`, `fs2d_contact_atoms_cof.png` | `contact_cof_scatter` | `260909-afm` (`contact`, `cof_ranking`) |
 | `fs2d_sheet_profile_mos2.png` | `sheet_profile` | `260909-afm` (h-MoS₂ snapshots) |
-| `integrity_panel_h_{MoS2,NiSe2}_l2.png` | `integrity_panel` | `260909-afm` (snapshots and traces) |
-
-**Not yet rebuildable from the archive alone:**
-- The last five rows read tables that are analyses of the AFM campaign: contact metrics,
-  stick-slip periods, the COF ranking and integrity traces. FrictionSim2D will compute these
-  itself, and until it does, those plots expect the tables in `tables/`.
-- The sheet profile and the integrity panels also read the run's snapshots from `trees/`,
-  which `FrictionSim2D aiida export-results 260909-afm trees/260909-afm` writes.
-- The two sheet-on-sheet figures were drawn from runs cut to whole lattice periods. That cut
-  is one of the same analyses.
+| `integrity_panel_h_{MoS2,NiSe2}_l2.png` | `integrity_panel` | `260909-afm` (snapshots, `integrity_traces`, `run_status`) |
 
 ## Files
 
