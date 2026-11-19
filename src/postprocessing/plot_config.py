@@ -26,7 +26,8 @@ from typing_extensions import Annotated
 __all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
            'SummaryPlot', 'TimeseriesPlot', 'StickSlipPlot',
            'ScatterComparisonPlot', 'RankFrictionPlot', 'CorrelationPlot',
-           'CofHistogramPlot', 'AnyPlot', 'DatasetsHeader', 'PlotDocument',
+           'CofHistogramPlot', 'TableSource', 'StickslipPeriodHistogramPlot',
+           'ContactCofScatterPlot', 'SheetProfilePlot', 'IntegrityPanelPlot', 'AnyPlot', 'DatasetsHeader', 'PlotDocument',
            'load_plot_document', 'schema_markdown', 'FigureSettings',
            'FontSettings', 'ColorSettings', 'MarkerSettings', 'LineSettings',
            'GridSettings', 'ErrorBandSettings', 'LegendSettings',
@@ -37,7 +38,8 @@ __all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
 #: would validate documents the Plotter then logs as an unknown plot type.
 PLOT_TYPES = ('summary', 'timeseries', 'stick_slip_analysis',
               'scatter_comparison', 'rank_friction', 'correlation',
-              'cof_histogram')
+              'cof_histogram', 'stickslip_period_histogram', 'contact_cof_scatter',
+              'sheet_profile', 'integrity_panel')
 
 _FORBID = ConfigDict(extra='forbid', populate_by_name=True)
 
@@ -325,12 +327,96 @@ class CofHistogramPlot(PlotBase):
     with_adhesion_label: Optional[str] = None
     without_adhesion_label: Optional[str] = None
     without_adhesion_legend_first: Optional[bool] = None
-    no_adhesion_hatch: Optional[str] = Field(None, description="Hatch of the slope bar (default '///')")
+    no_adhesion_hatch: Optional[str] = Field(
+        None, description="Hatch of the slope bar (default '///')")
+
+
+class TableSource(BaseModel):
+    """Where a table plot reads its rows. A bare string is a file path.
+
+    A CSV path, resolved like external-series files. (Analysis results by
+    name come with the analysis layer.)
+    """
+    model_config = _FORBID
+
+    file: Optional[Path] = Field(None, description='CSV file')
+
+    @model_validator(mode='before')
+    @classmethod
+    def _bare_path(cls, value):
+        return {'file': value} if isinstance(value, (str, Path)) else value
+
+
+class _TablePlot(PlotBase):
+    """Shared fields of the analysis-figure plot types."""
+    loads: Optional[List[float]] = Field(None, description='Loads (nN), one colour each')
+    load_colors: Optional[List[str]] = None
+    line_width: Optional[float] = None
+
+
+class StickslipPeriodHistogramPlot(_TablePlot):
+    """Lateral-force period / lattice period along the scan, one step line per load."""
+    plot_type: Literal['stickslip_period_histogram'] = 'stickslip_period_histogram'
+
+    stickslip_file: Optional[TableSource] = Field(
+        None,
+        description='material, load_nN, lf_period_A, a_x_A, lf_period_clear')
+    ranking_file: Optional[TableSource] = Field(None, description='material, eligible')
+    bins_arange: Optional[List[float]] = Field(None, description='[start, stop, step]')
+    reference_line: Optional[float] = Field(1, description='x of the dashed line; null for none')
+
+
+class ContactCofScatterPlot(_TablePlot):
+    """COF against a tip-contact measure at one state, one colour per load."""
+    plot_type: Literal['contact_cof_scatter'] = 'contact_cof_scatter'
+
+    contact_file: Optional[TableSource] = Field(
+        None, description='material, load_nN, state, <x_column>')
+    ranking_file: Optional[TableSource] = Field(
+        None, description='material, eligible, cof_<L>nN')
+    x_column: Optional[str] = Field(None, description='Contact column on x (required)')
+    state: Optional[str] = Field(None, description="'load' (default) or 'final'")
+    marker_scale: Optional[float] = Field(None, description='times markers.size**2 (0.8)')
+    alpha: Optional[float] = None
+    y_scale: Optional[Literal['log', 'linear']] = None
+    y_ticks: Optional[List[float]] = None
+
+
+class SheetProfilePlot(_TablePlot):
+    """Top surface and bottom layer height vs distance from the tip axis, per load."""
+    plot_type: Literal['sheet_profile'] = 'sheet_profile'
+
+    run_dir: Optional[str] = Field(None, description='AFM run directory holding <layer_dir>/')
+    layer_dir: Optional[str] = None
+    tip_types: Optional[List[int]] = None
+    tip_apex_depth: Optional[float] = None
+    far_field_radius: Optional[float] = None
+    sublayer_dz: Optional[float] = None
+    radial_bins_arange: Optional[List[float]] = Field(None, description='[start, stop, step]')
+    top_label: Optional[str] = None
+    bottom_label: Optional[str] = None
+
+
+class IntegrityPanelPlot(PlotBase):
+    """End-of-slide integrity panel of one material and layer, a column per load."""
+    plot_type: Literal['integrity_panel'] = 'integrity_panel'
+
+    material: Optional[str] = Field(None, description='Material (required)')
+    run_dir: Optional[str] = Field(None, description='AFM run directory holding L<layer>/')
+    layer: Optional[int] = None
+    loads: Optional[List[float]] = None
+    traces_file: Optional[TableSource] = Field(
+        None,
+        description='run_id, step, temp_sheet_3d, comz_L1, comz_L2')
+    status_file: Optional[TableSource] = Field(None, description='run_id, force, status')
+    dpi: Optional[int] = None
 
 
 AnyPlot = Annotated[
     Union[SummaryPlot, TimeseriesPlot, StickSlipPlot, ScatterComparisonPlot,
-          RankFrictionPlot, CorrelationPlot, CofHistogramPlot],
+          RankFrictionPlot, CorrelationPlot, CofHistogramPlot,
+          StickslipPeriodHistogramPlot, ContactCofScatterPlot, SheetProfilePlot,
+          IntegrityPanelPlot],
     Field(discriminator='plot_type')]
 
 
@@ -531,7 +617,11 @@ def schema_markdown() -> str:
               'scatter_comparison': ScatterComparisonPlot,
               'rank_friction': RankFrictionPlot,
               'correlation': CorrelationPlot,
-              'cof_histogram': CofHistogramPlot}
+              'cof_histogram': CofHistogramPlot,
+              'stickslip_period_histogram': StickslipPeriodHistogramPlot,
+              'contact_cof_scatter': ContactCofScatterPlot,
+              'sheet_profile': SheetProfilePlot,
+              'integrity_panel': IntegrityPanelPlot}
     out = ['## Document', '', '| field | type | meaning |', '|---|---|---|']
     out += _model_rows(PlotDocument)
     for plot_type, model in models.items():

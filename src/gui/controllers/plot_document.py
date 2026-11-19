@@ -22,9 +22,12 @@ from typing import Any, Dict, List, Optional
 from pydantic import ValidationError
 
 from ...postprocessing.plot_config import (PLOT_TYPES, CofHistogramPlot,
-                                           CorrelationPlot, PlotBase,
-                                           RankFrictionPlot,
+                                           ContactCofScatterPlot,
+                                           CorrelationPlot, IntegrityPanelPlot,
+                                           PlotBase, RankFrictionPlot,
                                            ScatterComparisonPlot,
+                                           SheetProfilePlot,
+                                           StickslipPeriodHistogramPlot,
                                            StickSlipPlot, SummaryPlot,
                                            TimeseriesPlot)
 from ..schema.introspect import SectionSpec, describe_section
@@ -43,6 +46,10 @@ MODEL_BY_PLOT_TYPE: Dict[str, type] = {
     'rank_friction': RankFrictionPlot,
     'correlation': CorrelationPlot,
     'cof_histogram': CofHistogramPlot,
+    'stickslip_period_histogram': StickslipPeriodHistogramPlot,
+    'contact_cof_scatter': ContactCofScatterPlot,
+    'sheet_profile': SheetProfilePlot,
+    'integrity_panel': IntegrityPanelPlot,
 }
 
 #: Every `PlotBase` field name, including `plot_type`.

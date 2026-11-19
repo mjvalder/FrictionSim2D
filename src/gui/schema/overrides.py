@@ -542,6 +542,10 @@ _PLOT: Dict[str, SectionOverride] = {
     'rank_friction': SectionOverride(label='Ranking'),
     'correlation': SectionOverride(label='Correlation'),
     'cof_histogram': SectionOverride(label='COF-slope histogram'),
+    'stickslip_period_histogram': SectionOverride(label='Stick-slip period histogram'),
+    'contact_cof_scatter': SectionOverride(label='Contact vs COF'),
+    'sheet_profile': SectionOverride(label='Sheet profile'),
+    'integrity_panel': SectionOverride(label='Integrity panel'),
 }
 
 #: Settings groups. Only the fields worth explaining are listed; the rest fall

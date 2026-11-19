@@ -19,6 +19,7 @@ from .plot_ranking import PlotRankingMixin
 from .plot_style import DEFAULT_SETTINGS
 from .plot_stick_slip import PlotStickSlipMixin
 from .plot_summary import PlotSummaryMixin
+from .plot_tables import PlotTablesMixin
 from .plot_timeseries import PlotTimeseriesMixin
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class Plotter(
     PlotStickSlipMixin,
     PlotCorrelationMixin,
     PlotRankingMixin,
+    PlotTablesMixin,
 ):
     """Generate plots from friction simulation data."""
 
@@ -139,6 +141,10 @@ class Plotter(
             'rank_friction': self.rank_friction,
             'correlation': self._generate_correlation_plots,
             'cof_histogram': self._generate_cof_histogram,
+            'stickslip_period_histogram': self._generate_stickslip_period_histogram,
+            'contact_cof_scatter': self._generate_contact_cof_scatter,
+            'sheet_profile': self._generate_sheet_profile,
+            'integrity_panel': self._generate_integrity_panel,
         }
         if plot_type not in dispatch:
             raise PlotDataError(
