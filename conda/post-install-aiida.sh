@@ -17,32 +17,32 @@ SRCDIR="${SRC_DIR:-.}"
 mkdir -p "$PREFIX/libexec/frictionsim2d"
 
 # Copy startup script
-if [ -f "$SRCDIR/src/aiida/start_aiida.sh" ]; then
-    cp "$SRCDIR/src/aiida/start_aiida.sh" "$PREFIX/libexec/frictionsim2d/"
+if [ -f "$SRCDIR/tools/aiida_services/start_aiida.sh" ]; then
+    cp "$SRCDIR/tools/aiida_services/start_aiida.sh" "$PREFIX/libexec/frictionsim2d/"
     chmod +x "$PREFIX/libexec/frictionsim2d/start_aiida.sh"
 else
-    echo "WARNING: start_aiida.sh not found at $SRCDIR/src/aiida/start_aiida.sh" >&2
+    echo "WARNING: start_aiida.sh not found at $SRCDIR/tools/aiida_services/start_aiida.sh" >&2
 fi
 
 # Create symlink in bin for easy access
 ln -sf "$PREFIX/libexec/frictionsim2d/start_aiida.sh" "$PREFIX/bin/frictionsim2d-start-aiida"
 
 # Copy hook scripts and installer
-if [ -d "$SRCDIR/src/aiida/hooks" ]; then
+if [ -d "$SRCDIR/tools/aiida_services/hooks" ]; then
     mkdir -p "$PREFIX/libexec/frictionsim2d/hooks"
-    cp "$SRCDIR/src/aiida/hooks/activate_services.sh" "$PREFIX/libexec/frictionsim2d/hooks/" || true
-    cp "$SRCDIR/src/aiida/hooks/deactivate_services.sh" "$PREFIX/libexec/frictionsim2d/hooks/" || true
+    cp "$SRCDIR/tools/aiida_services/hooks/activate_services.sh" "$PREFIX/libexec/frictionsim2d/hooks/" || true
+    cp "$SRCDIR/tools/aiida_services/hooks/deactivate_services.sh" "$PREFIX/libexec/frictionsim2d/hooks/" || true
     chmod +x "$PREFIX/libexec/frictionsim2d/hooks"/*.sh || true
 else
-    echo "WARNING: hooks directory not found at $SRCDIR/src/aiida/hooks" >&2
+    echo "WARNING: hooks directory not found at $SRCDIR/tools/aiida_services/hooks" >&2
 fi
 
-if [ -f "$SRCDIR/src/aiida/install_conda_hooks.sh" ]; then
+if [ -f "$SRCDIR/tools/aiida_services/install_conda_hooks.sh" ]; then
     mkdir -p "$PREFIX/libexec/frictionsim2d/hooks"
-    cp "$SRCDIR/src/aiida/install_conda_hooks.sh" "$PREFIX/libexec/frictionsim2d/hooks/"
+    cp "$SRCDIR/tools/aiida_services/install_conda_hooks.sh" "$PREFIX/libexec/frictionsim2d/hooks/"
     chmod +x "$PREFIX/libexec/frictionsim2d/hooks/install_conda_hooks.sh"
 else
-    echo "WARNING: install_conda_hooks.sh not found at $SRCDIR/src/aiida/install_conda_hooks.sh" >&2
+    echo "WARNING: install_conda_hooks.sh not found at $SRCDIR/tools/aiida_services/install_conda_hooks.sh" >&2
 fi
 
 # Create symlink for hook installer

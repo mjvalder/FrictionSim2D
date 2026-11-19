@@ -14,7 +14,7 @@
 # Usage:
 #   conda activate frictionsim2d-aiida
 #   export PYTHONPATH=/path/to/FrictionSim2D
-#   bash src/aiida/start_aiida.sh [--profile PROFILE_NAME]
+#   bash tools/aiida_services/start_aiida.sh [--profile PROFILE_NAME]
 #
 # Options:
 #   --profile NAME   AiiDA profile name (default: friction2d)

@@ -8,7 +8,7 @@
 # Run once after activating your conda environment, then restart RabbitMQ:
 #
 #   conda activate fs2d_test
-#   bash src/aiida/configure_rabbitmq.sh
+#   bash tools/aiida_services/configure_rabbitmq.sh
 #   rabbitmqctl shutdown   # if already running
 #   rabbitmq-server -detached
 #
