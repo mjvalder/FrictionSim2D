@@ -13,7 +13,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch, Rectangle
 
 from .labels import label_for
 from .plot_mixin_base import PlotterMixinBase
@@ -593,8 +593,33 @@ class PlotSummaryMixin(PlotterMixinBase):
     # SCATTER COMPARISON PLOT
     # =====================================================================
 
+    @staticmethod
+    def _mean_load_ratio(x_data, y_data, x_range=None) -> tuple[float, float]:
+        """Mean of LF/NF over the loads, and its s.e. (SD across loads / sqrt(n)).
+
+        Unlike the LF-NF slope this keeps the adhesion contribution. Zero-load
+        points have no defined ratio and are dropped.
+        """
+        x = np.asarray(x_data, dtype=float)
+        y = np.asarray(y_data, dtype=float)
+        mask = np.isfinite(x) & np.isfinite(y) & (x > 0)
+        if x_range is not None and len(x_range) == 2:
+            mask &= (x >= x_range[0]) & (x <= x_range[1])
+        ratios = y[mask] / x[mask]
+        if len(ratios) == 0:
+            return float('nan'), 0.0
+        stderr = ratios.std(ddof=1) / np.sqrt(len(ratios)) if len(ratios) > 1 else 0.0
+        return float(ratios.mean()), float(stderr)
+
     def _generate_cof_histogram(self, plot_config: dict) -> None:
-        """Bar chart comparing COF slope per dataset and external series."""
+        """Bar chart comparing COF per dataset and external series.
+
+        Default: one bar per series, the slope of LF vs NF (adhesion removed).
+        With ``show_adhesion_pairs`` each series gets two bars: the mean of
+        LF/NF over the loads (with adhesion, window ``ratio_x_range``) and the
+        slope (without adhesion). External series flagged ``solid`` are this
+        work's data and are drawn filled, not as hollow rings.
+        """
         first_n = plot_config.get('average_first_n_timesteps')
         timestep_range = plot_config.get('average_timestep_range')
         summary_df = self._get_summary_data_df(
@@ -617,8 +642,12 @@ class PlotSummaryMixin(PlotterMixinBase):
 
         slope_fit_constraint = plot_config.get('slope_fit_constraint', 'none')
         slope_decimals = int(plot_config.get('slope_decimals', 5))
+        # Load window of the mean LF/NF; defaults to the slope fit's window
+        ratio_x_range = plot_config.get('ratio_x_range', fit_x_range_effective)
 
         bar_labels = []
+        bar_ratios = []
+        bar_ratio_errs = []
         bar_slopes = []
         bar_errs = []
         bar_colors = []
@@ -636,8 +665,10 @@ class PlotSummaryMixin(PlotterMixinBase):
             df = self._apply_material_filter(df, plot_config, 'dataset_label')
             y_col = self._resolve_lf_axis(df, y_col, plot_config)
 
-        ordered_ds = [d for d in (datasets or []) if d in df['dataset_label'].unique()]
-        ordered_ds += [d for d in df['dataset_label'].unique() if d not in ordered_ds]
+        present = (list(df['dataset_label'].unique())
+                   if 'dataset_label' in df.columns else [])
+        ordered_ds = [d for d in (datasets or []) if d in present]
+        ordered_ds += [d for d in present if d not in ordered_ds]
         for ds_label in ordered_ds:
             color = self._get_consistent_color(
                 dataset_label=ds_label,
@@ -662,11 +693,16 @@ class PlotSummaryMixin(PlotterMixinBase):
             if fit is None:
                 continue
             label = self._display_dataset_label(ds_label)
+            ratio, ratio_err = self._mean_load_ratio(gx, gy, ratio_x_range)
+            logger.info("COF histogram [%s]: slope=%.6f, mean LF/NF=%.6f +/- %.6f",
+                        label, fit['slope'], ratio, ratio_err)
             bar_labels.append(label)
             # the LF-vs-NF regression slope -- cof_slope, not the COF
             bar_slopes.append(fit['slope'])
             bar_errs.append(fit['slope_stderr'])
             bar_colors.append(color)
+            bar_ratios.append(ratio)
+            bar_ratio_errs.append(ratio_err)
 
         data_cache: dict[str, dict] = {}
         for series in plot_config.get('external_series', []):
@@ -759,11 +795,16 @@ class PlotSummaryMixin(PlotterMixinBase):
             if fit is None:
                 continue
 
+            ratio, ratio_err = self._mean_load_ratio(x_arr, y_arr, ratio_x_range)
+            logger.info("COF histogram [%s]: slope=%.6f, mean LF/NF=%.6f +/- %.6f",
+                        label, fit['slope'], ratio, ratio_err)
             bar_labels.append(label)
             # the LF-vs-NF regression slope -- cof_slope, not the COF
             bar_slopes.append(fit['slope'])
             bar_errs.append(fit['slope_stderr'])
             bar_colors.append(color)
+            bar_ratios.append(ratio)
+            bar_ratio_errs.append(ratio_err)
 
         if not bar_labels:
             logger.warning("No datasets produced COF values for histogram. Skipping.")
@@ -772,25 +813,44 @@ class PlotSummaryMixin(PlotterMixinBase):
         fig, ax = self.new_figure()
         x_pos = np.arange(len(bar_labels))
         bar_width = float(plot_config.get('bar_width', 0.6))
+        paired = bool(plot_config.get('show_adhesion_pairs', False))
+        hatch = plot_config.get('no_adhesion_hatch', '///')
+        # One spec per drawn bar: (x, width, value, err, color, label, hatch)
+        specs = []
+        for i, (label, color) in enumerate(zip(bar_labels, bar_colors)):
+            slope_bar = (bar_slopes[i], bar_errs[i])
+            ratio_bar = (bar_ratios[i], bar_ratio_errs[i])
+            if not paired:
+                specs.append((x_pos[i], bar_width, *slope_bar, color, label, None))
+                continue
+            half = bar_width / 2.0
+            specs.append((x_pos[i] - half / 2.0, half, *ratio_bar, color, label, None))
+            specs.append((x_pos[i] + half / 2.0, half, *slope_bar, color, label, hatch))
+        spec_x, spec_w, spec_v, spec_e, spec_c, spec_l, spec_h = zip(*specs)
         bars_drawn = ax.bar(
-            x_pos,
-            bar_slopes,
-            width=bar_width,
-            color=bar_colors,
-            yerr=bar_errs,
-            capsize=4,
+            spec_x, spec_v, width=spec_w, color=spec_c, yerr=spec_e, capsize=4,
             error_kw={'elinewidth': 1.2, 'ecolor': 'k', 'alpha': 0.7},
             edgecolor='none',
         )
 
+        # Every axis limit is set BEFORE the pixel->data transforms below, so
+        # inset_x and inset_y are the same number of pixels on both axes.
         ax.set_xlim(-0.5, len(bar_labels) - 0.5)
         ax.set_ylim(bottom=0)
-        y_top = max(c + e for c, e in zip(bar_slopes, bar_errs)) * 1.35
-        ax.set_ylim(top=y_top)
+        ax.set_ylim(top=max(v + e for v, e in zip(spec_v, spec_e)) * 1.35)
+        y_limits = plot_config.get('y_limits')
+        if y_limits:
+            if y_limits[0] is not None:
+                ax.set_ylim(bottom=y_limits[0])
+            if len(y_limits) > 1 and y_limits[1] is not None:
+                ax.set_ylim(top=y_limits[1])
 
         internal_label_set = {
             self._display_dataset_label(ds_label) for ds_label in ordered_ds
         }
+        internal_label_set |= {series.get('label')
+                               for series in plot_config.get('external_series', [])
+                               if series.get('solid')}
         external_outline_width = float(plot_config.get('external_outline_width', 10.0))
         outline_px = external_outline_width * fig.dpi / 72.0
         p0 = ax.transData.inverted().transform((0.0, 0.0))
@@ -799,12 +859,10 @@ class PlotSummaryMixin(PlotterMixinBase):
         inset_x = abs(p_dx[0] - p0[0])
         inset_y = abs(p_dy[1] - p0[1])
         background_color = ax.get_facecolor()
-        for bar_obj, bar_label, bar_color in zip(
-            bars_drawn,
-            bar_labels,
-            bar_colors,
-        ):
+        for bar_obj, bar_label, bar_color, set_hatch in zip(
+                bars_drawn, spec_l, spec_c, spec_h):
             if bar_label not in internal_label_set:
+                # An inward-only hollow ring, with the inset shrunk for short bars.
                 bar_obj.set_facecolor(bar_color)
                 bar_obj.set_edgecolor('none')
                 x0, y0 = bar_obj.get_x(), bar_obj.get_y()
@@ -814,15 +872,33 @@ class PlotSummaryMixin(PlotterMixinBase):
                 inner_w = max(w0 - 2.0 * inset_x_eff, 0.0)
                 inner_h = max(h0 - 2.0 * inset_y_eff, 0.0)
                 if inner_w > 0.0 and inner_h > 0.0:
-                    cutout = Rectangle(
-                        (x0 + inset_x_eff, y0 + inset_y_eff),
-                        inner_w,
-                        inner_h,
+                    ax.add_patch(Rectangle(
+                        (x0 + inset_x_eff, y0 + inset_y_eff), inner_w, inner_h,
                         facecolor=background_color,
-                        edgecolor='none',
+                        edgecolor=bar_color if set_hatch else 'none',
+                        hatch=set_hatch, linewidth=0,
                         zorder=bar_obj.get_zorder() + 0.2,
-                    )
-                    ax.add_patch(cutout)
+                    ))
+            elif set_hatch:
+                bar_obj.set_hatch(set_hatch)
+                bar_obj.set_edgecolor(background_color)
+                bar_obj.set_linewidth(0)
+            else:
+                bar_obj.set_edgecolor('none')
+
+        if paired:
+            ax.set_axisbelow(True)
+            legend_handles = [
+                Patch(facecolor='0.55', edgecolor='none',
+                      label=plot_config.get('with_adhesion_label', 'With adhesion')),
+                Patch(facecolor='0.55', edgecolor='white', hatch=hatch, linewidth=0,
+                      label=plot_config.get('without_adhesion_label', 'Without adhesion')),
+            ]
+            if plot_config.get('without_adhesion_legend_first', False):
+                legend_handles.reverse()
+            ax.legend(handles=legend_handles,
+                      loc=plot_config.get('legend_location', 'upper left'),
+                      fontsize=self.settings["fonts"]["legend"])
 
         ax.set_xticks(x_pos)
         rotation = int(plot_config.get('x_label_rotation', 0))
@@ -845,9 +921,15 @@ class PlotSummaryMixin(PlotterMixinBase):
             labelsize=self.settings["fonts"]["tick_label"],
         )
 
+        grid_config = self.settings.get("grid", {})
+        if grid_config.get("show", True):
+            ax.grid(True, which='major', axis='y',
+                    linestyle=grid_config.get("major_style", "-"),
+                    alpha=grid_config.get("major_alpha", 0.5))
+
         if plot_config.get('annotate_bars', True):
             err_pad = (max(bar_errs) if bar_errs else 0) * 0.3 + max(bar_slopes) * 0.01
-            for bar_obj, slope_val in zip(bars_drawn, bar_slopes):
+            for bar_obj, slope_val in zip(bars_drawn, spec_v):
                 ax.text(
                     bar_obj.get_x() + bar_obj.get_width() / 2.0,
                     bar_obj.get_height() + err_pad,

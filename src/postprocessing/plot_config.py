@@ -61,6 +61,8 @@ class ExternalSeries(BaseModel):
         None, description='lambda source, evaluated')
     y_transform: Optional[str] = None
     fit_line_style: Optional[str] = Field(None, description="Fit line style (default '--')")
+    solid: Optional[bool] = Field(
+        None, description='cof_histogram: draw filled like a dataset (this work), not hollow')
 
 
 class SourceSpec(BaseModel):
@@ -78,6 +80,11 @@ class SourceSpec(BaseModel):
     error_metric: Optional[str] = None
     material_column: Optional[str] = None
     value_column: Optional[str] = None
+    load_column: Optional[Literal['force', 'pressure']] = Field(
+        None, description='Column load_range applies to (default: force, else pressure)')
+    load_range: Optional[List[float]] = Field(None, description='Alias of force_range')
+    require_all_loads: Optional[bool] = Field(
+        None, description='Drop a material missing any load the range holds')
 
 
 class PlotBase(BaseModel):
@@ -309,6 +316,16 @@ class CofHistogramPlot(PlotBase):
     slope_fit_constraint: Optional[
         Literal['first_point', 'origin', 'none']] = None
     x_label_rotation: Optional[int] = None
+    external_outline_width: Optional[float] = Field(
+        None, description='Ring width (pt) of a hollow external-series bar (default 10)')
+    show_adhesion_pairs: Optional[bool] = Field(
+        None, description='Two bars per series: mean LF/NF (with adhesion) and the slope')
+    ratio_x_range: Optional[List[float]] = Field(
+        None, description='Load window of the mean LF/NF (default: the fit window)')
+    with_adhesion_label: Optional[str] = None
+    without_adhesion_label: Optional[str] = None
+    without_adhesion_legend_first: Optional[bool] = None
+    no_adhesion_hatch: Optional[str] = Field(None, description="Hatch of the slope bar (default '///')")
 
 
 AnyPlot = Annotated[

@@ -1158,8 +1158,17 @@ class PlotCommonMixin(PlotterMixinBase):
             logger.warning("No data found for source: %s", source_config)
             return None, None, None
 
-        force_range = source_config.get('force_range')
+        # 'load_range' is an alias of 'force_range'; 'load_column' pins the
+        # column it applies to ('force' nN or 'pressure' GPa) instead of the
+        # force-then-pressure fallback below.
+        force_range = source_config.get('load_range', source_config.get('force_range'))
+        load_column = source_config.get('load_column')
         error_metric = source_config.get('error_metric', 'slope_stderr')
+        expected_loads = None
+        if (force_range and len(force_range) == 2 and load_column
+                and source_config.get('require_all_loads', False)):
+            in_range = df[load_column].between(force_range[0], force_range[1])
+            expected_loads = set(df.loc[in_range, load_column].round(6))
 
         materials_out: list[str] = []
         values_out: list[float] = []
@@ -1167,6 +1176,21 @@ class PlotCommonMixin(PlotterMixinBase):
 
         for mat_id in df['id'].unique():
             mat_df = df[df['id'] == mat_id].copy()
+
+            if force_range and len(force_range) == 2 and load_column:
+                filtered = mat_df[mat_df[load_column].between(force_range[0], force_range[1])]
+                if len(filtered) < 2:
+                    continue
+                present = set(filtered[load_column].round(6))
+                if expected_loads is not None and present != expected_loads:
+                    logger.info("%s: skipped, missing loads %s", mat_id,
+                                sorted(expected_loads - present))
+                    continue
+                materials_out.append(mat_id)
+                values_out.append(float(filtered[metric].mean()))
+                errors_out.append(self._source_error(filtered, load_column, metric,
+                                                     error_metric))
+                continue
 
             if force_range and len(force_range) == 2:
                 candidate_cols = [
@@ -1202,24 +1226,10 @@ class PlotCommonMixin(PlotterMixinBase):
                 if len(filtered) < 2:
                     continue
 
-                avg_value = float(filtered[metric].mean())
-                fit = self._calculate_linear_fit(
-                    filtered[force_col].values,
-                    filtered[metric].values,
-                )
-                if fit:
-                    error_map = {
-                        'slope_stderr': fit['slope_stderr'],
-                        'rmse': fit['rmse'],
-                        'r_squared': 1 - fit['r_squared'],
-                    }
-                    error = float(error_map.get(error_metric, fit['slope_stderr']))
-                else:
-                    error = float(filtered[metric].std())
-
                 materials_out.append(mat_id)
-                values_out.append(avg_value)
-                errors_out.append(error)
+                values_out.append(float(filtered[metric].mean()))
+                errors_out.append(self._source_error(filtered, force_col, metric,
+                                                     error_metric))
                 continue
 
             force = source_config.get('force')
@@ -1234,6 +1244,20 @@ class PlotCommonMixin(PlotterMixinBase):
             errors_out.append(float(mat_df[metric].std()) if len(mat_df) > 1 else 0.0)
 
         return materials_out, np.array(values_out), np.array(errors_out)
+
+    def _source_error(self, frame: pd.DataFrame, load_col: str, metric: str,
+                      error_metric: str) -> float:
+        """Error bar of a load-averaged source value: ``sem`` (SD across the
+        loads / sqrt(n)), or from the metric-vs-load fit (``slope_stderr``,
+        ``rmse``, ``r_squared`` as 1 - R^2); SD when the fit fails."""
+        if error_metric == 'sem':
+            return float(frame[metric].std() / np.sqrt(len(frame)))
+        fit = self._calculate_linear_fit(frame[load_col].values, frame[metric].values)
+        if not fit:
+            return float(frame[metric].std())
+        error_map = {'slope_stderr': fit['slope_stderr'], 'rmse': fit['rmse'],
+                     'r_squared': 1 - fit['r_squared']}
+        return float(error_map.get(error_metric, fit['slope_stderr']))
 
     @staticmethod
     def _iterative_outlier_removal(
