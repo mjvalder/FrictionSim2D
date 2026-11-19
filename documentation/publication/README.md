@@ -52,6 +52,11 @@ for s in 260909-afm 261107-sheet 260227-sw_lammps 260227-mos2_jing2 260227-sevik
     FrictionSim2D aiida dataset "$s" "$s"
 done
 
+# The AFM load curve was averaged over each run's whole window (no transient skip):
+FrictionSim2D aiida postprocess 260909-afm --settings-file documentation/publication/settings_whole_window.yaml
+FrictionSim2D aiida dataset 260909-afm-whole 260909-afm \
+    --settings-file documentation/publication/settings_whole_window.yaml
+
 cd documentation/publication
 FrictionSim2D postprocess plot plots_publication.json --settings plot_settings.json --output-dir plots
 python compare_to_reference.py plots
@@ -96,6 +101,7 @@ disk.
 |---|---|
 | `plots_publication.json` | The plot document: one entry per figure |
 | `plot_settings.json` | Figure style (size, fonts, palette) used for the article |
+| `settings_whole_window.yaml` | Summary option for the `260909-afm-whole` dataset: no transient skip |
 | `trib_index.json` | Lubricating figure of merit from high-throughput DFT [1], restricted to the materials whose structure matches ours |
 | `mos2_comparison_data.json` | Literature MoS₂ COF against load from MD [2] |
 | `mos2_reaxff_comparison.json` | Literature MoS₂ ReaxFF and experimental nanoscale friction [3] |

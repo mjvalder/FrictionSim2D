@@ -43,6 +43,13 @@ class PlotStickSlipMixin(PlotterMixinBase):
             ticker.FormatStrFormatter(f'%.{decimals}f'),
         )
 
+    @staticmethod
+    def _stick_slip_time(run_time: np.ndarray, time_scale: float, *,
+                         shift: bool = True) -> np.ndarray:
+        """The run's time axis in display units; from 0 unless ``shift`` is
+        False, which keeps the LAMMPS clock (the published figures' axis)."""
+        return ((run_time - run_time[0]) if shift else run_time) * time_scale
+
     def _load_stick_slip_run(self, plot_config: dict) -> dict | None:
         """Load and filter one run for stick-slip analysis.
 
@@ -160,7 +167,8 @@ class PlotStickSlipMixin(PlotterMixinBase):
             logger.error("Not enough points for stick-slip analysis.")
             return None
 
-        t = (run_time[:n] - run_time[0]) * time_scale
+        t = self._stick_slip_time(run_time[:n], time_scale,
+                                  shift=plot_config.get('shift_time_to_zero', True))
         x = np.asarray(df[displacement_col].iloc[:n], dtype=float) * displacement_scale
 
         finite_mask = np.isfinite(t) & np.isfinite(x)

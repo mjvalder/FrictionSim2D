@@ -7,7 +7,7 @@
     "aiida://dataset/260227-rebomos",
     "aiida://dataset/260312-force_rebomos",
     "aiida://dataset/260312-force_sevik",
-    "aiida://dataset/260909-afm",
+    "aiida://dataset/260909-afm-whole",
     "aiida://dataset/261107-sheet",
     "aiida://dataset/260830-deepmd",
     "aiida://dataset/260909-mace_d3",
@@ -626,7 +626,8 @@
         260
       ],
       "fft_peaks_to_report": 2,
-      "fft_peak_rank": 2
+      "fft_peak_rank": 2,
+      "shift_time_to_zero": false
     },
     {
       "_source": "aiida_dump/plots_publication.json (also writes the _spectrum.png and the results JSON)",
@@ -656,7 +657,8 @@
       "fft_peaks_to_report": 2,
       "extrema_use_prominence": true,
       "extrema_min_prominence": 0.015,
-      "extrema_min_distance_points": 6
+      "extrema_min_distance_points": 6,
+      "shift_time_to_zero": false
     },
     {
       "_source": "plots_pub/plots_sheetonsheet_261107.json",

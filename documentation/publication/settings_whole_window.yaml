@@ -1,0 +1,4 @@
+# Summaries over the whole window (no transient skip), as the published
+# AFM load curve was averaged. Used for the 260909-afm-whole dataset.
+aiida:
+  skip_fraction: 0.0

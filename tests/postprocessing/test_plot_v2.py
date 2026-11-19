@@ -692,3 +692,12 @@ def test_a_hand_built_no_output_record_yields_nothing(tmp_path):
     runs = list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access
 
     assert len(runs) == 1
+
+
+def test_stick_slip_time_keeps_the_run_clock_when_asked():
+    """The published stick-slip figures used LAMMPS time (the slide starts at 22 ps);
+    ``shift_time_to_zero: false`` keeps it, the default still starts at 0."""
+    import numpy as np  # pylint: disable=import-outside-toplevel
+    clock = np.array([22000.0, 23000.0, 24000.0])
+    assert list(Plotter._stick_slip_time(clock, 0.001, shift=True)) == [0.0, 1.0, 2.0]
+    assert list(Plotter._stick_slip_time(clock, 0.001, shift=False)) == [22.0, 23.0, 24.0]

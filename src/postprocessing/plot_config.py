@@ -225,6 +225,8 @@ class StickSlipPlot(PlotBase):
     """One run's sawtooth, its extrema and its power spectrum."""
     plot_type: Literal['stick_slip_analysis'] = 'stick_slip_analysis'
 
+    shift_time_to_zero: Optional[bool] = Field(
+        None, description='Start the time axis at 0 (default) or keep the LAMMPS clock')
     apply_hann_window: Optional[bool] = None
     bottom_ylabel: Optional[str] = None
     displacement_axis: Optional[str] = None
