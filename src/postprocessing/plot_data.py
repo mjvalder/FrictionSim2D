@@ -83,6 +83,9 @@ class Plotter(
         self._db_summary_rows: list[dict] = []
         #: label -> the dataset's units (family -> key -> unit).
         self.dataset_units: dict[str, dict] = {}
+        #: label -> (dataset name, rows) of every ``aiida://dataset/`` label;
+        #: its time series are exported from the store on first use.
+        self._dataset_sources: dict[str, tuple[str, list[dict]]] = {}
 
         self.type_display_names = {
             'b_type': 'buckled',

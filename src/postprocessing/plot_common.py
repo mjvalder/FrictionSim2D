@@ -362,6 +362,7 @@ class PlotCommonMixin(PlotterMixinBase):
                     f"{label}: {data_dir} names no dataset; "
                     f"use `{DATASET_URI}<name>`")
             rows, units = self._read_dataset(label, name)
+            self._dataset_sources[label] = (name, rows)
             self.dataset_units[label] = units
             self._db_summary_rows.extend(
                 self._dataset_to_summary_rows(label, rows))
@@ -383,6 +384,44 @@ class PlotCommonMixin(PlotterMixinBase):
         except LookupError as exc:
             raise PlotDataError(f"{label}: {exc}") from exc
 
+    def _materialise_dataset(self, label: str) -> None:
+        """Export the sets of an ``aiida://dataset/`` label and read them, so
+        its time series reach the plots through the file path.
+
+        The trees go under ``$XDG_CACHE_HOME/FrictionSim2D/datasets/<name>/``
+        (``~/.cache`` without the variable), one per set, and are reused while
+        ``outputs/`` exists. Only the dataset's own points are kept
+        (:meth:`_dataset_point_keys`).
+        """
+        # pylint: disable=import-outside-toplevel
+        import os
+
+        from ..aiida.export import export_results
+        from .read_data import DataReader
+
+        name, rows = self._dataset_sources[label]
+        cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
+        root = cache / 'FrictionSim2D' / 'datasets' / name
+        for set_label in sorted({str(r['set']) for r in rows if r.get('set')}):
+            tree = root / set_label
+            if not (tree / 'outputs').is_dir():
+                logger.info("Exporting set '%s' of dataset '%s' to %s", set_label, name, tree)
+                export_results(set_label, tree)
+                DataReader(results_dir=str(tree)).export_full_data_to_json()
+            for entry in sorted((tree / 'outputs').glob('output_full_*.json')):
+                key = entry.stem[len('output_full_'):]
+                self.full_data_files[label].setdefault(key, [])
+                self.full_data_files[label][key].append(str(entry))
+
+    @staticmethod
+    def _point_key(record: dict) -> tuple:
+        return (str(record.get('rel_path')), round(float(record.get('load') or 0.0), 6),
+                round(float(record.get('angle') or 0.0), 6))
+
+    def _dataset_point_keys(self, label: str) -> set:
+        """``(rel_path, load, angle)`` of every point the dataset holds."""
+        return {self._point_key(r) for r in self._dataset_sources[label][1]}
+
     def _load_all_metadata(self) -> None:
         """Load and merge metadata from all available data files."""
         for label in self.labels:
@@ -403,11 +442,16 @@ class PlotCommonMixin(PlotterMixinBase):
         every plot drawn from one is missing whichever sweep arm the old
         nested walk overwrote.
         """
+        if (label in self._dataset_sources
+                and not self.full_data_files.get(label, {}).get(file_key)):
+            self._materialise_dataset(label)
         file_path = self.full_data_files.get(label, {}).get(file_key)
         if not file_path:
             logger.debug("No data file for label '%s', file_key '%s'",
                          label, file_key)
             return None, None
+        if isinstance(file_path, list):  # a dataset's sets, one export each
+            return self._load_dataset_runs(label, file_path)
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -424,6 +468,19 @@ class PlotCommonMixin(PlotterMixinBase):
         metadata = dict(data.get('metadata', {}))
         metadata['units'] = data.get('units', {})
         return data.get('runs', []), metadata
+
+    def _load_dataset_runs(self, label: str, paths: list) -> tuple[list, dict]:
+        """The runs of a dataset's exports that are the dataset's own points."""
+        keep = self._dataset_point_keys(label)
+        runs: list = []
+        metadata: dict = {}
+        for path in paths:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            runs += [r for r in data.get('runs', []) if self._point_key(r) in keep]
+            metadata.update(data.get('metadata', {}))
+            metadata['units'] = data.get('units', {})
+        return runs, metadata
 
     # =====================================================================
     # DATA EXTRACTION
