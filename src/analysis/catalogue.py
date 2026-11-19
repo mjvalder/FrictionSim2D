@@ -1,2 +1,3 @@
 """Imports every analysis module, which registers it (see ``base.get_analysis``)."""
-from . import sheet_geometry  # noqa: F401  pylint: disable=unused-import
+# pylint: disable=unused-import
+from . import cof_ranking, periods, sheet_geometry  # noqa: F401

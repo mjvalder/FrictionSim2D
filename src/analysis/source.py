@@ -115,6 +115,13 @@ class RunSource:
         """The run's built ``<mat>_<n>.lmp``, or None when not stored."""
         return self._fetch.structure_text(row)
 
+    def run_fields(self, row: Any) -> Dict[str, Any]:
+        """The run's parameter fields: every block field (``settings.simulation.
+        timestep``, ``general.driving_spring``, ...), an elided one refilled
+        from the run's stored schema default, plus ``derived.<name>`` for the
+        derived values (``derived.drive_k``)."""
+        return self._fetch.run_fields(row)
+
 
 class StoreFetcher:
     """Reads a row's files from the loaded AiiDA profile.
@@ -125,6 +132,7 @@ class StoreFetcher:
 
     def __init__(self) -> None:
         self._tmp: Optional[tempfile.TemporaryDirectory] = None
+        self._fields: Dict[str, Dict[str, Any]] = {}
 
     def close(self) -> None:
         """Remove the snapshot copies handed out so far."""
@@ -198,6 +206,26 @@ class StoreFetcher:
                                   f'<mat>_{n_layers}.lmp')
             return hits[named[0]].get_content()
         return next(iter(hits.values())).get_content()
+
+    def run_fields(self, row: Any) -> Dict[str, Any]:
+        """The ``schema`` defaults of the row's CalcJob, overlaid with its
+        ``blocks`` fields, plus its ``derived`` fields as ``derived.<name>``
+        (`calcjob.py:161-166`). Read once per CalcJob."""
+        if row.calc_uuid not in self._fields:
+            from aiida import orm  # pylint: disable=import-outside-toplevel
+            calc = orm.load_node(row.calc_uuid)
+            out: Dict[str, Any] = {}
+            if 'schema' in calc.inputs:
+                out.update({path: spec.get('default') for path, spec in
+                            (calc.inputs.schema.get_dict().get('fields') or {}).items()})
+            if 'blocks' in calc.inputs:
+                for block in calc.inputs.blocks.values():
+                    out.update(block.get_dict().get('fields') or {})
+            if 'derived' in calc.inputs:
+                out.update({f'derived.{k}': v for k, v in
+                            (calc.inputs.derived.get_dict().get('fields') or {}).items()})
+            self._fields[row.calc_uuid] = out
+        return dict(self._fields[row.calc_uuid])
 
 
 def dataset_table(name: str) -> Any:

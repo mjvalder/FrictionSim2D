@@ -1,0 +1,292 @@
+"""Whole-period COF of each run: the mean over the whole lattice periods of
+sliding that follow the spring-loading transient, counted back from the end.
+
+Port of ``ML_taxonomy/scripts/rank_cof_v2.py`` (``run_cof`` :40-51) with the
+transient of ``ML_taxonomy/taxlib/scales.py`` (``settle_skip`` :22-27) for the
+AFM family, and of
+``publication_export/provenance_scripts/convert_sheet_schema3_to_legacy.py``
+(``analyse`` :72-104, the source of ``261107_sheetonsheet/periods``) for the
+sheet-on-sheet family:
+
+- ``dx``      = the drive distance per window sample (A);
+- ``n_skip``  = ``ceil((|mean lfx over the 2nd half| / K) / dx)``, capped at
+  half the window;
+- ``period``  = ``a_x / dx`` samples, ``a_x`` the material's ``period_x_top``
+  (:mod:`.sheet_geometry`);
+- ``k``       = ``floor((N - n_skip) / period)`` whole periods, the last
+  ``round(k * period)`` samples; ``k < 1`` falls back to ``[n_skip:]``.
+
+Only 0 degree runs are cut: ``a_x`` is the period along x.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+from pydantic import BaseModel, field_validator
+
+from .base import Analysis, register
+
+logger = logging.getLogger(__name__)
+
+__all__ = ['OFF_AXIS', 'PeriodSummary', 'period_map', 'run_periods', 'settle_skip',
+           'whole_periods']
+
+#: 1 m/s in A/ps (taxlib/constants.py:4); the converter's ``speed / 100.0`` (:91).
+MS_TO_A_PER_PS = 0.01
+#: 1 eV/A in nN, per family: taxlib/constants.py:3 (AFM) and the sheet
+#: converter's EV_PER_A_TO_NN (:37). They differ in the 8th figure; each is kept.
+EV_PER_A_TO_NN = {'afm': 1.602176634, 'sheetonsheet': 1.602176565}
+#: 1 N/m in eV/A^2 (runtax/ingest_v2.py:41): a run without a recorded
+#: ``drive_k`` takes its ``driving_spring`` through it (ingest_v2.py:102-103).
+N_PER_M_TO_EV_PER_A2 = 0.06241509
+#: The transient is capped at this fraction of the window (scales.py:22).
+SETTLE_CAP = 0.5
+#: The drop reason of a run at a nonzero angle.
+OFF_AXIS = 'period_x_only_at_0deg'
+#: The layer whose ``period_x_top`` sets ``a_x``: the published tables read
+#: the v2 AFM bilayers' (rank_cof_v2.py:72; the converter's GEOMETRY, :36).
+GEOMETRY_LAYER = 2
+
+
+def settle_skip(lfx: np.ndarray, k_spring: float, dx: float, cap: float = SETTLE_CAP) -> int:
+    """Samples of the spring-loading transient: the stretch ``|late mean
+    lfx| / K`` in drive samples, capped at ``cap * N`` (scales.py:22-27).
+    0 when ``K`` or ``dx`` is not a positive number."""
+    if not np.isfinite(k_spring) or k_spring <= 0 or not np.isfinite(dx) or dx <= 0:
+        return 0
+    lfx = np.asarray(lfx, dtype=float)
+    late = float(np.abs(lfx[len(lfx) // 2:].mean()))
+    return int(min(np.ceil((late / k_spring) / dx), cap * len(lfx)))
+
+
+def whole_periods(n: int, n_skip: int, period: float) -> Tuple[int, int]:
+    """``(k, start_row)``: the whole periods after the transient, counted back
+    from the end (rank_cof_v2.py:48-49, converter :97-98). No usable period,
+    or less than one, gives ``(0, n_skip)``."""
+    if not np.isfinite(period) or period <= 0:
+        return 0, n_skip
+    k = int((n - n_skip) // period)
+    return (k, n - int(round(k * period))) if k >= 1 else (0, n_skip)
+
+
+def _forces(family: str, window: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(lf, nf, cof)`` per sample. AFM: ``|lfx, lfy|`` over the signed nf,
+    0 where nf is 0 (``data.models.compute_derived_columns``, the export's
+    ``cof`` that afm2_long carries). Sheet: ``|lfx, lfy|`` over ``|nf|``,
+    NaN where it is 0 (converter :74-77)."""
+    lfx = window['lfx'].to_numpy(float)
+    lfy = window['lfy'].to_numpy(float)
+    nf = window['nf'].to_numpy(float)
+    lf = np.hypot(lfx, lfy)
+    if family == 'sheetonsheet':
+        nf = np.abs(nf)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            return lf, nf, np.where(nf > 0, lf / nf, np.nan)
+    from ..data.models import compute_derived_columns  # pylint: disable=import-outside-toplevel
+    lf, cof = compute_derived_columns(lfx, lfy, nf)
+    return lf, nf, cof
+
+
+def _mean(values: np.ndarray, family: str) -> float:
+    """The sheet converter's ``nanmean`` (:82, :101); a plain mean for AFM
+    (rank_cof_v2.py:50)."""
+    return float(np.nanmean(values) if family == 'sheetonsheet' else values.mean())
+
+
+def _spring(fields: Dict[str, Any], family: str) -> float:
+    """K in nN/A: ``derived.drive_k`` (eV/A^2), else ``driving_spring`` (N/m)
+    in eV/A^2 (ingest_v2.py:102-103), times the family's eV/A -> nN."""
+    drive_k = fields.get('derived.drive_k')
+    if drive_k is None:
+        spring = fields.get('general.driving_spring')
+        if spring is None:
+            return float('nan')
+        drive_k = float(spring) * N_PER_M_TO_EV_PER_A2
+    return float(drive_k) * EV_PER_A_TO_NN[family]
+
+
+def run_periods(family: str, window: pd.DataFrame, speed: float,
+                fields: Dict[str, Any], period_x: float) -> Dict[str, Any]:
+    """The whole-period columns of one 0 degree run.
+
+    ``dx`` is the nominal drive distance per window sample, the converter's
+    ``median(diff(time)) * speed / 100 * timestep`` (:91-92), which for the
+    AFM campaign is taxlib's ``speed * 0.01 * 1 ps`` (taxlib_adapter.py:39-40)
+    to the bit.
+    """
+    lf, nf, cof = _forces(family, window)
+    n = len(cof)
+    timestep = float(fields.get('settings.simulation.timestep', float('nan')))
+    a_per_step = float(speed) / 100.0 * timestep
+    dx = float(np.median(np.diff(window['time'].to_numpy(float)))) * a_per_step
+    k_spring = _spring(fields, family)
+    n_skip = settle_skip(window['lfx'].to_numpy(float), k_spring, dx)
+    period = period_x / dx if np.isfinite(period_x) else float('nan')
+    k, start = whole_periods(n, n_skip, period)
+    out = {'n_rows': n, 'dx_A': dx, 'period_x_A': period_x, 'period_samples': period,
+           'spring_nN_A': k_spring, 'n_skip': n_skip, 'n_periods': k, 'start_row': start,
+           'cof_periods': _mean(cof[start:], family),
+           'lf_periods': float(lf[start:].mean()), 'nf_periods': float(nf[start:].mean()),
+           'cof_full_run': _mean(cof, family)}
+    if family == 'sheetonsheet' and {'react_x', 'react_y'} <= set(window.columns):
+        # The reaction on the fixed bottom layer, the plotter's lf_source sx_sy
+        # (converter :18-20, :81).
+        out['lf_sx_sy_periods'] = float(np.hypot(window['react_x'].to_numpy(float),
+                                                 window['react_y'].to_numpy(float))[start:].mean())
+    return out
+
+
+def material_key(materials: Any) -> str:
+    """The material name `sheet_geometry` keys its rows by (s42:138)."""
+    from .sheet_geometry import _material  # pylint: disable=import-outside-toplevel,protected-access
+    first = materials if isinstance(materials, str) else list(materials)[0]
+    return _material(first)
+
+
+def _fmt(value: Any) -> str:
+    value = float(value)
+    return str(int(value)) if value.is_integer() else f'{value:g}'
+
+
+def summary_identity(row: Any) -> Dict[str, Any]:
+    """The identity columns of a summary row, spelled as
+    ``PlotCommonMixin._dataset_to_summary_rows`` spells them
+    (plot_common.py:313-333): ``id``/``material`` underscored, ``size`` as
+    ``100x100y``, ``force`` or ``pressure`` by ``load_kind``, ``layer``."""
+    materials = getattr(row, 'materials', None)
+    materials = '+'.join([materials] if isinstance(materials, str) else list(materials or ()))
+    flake = getattr(row, 'flake_material', None)
+    material = f'{materials}+flake-{flake}' if isinstance(flake, str) and flake else materials
+    material = material.replace('-', '_')
+    sx, sy = getattr(row, 'size_x', None), getattr(row, 'size_y', None)
+    size = (f'{_fmt(sx)}x{_fmt(sy)}y' if sx is not None and sy is not None
+            and not (pd.isna(sx) or pd.isna(sy)) else 'unknownx')
+    kind = getattr(row, 'load_kind', None)
+    load = float(row.load)
+    layers = getattr(row, 'layers', None)
+    return {'run_uuid': getattr(row, 'run_uuid', None), 'point_uuid': row.point_uuid,
+            'id': material, 'material': material, 'size': size,
+            'layer': None if layers is None or pd.isna(layers) else int(layers),
+            'load': load, 'load_kind': kind,
+            'force': load if kind == 'force' else float('nan'),
+            'pressure': load if kind == 'pressure' else float('nan'),
+            'angle': float(row.angle), 'speed': float(row.speed)}
+
+
+def _json_before(value: Any) -> Any:
+    """A JSON text (a CLI ``--param``) as its value."""
+    return json.loads(value) if isinstance(value, str) else value
+
+
+class PeriodParams(BaseModel):
+    """Where ``a_x`` comes from.
+
+    ``period_x``: material -> ``period_x_top`` (A), used as given. Without it,
+    ``geometry_dataset`` names the dataset whose `sheet_geometry` supplies it
+    (run, or reused, through :func:`~src.analysis.store.run_analysis`); with
+    neither, `sheet_geometry` is computed from the analysed source itself.
+    The geometry rows of layer :data:`GEOMETRY_LAYER` are read. ``lattice``:
+    material -> A, the fallback for a material with no geometry row (the
+    database ``lat_a`` of rank_cof_v2.py:73, 89). A material with neither is
+    averaged over ``[n_skip:]`` and logged.
+    """
+
+    period_x: Optional[Dict[str, float]] = None
+    geometry_dataset: Optional[str] = None
+    lattice: Dict[str, float] = {}
+
+    @field_validator('period_x', 'lattice', mode='before')
+    @classmethod
+    def _parse(cls, value: Any) -> Any:
+        return _json_before(value)
+
+
+def period_map(source: Any, params: PeriodParams) -> Dict[str, float]:
+    """material -> ``a_x`` (A): the geometry's ``period_x_top`` over the
+    ``lattice`` fallback (rank_cof_v2.py:72-73)."""
+    period = dict(params.lattice)
+    if params.period_x is not None:
+        period.update(params.period_x)
+        return period
+    if params.geometry_dataset is not None:
+        from .store import run_analysis  # pylint: disable=import-outside-toplevel
+        geometry = run_analysis('sheet_geometry', params.geometry_dataset)
+    else:
+        geometry = _own_geometry(source)
+    if not geometry.empty:
+        rows = geometry[geometry['layer'] == GEOMETRY_LAYER]
+        period.update(rows.set_index('material')['period_x_top'].astype(float).to_dict())
+    return period
+
+
+class _GeometryView:  # pylint: disable=too-few-public-methods
+    """The source's pass rows of layer :data:`GEOMETRY_LAYER`, with drops kept
+    apart: a material without a structure is a fallback here, not a drop."""
+
+    def __init__(self, source: Any) -> None:
+        rows = source.rows
+        self.rows = rows[rows['layers'] == GEOMETRY_LAYER] if 'layers' in rows else rows.iloc[:0]
+        self.dropped: List[Tuple[str, str]] = []
+        self.structure_text = source.structure_text
+        self.settings_text = source.settings_text
+
+
+def _own_geometry(source: Any) -> pd.DataFrame:
+    from .sheet_geometry import SheetGeometry  # pylint: disable=import-outside-toplevel
+    return SheetGeometry().compute(_GeometryView(source), SheetGeometry.Params())
+
+
+def period_rows(source: Any, rows: pd.DataFrame, period: Dict[str, float]) -> List[Dict[str, Any]]:
+    """One :func:`run_periods` record (with its summary identity) per row of
+    ``rows`` (pass rows at 0 degrees)."""
+    out = []
+    missing = set()
+    for row in rows.itertuples():
+        key = material_key(row.materials)
+        a_x = period.get(key, float('nan'))
+        if not np.isfinite(a_x):
+            missing.add(key)
+        window = source.frames(row)['window']
+        out.append({**summary_identity(row),
+                    **run_periods(source.family, window, row.speed, source.run_fields(row), a_x)})
+    for key in sorted(missing):
+        logger.warning('%s: no period_x_top and no lattice fallback; its runs are '
+                       'averaged over [n_skip:]', key)
+    return out
+
+
+@register
+class PeriodSummary(Analysis):  # pylint: disable=too-few-public-methods
+    """Per run: the COF, LF and NF over its whole lattice periods.
+
+    Summary-shaped: ``id, material, size, layer, force, pressure, angle``
+    as a summary row has them, and ``cof``, ``lf``, ``nf`` (plus
+    ``lf_sx_sy`` for the sheet family) aliasing the period means, so a plot
+    reads it as it reads summaries.
+    """
+
+    name = 'period_summary'
+    version = '1'
+    level = 'run'
+    families = frozenset({'afm', 'sheetonsheet'})
+    Params = PeriodParams
+
+    def compute(self, source, params) -> pd.DataFrame:
+        """The pass rows at 0 degrees; any other angle is dropped
+        (:data:`OFF_AXIS`)."""
+        rows = source.rows
+        on_axis = rows['angle'].astype(float) == 0.0
+        source.dropped.extend((str(r.point_uuid), OFF_AXIS) for r in rows[~on_axis].itertuples())
+        table = pd.DataFrame(period_rows(source, rows[on_axis], period_map(source, params)))
+        if table.empty:
+            return table
+        table['cof'] = table['cof_periods']
+        table['lf'] = table['lf_periods']
+        table['nf'] = table['nf_periods']
+        if 'lf_sx_sy_periods' in table:
+            table['lf_sx_sy'] = table['lf_sx_sy_periods']
+        return table
