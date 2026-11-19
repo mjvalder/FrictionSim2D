@@ -191,7 +191,7 @@ def test_an_unknown_dataset_is_refused(store, tmp_path):
                 output_dir=str(tmp_path / 'plots'))
 
 
-def test_dataset_timeseries_equals_export(store, tmp_path, monkeypatch):
+def test_dataset_timeseries_equals_export(store, tmp_path):
     """A time-series plot of `aiida://dataset/paper` sees the same frames as one
     of the set exported by hand -- minus the point the dataset leaves out."""
     import pandas as pd  # pylint: disable=import-outside-toplevel
@@ -199,7 +199,6 @@ def test_dataset_timeseries_equals_export(store, tmp_path, monkeypatch):
     from src.aiida.export import export_results  # pylint: disable=import-outside-toplevel
     from src.postprocessing.read_data import DataReader  # pylint: disable=import-outside-toplevel
 
-    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'cache'))
     export_results('camp', tmp_path / 'by_hand')
     DataReader(results_dir=str(tmp_path / 'by_hand')).export_full_data_to_json()
     by_hand = Plotter(data_dirs=[str(tmp_path / 'by_hand')], labels=['x'],
@@ -214,3 +213,20 @@ def test_dataset_timeseries_equals_export(store, tmp_path, monkeypatch):
     assert sorted(got) == [30.0, 50.0], 'the failed 10 N point is not in the dataset'
     for load, frame in got.items():
         pd.testing.assert_frame_equal(frame, expected[load])
+    assert not (tmp_path / 'p2').exists() or not any((tmp_path / 'p2').rglob('*.json'))
+
+
+def test_dataset_timeseries_reads_only_the_points_the_plot_selects(store, tmp_path,
+                                                                   monkeypatch):
+    from src.aiida import query  # pylint: disable=import-outside-toplevel
+
+    read = []
+    real = query.point_frames
+    monkeypatch.setattr(query, 'point_frames',
+                        lambda calc, point: read.append(point) or real(calc, point))
+    stored = Plotter(data_dirs=['aiida://dataset/paper'], labels=['paper'],
+                     output_dir=str(tmp_path / 'p'))
+    runs = list(stored._extract_all_runs('paper', '100x100y',
+                                         plot_config={'filter_forces': [30]}))
+    assert [r['load'] for r in runs] == [30.0]
+    assert len(read) == 1

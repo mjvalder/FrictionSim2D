@@ -71,7 +71,8 @@ class PlotStickSlipMixin(PlotterMixinBase):
         # The time axis is the run's own `time` column, not a global
         # metadata list: two runs of different lengths cannot share one.
         tier = plot_config.get('tier', 'window')
-        all_runs = list(self._extract_all_runs(label, file_key, tier))
+        all_runs = list(self._extract_all_runs(label, file_key, tier,
+                                                     plot_config=plot_config))
         if not all_runs:
             logger.error(
                 "No runs found for label '%s' and file_key '%s'.",

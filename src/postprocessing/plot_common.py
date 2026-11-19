@@ -384,52 +384,85 @@ class PlotCommonMixin(PlotterMixinBase):
         except LookupError as exc:
             raise PlotDataError(f"{label}: {exc}") from exc
 
-    def _materialise_dataset(self, label: str) -> None:
-        """Export the sets of an ``aiida://dataset/`` label and read them, so
-        its time series reach the plots through the file path.
+    #: plot_config key -> run key, for the filters a dataset's rows are cut
+    #: down by before any frame is read.
+    _DATASET_PREFILTERS = {'filter_materials': 'id', 'filter_forces': 'force',
+                           'force': 'force', 'pressures': 'pressure',
+                           'filter_pressures': 'pressure', 'angle': 'angle',
+                           'filter_layer': 'layer', 'filter_speed': 'speed',
+                           'filter_tip_radius': 'tip_radius'}
 
-        The trees go under :meth:`_dataset_cache_dir`, one per set, and are
-        reused while ``outputs/`` exists. Only the dataset's own points are
-        kept (:meth:`_dataset_point_keys`).
-        """
+    @classmethod
+    def _row_may_match(cls, row: dict, plot_config: dict) -> bool:
+        """False only when a filter the plot sets explicitly rules the row out
+        -- the same matching as the plots' own run filters, so the rows kept
+        are always a superset of the runs the plot selects."""
+        for key, run_key in cls._DATASET_PREFILTERS.items():
+            value = plot_config.get(key)
+            if value is None:
+                continue
+            have = row.get(run_key)
+            if have is None or (isinstance(have, float) and np.isnan(have)):
+                return False
+            if run_key == 'id':
+                wanted = value if isinstance(value, list) else [value]
+                if not any(str(v) in str(have) for v in wanted):
+                    return False
+            elif isinstance(value, list):
+                if have not in value:
+                    return False
+            elif have != value:
+                return False
+        return True
+
+    def _dataset_runs(self, label: str, file_key: str, tier: str,
+                      plot_config: dict | None) -> list[dict]:
+        """The runs of an ``aiida://dataset/`` label, read point by point from
+        the store: only the rows of size ``file_key`` the plot's explicit
+        filters keep, and only their ``tier``. Nothing is written to disk."""
         # pylint: disable=import-outside-toplevel
-        from ..aiida.export import export_results
-        from .read_data import DataReader
+        from ..aiida import query  # noqa: PLC0415
+        from ..data.models import compute_derived_columns  # noqa: PLC0415
 
-        name, rows = self._dataset_sources[label]
-        root = self._dataset_cache_dir(label)
-        for set_label in sorted({str(r['set']) for r in rows if r.get('set')}):
-            tree = root / set_label
-            if not (tree / 'outputs').is_dir():
-                logger.info("Exporting set '%s' of dataset '%s' to %s", set_label, name, tree)
-                export_results(set_label, tree)
-                DataReader(results_dir=str(tree)).export_full_data_to_json()
-            for entry in sorted((tree / 'outputs').glob('output_full_*.json')):
-                key = entry.stem[len('output_full_'):]
-                self.full_data_files[label].setdefault(key, [])
-                self.full_data_files[label][key].append(str(entry))
-
-    def _dataset_cache_dir(self, label: str) -> Path:
-        """``$XDG_CACHE_HOME/FrictionSim2D/datasets/<name>-<hash>`` (``~/.cache``
-        without the variable). The hash covers the dataset's point identities,
-        so a re-imported set (new calc uuids) never reuses a stale export."""
-        import hashlib  # pylint: disable=import-outside-toplevel
-        import os  # pylint: disable=import-outside-toplevel
-
-        name, rows = self._dataset_sources[label]
-        ident = sorted(f"{r.get('calc_uuid')}|{r.get('point_uuid')}" for r in rows)
-        digest = hashlib.sha256('\n'.join(ident).encode()).hexdigest()[:12]
-        cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
-        return cache / 'FrictionSim2D' / 'datasets' / f'{name}-{digest}'
-
-    @staticmethod
-    def _point_key(record: dict) -> tuple:
-        return (str(record.get('rel_path')), round(float(record.get('load') or 0.0), 6),
-                round(float(record.get('angle') or 0.0), 6))
-
-    def _dataset_point_keys(self, label: str) -> set:
-        """``(rel_path, load, angle)`` of every point the dataset holds."""
-        return {self._point_key(r) for r in self._dataset_sources[label][1]}
+        rows = [r for r in self._db_summary_rows
+                if r.get('dataset_label') == label and r.get('size') == file_key
+                and self._row_may_match(r, plot_config or {})]
+        built: list[dict] = []
+        for row in rows:
+            cache_key = (label, tier, row.get('point_uuid'))
+            if cache_key not in self.runs_cache:
+                frame = query.point_frames(row['calc_uuid'], row['node_uuid']).get(tier)
+                if frame is None:
+                    self.runs_cache[cache_key] = []
+                    continue
+                # float64 throughout, as an export's rows come back from JSON
+                frame = frame.reset_index(drop=True).astype(
+                    {c: float for c in frame.columns
+                     if pd.api.types.is_numeric_dtype(frame[c])})
+                if {'lfx', 'lfy', 'nf'} <= set(frame.columns):
+                    # what the DataReader adds before it exports
+                    frame['lateral_force'], frame['cof'] = compute_derived_columns(
+                        frame['lfx'].to_numpy(dtype=float),
+                        frame['lfy'].to_numpy(dtype=float),
+                        frame['nf'].to_numpy(dtype=float))
+                df = self._add_derived_columns(frame)
+                self.runs_cache[cache_key] = [{
+                    'id': row['id'], 'material': row['material'],
+                    'family': row.get('family'), 'model': row.get('model'),
+                    'size': row['size'], 'temperature': row.get('temperature'),
+                    'potential': row.get('potential'), 'rel_path': row.get('rel_path'),
+                    'layer': row.get('layer'), 'speed': row.get('speed'),
+                    'angle': row.get('angle'), 'tip_radius': row.get('tip_radius'),
+                    'load_kind': row.get('load_kind'), 'load': row.get('load'),
+                    'force': row.get('load') if row.get('load_kind') == 'force' else None,
+                    'pressure': (row.get('load') if row.get('load_kind') == 'pressure'
+                                 else None),
+                    'tiers': {}, 'units': {}, 'post': {}, 'df': df,
+                }]
+            built += self.runs_cache[cache_key]
+        if built:
+            self.plot_family = built[0]['family'] or self.plot_family
+        return built
 
     def _load_all_metadata(self) -> None:
         """Load and merge metadata from all available data files."""
@@ -451,16 +484,11 @@ class PlotCommonMixin(PlotterMixinBase):
         every plot drawn from one is missing whichever sweep arm the old
         nested walk overwrote.
         """
-        if (label in self._dataset_sources
-                and not self.full_data_files.get(label, {}).get(file_key)):
-            self._materialise_dataset(label)
         file_path = self.full_data_files.get(label, {}).get(file_key)
         if not file_path:
             logger.debug("No data file for label '%s', file_key '%s'",
                          label, file_key)
             return None, None
-        if isinstance(file_path, list):  # a dataset's sets, one export each
-            return self._load_dataset_runs(label, file_path)
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -478,32 +506,26 @@ class PlotCommonMixin(PlotterMixinBase):
         metadata['units'] = data.get('units', {})
         return data.get('runs', []), metadata
 
-    def _load_dataset_runs(self, label: str, paths: list) -> tuple[list, dict]:
-        """The runs of a dataset's exports that are the dataset's own points."""
-        keep = self._dataset_point_keys(label)
-        runs: list = []
-        metadata: dict = {}
-        for path in paths:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            runs += [r for r in data.get('runs', []) if self._point_key(r) in keep]
-            metadata.update(data.get('metadata', {}))
-            metadata['units'] = data.get('units', {})
-        return runs, metadata
-
     # =====================================================================
     # DATA EXTRACTION
     # =====================================================================
 
     def _extract_all_runs(self, label: str, file_key: str,
-                          tier: str = 'window'):
+                          tier: str = 'window', plot_config: dict | None = None):
         """Yield one dict per run in the v2 export, for the requested tier.
 
         The v1 version walked a nested dict and reconstructed parameters from
         key PREFIXES (`f30.0`, `a-15`, `l2`). Every one of those is now a
         typed field on the run record, so there is nothing left to parse --
         and nothing left to mis-parse.
+
+        An ``aiida://dataset/`` label is read from the store instead
+        (:meth:`_dataset_runs`); ``plot_config`` lets it read only the points
+        the plot's explicit filters keep.
         """
+        if label in self._dataset_sources:
+            yield from self._dataset_runs(label, file_key, tier, plot_config)
+            return
         runs, metadata = self._load_full_data(label, file_key)
         if not runs:
             return

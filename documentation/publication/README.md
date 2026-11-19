@@ -57,9 +57,9 @@ FrictionSim2D postprocess plot plots_publication.json --settings plot_settings.j
 python compare_to_reference.py plots
 ```
 
-`plots_publication.json` reads each set as `aiida://dataset/<set>`. For a timeseries or
-stick-slip plot, the plotter exports the sets it needs once, into
-`~/.cache/FrictionSim2D/datasets/`, and reuses that copy afterwards.
+`plots_publication.json` reads each set as `aiida://dataset/<set>`. A timeseries or stick-slip
+plot reads only the points its filters select, straight from the store; nothing is written to
+disk.
 `compare_to_reference.py` compares each rebuilt figure with the published one in
 `Images/plots/`. It reports each figure as identical byte for byte, identical pixel for pixel
 (only the PNG metadata differs), or different.

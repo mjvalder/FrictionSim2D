@@ -46,7 +46,8 @@ class PlotTimeseriesMixin(PlotterMixinBase):
 
         all_runs_by_dataset = {}
         for label in datasets:
-            all_runs = list(self._extract_all_runs(label, file_key, tier))
+            all_runs = list(self._extract_all_runs(label, file_key, tier,
+                                                     plot_config=plot_config))
             if all_runs:
                 all_runs_by_dataset[label] = all_runs
             else:

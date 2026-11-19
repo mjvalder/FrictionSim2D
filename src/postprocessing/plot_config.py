@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from typing_extensions import Annotated
 
 __all__ = ['PLOT_TYPES', 'ExternalSeries', 'SourceSpec', 'PlotBase',
@@ -41,7 +41,7 @@ PLOT_TYPES = ('summary', 'timeseries', 'stick_slip_analysis',
               'cof_histogram', 'stickslip_period_histogram', 'contact_cof_scatter',
               'sheet_profile', 'integrity_panel')
 
-_FORBID = ConfigDict(extra='forbid', populate_by_name=True)
+_FORBID = ConfigDict(extra='forbid', populate_by_name=True, serialize_by_alias=True)
 
 
 class ExternalSeries(BaseModel):
@@ -345,6 +345,11 @@ class TableSource(BaseModel):
     @classmethod
     def _bare_path(cls, value):
         return {'file': value} if isinstance(value, (str, Path)) else value
+
+    @model_serializer(mode='wrap')
+    def _as_bare_path(self, handler):
+        """A file-only source dumps back to the bare path it was written as."""
+        return str(self.file) if self.file is not None else handler(self)
 
 
 class _TablePlot(PlotBase):

@@ -786,6 +786,33 @@ def dataset_rows(name: str) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, s
     return rows, dict(table.get('units') or {})
 
 
+def point_frames(calc_uuid: str, node_uuid: str) -> Dict[str, Any]:
+    """The stored tiers of one point as frames (``tier -> DataFrame``), read
+    the way the DataReader and the store's summaries read them.
+
+    Nothing is exported: the point's files go through a temporary directory
+    and are gone when this returns.
+
+    ``node_uuid`` is the point's FolderData (the ``node_uuid`` column of
+    :func:`dataset_rows`), not its ``point_uuid`` identity.
+
+    Raises:
+        LookupError: no such point of that CalcJob.
+    """
+    from tempfile import TemporaryDirectory  # pylint: disable=import-outside-toplevel
+
+    from .steps import _point_frames  # pylint: disable=import-outside-toplevel,protected-access
+    _require_aiida()
+    nodes = {n.uuid: n for n in _nodes_by_uuid([calc_uuid, node_uuid])}
+    calc, point = nodes.get(calc_uuid), nodes.get(node_uuid)
+    if calc is None or point is None:
+        raise LookupError(f'no point node {node_uuid} of CalcJob {calc_uuid}')
+    family = point.base.attributes.get('family')
+    n_layers = int(calc.inputs.parameters.get_dict()['n_layers'])
+    with TemporaryDirectory() as tmp:
+        return _point_frames(point, Path(tmp) / 'results', family, n_layers)
+
+
 # ---------------------------------------------------------------------------
 # Friction2DDB
 # ---------------------------------------------------------------------------
