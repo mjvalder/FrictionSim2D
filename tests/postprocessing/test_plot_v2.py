@@ -692,3 +692,13 @@ def test_a_hand_built_no_output_record_yields_nothing(tmp_path):
     runs = list(plotter._extract_all_runs('ds', '100x100y'))  # pylint: disable=protected-access
 
     assert len(runs) == 1
+
+
+def test_a_dataset_cache_folder_changes_with_its_points(tmp_path):
+    """A re-imported set gives new calc uuids, so its dataset is exported afresh."""
+    plotter = Plotter(data_dirs=[], labels=[], output_dir=str(tmp_path))
+    plotter._dataset_sources['a'] = ('paper', [{'calc_uuid': 'c1', 'point_uuid': 'p1'}])
+    plotter._dataset_sources['b'] = ('paper', [{'calc_uuid': 'c2', 'point_uuid': 'p1'}])
+    first, second = plotter._dataset_cache_dir('a'), plotter._dataset_cache_dir('b')
+    assert first != second and first.parent == second.parent
+    assert first.name.startswith('paper-')

@@ -388,20 +388,16 @@ class PlotCommonMixin(PlotterMixinBase):
         """Export the sets of an ``aiida://dataset/`` label and read them, so
         its time series reach the plots through the file path.
 
-        The trees go under ``$XDG_CACHE_HOME/FrictionSim2D/datasets/<name>/``
-        (``~/.cache`` without the variable), one per set, and are reused while
-        ``outputs/`` exists. Only the dataset's own points are kept
-        (:meth:`_dataset_point_keys`).
+        The trees go under :meth:`_dataset_cache_dir`, one per set, and are
+        reused while ``outputs/`` exists. Only the dataset's own points are
+        kept (:meth:`_dataset_point_keys`).
         """
         # pylint: disable=import-outside-toplevel
-        import os
-
         from ..aiida.export import export_results
         from .read_data import DataReader
 
         name, rows = self._dataset_sources[label]
-        cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
-        root = cache / 'FrictionSim2D' / 'datasets' / name
+        root = self._dataset_cache_dir(label)
         for set_label in sorted({str(r['set']) for r in rows if r.get('set')}):
             tree = root / set_label
             if not (tree / 'outputs').is_dir():
@@ -412,6 +408,19 @@ class PlotCommonMixin(PlotterMixinBase):
                 key = entry.stem[len('output_full_'):]
                 self.full_data_files[label].setdefault(key, [])
                 self.full_data_files[label][key].append(str(entry))
+
+    def _dataset_cache_dir(self, label: str) -> Path:
+        """``$XDG_CACHE_HOME/FrictionSim2D/datasets/<name>-<hash>`` (``~/.cache``
+        without the variable). The hash covers the dataset's point identities,
+        so a re-imported set (new calc uuids) never reuses a stale export."""
+        import hashlib  # pylint: disable=import-outside-toplevel
+        import os  # pylint: disable=import-outside-toplevel
+
+        name, rows = self._dataset_sources[label]
+        ident = sorted(f"{r.get('calc_uuid')}|{r.get('point_uuid')}" for r in rows)
+        digest = hashlib.sha256('\n'.join(ident).encode()).hexdigest()[:12]
+        cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
+        return cache / 'FrictionSim2D' / 'datasets' / f'{name}-{digest}'
 
     @staticmethod
     def _point_key(record: dict) -> tuple:
