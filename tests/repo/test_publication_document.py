@@ -14,7 +14,8 @@ def test_publication_document_validates():
     assert len(document.data_dirs) == 11
     assert all(d.startswith(('aiida://dataset/', 'aiida://analysis/'))
                for d in document.data_dirs)
-    assert 'aiida://analysis/period_summary/261107-sheet' in document.data_dirs
+    assert ('aiida://analysis/period_summary/261107-sheet?geometry_dataset=260909-afm'
+            in document.data_dirs)
 
 
 def test_every_table_and_snapshot_is_read_from_the_store():
@@ -85,3 +86,16 @@ def test_known_differences_name_published_figures():
     assert len(named) == 14
     script = (PUB / 'compare_to_reference.py').read_text(encoding='utf-8')
     assert 'Known differences' in script and 'stick-slip' not in script
+
+
+def test_mlip_series_read_the_whole_window_datasets():
+    """Spec 7.2: the MLIP series are read from the store, not a frozen JSON."""
+    raw = json.loads((PUB / 'plots_publication.json').read_text(encoding='utf-8'))
+    dirs = dict(zip(raw['labels'], raw['data_dirs']))
+    series = [s for p in raw['plots'] for s in p.get('external_series', []) if 'dataset' in s]
+    assert len(series) == 6                       # three MLIPs, two figures
+    for entry in series:
+        assert dirs[entry['dataset']].endswith('-whole'), entry
+        assert entry['y_key'] == 'lf_sx_sy'
+    assert not (PUB / 'mos2_mlip_lf_nf.json').exists()
+    assert (PUB / 'settings_default.yaml').is_file()

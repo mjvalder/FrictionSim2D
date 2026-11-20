@@ -45,17 +45,22 @@ FrictionSim2D aiida setup                                 # once: creates the pr
 FrictionSim2D aiida import-archive friction2d_archive.aiida
 FrictionSim2D aiida list-sets                             # the 11 sets above
 
-# One dataset per set (skip any that `aiida list-sets` already shows):
+# One dataset per set, with the default transient skip whatever your own settings say
+# (`aiida dataset` refuses a name that already exists: skip those):
 for s in 260909-afm 261107-sheet 260227-sw_lammps 260227-mos2_jing2 260227-sevik_mos2 \
-         260227-rebomos 260312-force_rebomos 260312-force_sevik 260830-deepmd \
-         260909-mace_d3 260909-mace_nod3; do
-    FrictionSim2D aiida dataset "$s" "$s"
+         260227-rebomos 260312-force_rebomos 260312-force_sevik; do
+    FrictionSim2D aiida dataset "$s" "$s" \
+        --settings-file documentation/publication/settings_default.yaml
 done
 
-# The AFM load curve was averaged over each run's whole window (no transient skip):
-FrictionSim2D aiida postprocess 260909-afm --settings-file documentation/publication/settings_whole_window.yaml
-FrictionSim2D aiida dataset 260909-afm-whole 260909-afm \
-    --settings-file documentation/publication/settings_whole_window.yaml
+# The AFM load curve and the MLIP series were averaged over each run's whole window
+# (no transient skip): summarise those sets again without it, and build *-whole datasets.
+for s in 260909-afm 260830-deepmd 260909-mace_d3 260909-mace_nod3; do
+    FrictionSim2D aiida postprocess "$s" \
+        --settings-file documentation/publication/settings_whole_window.yaml
+    FrictionSim2D aiida dataset "$s-whole" "$s" \
+        --settings-file documentation/publication/settings_whole_window.yaml
+done
 
 # The analyses the table, snapshot and sheet-on-sheet figures read, in this order:
 FrictionSim2D analyse run sheet_geometry 260909-afm
@@ -63,7 +68,8 @@ FrictionSim2D analyse run cof_ranking 260909-afm
 FrictionSim2D analyse run period_summary 261107-sheet --param geometry_dataset=260909-afm
 FrictionSim2D analyse run contact 260909-afm
 FrictionSim2D analyse run stick_slip 260909-afm
-FrictionSim2D analyse run integrity_traces 260909-afm
+FrictionSim2D analyse run integrity_traces 260909-afm \
+    --param materials=h_MoS2,h_NiSe2 --param layer=2
 FrictionSim2D analyse run run_status 260909-afm
 
 cd documentation/publication
@@ -74,12 +80,17 @@ python compare_to_reference.py plots
 `plots_publication.json` reads each set as `aiida://dataset/<set>`. A timeseries or stick-slip
 plot reads only the points its filters select, straight from the store; nothing is written to
 disk. The tables of the analysis figures are the stored analyses, read as
-`{"analysis": <name>, "dataset": "260909-afm"}`. The snapshot figures read the stored
-snapshots of `260909-afm`. The sheet-on-sheet figures read
-`aiida://analysis/period_summary/261107-sheet`: each run cut to whole lattice periods. That
-cut takes the lattice period along the scan from the AFM bilayers
-(`geometry_dataset=260909-afm`), as the published cut did. The plotter never computes an
-analysis; a missing one stops the plot and names the `analyse run` command.
+`{"analysis": <name>, "dataset": "260909-afm"}`, with `"params"` where the command above
+gives `--param`s. The snapshot figures read the stored snapshots of `260909-afm`. The
+sheet-on-sheet figures read
+`aiida://analysis/period_summary/261107-sheet?geometry_dataset=260909-afm`: each run cut
+to whole lattice periods. That cut takes the lattice period along the scan from the AFM
+bilayers (`geometry_dataset=260909-afm`), as the published cut did. The MLIP bars of the
+histogram and the MLIP lines of the LF-NF figure are the mean NF and mean
+`|v_sx, v_sy|` per load of the three `*-whole` MLIP datasets (the reduction of
+`make_cof_histogram_mlip.py`), read from the store. A plot reads the result stored under
+exactly the params it names, never another; the plotter never computes an analysis, and a
+missing one stops the plot and names the `analyse run` command.
 
 `compare_to_reference.py` compares each rebuilt figure with the published one in
 `Images/plots/`. It reports each figure as identical byte for byte, identical pixel for pixel
@@ -90,7 +101,7 @@ under [Known differences from the published figures](#known-differences-from-the
 
 | Figure | Plot type | Sets |
 |---|---|---|
-| `cof_histogram_mos2.png` | `cof_histogram` | 260227 (four potentials), MLIP sets via `mos2_mlip_lf_nf.json`, literature |
+| `cof_histogram_mos2.png` | `cof_histogram` | 260227 (four potentials), the three `*-whole` MLIP datasets, literature |
 | `lf_vs_nf_100x100_mos2_sx_sy.png` | `summary` | as above |
 | `lf_vs_load_100x100_afm.png` | `summary` | `260909-afm` |
 | `lf_vs_time_h_MoS2_l2_afm_v3.png`, `lf_vs_time_h_MoS2_l2_afm_2_30_85nN.png` | `timeseries` | `260909-afm` (the two files are the same figure) |
@@ -106,7 +117,8 @@ under [Known differences from the published figures](#known-differences-from-the
 ## Known differences from the published figures
 
 The rebuilt figures match the published ones except for the following. Each difference comes
-from the data, as stated; the drawing code is the same.
+from the data, as stated, except in the stick-slip figures, whose annotations are drawn
+differently.
 
 - `fs2d_afm_stickslip_period.png`: the runs are those that pass the integrity check. The
   published figure used the runs a classifier labelled sliding. The rebuilt figure has 481 runs
@@ -118,23 +130,29 @@ from the data, as stated; the drawing code is the same.
 - `integrity_panel_h_MoS2_l2.png`, `integrity_panel_h_NiSe2_l2.png`: the temperature and gap
   traces are the stored double-precision frames; the published panels used single-precision
   copies. The lines move by less than a pixel, in the temperature and gap rows only. The traces
-  are one table of about 1.36 million rows (`integrity_traces` over `260909-afm`), which every
-  panel reads in full.
+  are the `integrity_traces` of the two bilayers only (`materials`, `layer` params).
 - `lf_vs_load_100x100_sheetonsheet.png`: 126 of the 1401 runs of `261107-sheet` fail the
   integrity check and are left out; the published cut kept them. The figure has 10 fewer
   points: b-SiGe at 8 loads, p-GeSe and p-SnTe at 20 GPa.
 - `tribindex_vs_cof_sheetonsheet.png`: the same 126 runs are left out. 9 points in the
   5–20 GPa window are missing, from b-antimonene, b-bismuthene, black phosphorus, p-GeSe,
   p-GeTe, p-SnSe, p-SnTe and p-arsenene.
-- `cof_histogram_mos2.png`: the bar values equal the published ones within 10⁻⁴. The image is
-  19 px wider (layout only).
+- `cof_histogram_mos2.png`: the bar values equal the published ones within 10⁻⁴; the MLIP
+  series read from the store equal the published ones within 10⁻¹². The image is 19 px wider
+  (layout only).
 - `lf_vs_nf_100x100_mos2_sx_sy.png`: the values are the same; only some pixels differ.
 - `lf_vs_time_h_MoS2_l2_v_com_top.png`: the SW-Kandemir lateral force is 1.602 times the
   published curve. The published curve was in eV/Å but labelled nN. The archive stores the
   legacy SW results converted to nN.
-- `stick_slip_h_MoS2_v_com_top_0.1GPa_{rebomos,sevik}{,_spectrum}.png`: the displacement
-  trace is offset by about 23 rows against the published one, although the data and the time
-  axis are the same. The cause is not yet known.
+- `stick_slip_h_MoS2_v_com_top_0.1GPa_{rebomos,sevik}.png`: the data are the same. Every line
+  drawn (the displacement trace, the extrema markers) equals the published one point for point,
+  and the stored time axis equals the published file's `time_series`. Only the period arrows
+  differ: the rebuilt plot draws each `T(f)` arrow above its label's white box, while the
+  published one drew the box over the arrow, so its shaft shows faint.
+- `stick_slip_h_MoS2_v_com_top_0.1GPa_{rebomos,sevik}_spectrum.png`: the spectrum is the same
+  line. Only the peak labels differ: the rebuilt plot marks each labelled peak with a larger
+  dot and writes `f1`/`f2` just above it; the published one wrote them a little higher, joined
+  to the peak by a thin red line.
 
 ## Files
 
@@ -142,11 +160,11 @@ from the data, as stated; the drawing code is the same.
 |---|---|
 | `plots_publication.json` | The plot document: one entry per figure |
 | `plot_settings.json` | Figure style (size, fonts, palette) used for the article |
-| `settings_whole_window.yaml` | Summary option for the `260909-afm-whole` dataset: no transient skip |
+| `settings_default.yaml` | Summary option for every other dataset: the default transient skip (20 %) |
+| `settings_whole_window.yaml` | Summary option for the `*-whole` datasets: no transient skip |
 | `trib_index.json` | Lubricating figure of merit from high-throughput DFT [1], restricted to the materials whose structure matches ours |
 | `mos2_comparison_data.json` | Literature MoS₂ COF against load from MD [2] |
 | `mos2_reaxff_comparison.json` | Literature MoS₂ ReaxFF and experimental nanoscale friction [3] |
-| `mos2_mlip_lf_nf.json` | Mean NF and mean LF (`|v_sx, v_sy|`) per load of the three MLIP sets |
 | `compare_to_reference.py` | Rebuilt figures against `Images/plots/` |
 | `Images/` | The article's figures (`plots/`) and artwork |
 

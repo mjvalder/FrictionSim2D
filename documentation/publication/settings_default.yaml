@@ -1,0 +1,4 @@
+# Summaries with the default transient skip (the first 20 % of each window dropped),
+# whatever the per-user settings file says. Used for every dataset but the *-whole ones.
+aiida:
+  skip_fraction: 0.2

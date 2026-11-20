@@ -1,5 +1,5 @@
 {
-  "_comment": "Every figure of the article. Read from the AiiDA store of the DOI archive: one dataset per simulation set (aiida://dataset/<set>) and the stored analyses of 260909-afm and 261107-sheet (aiida://analysis/<name>/<set>, {\"analysis\": ..., \"dataset\": ...}); see README.md. Each plot's _source names the config or script it was first made with.",
+  "_comment": "Every figure of the article. Read from the AiiDA store of the DOI archive: one dataset per simulation set (aiida://dataset/<set>) and the stored analyses of 260909-afm and 261107-sheet (aiida://analysis/<name>/<set>?<params>, {\"analysis\": ..., \"dataset\": ..., \"params\": ...}); the MLIP bars and lines read the *-whole MLIP datasets' summary rows (external series with \"dataset\"); see README.md. Each plot's _source names the config or script it was first made with.",
   "data_dirs": [
     "aiida://dataset/260227-sw_lammps",
     "aiida://dataset/260227-mos2_jing2",
@@ -8,10 +8,10 @@
     "aiida://dataset/260312-force_rebomos",
     "aiida://dataset/260312-force_sevik",
     "aiida://dataset/260909-afm-whole",
-    "aiida://analysis/period_summary/261107-sheet",
-    "aiida://dataset/260830-deepmd",
-    "aiida://dataset/260909-mace_d3",
-    "aiida://dataset/260909-mace_nod3"
+    "aiida://analysis/period_summary/261107-sheet?geometry_dataset=260909-afm",
+    "aiida://dataset/260830-deepmd-whole",
+    "aiida://dataset/260909-mace_d3-whole",
+    "aiida://dataset/260909-mace_nod3-whole"
   ],
   "labels": [
     "mos2_jiang1",
@@ -83,32 +83,23 @@
       "external_outline_width": 6.0,
       "external_series": [
         {
-          "file": "mos2_mlip_lf_nf.json",
-          "path": [
-            "DeePMD + D3"
-          ],
+          "dataset": "deepmd",
           "x_key": "nf",
-          "y_key": "lf",
+          "y_key": "lf_sx_sy",
           "label": "DeePMD + D3",
           "solid": true
         },
         {
-          "file": "mos2_mlip_lf_nf.json",
-          "path": [
-            "MACE + D3"
-          ],
+          "dataset": "mace_d3",
           "x_key": "nf",
-          "y_key": "lf",
+          "y_key": "lf_sx_sy",
           "label": "MACE + D3",
           "solid": true
         },
         {
-          "file": "mos2_mlip_lf_nf.json",
-          "path": [
-            "MACE (no D3)"
-          ],
+          "dataset": "mace_nod3",
           "x_key": "nf",
-          "y_key": "lf",
+          "y_key": "lf_sx_sy",
           "label": "MACE (no D3)",
           "solid": true
         },
@@ -311,7 +302,14 @@
       ],
       "traces_file": {
         "analysis": "integrity_traces",
-        "dataset": "260909-afm"
+        "dataset": "260909-afm",
+        "params": {
+          "materials": [
+            "h_MoS2",
+            "h_NiSe2"
+          ],
+          "layer": 2
+        }
       },
       "status_file": {
         "analysis": "run_status",
@@ -339,7 +337,14 @@
       ],
       "traces_file": {
         "analysis": "integrity_traces",
-        "dataset": "260909-afm"
+        "dataset": "260909-afm",
+        "params": {
+          "materials": [
+            "h_MoS2",
+            "h_NiSe2"
+          ],
+          "layer": 2
+        }
       },
       "status_file": {
         "analysis": "run_status",
@@ -470,12 +475,9 @@
       "y_label": "Lateral Force (nN)",
       "external_series": [
         {
-          "file": "mos2_mlip_lf_nf.json",
-          "path": [
-            "DeePMD + D3"
-          ],
+          "dataset": "deepmd",
           "x_key": "nf",
-          "y_key": "lf",
+          "y_key": "lf_sx_sy",
           "label": "DeepMD-D3*",
           "plot_style": "line",
           "marker_style": "P",
@@ -483,12 +485,9 @@
           "fit_line_style": "-"
         },
         {
-          "file": "mos2_mlip_lf_nf.json",
-          "path": [
-            "MACE + D3"
-          ],
+          "dataset": "mace_d3",
           "x_key": "nf",
-          "y_key": "lf",
+          "y_key": "lf_sx_sy",
           "label": "MACE-D3*",
           "plot_style": "line",
           "marker_style": "P",
@@ -496,12 +495,9 @@
           "fit_line_style": "-"
         },
         {
-          "file": "mos2_mlip_lf_nf.json",
-          "path": [
-            "MACE (no D3)"
-          ],
+          "dataset": "mace_nod3",
           "x_key": "nf",
-          "y_key": "lf",
+          "y_key": "lf_sx_sy",
           "label": "MACE*",
           "plot_style": "line",
           "marker_style": "P",
