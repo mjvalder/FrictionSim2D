@@ -152,6 +152,24 @@ def test_contact_reads_only_the_window_loads_at_the_angle(tmp_path):
     assert set(table['point_uuid']) == {'p1', 'p2'}
 
 
+def test_contact_drops_a_state_whose_contact_atoms_are_collinear(tmp_path):
+    """A tip touching one row of atoms has a flat convex hull: scipy raises
+    QhullError (a RuntimeError). The state is dropped, the run goes on."""
+    atoms = _structure()
+    centre = (N // 2) * A
+    line = [a for a in atoms if a[0] != 4] + [(4, centre + i * A, centre, GAP + LIFT)
+                                              for i in (-1, 0, 1)]
+    flat = _write(tmp_path / 'line.data', line)
+    good = _write(tmp_path / 'good.data', atoms)
+    table, source = _contact([_row('p1'), _row('p2', load=20.0)],
+                             _Fetch({('p1', 'load'): flat, ('p1', 'final'): good,
+                                     ('p2', 'load'): good, ('p2', 'final'): good}))
+
+    assert list(zip(table['point_uuid'], table['state'])) == [
+        ('p1', 'final'), ('p2', 'load'), ('p2', 'final')]
+    assert source.dropped == [('p1', 'contact_degenerate_load')]
+
+
 def test_anion_is_the_highest_group_then_the_most_electronegative():
     # Electronegativity alone picks W (2.36) over Te (2.1) (s40:154-156).
     assert anion({'W', 'Te'}) == 'Te'

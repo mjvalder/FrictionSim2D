@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 from pydantic import field_validator
-from scipy.spatial import ConvexHull, cKDTree  # pylint: disable=no-name-in-module
+from scipy.spatial import ConvexHull, QhullError, cKDTree  # pylint: disable=no-name-in-module
 
 from .base import Analysis, register
 from .cof_ranking import WINDOW, _loads
@@ -52,6 +52,9 @@ RMIN = 2 ** (1 / 6)
 NO_SNAPSHOT = 'no_{state}_snapshot'
 #: The drop reason of a snapshot s40's ``one`` could not read (it returns None, :103-105).
 UNREADABLE = 'contact_unreadable_{state}'
+#: The drop reason of a state whose contact atoms are collinear (or coincide):
+#: their convex hull is flat, and scipy's Qhull raises instead of giving 0.
+DEGENERATE = 'contact_degenerate_{state}'
 
 #: element -> (periodic group, Pauling electronegativity), the ``group`` and
 #: ``en`` columns of ML_taxonomy ``baseline_inputs/descriptors/elemental_properties.csv``
@@ -220,8 +223,9 @@ class Contact(Analysis):  # pylint: disable=too-few-public-methods
 
     def compute(self, source, params) -> pd.DataFrame:
         """One row per pass run at the window loads and ``angle``, and state.
-        A state with no stored snapshot (:data:`NO_SNAPSHOT`), or one that
-        cannot be read (:data:`UNREADABLE`), is dropped; a run whose material
+        A state with no stored snapshot (:data:`NO_SNAPSHOT`), one that
+        cannot be read (:data:`UNREADABLE`), or one whose contact atoms have a
+        flat hull (:data:`DEGENERATE`), is dropped; a run whose material
         has no ``a_x`` is dropped (:data:`~.periods.NO_PERIOD`)."""
         loads = tuple(float(f) for f in params.loads)
         rows = source.rows
@@ -262,6 +266,8 @@ class Contact(Analysis):  # pylint: disable=too-few-public-methods
                 area_xy = (box['x'][1] - box['x'][0]) * (box['y'][1] - box['y'][0])
                 found.append((state, contact_metrics(typ, xyz, area_xy, tip, top, sheet,
                                                      tip_pairs(text, tip), a_x)))
+            except QhullError:
+                source.dropped.append((str(row.point_uuid), DEGENERATE.format(state=state)))
             except (OSError, IndexError, TypeError, ValueError, KeyError):
                 source.dropped.append((str(row.point_uuid), UNREADABLE.format(state=state)))
         return found
