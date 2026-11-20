@@ -63,6 +63,8 @@ REALIZATION = 'realization'
 
 _GROUP_PREFIX = 'friction2d/'
 _DATASET_PREFIX = 'friction2d/datasets/'
+#: ``src.analysis.store.ANALYSIS_GROUP_PREFIX``: analysis Groups are not sets.
+_ANALYSIS_PREFIX = 'friction2d/analyses/'
 _POINTS_LINK = 'points__%'
 _BLOCKS_LINK = 'blocks__'
 _SCHEMA_LINK = 'schema'
@@ -139,7 +141,7 @@ def _set_groups() -> List[Tuple[str, str, int, Dict[str, Any]]]:
         orm.Group, filters={'label': {'like': f'{_GROUP_PREFIX}%'}},
         project=['label', 'uuid', 'id', 'extras'])
     return [(label, uuid, pk, extras or {}) for label, uuid, pk, extras in qb.all()
-            if not label.startswith(_DATASET_PREFIX)]
+            if not label.startswith((_DATASET_PREFIX, _ANALYSIS_PREFIX))]
 
 
 def _labels_of_calcs() -> Dict[str, List[str]]:

@@ -11,7 +11,8 @@
   every live point having a verdict, with the closure checked to stay inside
   the campaign [I6], per-atom data opt-in, HPC details anonymised by default,
   JSON sidecars ``<archive>.params/`` that :func:`src.aiida.compare.
-  load_blocks_from_sidecar` reads, a README and its size logged [M4].
+  load_blocks_from_sidecar` reads, a README and its size logged [M4]. The
+  stored analysis results of the set's datasets travel with it.
 * :func:`export_dataset` writes one dataset as its own archive.
 
 Every aiida import is deferred, so importing this module needs no aiida-core.
@@ -583,6 +584,33 @@ def _start_pks(group, *, include_peratom: bool = False) -> Set[int]:
     if not include_peratom:
         frontier -= _peratom_pks(calcs)
     return calcs | _reachable_functions(frontier)
+
+
+#: The Group of a dataset's stored analysis results is this plus the dataset
+#: name (``src.analysis.store.ANALYSIS_GROUP_PREFIX``; kept here so this
+#: module never imports ``src.analysis``).
+ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
+
+
+def _analysis_groups(label: str) -> List[Any]:
+    """The analysis Groups (``friction2d/analyses/<dataset>``) of every
+    dataset built from the set ``label``, alone or with other sets, in label
+    order. A result's CSV is the only place another set's points appear: its
+    inputs are the dataset's table ``Dict`` (no creator), a params ``Dict``
+    and the results it read, so no foreign CalcJob is reached."""
+    from aiida import orm  # pylint: disable=import-outside-toplevel
+
+    from .steps import DATASET_EXTRA, KIND_EXTRA  # pylint: disable=import-outside-toplevel
+
+    qb = orm.QueryBuilder().append(
+        orm.Dict, filters={f'extras.{KIND_EXTRA}': 'dataset'},
+        project=[f'extras.{DATASET_EXTRA}', 'attributes.labels'])
+    names = sorted({name for name, labels in qb.all() if label in (labels or ())})
+    if not names:
+        return []
+    found = orm.QueryBuilder().append(orm.Group, filters={
+        'label': {'in': [f'{ANALYSIS_GROUP_PREFIX}{name}' for name in names]}})
+    return sorted(found.all(flat=True), key=lambda g: g.label)
 
 
 def _check_closure(label: str, group, start: Set[int]) -> None:
@@ -1228,6 +1256,9 @@ so the archive imports and its data loads without FrictionSim2D installed; only
   `structures__*`, `parameters` (inputs).
 * Calcfunctions on the points: `check_integrity` (verdict `Dict`), `apply_ruling` /
   `withdraw_ruling` (user rulings), `summarise` (summary `Dict` with `units`).
+* Analyses (set archives): Groups `friction2d/analyses/<dataset>` of `SinglefileData`
+  CSV results, each made by a `record_analysis` calcfunction from the dataset's table
+  `Dict` and a params `Dict` (`analysis`, `version`, `params`).
 
 Schema node(s), giving the unit, kind and default of every field:
 {schemas}
@@ -1288,10 +1319,14 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
 
     The entities are the set Group (so an import re-creates it), its CalcJobs
     and every calcfunction reached from their outputs (verdicts, rulings,
-    summaries); aiida's export closure adds their inputs and created outputs.
-    Dataset Groups and their table Dicts are never included
-    (:func:`export_dataset`). The archive is written beside ``output_path``
-    and moved into place only once rewritten.
+    summaries), and the analysis Groups ``friction2d/analyses/<dataset>`` of
+    every dataset built from the set (:func:`_analysis_groups`), so the
+    stored analysis results and their ``record_analysis`` calcfunctions
+    travel too; aiida's export closure adds their inputs and created outputs
+    -- for an analysis, the dataset's table Dict and the results it read.
+    Dataset Groups are never included (:func:`export_dataset`). The archive
+    is written beside ``output_path`` and moved into place only once
+    rewritten.
 
     Args:
         label: The set.
@@ -1318,7 +1353,9 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
         unchecked = _unchecked(group)
         if unchecked:
             raise UncheckedPointsError(f'set {label!r}', unchecked)
+    analyses = _analysis_groups(label)
     start = _start_pks(group, include_peratom=include_peratom)
+    start |= {node.pk for g in analyses for node in g.nodes}
     _check_closure(label, group, start)
     calcs = _calcjobs(group)
     members = {calc.pk for calc in calcs}
@@ -1330,7 +1367,8 @@ def export_archive(label: str, output_path: Path, *, profile: Optional[str] = No
                             calcs=calcs, include_peratom=include_peratom,
                             keep_hpc_paths=keep_hpc_paths)
 
-    counts = _write_archive([group, *(orm.load_node(pk) for pk in sorted(start - members))],
+    counts = _write_archive([group, *analyses,
+                             *(orm.load_node(pk) for pk in sorted(start - members))],
                             output_path, anonymise=not keep_hpc_paths,
                             drop_peratom=not include_peratom, readme=readme,
                             sidecars=sidecars)

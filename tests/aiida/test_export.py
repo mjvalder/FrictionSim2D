@@ -12,8 +12,10 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import yaml
+from pydantic import BaseModel
 
 pytest.importorskip('aiida')
 pytest.importorskip('scipy')
@@ -30,7 +32,12 @@ from src.aiida.export import (  # noqa: E402
     export_results, import_archive, rebuild_set,
 )
 from src.aiida.ingest import import_root  # noqa: E402
+import src.aiida.query as query_mod  # noqa: E402
+import src.aiida.steps as steps_mod  # noqa: E402
 from src.aiida.query import related  # noqa: E402
+from src.analysis.store import (  # noqa: E402
+    ANALYSIS_GROUP_PREFIX, find_result, params_hash, store_result,
+)
 from src.aiida.steps import build_dataset, postprocess_group  # noqa: E402
 from src.aiida.store import BLOCK_HASH_EXTRA, verify  # noqa: E402
 from src.postprocessing.read_data import DataReader  # noqa: E402
@@ -332,6 +339,70 @@ def test_a_dataset_is_its_own_archive(aiida_profile_clean, no_profile_switch, tm
     assert table_uuid in {n.uuid for n in group.nodes}
     with pytest.raises(LookupError, match='none'):
         export_dataset('none', tmp_path / 'none.aiida')
+
+
+# --- analyses travel with the set (spec 5.1) -----------------------------------
+
+class _Probe:
+    """A stand-in analysis: what `store_result` reads of one."""
+    name = 'probe'
+    version = '1'
+
+    class Params(BaseModel):
+        """The one knob."""
+        scale: float = 1.0
+
+
+def _analysis_nodes(dataset):
+    found = orm.QueryBuilder().append(
+        orm.Group, filters={'label': f'{ANALYSIS_GROUP_PREFIX}{dataset}'}).all(flat=True)
+    return [n for g in found for n in g.nodes if isinstance(n, orm.SinglefileData)]
+
+
+def test_the_archive_carries_the_analyses_of_the_sets_datasets(
+        aiida_profile_clean, no_profile_switch, tmp_path):
+    """Every result stored over a dataset built from the set (alone or with
+    another set) travels with its `record_analysis` node, its inputs (the
+    dataset table among them) and the results it read; a dataset of another
+    set only does not, and nothing pulls the other set's CalcJobs in."""
+    _run(tmp_path / 'a', 'h-MoS2', loads=(10.0,))
+    _run(tmp_path / 'b', 'h-WS2', loads=(10.0,))
+    assert import_root(tmp_path / 'a', label='A').ok()
+    assert import_root(tmp_path / 'b', label='B').ok()
+    postprocess_group('A', options=OPTIONS)
+    postprocess_group('B', options=OPTIONS)
+    tables = {name: build_dataset(name, labels, options=OPTIONS).uuid
+              for name, labels in (('only_a', ['A']), ('both', ['A', 'B']),
+                                   ('only_b', ['B']))}
+    table = pd.DataFrame({'run_uuid': ['r1', 'r2'], 'value': [0.1 + 0.2, 1.0 / 3.0]})
+    base_uuid = store_result(_Probe, 'only_a', {}, table, dropped=[('p1', 'failed_integrity')])
+    reader = store_result(_Probe, 'only_a', {'scale': 2.0}, table, dropped=[],
+                          depends={'base': orm.load_node(base_uuid)})
+    both_uuid = store_result(_Probe, 'both', {}, table, dropped=[])
+    store_result(_Probe, 'only_b', {}, table, dropped=[])
+    a_calcs = {c.uuid for c in _calcjobs('A')}
+
+    path = export_archive('A', tmp_path / 'a.aiida')
+
+    assert _archive_calcjob_uuids(path, tmp_path) == a_calcs
+    aiida_profile_clean.reset_storage()
+    import_archive(path)
+    assert {n.uuid for n in _analysis_nodes('only_a')} == {base_uuid, reader}
+    assert {n.uuid for n in _analysis_nodes('both')} == {both_uuid}
+    assert not _analysis_nodes('only_b')
+    back = find_result('probe', 'only_a', params_hash=params_hash({'scale': 1.0}),
+                       version='1')
+    pd.testing.assert_frame_equal(back, table)
+    node = orm.load_node(reader)
+    assert node.creator.process_label == 'record_analysis'
+    assert node.creator.inputs.base.uuid == base_uuid
+    assert node.creator.inputs.dataset.uuid == tables['only_a']
+    assert orm.load_node(both_uuid).creator.inputs.dataset.uuid == tables['both']
+    assert orm.load_node(base_uuid).base.attributes.get('dropped') == [['p1', 'failed_integrity']]
+    sets = {label for label, *_ in query_mod._set_groups()}
+    assert sets == {'friction2d/A'}, 'analysis Groups are not sets'
+    assert {g.label for g in steps_mod._set_groups()} == {'friction2d/A'}
+    assert export_mod.ANALYSIS_GROUP_PREFIX == ANALYSIS_GROUP_PREFIX
 
 
 # --- Review Focus 3 [C2]: two profiles share hashed nodes -----------------------

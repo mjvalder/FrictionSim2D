@@ -1844,13 +1844,14 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> int:
 # only what no other set still holds.
 
 def _set_groups() -> List[Any]:
-    """Every ``friction2d/<label>`` set Group (datasets excluded)."""
+    """Every ``friction2d/<label>`` set Group (dataset and analysis Groups excluded)."""
     from .ingest import GROUP_PREFIX  # pylint: disable=import-outside-toplevel
 
     qb = orm.QueryBuilder().append(
         orm.Group, filters={'label': {'like': f'{GROUP_PREFIX}/%'}})
     return [g for g in qb.all(flat=True)
-            if not g.label.startswith(f'{GROUP_PREFIX}/datasets/')]
+            if not g.label.startswith((f'{GROUP_PREFIX}/datasets/',
+                                       f'{GROUP_PREFIX}/analyses/'))]
 
 
 def _calcjobs_of(group) -> List[Any]:
