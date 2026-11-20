@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from aiida import orm
 from aiida.engine import calcfunction
@@ -54,8 +54,8 @@ from .rulings import Policy, select
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'RecheckReport', 'RulingReport', 'apply_ruling',
-           'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
+__all__ = ['CODE_VERSION', 'DATASET_PREFIX', 'DatasetDeletion', 'RecheckReport', 'RulingReport',
+           'apply_ruling', 'apply_rulings', 'build_dataset', 'check_group', 'check_integrity',
            'delete_dataset', 'is_provisional', 'latest_summaries', 'latest_verdict',
            'latest_verdicts', 'normalise_options', 'options_hash', 'postprocess_group',
            'recheck_set', 'rule_group', 'summarise', 'summary_options', 'withdraw_ruling']
@@ -1810,10 +1810,27 @@ def build_dataset(name: str, labels: Sequence[str], *, policy: Policy = Policy()
     return table
 
 
-def delete_dataset(name: str, *, profile: Optional[str] = None) -> int:
+class DatasetDeletion(NamedTuple):
+    """What :func:`delete_dataset` deleted: the dataset's table ``Dict`` nodes
+    and the analysis results (``src.analysis``) computed from them."""
+
+    tables: int
+    analyses: int
+
+
+#: The Group of a dataset's analysis results is this plus the dataset name
+#: (``src.analysis.store.ANALYSIS_GROUP_PREFIX``).
+_ANALYSIS_GROUP = 'friction2d/analyses/'
+
+
+def delete_dataset(name: str, *, profile: Optional[str] = None) -> DatasetDeletion:
     """Delete the dataset ``friction2d/datasets/<name>``: its Group and its
     table Dict. The summaries it held are kept (their points' sets own them).
-    Returns the number of nodes deleted."""
+
+    Every analysis result computed from the table goes with it (the table is
+    an input of its ``record_analysis``): they are counted, logged as a
+    WARNING, and their emptied Group ``friction2d/analyses/<name>`` removed.
+    Returns the counts (:class:`DatasetDeletion`)."""
     # pylint: disable=import-outside-toplevel
     from aiida.tools import delete_nodes
 
@@ -1827,10 +1844,22 @@ def delete_dataset(name: str, *, profile: Optional[str] = None) -> int:
     (group,) = found
     tables = [n.pk for n in group.nodes
               if isinstance(n, orm.Dict) and n.base.extras.get(DATASET_EXTRA, None) == name]
+    analyses = 0
+    if tables:
+        doomed, _ = delete_nodes(tables, dry_run=True)
+        analyses = orm.QueryBuilder().append(orm.SinglefileData, filters={
+            'id': {'in': list(doomed)}, 'extras': {'has_key': 'analysis'}}).count()
+    if analyses:
+        logger.warning('deleting dataset %r also deletes the %d analysis results '
+                       'computed from it', name, analyses)
     orm.Group.collection.delete(group.pk)
     if tables:
         delete_nodes(tables, dry_run=False)
-    return len(tables)
+    for left in orm.QueryBuilder().append(
+            orm.Group, filters={'label': f'{_ANALYSIS_GROUP}{name}'}).all(flat=True):
+        if not left.count():
+            orm.Group.collection.delete(left.pk)
+    return DatasetDeletion(len(tables), analyses)
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ pytest.importorskip('scipy')
 pytestmark = pytest.mark.aiida
 
 from aiida import orm  # noqa: E402
+from aiida.common import exceptions  # noqa: E402
 
 import src.aiida.steps as steps  # noqa: E402
 from src.aiida.block_schema import SUMMARY_UNITS  # noqa: E402
@@ -522,11 +523,37 @@ def test_delete_refuses_a_set_a_dataset_draws_on(aiida_profile_clean, no_profile
 
     with pytest.raises(ValueError, match="no dataset 'nope'"):
         delete_dataset('nope')
-    assert delete_dataset('paper') == 1
+    assert delete_dataset('paper') == (1, 0)
     assert orm.QueryBuilder().append(orm.Node).count() == before - 1
     assert len(_summaries()) == 2                           # the set still owns them
     assert delete_simulation_set('camp') > 0
     assert _summaries() == []
+
+
+def test_delete_dataset_counts_and_warns_of_the_analyses_it_takes(
+        aiida_profile_clean, no_profile_switch, tmp_path, caplog):
+    import pandas as pd
+    pytest.importorskip('scipy')
+    from src.analysis.base import get_analysis
+    from src.analysis.store import ANALYSIS_GROUP_PREFIX, store_result
+    _tree(tmp_path, eject=(10.0,))
+    import_root(tmp_path, label='camp')
+    postprocess_group('camp')
+    build_dataset('paper', ['camp'])
+    table = pd.DataFrame([{'material': 'h_MoS2', 'layer': 2, 'period_x_top': 3.16}])
+    uuids = [store_result(get_analysis('sheet_geometry'), 'paper', {}, table, dropped=[])
+             for _ in range(2)]
+
+    with caplog.at_level('WARNING'):
+        deleted = delete_dataset('paper')
+
+    assert deleted.tables == 1 and deleted.analyses == 2
+    assert "2 analysis results" in caplog.text and 'paper' in caplog.text
+    for uuid in uuids:
+        with pytest.raises(exceptions.NotExistent):
+            orm.load_node(uuid)
+    assert not orm.QueryBuilder().append(
+        orm.Group, filters={'label': f'{ANALYSIS_GROUP_PREFIX}paper'}).count()
 
 
 def test_a_failed_dataset_store_leaves_nothing(aiida_profile_clean, no_profile_switch,
