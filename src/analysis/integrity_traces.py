@@ -18,17 +18,18 @@ integrity verdict.
 """
 from __future__ import annotations
 
-from typing import Any, List
+import json
+from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from .base import Analysis, register
 from .periods import summary_identity
 
-__all__ = ['MEASURES', 'NO_WINDOW', 'IntegrityTraces', 'RunStatus', 'completion_status',
-           'run_id']
+__all__ = ['MEASURES', 'NO_WINDOW', 'IntegrityTraces', 'RunStatus', 'TraceParams',
+           'completion_status', 'run_id']
 
 #: The stored s48 measures carried per run (`integrity._RULES`' measure keys).
 MEASURES = ('hole', 'isolated', 'ejected', 'T_sigma', 'gap_rise')
@@ -56,7 +57,34 @@ def run_id(row: Any) -> str:
 
 
 class _NoParams(BaseModel):
-    """Neither analysis has parameters."""
+    """`run_status` has no parameters."""
+
+
+class TraceParams(BaseModel):
+    """Which points `integrity_traces` traces: ``materials`` (names in
+    either spelling, ``h-MoS2`` or ``h_MoS2``; a list, JSON text or
+    comma-separated) and ``layer``. None (the default) keeps every one. A
+    point left out is not dropped: it is outside the selection."""
+
+    materials: Optional[List[str]] = None
+    layer: Optional[int] = None
+
+    @field_validator('materials', mode='before')
+    @classmethod
+    def _parse(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            value = json.loads(text) if text.startswith('[') else text.split(',')
+        if value is None:
+            return None
+        return [str(v).strip().replace('-', '_') for v in value]
+
+
+def _selected(row: Any, params: TraceParams) -> bool:
+    ident = summary_identity(row)
+    if params.materials is not None and ident['material'] not in params.materials:
+        return False
+    return params.layer is None or ident['layer'] == params.layer
 
 
 @register
@@ -64,18 +92,23 @@ class IntegrityTraces(Analysis):  # pylint: disable=too-few-public-methods
     """Window-tier traces of every point that has one, failed points included."""
 
     name = 'integrity_traces'
-    version = '1'
+    version = '2'
     level = 'run_state'
     families = frozenset({'afm', 'sheetonsheet'})
-    Params = _NoParams
+    Params = TraceParams
+    #: Its rows are keyed by ``run_id`` (the frozen table's id), not the level's columns.
+    identity = ('run_id',)
 
     def compute(self, source, params) -> pd.DataFrame:
-        """One row per window sample of each point (any verdict). A point
-        with no window tier is recorded as dropped (:data:`NO_WINDOW`); the
-        non-pass points :class:`RunSource` pre-lists are not dropped."""
+        """One row per window sample of each selected point (any verdict;
+        :class:`TraceParams`). A point with no window tier is recorded as
+        dropped (:data:`NO_WINDOW`); the non-pass points :class:`RunSource`
+        pre-lists are not dropped."""
         source.dropped.clear()
         frames: List[pd.DataFrame] = []
         for row in source.all_rows.itertuples():
+            if not _selected(row, params):
+                continue
             window = source.frames(row).get('window')
             if window is None or window.empty:
                 source.dropped.append((str(row.point_uuid), NO_WINDOW))
@@ -105,6 +138,8 @@ class RunStatus(Analysis):  # pylint: disable=too-few-public-methods
     level = 'run_state'
     families = frozenset({'afm', 'sheetonsheet'})
     Params = _NoParams
+    #: Its rows are keyed by ``run_id`` (the frozen table's id), not the level's columns.
+    identity = ('run_id',)
 
     def compute(self, source, params) -> pd.DataFrame:
         """One row per point of ``source.all_rows``. Nothing is dropped: the

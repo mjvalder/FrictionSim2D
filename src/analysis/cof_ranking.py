@@ -16,7 +16,7 @@ import pandas as pd
 from pydantic import field_validator
 
 from .base import Analysis, register
-from .periods import PeriodParams, material_key, period_map, period_rows
+from .periods import PeriodDepends, PeriodParams, material_key, period_map, period_rows
 from .source import PASS_STATUS
 
 __all__ = ['NOT_RUN', 'CofRanking', 'WINDOW']
@@ -100,11 +100,11 @@ def _material_row(material: str, loads: Tuple[float, ...], points: pd.DataFrame,
 
 
 @register
-class CofRanking(Analysis):  # pylint: disable=too-few-public-methods
+class CofRanking(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
     """Each material's whole-period COF over the load window, and its rank."""
 
     name = 'cof_ranking'
-    version = '2'
+    version = '3'
     level = 'material'
     families = frozenset({'afm'})
     Params = RankingParams

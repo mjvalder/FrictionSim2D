@@ -251,15 +251,23 @@ def test_period_map_own_source_reads_every_point():
     assert period['h_M'] == pytest.approx(3.0, abs=0.002)
 
 
+def _geometry_node(table):
+    """A stand-in stored result node holding ``table`` as its CSV."""
+    from types import SimpleNamespace
+    content = table.to_csv(index=False).encode()
+    return SimpleNamespace(get_content=lambda mode='rb': content)
+
+
 def test_period_map_geometry_dataset(monkeypatch):
     from src.analysis import store
     calls = []
 
     def fake(name, dataset, params=None, **kw):
         calls.append((name, dataset))
-        return pd.DataFrame({'material': ['h_M'], 'layer': [2], 'period_x_top': [2.5]})
+        return _geometry_node(pd.DataFrame({'material': ['h_M'], 'layer': [2],
+                                            'period_x_top': [2.5]}))
 
-    monkeypatch.setattr(store, 'run_analysis', fake)
+    monkeypatch.setattr(store, 'result_node', fake)
     period = period_map(_source([_row('p0')], {}), PeriodParams(geometry_dataset='geo'))
 
     assert calls == [('sheet_geometry', 'geo')]
@@ -274,8 +282,8 @@ def test_period_map_period_x_is_used_as_given():
 
 def test_period_map_lattice_fallback(monkeypatch):
     from src.analysis import store
-    monkeypatch.setattr(store, 'run_analysis', lambda *a, **k: pd.DataFrame(
-        {'material': ['h_M'], 'layer': [2], 'period_x_top': [2.5]}))
+    monkeypatch.setattr(store, 'result_node', lambda *a, **k: _geometry_node(pd.DataFrame(
+        {'material': ['h_M'], 'layer': [2], 'period_x_top': [2.5]})))
 
     period = period_map(_source([_row('p0')], {}), PeriodParams(geometry_dataset='geo',
                                                       lattice={'h_M': 9.0, 'h_N': 4.0}))
@@ -285,9 +293,9 @@ def test_period_map_lattice_fallback(monkeypatch):
 
 def test_period_map_layer_fallback(monkeypatch):
     from src.analysis import store
-    monkeypatch.setattr(store, 'run_analysis', lambda *a, **k: pd.DataFrame(
+    monkeypatch.setattr(store, 'result_node', lambda *a, **k: _geometry_node(pd.DataFrame(
         {'material': ['h_M', 'h_M', 'h_N', 'h_S'], 'layer': [1, 2, 1, 4],
-         'period_x_top': [2.4, 2.5, 3.3, 5.0]}))
+         'period_x_top': [2.4, 2.5, 3.3, 5.0]})))
 
     period = period_map(_source([_row('p0')], {}), PeriodParams(geometry_dataset='geo'))
 

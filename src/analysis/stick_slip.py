@@ -35,8 +35,8 @@ from scipy.signal import find_peaks
 
 from .base import Analysis, register
 from .cof_ranking import WINDOW, _loads
-from .periods import (NO_PERIOD, PeriodParams, _json_before, drive_step, material_key,
-                      period_map, summary_identity)
+from .periods import (NO_PERIOD, PeriodDepends, PeriodParams, _json_before, drive_step,
+                      material_key, period_map, summary_identity)
 
 __all__ = ['BIN_A', 'LOCK', 'MIN_OVERLAP', 'MIN_SLIP_A', 'RING', 'R_CLEAR', 'SLIP_K',
            'StickSlip', 'StickSlipParams', 'TAXLIB_SLIP_K', 'measure', 'on_displacement',
@@ -254,12 +254,12 @@ class StickSlipParams(PeriodParams):
 
 
 @register
-class StickSlip(Analysis):  # pylint: disable=too-few-public-methods
+class StickSlip(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
     """Ring period, lateral-force period, slips and energy oscillation of
     each run's tip trajectory."""
 
     name = 'stick_slip'
-    version = '1'
+    version = '2'
     level = 'run'
     families = frozenset({'afm'})
     Params = StickSlipParams

@@ -45,8 +45,8 @@ import pandas as pd
 from pydantic import field_validator
 
 from .base import Analysis, register
-from .periods import (PeriodParams, _json_before, _spring, drive_step, material_key,
-                      period_map, settle_skip, summary_identity)
+from .periods import (PeriodParams, _json_before, _spring, drive_step, geometry_depends,
+                      material_key, period_map, settle_skip, summary_identity)
 
 __all__ = ['SlidingPhysics', 'SlidingPhysicsParams', 'ageing', 'block_se', 'body_start',
            'e_int_rel', 'energy_residual', 'friction_work', 'il_slip_frac',
@@ -428,15 +428,17 @@ class SlidingPhysics(Analysis):  # pylint: disable=too-few-public-methods
     strength from a stored contact result."""
 
     name = 'sliding_physics'
-    version = '2'
+    version = '3'
     level = 'run'
     families = frozenset({'afm', 'sheetonsheet'})
     Params = SlidingPhysicsParams
 
     @classmethod
-    def depends_on(cls, dataset: str) -> Dict[str, Any]:
-        """The newest stored ``contact`` result of ``dataset`` (None: none)."""
-        return {'contact': contact_result(dataset)}
+    def depends_on(cls, dataset: str, params) -> Dict[str, Any]:
+        """The newest stored ``contact`` result of ``dataset`` (None: none)
+        and the `sheet_geometry` result ``a_x`` comes from
+        (:func:`~.periods.geometry_depends`)."""
+        return {**geometry_depends(dataset, params), 'contact': contact_result(dataset)}
 
     def compute(self, source, params) -> pd.DataFrame:
         """One row per pass run at ``angle``; a run with no window tier is
@@ -473,7 +475,7 @@ class SlidingPhysics(Analysis):  # pylint: disable=too-few-public-methods
         depends = getattr(source, 'depends', None)
         dataset = getattr(source, 'dataset', None)
         if depends is None:
-            depends = self.depends_on(dataset) if dataset is not None else {}
+            depends = {'contact': contact_result(dataset)} if dataset is not None else {}
         node = depends.get('contact')
         contact = None if node is None else _node_table(node)
         if contact is None or contact.empty:

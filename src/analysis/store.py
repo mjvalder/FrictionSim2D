@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Type, Un
 import pandas as pd
 from pydantic import BaseModel
 
-from .base import Analysis, get_analysis
+from .base import Analysis, check_identity, get_analysis
 
 try:
     from aiida import orm
@@ -40,8 +40,9 @@ except ImportError:  # pragma: no cover - the aiida tier skips without it
         return func
 
 __all__ = ['ANALYSIS_GROUP_PREFIX', 'find_result',
-           'find_result_node', 'params_hash', 'record_analysis',
-           'run_analysis', 'store_result']
+           'find_result_node', 'normalised_params', 'params_hash', 'record_analysis',
+           'result_node', 'run_analysis', 'select_result_node', 'store_result',
+           'stored_params']
 
 #: The Group of a dataset's results is this plus the dataset name.
 ANALYSIS_GROUP_PREFIX = 'friction2d/analyses/'
@@ -178,6 +179,81 @@ def find_result_node(name: str, dataset: str, params_hash: Optional[str] = None,
     return _find_node(name, dataset, params_hash, version)
 
 
+def _query_nodes(name: str, dataset: str, version: Optional[str]):
+    filters: Dict[str, Any] = {'extras.analysis': name, 'extras.dataset': dataset}
+    if version is not None:
+        filters['extras.version'] = version
+    qb = orm.QueryBuilder().append(
+        orm.Group, tag='g', filters={'label': f'{ANALYSIS_GROUP_PREFIX}{dataset}'})
+    qb.append(orm.SinglefileData, with_group='g', filters=filters, project=['*'])
+    return qb.all(flat=True)
+
+
+def stored_params(name: str, dataset: str, version: Optional[str] = None
+                  ) -> Dict[str, Dict[str, Any]]:
+    """``params_hash -> params`` of every stored result of ``name`` over
+    ``dataset`` (of ``version``, when given): the params its
+    ``record_analysis`` read."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for node in _query_nodes(name, dataset, version):
+        digest = node.base.extras.get('params_hash', None)
+        if digest not in out:
+            out[digest] = node.creator.inputs.params.get_dict().get('params', {})
+    return out
+
+
+def normalised_params(name: str, params: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """``params`` as :func:`run_analysis` hashes them: validated by the
+    registered analysis' ``Params`` model, defaults filled in. An
+    unregistered name keeps them as given.
+
+    Raises:
+        ValueError: a name the analysis has no parameter of, or a bad value.
+    """
+    params = dict(params or {})
+    try:
+        cls = get_analysis(name)
+    except KeyError:
+        return params
+    unknown = sorted(set(params) - set(cls.Params.model_fields))
+    if unknown:
+        raise ValueError(f'{name} has no parameter {", ".join(unknown)} (known: '
+                         f'{", ".join(sorted(cls.Params.model_fields)) or "none"})')
+    return _params_dict(cls.Params(**params))
+
+
+def select_result_node(name: str, dataset: str, params: Optional[Mapping[str, Any]] = None,
+                       version: Optional[str] = None):
+    """The newest stored result of ``name`` over ``dataset`` under exactly
+    ``params`` (none: the defaults), of ``version`` (default: the registered
+    one), or None when nothing of that analysis is stored for the dataset.
+
+    Raises:
+        ValueError: an unknown parameter or a bad value.
+        LookupError: none under these params, but results under others are
+            stored; the message names them (the parameters that differ).
+    """
+    values = normalised_params(name, params)
+    if version is None:
+        try:
+            version = get_analysis(name).version
+        except KeyError:
+            pass
+    node = _find_node(name, dataset, params_hash(values), version)
+    if node is not None:
+        return node
+    others = stored_params(name, dataset, version)
+    if not others:
+        return None
+    sets = ['{' + ', '.join(f'{k}={v!r}' for k, v in sorted(p.items())
+                             if values.get(k, object()) != v) + '}'
+            for p in others.values()]
+    asked = ', '.join(f'{k}={v!r}' for k, v in sorted(dict(params or {}).items())) or 'defaults'
+    raise LookupError(f'no stored {name} over {dataset} under {asked}; stored under: '
+                      f'{"; ".join(sorted(sets))} -- name those params, or run: '
+                      f'FrictionSim2D analyse run {name} {dataset}')
+
+
 def find_result(name: str, dataset: str, params_hash: Optional[str] = None,  # pylint: disable=redefined-outer-name
                 version: Optional[str] = None) -> Optional[pd.DataFrame]:
     """The newest stored table of analysis ``name`` over ``dataset`` (with
@@ -194,13 +270,12 @@ def find_result(name: str, dataset: str, params_hash: Optional[str] = None,  # p
     return _from_csv(node.get_content(mode='rb'))
 
 
-def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
-                 force: bool = False) -> pd.DataFrame:
-    """The table of analysis ``name`` over ``dataset``: the stored one with
-    the same name, version, params, dataset and read results
-    (:meth:`~src.analysis.base.Analysis.depends_on`), else (or with ``force``)
-    computed from the dataset and stored. The table returned is the stored
-    one read back, so a reuse and a fresh run return the same frame.
+def result_node(name: str, dataset: str, params: Optional[dict] = None, *,
+                force: bool = False):
+    """The stored result node of analysis ``name`` over ``dataset``: the one
+    with the same name, version, params, dataset and read results
+    (:meth:`~src.analysis.base.Analysis.depends_on`), else (or with
+    ``force``) computed from the dataset and stored.
 
     Raises:
         KeyError: no analysis of that name.
@@ -212,20 +287,37 @@ def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
     model = cls.Params(**(params or {}))
     values = _params_dict(model)
     digest = params_hash(values)
-    depends = cls.depends_on(dataset)
+    depends = cls.depends_on(dataset, model)
     if not force:
         node = _find_node(name, dataset, digest, cls.version,
                           depends_key(depends) if depends else None)
         if node is not None:
-            return _from_csv(node.get_content(mode='rb'))
+            return node
     with RunSource.from_dataset(dataset) as source:
         if source.family not in cls.families:
             raise ValueError(f'{name} reads families {sorted(cls.families)}, '
                              f'not {source.family!r} (dataset {dataset!r})')
         source.depends = depends
         table = cls().compute(source, model)
+        check_identity(cls, table)
         dropped = source.dropped
         notes = list(getattr(source, 'notes', []))
     uuid = store_result(cls, dataset, values, table, dropped=dropped, notes=notes,
                         depends=depends)
-    return _from_csv(orm.load_node(uuid).get_content(mode='rb'))
+    return orm.load_node(uuid)
+
+
+def run_analysis(name: str, dataset: str, params: Optional[dict] = None, *,
+                 force: bool = False) -> pd.DataFrame:
+    """The table of analysis ``name`` over ``dataset``: the stored one with
+    the same name, version, params, dataset and read results
+    (:meth:`~src.analysis.base.Analysis.depends_on`), else (or with ``force``)
+    computed from the dataset and stored (:func:`result_node`). The table
+    returned is the stored one read back, so a reuse and a fresh run return
+    the same frame.
+
+    Raises:
+        KeyError: no analysis of that name.
+        ValueError: the dataset is not a family the analysis reads.
+    """
+    return _from_csv(result_node(name, dataset, params, force=force).get_content(mode='rb'))

@@ -35,7 +35,8 @@ from scipy.spatial import ConvexHull, QhullError, cKDTree  # pylint: disable=no-
 
 from .base import Analysis, register
 from .cof_ranking import WINDOW, _loads
-from .periods import NO_PERIOD, PeriodParams, material_key, period_map, summary_identity
+from .periods import (NO_PERIOD, PeriodDepends, PeriodParams, material_key, period_map,
+                      summary_identity)
 
 __all__ = ['CUTOFF', 'FAR', 'RMIN', 'SUBLAYER_DZ', 'Contact', 'ContactParams', 'anion',
            'contact_metrics', 'lj_energy', 'tip_pairs']
@@ -211,12 +212,12 @@ class ContactParams(PeriodParams):
 
 
 @register
-class Contact(Analysis):  # pylint: disable=too-few-public-methods
+class Contact(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
     """Tip-sheet contact, interlocking and LJ energy of each run's load and
     final snapshots."""
 
     name = 'contact'
-    version = '1'
+    version = '2'
     level = 'run_state'
     families = frozenset({'afm'})
     Params = ContactParams

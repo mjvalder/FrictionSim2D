@@ -76,6 +76,21 @@ def test_integrity_traces_hold_every_sample_with_the_stored_measures():
     assert sorted(source.dropped) == [('c', 'no_window_tier'), ('d', 'no_window_tier')]
 
 
+def test_integrity_traces_keep_only_the_materials_and_layer_asked_for():
+    rows = [_row('a', 10.0), _row('b', 10.0, material='h-N'), _row('c', 10.0, layers=1),
+            _row('e', 10.0, material='h-X')]
+    windows = {u: _window() for u in 'abce'}
+    source = RunSource(pd.DataFrame(rows), 'afm', fetch=_Fetch(windows))
+    cls = get_analysis('integrity_traces')
+
+    table = cls().compute(source, cls.Params(materials='["h_M", "h-N"]', layer=2))
+    assert sorted(set(table['run_id'])) == ['h_M/l2/f10/a0', 'h_N/l2/f10/a0']
+    assert source.dropped == []                 # left out, not dropped
+    every = cls().compute(source, cls.Params())
+    assert len(set(every['run_id'])) == 4
+    assert cls.Params(materials='h_M,h_N').materials == ['h_M', 'h_N']
+
+
 def test_run_status_has_one_row_per_point_and_drops_none():
     source = _source()
     assert len(source.dropped) == 3          # RunSource itself records the non-pass points

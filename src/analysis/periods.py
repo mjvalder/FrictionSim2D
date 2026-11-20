@@ -32,8 +32,9 @@ from .base import Analysis, register
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'PeriodParams', 'PeriodSummary',
-           'dominant_period', 'period_map', 'run_periods', 'settle_skip', 'whole_periods']
+__all__ = ['GEOMETRY', 'NO_DRIVE_STEP', 'NO_PERIOD', 'OFF_AXIS', 'PeriodDepends', 'PeriodParams',
+           'PeriodSummary', 'dominant_period', 'geometry_depends', 'period_map', 'run_periods',
+           'settle_skip', 'whole_periods']
 
 #: 1 m/s in A/ps (taxlib/constants.py:4); the converter's ``speed / 100.0`` (:91).
 MS_TO_A_PER_PS = 0.01
@@ -235,9 +236,11 @@ class PeriodParams(BaseModel):
     """Where ``a_x`` comes from.
 
     ``period_x``: material -> ``period_x_top`` (A), used as given. Without it,
-    ``geometry_dataset`` names the dataset whose `sheet_geometry` supplies it
-    (run, or reused, through :func:`~src.analysis.store.run_analysis`); with
-    neither, `sheet_geometry` is computed from the analysed source itself.
+    the stored `sheet_geometry` result of ``geometry_dataset``, else of the
+    analysed dataset, supplies it (run, or reused, through
+    :func:`~src.analysis.store.result_node`); that result is part of the
+    analysis' identity (:func:`geometry_depends`). A source that is not a
+    stored dataset (a test's) computes `sheet_geometry` from itself.
     Each material takes its row of layer :data:`GEOMETRY_LAYER`, else layer
     1, else its highest (a sheet stack's). ``lattice``: material -> A, the
     fallback for a material with no geometry row (the database ``lat_a`` of
@@ -262,9 +265,12 @@ def period_map(source: Any, params: PeriodParams) -> Dict[str, float]:
     if params.period_x is not None:
         period.update(params.period_x)
         return period
-    if params.geometry_dataset is not None:
-        from .store import run_analysis  # pylint: disable=import-outside-toplevel
-        geometry = run_analysis('sheet_geometry', params.geometry_dataset)
+    node = (getattr(source, 'depends', None) or {}).get(GEOMETRY)
+    if node is None:
+        node = geometry_depends(getattr(source, 'dataset', None), params).get(GEOMETRY)
+    if node is not None:
+        from .store import _from_csv  # pylint: disable=import-outside-toplevel,protected-access
+        geometry = _from_csv(node.get_content(mode='rb'))
     else:
         geometry = _own_geometry(source)
     if not geometry.empty:
@@ -274,6 +280,33 @@ def period_map(source: Any, params: PeriodParams) -> Dict[str, float]:
         best = ranked.sort_values('_order', kind='stable').drop_duplicates('material')
         period.update(best.set_index('material')['period_x_top'].astype(float).to_dict())
     return period
+
+
+#: The name a period analysis keys the `sheet_geometry` result it reads by
+#: (:meth:`~src.analysis.base.Analysis.depends_on`).
+GEOMETRY = 'sheet_geometry'
+
+
+def geometry_depends(dataset: Optional[str], params: PeriodParams) -> Dict[str, Any]:
+    """``{'sheet_geometry': node}``: the stored `sheet_geometry` result that
+    supplies ``a_x`` -- of ``params.geometry_dataset``, else of ``dataset`` --
+    run or reused (:func:`~src.analysis.store.result_node`). Empty when
+    ``params.period_x`` gives ``a_x`` (nothing is read) or there is no dataset."""
+    target = params.geometry_dataset or dataset
+    if params.period_x is not None or target is None:
+        return {}
+    from .store import result_node  # pylint: disable=import-outside-toplevel
+    return {GEOMETRY: result_node(GEOMETRY, target)}
+
+
+class PeriodDepends:  # pylint: disable=too-few-public-methods
+    """Mixin of the analyses that read ``a_x`` (:class:`PeriodParams`): the
+    `sheet_geometry` result they read is part of their identity."""
+
+    @classmethod
+    def depends_on(cls, dataset: str, params: PeriodParams) -> Dict[str, Any]:
+        """The `sheet_geometry` result ``a_x`` comes from (:func:`geometry_depends`)."""
+        return geometry_depends(dataset, params)
 
 
 class _GeometryView:  # pylint: disable=too-few-public-methods
@@ -319,7 +352,7 @@ def period_rows(source: Any, rows: pd.DataFrame, period: Dict[str, float]) -> Li
 
 
 @register
-class PeriodSummary(Analysis):  # pylint: disable=too-few-public-methods
+class PeriodSummary(PeriodDepends, Analysis):  # pylint: disable=too-few-public-methods
     """Per run: the COF, LF and NF over its whole lattice periods.
 
     Summary-shaped: ``id, material, size, layer, force, pressure, angle``
@@ -329,7 +362,7 @@ class PeriodSummary(Analysis):  # pylint: disable=too-few-public-methods
     """
 
     name = 'period_summary'
-    version = '2'
+    version = '3'
     level = 'run'
     families = frozenset({'afm', 'sheetonsheet'})
     Params = PeriodParams

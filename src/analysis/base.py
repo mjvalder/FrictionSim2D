@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, FrozenSet, Literal, Tuple, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, FrozenSet, Literal, Optional, Tuple, Type
 
 from pydantic import BaseModel
 
@@ -17,7 +17,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
     from .source import RunSource
 
-__all__ = ['ANALYSES', 'IDENTITY_COLUMNS', 'Analysis', 'get_analysis', 'register']
+__all__ = ['ANALYSES', 'IDENTITY_COLUMNS', 'Analysis', 'check_identity', 'get_analysis',
+           'identity_columns', 'register']
 
 Level = Literal['run', 'run_state', 'material']
 
@@ -43,18 +44,37 @@ class Analysis(ABC):  # pylint: disable=too-few-public-methods
     level: ClassVar[Level]
     families: ClassVar[FrozenSet[str]]
     Params: ClassVar[Type[BaseModel]]
+    #: The columns every row of the table carries (:func:`identity_columns`);
+    #: None: the level's :data:`IDENTITY_COLUMNS`.
+    identity: ClassVar[Optional[Tuple[str, ...]]] = None
 
     @abstractmethod
     def compute(self, source: 'RunSource', params: BaseModel) -> 'pd.DataFrame':
         """The table of ``source`` under ``params`` (an instance of ``Params``)."""
 
     @classmethod
-    def depends_on(cls, dataset: str) -> Dict[str, Any]:  # pylint: disable=unused-argument
-        """The other stored results of ``dataset`` this analysis reads, as
-        ``name -> result node`` (None: not stored). They are part of a
-        result's identity (a stored result is reused only while they are the
-        same) and are linked as inputs of the result. None by default."""
+    def depends_on(cls, dataset: str,  # pylint: disable=unused-argument
+                   params: BaseModel) -> Dict[str, Any]:  # pylint: disable=unused-argument
+        """The other stored results this analysis reads over ``dataset``
+        under ``params`` (an instance of ``Params``), as ``name -> result
+        node`` (None: not stored). They are part of a result's identity (a
+        stored result is reused only while they are the same) and are linked
+        as inputs of the result. None by default."""
         return {}
+
+
+def identity_columns(cls: Type[Analysis]) -> Tuple[str, ...]:
+    """The columns a table of ``cls`` must carry: its own ``identity``, else
+    its level's :data:`IDENTITY_COLUMNS`."""
+    return cls.identity if cls.identity is not None else IDENTITY_COLUMNS[cls.level]
+
+
+def check_identity(cls: Type[Analysis], table: 'pd.DataFrame') -> None:
+    """Raise ``ValueError`` naming the identity columns (:func:`identity_columns`)
+    a non-empty ``table`` of ``cls`` lacks."""
+    missing = [c for c in identity_columns(cls) if c not in table.columns]
+    if len(table) and missing:
+        raise ValueError(f'{cls.name}: its table lacks the identity columns {missing}')
 
 
 #: name -> registered analysis class.

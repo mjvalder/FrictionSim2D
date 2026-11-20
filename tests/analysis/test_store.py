@@ -231,3 +231,49 @@ def test_store_source_frames_carry_the_peratom_tier(store_with_peratom):
             assert {'window', 'peratom'} <= set(frames)
             assert 'E_int_tip_sheet' in frames['peratom']
             assert len(frames['peratom']) == 50
+
+
+def test_select_result_node_defaults_to_the_default_params(store, probe):
+    from src.analysis.store import result_node, select_result_node
+    default = result_node('probe', 'paper')
+    scaled = result_node('probe', 'paper', {'scale': 2.0})      # newer, other params
+
+    assert select_result_node('probe', 'paper').uuid == default.uuid
+    assert select_result_node('probe', 'paper', {}).uuid == default.uuid
+    assert select_result_node('probe', 'paper', {'scale': '2'}).uuid == scaled.uuid
+    with pytest.raises(LookupError, match='scale'):
+        select_result_node('probe', 'paper', {'scale': 3.0})
+
+
+def test_select_result_node_refuses_other_params_by_default(store, probe):
+    from src.analysis.store import result_node, select_result_node
+    result_node('probe', 'paper', {'scale': 2.0})
+
+    with pytest.raises(LookupError, match=r"scale.*2\.0"):
+        select_result_node('probe', 'paper')
+    with pytest.raises(ValueError, match='bogus'):
+        select_result_node('probe', 'paper', {'bogus': 1})
+
+
+def test_select_result_node_is_none_when_nothing_is_stored(store, probe):
+    from src.analysis.store import select_result_node
+    assert select_result_node('probe', 'paper') is None
+
+
+def test_run_analysis_refuses_a_table_without_its_identity_columns(store, probe, monkeypatch):
+    compute = probe.compute
+    monkeypatch.setattr(probe, 'compute',
+                        lambda self, source, params: compute(self, source, params).drop(
+                            columns=['angle', 'load_kind']))
+    with pytest.raises(ValueError, match=r"probe.*\['load_kind', 'angle'\]"):
+        run_analysis('probe', 'paper')
+    assert find_result('probe', 'paper') is None
+
+
+def test_the_run_id_tables_declare_their_own_identity():
+    from src.analysis.base import get_analysis, identity_columns
+    assert identity_columns(get_analysis('integrity_traces')) == ('run_id',)
+    assert identity_columns(get_analysis('run_status')) == ('run_id',)
+    assert identity_columns(get_analysis('contact')) == (
+        'run_uuid', 'material', 'layer', 'load', 'load_kind', 'angle')
+    assert identity_columns(get_analysis('cof_ranking')) == ('material', 'layer')
